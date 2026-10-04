@@ -251,9 +251,21 @@ multiplies with its services.
 | Overlay value | `local` | `cloud` | `cloud-entry` |
 |---|---|---|---|
 | Steps at once | 4 | 2 | 1 |
-| Each container's request | 250m CPU, 512Mi | 250m CPU, 512Mi | 250m CPU, 512Mi |
-| Each container's limit | 2 CPU, 4Gi | 2 CPU, 4Gi | 2 CPU, 4Gi |
+| Each container's request | 250m CPU, 512Mi, 1Gi of disk | 250m CPU, 512Mi, 1Gi of disk | 250m CPU, 512Mi, 1Gi of disk |
+| Each container's limit | 2 CPU, 4Gi, 20Gi of disk | 2 CPU, 4Gi, 20Gi of disk | 2 CPU, 4Gi, 10Gi of disk |
+| The workspace's size limit | 20Gi | 20Gi | 10Gi |
 | Cache claim | 20Gi, `ReadWriteOnce`, the cluster's default class | 100Gi, `ReadWriteMany`, `azureblob-nfs-premium` | 50Gi, `ReadWriteMany`, `azureblob-nfs-premium` |
+
+**Disk** is ephemeral storage. A container's own files outside any volume, and
+its logs, count against its limit; every emptyDir counts against the sum of the
+pod's containers' limits, the workspace among them; and the workspace has a
+size limit of its own, the same number, which the Job shows
+(`MEMQL_PIPELINES_WORKSPACE_LIMIT`, set by the pipelines ConfigMap beside the
+LimitRange). The kubelet evicts a pod past any of them, and the step fails
+`pipeline_step_disk_exceeded`, quoting the kubelet. A declared cache is the
+claim's storage and counts against none of them; on a local cluster the
+`local-path` class keeps that claim on a node's disk and does not enforce its
+size.
 
 The cloud values are sized for the default node pool `azure-provision.sh`
 creates (2 x Standard_D2as_v4) with the mesh already on it. An instance that runs

@@ -21,7 +21,9 @@
 # service sidecar as well as the step -- so a step's request multiplies with
 # its services. A CI-heavy instance raises the ceiling and the requests in ITS
 # OWN overlay, together with a dedicated node pool for the steps: raising them
-# alone gives steps that sit Pending until their scheduling timeout.
+# alone gives steps that sit Pending until their scheduling timeout. The disk
+# limit is half the other overlays', 10 GiB a container, restated as the
+# workspace's in the ConfigMap after it.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -55,6 +57,18 @@ spec:
       default:
         cpu: "2"
         memory: 4Gi
+        ephemeral-storage: 10Gi
       defaultRequest:
         cpu: 250m
         memory: 512Mi
+        ephemeral-storage: 1Gi
+---
+# THE WORKSPACE LIMIT is the LimitRange's default ephemeral-storage limit above,
+# restated: the workbench gives every step's /workspace that size limit
+# (render_pipelines_test.go holds the two equal).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memql-pipelines
+data:
+  MEMQL_PIPELINES_WORKSPACE_LIMIT: 10Gi

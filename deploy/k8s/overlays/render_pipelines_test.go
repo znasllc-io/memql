@@ -119,14 +119,22 @@ func ptr[T any](v T) *T { return &v }
 // 1 CPU / 2Gi the cloud overlay first carried, not one step fit. A CI-heavy
 // instance raises these in its own overlay together with a dedicated node pool
 // for the steps; changing them here is that decision, so it shows in review.
+//
+// DISK (review M4) is a container's ephemeral storage: its own files outside
+// any volume and its logs, and -- summed over the pod's containers -- every
+// emptyDir too, the step's workspace among them. The kubelet evicts a pod
+// past either, so a step cannot fill its node's disk. The entry overlay, the
+// smallest install, gives a step half what the others do. The workspace's own
+// size limit is the same number (TestThePipelinesWorkspaceLimitIsTheLimitRanges).
 var pipelinesSizing = map[string]struct {
 	ceiling                   string
 	limitCPU, limitMemory     string
 	requestCPU, requestMemory string
+	limitDisk, requestDisk    string
 }{
-	"cloud":       {ceiling: "2", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi"},
-	"cloud-entry": {ceiling: "1", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi"},
-	"local":       {ceiling: "4", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi"},
+	"cloud":       {ceiling: "2", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "20Gi", requestDisk: "1Gi"},
+	"cloud-entry": {ceiling: "1", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "10Gi", requestDisk: "1Gi"},
+	"local":       {ceiling: "4", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "20Gi", requestDisk: "1Gi"},
 }
 
 // wantRunnerGrants is the runner's whole grant, as group/resource -> verbs:
@@ -728,6 +736,39 @@ func stated(t *testing.T, overlay, kind string) *yaml.Node {
 	}
 }
 
+// statedNamed is stated for the document of the given kind AND name, or nil.
+func statedNamed(t *testing.T, overlay, kind, name string) *yaml.Node {
+	t.Helper()
+	path := filepath.Join(overlay, pipelinesValuesFile)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
+	for {
+		var node yaml.Node
+		err := dec.Decode(&node)
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			t.Fatalf("decoding %s: %v", path, err)
+		}
+		var head struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+		}
+		if err := node.Decode(&head); err != nil {
+			t.Fatalf("decoding %s: %v", path, err)
+		}
+		if head.Kind == kind && head.Metadata.Name == name {
+			return &node
+		}
+	}
+}
+
 // TestPipelinesCeilingAndLimitsAreValues covers the two numbers that bound
 // what steps can take from a cluster.
 //
@@ -783,15 +824,16 @@ func TestPipelinesCeilingAndLimitsAreValues(t *testing.T) {
 				}
 				containerItems++
 				for res, pinned := range map[string][2]string{
-					"cpu":    {want.limitCPU, want.requestCPU},
-					"memory": {want.limitMemory, want.requestMemory},
+					"cpu":               {want.limitCPU, want.requestCPU},
+					"memory":            {want.limitMemory, want.requestMemory},
+					"ephemeral-storage": {want.limitDisk, want.requestDisk},
 				} {
 					if item.Default[res] != pinned[0] || item.DefaultRequest[res] != pinned[1] {
 						t.Errorf("the Container %s default limit / request is %q / %q, want %q / %q "+
 							"(pipelinesSizing says why)", res, item.Default[res], item.DefaultRequest[res], pinned[0], pinned[1])
 					}
 				}
-				for _, res := range []string{"cpu", "memory"} {
+				for _, res := range []string{"cpu", "memory", "ephemeral-storage"} {
 					lim, req := item.Default[res], item.DefaultRequest[res]
 					if lim == "" || req == "" {
 						t.Errorf("the Container limits leave %s unset (default %q, defaultRequest %q); a step "+
@@ -801,7 +843,7 @@ func TestPipelinesCeilingAndLimitsAreValues(t *testing.T) {
 					// The API server refuses a LimitRange whose default request
 					// exceeds its default limit -- at sync time, not here.
 					if res == "cpu" && milliCPU(t, overlay, req) > milliCPU(t, overlay, lim) ||
-						res == "memory" && mebibytes(t, overlay, req) > mebibytes(t, overlay, lim) {
+						res != "cpu" && mebibytes(t, overlay, req) > mebibytes(t, overlay, lim) {
 						t.Errorf("the default %s request %s exceeds the default limit %s; the API server refuses "+
 							"that LimitRange", res, req, lim)
 					}
@@ -830,6 +872,62 @@ func TestPipelinesCeilingAndLimitsAreValues(t *testing.T) {
 			}
 			if fmt.Sprint(limits.Spec.Limits) != fmt.Sprint(statedLimits.Spec.Limits) {
 				t.Errorf("the limits render %+v but %s states %+v", limits.Spec.Limits, pipelinesValuesFile, statedLimits.Spec.Limits)
+			}
+		})
+	}
+}
+
+// TestThePipelinesWorkspaceLimitIsTheLimitRanges (review M4): the workbench
+// gives every step's workspace a sizeLimit, MEMQL_PIPELINES_WORKSPACE_LIMIT
+// from the pipelines ConfigMap, and the LimitRange gives every container a
+// default ephemeral-storage limit. The two are one decision: the LimitRange's
+// bounds the whole pod, the workspace included, and the same number on the
+// workspace bounds it however many services share that sum and shows the
+// bound on the Job. So in every overlay the rendered ConfigMap carries the
+// rendered LimitRange's number, and the overlay states it beside the
+// LimitRange in pipelines-values.yaml rather than inheriting the component's.
+func TestThePipelinesWorkspaceLimitIsTheLimitRanges(t *testing.T) {
+	const key = "MEMQL_PIPELINES_WORKSPACE_LIMIT"
+	for _, overlay := range pipelinesOverlays {
+		t.Run(overlay, func(t *testing.T) {
+			objs := renderedObjects(t, overlay)
+
+			var limits pipelinesLimits
+			theOne(t, objs, "LimitRange", "memql-pipelines-limits").decode(t, &limits)
+			var disk string
+			for _, item := range limits.Spec.Limits {
+				if item.Type == "Container" {
+					disk = item.Default["ephemeral-storage"]
+				}
+			}
+			if disk == "" {
+				t.Fatal("the LimitRange gives a container no default ephemeral-storage limit; nothing bounds a step's disk")
+			}
+
+			var cm struct {
+				Data map[string]string `yaml:"data"`
+			}
+			theOne(t, objs, "ConfigMap", pipelinesConfigMap).decode(t, &cm)
+			if got := cm.Data[key]; got != disk {
+				t.Errorf("the %s ConfigMap sets %s=%q, but the LimitRange's default ephemeral-storage limit is %q: "+
+					"a step's workspace would show one bound while the kubelet enforces another", pipelinesConfigMap, key, got, disk)
+			}
+
+			// STATED, not inherited: the ConfigMap's number is this overlay's,
+			// next to the LimitRange it must equal.
+			node := statedNamed(t, overlay, "ConfigMap", pipelinesConfigMap)
+			if node == nil {
+				t.Fatalf("%s/%s states no %s ConfigMap; the workspace limit is this overlay's value, beside its LimitRange",
+					overlay, pipelinesValuesFile, pipelinesConfigMap)
+			}
+			var stated struct {
+				Data map[string]string `yaml:"data"`
+			}
+			if err := node.Decode(&stated); err != nil {
+				t.Fatalf("decoding the stated ConfigMap: %v", err)
+			}
+			if stated.Data[key] != disk {
+				t.Errorf("%s/%s states %s=%q, want the LimitRange's %q", overlay, pipelinesValuesFile, key, stated.Data[key], disk)
 			}
 		})
 	}

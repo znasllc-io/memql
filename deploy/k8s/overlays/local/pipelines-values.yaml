@@ -12,7 +12,8 @@
 # defaults, because they are this overlay's decision and an inherited number is
 # one nobody decided: a laptop also runs the whole mesh and the database, so it
 # is asked for at most four steps at once, each container reserving 250m /
-# 512Mi and capped at two CPUs / 4 GiB.
+# 512Mi / 1 GiB of disk and capped at two CPUs / 4 GiB / 20 GiB of disk -- the
+# disk limit restated as the workspace's, in the ConfigMap after the limits.
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -34,9 +35,21 @@ spec:
       default:
         cpu: "2"
         memory: 4Gi
+        ephemeral-storage: 20Gi
       defaultRequest:
         cpu: 250m
         memory: 512Mi
+        ephemeral-storage: 1Gi
+---
+# THE WORKSPACE LIMIT is the LimitRange's default ephemeral-storage limit above,
+# restated: the workbench gives every step's /workspace that size limit
+# (render_pipelines_test.go holds the two equal).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memql-pipelines
+data:
+  MEMQL_PIPELINES_WORKSPACE_LIMIT: 20Gi
 ---
 # BINDS ON FIRST USE. local-path is WaitForFirstConsumer, so this claim stays
 # Pending until a pipeline step first mounts it. Argo CD reads a Pending claim

@@ -18,7 +18,7 @@ Epic memql#5478, task memql#5492.
 | `ResourceQuota/memql-pipelines-ceiling` | `memql-pipelines` | How many steps run at once (`count/jobs.batch`) |
 | `LimitRange/memql-pipelines-limits` | `memql-pipelines` | Every step container's default requests and limits |
 | `NetworkPolicy/memql-pipelines-isolate` | `memql-pipelines` | Nothing in; DNS and the public internet out |
-| `ConfigMap/memql-pipelines` | the mesh's | `MEMQL_PIPELINES_NAMESPACE`, `MEMQL_PIPELINES_CLONE_IMAGE` |
+| `ConfigMap/memql-pipelines` | the mesh's | `MEMQL_PIPELINES_NAMESPACE`, `MEMQL_PIPELINES_CLONE_IMAGE`, `MEMQL_PIPELINES_WORKSPACE_LIMIT` |
 
 It also appends that ConfigMap to the **workbench** Deployment's `envFrom`, and
 to nothing else: the workbench is the one binary that contains the runner.
@@ -76,6 +76,8 @@ can run.
 | Steps at once | 4 | 2 | 1 |
 | Container limit | 2 CPU / 4Gi | 2 CPU / 4Gi | 2 CPU / 4Gi |
 | Container request | 250m / 512Mi | 250m / 512Mi | 250m / 512Mi |
+| Container disk limit / request (`ephemeral-storage`) | 20Gi / 1Gi | 20Gi / 1Gi | 10Gi / 1Gi |
+| Workspace size limit (`MEMQL_PIPELINES_WORKSPACE_LIMIT`) | 20Gi | 20Gi | 10Gi |
 
 - **The cloud numbers are sized for the default pool** `azure-provision.sh`
   creates — 2 x Standard_D2as_v4, about 3.8 allocatable CPU — with the
@@ -130,6 +132,18 @@ can run.
   container in the pod — the clone init container and each service sidecar as
   well as the step. A default request above its default limit is refused by
   the API server.
+- **Disk is `ephemeral-storage`**: a container's own files outside any volume
+  and its logs count against its limit, and every emptyDir counts against the
+  sum of the pod's — the step's workspace among them. The kubelet evicts a pod
+  past either, and the step fails `pipeline_step_disk_exceeded`, so no step can
+  fill its node's disk with its working copy or its containers' files. The
+  workbench gives the workspace the same number as its own size limit, through
+  the ConfigMap's `MEMQL_PIPELINES_WORKSPACE_LIMIT`, which bounds it however
+  many services share that sum and shows the bound on the Job; each overlay
+  states it beside its LimitRange, and `render_pipelines_test.go` holds the two
+  equal. A declared cache is the claim's storage, not ephemeral storage, and
+  counts against neither — and `local-path`, the local class, keeps its claim
+  on a node's disk without enforcing the claim's size.
 
 ## The grant
 

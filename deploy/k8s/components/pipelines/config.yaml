@@ -20,6 +20,13 @@
 #                                  docker buildx imagetools inspect docker.io/library/buildpack-deps:bookworm-scm
 #                                on 2026-10-03; move it by measuring again, never
 #                                by editing the tag alone.
+#   MEMQL_PIPELINES_WORKSPACE_LIMIT
+#                                the size limit of every step's /workspace: the
+#                                LimitRange's default ephemeral-storage limit
+#                                (ceiling.yaml), stated beside it in each
+#                                overlay's pipelines-values.yaml, so the bound
+#                                the kubelet evicts a step for is the one its
+#                                Job shows.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -30,3 +37,4 @@ metadata:
 data:
   MEMQL_PIPELINES_NAMESPACE: memql-pipelines
   MEMQL_PIPELINES_CLONE_IMAGE: "docker.io/library/buildpack-deps:bookworm-scm@sha256:b42f74a50a22540b839042134919504ff7c51e7cf8d751b79d0f94c56566cb92"
+  MEMQL_PIPELINES_WORKSPACE_LIMIT: 20Gi

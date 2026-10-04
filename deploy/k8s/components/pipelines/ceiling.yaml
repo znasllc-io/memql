@@ -33,6 +33,15 @@ spec:
 # sidecar as well as the step -- and fills only what a container leaves unset.
 # A default request above its default limit is refused by the API server, so
 # the two move together.
+#
+# DISK is ephemeral-storage: a container's own files outside any volume and
+# its logs, against its own limit, and -- summed over the pod's containers --
+# every emptyDir too, the step's workspace among them, against the sum of
+# their limits. The kubelet evicts a pod past either, so no step can fill its
+# node's disk (it fails pipeline_step_disk_exceeded). The workbench gives the
+# workspace the same number as its own size limit
+# (MEMQL_PIPELINES_WORKSPACE_LIMIT, config.yaml), which bounds it however many
+# services share the sum; the overlays state both together.
 apiVersion: v1
 kind: LimitRange
 metadata:
@@ -47,6 +56,8 @@ spec:
       default:
         cpu: "2"
         memory: 4Gi
+        ephemeral-storage: 20Gi
       defaultRequest:
         cpu: 250m
         memory: 512Mi
+        ephemeral-storage: 1Gi
