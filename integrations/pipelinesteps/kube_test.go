@@ -344,6 +344,42 @@ func TestOwnSecretMakesTheJobItsOwner(t *testing.T) {
 	}
 }
 
+// TestKubeRefusesAnEmptyName (fix round 1): an empty name makes the path of
+// the whole collection -- DeleteJob("") would delete every Job in the
+// namespace, GetJob("") read a list as one Job -- so every method that acts on
+// one object refuses it and sends nothing. The fake answers each collection
+// the way the API server would, so a request made would be a success.
+func TestKubeRefusesAnEmptyName(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range []struct {
+		name string
+		call func(k *Kube) error
+	}{
+		{"GetJob", func(k *Kube) error { _, err := k.GetJob(ctx, ""); return err }},
+		{"AnnotateJob", func(k *Kube) error {
+			_, err := k.AnnotateJob(ctx, "", map[string]string{AnnotRunner: "workbench-0 x"}, "")
+			return err
+		}},
+		{"DeleteJob", func(k *Kube) error { return k.DeleteJob(ctx, "") }},
+		{"DeleteSecret", func(k *Kube) error { return k.DeleteSecret(ctx, "") }},
+		{"OwnSecret", func(k *Kube) error { return k.OwnSecret(ctx, "", kubeJob("uid-9", "3", nil)) }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			kube, fake := newKubeFake(t, map[string]kubeAnswer{
+				"GET " + kubeJobs:       kubeOK(200, map[string]any{"kind": "JobList", "apiVersion": "batch/v1", "items": []Job{kubeJob("uid-1", "8", nil)}}),
+				"PATCH " + kubeJobs:     kubeOK(200, map[string]any{"kind": "Job"}),
+				"DELETE " + kubeJobs:    kubeOK(200, map[string]any{"kind": "JobList", "apiVersion": "batch/v1", "items": []Job{}}),
+				"PATCH " + kubeSecrets:  kubeOK(200, map[string]any{"kind": "Secret"}),
+				"DELETE " + kubeSecrets: kubeOK(200, map[string]any{"kind": "SecretList", "apiVersion": "v1", "items": []Secret{}}),
+			})
+			if err := c.call(kube); err == nil || !strings.Contains(err.Error(), "empty name") {
+				t.Errorf("err = %v, want the empty name refused", err)
+			}
+			fake.wantRequests(t)
+		})
+	}
+}
+
 // TestOwnSecretRefusesAJobWithoutAUID: an owner reference names its owner by
 // uid; without one there is nothing to own the Secret, and nothing is sent.
 func TestOwnSecretRefusesAJobWithoutAUID(t *testing.T) {

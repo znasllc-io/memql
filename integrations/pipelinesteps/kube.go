@@ -22,8 +22,12 @@ import (
 // module graph). Each method is one or two API calls and decides nothing about
 // a step; the runner composes them.
 //
-// Three rules hold across the methods:
+// Four rules hold across the methods:
 //
+//   - An object is always named. An empty name would address the whole
+//     collection -- a GET would list every Job, a DELETE delete every Job or
+//     Secret in the namespace -- so a method that acts on one object refuses
+//     it before a request is made.
 //   - A delete never orphans. Every delete asks for background propagation:
 //     the API's default for a batch/v1 Job is to ORPHAN its pods, which would
 //     leave the step running with its Job gone.
@@ -86,6 +90,9 @@ func (k *Kube) CreateSecret(ctx context.Context, s Secret) error {
 // is gone. The merge patch replaces the whole list: the Secret has no other
 // owner.
 func (k *Kube) OwnSecret(ctx context.Context, secretName string, job Job) error {
+	if err := named("secret", secretName); err != nil {
+		return err
+	}
 	if job.Metadata.Name == "" || job.Metadata.UID == "" {
 		return fmt.Errorf("pipelinesteps: job %q cannot own secret %s: an owner is named by its uid, and the Job has none (use the Job the API server returned)", job.Metadata.Name, secretName)
 	}
@@ -135,6 +142,9 @@ func (k *Kube) CreateJob(ctx context.Context, j Job) (job Job, created bool, err
 // GetJob reads the step's Job. An absent one is the API server's 404
 // (deploycontrol.IsNotFound).
 func (k *Kube) GetJob(ctx context.Context, name string) (Job, error) {
+	if err := named("job", name); err != nil {
+		return Job{}, err
+	}
 	out, err := k.api.Do(ctx, http.MethodGet, k.jobsPath(name), "", nil)
 	if err != nil {
 		return Job{}, err
@@ -146,9 +156,13 @@ func (k *Kube) GetJob(ctx context.Context, name string) (Job, error) {
 // Job as patched. A non-empty resourceVersion makes it a compare-and-swap: the
 // API server refuses it 409 (deploycontrol.IsConflict) when the Job changed
 // since the runner read that version, which is how two replicas racing to take
-// a Job over learn which one won. An empty one patches unconditionally (the
-// heartbeat, the outcome).
+// a Job over learn which one won, and how the heartbeat never stamps over a
+// claim another replica made. An empty one patches unconditionally: the
+// observation and the outcome, which only the claim's holder writes.
 func (k *Kube) AnnotateJob(ctx context.Context, name string, annots map[string]string, resourceVersion string) (Job, error) {
+	if err := named("job", name); err != nil {
+		return Job{}, err
+	}
 	if annots == nil {
 		// A null in a merge patch deletes: "annotations": null would wipe the
 		// persisted outcome and the runner's claim along with everything else.
@@ -172,11 +186,17 @@ func (k *Kube) AnnotateJob(ctx context.Context, name string, annots map[string]s
 // DeleteJob deletes the step's Job, and with it (background propagation) its
 // pod and, once OwnSecret has run, its Secret. An absent Job is deleted.
 func (k *Kube) DeleteJob(ctx context.Context, name string) error {
+	if err := named("job", name); err != nil {
+		return err
+	}
 	return k.delete(ctx, k.jobsPath(name))
 }
 
 // DeleteSecret deletes the step's Secret. An absent Secret is deleted.
 func (k *Kube) DeleteSecret(ctx context.Context, name string) error {
+	if err := named("secret", name); err != nil {
+		return err
+	}
 	return k.delete(ctx, k.corePath("secrets", name))
 }
 
@@ -308,6 +328,15 @@ func noLogYet(err error) error {
 		return err
 	}
 	return fmt.Errorf("%w: %w", ErrContainerNotStarted, err)
+}
+
+// named refuses an empty name for one object: the path it makes is the
+// collection's.
+func named(kind, name string) error {
+	if name == "" {
+		return fmt.Errorf("pipelinesteps: no %s is named, and an empty name would address every %s in the namespace; nothing was sent", kind, kind)
+	}
+	return nil
 }
 
 // jobsPath is the Jobs collection of the namespace, or one Job in it.
