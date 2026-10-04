@@ -50,3 +50,29 @@ func TestUpdateInboundRequestStatusRefusesAClient(t *testing.T) {
 	require.Equal(t, "failed", latestPayload(t, internal, db, conceptName, canonicalId)["status"],
 		"the server-side stamp must still land")
 }
+
+// TestStageInboundRequestKeepsTheTierThatCreatedTheRow (memql#5795): the
+// dispatch automation fires once, on node.created, and reads verifiedBy off
+// that payload, so the row must keep the tier of the delivery that CREATED it.
+// A re-stage of the same signed payload does not dispatch again and must not
+// rewrite which secret verified the row that was dispatched.
+func TestStageInboundRequestKeepsTheTierThatCreatedTheRow(t *testing.T) {
+	eng, db, ctx := sharedReadMergeEngine(t)
+	internal := auth.ContextWithInternalOrigin(ctx)
+	reqId := "in5795-" + uniqueSuffix("tier-create-only")
+	stage := func(tier string) string {
+		return runMutation(t, internal, eng, "stageInboundRequest", map[string]any{
+			"requestId":         reqId,
+			"source":            "shopify-acme",
+			"medium":            "webhook",
+			"body":              `{"a":1}`,
+			"signatureVerified": true,
+			"verifiedBy":        tier,
+			"receivedAt":        "2026-10-04T12:00:00Z",
+		})
+	}
+	canonicalId := stage("connector")
+	stage("env")
+	require.Equal(t, "connector", latestPayload(t, internal, db, "v1:platform:inboundRequest", canonicalId)["verifiedBy"],
+		"a re-stage rewrote the tier of the row that was dispatched")
+}

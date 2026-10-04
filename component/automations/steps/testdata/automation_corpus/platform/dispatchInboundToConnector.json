@@ -28,7 +28,8 @@
               "read"
             ],
             "source": "s-source",
-            "status": "succeeded"
+            "status": "succeeded",
+            "verifiedBy": "s-verifiedBy"
           },
           "topic": "graph.node.created.v1:platform:inboundRequest"
         },
@@ -42,7 +43,8 @@
               "headersJson": "s-headersJson",
               "inboundRequestId": "v1:probe:thing:1",
               "receivedAt": "s-receivedAt",
-              "source": "s-source"
+              "source": "s-source",
+              "verifiedBy": "s-verifiedBy"
             },
             "kind": "builtin",
             "name": "datasyncDispatchInbound"
@@ -81,7 +83,8 @@
               "read"
             ],
             "source": "s-source",
-            "status": "succeeded"
+            "status": "succeeded",
+            "verifiedBy": "s-verifiedBy"
           },
           "topic": "graph.node.created.v1:platform:inboundRequest"
         },
@@ -95,7 +98,8 @@
               "headersJson": "s-headersJson",
               "inboundRequestId": "v1:probe:thing:1",
               "receivedAt": "s-receivedAt",
-              "source": "s-source"
+              "source": "s-source",
+              "verifiedBy": "s-verifiedBy"
             },
             "kind": "builtin",
             "name": "datasyncDispatchInbound"
@@ -134,7 +138,8 @@
               "read"
             ],
             "source": "s-source",
-            "status": "succeeded"
+            "status": "succeeded",
+            "verifiedBy": "s-verifiedBy"
           },
           "topic": "graph.node.created.v1:platform:inboundRequest"
         },
@@ -148,7 +153,8 @@
               "headersJson": "s-headersJson",
               "inboundRequestId": "v1:probe:thing:1",
               "receivedAt": "s-receivedAt",
-              "source": "s-source"
+              "source": "s-source",
+              "verifiedBy": "s-verifiedBy"
             },
             "kind": "builtin",
             "name": "datasyncDispatchInbound"
@@ -187,7 +193,8 @@
               "read"
             ],
             "source": "s-source",
-            "status": "succeeded"
+            "status": "succeeded",
+            "verifiedBy": "s-verifiedBy"
           },
           "topic": "graph.node.created.v1:platform:inboundRequest"
         },
@@ -201,7 +208,8 @@
               "headersJson": "s-headersJson",
               "inboundRequestId": "v1:probe:thing:1",
               "receivedAt": "s-receivedAt",
-              "source": "s-source"
+              "source": "s-source",
+              "verifiedBy": "s-verifiedBy"
             },
             "kind": "builtin",
             "name": "datasyncDispatchInbound"
