@@ -109,7 +109,7 @@ func (s *step) settle(dec pl.StepResult, pod *Pod, f *follower) pl.StepResult {
 	libCtx, cancelLib := s.libraryContext()
 	defer cancelLib()
 	cr := s.storeLog(libCtx, &res, notes)
-	s.storeArtifacts(libCtx, cr, &res, notes)
+	s.storeFramedArtifacts(libCtx, cr, &res, notes)
 	fitOutcome(&res, notes)
 	persistCtx, cancelPersist := s.persistContext()
 	defer cancelPersist()
@@ -303,9 +303,11 @@ func completeLogNote(storeMaxLines int) string {
 	return liveLogStops(storeMaxLines) + "the complete log is archived to the Library"
 }
 
-// storeArtifacts stores the step's artifacts, one Library file each, named by
-// their path.
-func (s *step) storeArtifacts(ctx context.Context, cr CaptureResult, res *pl.StepResult, notes *noteList) {
+// storeFramedArtifacts stores the artifacts the wrapper framed in the step's
+// log, one Library file each, named by their path (stepFiles.storeArtifacts):
+// what it adds is the frame -- the archive the capture decoded out of it, and
+// its verdict on a frame that is missing, cut short or too large.
+func (s *step) storeFramedArtifacts(ctx context.Context, cr CaptureResult, res *pl.StepResult, notes *noteList) {
 	files := s.files()
 	if cr.ArtifactNote != nil {
 		files.artifactFact(res, notes, *cr.ArtifactNote)

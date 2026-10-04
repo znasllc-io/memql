@@ -184,7 +184,7 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 	if _, archive, read := files.closeLog(capture, &res, notes, completeLogNote(f.cfg.LogStoreMaxLines)); read {
 		files.fileLog(libCtx, archive, &res, notes)
 	}
-	f.storeArtifacts(libCtx, files, out, &res, notes)
+	f.storeReturnedArtifacts(libCtx, files, out, &res, notes)
 	fitOutcome(&res, notes)
 	return res, nil
 }
@@ -392,12 +392,15 @@ func (f *Fleet) classify(ctx context.Context, req pl.StepRequest, run StepRun, r
 	}
 }
 
-// storeArtifacts files the artifacts the machine packed through the cluster
-// runner's own helpers (stepFiles). An archive past this cluster's cap, or
-// past what the machine sends back, fails the step as one past the cluster's
-// does. The machine sends no archive when the declared paths matched nothing,
-// so then each of them is noted as matching nothing.
-func (f *Fleet) storeArtifacts(ctx context.Context, files stepFiles, out *fleetOutput, res *pl.StepResult, notes *noteList) {
+// storeReturnedArtifacts files the artifacts the machine returned through the
+// cluster runner's own helpers (stepFiles.storeArtifacts): what it adds is the
+// machine's answer -- its archive, sent base64 and refused before it is
+// decoded when far past the cap, or its word that it sent none. An archive
+// past this cluster's cap, or past what the machine sends back, fails the step
+// as one past the cluster's does. The machine sends no archive when the
+// declared paths matched nothing, so then each of them is noted as matching
+// nothing.
+func (f *Fleet) storeReturnedArtifacts(ctx context.Context, files stepFiles, out *fleetOutput, res *pl.StepResult, notes *noteList) {
 	if len(files.run.Artifacts) == 0 || out == nil {
 		return
 	}
