@@ -123,14 +123,16 @@ type Result struct {
 	// failed.
 	RefusedBeforeStart bool
 
-	// RefusedByGate says THIS engine's own gate refused the call before any
-	// routing (preDispatchCheck: rule 0, the pipeline gate, the agent gates):
-	// a decision about the request -- who asked, its shape, a read the gate
-	// could not make, the owner's off switch -- rather than a fact about the
-	// owner's machines. Always alongside RefusedBeforeStart. Never set by a
-	// routing or machine refusal, a sibling replica's included, whatever code
-	// it carries: the same code from a sibling is that replica's word about a
-	// machine it holds.
+	// RefusedByGate says THIS engine refused the call before any routing
+	// decision, by its own checks or reads (rulings R33b, R33c): its gate
+	// (preDispatchCheck: rule 0, the pipeline gate, the agent gates), or a
+	// read the router could not make (the owner's machines, unreadable in a
+	// database outage). A decision about the request -- who asked, its shape,
+	// the owner's off switch -- or a fault of the engine's, rather than a fact
+	// about the owner's machines. Always alongside RefusedBeforeStart. Never
+	// set by a routing decision or a machine's refusal, a sibling replica's
+	// included, whatever code it carries: the same code from a sibling is
+	// that replica's word about a machine it holds.
 	RefusedByGate bool
 }
 
@@ -343,7 +345,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 	record := plan.Record()
 	record.ReroutedFrom = req.ReroutedFrom
 	if err != nil {
-		res := Result{OK: false, ErrorCode: "no_worker_available", ErrorMessage: err.Error(), RefusedBeforeStart: true}
+		// The router could not read what it routes over -- the owner's machines,
+		// in a database outage -- so it decided nothing about them: an engine
+		// fault, refused before any routing decision (ruling R33c), never "no
+		// machine of yours offers this". The code the agent tool loop reads
+		// stays no_worker_available.
+		res := Result{OK: false, ErrorCode: "no_worker_available", ErrorMessage: err.Error(),
+			RefusedBeforeStart: true, RefusedByGate: true}
 		d.recordInvocation(ctx, req, "", startedAt, d.clock(), res, "no_worker_available", record)
 		return res, nil
 	}

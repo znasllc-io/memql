@@ -728,17 +728,19 @@ func TestFleetStepReadsGoTimings(t *testing.T) {
 }
 
 // gateStore is the slice of the dispatcher's store its gate and router read:
-// the owner's machines, no routing policy, and the kill switch.
+// the owner's machines (or the error reading them), no routing policy, and the
+// kill switch.
 type gateStore struct {
 	mu          sync.Mutex
 	machines    []worker.Candidate
+	machinesErr error
 	computerUse bool
 	prefsErr    error
 	invocations []workerservice.InvocationRow
 }
 
 func (s *gateStore) WorkersForOwner(context.Context, string) ([]worker.Candidate, error) {
-	return s.machines, nil
+	return s.machines, s.machinesErr
 }
 func (s *gateStore) RoutingPolicyForOwner(context.Context, string) (*worker.Policy, error) {
 	return nil, nil
@@ -774,19 +776,25 @@ func TestFleetStepPassesTheRealDispatchersPipelineGate(t *testing.T) {
 	for _, c := range []struct {
 		name        string
 		machines    []worker.Candidate
+		machinesErr error
 		computerUse bool
 		prefsErr    error
 		status      pl.Outcome
 		code        string
+		says        string // what the failure must carry, when anything
 	}{
-		{"an owner with no machines", nil, true, nil, pl.OutcomeRefused, pl.CodeNoMachineForNeed},
-		{"a machine held by a sibling replica this node cannot reach", []worker.Candidate{builder}, true, nil, pl.OutcomeRefused, pl.CodeNoMachineForNeed},
-		{"an owner whose computer use is off", []worker.Candidate{builder}, false, nil, pl.OutcomeRefused, pl.CodeFleetDisabled},
+		{"an owner with no machines", nil, nil, true, nil, pl.OutcomeRefused, pl.CodeNoMachineForNeed, ""},
+		{"a machine held by a sibling replica this node cannot reach", []worker.Candidate{builder}, nil, true, nil, pl.OutcomeRefused, pl.CodeNoMachineForNeed, ""},
+		{"an owner whose computer use is off", []worker.Candidate{builder}, nil, false, nil, pl.OutcomeRefused, pl.CodeFleetDisabled, ""},
 		// The real gate refusing for a reason of its own: an executor error.
-		{"an owner whose computer-use setting cannot be read", []worker.Candidate{builder}, true, errors.New("db down"), pl.OutcomeRefused, pl.CodeExecutorError},
+		{"an owner whose computer-use setting cannot be read", []worker.Candidate{builder}, nil, true, errors.New("db down"), pl.OutcomeRefused, pl.CodeExecutorError, ""},
+		// The router unable to read the owner's machines (ruling R33c): the
+		// engine's own fault, not "no machine of yours offers this need" --
+		// an executor error carrying the router's words.
+		{"an owner whose machines cannot be read", []worker.Candidate{builder}, errors.New("the fleet read timed out"), true, nil, pl.OutcomeRefused, pl.CodeExecutorError, "the fleet read timed out"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			store := &gateStore{machines: c.machines, computerUse: c.computerUse, prefsErr: c.prefsErr}
+			store := &gateStore{machines: c.machines, machinesErr: c.machinesErr, computerUse: c.computerUse, prefsErr: c.prefsErr}
 			d, err := worker.NewDispatcher(worker.Options{
 				Logger:     quietLogger(),
 				Registry:   workerservice.NewRegistry(quietLogger(), nil),
@@ -801,6 +809,9 @@ func TestFleetStepPassesTheRealDispatchersPipelineGate(t *testing.T) {
 			wantFailure(t, res, c.status, c.code)
 			if strings.Contains(res.Failure.Message, "denied_pipeline_purpose") {
 				t.Fatalf("the real gate refused the request this path builds: %s", res.Failure.Message)
+			}
+			if !strings.Contains(res.Failure.Message, c.says) {
+				t.Errorf("failure %q, want it to carry %q", res.Failure.Message, c.says)
 			}
 			store.mu.Lock()
 			defer store.mu.Unlock()
