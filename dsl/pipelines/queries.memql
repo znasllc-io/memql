@@ -97,10 +97,11 @@ query channel pipelineChannelsForOwner {
 
 // ---- server-only, the runner's ----
 
-/// The active pipelines of one repository -- the trigger's match for a delivery. @serverOnly: the
-/// caller is a GitHub delivery with no person behind it, and every owner who connected the
-/// repository must be found, so an actor.userId conjunct would match nothing and the delivery would
-/// open no run. Several owners may connect one repository, hence a page rather than one row.
+/// The active pipelines of one repository -- the trigger's match for a delivery, and connect's check
+/// that no other source runs it. @serverOnly: the caller is a GitHub delivery with no person behind
+/// it, and the pipeline must be found whoever owns it, so an actor.userId conjunct would match nothing
+/// and the delivery would open no run. A repository has one pipeline: connect refuses a second
+/// source's with pipeline_already_connected, so this answers one row at most.
 @serverOnly
 @actor
 query pipeline pipelinesForRepository {

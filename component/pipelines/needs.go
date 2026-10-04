@@ -4,9 +4,10 @@ import "sort"
 
 // The closed set of environment needs a step may name (D8). It is the
 // workbench's environment hint (integrations/workbench, EnvironmentNeeds)
-// plus docker, which the substrate adds there too; a parity test in the
-// integrations module holds the two lists together. An unknown need is a
-// typed refusal, never a silent fallback to somebody's laptop.
+// plus docker. The substrate (epic memql#5478) adds docker to that list and a
+// parity test to the integrations module holding the two together; until it
+// lands, no test does. An unknown need is a typed refusal, never a silent
+// fallback to somebody's laptop.
 const (
 	NeedDisplay      = "display"
 	NeedDocker       = "docker"
