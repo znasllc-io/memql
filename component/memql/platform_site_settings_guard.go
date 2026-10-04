@@ -213,9 +213,9 @@ var siteStoreIdForm = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 // the edge merges over `settings` for one store.
 //
 // The VALUES are not checked against any store: an entry for a store this
-// site is not bound to is inert, because the edge applies only the entry of
-// the store the in-force binding names, and binding a store already requires
-// reading it (platform_site_binding_guard.go).
+// site is not bound to is never served, because the edge applies only the
+// entry of the store the in-force binding names, and binding a store already
+// requires reading it (platform_site_binding_guard.go).
 func (e *MemQLEngine) validateSiteStoreSettings(
 	ctx context.Context,
 	payload map[string]any,

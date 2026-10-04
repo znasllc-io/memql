@@ -822,7 +822,7 @@ bound to one store get that store's values.
   authorization: the deployable's owner, or a cluster owner. It needs no
   store part -- which store a deployable is bound to stays
   `updateSiteStoreBinding`'s -- and an entry for a store the deployable is not
-  bound to is inert.
+  bound to is never served.
 
 ---
 

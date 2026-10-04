@@ -599,7 +599,7 @@ mutation site updateSiteSettings {
 /// guardRowAuthzWrite -- the row's owner, or a cluster owner through the explicit escape -- and no
 /// capability part, because these are runtime settings like `settings`, not a store binding. Which
 /// store a site is bound to stays the `store` part's (updateSiteStoreBinding); an entry for a store
-/// the site is not bound to is inert.
+/// the site is not bound to is never served.
 mutation site updateSiteStoreSettings {
   args {
     siteId         string!
