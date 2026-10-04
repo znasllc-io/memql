@@ -628,6 +628,21 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// name a user that caller could not act as), and the report is the
 		// output of the offline analysis rather than anything a caller sent.
 		//
+		// The update feeds write through the same stamp, and the webhook feed
+		// was the one entry point that held a caller's text:
+		// packageNoteUpstreamFromWebhook is a builtin, which any signed-in
+		// client's query can name (@sdk has no engine effect), and it noted
+		// whatever source and body it was handed -- a forged push that moved
+		// every tracking package's cue and started an armed source's automatic
+		// deploy. It now refuses every call that did not arrive with internal
+		// origin before its first read, and takes no delivery from its caller
+		// at all: it is handed the staged inboundRequest's id and reads the
+		// source, the body and the receiver's signatureVerified from the row,
+		// noting nothing from an unverified one
+		// (component/packages/feeds_test.go). The one caller-supplied value
+		// left is that row id, and all it can name is a delivery the inbound
+		// receiver verified.
+		//
 		// The stamp is scoped to ONE Execute call and cannot escape: it is
 		// applied inline inside store.writeInternal and the marked context is
 		// never returned, so no later frame inherits it -- the memql#2879
@@ -635,7 +650,7 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// own actor, which is what keeps row admission the composite tier's
 		// decision. Both asserted in
 		// component/packages/internal_origin_test.go.
-		"component/packages": "package deploy pipeline -- server-initiated; stage advances happen after cross-node handoffs with no caller in scope, and every id is engine-minted (memql#4794)",
+		"component/packages": "package deploy pipeline -- server-initiated; stage advances happen after cross-node handoffs with no caller in scope, every id is engine-minted, and the webhook feed refuses every call without internal origin and reads its delivery from the staged row (memql#4794, epic memql#5477)",
 		// PIPELINES (epic memql#5477). SERVER-INITIATED, and the argument is
 		// component/packages' one step on, because a pipeline hangs off a
 		// package and borrows its owner.

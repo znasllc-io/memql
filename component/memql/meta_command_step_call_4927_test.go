@@ -49,16 +49,27 @@ func TestAnAutomationStepsRenderedCallReachesItsBuiltin(t *testing.T) {
 	}{
 		{
 			// dsl/platform/automations.memql, automation notePackageUpstreamFromWebhook.
-			what: "the inbound webhook that notes an upstream moving",
-			query: `packageNoteUpstreamFromWebhook("inboundRequestId": "req-1", ` +
-				`"source": "github", "body": "{}")`,
-			want: map[string]string{"inboundRequestId": "req-1", "source": "github"},
+			// It once passed the source and the body as well; the feed now reads
+			// both off the staged row (epic memql#5477), so the step hands over
+			// the row's id alone.
+			what:  "the inbound webhook that notes an upstream moving",
+			query: `packageNoteUpstreamFromWebhook("inboundRequestId": "req-1")`,
+			want:  map[string]string{"inboundRequestId": "req-1"},
 		},
 		{
 			// dsl/campaigns/automations.memql, automation ingestCampaignFeedback.
 			what:  "campaign bounce and complaint ingestion",
 			query: `campaignIngestFeedback("inboundRequestId": "req-2")`,
 			want:  map[string]string{"inboundRequestId": "req-2"},
+		},
+		{
+			// dsl/platform/automations.memql, automation
+			// recordPreviewOrderObservation: the step that renders SEVERAL
+			// quoted keys, comma-separated, which the webhook case above carried
+			// until it narrowed to one.
+			what:  "a storefront preview noting a mirrored order",
+			query: `sitePreviewNoteOrder("orderId": "order-1", "storeId": "store-1")`,
+			want:  map[string]string{"orderId": "order-1", "storeId": "store-1"},
 		},
 	}
 

@@ -533,7 +533,9 @@ rollback button performs.
 ## Update detection
 
 Two feeds, one effect. Both write exactly `latestKnownVersion` and
-`updateAvailable` on the package row, and **neither ever deploys anything**.
+`updateAvailable` on the package row, and **neither deploys anything by
+itself**: a source whose [auto-deploy](#auto-deploy) switch is on starts its
+own run from the version they noted, through the same confirm gate.
 
 - **Webhook (preferred).** GitHub pushes and releases arrive
   through the existing `POST /inbound/{source}` seam -- deny-by-default source allowlist plus
@@ -545,7 +547,11 @@ Two feeds, one effect. Both write exactly `latestKnownVersion` and
   secret is the app's own. **The feed reads pushes and releases only.** The
   same source also carries pull request, merge group and check deliveries;
   those are pipelines', and none of them moves the cue or starts an
-  auto-deploy.
+  auto-deploy. **It acts on the staged row and on nothing else**: the shipped
+  automation hands it the row's id, the source, the body and the receiver's
+  signature verdict are read from the row, and a call that did not come from
+  that automation is refused before anything is read. A `github` source
+  configured to verify no signature (`scheme=none`) moves no cue.
 - **Polling.** A scheduled automation every ten minutes, for clusters no
   webhook can reach. It reads each repo-sourced package's upstream head under
   **that package's own credential**, resolved at call time under the package

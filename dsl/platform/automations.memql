@@ -91,19 +91,15 @@ automation reconcileAccountFrontDoors {
 /// Notice a push or release for a repository this cluster tracks as a package. Rides the existing
 /// inbound seam -- the receiver has already checked the source allowlist and the per-source HMAC by
 /// the time a row exists -- so this adds no HTTP surface at all. A delivery matching no package is
-/// a no-op: most of a cluster's webhooks are about something else.
+/// a no-op: most of a cluster's webhooks are about something else. It hands the feed the row's id
+/// and nothing else: the feed reads the source, the body and the signature verdict from the row
+/// itself, so what moves a package's update cue is the delivery the receiver verified.
 @trigger(event="node.created", concept="v1:platform:inboundRequest")
 automation notePackageUpstreamFromWebhook {
   args {
-    id     any
-    source any
-    body   any
+    id  any
   }
-  note := builtin packageNoteUpstreamFromWebhook(
-    inboundRequestId: args.id,
-    source: args.source,
-    body: args.body
-  )
+  note := builtin packageNoteUpstreamFromWebhook(inboundRequestId: args.id)
 }
 
 /// The polling fallback for clusters no webhook can reach. Every 10 minutes, which is the cadence

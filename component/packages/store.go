@@ -122,6 +122,15 @@ func (s *store) packagesTrackingRepos(ctx context.Context) ([]map[string]any, er
 	return s.queryAll(ctx, "query packagesTrackingRepos()")
 }
 
+// inboundRequestById is the staged delivery the webhook feed acts on, read by
+// the id the automation hands it: the source, the body and the receiver's
+// signatureVerified come from this row and from nowhere else (feeds.go).
+// Unstamped like every read here -- v1:platform:inboundRequest declares no row
+// tier, so the automation's own actor reads it.
+func (s *store) inboundRequestById(ctx context.Context, id string) (map[string]any, error) {
+	return s.queryOne(ctx, fmt.Sprintf("query inboundRequestById(requestId: %s)", langparser.QuoteString(id)))
+}
+
 // lastSucceededDeployment is the newest run of this package that actually
 // finished, or nil.
 //

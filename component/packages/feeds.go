@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
@@ -37,24 +38,68 @@ func webhookSource() string {
 	return defaultWebhookSource
 }
 
+// errWebhookFeedClientOrigin is the webhook feed reached by anything but the
+// shipped automation.
+var errWebhookFeedClientOrigin = errors.New("packages: the webhook feed is driven by the engine's own automation and refuses a call from a client")
+
+// errWebhookDeliveryUnverified is a staged delivery on the packages source
+// whose signature the inbound receiver did not check.
+var errWebhookDeliveryUnverified = errors.New("packages: this delivery's signature was not verified, and an unsigned delivery never moves a package's update cue; configure the inbound source with the webhook's signing secret")
+
 // handleNoteUpstreamFromWebhook is the webhook feed.
 //
-// It reads a row the inbound receiver ALREADY verified -- source allowlist and
-// per-source HMAC both -- so there is no signature check here and there must
-// not be one: a second, weaker copy of a check that already passed is how a
-// bypass gets written. A delivery matching no package is a no-op, because most
-// of a cluster's webhooks are about something else entirely.
+// IT IS HANDED A ROW ID AND NOTHING ELSE. packageNoteUpstreamFromWebhook is a
+// builtin, and any signed-in client's query can name a builtin -- @sdk has no
+// engine effect and a builtin takes no @serverOnly -- so two things stand
+// between a caller and a forged push. The feed refuses every call that did not
+// arrive with internal origin, which the automation executor stamps on a
+// tree-loaded automation's step context and on nothing a client sends, BEFORE
+// it reads anything. And it reads the delivery it acts on from the STAGED
+// v1:platform:inboundRequest row, never from an argument: the source, the body
+// and the receiver's signatureVerified are the row's. A forged push matters
+// because of what it moves -- latestKnownVersion on every package tracking the
+// repository, and through startAutoRun an armed source's automatic deploy of
+// whatever commit the body names.
+//
+// The receiver ALREADY verified the row -- source allowlist and per-source HMAC
+// both -- so the feed does not check a signature itself, and must not: a
+// second, weaker copy of a check that already passed is how a bypass gets
+// written. It reads the receiver's VERDICT instead, and an unverified row (a
+// source configured with scheme none) moves nothing. A delivery matching no
+// package is a no-op, because most of a cluster's webhooks are about something
+// else entirely.
 func (i *Integration) handleNoteUpstreamFromWebhook(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, errWebhookFeedClientOrigin
+	}
 	deps, err := i.resolve()
 	if err != nil {
 		return nil, err
 	}
-	source := strings.TrimSpace(stringArg(args, "source"))
+	requestID := strings.TrimSpace(stringArg(args, "inboundRequestId"))
+	if requestID == "" {
+		return nil, fmt.Errorf("packages: inboundRequestId is required")
+	}
+	staged, err := deps.Store.inboundRequestById(ctx, requestID)
+	if err != nil {
+		return nil, err
+	}
+	if staged == nil {
+		return nil, fmt.Errorf("packages: no delivery is staged as %q", requestID)
+	}
+	// The source first: a row on another source is somebody else's, whether
+	// or not it was verified, and is skipped rather than refused.
+	source := rowString(staged, "source")
 	if source != webhookSource() {
 		return resultNode(map[string]any{"skipped": "not a package source", "source": source}), nil
 	}
+	if !rowBool(staged, "signatureVerified") {
+		return nil, fmt.Errorf("%w (staged as %q)", errWebhookDeliveryUnverified, requestID)
+	}
 
-	ev, perr := parseGitHubPush(stringArg(args, "body"))
+	// The body exactly as staged -- the bytes the signature covered.
+	body, _ := staged["body"].(string)
+	ev, perr := parseGitHubPush(body)
 	if perr != nil {
 		// A body this cluster cannot read is not a failure of the delivery --
 		// GitHub sends event types nobody here models. Skipped, and named, so

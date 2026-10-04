@@ -29,7 +29,8 @@ func TestWebhookOnlyUpdatesItsTrackedBranch(t *testing.T) {
 	other := trackedPackage("old-release", "old-release", false)
 	other["id"], other["repoRef"] = "v1:platform:package:release", "release"
 	i, engine := feedHarness(t, main, other)
-	_, err := i.handleNoteUpstreamFromWebhook(context.Background(), map[string]any{"source": "github", "body": pushBody}, 0)
+	stageDelivery(engine, "github", pushBody, true)
+	_, err := deliver(i)
 	if err != nil {
 		t.Fatal(err)
 	}
