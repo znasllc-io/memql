@@ -502,6 +502,49 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.updated.v1:platform:sourceConnection", TargetType: ""},
 		{Pattern: "graph.node.created.v1:platform:externalConnection", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:platform:externalConnection", TargetType: ""},
+		// Pipelines (epic memql#5477; design record D11: every pipelines
+		// concept's events carry broadcast routing rules from day one). All
+		// three concepts, created and updated.
+		//
+		// WHO WRITES. A run is OPENED where its trigger fires -- the bff that
+		// staged a GitHub delivery, or the agent replica holding the
+		// pipelines-poll lease -- and is CLAIMED and DRIVEN by an agent
+		// replica, which writes its lease, its heartbeat, its stages and its
+		// conclusion. A pipeline is written by whichever bff took the
+		// person's connect or disconnect, and on agent replicas by the poll
+		// (heads) and the driver (timings). A channel gains its writer in
+		// epic memql#5480; its rules land with its tier so the surface that
+		// lists channels is live on arrival.
+		//
+		// WHO READS. Two readers, and the first is why these rules are
+		// load-bearing rather than cosmetic: the agent's driver itself. A
+		// webhook opens a `queued` run on the bff, and that run's created
+		// event is how an agent replica learns there is a run to claim (plan
+		// decision 10). Under default-deny it would sit queued until the
+		// poll's recovery found it a minute later. The second is the OS window
+		// the bff serves: the Runs list and the run page watch a run walk
+		// queued -> in_progress -> completed, written on another node.
+		//
+		// SAFE TO BROADCAST, checked rather than assumed: no automation in the
+		// tree triggers on v1:pipelines:* (dsl/pipelines/automations.memql
+		// triggers on v1:platform:inboundRequest and on a schedule). The one
+		// subscriber that acts on these events, the agent's driver, claims a
+		// run under a gated read-modify-write lease, so every agent replica
+		// hearing the same event amounts to one claim and the rest finding the
+		// lease taken. Volume is a few rows per run -- the open, the claim, a
+		// heartbeat every 30 seconds, one write per stage, the conclusion --
+		// and a run is a push. driverHeartbeatAt is a heartbeat and must never
+		// enter an arrival-cue fingerprint.
+		//
+		// v1:platform:inboundRequest stays LOCAL, deliberately: a delivery is
+		// handled on the node that staged it, and only the run it opens
+		// crosses the mesh.
+		{Pattern: "graph.node.created.v1:pipelines:pipeline", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:pipelines:pipeline", TargetType: ""},
+		{Pattern: "graph.node.created.v1:pipelines:run", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:pipelines:run", TargetType: ""},
+		{Pattern: "graph.node.created.v1:pipelines:channel", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:pipelines:channel", TargetType: ""},
 		// ---- The browser-facing completion (memql#4542) -------------------
 		//
 		// Everything from here to the end of this block was added by ONE

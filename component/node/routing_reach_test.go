@@ -140,6 +140,18 @@ func TestBrowserFacingConceptsForwardWithTheVerbsTheirSurfacesSubscribeTo(t *tes
 		{"v1:work:run", []string{"created", "updated", "deleted"}, "a run's status flips on the node that runs it, and the person watching is on the bff"},
 		{"v1:work:step", []string{"created", "updated", "deleted"}, "the run rail is one LiveList over step rows"},
 		{"v1:work:approval", []string{"created", "updated", "deleted"}, "a person must see an approval arrive without polling"},
+
+		// PIPELINES (epic memql#5477, design record D11). Ahead of their
+		// surface again -- the Runs list and the run page are epic
+		// memql#5479 -- and for v1:pipelines:run the claim is stronger than
+		// a surface's: a run opened on the bff is claimed by an agent
+		// replica BECAUSE its created event crosses, so dropping that rule
+		// strands every webhook-opened run until the poll's recovery.
+		// CREATED + UPDATED only, as for the campaigns rows: nothing deletes
+		// a pipelines row, and nothing publishes graph.node.deleted.
+		{"v1:pipelines:pipeline", []string{"created", "updated"}, "a source's Pipeline facts, connected on one replica and read on another"},
+		{"v1:pipelines:run", []string{"created", "updated"}, "the agent driver claiming a run the bff opened, and the Runs list watching it walk to completed"},
+		{"v1:pipelines:channel", []string{"created", "updated"}, "the notify stage's channels (writers in epic memql#5480)"},
 	}
 
 	for _, c := range cases {
