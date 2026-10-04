@@ -683,11 +683,11 @@ const COPY: Record<string, RefusalCopy> = {
   // Where a step executes (epic memql#5478).
   pipeline_step_timeout: {
     title: "The step ran past its time limit and was stopped",
-    next: "Raise the step's timeout in memql-package.yaml, or split the work.",
+    next: "Raise the step's timeout in memql-package.yaml, or split the work. On one of your machines, its pipelines max_timeout_sec can be the limit.",
   },
   pipeline_run_ceiling: {
     title: "The run passed its wall-clock ceiling",
-    next: "Its unfinished steps were stopped. Shorten the run, or ask an operator to raise MEMQL_PIPELINES_RUN_MAX_MINUTES.",
+    next: "Its unfinished steps were stopped or never started. Shorten the run or run fewer steps at once, or ask an operator to raise MEMQL_PIPELINES_RUN_MAX_MINUTES.",
   },
   pipeline_no_machine_for_need: {
     title: "No online machine of yours offers what this step needs",
