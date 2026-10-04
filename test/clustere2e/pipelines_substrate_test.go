@@ -977,8 +977,14 @@ func engineClusterAPI(ctx context.Context, t *testing.T, c *substrateCluster, na
 		Timeout:   30 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: c.roots, MinVersion: tls.VersionTLS12}},
 	})
-	if _, err := api.Do(ctx, http.MethodGet, "apis/batch/v1/namespaces/"+namespace+"/jobs?limit=1", "", nil); err != nil {
-		t.Fatalf("the engine (%s/%s) cannot list Jobs in %s: %v -- the runner's Role and RoleBinding "+
+	// Asked with a call the runner makes -- a read of one Job by name -- of a
+	// name no step's Job has (a step's is mp- and 24 hex): the API server
+	// answers 404 to an identity that may read Jobs here and 403 to one that
+	// may not. Not a list: the runner never lists Jobs, and its Role does not
+	// let it.
+	grantCheck := "apis/batch/v1/namespaces/" + namespace + "/jobs/pipelines-e2e-grant-check"
+	if _, err := api.Do(ctx, http.MethodGet, grantCheck, "", nil); !deploycontrol.IsNotFound(err) {
+		t.Fatalf("the engine (%s/%s) cannot read Jobs in %s (%v) -- the runner's Role and RoleBinding "+
 			"(deploy/k8s/components/pipelines/rbac.yaml) are not deployed, or do not reach it",
 			substrateMeshNamespace, substrateEngineAccount, namespace, err)
 	}
