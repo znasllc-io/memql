@@ -264,6 +264,42 @@ func TestCanDispatchStoredRunRecovery(t *testing.T) {
 	}
 }
 
+// A DUE `retry` WAIT IS SERVABLE (memql#5664). The failure path parks a run on
+// a retry when the rules call its failure a blip and the run's budget has
+// room; the sweep hands it back with a recovery dispatch at `waiting`, and the
+// agent's admission refused every waiting run that was not an inference park
+// -- so the dispatch ran nothing and held the run's claim for its lease, and
+// the retry never happened. A retry wait is the failure path's own timer: it
+// is admitted when it is due and asked for by the sweep, and never on a stale
+// event, before its backoff, or for a wait only the planner can serve.
+func TestCanDispatchStoredRunServesADueRetryWait(t *testing.T) {
+	now := time.Now()
+	at := func(d time.Duration) string { return now.Add(d).UTC().Format(time.RFC3339Nano) }
+	for _, tc := range []struct {
+		name      string
+		waiting   map[string]any
+		requested string
+		recovery  bool
+		want      bool
+	}{
+		{"a due retry, asked for by the sweep", map[string]any{"kind": "retry", "subject": "fetch", "resumeAt": at(-time.Second)}, "waiting", true, true},
+		{"a retry still inside its backoff", map[string]any{"kind": "retry", "subject": "fetch", "resumeAt": at(time.Minute)}, "waiting", true, false},
+		{"a retry nobody could read the time of", map[string]any{"kind": "retry", "subject": "fetch", "resumeAt": "soon"}, "waiting", true, false},
+		{"a retry with no time at all", map[string]any{"kind": "retry", "subject": "fetch"}, "waiting", true, false},
+		{"a stale event into a due retry", map[string]any{"kind": "retry", "subject": "fetch", "resumeAt": at(-time.Second)}, "waiting", false, false},
+		{"an event that said running", map[string]any{"kind": "retry", "subject": "fetch", "resumeAt": at(-time.Second)}, "running", false, false},
+		{"a replan is the planner's", map[string]any{"kind": "replan", "subject": "fetch", "resumeAt": at(-time.Second)}, "waiting", true, false},
+		{"a repair is the planner's", map[string]any{"kind": "repair", "subject": "fetch", "resumeAt": at(-time.Second)}, "waiting", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := DispatchRequest{Status: tc.requested, Recovery: tc.recovery}
+			if got := req.CanDispatchStoredRun("g", "waiting", tc.waiting, now); got != tc.want {
+				t.Fatalf("CanDispatchStoredRun = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestARerunIsClaimedUnderItsOwnRequest pins the claim grain of a re-run (epic
 // memql#5414). A re-run executes a FINISHED run again under its own id, usually
 // within the lease of the dispatch before it -- a person reads the answer and

@@ -204,8 +204,13 @@ func runnerOwnsRecovery(triggeredBy string) bool {
 
 // CanDispatchStoredRun rechecks an event or explicit recovery request against
 // the authoritative row. Ordinary journals belong to their scheduler; only
-// the sweep can take one over. A waiting run is eligible solely for a due
-// inference retry explicitly requested by that sweep, never a stale event. A
+// the sweep can take one over. A waiting run is eligible solely for a retry
+// that is DUE and explicitly requested by that sweep, never a stale event:
+// a due inference retry, or a due `retry` wait the failure path parked on
+// (memql#5664) -- which this refused until then, so the sweep's recovery
+// dispatch ran nothing and held the run's claim for its lease, and a blip the
+// rules had called retryable was never retried. A replan or repair wait is
+// never eligible here: it is the planner's remedy, not an execution. A
 // driver-owned run is never eligible (IsDriverOwnedRun).
 func (r DispatchRequest) CanDispatchStoredRun(goalId, status string, waitingOn map[string]any, now time.Time) bool {
 	if IsDriverOwnedRun(r.TriggeredBy) {
@@ -215,8 +220,11 @@ func (r DispatchRequest) CanDispatchStoredRun(goalId, status string, waitingOn m
 		return r.Status == runStatusRunning && (strings.TrimSpace(goalId) != "" || r.Recovery)
 	}
 	if status == runStatusWaiting && r.Status == runStatusWaiting && r.Recovery {
-		due, inference := inferenceRetryDue(map[string]any{"waitingOn": waitingOn}, now)
-		return inference && due
+		if due, inference := inferenceRetryDue(map[string]any{"waitingOn": waitingOn}, now); inference {
+			return due
+		}
+		due, retry := failureRetryDue(waitingOn, now)
+		return retry && due
 	}
 	return false
 }
@@ -289,6 +297,21 @@ func (i *Integration) HandleRunEvent(ev events.Event) {
 	if req.Status == runStatusCompiling {
 		if i.compilerRef() != nil {
 			go i.dispatchCompile(context.Background(), CompileRequest{RunId: req.RunId, OwnerUserId: req.OwnerUserId})
+		}
+		return
+	}
+	if req.Status == runStatusWaiting {
+		// A WAITING RUN IS NEVER EXECUTED FROM AN EVENT -- but a replan or
+		// repair wait is HANDED TO ITS REMEDY from one (failure_waits.go). The
+		// sweep that would otherwise serve it runs on the general cron leader,
+		// which can be any node type, so a remedy only a planner holds would
+		// wait for a planner to lead; this event reaches every planner replica
+		// the moment the failure path writes the wait, and the claim keeps the
+		// remedy to one of them.
+		if i.remedyRef() != nil && !IsDriverOwnedRun(req.TriggeredBy) {
+			if kind, since, ok := remedyWaitOf(ev); ok {
+				go i.handOffRemedy(context.Background(), kind, req.RunId, req.OwnerUserId, since)
+			}
 		}
 		return
 	}
@@ -492,6 +515,21 @@ func runEventFields(ev events.Event) (DispatchRequest, bool) {
 	}
 	req.TriggeredBy, _ = payload["triggeredBy"].(string)
 	return req, true
+}
+
+// remedyWaitOf reads a replan or repair wait off a run event's payload: its
+// kind and the `since` that identifies it. ok is false for every other wait,
+// and for an event that carried no payload to read one out of.
+func remedyWaitOf(ev events.Event) (kind, since string, ok bool) {
+	payload, _ := ev.Payload["payload"].(map[string]any)
+	if payload == nil {
+		return "", "", false
+	}
+	kind, _, _, _, ok = failureWait(payload)
+	if !ok || (kind != waitKindReplan && kind != waitKindRepair) {
+		return "", "", false
+	}
+	return kind, rowString(rowMap(payload, "waitingOn"), "since"), true
 }
 
 // ErrRunAlreadyClosed is FailRun's answer for a run that reached a terminal

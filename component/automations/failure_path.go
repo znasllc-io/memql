@@ -170,6 +170,14 @@ func (j *workJournal) classifyAndAct(ctx context.Context, exec *AutomationExecut
 	}
 
 	act := work.ActFor(symptom, sig.RetriesSpent, sig.MaxRetries)
+	if (act == work.ActReplan || act == work.ActRepair) && budget.goalId == "" {
+		// A RUN WITH NO GOAL HAS NOTHING EITHER REMEDY CAN ACT ON. A re-plan
+		// installs a new template for a goal's run, and a repair is a re-run,
+		// which only a goal's run takes -- the dispatcher leaves every other
+		// run to the scheduler that owns it. Parked on either wait, the run
+		// would wait for a remedy that refuses it; asking is the act left.
+		act = work.ActAsk
+	}
 	j.recordSymptom(ctx, exec, stepKey, symptom)
 
 	now := time.Now().UTC()
@@ -401,6 +409,9 @@ func (j *workJournal) waitOnApproval(ctx context.Context, exec *AutomationExecut
 type runRetryBudget struct {
 	spent int
 	max   int
+	// goalId is the run's goal, "" for an automation's run: the two remedies
+	// act only on a goal's run.
+	goalId string
 	// stored is the run's spent object as read, so the write that counts a
 	// retry keeps every other counter on it: updateWorkRun's read-merge is
 	// shallow, and `spent: {retries: n}` alone would erase the rest.
@@ -456,6 +467,7 @@ func (j *workJournal) retryBudget(ctx context.Context, exec *AutomationExecution
 	if goalId == "" {
 		return budget, true
 	}
+	budget.goalId = goalId
 	owner := stringField(runs[0], "ownerUserId")
 	if owner == "" {
 		// A goal is a person's; one with no owner on its run is an anomaly,

@@ -47,11 +47,14 @@ func failedRun(id, message string, attempt, retries int) *AutomationExecution {
 }
 
 // closeWith closes run through the failure path against a journal whose run
-// row is readable and names no goal -- an automation's run, whose retry budget
-// is work.DefaultMaxRetries with nothing spent.
+// is a goal's, readable, with nothing spent and no budget declared -- so its
+// retry budget is work.DefaultMaxRetries.
 func closeWith(t *testing.T, c SymptomClassifier, run *AutomationExecution) []string {
 	t.Helper()
-	return closeWithBudget(t, c, run, &budgetAnsweringExecutor{run: map[string]any{"id": run.ID}})
+	return closeWithBudget(t, c, run, &budgetAnsweringExecutor{
+		run:  goalRun(run.ID, 0),
+		goal: map[string]any{"id": "v1:work:goal:g1", "ceilings": map[string]any{}},
+	})
 }
 
 func closeWithBudget(t *testing.T, c SymptomClassifier, run *AutomationExecution, exec *budgetAnsweringExecutor) []string {
@@ -203,6 +206,27 @@ func TestTheRetryBudgetIsTheGoalsOrTheDefault(t *testing.T) {
 				t.Fatalf("waitingOn.kind = %v, want %q", waiting["kind"], tc.want)
 			}
 		})
+	}
+}
+
+// A RUN WITH NO GOAL HAS NOTHING A REMEDY CAN ACT ON. A re-plan installs a
+// goal's template and a repair is a re-run, which only a goal's run takes, so
+// an automation's run whose failure reads as a plan or contract miss asks a
+// person instead of parking on a wait no remedy would serve. A blip on the
+// same run still retries: a retry needs no goal.
+func TestARunWithNoGoalAsksRatherThanWaitingOnARemedy(t *testing.T) {
+	automationRun := func() *budgetAnsweringExecutor {
+		return &budgetAnsweringExecutor{run: map[string]any{"id": "v1:work:run:ng"}}
+	}
+	calls := closeWithBudget(t, &countingClassifier{symptom: work.SymptomPlan}, failedRun("v1:work:run:ng", "the vendor said something nobody has a rule for", 1, 0), automationRun())
+	_, args := argsOf(t, lastCallNamed(t, calls, "updateWorkRun"))
+	if waiting, _ := args["waitingOn"].(map[string]any); waiting["kind"] != WaitKindApproval {
+		t.Fatalf("waitingOn.kind = %v, want %q: no remedy serves a run with no goal", waiting["kind"], WaitKindApproval)
+	}
+	calls = closeWithBudget(t, &countingClassifier{}, failedRun("v1:work:run:ng", "dial tcp: connection refused", 1, 0), automationRun())
+	_, args = argsOf(t, lastCallNamed(t, calls, "updateWorkRun"))
+	if waiting, _ := args["waitingOn"].(map[string]any); waiting["kind"] != WaitKindRetry {
+		t.Fatalf("waitingOn.kind = %v, want %q: a blip retries with or without a goal", waiting["kind"], WaitKindRetry)
 	}
 }
 
