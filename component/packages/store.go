@@ -132,22 +132,33 @@ func (s *store) inboundRequestById(ctx context.Context, id string) (map[string]a
 }
 
 // lastSucceededDeployment is the newest run of this package that actually
-// finished, or nil.
+// finished and published to the public, or nil.
 //
 // Folded from the package's own timeline rather than asked for by a query of
 // its own: packageDeployments is already newest-first and bounded at fifty,
 // which is more than enough to find the last success -- and a fifty-run gap
 // with no success in it is a package whose auto-deploy should be parking
 // anyway.
+//
+// A RUN THAT PUBLISHED ONLY CANDIDATES IS SKIPPED (memql#5601). This is the
+// auto-confirm baseline, the plan fingerprint does not carry the target, and
+// an automatic run publishes to the SERVING version -- so a plan somebody
+// approved only as a candidate would otherwise confirm itself to the public
+// on the next push. An outcome list that cannot be read is not skipped: that
+// run is judged as it always was.
 func (s *store) lastSucceededDeployment(ctx context.Context, packageId string) (map[string]any, error) {
 	rows, err := s.deploymentsForPackage(ctx, packageId)
 	if err != nil {
 		return nil, err
 	}
 	for _, row := range rows {
-		if rowString(row, "status") == "succeeded" {
-			return row, nil
+		if rowString(row, "status") != "succeeded" {
+			continue
 		}
+		if outcomes, oerr := deployableOutcomes(row); oerr == nil && candidatesOnly(outcomes) {
+			continue
+		}
+		return row, nil
 	}
 	return nil, nil
 }
