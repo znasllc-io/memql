@@ -508,14 +508,18 @@ alone does not change pgdriver's socket read deadline.
 
 A migration with more work than one attempt holds splits it into bounded
 statements instead. The `v1:platform:moduleReadiness` history collapse
-(`20260921000000`) deletes in committed batches and stops before the
-attempt's deadline, releasing the lock with nothing left running; the next
-attempt, on the node's next monitor tick or the migrate Job's retry, resumes
-where it stopped. On an upgrade carrying a large readiness history, expect a
-few attempts to end with `deferred to the next migration attempt`: that error
-is progress, not a failure, and needs no recovery. Until the walk finishes,
-its position is the one row of the `module_readiness_collapse_progress`
-table, which is dropped when it does.
+(`20260921000000`) deletes in committed batches and ends an attempt with
+nothing of its own left running: before the attempt's deadline, when the
+attempt is cancelled, or once the backend of a step whose connection was cut
+has no transaction open. It then releases the lock. A node resumes it on its
+next monitor tick, and `memql migrate` starts the next attempt itself, up to 20
+of them, so the migrate Job's retries are not spent on progress. On an upgrade
+carrying a large readiness history, expect a few attempts to end with
+`deferred to the next migration attempt`: that error is progress, not a
+failure, and needs no recovery. An attempt needs at least 3 s left for the
+collapse to start a step; the 30 s default leaves it most of every attempt.
+Until the walk finishes, its position is the one row of the
+`module_readiness_collapse_progress` table, which is dropped when it does.
 
 #### Connection pooling: hybrid endpoint split (`DIRECT_DSN`)
 
