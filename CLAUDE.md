@@ -836,7 +836,7 @@ user's computer).
   to `integration.workbench.dispatchHost`.
 - **The environment hint and the reroute (memql#4353).**
   `workbenchDispatchHost` takes an OPTIONAL `environment { os, needs[] }`,
-  `needs` from the closed set `display` / `gpu` / `macos_tooling` /
+  `needs` from the closed set `display` / `docker` / `gpu` / `macos_tooling` /
   `user_files`. A mismatch returns a typed `environment_mismatch` having run
   NOTHING; an UNKNOWN need is `invalid_environment_hint`, so a typo can never
   send a call to somebody's laptop. Omitted means no hint; there is no default.

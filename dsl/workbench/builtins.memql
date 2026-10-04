@@ -7,12 +7,13 @@
 // integration's `dispatchHost` capability.
 
 // `environment` is the OPTIONAL HINT (memql#4353, design 6.1):
-// { os: "<goos>", needs: ["display"|"gpu"|"macos_tooling"|"user_files"] }.
+// { os: "<goos>", needs: ["display"|"docker"|"gpu"|"macos_tooling"|"user_files"] }.
 // The agent says what the action needs; handleDispatchHost compares it with
-// what a workbench IS -- Linux, headless, no user files -- and returns a typed
-// `environment_mismatch` NAMING THE UNMET NEEDS instead of running the action
-// and failing obscurely three layers down (a `defaults read` on Linux, an
-// xdotool with no DISPLAY, a path under /Users that is not there).
+// what a workbench IS -- Linux, headless, no user files, no Docker daemon --
+// and returns a typed `environment_mismatch` NAMING THE UNMET NEEDS instead of
+// running the action and failing obscurely three layers down (a `defaults
+// read` on Linux, an xdotool with no DISPLAY, a path under /Users that is not
+// there).
 //
 // A mismatch is not a failure and not a switch. The tool loop reroutes to the
 // user's own fleet ONLY when the plan already holds standing scope at the level

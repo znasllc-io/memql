@@ -603,8 +603,13 @@ export const STRATEGY_BLURB: Record<RoutingStrategy, string> = {
   labelMatch: "Most preferred labels matched first, then registration order.",
 };
 
+// The fallback governs an AGENT's calls. A pipeline step always tries the next
+// matching machine, whatever this says (integrations/agent/worker's
+// fallbackFor): its consents are the pipeline's and the machine's own, and a
+// refusal before start ran nothing. The `none` line says so, because an owner
+// who picks it would otherwise expect their pipeline steps to stop too.
 export const FALLBACK_BLURB: Record<RoutingFallback, string> = {
-  none: "Report the refusal.",
+  none: "Report the refusal. A pipeline step still tries the next match.",
   nextMatching:
     "Try the next candidate. Only ever before a call has started -- never a re-run.",
 };
