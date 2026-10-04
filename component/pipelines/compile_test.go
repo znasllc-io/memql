@@ -1,0 +1,520 @@
+package pipelines
+
+import (
+	"fmt"
+	"maps"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// selectorStub is a Selector with fixed answers, standing in for the
+// GraphSelector Task 3 builds over a graph read from source, so Compile is
+// tested on values alone.
+type selectorStub struct {
+	all      []string
+	affected Selection
+	dirs     map[string]string
+}
+
+func (s selectorStub) All() []string                  { return s.all }
+func (s selectorStub) Affected() Selection            { return s.affected }
+func (s selectorStub) DirOf(importPath string) string { return s.dirs[importPath] }
+
+// The repository the record's example runs against: eight packages, two of
+// them under the db-gated trees, one (databasex) beside a db-gated tree's name
+// without being under it, and one (sense) new enough to be unmeasured.
+const (
+	d7Root      = "example.test/app"
+	d7Tool      = "example.test/app/cmd/tool"
+	d7Database  = "example.test/app/component/database"
+	d7DatabaseX = "example.test/app/component/databasex"
+	d7GRPC      = "example.test/app/component/grpc"
+	d7Memql     = "example.test/app/component/memql"
+	d7Sense     = "example.test/app/component/memql/sense"
+	d7Env       = "example.test/app/core/env"
+
+	d7Image    = "ghcr.io/znasllc-io/memql-toolchain@sha256:..."
+	d7Postgres = "ghcr.io/znasllc-io/timescaledb-pgvector@sha256:..."
+)
+
+var d7Dirs = map[string]string{
+	d7Root:      ".",
+	d7Tool:      "cmd/tool",
+	d7Database:  "component/database",
+	d7DatabaseX: "component/databasex",
+	d7GRPC:      "component/grpc",
+	d7Memql:     "component/memql",
+	d7Sense:     "component/memql/sense",
+	d7Env:       "core/env",
+}
+
+var d7Timings = map[string]float64{
+	d7Root:      111.40,
+	d7Tool:      445.63,
+	d7Database:  20,
+	d7DatabaseX: 60,
+	d7GRPC:      119.09,
+	d7Memql:     496,
+	d7Env:       3,
+}
+
+func d7Selector(affected Selection) selectorStub {
+	return selectorStub{all: slices.Sorted(maps.Keys(d7Dirs)), affected: affected, dirs: d7Dirs}
+}
+
+// d7Command is a command step of the record's example as Compile renders it
+// before any packages are chosen.
+func d7Command(stage, name, run string, dependsOn ...string) Step {
+	return Step{
+		Key: stage + "/" + name, Stage: stage, Name: name, Kind: StepCommand, Run: run,
+		Image: d7Image, Caches: []string{"go", "npm"},
+		TimeoutSeconds: int(DefaultStepTimeout.Seconds()), DependsOn: dependsOn,
+	}
+}
+
+func d7Shard(step Step, index, count int, packages ...string) Step {
+	step.Key = fmt.Sprintf("%s#%d", step.Key, index)
+	step.Shard = ShardRef{Index: index, Count: count}
+	step.Packages = packages
+	return step
+}
+
+var (
+	d7BuildVet = d7Command("checks", "build-vet", "go build ./... && go vet ./...")
+	d7GoTests  = d7Command("tests", "go-tests", "go test $MEMQL_PACKAGES", "checks/build-vet")
+	d7DBTests  = func() Step {
+		s := d7Command("tests", "db-tests", "MEMQL_REQUIRE_DB=1 go test $MEMQL_PACKAGES", "checks/build-vet")
+		s.Services = map[string]Service{"postgres": {Image: d7Postgres}}
+		return s
+	}()
+	d7OSChecks = func() Step {
+		s := d7Command("tests", "os-checks", "make os-typecheck os-test os-build", "checks/build-vet")
+		s.Needs = []string{NeedDocker}
+		return s
+	}()
+)
+
+func mustCompilePlan(t *testing.T, spec *Spec, in CompileInput) Plan {
+	t.Helper()
+	plan, r := Compile(spec, in)
+	if r != nil {
+		t.Fatalf("Compile refused: %v", r)
+	}
+	return plan
+}
+
+func planStageNames(p Plan) []string {
+	var out []string
+	for _, s := range p.Stages {
+		out = append(out, s.Name)
+	}
+	return out
+}
+
+func planStepByKey(t *testing.T, p Plan, key string) Step {
+	t.Helper()
+	for _, s := range p.Steps() {
+		if s.Key == key {
+			return s
+		}
+	}
+	t.Fatalf("the plan has no step %q; it has %v", key, planStepKeys(p.Steps()))
+	return Step{}
+}
+
+func planStepKeys(steps []Step) []string {
+	var out []string
+	for _, s := range steps {
+		out = append(out, s.Key)
+	}
+	return out
+}
+
+func diffPlanSteps(t *testing.T, got, want []Step) {
+	t.Helper()
+	if !reflect.DeepEqual(planStepKeys(got), planStepKeys(want)) {
+		t.Fatalf("step keys = %v\nwant        %v", planStepKeys(got), planStepKeys(want))
+	}
+	for i := range want {
+		if !reflect.DeepEqual(got[i], want[i]) {
+			t.Errorf("step %s =\n%+v\nwant\n%+v", want[i].Key, got[i], want[i])
+		}
+	}
+}
+
+// (a) A pull request: affected mode. The push-only stages are absent; go-tests
+// is split by the timing table, db-tests narrowed to the db-gated trees; the
+// os bucket gates os-checks on what changed.
+func TestCompileThePullRequestRunOfTheRecordsExample(t *testing.T) {
+	affected := Selection{
+		Reason:   "2 packages changed",
+		Seeds:    []string{d7Memql, d7GRPC},
+		Packages: []string{d7DatabaseX, d7GRPC, d7Memql, d7Sense, d7Env},
+	}
+	in := CompileInput{
+		Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet,
+		Selector: d7Selector(affected), Timings: d7Timings,
+		Changed: []string{"component/memql/engine.go", "docs/README.md"}, ChangedKnown: true,
+	}
+	plan := mustCompilePlan(t, d7ExampleSpec(), in)
+
+	if plan.Mode != ModeAffected || plan.Event != EventPullRequest {
+		t.Errorf("plan is %s/%s, want affected/pull_request", plan.Mode, plan.Event)
+	}
+	if got, want := planStageNames(plan), []string{"checks", "tests"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("stages = %v, want %v: deploy and notify run on push only", got, want)
+	}
+	if !reflect.DeepEqual(plan.Stages[1].Needs, []string{"checks"}) {
+		t.Errorf("tests needs = %v, want the stage's needs as written", plan.Stages[1].Needs)
+	}
+
+	osSkipped := d7OSChecks
+	osSkipped.Skip = &Skip{Code: CodeNotAffected, Reason: "No change under bucket os."}
+	diffPlanSteps(t, plan.Steps(), []Step{
+		d7BuildVet,
+		// memql (496), grpc (119.09), databasex (60) and env (3) open the four
+		// shards; sense, unmeasured, joins the lightest, env's.
+		d7Shard(d7GoTests, 1, 4, d7Memql),
+		d7Shard(d7GoTests, 2, 4, d7GRPC),
+		d7Shard(d7GoTests, 3, 4, d7DatabaseX),
+		d7Shard(d7GoTests, 4, 4, d7Sense, d7Env),
+		// Two affected packages lie under the db-gated trees; databasex only
+		// shares a prefix with component/database. Two packages, two shards.
+		d7Shard(d7DBTests, 1, 2, d7Memql),
+		d7Shard(d7DBTests, 2, 2, d7Sense),
+		osSkipped,
+	})
+
+	// The same run with a change under clients/: os-checks runs.
+	in.Changed = append(in.Changed, "clients/os/src/main.ts")
+	plan = mustCompilePlan(t, d7ExampleSpec(), in)
+	if got := planStepByKey(t, plan, "tests/os-checks"); !reflect.DeepEqual(got, d7OSChecks) {
+		t.Errorf("os-checks with a change under clients/ =\n%+v\nwant it to run:\n%+v", got, d7OSChecks)
+	}
+}
+
+// (b) A push to the default branch: full mode. Every stage is present, the
+// packages are every package (the affected selection is not consulted), the
+// bucket gates nothing, and notify compiles to one notify step.
+func TestCompileThePushRunOfTheRecordsExample(t *testing.T) {
+	in := CompileInput{
+		Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet,
+		// A selection that would answer differently, to show full mode never reads it.
+		Selector: d7Selector(Selection{Packages: []string{d7Env}}), Timings: d7Timings,
+		Changed: []string{"docs/README.md"}, ChangedKnown: true,
+	}
+	plan := mustCompilePlan(t, d7ExampleSpec(), in)
+
+	if got, want := planStageNames(plan), []string{"checks", "tests", "deploy", "notify"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("stages = %v, want %v", got, want)
+	}
+	testsKeys := []string{
+		"tests/go-tests#1", "tests/go-tests#2", "tests/go-tests#3", "tests/go-tests#4",
+		"tests/db-tests#1", "tests/db-tests#2", "tests/db-tests#3", "tests/os-checks",
+	}
+	verify := d7Command("deploy", "verify-rollout",
+		"memql-verify --target=https://api.<domain> --version=$MEMQL_VERSION", testsKeys...)
+	notify := Step{
+		Key: "notify/notify", Stage: "notify", Name: "notify", Kind: StepNotify,
+		Channel: "znas-instance", TimeoutSeconds: int(DefaultStepTimeout.Seconds()),
+		DependsOn: []string{"deploy/verify-rollout"},
+	}
+	diffPlanSteps(t, plan.Steps(), []Step{
+		d7BuildVet,
+		// memql, tool, grpc and root open the shards; databasex joins root's,
+		// then database, env and the unmeasured sense each join grpc's, the
+		// lightest at every turn.
+		d7Shard(d7GoTests, 1, 4, d7Memql),
+		d7Shard(d7GoTests, 2, 4, d7Tool),
+		d7Shard(d7GoTests, 3, 4, d7Database, d7GRPC, d7Sense, d7Env),
+		d7Shard(d7GoTests, 4, 4, d7Root, d7DatabaseX),
+		// Three packages lie under the db-gated trees: three shards, not four.
+		d7Shard(d7DBTests, 1, 3, d7Memql),
+		d7Shard(d7DBTests, 2, 3, d7Database),
+		d7Shard(d7DBTests, 3, 3, d7Sense),
+		d7OSChecks,
+		verify,
+		notify,
+	})
+
+	for i := range 20 {
+		if again := mustCompilePlan(t, d7ExampleSpec(), in); !reflect.DeepEqual(again, plan) {
+			t.Fatalf("compile %d differs from the first: Compile is not deterministic", i)
+		}
+	}
+}
+
+// (c) only: db-gated and only: not-db-gated split the candidates between them,
+// with no package in both and none in neither. A tree is matched on a "/"
+// boundary, and "." is the root package alone, as the CI bridge reads it.
+func TestCompileOnlySplitsTheCandidatesByTheDBGatedTrees(t *testing.T) {
+	compileSplit := func(trees ...string) (db, rest []string) {
+		spec := &Spec{
+			Select: &Select{Go: SelectImportGraph, DBGated: trees},
+			Stages: []StageSpec{{Name: "tests", Steps: []StepSpec{
+				{Name: "db", Run: "go test $MEMQL_PACKAGES", Packages: PackagesAll, Only: OnlyDBGated},
+				{Name: "unit", Run: "go test $MEMQL_PACKAGES", Packages: PackagesAll, Only: OnlyNotDBGated},
+			}}},
+		}
+		plan := mustCompilePlan(t, spec, CompileInput{Mode: ModeAffected, Event: EventPullRequest, Selector: d7Selector(Selection{})})
+		return planStepByKey(t, plan, "tests/db").Packages, planStepByKey(t, plan, "tests/unit").Packages
+	}
+
+	db, rest := compileSplit("component/memql", "./component/database/")
+	if want := []string{d7Database, d7Memql, d7Sense}; !reflect.DeepEqual(db, want) {
+		t.Errorf("db-gated = %v, want %v", db, want)
+	}
+	if want := []string{d7Root, d7Tool, d7DatabaseX, d7GRPC, d7Env}; !reflect.DeepEqual(rest, want) {
+		t.Errorf("not-db-gated = %v, want %v", rest, want)
+	}
+	union := slices.Sorted(slices.Values(append(slices.Clone(db), rest...)))
+	if !reflect.DeepEqual(union, slices.Sorted(maps.Keys(d7Dirs))) {
+		t.Errorf("db-gated and not-db-gated together = %v, want every package exactly once", union)
+	}
+
+	db, rest = compileSplit(".")
+	if !reflect.DeepEqual(db, []string{d7Root}) || len(rest) != len(d7Dirs)-1 {
+		t.Errorf(`the tree "." selected %v; it is the root package alone`, db)
+	}
+}
+
+// (d) A need routes a step to the fleet, which a cluster-only pipeline has not
+// consented to. Absent compute means cluster.
+func TestCompileRefusesANeedOnAClusterOnlyPipeline(t *testing.T) {
+	for _, compute := range []Compute{ComputeCluster, ""} {
+		_, r := Compile(d7ExampleSpec(), CompileInput{
+			Mode: ModeAffected, Event: EventPullRequest, Compute: compute,
+			Selector: d7Selector(Selection{Packages: []string{d7Memql}}),
+		})
+		if r == nil || r.Code != CodeFleetNotConsented || r.Scope != "tests/os-checks" {
+			t.Errorf("compute %q: Compile = %v, want pipeline_fleet_not_consented (tests/os-checks)", compute, r)
+			continue
+		}
+		if !strings.Contains(r.Detail, NeedDocker) {
+			t.Errorf("detail %q does not name the need", r.Detail)
+		}
+	}
+
+	// Refused even on a pull request whose change would skip the step: the
+	// answer must not depend on which files a change happened to touch.
+	_, r := Compile(d7ExampleSpec(), CompileInput{
+		Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeCluster,
+		Selector: d7Selector(Selection{}), Changed: []string{"docs/README.md"}, ChangedKnown: true,
+	})
+	if r == nil || r.Code != CodeFleetNotConsented {
+		t.Errorf("with os-checks skipped by its bucket: Compile = %v, want pipeline_fleet_not_consented", r)
+	}
+}
+
+// (e) A secret is a name the pipeline's owner allows, or the run is refused
+// before any executor could be handed it. Only the stages that run are asked.
+func TestCompileRefusesASecretTheOwnerDidNotAllow(t *testing.T) {
+	spec := d7ExampleSpec()
+	spec.Stages[2].Steps[0].Secrets = []string{"DEPLOY_TOKEN"}
+	push := CompileInput{
+		Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet,
+		Selector: d7Selector(Selection{}), AllowedSecrets: []string{"NPM_TOKEN"},
+	}
+
+	_, r := Compile(spec, push)
+	if r == nil || r.Code != CodeSecretNotAllowed || r.Scope != "deploy/verify-rollout" {
+		t.Fatalf("Compile = %v, want pipeline_secret_not_allowed (deploy/verify-rollout)", r)
+	}
+	if !strings.Contains(r.Detail, "DEPLOY_TOKEN") {
+		t.Errorf("detail %q does not name the secret", r.Detail)
+	}
+
+	push.AllowedSecrets = []string{"NPM_TOKEN", "DEPLOY_TOKEN"}
+	plan := mustCompilePlan(t, spec, push)
+	if got := planStepByKey(t, plan, "deploy/verify-rollout").Secrets; !reflect.DeepEqual(got, []string{"DEPLOY_TOKEN"}) {
+		t.Errorf("verify-rollout secrets = %v, want the names as written", got)
+	}
+
+	// A pull request does not plan the deploy stage, so its secret is not asked.
+	mustCompilePlan(t, spec, CompileInput{
+		Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet,
+		Selector: d7Selector(Selection{}),
+	})
+}
+
+// (f) Nothing affected: a step that selects packages is one skipped step, with
+// its reason in words, never zero steps and never a step with no packages.
+func TestCompileSkipsAPackageStepWhenNothingIsAffected(t *testing.T) {
+	plan := mustCompilePlan(t, d7ExampleSpec(), CompileInput{
+		Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet,
+		Selector: d7Selector(Selection{Reason: "no Go package changed"}), Timings: d7Timings,
+		Changed: []string{"docs/README.md"}, ChangedKnown: true,
+	})
+	goSkipped := d7GoTests
+	goSkipped.Skip = &Skip{Code: CodeNotAffected, Reason: "No affected Go packages."}
+	dbSkipped := d7DBTests
+	dbSkipped.Skip = &Skip{Code: CodeNotAffected, Reason: "No db-gated packages are affected."}
+	osSkipped := d7OSChecks
+	osSkipped.Skip = &Skip{Code: CodeNotAffected, Reason: "No change under bucket os."}
+	diffPlanSteps(t, plan.Steps(), []Step{d7BuildVet, goSkipped, dbSkipped, osSkipped})
+}
+
+// (g) An affected selection that came back Full (go.mod changed, the graph is
+// incomplete) selects every package, exactly as full mode does.
+func TestCompileAFullSelectionSelectsEveryPackage(t *testing.T) {
+	affected := mustCompilePlan(t, d7ExampleSpec(), CompileInput{
+		Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet,
+		Selector: d7Selector(Selection{Full: true, Reason: "go.mod changed"}), Timings: d7Timings,
+	})
+	full := mustCompilePlan(t, d7ExampleSpec(), CompileInput{
+		Mode: ModeFull, Event: EventMergeGroup, Compute: ComputeClusterAndFleet,
+		Selector: d7Selector(Selection{}), Timings: d7Timings,
+	})
+	for _, key := range []string{"tests/go-tests#1", "tests/go-tests#2", "tests/go-tests#3", "tests/go-tests#4", "tests/db-tests#3"} {
+		if got, want := planStepByKey(t, affected, key).Packages, planStepByKey(t, full, key).Packages; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s = %v under a Full selection, want %v as in full mode", key, got, want)
+		}
+	}
+}
+
+func TestCompileRefusesAPackageStepWithNoSelector(t *testing.T) {
+	_, r := Compile(d7ExampleSpec(), CompileInput{Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet})
+	if r == nil || r.Code != CodeSelectMissing || r.Scope != "tests/go-tests" {
+		t.Errorf("Compile = %v, want pipeline_select_missing (tests/go-tests)", r)
+	}
+}
+
+// A spec Validate refuses is refused by Compile, unchanged, with no plan.
+func TestCompileReturnsValidatesRefusal(t *testing.T) {
+	spec := d7ExampleSpec()
+	spec.Stages[1].Steps[2].Needs = map[string]bool{"network": true}
+	plan, r := Compile(spec, CompileInput{Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet})
+	if want := Validate(spec); !reflect.DeepEqual(r, want) || r == nil {
+		t.Errorf("Compile refused %v, want Validate's %v", r, want)
+	}
+	if !reflect.DeepEqual(plan, Plan{}) {
+		t.Errorf("a refused compile returned a plan: %+v", plan)
+	}
+}
+
+// `on` names events and modes; a stage whose `on` excludes the run is absent
+// from the plan, and the next stage depends on the stage before it that IS
+// planned.
+func TestCompilePlansAStageByEventOrMode(t *testing.T) {
+	spec := &Spec{Stages: []StageSpec{
+		{Name: "lint", Steps: []StepSpec{{Name: "vet", Run: "go vet ./..."}}},
+		{Name: "slow", On: []string{"full"}, Steps: []StepSpec{{Name: "e2e", Run: "make e2e"}}},
+		{Name: "queue", On: []string{"merge_group"}, Steps: []StepSpec{{Name: "smoke", Run: "make smoke"}}},
+		{Name: "report", Steps: []StepSpec{{Name: "sum", Run: "true"}}},
+	}}
+	for _, tc := range []struct {
+		mode   Mode
+		event  Event
+		stages []string
+		after  []string // what report depends on
+	}{
+		{ModeAffected, EventPullRequest, []string{"lint", "report"}, []string{"lint/vet"}},
+		{ModeFull, EventPush, []string{"lint", "slow", "report"}, []string{"slow/e2e"}},
+		{ModeFull, EventMergeGroup, []string{"lint", "slow", "queue", "report"}, []string{"queue/smoke"}},
+	} {
+		plan := mustCompilePlan(t, spec, CompileInput{Mode: tc.mode, Event: tc.event})
+		if got := planStageNames(plan); !reflect.DeepEqual(got, tc.stages) {
+			t.Errorf("%s/%s: stages = %v, want %v", tc.mode, tc.event, got, tc.stages)
+		}
+		if got := planStepByKey(t, plan, "report/sum").DependsOn; !reflect.DeepEqual(got, tc.after) {
+			t.Errorf("%s/%s: report depends on %v, want %v", tc.mode, tc.event, got, tc.after)
+		}
+	}
+}
+
+func TestCompileTimeoutsAndASingleShard(t *testing.T) {
+	spec := &Spec{
+		Select: &Select{Go: SelectImportGraph},
+		Stages: []StageSpec{{Name: "tests", Steps: []StepSpec{
+			{Name: "unit", Run: "go test $MEMQL_PACKAGES", Packages: PackagesAffected, Shards: 4, Timeout: "45m"},
+			{Name: "lint", Run: "go vet ./...", Timeout: "1h30m"},
+		}}},
+	}
+	plan := mustCompilePlan(t, spec, CompileInput{
+		Mode: ModeAffected, Event: EventPullRequest,
+		Selector: d7Selector(Selection{Packages: []string{d7GRPC}}),
+	})
+	// One package cannot be split: the step runs unsharded, under its own key,
+	// and exports no MEMQL_SHARD.
+	unit := planStepByKey(t, plan, "tests/unit")
+	if unit.Shard != (ShardRef{}) || !reflect.DeepEqual(unit.Packages, []string{d7GRPC}) {
+		t.Errorf("a one-package shard set compiled to %+v, want one unsharded step", unit)
+	}
+	if unit.TimeoutSeconds != 45*60 {
+		t.Errorf("unit timeout = %ds, want 2700", unit.TimeoutSeconds)
+	}
+	if got := planStepByKey(t, plan, "tests/lint").TimeoutSeconds; got != 90*60 {
+		t.Errorf("lint timeout = %ds, want 5400", got)
+	}
+}
+
+// A bucket can only skip a step when the change is KNOWN. Unknown changes, or
+// a change list that came back empty, run the step: skipping on a change list
+// nobody could read would report green for work that never ran.
+func TestCompileRunsABucketStepWhenTheChangeIsNotKnown(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		changed []string
+		known   bool
+	}{
+		{"unknown changes", []string{"docs/README.md"}, false},
+		{"an empty change list", nil, true},
+	} {
+		plan := mustCompilePlan(t, d7ExampleSpec(), CompileInput{
+			Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet,
+			Selector: d7Selector(Selection{Full: true}), Changed: tc.changed, ChangedKnown: tc.known,
+		})
+		if skip := planStepByKey(t, plan, "tests/os-checks").Skip; skip != nil {
+			t.Errorf("%s: os-checks skipped (%s)", tc.name, skip.Reason)
+		}
+	}
+}
+
+func TestNeedsSelector(t *testing.T) {
+	if !NeedsSelector(d7ExampleSpec()) {
+		t.Error("NeedsSelector(D7) = false; go-tests selects packages")
+	}
+	spec := d7ExampleSpec()
+	spec.Stages[1].Steps = spec.Stages[1].Steps[2:]
+	if NeedsSelector(spec) {
+		t.Error("NeedsSelector = true for a spec whose steps select no packages")
+	}
+	if NeedsSelector(nil) {
+		t.Error("NeedsSelector(nil) = true")
+	}
+}
+
+func TestPlanStepsFlattensInExecutionOrder(t *testing.T) {
+	p := Plan{Stages: []PlanStage{
+		{Name: "a", Steps: []Step{{Key: "a/1"}, {Key: "a/2"}}},
+		{Name: "b"},
+		{Name: "c", Steps: []Step{{Key: "c/1"}}},
+	}}
+	if got, want := planStepKeys(p.Steps()), []string{"a/1", "a/2", "c/1"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Steps() = %v, want %v", got, want)
+	}
+}
+
+// The plan owns its values: changing a compiled step changes neither the spec
+// nor a sibling step, so a driver may annotate steps freely.
+func TestCompileSharesNoStorageWithTheSpecOrBetweenSteps(t *testing.T) {
+	spec := d7ExampleSpec()
+	plan := mustCompilePlan(t, spec, CompileInput{
+		Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet,
+		Selector: d7Selector(Selection{}), Timings: d7Timings,
+	})
+	first := planStepByKey(t, plan, "tests/db-tests#1")
+	first.Caches[0] = "changed"
+	first.DependsOn[0] = "changed"
+	first.Services["postgres"] = Service{Image: "changed"}
+
+	if spec.Caches[0] != "go" || spec.Services["postgres"].Image != d7Postgres {
+		t.Error("changing a compiled step changed the spec")
+	}
+	second := planStepByKey(t, plan, "tests/db-tests#2")
+	if second.Caches[0] != "go" || second.DependsOn[0] != "checks/build-vet" || second.Services["postgres"].Image != d7Postgres {
+		t.Errorf("changing one shard changed its sibling: %+v", second)
+	}
+}
