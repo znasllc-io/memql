@@ -19,6 +19,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/component/pipelines"
 )
@@ -51,6 +52,10 @@ type memStore struct {
 	// Injected failures.
 	failCreateRun error
 	failUpdateRun error
+
+	// work is the work spine the journal writes through, whose step rows
+	// WorkSteps reads back (nil: no work rows at all).
+	work *fakeWork
 }
 
 type pipelineUpdate struct {
@@ -291,6 +296,31 @@ func (s *memStore) RunByID(_ context.Context, runID string) (*Run, error) {
 	return &r, nil
 }
 
+// PipelinesActive is pipelinesActive: one active pipeline, whoever's.
+func (s *memStore) PipelinesActive(context.Context) ([]Pipeline, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, p := range s.pipelines {
+		if p.Active() {
+			return []Pipeline{p}, nil
+		}
+	}
+	return nil, nil
+}
+
+// WorkSteps is workStepsForRun over the rows the journal wrote through the
+// fake work spine, read back through the production row reader.
+func (s *memStore) WorkSteps(_ context.Context, workRunID string) ([]WorkStep, error) {
+	if s.work == nil {
+		return nil, nil
+	}
+	var out []WorkStep
+	for _, row := range s.work.stepRows(bareID(workRunID)) {
+		out = append(out, workStepFromRow(row))
+	}
+	return out, nil
+}
+
 // CreatePipeline is createPipeline: a read-merge insert that restates the
 // configuration, re-activates the row and moves connectedAt, keeping heads
 // and timings.
@@ -479,6 +509,10 @@ type fakeGitHub struct {
 	// treeKeeps records each Tree call's keep decision for the files it
 	// held, so a test can assert what was asked for.
 	treeCalls []string
+	// treeErr is every Tree call's answer when set; treeKept is every path
+	// keep admitted, across calls.
+	treeErr  error
+	treeKept []string
 }
 
 type tokenMint struct{ CredentialID, Owner, Repository string }
@@ -599,6 +633,9 @@ func (g *fakeGitHub) Tree(_ context.Context, _, repository, sha string, keep fun
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.treeCalls = append(g.treeCalls, repository+"@"+sha)
+	if g.treeErr != nil {
+		return nil, g.treeErr
+	}
 	src, ok := g.trees[repository+"@"+sha]
 	if !ok {
 		return nil, &githubapp.StatusError{Status: 404, Endpoint: "/repos/" + repository + "/tarball/" + sha}
@@ -609,6 +646,7 @@ func (g *fakeGitHub) Tree(_ context.Context, _, repository, sha string, keep fun
 		if keep == nil || !keep(name) {
 			continue
 		}
+		g.treeKept = append(g.treeKept, name)
 		total += int64(len(f.Data))
 		if total > maxBytes {
 			return nil, ErrTreeTooLarge
@@ -765,4 +803,253 @@ func personCtx(userID string) context.Context {
 // clusterOwnerCtx is a cluster owner -- who reads every source.
 func clusterOwnerCtx(userID string) context.Context {
 	return auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: userID, Role: auth.RoleOwner})
+}
+
+// ---------------------------------------------------------------------------
+// The work spine under the journal (the driver, Task 10b)
+// ---------------------------------------------------------------------------
+
+// fakeWork is the engine the REAL workjournal writes through. Every call is
+// handed to the real parser -- the string is what the engine receives -- and
+// recorded; the goal, run and step rows it describes are kept as the
+// read-merge of every version, so a resumed driver reads back exactly what
+// the journal wrote (memStore.WorkSteps).
+type fakeWork struct {
+	mu    sync.Mutex
+	calls []journalCall
+	goals map[string]map[string]any
+	runs  map[string]map[string]any
+	steps map[string]map[string]any
+	// refuse fails every call, as an engine that refuses the writes would.
+	refuse error
+}
+
+// journalCall is one write the journal made.
+type journalCall struct {
+	Name     string
+	Args     map[string]any
+	Actor    string
+	Internal bool
+	Raw      string
+}
+
+func newFakeWork() *fakeWork {
+	return &fakeWork{goals: map[string]map[string]any{}, runs: map[string]map[string]any{}, steps: map[string]map[string]any{}}
+}
+
+func (w *fakeWork) Execute(ctx context.Context, query string) (any, error) {
+	parsed, err := langparser.ParseExpression(strings.TrimPrefix(strings.TrimSpace(query), "mutation "))
+	if err != nil {
+		return nil, fmt.Errorf("fakeWork: the parser refuses the journal's call %s: %w", query, err)
+	}
+	fn, ok := parsed.(*langparser.FunctionCallExpr)
+	if !ok {
+		return nil, fmt.Errorf("fakeWork: %s parsed as %T", query, parsed)
+	}
+	ac, _ := auth.AccessFromContext(ctx)
+	actor := ""
+	if ac != nil {
+		actor = ac.UserId
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.refuse != nil {
+		return nil, w.refuse
+	}
+	w.calls = append(w.calls, journalCall{
+		Name: fn.Name, Args: fn.Args, Actor: actor, Internal: auth.OriginFromContext(ctx).IsInternal(), Raw: query,
+	})
+	merge := func(table map[string]map[string]any, idArg string) {
+		id, _ := fn.Args[idArg].(string)
+		row := table[id]
+		if row == nil {
+			row = map[string]any{}
+			table[id] = row
+		}
+		for k, v := range fn.Args {
+			row[k] = v
+		}
+	}
+	switch fn.Name {
+	case "createWorkGoal", "updateWorkGoal":
+		merge(w.goals, "goalId")
+	case "createWorkRun", "updateWorkRun":
+		merge(w.runs, "runId")
+	case "createWorkStep", "updateWorkStep":
+		merge(w.steps, "stepId")
+	}
+	return nil, nil
+}
+
+// stepRows is every step row of one work run, as merged so far.
+func (w *fakeWork) stepRows(runID string) []map[string]any {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var out []map[string]any
+	for _, row := range w.steps {
+		if id, _ := row["runId"].(string); bareID(id) == runID {
+			out = append(out, maps.Clone(row))
+		}
+	}
+	return out
+}
+
+// stepRow is the merged row of the step keyed key, or nil.
+func (w *fakeWork) stepRow(key string) map[string]any {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, row := range w.steps {
+		if row["key"] == key {
+			return maps.Clone(row)
+		}
+	}
+	return nil
+}
+
+// run is the merged work run row, or nil.
+func (w *fakeWork) run(runID string) map[string]any {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return maps.Clone(w.runs[bareID(runID)])
+}
+
+// goal is the merged goal row, or nil.
+func (w *fakeWork) goal(goalID string) map[string]any {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return maps.Clone(w.goals[bareID(goalID)])
+}
+
+func (w *fakeWork) recorded() []journalCall {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return slices.Clone(w.calls)
+}
+
+// callsNamed is every call to one mutation, in order.
+func (w *fakeWork) callsNamed(name string) []journalCall {
+	var out []journalCall
+	for _, c := range w.recorded() {
+		if c.Name == name {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// receiptsOf is every receipt (updateWorkStep) of the step keyed key.
+func (w *fakeWork) receiptsOf(key string) []journalCall {
+	row := w.stepRow(key)
+	if row == nil {
+		return nil
+	}
+	id, _ := row["stepId"].(string)
+	var out []journalCall
+	for _, c := range w.callsNamed("updateWorkStep") {
+		if c.Args["stepId"] == id {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// The executor
+// ---------------------------------------------------------------------------
+
+// fakeExecutor is a runner: it records every request in the order Execute was
+// entered and every Cancel, and answers through answer (a pass when nil).
+type fakeExecutor struct {
+	mu       sync.Mutex
+	requests []pipelines.StepRequest
+	cancels  []string
+	answer   func(ctx context.Context, req pipelines.StepRequest) (pipelines.StepResult, error)
+	// entered is told each step key as its Execute begins.
+	entered chan string
+}
+
+func (e *fakeExecutor) Execute(ctx context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+	e.mu.Lock()
+	e.requests = append(e.requests, req)
+	answer, entered := e.answer, e.entered
+	e.mu.Unlock()
+	if entered != nil {
+		entered <- req.StepKey
+	}
+	if answer == nil {
+		return passed(req), nil
+	}
+	return answer(ctx, req)
+}
+
+func (e *fakeExecutor) Cancel(_ context.Context, runID string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.cancels = append(e.cancels, runID)
+	return nil
+}
+
+func (e *fakeExecutor) sent() []pipelines.StepRequest {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.requests)
+}
+
+func (e *fakeExecutor) sentKeys() []string {
+	var out []string
+	for _, r := range e.sent() {
+		out = append(out, r.StepKey)
+	}
+	return out
+}
+
+func (e *fakeExecutor) cancelled() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.cancels)
+}
+
+// passed is a step that ran on the cluster and passed, with everything a
+// runner reports: where, for how long, its log and its artifacts.
+func passed(req pipelines.StepRequest) pipelines.StepResult {
+	return pipelines.StepResult{
+		Status:          pipelines.OutcomeSucceeded,
+		ExitCode:        0,
+		StartedAt:       "2026-10-03T12:00:00Z",
+		FinishedAt:      "2026-10-03T12:00:42Z",
+		Where:           pipelines.Where{Surface: "cluster", NodeID: "workbench-0", JobName: "job-" + req.StepKey},
+		LogFileID:       "file-log-" + req.StepKey,
+		ArtifactFileIDs: []string{"file-art-" + req.StepKey},
+		LogTail:         "ok\n",
+		LogLines:        12,
+	}
+}
+
+// installExecutor registers e as the node's executor for the test's length.
+func installExecutor(t *testing.T, e pipelines.Executor) {
+	t.Helper()
+	prev := pipelines.RegisterExecutor(e)
+	t.Cleanup(func() { pipelines.RegisterExecutor(prev) })
+}
+
+// ---------------------------------------------------------------------------
+// Logs
+// ---------------------------------------------------------------------------
+
+// lockedBuffer is a log sink many goroutines write to at once.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

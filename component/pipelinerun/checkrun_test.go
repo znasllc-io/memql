@@ -2,6 +2,7 @@ package pipelinerun
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,10 +47,14 @@ func TestComposeCheckRunAcrossARunsLife(t *testing.T) {
 	}
 }
 
-func TestARefusedRunIsAFailedCheckRunThatSaysWhy(t *testing.T) {
+// A manifest that cannot compile is a FAILED run carrying its typed refusal
+// (D9) -- conclusion failure, not refused, which is a fork's alone -- and its
+// check run says what is wrong and what to do rather than "Failed" over an
+// empty table.
+func TestARunFailedByARefusalIsAFailedCheckRunThatSaysWhy(t *testing.T) {
 	p := testPipeline(DeliveryWebhook)
 	r := queuedRun(p, shaA)
-	r.Status, r.Conclusion, r.FinishedAt = StatusCompleted, ConclusionRefused, testNow
+	r.Status, r.Conclusion, r.FinishedAt = StatusCompleted, ConclusionFailure, testNow
 	r.RefusalCode, r.RefusalMessage, r.RefusalScope = pipelines.CodeNeedUnknown, "quantum is not a need", "checks/vet"
 
 	report := ReportFor(p, r, nil)
@@ -58,13 +63,38 @@ func TestARefusedRunIsAFailedCheckRunThatSaysWhy(t *testing.T) {
 	}
 	cr := ComposeCheckRun(testOSOrigin, p, r, report)
 	if cr.Conclusion != "failure" {
-		t.Errorf("a refused run fails its check (neutral would satisfy a required check): %q", cr.Conclusion)
+		t.Errorf("a run failed by a refusal fails its check: %q", cr.Conclusion)
 	}
 	if cr.Output.Title != "Refused: unknown need (checks/vet)" {
 		t.Errorf("title = %q", cr.Output.Title)
 	}
+	if !strings.Contains(cr.Output.Summary, "quantum is not a need") || !strings.Contains(cr.Output.Summary, "memql-package.yaml") {
+		t.Errorf("the summary carries the refusal's sentence and its remedy:\n%s", cr.Output.Summary)
+	}
 	if !cr.StartedAt.Equal(testNow) {
 		t.Errorf("a run that never started reports one instant: started %v", cr.StartedAt)
+	}
+}
+
+func TestOnlyACompletedRunWithARefusalCodeCarriesARefusal(t *testing.T) {
+	p := testPipeline(DeliveryWebhook)
+	fork := queuedRun(p, shaA)
+	fork.Status, fork.Conclusion = StatusCompleted, ConclusionRefused
+	fork.RefusalCode, fork.RefusalMessage = pipelines.CodeForkRefused, "from a fork"
+	if ref := fork.Refusal(); ref == nil || ref.Code != pipelines.CodeForkRefused {
+		t.Errorf("a fork's refused run carries its refusal: %+v", ref)
+	}
+
+	stepsFailed := queuedRun(p, shaA)
+	stepsFailed.Status, stepsFailed.Conclusion = StatusCompleted, ConclusionFailure
+	if ref := stepsFailed.Refusal(); ref != nil {
+		t.Errorf("a run its steps failed carries no refusal -- its check run is the stage table: %+v", ref)
+	}
+
+	going := queuedRun(p, shaA)
+	going.Status, going.RefusalCode = StatusInProgress, pipelines.CodeNeedUnknown
+	if ref := going.Refusal(); ref != nil {
+		t.Errorf("a run still going has no refusal to report yet: %+v", ref)
 	}
 }
 

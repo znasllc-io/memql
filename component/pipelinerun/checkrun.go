@@ -19,6 +19,10 @@ import (
 // A 403 on a write is an installation predating `checks: write`; it records
 // checkRunState "refused" and the pipeline_check_permission_missing note on
 // the run, and NEVER stops the run.
+//
+// A CHECK RUN IS WRITTEN OUTSIDE EVERY GATE by the driver: a call to GitHub
+// never holds a gate's connection (lease.go, driverGate). The row write that
+// records its answer is the gated part, as a fresh read and one write.
 
 // checkPermissionMessage is the note a run carries when GitHub refused its
 // check run. It names the repair: the app's permissions, accepted per
@@ -190,4 +194,46 @@ func (w CheckRunWrite) Patch(r Run) (RunPatch, bool) {
 		}
 	}
 	return patch, changed
+}
+
+// ---------------------------------------------------------------------------
+// The driver's check run
+// ---------------------------------------------------------------------------
+
+// publish moves a driven run's check run to what the run is now: outside
+// every gate, behind the fresh-read fence (a lost lease writes nothing, to
+// GitHub as to a row). It never fails the run -- a check run is a report OF
+// the run. Its answer is recorded on the row, as one gated fresh read and
+// write, when it says something new: an id created now, a 403, a state that
+// changed.
+func (dr *runDriver) publish(ctx context.Context) {
+	if !dr.havePipeline || !dr.stillHolds(ctx) {
+		return
+	}
+	w := publishCheckRun(ctx, dr.d, dr.p, dr.run, ReportFor(dr.p, dr.run, dr.report()))
+	if w.Err != nil {
+		dr.log.Warn("pipelines: the run's check run was not moved",
+			"checkRunState", w.State, "error", dr.mask(w.Err.Error()))
+	}
+	if patch, changed := w.Patch(dr.run); changed {
+		if err := dr.writeRun(ctx, patch); err != nil && !errors.Is(err, errLeaseLost) {
+			dr.log.Warn("pipelines: the check run's state was not recorded on the run", "error", err)
+		}
+	}
+}
+
+// report is every step of a driven run as the check run reports it, each log
+// tail and message MASKED with every secret value the drive resolved before
+// CheckOutput ever reads them (Review Focus 5): a step can only echo its own
+// values, and masking with all of them costs nothing.
+func (dr *runDriver) report() []pipelines.StepReport {
+	values := dr.maskValues()
+	out := make([]pipelines.StepReport, 0, len(dr.tracks))
+	for _, t := range dr.tracks {
+		s := t.snapshot()
+		s.LogTail = pipelines.MaskSecrets(s.LogTail, values)
+		s.Message = pipelines.MaskSecrets(s.Message, values)
+		out = append(out, s.Report())
+	}
+	return out
 }

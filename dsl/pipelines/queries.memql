@@ -222,3 +222,17 @@ query run pipelineRunById {
   filter  row => row.id == args.runId && actor.isClusterOwner == true
   shape   pipelineRunFull
 }
+
+/// Whether ANY repository is connected: one active pipeline, whoever owns it -- what the pipelines
+/// readiness item reports as "a repository connected". @serverOnly: the readiness evaluator asks as
+/// the cluster's own actor, not as a person, and the fact is about the cluster: an actor.userId
+/// conjunct would answer for whichever owner happened to ask and report a cluster whose only
+/// pipeline is a colleague's as having none. Bounded to the one row the question needs.
+@serverOnly
+@actor
+query pipeline pipelinesActive {
+  filter    row => statusIsActive(row) && actor.isClusterOwner == true
+  sort      "row.createdAt", "asc"
+  paginate  1
+  shape     pipelineFull
+}

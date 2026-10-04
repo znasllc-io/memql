@@ -40,6 +40,12 @@ const (
 	qPipelineRunByCheckRun      = "pipelineRunByCheckRun"      // (repository, checkRunId)
 	qPipelineRunsUnfinished     = "pipelineRunsUnfinished"     // ()
 	qPipelineRunByID            = "pipelineRunById"            // (runId)
+	qPipelinesActive            = "pipelinesActive"            // ()
+
+	// The work spine's read of one run's steps (dsl/work), server-only and
+	// cluster-owner-conjoined like the reads above: a resumed driver reads the
+	// steps its predecessor's journal wrote.
+	qWorkStepsForRun = "workStepsForRun" // (runId)
 
 	// Writes, every one @serverOnly.
 	mCreatePipeline    = "createPipeline"
@@ -224,6 +230,26 @@ func (s *dslStore) RunsUnfinished(ctx context.Context) ([]Run, error) {
 
 func (s *dslStore) RunByID(ctx context.Context, runID string) (*Run, error) {
 	return oneRun(s.systemRead(ctx, qPipelineRunByID, map[string]any{"runId": bareID(runID)}))
+}
+
+func (s *dslStore) PipelinesActive(ctx context.Context) ([]Pipeline, error) {
+	return allPipelines(s.systemRead(ctx, qPipelinesActive, nil))
+}
+
+func (s *dslStore) WorkSteps(ctx context.Context, workRunID string) ([]WorkStep, error) {
+	id := bareID(workRunID)
+	if id == "" {
+		return nil, nil
+	}
+	rows, err := s.systemRead(ctx, qWorkStepsForRun, map[string]any{"runId": id})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]WorkStep, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, workStepFromRow(row))
+	}
+	return out, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -682,6 +708,30 @@ func runFromRow(row map[string]any) Run {
 		})
 	}
 	return r
+}
+
+// workStepFromRow reads a v1:work:step through workStepFull. The call is the
+// driver's own declaration ({construct, name, stage, packages}); the result
+// carries a skipped or cancelled step's reason.
+func workStepFromRow(row map[string]any) WorkStep {
+	s := WorkStep{
+		Key:          rowString(row, "key"),
+		Seq:          rowInt(row, "seq"),
+		Status:       rowString(row, "status"),
+		Attempt:      rowInt(row, "attempt"),
+		DurationMs:   rowInt64(row, "durationMs"),
+		ErrorCode:    rowString(row, "errorCode"),
+		ErrorMessage: rowString(row, "errorMessage"),
+	}
+	if call, ok := row["call"].(map[string]any); ok {
+		s.Stage = rowString(call, "stage")
+		s.Name = rowString(call, "name")
+		s.Packages = rowStrings(call, "packages")
+	}
+	if result, ok := row["result"].(map[string]any); ok {
+		s.Reason = rowString(result, "reason")
+	}
+	return s
 }
 
 func packageFromRow(row map[string]any) PackageSource {

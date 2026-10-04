@@ -69,6 +69,12 @@ type Store interface {
 	// RunsUnfinished answers oldest first: recovery's read (Task 10b).
 	RunsUnfinished(ctx context.Context) ([]Run, error)
 	RunByID(ctx context.Context, runID string) (*Run, error)
+	// PipelinesActive answers at most one active pipeline, whoever owns it:
+	// the readiness report asks only whether ANY repository is connected.
+	PipelinesActive(ctx context.Context) ([]Pipeline, error)
+	// WorkSteps is every v1:work:step of one work run at its latest version
+	// (dsl/work's workStepsForRun): what a resumed driver keeps and re-sends.
+	WorkSteps(ctx context.Context, workRunID string) ([]WorkStep, error)
 
 	// Writes, under the owner's borrowed authority. Create* borrow the
 	// value's own OwnerUserID; Update* take the owner explicitly.

@@ -65,12 +65,27 @@ type Deps struct {
 	// executing now rather than at its next heartbeat (Task 10b). Nil is a
 	// no-op: the heartbeat still reads the flag.
 	SignalCancel func(ctx context.Context, runID string)
+
+	// Drive makes this node a DRIVER: it claims queued runs from their
+	// events, drives them over the work spine and recovers stranded ones
+	// (driver.go). Only an agent node sets it (EnableDriver, from
+	// app/integrations_pipelines_agent.go); everywhere else HandleRunEvent
+	// and RecoverRuns return at once, having done nothing.
+	Drive bool
+	// HeartbeatEvery is how often a driver renews its lease; zero is
+	// leaseRenewEvery (30 s). A test shortens it to watch a lease be lost.
+	HeartbeatEvery time.Duration
 }
 
 // Integration is the `pipelines` plug-in.
 type Integration struct {
 	mu   sync.RWMutex
 	deps Deps
+
+	// drives is what this node is driving now, by bare run id: the one
+	// piece of a run's state that lives in memory, and only for as long as
+	// this replica holds the run's lease (driver.go).
+	drives driveRegistry
 }
 
 // New builds the integration over deps. The plug-in factory (capabilities.go)
@@ -90,6 +105,19 @@ func (i *Integration) Configure(apply func(d *Deps)) {
 	apply(&i.deps)
 }
 
+// EnableDriver makes this node a driver (Deps.Drive) and installs the two
+// hooks the opening half calls a driver through: the poll's recovery
+// (Deps.Recover) and a cancel's signal (Deps.SignalCancel). app/ calls it on
+// an agent node, beside subscribing HandleRunEvent to the run's events; a
+// test calls it on an integration over fakes.
+func (i *Integration) EnableDriver() {
+	i.Configure(func(d *Deps) {
+		d.Drive = true
+		d.Recover = i.RecoverRuns
+		d.SignalCancel = i.SignalCancel
+	})
+}
+
 // snapshot is the ports as configured now, with the defaults a zero Deps
 // leaves out. Every operation reads it once, at its start, so a Configure
 // that lands mid-operation cannot change a port half-way through one.
@@ -105,6 +133,9 @@ func (i *Integration) snapshot() Deps {
 	}
 	if d.OSOrigin == nil {
 		d.OSOrigin = func() string { return "" }
+	}
+	if d.HeartbeatEvery <= 0 {
+		d.HeartbeatEvery = leaseRenewEvery
 	}
 	return d
 }

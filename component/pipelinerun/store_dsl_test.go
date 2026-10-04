@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -104,6 +105,8 @@ func everyStoreCall(s Store, value string) []struct {
 		{"PipelinesForRepository", func() error { _, err := s.PipelinesForRepository(ctx, value); return err }},
 		{"PipelinesPolled", func() error { _, err := s.PipelinesPolled(ctx); return err }},
 		{"PipelineByID", func() error { _, err := s.PipelineByID(ctx, value); return err }},
+		{"PipelinesActive", func() error { _, err := s.PipelinesActive(ctx); return err }},
+		{"WorkSteps", func() error { _, err := s.WorkSteps(ctx, value); return err }},
 		{"RunsForKey", func() error { _, err := s.RunsForKey(ctx, value); return err }},
 		{"RunsForPipelineSHA", func() error { _, err := s.RunsForPipelineSHA(ctx, value, value); return err }},
 		{"RunByCheckRun", func() error { _, err := s.RunByCheckRun(ctx, value, 30431907812); return err }},
@@ -165,12 +168,16 @@ func TestEveryRenderedCallParses(t *testing.T) {
 }
 
 // TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares reads dsl/pipelines
-// (and Deployables' packageById) and holds every rendered call to it: the
-// construct exists, of the kind the call says, and every argument the call
-// passes is one the construct's args block declares.
+// (and Deployables' packageById, and the work spine's workStepsForRun) and
+// holds every rendered call to it: the construct exists, of the kind the call
+// says, and every argument the call passes is one the construct's args block
+// declares.
 func TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares(t *testing.T) {
 	declared := map[string]dslConstruct{}
-	for _, file := range []string{"../../dsl/pipelines/queries.memql", "../../dsl/pipelines/mutations.memql", "../../dsl/platform/queries.memql"} {
+	for _, file := range []string{
+		"../../dsl/pipelines/queries.memql", "../../dsl/pipelines/mutations.memql",
+		"../../dsl/platform/queries.memql", "../../dsl/work/queries.memql",
+	} {
 		for name, c := range readDSLConstructs(t, file) {
 			declared[name] = c
 		}
@@ -214,7 +221,7 @@ func TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares(t *testing.T) {
 	for _, want := range []string{
 		qPipelinesForOwner, qPipelineForOwner, qPipelineForPackage, qPipelineRunsForOwner, qPipelineRunForOwner,
 		qPipelinesForRepository, qPipelinesPolled, qPipelineByID, qPipelineRunsForKey, qPipelineRunsForPipelineSha,
-		qPipelineRunByCheckRun, qPipelineRunsUnfinished, qPipelineRunByID,
+		qPipelineRunByCheckRun, qPipelineRunsUnfinished, qPipelineRunByID, qPipelinesActive, qWorkStepsForRun,
 		mCreatePipeline, mUpdatePipeline, mCreatePipelineRun, mUpdatePipelineRun, qPackageByID,
 	} {
 		if !seen[want] {
@@ -397,6 +404,52 @@ func TestRowsAreReadBackBareAndTyped(t *testing.T) {
 	}
 	if p.Heads["branch:main"] != shaA || p.Timings["acme.test/a"] != 1.5 || len(p.SecretNames) != 2 {
 		t.Errorf("heads %v timings %v secrets %v", p.Heads, p.Timings, p.SecretNames)
+	}
+}
+
+// A resumed driver reads its predecessor's step rows through the work spine's
+// own server-only read, as the pipelines system actor, with the BARE run id
+// the journal addresses them by; what it keeps of each is what workStepFull
+// projects -- the call the driver declared and the receipt's fields.
+func TestWorkStepsAreReadBackForAResume(t *testing.T) {
+	engine := newRecordingEngine()
+	engine.answers[qWorkStepsForRun] = []any{map[string]any{
+		"id":           "v1:work:step:s1",
+		"key":          "tests.go#2",
+		"seq":          float64(3),
+		"status":       "skipped",
+		"attempt":      float64(1),
+		"durationMs":   float64(1200),
+		"errorCode":    pipelines.CodeStageBlocked,
+		"errorMessage": "Not run: stage checks failed.",
+		"call":         map[string]any{"construct": "pipeline", "name": "go", "stage": "tests", "packages": []any{"acme.test/a", "acme.test/b"}},
+		"result":       map[string]any{"reason": "Not run: stage checks failed."},
+	}}
+	steps, err := NewDSLStore(engine).WorkSteps(context.Background(), "v1:work:run:w1")
+	if err != nil || len(steps) != 1 {
+		t.Fatalf("WorkSteps: %+v %v", steps, err)
+	}
+	want := WorkStep{
+		Key: "tests.go#2", Seq: 3, Status: WorkStepSkipped, Attempt: 1, DurationMs: 1200,
+		ErrorCode: pipelines.CodeStageBlocked, ErrorMessage: "Not run: stage checks failed.",
+		Stage: "tests", Name: "go", Packages: []string{"acme.test/a", "acme.test/b"}, Reason: "Not run: stage checks failed.",
+	}
+	got := steps[0]
+	if got.Key != want.Key || got.Seq != want.Seq || got.Status != want.Status || got.Attempt != want.Attempt ||
+		got.DurationMs != want.DurationMs || got.ErrorCode != want.ErrorCode || got.ErrorMessage != want.ErrorMessage ||
+		got.Stage != want.Stage || got.Name != want.Name || got.Reason != want.Reason || !slices.Equal(got.Packages, want.Packages) {
+		t.Errorf("step = %+v, want %+v", got, want)
+	}
+	calls := engine.recorded()
+	if len(calls) != 1 || calls[0].query != `query workStepsForRun(runId: "w1")` {
+		t.Fatalf("calls = %+v", calls)
+	}
+	if !calls[0].origin.IsInternal() || calls[0].actor == nil || calls[0].actor.UserId != "system:pipelines" {
+		t.Errorf("the read is the pipelines system actor's, stamped internal: %+v", calls[0].actor)
+	}
+
+	if none, err := NewDSLStore(engine).WorkSteps(context.Background(), "  "); err != nil || none != nil || len(engine.recorded()) != 1 {
+		t.Errorf("no work run is no read: %v %v", none, err)
 	}
 }
 

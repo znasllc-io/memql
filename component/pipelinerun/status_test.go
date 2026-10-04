@@ -45,22 +45,30 @@ func statusOf(t *testing.T, h *harness) (state string, touched bool, raw []byte)
 	return state, touched, nodes[0].Payload
 }
 
+// The module is set up when the GitHub App is installed, a repository is
+// connected and a runner is present (docs/public/operate/pipelines.md,
+// Readiness); anything touched short of that is partial.
 func TestTheStatusReportIsWhatReadinessReads(t *testing.T) {
 	cases := []struct {
-		name        string
-		app, runner bool
-		state       string
-		touched     bool
+		name                   string
+		app, connected, runner bool
+		state                  string
+		touched                bool
 	}{
-		{"app and runner", true, true, "configured", true},
-		{"app only", true, false, "needs_configuration", true},
-		{"runner only", false, true, "needs_configuration", true},
-		{"neither", false, false, "needs_configuration", false},
+		{"app, a connected repository and a runner", true, true, true, "configured", true},
+		{"app and runner, nothing connected", true, false, true, "needs_configuration", true},
+		{"app and a connected repository, no runner", true, true, false, "needs_configuration", true},
+		{"app only", true, false, false, "needs_configuration", true},
+		{"runner only", false, false, true, "needs_configuration", true},
+		{"nothing", false, false, false, "needs_configuration", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t)
 			h.github.unconfigured = !c.app
+			if c.connected {
+				h.store.addPipeline(testPipeline(DeliveryWebhook))
+			}
 			var prev pipelines.Executor
 			if c.runner {
 				prev = pipelines.RegisterExecutor(stubExecutor{})
@@ -74,6 +82,28 @@ func TestTheStatusReportIsWhatReadinessReads(t *testing.T) {
 				t.Errorf("state %q touched %v; want %q and %v\n%s", state, touched, c.state, c.touched, raw)
 			}
 		})
+	}
+}
+
+// A connected repository is any ACTIVE pipeline, whoever's: a disconnected
+// one is history, and an unreadable answer is not "connected".
+func TestTheStatusReportCountsOnlyAnActivePipeline(t *testing.T) {
+	prev := pipelines.RegisterExecutor(stubExecutor{})
+	t.Cleanup(func() { pipelines.RegisterExecutor(prev) })
+
+	h := newHarness(t)
+	gone := testPipeline(DeliveryWebhook)
+	gone.Status = PipelineDisconnected
+	h.store.addPipeline(gone)
+	if state, _, raw := statusOf(t, h); state != "needs_configuration" || !strings.Contains(string(raw), "no repository is connected") {
+		t.Errorf("a disconnected pipeline connects nothing: %q\n%s", state, raw)
+	}
+
+	other := testPipeline(DeliveryPoll)
+	other.ID, other.OwnerUserID = PipelineIDFor("pkg-other"), "v1:identity:user:"+otherID
+	h.store.addPipeline(other)
+	if state, _, raw := statusOf(t, h); state != "configured" {
+		t.Errorf("a colleague's active pipeline is a connected repository of this cluster: %q\n%s", state, raw)
 	}
 }
 

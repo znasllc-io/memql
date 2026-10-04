@@ -69,6 +69,65 @@ const (
 	StepRefused   = "refused"
 )
 
+// A stage's status as the run row's `stages` records it: the words a machine
+// reads (the OS renders its own). The check run's table spells the same
+// states for a person (pipelines.CheckOutput).
+const (
+	StageWaiting   = "waiting"
+	StageRunning   = "running"
+	StagePassed    = "passed"
+	StageFailed    = "failed"
+	StageCancelled = "cancelled"
+	StageSkipped   = "skipped"
+	// StageBlocked is a stage an earlier stage's failure kept from running
+	// (pipeline_stage_blocked).
+	StageBlocked = "blocked"
+)
+
+// A v1:work:step's status, in the step concept's own vocabulary
+// (dsl/work/concepts.memql) -- which is not StepState's: the work spine says
+// `done` where the check run says succeeded.
+const (
+	WorkStepPending   = "pending"
+	WorkStepRunning   = "running"
+	WorkStepDone      = "done"
+	WorkStepFailed    = "failed"
+	WorkStepSkipped   = "skipped"
+	WorkStepCancelled = "cancelled"
+)
+
+// WorkStep is one v1:work:step of a pipeline's work run, at its latest
+// version: what a resumed driver reads to keep the steps that finished and to
+// re-send the one that was running. The journal writes these rows; this
+// package only reads them.
+type WorkStep struct {
+	Key string
+	// Seq is the step's place in the plan the work run was opened with.
+	Seq          int
+	Status       string
+	Attempt      int
+	DurationMs   int64
+	ErrorCode    string
+	ErrorMessage string
+	// Stage and Name are the step's call: which manifest step the row is.
+	Stage, Name string
+	// Packages is the slice the plan gave the step (call.packages); nil for a
+	// step that selects none. A resumed step is re-sent with THIS slice, not
+	// one recomputed from a timing table that may have moved since.
+	Packages []string
+	// Reason is a skipped or cancelled step's reason (result.reason).
+	Reason string
+}
+
+// Finished reports whether the row carries the step's receipt.
+func (s WorkStep) Finished() bool {
+	switch s.Status {
+	case WorkStepDone, WorkStepFailed, WorkStepSkipped, WorkStepCancelled:
+		return true
+	}
+	return false
+}
+
 // Pipeline is one v1:pipelines:pipeline row as this package reads it.
 //
 // EVERY ID IS BARE except OwnerUserID. A relationship field is stored
@@ -167,9 +226,16 @@ type Run struct {
 // reopened: a re-run is a new row.
 func (r Run) Finished() bool { return r.Status == StatusCompleted }
 
-// Refusal is the refusal a refused run carries, or nil.
+// Refusal is the refusal a completed run ended on, or nil. Two conclusions
+// carry one (D9): a fork's run is `refused`, never queued; and a run the
+// driver ended before any step ran -- a manifest that does not compile, a
+// grant that no longer reaches the repository, a disconnected pipeline -- is
+// a `failure` WITH its refusal, so its check run says what is wrong and what
+// to do rather than "Failed" over an empty table. The refusal fields are
+// written only then: a run failed by its steps carries the codes on its steps
+// and none here, and its check run reports the stage table.
 func (r Run) Refusal() *pipelines.Refusal {
-	if r.Conclusion != ConclusionRefused || strings.TrimSpace(r.RefusalCode) == "" {
+	if r.Status != StatusCompleted || strings.TrimSpace(r.RefusalCode) == "" {
 		return nil
 	}
 	return &pipelines.Refusal{Code: r.RefusalCode, Detail: r.RefusalMessage, Scope: r.RefusalScope}
