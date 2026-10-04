@@ -98,8 +98,8 @@ on a bridge network can forge ARP replies and read the traffic of the pods
 beside it -- something no network policy governs. `cache-prep`, `clone` and the
 isolation probe run fixed scripts that need no capability at all, and drop every
 one; the step and each service drop `NET_RAW` alone, because their images'
-entrypoints may use the rest of the runtime's set (postgres's changes the owner
-of its data directory and steps down to its own user).
+entrypoints may use the rest of the runtime's set (postgres's changes its data
+directory's permissions and switches to its own user, and fails without them).
 The pod runs as the ServiceAccount `memql-pipelines-step`, which nothing is bound
 to and whose token is never mounted, with Service links off: no cluster
 credential is in it, and the only Secret it can name is its own. The namespace
@@ -161,13 +161,14 @@ kubelet expands no `$(NAME)` and turns no `$$` into `$`.
 fails the step `pipeline_job_rejected`. A step that declares a cache mounts one
 directory of the shared claim `memql-pipelines-cache` at `/cache`, and only
 that one: its owner's, its repository's, and its run's trust's
-(`owners/<owner>/repos/<repository>/<trust>`, the owner and the repository each
-24 hex derived from their names). A step can rewrite any entry of the cache it
-is given, and Go trusts its build cache by its own key, so whoever writes a
-cache decides what a later build that reads it gets. Hence three walls:
+(`owners/<owner>/repos/<repository>/<trust>`: 24 hex derived from the owner's
+id, 24 hex derived from the repository's owner and name, and the trust). A step
+can rewrite any entry of the cache it is given, and Go trusts its build cache by
+its own key, so whoever writes a cache decides what a later build that reads it
+gets. Hence three walls:
 
-- **Two owners never share a cache**, and **two repositories of one owner never
-  do**.
+- **Two owners never share a cache.**
+- **Two repositories of one owner never share one.**
 - **A pull request never writes what the default branch reads.** A run opened
   for a push to the default branch, the merge queue or a published release is
   `trusted`; a pull request's run is `untrusted`; each mounts its own half, so a
@@ -711,13 +712,13 @@ Registered in `scripts/secrets/manifest.yaml` under the `pipelines` component.
 
 The first six are read when a node starts. A value that is not a positive whole
 number falls back to its default -- never to a bound, and never to no limit --
-and a value past a bound is clamped to it; a workspace limit that is not a whole
-number of `Ki`, `Mi`, `Gi` or `Ti` is its default. The agent and the workbench both read
-the ceiling and the two caps, so set them where both read them: `memql-secrets`,
-which every node reads, rather than the `memql-pipelines` ConfigMap, which only
-the workbench does. The retention window reads a stored global variable of the
-same name when the environment does not set it, and a value that is not a
-positive whole number is 30.
+and a value past a bound is clamped to it; a workspace limit that is not a
+whole number of `Ki`, `Mi`, `Gi` or `Ti` is its default. The agent and the
+workbench both read the ceiling and the two caps, so set them where both read
+them: `memql-secrets`, which every node reads, rather than the
+`memql-pipelines` ConfigMap, which only the workbench does. The retention
+window reads a stored global variable of the same name when the environment
+does not set it, and a value that is not a positive whole number is 30.
 
 ---
 

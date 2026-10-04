@@ -951,8 +951,9 @@ func TestBuildJobIsAPureFunctionOfItsInputs(t *testing.T) {
 // directory under a root-owned claim root of 0777 and of 0755, with every
 // capability dropped), so they drop ALL. The step and the services run images
 // the platform did not build, whose entrypoints use the rest of the set
-// (postgres's chowns its data directory and steps down to its own user), so
-// they drop NET_RAW alone. No container adds one back.
+// (postgres's, measured, cannot open up its data directory or switch to its
+// own user without it), so they drop NET_RAW alone. No container adds one
+// back.
 func TestEveryContainerGivesUpTheRuntimesRawSockets(t *testing.T) {
 	want := map[string][]string{
 		ContainerCachePrep:         {"ALL"},

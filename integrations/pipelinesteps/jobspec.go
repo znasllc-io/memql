@@ -430,7 +430,7 @@ const (
 
 // rootContext pins cache-prep and the clone to uid 0 (ruling R17): the cache
 // claim's root is root-owned and may be 0755, so only root can open the
-// owner's directory under it. Root by uid alone: both run a fixed script that
+// step's directory under it. Root by uid alone: both run a fixed script that
 // needs none of the runtime's default capabilities -- an owner creates and
 // chmods its own directories, and git fetches and checks out as anyone does --
 // so they drop every one (measured on k3s v1.35, under a root-owned claim root
@@ -447,8 +447,11 @@ func rootContext() *SecurityContext {
 // imageContext is the step's and every service's: the image's own user, no
 // privilege escalation, and the runtime's default capabilities but NET_RAW.
 // These are images the platform did not build, whose entrypoints use the rest
-// of the set -- postgres's chowns its data directory and steps down to its own
-// user -- so only the one that reaches the network beneath the pod goes.
+// of the set -- postgres's opens up its data directory and switches to its own
+// user, and with every capability dropped it stops there (measured on k3s
+// v1.35: "chmod: changing permissions of '/var/lib/postgresql/data': Operation
+// not permitted", "failed switching to 'postgres'") -- so only the one that
+// reaches the network beneath the pod goes.
 func imageContext() *SecurityContext {
 	return &SecurityContext{
 		AllowPrivilegeEscalation: ptr(false),
