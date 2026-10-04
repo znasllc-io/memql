@@ -1,0 +1,139 @@
+The Go tree ScanGoTree and Affected are tested on (epic memql#5477), in the
+txtar layout: each "-- path --" line starts a file.
+
+It is an archive rather than a directory on purpose. Real go.mod and .go files
+under testdata would be seen by this repository's own walkers: the module
+scripts find every go.mod, and the AST gates parse every tracked .go file --
+and broken/x.go does not parse, by design.
+
+The shape: module example.test/shop with a root package; a; b imports a; c
+imports b only from an external _test.go; tagged imports a only under
+//go:build tools; a nested module sub whose package sub/client imports
+example.test/shop/a, with no package at sub's own root; testdata/, _hidden/,
+.tools/ and vendor/, which the go tool skips; a/_scratch.go and b/.#b.go,
+files the go tool ignores; and broken/x.go, which does not parse.
+-- go.mod --
+module example.test/shop
+
+go 1.22
+-- shop.go --
+// Package shop is the root package.
+package shop
+
+import (
+	"fmt"
+
+	"example.test/shop/a"
+)
+
+// Describe names the root.
+func Describe() string { return fmt.Sprint("shop:", a.Name) }
+-- a/a.go --
+package a
+
+// Name is a's name.
+const Name = "a"
+-- a/a_test.go --
+package a
+
+import "testing"
+
+func TestName(t *testing.T) {
+	if Name != "a" {
+		t.Fatal(Name)
+	}
+}
+-- a/_scratch.go --
+package a
+
+import "example.test/shop/c"
+
+var _ = c.Name
+-- a/testdata/golden.json --
+{"name": "a"}
+-- b/b.go --
+package b
+
+import "example.test/shop/a"
+
+// Name is b's name.
+var Name = a.Name + "b"
+-- b/.#b.go --
+package b
+
+import "example.test/shop/c"
+
+var _ = c.Name
+-- c/c.go --
+package c
+
+// Name is c's name.
+const Name = "c"
+-- c/c_test.go --
+package c_test
+
+import (
+	"testing"
+
+	"example.test/shop/b"
+)
+
+func TestB(t *testing.T) { _ = b.Name }
+-- tagged/tagged.go --
+//go:build tools
+
+package tagged
+
+import _ "example.test/shop/a"
+-- docs/guide.md --
+# Guide
+-- sub/go.mod --
+module example.test/shop/sub
+
+go 1.22
+
+require example.test/shop v0.0.0
+
+replace example.test/shop => ../
+-- sub/README.md --
+The sub module has no package at its root.
+-- sub/client/client.go --
+package client
+
+import "example.test/shop/a"
+
+// Name is the client's name for a.
+var Name = a.Name
+-- testdata/fixture.go --
+package fixture
+
+import "example.test/shop/b"
+
+var _ = b.Name
+-- _hidden/hidden.go --
+package hidden
+
+import "example.test/shop/c"
+
+var _ = c.Name
+-- .tools/tool.go --
+package tool
+
+import "example.test/shop/b"
+
+var _ = b.Name
+-- vendor/modules.txt --
+# example.test/dep v1.0.0
+## explicit
+example.test/dep
+-- vendor/example.test/dep/dep.go --
+package dep
+
+import "example.test/shop/c"
+
+var _ = c.Name
+-- broken/x.go --
+package broken
+
+import (
+	"example.test/shop/a"
