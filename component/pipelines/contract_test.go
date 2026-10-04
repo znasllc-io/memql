@@ -180,3 +180,31 @@ func sortedKeys(m map[string]any) []string {
 	sort.Strings(out)
 	return out
 }
+
+// The work spine reads a "/" in a step key as a NESTED step (its loaders,
+// the head rules and the Nexus drawing), so a pipeline step's key must never
+// carry one. This pins the format and, over the record's own example in its
+// widest run (every stage, shards included), that no compiled key does.
+func TestStepKeysAreNeverNested(t *testing.T) {
+	if got := StepKey("tests", "go-tests"); got != "tests.go-tests" {
+		t.Errorf(`StepKey("tests", "go-tests") = %q, want "tests.go-tests"`, got)
+	}
+	plan, refusal := Compile(d7ExampleSpec(), CompileInput{
+		Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet,
+		AllowedSecrets: []string{"DEPLOY_TOKEN"},
+		Selector:       d7Selector(Selection{Full: true}), Timings: d7Timings,
+	})
+	if refusal != nil {
+		t.Fatalf("Compile refused the record's example: %v", refusal)
+	}
+	for _, step := range plan.Steps() {
+		if strings.Contains(step.Key, "/") {
+			t.Errorf("step key %q carries a /, which the work spine reads as a nested step", step.Key)
+		}
+		for _, dep := range step.DependsOn {
+			if strings.Contains(dep, "/") {
+				t.Errorf("step %q depends on %q, which carries a /", step.Key, dep)
+			}
+		}
+	}
+}

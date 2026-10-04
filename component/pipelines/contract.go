@@ -50,6 +50,16 @@ const (
 // in the way integrations/work treats a procedure replay's run.
 const WorkTriggerPrefix = "pipeline:"
 
+// StepKey is a step's v1:work:step key: "<stage>.<step>".
+//
+// NOT "<stage>/<step>": the work spine reads a "/" in a step key as a NESTED
+// step -- a row of a logic a statement called -- and its loaders, the head
+// rules and the Nexus drawing all treat one that way. A dot is outside the
+// stage and step name grammar, so a key still splits back unambiguously, and
+// it means nothing to the spine. A refusal's Scope stays "stage/step": it is
+// a path into the manifest, like "select/buckets/os", not a key.
+func StepKey(stage, step string) string { return stage + "." + step }
+
 // Repository names a GitHub repository.
 type Repository struct {
 	Owner    string `json:"owner"`
@@ -90,8 +100,8 @@ type Skip struct {
 
 // Step is one compiled step: one v1:work:step row and one Execute call.
 type Step struct {
-	// Key is the v1:work:step key: "stage/step", or "stage/step#i" for the
-	// i-th shard.
+	// Key is the v1:work:step key, StepKey(stage, step): "stage.step", or
+	// "stage.step#i" for the i-th shard.
 	Key   string   `json:"key"`
 	Stage string   `json:"stage"`
 	Name  string   `json:"name"`

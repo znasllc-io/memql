@@ -78,7 +78,7 @@ func NeedsSelector(spec *Spec) bool {
 // `on` excludes the run is absent from the plan, not skipped. Each planned
 // stage compiles, in order:
 //
-//   - a notify stage to one notify step, "<stage>/notify";
+//   - a notify stage to one notify step, "<stage>.notify";
 //   - every other step to one step "<stage>/<step>", or, split by the timing
 //     table into k > 1 shards, to k steps "<stage>/<step>#<i>";
 //   - every step depends on every step of the stage planned before it, so
@@ -121,7 +121,7 @@ func Compile(spec *Spec, in CompileInput) (Plan, *Refusal) {
 		planned := PlanStage{Name: stage.Name, Needs: compiledCopy(stage.Needs)}
 		if stage.Channel != "" {
 			planned.Steps = []Step{{
-				Key: stage.Name + "/notify", Stage: stage.Name, Name: "notify", Kind: StepNotify,
+				Key: StepKey(stage.Name, "notify"), Stage: stage.Name, Name: "notify", Kind: StepNotify,
 				Channel: stage.Channel, TimeoutSeconds: int(DefaultStepTimeout / time.Second),
 				DependsOn: compiledCopy(previous),
 			}}
@@ -204,7 +204,7 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 	}
 
 	step := Step{
-		Key: scope, Stage: stage, Name: declared.Name, Kind: StepCommand, Run: declared.Run,
+		Key: StepKey(stage, declared.Name), Stage: stage, Name: declared.Name, Kind: StepCommand, Run: declared.Run,
 		Image:          c.spec.Image,
 		Services:       c.servicesFor(declared.Services),
 		Caches:         compiledCopy(c.spec.Caches),
@@ -239,7 +239,7 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 			out := make([]Step, len(shards))
 			for i, packages := range shards {
 				shard := cloneCompiledStep(step)
-				shard.Key = fmt.Sprintf("%s#%d", scope, i+1)
+				shard.Key = fmt.Sprintf("%s#%d", step.Key, i+1)
 				shard.Packages = packages
 				shard.Shard = ShardRef{Index: i + 1, Count: len(shards)}
 				out[i] = shard

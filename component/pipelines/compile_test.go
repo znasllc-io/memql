@@ -68,7 +68,7 @@ func d7Selector(affected Selection) selectorStub {
 // before any packages are chosen.
 func d7Command(stage, name, run string, dependsOn ...string) Step {
 	return Step{
-		Key: stage + "/" + name, Stage: stage, Name: name, Kind: StepCommand, Run: run,
+		Key: StepKey(stage, name), Stage: stage, Name: name, Kind: StepCommand, Run: run,
 		Image: d7Image, Caches: []string{"go", "npm"},
 		TimeoutSeconds: int(DefaultStepTimeout.Seconds()), DependsOn: dependsOn,
 	}
@@ -83,14 +83,14 @@ func d7Shard(step Step, index, count int, packages ...string) Step {
 
 var (
 	d7BuildVet = d7Command("checks", "build-vet", "go build ./... && go vet ./...")
-	d7GoTests  = d7Command("tests", "go-tests", "go test $MEMQL_PACKAGES", "checks/build-vet")
+	d7GoTests  = d7Command("tests", "go-tests", "go test $MEMQL_PACKAGES", "checks.build-vet")
 	d7DBTests  = func() Step {
-		s := d7Command("tests", "db-tests", "MEMQL_REQUIRE_DB=1 go test $MEMQL_PACKAGES", "checks/build-vet")
+		s := d7Command("tests", "db-tests", "MEMQL_REQUIRE_DB=1 go test $MEMQL_PACKAGES", "checks.build-vet")
 		s.Services = map[string]Service{"postgres": {Image: d7Postgres}}
 		return s
 	}()
 	d7OSChecks = func() Step {
-		s := d7Command("tests", "os-checks", "make os-typecheck os-test os-build", "checks/build-vet")
+		s := d7Command("tests", "os-checks", "make os-typecheck os-test os-build", "checks.build-vet")
 		s.Needs = []string{NeedDocker}
 		return s
 	}()
@@ -193,14 +193,14 @@ func TestCompileThePullRequestRunOfTheRecordsExample(t *testing.T) {
 	excluding.Select.Buckets["os"] = append(excluding.Select.Buckets["os"], "!clients/vendor/**")
 	vendorOnly := in
 	vendorOnly.Changed = []string{"clients/vendor/lib.js"}
-	if got := planStepByKey(t, mustCompilePlan(t, excluding, vendorOnly), "tests/os-checks"); got.Skip == nil {
+	if got := planStepByKey(t, mustCompilePlan(t, excluding, vendorOnly), "tests.os-checks"); got.Skip == nil {
 		t.Errorf("os-checks ran on a change only under an excluded path: %+v", got)
 	}
 
 	// The same run with a change under clients/: os-checks runs.
 	in.Changed = append(in.Changed, "clients/os/src/main.ts")
 	plan = mustCompilePlan(t, d7ExampleSpec(), in)
-	if got := planStepByKey(t, plan, "tests/os-checks"); !reflect.DeepEqual(got, d7OSChecks) {
+	if got := planStepByKey(t, plan, "tests.os-checks"); !reflect.DeepEqual(got, d7OSChecks) {
 		t.Errorf("os-checks with a change under clients/ =\n%+v\nwant it to run:\n%+v", got, d7OSChecks)
 	}
 }
@@ -221,15 +221,15 @@ func TestCompileThePushRunOfTheRecordsExample(t *testing.T) {
 		t.Fatalf("stages = %v, want %v", got, want)
 	}
 	testsKeys := []string{
-		"tests/go-tests#1", "tests/go-tests#2", "tests/go-tests#3", "tests/go-tests#4",
-		"tests/db-tests#1", "tests/db-tests#2", "tests/db-tests#3", "tests/os-checks",
+		"tests.go-tests#1", "tests.go-tests#2", "tests.go-tests#3", "tests.go-tests#4",
+		"tests.db-tests#1", "tests.db-tests#2", "tests.db-tests#3", "tests.os-checks",
 	}
 	verify := d7Command("deploy", "verify-rollout",
 		"memql-verify --target=https://api.<domain> --version=$MEMQL_VERSION", testsKeys...)
 	notify := Step{
-		Key: "notify/notify", Stage: "notify", Name: "notify", Kind: StepNotify,
+		Key: "notify.notify", Stage: "notify", Name: "notify", Kind: StepNotify,
 		Channel: "znas-instance", TimeoutSeconds: int(DefaultStepTimeout.Seconds()),
-		DependsOn: []string{"deploy/verify-rollout"},
+		DependsOn: []string{"deploy.verify-rollout"},
 	}
 	diffPlanSteps(t, plan.Steps(), []Step{
 		d7BuildVet,
@@ -269,7 +269,7 @@ func TestCompileOnlySplitsTheCandidatesByTheDBGatedTrees(t *testing.T) {
 			}}},
 		}
 		plan := mustCompilePlan(t, spec, CompileInput{Mode: ModeAffected, Event: EventPullRequest, Selector: d7Selector(Selection{})})
-		return planStepByKey(t, plan, "tests/db").Packages, planStepByKey(t, plan, "tests/unit").Packages
+		return planStepByKey(t, plan, "tests.db").Packages, planStepByKey(t, plan, "tests.unit").Packages
 	}
 
 	db, rest := compileSplit("component/memql", "./component/database/")
@@ -338,7 +338,7 @@ func TestCompileRefusesASecretTheOwnerDidNotAllow(t *testing.T) {
 
 	push.AllowedSecrets = []string{"NPM_TOKEN", "DEPLOY_TOKEN"}
 	plan := mustCompilePlan(t, spec, push)
-	if got := planStepByKey(t, plan, "deploy/verify-rollout").Secrets; !reflect.DeepEqual(got, []string{"DEPLOY_TOKEN"}) {
+	if got := planStepByKey(t, plan, "deploy.verify-rollout").Secrets; !reflect.DeepEqual(got, []string{"DEPLOY_TOKEN"}) {
 		t.Errorf("verify-rollout secrets = %v, want the names as written", got)
 	}
 
@@ -377,7 +377,7 @@ func TestCompileAFullSelectionSelectsEveryPackage(t *testing.T) {
 		Mode: ModeFull, Event: EventMergeGroup, Compute: ComputeClusterAndFleet,
 		Selector: d7Selector(Selection{}), Timings: d7Timings,
 	})
-	for _, key := range []string{"tests/go-tests#1", "tests/go-tests#2", "tests/go-tests#3", "tests/go-tests#4", "tests/db-tests#3"} {
+	for _, key := range []string{"tests.go-tests#1", "tests.go-tests#2", "tests.go-tests#3", "tests.go-tests#4", "tests.db-tests#3"} {
 		if got, want := planStepByKey(t, affected, key).Packages, planStepByKey(t, full, key).Packages; !reflect.DeepEqual(got, want) {
 			t.Errorf("%s = %v under a Full selection, want %v as in full mode", key, got, want)
 		}
@@ -420,15 +420,15 @@ func TestCompilePlansAStageByEventOrMode(t *testing.T) {
 		stages []string
 		after  []string // what report depends on
 	}{
-		{ModeAffected, EventPullRequest, []string{"lint", "report"}, []string{"lint/vet"}},
-		{ModeFull, EventPush, []string{"lint", "slow", "report"}, []string{"slow/e2e"}},
-		{ModeFull, EventMergeGroup, []string{"lint", "slow", "queue", "report"}, []string{"queue/smoke"}},
+		{ModeAffected, EventPullRequest, []string{"lint", "report"}, []string{"lint.vet"}},
+		{ModeFull, EventPush, []string{"lint", "slow", "report"}, []string{"slow.e2e"}},
+		{ModeFull, EventMergeGroup, []string{"lint", "slow", "queue", "report"}, []string{"queue.smoke"}},
 	} {
 		plan := mustCompilePlan(t, spec, CompileInput{Mode: tc.mode, Event: tc.event})
 		if got := planStageNames(plan); !reflect.DeepEqual(got, tc.stages) {
 			t.Errorf("%s/%s: stages = %v, want %v", tc.mode, tc.event, got, tc.stages)
 		}
-		if got := planStepByKey(t, plan, "report/sum").DependsOn; !reflect.DeepEqual(got, tc.after) {
+		if got := planStepByKey(t, plan, "report.sum").DependsOn; !reflect.DeepEqual(got, tc.after) {
 			t.Errorf("%s/%s: report depends on %v, want %v", tc.mode, tc.event, got, tc.after)
 		}
 	}
@@ -448,14 +448,14 @@ func TestCompileTimeoutsAndASingleShard(t *testing.T) {
 	})
 	// One package cannot be split: the step runs unsharded, under its own key,
 	// and exports no MEMQL_SHARD.
-	unit := planStepByKey(t, plan, "tests/unit")
+	unit := planStepByKey(t, plan, "tests.unit")
 	if unit.Shard != (ShardRef{}) || !reflect.DeepEqual(unit.Packages, []string{d7GRPC}) {
 		t.Errorf("a one-package shard set compiled to %+v, want one unsharded step", unit)
 	}
 	if unit.TimeoutSeconds != 45*60 {
 		t.Errorf("unit timeout = %ds, want 2700", unit.TimeoutSeconds)
 	}
-	if got := planStepByKey(t, plan, "tests/lint").TimeoutSeconds; got != 90*60 {
+	if got := planStepByKey(t, plan, "tests.lint").TimeoutSeconds; got != 90*60 {
 		t.Errorf("lint timeout = %ds, want 5400", got)
 	}
 }
@@ -476,7 +476,7 @@ func TestCompileRunsABucketStepWhenTheChangeIsNotKnown(t *testing.T) {
 			Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet,
 			Selector: d7Selector(Selection{Full: true}), Changed: tc.changed, ChangedKnown: tc.known,
 		})
-		if skip := planStepByKey(t, plan, "tests/os-checks").Skip; skip != nil {
+		if skip := planStepByKey(t, plan, "tests.os-checks").Skip; skip != nil {
 			t.Errorf("%s: os-checks skipped (%s)", tc.name, skip.Reason)
 		}
 	}
@@ -515,7 +515,7 @@ func TestCompileSharesNoStorageWithTheSpecOrBetweenSteps(t *testing.T) {
 		Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet,
 		Selector: d7Selector(Selection{}), Timings: d7Timings,
 	})
-	first := planStepByKey(t, plan, "tests/db-tests#1")
+	first := planStepByKey(t, plan, "tests.db-tests#1")
 	first.Caches[0] = "changed"
 	first.DependsOn[0] = "changed"
 	first.Services["postgres"] = Service{Image: "changed"}
@@ -523,8 +523,8 @@ func TestCompileSharesNoStorageWithTheSpecOrBetweenSteps(t *testing.T) {
 	if spec.Caches[0] != "go" || spec.Services["postgres"].Image != d7Postgres {
 		t.Error("changing a compiled step changed the spec")
 	}
-	second := planStepByKey(t, plan, "tests/db-tests#2")
-	if second.Caches[0] != "go" || second.DependsOn[0] != "checks/build-vet" || second.Services["postgres"].Image != d7Postgres {
+	second := planStepByKey(t, plan, "tests.db-tests#2")
+	if second.Caches[0] != "go" || second.DependsOn[0] != "checks.build-vet" || second.Services["postgres"].Image != d7Postgres {
 		t.Errorf("changing one shard changed its sibling: %+v", second)
 	}
 }
