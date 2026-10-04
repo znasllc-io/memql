@@ -300,6 +300,13 @@ function DeployablesAppContent({
       setRunOpenRequest(held => ({ runId: requestedRun, revision: (held?.revision ?? 0) + 1 }));
       navigate("runs");
     }
+    // A source named by a link: its page, on the Sources tab -- the same
+    // request the map's Checks node and a run page's trail make.
+    const requestedSource = intent.payload.packageId;
+    if (typeof requestedSource === "string" && requestedSource && typeof requestedRun !== "string") {
+      setSourceOpenRequest(held => ({ packageId: requestedSource, revision: (held?.revision ?? 0) + 1 }));
+      navigate("sources");
+    }
     if (intent.payload.provider === "shopify") { setConnectionProvider("shopify"); setConnectionsIntent(intent); }
     const shopify = intent.payload["shopify"];
     if (shopify && typeof shopify === "object" && "siteId" in shopify && typeof shopify.siteId === "string" && shopify.siteId) {
