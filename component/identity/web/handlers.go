@@ -353,7 +353,11 @@ func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
 	// COMPLETED nowhere, which is what stops a shared mailbox from being a
 	// first-come-first-served credential.
 	s.setMagicLinkCookie(w, res.BindingNonce, s.bindingLifetime(res))
-	http.Redirect(w, r, checkEmailURL(email, res.RequestId), http.StatusSeeOther)
+	destination := checkEmailURL(email, res.RequestId)
+	if in.IsAccessRequest {
+		destination += "&action=access_request_created"
+	}
+	http.Redirect(w, r, destination, http.StatusSeeOther)
 }
 
 // checkEmailURL builds the post-issue redirect. The request id rides along so
@@ -446,7 +450,7 @@ func (s *Server) routeLoginEmail(r *http.Request, email, returnTo string) (*webt
 	case "open":
 		return nil, false
 	case "domain_restricted":
-		if emailMatchesAllowedDomain(email, s.Cfg.RegistrationDomains) {
+		if emailMatchesAllowedDomain(email, strings.Split(settings.RegistrationDomains, ",")) {
 			return nil, false
 		}
 		return s.renderLoginStage(r, "waitlist_signup", email, returnTo,
@@ -703,12 +707,7 @@ func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
 		mode = string(s.Cfg.RegistrationMode)
 	}
 	if mode == "" {
-		// Waitlist is the conservative default — strangers can't grab
-		// accounts on a freshly bootstrapped cluster, the operator gets
-		// to review every request from the admin UI. Operator can
-		// switch to open / domain_restricted / invite_only any time
-		// from /admin/settings.
-		mode = "waitlist"
+		mode = "invite_only"
 	}
 	internalDomains := strings.Join(bs.InternalDomains, ", ")
 	if internalDomains == "" {
@@ -717,6 +716,10 @@ func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
 	registrationDomains := strings.Join(bs.RegistrationDomains, ", ")
 	if registrationDomains == "" {
 		registrationDomains = strings.Join(s.Cfg.RegistrationDomains, ", ")
+	}
+	internalRole := strings.TrimSpace(bs.InternalDefaultRole)
+	if internalRole == "" {
+		internalRole = s.Cfg.InternalDefaultRole
 	}
 	data := webtempl.SetupWizardData{
 		Layout:                     s.LayoutData(r, "Set up your cluster", false, nil, extra),
@@ -730,6 +733,7 @@ func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
 		PrefillOwnerBirthdate:      strings.TrimSpace(bs.OwnerBirthdate),
 		PrefillOrgName:             strings.TrimSpace(bs.OrgName),
 		PrefillInternalDomains:     internalDomains,
+		PrefillInternalDefaultRole: internalRole,
 		PrefillRegistrationDomains: registrationDomains,
 		PrefillNotifyEmails:        strings.Join(bs.NotifyEmails, ", "),
 		PrefillMode:                mode,

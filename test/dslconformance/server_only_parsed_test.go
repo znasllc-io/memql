@@ -870,7 +870,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// only be written by the code that VERIFIED an id token carrying it,
 		// and at that moment there is no caller to scope to -- the person has
 		// not been admitted yet.
-		{Path: "identity/mutations.memql", Name: "createOidcIdentity"}:           true,
+		{Path: "identity/mutations.memql", Name: "createOidcIdentity"}: true,
+		// Review stamps the authenticated actor and serializes an invitation mint.
+		// A caller-scoped mutation cannot provide that cross-replica coordination;
+		// the gated identity-admin operation owns both writes and delivery.
+		{Path: "identity/mutations.memql", Name: "approveAccessRequest"}:         true,
+		{Path: "identity/mutations.memql", Name: "rejectAccessRequest"}:          true,
 		{Path: "identity/mutations.memql", Name: "createUserInvitation"}:         true,
 		{Path: "identity/mutations.memql", Name: "recordUserInvitationDelivery"}: true,
 		{Path: "identity/mutations.memql", Name: "bindUserInvitation"}:           true,

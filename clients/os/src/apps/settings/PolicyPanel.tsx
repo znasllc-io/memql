@@ -1,3 +1,4 @@
+import { JoiningPolicyFields, useJoiningPolicy } from "../../auth/JoiningPolicy";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { Button, Caption, Field, Input, Notice, Panel, Select, Subhead } from "../../kit";
 import { draftProblem, editFromDraft, useClusterPolicy } from "./clusterPolicy";
@@ -27,7 +28,9 @@ import { useSettingsWrites } from "./settingsWrites";
 export function PolicyPanel({ enabled }: { enabled: boolean }) {
   const policy = useClusterPolicy(enabled);
   const writes = useSettingsWrites();
-  const problem = draftProblem(policy.draft);
+  const joining = useJoiningPolicy(policy.draft, policy.set);
+  const problem = joining.problem || draftProblem({ ...policy.draft, ...joining.effective });
+  const clean = policy.clean && !joining.pending;
   const busy = writes.busyKey === "cluster-settings";
 
   if (!enabled) return null;
@@ -68,72 +71,7 @@ export function PolicyPanel({ enabled }: { enabled: boolean }) {
       ) : null}
       {writes.done ? <Notice tone="info" sentence={writes.done} /> : null}
 
-      <Field label="Who can sign up">
-        <Select
-          id="policy-registration-mode"
-          label="Who can sign up"
-          value={policy.draft.registrationMode}
-          onChange={(next) => policy.set({ registrationMode: next })}
-        >
-          <option value="open">Anyone</option>
-          <option value="domain_restricted">Anyone at an allowed email domain</option>
-          <option value="invite_only">Only people who were invited</option>
-          <option value="waitlist">Anyone, but an admin approves them</option>
-        </Select>
-      </Field>
-
-      {policy.draft.registrationMode === "domain_restricted" ? (
-        <Field label="Allowed email domains">
-          <Input
-            id="policy-registration-domains"
-            label="Allowed email domains"
-            value={policy.draft.registrationDomains}
-            onChange={(next) => policy.set({ registrationDomains: next })}
-            placeholder="acme.com, acme.co.uk"
-          />
-        </Field>
-      ) : null}
-
-      {policy.draft.registrationMode === "waitlist" ? (
-        <Field label="Tell these addresses about a request">
-          <Input
-            id="policy-notify-emails"
-            label="Tell these addresses about a request"
-            value={policy.draft.accessRequestNotifyEmails}
-            onChange={(next) => policy.set({ accessRequestNotifyEmails: next })}
-            placeholder="ops@acme.com"
-          />
-        </Field>
-      ) : null}
-
-      <Field label="Treat these email domains as internal">
-        <Input
-          id="policy-internal-domains"
-          label="Treat these email domains as internal"
-          value={policy.draft.internalDomains}
-          onChange={(next) => policy.set({ internalDomains: next })}
-          placeholder="acme.com"
-        />
-      </Field>
-      <Field label="Role an internal person gets on their first sign-in">
-        <Select
-          id="policy-internal-role"
-          label="Role an internal person gets on their first sign-in"
-          value={policy.draft.internalDefaultRole}
-          onChange={(next) => policy.set({ internalDefaultRole: next })}
-        >
-          <option value="reader">Reader</option>
-          <option value="writer">Writer</option>
-          <option value="admin">Admin</option>
-          <option value="developer">Developer</option>
-          <option value="owner">Owner</option>
-        </Select>
-      </Field>
-      <Caption>
-        Somebody whose address is not on that list gets owner of a personal
-        space of their own instead, which is the external case rather than a
-        lesser one.
-      </Caption>
+      <JoiningPolicyFields policy={joining} />
 
       <Field label="Session length (minutes)">
         <Input
@@ -222,27 +160,28 @@ export function PolicyPanel({ enabled }: { enabled: boolean }) {
           tone="primary"
           busy={busy}
           busyLabel="Saving"
-          disabled={policy.clean || problem !== "" || policy.error !== ""}
+          disabled={clean || policy.loading || problem !== "" || policy.error !== ""}
           onClick={() => {
-            void writes.saveClusterSettings(editFromDraft(policy.draft)).then((ok) => {
-              if (ok) policy.reload();
+            void writes.saveClusterSettings(editFromDraft({ ...policy.draft, ...joining.effective })).then((ok) => {
+              if (ok) { joining.reset(); policy.reload(); }
             });
           }}
         >
           Save
         </Button>
         {/* ABSENT while there is nothing to revert, rather than disabled. */}
-        {policy.clean ? null : (
+        {clean ? null : (
           <Button
             onClick={() => {
               writes.clear();
               policy.revert();
+              joining.reset();
             }}
           >
             Discard changes
           </Button>
         )}
-        {policy.loading ? <RecordListSkeleton label="Reading what is stored" /> : <Caption>{policy.clean
+        {policy.loading ? <RecordListSkeleton label="Reading what is stored" /> : <Caption>{clean
               ? "Nothing to save."
               : "Not saved yet."}</Caption>}
       </div>

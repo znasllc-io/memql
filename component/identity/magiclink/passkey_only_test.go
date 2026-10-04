@@ -38,6 +38,8 @@ func (e *policyEngine) Execute(_ context.Context, q string) (*memqlengine.Execut
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	switch {
+	case q == "query clusterSettingsCurrent()":
+		return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}, nil
 	case strings.HasPrefix(q, "query userByEmail("):
 		e.reads++
 		if e.policy == "" {

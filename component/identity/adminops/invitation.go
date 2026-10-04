@@ -57,6 +57,8 @@ import (
 
 // UserInvitation is the issue request.
 type UserInvitation struct {
+	// A review records its decision before the credential leaves the process.
+	beforeDelivery func(invitationID string) error
 	// Email is the address the invitation authorizes to register.
 	Email string
 	// Role is the cluster role the recipient lands with. Empty means the
@@ -164,7 +166,10 @@ func (s *Service) IssueUserInvitation(ctx context.Context, in UserInvitation) Re
 		}
 	}
 
-	mode, domains := s.registrationPolicy(ctx)
+	mode, domains, policyErr := s.registrationPolicy(ctx)
+	if policyErr != nil {
+		return s.finish(ctx, identity.AuditCategoryAdmin, "user_invitation_issued", act, "", email, detail, "", policyErr)
+	}
 	detail["registrationMode"] = mode
 	if mode == string(identity.RegistrationModeDomainRestricted) && !domainAllowed(email, domains) {
 		return fail(CodeInvalidArgument, s.emit(ctx, identity.AuditCategoryAdmin, "user_invitation_issued",
@@ -245,6 +250,12 @@ func (s *Service) IssueUserInvitation(ctx context.Context, in UserInvitation) Re
 			detail, "", err)
 	}
 	detail["invitationId"] = invitationID
+	if in.beforeDelivery != nil {
+		if err := in.beforeDelivery(invitationID); err != nil {
+			_, _ = s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), fmt.Sprintf(`mutation revokeUserInvitation(invitationId: %s)`, quote(invitationID)))
+			return s.finish(ctx, identity.AuditCategoryAdmin, "user_invitation_issued", act, "", email, detail, "", err)
+		}
+	}
 
 	link := invitationURL(base, plain)
 
@@ -422,16 +433,16 @@ func (s *Service) RevokeUserInvitation(ctx context.Context, invitationID string)
 // node that cannot read the policy must not invent one, and inventing
 // invite_only here would refuse invitations on a cluster that never asked for
 // that.
-func (s *Service) registrationPolicy(ctx context.Context) (string, []string) {
+func (s *Service) registrationPolicy(ctx context.Context) (string, []string, error) {
 	if s.RegistrationPolicy == nil {
-		return string(identity.RegistrationModeOpen), nil
+		return string(identity.RegistrationModeOpen), nil, nil
 	}
-	mode, domains := s.RegistrationPolicy(ctx)
+	mode, domains, err := s.RegistrationPolicy(ctx)
 	mode = strings.TrimSpace(strings.ToLower(mode))
 	if mode == "" {
 		mode = string(identity.RegistrationModeOpen)
 	}
-	return mode, domains
+	return mode, domains, err
 }
 
 func domainAllowed(email string, domains []string) bool {

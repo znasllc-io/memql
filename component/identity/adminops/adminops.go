@@ -192,6 +192,7 @@ func fail(code int32, auditID, message string) Result {
 // Service performs the gated writes. Construct one per node; it holds no
 // per-call state.
 type Service struct {
+	AccessRequests *identity.Store
 	// Engine executes the DSL. Required.
 	Engine identity.EngineExecutor
 	// Audit receives one event per call, refusals included. Required in
@@ -227,10 +228,9 @@ type Service struct {
 	// so the package stays out of the environment and the wiring layer answers.
 	//
 	// Optional. Unset degrades to "open" -- the mode that adds no restriction.
-	// A node that cannot read the policy must not invent one, and inventing
-	// invite_only here would refuse invitations on a cluster that never asked
-	// for it.
-	RegistrationPolicy func(ctx context.Context) (mode string, domains []string)
+	// A wired reader must return storage errors; issuance refuses rather than
+	// falling back to an older policy that may allow a blocked domain.
+	RegistrationPolicy func(ctx context.Context) (mode string, domains []string, err error)
 
 	// SendInvitationEmail delivers the invitation email an issued invitation is
 	// useless without (memql#4584).
@@ -788,6 +788,9 @@ func (s *Service) UpdateClusterSettings(ctx context.Context, in ClusterSettings)
 		return fail(CodeInvalidArgument, s.emit(ctx, identity.AuditCategoryConfiguration,
 			"cluster_settings_updated", act, "", "", detail, identity.AuditOutcomeFailure, reason), message)
 	}
+	if refusal := auth.MayAssignRole(auth.UserContext{ID: act.userID, Role: act.role}, auth.AssignOnInvitation, "", "", role, nil); refusal != auth.AssignAllowed {
+		return fail(CodePermissionDenied, s.emit(ctx, identity.AuditCategoryConfiguration, "cluster_settings_updated", act, "", "", detail, identity.AuditOutcomeBlocked, "internal_role_above_caller"), "You cannot grant this default internal role.")
+	}
 
 	q := fmt.Sprintf(`mutation updateClusterSettings(`+
 		`id: "cluster",`+
@@ -833,6 +836,9 @@ func (s *Service) UpdateClusterSettings(ctx context.Context, in ClusterSettings)
 // is an explicit reject rather than a silent clamp: an operator should know
 // what they got.
 func validateSettings(in ClusterSettings, mode, role string) (reason, message string) {
+	if err := identity.ValidateRegistrationLists(mode, in.RegistrationDomains, in.InternalDomains, in.AccessRequestNotifyEmails); err != nil {
+		return "invalid_joining_policy", err.Error()
+	}
 	switch mode {
 	case "open", "domain_restricted", "invite_only", "waitlist":
 	default:

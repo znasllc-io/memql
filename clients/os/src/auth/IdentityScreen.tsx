@@ -102,7 +102,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
   if (page?.page === "setup_wizard") return <div className="os-identity-gate"><OwnershipWizard data={data} busy={busy} error={error} submit={submit} /></div>;
 
   if (page?.page === "setup_passkey") {
-    const steps = ["Cluster owner", "Your installation", "Account access", ...(data.Local === true ? [] : ["Verify email"]), "Register passkey"];
+    const steps = ["Organization and owner", "Your installation", "Joining the cluster", ...(data.Local === true ? [] : ["Verify email"]), "Register passkey"];
     const complete = () => void run(async () => {
       const destination = await registerPasskey(config, `Bootstrap ${value(data, "EnrollmentToken")}`, "Owner passkey");
       if (!destination) throw new Error("Setup is still incomplete. Retry this step.");
@@ -142,11 +142,11 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
         {data.Local === true && <p>Use the passkey already created for this setup. A different browser cannot replace that claim.</p>}</>;
       break;
     case "check_email":
-      title = "Check your email";
+      title = data.Action === "access_request_created" ? "Request received" : "Check your email";
       body = <><p>{data.Action === "access_request_created" ? "Your access request has been received. An administrator will follow up at" : "Open the verification link sent to"} <strong>{value(data, "Email")}</strong>.</p>
         {data.Action !== "access_request_created" && <p>Return to this browser to continue. The link expires in {value(data, "ExpiresIn")}.</p>}
-        {data.SharedMailboxHint === true && <p>Anyone who can read this shared mailbox can use its sign-in links. A passkey can keep access personal.</p>}
-        {act("Check again", () => void load(path))}</>; break;
+        {data.Action !== "access_request_created" && data.SharedMailboxHint === true && <p>Anyone who can read this shared mailbox can use its sign-in links. A passkey can keep access personal.</p>}
+        {data.Action !== "access_request_created" && act("Check again", () => void load(path))}</>; break;
     case "landing":
       title = value(data, "Problem") || (data.Approved ? "Sign-in confirmed" : "Confirm sign-in");
       body = <><p>{value(data, "Message") || `Sign in as ${value(data, "MaskedEmail")}.`}</p>

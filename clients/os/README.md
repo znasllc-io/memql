@@ -30,6 +30,25 @@ membership before sealing the claim or issuing a session. Every step is
 idempotent under the same claim lock. The optional “Title in organization” is
 profile text (`primaryRole`), never an authorization role.
 
+Setup's **Joining the cluster** step and **Settings → Cluster → Policy** share
+one joining-policy editor. Invitation only is the initial default and requires an invitation; Approved
+email domains allows exact listed domains (other domains may request access,
+but must be added before they can be invited); Admin approval queues requests;
+Open registration admits anyone after email verification. These are admission
+rules, independent from the optional internal-domain list: after admission,
+matching people receive the internal default role, other people start as
+Readers, and an invitation's explicit role wins. Changes apply to subsequent
+admission decisions and provisioning across replicas; existing accounts keep
+their roles. Outstanding credentials retain their existing lifetime. Local
+passkey-only installations retain that sign-in restriction in every mode.
+
+**Users → Access requests** reviews pending requests. Approval issues an
+invitation through the existing admission authority; rejection requires a note.
+A shared database lock serializes competing reviews. Creation and review events
+broadcast across nodes. Notification recipients are optional; an empty list
+uses cluster owners and admins. Notice throttling is shared across replicas,
+and failed delivery leaves the request available for review.
+
 The Identity app contains your profile, passkeys, sessions, personal access
 tokens, and sign-in policy. Email verification, invitations, recovery, and
 external OAuth consent also render in OS. Old identity page URLs hand off to

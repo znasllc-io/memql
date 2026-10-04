@@ -1,8 +1,9 @@
+import { holds } from "../../system/roles";
 import { listCount } from "../../kit/RecordRow";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
-import { Check, Head, Panel, SetupGroup, gateFor } from "../../kit";
+import { Check, Head, Notice, Panel, SetupGroup, gateFor } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import { useOsIfPresent } from "../../chrome/state";
@@ -12,6 +13,7 @@ import { useUsersActions } from "./actions";
 import { GroupsSection } from "./GroupsSection";
 import { PeopleSection } from "./PeopleSection";
 import { RolesSection } from "./RolesSection";
+import { AccessRequestsSection } from "./AccessRequestsSection";
 import { groupFromRow, invitationFromRow, personFromRow } from "./rows";
 import {
   DEFAULT_USERS_SETTINGS,
@@ -206,6 +208,9 @@ export function UsersApp({
       />
     );
   }
+  if (sectionId === "requests") return operator
+    ? <AccessRequestsSection catalog={catalog} viewerRole={viewerRole} canReview={holds("create", "principal")} />
+    : <Notice tone="info" sentence="Access requests are reviewed by cluster administrators." />;
   if (sectionId === "roles") {
     return (
       <RolesSection

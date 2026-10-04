@@ -368,6 +368,7 @@ const users: OsAppManifest = {
   icon: Users,
   requires: "app:users",
   sections: USERS_SECTIONS,
+  attentionChanges: [{ id: "users:access-requests", revision: "review-1", sectionId: "requests", label: "Review requests to join this cluster" }],
   records: [
     { section: "people", idField: "userId", query: "identity.searchUsers", labels: ["displayName", "primaryEmail"] },
     { section: "groups", idField: "groupId", query: "identity.groupsAll", labels: ["name"] },

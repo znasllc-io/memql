@@ -313,6 +313,7 @@ export type IdentityAdminRequestPayload =
   | { rotateRecoveryKey: IdentityAdminRotateRecoveryKeyPayload }
   | { issueUserInvitation: IdentityAdminIssueUserInvitationPayload }
   | { revokeUserInvitation: IdentityAdminRevokeUserInvitationPayload }
+  | { reviewAccessRequest: { requestId: string; decision: "approve" | "reject"; role: string; note: string } }
   | { resetSignInPolicy: IdentityAdminResetSignInPolicyPayload };
 
 /**

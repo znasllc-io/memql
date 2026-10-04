@@ -8782,6 +8782,52 @@ a.os-button {
   outline: 2px solid var(--os-accent);
   outline-offset: 2px;
 }
+.os-entry-list > .os-form-row { flex-wrap: nowrap; }
+.os-entry-list > p { margin: 5px 0 0; }
+.os-entry-list-list {
+  list-style: none;
+  margin: 7px 0 0;
+  padding: 0;
+}
+.os-entry-list-list .os-chip {
+  max-width: 100%;
+  padding: 1px 3px 1px 10px;
+  color: var(--os-ink);
+}
+.os-entry-list-list .os-chip > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.os-entry-list-list .os-chip-remove {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+}
+.os-entry-list .os-entry-list-error { color: var(--os-error); }
+.os-joining-policy {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 34rem;
+}
+.os-joining-policy p { margin: 0; }
+.os-joining-defaults {
+  border-top: 1px solid var(--os-line);
+  padding-top: 14px;
+}
+.os-joining-defaults > summary {
+  cursor: pointer;
+  color: var(--os-ink);
+  font-size: var(--os-text-base);
+}
+.os-joining-defaults > summary:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 3px;
+}
+.os-joining-defaults > :not(summary) { margin-top: 12px; }
 .os-wizard-stage-title {
   margin: 0;
   font-size: var(--os-text-md);

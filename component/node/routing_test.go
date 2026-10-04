@@ -2,6 +2,15 @@ package node
 
 import "testing"
 
+func TestAccessRequestsReachReviewersOnOtherNodes(t *testing.T) {
+	for _, action := range []string{"created", "updated"} {
+		d := evaluateRouting(defaultRoutingRules(), "graph.node."+action+".v1:identity:accessRequest")
+		if !d.Forward || d.TargetType != "" {
+			t.Fatalf("%s must broadcast to every node: %+v", action, d)
+		}
+	}
+}
+
 func TestEvaluateRouting_BlockRules(t *testing.T) {
 	rules := defaultRoutingRules()
 

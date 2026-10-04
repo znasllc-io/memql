@@ -136,10 +136,14 @@ func (s *Server) provisionOidcUser(ctx context.Context, c oidc.Claims) (string, 
 		return "", errors.New("oidc sign-in: the provider did not verify this email, so no account can be created")
 	}
 
-	if s.Cfg.RegistrationMode != identity.RegistrationModeDirectory {
+	cfg, err := s.Store.RegistrationConfig(ctx, s.Cfg)
+	if err != nil {
+		return "", fmt.Errorf("oidc sign-in: registration policy unavailable: %w", err)
+	}
+	if cfg.RegistrationMode != identity.RegistrationModeDirectory {
 		// Ask the ordinary policy. Nil invitation: a federated sign-in carries
 		// none, so `invite_only` refuses here exactly as it refuses an email.
-		d, err := registration.Decide(s.Cfg, email, nil)
+		d, err := registration.Decide(cfg, email, nil)
 		if err != nil || d.Action != registration.ActionIssueMagicLink {
 			return "", fmt.Errorf("oidc sign-in: this cluster's registration mode does not admit %s (%s)", email, d.Reason)
 		}
@@ -150,9 +154,9 @@ func (s *Server) provisionOidcUser(ctx context.Context, c oidc.Claims) (string, 
 		return "", fmt.Errorf("oidc sign-in: user id mint: %w", err)
 	}
 	role := s.oidcRoleFor(c)
-	internal := s.Cfg.IsInternalEmail(email)
+	internal := cfg.IsInternalEmail(email)
 	if role == "" && internal {
-		role = s.Cfg.InternalDefaultRole
+		role = cfg.InternalDefaultRole
 	}
 	if err := s.Store.CreateUserOnFirstLogin(ctx, userId, c.Name, email, role, internal, identity.UserProfileSeed{}); err != nil {
 		return "", fmt.Errorf("oidc sign-in: create user: %w", err)

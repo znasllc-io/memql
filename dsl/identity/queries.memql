@@ -164,6 +164,7 @@ query accountEntitlement accountEntitlement {
 
 /// Returns the access request with the given id. Zero or one result.
 @unbounded("access request by id (guarded) -- bounded to a single row")
+@requiresRank("admin")
 query accessRequest accessRequestById {
   args {
     requestId  string!
@@ -1493,6 +1494,7 @@ query identity patIdentityByKeyHash {
 //
 
 /// Access requests with status=pending; backs the admin review queue.
+@requiresRank("admin")
 query accessRequest pendingAccessRequests {
   filter  row => statusIsPending(row)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over

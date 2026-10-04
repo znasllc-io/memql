@@ -211,34 +211,6 @@ QueryClient.prototype.applyResponsibilityIntake = function (this: QueryClient, a
   return this.executeNamed("applyResponsibilityIntake", buildApplyResponsibilityIntake(args), opts);
 };
 
-/** Approve an access request (status=approved, stamps reviewer + invitation). */
-// Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["approveAccessRequest"] in generated_concepts.ts).
-export interface ApproveAccessRequestArgs {
-  requestId: string;
-  reviewedBy: string;
-  invitationId: string;
-  reviewerNote?: string;
-}
-
-export function buildApproveAccessRequest(args: ApproveAccessRequestArgs): string {
-  const parts: string[] = [];
-  parts.push("requestId: " + renderMemQLValue(args.requestId));
-  parts.push("reviewedBy: " + renderMemQLValue(args.reviewedBy));
-  parts.push("invitationId: " + renderMemQLValue(args.invitationId));
-  if (args.reviewerNote !== undefined) parts.push("reviewerNote: " + renderMemQLValue(args.reviewerNote));
-  return "mutation approveAccessRequest(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    approveAccessRequest(args: ApproveAccessRequestArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.approveAccessRequest = function (this: QueryClient, args: ApproveAccessRequestArgs = {} as ApproveAccessRequestArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("approveAccessRequest", buildApproveAccessRequest(args), opts);
-};
-
 /** Approve a pending device authorization. The approver is stamped from actor.userId -- the form cannot name someone else. */
 // Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["approveDeviceCode"] in generated_concepts.ts).
 export interface ApproveDeviceCodeArgs {
@@ -5542,32 +5514,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.reinforceMemoryBelief = function (this: QueryClient, args: ReinforceMemoryBeliefArgs = {} as ReinforceMemoryBeliefArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("reinforceMemoryBelief", buildReinforceMemoryBelief(args), opts);
-};
-
-/** Reject an access request (status=rejected, stamps reviewer + note). */
-// Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["rejectAccessRequest"] in generated_concepts.ts).
-export interface RejectAccessRequestArgs {
-  requestId: string;
-  reviewedBy: string;
-  reviewerNote?: string;
-}
-
-export function buildRejectAccessRequest(args: RejectAccessRequestArgs): string {
-  const parts: string[] = [];
-  parts.push("requestId: " + renderMemQLValue(args.requestId));
-  parts.push("reviewedBy: " + renderMemQLValue(args.reviewedBy));
-  if (args.reviewerNote !== undefined) parts.push("reviewerNote: " + renderMemQLValue(args.reviewerNote));
-  return "mutation rejectAccessRequest(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    rejectAccessRequest(args: RejectAccessRequestArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.rejectAccessRequest = function (this: QueryClient, args: RejectAccessRequestArgs = {} as RejectAccessRequestArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("rejectAccessRequest", buildRejectAccessRequest(args), opts);
 };
 
 /** Reject a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and sets validationStatus=rejected (valid stays false, so the override is never resolution-eligible), stamping validatedBy=actor.userId + validatedAt + the rejectionReason. A rejected proposal is RECORDED for audit, not silently dropped. Owned: gated by `row.ownerUserId == actor.userId` in the update read-merge. */

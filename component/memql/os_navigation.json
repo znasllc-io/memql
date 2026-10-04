@@ -355,6 +355,10 @@
         "name": "People"
       },
       {
+        "id": "requests",
+        "name": "Access requests"
+      },
+      {
         "id": "groups",
         "name": "Groups"
       },
