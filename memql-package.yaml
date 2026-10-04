@@ -108,6 +108,7 @@ pipeline:
       - examples/referencepack
       - packs
       - test/inboundhop
+      - test/pipelinehop
     buckets:
       # Every change that is not Go source. ci.yml's planner adds its gate
       # packages for exactly that change (scripts/ci/selection): their tests read
