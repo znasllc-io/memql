@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"slices"
@@ -1214,14 +1215,34 @@ func (t apiTrouble) warn(s *step, what string, err error) {
 
 // due says err, met making the call what at now, is to be logged -- it is not
 // what was logged for that call last, less than apiTroubleRepeat ago -- and
-// records it when it is.
+// records it when it is. What is compared is troubleKey's: the same failure
+// met asking after two steps' Jobs is one failure (fix round 3).
 func (t apiTrouble) due(now time.Time, what string, err error) bool {
-	said := err.Error()
+	said := troubleKey(err)
 	if last, ok := t[what]; ok && last.err == said && now.Sub(last.at) < apiTroubleRepeat {
 		return false
 	}
 	t[what] = troubleLogged{err: said, at: now}
 	return true
+}
+
+// troubleKey is what an API error says about the API server, not about what
+// was asked of it: a refusal's status code and reason, or the transport's own
+// error -- never the request, whose path names the object (a Job).
+func troubleKey(err error) string {
+	var se *deploycontrol.StatusError
+	if errors.As(err, &se) {
+		var status struct {
+			Reason string `json:"reason"`
+		}
+		_ = json.Unmarshal([]byte(se.Body), &status)
+		return strconv.Itoa(se.Code) + " " + status.Reason
+	}
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return ue.Err.Error()
+	}
+	return err.Error()
 }
 
 // createFailure is the step's failure when the API server refused to create

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"reflect"
 	"sort"
@@ -4312,24 +4313,50 @@ func TestStatusStates(t *testing.T) {
 	})
 }
 
-// TestStatusLogsAPersistentAPIErrorOnce (fix round 2, minor 5): the agent
-// asks after every step it waits on every statusPollInterval, so an API error
-// Status keeps meeting is logged when it appears, not on every question.
+// TestStatusLogsAPersistentAPIErrorOnce (fix round 2 and 3, minor 5): the
+// agent asks after every step it waits on every statusPollInterval, so an API
+// error Status keeps meeting is logged when it appears, not on every question
+// -- however many steps are asked after in turn: what is compared is what the
+// error says about the API server, never the request's path, which names
+// each step's Job.
 func TestStatusLogsAPersistentAPIErrorOnce(t *testing.T) {
 	h := newRunnerHarness(t)
 	logs := h.logs()
 	h.c.with(func(c *rtCluster) {
-		for i := 0; i < 10; i++ {
+		for i := 0; i < 20; i++ {
 			c.jobGetFailures = append(c.jobGetFailures, rtUnavailable)
 		}
 	})
-	for i := 0; i < 10; i++ {
-		if got := h.r.Status(context.Background(), StatusRequest{JobName: testJobName}); got.State != StateStale {
+	jobs := []string{JobName("run-1", "tests.a", 1), JobName("run-1", "tests.b", 1)}
+	for i := 0; i < 20; i++ {
+		if got := h.r.Status(context.Background(), StatusRequest{JobName: jobs[i%2]}); got.State != StateStale {
 			t.Fatalf("Status = %+v, want stale: nothing here vouches for the step", got)
 		}
 	}
 	if n := logs.count("pipelines: reading a step's Job for its status"); n != 1 {
-		t.Errorf("%d warnings of ten failed reads, want one\n%s", n, logs)
+		t.Errorf("%d warnings of twenty failed reads of two steps' Jobs, want one\n%s", n, logs)
+	}
+}
+
+// TestTroubleKeyNamesNoObject (fix round 3): what an API error says about the
+// API server, without the request -- the same for every Job it was about.
+func TestTroubleKeyNamesNoObject(t *testing.T) {
+	refusal := func(job string) error {
+		return &deploycontrol.StatusError{Method: "GET", Path: kubeJobs + "/" + job, Code: 503,
+			Status: "503 Service Unavailable", Body: rtUnavailable.body}
+	}
+	dial := func(job string) error {
+		return fmt.Errorf("GET %s: %w", kubeJobs+"/"+job, &url.Error{Op: "Get", URL: "https://10.0.0.1:443" + kubeJobs + "/" + job,
+			Err: errors.New("dial tcp 10.0.0.1:443: connect: connection refused")})
+	}
+	for name, mk := range map[string]func(string) error{"a refusal": refusal, "a transport error": dial} {
+		a, b := troubleKey(mk("mp-aaaaaaaaaaaaaaaaaaaaaaaa")), troubleKey(mk("mp-bbbbbbbbbbbbbbbbbbbbbbbb"))
+		if a != b || strings.Contains(a, "mp-") || a == "" {
+			t.Errorf("%s: keys %q and %q, want one key naming no Job", name, a, b)
+		}
+	}
+	if troubleKey(refusal("x")) == troubleKey(&deploycontrol.StatusError{Code: 500, Body: `{"kind":"Status","reason":"InternalError"}`}) {
+		t.Error("a 503 and a 500 share a key: a change in what the API server says would not be logged")
 	}
 }
 
