@@ -53,6 +53,15 @@ const (
 	// the machine clones before the command and packs artifacts after it,
 	// and the dispatcher's default (five minutes) would end a long step early.
 	fleetCloneSlack = 5 * time.Minute
+	// fleetGrace is the most a fleet step takes past its effective timeout:
+	// the machine's clone and packing (fleetCloneSlack), then filing what it
+	// captured in the Library window (libraryPhaseTimeout, a window no
+	// cancel and no deadline of the step's ends). The pipeline driver stops
+	// waiting stepGrace past the step's own timeout
+	// (component/pipelinerun/driver.go), which the effective one never
+	// exceeds, so fleetGrace must stay inside it, or a step still filing its
+	// files reads as one that never reported. A test holds the two apart.
+	fleetGrace = fleetCloneSlack + libraryPhaseTimeout
 	// fleetMaxPartialLine bounds a line still waiting for its newline. The
 	// cockpit cuts a line longer than 64 KiB where no secret straddles the
 	// cut, so a partial past this is fed as a line of its own at exactly such

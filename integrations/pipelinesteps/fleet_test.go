@@ -9,6 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -883,6 +886,41 @@ func TestFleetStepFailuresAreTyped(t *testing.T) {
 		f, _, _, _ := newTestFleet(t, d)
 		wantFailure(t, runFleet(t, f, fleetReq()), pl.OutcomeFailed, pl.CodeExecutorError)
 	})
+}
+
+// driverStepGrace is component/pipelinerun/driver.go's stepGrace: how long
+// past a step's own timeout the pipeline driver waits for Execute before it
+// stops waiting. The driver does not export it, so it is pinned here --
+// change the two together -- and TestAFleetStepsGraceStaysInsideTheDrivers
+// reads driver.go to check the pin still says what the driver does.
+const driverStepGrace = 10 * time.Minute
+
+// TestAFleetStepsGraceStaysInsideTheDrivers: a fleet step can take its
+// effective timeout and fleetGrace past it -- the machine's clone and packing,
+// then the Library window, which no deadline of the step's ends -- while the
+// driver stops waiting driverStepGrace past the step's own timeout. A step
+// still filing its files must never read as one that never reported.
+func TestAFleetStepsGraceStaysInsideTheDrivers(t *testing.T) {
+	if fleetGrace >= driverStepGrace {
+		t.Errorf("fleetGrace = %v (clone and packing %v + Library window %v), want it inside the driver's stepGrace %v",
+			fleetGrace, fleetCloneSlack, libraryPhaseTimeout, driverStepGrace)
+	}
+	// The fleet as built files within the grace it names.
+	if f := NewFleet(exConfig(), &fakeDispatcher{}, nil, nil, nil, quietLogger()); fleetCloneSlack+f.libraryTimeout > fleetGrace {
+		t.Errorf("a fleet's Library window is %v, past the %v fleetGrace leaves it after the clone and packing", f.libraryTimeout, fleetGrace-fleetCloneSlack)
+	}
+	// The pin is the driver's.
+	src, err := os.ReadFile(filepath.Join("..", "..", "component", "pipelinerun", "driver.go"))
+	if err != nil {
+		t.Fatalf("reading the driver to check the pinned stepGrace: %v", err)
+	}
+	m := regexp.MustCompile(`(?m)^\s*stepGrace\s*=\s*(\d+)\s*\*\s*time\.Minute\s*$`).FindSubmatch(src)
+	if m == nil {
+		t.Fatal("component/pipelinerun/driver.go no longer declares stepGrace as N * time.Minute: re-pin driverStepGrace by hand")
+	}
+	if minutes, _ := strconv.Atoi(string(m[1])); time.Duration(minutes)*time.Minute != driverStepGrace {
+		t.Errorf("the driver's stepGrace is %d minutes, the pin says %v: change driverStepGrace with it", minutes, driverStepGrace)
+	}
 }
 
 // TestFleetStepFilesWhatACancelledStepCaptured: a run's cancel ends the
