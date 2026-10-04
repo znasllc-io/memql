@@ -50,7 +50,7 @@ export type Screen =
   | "uninstallPreview"
   /** Step progress. */
   | "running"
-  /** One step failed; retry or switch it to guided. */
+  /** One step failed; retry it. */
   | "failedStep"
   /** Terminal: finished, or cancelled. */
   | "done";
@@ -78,8 +78,6 @@ export interface StepProgress {
   exitCode: number | null;
   /** Everything the script wrote, verbatim, for the failure disclosure. */
   log: string;
-  /** This step alone was switched to guided. */
-  guided: boolean;
   /**
    * The exact command that fixes this failure, when the capability named one
    * (memql#3551).
@@ -356,27 +354,6 @@ export function connectDomainProblem(domain: string): string | undefined {
 }
 
 /**
- * The stand-in a domain occupies while the webview is composing the hint.
- *
- * WHY A TEMPLATE AND NOT A RULE (memql#4431). The hint under the domain box
- * updates as the operator types, which means something on the WEBVIEW side has
- * to build `api.<domain>:443`. `endpoint.ts` records at length that this
- * composition was once inlined in three places, that three copies is three
- * places to drift from the ingress that actually serves it, and that the drift
- * is invisible because every copy produces a plausible hostname.
- *
- * So the webview is handed the composition ALREADY PERFORMED, by the real
- * function, over a placeholder -- and substitutes the typed domain into it. The
- * convention still has exactly one spelling; the script only knows how to
- * replace a substring.
- *
- * The placeholder survives `normalizeDomain` untouched (it has no whitespace and
- * no leading or trailing dots), which is what makes the template come back with
- * a hole in it rather than an empty string.
- */
-export const DERIVATION_PLACEHOLDER = "%DOMAIN%";
-
-/**
  * The sentence under the domain box: what this form is about to connect to.
  *
  * A DERIVATION SHOWN IS A DERIVATION AN OPERATOR CAN CHECK. Two fields now
@@ -517,7 +494,6 @@ function endpointProblem(name: string, endpoint: string): string | undefined {
 export function requiredFields(action: AddClusterAction): InputField[] {
   switch (action) {
     case "install":
-    case "installGuided":
       return [
         "domain",
         "ownerFirstName",
@@ -609,7 +585,6 @@ function screenFor(action: AddClusterAction): Screen {
 export class AddClusterState {
   private currentScreen: Screen = "landing";
   private chosen: AddClusterAction | undefined;
-  private guidedRun = false;
   private values: Inputs = { ...DEFAULT_INPUTS };
   /** Whether `version` carries an operator's answer rather than a default. */
   private versionTouched = false;
@@ -692,21 +667,10 @@ export class AddClusterState {
   // between a misclick on Back and a destroyed break-glass credential.
   private keyCopied = false;
 
-  // WHETHER THE LOG PANE IS OPEN, AND WHETHER IT IS STILL FOLLOWING THE TAIL
-  // (memql#4455).
-  //
-  // HERE RATHER THAN IN THE DOM, and that is the whole reason these are fields
-  // at all. Both panels re-render by assigning `webview.html`, which replaces
-  // the entire document -- during a run that happens on every `stepLog`,
-  // roughly once a second. A `<details>` an operator opened would close itself
-  // a second later, while they were reading it. So the open/closed flag is
-  // panel state, the toggle is a message like every other control, and the
-  // renderer emits the pane only when this says so.
+  // WHETHER THE LOG IS DISCLOSED (memql#4455). The page opens and closes it
+  // itself; this records which way, so the next document the page is given (a
+  // reload, a theme change) draws it the same, and a failure opens it.
   private logsShown = false;
-  // Pinned to the bottom until the operator scrolls up, and re-armed when they
-  // scroll back down. TRUE initially because a pane opened mid-run should show
-  // what is happening NOW; there is nothing above the tail worth landing on.
-  private logsFollowTail = true;
 
   /**
    * `now` is the clock step timings are read from, in epoch milliseconds --
@@ -721,10 +685,6 @@ export class AddClusterState {
   }
   get action(): AddClusterAction | undefined {
     return this.chosen;
-  }
-  /** The whole RUN is guided, as opposed to one step being switched. */
-  get guided(): boolean {
-    return this.guidedRun;
   }
   get inputs(): Inputs {
     return { ...this.values };
@@ -955,7 +915,6 @@ export class AddClusterState {
    */
   setLogsOpen(open: boolean): void {
     this.logsShown = open;
-    if (open) this.logsFollowTail = true;
   }
 
   /** Cancel was pressed and the run is still coming to rest. */
@@ -968,8 +927,7 @@ export class AddClusterState {
    *
    * THE SCREEN DOES NOT MOVE. The executor stops at the next wave boundary,
    * not at the click, so the run is still working; `finish` is what settles it
-   * once the report arrives. The deployment page's older `cancel()` below
-   * still moves to `done` at once and is kept for it.
+   * once the report arrives.
    */
   requestStop(): void {
     this.stopRequested = true;
@@ -987,35 +945,6 @@ export class AddClusterState {
     this.highWater = 0;
     this.failedId = undefined;
     this.stopRequested = false;
-  }
-
-  /** Whether the pane should still be pinned to the tail on the next render. */
-  get logsFollow(): boolean {
-    return this.logsFollowTail;
-  }
-
-  /**
-   * The operator pressed the disclosure.
-   *
-   * RE-ARMS THE TAIL ON OPEN, because a pane being opened is a pane nobody has
-   * scrolled yet, and the honest landing place for one opened during a run is
-   * whatever is happening now. Closing leaves the flag alone: it is answered
-   * again the next time the pane is opened.
-   */
-  toggleLogs(): void {
-    this.logsShown = !this.logsShown;
-    if (this.logsShown) this.logsFollowTail = true;
-  }
-
-  /**
-   * The pane was scrolled, and whether it ended up at the bottom.
-   *
-   * RECORDED, NEVER REPAINTED -- the same call every keystroke on these forms
-   * makes. A render replaces the document, so answering a scroll with one would
-   * fight the operator for the scrollbar.
-   */
-  setLogsFollow(follow: boolean): void {
-    this.logsFollowTail = follow;
   }
 
   /**
@@ -1063,9 +992,7 @@ export class AddClusterState {
   // Nothing replaces it, because the sentence it accompanied was an invitation
   // to go and configure a vendor provider, and THIS cluster cannot use one: a
   // k3d cluster's OIDC issuer is not publicly reachable, so no vendor can
-  // verify a token minted by it, and federation is the only door left. What the
-  // done screen says instead is where a local cluster's models actually come
-  // from -- see `installScreens.ts`.
+  // verify a token minted by it, and federation is the only door left.
 
   // ---------------------------------------------------------------------------
   // routing
@@ -1073,10 +1000,6 @@ export class AddClusterState {
 
   chooseAction(action: AddClusterAction): void {
     this.chosen = action;
-    // Guided is a property of the RUN, not a second screen. The collect step is
-    // identical either way; the difference appears when steps execute, where a
-    // guided step renders its command and waits on the same verify.
-    this.guidedRun = action === "installGuided";
     this.currentScreen = screenFor(action);
     this.fieldErrors = [];
     this.clearConnectProblems();
@@ -1084,7 +1007,6 @@ export class AddClusterState {
 
   back(): void {
     this.chosen = undefined;
-    this.guidedRun = false;
     this.currentScreen = "landing";
     this.fieldErrors = [];
     // The recovery key's display lifetime IS the done screen (memql#4079).
@@ -1280,7 +1202,6 @@ export class AddClusterState {
     // outlive it -- and carrying it forward would open a pane onto the previous
     // run's output while this one has produced none.
     this.logsShown = false;
-    this.logsFollowTail = true;
     // AND WITHOUT THE LAST RUN'S ROWS. The run screen is painted before this
     // run's plan arrives (the platform check and the password prompt sit in
     // between), and the last run's rows there would show its finished bar and
@@ -1537,7 +1458,6 @@ export class AddClusterState {
     this.connectValues = { ...EMPTY_CONNECT };
     this.clearConnectProblems();
     this.chosen = undefined;
-    this.guidedRun = false;
     this.currentScreen = "landing";
   }
 
@@ -1649,43 +1569,6 @@ export class AddClusterState {
   }
 
   /**
-   * Marks the failed steps guided, and only those steps.
-   *
-   * PER STEP, deliberately. An operator who would rather run the one command
-   * that needs sudo by hand should not be dropped into a fully manual install
-   * for the other eleven.
-   */
-  switchToGuided(): void {
-    const failed = this.records.filter((p) => p.state === "failed");
-    if (failed.length === 0) return;
-    for (const entry of failed) entry.guided = true;
-    this.startAnotherAttempt();
-  }
-
-  /**
-   * Forgets the previous run entirely, before a DIFFERENT run starts on the
-   * same page.
-   *
-   * The deployment page holds one machine for its lifetime and runs rebuilds,
-   * updates and moves through it. Its next run's plan replaces the rows the
-   * moment it arrives, but the page paints the run screen before that -- and
-   * painting the last run's rows there would show a finished bar, the last
-   * run's closing sentence and a Back button for a run that has not started.
-   * A Retry is not this: it keeps the rows (and a step switched to guided keeps
-   * that choice), through `retry` / `switchToGuided`.
-   */
-  resetRun(): void {
-    this.records = [];
-    this.failedId = undefined;
-    this.wasCancelled = false;
-    this.stopRequested = false;
-    this.didSucceed = false;
-    this.logsShown = false;
-    this.logsFollowTail = true;
-    this.highWater = 0;
-  }
-
-  /**
    * The screen for the attempt the operator just asked for, before its plan
    * arrives.
    *
@@ -1700,7 +1583,7 @@ export class AddClusterState {
    * attempt that kept the previous output would render both runs concatenated
    * inside one disclosure with no boundary -- and the failure being read would
    * be the one that is no longer happening. What each step came to last time
-   * survives as `previousState`, and a guided choice survives as itself.
+   * survives as `previousState`.
    */
   private startAnotherAttempt(): void {
     this.records = recordsForAttempt(this.records, this.records);
@@ -1709,20 +1592,6 @@ export class AddClusterState {
     this.wasCancelled = false;
     this.stopRequested = false;
     this.currentScreen = "running";
-  }
-
-  /**
-   * Ends the run at the operator's request.
-   *
-   * The progress list is KEPT. What ran, ran -- the receipt records it and an
-   * uninstall can take it back, so a cancel that cleared the display would tell
-   * the operator less than the machine actually knows.
-   */
-  cancel(): void {
-    this.wasCancelled = true;
-    this.didSucceed = false;
-    this.failedId = undefined;
-    this.currentScreen = "done";
   }
 
   finish(report: { ok: boolean; cancelled?: boolean }): void {

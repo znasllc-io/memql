@@ -24,7 +24,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 
 import { readBuildStamp } from "../src/version/buildStamp.js";
-import { checkoutSkew, checkoutSkewFactValue, shortCommit } from "../src/version/checkoutSkew.js";
+import { checkoutSkew, shortCommit } from "../src/version/checkoutSkew.js";
 import { rebuildCheck, type RebuildPreflightInputs } from "../src/state/rebuildPreflight.js";
 import { localOverviewBar } from "../src/deploy/instanceActions.js";
 import { localOverviewScreen } from "../src/webview/deploymentScreens.js";
@@ -74,7 +74,7 @@ test("an unstamped extension says it cannot be compared, rather than claiming a 
 test("no checkout is its own answer, and contributes no fact row", () => {
   const skew = checkoutSkew({ extensionCommit: EXT, checkoutCommit: "" });
   assert.equal(skew.state, "noCheckout");
-  assert.equal(checkoutSkewFactValue({ extensionCommit: EXT, checkoutCommit: "" }), "");
+  assert.equal(skew.terse, "");
 });
 
 // ---------------------------------------------------------------------------

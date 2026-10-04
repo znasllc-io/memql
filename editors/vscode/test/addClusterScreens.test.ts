@@ -71,7 +71,7 @@ const LIST_PROBLEM =
   "the cluster is off this machine, but \"memql\" could not be removed from the cluster list: EACCES: permission denied, open '/Users/ada/.memql/clusters.yaml'";
 
 function rowStep(over: Partial<RowStep> & { id: string }): RowStep {
-  return { description: "", action: "run", reason: "", preserved: false, target: "", elevation: "none", shared: false, sharedReason: "", ...over };
+  return { description: "", action: "run", preserved: false, elevation: "none", shared: false, sharedReason: "", ...over };
 }
 
 /** Every screen, in the states that matter. */

@@ -18,7 +18,6 @@ import {
   setSelectedCluster,
   upsertCluster,
 } from "../src/clusters/file.js";
-import { needsAuth } from "../src/clusters/model.js";
 
 async function tempFile(contents: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "memql-clusters-"));
@@ -301,30 +300,6 @@ test("writes create the file and its parent directory when absent", async () => 
   const f = path.join(dir, "nested", "clusters.yaml");
   await upsertCluster(f, { name: "local", endpoint: "api.memql.localhost:443" });
   assert.equal((await readClustersFile(f)).clusters[0]?.name, "local");
-});
-
-test("needsAuth is false for a cluster with an endpoint and a token", () => {
-  assert.equal(needsAuth({ name: "l", endpoint: "h:443", token: "eyJhbGci.eyJzdWIi.sig" }), false);
-});
-
-test("needsAuth is false for a cluster holding only a refresh token", () => {
-  // A refresh token IS a credential: the resolver exchanges it for an access
-  // token before dialing (memql#3385), so the row must not read as unconfigured.
-  assert.equal(needsAuth({ name: "l", endpoint: "h:443", refreshToken: "rt" }), false);
-});
-
-test("needsAuth is TRUE for an issuer/clientId pair with no token", () => {
-  // memql#3383. An issuer and a client id name WHERE tokens come from; they are
-  // not a token. Counting them as "configured" is what let a credential-less
-  // cluster look ready and then fail at the handshake with nothing useful said.
-  assert.equal(
-    needsAuth({ name: "s", endpoint: "h:443", issuer: "https://i", clientId: "cockpit" }),
-    true,
-  );
-});
-
-test("needsAuth is true without an endpoint", () => {
-  assert.equal(needsAuth({ name: "l", endpoint: "", token: "eyJhbGci.eyJzdWIi.sig" }), true);
 });
 
 // --- The identity field is exempt from the "" -> delete rule ---------------

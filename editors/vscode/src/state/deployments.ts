@@ -26,10 +26,10 @@
 //  3. A VERSION IS SHOWN FROM WHAT WAS RECORDED, OR NOT AT ALL. `versionLabel`
 //     is the tag, the branch and commit, the checkout build or the registry's
 //     recorded release -- whichever names what is running. The word "unknown"
-//     used to fill the gap (`displayVersion`), and it put a false claim in the
-//     Deployments heading for every branch install, whose commit was recorded
-//     all along. A surface with no label now leaves the version out; the word
-//     survives only where a sentence needs a noun (a forecast's "from").
+//     used to fill the gap, and it put a false claim in the Deployments
+//     heading for every branch install, whose commit was recorded all along.
+//     A surface with no label now leaves the version out; the word survives
+//     only where a sentence needs a noun (a forecast's "from").
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 //
@@ -95,7 +95,7 @@ export interface Instance {
    * when the receipt records no checkout at all -- the release clusters.yaml
    * says the cluster reported. Never set for a branch or commit install.
    * Remote: the current deployment's version.
-   * Absent when it could not be resolved -- render it with displayVersion.
+   * Absent when it could not be resolved, and a surface then leaves it out.
    */
   version?: string;
   /**
@@ -311,19 +311,6 @@ export function runIsTerminal(status: RunStatus): boolean {
   return TERMINAL_RUN_STATUSES.has(status);
 }
 
-/**
- * A version, as a surface should print it.
- *
- * The word rather than the empty string, for the reason state/topology.ts gave
- * when it drew a node with no resolvable deployment: a blank is read as a fact
- * about the instance ("it has no version") when it is a fact about the read
- * ("we could not resolve one"). The two ask for different next actions.
- */
-export function displayVersion(version: string | undefined): string {
-  const value = (version ?? "").trim();
-  return value === "" ? "unknown" : value;
-}
-
 // ---------------------------------------------------------------------------
 // the local instance
 // ---------------------------------------------------------------------------
@@ -481,8 +468,7 @@ export interface RemoteInstanceInput {
   /**
    * The deployment records read for this cluster, and the id of the current
    * one (deploymentHistory.currentDeploymentId). Empty when history has not
-   * loaded or nothing has landed: the version then resolves to unknown, which
-   * `displayVersion` renders as itself.
+   * loaded or nothing has landed: the version is then absent.
    */
   deployments?: DeploymentRecord[];
   currentDeploymentId?: string;

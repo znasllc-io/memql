@@ -113,7 +113,10 @@ test("StepTraceModel -- a run that STARTED AND FAILED keeps its trace", () => {
   assert.equal(trace.settled, true);
   assert.equal(trace.refusal, undefined);
   assert.equal(trace.steps.length, 2);
-  assert.deepEqual(trace.counts, { success: 1, failed: 1, skipped: 0, other: 0 });
+  assert.deepEqual(
+    trace.steps.map((s) => s.status),
+    ["success", "failed"],
+  );
 });
 
 test("StepTraceModel -- a REFUSAL is its own status, with no timeline", () => {

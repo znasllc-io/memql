@@ -3,17 +3,15 @@
 // This is the half of #3474 that can be TESTED. `webview/addClusterPanel.ts`
 // imports `vscode`, which `cmd/memql-lsp/vscodeimportrule_test.go` keeps out of
 // the unit lane by design -- so anything asserted about what an operator is
-// shown has to live on this side of that line. The panel calls
-// `renderInstallSteps(toStepViews(state.steps))` and adds no judgement of its
-// own, exactly as `views/clustersTree.ts` leans on `state/topology.ts`.
+// shown has to live on this side of that line.
 //
 // TWO JOBS, BOTH DELIBERATELY SMALL:
 //
 //  1. TRANSLATE, do not decide. `StepProgress` is the wizard's record of a run
-//     (state/addCluster.ts, #3470) and `InstallStepView` is what the renderer
-//     draws (view-kit's install.ts). The step order, which steps ran, and what
-//     each one reported are the graph's and the executor's; this file changes
-//     the shape and nothing else.
+//     (state/addCluster.ts, #3470) and the run's progress is what the progress
+//     screen draws. The step order, which steps ran, and what each one
+//     reported are the graph's and the executor's; this file changes the shape
+//     and nothing else.
 //
 //  2. SAY WHAT AN EXIT CODE MEANS FOR THE OPERATOR. The capability-script
 //     contract's codes are stable and each asks for a genuinely different next
@@ -22,8 +20,6 @@
 //     would be telling the operator the number and withholding the meaning.
 //
 // Refs: #3474 #3470 #3469 #3463
-
-import type { InstallStepView } from "@znasllc-io/memql-view-kit";
 
 import type { StepProgress, StepState } from "./addCluster.js";
 import {
@@ -233,79 +229,6 @@ export function failureGuidance(
         retryable: true,
       };
   }
-}
-
-/**
- * Projects the wizard's step records into what the renderer draws.
- *
- * ORDER IS PRESERVED. `AddClusterState` appends in the order the executor
- * reported steps, which is the graph's wave order; re-sorting here would draw a
- * sequence that is a property of this function rather than of the dependency
- * graph that was actually walked.
- */
-export function toStepViews(steps: readonly StepProgress[]): InstallStepView[] {
-  return steps.map((step) => {
-    const view: InstallStepView = {
-      id: step.id,
-      // The description is what the step DOES, in the graph's own words. Falling
-      // back to the id keeps a step visible when the description has not
-      // arrived yet -- a blank row would read as a bug in the wizard rather
-      // than as a step whose first event has not landed.
-      label: step.description === "" ? step.id : step.description,
-      state: step.state,
-    };
-
-    const detail = detailFor(step);
-    if (detail !== "") view.detail = detail;
-
-    // NEITHER THE EXIT CODE NOR A LOG LINE RIDES ON A CHECKLIST ROW ANY MORE
-    // (memql#4456 over memql#4194).
-    //
-    // memql#4194 put a short redacted last-line here because the full log had
-    // nowhere on the page to be -- it went to the MemQL Install output channel,
-    // and the inline line ended by SAYING SO. That is no longer true: the run
-    // screens carry a log pane (memql#4455), so the sentence pointed somewhere
-    // else while the thing it described was one click below it, and the same
-    // stderr rendered in two places.
-    //
-    // D4's rule is that verbatim output, exit codes and envelope fields have
-    // exactly one home, and it is the pane. The checklist keeps what a
-    // checklist is for: which step, what state, and the reason sentence the
-    // capability wrote for a human (`detailFor`).
-    return view;
-  });
-}
-
-/**
- * The one line under a step's label.
- *
- * A guided step says so even when it has a reason, because "you are running
- * this one by hand" changes what the operator is looking at more than the
- * reason does.
- */
-function detailFor(step: StepProgress): string {
-  const parts: string[] = [];
-  if (step.guided) parts.push("guided -- you run this one");
-  if (step.reason !== "") parts.push(step.reason);
-  return parts.join(" -- ");
-}
-
-/**
- * Whether a run has anything left to do.
- *
- * Used to decide whether the run screen offers Cancel. A run with no pending or
- * running steps is over in every sense except the report, and offering to
- * cancel it would promise something there is nothing left to stop.
- *
- * AN EMPTY LIST IS NOT SETTLED. No steps reported yet is the START of a run --
- * the first `stepStarted` has not arrived -- and that is precisely when an
- * operator is most likely to want out. Reading "nothing pending" off an empty
- * list would withdraw Cancel for the whole opening stretch of the longest
- * operation the wizard performs.
- */
-export function runIsSettled(steps: readonly StepProgress[]): boolean {
-  if (steps.length === 0) return false;
-  return !steps.some((s) => s.state === "pending" || s.state === "running");
 }
 
 // ---------------------------------------------------------------------------

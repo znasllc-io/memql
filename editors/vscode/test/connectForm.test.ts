@@ -3,7 +3,6 @@ import { test } from "node:test";
 
 import {
   AddClusterState,
-  DERIVATION_PLACEHOLDER,
   connectDomainProblem,
   derivationLine,
   type ConnectField,
@@ -165,20 +164,9 @@ test("the registration's SHAPE is unchanged: no local key, empty optionals omitt
 });
 
 test("the derivation hint is composed by the real function, not re-implemented", () => {
-  // THE TEMPLATE IS THE POINT (memql#4431). The webview updates this line as the
-  // operator types, which means something on that side builds the sentence. It
-  // is handed the composition ALREADY PERFORMED over a placeholder, so the
-  // convention keeps exactly one spelling -- endpoint.ts records that it once
+  // ONE SPELLING (memql#4431). endpoint.ts records that this composition once
   // had three, and that the drift is invisible because every copy produces a
   // plausible hostname.
-  const template = composeEndpointFromDomain(DERIVATION_PLACEHOLDER);
-  assert.match(template, /%DOMAIN%/, "the placeholder must survive the composition");
-  assert.equal(
-    template.replace(DERIVATION_PLACEHOLDER, "example.com"),
-    composeEndpointFromDomain("example.com"),
-    "substituting into the template must equal composing directly, or the hint lies about what gets saved",
-  );
-
   // EXACT, NOT A SUBSTRING MATCH. An unanchored /api\.example\.com:443/ passes
   // for "Will connect to evil.example.net/api.example.com:443." -- it asserts
   // that the endpoint appears SOMEWHERE in the sentence, which is not what the

@@ -62,34 +62,3 @@ export function recordDiagnostic(
   }
   sink.appendLine("");
 }
-
-/**
- * The SHAPE of a saved run-configuration value, never the value (memql#4194).
- *
- * The Runs tree used to hover the whole args object as JSON -- and saved run
- * arguments are whatever a developer typed, which can be an address, a name,
- * or a pasted credential. The shape answers the question the hover exists for
- * ("is this the run with the big payload or the empty one?") without
- * republishing what was typed. The values themselves are one click away in the
- * configurations file.
- */
-export function valueShape(value: unknown): string {
-  if (value === null) return "null";
-  if (value === undefined) return "absent";
-  if (typeof value === "string") return `string(${value.length})`;
-  if (typeof value === "number") return "number";
-  if (typeof value === "boolean") return "boolean";
-  if (Array.isArray(value)) return `array[${value.length}]`;
-  if (typeof value === "object") return `object{${Object.keys(value as object).length}}`;
-  return typeof value;
-}
-
-/**
- * One `name: shape` line per argument, sorted for a stable hover.
- * Empty array for a run saved with no arguments.
- */
-export function argShapeLines(args: Record<string, unknown>): string[] {
-  return Object.keys(args)
-    .sort()
-    .map((name) => `${name}: ${valueShape(args[name])}`);
-}

@@ -40,9 +40,15 @@ import {
 } from "../src/state/languageReference.js";
 import {
   identityMeta,
-  renderLanguageReferencePage,
+  languageReferenceParts,
   type LanguageReferenceInput,
 } from "../src/webview/languageReferenceScreens.js";
+
+/** The page as one string: its head and body, which is all it draws. */
+function renderLanguageReferencePage(input: LanguageReferenceInput): string {
+  const parts = languageReferenceParts(input);
+  return parts.head + parts.body;
+}
 
 // A slice of a real grammar: the header comment, two banners, a wrapped
 // production and a plain one. Every shape the block parser has to handle.

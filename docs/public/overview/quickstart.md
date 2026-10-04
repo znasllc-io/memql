@@ -24,11 +24,13 @@ and validate it with the command-line linter.
 ## Connect to an existing cluster
 
 1. Open a trusted workspace in VS Code or Cursor.
-2. Run **MemQL: Add Cluster** and enter the domain supplied by your operator.
-3. Select the cluster and use **Sign In**. The extension discovers the endpoints
-   and opens the cluster's sign-in flow.
+2. Run **MemQL: Add Cluster**, choose **Connect to a cluster**, enter a name
+   and the domain supplied by your operator, and press **Connect**. The
+   extension works out the endpoints from the domain.
+3. Press **Sign in**. Your browser opens the cluster's sign-in; after that the
+   extension reconnects on its own.
 4. Browse **Constructs** for definitions and **Data** for rows your account may
-   read. Use **Open Console** to reach that cluster's MemQL OS.
+   read. Use **Open MemQL OS** to reach that cluster's MemQL OS.
 
 You do not need Docker to connect to someone else's cluster. A personal access
 token is not a substitute for the identity-issued access token used by the
@@ -42,11 +44,14 @@ compilation, and readiness checks. Setup time depends on your host and network.
 
 ### Through the extension
 
-Use the local-install option in **MemQL: Add Cluster**. The installer currently
-supports **Linux x64 and Apple Silicon macOS**. Docker must already be installed
-and running. Review the install plan and follow the ownership/passkey handoff.
-See [install prerequisites](../operate/install-prerequisites.md) for what it
-places on your machine.
+Run **MemQL: Install Local Cluster...** (or **Install MemQL on this computer**
+in **MemQL: Add Cluster**). The installer currently supports **Linux x64 and
+Apple Silicon macOS**. Docker must already be installed and running. Enter your
+name and email, press **Install**, and follow the progress screen. When it
+finishes, save the recovery key it shows once, then **Sign in** or **Set up a
+passkey**. **MemQL: Uninstall Local Cluster...** removes it again. See
+[install prerequisites](../operate/install-prerequisites.md) for what it places
+on your machine.
 
 Installing the extension and installing a cluster are different operations.
 The extension's language server can run on additional packaged platforms; that
