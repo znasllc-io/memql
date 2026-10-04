@@ -216,6 +216,19 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # refuses; the root module may depend on all three, so it sits under test/
 # beside clustere2e, and a db-gated test outside this lane only ever runs on
 # the machine of whoever happened to have Postgres up.
+#
+# epic memql#5477 added `component/pipelinerun`. Its store writes four
+# @serverOnly mutations under a borrowed owner and reads eight server-only
+# queries as its own system actor, and every claim worth testing about that is
+# the ENGINE's over real rows: that the stamped calls are admitted and an
+# unstamped one refused, that ownerUserId is stamped from the borrowed actor,
+# that the owner conjunct hides a run from a stranger, that a reconnect's
+# read-merge insert keeps the poll's heads, and that createPipelineRun's
+# @createOnly keeps a claimed run claimed. The package's other suites drive a
+# recording engine that parses every call and gates none, which passes the
+# right store and a wrong one alike. What the complement now means, having
+# looked: the package moves from go-checks to db-tests whole, and its unit
+# suites run beside a database they ignore.
 readonly DB_GATED_TREES=(
 	"app"
 	"component/memql"
@@ -230,6 +243,7 @@ readonly DB_GATED_TREES=(
 	"component/logstore"
 	"component/node"
 	"component/packages"
+	"component/pipelinerun"
 	"component/server"
 	"component/sitehealth"
 	"component/sitetraffic"
