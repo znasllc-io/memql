@@ -13,18 +13,30 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // fakeEngine records what the handler executed instead of running it, so the
-// staging call can be inspected without a database.
+// staging call can be inspected without a database. It also keeps the call
+// ORIGIN and actor subject of each context it was handed: the rendered text
+// is identical with or without the internal-origin stamp, so a test reading
+// only calls cannot see the stamp go missing.
 type fakeEngine struct {
-	calls []string
-	err   error
+	calls    []string
+	origins  []auth.CallOrigin
+	subjects []string
+	err      error
 }
 
-func (f *fakeEngine) Execute(_ context.Context, q string) (any, error) {
+func (f *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 	f.calls = append(f.calls, q)
+	f.origins = append(f.origins, auth.OriginFromContext(ctx))
+	subject := ""
+	if tok := auth.TokenInfoFromContext(ctx); tok != nil {
+		subject = tok.Subject
+	}
+	f.subjects = append(f.subjects, subject)
 	return nil, f.err
 }
 
@@ -51,6 +63,36 @@ func signedRequest(t *testing.T, body string) *http.Request {
 
 func hexSource() SourceConfig {
 	return SourceConfig{Scheme: SchemeHMACSHA256Hex, Secret: testSecret, SignatureHeader: "X-Sig"}
+}
+
+// The receiver's ONE write runs under internal origin, as the named inbound
+// actor, whatever the request's own context says.
+//
+// stageInboundRequest is @serverOnly (memql#5707), so without the stamp the
+// engine refuses every staging write and the receiver answers 503 to every
+// verified delivery -- which every sender retries, so the outage looks like a
+// flaky endpoint rather than a missing line. Until this test only the
+// db-gated hop test in test/inboundhop could see that; the rendered mutation
+// text is identical either way. The request context is stamped CLIENT
+// explicitly, so the assertion cannot pass by inheriting an origin from the
+// caller: only systemActorContext can make it internal.
+func TestTheStagingWriteRunsUnderInternalOriginAsTheInboundActor(t *testing.T) {
+	eng := &fakeEngine{}
+	rec := httptest.NewRecorder()
+	r := signedRequest(t, `{"event":"order.created"}`)
+	r = r.WithContext(auth.ContextWithClientOrigin(r.Context()))
+	testHandler(t, eng, hexSource()).ServeHTTP(rec, r)
+
+	if rec.Code != http.StatusAccepted || len(eng.calls) != 1 {
+		t.Fatalf("a well-signed request: %d, %d staging calls: %s", rec.Code, len(eng.calls), rec.Body)
+	}
+	if !eng.origins[0].IsInternal() {
+		t.Errorf("stageInboundRequest ran with %s origin. It is @serverOnly, so the engine refuses it and "+
+			"every verified delivery is answered 503; systemActorContext must stamp internal origin", eng.origins[0])
+	}
+	if eng.subjects[0] != systemInboundActor {
+		t.Errorf("staging ran as %q, want the named inbound actor %q", eng.subjects[0], systemInboundActor)
+	}
 }
 
 // The happy path: a well-signed request is staged and acknowledged.

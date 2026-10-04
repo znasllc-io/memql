@@ -236,25 +236,49 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // the row that describes the store, and the connector is what can read it.
 //
 // ENV WINS, deliberately. An operator who has pinned a source in the
-// environment has made a statement about it, and a connector that later
-// claims the same name must not silently take it over -- that would move
-// which secret verifies a live sender, with nothing in the environment
-// changed to say so.
+// environment has made a statement about it, and neither a source the
+// cluster registers later nor a connector that claims the same name may
+// silently take it over -- that would move which secret verifies a live
+// sender, with nothing in the environment changed to say so.
+//
+// The one exception is a refusal, not a takeover: a pinned name the
+// dispatcher would hand to a connector is answered 404 rather than verified
+// by the env secret -- see the first branch below (memql#5707 follow-up).
 func (h *Handler) resolveSource(ctx context.Context, name string) (SourceConfig, bool) {
 	if src, ok := h.cfg.Sources[name]; ok {
-		// A BOUND connector's OWN name is never an env source. The connector
-		// reads a row under that name as "verified by my app secret" and
-		// binds the tenant off the signed body on that premise, so a body the
-		// env secret verified must never be staged under it -- and whether
-		// the connector currently CLAIMS the name is no help: an app with a
-		// client id but no sealed secret claims nothing, and that is exactly
-		// the state in which a stray row would be bound by client id. The
-		// name is reserved outright (memql#5707 review); a per-tenant name
-		// such as shopify-<storeId> stays ENV WINS, and the connector side
-		// refuses an app-level row it cannot have signed for as well.
-		if _, bound := memqlsync.Lookup(name); bound {
-			h.logger.Error("inbound receiver: env source names a bound connector, refusing with 404",
-				"source", name, "env", "MEMQL_INBOUND_SOURCE_"+envSuffix(name)+"_*")
+		// A name a bound connector CLAIMS is never an env source. The
+		// dispatcher routes a staged row by its source name alone, through
+		// memqlsync.ConnectorForSource -- SourceClaimed below gives the same
+		// answer, so the two cannot disagree -- and the connector reads a row under a name it
+		// claims as verified by ITS secret for that tenant: its own name as
+		// signed by the app secret, a tenant's `shopify-<storeId>` as signed
+		// by that store's webhook secret, with the store bound off the NAME.
+		// A body the env secret verified must never be handed to it on that
+		// premise; for a custom-app store it would queue a privacy purge
+		// from a body the operator's secret signed.
+		//
+		// A bound connector's own name is refused whether or not it currently
+		// claims it: an app with a client id but no sealed secret claims
+		// nothing, and that is exactly the state in which a stray row would
+		// be bound by client id. Refused, not handed to the connector, so
+		// the verifying secret moves in neither direction and the operator
+		// has an ERROR naming the variable to rename or remove (memql#5707
+		// review and follow-up).
+		//
+		// FAILS CLOSED. SourceClaimed asks the claim only, never the
+		// tenant's secret, and reports a connector that could not read its
+		// tenants as an error rather than "not mine" -- which is the answer
+		// that would admit the pin. Refused with the same 404, so an
+		// unauthenticated caller learns nothing either way.
+		c, claimed, err := memqlsync.SourceClaimed(ctx, name)
+		if err != nil {
+			h.logger.Error("inbound receiver: could not tell whether a connector claims an env source, refusing with 404",
+				"source", name, "env", "MEMQL_INBOUND_SOURCE_"+envSuffix(name)+"_*", "error", err)
+			return SourceConfig{}, false
+		}
+		if claimed {
+			h.logger.Error("inbound receiver: env source names a source a bound connector claims, refusing with 404",
+				"source", name, "connector", c.Name(), "env", "MEMQL_INBOUND_SOURCE_"+envSuffix(name)+"_*")
 			return SourceConfig{}, false
 		}
 		return src, true

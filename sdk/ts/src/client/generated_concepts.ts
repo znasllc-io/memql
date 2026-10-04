@@ -1017,7 +1017,6 @@ export const BoundConcepts = {
   updateDeploymentStatus: "v1:cluster:deployment",
   updateEmailRule: "v1:campaigns:emailRule",
   updateIdentity: "v1:identity:identity",
-  updateInboundRequestStatus: "v1:platform:inboundRequest",
   updateLibraryWatchedFolder: "v1:library:watchedFolder",
   updateMissingCapabilityStatus: "v1:platform:missingCapability",
   updateMyPreferences: "v1:identity:user",

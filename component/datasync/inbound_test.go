@@ -193,9 +193,45 @@ func TestTheDispatcherStampsTheRequestRow(t *testing.T) {
 	}
 }
 
-// A staged row whose metadata cannot be parsed is stamped `failed` before
-// any connector is asked, not left `received` to re-fire identically on
-// every re-stage.
+// updateInboundRequestStatus is @serverOnly (memql#5707 follow-up), so the
+// dispatcher's stamp is refused unless its context carries internal origin
+// -- and d.stamp discards the error, so a refused stamp is SILENT: the row
+// stays `received` while the connector's work is done. The stamp must carry
+// the origin itself, through OperatorContext, whatever context Dispatch was
+// handed; here that context is explicitly CLIENT, so inheritance cannot
+// satisfy the assertion. Every exit that stamps is covered: processed after
+// an apply, processed for a delivery the connector does not recognise, and
+// failed for an apply error.
+func TestTheDispatchersStampCarriesInternalOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		c    *fakeConnector
+	}{
+		{"applied", &fakeConnector{name: "shopify", domains: []memqlsync.DomainSpec{{Concept: testMirrorConcept}},
+			applyWrites: []memqlsync.MirrorWrite{{Concept: testMirrorConcept, RowId: "p1", Version: testNow.Format(time.RFC3339)}}}},
+		{"unrecognised", &fakeConnector{name: "shopify"}},
+		{"apply failed", &fakeConnector{name: "shopify", applyErr: errors.New("vendor said no")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := newFakeEngine()
+			d := testDispatcher(engine, newFakeWriter(), tc.c)
+			_, _ = d.Dispatch(auth.ContextWithClientOrigin(context.Background()),
+				memqlsync.InboundRequest{RequestId: "r", Source: "shopify", ReceivedAt: testNow})
+			origins := engine.internalContaining("updateInboundRequestStatus")
+			if len(origins) != 1 {
+				t.Fatalf("stamped %d times, want 1", len(origins))
+			}
+			if !origins[0] {
+				t.Error("the request-row stamp ran without internal origin; updateInboundRequestStatus is " +
+					"@serverOnly, so the engine refuses it and d.stamp drops the error")
+			}
+		})
+	}
+}
+
+// A staged row whose metadata cannot be parsed is stamped `failed` once a
+// connector claims it and before Apply is called, not left `received` to
+// re-fire identically on every re-stage.
 func TestUnparseableStagedMetadataStampsTheRowFailed(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -221,6 +257,42 @@ func TestUnparseableStagedMetadataStampsTheRowFailed(t *testing.T) {
 			}
 			if c.applyCalls != 0 {
 				t.Fatal("the connector was asked to apply a delivery whose metadata never parsed")
+			}
+		})
+	}
+}
+
+// The same unreadable metadata on a source NO connector serves is not the
+// dispatcher's to judge. Dispatch's contract is that such a row is a no-op,
+// left `received` for the product automation that does serve it -- which may
+// read none of the metadata and have no quarrel with it. So the metadata is
+// parsed only after a connector claims the row: here nothing is stamped, no
+// error is raised, and the builtin reports the row skipped.
+func TestUnparseableMetadataOnAnUnservedSourceIsLeftAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+	}{
+		{"headers that are not a JSON object", map[string]any{"headersJson": "[]"}},
+		{"a receipt time that is not RFC3339", map[string]any{"receivedAt": "2026-09-27T23:59:60Z"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := newFakeEngine()
+			c := &fakeConnector{name: "shopify", domains: []memqlsync.DomainSpec{{Concept: testMirrorConcept}}}
+			i := &Integration{dispatcher: testDispatcher(engine, newFakeWriter(), c)}
+			args := map[string]any{"inboundRequestId": "req-other", "source": "stripe", "body": "{}"}
+			for k, v := range tc.args {
+				args[k] = v
+			}
+			nodes, err := i.handleDispatchInbound(auth.ContextWithInternalOrigin(context.Background()), args, 0)
+			if err != nil {
+				t.Fatalf("a row no connector serves raised %v -- it is the product automation's, not a dispatch failure", err)
+			}
+			if n := engine.countContaining("updateInboundRequestStatus"); n != 0 {
+				t.Fatalf("a row no connector serves was stamped %d times; it belongs to whatever does serve it", n)
+			}
+			if len(nodes) != 1 || !strings.Contains(string(nodes[0].Payload), `"outcome":"skipped"`) {
+				t.Fatalf("result %v, want one skipped node", nodes)
 			}
 		})
 	}
