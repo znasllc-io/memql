@@ -49,6 +49,7 @@ import {
   imageTagFor,
 } from "../src/install/stackPin.js";
 import type { ExecEvent, StepPlan } from "../src/install/executor.js";
+import { compareVersions } from "../src/version/compare.js";
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 
@@ -1048,6 +1049,37 @@ test("the pinned tag is a release tag, not a branch", async () => {
   // deliberate pin from a stale one, and one that asked the network would fail
   // offline for reasons unrelated to the change under test.
   assert.match(DEFAULT_STACK_TAG, /^v\d+\.\d+\.\d+$/);
+});
+
+// A FLOOR IS NOT RECENCY, and the manifests beside the pin can show one
+// offline (memql#5632). A `--commit` install -- install-cluster-e2e's repair
+// and round-trip legs -- runs the checkout's manifests on this pin's images
+// (imageTagForVersion), so an engine subcommand those manifests run has to
+// exist, as they run it, in the pinned release. Each entry is the first
+// release that does. It can only be written once that release is cut, which is
+// when the pin moves to cover it, so this guards the pin against falling back
+// below a known floor; a requirement nobody recorded is not caught here.
+const MANIFEST_SUBCOMMAND_FLOORS: readonly { manifest: string; subcommand: string; since: string }[] = [
+  // #5631: the environment bootstrap and pack boot ordering the local
+  // overlay's package-DSL init container needs. v0.19.1 had no dsl-fetch.
+  { manifest: "deploy/k8s/components/dsl-packages/kustomization.yaml", subcommand: "dsl-fetch", since: "v0.22.10" },
+];
+
+test("the pin is not older than any engine subcommand the shipped manifests run", async () => {
+  for (const floor of MANIFEST_SUBCOMMAND_FLOORS) {
+    const body = await fs.readFile(path.join(REPO_ROOT, floor.manifest), "utf8");
+    assert.ok(
+      body.includes(`"/app/memql", "${floor.subcommand}"`),
+      `${floor.manifest} no longer runs \`memql ${floor.subcommand}\`: delete its floor rather than let it hold the pin for nothing`,
+    );
+    const relation = compareVersions(DEFAULT_STACK_TAG, floor.since);
+    assert.ok(
+      relation === "current" || relation === "ahead",
+      `DEFAULT_STACK_TAG ${DEFAULT_STACK_TAG} ${relation === "behind" ? "predates" : "cannot be compared with"} ` +
+        `${floor.since}, the first release whose \`memql ${floor.subcommand}\` ${floor.manifest} can run. ` +
+        `A --commit install pairs those manifests with this pin's images, so every one fails on that init container.`,
+    );
+  }
 });
 
 // Every param a capability script REQUIRES and has no default for has to come

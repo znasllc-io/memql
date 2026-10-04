@@ -152,7 +152,42 @@
 // the ones this tag names. Leaving the pin at v0.19.0 would leave every new
 // install with the broken credential no matter what main contains.
 //
-// Refs: #4066 #4063 #4059 #3998 #3990 #3879 #3880 #3703 #3602 #3600 #3593 #3560 #3375 #3363 #3357
+// BUMPED TO v0.24.0 (memql#5632). Eighty-six releases accumulated behind
+// v0.19.1, and the failure that surfaced was in an install that never asked
+// for this pin by name.
+//
+// The release-image legs of install-cluster-e2e (repair, round-trip) install
+// with `--commit=<revision>`. A commit is a CHECKOUT and not a version, so the
+// manifests are the revision's while the node images come from
+// `imageTagForVersion`'s fallback -- this pin. That pairing is deliberate: those
+// legs exist to test the manifests, the scripts and the installer against
+// published images. It holds only while the pin is at least as new as what the
+// checkout's manifests ask of the engine, and #5631 asked for more. The local
+// overlay's package-DSL init container runs `memql dsl-fetch` with the
+// environment bootstrap and pack boot ordering #5631 added, first released in
+// v0.22.10; a v0.19.1 binary has no `dsl-fetch` at all. So `dsl-packages-fetch`
+// exited 1 on agent, bff, planner and workbench, the install waited out its
+// budget, and the lane reported a workload that would not start. The version
+// was named only in a diagnostics artifact -- `memql-bff:0.19.1` on an init
+// container -- which is this comment's oldest finding again: a stale pin does
+// not fail like a stale pin.
+//
+// What it adds is WHERE the staleness hides. An install that names a tag
+// carries its own manifests and images and is coherent at any age. An install
+// that names a commit has no version of its own, inherits this one silently,
+// and pairs it with whatever the commit's manifests have learned since -- so
+// the pin went stale for every `--commit` install the moment main's manifests
+// moved past it, and no `--tag` install could have shown it.
+//
+// v0.24.0's seven node images (bff, identity, agent, planner, workbench, mcp,
+// edge) are published to GHCR under 0.24.0. The database operand does not move:
+// `memql-db` is versioned on the PostgreSQL axis and up.sh pins it separately
+// (16.15-timescaledb-2.29.1, memql#4063). No upgrade barrier lies between
+// v0.19.1 and v0.24.0 (version/barriers.ts holds one, after v0.18.0), so the
+// upgrade leg, which installs this pin and then moves to the revision under
+// test, crosses nothing it did not cross before.
+//
+// Refs: #5632 #5631 #4066 #4063 #4059 #3998 #3990 #3879 #3880 #3703 #3602 #3600 #3593 #3560 #3375 #3363 #3357
 
 /**
  * The release tag an install checks out when nothing else names one.
@@ -165,7 +200,7 @@
  * Overridden per run by `SessionOptions.tag` (`--tag` on the CLI). Applied in
  * `installPlan`, so no front end can forget it.
  */
-export const DEFAULT_STACK_TAG = "v0.19.1";
+export const DEFAULT_STACK_TAG = "v0.24.0";
 
 /**
  * The value the version picker carries for "the tip of main" (memql#3901).
@@ -208,6 +243,20 @@ export function isMainBranchChoice(version: string): boolean {
  * word. `isMainBranchChoice` stays the ONE discriminator; every caller asks it
  * first, and this refusal is what makes a caller that forgot fail at the call
  * rather than forty pods later.
+ *
+ * AN EMPTY VERSION MEANS THE PIN, AND A `--commit` INSTALL ARRIVES EMPTY. A
+ * commit names a checkout, not a release, so a fresh install from one runs the
+ * commit's manifests on DEFAULT_STACK_TAG's images. (A repair does not
+ * re-derive: it replays the image tag its receipt recorded, memql#4068.) That
+ * is the deliberate skew of install-cluster-e2e's release-image legs, which
+ * test the manifests, scripts and installer against published images rather
+ * than build the engine. It is coherent only while the pin is at least as new
+ * as what the commit's manifests require of the engine: when #5631's manifests
+ * began running a `dsl-fetch` the v0.19.1 pin did not have, every such install
+ * failed on its DSL init containers (memql#5632). So the first release that
+ * carries what a manifest change needs from the engine is also the release
+ * that moves the pin. Until it is cut, that change's own release-image legs
+ * fail exactly this way, and `from-source` is the leg that runs its engine.
  */
 export function imageTagForVersion(version: string): string {
   if (isMainBranchChoice(version)) {
@@ -258,7 +307,9 @@ export const DEFAULT_REGISTRATION_MODE = "invite_only";
  * identical -- one build, pushed to both.
  *
  * The tag is DEFAULT_STACK_TAG: the manifests and the images they run come from
- * the same release, which is the whole point of pinning either.
+ * the same release, which is the whole point of pinning either. The exception
+ * is an install from a commit, which has manifests and no release; see
+ * `imageTagForVersion` for why it pairs them with this pin (memql#5632).
  */
 export const DEFAULT_IMAGE_REGISTRY = "ghcr.io/znasllc-io";
 
