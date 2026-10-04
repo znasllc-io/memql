@@ -64,13 +64,15 @@ not fill the gap with a guess.
    installation that serves merchants.
 4. **Close the blocking MemQL gaps before submitting for review**
    ([section 13](#13-requires-memql-implementation-gaps-with-file-pointers)).
-   They are: `app/uninstalled` handling, client-secret rotation, webhook
-   subscriptions scoped to the grant, reinstall after `shop/redact`, and a
-   supported way to provision the operator records. Also decide how MemQL's
-   sign-in-before-OAuth step meets App Store requirement 2.3.2.
+   `app/uninstalled` handling (G1), webhook subscriptions scoped to the grant
+   (G3) and reinstall after `shop/redact` (G4) were closed by the backlog sweep
+   that delivered this investigation, together with G5, G7 and G9. Still open,
+   tracked in memql#5807: client-secret rotation (G2), a supported way to
+   provision the operator records (G6), and how MemQL's sign-in-before-OAuth
+   step meets App Store requirement 2.3.2 (G8).
 5. **Decide whether order sync ships at launch before submitting.** The
    submission should carry the eight scopes the code requests, which include
-   `write_products` (the public doc still says `read_products`). `read_orders`
+   `write_products` (the public Connect page now says so too). `read_orders`
    reaches Orders, which Shopify classifies as protected customer data, so
    keeping it means a protected-customer-data request and meeting its
    requirements [S10]. Deferring it means moving it to `optional_scopes`,
@@ -91,8 +93,8 @@ every hourly refresh.
 | Expiring offline tokens: sealed pair, refresh, cross-replica serialization | Implemented `[code]` `[test]`; a refresh against Shopify itself is not recorded `[needs live exercise]` |
 | Automatic Storefront token (`storefrontAccessTokenCreate`) | Implemented `[code]` `[test]` `[live 2026-09-25]` |
 | Compliance webhooks on the app-level endpoint | Implemented `[code]` `[test]`; not registered on any merchant-facing app yet |
-| `app/uninstalled` | **Not handled** `[code]` (gap G1) |
-| Client-secret rotation | **Not supported without reconnecting every store** `[code]` (gap G2) |
+| `app/uninstalled` | Handled on the app-level endpoint: the store is marked uninstalled, its grant blanked, the edge reads it `unavailable` `[code]` `[test]` (G1, fixed); not yet delivered by a merchant-facing app `[needs live exercise]` |
+| Client-secret rotation | **Not supported without reconnecting every store** `[code]` (gap G2, memql#5807) |
 | Public app registration, listing, review | Pending (Owner, Shopify) |
 | Protected customer data request | Pending, and only if `read_orders` ships (Owner, Shopify) |
 | Operator records on the merchant-facing installation | None set, per the issue comment of 2026-09-25 (Cluster operator) |
@@ -285,8 +287,10 @@ From [S9] unless noted:
   they accept permissions access on the OAuth handshake page." MemQL meets this:
   the callback returns to the Settings surface that began the flow.
 - **2.3.4** OAuth again "even if the merchant has previously installed and then
-  uninstalled your app." This is partial. The flow repeats, but MemQL never
-  learns of the uninstall (G1) and does not clear a redacted store (G4).
+  uninstalled your app." MemQL meets this since the backlog sweep: the flow
+  repeats, an `app/uninstalled` marks the store uninstalled (G1), and a
+  verified reinstall clears an uninstalled or purged store and re-checks its
+  Storefront token (G4, G5).
 - **3.1.1** "Your app must have a valid TLS/SSL certificate without any errors."
   A cloud installation's front door issues real certificates. A local mkcert
   installation does not qualify.
@@ -473,7 +477,7 @@ From [S9] unless noted:
   Shopify's server-to-server webhooks need a public HTTPS endpoint, on these
   two paths:
   - `https://api.<domain>/inbound/shopify`: the app-level endpoint (compliance
-    topics, and `app/uninstalled` once G1 lands).
+    topics and `app/uninstalled`).
   - `https://api.<domain>/inbound/shopify-<storeId>`: per-store mirror
     deliveries.
 
@@ -546,20 +550,20 @@ scope list.
 | Request expiring offline tokens | S12, S1 | `expiring=1` (`offline_token.go`) | meets |
 | Store both tokens, refresh before expiry; an invalid refresh token answers `401` | S2, S3 | one sealed row; refresh when under one minute remains; a failed refresh stops Admin calls, and an expired refresh token asks for a reconnect | meets |
 | Serialize per shop; persist pair atomically; never acquire and refresh at once | S13, S2 | one per-store advisory lock for both | meets |
-| Rotate the secret by refreshing with the new one; webhooks signed with the oldest unrevoked secret | S15 | the grant carries its own copy of the connect-time secret; the per-store webhook secret is another copy; the app-level endpoint verifies one secret | **gap G2** |
+| Rotate the secret by refreshing with the new one; webhooks signed with the oldest unrevoked secret | S15 | the grant carries its own copy of the connect-time secret; the per-store webhook secret is another copy; the app-level endpoint verifies one secret | **gap G2** (memql#5807) |
 | Secret never in the browser | S15 | sealed `globalSecret`; `shopifyConnectionProviderStatus` answers only `configured` and `installUrl` | meets |
 | Install starts on Shopify; no shop entry | S9 2.3.1 | install URL limited to Shopify hosts; shop only from the signed launch | meets |
 | OAuth before any other step | S9 2.3.2 | MemQL sign-in precedes OAuth | **open: Q1** |
 | Back to the app UI after OAuth | S9 2.3.3 | returns to the originating Settings surface | meets |
-| OAuth again after reinstall | S9 2.3.4 | flow repeats; uninstall unseen; redacted store not cleared | **gaps G1, G4** |
+| OAuth again after reinstall | S9 2.3.4 | flow repeats; an uninstall marks the store uninstalled; a verified reinstall clears an uninstalled or purged store | meets (G1, G4 fixed) |
 | Request only necessary scopes | S9 3.2 | eight scopes, `read_orders` among them | decision: Q10 |
 | Compliance webhooks: 200 ack, 401 on bad HMAC, done within 30 days | S16 | app-level endpoint; `202`; `401`; jobs (data request on receipt, redact after 24 h, shop purge after a 48 h hold) | meets; registration pending |
 | Answer within 5 s; deduplicate | S32 | stage, then `202`; row id from signed material | meets |
 | API subscriptions deleted after 8 failures | S32 | daily reconcile recreates them | meets |
-| Subscribe only to topics the grant covers | S34 | all 163 generated topics for every store | **gap G3** |
-| Handle `app/uninstalled` | S34, S35 | ignored as an unmirrored topic | **gap G1** |
+| Subscribe only to topics the grant covers | S34 | only the topics the store's grant covers; the rest are reported as `subscriptions.notGranted` | meets (G3 fixed) |
+| Handle `app/uninstalled` | S34, S35 | app-level endpoint, bound by the signed shop domain and the store's `appClientId`; marks the store uninstalled | meets (G1 fixed) |
 | Protected customer data for orders | S10 | not requested | approval pending, or defer `read_orders` |
-| Storefront token without a manual step | S18, S19 | minted on first connect; kept, not re-checked, on reconnect | meets; **gap G5** |
+| Storefront token without a manual step | S18, S19 | minted on first connect; re-checked on reconnect and re-minted when Shopify refuses it | meets (G5 fixed) |
 | Products available to the app | S21 to S26 | MemQL cannot publish (no publications scopes) | **open: Q3** |
 
 ---
@@ -595,12 +599,13 @@ scope list.
   merchant arriving from the App Store lands on MemQL sign-in. Someone with no
   account on the installation, or without `app:settings/connections`, cannot
   finish. Invite first, then install, and prefer a limited-visibility listing.
-- **L9. The earlier per-storefront path is still callable.**
+- **L9. The earlier per-storefront path is reserved to a cluster owner.**
   `shopifyStoreAppSave` takes a client id and secret, and
-  `shopifyStorefrontTokenSet` takes a pasted token. Both remain declared under
-  `execute app:deployables/store` (`dsl/shopify/overlay/builtins.memql`). The OS
-  no longer calls either, so they are outside the ordinary flow, but they are not
-  retired (G9).
+  `shopifyStorefrontTokenSet` takes a pasted token
+  (`dsl/shopify/overlay/builtins.memql`). The OS no longer calls either. Since
+  the backlog sweep (G9) each handler admits only a cluster owner. They stay
+  declared because `/auth/shopify/callback` still finishes the states
+  `shopifyConnectBegin` writes.
 - **L10. A store belongs to the person who connected it.** If a second MemQL
   user authorizes the same store at Shopify, MemQL refuses to replace the first
   person's grant (`connections.go` `managedTarget`, answered as
@@ -756,10 +761,10 @@ api_version = "2026-07"
   compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
   uri = "https://api.<domain>/inbound/shopify"
 
-# Add only once MemQL handles the topic on the app-level endpoint (gap G1):
-#  [[webhooks.subscriptions]]
-#  topics = [ "app/uninstalled" ]
-#  uri = "https://api.<domain>/inbound/shopify"
+  # MemQL marks the store uninstalled on this topic (G1).
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "https://api.<domain>/inbound/shopify"
 
 [build]
 # Stops `shopify app dev` from rewriting the registered URLs to a tunnel.
@@ -793,7 +798,7 @@ automatically_update_urls_on_dev = false
 | OAuth redirect URL | `https://identity.<sandbox domain>/auth/shopify/callback` | `https://identity.<domain>/auth/shopify/callback` |
 | Completion route (internal, not registered) | `https://os.<sandbox domain>/auth/shopify/complete` | `https://os.<domain>/auth/shopify/complete` |
 | Compliance webhooks | Need a public `api.<sandbox domain>`; unreachable on `.localhost` (L2) | `https://api.<domain>/inbound/shopify` |
-| `app/uninstalled` | After G1, same endpoint | After G1, `https://api.<domain>/inbound/shopify` |
+| `app/uninstalled` | Same endpoint as the compliance webhooks; unreachable on `.localhost` (L2) | `https://api.<domain>/inbound/shopify` |
 | Per-store mirror webhooks | Registered by MemQL; delivered only on a public sandbox domain | Registered by MemQL at `https://api.<domain>/inbound/shopify-<storeId>` |
 | Storefront API | Token minted by Connect from the app's unauthenticated scopes; no Headless channel needed for catalog and cart | Same. Headless channel only for trade sign-in (L7) |
 | Scopes | Same eight; the current version needs `write_products` (step A1) | Same eight, subject to Q10 |
@@ -851,16 +856,16 @@ Non-secret identifiers only, as recorded in the issue's comments on 2026-09-25.
 
 **Requires MemQL implementation** (MemQL engineering; details in section 13)
 
-- [ ] G1 `app/uninstalled` *(blocks review)*
-- [ ] G2 client-secret rotation *(blocks review)*
-- [ ] G3 subscriptions scoped to the grant *(blocks review)*
-- [ ] G4 reinstall after `shop/redact` *(blocks review)*
-- [ ] G5 Storefront token re-check on reconnect
-- [ ] G6 a supported path to provision and rotate the operator records *(blocks launch)*
-- [ ] G7 public doc and sandbox scope drift (`read_products` versus `write_products`)
-- [ ] G8 decision on 2.3.2 (sign-in before OAuth)
-- [ ] G9 retire or restrict the legacy per-storefront builtins
-- [ ] G10 `customers/redact` coverage of MemQL-origin rows and earlier exports
+- [x] G1 `app/uninstalled` (fixed in the backlog sweep)
+- [ ] G2 client-secret rotation *(blocks review; memql#5807)*
+- [x] G3 subscriptions scoped to the grant (fixed in the backlog sweep)
+- [x] G4 reinstall after `shop/redact` (fixed in the backlog sweep)
+- [x] G5 Storefront token re-check on reconnect (fixed in the backlog sweep)
+- [ ] G6 a supported path to provision and rotate the operator records *(blocks launch; memql#5807)*
+- [x] G7 public doc scope drift (fixed in the backlog sweep); the sandbox app's registered version still lists `read_products` until step A1
+- [ ] G8 decision on 2.3.2 (sign-in before OAuth) *(memql#5807)*
+- [x] G9 restrict the legacy per-storefront builtins to a cluster owner (fixed in the backlog sweep)
+- [ ] G10 `customers/redact` coverage of MemQL-origin rows and earlier exports *(memql#5807)*
 
 **Requires merchant authorization** (Merchant staff)
 
@@ -876,7 +881,7 @@ Non-secret identifiers only, as recorded in the issue's comments on 2026-09-25.
 Found by reading the code at `37959fe6d`. None is implemented here. Each one
 needs a failing test first.
 
-- **G1. `app/uninstalled` is not handled.** *Blocks review.*
+- **G1. `app/uninstalled` is not handled.** *Blocks review.* **Fixed in the backlog sweep**: the app-level endpoint binds the topic by the signed shop domain and the store's `appClientId`, marks the store `uninstalledAt`, blanks its grant and reports the storefront `unavailable`; a late delivery after a reinstall is recognised and ignored.
   - `integrations/shopify/apply.go` `Apply` drops any topic missing from
     `generated.Topics`, and `apply_test.go`
     (`TestApplyIsANoOpForAnUnknownStoreAndAnUnmirroredTopic`) pins
@@ -896,7 +901,7 @@ needs a failing test first.
     deliveries already are. Then mark the store disconnected so the edge reports
     `unavailable` and the Store panel says why, audit it, and leave
     `shop/redact` to purge.
-- **G2. Client-secret rotation forces every store to reconnect.** *Blocks review.*
+- **G2. Client-secret rotation forces every store to reconnect.** *Blocks review.* Open: memql#5807.
   - `offline_token.go` `offlineGrant` embeds `ClientSecret`, and `adminToken`
     refreshes with that embedded copy. Refreshing never re-pins a token to a new
     secret [S15].
@@ -910,7 +915,7 @@ needs a failing test first.
     the previous secret during a rotation window. Resolve managed stores'
     per-store verification from the app secret rather than a frozen copy, or
     re-seal the copies on rotation.
-- **G3. Webhook subscriptions ignore the grant.** *Blocks review.*
+- **G3. Webhook subscriptions ignore the grant.** *Blocks review.* **Fixed in the backlog sweep**: subscriptions reuse `scopesMissingFor`, and skipped topics are reported as `subscriptions.notGranted`.
   - `subscriptions.go` `EnsureSubscriptionsForStore` registers all 163
     `generated.SubscribedTopics` for every store, on connect, on boot and daily.
   - For a store holding the eight managed scopes, 97 of the 163 route to
@@ -925,7 +930,9 @@ needs a failing test first.
   - `reconcile.go` `scopesMissingFor` already makes this decision for
     reconciliation. Reuse it for subscriptions.
 - **G4. Reinstall after `shop/redact` leaves the store paused and redacted.**
-  *Blocks review.*
+  *Blocks review.* **Fixed in the backlog sweep**: a verified reinstall clears
+  `uninstalledAt` and `redactedAt` (a purged store returns to `configured`), and
+  the impossible `"redacted"` status guard is gone.
   - `markStoreRedacted` sets `status: "paused"` and `redactedAt`
     (`dsl/shopify/overlay/mutations.memql`).
   - `connections.go` `managedTarget` refuses only `prior.Status == "redacted"`,
@@ -937,13 +944,13 @@ needs a failing test first.
     it as `store_redacted`.
   - Needed: decide between a named refusal and clearing the redaction (status
     back to `configured`) on a verified reinstall, then fix the guard.
-- **G5. A reconnect keeps the old Storefront token unchecked.**
+- **G5. A reconnect keeps the old Storefront token unchecked.** **Fixed in the backlog sweep**: a kept token is checked once and re-minted only when Shopify refuses it.
   - `connect_write.go` step 13 mints only when `StorefrontTokenRef` is empty.
   - If an uninstall revoked the app-minted token (Q4), the storefront stays
     broken after a reinstall.
   - Needed: re-check the token (`storefrontTokenWorks`) on reconnect, and
     re-mint when Shopify refuses it, within the 100-token cap [S18].
-- **G6. No supported way to provision or rotate the three operator records.**
+- **G6. No supported way to provision or rotate the three operator records.** Open: memql#5807.
   *Blocks launch.*
   - They are absent from `scripts/secrets/manifest.yaml`, so `go run
     ./scripts/secrets seed` ignores them.
@@ -955,26 +962,26 @@ needs a failing test first.
     server-side under `MEMQL_MASTER_KEY`.
   - Needed: manifest entries (global; the secret as a secret), or a configure
     builtin with server-side sealing, plus the operator doc.
-- **G7. Scope drift.**
+- **G7. Scope drift.** **Fixed in the backlog sweep** for the public doc, with a test holding its scope sentence to the code.
   - `docs/public/operate/shopify-connect.md` lists `read_products`. The code
     has requested `write_products` since `53b46ece8`.
   - The sandbox version predates the change (step A1).
   - A managed connection refuses only a missing *Storefront* scope
     (`connections.go` `writeManagedConnection`). A grant without
     `write_products` connects, and product-content delivery fails later.
-- **G8. Sign-in before OAuth versus requirement 2.3.2.**
+- **G8. Sign-in before OAuth versus requirement 2.3.2.** Open: memql#5807.
   - `handleAccountConnectBegin` requires a signed-in caller holding
     `app:settings/connections` and a browser session before any OAuth step. A
     reviewer installing from the listing lands on MemQL sign-in.
   - Either justify it with review credentials, or redesign so OAuth runs first
     and a signed-in user claims the grant within a bounded window. The redesign
     is a security design question about binding, not a small change.
-- **G9. The legacy per-storefront builtins are still declared**
+- **G9. The legacy per-storefront builtins are still declared** **Fixed in the backlog sweep**: each handler admits only a cluster owner.
   (`dsl/shopify/overlay/builtins.memql`: `shopifyStoreAppSave`,
   `shopifyConnectBegin`, `shopifyStorefrontTokenSet`). They accept developer
   credentials and pasted tokens. Retire them or restrict them to the cluster
   owner.
-- **G10. `customers/redact` covers the generated mirror only.**
+- **G10. `customers/redact` covers the generated mirror only.** Open: memql#5807.
   - `compliance.go` `RedactCustomer` walks `generated.ApplyOrder`.
   - MemQL-origin concepts the connector pushes (`connector.go` `originDomains`,
     for example `v1:commerce:customerNote`) are outside that walk.
@@ -1060,7 +1067,7 @@ needs a failing test first.
 | Insufficient Storefront scopes | `TestOnlyAMissingStorefrontScopeRefuses` | `[test]` |
 | Person lacks `app:settings/connections`, or the store is another person's | `managedTarget`, `managedPerson`; no managed-path test found | add a test |
 | Multiple stores from different accounts | none | `[needs live exercise]` |
-| Uninstall, then reinstall | not handled (G1, G4, G5) | needs implementation, then a live exercise |
+| Uninstall, then reinstall | implemented (G1, G4, G5) `[code]` `[test]` | needs a live exercise |
 | Storefront changes its selected store | OS tests in `shopifyConnect.test.tsx` (keep binding on failure, clear old store display); binding guard tests in `component/memql` | `[test]`; switch to a client store `[needs live exercise]` |
 | Webhook delivery and compliance requests end to end | `managed_webhooks_test.go`, `compliance_test.go` | `[test]`; delivery from Shopify `[needs live exercise]` (needs a public domain, L2) |
 
