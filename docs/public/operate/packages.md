@@ -535,16 +535,17 @@ rollback button performs.
 Two feeds, one effect. Both write exactly `latestKnownVersion` and
 `updateAvailable` on the package row, and **neither ever deploys anything**.
 
-- **Webhook (preferred).** GitHub pushes arrive through the existing
-  `POST /inbound/{source}` seam -- deny-by-default source allowlist plus
+- **Webhook (preferred).** GitHub pushes and published releases arrive
+  through the existing `POST /inbound/{source}` seam -- deny-by-default source allowlist plus
   per-source HMAC (memql#2957). No new HTTP route. Point a repository webhook
   at `https://api.<domain>/inbound/github`, add `github` to
   `MEMQL_INBOUND_SOURCE_ALLOWLIST`, and set its HMAC secret the way that
   runbook describes. A cluster running [GitHub Connect](github-connect.md)
   configures ONE webhook on the app instead of one per repository, and its
-  secret is the app's own. **The feed reads pushes only.** The same source
-  also carries pull request, merge group, release and check deliveries; those
-  are pipelines', and none of them moves the cue or starts an auto-deploy.
+  secret is the app's own. **The feed reads pushes and releases only.** The
+  same source also carries pull request, merge group and check deliveries;
+  those are pipelines', and none of them moves the cue or starts an
+  auto-deploy.
 - **Polling.** A scheduled automation every ten minutes, for clusters no
   webhook can reach. It reads each repo-sourced package's upstream head under
   **that package's own credential**, resolved at call time under the package
