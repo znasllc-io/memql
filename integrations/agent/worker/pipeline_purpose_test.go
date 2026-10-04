@@ -1029,6 +1029,55 @@ func TestPipelineCredentialMaskingLeavesBlankLinesAlone(t *testing.T) {
 	}
 }
 
+func TestPipelineCredentialMaskingLeavesNoRemnantOfOverlappingValues(t *testing.T) {
+	// The final review of epic memql#5478 (round 2): a pipeline step's
+	// credentials are masked out of the machine's words as the seam masks text
+	// (pl.MaskSecrets). A clone token and a secret printed overlapping are one
+	// span: masked one after the other they leave "***ijkl", a remnant that
+	// the capture, and the check run after it, cannot finish masking. And a
+	// value a bare carriage return breaks into parts has each part masked.
+	setup := func() (*pipelineFleet, Request) {
+		f := newPipelineFleet(t)
+		req := pipelineRequest()
+		req.Args["token"] = "abcdefgh"
+		req.Args["secrets"] = map[string]any{"NPM_AUTH": "efghijkl", "LOGIN": "user-name-abcd\rpass-word-efgh"}
+		req.Args["cloneUrl"] = "https://x:abcdefghijkl@github.com/o/r.git"
+		return f, req
+	}
+
+	// The machine's error, in the result and in the record.
+	f, req := setup()
+	f.failure = &memqlv1.Failure{ErrorCode: "clone_failed", ErrorMessage: "git said: abcdefghijkl failed"}
+	res, err := f.d.Dispatch(asPipelineExecutor(), req)
+	if err != nil || res.OK {
+		t.Fatalf("result = %+v err = %v, want the machine's clone_failed", res, err)
+	}
+	const wantError = "git said: *** failed"
+	if got := f.store.lastInvocation(t).ErrorMessage; got != wantError || res.ErrorMessage != wantError {
+		t.Fatalf("error message: result %q, record %q; want %q", res.ErrorMessage, got, wantError)
+	}
+
+	// The machine's preview, and the arguments the record keeps.
+	f, req = setup()
+	f.preview = "pass-word-efgh logged in as user-name-abcd; git said: abcdefghijkl"
+	res, err = f.d.Dispatch(asPipelineExecutor(), req)
+	if err != nil || !res.OK {
+		t.Fatalf("result = %+v err = %v", res, err)
+	}
+	row := f.store.lastInvocation(t)
+	const wantPreview = "*** logged in as ***; git said: ***"
+	if row.OutputPreview != wantPreview || res.OutputPreview != wantPreview {
+		t.Fatalf("preview: result %q, record %q; want %q", res.OutputPreview, row.OutputPreview, wantPreview)
+	}
+	args, err := json.Marshal(row.ArgsRedacted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "https://x:***@github.com/o/r.git") || strings.Contains(string(args), "ijkl") {
+		t.Fatalf("argsRedacted = %s, want the clone URL's credentials masked whole", args)
+	}
+}
+
 func TestPipelineStepWithMisshapenCredentialsIsRefused(t *testing.T) {
 	// The masker has to know every value it masks. Credentials in a shape the
 	// gate cannot read -- secrets as a list, a secret that is not a string, a

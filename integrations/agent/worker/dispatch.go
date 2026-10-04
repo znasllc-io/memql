@@ -934,14 +934,14 @@ func (d *Dispatcher) recordInvocation(
 	// arrives here RAW -- the caller's copy is masked at Dispatch's return --
 	// so this mask is the record's own. Masked before the preview is clamped,
 	// so a value cut in half by the clamp is not.
-	if m := pipelineCredentialMasker(req); m != nil {
+	if mask := pipelineCredentialMasker(req); mask != nil {
 		if argsRedacted != nil {
-			if masked, ok := maskCredentials(argsRedacted, m).(map[string]any); ok {
+			if masked, ok := maskCredentials(argsRedacted, mask).(map[string]any); ok {
 				argsRedacted = masked
 			}
 		}
-		preview = m.Replace(preview)
-		errorMessage = m.Replace(errorMessage)
+		preview = mask(preview)
+		errorMessage = mask(errorMessage)
 	}
 	row := workerservice.InvocationRow{
 		ID:            newInvocationId(),

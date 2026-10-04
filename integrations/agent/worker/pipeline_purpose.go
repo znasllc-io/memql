@@ -46,10 +46,10 @@ package worker
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	pl "github.com/znasllc-io/memql/component/pipelines"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 )
 
@@ -302,16 +302,9 @@ func auditActor(req Request) string {
 // secrets. redactArgs already replaces both by KEY. They are also masked by
 // VALUE, wherever they appear, because the key is not the only place a value
 // can be: a token embedded in a clone URL, or a secret a command echoes into
-// the output preview, is the same credential under a key nothing scrubs.
-
-const (
-	// pipelineCredentialMinLen is the shortest value masked. Shorter ones
-	// would mask ordinary words; it is the floor the step capture uses too
-	// (integrations/pipelinesteps).
-	pipelineCredentialMinLen = 4
-	// pipelineCredentialMask replaces a credential value.
-	pipelineCredentialMask = "***"
-)
+// the output preview, is the same credential under a key nothing scrubs. The
+// masking is the seam's (pl.MaskSecrets), as the step capture's is, so what
+// leaves here is what the capture and the check run would make of it.
 
 // pipelineCredentialShape refuses credentials the gate cannot be sure it has
 // read in full: a token that is not a string, or secrets that are not a map of
@@ -343,47 +336,27 @@ func pipelineCredentialShape(args map[string]any) error {
 //
 // It reads every string under the token and the secrets, WHATEVER their shape:
 // the gate refuses a shape it cannot read (pipelineCredentialShape), but the
-// refused call is still recorded, and its record must be masked too. A
-// multi-line value is masked whole and line by line, so output that re-wraps it
-// still masks. Each piece is masked by what it SAYS -- trimmed, and only when
-// that is at least pipelineCredentialMinLen -- so a line that is blank once
+// refused call is still recorded, and its record must be masked too. It masks
+// as the seam does (pl.MaskSecrets over pl.MaskForms): a value as stored,
+// without the whitespace around it, and each line of it -- at a newline or a
+// carriage return -- without its own, four bytes or more, so a line blank once
 // trimmed, an indent inside a key, never masks every run of spaces in the
 // output, and an indented line still masks when printed with other
-// indentation.
-func pipelineCredentialMasker(req Request) *strings.Replacer {
+// indentation; and values that overlap where printed are one span, with no
+// remnant of either beside the mask.
+func pipelineCredentialMasker(req Request) func(string) string {
 	if req.Tool != "workerHost" || req.Action != PipelineStepAction {
 		return nil
 	}
-	seen := map[string]bool{}
-	add := func(v string) {
-		for _, piece := range append([]string{v}, strings.Split(v, "\n")...) {
-			if piece = strings.TrimSpace(piece); len(piece) >= pipelineCredentialMinLen {
-				seen[piece] = true
-			}
-		}
-	}
+	var values []string
+	add := func(v string) { values = append(values, v) }
 	eachString(req.Args["token"], add)
 	eachString(req.Args["secrets"], add)
-	if len(seen) == 0 {
+	forms := pl.MaskForms(values)
+	if len(forms) == 0 {
 		return nil
 	}
-	values := make([]string, 0, len(seen))
-	for v := range seen {
-		values = append(values, v)
-	}
-	// Longest first: where one value contains another, the longer is masked
-	// whole rather than leaving its remainder behind.
-	sort.Slice(values, func(i, j int) bool {
-		if len(values[i]) != len(values[j]) {
-			return len(values[i]) > len(values[j])
-		}
-		return values[i] < values[j]
-	})
-	pairs := make([]string, 0, 2*len(values))
-	for _, v := range values {
-		pairs = append(pairs, v, pipelineCredentialMask)
-	}
-	return strings.NewReplacer(pairs...)
+	return func(s string) string { return pl.MaskSecrets(s, forms) }
 }
 
 // eachString hands every string inside v to fn, whatever the nesting.
@@ -416,41 +389,41 @@ func eachString(v any, fn func(string)) {
 // record masks its own copy (recordInvocation), so neither depends on the
 // other having run.
 func maskPipelineResult(req Request, res Result) Result {
-	if m := pipelineCredentialMasker(req); m != nil {
-		res.OutputPreview = m.Replace(res.OutputPreview)
-		res.ErrorMessage = m.Replace(res.ErrorMessage)
+	if mask := pipelineCredentialMasker(req); mask != nil {
+		res.OutputPreview = mask(res.OutputPreview)
+		res.ErrorMessage = mask(res.ErrorMessage)
 	}
 	return res
 }
 
 // maskCredentials returns v with every string inside it masked. Maps and
 // slices are copied, never edited in place.
-func maskCredentials(v any, m *strings.Replacer) any {
+func maskCredentials(v any, mask func(string) string) any {
 	switch t := v.(type) {
 	case string:
-		return m.Replace(t)
+		return mask(t)
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for k, x := range t {
-			out[k] = maskCredentials(x, m)
+			out[k] = maskCredentials(x, mask)
 		}
 		return out
 	case map[string]string:
 		out := make(map[string]string, len(t))
 		for k, x := range t {
-			out[k] = m.Replace(x)
+			out[k] = mask(x)
 		}
 		return out
 	case []any:
 		out := make([]any, len(t))
 		for i, x := range t {
-			out[i] = maskCredentials(x, m)
+			out[i] = maskCredentials(x, mask)
 		}
 		return out
 	case []string:
 		out := make([]string, len(t))
 		for i, x := range t {
-			out[i] = m.Replace(x)
+			out[i] = mask(x)
 		}
 		return out
 	}
