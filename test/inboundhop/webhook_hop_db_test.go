@@ -42,6 +42,7 @@ import (
 	"github.com/znasllc-io/memql/component/datasync"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/inbound"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 	"github.com/znasllc-io/memql/component/secret"
@@ -188,9 +189,9 @@ func TestAnUnparseableStagedHeaderRowIsStampedFailed(t *testing.T) {
 	t.Cleanup(func() { memqlsync.UnbindForTest(shopify.ConnectorName) })
 
 	requestID := "inb-badmeta-" + suffix
-	if _, err := a.Execute(seedCtx(), fmt.Sprintf(`mutation stageInboundRequest(requestId: %q, source: %q, medium: "webhook", `+
+	if _, err := a.Execute(seedCtx(), fmt.Sprintf(`mutation stageInboundRequest(requestId: %s, source: %s, medium: "webhook", `+
 		`body: "{}", headersJson: "[]", signatureVerified: true, receivedAt: "2026-09-27T12:00:00Z")`,
-		requestID, "shopify-"+storeID)); err != nil {
+		langparser.QuoteString(requestID), langparser.QuoteString("shopify-"+storeID))); err != nil {
 		t.Fatalf("stage: %v", err)
 	}
 	row := stagedRow(t, a, requestID)
