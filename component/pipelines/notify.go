@@ -38,6 +38,14 @@ const (
 	NotifyRecovered NotifyOutcome = "recovered"
 )
 
+// Valid reports whether o is an outcome a notification announces: passed,
+// failed or recovered. Both composers refuse any other, and a caller that would
+// rather know first can ask.
+func (o NotifyOutcome) Valid() bool {
+	_, ok := outcomeColors[o]
+	return ok
+}
+
 // Link is a labelled URL in a notification: one a manifest's notify stage
 // declares (Docs), or one of the run's Library files.
 type Link struct {
@@ -48,11 +56,15 @@ type Link struct {
 // Notification is everything a message says. Every string is already masked by
 // the caller (MaskSecrets), so a composer renders what it is given.
 //
-// What a repository or a person wrote -- Pipeline, Title, Branch, Version,
-// FailedMessage and the labels of Links and Artifacts -- is collapsed to one
-// line and escaped for the medium. Names and codes the engine itself
-// validated -- FailedStep, FailedCode -- are not: a stage and step name holds
-// no Markdown by its grammar, and a code is from the catalogue.
+// Every text in it that something outside this package wrote is collapsed to
+// one line and escaped for the medium: Pipeline, Title, Branch, Version, the
+// failed step's name, code and message, and the labels of Links and Artifacts.
+// That includes FailedStep and FailedCode. Nothing here makes a code one from
+// the catalogue -- the driver takes it from the executor's answer and only
+// masks it, which is not vouching for it -- or a step's name one the manifest's
+// grammar allows, so neither is a place a link may be written. The cost is that
+// a Discord body spells pipeline_step_timeout as pipeline\_step\_timeout,
+// which Discord draws as the code it is.
 type Notification struct {
 	Pipeline    string // the pipeline's name: "memql"
 	Event       Event
@@ -64,7 +76,8 @@ type Notification struct {
 	Outcome     NotifyOutcome
 	Stages      int   // stages before the notify stage that ran
 	DurationMs  int64 // the run so far
-	// The first failed step, for NotifyFailed: "deploy/verify-rollout", its code and message.
+	// The first failed step, for NotifyFailed: its name as "stage/step" (a
+	// refusal's scope) or "stage.step" (a step's key), its code and its message.
 	FailedStep, FailedCode, FailedMessage string
 	OSOrigin                              string // "https://os.<domain>", "" when unknown
 	RunPageURL                            string // "" when unknown
@@ -119,23 +132,21 @@ const (
 // the run page as fields.
 //
 // An outcome that is not passed, failed or recovered is an error rather than a
-// pass: a message that reads green for a run nobody judged is the false green
-// pipelines exist to count.
+// pass (see NotifyOutcome.Valid): a message that reads green for a run nobody
+// judged is the false green pipelines exist to count.
 //
 // Nothing in the message may notify anyone, whatever a commit title says.
 // allowed_mentions.parse is therefore always the empty array: present, and an
 // array, because null or absent leaves Discord's defaults in force. A mention
 // in the text stays text, written as the commit wrote it.
 func DiscordMessage(n Notification) ([]byte, error) {
-	color, ok := outcomeColor(n.Outcome)
-	if !ok {
-		return nil, fmt.Errorf("pipelines: a notification's outcome is %q; it must be %s, %s or %s",
-			n.Outcome, NotifyPassed, NotifyFailed, NotifyRecovered)
+	if err := checkOutcome(n.Outcome); err != nil {
+		return nil, err
 	}
 	payload := discordPayload{
 		Username:        notifyUsername,
 		AllowedMentions: discordMentions{Parse: []string{}},
-		Embeds:          []discordEmbed{newEmbedPlan(n, color).embed()},
+		Embeds:          []discordEmbed{newEmbedPlan(n, outcomeColors[n.Outcome]).embed()},
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -152,10 +163,14 @@ func DiscordMessage(n Notification) ([]byte, error) {
 // plain text. Nothing is escaped, because nothing is rendered; the subject is
 // one line, since a line break in it would start a header.
 //
-// It cannot fail, so an outcome it does not know is left out of the subject and
-// the body rather than refused (DiscordMessage refuses it): the message says
-// nothing about how the run ended, and never that it passed.
-func EmailMessage(n Notification) (subject, body string) {
+// An outcome that is not passed, failed or recovered is refused exactly as
+// DiscordMessage refuses it -- the same error, and no subject and no body -- so
+// the two composers agree about what may be sent: an email that says nothing of
+// how the run ended is no announcement, and is never a pass.
+func EmailMessage(n Notification) (subject, body string, err error) {
+	if err = checkOutcome(n.Outcome); err != nil {
+		return "", "", err
+	}
 	subject = fitRunes(notifyTitle(n, asWritten), discordTitleMax)
 
 	var b strings.Builder
@@ -168,12 +183,16 @@ func EmailMessage(n Notification) (subject, body string) {
 	for _, fact := range plainFacts(n) {
 		b.WriteString(fact + "\n")
 	}
-	return subject, b.String()
+	return subject, b.String(), nil
 }
 
 // Headline is the notification's one line, in plain text: what ran and how it
 // ended, as "Release v0.21.7 passed" or "Push to main failed at tests". The
 // Discord title and the email subject are the pipeline's name before it.
+//
+// It has no error to return, so an outcome it does not know leaves the verdict
+// off rather than refusing: it says nothing of the run, and never that it
+// passed.
 func Headline(n Notification) string { return headline(n, asWritten) }
 
 type discordPayload struct {
@@ -211,14 +230,23 @@ func (e discordEmbed) size() int {
 	return size
 }
 
-func outcomeColor(outcome NotifyOutcome) (int, bool) {
-	switch outcome {
-	case NotifyPassed, NotifyRecovered:
-		return colorPassed, true
-	case NotifyFailed:
-		return colorFailed, true
+// outcomeColors is every outcome a notification announces, with the color of
+// the embed that announces it. It is the one place that says which there are:
+// Valid asks it, and so does the Discord color, so the two cannot disagree.
+var outcomeColors = map[NotifyOutcome]int{
+	NotifyPassed:    colorPassed,
+	NotifyFailed:    colorFailed,
+	NotifyRecovered: colorPassed,
+}
+
+// checkOutcome is how both composers refuse an outcome they do not know, in
+// the same words.
+func checkOutcome(o NotifyOutcome) error {
+	if o.Valid() {
+		return nil
 	}
-	return 0, false
+	return fmt.Errorf("pipelines: a notification's outcome is %q; it must be %s, %s or %s",
+		o, NotifyPassed, NotifyFailed, NotifyRecovered)
 }
 
 // embedPlan is an embed before the whole is held to Discord's limits: every
@@ -241,8 +269,10 @@ func newEmbedPlan(n Notification, color int) embedPlan {
 		lines:     descriptionLines(n, escapeDiscord),
 		artifacts: discordArtifactLines(n.Artifacts),
 	}
-	if len(p.lines) > 0 {
-		p.lines[0] = atLineStart(p.lines[0])
+	// Every line begins with text a person or a runner wrote: the first with the
+	// commit's title, the failure's with the failed step's name.
+	for i := range p.lines {
+		p.lines[i] = atLineStart(p.lines[i])
 	}
 	// The title's link is a JSON property, not Markdown: the run page as it
 	// was given, with nothing percent-encoded that the caller did not.
@@ -359,10 +389,11 @@ func escapeDiscord(s string) string {
 }
 
 // atLineStart makes escaped text safe to open a line. Markdown reads a
-// heading, a subtext or a numbered list from a line's first characters, and the
-// description's first line opens with a commit's own title, which a person
-// picks and which could be "# Release notes". A backslash before the character
-// that would make it one is dropped by the reader.
+// heading, a subtext or a numbered list from a line's first characters, and a
+// description line opens with text a person or a runner picked -- a commit's
+// title that could be "# Release notes", a step's name that could be "- item".
+// A backslash before the character that would make it one is dropped by the
+// reader.
 func atLineStart(s string) string {
 	if s == "" {
 		return s
@@ -449,14 +480,25 @@ func headline(n Notification, esc escaper) string {
 	case NotifyRecovered:
 		return subject + " recovered"
 	case NotifyFailed:
-		if stage, _, _ := strings.Cut(oneLineText(n.FailedStep), "/"); stage != "" {
-			return subject + " failed at " + stage
+		if stage := stageOfStep(oneLineText(n.FailedStep)); stage != "" {
+			return subject + " failed at " + esc(stage)
 		}
 		return subject + " failed"
 	}
 	// An outcome this package does not know says nothing about the run: never
 	// "passed" by default.
 	return subject
+}
+
+// stageOfStep is the stage a failed step is in. A step is named "stage/step"
+// where a refusal's scope is, and "stage.step" where a step's key is (StepKey):
+// the stage is what comes before the first "/" or ".", neither of which a
+// stage's name holds.
+func stageOfStep(step string) string {
+	if i := strings.IndexAny(step, "/."); i >= 0 {
+		return step[:i]
+	}
+	return step
 }
 
 // runSubject names the run by what opened it.
@@ -576,15 +618,16 @@ func passedLine(n Notification) string {
 }
 
 // failedLine names the step that failed, its code and what the runner said.
-// The message is cut to maxFailedMessageRunes before it is escaped, so the cut
+// All three are text something outside this package wrote, so all three are
+// escaped. The message is cut to maxFailedMessageRunes before it is, so the cut
 // is of the words as written and an escape is never split.
 func failedLine(n Notification, esc escaper) string {
 	who := "The run"
-	if step := oneLineText(n.FailedStep); step != "" {
+	if step := esc.line(n.FailedStep); step != "" {
 		who = step
 	}
 	line := who + " failed"
-	if code := oneLineText(n.FailedCode); code != "" {
+	if code := esc.line(n.FailedCode); code != "" {
 		line += ": " + code
 	}
 	line += "."

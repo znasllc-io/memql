@@ -78,6 +78,16 @@ func composeDiscord(t *testing.T, n Notification) (wireEmbed, string) {
 	return msg.Embeds[0], string(raw)
 }
 
+// composeEmail composes n as an email and fails the test when it is refused.
+func composeEmail(t *testing.T, n Notification) (subject, body string) {
+	t.Helper()
+	subject, body, err := EmailMessage(n)
+	if err != nil {
+		t.Fatalf("EmailMessage: %v", err)
+	}
+	return subject, body
+}
+
 func fieldNames(e wireEmbed) []string {
 	var out []string
 	for _, f := range e.Fields {
@@ -108,10 +118,13 @@ func embedSize(e wireEmbed) int {
 	return size
 }
 
-// endsInsideAnEscape reports whether s ends in an odd run of backslashes: the
-// last one escapes whatever the reader appends, so a cut that left it behind
-// would swallow the first dot of its own "...".
+// endsInsideAnEscape reports whether s ends, before the "..." that marks a cut,
+// in an odd run of backslashes: the last one escapes whatever the reader
+// appends, so a cut that left it behind would swallow the first dot of its own
+// mark. The mark is trimmed first. A cut string always ends in it, so a check
+// of the last characters could never see the defect it exists to look for.
 func endsInsideAnEscape(s string) bool {
+	s = strings.TrimSuffix(s, "...")
 	return (len(s)-len(strings.TrimRight(s, `\`)))%2 == 1
 }
 
@@ -190,7 +203,9 @@ func TestDiscordMessageOfAPassedRelease(t *testing.T) {
 }
 
 // A push has no tag: MEMQL_VERSION is the commit, shown as its first seven
-// characters, and a failure names the step, its code and the message.
+// characters, and a failure names the step, its code and the message. The code
+// is escaped like every other text the message carries: its underscores become
+// \_, which Discord draws as the underscores they are.
 func TestDiscordMessageOfAFailedPush(t *testing.T) {
 	n := releasePassed()
 	n.Event, n.Outcome, n.Title = EventPush, NotifyFailed, "Fix the cart badge"
@@ -202,7 +217,7 @@ func TestDiscordMessageOfAFailedPush(t *testing.T) {
 		Title: "memql · Push to main failed at tests",
 		URL:   "https://os.example.test/?pipelineRun=run1",
 		Description: "Fix the cart badge (a944ae3)\n" +
-			"tests/go-tests#2 failed: pipeline_step_timeout. The step ran past its 20m timeout.",
+			"tests/go-tests#2 failed: pipeline\\_step\\_timeout. The step ran past its 20m timeout.",
 		Color: 15158332,
 		Fields: []wireField{
 			{"Version", "a944ae3", true},
@@ -226,15 +241,22 @@ func TestDiscordMessageForEveryOutcomeOfEveryEvent(t *testing.T) {
 		subject       string // what the title calls the run
 		step, stage   string // the first failed step, and the stage it is in
 		code, message string
+		codeShown     string // the code as the Discord body spells it: underscores escaped
 	}{
+		// A scope is "stage/step" and a step's key is "stage.step" (StepKey): the
+		// stage is the part before either, so the table has both.
 		{"release", func(n *Notification) {}, "Release v0.21.7",
-			"deploy/verify-rollout", "deploy", "rollout_version_mismatch", "bff-2 reports v0.21.6, not v0.21.7."},
+			"deploy/verify-rollout", "deploy", "rollout_version_mismatch", "bff-2 reports v0.21.6, not v0.21.7.",
+			`rollout\_version\_mismatch`},
 		{"push", func(n *Notification) { n.Event = EventPush }, "Push to main",
-			"tests/go-tests#2", "tests", "pipeline_step_timeout", "The step ran past its 20m timeout."},
+			"tests.go-tests#2", "tests", "pipeline_step_timeout", "The step ran past its 20m timeout.",
+			`pipeline\_step\_timeout`},
 		{"pull request", func(n *Notification) { n.Event, n.PullRequest = EventPullRequest, 42 }, "Pull request #42",
-			"checks/build-vet", "checks", "pipeline_step_failed", "The command exited with status 1."},
+			"checks/build-vet", "checks", "pipeline_step_failed", "The command exited with status 1.",
+			`pipeline\_step\_failed`},
 		{"merge queue", func(n *Notification) { n.Event = EventMergeGroup }, "Merge queue a944ae3",
-			"tests/db-tests#1", "tests", "pipeline_service_failed", "The postgres service did not become ready."},
+			"tests.db-tests#1", "tests", "pipeline_service_failed", "The postgres service did not become ready.",
+			`pipeline\_service\_failed`},
 	}
 	const commit = "Add the notify stage (a944ae3)"
 	const passedLine = "All 4 stages passed in 5m 58s."
@@ -258,7 +280,7 @@ func TestDiscordMessageForEveryOutcomeOfEveryEvent(t *testing.T) {
 				case NotifyFailed:
 					n.FailedStep, n.FailedCode, n.FailedMessage = ev.step, ev.code, ev.message
 					wantTitle = "memql · " + ev.subject + " failed at " + ev.stage
-					wantDescription = commit + "\n" + ev.step + " failed: " + ev.code + ". " + ev.message
+					wantDescription = commit + "\n" + ev.step + " failed: " + ev.codeShown + ". " + ev.message
 					wantColor = 15158332
 				}
 
@@ -277,7 +299,7 @@ func TestDiscordMessageForEveryOutcomeOfEveryEvent(t *testing.T) {
 				if e.URL != n.RunPageURL {
 					t.Errorf("url = %q, want the run page %q", e.URL, n.RunPageURL)
 				}
-				subject, _ := EmailMessage(n)
+				subject, _ := composeEmail(t, n)
 				if subject != e.Title {
 					t.Errorf("email subject = %q, want the Discord title %q", subject, e.Title)
 				}
@@ -310,10 +332,26 @@ func TestHeadlineNamesTheRunByItsEventAndTheOutcomeByItsWords(t *testing.T) {
 			"Push to main failed at deploy"},
 		{"failed at a stage named alone", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "deploy"},
 			"Push to main failed at deploy"},
+		// A step's key is "stage.step" (StepKey), where a scope is "stage/step":
+		// neither separator is in a stage's name, so the first of them ends it.
+		{"failed at the stage of a step key", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "tests.go-tests#2"},
+			"Push to main failed at tests"},
+		{"failed at the stage of another step key", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "deploy.verify-rollout"},
+			"Push to main failed at deploy"},
+		{"a slash before a dot", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "tests/go.tests"},
+			"Push to main failed at tests"},
+		{"a dot before a slash", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "tests.go/tests"},
+			"Push to main failed at tests"},
+		{"a stage with a trailing separator", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "deploy."},
+			"Push to main failed at deploy"},
+		{"a step with no stage in front of it", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: ".verify-rollout"},
+			"Push to main failed"},
+		{"a step key broken across lines", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "te\nsts.go-tests"},
+			"Push to main failed at te sts"},
 		{"failed with no step to name", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed}, "Push to main failed"},
 		{"recovered", Notification{Event: EventPush, Branch: "main", Outcome: NotifyRecovered}, "Push to main recovered"},
 		// An outcome this package does not know is never a pass: it says
-		// nothing, and DiscordMessage refuses it (below).
+		// nothing, and both composers refuse it (below).
 		{"an outcome nobody named", Notification{Event: EventPush, Branch: "main", Outcome: "unknown"}, "Push to main"},
 	}
 	for _, tc := range cases {
@@ -339,6 +377,71 @@ func TestDiscordMessageRefusesAnOutcomeItDoesNotKnow(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), fmt.Sprintf("%q", string(outcome))) {
 			t.Errorf("outcome %q: the error %q does not name it", outcome, err)
+		}
+	}
+}
+
+// The two composers refuse the same outcomes, with the same error. An email
+// that said nothing of how the run ended would be read as good news by anyone
+// who saw only that it arrived.
+func TestEmailMessageRefusesAnOutcomeItDoesNotKnow(t *testing.T) {
+	for _, outcome := range []NotifyOutcome{"", "unknown", "PASSED", "passed "} {
+		n := releasePassed()
+		n.Outcome = outcome
+		subject, body, err := EmailMessage(n)
+		if err == nil {
+			t.Errorf("outcome %q: EmailMessage composed %q, want an error", outcome, subject)
+			continue
+		}
+		if subject != "" || body != "" {
+			t.Errorf("outcome %q: a refused email carries the subject %q and the body %q; nothing may be sent", outcome, subject, body)
+		}
+		if !strings.Contains(err.Error(), fmt.Sprintf("%q", string(outcome))) {
+			t.Errorf("outcome %q: the error %q does not name it", outcome, err)
+		}
+		if _, discordErr := DiscordMessage(n); discordErr == nil || discordErr.Error() != err.Error() {
+			t.Errorf("outcome %q: EmailMessage refuses with %q and DiscordMessage with %v; the two must say the same", outcome, err, discordErr)
+		}
+	}
+}
+
+// NotifyOutcome.Valid is the question both composers ask, so a caller may ask
+// it first, and the three agree about every outcome.
+func TestDiscordMessageAndEmailMessageAgreeWithValid(t *testing.T) {
+	for outcome, valid := range map[NotifyOutcome]bool{
+		NotifyPassed: true, NotifyFailed: true, NotifyRecovered: true,
+		"": false, "unknown": false, "PASSED": false, "passed ": false,
+	} {
+		n := releasePassed()
+		n.Outcome = outcome
+		if got := outcome.Valid(); got != valid {
+			t.Errorf("%q.Valid() = %v, want %v", outcome, got, valid)
+		}
+		_, discordErr := DiscordMessage(n)
+		_, _, emailErr := EmailMessage(n)
+		if (discordErr == nil) != valid || (emailErr == nil) != valid {
+			t.Errorf("outcome %q (valid = %v): DiscordMessage error %v, EmailMessage error %v", outcome, valid, discordErr, emailErr)
+		}
+	}
+}
+
+// Every outcome Valid admits is one the composers have words for: a verdict in
+// the headline and a line of its own under the title. An outcome added to the
+// one table and not to those would be sent as a message that says nothing of
+// the run -- the default of a switch deciding what an unknown value means.
+func TestDiscordEveryValidOutcomeIsSpokenFor(t *testing.T) {
+	if len(outcomeColors) != 3 {
+		t.Fatalf("outcomeColors has %d outcomes; a new one needs words in headline and outcomeLine, and a case here", len(outcomeColors))
+	}
+	for outcome := range outcomeColors {
+		n := releasePassed()
+		n.Outcome = outcome
+		n.FailedStep, n.FailedCode = "tests/go-tests", "pipeline_step_failed"
+		if head := Headline(n); head == runSubject(n, asWritten) {
+			t.Errorf("outcome %q has no verdict in its headline: %q", outcome, head)
+		}
+		if lines := descriptionLines(n, asWritten); len(lines) != 2 {
+			t.Errorf("outcome %q has no line of its own under the title: %q", outcome, lines)
 		}
 	}
 }
@@ -370,29 +473,41 @@ func TestDiscordEscapeCoversExactlyTheMarkdownCharacters(t *testing.T) {
 	}
 }
 
-// Every place a repository's or a person's words are rendered, in one hostile
-// string: each must arrive escaped and on one line, so that nothing in it can
-// open a link, a mention, a heading or a quote, or start a line of its own.
+// Every place a repository's, a runner's or a person's words are rendered, in
+// one hostile string: each must arrive escaped and on one line, so that nothing
+// in it can open a link, a mention, a heading or a quote, or start a line of
+// its own.
+//
+// That includes the failed step's name and its code. Nothing at this seam makes
+// a code one from the catalogue -- the driver takes it from the executor's
+// answer and only masks it -- and a step's name is whatever the caller passes,
+// so neither is a place a link may be written.
 func TestDiscordMessageEscapesEveryTextAPersonSupplied(t *testing.T) {
 	const hostile = "[x](https://evil.test)"
 	const escaped = `\[x\]\(https://evil.test\)`
+	const hostileCode = "[Sign in again](https://evil.test/phish) **urgent** @everyone"
+	const escapedCode = `\[Sign in again\]\(https://evil.test/phish\) \*\*urgent\*\* @everyone`
+	const hostileStep = "**tests**/[go-tests](https://evil.test)"
+	const escapedStep = `\*\*tests\*\*/\[go-tests\]\(https://evil.test\)`
 
 	n := releasePassed()
 	n.Pipeline = "my_repo"
 	n.Event, n.Branch = EventPush, hostile
 	n.Version = "v1_beta*"
 	n.Outcome = NotifyFailed
-	n.FailedStep, n.FailedCode, n.FailedMessage = "tests/go-tests", "pipeline_step_failed", hostile+"\n# heading\n> quote"
+	n.FailedStep, n.FailedCode, n.FailedMessage = hostileStep, hostileCode, hostile+"\n# heading\n> quote"
 	n.Links = []Link{{Label: "*" + hostile + "*", URL: "https://memql.io/docs/"}}
 	n.Artifacts = []Link{{Label: hostile, URL: "https://os.example.test/?libraryFile=f1"}}
 
 	e, _ := composeDiscord(t, n)
-	if want := `my\_repo · Push to ` + escaped + " failed at tests"; e.Title != want {
+	// The stage the title says the run failed at is the step's name up to its
+	// first "/" or ".", and it is escaped like the rest of the title.
+	if want := `my\_repo · Push to ` + escaped + ` failed at \*\*tests\*\*`; e.Title != want {
 		t.Errorf("title = %q, want %q", e.Title, want)
 	}
 	// One line, with the heading and the quote the message tried to start
 	// folded into it and the quote's marker escaped.
-	wantLine := `tests/go-tests failed: pipeline_step_failed. ` + escaped + ` # heading \> quote`
+	wantLine := escapedStep + ` failed: ` + escapedCode + `. ` + escaped + ` # heading \> quote`
 	if lines := strings.Split(e.Description, "\n"); len(lines) != 2 || lines[1] != wantLine {
 		t.Errorf("description lines = %q, want 2 lines ending in %q", lines, wantLine)
 	}
@@ -483,8 +598,33 @@ func TestDiscordMessageLinksTheOSOriginWithOneSlash(t *testing.T) {
 		if got := fieldNamed(t, e, "MemQL OS").Value; got != "[Open](https://os.example.test/)" {
 			t.Errorf("origin %q: MemQL OS = %q", origin, got)
 		}
-		if _, body := EmailMessage(n); !strings.Contains(body, "\nMemQL OS: https://os.example.test/\n") {
+		if _, body := composeEmail(t, n); !strings.Contains(body, "\nMemQL OS: https://os.example.test/\n") {
 			t.Errorf("origin %q: the email's OS link is not one slash:\n%s", origin, body)
+		}
+	}
+}
+
+// The failure line opens with the failed step's name, which is as much text
+// someone chose as the commit's title above it: a step called "# URGENT" must
+// not draw as a heading, nor "- item" as a bullet.
+func TestDiscordMessageNeutralizesAStepNameThatStartsALine(t *testing.T) {
+	for step, want := range map[string]string{
+		"# URGENT":   `\# URGENT failed: c.`,
+		"-# small":   `\-# small failed: c.`,
+		"- first":    `\- first failed: c.`,
+		"1. first":   `1\. first failed: c.`,
+		"> a quote":  `\> a quote failed: c.`,
+		"* a bullet": `\* a bullet failed: c.`,
+		"tests/a":    `tests/a failed: c.`,
+		"tests.a-1":  `tests.a-1 failed: c.`,
+	} {
+		n := releasePassed()
+		n.Outcome = NotifyFailed
+		n.FailedStep, n.FailedCode = step, "c"
+		e, _ := composeDiscord(t, n)
+		lines := strings.Split(e.Description, "\n")
+		if len(lines) != 2 || lines[1] != want {
+			t.Errorf("step %q: description lines = %q, want a second line %q", step, lines, want)
 		}
 	}
 }
@@ -793,7 +933,7 @@ func TestDiscordMessageCutsAFailureMessageAt300Runes(t *testing.T) {
 	e, _ := composeDiscord(t, n)
 	assertWithinDiscordLimits(t, e)
 
-	const prefix = "deploy/verify-rollout failed: rollout_failed. "
+	const prefix = `deploy/verify-rollout failed: rollout\_failed. `
 	line := strings.Split(e.Description, "\n")[1]
 	message := strings.TrimPrefix(line, prefix)
 	if message == line {
@@ -1044,7 +1184,7 @@ func TestEmailMessageOfAPassedRelease(t *testing.T) {
 		{Label: "memql-linux-amd64.tar.gz", URL: "https://os.example.test/?libraryFile=f1"},
 		{Label: "SHA256SUMS", URL: "https://os.example.test/?libraryFile=f2"},
 	}
-	subject, body := EmailMessage(n)
+	subject, body := composeEmail(t, n)
 	if want := "memql · Release v0.21.7 passed"; subject != want {
 		t.Errorf("subject = %q, want %q", subject, want)
 	}
@@ -1069,7 +1209,7 @@ func TestEmailMessageOfAFailedRunOnAClusterWithNoOSDomain(t *testing.T) {
 	n.Version = goldenMerged
 	n.OSOrigin, n.RunPageURL = "", ""
 	n.FailedStep, n.FailedCode, n.FailedMessage = "tests/go-tests#2", "pipeline_step_timeout", "The step ran past its 20m timeout."
-	subject, body := EmailMessage(n)
+	subject, body := composeEmail(t, n)
 	if want := "memql · Push to main failed at tests"; subject != want {
 		t.Errorf("subject = %q, want %q", subject, want)
 	}
@@ -1088,7 +1228,7 @@ func TestEmailMessageOfAFailedRunOnAClusterWithNoOSDomain(t *testing.T) {
 func TestEmailMessageListsFiveArtifactsAndCountsTheRest(t *testing.T) {
 	n := releasePassed()
 	n.Artifacts = numberedArtifacts(9, 1)
-	_, body := EmailMessage(n)
+	_, body := composeEmail(t, n)
 	want := "Artifacts:\n" +
 		"- 1.tgz: https://os.example.test/?libraryFile=f1\n" +
 		"- 2.tgz: https://os.example.test/?libraryFile=f2\n" +
@@ -1109,10 +1249,15 @@ func TestEmailMessageIsPlainTextOnOneSubjectLine(t *testing.T) {
 	n.Event, n.Branch = EventPush, "feature_x\r\nBcc: someone@example.test"
 	n.Title = "[click](https://evil.test) @everyone **x**"
 	n.Outcome = NotifyFailed
-	n.FailedStep, n.FailedCode, n.FailedMessage = "tests/go-tests", "pipeline_step_failed", "exit status 1\n> quoted"
+	// The step and its code are text a manifest and a runner wrote: they may
+	// carry a line break and Markdown, and neither may start a line of the
+	// email or a header of its own.
+	n.FailedStep = "tests/go-tests\r\nX-Injected: step"
+	n.FailedCode = "pipeline_step_failed\r\nX-Injected: *code*"
+	n.FailedMessage = "exit status 1\n> quoted"
 	n.Links = []Link{{Label: "Release *notes*", URL: "https://memql.io/docs/a_b"}}
 
-	subject, body := EmailMessage(n)
+	subject, body := composeEmail(t, n)
 	if want := "memql · Push to feature_x Bcc: someone@example.test failed at tests"; subject != want {
 		t.Errorf("subject = %q, want %q", subject, want)
 	}
@@ -1122,9 +1267,14 @@ func TestEmailMessageIsPlainTextOnOneSubjectLine(t *testing.T) {
 	if strings.Contains(body, `\`) {
 		t.Errorf("the plain-text body carries a Markdown escape:\n%s", body)
 	}
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "X-Injected") || strings.HasPrefix(line, "Bcc") {
+			t.Errorf("a line break in the step or its code started a line of its own: %q", line)
+		}
+	}
 	for _, want := range []string{
 		"[click](https://evil.test) @everyone **x** (a944ae3)\n",
-		"tests/go-tests failed: pipeline_step_failed. exit status 1 > quoted\n",
+		"tests/go-tests X-Injected: step failed: pipeline_step_failed X-Injected: *code*. exit status 1 > quoted\n",
 		"Release *notes*: https://memql.io/docs/a_b\n",
 	} {
 		if !strings.Contains(body, want) {
@@ -1134,7 +1284,7 @@ func TestEmailMessageIsPlainTextOnOneSubjectLine(t *testing.T) {
 }
 
 func TestEmailMessageHoldsItsSubjectToOneLineOfSaneLength(t *testing.T) {
-	subject, _ := EmailMessage(hostileNotification())
+	subject, _ := composeEmail(t, hostileNotification())
 	if got := utf8.RuneCountInString(subject); got > 256 {
 		t.Errorf("the subject is %d runes", got)
 	}
@@ -1150,7 +1300,7 @@ func TestEmailSubjectEqualsTheDiscordTitleExceptWhereMarkdownNeededEscaping(t *t
 	n := releasePassed()
 	n.Event, n.Branch = EventPush, "release_candidate"
 	e, _ := composeDiscord(t, n)
-	subject, _ := EmailMessage(n)
+	subject, _ := composeEmail(t, n)
 	if e.Title != `memql · Push to release\_candidate passed` || subject != "memql · Push to release_candidate passed" {
 		t.Errorf("title = %q, subject = %q", e.Title, subject)
 	}
