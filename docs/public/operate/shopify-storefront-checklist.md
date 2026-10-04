@@ -249,6 +249,13 @@ is the opposite kind of credential and never appears in any served byte;
 that is asserted by a test that greps the served document, and again by the
 cluster-e2e leg against a document a real cluster really served.
 
+- [ ] The store row's `storefrontTokenRef` is `SHOPIFY_<STOREID>_STOREFRONT_TOKEN`,
+      the name Connect seals the token under. The edge publishes no other
+      secret for a store (memql#5626): a ref naming anything else is refused
+      before it is looked up, the `storefront` block reads `unavailable`, and
+      the edge logs which ref it refused
+      ([the Shopify connector](shopify-connector.md)).
+
 ## 8. What headless loses from a Liquid theme
 
 Each of these works only inside a theme. A headless storefront has no theme,

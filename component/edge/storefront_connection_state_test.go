@@ -8,7 +8,7 @@ import (
 
 func TestStorefrontConnectionStateDoesNotMaskFailuresAsDesignPreview(t *testing.T) {
 	bound := map[string]any{"storeId": "store"}
-	store := &BoundStore{ID: "store", Domain: "example.myshopify.com", StorefrontTokenRef: "public-token-ref"}
+	store := &BoundStore{ID: "store", Domain: "example.myshopify.com", StorefrontTokenRef: StorefrontTokenSecretName("store")}
 	for _, tc := range []struct {
 		name string
 		site *Site

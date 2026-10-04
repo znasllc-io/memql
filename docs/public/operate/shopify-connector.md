@@ -164,6 +164,19 @@ screen. No screen seals a token by hand: Connect Shopify seals them on the
 server, and the environment seed below does for a cluster's first store. Name a
 row one of them wrote.
 
+**The edge publishes one secret per store, and checks it is that one**
+(memql#5626). A storefront's runtime document carries the Storefront token to
+every visitor, so the edge resolves `storefrontTokenRef` only when it names the
+store's OWN token, `SHOPIFY_<STOREID>_STOREFRONT_TOKEN` (the id upper-cased,
+hyphens kept) -- the name Connect, a pasted token and the seed all seal it
+under. A ref naming anything else -- the store's Admin token, another store's
+token, any other cluster secret -- is never looked up: the storefront reads
+`connectionState: "unavailable"`, and the edge logs one warning an hour naming
+the site, the store and the ref. The repair is to seal the token again through
+Connect or the Store panel, which writes it under the right name. The name is
+the check because nothing else marks a Storefront token: every Shopify secret,
+the Admin token included, is sealed with kind `vendor_api_key`.
+
 **A store row and a site binding are one record.** The storefront's binding
 NAMES this row -- `binding: {storeId}` on `v1:platform:site` -- and does not
 copy it. The edge resolves the myshopify.com domain and the Storefront token
