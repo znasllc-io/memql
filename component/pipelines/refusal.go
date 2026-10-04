@@ -85,6 +85,19 @@ const (
 	CodeNotifyUnavailable = "pipeline_notify_unavailable"
 )
 
+// Re-running only what failed (epic memql#5479, D13's "Re-run failed").
+const (
+	// CodePassedEarlier is a step a failed-only re-run carries over rather
+	// than runs: the attempt it re-runs passed it, with the same package
+	// slice. A skip, because it fails nothing -- and not a pass, because this
+	// attempt executed nothing and the journal does not say otherwise.
+	CodePassedEarlier = "pipeline_passed_earlier"
+	// CodeNothingToRerun refuses a failed-only re-run of a run that has no
+	// failed or cancelled step to run again: one that passed, or one refused
+	// before any step began.
+	CodeNothingToRerun = "pipeline_nothing_to_rerun"
+)
+
 // The substrate's codes (epic memql#5478), declared here so the catalogue,
 // its parity test and the OS copy land once.
 const (
@@ -131,6 +144,7 @@ var codeClasses = map[string]Class{
 	CodeForkRefused:       ClassRefusal,
 	CodeDisconnected:      ClassRefusal,
 	CodeAlreadyConnected:  ClassRefusal,
+	CodeNothingToRerun:    ClassRefusal,
 
 	CodeRunnerUnavailable:   ClassFailure,
 	CodeExecutorError:       ClassFailure,
@@ -152,6 +166,7 @@ var codeClasses = map[string]Class{
 	CodeStageBlocked:      ClassSkip,
 	CodeNotAffected:       ClassSkip,
 	CodeNotifyUnavailable: ClassSkip,
+	CodePassedEarlier:     ClassSkip,
 
 	CodeCheckPermission:   ClassNote,
 	CodeArtifactMissing:   ClassNote,

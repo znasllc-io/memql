@@ -49,6 +49,7 @@ shape run pipelineRunFull {
   attempt
   trigger
   rerunOf
+  rerunFailedOnly
   deliveryId
   pullRequest
   headBranch

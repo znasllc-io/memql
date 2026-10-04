@@ -745,7 +745,7 @@ func (s *gateStore) RoutingPolicyForOwner(context.Context, string) (*worker.Poli
 }
 func (s *gateStore) TouchWorkerSelected(context.Context, string, string) error { return nil }
 func (s *gateStore) UserPreferences(context.Context, string) (worker.Preferences, error) {
-	return worker.Preferences{ComputerUseEnabled: s.computerUse}, s.prefsErr
+	return worker.Preferences{KillSwitchEngaged: !s.computerUse}, s.prefsErr
 }
 func (s *gateStore) AgentAuthorization(context.Context, string, string) (*worker.Authorization, error) {
 	return nil, nil

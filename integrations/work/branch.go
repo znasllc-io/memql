@@ -28,6 +28,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 func (i *Integration) handleBranchRun(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -117,6 +118,7 @@ func (i *Integration) handleBranchRun(ctx context.Context, args map[string]any, 
 		Status:              runStatusRunning,
 		StartedAt:           now,
 		OwnerUserId:         source.owner,
+		Routing:             common.RouteChoiceFrom(source.row["routing"]),
 		Head:                forkHead.Object(),
 		// The fork's sessions run in a directory named for the fork, never in
 		// the source's: the source is untouched, its workspace included.

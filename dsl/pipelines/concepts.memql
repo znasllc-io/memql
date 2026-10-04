@@ -83,6 +83,7 @@ concept run {
   attempt            int!  @description("1 for the first run of a key; a re-run is attempt + 1.")
   trigger            enum("webhook", "poll", "rerun")!  @description("What opened this row: a GitHub delivery, the poll, or a person's or GitHub's re-run request.")
   rerunOf            string  @description("The pipelines run this attempt re-runs, when trigger is rerun. Empty otherwise.")
+  rerunFailedOnly    bool  @description("This attempt re-runs only what did not pass in rerunOf (epic memql#5479): a step rerunOf passed, with the same package slice, is carried over as skipped pipeline_passed_earlier rather than run again, and everything else runs. False for a whole re-run and for every attempt a delivery or the poll opened.")
   deliveryId         string  @description("GitHub's delivery GUID (the X-GitHub-Delivery header) of the webhook that opened this run. Correlation only; empty for a poll or a re-run.")
   pullRequest        int  @description("The pull request number for a pull_request run. Absent for every other event.")
   headBranch         string  @description("The branch the head SHA was pushed to, when GitHub named one.")

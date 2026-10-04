@@ -162,10 +162,13 @@ type inferenceDoors struct {
 	LocalModels           int
 	EligibleModelIds      []string
 	// AppEligible and RunnableApps are the app door (epic memql#5096): a
-	// signed-in Claude Code or Codex on a machine whose stream THIS replica
-	// holds. They live here rather than beside the caller for the reason the
-	// type's own note gives -- the readiness verdict and the inferenceStatus
-	// row must not be able to disagree about whether inference is configured.
+	// signed-in Claude Code or Codex on a machine this node can REACH -- one
+	// whose stream this replica holds, or one held by an agent it can forward
+	// a call to (AppDoor.Reachable, the chat door's predicate; inference is a
+	// chat turn, and a chat turn crosses). They live here rather than beside
+	// the caller for the reason the type's own note gives -- the readiness
+	// verdict and the inferenceStatus row must not be able to disagree about
+	// whether inference is configured.
 	AppEligible          bool
 	RunnableApps         []string
 	AppSessionsInstalled bool
@@ -209,7 +212,10 @@ func (e *MemQLEngine) inferenceDoors(ctx context.Context) inferenceDoors {
 	d.AppSessionsInstalled = e.providers.AppInferenceInstalled()
 	if doors, err := e.providers.AppDoors(ctx, actingUserFromContext(ctx)); err == nil {
 		for _, door := range doors {
-			if door.Runnable() {
+			// REACHABLE, not Runnable: Runnable is the session door's
+			// local-only question (can a step handover open HERE), and this
+			// row answers the chat door's -- can this caller get inference.
+			if door.Reachable() {
 				d.AppEligible = true
 				d.RunnableApps = append(d.RunnableApps, door.AppId)
 				// Runnable apps currently answer completed chat only. Do not

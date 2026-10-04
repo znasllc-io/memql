@@ -3,7 +3,6 @@ import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
-import { TaskRouting } from "./TaskRouting";
 import { accessAdmits } from "../../system/registry";
 import { AppsSection } from "./apps/AppsSection";
 import { useAddMachineFlow } from "./addMachine/useAddMachineFlow";
@@ -26,8 +25,8 @@ import { useSession } from "../../chrome/access";
 // The foundation shipped this app as its live exemplar -- a read-only machine
 // list proving the substrate end to end. Everything here is the promotion of
 // that exemplar into the app: rename, operator labels, revoke and per-machine
-// detail; the routing policy and the per-call routing record; the workbench
-// workspaces and the add-machine entry.
+// detail; routing (routes, rules, machine choice and history) and the per-call
+// routing record; the workbench workspaces and the add-machine entry.
 //
 // Sections are the app's own navigation. It never opens a window.
 
@@ -123,9 +122,9 @@ export function FleetApp({
         {id === "overview" ? <FleetOverview onOpenMachine={machineId => { select({ machineId, view: "equipment" }); navigate("machines", { fromContent: true }); }} />
           : id === "settings" ? <FleetSettingsSection settings={settings} update={update} />
           : id === "logs" ? <AppLogsSection app="fleet" subjectConcepts={FLEET_LOG_CONCEPTS} intent={active ? intent : undefined} consumeIntent={consumeIntent} />
-          : id === "policies" ? <TaskRouting />
           : id === "models" ? <ModelsSection onHome={() => navigate("machines", { fromContent: true })} />
-          : id === "routing" ? <RoutingSection />
+          : id === "routing" ? <RoutingSection intent={active ? intent : undefined} consumeIntent={consumeIntent}
+              onAddMachine={() => { if (!addMachine.active) addMachine.start({ inference: true }); navigate("machines", { fromContent: true }); }} />
           : id === "workbenches" ? <WorkbenchesSection />
           : id === "apps" ? <AppsSection sessionTarget={sessionTarget} navigation={active ? navigation : undefined} />
           : <FleetWorkspace onOpenSession={id => { setSessionTarget(held => ({ id, revision: (held?.revision ?? 0) + 1 })); navigate("apps", { fromContent: true }); }} selection={selection} select={select} navigate={navigate}

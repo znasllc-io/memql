@@ -288,6 +288,13 @@ type FleetCallRequest struct {
 	// that has such a knob; one that has none ignores it. Empty means the
 	// level decides.
 	Effort string
+	// Level is the level the router resolved this call at (one of
+	// core/airoute's words). It rides ModelCallStart.level to the machine,
+	// where it never changes the model -- the router already chose that --
+	// and reaches the one knob a local runtime has for it: an Ollama `fast`
+	// call runs with the model's hidden thinking off. Empty means no level was
+	// bound, which the machine reads as "run at the runtime's own defaults".
+	Level string
 	// OnDelta, when set, receives streamed content as it arrives.
 	OnDelta func(string)
 }
@@ -871,6 +878,9 @@ type fleetProvider struct {
 	// effort is a person's explicit effort for this one call (epic
 	// memql#5414), bound per resolution for the reason the floor is.
 	effort string
+	// level is the level this resolution was made at, bound per resolution
+	// for the same reason; see FleetCallRequest.Level for what it reaches.
+	level string
 	// lastMu guards the surface bookkeeping the ledger reads back after a
 	// call. It is per-entry rather than per-call because the provider
 	// interfaces return a string and have nowhere to carry it.
@@ -954,6 +964,9 @@ func (p *fleetProvider) call(ctx context.Context, req FleetCallRequest) (FleetCa
 
 	if strings.TrimSpace(req.Effort) == "" {
 		req.Effort = p.effort
+	}
+	if strings.TrimSpace(req.Level) == "" {
+		req.Level = p.level
 	}
 
 	req.ContextTokens = max(req.ContextTokens, p.minContextTokens)

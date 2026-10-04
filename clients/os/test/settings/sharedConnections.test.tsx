@@ -32,4 +32,18 @@ describe("connections shared across apps", () => {
     rememberConnectAttempt("flow", "viewer", "", "connections", "settings");
     expect(correlateConnectReturn({ reason: "connect_state_invalid", section: "sources" }, "viewer")).toMatchObject({ appId: "settings", section: "connections" });
   });
+  it("brings a GitHub App setup begun from Settings > Pipelines back there, even through GitHub's neutral install return", () => {
+    // The return path the section hands the identity node names it ...
+    const path = returnPathFor("pipelines", "settings");
+    expect(readConnectReturn(path.slice(1) + "&github=installed")).toMatchObject({ appId: "settings", section: "pipelines" });
+    // ... and GitHub's own landing after the install names nothing, so the
+    // remembered start of the trip is what decides.
+    rememberConnectAttempt("", "viewer", "", "pipelines", "settings");
+    const neutral = readConnectReturn("github=installed")!;
+    expect(neutral.section).toBe("sources");
+    expect(correlateConnectReturn(neutral, "viewer")).toMatchObject({ appId: "settings", section: "pipelines", reason: "installed" });
+    // Somebody else's record steers nothing.
+    rememberConnectAttempt("", "someone-else", "", "pipelines", "settings");
+    expect(correlateConnectReturn(readConnectReturn("github=installed")!, "viewer")).toMatchObject({ section: "sources" });
+  });
 });

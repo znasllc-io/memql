@@ -52,11 +52,11 @@ func TestRerunRefusals(t *testing.T) {
 	h.store.addRun(going)
 
 	// Somebody else's run is no run.
-	if _, err := h.integ.Rerun(personCtx(otherID), going.ID); err == nil {
+	if _, err := h.integ.Rerun(personCtx(otherID), going.ID, false); err == nil {
 		t.Errorf("another person re-ran somebody else's run")
 	}
 	// A run still going is not re-run.
-	if _, err := h.integ.Rerun(personCtx(ownerID), going.ID); !errors.Is(err, ErrRunInProgress) {
+	if _, err := h.integ.Rerun(personCtx(ownerID), going.ID, false); !errors.Is(err, ErrRunInProgress) {
 		t.Errorf("err = %v, want ErrRunInProgress", err)
 	}
 
@@ -64,7 +64,7 @@ func TestRerunRefusals(t *testing.T) {
 	fork := queuedRun(p, shaB)
 	fork.Status, fork.Conclusion, fork.RefusalCode = StatusCompleted, ConclusionRefused, pipelines.CodeForkRefused
 	h.store.addRun(fork)
-	if _, err := h.integ.Rerun(personCtx(ownerID), fork.ID); refusalCode(err) != pipelines.CodeForkRefused {
+	if _, err := h.integ.Rerun(personCtx(ownerID), fork.ID, false); refusalCode(err) != pipelines.CodeForkRefused {
 		t.Errorf("fork re-run: %v", err)
 	}
 
@@ -74,10 +74,41 @@ func TestRerunRefusals(t *testing.T) {
 	h.store.addRun(done)
 	p.Status = PipelineDisconnected
 	h.store.addPipeline(p)
-	if _, err := h.integ.Rerun(personCtx(ownerID), done.ID); refusalCode(err) != pipelines.CodeDisconnected {
+	if _, err := h.integ.Rerun(personCtx(ownerID), done.ID, false); refusalCode(err) != pipelines.CodeDisconnected {
 		t.Errorf("disconnected re-run: %v", err)
 	}
 	if n := len(h.store.runCreates); n != 0 {
 		t.Errorf("no refused re-run wrote a run: %d", n)
+	}
+}
+
+// TestARerunOfFailedStepsIsRefusedWhenNothingFailed: the act is offered only
+// on a run with something to run again, and the engine holds the same line.
+// A run that passed, and a run refused before any step (a manifest that does
+// not compile), have no failed step; the second is still re-runnable whole.
+func TestARerunOfFailedStepsIsRefusedWhenNothingFailed(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+
+	passedRun := queuedRun(p, shaA)
+	passedRun.Status, passedRun.Conclusion = StatusCompleted, ConclusionSuccess
+	h.store.addRun(passedRun)
+	if _, err := h.integ.Rerun(personCtx(ownerID), passedRun.ID, true); refusalCode(err) != pipelines.CodeNothingToRerun {
+		t.Errorf("a passed run has no failed step to re-run: %v", err)
+	}
+
+	refused := queuedRun(p, shaB)
+	refused.Status, refused.Conclusion, refused.RefusalCode = StatusCompleted, ConclusionFailure, pipelines.CodeStepInvalid
+	h.store.addRun(refused)
+	if _, err := h.integ.Rerun(personCtx(ownerID), refused.ID, true); refusalCode(err) != pipelines.CodeNothingToRerun {
+		t.Errorf("a run refused before any step has no failed step to re-run: %v", err)
+	}
+	if n := len(h.store.runCreates); n != 0 {
+		t.Fatalf("no refused re-run wrote a run: %d", n)
+	}
+	whole, err := h.integ.Rerun(personCtx(ownerID), refused.ID, false)
+	if err != nil || whole.RerunFailedOnly {
+		t.Errorf("the refused run is still re-run whole: %+v %v", whole, err)
 	}
 }

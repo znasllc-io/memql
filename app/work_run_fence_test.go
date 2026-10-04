@@ -30,3 +30,24 @@ func TestExecutionHopFencesLiveStepAfterClaimLeaseExpires(t *testing.T) {
 		t.Fatal("terminal run admitted a stale event")
 	}
 }
+
+// TestTheStoredJournalFencesAnIdOnlyEvent: an id-only run event carries no
+// triggeredBy, so the subscriber passes it to this privileged read -- and the
+// read is the one place left to recognise a run its driver owns. Asked of the
+// REQUEST alone, a journal (the Library's analysis pass, an app session's
+// recording) is admitted here, fails to load a template called
+// "libraryAnalyzeFile", and is failed automation_not_runnable.
+func TestTheStoredJournalFencesAnIdOnlyEvent(t *testing.T) {
+	now := time.Now()
+	idOnly := work.DispatchRequest{RunId: "r", Status: "running"}
+	for _, stored := range []string{"journal:libraryAnalyzeFile", "journal:appSession", "procedure:canary"} {
+		j := &automations.RunJournal{RunId: "r", GoalId: "g", Status: "running", TriggeredBy: stored}
+		if workRunCanStart(idOnly, j, now) {
+			t.Errorf("a stored %s run was admitted on an id-only event; its driver owns it", stored)
+		}
+	}
+	// The control: a compiled goal run is still admitted on the same event.
+	if !workRunCanStart(idOnly, &automations.RunJournal{RunId: "r", GoalId: "g", Status: "running", TriggeredBy: "api"}, now) {
+		t.Fatal("the control: a compiled goal run is no longer admitted on an id-only event")
+	}
+}

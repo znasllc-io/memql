@@ -33,6 +33,7 @@ func (a *audioChain) call(ctx context.Context, inputChars int, invoke func(conte
 	var last error
 	var previous Resolved
 	var previousCtx context.Context
+	selection := a.resolved
 	for _, name := range a.chain {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -41,7 +42,7 @@ func (a *audioChain) call(ctx context.Context, inputChars int, invoke func(conte
 		if !ok {
 			continue
 		}
-		resolved = resolved.withDecisionFrom(a.resolved)
+		resolved = resolved.withDecisionFrom(selection)
 		if last != nil {
 			a.router.recordObserved(previousCtx, fallbackRecord(a.req, previous, last))
 		}
@@ -49,13 +50,14 @@ func (a *audioChain) call(ctx context.Context, inputChars int, invoke func(conte
 		attemptCtx := startObservation(ctx, a.req, resolved, start)
 		result, outputChars, err := invoke(attemptCtx, client)
 		record := buildRecord(a.req, resolved, client, EstimateTokensFromChars(inputChars), EstimateTokensFromChars(outputChars), 0, start, time.Time{}, time.Now(), false, err, ctx.Err())
-		a.router.recordObserved(attemptCtx, record)
+		a.router.recordAttempt(attemptCtx, record)
 		if err == nil {
 			return result, nil
 		}
 		last = err
 		previous = resolved
 		previousCtx = attemptCtx
+		selection = selection.withAttemptFailed(resolved, err)
 		// Audio is a pure inference request; a failed request has no workspace
 		// mutation to replay. Each attempt remains separately visible in Activity.
 		if ctx.Err() != nil {

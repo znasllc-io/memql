@@ -135,7 +135,7 @@ the variables for the second.
 | Campaign sending | The deployment, on the bff | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET`, `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` |
 | Workbenches | The deployment, on the agent | `MEMQL_WORKBENCH_REMOTE`, `MEMQL_WORKER_PEERS` |
 | Local apps | The deployment, on the agent | `MEMQL_MCP_PUBLIC_URL`, `MEMQL_NODE_BOOTSTRAP_TOKEN`, `MEMQL_IDENTITY_VERIFIER_BASE_URL` |
-| Pipelines (optional) | Connecting a pipeline to a source; its Settings section arrives with epic memql#5479 | The GitHub App holding checks write, one connected repository, and a pipeline runner on the agent ([Pipelines](pipelines.md)) |
+| Pipelines (optional) | The OS, at Settings -> Pipelines (cluster owners); a pipeline itself is connected from its source's page | The GitHub App holding checks write, one connected repository, and a pipeline runner on the agent ([Pipelines](pipelines.md)) |
 
 A module is **configured** when any one of its lanes is complete -- lanes are
 alternatives, not requirements. A module with some required slots present and
@@ -215,6 +215,22 @@ node's verdict, so every readiness row carries them whatever its state, and the
 folded verdict carries them even when no node has reported. A node without the
 named integration reports `notApplicable`, so until some node carries it the
 verdict reads *Not reported* -- never *Not set up*.
+
+**An integration-evaluated module's row carries its report's settings as one
+lane**, named `report`, one slot per setting -- presence and source, never a
+value -- written only by a node that hosts the integration and could ask it.
+That is how a surface says WHICH of a module's facts hold rather than only
+whether all of them do: Settings -> Pipelines draws its three sub-steps (the
+GitHub App, a repository connected, a runner) from the pipelines report's three
+settings, read off the agent nodes that run steps.
+
+**The marker under the gear.** While an optional, dismissable module is neither
+configured nor dismissed, MemQL OS marks the Settings icon for a person who may
+open that module's Settings section -- the attention dot the dock already draws
+-- and the section says what is missing. *Not now* writes that person's own
+receipt for the marker: it clears for them, nobody else, and the section stays
+where it was. Opening the section does not clear it; only *Not now* or the
+module being set up does.
 
 The shell carries a copy of the module ids and descriptions
 (`clients/os/src/system/modules.ts`), pinned to this manifest by

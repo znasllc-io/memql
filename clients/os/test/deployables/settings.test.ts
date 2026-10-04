@@ -26,7 +26,7 @@ describe("the manifest", () => {
     expect(deployables?.component.name).toBe("DeployablesApp");
   });
 
-  it("declares exactly Overview, Deployables, Sources, Logs and Settings, in that order", () => {
+  it("declares exactly Overview, Deployables, Sources, Runs, Logs and Settings, in that order", () => {
     // Actions, Sites and Packages retired with the compose epic (memql#4885):
     // one list and one page replaced three sections and two mental models.
     // FOUR, not the three the compose restructure left: Logs is a shell
@@ -37,15 +37,19 @@ describe("the manifest", () => {
     // deployables, with a life of its own. It used to be a header row inside
     // the deployables list with its apps indented beneath it -- a tab is a
     // different kind of thing, and a subset is a filter.
-    expect(DEPLOYABLES_SECTION_IDS).toEqual(["map", "deployables", "sources", "logs", "settings"]);
-    expect(DEPLOYABLES_SECTIONS.map((s) => s.name)).toEqual(["Overview", "Deployables", "Sources", "Logs", "Settings"]);
-    // The gated one is offered to an admin and withheld below, so the window
-    // nav genuinely differs by role -- the assertion the three-section version
-    // of this file could not make, because it had nothing gated.
+    // RUNS IS THE THIRD NOUN (epic memql#5479, D12): every pipeline run of
+    // every source the person connected. A run has a page of its own, which is
+    // what a source's Checks row and a GitHub check's details link open.
+    expect(DEPLOYABLES_SECTION_IDS).toEqual(["map", "deployables", "sources", "runs", "logs", "settings"]);
+    expect(DEPLOYABLES_SECTIONS.map((s) => s.name)).toEqual(["Overview", "Deployables", "Sources", "Runs", "Logs", "Settings"]);
+    // The gated ones differ by role, so the window nav genuinely does: Logs is
+    // the log store's admin floor, Runs is the roles that connect pipelines.
     installSeededAccess("reader");
     expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "sources", "settings"]);
     installSeededAccess("admin");
     expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "sources", "logs", "settings"]);
+    installSeededAccess("developer");
+    expect(sectionsFor(deployables!).map((s) => s.id)).toEqual(["map", "deployables", "sources", "runs", "logs", "settings"]);
   });
 
   it("announces the unified Sources destination without a second repository or account section", () => {
@@ -61,7 +65,7 @@ describe("the manifest", () => {
     expect(deployables?.sections?.[0]?.id).toBe("map");
   });
 
-  it("gates Logs at admin and nothing else", () => {
+  it("gates Logs at admin and Runs at the roles that connect pipelines, and nothing else", () => {
     // The app itself admits every signed-in user, because the concept's
     // composite tier means everyone has deployables of their own to read, and
     // the WRITE half is gated inside the section -- Add a deployable renders for
@@ -75,11 +79,14 @@ describe("the manifest", () => {
     expect(deployables?.requires).toBe("app:deployables");
     expect(rolesOpening("app:deployables")).toEqual(["owner", "developer", "admin", "user", "viewer"]);
     const gated = (deployables?.sections ?? []).filter((s) => s.requires !== undefined);
-    expect(gated.map((s) => s.id)).toEqual(["logs"]);
+    expect(gated.map((s) => s.id)).toEqual(["runs", "logs"]);
     for (const section of gated) {
-      expect(section.requires).toBe("app:deployables/logs");
+      expect(section.requires).toBe(`app:deployables/${section.id}`);
     }
     expect(rolesOpening("app:deployables/logs")).toEqual(["owner", "developer", "admin"]);
+    // Runs lists the runs of pipelines the viewer connected, read owner-scoped;
+    // the `connect` part is owner and developer, so the tab is too.
+    expect(rolesOpening("app:deployables/runs")).toEqual(["owner", "developer"]);
   });
 
   it("declares the settings section its gear points at", () => {

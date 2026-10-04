@@ -52,6 +52,7 @@ import (
 
 	workstate "github.com/znasllc-io/memql/component/work"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/component/workjournal"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -60,6 +61,12 @@ import (
 // opens and a run the delegate opened read as the same kind of thing in the
 // Work app's feed.
 const appSessionTemplate = "appSession"
+
+// maxRecordingStatement bounds the goal statement a recording opens. The
+// statement is what the Work feed and Nexus show a person; the prompt that
+// used to be written here whole is kept on the session row, which is where a
+// reader who wants it looks.
+const maxRecordingStatement = 160
 
 // SessionWriter records an app session's actions.
 //
@@ -104,6 +111,10 @@ func (w *SessionWriter) SetNow(now func() time.Time) {
 // With no run, one is opened here and the delegating step is stamped, which is
 // the delegated-task path: nothing handed a step over, so nothing opened a run
 // for it.
+//
+// A MODEL CALL (r.ModelCall) is opened here too, and claims less: it names the
+// calling run as its parent -- which is what makes the session traceable to the
+// work that caused it -- and nothing else. See RecordingOpen.ModelCall.
 func (w *SessionWriter) OpenRecording(ctx context.Context, r workerservice.RecordingOpen) (string, error) {
 	owner := strings.TrimSpace(r.OwnerUserId)
 	if owner == "" {
@@ -121,10 +132,7 @@ func (w *SessionWriter) OpenRecording(ctx context.Context, r workerservice.Recor
 	goalId := deriveRecordingId("goal", r.SessionId, "")
 	runId := deriveRecordingId("run", r.SessionId, now.Format(time.RFC3339Nano))
 
-	statement := "run this in " + firstNonBlank(r.App, "a local app")
-	if p := strings.TrimSpace(r.Prompt); p != "" {
-		statement = p
-	}
+	statement := recordingStatement(r)
 
 	// THE RUN INHERITS ITS PARENT'S GOAL (epic memql#5408, gap G2), exactly as
 	// a run the delegate opens does: procedure learning mines the recordings of
@@ -133,9 +141,16 @@ func (w *SessionWriter) OpenRecording(ctx context.Context, r workerservice.Recor
 	// the parent's variables, less the replay-only ones -- cannot say which
 	// input supplied each parameter. Read under the owner's own actor -- the
 	// parent is theirs -- and a parent that cannot be read leaves the recording
-	// with its own statement's signature rather than refused: the session runs
-	// either way.
-	inherited := w.parentRunInheritance(ctx, owner, r.ParentRunId)
+	// with the signature of what it was asked rather than refused: the session
+	// runs either way.
+	//
+	// A MODEL CALL INHERITS NOTHING. It is one call a step made, not a
+	// recording of the goal's work, and joining the goal's corpus would teach
+	// the lift a procedure from a classifier's answer.
+	var inherited runInheritance
+	if !r.ModelCall {
+		inherited = w.parentRunInheritance(ctx, owner, r.ParentRunId)
+	}
 	if err := w.store.writeInternal(ownerActor(ctx, owner), "mutation "+call("createWorkGoal", map[string]any{
 		"goalId":       goalId,
 		"statement":    statement,
@@ -147,15 +162,18 @@ func (w *SessionWriter) OpenRecording(ctx context.Context, r workerservice.Recor
 	}
 	runArgs := map[string]any{
 		"runId":               runId,
-		"goalSignature":       workstate.GoalSignature(statement, nil),
 		"goalId":              goalId,
 		"automationName":      appSessionTemplate,
 		"templateFingerprint": appSessionTemplate,
-		"triggeredBy":         "system",
-		"mode":                "live",
-		"status":              "running",
-		"nodeId":              selfNodeId(),
-		"startedAt":           now.Format(time.RFC3339),
+		// DRIVER-OWNED: this writer opens, records and closes the run, and
+		// the dispatcher must never adopt it (IsDriverOwnedRun). "system" read
+		// as compiled goal work, and every recording was failed
+		// automation_not_runnable a millisecond after it opened.
+		"triggeredBy": workjournal.TriggeredBy(appSessionTemplate),
+		"mode":        "live",
+		"status":      "running",
+		"nodeId":      selfNodeId(),
+		"startedAt":   now.Format(time.RFC3339),
 		"input": map[string]any{
 			"app":          r.App,
 			"sessionId":    r.SessionId,
@@ -166,6 +184,14 @@ func (w *SessionWriter) OpenRecording(ctx context.Context, r workerservice.Recor
 	}
 	if parent := strings.TrimSpace(r.ParentRunId); parent != "" {
 		runArgs["parentRunId"] = parent
+	}
+	if !r.ModelCall {
+		// THE SIGNATURE IS WHAT WAS ASKED, not the statement: the statement is
+		// a short sentence naming the app, and a signature built from it would
+		// pool every task ever delegated to that app into one corpus. A model
+		// call writes none -- the same pooling, for every call through the
+		// door, is exactly what its short statement would cause.
+		runArgs["goalSignature"] = workstate.GoalSignature(firstNonBlank(r.Prompt, statement), nil)
 	}
 	if inherited.goalSignature != "" {
 		runArgs["goalSignature"] = inherited.goalSignature
@@ -180,7 +206,12 @@ func (w *SessionWriter) OpenRecording(ctx context.Context, r workerservice.Recor
 	// A FAILURE HERE IS A WARNING. The session is about to run on somebody's
 	// machine either way; losing the back-pointer costs a reader a journey,
 	// and refusing the work would cost them the work.
-	if stepId := strings.TrimSpace(r.ParentStepId); stepId != "" {
+	//
+	// NOT FOR A MODEL CALL: childRunId means "this step was handed over", and
+	// a step that made three calls through an app would have it overwritten
+	// three times with runs that are not the step's work. What a model call
+	// names as its step is the calling step's KEY, too, not a row.
+	if stepId := strings.TrimSpace(r.ParentStepId); stepId != "" && !r.ModelCall {
 		if err := w.store.writeInternal(ownerActor(ctx, owner), "mutation "+call("updateWorkStep", map[string]any{
 			"stepId":     stepId,
 			"childRunId": runId,
@@ -371,6 +402,12 @@ func (w *SessionWriter) CloseRecording(ctx context.Context, r workerservice.Reco
 	}
 	if succeeded {
 		closeRun["outcome"] = answerResult(r)
+		// CLEARED, not omitted: the read-merge keeps whatever an earlier
+		// write named, and a succeeded run carrying an error code -- which is
+		// what a dispatcher's wrongful failure left behind -- reads as a
+		// failure to everything keyed on errorCode.
+		closeRun["errorCode"] = ""
+		closeRun["errorMessage"] = ""
 	} else {
 		closeRun["errorCode"] = "app_session_" + r.Status
 		closeRun["errorMessage"] = r.ErrorMessage
@@ -378,9 +415,61 @@ func (w *SessionWriter) CloseRecording(ctx context.Context, r workerservice.Reco
 	return w.store.writeInternal(ownerActor(ctx, owner), "mutation "+call("updateWorkRun", closeRun))
 }
 
+// HeartbeatRecording says the recording run is still being written.
+//
+// The run is this writer's, not the dispatcher's, so no executor beats for it
+// -- and the work sweep abandons a running run whose heartbeat is a minute
+// old, which is every session longer than a minute. The replica holding the
+// session calls this from its flush, throttled.
+//
+// It names the heartbeat and nothing else: updateWorkRun is a read-merge, and
+// any other field named here would be rewritten on every beat.
+func (w *SessionWriter) HeartbeatRecording(ctx context.Context, r workerservice.RecordingHeartbeat) error {
+	owner, err := recordingOwner(r.OwnerUserId, r.RunId, "a heartbeat")
+	if err != nil {
+		return err
+	}
+	at := r.At
+	if at.IsZero() {
+		at = w.now()
+	}
+	return w.store.writeInternal(ownerActor(ctx, owner), "mutation "+call("updateWorkRun", map[string]any{
+		"runId":       r.RunId,
+		"heartbeatAt": at.UTC().Format(time.RFC3339Nano),
+	}))
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// recordingStatement is the goal a recording opens, as a person reads it in the
+// Work feed: which app, doing what kind of thing -- and, for a delegated task,
+// the first line of what it was asked, bounded. Never the prompt whole: a
+// classifier call through an app put a 3,452-character goal into the feed,
+// one per call.
+func recordingStatement(r workerservice.RecordingOpen) string {
+	app := firstNonBlank(r.App, "a local app")
+	if r.ModelCall {
+		return app + " answered a model call"
+	}
+	statement := "run this in " + app
+	if head := firstLine(r.Prompt); head != "" {
+		statement += ": " + head
+	}
+	if runes := []rune(statement); len(runes) > maxRecordingStatement {
+		statement = strings.TrimSpace(string(runes[:maxRecordingStatement-3])) + "..."
+	}
+	return statement
+}
+
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		s = s[:i]
+	}
+	return strings.TrimSpace(s)
+}
 
 // recordingOwner checks the two preconditions and answers the owner to borrow.
 //

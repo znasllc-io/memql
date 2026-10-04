@@ -59,7 +59,7 @@ describe("the permissions self-view (memql#4744)", () => {
     expect(hiddenSurfaces(OS_REGISTRY).map((h) => h.label)).toEqual(gated);
     // The anti-vacuous floor: if the seeds ever opened everything to admin,
     // the assertion above would compare two empty lists and pass against a
-    // registry that hid everything from one. Integrations and Doors are
+    // registry that hid everything from one. Integrations and Vendors are
     // owner-or-developer by program decision P6; Data origins and the Audit
     // trail are owner-floored because the engine is (row admission returns
     // ZERO ROWS rather than an error there, so a section is the only
@@ -70,7 +70,7 @@ describe("the permissions self-view (memql#4744)", () => {
     // in its place because it is the one the comment above already argues
     // for and the list had never actually asserted.
     expect(gated).toContain("Settings -- Integrations");
-    expect(gated).toContain("Settings -- Doors");
+    expect(gated).toContain("Settings -- Vendors");
     expect(gated).toContain("Cluster -- Audit trail");
     expect(gated).toContain("Cluster -- Data origins");
   });

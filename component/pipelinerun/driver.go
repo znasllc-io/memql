@@ -481,6 +481,15 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 		// again writes the same ids, and nothing has run to lose.
 	}
 
+	// A FAILED-ONLY RE-RUN carries what its original passed (epic
+	// memql#5479). Here and only here: on a resume the carried steps are
+	// already in the rows, each a skip the declarations below recorded, and
+	// reading the original again could only disagree with what this run
+	// began as.
+	if dr.run.RerunFailedOnly && !dr.carryFromOriginal(ctx) {
+		return nil, false
+	}
+
 	work := workjournal.Work{
 		OwnerUserID: dr.run.OwnerUserID,
 		Template:    workTemplatePrefix + dr.p.Name,
@@ -533,6 +542,73 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 	dr.workRun.Store(w)
 	dr.setFacts()
 	return nil, true
+}
+
+// carryFromOriginal reads the attempt this one re-runs, and its steps, and
+// carries every step it passed (carryPassed). It answers false when the drive
+// must stop: a read that did not answer is not "nothing passed", because
+// running everything again is not what was asked for. An original nobody can
+// read any more -- retention retired it -- carries nothing, and the run runs
+// every step, which is the honest reading of "re-run what did not pass" when
+// what passed can no longer be shown.
+func (dr *runDriver) carryFromOriginal(ctx context.Context) bool {
+	d := dr.d
+	originalID := strings.TrimSpace(dr.run.RerunOf)
+	if originalID == "" {
+		return true
+	}
+	fresh := memql.ContextWithFreshRead(ctx)
+	original, err := d.Store.RunByID(fresh, originalID)
+	if err != nil {
+		dr.abort("reading the attempt this run re-runs", err)
+		return false
+	}
+	if original == nil || strings.TrimSpace(original.WorkRunID) == "" {
+		dr.log.Warn("pipelines: the attempt a failed-only re-run re-runs is gone; every step runs",
+			"rerunOf", originalID)
+		return true
+	}
+	rows, err := d.Store.WorkSteps(fresh, original.WorkRunID)
+	if err != nil {
+		dr.abort("reading the steps of the attempt this run re-runs", err)
+		return false
+	}
+	carryPassed(dr.tracks, rows, max(original.Attempt, 1))
+	return true
+}
+
+// carryPassed marks a planned step skipped pipeline_passed_earlier when the
+// attempt it re-runs PASSED it with the same package slice, or had carried it
+// already -- keeping the attempt it first passed in. A shard whose slice moved
+// since (the timing table learned between the attempts) runs again: a pass
+// over other packages is not a pass of these. A failed, cancelled or never
+// reached step runs, and a step the plan skips keeps the plan's reason.
+func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
+	byKey := make(map[string]WorkStep, len(prior))
+	for _, row := range prior {
+		if row.Key != "" {
+			byKey[row.Key] = row
+		}
+	}
+	for _, t := range tracks {
+		row, ok := byKey[t.step.Key]
+		if !ok || t.step.Skip != nil {
+			continue
+		}
+		passed := row.Status == WorkStepDone
+		carried := row.Status == WorkStepSkipped && row.Skip != nil && row.Skip.Code == pipelines.CodePassedEarlier
+		if !passed && !carried {
+			continue
+		}
+		if !slices.Equal(row.Packages, t.step.Packages) {
+			continue
+		}
+		reason := fmt.Sprintf("Passed in attempt %d.", priorAttempt)
+		if carried && strings.TrimSpace(row.Skip.Reason) != "" {
+			reason = row.Skip.Reason
+		}
+		t.step.Skip = &pipelines.Skip{Code: pipelines.CodePassedEarlier, Reason: reason}
+	}
 }
 
 // decls are the plan's steps as the journal declares them, in plan order: an

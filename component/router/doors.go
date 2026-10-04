@@ -99,6 +99,12 @@ type InferenceUnavailable struct {
 	// CeilingReason is the guard's own sentence when Code is
 	// ceiling_reached. Carried verbatim: it names the env var to change.
 	CeilingReason string
+	// Pinned is the one source the call PINNED, when it pinned one -- a
+	// person's choice for the run, their override of a step, an author's
+	// default. A pin is walked alone and never substituted, so the refusal
+	// names it: the door list below it is one line long by construction, and
+	// without this it would read as a fleet with nothing awake.
+	Pinned string
 }
 
 // Error leads with the CODE, and that is a contract rather than a style
@@ -118,6 +124,9 @@ func (e *InferenceUnavailable) Error() string {
 		}
 	} else {
 		b.WriteString(": no door to a model is open for this call")
+	}
+	if e.Pinned != "" {
+		fmt.Fprintf(&b, " [pinned to %s: a pinned source is never substituted]", e.Pinned)
 	}
 	if e.PolicyName != "" {
 		fmt.Fprintf(&b, " [policy %s]", e.PolicyName)
@@ -151,6 +160,9 @@ func (e *InferenceUnavailable) AsMap() map[string]any {
 	}
 	if e.CeilingReason != "" {
 		out["ceilingReason"] = e.CeilingReason
+	}
+	if e.Pinned != "" {
+		out["pinned"] = e.Pinned
 	}
 	return out
 }

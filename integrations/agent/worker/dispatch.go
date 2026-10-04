@@ -66,7 +66,12 @@ type Store interface {
 
 // Preferences carries the dispatch-relevant user preference fields.
 type Preferences struct {
-	ComputerUseEnabled bool
+	// KillSwitchEngaged is true ONLY when the user explicitly switched
+	// computer use off (preferences.computerUseEnabled == false). Unset is
+	// not engaged (Q13: opt in to disable), and the zero value says so --
+	// a reader that finds no row, or a fake that sets nothing, cannot close
+	// anything by accident.
+	KillSwitchEngaged bool
 }
 
 // Authorization carries the dispatch-relevant agentAuthorization
@@ -732,11 +737,11 @@ func (d *Dispatcher) preDispatchCheck(ctx context.Context, req Request) gateResu
 	if d.store != nil {
 		prefs, err := d.store.UserPreferences(ctx, req.OwnerUserId)
 		if err != nil {
-			d.logger.Warn("user preferences lookup failed; treating as kill-switch enabled",
+			d.logger.Warn("user preferences lookup failed; the kill switch reads as not engaged",
 				"owner_user_id", req.OwnerUserId,
 				"error", err,
 			)
-		} else if !prefs.ComputerUseEnabled {
+		} else if prefs.KillSwitchEngaged {
 			return gateResult{
 				deny:               true,
 				requiredCapability: required.Capability,
@@ -965,13 +970,15 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 		return
 	}
 	// "agent:<id>" for an agent's call; a pipeline step has no agent and is
-	// attributed to its run (auditActor).
+	// attributed to its run (auditActor). Neither is a v1:identity:identity
+	// credential: the actor rides as the LABEL, and ActorIdentityId stays
+	// empty.
 	actor := auditActor(req)
 	switch gate.outcome {
 	case "denied_by_scope":
 		d.auditor.Emit(ctx, workerservice.AuditEvent{
 			Action:        "scope_elevation_requested",
-			Actor:         actor,
+			ActorLabel:    actor,
 			Target:        req.AgentId,
 			TargetType:    "agent",
 			OwnerUserId:   req.OwnerUserId,
@@ -988,7 +995,7 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 	case "kill_switch_engaged":
 		d.auditor.Emit(ctx, workerservice.AuditEvent{
 			Action:        "worker_call_blocked_by_kill_switch",
-			Actor:         actor,
+			ActorLabel:    actor,
 			Target:        req.OwnerUserId,
 			TargetType:    "user",
 			OwnerUserId:   req.OwnerUserId,
@@ -998,7 +1005,7 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 	case "denied_by_policy":
 		ev := workerservice.AuditEvent{
 			Action:        "worker_call_denied_by_policy",
-			Actor:         actor,
+			ActorLabel:    actor,
 			Target:        req.AgentId,
 			TargetType:    "agent",
 			OwnerUserId:   req.OwnerUserId,
@@ -1044,7 +1051,7 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 		}
 		d.auditor.Emit(ctx, workerservice.AuditEvent{
 			Action:        "command_blocked",
-			Actor:         actor,
+			ActorLabel:    actor,
 			Target:        req.AgentId,
 			TargetType:    "agent",
 			OwnerUserId:   req.OwnerUserId,

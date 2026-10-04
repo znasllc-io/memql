@@ -213,7 +213,9 @@ func (i *Integration) rerequested(ctx context.Context, d Deps, p Pipeline, t pip
 	if original.RefusalCode == pipelines.CodeForkRefused {
 		return OpenResult{}, "a pull request from a fork is never run, re-requested or not", nil
 	}
-	opened, err := i.open(ctx, d, p, rerunOf(*original, deliveryID))
+	// GitHub's re-request re-runs the whole check: one check run reports
+	// the whole run, so there is no failed half of it to ask for.
+	opened, err := i.open(ctx, d, p, rerunOf(*original, deliveryID, false))
 	if errors.Is(err, ErrRunInProgress) {
 		return opened, "the commit's newest run has not finished", nil
 	}
@@ -242,12 +244,13 @@ func (i *Integration) released(ctx context.Context, d Deps, p Pipeline, t pipeli
 	return opened, "", err
 }
 
-// rerunOf is the opening of r's next attempt.
-func rerunOf(r Run, deliveryID string) Opening {
+// rerunOf is the opening of r's next attempt: whole, or -- failedOnly, a
+// person's "Re-run failed" -- running only what r did not pass.
+func rerunOf(r Run, deliveryID string, failedOnly bool) Opening {
 	return Opening{
 		Event: r.Event, Mode: r.Mode, SHA: r.SHA, BaseSHA: r.BaseSHA, Branch: r.HeadBranch,
 		Title: r.Title, PullRequest: r.PullRequest, Version: r.Version,
-		Trigger: TriggerRerun, RerunOf: r.ID, DeliveryID: deliveryID,
+		Trigger: TriggerRerun, RerunOf: r.ID, DeliveryID: deliveryID, FailedOnly: failedOnly,
 	}
 }
 

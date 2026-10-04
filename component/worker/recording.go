@@ -311,6 +311,14 @@ type RecordingOpen struct {
 	// recorder opening its own run can stamp childRunId on it.
 	ParentRunId  string
 	ParentStepId string
+	// ModelCall marks a session that answers ONE model call a step made (the
+	// chat, structured and vision doors), rather than a step handed over or a
+	// task delegated. Its recording names the calling run as its parent, for
+	// attribution, and claims nothing else: no childRunId on the calling step,
+	// which means "this step was delegated" and which every call in the step
+	// would otherwise overwrite, and no share of the parent goal's procedure
+	// corpus, which one model call is not a recording of.
+	ModelCall bool
 }
 
 // RecordedAction is one action to write: the event plus everything the runner
@@ -382,6 +390,21 @@ type RecordingClose struct {
 	FinishedAt time.Time
 }
 
+// RecordingHeartbeat says the recording run is still being written by the
+// replica holding its session.
+//
+// The run is written by a Go driver, not executed by the dispatcher, so
+// nothing else beats for it -- and the work sweep closes a running run whose
+// heartbeat is older than a minute as abandoned by a node that went away. A
+// session that runs for an hour records nothing for long stretches, so without
+// this every long session's recording was closed underneath it.
+type RecordingHeartbeat struct {
+	SessionId   string
+	OwnerUserId string
+	RunId       string
+	At          time.Time
+}
+
 // SessionRecorder writes an app session's actions into the work spine.
 //
 // Declared HERE and implemented in integrations/work, so the dependency points
@@ -402,6 +425,9 @@ type SessionRecorder interface {
 	RecordAction(ctx context.Context, r RecordedAction) error
 	RecordGap(ctx context.Context, r RecordedGap) error
 	CloseRecording(ctx context.Context, r RecordingClose) error
+	// HeartbeatRecording keeps the recording run from being abandoned while
+	// the session it records is still held.
+	HeartbeatRecording(ctx context.Context, r RecordingHeartbeat) error
 }
 
 // ContentRequest is one file content to store.

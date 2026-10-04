@@ -1,0 +1,97 @@
+{
+  "automation": "worker/automations.memql workerAppSessionStaleSweep",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "MEMQL_APP_SESSION_STALL_GRACE_SECONDS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "name": "MEMQL_APP_SESSION_MAX_AGE_SECONDS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "heartbeatBefore": "<ts>",
+              "startedBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "openAppSessions"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "MEMQL_APP_SESSION_STALL_GRACE_SECONDS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "name": "MEMQL_APP_SESSION_MAX_AGE_SECONDS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "heartbeatBefore": "<ts>",
+              "startedBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "openAppSessions"
+          },
+          {
+            "args": {
+              "endedAt": "<ts>",
+              "errorMessage": "No agent replica is holding this session any more -- the node that ran it stopped reporting, or the session outlived the longest any session may run. Whatever the app already did on the machine stays there, and an answer it submitted is kept; asking again starts a new session.",
+              "exitCode": -1,
+              "sessionId": "v1:probe:row:openAppSessions-1",
+              "status": "failed"
+            },
+            "kind": "mutation",
+            "name": "endAppSession"
+          },
+          {
+            "args": {
+              "endedAt": "<ts>",
+              "errorMessage": "No agent replica is holding this session any more -- the node that ran it stopped reporting, or the session outlived the longest any session may run. Whatever the app already did on the machine stays there, and an answer it submitted is kept; asking again starts a new session.",
+              "exitCode": -1,
+              "sessionId": "v1:probe:row:openAppSessions-2",
+              "status": "failed"
+            },
+            "kind": "mutation",
+            "name": "endAppSession"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

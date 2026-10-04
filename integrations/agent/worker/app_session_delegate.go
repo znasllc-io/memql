@@ -11,13 +11,15 @@ package worker
 // `//go:build agent` while the contract lives in component/memql.
 //
 // WHAT IT REUSES, AND WHY THAT IS THE DESIGN. The run goes through
-// CockpitAppExecutor.Run -- the SAME executor a delegated task uses -- because
-// a routed step and a delegated task are the same act: opening an app session
-// on somebody's machine with the owner's consent gates in front of it. A second
-// path here would be a second set of gates, and the two would disagree exactly
-// once, on the case nobody tested. That executor is also the one thing in this
-// tree that had no production caller on the delegation path; this file is that
-// caller.
+// CockpitAppExecutor -- the SAME executor a delegated task uses -- because a
+// routed step and a delegated task are the same act: opening an app session on
+// somebody's machine with the owner's app gate (app_gate.go) in front of it. A
+// second path here would be a second set of gates, and the two would disagree
+// exactly once, on the case nobody tested. This file asks that gate itself,
+// with the pin the router handed over, before it opens the child run -- then
+// runs the admitted step through the executor. That executor is also the one
+// thing in this tree that had no production caller on the delegation path;
+// this file is that caller.
 //
 // THE SUBRUN IS A REAL RUN, and that is what makes `childRunId` worth reading.
 // A step that says "delegated" and points at nothing leaves the reader with
@@ -70,13 +72,16 @@ const (
 	snapshotPromotionPoll = 100 * time.Millisecond
 )
 
-// stepExecutor is the narrow half of CockpitAppExecutor this file needs.
+// stepExecutor is the narrow half of CockpitAppExecutor this file needs: the
+// app gate, asked with the door's pin before anything is opened, and the run
+// of a step the gate admitted.
 //
 // Declared as an interface so the test can substitute a recorder without
 // standing up a dispatcher, a router, a registry and a session runner -- four
 // collaborators none of which this file's logic is about.
 type stepExecutor interface {
-	Run(ctx context.Context, req planner.ExecutorRequest, progress planner.ProgressCallback) (planner.ExecutorResult, error)
+	admitSession(ctx context.Context, ownerUserId string, pin memqlengine.AppDoorPin) *appGateRefusal
+	runAdmitted(ctx context.Context, req planner.ExecutorRequest, progress planner.ProgressCallback) (planner.ExecutorResult, error)
 }
 
 // stepStamper writes the parent step's childRunId and makes the owner-scoped
@@ -106,11 +111,17 @@ type AppSessionDelegate struct {
 // step simply carries no childRunId. Refusing the run because the bookkeeping
 // is unwired would take the door down for a fault in the wrong layer.
 func NewAppSessionDelegate(exec *CockpitAppExecutor, journal *workjournal.Journal, engine *memqlengine.MemQLEngine, logger *slog.Logger) *AppSessionDelegate {
+	// A nil executor stays a nil INTERFACE, so RunStep refuses it as unwired
+	// rather than asking the gate through a nil pointer.
+	var executor stepExecutor
+	if exec != nil {
+		executor = exec
+	}
 	var stamper stepStamper
 	if engine != nil {
 		stamper = engine
 	}
-	return newAppSessionDelegateFor(exec, journal, stamper, logger)
+	return newAppSessionDelegateFor(executor, journal, stamper, logger)
 }
 
 func newAppSessionDelegateFor(exec stepExecutor, journal *workjournal.Journal, engine stepStamper, logger *slog.Logger) *AppSessionDelegate {
@@ -133,12 +144,22 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 				"on an agent node running WorkerService")
 	}
 	owner := strings.TrimSpace(h.ActingUserId)
-	if owner == "" {
-		// The same refusal CockpitAppExecutor.Run makes, made earlier so the
-		// child run is never opened under a blank actor -- a row written that
-		// way is readable by nobody, including the operator asking what ran.
+	if auth.ActsForNoPerson(ctx, owner) {
+		// The same refusal the app gate makes, made earlier so the child run
+		// is never opened under an actor that names nobody -- a row written
+		// that way is readable by nobody, including the operator asking what
+		// ran.
 		return memqlengine.AppSessionOutcome{}, fmt.Errorf(
-			"app session: the step has no owner; a machine-touching door cannot run unattributed")
+			"app session: the step has %s; a machine-touching door cannot run unattributed", memqlengine.AppNoOwnerReason)
+	}
+
+	// THE APP GATE, BEFORE ANYTHING IS OPENED (app_gate.go): a pin the owner
+	// did not make, and the kill switch. A refused step leaves no child run
+	// behind and no childRunId on the parent step, and its refusal keeps its
+	// own code rather than becoming a child run failed as app_session_failed
+	// with the reason in its text.
+	if refusal := d.exec.admitSession(ctx, owner, h.Pin); refusal != nil {
+		return memqlengine.AppSessionOutcome{}, fmt.Errorf("app session: %w", refusal)
 	}
 
 	// THE STEP ROW this session serves. The handover names the run and the
@@ -167,7 +188,7 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 		childStep = child.Step(ctx, appSessionStepKey)
 	}
 
-	res, runErr := d.exec.Run(ctx, planner.ExecutorRequest{
+	res, runErr := d.exec.runAdmitted(ctx, planner.ExecutorRequest{
 		StepId:      h.StepId,
 		RunId:       h.RunId,
 		AgentId:     h.AgentId,
@@ -209,9 +230,10 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 	// substitutes for the other: a harness can answer the schema and still
 	// exit non-zero, and a session that answered no schema still produced a
 	// transcript. Content is the TEXT answer either way, because that is what
-	// a chat surface renders.
+	// a chat surface renders -- the app's own output, not the transcript,
+	// whose stderr carries the cockpit's diagnostics.
 	out.Result = resultJSON(res.Output["result"])
-	out.Content = outputString(res.Output, "transcript")
+	out.Content = outputString(res.Output, "answer")
 	if out.Content == "" && len(out.Result) > 0 {
 		out.Content = string(out.Result)
 	}

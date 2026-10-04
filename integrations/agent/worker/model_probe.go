@@ -136,7 +136,7 @@ func (r *ForwardRouter) ForwardModelProbe(
 		// Best-effort cancel so the machine stops running the suite. It is
 		// somebody's GPU, and unlike a pull there is nothing left behind that a
 		// later run resumes -- a cancelled probe simply measured less.
-		r.sender.Send(nodeId, &nodev1.NodeClientMessage{
+		r.sendCancel(nodeId, &nodev1.NodeClientMessage{
 			MessageId: id.NewShortId(),
 			Payload: &nodev1.NodeClientMessage_ModelProbeForwardCancel{
 				ModelProbeForwardCancel: &nodev1.ModelProbeForwardCancel{RequestId: requestId, Reason: "caller_cancelled"},

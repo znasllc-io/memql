@@ -175,16 +175,17 @@ func (i *Integration) SweepWaiting(ctx context.Context, olderThan time.Duration)
 			// Read past in every shape, and nothing is written.
 			continue
 		}
-		if runnerOwned(triggeredBy) && status != runStatusRunning {
-			// A PROCEDURE'S REPLAY RUN IS ITS RUNNER'S
-			// (ProcedureReplayTriggerPrefix) -- the one runner-owned run still
-			// here, since a pipeline's was read past above. It is never
-			// compiled and never parks, so nothing below that compiles,
-			// resumes, remedies or retries a run applies to it -- and every
-			// one of those hands the run to the template executor. A replay
-			// run in any shape but `running` is left for its runner rather
-			// than guessed at. At `running` it falls through to the heartbeat,
-			// the one judgment made of every run, and the backstop does not
+		driverOwned := IsDriverOwnedRun(triggeredBy)
+		if driverOwned && status != runStatusRunning {
+			// A DRIVER-OWNED RUN IS ITS DRIVER'S (IsDriverOwnedRun): a
+			// procedure's replay run, or a Go-written journal -- a pipeline's
+			// run was read past above. It is never compiled and never parks,
+			// so nothing below that compiles, resumes, remedies or retries a run
+			// applies to it -- and every one of those hands the run to the
+			// template executor. A driver-owned run in any shape but `running`
+			// is left for its driver rather than guessed at. At `running` it
+			// falls through to the heartbeat, the one judgment made of every run
+			// -- which is why both drivers heartbeat -- and the backstop does not
 			// offer it back.
 			continue
 		}
@@ -314,7 +315,7 @@ func (i *Integration) SweepWaiting(ctx context.Context, olderThan time.Duration)
 		// A takeover RESUMES rather than restarts: the seam loads the run's
 		// journal and resumes from the step that was in flight, so the steps
 		// that already ran are not re-executed.
-		if status != runStatusCompiling && i.redispatchStale(writeCtx, run, runId, owner) {
+		if status != runStatusCompiling && !driverOwned && i.redispatchStale(writeCtx, run, runId, owner) {
 			res.Redispatched++
 			continue
 		}
@@ -417,11 +418,12 @@ func (i *Integration) redispatchStale(ctx context.Context, run map[string]any, r
 		return false
 	}
 	// TriggeredBy travels with the offer, and it is what makes dispatchRun
-	// refuse a PROCEDURE'S REPLAY RUN before claiming it: such a run names an
-	// automation and has no goal, which is otherwise exactly what this hands
-	// back (ProcedureReplayTriggerPrefix). Refused, a silent one is closed by
-	// its heartbeat like any other. A pipeline's run, refused there too, never
-	// gets this far: the sweep reads past it (runnerOwnsRecovery).
+	// refuse a DRIVER-OWNED RUN before claiming it: a replay run names an
+	// automation and has no goal, and a journal names a template word beside
+	// a goal, and either is otherwise exactly what this hands back
+	// (IsDriverOwnedRun). Refused, a silent one is closed by its heartbeat
+	// like any other. A pipeline's run never gets this far: the sweep reads
+	// past it (runnerOwnsRecovery).
 	if !i.dispatchRun(ctx, DispatchRequest{
 		RunId: runId, OwnerUserId: owner, GoalId: rowString(run, "goalId"), Status: rowString(run, "status"),
 		TriggeredBy: rowString(run, "triggeredBy"), Recovery: true,

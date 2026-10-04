@@ -187,3 +187,71 @@ func (c *Client) ScopedInstallationToken(ctx context.Context, installationID int
 	}
 	return token, expiresAt, nil
 }
+
+// AppInstallation is one installation of this cluster's app, as the APP sees
+// it (the person-facing listing is Installation, in user.go):
+// whose it is, where its settings live on GitHub, and the permissions and
+// events it has ACCEPTED -- which lag what the app asks for until the account
+// that installed it approves a change GitHub sends it.
+type AppInstallation struct {
+	ID          int64
+	Account     string
+	AccountType string
+	// HTMLURL is the installation's own settings page on GitHub, where a
+	// permissions change waits to be accepted.
+	HTMLURL     string
+	Permissions map[string]string
+	Events      []string
+	// SuspendedAt is set while the installation is suspended.
+	SuspendedAt string
+}
+
+// installationsPerPage is GitHub's largest page for the app's installations.
+const installationsPerPage = 100
+
+// Installations lists every installation of this cluster's app, asked under
+// the app JWT, page by page until a page comes back short.
+//
+// It is the one read that can see a PERMISSIONS CHANGE nobody accepted: an app
+// whose permissions grew (pipelines' checks write, epic memql#5477) keeps
+// every existing installation on the old set until its account approves, and
+// until then every check-run write there answers 403. The pipelines readiness
+// item compares what each installation accepted with what the app asks for and
+// names the ones that lag, with the page where the change waits.
+func (c *Client) Installations(ctx context.Context) ([]AppInstallation, error) {
+	cfg := c.config()
+	if !cfg.Configured() {
+		return nil, ErrNotConfigured
+	}
+	var out []AppInstallation
+	for page := 1; ; page++ {
+		assertion, err := c.appJWT(cfg, c.now())
+		if err != nil {
+			return nil, err
+		}
+		var payload []struct {
+			ID      int64 `json:"id"`
+			Account struct {
+				Login string `json:"login"`
+				Type  string `json:"type"`
+			} `json:"account"`
+			HTMLURL     string            `json:"html_url"`
+			Permissions map[string]string `json:"permissions"`
+			Events      []string          `json:"events"`
+			SuspendedAt string            `json:"suspended_at"`
+		}
+		endpoint := "/app/installations?per_page=" + strconv.Itoa(installationsPerPage) + "&page=" + strconv.Itoa(page)
+		if _, cerr := c.call(ctx, http.MethodGet, endpoint, assertion, &payload); cerr != nil {
+			return nil, cerr
+		}
+		for _, p := range payload {
+			out = append(out, AppInstallation{
+				ID: p.ID, Account: p.Account.Login, AccountType: p.Account.Type, HTMLURL: p.HTMLURL,
+				Permissions: p.Permissions, Events: p.Events, SuspendedAt: p.SuspendedAt,
+			})
+		}
+		if len(payload) < installationsPerPage {
+			return out, nil
+		}
+	}
+}

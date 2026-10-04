@@ -170,18 +170,25 @@ func TestNodeClassStreamInterceptorWithRevocation_RejectsRevoked(t *testing.T) {
 
 // TestNodeClassStreamInterceptorWithRevocation_RejectsOnResolverError
 // asserts a resolver lookup failure fails closed -- the interceptor
-// rejects with Unauthenticated rather than admitting traffic on a
-// partial check. Prevents an identity-store outage from silently
-// disabling the revocation gate.
+// rejects rather than admitting traffic on a partial check, so an
+// identity-store outage cannot silently disable the revocation gate.
+//
+// The CODE is load-bearing too. The token verified; this node could not
+// finish checking it (a draining pod answers here once its database pool
+// is released). Unauthenticated sent every caller into a token re-mint
+// and an immediate re-dial, which is how a local rollout minted ~2,900
+// node tokens in 27 seconds. Unavailable is a refusal the caller backs
+// off from (TestNodeTokenMintedOnceAcrossReconnects holds the client half).
 func TestNodeClassStreamInterceptorWithRevocation_RejectsOnResolverError(t *testing.T) {
-	r := &fakeRevocationResolver{err: errors.New("db unreachable")}
+	r := &fakeRevocationResolver{err: errors.New("delivery substrate: database not available")}
 	err, called := runRevocationInterceptor(t, r, 0, "bff", "bff-local")
 	require.Error(t, err)
 	assert.False(t, called)
 
 	st, ok := status.FromError(err)
 	require.True(t, ok)
-	assert.Equal(t, codes.Unauthenticated, st.Code())
+	assert.Equal(t, codes.Unavailable, st.Code())
+	assert.NotContains(t, st.Message(), "Unauthenticated")
 }
 
 // TestNodeClassStreamInterceptorWithRevocation_CachesPositiveAnswers

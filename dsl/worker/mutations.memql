@@ -823,6 +823,10 @@ mutation appSession createAppSession {
     credentialRef: args.credentialRef ?? ""
     credentialExpiresAt: args.credentialExpiresAt ?? ""
     args.startedAt
+    // The replica writing the row IS the holder, so the open is its first
+    // report: a session whose replica dies before the drain's first flush
+    // is judged from the moment it started, not left unjudgeable.
+    heartbeatAt: args.startedAt
   }
 }
 
@@ -850,6 +854,13 @@ mutation appSession createAppSession {
 // out-of-order or duplicate. It is written so the LOSS IS VISIBLE: a
 // procedure lifted from an incomplete recording would otherwise be lifted
 // as if it were complete.
+//
+// `status` and `heartbeatAt` are the HOLDER's, and both are written only
+// when named. The MCP node allocates a step through here too, from a
+// different replica and possibly after the session ended -- an app that
+// calls `submit` and exits races its own end -- so a default here would
+// resurrect a finished row to `running`, or keep an orphaned one looking
+// held for as long as its app kept calling MemQL.
 
 /// Advance a live app-session row's recording counters, and allocate the next step seq.
 ///
@@ -868,6 +879,9 @@ mutation appSession recordAppSessionProgress {
     recordedSteps  int
     droppedActions  int
     status         enum("starting", "running")
+    /// When the replica holding the session wrote this. Named only by the holder's drain; see the
+    /// concept's heartbeatAt for why the MCP node's allocation must not name it.
+    heartbeatAt    string
   }
   update {
     // NOT `?? 0`. A caller advancing only the drop count must not reset the
@@ -876,8 +890,12 @@ mutation appSession recordAppSessionProgress {
     // default here is what would break it.
     args.recordedSteps
     args.droppedActions
+    // NOT `?? "running"`, for the same reason and a sharper one: this used
+    // to default, and the MCP node's allocation -- which names no status --
+    // flipped a session that had already ended back to `running`.
+    args.status
+    args.heartbeatAt
     id: args.sessionId
-    status: args.status ?? "running"
   }
 }
 
@@ -892,6 +910,19 @@ mutation appSession recordAppSessionProgress {
 // `unknown` rather than folding silence into either `metered` or
 // `subscription`. Inferring here is what would make the number the
 // owner asked for -- what the subscription covered -- untrustworthy.
+//
+// EVERY FIELD BUT THE STATUS AND THE END IS WRITTEN ONLY WHEN NAMED.
+// Two writers end a session. The holder names everything it has,
+// every time (component/worker.EngineStore.EndAppSession); the stale
+// sweep names only what it knows -- status, exitCode, errorMessage --
+// because nobody saw the session end. The sweep reads the open rows
+// and THEN ends each, so a holder that recovers in between has
+// already written the true account by the time the sweep's write
+// lands; a `?? {}` / `?? "unknown"` here overwrote that usage,
+// billing, transcript and artifact list with a dead session's blanks,
+// and the spend rollup reads them. The create already opens the row
+// with usage {}, billing "unknown" and an empty transcript, so a row
+// the sweep closes shows exactly those without a default here.
 
 /// Drive an app session to a terminal status with its reported usage.
 ///
@@ -929,20 +960,22 @@ mutation appSession endAppSession {
   update {
     id: args.sessionId
     args.status
-    exitCode: args.exitCode ?? 0
-    usage: args.usage ?? {}
-    billing: args.billing ?? "unknown"
-    transcriptFileId: args.transcriptFileId ?? ""
-    transcriptTruncated: args.transcriptTruncated ?? false
+    // Bare, all of them: see the header. A default here is what let a
+    // sweep that lost the race blank the holder's account.
+    args.exitCode
+    args.usage
+    args.billing
+    args.transcriptFileId
+    args.transcriptTruncated
     // NOT `?? 0`, for recordAppSessionProgress's reason: the end carries the
     // counters only when the recorder had them, and defaulting would report a
     // recorded session as having recorded nothing.
     args.recordedSteps
     args.droppedActions
-    producedArtifactIds: args.producedArtifactIds ?? []
-    appSessionRef: args.appSessionRef ?? ""
-    errorMessage: args.errorMessage ?? ""
-    cancelReason: args.cancelReason ?? ""
+    args.producedArtifactIds
+    args.appSessionRef
+    args.errorMessage
+    args.cancelReason
     // NOT `?? {}`. A session END that carries no result must not blank a
     // result a `submit` already recorded: the app volunteered its answer
     // mid-run and the harness simply had none to add. Omitting the key

@@ -55,8 +55,16 @@ func (a *App) wireWorkerForwarding(
 	// The RECEIVING half. Installed first: a replica that can send but not
 	// receive is a mesh where forwards flow one way, which is harder to
 	// diagnose than one where they do not flow at all.
+	// The app door, when this replica has one (integrations_worker_agent.go
+	// built it before the cluster phase): it SERVES app calls forwarded here
+	// by the planner and by sibling agents, and FORWARDS the ones for a
+	// machine a sibling holds (the planner/app-source design, section 3a).
+	appDoor, _ := a.appInference.(*agentworker.AppInference)
 	if nodeServer != nil {
 		handler := agentworker.NewForwardHandler(a.workerRegistry(), integ.Dispatcher().FleetStore(), a.Logger)
+		if appDoor != nil {
+			handler.SetAppCallServer(appDoor)
+		}
 		nodeServer.SetWorkerForwardHandler(handler)
 	} else {
 		a.Logger.Warn("worker forwarding: NodeServer is nil; inbound machine dispatches will be unhandled")
@@ -87,6 +95,11 @@ func (a *App) wireWorkerForwarding(
 		a.Dependencies = append(a.Dependencies, dialer)
 	}
 	integ.Dispatcher().SetRemoteDispatcher(forwarder)
+	if appDoor != nil {
+		appDoor.SetForward(forwarder, nodeIdentity.ID)
+		a.Logger.Info("app door: calls for a machine held by a sibling replica are forwarded there",
+			"node_id", nodeIdentity.ID)
+	}
 
 	// LOCAL INFERENCE (epic memql#4676). Installed here rather than in
 	// integrations_worker_agent.go because it needs the FORWARD: a model call

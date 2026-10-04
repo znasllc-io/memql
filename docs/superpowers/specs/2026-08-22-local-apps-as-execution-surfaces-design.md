@@ -78,6 +78,16 @@ forward reaches it on any replica.
 
 ### D4 -- Consent is the headless class, reused
 
+> **Superseded by the app gate** (`integrations/agent/worker/app_gate.go`,
+> 2026-09-28, owner decision). App sessions no longer take the headless
+> consent class: no per-task approval, no standing `computerUseScope`, no
+> classifier, and no `agentAuthorization` row is read. Their consent is the
+> machine's `apps.allow` (allowed and signed in) on the owner's own machine,
+> plus a decision naming the app -- a routing rule's chain, or an explicit pin
+> the owner made themselves -- with the computer-use kill switch closing app
+> sessions only when it is explicitly engaged. The record below is kept as
+> written; see [Local apps -> Consent](../../public/operate/local-apps.md#consent).
+
 An app run edits files and runs commands on the user's machine. It needs
 exactly what `workerHost` needs -- per-task approval, standing scope at
 `interact` or above, the kill switch, the classifier -- plus the machine's
@@ -158,7 +168,8 @@ tier. Live in the portal through CDC (sub-project B's admission applies).
 - `integrations/agent/worker/cockpitapp`: `RegisterContainerExecutor("cockpit-app", ...)`
   from `init()` under the agent build tag. `Run(ctx, req, progress)`: resolve
   the delegation policy; `RequireLabels = {app:<id>}` merged with the task's;
-  `Router.Pick` (G); the consent gates (D4) with the card text "run
+  `Router.Pick` (G); the consent gates (D4, since superseded by the app
+  gate) with the card text "run
   `<app>` on `<machine>` in `<workspace>`"; open the session, locally or
   through `WorkerForward` (G); map chunks to `ProgressCallback` events
   (`command`, `file`, `narration`); map `AppSessionEnd` to `ExecutorResult`
@@ -227,7 +238,7 @@ exists.
 
 | Concern | Handling |
 |---|---|
-| Running an agent on the user's machine | D4: the headless consent class, plus `apps.allow` on the machine |
+| Running an agent on the user's machine | D4 as written: the headless consent class, plus `apps.allow` on the machine. Superseded by the app gate: `apps.allow` on the owner's own machine, a routing rule or the owner's own pin naming the app, and the kill switch when explicitly engaged |
 | The back-channel credential leaking | per-run, short-lived, user-scoped, MCP-surface-pinned, revoked at end, written to a file the cockpit deletes |
 | A delegated app reaching rows the user cannot | it acts as the user over MCP; row authz applies as to any stream |
 | Prompt injection from Library inputs | the app runs in the workspace with the inputs it was given; the card named them; the transcript is kept |

@@ -1,5 +1,7 @@
 import { siteStateWord } from "../words";
 import { bundleForm, bundleFormLabel, domainOf, siteName, type SiteRow } from "../rows";
+import { idTail } from "../pipelines/rows";
+import type { OutcomeKey } from "../pipelines/runs";
 
 // The deploy map's arithmetic: rows in, positioned nodes and edges out.
 //
@@ -27,8 +29,14 @@ import { bundleForm, bundleFormLabel, domainOf, siteName, type SiteRow } from ".
 // Geometry
 // ---------------------------------------------------------------------------
 
-/** Column origins: host, site, bundle, artifact. */
-export const COLUMN_X = [0, 220, 460, 700] as const;
+/**
+ * Column origins: host, site, bundle, artifact, checks.
+ *
+ * Checks is APPENDED, never inserted (epic memql#5479): the four columns
+ * before it keep the positions they always had, so a cluster with no pipeline
+ * draws exactly the map it drew before pipelines existed.
+ */
+export const COLUMN_X = [0, 220, 460, 700, 940] as const;
 
 export const NODE_W = 200;
 export const NODE_H = 44;
@@ -56,7 +64,26 @@ export const HOST_CHARS = 26;
 export const SITE_CHARS = 22;
 export const SUB_CHARS = 28;
 
-export type MapNodeKind = "host" | "site" | "bundle" | "artifact";
+export type MapNodeKind = "host" | "site" | "bundle" | "artifact" | "checks";
+
+/**
+ * What the map says about one source's checks (D14: "The Deployment map on
+ * Overview draws the same Checks node"), keyed by the source's package id in
+ * its short form -- the way `PipelineRow.packageId` carries it.
+ *
+ * A READING HANDED IN, NOT ONE MADE HERE. The words come from the pipelines
+ * feeds, which this function never sees: it lays out what it is given, and a
+ * source missing from the map simply has no Checks node -- which is also what
+ * a source with no active pipeline is.
+ */
+export interface MapChecks {
+  /** The default branch's newest run, in words: "Passed on main". */
+  sublabel: string;
+  /** That run's outcome, for the status dot; "" when there is no run to read. */
+  status: OutcomeKey | "";
+  /** What the node is read out as being about: the source's repository. */
+  source?: string;
+}
 
 export interface MapNode {
   /** Stable across renders and across row updates -- the arrival cue keys on it. */
@@ -95,9 +122,18 @@ export interface MapNode {
    * -- two sites pointing at one bundle is a fact you cannot see in a table.
    */
   siteIds: string[];
-  /** Site nodes only: drives the status dot and the kind glyph. */
+  /**
+   * Site and checks nodes: drives the status dot. A site's status, or the
+   * outcome of a checks node's run ("" when it has none, and then no dot).
+   */
   status: string;
+  /** Site nodes only: drives the kind glyph. */
   siteKind: string;
+  /**
+   * Checks nodes only: the source the node opens, spelled the way the site
+   * rows spell it. "" for every other kind.
+   */
+  packageId: string;
 }
 
 export interface MapEdge {
@@ -163,8 +199,16 @@ export const NO_DOMAIN_LABEL = "no hostname yet";
  * the fact it carries is worth. A bundle serving sites under two domains is
  * therefore drawn once per domain, which is also a true reading of it -- it is
  * serving in two places.
+ *
+ * A CHECKS NODE CLOSES A BAND whose site came from a source with an active
+ * pipeline (`checks`, keyed by package id), after the bundle that source
+ * built -- or after the site itself, when it serves no bundle yet. It is one
+ * node per source per group, deduped and re-centred exactly like a shared
+ * bundle, because the checks are a fact about the SOURCE: two apps of one
+ * repository are two bands pointing at one reading of its default branch, not
+ * two readings that happen to agree.
  */
-export function layout(sites: readonly SiteRow[]): MapLayout {
+export function layout(sites: readonly SiteRow[], checks?: ReadonlyMap<string, MapChecks>): MapLayout {
   const usable = sites.filter((s) => s.id !== "");
   if (usable.length === 0) return EMPTY_LAYOUT;
 
@@ -223,6 +267,7 @@ export function layout(sites: readonly SiteRow[]): MapLayout {
         siteIds: [site.id],
         status: "",
         siteKind: "",
+        packageId: "",
       });
       remember(sharedYs, hostId, bandY);
 
@@ -244,6 +289,7 @@ export function layout(sites: readonly SiteRow[]): MapLayout {
         siteIds: [site.id],
         status: site.status === "live" ? siteStateWord(site).toLowerCase() : site.status,
         siteKind: site.kind,
+        packageId: "",
       });
 
       edges.push({ id: `${hostId}->${siteId}`, from: hostId, to: siteId, siteId: site.id });
@@ -251,8 +297,8 @@ export function layout(sites: readonly SiteRow[]): MapLayout {
       // A site with no bundleRef gets no bundle node: the map draws row facts,
       // and "nothing is deployed here" is a fact best told by an absence rather
       // than by a box saying "none".
+      const bundleId = form === "none" ? "" : `bundle:${domain}:${site.bundleRef}`;
       if (form !== "none") {
-        const bundleId = `bundle:${domain}:${site.bundleRef}`;
         pushOnce(nodes, {
           id: bundleId,
           kind: "bundle",
@@ -270,6 +316,7 @@ export function layout(sites: readonly SiteRow[]): MapLayout {
           siteIds: [],
           status: "",
           siteKind: "",
+          packageId: "",
         });
         addSite(nodes, bundleId, site.id);
         remember(sharedYs, bundleId, bandY);
@@ -292,6 +339,7 @@ export function layout(sites: readonly SiteRow[]): MapLayout {
             siteIds: [],
             status: "",
             siteKind: "",
+            packageId: "",
           });
           addSite(nodes, artifactId, site.id);
           remember(sharedYs, artifactId, bandY);
@@ -303,6 +351,41 @@ export function layout(sites: readonly SiteRow[]): MapLayout {
           });
           groupRight = Math.max(groupRight, COLUMN_X[3] + NODE_W);
         }
+      }
+
+      // THE SOURCE'S CHECKS, after what it built. Looked up by the package's
+      // SHORT id, because the pipelines feeds and the site rows are two egress
+      // seams that need not spell an id alike; the node keeps the site row's
+      // own spelling, which is what the source's page is found by.
+      const reading = site.packageId === "" ? undefined : (checks?.get(idTail(site.packageId)) ?? checks?.get(site.packageId));
+      if (reading !== undefined) {
+        const checksId = `checks:${domain}:${site.packageId}`;
+        pushOnce(nodes, {
+          id: checksId,
+          kind: "checks",
+          label: "Checks",
+          sublabel: ellipsize(reading.sublabel, SUB_CHARS),
+          // The source rides on the full reading, so the tooltip and the
+          // spoken label say whose checks these are; the box has no room.
+          full: `${reading.source?.trim() || "this source"}: ${reading.sublabel}`,
+          x: COLUMN_X[4],
+          y: bandY,
+          w: NODE_W,
+          h: NODE_H,
+          group: domain,
+          siteIds: [],
+          status: reading.status,
+          siteKind: "",
+          packageId: site.packageId,
+        });
+        addSite(nodes, checksId, site.id);
+        remember(sharedYs, checksId, bandY);
+        const from = bundleId === "" ? siteId : bundleId;
+        // ONE EDGE PER PAIR. Two apps sharing a bundle and a source would
+        // otherwise draw the same curve twice, the later one painting over
+        // the first's selection highlight.
+        pushEdgeOnce(edges, { id: `${from}->${checksId}`, from, to: checksId, siteId: site.id });
+        groupRight = Math.max(groupRight, COLUMN_X[4] + NODE_W);
       }
 
       groupRight = Math.max(groupRight, COLUMN_X[1] + NODE_W);
@@ -392,6 +475,11 @@ export function middleEllipsize(text: string, max: number): string {
 function pushOnce(nodes: MapNode[], node: MapNode): void {
   if (nodes.some((n) => n.id === node.id)) return;
   nodes.push(node);
+}
+
+function pushEdgeOnce(edges: MapEdge[], edge: MapEdge): void {
+  if (edges.some((e) => e.id === edge.id)) return;
+  edges.push(edge);
 }
 
 function addSite(nodes: MapNode[], id: string, siteId: string): void {

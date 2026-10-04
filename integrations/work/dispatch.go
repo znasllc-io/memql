@@ -75,6 +75,7 @@ package work
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -82,6 +83,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/component/workjournal"
 )
 
 // runClaimTTL is the claim lease.
@@ -161,6 +163,26 @@ func isProcedureReplay(triggeredBy string) bool {
 	return strings.HasPrefix(strings.TrimSpace(triggeredBy), ProcedureReplayTriggerPrefix)
 }
 
+// IsDriverOwnedRun reports a run whose DRIVER writes and runs it, so this
+// dispatcher never may: a procedure's replay run (ProcedureReplayTriggerPrefix),
+// a pipeline's run (pipelines.WorkTriggerPrefix, epic memql#5477), and a
+// Go-written journal (workjournal.TriggerPrefix) -- the Library's analysis
+// pass, the D7 delegate's child run, and an app session's recording.
+//
+// A journal has exactly the shape this dispatcher takes for compiled goal work
+// -- `running`, a goal, and an automationName that is a template WORD naming no
+// automation -- and until it carried the marker, every agent replica claimed
+// each one a millisecond after it opened, could not load the template, and
+// failed it automation_not_runnable over what its driver was recording. Every
+// admission here asks this: the subscriber before the claim, dispatchRun,
+// CanDispatchStoredRun, the sweep's recovery paths, and the privileged re-read
+// (app/work_run_fence.go), which asks it of the STORED row because an id-only
+// event carries no triggeredBy at all.
+func IsDriverOwnedRun(triggeredBy string) bool {
+	by := strings.TrimSpace(triggeredBy)
+	return isProcedureReplay(by) || isPipelineRun(by) || strings.HasPrefix(by, workjournal.TriggerPrefix)
+}
+
 // isPipelineRun reports a triggeredBy the pipelines driver wrote:
 // `pipeline:<mode>` (pipelines.WorkTriggerPrefix, the one spelling of the
 // prefix; epic memql#5477). The driver opens the run through the work journal
@@ -168,14 +190,6 @@ func isProcedureReplay(triggeredBy string) bool {
 // under a lease of its own on the pipelines run.
 func isPipelineRun(triggeredBy string) bool {
 	return strings.HasPrefix(strings.TrimSpace(triggeredBy), pipelines.WorkTriggerPrefix)
-}
-
-// runnerOwned reports a run another runner EXECUTES: a learned procedure's
-// replay run or a pipeline's run. The dispatcher's admission never takes one,
-// on either of its checks -- the template executor has nothing to load for
-// either, and taking one runs its steps a second time.
-func runnerOwned(triggeredBy string) bool {
-	return isProcedureReplay(triggeredBy) || isPipelineRun(triggeredBy)
 }
 
 // runnerOwnsRecovery reports a run whose runner judges its LIVENESS as well,
@@ -192,10 +206,9 @@ func runnerOwnsRecovery(triggeredBy string) bool {
 // the authoritative row. Ordinary journals belong to their scheduler; only
 // the sweep can take one over. A waiting run is eligible solely for a due
 // inference retry explicitly requested by that sweep, never a stale event. A
-// run another runner owns -- a procedure's replay, a pipeline's run -- is
-// never eligible (runnerOwned).
+// driver-owned run is never eligible (IsDriverOwnedRun).
 func (r DispatchRequest) CanDispatchStoredRun(goalId, status string, waitingOn map[string]any, now time.Time) bool {
-	if runnerOwned(r.TriggeredBy) {
+	if IsDriverOwnedRun(r.TriggeredBy) {
 		return false
 	}
 	if status == runStatusRunning {
@@ -304,6 +317,13 @@ func (i *Integration) HandleRunEvent(ev events.Event) {
 	if (req.AutomationName == "" || strings.TrimSpace(req.GoalId) == "") && !req.idOnly() {
 		return
 	}
+	// A run its driver owns is not this dispatcher's, however goal-backed it
+	// looks (IsDriverOwnedRun). Checked here as well as in dispatchRun so a
+	// journal's own writes -- every step of a Library pass -- cost no
+	// goroutine per event on every replica.
+	if IsDriverOwnedRun(req.TriggeredBy) {
+		return
+	}
 	if i.dispatcherRef() == nil {
 		// Not an executing node. Silent by design -- every bff and identity
 		// replica sees this event, and a log line per run event per replica
@@ -357,15 +377,15 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 	if d == nil {
 		return false
 	}
-	if runnerOwned(req.TriggeredBy) {
-		// Refused BEFORE the claim: the run is its runner's -- a procedure's
-		// replay runner (ProcedureReplayTriggerPrefix) or the pipelines driver
-		// (pipelines.WorkTriggerPrefix) -- and a lease taken for it would be
-		// one this node never uses. Silent, because the refusal is the design
-		// rather than an incident: on an event there is nothing to say, and on
-		// recovery the caller -- the sweep's backstop -- goes on to judge a
-		// replay run by its heartbeat and says what it did. A pipeline's run
-		// never reaches the backstop at all (runnerOwnsRecovery).
+	if IsDriverOwnedRun(req.TriggeredBy) {
+		// Refused BEFORE the claim: the run is its driver's -- a replay
+		// runner's, the pipelines driver's or a journal's (IsDriverOwnedRun)
+		// -- and a lease taken for it would be one this node never uses.
+		// Silent, because the refusal is the design rather than an incident:
+		// on an event there is nothing to say, and on recovery the caller --
+		// the sweep's backstop -- goes on to judge the run by its heartbeat and
+		// says what it did. A pipeline's run never reaches the backstop at all
+		// (runnerOwnsRecovery).
 		return false
 	}
 	claimer := i.runClaimerRef()
@@ -474,6 +494,11 @@ func runEventFields(ev events.Event) (DispatchRequest, bool) {
 	return req, true
 }
 
+// ErrRunAlreadyClosed is FailRun's answer for a run that reached a terminal
+// status before the failure could be written. The run's own close stands, and
+// the caller says so rather than reporting a failure it did not record.
+var ErrRunAlreadyClosed = errors.New("work: the run had already finished; its own close stands")
+
 // FailRun closes a run the dispatcher could not execute.
 //
 // It exists because the two failures a dispatcher has -- an automation that
@@ -484,9 +509,36 @@ func runEventFields(ev events.Event) (DispatchRequest, bool) {
 // stopped answering. That sentence is true of a node loss and false here, and
 // it sends whoever reads it at the infrastructure.
 //
+// IT NEVER OVERWRITES A FINISHED RUN. The dispatcher decides from a read made
+// about a second earlier -- loading the template happens in between -- and
+// the run's own driver can close it in that window. The write was
+// unconditional, so a driver's real failure (an app session's, with the
+// machine's reason) was replaced by automation_not_runnable. So the run is
+// re-read immediately before the write and failed only from a status it can
+// still be failed from: running, compiling or waiting -- waiting included,
+// because a waiting inference-retry run whose template cannot load would
+// otherwise stay parked and be redispatched every lease. A read-then-write is
+// the strongest guard updateWorkRun allows (a mutation has no conditional
+// form); it narrows the window from a template load to one round trip.
+//
+// A run the owner's actor cannot see -- the deployment's own, whose owner is
+// present-and-empty -- is failed as before: there is nothing to judge it by,
+// and refusing would leave it for the abandoned sweep's node-loss sentence.
+//
 // The write borrows the owner's authority, as every write in this package
 // does; a blank owner is the deployment's own run and stays blank.
 func (i *Integration) FailRun(ctx context.Context, ownerUserId, runId, code, message string) error {
+	current, err := i.store().runForOwner(ownerActor(ctx, ownerUserId), runId)
+	if err != nil {
+		return fmt.Errorf("work: re-read run %s before failing it: %w", runId, err)
+	}
+	if current != nil {
+		switch status := rowString(current, "status"); status {
+		case runStatusRunning, runStatusCompiling, runStatusWaiting:
+		default:
+			return fmt.Errorf("%w (run %s is %s)", ErrRunAlreadyClosed, runId, status)
+		}
+	}
 	return i.store().updateRun(ownerActor(ctx, ownerUserId), runId, map[string]any{
 		"status":       "failed",
 		"errorCode":    code,
@@ -579,6 +631,12 @@ func (i *Integration) OpenDirectGoal(ctx context.Context, g DirectGoal) (goalId,
 		}
 	}
 
+	// A direct goal a run's step opened -- a compose, an agent() -- carries
+	// that run's routing choice when the run is the same person's.
+	routing, err := goalRouting(ctx, owner)
+	if err != nil {
+		return "", "", err
+	}
 	if err := st.createGoalRow(scoped, goalSeed{
 		GoalId:       goalId,
 		Statement:    statement,
@@ -587,6 +645,7 @@ func (i *Integration) OpenDirectGoal(ctx context.Context, g DirectGoal) (goalId,
 		RequestedVia: g.RequestedVia,
 		AccountIds:   g.AccountIds,
 		Ceilings:     g.Ceilings,
+		Routing:      routing,
 	}); err != nil {
 		return "", "", err
 	}
@@ -620,6 +679,7 @@ func (i *Integration) OpenDirectGoal(ctx context.Context, g DirectGoal) (goalId,
 		NodeId:             selfNodeId(),
 		StartedAt:          now,
 		OwnerUserId:        owner,
+		Routing:            routing,
 	}); err != nil {
 		return closeUnstarted(err)
 	}

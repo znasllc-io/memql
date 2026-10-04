@@ -17,11 +17,11 @@ import { DiagnosticsSection } from "./DiagnosticsSection";
 import { IntegrationsSection } from "./IntegrationsSection";
 import { KeysSection } from "./KeysSection";
 import { LanguageSection } from "./LanguageSection";
-import { DecisionsSection } from "./DecisionsSection";
-import { DoorsSection } from "./DoorsSection";
+import { VendorsSection } from "./VendorsSection";
 import { LevelsSection } from "./LevelsSection";
+import { PipelinesSection } from "./PipelinesSection";
 import { ProceduresSection } from "./ProceduresSection";
-import { RulesSection } from "./RulesSection";
+import { RoutingMovedSection } from "./RoutingLink";
 import { TokensSection } from "./TokensSection";
 import { ConnectionHistoryProvider } from "./useConnectionHistory";
 
@@ -71,11 +71,17 @@ function sectionFor(sectionId: string, intent: OsAppProps["intent"], consumeInte
   // intent by id once they have acted on it.
   if (sectionId === "integrations")
     return <IntegrationsSection intent={intent} consumeIntent={consumeIntent} />;
+  // Pipelines (epic memql#5479, D15): the cluster's optional readiness item.
+  // It takes the intent because a GitHub App registered from here comes back
+  // here, carrying how the trip went.
+  if (sectionId === "pipelines")
+    return <PipelinesSection intent={intent} consumeIntent={consumeIntent} />;
   if (sectionId === "providers")
-    return <DoorsSection intent={intent} consumeIntent={consumeIntent} />;
+    return <VendorsSection intent={intent} consumeIntent={consumeIntent} />;
   if (sectionId === "levels") return <LevelsSection />;
-  if (sectionId === "rules") return <RulesSection />;
-  if (sectionId === "decisions") return <DecisionsSection />;
+  // Rules and Decisions moved to Fleet > Routing; their sections are signposts.
+  if (sectionId === "rules") return <RoutingMovedSection what="rules" />;
+  if (sectionId === "decisions") return <RoutingMovedSection what="decisions" />;
   // Procedures (epic memql#5408): the certification ladder's values, which
   // decide when a learned procedure stops needing a model.
   if (sectionId === "procedures") return <ProceduresSection />;

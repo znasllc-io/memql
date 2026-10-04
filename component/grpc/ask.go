@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -13,8 +14,26 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
+// handleAskStream runs one Ask turn.
+//
+// THE TURN'S SOURCE AND LEVEL (AiChatMsg.provider and .level) ARE A ROUTING
+// CHOICE, NOT A CONTEXT VALUE. The turn is a goal: compiled on a planner, its
+// steps run on an agent, neither sharing memory with this replica -- so a
+// provider override on this handler's context reached none of the calls that
+// mattered. The engine writes the choice onto the goal's run row instead, and
+// every node that executes the run applies it from there (RunAsk).
+//
+// The grammar is checked HERE, before the engine is reached, so a word outside
+// the picker's vocabulary never opens a goal, a run or a transcript turn; a
+// route the cluster does not have is the engine's to refuse, and arrives with
+// the same code.
 func (s *streamSession) handleAskStream(ctx context.Context, requestID, correlate string, request *memqlv1.AiChatMsg) {
-	ctx = engine.WithProviderOverride(ctx, request.GetProvider())
+	route := engine.AskRoute{Source: request.GetProvider(), Level: request.GetLevel()}
+	if _, err := engine.ParseRouteChoice(route.Source, route.Level); err != nil {
+		code, message, metadata := askFailureStatus(err)
+		_ = s.sendQueryErrorWithMetadata(requestID, correlate, code, message, metadata)
+		return
+	}
 	chunks := make(chan common.StreamChunk, 16)
 	send := func(chunk common.StreamChunk) {
 		select {
@@ -24,7 +43,7 @@ func (s *streamSession) handleAskStream(ctx context.Context, requestID, correlat
 	}
 	go func() {
 		defer close(chunks)
-		_, err := s.service.engine.RunAsk(ctx, request.GetConversationId(), requestID, request.GetMessages()[0].GetContent(), request.GetPageContext(), func(text string) { send(common.StreamChunk{Content: text}) }, func(event engine.WorkEvent) {
+		_, err := s.service.engine.RunAsk(ctx, request.GetConversationId(), requestID, request.GetMessages()[0].GetContent(), request.GetPageContext(), route, func(text string) { send(common.StreamChunk{Content: text}) }, func(event engine.WorkEvent) {
 			encoded, _ := json.Marshal(event)
 			var metadata map[string]any
 			_ = json.Unmarshal(encoded, &metadata)
@@ -40,7 +59,8 @@ func (s *streamSession) handleAskStream(ctx context.Context, requestID, correlat
 	var index int64
 	for chunk := range chunks {
 		if chunk.Error != nil {
-			_ = s.sendQueryError(requestID, correlate, codes.Internal, chunk.Error.Error())
+			code, message, metadata := askFailureStatus(chunk.Error)
+			_ = s.sendQueryErrorWithMetadata(requestID, correlate, code, message, metadata)
 			return
 		}
 		out := &memqlv1.AiStreamChunk{StreamId: requestID, RequestId: requestID, Index: index}
@@ -65,6 +85,19 @@ func (s *streamSession) handleAskStream(ctx context.Context, requestID, correlat
 			_ = s.sendServerMessage(correlate, &memqlv1.MemqlServerMessage{Payload: &memqlv1.MemqlServerMessage_AiChatResult{AiChatResult: &memqlv1.AiChatResult{RequestId: requestID, Message: &memqlv1.AiChatMessage{Role: "assistant", Content: text.String()}}}})
 		}
 	}
+}
+
+// askFailureStatus is how one failed Ask turn is reported. A refused ROUTE
+// CHOICE is the caller's to fix, so it is InvalidArgument and its metadata
+// carries the stable code and the half of the choice refused ("source" or
+// "level") for a client to branch on without reading prose. Anything else is
+// Internal, as before.
+func askFailureStatus(err error) (codes.Code, string, map[string]string) {
+	var choice *engine.RouteChoiceError
+	if errors.As(err, &choice) {
+		return codes.InvalidArgument, choice.Error(), map[string]string{"code": choice.Code, "field": choice.Field}
+	}
+	return codes.Internal, err.Error(), nil
 }
 
 // Register before launching work: CancelRequest may be the very next envelope.

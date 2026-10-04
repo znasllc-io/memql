@@ -165,3 +165,31 @@ func TestStreamFallbackPreservesLastRefusalAndCancellation(t *testing.T) {
 		}
 	})
 }
+
+// A STREAM RETRIED AFTER AN UNSTARTED REFUSAL NAMES THE REFUSED SOURCE on the
+// row of the source that then served it (failure_reason.go): the refusal
+// arrives as the first chunk, after the wrapper returned, so the retry is a
+// second walk -- and the walk so far has to travel with it.
+func TestAStreamRetriedAfterARefusalNamesTheRefusedSourceOnTheServedRow(t *testing.T) {
+	first := &refusalStream{chunks: []common.StreamToolChunk{{Error: &memql.FleetUnavailable{ModelId: "first"}, Done: true}}}
+	second := &refusalStream{chunks: []common.StreamToolChunk{{Content: "served", Done: true}}}
+	f := refusalFallback(first, second)
+	ledger := &countingLedger{writes: make(chan string, 8)}
+	f.router.engine = ledger
+
+	ch, err := f.CallChatStreamWithTools(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range ch {
+	}
+	rows := ledgerRows(t, ledger, 3)
+	served, ok := rows["ok"]
+	if !ok {
+		t.Fatalf("no ok row among %v", rows)
+	}
+	entry, _ := consideredArg(served, "first")
+	if line, _ := entry["reason"].(string); !strings.HasPrefix(line, "failed when called: "+memql.RefusalCodeNoLocalModel) {
+		t.Errorf("the served row's line for the refused source is %q, want its failure and code", line)
+	}
+}

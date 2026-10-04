@@ -7,9 +7,9 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 // grants design, section 2's table and section 4 "A missing part").
 //
 // An app is `read app:<id>`; a PART of one is `execute app:<id>/<part>`, and
-// Deployables is the first app to carry the vocabulary. Six parts, each the
-// name of a thing a person does here, each grantable to a person or a group
-// by name:
+// Deployables is the first app to carry the vocabulary. Eleven parts, each
+// the name of a thing a person does here, each grantable to a person or a
+// group by name:
 //
 //   sources   add or edit a source, its credential, its auto-deploy switch
 //   deploy    analyze, confirm, retry, cancel a run; publish a Library zip
@@ -20,8 +20,18 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 //   store     attach or change the Shopify store a storefront fronts
 //   preview   publish a candidate version, exercise it against a development
 //             store, open and end a preview
+//   connect   preview, connect, reconnect or disconnect a source's pipeline
+//   rerun     re-run a pipeline run, whole or only its failed steps
+//   cancel    stop a queued or running pipeline run
+//   channels  name where a pipeline's notify stage delivers (epic memql#5480)
 //
-// ALL SEVEN ARE SEEDED ON OWNER AND DEVELOPER. `store` was owner alone
+// The last four are the pipelines parts (epic memql#5479, task memql#5498).
+// They are GLOBAL, never per organization: a pipeline is acted on by its
+// owner alone (the engine resolves every one of them owner-scoped first), and
+// the organization capability table does not name them -- so reading them
+// through `partsForOrganization` would hide an act its owner holds.
+//
+// ALL ELEVEN ARE SEEDED ON OWNER AND DEVELOPER. `store` was owner alone
 // (memql#5541) while v1:shopify:store was plain @rowAuthz(clusterOwner): a
 // developer holding the part would have been drawn the control and served no
 // rows, a refusal rendered as an empty panel (memql#5216). The store concept
@@ -57,9 +67,12 @@ import { availableInAnyOrganization, hasOrganizationDecisions, holds, holdsForOr
 // version and exercise it end to end against a development store, and still
 // not be able to put it in front of a shopper.
 
-export const DEPLOYABLE_PARTS = ["sources", "deploy", "publish", "retire", "domains", "store", "preview"] as const;
+export const DEPLOYABLE_PARTS = ["sources", "deploy", "publish", "retire", "domains", "store", "preview", "connect", "rerun", "cancel", "channels"] as const;
 
 export type DeployablePart = (typeof DEPLOYABLE_PARTS)[number];
+
+/** The pipelines parts: global, never per organization (see the header). */
+const PIPELINE_PARTS: ReadonlySet<DeployablePart> = new Set<DeployablePart>(["connect", "rerun", "cancel", "channels"]);
 
 /** Which parts the effective set holds, one answer per part. */
 export type PartsHeld = Readonly<Record<DeployablePart, boolean>>;
@@ -78,6 +91,10 @@ export const NO_PARTS: PartsHeld = Object.freeze({
   domains: false,
   store: false,
   preview: false,
+  connect: false,
+  rerun: false,
+  cancel: false,
+  channels: false,
 });
 
 /** Every part held: what the seeds give an owner. */
@@ -89,6 +106,10 @@ export const ALL_PARTS: PartsHeld = Object.freeze({
   domains: true,
   store: true,
   preview: true,
+  connect: true,
+  rerun: true,
+  cancel: true,
+  channels: true,
 });
 
 /** `ALL_PARTS` minus the named ones, for a surface or a test that withholds some. */
@@ -130,7 +151,7 @@ export function useDeployableParts(): PartsHeld {
 export function partsForOrganization(accountId: string, fallback: PartsHeld, dataVerb: "create" | "update" = "update"): PartsHeld {
   if (!hasOrganizationDecisions()) return fallback;
   const allowed = holdsForOrganization(accountId, "read", "data") && holdsForOrganization(accountId, "read", "app:deployables") && holdsForOrganization(accountId, dataVerb, "data");
-  return Object.fromEntries(DEPLOYABLE_PARTS.map(part => [part, allowed && holdsForOrganization(accountId, "execute", partResource(part))])) as Record<DeployablePart, boolean>;
+  return Object.fromEntries(DEPLOYABLE_PARTS.map(part => [part, PIPELINE_PARTS.has(part) ? fallback[part] : allowed && holdsForOrganization(accountId, "execute", partResource(part))])) as Record<DeployablePart, boolean>;
 }
 
 /** Personal GitHub grants and installation bindings have no owning MemQL

@@ -514,6 +514,8 @@ export interface AiChatPayload {
   requestId: string;
   messages: AiChatMessageWire[];
   provider?: string;
+  /** "" (Auto) | "fast" | "strong" | "reasoning" -- AiChatMsg.level. */
+  level?: string;
   stream?: boolean;
   fleetRegistrationId?: string;
   conversationId?: string;

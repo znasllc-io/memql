@@ -1,0 +1,299 @@
+/* Pipelines in Deployables (epic memql#5479).
+ *
+ * THE OS'S OWN TOKENS AND KIT, AND NOTHING THEMEABLE HERE: a theme pack
+ * carries colour and wallpaper values only, so every colour below is a token
+ * or a mix of two. The one place this epic spends boldness is the run page's
+ * stops across the top; everything around them is the kit's quiet rows.
+ *
+ * Blocks: the Runs list, a run page's meta line, its stops, its steps and log.
+ * The source page's Checks, the pipeline settings page and the connect rail
+ * keep their own blocks in their own files. */
+
+/* ---- one mark on its own: a run's outcome, a step's state ---------------- */
+
+/* A single `.os-rail-stage` reused for its mark colours alone: no thread, no
+ * label column. */
+.os-rail-stage.pipeline-mark {
+  display: inline-grid;
+  grid-template-columns: auto;
+  padding: 0;
+}
+.os-rail-stage.pipeline-mark::before {
+  display: none;
+}
+
+/* A RUNNING MARK HOLDS STILL HERE. The deploy rail pulses its one running
+ * stage; a list of runs and a stage's steps can hold several at once, and a
+ * page of pulses is the perpetual motion SUPERVISED-VISUAL-COMPOSITION.md
+ * rules out. The solid accent disc with no glyph already says "moving"; the
+ * stops across a run page keep the reduced-motion ring, since there the
+ * running stop is also the one the eye should find first. */
+.os-rail-stage.pipeline-mark[data-state="current"] .os-rail-mark {
+  animation: none;
+  box-shadow: none;
+}
+.pipeline-stops .os-rail-stage[data-state="current"] .os-rail-mark {
+  animation: none;
+  box-shadow: 0 0 0 3px var(--os-accent-soft);
+}
+
+/* A QUEUED RUN'S EMPTY RING takes the muted ink for its edge: the base mark's
+ * hairline all but disappears on the plate at list size, and an empty ring is
+ * the whole of what says "not started". */
+.os-rail-stage.pipeline-mark[data-state="waiting"] .os-rail-mark,
+.os-rail-stage.pipeline-mark[data-state="ahead"] .os-rail-mark,
+.pipeline-stops .os-rail-stage[data-state="ahead"] .os-rail-mark {
+  border-color: var(--os-muted);
+}
+
+/* ---- facts on one line, separated by hairlines rather than glyphs -------- */
+
+.pipeline-run-facts,
+.pipeline-run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 9px;
+  row-gap: 2px;
+  min-width: 0;
+}
+.pipeline-run-facts > * + *,
+.pipeline-run-meta > * + * {
+  position: relative;
+  padding-left: 10px;
+}
+.pipeline-run-facts > * + *::before,
+.pipeline-run-meta > * + *::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 1px;
+  height: 0.85em;
+  transform: translateY(-50%);
+  background: var(--os-line);
+}
+
+.pipeline-mono {
+  font-family: var(--os-font-mono);
+  font-size: 0.92em;
+  letter-spacing: 0;
+}
+
+/* ---- the Runs list ------------------------------------------------------- */
+
+.pipeline-runs-days {
+  display: grid;
+  gap: 20px;
+}
+.pipeline-runs-day {
+  display: grid;
+  gap: 6px;
+}
+.pipeline-runs-day-label {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  font-weight: 600;
+  color: var(--os-muted);
+}
+.pipeline-run-detail {
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+}
+.pipeline-nowrap {
+  white-space: nowrap;
+}
+.pipeline-run-time {
+  min-width: 5ch;
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.pipeline-runs-more {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 12px;
+  padding: 4px 0 12px;
+}
+
+/* ---- a run page ---------------------------------------------------------- */
+
+.pipeline-run-meta {
+  margin: -6px 0 0;
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+}
+.pipeline-run-meta a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, currentColor 35%, transparent);
+  text-underline-offset: 2px;
+}
+.pipeline-run-meta a:hover {
+  color: var(--os-ink);
+}
+
+/* THE STOPS ACROSS THE TOP. The vertical rail's stage, mark and colours, laid
+ * in a row: each stop is a column, the thread runs from one mark's centre to
+ * the next at the marks' height, and the thread up to a finished stop carries
+ * the accent. A row of many stages scrolls sideways in a narrow window rather
+ * than squeezing its names. */
+.os-rail.pipeline-stops {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(108px, 1fr);
+  gap: 0;
+  margin: 2px 0 0;
+  padding: 0;
+  overflow-x: auto;
+}
+.pipeline-stops .os-rail-stage.pipeline-stop {
+  display: block;
+  padding: 0;
+}
+.pipeline-stops .os-rail-stage.pipeline-stop::before {
+  left: calc(50% + 15px);
+  right: calc(-50% + 15px);
+  top: 21px;
+  bottom: auto;
+  width: auto;
+  height: 1px;
+}
+.pipeline-stops .os-rail-stage.pipeline-stop[data-state="done"]::before {
+  background: var(--os-accent);
+  opacity: 0.55;
+}
+.pipeline-stop-button {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 10px 8px 12px;
+  border: 0;
+  border-radius: var(--os-radius-sm) var(--os-radius-sm) 0 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+.pipeline-stop-button:hover {
+  background: var(--os-hover);
+}
+.pipeline-stop-button:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: -2px;
+}
+.pipeline-stops .os-rail-mark {
+  width: 21px;
+  height: 21px;
+}
+.pipeline-stop-name {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--os-ink);
+  font-size: var(--os-text-base);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pipeline-stop-word {
+  display: flex;
+  gap: 6px;
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+}
+.pipeline-stop-took {
+  font-variant-numeric: tabular-nums;
+}
+.pipeline-stops .pipeline-stop[data-state="current"] .pipeline-stop-name {
+  color: var(--os-accent);
+}
+.pipeline-stops .pipeline-stop[data-state="stopped"] .pipeline-stop-word {
+  color: var(--os-warn);
+}
+.pipeline-stops .pipeline-stop[data-state="ahead"] .pipeline-stop-name,
+.pipeline-stops .pipeline-stop[data-state="ahead"] .pipeline-stop-word {
+  opacity: 0.6;
+}
+/* THE OPEN STOP IS A SELECTION, drawn apart from its state and from focus: an
+ * accent edge under it, standing on the panel's top line, so the stop and the
+ * steps beneath read as one thing. */
+.pipeline-stops .pipeline-stop[data-open="true"] .pipeline-stop-button {
+  box-shadow: inset 0 -2px 0 var(--os-accent);
+}
+.pipeline-stops .pipeline-stop[data-open="true"] .pipeline-stop-name {
+  font-weight: 600;
+}
+
+.pipeline-stage-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: -12px;
+  padding-top: 6px;
+  border-top: 1px solid var(--os-line);
+}
+
+/* ---- a stage's steps ----------------------------------------------------- */
+
+.pipeline-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pipeline-step-took {
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+.pipeline-step-failure {
+  display: grid;
+  gap: 8px;
+  padding: 0 0 12px 40px;
+}
+.pipeline-step-message {
+  margin: 0;
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+}
+.pipeline-log {
+  max-height: 22em;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: var(--os-wash);
+  color: var(--os-ink);
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+  font-variant-ligatures: none;
+  line-height: 1.55;
+  white-space: pre;
+  tab-size: 4;
+}
+.pipeline-log:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+}
+.pipeline-log-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 18px;
+  margin: 0;
+  font-size: var(--os-text-sm);
+}
+.pipeline-log-saved {
+  color: var(--os-muted);
+}
+
+@media (max-width: 560px) {
+  .pipeline-step-failure {
+    padding-left: 0;
+  }
+  .os-rail.pipeline-stops {
+    grid-auto-columns: minmax(92px, 1fr);
+  }
+}

@@ -23,6 +23,7 @@ import { useAppSetupMark } from "./useAppSetupMark";
 import { Mark } from "./Mark";
 import { useOs } from "./state";
 import { WindowErrorBoundary } from "./WindowErrorBoundary";
+import { useWindowAsk } from "./windowAsk";
 
 // Phone chrome (spec D13): no desks, no windows, no pins. The Launcher
 // grid is home; an app opens full screen, one at a time, with its section
@@ -38,6 +39,8 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
   const current = currentAppId ? apps.find((a) => a.id === currentAppId) ?? null : null;
   const sections = current ? sectionsFor(current) : [];
   const activeSection = sections.find((s) => s.id === sectionId) ?? sections[0];
+  // What the open app noted rides on the orb's Ask; noting never opens.
+  const appAsk = useWindowAsk(current ? `app:${current.id}${activeSection ? ` section:${activeSection.id}` : ""}` : "");
 
   // The same two gates the window frame computes, for the same reasons -- see
   // WindowFrame.tsx. The phone has no gear, so the mark rides on the Settings
@@ -125,7 +128,8 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
                 sectionId={activeSection?.id ?? ""}
                 reportSetupState={reportSetupState}
                 navigate={setSectionId}
-                askContext={(tag) => openAsk(tag)}
+                askContext={appAsk.askContext}
+                askAbout={appAsk.askAbout}
               /></AttentionDestination>
             </WindowErrorBoundary>
           )}
@@ -153,7 +157,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
         >
           <LayoutGrid size={20} aria-hidden />
         </button>
-        <button type="button" className="os-ask-orb" aria-label="Ask" onClick={() => openAsk(null)}>
+        <button type="button" className="os-ask-orb" aria-label="Ask" onClick={() => openAsk(current ? appAsk.contextTag() : null)}>
           <Mark className="os-ask-mark" />
         </button>
       </footer>

@@ -79,18 +79,18 @@ describe("the Fleet manifest", () => {
   it("declares its sections in order, Overview first, with a settings gear target", () => {
     const fleet = appById(OS_REGISTRY, "fleet");
     expect(fleet).toBeTruthy();
-    // Models sits between Machines and Routing (epic memql#5096): the
-    // hardware, then what runs on it, then how calls are steered to it -- and
-    // Routing's model preference reorders the ranking Models shows. Apps sits
-    // after Workbenches (epic memql#5009): the cluster's own sandbox, then the
-    // person's own computer, then the logs about both.
+    // Routing is ONE section right after Machines (routing redesign,
+    // 2026-09-28): it replaced "Policies" and "Machine routing" and keeps the
+    // latter's id, so a stored default and a deep link still land. Models
+    // follows: what the fleet can serve, in the order Routing's model order
+    // ranks it. Apps sits after Workbenches (epic memql#5009): the cluster's
+    // own sandbox, then the person's own computer, then the logs about both.
     installSeededAccess("owner");
     expect(sectionsFor(fleet!).map((s) => s.id)).toEqual([
       "overview",
       "machines",
-      "policies",
-      "models",
       "routing",
+      "models",
       "apps",
       "workbenches",
       "logs",
@@ -116,9 +116,8 @@ describe("the Fleet manifest", () => {
     expect(sectionsFor(fleet).map((s) => s.id)).toEqual([
       "overview",
       "machines",
-      "policies",
-      "models",
       "routing",
+      "models",
       "apps",
       "workbenches",
       "settings",
@@ -136,7 +135,7 @@ describe("the Fleet app shell", () => {
     first.view.unmount();
 
     const second = mount(fakeConnection(), "routing", store);
-    expect(await screen.findByRole("heading", { name: "Machine routing" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Routing" })).toBeTruthy();
     second.view.unmount();
 
     const third = mount(fakeConnection(), "workbenches", store);
@@ -173,7 +172,7 @@ describe("the Fleet app shell", () => {
         </MachinesProvider>,
       ),
     );
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Machine routing" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Routing" })).toBeTruthy());
     expect(navigate).toHaveBeenCalledTimes(1);
   });
 
@@ -205,7 +204,7 @@ describe("the Fleet app shell", () => {
   it("stores the chosen default section", async () => {
     const store = memoryStore(DEFAULT_FLEET_SETTINGS);
     mount(fakeConnection(), "settings", store);
-    await click(await screen.findByRole("radio", { name: "Machine routing" }));
+    await click(await screen.findByRole("radio", { name: "Routing" }));
     expect(store.saved.at(-1)?.defaultSection).toBe("routing");
   });
 });

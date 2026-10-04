@@ -34,6 +34,7 @@ import { Mark } from "./Mark";
 import { useOs } from "./state";
 import { WindowErrorBoundary } from "./WindowErrorBoundary";
 import { ContextMenu } from "./ContextMenu";
+import { useWindowAsk } from "./windowAsk";
 
 // The window (spec A): glass frame on a token-carrying root, computed rect
 // (the desk animates BETWEEN rects; during a drag dnd-kit's transform
@@ -131,6 +132,8 @@ export function WindowFrame({
   const Icon = manifest.icon;
   const Body = manifest.component;
   const contextTag = `app:${manifest.id}${current ? ` section:${current.id}` : ""}`;
+  // What the app noted rides on this window's Ask button; noting never opens.
+  const windowAsk = useWindowAsk(contextTag);
 
   const style: React.CSSProperties = {
     left: rect.x,
@@ -184,7 +187,7 @@ export function WindowFrame({
             className="os-icon-button"
             aria-label={`Ask about ${manifest.name}`}
             title={`Ask about ${manifest.name}`}
-            onClick={() => openAsk(visiblePageContext(content.current, contextTag), visiblePageLabel(content.current, `${manifest.name} / ${current?.name ?? ""}`))}
+            onClick={() => openAsk(visiblePageContext(content.current, windowAsk.contextTag()), visiblePageLabel(content.current, `${manifest.name} / ${current?.name ?? ""}`))}
           >
             <Mark size={14} aria-hidden />
           </button>
@@ -326,7 +329,8 @@ export function WindowFrame({
                 navigation={win.sectionNavigation}
                 windowVisible={!hidden}
                 navigate={(sectionId, options) => actions.navigateSection(win.id, sectionId, options?.fromContent ? "content" : "peer")}
-                askContext={(tag) => openAsk(tag)}
+                askContext={windowAsk.askContext}
+                askAbout={windowAsk.askAbout}
                 intent={win.intent}
                 consumeIntent={(intentId) => actions.consumeWindowIntent(win.id, intentId)}
               /></AttentionDestination></WindowSearchContext.Provider>

@@ -133,7 +133,7 @@ func fleetCallSites() []struct {
 			"credentialExpiresAt", "startedAt",
 		}, "component/worker/appsession_store.go CreateAppSession"},
 		{"recordAppSessionProgress", []string{
-			"sessionId", "recordedSteps", "droppedActions", "status",
+			"sessionId", "recordedSteps", "droppedActions", "status", "heartbeatAt",
 		}, "component/worker/appsession_store.go RecordAppSessionProgress"},
 		{"endAppSession", []string{
 			"sessionId", "status", "exitCode", "usage", "billing", "transcriptFileId",

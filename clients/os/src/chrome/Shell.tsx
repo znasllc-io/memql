@@ -21,6 +21,7 @@ import { SdkAskTransport } from "../ask/sdkTransport";
 import { type AskTransport } from "../ask/askController";
 import { OS_REGISTRY } from "../apps/registry";
 import { ConceptOpenDispatcher } from "../apps/concepts/ConceptOpenDispatcher";
+import { RunOpenDispatcher } from "../apps/deployables/pipelines/RunOpenDispatcher";
 import { ConnectReturnDispatcher } from "../apps/deployables/sources/ConnectReturnDispatcher";
 import { SetupFactsScope } from "../apps/setup/SetupFactsScope";
 import { SetupPresence } from "../apps/setup/SetupPresence";
@@ -50,6 +51,7 @@ import { Dock } from "./Dock";
 import { ShellDragScope } from "./dragScope";
 import { gridForViewport, OsProvider, useOs } from "./state";
 import { LauncherOverlay } from "./LauncherOverlay";
+import { OptionalReadiness } from "./OptionalReadiness";
 import { PhoneShell } from "./PhoneShell";
 import { useReadinessFeed } from "../live/readiness";
 
@@ -304,6 +306,15 @@ function ShellRoster({
           answer to a portal route that no longer exists. Renders nothing,
           and does nothing on a browser that arrived without the marker. */}
       <ConceptOpenDispatcher />
+      {/* A pipeline run named in the address opens Deployables' Runs on it
+          (epic memql#5479): a check run's details link on GitHub. */}
+      <RunOpenDispatcher />
+      {/* An optional readiness item nobody has answered marks the place it
+          is set up from -- Pipelines marks Settings (epic memql#5479, D15).
+          A runtime attention change at shell lifetime, so a closed Settings
+          is marked too; only the section's "Not now" clears it. Renders
+          nothing. */}
+      <OptionalReadiness />
       <IdentityOpenDispatcher />
       {/* Where a captured line comes from: the focused window's app and
           section, read from this provider's state at capture time. */}

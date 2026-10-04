@@ -22,6 +22,7 @@
 use authoring.concepts.{ construct }
 use identity.concepts.{ user }
 use planner.concepts.{ responsibility }
+use router.concepts.{ call }
 
 /// The intent, owned by a person. Execution state does not live here: it lives on the run, so a
 /// goal that has been re-run, forked or repaired still reads as one thing.
@@ -40,6 +41,7 @@ concept goal {
   requestFingerprint string @description("Immutable fingerprint for a retryable approval-gated request. Absent on ordinary goals; recorded only by the work runtime.")
   closedAt          datetime  @description("When status reached closed.")
   closeReason       string  @description("Why it closed, in words a person can read.")
+  routing           object  @description("The owner's routing choice for every run of this goal -- the Ask route picker's: {source, level, by}. source is empty (the rules decide), a pinned source (app:<id>, app:*, fleet:strongest, fleet:fastest, fleet:<modelId>, federation:cheapest, federation:strongest) or a route (policy:<name>); level is empty or fast, strong, reasoning; by is the owner, stamped by the server. Each run copies it onto its own row, which is what the executing nodes read. Deliberately NOT in input: the input is what the model reads. Absent when nobody chose, which routes by the rules.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="forResponsibility", field="responsibilityId", target=responsibility, direction="outgoing")
@@ -54,7 +56,7 @@ concept run {
   executionAuthority object @description("Server-recorded execution ceiling and credential expiry; never model input or a bearer token.")
   ownerUserId            string  @serverSet  @description("Copied from the goal's owner when there is one; present-and-empty for a system run.")
   goalId                 string  @description("v1:work:goal.id this run executes, or EMPTY for an automation run that no goal asked for.")
-  goalSignature          string  @description("component/work.GoalSignature of the goal this run serves: sha256 over the normalized goal statement plus the sorted input argument names -- the key compile's exact-match tier and the procedure corpus both look work up by (epics memql#5402, memql#5408). Written at open for a goal's run; a delegated app session's recording run COPIES its parent's, which is how a recording joins the corpus of the goal it served, and a parentless session derives its own from its statement. Absent on older or unrelated system runs, which the corpus loader skips rather than guesses.")
+  goalSignature          string  @description("component/work.GoalSignature of the goal this run serves: sha256 over the normalized goal statement plus the sorted input argument names -- the key compile's exact-match tier and the procedure corpus both look work up by (epics memql#5402, memql#5408). Written at open for a goal's run; a delegated app session's recording run COPIES its parent's, which is how a recording joins the corpus of the goal it served, and a parentless session derives its own from what it was ASKED -- its prompt, not its goal statement, which is a short sentence naming the app and would pool every task ever delegated to that app into one corpus. A recording that answers ONE model call through the app door writes none and inherits none: one call a step made is not a recording of the goal's work. Absent on those, and on older or unrelated system runs, which the corpus loader skips rather than guesses.")
   automationName         string!  @description("The automation this run executes -- the template's name in the registry.")
   templateConstructId    string  @description("v1:authoring:construct.id when the template is an authored construct (epic A2).")
   templateVersion        string  @description("The construct version compiled to (epic A2).")
@@ -62,7 +64,7 @@ concept run {
   variables              object  @description("The bound args (epic A2).")
   input                  object  @description("The automation's input envelope, restored on resume.")
   inputFingerprint       string  @description("Hash of input, for verification on resume.")
-  triggeredBy            string  @description("How the run was triggered: schedule, event, manual, a sub-automation, or resumed:<runId>.")
+  triggeredBy            string  @description("How the run was triggered: schedule, event, manual, a sub-automation, or resumed:<runId>. Two prefixes mark a run its DRIVER writes and runs, which the work dispatcher never adopts: procedure:<mode> (a learned procedure's replay) and journal:<template> (a Go-written journal -- the Library's analysis pass, a delegated step's child run, an app session's recording). Such a run carries a goal and names a template word that is no automation, which is otherwise exactly what the dispatcher executes.")
   triggerEvent           object  @description("{topic, kind, payload} of the triggering event, when there was one. Restored on resume.")
   callerSuppliedPayload  bool  @description("The trigger payload came from a caller (MCP, a dry-run), so a resume must NOT restore internal origin to it (memql#2888, memql#2890).")
   mode                   enum("live", "replay", "fork")!  @description("live serves nothing from the journal; replay serves every model call from it; fork serves the shared prefix.")
@@ -91,6 +93,7 @@ concept run {
   head                   object  @description("The run's HEAD (epic memql#5414, design D18): the current version of every top-level step, {\"<stepKey>\": {\"version\": int, \"runId\": string}}. runId is present only when that version lives in ANOTHER run -- a branch's shared prefix, served from the run it forked by reference. The journal writes the whole map at every step receipt, a re-run advances the entries it re-executes, and moving the head (moveRunHead) points an entry back at an earlier version. Every version stays stored; the head only says which one is current. ABSENT on runs written before the field existed, where a reader takes each step's newest row as current.")
   staleSteps             []string  @description("Step keys whose current version was computed against an upstream version that is no longer current (epic memql#5414, D18). A head move writes them and the re-run it starts clears them as each gets a new version. Empty on a run whose every step agrees with its head.")
   rerun                  object  @description("The pending re-run of this run (epic memql#5414, D18 and D19): {requestId, reason: rerun|headMove|branch, stepKey, override, snapshot, workspace, requestedBy, requestedAt}. Written on the node the person's act arrived at and served on the agent that executes the run -- the request rides the ROW because the executing replica holds none of the originating one's memory. Cleared to {} when the run closes.")
+  routing                object  @description("The owner's routing choice every model call of this run honours, on every node that executes it -- copied from the goal when the run opens, inherited by a fork, a replay and a branch: {source, level, by} (see v1:work:goal.routing). The planner's compile claim and the agent's dispatch stamp it onto the run context they build from THIS row, so neither needs anything from the node that took the turn. A pinned source is the owner's own pin and never substituted; a route fails over along its chain; the level binds the calls the run's steps make. Absent when nobody chose.")
   validation             object  @description("The answer validator's summary (epic memql#5414, design D22): {verdict: pass|flag, stepKey, version, observationId, level, at}. A PRE-FILTER, never a certification: it is shown beside the person's own verdict, it never counts as a like and it never moves a procedure's ladder. The detail -- a verdict per axis and the reason -- is the decision observation it names.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
@@ -156,8 +159,8 @@ concept modelCall {
   runId         string!  @description("v1:work:run.id the call was made for.")
   stepKey       string  @description("The step that made the call.")
   requestHash   string!  @description("Hash over provider, model, settings, messages, tools and output schema -- the replay key.")
-  provider      string!  @description("Provider name as the router resolved it.")
-  model         string!  @description("Model id as the router resolved it.")
+  provider      string!  @description("The source that ANSWERED: the route's pick, or the source the router fell back to when the pick failed at call time. The request hash is over the pick, since a replay asks the same question of it.")
+  model         string!  @description("Model id of the source that answered, as that source reported it when it did.")
   settings      object  @description("Temperature, max tokens and the rest of the request settings.")
   promptRef     string  @description("The prompt construct name.")
   promptVersion string  @description("The prompt construct version at call time.")
@@ -168,9 +171,12 @@ concept modelCall {
   served        enum("live", "journal", "local")!  @description("live = a provider answered; journal = served from a recorded response; local = a fleet model answered.")
   response      object  @description("The response, structured output or text.")
   error         string  @description("The provider's error, when there was one.")
+  routerCallId  string  @description("The v1:router:call row that records the attempt this call ended on -- the decision record behind it. Empty on a row served from the journal, where no source was asked, and on a call no router wrapped.")
+  decision      object  @description("The routing decision behind the source that answered: {level, requestedLevel, servedLevel, degraded, rule, policy, door, outcome, minContextTokens, considered: [{entry, door, reason}]}. `considered` is every source the route passed over, in order and with why -- an app source this node cannot open, a machine that was asleep -- and ends with the one that served. Empty wherever routerCallId is.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
+  @relationship(type="references", as="decidedBy", field="routerCallId", target=call, direction="outgoing")
 }
 
 /// One human gate. Every kind of gate is this concept; an approval never carries to a modified

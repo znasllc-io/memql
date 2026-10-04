@@ -135,4 +135,8 @@ type GitHub interface {
 	// synthesized top-level directory stripped). More than maxBytes of kept
 	// content is ErrTreeTooLarge.
 	Tree(ctx context.Context, token, repository, sha string, keep func(path string) bool, maxBytes int64) (fs.FS, error)
+	// Installations is every installation of the cluster's app with what it
+	// has ACCEPTED, asked as the app itself: the Settings item's read of
+	// installations whose permissions lag the app's (epic memql#5479, D15).
+	Installations(ctx context.Context) ([]githubapp.AppInstallation, error)
 }

@@ -268,7 +268,7 @@ func (a *App) setupCockpitAppExecutor(
 		// THE STEP-HANDOVER SEAM (epic memql#5391, design D7). The door above
 		// serves a CHAT turn through an app; this one hands a whole STEP to
 		// one, which is what a tool-needing call resolved to an `app:` entry
-		// becomes. Same executor, same consent gates, same session runner --
+		// becomes. Same executor, same app gate, same session runner --
 		// a routed step and a delegated task are the same act.
 		//
 		// The wiring IS the feature here as much as it is above: without this

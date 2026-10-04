@@ -84,9 +84,9 @@ func asPipelineExecutor() context.Context {
 	return auth.ContextWithInternalOrigin(context.Background())
 }
 
-// gateStore is fakeStore with the gate reads made settable and the agent
+// pipelineGateStore is fakeStore with the gate reads made settable and the agent
 // authorization read counted.
-type gateStore struct {
+type pipelineGateStore struct {
 	*fakeStore
 	computerUseOff bool
 	prefsErr       error
@@ -94,15 +94,15 @@ type gateStore struct {
 	authCalls      int
 }
 
-func (s *gateStore) UserPreferences(context.Context, string) (Preferences, error) {
+func (s *pipelineGateStore) UserPreferences(context.Context, string) (Preferences, error) {
 	if s.prefsErr != nil {
 		// EngineStore's answer on a failed read: "enabled", with the error.
-		return Preferences{ComputerUseEnabled: true}, s.prefsErr
+		return Preferences{}, s.prefsErr
 	}
-	return Preferences{ComputerUseEnabled: !s.computerUseOff}, nil
+	return Preferences{KillSwitchEngaged: s.computerUseOff}, nil
 }
 
-func (s *gateStore) AgentAuthorization(context.Context, string, string) (*Authorization, error) {
+func (s *pipelineGateStore) AgentAuthorization(context.Context, string, string) (*Authorization, error) {
 	s.authCalls++
 	return s.authorization, nil
 }
@@ -114,12 +114,12 @@ func (a *recordingAuditor) Emit(_ context.Context, ev workerservice.AuditEvent) 
 }
 
 // pipelineFleet is the owner's machines, live in a real registry on THIS
-// replica, behind a dispatcher whose store is a gateStore. It records every
+// replica, behind a dispatcher whose store is a pipelineGateStore. It records every
 // envelope that reached a machine; a machine answers with preview as its
 // output preview, or with failure when that is set.
 type pipelineFleet struct {
 	d          *Dispatcher
-	store      *gateStore
+	store      *pipelineGateStore
 	audit      *recordingAuditor
 	registry   *workerservice.Registry
 	dispatched map[string][]*memqlv1.ToolDispatch
@@ -170,7 +170,7 @@ func newPipelineFleet(t *testing.T, cands ...Candidate) *pipelineFleet {
 		reg.Add(w)
 	}
 	f.registry = reg
-	f.store = &gateStore{fakeStore: &fakeStore{fakeFleet: &fakeFleet{owner: pipelineOwner, machines: cands}}}
+	f.store = &pipelineGateStore{fakeStore: &fakeStore{fakeFleet: &fakeFleet{owner: pipelineOwner, machines: cands}}}
 	d, err := NewDispatcher(Options{
 		Logger:     testLogger(),
 		Registry:   reg,
@@ -223,7 +223,7 @@ func TestPipelinePurposeIsRefusedOutsideInternalOrigin(t *testing.T) {
 				t.Fatalf("audit events = %+v, want exactly one", f.audit.events)
 			}
 			ev := f.audit.events[0]
-			if ev.Action != "worker_call_denied_by_policy" || ev.Actor != "pipeline:"+pipelineRunId ||
+			if ev.Action != "worker_call_denied_by_policy" || ev.ActorLabel != "pipeline:"+pipelineRunId ||
 				ev.TargetType != "user" || ev.Target != pipelineOwner {
 				t.Fatalf("audit event = %+v, want worker_call_denied_by_policy by pipeline:%s against user %s",
 					ev, pipelineRunId, pipelineOwner)
@@ -350,7 +350,7 @@ func TestPipelinePurposeHonoursTheKillSwitch(t *testing.T) {
 		t.Fatalf("invocation outcome = %q, want kill_switch_engaged", row.Outcome)
 	}
 	if len(f.audit.events) != 1 || f.audit.events[0].Action != "worker_call_blocked_by_kill_switch" ||
-		f.audit.events[0].Actor != "pipeline:"+pipelineRunId {
+		f.audit.events[0].ActorLabel != "pipeline:"+pipelineRunId {
 		t.Fatalf("audit events = %+v, want worker_call_blocked_by_kill_switch by the pipeline", f.audit.events)
 	}
 
@@ -710,7 +710,7 @@ func TestPipelineStepIsRefusedWithoutThePipelinePurpose(t *testing.T) {
 	if len(f.audit.events) != 1 {
 		t.Fatalf("audit events = %+v, want exactly one", f.audit.events)
 	}
-	if ev := f.audit.events[0]; ev.Action != "worker_call_denied_by_policy" || ev.Actor != "agent:agent-1" ||
+	if ev := f.audit.events[0]; ev.Action != "worker_call_denied_by_policy" || ev.ActorLabel != "agent:agent-1" ||
 		ev.TargetType != "user" || ev.Target != pipelineOwner || ev.Detail["action"] != PipelineStepAction {
 		t.Fatalf("audit event = %+v, want worker_call_denied_by_policy by agent:agent-1 against user %s naming the action",
 			ev, pipelineOwner)

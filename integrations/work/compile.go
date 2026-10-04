@@ -129,6 +129,10 @@ func (i *Integration) pendingCompile(ctx context.Context, runId string) (Compile
 		RunId: runId, GoalId: goalId, OwnerUserId: req.OwnerUserId,
 		Mode: rowString(run, "mode"), ReplayPolicy: rowString(run, "replayPolicy"),
 		SourceRunId: rowString(run, "forkedFromRunId"), ForkAtStepKey: rowString(run, "forkAtStepKey"),
+		// The owner's routing choice, from the ROW: triage and the compile
+		// pass on this planner honour it without anything from the node that
+		// took the turn.
+		Routing: common.RouteChoiceFrom(run["routing"]),
 	}
 	if rc.Mode == "" {
 		rc.Mode = common.RunModeLive

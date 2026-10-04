@@ -19,6 +19,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/airoute"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // ResolveFor satisfies memql.AIResolver.
@@ -44,10 +45,37 @@ func (r *Router) ResolveFor(ctx context.Context, req ResolveRequest) (memql.Reso
 	if strings.TrimSpace(req.CallerKind) == "" {
 		req.CallerKind = auth.CallerKindFromContext(ctx)
 	}
+	// AND WHICH WORK STEP IT SERVES, which is the session door's hinge (design
+	// D7). The engine seam's applyCallAttribution fills these for a prompt
+	// call; a request built outside the engine -- the agent replier's, on
+	// every lane -- skips that seam, and an owned work turn that policy routes
+	// to an app would reach sessionDoorFor with no step and be refused, with
+	// nothing behind the door tried. The run context names the step by KEY,
+	// which is what the handover carries (memql.AppSessionHandover.StepId).
+	// Filled only if empty: a caller that named its step knows better than
+	// the context.
+	if run, ok := common.RunFromContext(ctx); ok {
+		if strings.TrimSpace(req.RunId) == "" {
+			req.RunId = run.RunId
+		}
+		if strings.TrimSpace(req.StepId) == "" {
+			req.StepId = run.StepKey
+		}
+	}
+	// AND WHAT THE RUN'S OWNER CHOSE (the Ask route picker). Applied HERE,
+	// the one function every model call reaches -- the engine's prompt seam
+	// and the agent replier's own request alike -- so no call site can forget
+	// it, and it is read off the run context the executing node built from
+	// the run ROW: the planner compiling and the agent running a step each see
+	// it without sharing memory with the node that took the turn. It never
+	// overrides what the executing step's own override names.
+	req, err := memql.ApplyRunRouting(ctx, req)
+	if err != nil {
+		return memql.ResolvedProvider{}, err
+	}
 
 	var client any
 	var resolved Resolved
-	var err error
 
 	switch req.Modality {
 	case airoute.ModalityStreamingTools:
@@ -59,7 +87,7 @@ func (r *Router) ResolveFor(ctx context.Context, req ResolveRequest) (memql.Reso
 	case airoute.ModalityChat:
 		client, resolved, err = r.resolveChat(ctx, req)
 	case airoute.ModalityStructured:
-		client, resolved, err = r.resolveDirect(ctx, req, modalityStructured)
+		client, resolved, err = r.resolveStructured(ctx, req)
 	case airoute.ModalityVision:
 		client, resolved, err = r.resolveDirect(ctx, req, modalityVision)
 	case airoute.ModalityEmbedding:

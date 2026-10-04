@@ -1,4 +1,5 @@
-import { Caption, RecordList, RecordRow, Head, Measure, Notice } from "../../kit";
+import { Caption, RecordList, RecordListSkeleton, RecordRow, Head, Measure, Notice } from "../../kit";
+import { RoutingIsInFleet } from "./RoutingLink";
 import { useSession } from "../../chrome/access";
 import { doorFor } from "./providerFacts";
 import { useProviderRegistry } from "./providerFacts";
@@ -106,22 +107,21 @@ export function LevelsSection() {
       <Head title="Levels" meta={inference.status.read && !inference.status.error ? levels.length : undefined} />
       <p className="os-caption">
         A level is how much intelligence a call needs. Every call names one and
-        never names a model, so a model can change without a release. What each
-        level gets is decided by the rules -- this page is what those rules
-        currently produce.
+        never a model; this page is what a call at each level gets right now.
       </p>
+      <RoutingIsInFleet tab="rules" />
 
       {inference.status.error ? (
         <Notice
           tone="warn"
           sentence={`The cluster declined this read for ${access?.role || "your role"}.`}
-          next="Without it these rows cannot say which door takes a call."
+          next="Without it these rows cannot say which source takes a call."
           detail={inference.status.error}
         />
       ) : null}
 
       {!inference.status.read && inference.status.error === "" ? (
-        <Caption>Asking the cluster.</Caption>
+        <RecordListSkeleton label="Loading the levels" rows={4} />
       ) : (
         <>
           {shared === "" ? null : (
@@ -149,16 +149,15 @@ export function LevelsSection() {
       {inference.status.read && !anyOpen ? (
         <Notice
           tone="warn"
-          sentence="No door is open, so every level parks."
-          next="Pull a model onto a machine you own, sign in to Claude Code or Codex on one, or federate a vendor in Doors."
+          sentence="No source is ready, so every level waits."
+          next="Pull a model onto a machine you own, sign in to Claude Code or Codex on one, or set up a vendor in Vendors."
         />
       ) : null}
 
       {bindings.available ? null : (
         <Caption>
           Which model serves each level is the fleet&apos;s to choose, and this
-          cluster does not report it yet. The door each level goes through is
-          what these rows are telling you.
+          cluster does not report it yet. These rows say which source takes it.
         </Caption>
       )}
     </div>

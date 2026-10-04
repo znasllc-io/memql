@@ -244,7 +244,13 @@ export function Rail({
   );
 }
 
-function StopGlyph({ state, size }: { state: StopState; size: number }) {
+/**
+ * A stop's glyph: a check, a dash, a cross, or nothing for a stop that is
+ * moving, waiting on you or not reached. Exported on its second use -- a
+ * pipeline run's stops across the top (epic memql#5479) draw the same marks
+ * in the same states, so a run and a deploy read in one vocabulary.
+ */
+export function StopGlyph({ state, size }: { state: StopState; size: number }) {
   switch (state) {
     case "done":
     case "complete":

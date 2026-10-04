@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -163,18 +164,27 @@ func (r *Router) resolveChat(ctx context.Context, req ResolveRequest) (common.Ch
 }
 
 // ResolveStructured picks a provider for a structured-output call -- the
-// classifiers, the routing prompts, every CallChatStructured site.
-//
-// There is no fallback wrapper and no observer on this surface yet: the
-// observed* wrappers cover the three chat surfaces, and wrapping a fourth
-// without a ledger row to write would be an empty layer. The RESOLUTION is
-// still recorded in full on Resolved.Decision.
+// classifiers, the routing prompts, every CallChatStructured site -- and
+// returns it wrapped, like the chat surfaces: a source that fails at call time
+// hands the call to the next one on the route, and every attempt writes its
+// v1:router:call row (fallback_structured.go).
 func (r *Router) ResolveStructured(req ResolveRequest) (common.ChatStructuredProvider, Resolved, error) {
-	client, resolved, err := r.resolveDirect(context.Background(), req, modalityStructured)
+	return r.resolveStructured(context.Background(), req)
+}
+
+func (r *Router) resolveStructured(ctx context.Context, req ResolveRequest) (common.ChatStructuredProvider, Resolved, error) {
+	chain, resolved, err := r.resolveChain(ctx, req, modalityStructured)
 	if err != nil {
 		return nil, Resolved{}, err
 	}
-	return client.(common.ChatStructuredProvider), resolved, nil
+	req = r.stampRequestId(req)
+	resolved.Chain = chain
+	return &fallbackStructured{
+		router:   r,
+		chain:    chain,
+		req:      req,
+		resolved: resolved,
+	}, resolved, nil
 }
 
 // ResolveVision picks a provider for a vision call -- an image or a document
@@ -323,6 +333,11 @@ type chainWinner struct {
 	// that carries it is not the registry entry's appProvider.
 	client    any
 	remaining []string
+	// localSeen is true when a local or app source came before this winner in
+	// the walked route, or is this winner. It is the walk's own sawLocalDoor,
+	// carried out so a fallback wrapper hopping to a vendor later asks the
+	// cost ceiling on exactly the condition the walk asks it on.
+	localSeen bool
 }
 
 // resolveChain decides which provider serves this call, and records the whole
@@ -389,9 +404,25 @@ func (r *Router) resolveChain(ctx context.Context, req ResolveRequest, mod provi
 		}
 		resolved, err := r.consentOrRefusal(ctx, req, mod, report, "", decision)
 		if err != nil {
+			// A PIN IS NEVER SUBSTITUTED, and the refusal says so by name:
+			// "no door is open" alone reads as a fleet with nothing awake,
+			// when the truth is that one source was named and it cannot serve.
+			var refusal *InferenceUnavailable
+			if errors.As(err, &refusal) {
+				refusal.Pinned = explicit
+			}
 			return nil, Resolved{}, err
 		}
 		return chainAndResolved(resolved)
+	}
+
+	// A PERSON'S ROUTE replaces the rule's chain (ResolveRequest.Route): the
+	// Ask route picker's `policy:<name>`, applied to every call of the run it
+	// was chosen for. No rule is consulted and the level is the call's own --
+	// the person chose the route, and the chain FAILS OVER along it exactly as
+	// a rule's would.
+	if route := strings.TrimSpace(req.Route); route != "" {
+		return r.resolveRoute(ctx, req, mod, policies, route, report)
 	}
 
 	// THE DEGRADE LOOP. Each pass matches a rule AT THE CURRENT LEVEL, because
@@ -501,6 +532,50 @@ func (r *Router) resolveChain(ctx context.Context, req ResolveRequest, mod provi
 		policyName = lastRule.Policy
 	}
 	resolved, err := r.consentOrRefusal(ctx, req, mod, report, policyName, decision)
+	if err != nil {
+		return nil, Resolved{}, err
+	}
+	return chainAndResolved(resolved)
+}
+
+// resolveRoute walks the chain of the route a person chose.
+//
+// A ROUTE THAT IS NOT REGISTERED IS A PLAIN ERROR, not a door refusal. The
+// turn that chose it was checked against the cluster's routes, so reaching
+// here means the route was removed since -- a configuration fault an owner
+// fixes. Reported as "every door is shut" it would park the run waiting for a
+// machine to wake, and no machine waking would ever serve it.
+func (r *Router) resolveRoute(
+	ctx context.Context,
+	req ResolveRequest,
+	mod providerModality,
+	policies *memql.PolicyRegistry,
+	route string,
+	report *doorReporter,
+) ([]string, Resolved, error) {
+	if policies == nil {
+		return nil, Resolved{}, fmt.Errorf("router: the route %q chosen for this call cannot be walked: no policy registry is wired into this router", route)
+	}
+	policy, found := policies.Lookup(route)
+	if !found {
+		return nil, Resolved{}, fmt.Errorf("router: the route %q chosen for this call is not one of this cluster's routes; choose another route or Auto", route)
+	}
+	decision := airoute.Decision{
+		RequestedLevel:   req.Level,
+		Level:            req.Level,
+		ServedLevel:      req.Level,
+		Policy:           route,
+		Touches:          req.Touches,
+		MinContextTokens: req.Needs.MinContextTokens,
+	}
+	winner, err := r.walkChain(ctx, req, mod, policy.ProviderChain(), nil, report, route)
+	if err != nil {
+		return nil, Resolved{}, err
+	}
+	if winner != nil {
+		return chainAndResolved(r.resolvedFrom(winner, mod, route, report, decision))
+	}
+	resolved, err := r.consentOrRefusal(ctx, req, mod, report, route, decision)
 	if err != nil {
 		return nil, Resolved{}, err
 	}
@@ -666,9 +741,16 @@ func (r *Router) walkChain(
 			// to reach the same answer when the fallback wrapper re-resolves
 			// this winner by name.
 			if serves, why := servesModality(entry.Client, mod); !serves {
-				sessionClient, isSession, sessionErr := r.sessionDoorFor(req, cand.Name, mod)
+				sessionClient, isSession, skip, sessionErr := r.sessionDoorFor(ctx, req, cand.Name, mod)
 				if sessionErr != nil {
 					return nil, sessionErr
+				}
+				if skip != "" {
+					// Held by another agent: the chat door is open from
+					// here and the session door is not, so the entry is
+					// passed over as a shut door would be.
+					report.note(cand.Name, skip)
+					continue
 				}
 				if isSession {
 					// NO REMAINING CHAIN, and that is the park rule (design D7,
@@ -688,6 +770,7 @@ func (r *Router) walkChain(
 				entry:     entry,
 				door:      cand.Door,
 				remaining: r.remainingNames(ctx, req, candidates[ci:], chain[idx+1:], banned),
+				localSeen: sawLocalDoor,
 			}, nil
 		}
 	}
@@ -771,6 +854,7 @@ func (r *Router) resolvedFrom(
 		Decision:     decision,
 		Entry:        winner.entry,
 		Client:       winner.client,
+		localSeen:    winner.localSeen,
 	}
 }
 
@@ -870,7 +954,7 @@ func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name st
 		// walk already resolved, which means the request carried a step. If it
 		// ever did arrive, a session winner's chain is itself alone, so the
 		// skip exhausts the chain and refuses rather than reaching a vendor.
-		sessionClient, isSession, err := r.sessionDoorFor(req, name, mod)
+		sessionClient, isSession, _, err := r.sessionDoorFor(ctx, req, name, mod)
 		if err != nil || !isSession {
 			return nil, Resolved{}, false
 		}
@@ -903,6 +987,12 @@ func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name st
 			r.logger.Debug("router: this door has no effort knob; the requested effort is not applied",
 				"provider", entry.Config.Name, "effort", effort, "requestId", req.RequestId)
 		}
+	}
+	// And HOW THE DOOR WAS REACHED, for an app door's own gate: a rule's chain
+	// named it, or a pin skipped every rule -- and whose pin. Only the router
+	// knows which, and only an app door asks (session_door.go's appDoorPin).
+	if pinnable, ok := client.(interface{ WithAppDoorPin(memql.AppDoorPin) any }); ok {
+		client = pinnable.WithAppDoorPin(appDoorPin(req, name))
 	}
 	return client, resolved, true
 }
@@ -963,7 +1053,7 @@ func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
 		"policy":             rec.Policy,
 		"door":               rec.Door,
 		"considered":         consideredArgs(rec.Considered),
-		"touches":            rec.Touches,
+		"touches":            touchesArgs(rec.Touches),
 		"minContextTokens":   rec.MinContextTokens,
 		"machineOwnerUserId": rec.MachineOwnerUserId,
 	}
@@ -995,6 +1085,18 @@ func consideredArgs(entries []airoute.ConsideredEntry) []map[string]any {
 		})
 	}
 	return out
+}
+
+// touchesArgs renders a call's footprint as the []string the concept's array
+// field takes, EMPTY RATHER THAN NIL: a nil slice renders as `null`, the
+// concept's validation refuses null for an array, and the refusal drops the
+// WHOLE row -- logged once, counted in RecordsDropped, and gone. A call that
+// names no footprint is most engine prompt calls and every structured one.
+func touchesArgs(touches []string) []string {
+	if touches == nil {
+		return []string{}
+	}
+	return touches
 }
 
 // billingOrMetered normalizes a record's billing for the ledger. An
@@ -1128,7 +1230,11 @@ func (r *Router) writeRecord(rec CallRecord) {
 		Claims:  map[string]any{"sub": "system:router"},
 	})
 
-	args := buildRouterCallArgs(rec, id.NewShortId())
+	callId := strings.TrimSpace(rec.CallId)
+	if callId == "" {
+		callId = id.NewShortId()
+	}
+	args := buildRouterCallArgs(rec, callId)
 	query, err := langparser.RenderCall("recordRouterCall", args)
 	if err != nil {
 		r.recordsDropped.Add(1)

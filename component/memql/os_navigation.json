@@ -228,6 +228,11 @@
         "name": "Sources"
       },
       {
+        "id": "runs",
+        "name": "Runs",
+        "requires": "app:deployables/runs"
+      },
+      {
         "id": "logs",
         "name": "Logs",
         "requires": "app:deployables/logs"
@@ -263,16 +268,12 @@
         "name": "Machines"
       },
       {
-        "id": "policies",
-        "name": "Policies"
+        "id": "routing",
+        "name": "Routing"
       },
       {
         "id": "models",
         "name": "Model library"
-      },
-      {
-        "id": "routing",
-        "name": "Machine routing"
       },
       {
         "id": "apps",
@@ -513,8 +514,13 @@
         "requires": "app:settings/integrations"
       },
       {
+        "id": "pipelines",
+        "name": "Pipelines",
+        "requires": "app:settings/pipelines"
+      },
+      {
         "id": "providers",
-        "name": "Doors",
+        "name": "Vendors",
         "requires": "app:settings/providers"
       },
       {

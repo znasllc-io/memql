@@ -217,12 +217,16 @@ func (s *server) admitRegistration(
 		return nil, fmt.Errorf("send register ack: %w", err)
 	}
 	if s.auditor != nil {
+		// The machine acted, on the worker token that admitted this stream.
+		// That token is a v1:identity:identity row, which is the only thing
+		// auditEvent.actorIdentityId can hold; the readable actor is the label.
 		s.auditor.Emit(ctx, AuditEvent{
-			Action:      "worker_registered",
-			Actor:       "worker:" + registration.ID,
-			Target:      registration.ID,
-			TargetType:  "worker",
-			OwnerUserId: registration.OwnerUserId,
+			Action:          "worker_registered",
+			ActorIdentityId: registration.IdentityId,
+			ActorLabel:      "worker:" + registration.ID,
+			Target:          registration.ID,
+			TargetType:      "worker",
+			OwnerUserId:     registration.OwnerUserId,
 			Detail: map[string]any{
 				"name":         registration.Name,
 				"capabilities": registration.Capabilities,
@@ -675,13 +679,23 @@ func (s *streamSession) close(cause error) {
 		}
 		// Emit an audit event mirroring "worker_registered" so downstream
 		// security telemetry has a paired connect/disconnect record.
+		//
+		// ON A DETACHED CONTEXT. s.cancel fired on the first line of close,
+		// so s.ctx is done here and the DB sink's write on it fails with
+		// context canceled before any row exists -- the disconnect would
+		// reach the log and never the trail. WithoutCancel keeps the
+		// stream's values (the write runs as the same caller); the timeout
+		// bounds a teardown that must not hang on a slow database.
 		if s.server != nil && s.server.auditor != nil {
-			s.server.auditor.Emit(s.ctx, AuditEvent{
-				Action:      "worker_disconnected",
-				Actor:       "worker:" + s.worker.RegistrationId,
-				Target:      s.worker.RegistrationId,
-				TargetType:  "worker",
-				OwnerUserId: s.worker.OwnerUserId,
+			auditCtx, cancelAudit := context.WithTimeout(context.WithoutCancel(s.ctx), 5*time.Second)
+			defer cancelAudit()
+			s.server.auditor.Emit(auditCtx, AuditEvent{
+				Action:          "worker_disconnected",
+				ActorIdentityId: s.worker.IdentityId,
+				ActorLabel:      "worker:" + s.worker.RegistrationId,
+				Target:          s.worker.RegistrationId,
+				TargetType:      "worker",
+				OwnerUserId:     s.worker.OwnerUserId,
 				Detail: map[string]any{
 					"name":                s.worker.Name,
 					"connectedAt":         s.worker.ConnectedAt.Format(time.RFC3339),
@@ -708,9 +722,8 @@ func (s *streamSession) close(cause error) {
 // THE CONTEXT COMES FROM Background(), NOT from the session. By the time close
 // runs, s.cancel has already fired and s.ctx is done, so a write on it would
 // be cancelled before it left the process -- and the failure would be silent,
-// because the flush is best-effort. The audit Emit just below still passes
-// s.ctx; that is a separate question about a separate sink and is not the
-// pattern to copy here.
+// because the flush is best-effort. The disconnect audit in close detaches for
+// the same reason.
 func (s *streamSession) clearConnectedNode() {
 	if s == nil || s.server == nil || s.server.store == nil || s.worker == nil {
 		return
@@ -1214,13 +1227,14 @@ func (s *streamSession) handleAuditEvent(ctx context.Context, evt *memqlv1.Audit
 		return
 	}
 	s.server.auditor.Emit(ctx, AuditEvent{
-		Action:      evt.GetAction(),
-		Actor:       "worker:" + s.worker.RegistrationId,
-		Target:      s.worker.RegistrationId,
-		TargetType:  "worker",
-		OwnerUserId: s.worker.OwnerUserId,
-		Detail:      map[string]any{"raw": string(evt.GetDetailJson())},
-		Timestamp:   s.server.clock(),
+		Action:          evt.GetAction(),
+		ActorIdentityId: s.worker.IdentityId,
+		ActorLabel:      "worker:" + s.worker.RegistrationId,
+		Target:          s.worker.RegistrationId,
+		TargetType:      "worker",
+		OwnerUserId:     s.worker.OwnerUserId,
+		Detail:          map[string]any{"raw": string(evt.GetDetailJson())},
+		Timestamp:       s.server.clock(),
 	})
 }
 

@@ -594,3 +594,150 @@ func TestAnUnreadableParentLeavesTheRecordingItsOwnStatementsSignature(t *testin
 		t.Errorf("the warning %q does not say what was written: the recording keeps its own statement's signature", warning)
 	}
 }
+
+// TestOpenRecordingStatementIsNotThePrompt. The goal a recording opens is
+// what the Work feed and Nexus show a person, and it used to be the whole
+// prompt: a classifier call through Claude Code put a 3,452-character goal
+// into the feed, one per call. The statement is a short sentence; the prompt
+// is already on the session row, which is where a reader who wants it looks.
+func TestOpenRecordingStatementIsNotThePrompt(t *testing.T) {
+	prompt := "[system] You are the symptom classifier. " + strings.Repeat("Classify the failure below. ", 120)
+	for _, tc := range []struct {
+		name string
+		open workerservice.RecordingOpen
+	}{
+		{"a delegated task", workerservice.RecordingOpen{
+			SessionId: testSessionId, OwnerUserId: testOwner, App: "claude-code", Prompt: prompt,
+		}},
+		{"a model call", workerservice.RecordingOpen{
+			SessionId: testSessionId, OwnerUserId: testOwner, App: "claude-code", Prompt: prompt,
+			ParentRunId: "v1:work:run:ask", ParentStepId: "reason", ModelCall: true,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, eng := newSessionWriter(t)
+			if _, err := w.OpenRecording(context.Background(), tc.open); err != nil {
+				t.Fatalf("OpenRecording: %v", err)
+			}
+			statement, _ := eng.callTo(t, "createWorkGoal").Args(t)["statement"].(string)
+			if statement == "" || len(statement) > maxRecordingStatement {
+				t.Fatalf("statement is %d characters, want 1..%d:\n%s", len(statement), maxRecordingStatement, statement)
+			}
+			if strings.Contains(statement, "symptom classifier") && tc.open.ModelCall {
+				t.Errorf("a model call's recording is named after its prompt: %q", statement)
+			}
+			if !strings.Contains(statement, "claude-code") {
+				t.Errorf("statement %q does not say which app ran", statement)
+			}
+			if parent := tc.open.ParentRunId; parent != "" {
+				if got := eng.callTo(t, "createWorkRun").Args(t)["parentRunId"]; got != parent {
+					t.Errorf("parentRunId = %v, want %s -- the session has to be traceable to the run that caused it", got, parent)
+				}
+			}
+		})
+	}
+}
+
+// TestAModelCallRecordingDoesNotClaimTheCallingStep. A chat, structured or
+// vision call answered by an app is ONE model call a step made -- not the
+// step handed over. So its recording must not stamp childRunId on the calling
+// step (that pointer means "this step was delegated", and every inference call
+// in a step would overwrite it), must not inherit the parent goal's signature
+// (it would join the goal's procedure corpus as if it were a recording of the
+// goal's work), and must write no signature of its own (a short statement is
+// shared by every model call, so a signature built from it would pool them all
+// into one corpus).
+func TestAModelCallRecordingDoesNotClaimTheCallingStep(t *testing.T) {
+	w, eng := newSessionWriter(t)
+	eng.reply("workRunForOwner", map[string]any{
+		"id": "v1:work:run:ask", "goalSignature": "sig-ask", "variables": map[string]any{"q": "hello"},
+	})
+	if _, err := w.OpenRecording(context.Background(), workerservice.RecordingOpen{
+		SessionId: testSessionId, OwnerUserId: testOwner, App: "claude-code", Prompt: "classify this",
+		ParentRunId: "v1:work:run:ask", ParentStepId: "reason", ModelCall: true,
+	}); err != nil {
+		t.Fatalf("OpenRecording: %v", err)
+	}
+	if calls := eng.callsTo("updateWorkStep"); len(calls) != 0 {
+		t.Errorf("a model call's recording stamped the calling step: %s", calls[0].Query)
+	}
+	if calls := eng.callsTo("workRunForOwner"); len(calls) != 0 {
+		t.Error("a model call's recording read the parent run to inherit from it")
+	}
+	run := eng.callTo(t, "createWorkRun").Args(t)
+	for _, absent := range []string{"goalSignature", "variables"} {
+		if v, present := run[absent]; present {
+			t.Errorf("a model call's recording wrote %s = %v", absent, v)
+		}
+	}
+	if run["parentRunId"] != "v1:work:run:ask" {
+		t.Errorf("parentRunId = %v, want the calling run", run["parentRunId"])
+	}
+}
+
+// TestARecordingRunIsDriverOwned: the recording is written and closed by this
+// writer, never executed, so the dispatcher must not adopt it (see
+// driver_owned_test.go for the dispatcher's half).
+func TestARecordingRunIsDriverOwned(t *testing.T) {
+	w, eng := newSessionWriter(t)
+	if _, err := w.OpenRecording(context.Background(), workerservice.RecordingOpen{
+		SessionId: testSessionId, OwnerUserId: testOwner, App: "codex",
+	}); err != nil {
+		t.Fatalf("OpenRecording: %v", err)
+	}
+	run := eng.callTo(t, "createWorkRun").Args(t)
+	if by, _ := run["triggeredBy"].(string); !IsDriverOwnedRun(by) {
+		t.Fatalf("triggeredBy = %q: the recording run reads as dispatchable work", by)
+	}
+}
+
+// TestHeartbeatRecordingBeatsTheRun: a recording run is written by this
+// driver, never executed, so nothing else heartbeats it -- and the work sweep
+// abandons a running run whose heartbeat is a minute old, which is every
+// session longer than a minute.
+func TestHeartbeatRecordingBeatsTheRun(t *testing.T) {
+	w, eng := newSessionWriter(t)
+	at := testNow.Add(90 * time.Second)
+	if err := w.HeartbeatRecording(context.Background(), workerservice.RecordingHeartbeat{
+		SessionId: testSessionId, OwnerUserId: testOwner, RunId: testRunId, At: at,
+	}); err != nil {
+		t.Fatalf("HeartbeatRecording: %v", err)
+	}
+	call := eng.callTo(t, "updateWorkRun")
+	args := call.Args(t)
+	if args["runId"] != testRunId || args["heartbeatAt"] != at.UTC().Format(time.RFC3339Nano) {
+		t.Errorf("updateWorkRun = %v, want the recording run's heartbeat", args)
+	}
+	for k := range args {
+		if k != "runId" && k != "heartbeatAt" {
+			t.Errorf("a heartbeat also wrote %s = %v; the read-merge would overwrite what the close wrote", k, args[k])
+		}
+	}
+	if call.Actor != testOwner || call.Origin != auth.OriginInternal {
+		t.Errorf("heartbeat ran as %q at %v, want the owner at internal origin", call.Actor, call.Origin)
+	}
+	if err := w.HeartbeatRecording(context.Background(), workerservice.RecordingHeartbeat{
+		SessionId: testSessionId, OwnerUserId: testOwner, At: at,
+	}); err == nil {
+		t.Error("a heartbeat naming no run was accepted")
+	}
+}
+
+// TestASucceededCloseClearsAStaleErrorCode: a run the dispatcher wrongly
+// failed before its driver closed it kept the dispatcher's errorCode through
+// the read-merge -- a succeeded run carrying automation_not_runnable.
+func TestASucceededCloseClearsAStaleErrorCode(t *testing.T) {
+	w, eng := newSessionWriter(t)
+	if err := w.CloseRecording(context.Background(), workerservice.RecordingClose{
+		SessionId: testSessionId, OwnerUserId: testOwner, RunId: testRunId, Seq: 1, Status: "ended",
+	}); err != nil {
+		t.Fatalf("CloseRecording: %v", err)
+	}
+	run := eng.callTo(t, "updateWorkRun").Args(t)
+	if code, named := run["errorCode"]; !named || code != "" {
+		t.Errorf("a succeeded close left errorCode unnamed (%v); a code from an earlier write survives the read-merge", code)
+	}
+	if msg, named := run["errorMessage"]; !named || msg != "" {
+		t.Errorf("a succeeded close left errorMessage unnamed (%v)", msg)
+	}
+}

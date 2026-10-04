@@ -333,6 +333,13 @@ func (d *workRunDispatcher) failRun(ctx context.Context, req workspine.DispatchR
 		return
 	}
 	if err := work.FailRun(ctx, req.OwnerUserId, req.RunId, code, message); err != nil {
+		if errors.Is(err, workspine.ErrRunAlreadyClosed) {
+			// The run's own driver closed it while this dispatch was loading
+			// its template. Its close is the truth, and it stands.
+			d.app.Logger.Info("work run dispatch: the run finished before its dispatch failure could be written; its own close stands",
+				"component", "work.dispatch", "run", req.RunId, "code", code, "error", err)
+			return
+		}
 		d.app.Logger.Warn("work run dispatch: could not record a run's failure; the abandoned sweep will close it instead",
 			"component", "work.dispatch", "run", req.RunId, "code", code, "error", err)
 		return

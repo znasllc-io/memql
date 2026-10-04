@@ -165,8 +165,18 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 	entry := resolved.Entry
 	resolution := resolved.Resolution
 	providerName := resolution.ProviderName
-	if entry == nil || entry.Client == nil {
+	if entry == nil || resolved.Client == nil {
 		return nil, fmt.Errorf("the router resolved %q for an ai() expression and handed back no provider record", providerName)
+	}
+	// THE ROUTED CLIENT, NEVER THE PICK'S REGISTRY CLIENT (synthesis2 fix 8).
+	// This called entry.Client -- the resolution's winner, raw -- so a source
+	// that failed at call time failed the step with the rest of the route
+	// standing behind it, and the call wrote no decision record. The router's
+	// chat wrapper serves the same bare prompt form (memql.AIProvider), walks
+	// the route, records every attempt, and says which source served.
+	caller, ok := resolved.Client.(AIProvider)
+	if !ok {
+		return nil, fmt.Errorf("the router resolved %q for an ai() expression and its client (%T) has no prompt form", providerName, resolved.Client)
 	}
 	// An ai() expression is TEXT, and the registry's own modality flag is what
 	// says whether a record serves one. The router interface-checked the chat
@@ -272,16 +282,31 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 	// `fleet:` providers answer on the user's own machine and MemQL is not
 	// billed, which is what `served: "local"` records -- the scorecard counts
 	// subscription and local spend separately from the dollar ceiling.
-	_, isFleet := IsFleetReference(providerName)
+	//
+	// THE SOURCE THAT SERVED is read back off the routed client after the
+	// call, and it is what the journal row, the completion events and the
+	// cache key name from here on. After a fallback the pick is a source that
+	// failed; naming it would record an answer it never gave.
+	servedName := providerName
 	journalReq := common.ModelRequest{
 		Provider: providerName,
 		Model:    resolution.Model,
 		Settings: answerAffectingParams(entry.Config.Params),
 		Messages: []common.ChatMessage{{Role: "user", Content: text}},
 	}
+	// The level rides to a fleet source the route serves from (fleet_level_test.go):
+	// the router binds it on the source it picks, and a caller that is itself a
+	// levelled client binds it here.
+	caller = withResolvedLevel(caller, resolution.Decision, req.Level)
 	result, err := r.seam.serve(ctx, journalReq, invocation.TemplateId, func(ctx context.Context) (modelCallOutcome, error) {
-		v, callErr := entry.Client.Call(ctx, text)
-		return modelCallOutcome{Value: v, Local: isFleet}, callErr
+		v, callErr := caller.Call(ctx, text)
+		outcome := modelCallOutcome{Value: v, Local: servedLocally(resolution.Decision.Door, providerName)}
+		if served, ok := servedBy(caller); ok {
+			outcome.Served = &served
+			outcome.Local = servedLocally(served.Decision.Door, served.ProviderName)
+			servedName = served.ProviderName
+		}
+		return outcome, callErr
 	})
 	if err != nil {
 		// A strict replay that could not be served is NOT an ai() failure and
@@ -294,23 +319,29 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 		// Emit completion error event
 		r.publishEvent(events.TopicAICompletionError, events.KindAICompletionError, map[string]any{
 			"templateId": invocation.TemplateId,
-			"provider":   providerName,
+			"provider":   servedName,
 			"durationMs": time.Since(startTime).Milliseconds(),
 			"error":      err.Error(),
 		})
-		return nil, fmt.Errorf("ai call via provider %q failed: %w", providerName, err)
+		return nil, fmt.Errorf("ai call via provider %q failed: %w", servedName, err)
 	}
 
 	// Emit completion finished event
 	r.publishEvent(events.TopicAICompletionFinished, events.KindAICompletionFinished, map[string]any{
 		"templateId": invocation.TemplateId,
-		"provider":   providerName,
+		"provider":   servedName,
 		"durationMs": time.Since(startTime).Milliseconds(),
 		"cached":     false,
 	})
 
+	// CACHED UNDER THE SOURCE THAT SERVED. The key folds in the provider so
+	// that a cached answer is only ever served for the entry that produced it
+	// (ai_cache_record.go), and a hit is recorded as that entry's. Stored
+	// under the pick after a fallback, a later hit would be recorded as the
+	// pick's answer when the pick never gave one; stored here it is a hit the
+	// next time routing picks the source that really answered.
 	if ttl > 0 && r.cache != nil {
-		r.cache.set(cacheKey, result, ttl)
+		r.cache.set(buildAICacheKey(invocation.TemplateId, servedName, text), result, ttl)
 	}
 	// Store the fresh result back into the semantic cache so the next
 	// near-duplicate prompt hits. No-op for disabled/unset namespaces.
@@ -318,6 +349,37 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 		r.semantic.Store(ctx, namespace, text, result)
 	}
 	return result, nil
+}
+
+// withResolvedLevel binds the level a resolution served at onto the provider
+// record an ai() expression calls.
+//
+// An ai() expression calls the registry RECORD the router resolved, not the
+// router's wrapped client, so the per-resolution binding the router applies in
+// providerLookup never reaches it. The level is the binding that decides how
+// fast a local call is: it is what turns a model's hidden thinking off on
+// Ollama, and without it goalComplexityTriage -- a `fast` ai() prompt -- spent
+// 26 s to 2 m 51 s on qwen3.5:4b producing thousands of hidden tokens before a
+// fifty-token answer.
+//
+// The SERVED level is the one bound, since that is what ran; a resolution
+// that names none (a pin resolved outside the rules) falls back to the level
+// the call asked for. A provider with no level knob -- a vendor record -- is
+// returned as it is, and so is one whose binding would not answer the ai()
+// surface, rather than calling something that cannot take the prompt.
+func withResolvedLevel(client AIProvider, decision airoute.Decision, asked airoute.Level) AIProvider {
+	level := decision.ServedLevel
+	if level == "" {
+		level = asked
+	}
+	levelled, ok := client.(interface{ WithLevel(string) any })
+	if !ok || level == "" {
+		return client
+	}
+	if bound, ok := levelled.WithLevel(string(level)).(AIProvider); ok {
+		return bound
+	}
+	return client
 }
 
 // noteCacheServed records the decision behind an answer a cache served.

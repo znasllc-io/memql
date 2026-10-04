@@ -9,7 +9,7 @@ import { AccountsApp } from "../src/apps/accounts/AccountsApp";
 import { LocalAccountsSettingsStore } from "../src/apps/accounts/settings";
 import { fakeConnection as accountConnection, accountRow, withSession as accountSession } from "../test/accounts/harness";
 import { createRoot } from "react-dom/client";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import "../src/styles/index.css";
 import { Panel } from "../src/kit";
@@ -34,6 +34,25 @@ import {
   type FakeSeed,
 } from "../test/deployables/harness";
 import { installQaConnection } from "./connectionShim";
+import {
+  ALLOWED_MACHINE,
+  FAILED_LOG,
+  PIPELINES_NO_RUNS_SEED,
+  PIPELINES_SEED,
+  PIPELINES_UNCONNECTED_SEED,
+  installContentRoute,
+  mapPipelines,
+} from "./pipelinesSeeds";
+import { rowsResult as deployRowsResult } from "../test/deployables/harness";
+import { SessionProvider } from "../src/chrome/access";
+import { OsProvider } from "../src/chrome/state";
+import { AttentionProvider } from "../src/attention/Attention";
+import { OS_REGISTRY } from "../src/apps/registry";
+import { OptionalReadiness } from "../src/chrome/OptionalReadiness";
+import { PipelinesSection } from "../src/apps/settings/PipelinesSection";
+import { UNKNOWN_RUNTIME_CONFIG } from "../src/cluster/config";
+import type { Readiness } from "../src/live/readiness";
+import type { Verdict } from "../src/system/readinessFold";
 import { StorePanel } from "../src/apps/deployables/store/StorePanel";
 import { DeployablesApp } from "../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../src/apps/deployables/settings";
@@ -69,6 +88,23 @@ import {
   procedureRow as nexusProcedureRow,
   withSession as nexusSession,
 } from "../test/nexus/harness";
+import { RoutingSection } from "../src/apps/fleet/routing/RoutingSection";
+import { RouteComposer, type RouteDraftState } from "../src/apps/fleet/routing/RouteComposer";
+import { NewRouteWizard } from "../src/apps/fleet/routing/NewRouteWizard";
+import { RuleWizard } from "../src/apps/fleet/routing/RuleWizard";
+import { routesLike } from "../src/apps/fleet/routing/routes";
+import { useRoutingFacts } from "../src/apps/fleet/routing/useRoutingFacts";
+import { useTaskPolicies } from "../src/apps/fleet/taskPolicies";
+import { useRuleActions, useRules } from "../src/apps/settings/rulesFacts";
+import { installSeededAccess } from "../test/seededAccess";
+import {
+  routeRow as qaRouteRow,
+  routingConnection,
+  ruleRow as qaRuleRow,
+  shippedRoutes as qaShippedRoutes,
+  shippedRules as qaShippedRules,
+  studioMachine as qaStudioMachine,
+} from "../test/fleet/routingFixtures";
 import { OriginsSection } from "../src/apps/cluster/origins/OriginsSection";
 import { MeshSection } from "../src/apps/cluster/mesh/MeshSection";
 import {
@@ -354,6 +390,119 @@ function Lists({ section }: { section: "deployables" | "sources" | "repositories
     </WindowBody>
   );
 }
+
+/**
+ * One Deployables section, opened the way a link opens it: a window intent
+ * naming a run (the check run's details link) or a source (the map's Checks
+ * node), epic memql#5479.
+ */
+function DeployablesWindow({ section, fallback, intent }: { section: string; fallback: string; intent?: Record<string, unknown> }) {
+  return (
+    <WindowBody fallback={fallback}>
+      <DeployablesApp
+        sectionId={section}
+        navigate={() => {}}
+        askContext={() => {}}
+        store={settingsStore()}
+        intent={intent ? { id: `qa-${section}`, payload: intent } : undefined}
+        consumeIntent={() => {}}
+      />
+    </WindowBody>
+  );
+}
+
+function RunsWindow({ runId }: { runId?: string }) {
+  return <DeployablesWindow section="runs" fallback="Runs" intent={runId ? { runId } : undefined} />;
+}
+
+/**
+ * The Deployables fake, answering the two shell-level reads a pipelines
+ * surface makes as well: the machines feed (whether "your fleet" exists) and
+ * the attention receipts (whether the Settings mark was answered).
+ */
+function pipelinesConnection(seed: FakeSeed, extra: { machines?: unknown[]; receipts?: unknown[] } = {}) {
+  const fake = fakeConnection(seed);
+  const base = fake.query.executeNamed.bind(fake.query);
+  (fake.query as unknown as { executeNamed: unknown }).executeNamed = async (name: string, call: string, opts?: unknown) => {
+    if (call === "query myAttentionReceipts()") return deployRowsResult((extra.receipts ?? []) as never);
+    if (call === "query myWorkersWithStatus()") return deployRowsResult((extra.machines ?? []) as never);
+    return base(name, call, opts as never);
+  };
+  return fake;
+}
+
+/** The session and the machines feed, as the shell gives a Deployables window. */
+function pipelinesWrap(el: JSX.Element, role: string) {
+  return withSession(<MachinesProvider>{el}</MachinesProvider>, { role, userId: "u-me" });
+}
+
+/** The pipelines readiness verdict, with the report lane's three facts when `slots` is given. */
+function pipelinesVerdict(state: Verdict["state"], slots: Partial<Record<"githubApp" | "repository" | "runner", boolean>> | null): Verdict {
+  return {
+    module: "pipelines",
+    state,
+    core: false,
+    optional: true,
+    dismissable: true,
+    disagreement: [],
+    nodes: [],
+    lanes: slots === null ? [] : [{
+      name: "report",
+      configurableFrom: "os",
+      complete: state === "configured",
+      slots: Object.entries(slots).map(([name, present]) => ({ name, present: present === true, source: present ? "set" : "" })),
+    }],
+    unknown: [],
+    stale: [],
+    aside: [],
+  } as Verdict;
+}
+
+/**
+ * Settings -> Pipelines in its window, under the providers the shell mounts
+ * it in -- the readiness reading it is drawn from, and the attention service
+ * whose mark its "Not now" answers.
+ */
+function SettingsPipelinesWindow({ verdict }: { verdict: Verdict | null }) {
+  installSeededAccess("owner");
+  const readiness: Readiness = {
+    loaded: true,
+    state: "live",
+    of: (id) => (verdict !== null && id === verdict.module ? verdict : null),
+    reseed: () => {},
+  } as Readiness;
+  return (
+    <SessionProvider
+      value={{
+        access: { userId: "u-me", primaryEmail: "owner@example.com", role: "owner", roleName: "", rank: 0 },
+        config: { ...UNKNOWN_RUNTIME_CONFIG, domain: "memql.example.com" },
+        ladderLoaded: true,
+        readiness,
+      }}
+    >
+      <OsProvider registry={OS_REGISTRY} actorRole="owner" grid={{ cols: 12, rows: 8 }}>
+        <AttentionProvider apps={OS_REGISTRY.apps}>
+          <MachinesProvider>
+            <OptionalReadiness />
+            <WindowBody fallback="Pipelines">
+              <PipelinesSection />
+            </WindowBody>
+          </MachinesProvider>
+        </AttentionProvider>
+      </OsProvider>
+    </SessionProvider>
+  );
+}
+
+const LAGGING = [{
+  installationId: "7",
+  account: "acme",
+  accountType: "Organization",
+  htmlUrl: "https://github.com/organizations/acme/settings/installations/7",
+  missingPermissions: ["checks"],
+  suspended: false,
+}];
+const APP_REGISTERED = { configured: true, source: "cluster", slug: "memql-on-memql-example-com", canSetup: true };
 
 /** The pane wrapper `DeployablePage` gives the Store view, verbatim. */
 function StorePane({ site, canBind }: { site: ReturnType<typeof siteFromRow>; canBind: boolean }) {
@@ -667,9 +816,83 @@ const VIEWS: Record<
   // The cluster's GitHub App, in each reading a surface has of it.
   "github-owner": { seed: NO_APP_OWNER, framed: true, render: () => <Lists section="deployables" /> },
   "github-member": { seed: NO_APP_MEMBER, role: "developer", framed: true, render: () => <Lists section="deployables" /> },
+  // Pipelines (epic memql#5479): the Runs tab and a run page in each state.
+  "pipeline-runs": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow /> },
+  "pipeline-runs-empty": { seed: PIPELINES_NO_RUNS_SEED, framed: true, render: () => <RunsWindow /> },
+  "pipeline-runs-none": { seed: {}, framed: true, render: () => <RunsWindow /> },
+  "pipeline-run-failed": {
+    connect: () => {
+      installContentRoute(FAILED_LOG);
+      return fakeConnection(PIPELINES_SEED);
+    },
+    framed: true,
+    render: () => <RunsWindow runId="r-7" />,
+  },
+  "pipeline-run-running": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-8" /> },
+  "pipeline-run-queued": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-9" /> },
+  "pipeline-run-passed": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-6" /> },
+  "pipeline-run-refused": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-5" /> },
+  "pipeline-run-cancelled": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-4" /> },
+  "pipeline-run-rerun": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-3" /> },
+  "pipeline-run-developer": { seed: PIPELINES_SEED, role: "developer", framed: true, render: () => <RunsWindow runId="r-7" /> },
+  // A source's checks, its pipeline page (`&click=Pipeline settings`), the
+  // connect rail (`&click=Connect pipeline`), and the map's Checks nodes.
+  "pipeline-source": { connect: () => pipelinesConnection(PIPELINES_SEED), wrap: pipelinesWrap, render: () => <DeployablesWindow section="sources" fallback="Sources" intent={{ packageId: "pkg-shop" }} /> },
+  "pipeline-source-none": {
+    connect: () => pipelinesConnection(PIPELINES_UNCONNECTED_SEED, { machines: [ALLOWED_MACHINE] }),
+    wrap: pipelinesWrap,
+    render: () => <DeployablesWindow section="sources" fallback="Sources" intent={{ packageId: "pkg-shop" }} />,
+  },
+  "pipeline-map": { connect: () => pipelinesConnection({ ...LISTS, ...mapPipelines() }), wrap: pipelinesWrap, render: () => <DeployablesWindow section="map" fallback="Overview" /> },
+  // Settings -> Pipelines, the optional readiness item, in each reading.
+  "settings-pipelines-unset": {
+    connect: () => pipelinesConnection({ githubApp: { configured: false, canSetup: true } }),
+    wrap: (el) => el,
+    render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("unconfigured", { githubApp: false, repository: false, runner: false })} />,
+  },
+  "settings-pipelines-partial": {
+    connect: () => pipelinesConnection({ githubApp: APP_REGISTERED, laggingInstallations: LAGGING as never }, { machines: [ALLOWED_MACHINE] }),
+    wrap: (el) => el,
+    render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("partial", { githubApp: true, repository: false, runner: true })} />,
+  },
+  "settings-pipelines-done": {
+    connect: () => pipelinesConnection({ githubApp: APP_REGISTERED }, { machines: [ALLOWED_MACHINE] }),
+    wrap: (el) => el,
+    render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("configured", { githubApp: true, repository: true, runner: true })} />,
+  },
+  "settings-pipelines-dismissed": {
+    connect: () => pipelinesConnection({ githubApp: { configured: false, canSetup: true } }, { receipts: [{ id: "rc-1", changeId: "readiness:pipelines", revision: "optional-1" }] }),
+    wrap: (el) => el,
+    render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("unconfigured", { githubApp: false, repository: false, runner: false })} />,
+  },
+  "settings-pipelines-unreported": {
+    connect: () => pipelinesConnection({ githubApp: { configured: false, canSetup: true } }),
+    wrap: (el) => el,
+    render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("unreported", null)} />,
+  },
   "settings-no-app": { seed: NO_APP_OWNER, framed: true, render: () => <Lists section="settings" /> },
   "settings-no-app-member": { seed: NO_APP_MEMBER, role: "developer", framed: true, render: () => <Lists section="settings" /> },
   "settings-app": { seed: APP_FROM_HERE, framed: true, render: () => <Lists section="settings" /> },
+  // FLEET > ROUTING (routing redesign, 2026-09-28). The list with a route of
+  // every reading (serving on its first source, on a later one, nothing
+  // ready, changed from shipped); a route's page with the circuit stopping
+  // at the SECOND slot; a draft holding a source that cannot serve; the
+  // protected embeddings route; a fleet with no machine at all; the rules as
+  // sentences; both wizards' first step; the machine choice; the history.
+  "routing-routes": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutingSection /> },
+  "routing-route": { connect: () => routingQa({ chatModel: false }), wrap: routingWrap, render: () => <RoutePreview name="localFirst" /> },
+  "routing-route-draft": {
+    connect: () => routingQa(),
+    wrap: routingWrap,
+    render: () => <RoutePreview name="nightShift" draft={{ entries: ["app:codex", "fleet:qwen3.8:27b", "federation:cheapest"], description: "Overnight batch work" }} />,
+  },
+  "routing-route-protected": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutePreview name="embeddingsBinding" /> },
+  "routing-route-empty": { connect: () => routingQa({ machines: false }), wrap: routingWrap, render: () => <RoutePreview name="localFirst" /> },
+  "routing-rules": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingTab: "rules" } }} /> },
+  "routing-new-route": { connect: () => routingQa(), wrap: routingWrap, render: () => <NewRoutePreview /> },
+  "routing-add-rule": { connect: () => routingQa(), wrap: routingWrap, render: () => <AddRulePreview /> },
+  "routing-machines": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingTab: "machines" } }} /> },
+  "routing-history": { connect: () => routingQa(), wrap: routingWrap, render: () => <RoutingSection intent={{ id: "qa", payload: { routingTab: "history" } }} /> },
   // The Fleet's machine detail. `fleet-healthy` is the control: nothing
   // should sit above the facts on a machine with nothing wrong with it.
   "fleet-healthy": {
@@ -1296,6 +1519,85 @@ function OriginsPane() {
   );
 }
 
+
+// --- Fleet > Routing ---------------------------------------------------------
+//
+// Over the suite's own routing double (test/fleet/routingFixtures.ts). The
+// harness does not click, so a route's page and the wizards are rendered
+// directly, in the same fleet-page -> fleet-routing -> tab structure the
+// section gives them, inside a Fleet window so the trail row is drawn.
+
+function routingQa(opts: { chatModel?: boolean; machines?: boolean } = {}) {
+  const studio = qaStudioMachine(opts.chatModel === false ? { labels: { "model:nomic-embed": "ctx=8192,embeddings=1" } } : {});
+  return routingConnection({
+    machines: opts.machines === false ? [] : [studio],
+    routes: [
+      ...qaShippedRoutes().map((r) => (r.name === "localOnly" ? qaRouteRow("localOnly", "fleet:strongest", ["app:claude-code"], { customized: true }) : r)),
+      qaRouteRow("nightShift", "app:codex", ["federation:cheapest"], { shipped: false, description: "Overnight batch work" }),
+    ],
+    rules: [
+      ...qaShippedRules(),
+      qaRuleRow({ name: "nightlyIsCheap", when: { tag: "nightly" }, policy: "nightShift", precedence: 20, onUnavailable: "park" }),
+      qaRuleRow({ name: "planningStaysLocal", when: { level: "reasoning", prompt: "planStep" }, level: "strong", policy: "localOnly", precedence: 10 }),
+    ],
+    decisions: [
+      { id: "d-1", createdAt: "2026-09-28T09:41:00Z", requestId: "r1", promptName: "goalComplexityTriage", level: "fast", requestedLevel: "fast", servedLevel: "fast", rule: "fastLane", policy: "fastLocalFirst", door: "local", model: "qwen3.5:4b", outcome: "ok", billing: "local", totalCost: 0, totalDurationMs: 1200, considered: [{ entry: "fleet:fastest", door: "local", why: "", served: true }] },
+      { id: "d-2", createdAt: "2026-09-28T09:40:00Z", requestId: "r2", promptName: "agentReply", level: "strong", requestedLevel: "reasoning", servedLevel: "strong", degraded: true, rule: "reasoningParks", policy: "federationStrongest", door: "app", model: "claude-code", outcome: "ok", billing: "subscription", totalCost: 0, totalDurationMs: 6400, considered: [{ entry: "fleet:strongest", door: "local", why: "no model meets the structured-output floor", served: false }, { entry: "app:*", door: "app", why: "", served: true }] },
+    ],
+  }).connection;
+}
+
+function routingWrap(el: JSX.Element, role: string) {
+  installSeededAccess(role);
+  return fleetSession(<MachinesProvider><FleetWindow>{el}</FleetWindow></MachinesProvider>);
+}
+
+function FleetWindow({ children }: { children: ReactNode }) {
+  const content = useRef<HTMLDivElement>(null);
+  return (
+    <div className="os-window" data-os-window="fleet" style={{ position: "fixed", inset: 0, display: "flex", flexDirection: "column" }}>
+      <div className="os-window-body">
+        <PageNavigationProvider root={content} trail={[]}>
+          <TrailRow fallback="Routing" />
+          <div ref={content} className="os-window-content" data-os-window-content>
+            <div className="fleet-app"><div className="fleet-page" data-fleet-section="routing">{children}</div></div>
+          </div>
+        </PageNavigationProvider>
+      </div>
+    </div>
+  );
+}
+
+function RoutingTabFrame({ children }: { children: ReactNode }) {
+  return <div className="fleet-routing"><div className="fleet-routing-tab">{children}</div></div>;
+}
+
+function useQaRoutes() {
+  const catalog = useTaskPolicies(0);
+  const like = useMemo(() => routesLike(catalog.policies), [catalog.policies]);
+  return { catalog, facts: useRoutingFacts(like) };
+}
+
+function RoutePreview({ name, draft }: { name: string; draft?: RouteDraftState }) {
+  const { catalog, facts } = useQaRoutes();
+  const [held, setHeld] = useState<RouteDraftState | undefined>(draft);
+  const route = catalog.policies.find((r) => r.name === name);
+  if (!route) return null;
+  return <RoutingTabFrame><RouteComposer route={route} facts={facts} draft={held} onDraft={setHeld} onBack={() => {}} onChanged={() => {}} onAddMachine={() => {}} /></RoutingTabFrame>;
+}
+
+function NewRoutePreview() {
+  const { catalog, facts } = useQaRoutes();
+  return <RoutingTabFrame><NewRouteWizard routes={catalog.policies} facts={facts} onCancel={() => {}} onCreated={() => {}} /></RoutingTabFrame>;
+}
+
+function AddRulePreview() {
+  const { catalog, facts } = useQaRoutes();
+  const rules = useRules(true);
+  const actions = useRuleActions(rules.reload);
+  return <RoutingTabFrame><RuleWizard actions={actions} rules={rules.rules} routes={catalog.policies} facts={facts} onCancel={() => {}} onDescribe={() => {}} onAdded={() => {}} /></RoutingTabFrame>;
+}
+
 function App() {
   const params = new URLSearchParams(window.location.search);
   const name = params.get("view") ?? "store";
@@ -1350,6 +1652,21 @@ if (new URLSearchParams(window.location.search).get("open") === "1") {
     for (const el of document.querySelectorAll("details")) el.open = true;
   }, 2500);
 }
+
+// A ONE-SHOT CAPTURE CANNOT PRESS A BUTTON EITHER, and some pages are reached
+// only by one: a source's Pipeline settings, the connect rail and its stops.
+// `?click=A|B` presses the first control whose text (or accessible name) is A
+// once the reads have landed, then B a beat later. `element.click()` is a real
+// click event, which React's root listener handles like a person's.
+const clicks = (new URLSearchParams(window.location.search).get("click") ?? "").split("|").filter((c) => c !== "");
+clicks.forEach((label, i) => {
+  window.setTimeout(() => {
+    const target = Array.from(document.querySelectorAll<HTMLElement>("button, [role=tab], [role=radio], a")).find(
+      (el) => (el.textContent ?? "").trim() === label || el.getAttribute("aria-label") === label,
+    );
+    target?.click();
+  }, 2500 + i * 1200);
+});
 
 const mode = new URLSearchParams(window.location.search).get("mode") ?? "dark";
 document.documentElement.setAttribute("data-theme", mode);

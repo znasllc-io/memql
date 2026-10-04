@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,10 @@ type recordingAppSessionStore struct {
 	finished  []AppSessionRow
 	allocated map[string]int
 	allocErr  error
+	// refuseStatusWrites refuses that many progress writes naming a status,
+	// as an engine blip would. A refused write did not land, so it is not
+	// recorded in appends.
+	refuseStatusWrites int
 }
 
 func (s *recordingAppSessionStore) CreateAppSession(_ context.Context, row AppSessionRow) error {
@@ -26,14 +31,18 @@ func (s *recordingAppSessionStore) CreateAppSession(_ context.Context, row AppSe
 	return nil
 }
 
-func (s *recordingAppSessionStore) RecordAppSessionProgress(_ context.Context, sessionId string, recordedSteps, droppedActions int, status string) error {
+func (s *recordingAppSessionStore) RecordAppSessionProgress(_ context.Context, sessionId string, recordedSteps, droppedActions int, status string, heartbeatAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if status != "" && s.refuseStatusWrites > 0 {
+		s.refuseStatusWrites--
+		return errors.New("the engine went away for a moment")
+	}
 	// A NEGATIVE COUNT MEANS "the caller did not name this field", which is
 	// how the allocator advances one counter without resetting the other.
 	// Recording it as 0 would make this fake claim a write the real store
 	// never makes.
-	row := AppSessionRow{ID: sessionId, Status: status}
+	row := AppSessionRow{ID: sessionId, Status: status, HeartbeatAt: heartbeatAt}
 	if recordedSteps >= 0 {
 		row.RecordedSteps = recordedSteps
 	}
@@ -278,6 +287,34 @@ func TestRunnerNonZeroExitIsFailed(t *testing.T) {
 	}
 	if !strings.Contains(terminal[0].ErrorMessage, "exited 2") {
 		t.Fatalf("terminal row must say why: %q", terminal[0].ErrorMessage)
+	}
+}
+
+// TestRunnerAnswerIsTheAppsOwnOutput: the ANSWER a caller renders is what
+// the app wrote to stdout. stderr is diagnostics -- the cockpit's own note
+// saying which model a level ran as, the app's warnings -- and belongs in the
+// transcript a reader inspects, never in the reply. An Ask "hi" answered
+// through Claude Code used to render as
+// "[memql] level strong runs claude-code with --model sonnet ... Hi!".
+func TestRunnerAnswerIsTheAppsOwnOutput(t *testing.T) {
+	runner, session, _, _ := newRunnerFixture(t, SubscriptionPresent)
+	const note = "[memql] level strong runs claude-code with --model sonnet --effort high (the cockpit's built-in table)\n"
+	go func() {
+		waitForSession(t, session, "sess-run")
+		session.handleAppSessionChunk(&memqlv1.AppSessionChunk{SessionId: "sess-run", Stream: AppSessionStreamStderr, Data: []byte(note), Seq: 1})
+		session.handleAppSessionChunk(&memqlv1.AppSessionChunk{SessionId: "sess-run", Stream: AppSessionStreamStdout, Data: []byte("Hi! What would you like help with?"), Seq: 2})
+		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run"})
+	}()
+
+	result, err := runner.Run(context.Background(), session.worker, runSpec(), nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Answer != "Hi! What would you like help with?" {
+		t.Errorf("answer = %q, want the app's stdout alone", result.Answer)
+	}
+	if !strings.Contains(result.Transcript, note) || !strings.Contains(result.Transcript, "Hi!") {
+		t.Errorf("transcript = %q, want both streams: it is the record a reader inspects", result.Transcript)
 	}
 }
 

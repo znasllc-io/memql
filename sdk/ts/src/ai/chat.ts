@@ -29,7 +29,14 @@ export interface AiChatOptions {
   conversationId?: string;
   pageContext?: string;
   requestId?: string;
+  /** The source that answers: "" (Auto: the cluster's rules decide),
+   * "app:claude-code", "app:codex", "fleet:strongest", "fleet:fastest",
+   * "fleet:<modelId>", "federation:cheapest", "federation:strongest" or
+   * "policy:<name>". */
   provider?: string;
+  /** How much intelligence the call needs: "" (Auto), "fast", "strong" or
+   * "reasoning". Omitted from the wire when empty. */
+  level?: string;
   /** Strict pin to one owned machine, using its bare registration id.
    * Requires a concrete fleet:<modelId> provider; never falls back to another machine. */
   fleetRegistrationId?: string;
@@ -75,6 +82,7 @@ export async function aiChat(
         messages: messages.map(toWireMessage),
         ...(opts.conversationId ? { conversationId: opts.conversationId, pageContext: opts.pageContext ?? "" } : {}),
         ...(opts.provider ? { provider: opts.provider } : {}),
+        ...(opts.level ? { level: opts.level } : {}),
         ...(opts.fleetRegistrationId ? { fleetRegistrationId: opts.fleetRegistrationId } : {}),
         // Always non-streaming on this surface; callers wanting
         // deltas use aiChatStream.
@@ -187,6 +195,7 @@ export function aiChatStream(
         ...(opts.conversationId ? { conversationId: opts.conversationId, pageContext: opts.pageContext ?? "" } : {}),
           stream: true,
           ...(opts.provider ? { provider: opts.provider } : {}),
+          ...(opts.level ? { level: opts.level } : {}),
           ...(opts.fleetRegistrationId ? { fleetRegistrationId: opts.fleetRegistrationId } : {}),
         },
       });

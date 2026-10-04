@@ -6,6 +6,7 @@ import (
 	"maps"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // fork.go -- forkRun and replayRun (design record section D, "Replay has
@@ -211,6 +212,10 @@ func (i *Integration) deriveRun(ctx context.Context, source map[string]any, d de
 		Status:              status,
 		StartedAt:           now,
 		OwnerUserId:         owner,
+		// The owner's routing choice is inherited like the template: a fork
+		// continues the same work, and a replay must ask the questions its
+		// journal answered.
+		Routing: common.RouteChoiceFrom(source["routing"]),
 	}
 	if err := i.store().createRunRow(ownerActor(ctx, owner), seed); err != nil {
 		return "", err

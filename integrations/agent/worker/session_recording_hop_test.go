@@ -87,6 +87,12 @@ func (h *hopRecorder) CloseRecording(_ context.Context, r workerservice.Recordin
 	return nil
 }
 
+// HeartbeatRecording touches the run, as the real writer's heartbeat does.
+func (h *hopRecorder) HeartbeatRecording(_ context.Context, r workerservice.RecordingHeartbeat) error {
+	h.touch("v1:work:run", r.OwnerUserId)
+	return nil
+}
+
 func (h *hopRecorder) touched() []string {
 	h.mu.Lock()
 	defer h.mu.Unlock()

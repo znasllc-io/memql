@@ -40,8 +40,8 @@ func fakeResolvers(env map[string]string, vars map[string]string, secrets map[st
 		// what every case here that is not about inference wants underneath it.
 		Registrations:        func(context.Context) ([]readiness.RegistrationFacts, error) { return nil, nil },
 		FederationConfigured: func() bool { return false },
-		IntegrationState: func(_ context.Context, name string) (string, bool, bool, error) {
-			return "", false, false, nil
+		IntegrationState: func(_ context.Context, name string) (IntegrationReading, error) {
+			return IntegrationReading{}, nil
 		},
 	}
 }
@@ -192,8 +192,8 @@ func TestIntegrationEvaluator(t *testing.T) {
 	}
 	for _, c := range cases {
 		r := fakeResolvers(nil, nil, nil)
-		r.IntegrationState = func(context.Context, string) (string, bool, bool, error) {
-			return c.state, c.touched, c.registered, nil
+		r.IntegrationState = func(context.Context, string) (IntegrationReading, error) {
+			return IntegrationReading{State: c.state, Touched: c.touched, Registered: c.registered}, nil
 		}
 		if got := evalOne(t, r, mod); got.State != c.want {
 			t.Errorf("%+v: got %s", c, got.State)
@@ -211,8 +211,8 @@ func TestIntegrationEvaluator(t *testing.T) {
 func TestIntegrationEvaluatorErrorIsUnknown(t *testing.T) {
 	mod := envregistry.Module{Name: "email", Core: true, Description: "d", Evaluator: "integration:email"}
 	r := fakeResolvers(nil, nil, nil)
-	r.IntegrationState = func(context.Context, string) (string, bool, bool, error) {
-		return "", false, true, errors.New("probe failed")
+	r.IntegrationState = func(context.Context, string) (IntegrationReading, error) {
+		return IntegrationReading{Registered: true}, errors.New("probe failed")
 	}
 	got := evalOne(t, r, mod)
 	if got.State != readiness.Unknown {
@@ -267,5 +267,38 @@ func TestReportsCarryTheModuleDeclaration(t *testing.T) {
 	got = evalOne(t, fakeResolvers(nil, nil, nil), twoSlotModule)
 	if got.Optional || got.Dismissable {
 		t.Fatalf("a module declaring neither flag reported one: %+v", got)
+	}
+}
+
+// TestAnIntegrationsLaneRidesItsRow: the report's settings, read by the node
+// that hosts the integration, are written on that node's row whatever its
+// verdict -- and nowhere a probe failed or the integration is not hosted, so
+// no node that cannot know states a fact (pipelines program design record,
+// D15: the item's sub-steps read the voting node's own facts).
+func TestAnIntegrationsLaneRidesItsRow(t *testing.T) {
+	mod := envregistry.Module{Name: "pipelines", Optional: true, Dismissable: true, Description: "d", Evaluator: "integration:pipelines"}
+	lane := &readiness.LaneReport{Name: readiness.IntegrationLaneName, ConfigurableFrom: "os",
+		Slots: []readiness.SlotReport{{Name: "githubApp", Present: true, Source: "configured"}, {Name: "runner"}}}
+
+	r := fakeResolvers(nil, nil, nil)
+	r.IntegrationState = func(context.Context, string) (IntegrationReading, error) {
+		return IntegrationReading{State: "needs_configuration", Touched: true, Registered: true, Lane: lane}, nil
+	}
+	got := evalOne(t, r, mod)
+	if got.State != readiness.Partial || len(got.Lanes) != 1 || got.Lanes[0].Name != readiness.IntegrationLaneName || len(got.Lanes[0].Slots) != 2 {
+		t.Fatalf("a hosted integration's lane rides its row: %+v", got)
+	}
+
+	r.IntegrationState = func(context.Context, string) (IntegrationReading, error) {
+		return IntegrationReading{Lane: lane}, nil
+	}
+	if got := evalOne(t, r, mod); got.State != readiness.NotApplicable || len(got.Lanes) != 0 {
+		t.Errorf("a node that does not host the integration states none of its facts: %+v", got)
+	}
+	r.IntegrationState = func(context.Context, string) (IntegrationReading, error) {
+		return IntegrationReading{Registered: true, Lane: lane}, errors.New("probe failed")
+	}
+	if got := evalOne(t, r, mod); got.State != readiness.Unknown || len(got.Lanes) != 0 {
+		t.Errorf("a probe that failed states none of its facts: %+v", got)
 	}
 }

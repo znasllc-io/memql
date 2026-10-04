@@ -18,7 +18,9 @@ import (
 // persisted journal supplies identity and lineage; no context value can be
 // assumed to have followed the graph event here.
 func workExecutionContext(ctx context.Context, j, source *automations.RunJournal, resolver *auth.IdentityResolver) (context.Context, error) {
-	run := common.RunContext{RunId: j.RunId, GoalId: j.GoalId, OwnerUserId: j.OwnerUserId, Mode: j.Mode, ReplayPolicy: j.ReplayPolicy, ForkAtStepKey: j.ForkAtStepKey}
+	// Routing is the owner's choice from the run row (the Ask route picker's):
+	// every model call the run's steps make on this replica honours it.
+	run := common.RunContext{RunId: j.RunId, GoalId: j.GoalId, OwnerUserId: j.OwnerUserId, Mode: j.Mode, ReplayPolicy: j.ReplayPolicy, ForkAtStepKey: j.ForkAtStepKey, Routing: j.Routing}
 	if run.Mode == "" {
 		run.Mode = common.RunModeLive
 	}

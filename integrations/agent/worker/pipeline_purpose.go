@@ -259,7 +259,7 @@ func (d *Dispatcher) pipelineGate(ctx context.Context, req Request) gateResult {
 				outcome:            "failure",
 			}
 		}
-		if !prefs.ComputerUseEnabled {
+		if prefs.KillSwitchEngaged {
 			return gateResult{
 				deny:               true,
 				requiredCapability: required.Capability,

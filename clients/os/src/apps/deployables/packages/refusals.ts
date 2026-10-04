@@ -647,6 +647,12 @@ const COPY: Record<string, RefusalCopy> = {
     title: "This repository already has a pipeline",
     next: "Another source runs its checks. Disconnect that pipeline first, or work from that source.",
   },
+  pipeline_nothing_to_rerun: {
+    // Re-run failed on a run with nothing that failed: one that passed, or
+    // one refused before any step ran.
+    title: "This run has no failed step to run again",
+    next: "Re-run it whole instead.",
+  },
   pipeline_check_permission_missing: {
     // A NOTE: the run executes and concludes as usual. An app registered
     // before pipelines cannot write checks until its permissions are widened
@@ -669,6 +675,13 @@ const COPY: Record<string, RefusalCopy> = {
   pipeline_notify_unavailable: {
     title: "Skipped because this cluster cannot send notifications yet",
     next: "Nothing failed, and the rest of the run is unaffected.",
+  },
+  pipeline_passed_earlier: {
+    // Re-run failed (epic memql#5479): the attempt this one re-runs passed
+    // the step with the same packages, so it is carried rather than run. The
+    // server's sentence names the attempt ("Passed in attempt 1.").
+    title: "Not run again: it passed in an earlier attempt",
+    next: "",
   },
 
   // Where a step executes (epic memql#5478).
@@ -842,6 +855,7 @@ const NOT_A_FAULT: ReadonlySet<string> = new Set([
   "pipeline_not_affected",
   "pipeline_stage_blocked",
   "pipeline_notify_unavailable",
+  "pipeline_passed_earlier",
   "pipeline_check_permission_missing",
   "pipeline_artifact_missing",
   "pipeline_log_capped",
@@ -858,6 +872,7 @@ const NOT_A_FAULT: ReadonlySet<string> = new Set([
   "pipeline_fleet_disabled",
   "pipeline_disconnected",
   "pipeline_already_connected",
+  "pipeline_nothing_to_rerun",
   "pipeline_step_cancelled",
 ]);
 
