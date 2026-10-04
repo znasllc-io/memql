@@ -270,7 +270,8 @@ decision about the run, not about the software.
   serve one published build ([storefront-preview.md](storefront-preview.md)),
   so a candidate would be served by nothing. A run asking for one is refused
   after the analysis and before anything is built, uploaded or bound, and the
-  engine refuses the write from any route with `storefront_has_no_candidate`.
+  engine refuses, from any route, a storefront candidate that is not the
+  version it already serves (`storefront_has_no_candidate`).
 - **Any other value is refused** before a run opens.
 
 ---

@@ -49,9 +49,10 @@ func placementTargets(placements map[string]Placement) (map[string]Placement, er
 // alias, each against its own store (docs/public/operate/storefront-preview.md).
 // The edge serves bundleRef on both, so a storefront candidate would be
 // served by nothing -- the run would report a publish and the build would be
-// visible nowhere. The engine refuses the write as well
-// (component/memql/platform_site_preview_guard.go); this is the same answer
-// one step earlier, before a byte is built or a binding re-pointed.
+// visible nowhere. The engine refuses a storefront candidate that is not the
+// serving version as well (component/memql/platform_site_preview_guard.go);
+// this is the same answer one step earlier, for every storefront candidate
+// placement, before a byte is built or a binding re-pointed.
 //
 // A skipped deployable is not judged: it publishes nothing.
 func refuseUnservedCandidates(rep *Report, placements map[string]Placement) error {

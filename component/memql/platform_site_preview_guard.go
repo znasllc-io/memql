@@ -19,7 +19,8 @@ import (
 // Five rules, and every one of them is a comparison a mutation body cannot
 // make -- either against the PRIOR row or against a DIFFERENT row:
 //
-//   - A storefront takes no new candidate version (memql#5601). (prior row)
+//   - A storefront takes no new candidate but its serving version (memql#5601).
+//     (prior row)
 //   - Non-storefront candidates may not equal the serving version. (prior row)
 //   - A promotion must NAME the candidate it is promoting. (prior row)
 //   - A preview binding must name a DEVELOPMENT store. (another row)
@@ -177,7 +178,8 @@ func (e *MemQLEngine) validateSitePreview(
 		return nil
 	}
 
-	// Rule 0 -- a storefront takes no new candidate version (memql#5601).
+	// Rule 0 -- a storefront takes no new candidate other than the version it
+	// serves (memql#5601).
 	//
 	// AHEAD OF THE SYSTEM-ACTOR EXEMPTION, deliberately. A candidate publish
 	// reaches this guard as setSiteCandidate from three routes, and the CI
@@ -186,7 +188,11 @@ func (e *MemQLEngine) validateSitePreview(
 	// exemption exists for the seed materializer, which sets no candidate, so
 	// this rule cannot refuse it.
 	if candidatePresent {
-		if refusal := SiteStorefrontCandidateRefusal(storefront, priorCandidateRef, candidate); !refusal.Empty() {
+		serving := priorBundleRef
+		if bundlePresent && !promoting {
+			serving = nextBundle
+		}
+		if refusal := SiteStorefrontCandidateRefusal(storefront, priorCandidateRef, serving, candidate); !refusal.Empty() {
 			return previewRefusalError(refusal)
 		}
 	}
@@ -202,8 +208,7 @@ func (e *MemQLEngine) validateSitePreview(
 	}
 
 	// Rule 1 -- a non-storefront candidate must differ from the serving version.
-	// A storefront's new candidate was refused outright by rule 0; one it
-	// inherited is not judged here either, for rule 0's bricking reason.
+	// A storefront is rule 0's: its candidate may only BE the serving version.
 	if candidatePresent && candidate != "" && !storefront {
 		serving := priorBundleRef
 		if bundlePresent && !promoting {

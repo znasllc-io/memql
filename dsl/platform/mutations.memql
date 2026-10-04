@@ -746,9 +746,9 @@ mutation site updateSiteStoreBinding {
 /// A PUBLISH CAN END HERE (memql#5601). POST /sites/{id}/bundles?target=candidate and a package
 /// deploy's `target: candidate` placement upload a new version and then call this rather than
 /// updateSiteBundle (component/edge's PointVersionStatement), so a version reaches the candidate
-/// without ever serving. A STOREFRONT TAKES NO NEW CANDIDATE, from any caller: its Testing
-/// destination serves the published build, so the same guard refuses the write with
-/// storefront_has_no_candidate.
+/// without ever serving. A STOREFRONT TAKES NO CANDIDATE BUT THE VERSION IT SERVES, from any
+/// caller: its Testing destination serves the published build, so any other version would be
+/// served by nothing, and the same guard refuses it with storefront_has_no_candidate.
 ///
 /// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite -- the row's owner, or a
 /// cluster owner through the explicit escape -- and @requiresCapability names the surface.

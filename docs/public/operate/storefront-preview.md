@@ -98,11 +98,12 @@ Admin tokens and webhook secrets never enter the browser configuration.
 `sitePreviewReadiness(siteId)` reports the Testing URL and availability.
 Non-storefront candidate previews retain their existing behavior. Storefronts
 use the shared published build instead of `candidateRef`, so a storefront takes
-no candidate version at all: `setSiteCandidate`, a package deploy's
-`target: candidate` placement and `POST /sites/{id}/bundles?target=candidate`
-are each refused for a storefront with `storefront_has_no_candidate`
-(memql#5601). A version is tried on Testing by publishing it, which reaches both
-destinations, and rolled back if it should not serve.
+no separate candidate version (memql#5601): a package deploy's
+`target: candidate` placement is refused for a storefront, and
+`setSiteCandidate` and `POST /sites/{id}/bundles?target=candidate` refuse any
+version but the one it already serves, with `storefront_has_no_candidate`. A
+version is tried on Testing by publishing it, which reaches both destinations,
+and rolled back if it should not serve.
 
 Site runtime settings are shared between destinations. Values that belong to
 ONE STORE -- the Customer Account API client of that store's Headless channel,

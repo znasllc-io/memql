@@ -109,9 +109,10 @@ func PointVersionStatement(siteID string, target Target, ref, artifactID string)
 	case TargetCandidate:
 		// setSiteCandidate, not updateSiteBundle with a second field: its
 		// guard (component/memql/platform_site_preview_guard.go) is what
-		// refuses a candidate equal to the serving version and a candidate on
-		// a storefront, and its capability is `preview` -- preparing a version
-		// is one grant, putting it in front of the public is another.
+		// refuses a candidate equal to the serving version, and on a
+		// storefront any candidate that is NOT the serving version, and its
+		// capability is `preview` -- preparing a version is one grant, putting
+		// it in front of the public is another.
 		b.WriteString("mutation setSiteCandidate(siteId: ")
 		b.WriteString(langparser.QuoteString(siteID))
 		b.WriteString(", candidateRef: ")

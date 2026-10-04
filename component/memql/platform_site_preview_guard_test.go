@@ -609,13 +609,15 @@ func TestAStorefrontCanTestTheSameBuildAgainstItsSandbox(t *testing.T) {
 	}
 }
 
-// A STOREFRONT TAKES NO NEW CANDIDATE VERSION (memql#5601). A storefront has
-// two destinations over ONE published build -- Production and its test--
-// Testing alias -- and the edge serves bundleRef on both, so a candidate on a
-// storefront is served by nothing. A candidate publish reaches this guard as
-// setSiteCandidate from three routes, and the CI route writes as a SYSTEM
-// actor, so the refusal is judged before the system-actor exemption: the
-// exemption exists for the seed materializer, which sets no candidate.
+// A STOREFRONT TAKES NO NEW CANDIDATE BUT ITS SERVING VERSION (memql#5601). A
+// storefront has two destinations over ONE published build -- Production and
+// its test-- Testing alias -- and the edge serves bundleRef on both, so a
+// candidate that is any other version is served by nothing. A candidate
+// publish reaches this guard as setSiteCandidate from three routes, and the CI
+// route writes as a SYSTEM actor, so the refusal is judged before the
+// system-actor exemption: the exemption exists for the seed materializer,
+// which sets no candidate. (The serving version itself stays writable --
+// TestAStorefrontCanTestTheSameBuildAgainstItsSandbox above.)
 func TestAStorefrontIsRefusedANewCandidateByEveryActor(t *testing.T) {
 	for _, actor := range []string{"v1:identity:user:operator", "system:edge-publish"} {
 		t.Run(actor, func(t *testing.T) {
@@ -643,7 +645,8 @@ func TestAStorefrontIsRefusedANewCandidateByEveryActor(t *testing.T) {
 // before the Testing destination existed may still carry a candidate, and
 // every write to it inherits that candidate through the read-merge -- so an
 // INHERITED candidate must pass, or that row could never be renamed again.
-// Clearing one passes, and a spa takes a candidate exactly as it did.
+// Clearing one passes, naming the serving version passes, and a spa takes a
+// candidate exactly as it did -- from the CI route's system actor too.
 func TestTheStorefrontCandidateRuleJudgesOnlyANewCandidate(t *testing.T) {
 	for name, d := range map[string]previewGuardDelta{
 		"a storefront's inherited candidate": {
@@ -655,6 +658,12 @@ func TestTheStorefrontCandidateRuleJudgesOnlyANewCandidate(t *testing.T) {
 			priorExisted: true, priorStatus: "live", priorKind: storefrontSiteKind,
 			priorBundleRef: "blob://sites/s/v/1/", priorCandidate: "blob://sites/s/v/0/",
 			payload: map[string]any{"id": "s", "candidateRef": ""},
+		},
+		"a storefront naming its serving version, from the CI route": {
+			priorExisted: true, priorStatus: "live", priorKind: storefrontSiteKind,
+			priorBundleRef: "blob://sites/s/v/1/",
+			payload:        map[string]any{"id": "s", "candidateRef": "blob://sites/s/v/1/"},
+			actor:          "system:edge-publish",
 		},
 		"a spa's new candidate": {
 			priorExisted: true, priorStatus: "live", priorKind: "spa",

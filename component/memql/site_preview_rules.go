@@ -73,8 +73,8 @@ const (
 	// axis, as it is from the status axis and the settings axis.
 	PreviewRefusalSystemOwned = "site_is_system_owned"
 	// PreviewRefusalStorefrontHasNoCandidate -- a storefront serves one published
-	// build on both of its destinations, so a candidate version would be served by
-	// nothing (memql#5601).
+	// build on both of its destinations, so a candidate that is not that build would
+	// be served by nothing (memql#5601).
 	PreviewRefusalStorefrontHasNoCandidate = "storefront_has_no_candidate"
 )
 
@@ -157,26 +157,32 @@ func SiteCandidateRefusal(serving, candidate string) PreviewRefusal {
 }
 
 // SiteStorefrontCandidateRefusal answers whether `candidate` may be set as the candidate
-// version of a deployable whose stored candidate is `prior` (memql#5601).
+// version of a storefront serving `serving`, whose stored candidate is `prior` (memql#5601).
 //
-// A STOREFRONT HAS NO CANDIDATE VERSION. It has two destinations over ONE
-// published build -- Production at its hostname, Testing at its test-- alias,
-// each against its own store -- and the edge serves bundleRef on both
-// (component/edge/preview.go). A storefront candidate would be served by
-// nothing: a publish that reported success and showed its build nowhere.
+// A STOREFRONT HAS NO SEPARATE CANDIDATE VERSION. It has two destinations over ONE
+// published build -- Production at its hostname, Testing at its test-- alias, each
+// against its own store -- and the edge serves bundleRef on both
+// (component/edge/preview.go). A candidate that differs from the serving version
+// would be served by nothing: a publish that reported success and showed its build
+// nowhere. So that is what is refused.
 //
-// ONLY A NEW CANDIDATE IS JUDGED. A storefront row from before the Testing
-// destination may still carry one, and every write to that row inherits it
-// through the read-merge; refusing the inherited value would make the row
-// unwritable. Clearing one is always allowed.
-func SiteStorefrontCandidateRefusal(storefront bool, prior, candidate string) PreviewRefusal {
+// THE SERVING VERSION ITSELF STAYS WRITABLE as the candidate. That is the same-build
+// test the Testing destination replaced (TestAStorefrontCanTestTheSameBuildAgainstItsSandbox);
+// nothing reads it now, and it names a build the storefront is visibly serving, so it
+// hides nothing.
+//
+// ONLY A NEW CANDIDATE IS JUDGED. A storefront row from before the Testing destination
+// may still carry a different one, and every write to that row inherits it through the
+// read-merge; refusing the inherited value would make the row unwritable. Clearing one
+// is always allowed.
+func SiteStorefrontCandidateRefusal(storefront bool, prior, serving, candidate string) PreviewRefusal {
 	candidate = strings.TrimSpace(candidate)
-	if !storefront || candidate == "" || candidate == strings.TrimSpace(prior) {
+	if !storefront || candidate == "" || candidate == strings.TrimSpace(prior) || candidate == strings.TrimSpace(serving) {
 		return PreviewRefusal{}
 	}
 	return PreviewRefusal{
 		Code:    PreviewRefusalStorefrontHasNoCandidate,
-		Message: "a storefront has no candidate version: its Testing destination serves the published build against the testing store, so a candidate would be served by nothing.",
+		Message: "a storefront has no separate candidate version: its Testing destination serves the published build against the testing store, so a version that is not the published one would be served by nothing.",
 		Remedy:  "Publish the version as the serving version, which reaches Testing and Production together, and roll back if it should not serve.",
 	}
 }
