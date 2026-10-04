@@ -2629,15 +2629,18 @@ QueryClient.prototype.pipelinesDisconnect = function (this: QueryClient, args: P
   return this.executeNamed("pipelinesDisconnect", buildPipelinesDisconnect(args), opts);
 };
 
-/** Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. The original stays exactly as it ended. */
+/** Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. With failedOnly, only what did not pass runs again: every step the original passed, with the same package slice, is carried over as skipped pipeline_passed_earlier, and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. The original stays exactly as it ended. */
 export interface PipelinesRerunArgs {
   /** The v1:pipelines:run to re-run. Must be the caller's own. */
   runId: string;
+  /** Run again only what did not pass: the original's passed steps are carried over. Absent or false re-runs every step. */
+  failedOnly?: boolean;
 }
 
 export function buildPipelinesRerun(args: PipelinesRerunArgs): string {
   const parts: string[] = [];
   parts.push("runId: " + renderMemQLValue(args.runId));
+  if (args.failedOnly !== undefined) parts.push("failedOnly: " + renderMemQLValue(args.failedOnly));
   return "builtin pipelinesRerun(" + parts.join(", ") + ")";
 }
 

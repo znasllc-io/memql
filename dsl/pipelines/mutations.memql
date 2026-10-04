@@ -130,6 +130,7 @@ mutation run createPipelineRun {
     attempt         int!
     trigger         string!
     rerunOf         string
+    rerunFailedOnly bool
     deliveryId      string
     pullRequest     int
     headBranch      string
@@ -155,6 +156,7 @@ mutation run createPipelineRun {
       ownerUserId: actor.userId
       conclusion: args.conclusion ?? ""
       checkRunState: args.checkRunState ?? ""
+      rerunFailedOnly: args.rerunFailedOnly ?? false
       cancelRequested: false
     }
   }

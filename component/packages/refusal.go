@@ -523,6 +523,13 @@ const (
 	CodePipelineAlreadyConnected    = "pipeline_already_connected"
 )
 
+// Re-running only what failed (epic memql#5479): a step a failed-only re-run
+// carries over (a skip), and the refusal of one with nothing to run again.
+const (
+	CodePipelinePassedEarlier  = "pipeline_passed_earlier"
+	CodePipelineNothingToRerun = "pipeline_nothing_to_rerun"
+)
+
 // Refusal is an analysis or pipeline failure carrying a stable Code.
 //
 // It is an error so it can travel the ordinary Go path, and it carries the

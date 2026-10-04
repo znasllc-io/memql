@@ -3437,10 +3437,13 @@ func PipelinesDisconnectBuild(args PipelinesDisconnectArgs) string {
 	return b.String()
 }
 
-// PipelinesRerun -- Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. The original stays exactly as it ended.
+// PipelinesRerun -- Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. With failedOnly, only what did not pass runs again: every step the original passed, with the same package slice, is carried over as skipped pipeline_passed_earlier, and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. The original stays exactly as it ended.
 type PipelinesRerunArgs struct {
 	// The v1:pipelines:run to re-run. Must be the caller's own.
 	RunId string
+	// Run again only what did not pass: the original's passed steps are carried over. Absent or false re-runs every step.
+	FailedOnly    bool
+	FailedOnlySet bool // set true to send failedOnly; required because zero-value bool is ambiguous
 }
 
 // PipelinesRerun calls the engine builtin pipelinesRerun.
@@ -3454,6 +3457,13 @@ func PipelinesRerunBuild(args PipelinesRerunArgs) string {
 	b.WriteString("builtin pipelinesRerun(")
 	b.WriteString("runId: ")
 	b.WriteString(quoteMemQL(args.RunId))
+	if args.FailedOnlySet {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("failedOnly: ")
+		b.WriteString(fmt.Sprintf("%v", args.FailedOnly))
+	}
 	b.WriteString(")")
 	return b.String()
 }

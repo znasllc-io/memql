@@ -67,9 +67,10 @@ builtin pipelinesDisconnect {
 @executor("integration.pipelines.rerun")
 @args(profile="object")
 @requiresCapability("execute", "app:deployables/rerun")
-@description("Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. The original stays exactly as it ended.")
+@description("Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. With failedOnly, only what did not pass runs again: every step the original passed, with the same package slice, is carried over as skipped pipeline_passed_earlier, and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. The original stays exactly as it ended.")
 builtin pipelinesRerun {
-  runId  string!  @description("The v1:pipelines:run to re-run. Must be the caller's own.")
+  runId       string!  @description("The v1:pipelines:run to re-run. Must be the caller's own.")
+  failedOnly  bool     @description("Run again only what did not pass: the original's passed steps are carried over. Absent or false re-runs every step.")
 }
 
 @sdk

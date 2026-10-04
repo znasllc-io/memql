@@ -1634,3 +1634,108 @@ func TestHandleRunEventActsOnlyOnAQueuedRunNobodyDrives(t *testing.T) {
 		t.Errorf("a node that does not drive claimed a run: %d writes", n)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Re-running only what failed (epic memql#5479, D13's "Re-run failed")
+// ---------------------------------------------------------------------------
+
+// TestARerunOfFailedStepsRunsOnlyWhatDidNotPass is the act end to end: the
+// first attempt passes checks.vet and tests.lint and fails tests.unit; the
+// failed-only re-run hands the runner tests.unit alone, settles the other two
+// skipped pipeline_passed_earlier with the attempt they passed in, and
+// concludes on what it ran.
+func TestARerunOfFailedStepsRunsOnlyWhatDidNotPass(t *testing.T) {
+	dh := newDriveHarness(t, driveManifest)
+	var failUnit atomic.Bool
+	failUnit.Store(true)
+	dh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		res := passed(req)
+		if req.StepKey == "tests.unit" && failUnit.Load() {
+			res.Status, res.ExitCode = pipelines.OutcomeFailed, 1
+		}
+		return res, nil
+	}
+	first := dh.openRun(t, prOpening())
+	deliver(t, dh.integ, first)
+	if ended, _ := dh.store.run(first.ID); ended.Conclusion != ConclusionFailure {
+		t.Fatalf("the first attempt concludes %q, want failure", ended.Conclusion)
+	}
+	sentBefore := len(dh.exec.sent())
+
+	failUnit.Store(false)
+	next, err := dh.integ.Rerun(personCtx(ownerID), first.ID, true)
+	if err != nil {
+		t.Fatalf("rerun failed steps: %v", err)
+	}
+	if !next.RerunFailedOnly || next.Attempt != 2 || next.RerunOf != first.ID {
+		t.Fatalf("the new attempt records what it re-runs: %+v", next)
+	}
+	deliver(t, dh.integ, next)
+
+	var keys []string
+	for _, req := range dh.exec.sent()[sentBefore:] {
+		keys = append(keys, req.StepKey)
+	}
+	if !slices.Equal(keys, []string{"tests.unit"}) {
+		t.Errorf("only the step that did not pass reaches the runner: %v", keys)
+	}
+	got, _ := dh.store.run(next.ID)
+	if got.Conclusion != ConclusionSuccess {
+		t.Errorf("the re-run concludes on what it ran: %q", got.Conclusion)
+	}
+	for _, row := range dh.work.stepRows(bareID(got.WorkRunID)) {
+		key, _ := row["key"].(string)
+		if key == "tests.unit" {
+			continue
+		}
+		if row["status"] != WorkStepSkipped || row["errorCode"] != pipelines.CodePassedEarlier || row["errorMessage"] != "Passed in attempt 1." {
+			t.Errorf("%s is carried over as passed in attempt 1: %v", key, row)
+		}
+	}
+}
+
+// TestCarryPassedCarriesOnlyIdenticalPasses holds the carry rule itself: a
+// step is carried when the attempt it re-runs PASSED it with the same package
+// slice, or carried it already (keeping the attempt it first passed in); a
+// failed step, a shard whose slice moved since, and a step the plan already
+// skips are left to the plan.
+func TestCarryPassedCarriesOnlyIdenticalPasses(t *testing.T) {
+	track := func(key string, packages ...string) *stepTrack {
+		return &stepTrack{step: pipelines.Step{Key: key, Packages: packages}}
+	}
+	vet, shardSame, shardMoved, db, carried := track("checks.vet"), track("tests.go#1", "a", "b"), track("tests.go#2", "c"), track("tests.db"), track("tests.lint")
+	planned := track("tests.os")
+	planned.step.Skip = &pipelines.Skip{Code: pipelines.CodeNotAffected, Reason: "No change under bucket os."}
+	prior := []WorkStep{
+		{Key: "checks.vet", Status: WorkStepDone},
+		{Key: "tests.go#1", Status: WorkStepDone, Packages: []string{"a", "b"}},
+		{Key: "tests.go#2", Status: WorkStepDone, Packages: []string{"c", "d"}},
+		{Key: "tests.db", Status: WorkStepFailed},
+		{Key: "tests.lint", Status: WorkStepSkipped, Skip: &pipelines.Skip{Code: pipelines.CodePassedEarlier, Reason: "Passed in attempt 1."}},
+		{Key: "tests.os", Status: WorkStepDone},
+	}
+	carryPassed([]*stepTrack{vet, shardSame, shardMoved, db, carried, planned}, prior, 2)
+
+	for _, c := range []struct {
+		name   string
+		t      *stepTrack
+		reason string
+	}{
+		{"a step that passed", vet, "Passed in attempt 2."},
+		{"a shard with the same slice", shardSame, "Passed in attempt 2."},
+		{"a step already carried keeps where it first passed", carried, "Passed in attempt 1."},
+	} {
+		if c.t.step.Skip == nil || c.t.step.Skip.Code != pipelines.CodePassedEarlier || c.t.step.Skip.Reason != c.reason {
+			t.Errorf("%s is carried with %q: %+v", c.name, c.reason, c.t.step.Skip)
+		}
+	}
+	if shardMoved.step.Skip != nil {
+		t.Errorf("a shard whose slice moved is run again: %+v", shardMoved.step.Skip)
+	}
+	if db.step.Skip != nil {
+		t.Errorf("a failed step is run again: %+v", db.step.Skip)
+	}
+	if planned.step.Skip.Code != pipelines.CodeNotAffected {
+		t.Errorf("the plan's own skip stands: %+v", planned.step.Skip)
+	}
+}
