@@ -21,6 +21,7 @@
  * rather than running the width of a maximised window. */
 .os-pipelines-setup .os-action-body > .os-caption,
 .os-pipelines-setup .os-rail-note,
+.os-pipelines-stop .os-caption,
 .os-pipelines-fleet {
   max-width: 80ch;
 }

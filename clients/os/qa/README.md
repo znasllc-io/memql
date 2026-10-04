@@ -53,10 +53,20 @@ or `pipeline-runs`, `pipeline-runs-empty`, `pipeline-runs-none`,
 `pipeline-run-rerun`, `pipeline-run-developer` (Deployables > Runs and a run
 page in each state, epic memql#5479; the seeds are `qa/pipelinesSeeds.ts`, and
 `pipeline-run-failed` answers the Library content route with a Go test's last
-lines so the log tail is judged with a real failure in it);
+lines so the log tail is judged with a real failure in it), or
+`pipeline-source`, `pipeline-source-none`, `pipeline-map` (a source's checks,
+a source with no pipeline, the Overview map's Checks nodes) and
+`settings-pipelines-unset`, `-partial`, `-done`, `-dismissed`, `-unreported`
+(Settings -> Pipelines in each reading);
 `mode` is `dark`
 or `light`. **Take at least one narrow capture** (`820,760`): two of
 the first three real defects this harness found were invisible at 1400x900.
+
+`&click=A|B` presses the control whose text or accessible name is A once the
+reads have landed, then B a beat later: `pipeline-source&click=Pipeline
+settings` is the pipeline page, `pipeline-source-none&click=Connect pipeline`
+the connect rail, and `...|Continue` its Compute stop. `element.click()` is a
+real click event, so React handles it like a person's.
 
 `&open=1` opens every `<details>` on the page once the reads have landed. A
 one-shot capture cannot click, and a facts list -- the densest thing on a

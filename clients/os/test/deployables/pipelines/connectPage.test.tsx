@@ -308,9 +308,11 @@ describe("Connect pipeline", () => {
     await click(act_("Continue"));
 
     await waitFor(() => expect(choiceNames()).toEqual(["Cluster", "Cluster and your fleet"]));
-    // Nothing needs a machine, so the cluster is the preselection -- and the
-    // fleet's own sentence says what it also takes.
-    expect(chosen()).toBe("Cluster");
+    // Nothing needs a machine, so the cluster is SUGGESTED -- in words, with
+    // no card drawn as chosen until somebody chooses one -- and the fleet's
+    // own sentence says what it also takes.
+    expect(chosen()).toBe("");
+    expect(screen.getByText("No step needs a machine yet, so the cluster is suggested.")).toBeTruthy();
     expect(screen.getByText(/Computer use must be on for your machines\./)).toBeTruthy();
     expect(floorWord()).toBe("Choose where steps run");
     expect(noAct("Connect pipeline")).toBe(true);
@@ -365,8 +367,10 @@ describe("Connect pipeline", () => {
     await emit(connection, WORKER_REGISTRATION_CONCEPT, ALLOWED, "NODE_CREATED");
     await waitFor(() => expect(choiceNames()).toEqual(["Cluster and your fleet"]));
     // Cluster is not offered: the engine refuses a step's need on a
-    // cluster-only pipeline, so the sentence says how to keep steps here.
-    expect(chosen()).toBe("Cluster and your fleet");
+    // cluster-only pipeline, so the sentence says how to keep steps here. The
+    // one option left is still not chosen for the person: running steps on
+    // their machines is consent, so it waits, unchecked, for their click.
+    expect(chosen()).toBe("");
     expect(screen.getByText(/Only your machines offer what this step needs: os-checks needs docker\./)).toBeTruthy();
     expect(floorWord()).toBe("Choose where steps run");
   });

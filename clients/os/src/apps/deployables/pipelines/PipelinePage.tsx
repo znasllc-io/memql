@@ -126,7 +126,7 @@ export function PipelinePage({ pkg, pipeline, can, backLabel, onBack, breadcrumb
             <Fact label="Check on GitHub" value={pipeline.name === "" ? "" : `MemQL / ${pipeline.name}`} />
             <Fact
               label="Repository"
-              value={pipeline.repository === "" ? "" : <a href={`https://github.com/${pipeline.repository}`} target="_blank" rel="noopener noreferrer">{pipeline.repository}</a>}
+              value={pipeline.repository === "" ? "" : <a className="os-link" href={`https://github.com/${pipeline.repository}`} target="_blank" rel="noopener noreferrer">{pipeline.repository}</a>}
             />
             <Fact label="Default branch" value={pipeline.defaultBranch} />
             <Fact label="How changes arrive" value={deliveryWords(pipeline.delivery)} />

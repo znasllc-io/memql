@@ -34,7 +34,25 @@ import {
   type FakeSeed,
 } from "../test/deployables/harness";
 import { installQaConnection } from "./connectionShim";
-import { FAILED_LOG, PIPELINES_NO_RUNS_SEED, PIPELINES_SEED, installContentRoute } from "./pipelinesSeeds";
+import {
+  ALLOWED_MACHINE,
+  FAILED_LOG,
+  PIPELINES_NO_RUNS_SEED,
+  PIPELINES_SEED,
+  PIPELINES_UNCONNECTED_SEED,
+  installContentRoute,
+  mapPipelines,
+} from "./pipelinesSeeds";
+import { rowsResult as deployRowsResult } from "../test/deployables/harness";
+import { SessionProvider } from "../src/chrome/access";
+import { OsProvider } from "../src/chrome/state";
+import { AttentionProvider } from "../src/attention/Attention";
+import { OS_REGISTRY } from "../src/apps/registry";
+import { OptionalReadiness } from "../src/chrome/OptionalReadiness";
+import { PipelinesSection } from "../src/apps/settings/PipelinesSection";
+import { UNKNOWN_RUNTIME_CONFIG } from "../src/cluster/config";
+import type { Readiness } from "../src/live/readiness";
+import type { Verdict } from "../src/system/readinessFold";
 import { StorePanel } from "../src/apps/deployables/store/StorePanel";
 import { DeployablesApp } from "../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../src/apps/deployables/settings";
@@ -374,23 +392,117 @@ function Lists({ section }: { section: "deployables" | "sources" | "repositories
 }
 
 /**
- * The Runs tab, or one run's page opened as the check run's details link opens
- * it: a window intent naming the run (epic memql#5479).
+ * One Deployables section, opened the way a link opens it: a window intent
+ * naming a run (the check run's details link) or a source (the map's Checks
+ * node), epic memql#5479.
  */
-function RunsWindow({ runId }: { runId?: string }) {
+function DeployablesWindow({ section, fallback, intent }: { section: string; fallback: string; intent?: Record<string, unknown> }) {
   return (
-    <WindowBody fallback="Runs">
+    <WindowBody fallback={fallback}>
       <DeployablesApp
-        sectionId="runs"
+        sectionId={section}
         navigate={() => {}}
         askContext={() => {}}
         store={settingsStore()}
-        intent={runId ? { id: `qa-${runId}`, payload: { runId } } : undefined}
+        intent={intent ? { id: `qa-${section}`, payload: intent } : undefined}
         consumeIntent={() => {}}
       />
     </WindowBody>
   );
 }
+
+function RunsWindow({ runId }: { runId?: string }) {
+  return <DeployablesWindow section="runs" fallback="Runs" intent={runId ? { runId } : undefined} />;
+}
+
+/**
+ * The Deployables fake, answering the two shell-level reads a pipelines
+ * surface makes as well: the machines feed (whether "your fleet" exists) and
+ * the attention receipts (whether the Settings mark was answered).
+ */
+function pipelinesConnection(seed: FakeSeed, extra: { machines?: unknown[]; receipts?: unknown[] } = {}) {
+  const fake = fakeConnection(seed);
+  const base = fake.query.executeNamed.bind(fake.query);
+  (fake.query as unknown as { executeNamed: unknown }).executeNamed = async (name: string, call: string, opts?: unknown) => {
+    if (call === "query myAttentionReceipts()") return deployRowsResult((extra.receipts ?? []) as never);
+    if (call === "query myWorkersWithStatus()") return deployRowsResult((extra.machines ?? []) as never);
+    return base(name, call, opts as never);
+  };
+  return fake;
+}
+
+/** The session and the machines feed, as the shell gives a Deployables window. */
+function pipelinesWrap(el: JSX.Element, role: string) {
+  return withSession(<MachinesProvider>{el}</MachinesProvider>, { role, userId: "u-me" });
+}
+
+/** The pipelines readiness verdict, with the report lane's three facts when `slots` is given. */
+function pipelinesVerdict(state: Verdict["state"], slots: Partial<Record<"githubApp" | "repository" | "runner", boolean>> | null): Verdict {
+  return {
+    module: "pipelines",
+    state,
+    core: false,
+    optional: true,
+    dismissable: true,
+    disagreement: [],
+    nodes: [],
+    lanes: slots === null ? [] : [{
+      name: "report",
+      configurableFrom: "os",
+      complete: state === "configured",
+      slots: Object.entries(slots).map(([name, present]) => ({ name, present: present === true, source: present ? "set" : "" })),
+    }],
+    unknown: [],
+    stale: [],
+    aside: [],
+  } as Verdict;
+}
+
+/**
+ * Settings -> Pipelines in its window, under the providers the shell mounts
+ * it in -- the readiness reading it is drawn from, and the attention service
+ * whose mark its "Not now" answers.
+ */
+function SettingsPipelinesWindow({ verdict }: { verdict: Verdict | null }) {
+  installSeededAccess("owner");
+  const readiness: Readiness = {
+    loaded: true,
+    state: "live",
+    of: (id) => (verdict !== null && id === verdict.module ? verdict : null),
+    reseed: () => {},
+  } as Readiness;
+  return (
+    <SessionProvider
+      value={{
+        access: { userId: "u-me", primaryEmail: "owner@example.com", role: "owner", roleName: "", rank: 0 },
+        config: { ...UNKNOWN_RUNTIME_CONFIG, domain: "memql.example.com" },
+        ladderLoaded: true,
+        readiness,
+      }}
+    >
+      <OsProvider registry={OS_REGISTRY} actorRole="owner" grid={{ cols: 12, rows: 8 }}>
+        <AttentionProvider apps={OS_REGISTRY.apps}>
+          <MachinesProvider>
+            <OptionalReadiness />
+            <WindowBody fallback="Pipelines">
+              <PipelinesSection />
+            </WindowBody>
+          </MachinesProvider>
+        </AttentionProvider>
+      </OsProvider>
+    </SessionProvider>
+  );
+}
+
+const LAGGING = [{
+  installationId: "7",
+  account: "acme",
+  accountType: "Organization",
+  htmlUrl: "https://github.com/organizations/acme/settings/installations/7",
+  missingPermissions: ["checks"],
+  suspended: false,
+}];
+const APP_REGISTERED = { configured: true, source: "cluster", slug: "memql-on-memql-example-com", canSetup: true };
 
 /** The pane wrapper `DeployablePage` gives the Store view, verbatim. */
 function StorePane({ site, canBind }: { site: ReturnType<typeof siteFromRow>; canBind: boolean }) {
@@ -723,6 +835,41 @@ const VIEWS: Record<
   "pipeline-run-cancelled": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-4" /> },
   "pipeline-run-rerun": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-3" /> },
   "pipeline-run-developer": { seed: PIPELINES_SEED, role: "developer", framed: true, render: () => <RunsWindow runId="r-7" /> },
+  // A source's checks, its pipeline page (`&click=Pipeline settings`), the
+  // connect rail (`&click=Connect pipeline`), and the map's Checks nodes.
+  "pipeline-source": { connect: () => pipelinesConnection(PIPELINES_SEED), wrap: pipelinesWrap, render: () => <DeployablesWindow section="sources" fallback="Sources" intent={{ packageId: "pkg-shop" }} /> },
+  "pipeline-source-none": {
+    connect: () => pipelinesConnection(PIPELINES_UNCONNECTED_SEED, { machines: [ALLOWED_MACHINE] }),
+    wrap: pipelinesWrap,
+    render: () => <DeployablesWindow section="sources" fallback="Sources" intent={{ packageId: "pkg-shop" }} />,
+  },
+  "pipeline-map": { connect: () => pipelinesConnection({ ...LISTS, ...mapPipelines() }), wrap: pipelinesWrap, render: () => <DeployablesWindow section="map" fallback="Overview" /> },
+  // Settings -> Pipelines, the optional readiness item, in each reading.
+  "settings-pipelines-unset": {
+    connect: () => pipelinesConnection({ githubApp: { configured: false, canSetup: true } }),
+    wrap: (el) => el,
+    render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("unconfigured", { githubApp: false, repository: false, runner: false })} />,
+  },
+  "settings-pipelines-partial": {
+    connect: () => pipelinesConnection({ githubApp: APP_REGISTERED, laggingInstallations: LAGGING as never }, { machines: [ALLOWED_MACHINE] }),
+    wrap: (el) => el,
+    render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("partial", { githubApp: true, repository: false, runner: true })} />,
+  },
+  "settings-pipelines-done": {
+    connect: () => pipelinesConnection({ githubApp: APP_REGISTERED }, { machines: [ALLOWED_MACHINE] }),
+    wrap: (el) => el,
+    render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("configured", { githubApp: true, repository: true, runner: true })} />,
+  },
+  "settings-pipelines-dismissed": {
+    connect: () => pipelinesConnection({ githubApp: { configured: false, canSetup: true } }, { receipts: [{ id: "rc-1", changeId: "readiness:pipelines", revision: "optional-1" }] }),
+    wrap: (el) => el,
+    render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("unconfigured", { githubApp: false, repository: false, runner: false })} />,
+  },
+  "settings-pipelines-unreported": {
+    connect: () => pipelinesConnection({ githubApp: { configured: false, canSetup: true } }),
+    wrap: (el) => el,
+    render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("unreported", null)} />,
+  },
   "settings-no-app": { seed: NO_APP_OWNER, framed: true, render: () => <Lists section="settings" /> },
   "settings-no-app-member": { seed: NO_APP_MEMBER, role: "developer", framed: true, render: () => <Lists section="settings" /> },
   "settings-app": { seed: APP_FROM_HERE, framed: true, render: () => <Lists section="settings" /> },
@@ -1505,6 +1652,21 @@ if (new URLSearchParams(window.location.search).get("open") === "1") {
     for (const el of document.querySelectorAll("details")) el.open = true;
   }, 2500);
 }
+
+// A ONE-SHOT CAPTURE CANNOT PRESS A BUTTON EITHER, and some pages are reached
+// only by one: a source's Pipeline settings, the connect rail and its stops.
+// `?click=A|B` presses the first control whose text (or accessible name) is A
+// once the reads have landed, then B a beat later. `element.click()` is a real
+// click event, which React's root listener handles like a person's.
+const clicks = (new URLSearchParams(window.location.search).get("click") ?? "").split("|").filter((c) => c !== "");
+clicks.forEach((label, i) => {
+  window.setTimeout(() => {
+    const target = Array.from(document.querySelectorAll<HTMLElement>("button, [role=tab], [role=radio], a")).find(
+      (el) => (el.textContent ?? "").trim() === label || el.getAttribute("aria-label") === label,
+    );
+    target?.click();
+  }, 2500 + i * 1200);
+});
 
 const mode = new URLSearchParams(window.location.search).get("mode") ?? "dark";
 document.documentElement.setAttribute("data-theme", mode);

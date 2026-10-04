@@ -353,9 +353,12 @@ function StageList({ preview }: { preview: PipelinePreview }) {
 /**
  * Where the steps run: one question, answered by choosing.
  *
- * NO CONTINUE. Choosing is the answer and the flow moves on to Confirm; the
- * checked option is the preselection until somebody chooses, and choosing it
- * is as much an answer as choosing the other one.
+ * NO CONTINUE. Choosing is the answer and the flow moves on to Confirm.
+ *
+ * A SUGGESTION IS SAID, NOT DRAWN AS CHOSEN (SUPERVISED-VISUAL-COMPOSITION.md:
+ * describe a proposal as a proposal). Until somebody chooses, no card is
+ * checked and the caption names the one the cluster suggests; a card drawn
+ * checked that still waited for a click read as an answer already given.
  */
 function ComputeBody({ reading, problem, name, onChoose }: {
   reading: Reading;
@@ -397,7 +400,7 @@ function ComputeBody({ reading, problem, name, onChoose }: {
            value anybody types. The value the engine stores is
            cluster_and_fleet, and nobody needs to read that here. */
         voice="prose"
-        value={compute.value}
+        value={compute.answered ? compute.value : ""}
         onChange={(value) => onChoose(value === "cluster_and_fleet" ? "cluster_and_fleet" : "cluster")}
         options={compute.options.map((value) => ({ value, label: COMPUTE_CHOICES[value].label, description: COMPUTE_CHOICES[value].description }))}
       />

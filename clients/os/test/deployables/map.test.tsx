@@ -614,6 +614,18 @@ describe("a source's checks on the map", () => {
     expect(document.querySelector(".os-map-heading .os-info-dialog")?.textContent ?? "").toContain("Choose it to open that source");
   });
 
+  it("runs a checks edge along its own row, then into the node: never diagonally through the artifact column", async () => {
+    mount(fakeConnection(checkedSeed()));
+    await screen.findByLabelText("Checks for acme/shop: Failed on main, at tests");
+    const edges = [...document.querySelectorAll<SVGPathElement>("path.os-deploy-edge")].map((p) => p.getAttribute("d") ?? "");
+    const toChecks = edges.filter((d) => / H \d/.test(d));
+    expect(toChecks).toHaveLength(1);
+    // From the bundle's right edge, level with it, to the gutter before the
+    // checks column -- the horizontal run is what keeps it out of other rows.
+    const [, y] = /^M \S+ (\S+) H/.exec(toChecks[0]!) ?? [];
+    expect(toChecks[0]).toMatch(new RegExp(`^M \\S+ ${y} H \\S+ C \\S+ ${y},`));
+  });
+
   it("says so when the default branch has not run, and draws no dot for it", async () => {
     mount(fakeConnection(checkedSeed({ pipelineRuns: [] })));
     const node = await screen.findByLabelText("Checks for acme/shop: No runs yet");

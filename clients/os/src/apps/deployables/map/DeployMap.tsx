@@ -151,12 +151,22 @@ export function DeployMap({
               if (!from || !to) return null;
               const a = nodeCentre(from);
               const b = nodeCentre(to);
+              // A CHECKS EDGE RUNS ALONG ITS OWN ROW, THEN DOWN THE LAST
+              // GUTTER. The artifact column lies between a bundle and its
+              // source's checks, and the curve every other edge draws cut
+              // diagonally under whatever that column held in other rows.
+              // Along the bundle's own row it can pass only that row's own
+              // artifact, and the spine in the gutter brackets every app one
+              // source serves.
+              const d = to.kind === "checks"
+                ? `M ${from.x + from.w} ${a.y} H ${to.x - 20} C ${to.x - 8} ${a.y}, ${to.x - 12} ${b.y}, ${to.x} ${b.y}`
+                : `M ${from.x + from.w} ${a.y} C ${from.x + from.w + 24} ${a.y}, ${to.x - 24} ${b.y}, ${to.x} ${b.y}`;
               return (
                 <path
                   key={edge.id}
                   className="os-deploy-edge"
                   data-selected={selectedSites.includes(edge.siteId) || undefined}
-                  d={`M ${from.x + from.w} ${a.y} C ${from.x + from.w + 24} ${a.y}, ${to.x - 24} ${b.y}, ${to.x} ${b.y}`}
+                  d={d}
                 />
               );
             })}

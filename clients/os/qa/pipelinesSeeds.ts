@@ -190,3 +190,64 @@ export const PIPELINES_NO_RUNS_SEED: FakeSeed = {
   pipelines: PIPELINES.slice(0, 1),
   pipelineRuns: [],
 };
+
+const previewStep = (name: string, over: Record<string, unknown> = {}) => ({
+  name, packages: "", only: "", shards: 0, bucket: "", needs: [] as string[], secrets: [] as string[], services: [] as string[], ...over,
+});
+
+/** What `pipelinesPreview` reads from memql-package.yaml for the shop: no step needs a machine. */
+export const PREVIEW = {
+  repository: "acme/shop",
+  defaultBranch: "main",
+  sha: SHA_A,
+  name: "shop",
+  checkName: "MemQL / shop",
+  stages: [
+    { name: "checks", on: [], channel: "", steps: [previewStep("vet"), previewStep("lint")] },
+    { name: "tests", on: [], channel: "", steps: [previewStep("go-tests", { packages: "affected", shards: 2 }), previewStep("os", { bucket: "os" })] },
+    { name: "deploy", on: ["push"], channel: "", steps: [previewStep("ship", { secrets: ["SHOP_TOKEN"] })] },
+  ],
+  needs: [] as string[],
+  secrets: ["SHOP_TOKEN"],
+  suggestedDelivery: "webhook",
+  existing: null,
+  refusal: null,
+} as unknown as Row;
+
+/** One of the viewer's machines, its own policy allowing pipeline steps. */
+export const ALLOWED_MACHINE = {
+  id: "v1:worker:registration:m-studio",
+  ownerUserId: VIEWER,
+  name: "studio-mac",
+  displayName: "",
+  platformInfo: { os: "darwin", arch: "arm64", hostname: "studio-mac" },
+  labels: { pipelines: "allowed" },
+  operatorLabels: {},
+  concurrency: { HEADLESS: 2 },
+  activeCount: 0,
+  registeredAt: "2026-09-01T00:00:00Z",
+  connectedNodeId: "agent-0",
+  lastSeenAt: new Date().toISOString(),
+} as unknown as Row;
+
+/** The shop's source with no pipeline yet: what Connect pipeline opens over. */
+export const PIPELINES_UNCONNECTED_SEED: FakeSeed = {
+  packages: PACKAGES.slice(0, 1),
+  pipelines: [],
+  pipelineRuns: [],
+  pipelinePreview: PREVIEW,
+};
+
+/** Pipelines on two of the list seed's sources, for the Overview map's Checks nodes. */
+export function mapPipelines(): Pick<FakeSeed, "pipelines" | "pipelineRuns"> {
+  return {
+    pipelines: [
+      pipelineRow({ id: "pl-acme", packageId: "pkg-acme", name: "acme", repository: "acme/storefront" }),
+      pipelineRow({ id: "pl-widgets", packageId: "pkg-widgets", name: "widgets-co", repository: "acme/widgets" }),
+    ],
+    pipelineRuns: [
+      runRow({ id: "rm-1", ownerUserId: VIEWER, pipelineId: "pl-acme", repository: "acme/storefront", event: "push", pullRequest: 0, headBranch: "main", conclusion: "success", workRunId: "", stages: [{ name: "checks", status: "passed", durationMs: 40000, steps: 1, failed: 0 }], ...finishedAfter(30, 40000) }),
+      runRow({ id: "rm-2", ownerUserId: VIEWER, pipelineId: "pl-widgets", repository: "acme/widgets", event: "push", pullRequest: 0, headBranch: "main", conclusion: "failure", workRunId: "", ...finishedAfter(90, 460000) }),
+    ],
+  };
+}
