@@ -1077,62 +1077,164 @@ func TestFleetStepFilesWhatACancelledStepCaptured(t *testing.T) {
 }
 
 // TestFleetStepBoundsItsFailureAsTheClusterDoes: a machine's words, a sibling
-// replica's code and the dispatcher's own error are as long as they like, and
-// the failure sentence quoting them is cut where it is made, to
-// failureMaxBytes, as the cluster's runner cuts one -- so the outcome stays
-// within outcomeMaxBytes whatever was said.
+// replica's code, the dispatcher's own error and an answer that is not the
+// contract are as long as they like, and the failure sentence quoting them is
+// cut where it is made, to failureMaxBytes, as the cluster's runner cuts one
+// -- so the outcome stays within outcomeMaxBytes whatever was said. The words
+// are runes of three bytes after a head of one, two or three bytes, so under
+// one head or another a rune lies across failureMaxBytes, and the cut must
+// leave it whole.
 func TestFleetStepBoundsItsFailureAsTheClusterDoes(t *testing.T) {
-	long := "boom " + strings.Repeat("x", 300<<10)
+	longWith := func(head int) string {
+		return "boom" + strings.Repeat("!", head) + " " + strings.Repeat("€", 100<<10)
+	}
 	for _, c := range []struct {
 		name   string
-		result worker.Result
-		err    error
+		answer func(long string) (worker.Result, error)
 		status pl.Outcome
 		code   string
+		// runes says the sentence quotes the words, whose runes reach the
+		// cut; an exit code is digits.
+		runes bool
 	}{
-		{"the machine's error", worker.Result{ErrorCode: "exec_failed", ErrorMessage: long}, nil, pl.OutcomeFailed, pl.CodeExecutorError},
-		{"a code nobody bounded", worker.Result{ErrorCode: long, ErrorMessage: "no"}, nil, pl.OutcomeFailed, pl.CodeExecutorError},
-		{"the machine's own policy", worker.Result{ErrorCode: "denied_by_policy", ErrorMessage: long}, nil, pl.OutcomeFailed, pl.CodeNoMachineForNeed},
-		{"a connection lost mid-run", worker.Result{ErrorCode: "worker_disconnected", ErrorMessage: long}, nil, pl.OutcomeFailed, pl.CodeNodeLost},
-		{"a failed clone", worker.Result{ErrorCode: pl.CodeCloneFailed, ErrorMessage: long}, nil, pl.OutcomeFailed, pl.CodeCloneFailed},
-		{"no machine could take it", worker.Result{ErrorCode: "worker_busy", ErrorMessage: long, RefusedBeforeStart: true},
-			nil, pl.OutcomeRefused, pl.CodeNoMachineForNeed},
-		{"the engine's own gate", worker.Result{ErrorCode: "bad_request", ErrorMessage: long, RefusedBeforeStart: true, RefusedByGate: true},
-			nil, pl.OutcomeRefused, pl.CodeExecutorError},
-		{"the dispatcher could not take it", worker.Result{}, errors.New(long), pl.OutcomeFailed, pl.CodeRunnerUnavailable},
+		{"the machine's error", func(long string) (worker.Result, error) {
+			return worker.Result{ErrorCode: "exec_failed", ErrorMessage: long}, nil
+		}, pl.OutcomeFailed, pl.CodeExecutorError, true},
+		{"a code nobody bounded", func(long string) (worker.Result, error) {
+			return worker.Result{ErrorCode: long, ErrorMessage: "no"}, nil
+		}, pl.OutcomeFailed, pl.CodeExecutorError, true},
+		{"the machine's own policy", func(long string) (worker.Result, error) {
+			return worker.Result{ErrorCode: "denied_by_policy", ErrorMessage: long}, nil
+		}, pl.OutcomeFailed, pl.CodeNoMachineForNeed, true},
+		{"a connection lost mid-run", func(long string) (worker.Result, error) {
+			return worker.Result{ErrorCode: "worker_disconnected", ErrorMessage: long}, nil
+		}, pl.OutcomeFailed, pl.CodeNodeLost, true},
+		{"a failed clone", func(long string) (worker.Result, error) {
+			return worker.Result{ErrorCode: pl.CodeCloneFailed, ErrorMessage: long}, nil
+		}, pl.OutcomeFailed, pl.CodeCloneFailed, true},
+		{"no machine could take it", func(long string) (worker.Result, error) {
+			return worker.Result{ErrorCode: "worker_busy", ErrorMessage: long, RefusedBeforeStart: true}, nil
+		}, pl.OutcomeRefused, pl.CodeNoMachineForNeed, true},
+		{"the engine's own gate", func(long string) (worker.Result, error) {
+			return worker.Result{ErrorCode: "bad_request", ErrorMessage: long, RefusedBeforeStart: true, RefusedByGate: true}, nil
+		}, pl.OutcomeRefused, pl.CodeExecutorError, true},
+		{"the dispatcher could not take it", func(long string) (worker.Result, error) {
+			return worker.Result{}, errors.New(long)
+		}, pl.OutcomeFailed, pl.CodeRunnerUnavailable, true},
+		// The JSON decoder's error quotes the number whole: 300 KiB of it.
+		{"an exit code no int holds, in an answer otherwise the contract", func(string) (worker.Result, error) {
+			return worker.Result{OK: true, OutputJSON: `{"exitCode":` + strings.Repeat("9", 300<<10) + `,"durationMs":10}`}, nil
+		}, pl.OutcomeFailed, pl.CodeExecutorError, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
-				r := c.result
-				r.WorkerId, r.NodeId = "reg-1", "agent-b"
-				return r, c.err
-			}}
-			f, _, _, _ := newTestFleet(t, d)
-			res := runFleet(t, f, fleetReq())
-			wantFailure(t, res, c.status, c.code)
-			if n := len(res.Failure.Message); n > failureMaxBytes {
-				t.Errorf("the failure sentence is %d bytes, over failureMaxBytes (%d)", n, failureMaxBytes)
+			straddled, heads := false, 3
+			if !c.runes {
+				heads = 1
 			}
-			if n := outcomeBytes(res); n > outcomeMaxBytes {
-				t.Errorf("the outcome is %d bytes, over outcomeMaxBytes (%d)", n, outcomeMaxBytes)
+			for head := 1; head <= heads; head++ {
+				long := longWith(head)
+				d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+					r, err := c.answer(long)
+					r.WorkerId, r.NodeId = "reg-1", "agent-b"
+					return r, err
+				}}
+				f, _, _, _ := newTestFleet(t, d)
+				res := runFleet(t, f, fleetReq())
+				wantFailure(t, res, c.status, c.code)
+				msg := res.Failure.Message
+				if n := len(msg); n > failureMaxBytes {
+					t.Errorf("head %d: the failure sentence is %d bytes, over failureMaxBytes (%d)", head, n, failureMaxBytes)
+				}
+				if n := outcomeBytes(res); n > outcomeMaxBytes {
+					t.Errorf("head %d: the outcome is %d bytes, over outcomeMaxBytes (%d)", head, n, outcomeMaxBytes)
+				}
+				if !utf8.ValidString(msg) {
+					t.Errorf("head %d: the failure sentence was cut inside a rune", head)
+				}
+				// A rune left whole across the cut ends the sentence short
+				// of failureMaxBytes.
+				straddled = straddled || len(msg) < failureMaxBytes
 			}
-			if !utf8.ValidString(res.Failure.Message) {
-				t.Error("the failure sentence was cut inside a rune")
+			if c.runes && !straddled {
+				t.Error("no head put a rune across the cut: the check above never met a rune boundary")
 			}
 		})
 	}
 
 	t.Run("the token minter's error", func(t *testing.T) {
-		d := &fakeDispatcher{}
-		f, _, tokens, _ := newTestFleet(t, d)
-		tokens.err = errors.New(long)
-		res := runFleet(t, f, fleetReq())
-		wantFailure(t, res, pl.OutcomeFailed, pl.CodeCloneFailed)
-		if n := len(res.Failure.Message); n > failureMaxBytes || len(d.reqs) != 0 {
-			t.Errorf("the failure sentence is %d bytes (failureMaxBytes %d), %d dispatch(es); want it bounded and nothing run",
-				n, failureMaxBytes, len(d.reqs))
+		straddled := false
+		for head := 1; head <= 3; head++ {
+			d := &fakeDispatcher{}
+			f, _, tokens, _ := newTestFleet(t, d)
+			tokens.err = errors.New(longWith(head))
+			res := runFleet(t, f, fleetReq())
+			wantFailure(t, res, pl.OutcomeFailed, pl.CodeCloneFailed)
+			msg := res.Failure.Message
+			if n := len(msg); n > failureMaxBytes || len(d.reqs) != 0 {
+				t.Errorf("head %d: the failure sentence is %d bytes (failureMaxBytes %d), %d dispatch(es); want it bounded and nothing run",
+					head, n, failureMaxBytes, len(d.reqs))
+			}
+			if !utf8.ValidString(msg) {
+				t.Errorf("head %d: the failure sentence was cut inside a rune", head)
+			}
+			straddled = straddled || len(msg) < failureMaxBytes
+		}
+		if !straddled {
+			t.Error("no head put a rune across the cut: the check above never met a rune boundary")
 		}
 	})
+}
+
+// TestFleetStepMasksItsFailureBeforeCuttingIt (the Task 12b re-review): a
+// failure sentence quoting the machine is masked whole, and only then cut to
+// failureMaxBytes. Cut first, a secret straddling the cut keeps its head,
+// which no masker can know for the secret.
+func TestFleetStepMasksItsFailureBeforeCuttingIt(t *testing.T) {
+	const secret = "S3CRET-straddling-the-failure-cut"
+	for _, c := range []struct {
+		name   string
+		answer func(said string) worker.Result
+		status pl.Outcome
+		code   string
+	}{
+		{"a failed step", func(said string) worker.Result {
+			return worker.Result{ErrorCode: "exec_failed", ErrorMessage: said}
+		}, pl.OutcomeFailed, pl.CodeExecutorError},
+		{"a refused step", func(said string) worker.Result {
+			return worker.Result{ErrorCode: "worker_busy", ErrorMessage: said, RefusedBeforeStart: true}
+		}, pl.OutcomeRefused, pl.CodeNoMachineForNeed},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			run := func(said string) string {
+				d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+					r := c.answer(said)
+					r.WorkerId, r.NodeId = "reg-1", "agent-b"
+					return r, nil
+				}}
+				f, _, _, _ := newTestFleet(t, d)
+				req := fleetReq()
+				req.Secrets["STRADDLING_TOKEN"] = secret
+				res := runFleet(t, f, req)
+				wantFailure(t, res, c.status, c.code)
+				return res.Failure.Message
+			}
+			// Where the machine's words begin in the sentence, measured, so
+			// the secret can begin six bytes before the cut.
+			const probe = "probe"
+			head := len(run(probe)) - len(probe)
+			msg := run(strings.Repeat("x", failureMaxBytes-head-6) + secret + strings.Repeat("y", 64))
+
+			for n := 1; n <= len(secret); n++ {
+				if strings.HasSuffix(msg, secret[:n]) {
+					t.Fatalf("the sentence ends %q, the head of the secret: it was cut before it was masked", secret[:n])
+				}
+			}
+			if !strings.Contains(msg, "***") || len(msg) > failureMaxBytes {
+				t.Errorf("the sentence (%d bytes) ends %q; want the secret masked in it, within failureMaxBytes (%d)",
+					len(msg), msg[max(0, len(msg)-40):], failureMaxBytes)
+			}
+		})
+	}
 }
 
 // TestFleetStepReadsGoTimings: a Go test step's passing packages' times come
