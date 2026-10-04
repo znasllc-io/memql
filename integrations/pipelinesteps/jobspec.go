@@ -46,6 +46,17 @@ const (
 	stepArtifactsVar  = "MEMQL_STEP_ARTIFACTS"
 	artifactMarkerVar = "MEMQL_ARTIFACT_MARKER"
 
+	// The step's git configuration (ruling R13). The clone container's uid
+	// never matches every step image's, and git refuses a repository another
+	// user owns -- root included -- so the step names /workspace safe. Through
+	// git's environment configuration because that is the command scope, one
+	// of the protected scopes safe.directory is read from; a repository's own
+	// config cannot vouch for itself. A substrate implementation detail, like
+	// the wrapper's umask, not part of the MEMQL_* contract.
+	gitConfigCountVar = "GIT_CONFIG_COUNT"
+	gitConfigKeyVar   = "GIT_CONFIG_KEY_0"
+	gitConfigValueVar = "GIT_CONFIG_VALUE_0"
+
 	// platformPrefix is the platform's namespace of variables. A step secret
 	// may not be named in it: the seam's compiler already refuses one, and
 	// pl.StepRequest.Environment drops one, so this is the third wall.
@@ -243,13 +254,16 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 
 // namesTheJobSets is every variable name the Job sets on its own account, in
 // the step container or its Secret, that a step secret may therefore not
-// take: the contract environment, the wrapper's variables, the declared
-// caches' variables, and the clone token's key.
+// take: the contract environment, the wrapper's variables, the step's git
+// configuration, the declared caches' variables, and the clone token's key.
 func namesTheJobSets(run StepRun) map[string]bool {
 	taken := map[string]bool{
 		stepCommandVar:    true,
 		stepArtifactsVar:  true,
 		artifactMarkerVar: true,
+		gitConfigCountVar: true,
+		gitConfigKeyVar:   true,
+		gitConfigValueVar: true,
 		gitTokenKey:       true,
 	}
 	for name := range run.Env {
@@ -362,7 +376,7 @@ func serviceContainers(services map[string]pl.Service) []Container {
 }
 
 func stepContainer(run StepRun, jobName, secretName string, caches []string) Container {
-	env := make([]EnvVar, 0, len(run.Env)+len(run.Secrets)+6)
+	env := make([]EnvVar, 0, len(run.Env)+len(run.Secrets)+9)
 	for _, name := range sortedKeys(run.Env) {
 		env = append(env, plainVar(name, run.Env[name]))
 	}
@@ -370,7 +384,12 @@ func stepContainer(run StepRun, jobName, secretName string, caches []string) Con
 	if len(run.Artifacts) > 0 {
 		env = append(env, plainVar(stepArtifactsVar, strings.Join(run.Artifacts, " ")))
 	}
-	env = append(env, plainVar(artifactMarkerVar, ArtifactMarker(jobName)))
+	env = append(env,
+		plainVar(artifactMarkerVar, ArtifactMarker(jobName)),
+		plainVar(gitConfigCountVar, "1"),
+		plainVar(gitConfigKeyVar, "safe.directory"),
+		plainVar(gitConfigValueVar, workspacePath),
+	)
 	for _, cache := range caches {
 		env = append(env, cacheVars[cache]...)
 	}

@@ -379,6 +379,9 @@ func TestBuildJob(t *testing.T) {
 			{Name: "MEMQL_STEP_COMMAND", Value: "go test $MEMQL_PACKAGES"},
 			{Name: "MEMQL_STEP_ARTIFACTS", Value: "coverage.out reports/*.xml"},
 			{Name: "MEMQL_ARTIFACT_MARKER", Value: "::memql-artifacts::4887b49fa27936d6"},
+			{Name: "GIT_CONFIG_COUNT", Value: "1"},
+			{Name: "GIT_CONFIG_KEY_0", Value: "safe.directory"},
+			{Name: "GIT_CONFIG_VALUE_0", Value: "/workspace"},
 			{Name: "GOMODCACHE", Value: "/cache/go/mod"},
 			{Name: "GOCACHE", Value: "/cache/go/build"},
 			{Name: "npm_config_cache", Value: "/cache/npm"},
@@ -403,6 +406,24 @@ func TestBuildJob(t *testing.T) {
 		doc := wire(t, job)
 		wantField(t, doc, false, "spec", "template", "spec", "containers", 0, "securityContext", "allowPrivilegeEscalation")
 		wantField(t, doc, "/workspace", "spec", "template", "spec", "containers", 0, "workingDir")
+	})
+
+	// Ruling R13: the clone container's uid never matches every step image's,
+	// and git refuses a repository another user owns -- root included -- so
+	// the step names the checkout safe through git's own environment
+	// configuration, the command scope safe.directory is read from.
+	t.Run("git in the step trusts the checkout whatever uid the image runs as", func(t *testing.T) {
+		step := stepOf(t, mustBuild(t, testConfig(), testRun()))
+		for name, want := range map[string]string{
+			"GIT_CONFIG_COUNT":   "1",
+			"GIT_CONFIG_KEY_0":   "safe.directory",
+			"GIT_CONFIG_VALUE_0": "/workspace",
+		} {
+			e, ok := envNamed(step, name)
+			if !ok || e.Value != want || e.ValueFrom != nil {
+				t.Errorf("step env %s = %+v (present %v), want the plain value %q", name, e, ok, want)
+			}
+		}
 	})
 
 	t.Run("a step declaring no artifacts carries no artifact list", func(t *testing.T) {
@@ -552,6 +573,9 @@ func TestBuildJob(t *testing.T) {
 			{"a secret named like the artifact marker", withSecret("MEMQL_ARTIFACT_MARKER"), pl.CodeJobRejected},
 			{"a secret sharing the clone token's key", withSecret("GIT_TOKEN"), pl.CodeJobRejected},
 			{"a secret named like a cache variable", withSecret("GOCACHE"), pl.CodeJobRejected},
+			{"a secret named like git's config count", withSecret("GIT_CONFIG_COUNT"), pl.CodeJobRejected},
+			{"a secret named like git's config key", withSecret("GIT_CONFIG_KEY_0"), pl.CodeJobRejected},
+			{"a secret named like git's config value", withSecret("GIT_CONFIG_VALUE_0"), pl.CodeJobRejected},
 			{"a secret also present as a plain value", func(_ *Config, r *StepRun) {
 				r.Env["CI"] = "true"
 				r.Secrets["CI"] = "planted-" + strings.Repeat("v", 8)

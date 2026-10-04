@@ -39,7 +39,10 @@ func runScript(t *testing.T, script, workspace string, env []string) shellRun {
 	// The script is a package constant and the substitute a t.TempDir() path,
 	// single-quoted so a temporary directory with a space in it stays one word.
 	quoted := "'" + strings.ReplaceAll(workspace, "'", `'"'"'`) + "'"
-	cmd := exec.Command("/bin/sh", "-c", strings.ReplaceAll(script, "/workspace", quoted))
+	local := strings.ReplaceAll(script, "/workspace", quoted)
+	// Started under a restrictive umask, as a container's process may be, so a
+	// script that relies on the mask it inherits shows it here.
+	cmd := exec.Command("/bin/sh", "-c", `umask 077 && exec /bin/sh -c "$1"`, "sh", local)
 	cmd.Dir = t.TempDir() // the script must place itself; it does not inherit the workspace
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer
@@ -139,6 +142,45 @@ func TestStepWrapperFramesDeclaredArtifactsAfterTheCommand(t *testing.T) {
 	}
 }
 
+// TestStepWrapperClearsTheUmaskBeforeTheCommandRuns: one cache volume serves
+// steps running as root and steps running as an image's own non-root user, so
+// a file one step leaves there has to stay writable by the next, whatever uid
+// that one runs as (ruling R13). The wrapper's FIRST statement clears the
+// umask, before anything it runs -- the command included -- creates a file.
+func TestStepWrapperClearsTheUmaskBeforeTheCommandRuns(t *testing.T) {
+	if first, _, _ := strings.Cut(stepWrapper, "\n"); first != "umask 0000" {
+		t.Errorf("the wrapper's first statement is %q, want umask 0000", first)
+	}
+	workspace, cache := t.TempDir(), t.TempDir()
+	res := runScript(t, stepWrapper, workspace, []string{
+		"PATH=" + os.Getenv("PATH"),
+		"CACHE_DIR=" + cache,
+		`MEMQL_STEP_COMMAND=umask && mkdir -p "$CACHE_DIR/go/mod" && echo cached > "$CACHE_DIR/go/mod/entry" && echo built > out.bin`,
+		"MEMQL_ARTIFACT_MARKER=" + testMarker,
+	})
+	if res.code != 0 {
+		t.Fatalf("exit status = %d (stderr %q)", res.code, res.stderr)
+	}
+	if got := strings.TrimSpace(res.stdout); got != "0000" {
+		t.Errorf("the command ran under umask %q, want 0000: the mask the container started with leaked through", got)
+	}
+	for path, want := range map[string]os.FileMode{
+		filepath.Join(cache, "go"):                 0o777,
+		filepath.Join(cache, "go", "mod"):          0o777,
+		filepath.Join(cache, "go", "mod", "entry"): 0o666,
+		filepath.Join(workspace, "out.bin"):        0o666,
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Errorf("the command did not create %s: %v", path, err)
+			continue
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("%s has mode %o, want %o: a step running as another uid could not write it", path, got, want)
+		}
+	}
+}
+
 // Review Focus 3: an image with no tar or base64 cannot frame its artifacts,
 // and that must cost the artifacts, never the step's outcome.
 func TestStepWrapperWithoutTarKeepsTheStepsStatus(t *testing.T) {
@@ -219,7 +261,13 @@ func TestCloneScriptChecksOutTheSHAAndNothingAfterIt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(src, "first.txt"), []byte("one\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	git(t, src, "add", "first.txt")
+	if err := os.MkdirAll(filepath.Join(src, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "sub", "inner.txt"), []byte("inner\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, src, "add", "first.txt", "sub/inner.txt")
 	git(t, src, "commit", "-q", "-m", "one")
 	sha := git(t, src, "rev-parse", "HEAD")
 	if err := os.WriteFile(filepath.Join(src, "second.txt"), []byte("two\n"), 0o644); err != nil {
@@ -247,6 +295,26 @@ func TestCloneScriptChecksOutTheSHAAndNothingAfterIt(t *testing.T) {
 	}
 	if !strings.Contains(res.stdout, "memql: checked out "+sha) {
 		t.Errorf("stdout = %q, want the line naming the SHA", res.stdout)
+	}
+
+	// Ruling R13: the clone runs as its image's user and the step as the step
+	// image's, which need not match, so the checkout is world-writable inside
+	// the pod's own scratch volume -- including the repository itself, which a
+	// step's git commands write to.
+	for path, want := range map[string]os.FileMode{
+		filepath.Join(workspace, "first.txt"):        0o666,
+		filepath.Join(workspace, "sub"):              0o777,
+		filepath.Join(workspace, "sub", "inner.txt"): 0o666,
+		filepath.Join(workspace, ".git"):             0o777,
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Errorf("%s missing from the checkout: %v", path, err)
+			continue
+		}
+		if got := info.Mode().Perm(); got != want {
+			t.Errorf("%s has mode %o, want %o: a step running as another uid could not write it", path, got, want)
+		}
 	}
 }
 
