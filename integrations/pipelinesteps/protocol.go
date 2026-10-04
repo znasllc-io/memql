@@ -62,6 +62,14 @@ type StepRun struct {
 	// DeadlineCode names whichever bound TimeoutSeconds is:
 	// pl.CodeStepTimeout or pl.CodeRunCeiling.
 	DeadlineCode string `json:"deadlineCode"`
+	// HandedAt is when the agent handed the step to the cluster, RFC 3339
+	// with nanoseconds: the moment TimeoutSeconds counts from on both sides
+	// (ruling R31). The agent gives the step up TimeoutSeconds and its grace
+	// after it; the runner gives the step's Job only what is left of
+	// TimeoutSeconds when it is created, so a step that waited for a slot
+	// under the ceiling has spent the rest. Every forward of one step carries
+	// the same moment. Empty: the runner counts from its Run's start.
+	HandedAt string `json:"handedAt,omitempty"`
 	// GoTimings asks the runner to read Go test timings out of the output.
 	GoTimings bool `json:"goTimings,omitempty"`
 }

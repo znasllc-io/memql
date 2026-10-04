@@ -1,6 +1,7 @@
 package pipelinesteps
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -207,7 +208,7 @@ func (r *Runner) Run(ctx context.Context, run StepRun) pl.StepResult {
 	defer r.track(run.RunID, jobName, cancel)()
 
 	s := &step{
-		r: r, run: run, jobName: jobName, ctx: ctx, trouble: apiTrouble{},
+		r: r, run: run, jobName: jobName, ctx: ctx, trouble: apiTrouble{}, began: r.now(),
 		// The ids, never the StepRun: its secrets would print.
 		log: r.log.With("runId", run.RunID, "workRunId", run.WorkRunID, "stepKey", run.StepKey,
 			"attempt", run.Attempt, "jobName", jobName, "node", r.cfg.NodeID),
@@ -375,6 +376,9 @@ type step struct {
 	jobName string
 	ctx     context.Context
 	log     *slog.Logger
+	// began is when this Run began: the step's timeout counts from it when
+	// the agent said nothing of when it handed the step over.
+	began time.Time
 
 	// capture is open while this Run captures the step's output; nil while
 	// it only waits on another runner.
@@ -574,6 +578,18 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 
 	waiting, attempts := false, 0
 	for {
+		left := s.budgetLeft()
+		if left <= 0 {
+			// The token must not outlive the Job that will not come.
+			s.deleteSecret()
+			return s.failed(cmp.Or(strings.TrimSpace(s.run.DeadlineCode), pl.CodeStepTimeout), fmt.Sprintf(
+				"the step's %s timeout ran out before its Job could be created -- waiting for a free slot under the pipelines "+
+					"ceiling, or for a runner to take it -- so it was never started", time.Duration(s.run.TimeoutSeconds)*time.Second)), Job{}, true
+		}
+		// What is left, in whole seconds rounded up: a step that never
+		// waited keeps its timeout as declared, and the part of a second it
+		// may gain is well inside the agent's grace.
+		spec.Spec.ActiveDeadlineSeconds = ptr(int64((left + time.Second - 1) / time.Second))
 		s.freshenToken()
 		j, made, err := s.r.kube.CreateJob(s.ctx, spec)
 		switch {
@@ -777,7 +793,7 @@ func (s *step) watch(hb *heartbeat) (pl.StepResult, bool) {
 		case PhaseSucceeded, PhaseFailed:
 			// The first terminal observation is the step's outcome: what
 			// decided it can be gone the next time anyone looks.
-			dec := s.decision(obs, pod)
+			dec := s.decision(obs, pod, job)
 			s.record(dec)
 			return s.settle(dec, pod, f), true
 		}
@@ -931,6 +947,24 @@ func (s *step) mintToken() (string, error) {
 		return "", errors.New("this workbench node has no token minter")
 	}
 	return s.r.tokens.CloneToken(s.ctx, s.run.InstallationID, s.run.Repository.Owner, s.run.Repository.Name)
+}
+
+// handedAt is when the agent handed the step over (StepRun.HandedAt), which
+// the step's timeout counts from on both sides; a Run told nothing counts
+// from its own start.
+func (s *step) handedAt() time.Time {
+	if at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(s.run.HandedAt)); err == nil {
+		return at
+	}
+	return s.began
+}
+
+// budgetLeft is what is left of the step's timeout now (ruling R31): time
+// spent before its Job exists -- waiting for a slot under the ceiling, or for
+// a forward to reach a runner -- is the step's. A hand-over stamped ahead of
+// this node's clock spent nothing.
+func (s *step) budgetLeft() time.Duration {
+	return time.Duration(s.run.TimeoutSeconds)*time.Second - max(s.r.now().Sub(s.handedAt()), 0)
 }
 
 // setSecrets makes the step's secret list the run's secrets and every token

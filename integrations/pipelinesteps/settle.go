@@ -2,6 +2,7 @@ package pipelinesteps
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -29,19 +30,35 @@ import (
 
 // decision is a terminal observation as the step's result: its status, exit
 // code, failure and times, and nothing else yet.
-func (s *step) decision(obs Observation, pod *Pod) pl.StepResult {
+func (s *step) decision(obs Observation, pod *Pod, job Job) pl.StepResult {
 	dec := pl.StepResult{Status: pl.OutcomeSucceeded, ExitCode: obs.ExitCode}
 	if obs.Phase == PhaseFailed {
 		dec.Status = pl.OutcomeFailed
 	}
 	if obs.Failure != nil {
-		dec.Failure = &pl.Failure{Code: obs.Failure.Code, Message: cutBytes(s.mask(obs.Failure.Message), failureMaxBytes)}
+		message := obs.Failure.Message
+		if obs.Failure.Code == cmp.Or(strings.TrimSpace(s.run.DeadlineCode), pl.CodeStepTimeout) {
+			message += s.shortened(job)
+		}
+		dec.Failure = &pl.Failure{Code: obs.Failure.Code, Message: cutBytes(s.mask(message), failureMaxBytes)}
 	}
 	dec.StartedAt, dec.FinishedAt = stepTimes(pod)
 	if dec.FinishedAt == "" {
 		dec.FinishedAt = s.r.nowText()
 	}
 	return dec
+}
+
+// shortened is what a deadline failure adds when the step's Job was given
+// less than its timeout, the rest spent before the Job was created (ruling
+// R31): the deadline the Job reports is not the one the step declared.
+func (s *step) shortened(job Job) string {
+	ads, full := job.Spec.ActiveDeadlineSeconds, int64(s.run.TimeoutSeconds)
+	if ads == nil || *ads >= full {
+		return ""
+	}
+	return fmt.Sprintf(", what was left of its %s timeout once it had waited %s to start (a wait for a free slot under the pipelines ceiling counts)",
+		time.Duration(full)*time.Second, time.Duration(full-*ads)*time.Second)
 }
 
 // record writes the decision on the Job, so a runner that adopts the step

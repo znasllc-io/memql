@@ -76,6 +76,10 @@ func (e *Executor) runCluster(ctx context.Context, run StepRun, timeout time.Dur
 				"workbench integration is missing), so a cluster step cannot be handed to a runner. Nothing ran."),
 			pl.Where{Surface: surfaceCluster, JobName: job})
 	}
+	// Every forward of the step carries the moment it was handed over, which
+	// the runner counts the step's timeout from, as giveUp below does (ruling
+	// R31): time spent before the Job exists is the step's.
+	run.HandedAt = e.now().UTC().Format(time.RFC3339Nano)
 	args, err := json.Marshal(run)
 	if err != nil {
 		return withWhere(failedResult(pl.CodeExecutorError, "The step could not be encoded for the workbench: "+err.Error()),

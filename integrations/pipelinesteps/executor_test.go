@@ -744,6 +744,38 @@ func staleResponse(runner string) *nodev1.WorkbenchForwardResponse {
 	return &nodev1.WorkbenchForwardResponse{PayloadJson: mustMarshal(StatusReply{State: StateStale, Runner: runner})}
 }
 
+// TestExecuteStampsWhenItHandedTheStepOver (ruling R31): the step's timeout
+// counts from the moment the agent handed it to the cluster, on both sides,
+// so every forward of the step -- the first and each re-forward -- carries
+// that one moment for the runner to count from.
+func TestExecuteStampsWhenItHandedTheStepOver(t *testing.T) {
+	wb := &scriptedWorkbench{}
+	var clock *exClock
+	wb.step = func(n int, _ *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+		clock.advance(time.Minute) // each forward goes later than the one before
+		if n == 1 {
+			return nil, "workbench-a", workbench.ErrWorkbenchPeerLost
+		}
+		return outcomeResponse(exOutcome("workbench-b")), "workbench-b", nil
+	}
+	e := newTestExecutor(wb, nil)
+	clock = withClock(e)
+	handed := exNow.UTC().Format(time.RFC3339Nano)
+
+	if res, err := e.Execute(context.Background(), exRequest()); err != nil || res.Status != pl.OutcomeSucceeded {
+		t.Fatalf("Execute = %+v, %v; want the adopting replica's outcome", res, err)
+	}
+	steps := wb.sent(workbench.PipelineStepAction)
+	if len(steps) != 2 {
+		t.Fatalf("step forwards = %d, want 2", len(steps))
+	}
+	for i, f := range steps {
+		if got := stepRunOf(t, f).HandedAt; got != handed {
+			t.Errorf("forward %d says the step was handed over at %q, want %q: the moment it first was", i+1, got, handed)
+		}
+	}
+}
+
 // TestExecuteReforwardsAStepWhoseJobStaysAbsent: a Job no runner has made
 // long after the forward is a request that may never have reached one (lost
 // to a stream drop on the way), so the step is forwarded again -- a runner

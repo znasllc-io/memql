@@ -259,6 +259,11 @@ type rtCluster struct {
 	// onJobPatch runs, with c.mu held, on every patch of a Job before it is
 	// applied.
 	onJobPatch func(c *rtCluster, p rtPatch)
+	// onJobCreate runs, with c.mu held, on every Job create before it is
+	// answered: n counts them. What it does is done before the runner hears
+	// the answer, so the runner's next try sees it.
+	onJobCreate func(c *rtCluster, n int)
+	jobCreates  int
 	// refuseBeats answers 503 to every patch that carries a log cursor -- a
 	// heartbeat of a runner that has captured a line -- applying nothing.
 	refuseBeats bool
@@ -398,6 +403,10 @@ func (c *rtCluster) createJob(w http.ResponseWriter, body []byte) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.jobCreates++
+	if c.onJobCreate != nil {
+		c.onJobCreate(c, c.jobCreates)
+	}
 	name := job.Metadata.Name
 	switch {
 	case len(c.createJobAnswers) > 0:
@@ -2478,6 +2487,103 @@ func TestRunnerWaitsOutAnExceededQuota(t *testing.T) {
 	})
 }
 
+// TestRunnerCountsTheWaitAgainstTheTimeout (ruling R31): the step's timeout
+// counts from when the agent handed it over (StepRun.HandedAt), as the agent's
+// own give-up does. The Job is given what is left when it is finally created;
+// a step with nothing left is failed with its deadline code, and nothing is
+// created for it.
+func TestRunnerCountsTheWaitAgainstTheTimeout(t *testing.T) {
+	deadlineOf := func(t *testing.T, h *rtHarness) int64 {
+		t.Helper()
+		ads := h.c.jobNow(t, testJobName).Spec.ActiveDeadlineSeconds
+		if ads == nil {
+			t.Fatal("the Job has no deadline")
+		}
+		return *ads
+	}
+	// waitFor refuses the first create for quota, and the wait it costs is d.
+	waitFor := func(h *rtHarness, d time.Duration) {
+		h.c.with(func(c *rtCluster) {
+			c.createJobAnswers = []kubeAnswer{rtQuotaRefusal(testJobName)}
+			c.onJobCreate = func(_ *rtCluster, n int) {
+				if n == 1 {
+					h.clock.Advance(d)
+				}
+			}
+		})
+	}
+
+	for _, c := range []struct {
+		name     string
+		handedAt string
+		queued   time.Duration
+		want     int64
+	}{
+		{"a step that never waited keeps its whole timeout", rtT0.Format(time.RFC3339Nano), 0, 900},
+		{"part of a second spent before the Job is not taken from it", rtT0.Add(-300 * time.Millisecond).Format(time.RFC3339Nano), 0, 900},
+		{"the wait for a slot is the step's", rtT0.Format(time.RFC3339Nano), 10 * time.Minute, 300},
+		{"so is the time before a forward reached a runner", rtT0.Add(-10 * time.Minute).Format(time.RFC3339Nano), 0, 300},
+		{"a Run told nothing counts from its own start", "", 10 * time.Minute, 300},
+		{"a hand-over stamped ahead of this node's clock spent nothing", rtT0.Add(time.Minute).Format(time.RFC3339Nano), 0, 900},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newRunnerHarness(t)
+			h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "done")))
+			run := rtRun()
+			run.HandedAt = c.handedAt
+
+			if c.queued > 0 {
+				waitFor(h, c.queued)
+			}
+
+			res := h.run(t, run)
+
+			if res.Status != pl.OutcomeSucceeded {
+				t.Fatalf("result = %+v (failure %+v), want success", res, res.Failure)
+			}
+			if got := deadlineOf(t, h); got != c.want {
+				t.Errorf("the Job's deadline is %ds, want %ds of the step's 900", got, c.want)
+			}
+		})
+	}
+
+	t.Run("a step with nothing left fails with its deadline code, and nothing is created", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		h.c.script(testJobName, rtRunningScript(testJobName))
+		waitFor(h, 15*time.Minute)
+		run := rtRun()
+		run.HandedAt, run.DeadlineCode = rtT0.Format(time.RFC3339Nano), pl.CodeRunCeiling
+
+		res := h.run(t, run)
+
+		rtWantCode(t, res, pl.OutcomeFailed, pl.CodeRunCeiling)
+		if !strings.Contains(res.Failure.Message, "15m0s timeout ran out before its Job could be created") {
+			t.Errorf("failure %q does not say the timeout ran out before the step started", res.Failure.Message)
+		}
+		if h.c.hasJob(testJobName) || h.c.hasSecret(testSecretName) {
+			t.Error("a step that never started left a Job, or the Secret holding its token")
+		}
+		h.leftNoArchive(t)
+	})
+
+	t.Run("a deadline the wait shortened says so", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		job := h.existingJob(t, rtRun(), nil)
+		job.Spec.ActiveDeadlineSeconds = ptrTo(int64(300))
+		h.c.putJob(job, &rtScript{states: []rtState{{job: JobStatus{
+			StartTime:  rtT0.Add(-5 * time.Minute),
+			Conditions: []JobCondition{{Type: "FailureTarget", Status: "True", Reason: "DeadlineExceeded"}},
+		}}}})
+
+		res := h.run(t, rtRun())
+
+		rtWantCode(t, res, pl.OutcomeFailed, pl.CodeStepTimeout)
+		if want := "within its deadline of 5m0s, what was left of its 15m0s timeout once it had waited 10m0s to start"; !strings.Contains(res.Failure.Message, want) {
+			t.Errorf("failure %q, want it to say %q", res.Failure.Message, want)
+		}
+	})
+}
+
 // TestRunnerCloneTokenFailureCreatesNothing: without a clone token there is
 // no clone, so there is no Job, and no Secret waiting for one.
 func TestRunnerCloneTokenFailureCreatesNothing(t *testing.T) {
@@ -2595,16 +2701,22 @@ func TestRunnerFreshensACloneTokenThatAgedInTheQueue(t *testing.T) {
 	const first, second = "ghs_first-token-0001", "ghs_second-token-0002"
 	h := newRunnerHarness(t)
 	h.tokens.seq = []string{first, second}
-	h.c.with(func(c *rtCluster) { c.quotaRefusals = 1 << 30 })
+	h.c.with(func(c *rtCluster) {
+		// One refusal, and the wait it costs outlasts the first token.
+		c.createJobAnswers = []kubeAnswer{rtQuotaRefusal(testJobName)}
+		c.onJobCreate = func(_ *rtCluster, n int) {
+			if n == 1 {
+				h.clock.Advance(tokenRefreshAge + time.Minute)
+			}
+		}
+	})
 	script := rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "done"))
 	script.tails = map[string]string{ContainerClone: "fetching with " + second + "\n" + rtCloneTail}
 	h.c.script(testJobName, script)
-	done := h.start(context.Background(), rtRun())
-	rtWaitUntil(t, "a refused create", func() bool { return len(h.c.requestsFor(http.MethodPost, kubeJobs)) >= 1 })
-	h.clock.Advance(tokenRefreshAge + time.Minute)
-	h.c.with(func(c *rtCluster) { c.quotaRefusals = 0 })
+	run := rtRun()
+	run.TimeoutSeconds = 3600 // time queued counts against it (ruling R31)
 
-	res := h.await(t, done)
+	res := h.run(t, run)
 
 	if res.Status != pl.OutcomeSucceeded {
 		t.Fatalf("result = %+v (failure %+v), want success", res, res.Failure)
@@ -2653,6 +2765,19 @@ func TestRunnerWritesItsTokenOverAReusedSecret(t *testing.T) {
 	}
 	if string(secret.Data["NPM_TOKEN"]) != plantedNPM {
 		t.Errorf("the Secret holds %q, want the step's secrets kept", keysOf(secret.Data))
+	}
+	// Written before the Job is created, so the clone has it.
+	written, created := -1, -1
+	for i, r := range h.c.requests() {
+		switch {
+		case r.Method == http.MethodPatch && r.Path == kubeSecrets+"/"+testSecretName && strings.Contains(r.Body, `"data"`) && written < 0:
+			written = i
+		case r.Method == http.MethodPost && r.Path == kubeJobs && created < 0:
+			created = i
+		}
+	}
+	if written < 0 || written > created {
+		t.Errorf("the token was written at request %d and the Job created at %d: the clone must find this Run's token", written, created)
 	}
 }
 
