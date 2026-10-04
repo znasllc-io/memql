@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -114,13 +115,16 @@ func (a *recordingAuditor) Emit(_ context.Context, ev workerservice.AuditEvent) 
 
 // pipelineFleet is the owner's machines, live in a real registry on THIS
 // replica, behind a dispatcher whose store is a gateStore. It records every
-// envelope that reached a machine.
+// envelope that reached a machine; a machine answers with preview as its
+// output preview, or with failure when that is set.
 type pipelineFleet struct {
 	d          *Dispatcher
 	store      *gateStore
 	audit      *recordingAuditor
+	registry   *workerservice.Registry
 	dispatched map[string][]*memqlv1.ToolDispatch
 	preview    string
+	failure    *memqlv1.Failure
 }
 
 func (f *pipelineFleet) total() int {
@@ -133,7 +137,9 @@ func (f *pipelineFleet) total() int {
 
 // newPipelineFleet registers one machine per candidate, all held by this
 // replica ("agent-1"), in the order given -- which is registration order, so
-// the default firstFit policy tries them in exactly this order.
+// the default firstFit policy tries them in exactly this order. Each live
+// registration advertises the labels its row carries, as a cockpit whose row
+// is current does.
 func newPipelineFleet(t *testing.T, cands ...Candidate) *pipelineFleet {
 	t.Helper()
 	if len(cands) == 0 {
@@ -150,15 +156,20 @@ func newPipelineFleet(t *testing.T, cands ...Candidate) *pipelineFleet {
 			Name:           id,
 			Capabilities:   []string{workerservice.CapabilityHeadless},
 			Concurrency:    map[string]uint32{workerservice.CapabilityHeadless: 4},
+			Labels:         maps.Clone(cands[i].Labels),
 		}
 		w.SetDispatchFunc(func(_ context.Context, d *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
 			f.dispatched[id] = append(f.dispatched[id], d)
+			if f.failure != nil {
+				return &memqlv1.ToolResult{CallId: d.GetCallId(), Payload: &memqlv1.ToolResult_Failure{Failure: f.failure}}, nil
+			}
 			return &memqlv1.ToolResult{CallId: d.GetCallId(), Payload: &memqlv1.ToolResult_Success{
 				Success: &memqlv1.Success{ResultJson: []byte(`{"exitCode":0}`), OutputPreview: f.preview},
 			}}, nil
 		}, func() {})
 		reg.Add(w)
 	}
+	f.registry = reg
 	f.store = &gateStore{fakeStore: &fakeStore{fakeFleet: &fakeFleet{owner: pipelineOwner, machines: cands}}}
 	d, err := NewDispatcher(Options{
 		Logger:     testLogger(),
@@ -414,9 +425,9 @@ func TestPipelineResultNamesTheMachine(t *testing.T) {
 	})
 
 	t.Run("held by a sibling replica", func(t *testing.T) {
-		h := newHop(t, func(_ context.Context, d *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
+		h := pipelineHop(t, func(_ context.Context, d *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
 			return okResult(d.GetCallId()), nil
-		}, func(c *Candidate) { c.Labels = pipelineLabels() })
+		})
 		req := pipelineRequest()
 		req.OwnerUserId = h.owner
 		res, err := h.dispatch.Dispatch(auth.ContextWithInternalOrigin(authorityCtx(t, h.owner)), req)
@@ -455,6 +466,7 @@ func TestPipelineStepOutputStreamsFromAMachineHeldHere(t *testing.T) {
 		RegistrationId: "ci-box", OwnerUserId: pipelineOwner, Name: "ci-box",
 		Capabilities: []string{workerservice.CapabilityHeadless},
 		Concurrency:  map[string]uint32{workerservice.CapabilityHeadless: 2},
+		Labels:       pipelineLabels(),
 	}
 	w.SetDispatchFunc(func(_ context.Context, d *memqlv1.ToolDispatch, onChunk func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
 		if onChunk == nil {
@@ -490,24 +502,38 @@ func TestPipelineStepOutputStreamsFromAMachineHeldHere(t *testing.T) {
 
 // --- rule 6: a sibling-held machine that cannot be reached is skipped --------
 
-func TestPipelineSkipsAMachineItsSiblingHoldsAndCannotReach(t *testing.T) {
-	sibling := func(t *testing.T) *hop {
-		h := newHop(t, func(context.Context, *memqlv1.ToolDispatch, func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
-			t.Fatal("nothing may reach a machine whose replica cannot be reached")
-			return nil, nil
-		}, func(c *Candidate) { c.Labels = pipelineLabels() })
-		h.link.mu.Lock()
-		h.link.reachable = false
-		h.link.mu.Unlock()
-		return h
-	}
-	ctx := func(t *testing.T, h *hop) context.Context {
-		return auth.ContextWithInternalOrigin(authorityCtx(t, h.owner))
-	}
+// pipelineHop is newHop whose machine allows pipeline steps on BOTH records of
+// that consent: the row the sender routes on, and the live registration on the
+// replica holding the stream, which re-reads it before dispatching.
+func pipelineHop(t *testing.T, fn workerservice.DispatchFunc) *hop {
+	t.Helper()
+	h := newHop(t, fn, func(c *Candidate) { c.Labels = pipelineLabels() })
+	// Before any dispatch runs, so no reader is racing the write.
+	h.registry.WorkerById("laptop").Labels = pipelineLabels()
+	return h
+}
 
-	// The laptop is first in registration order and its stream is on nodeB,
-	// which this replica cannot reach. The desktop is held HERE.
-	h := sibling(t)
+// unreachableSibling is a pipelineHop whose sibling replica this one cannot
+// reach, holding the owner's laptop. Nothing may reach the laptop.
+func unreachableSibling(t *testing.T) *hop {
+	t.Helper()
+	h := pipelineHop(t, func(context.Context, *memqlv1.ToolDispatch, func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
+		t.Fatal("nothing may reach a machine whose replica cannot be reached")
+		return nil, nil
+	})
+	h.link.mu.Lock()
+	h.link.reachable = false
+	h.link.mu.Unlock()
+	return h
+}
+
+// siblingThenLocal is the owner's two machines in registration order: the
+// laptop on the unreachable sibling, then a desktop held HERE. Both allow
+// pipelines. It returns this replica's dispatcher and a count of the desktop's
+// dispatches.
+func siblingThenLocal(t *testing.T) (*hop, *Dispatcher, *int) {
+	t.Helper()
+	h := unreachableSibling(t)
 	desktop := machine("desktop", withLabels(pipelineLabels()))
 	desktop.ConnectedNodeId = nodeA
 	h.store.machines = append(h.store.machines, desktop)
@@ -517,20 +543,36 @@ func TestPipelineSkipsAMachineItsSiblingHoldsAndCannotReach(t *testing.T) {
 		RegistrationId: "desktop", OwnerUserId: h.owner, Name: "desktop",
 		Capabilities: []string{workerservice.CapabilityHeadless},
 		Concurrency:  map[string]uint32{workerservice.CapabilityHeadless: 2},
+		Labels:       pipelineLabels(),
 	}
 	w.SetDispatchFunc(func(_ context.Context, d *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
 		ran++
 		return okResult(d.GetCallId()), nil
 	}, func() {})
 	localReg.Add(w)
-	d := newTestDispatcher(t, h.store, localReg, nodeA, h.link.router)
+	return h, newTestDispatcher(t, h.store, localReg, nodeA, h.link.router), &ran
+}
 
+// asPipelineAcrossTheMesh is asPipelineExecutor plus the forwarded authority a
+// forward re-asserts for the owner.
+func asPipelineAcrossTheMesh(t *testing.T, h *hop) context.Context {
+	return auth.ContextWithInternalOrigin(authorityCtx(t, h.owner))
+}
+
+func ownersPipelineRequest(h *hop) Request {
 	req := pipelineRequest()
 	req.OwnerUserId = h.owner
-	res, err := d.Dispatch(ctx(t, h), req)
-	if err != nil || !res.OK || ran != 1 {
+	return req
+}
+
+func TestPipelineSkipsAMachineItsSiblingHoldsAndCannotReach(t *testing.T) {
+	// The laptop is first in registration order and its stream is on nodeB,
+	// which this replica cannot reach. The desktop is held HERE.
+	h, d, ran := siblingThenLocal(t)
+	res, err := d.Dispatch(asPipelineAcrossTheMesh(t, h), ownersPipelineRequest(h))
+	if err != nil || !res.OK || *ran != 1 {
 		t.Fatalf("result = %+v err = %v ran = %d, want the step skipped past the unreachable laptop onto the desktop",
-			res, err, ran)
+			res, err, *ran)
 	}
 	if res.WorkerId != "desktop" || res.NodeId != nodeA {
 		t.Fatalf("result names %q on %q, want desktop on %s", res.WorkerId, res.NodeId, nodeA)
@@ -543,13 +585,48 @@ func TestPipelineSkipsAMachineItsSiblingHoldsAndCannotReach(t *testing.T) {
 
 	// With no candidate left, the refusal is the answer: reported, naming the
 	// machine that could not be reached, and never run on this replica.
-	h = sibling(t)
-	res, err = h.dispatch.Dispatch(ctx(t, h), func() Request { r := pipelineRequest(); r.OwnerUserId = h.owner; return r }())
+	h = unreachableSibling(t)
+	res, err = h.dispatch.Dispatch(asPipelineAcrossTheMesh(t, h), ownersPipelineRequest(h))
 	if err != nil || res.OK || res.ErrorCode != "worker_unreachable" {
 		t.Fatalf("result = %+v err = %v, want worker_unreachable", res, err)
 	}
 	if res.WorkerId != "laptop" || res.NodeId != nodeB {
 		t.Fatalf("result names %q on %q, want the unreachable laptop on %s", res.WorkerId, res.NodeId, nodeB)
+	}
+}
+
+func TestPipelineSkipsARefusalWhateverTheOwnersFallback(t *testing.T) {
+	// RULING R19. The owner's fallback preference governs AGENT work: an owner
+	// who stores `fallback: none` wants a refusal reported rather than routed
+	// around when an agent asked. A pipeline step has its own two consents, and
+	// the design is that a machine on a sibling replica is skipped, never
+	// failed (D10). So a pipeline step re-picks past a refusal before start
+	// while a candidate remains, whatever the stored fallback -- nothing ran on
+	// the refusing machine, which is what makes moving on a re-pick rather than
+	// a second execution, whoever asked.
+	ownersPolicy := &Policy{Id: "owner-policy", Strategy: StrategyFirstFit, Fallback: FallbackNone}
+
+	h, d, ran := siblingThenLocal(t)
+	h.store.policy = ownersPolicy
+	res, err := d.Dispatch(asPipelineAcrossTheMesh(t, h), ownersPipelineRequest(h))
+	if err != nil || !res.OK || *ran != 1 || res.WorkerId != "desktop" {
+		t.Fatalf("result = %+v err = %v ran = %d, want the step on the desktop despite fallback=none", res, err, *ran)
+	}
+	row := h.store.lastInvocation(t)
+	if row.Routing["policyId"] != "owner-policy" || row.Routing["attempts"] != 2 || row.Routing["reroutedFrom"] != "worker:laptop" {
+		t.Fatalf("routing = %v, want the owner's policy applied, two attempts, rerouted from worker:laptop", row.Routing)
+	}
+
+	// THE NEGATIVE CONTROL: the same stored policy still governs an agent's
+	// call -- the refusal is reported and the desktop is never tried.
+	h, d, ran = siblingThenLocal(t)
+	h.store.policy = ownersPolicy
+	agentReq := approvedRequest()
+	agentReq.OwnerUserId = h.owner
+	res, err = d.Dispatch(authorityCtx(t, h.owner), agentReq)
+	if err != nil || res.OK || res.ErrorCode != "worker_unreachable" || *ran != 0 {
+		t.Fatalf("agent call: result = %+v err = %v ran = %d, want worker_unreachable with the desktop untried -- "+
+			"fallback=none is the owner's to set for agent work", res, err, *ran)
 	}
 }
 
@@ -560,10 +637,10 @@ func TestPipelineSkipsAMachineItsSiblingHoldsAndCannotReach(t *testing.T) {
 func recordingHop(t *testing.T) (*hop, *[]*memqlv1.ToolDispatch) {
 	t.Helper()
 	var got []*memqlv1.ToolDispatch
-	h := newHop(t, func(_ context.Context, d *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
+	h := pipelineHop(t, func(_ context.Context, d *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
 		got = append(got, d)
 		return okResult(d.GetCallId()), nil
-	}, func(c *Candidate) { c.Labels = pipelineLabels() })
+	})
 	return h, &got
 }
 
@@ -838,6 +915,162 @@ func TestPipelineStepCredentialsNeverReachTheRecord(t *testing.T) {
 	args, _ = json.Marshal(f.store.lastInvocation(t).ArgsRedacted)
 	if strings.Contains(string(args), pipelineCloneToken) || strings.Contains(string(args), pipelineSecretValue) {
 		t.Fatalf("a refused dispatch recorded a credential value: %s", args)
+	}
+}
+
+func TestPipelineStepErrorMessagesNeverCarryItsCredentials(t *testing.T) {
+	// A failed clone is the likeliest leak there is: git names the URL it could
+	// not fetch, and a careless step echoes its environment on the way down.
+	// The machine's error message reaches the caller AND the record, and each
+	// is masked where it is made -- the result at the return, the record in the
+	// recorder -- so neither depends on the other having run.
+	f := newPipelineFleet(t)
+	f.failure = &memqlv1.Failure{
+		ErrorCode: "clone_failed",
+		ErrorMessage: "fatal: unable to access 'https://x-access-token:" + pipelineCloneToken +
+			"@github.com/o/r.git/' (NPM_AUTH=" + pipelineSecretValue + ")",
+	}
+	res, err := f.d.Dispatch(asPipelineExecutor(), pipelineRequest())
+	if err != nil || res.OK || res.ErrorCode != "clone_failed" {
+		t.Fatalf("result = %+v err = %v, want the machine's clone_failed", res, err)
+	}
+	row := f.store.lastInvocation(t)
+	for where, msg := range map[string]string{"the result's": res.ErrorMessage, "the record's": row.ErrorMessage} {
+		for _, leaked := range []string{pipelineCloneToken, pipelineSecretValue} {
+			if strings.Contains(msg, leaked) {
+				t.Fatalf("%s error message carries a credential value: %q", where, msg)
+			}
+		}
+		// Masked IN PLACE: the rest of the sentence is what a person needs.
+		if !strings.Contains(msg, "***") || !strings.Contains(msg, "github.com/o/r.git") {
+			t.Fatalf("%s error message = %q, want the values masked and the rest kept", where, msg)
+		}
+	}
+}
+
+// --- the machine's consent, re-read where it dispatches (R20) ---------------
+
+func TestTheDispatchingReplicaRereadsTheMachinesPipelinesConsent(t *testing.T) {
+	// The router routes on the ROW: the cockpit's labels merged with the
+	// owner's operator labels, up to a heartbeat old. The replica holding the
+	// machine's stream has the machine's own word -- the labels its cockpit
+	// advertised on THIS connection -- and re-reads the consent there before
+	// dispatching. A row still saying pipelines=allowed after the machine's
+	// policy stopped saying it, or an operator label claiming it on the
+	// machine's behalf, reaches nothing; and the refusal is BEFORE START, so a
+	// step moves on to a machine that does consent.
+
+	// Across the hop: the sibling holds the stream, and the live registration
+	// there no longer carries the label the row still does.
+	h, ran := recordingHop(t)
+	h.registry.WorkerById("laptop").Labels = map[string]string{"os": "linux"}
+	got := receive(t, h, forwardedStep(t, h, PurposePipeline, ""))
+	if got.GetErrorCode() != "pipelines_not_allowed" || !got.GetRefusedBeforeStart() || len(*ran) != 0 {
+		t.Fatalf("response = %+v dispatched = %d, want pipelines_not_allowed, refused before start, nothing run",
+			got, len(*ran))
+	}
+	// ...and through the sender's dispatcher: the refusal comes back as one.
+	res, err := h.dispatch.Dispatch(asPipelineAcrossTheMesh(t, h), ownersPipelineRequest(h))
+	h.link.wg.Wait()
+	if err != nil || res.OK || res.ErrorCode != "pipelines_not_allowed" || len(*ran) != 0 {
+		t.Fatalf("result = %+v err = %v dispatched = %d, want pipelines_not_allowed with nothing run", res, err, len(*ran))
+	}
+	// An agent's call to the same machine is not this rule's business.
+	agentReq := approvedRequest()
+	agentReq.OwnerUserId = h.owner
+	if res, err := h.dispatch.Dispatch(authorityCtx(t, h.owner), agentReq); err != nil || !res.OK || len(*ran) != 1 {
+		t.Fatalf("agent call: result = %+v err = %v dispatched = %d, want it run", res, err, len(*ran))
+	}
+	h.link.wg.Wait()
+	// THE POSITIVE CONTROL: the label live again, the same envelope runs.
+	h.registry.WorkerById("laptop").Labels = pipelineLabels()
+	if got := receive(t, h, forwardedStep(t, h, PurposePipeline, "")); !got.GetOk() || len(*ran) != 2 {
+		t.Fatalf("response = %+v dispatched = %d, want the step run", got, len(*ran))
+	}
+
+	// Held HERE: the same re-read, and the refusal moves the step on.
+	f := newPipelineFleet(t,
+		machine("stale", withLabels(pipelineLabels())),
+		machine("ci-box", withLabels(pipelineLabels())),
+	)
+	f.registry.WorkerById("stale").Labels = map[string]string{"os": "linux"}
+	res, err = f.d.Dispatch(asPipelineExecutor(), pipelineRequest())
+	if err != nil || !res.OK || res.WorkerId != "ci-box" || len(f.dispatched["stale"]) != 0 {
+		t.Fatalf("result = %+v err = %v dispatched on stale = %d, want the step past the stale machine onto ci-box",
+			res, err, len(f.dispatched["stale"]))
+	}
+	if row := f.store.lastInvocation(t); row.Routing["reroutedFrom"] != "worker:stale" {
+		t.Fatalf("routing = %v, want rerouted from worker:stale", row.Routing)
+	}
+}
+
+// --- the masker reads every credential, or the step does not run (Minor 7) ---
+
+func TestPipelineCredentialMaskingLeavesBlankLinesAlone(t *testing.T) {
+	// A multi-line secret is masked whole and line by line, so output that
+	// re-wraps it still masks. But a line that is blank once trimmed is padding,
+	// not a secret: masked, a four-space line would replace every indent in
+	// the output. And a line is masked by what it SAYS, so an indented line of
+	// a key printed with other indentation still masks.
+	f := newPipelineFleet(t)
+	f.preview = "    func main() {\n        key-line-two-value\n    }"
+	req := pipelineRequest()
+	req.Args["secrets"] = map[string]any{"DEPLOY_KEY": "key-line-one-value\n    \n    key-line-two-value\n"}
+	res, err := f.d.Dispatch(asPipelineExecutor(), req)
+	if err != nil || !res.OK {
+		t.Fatalf("result = %+v err = %v", res, err)
+	}
+	const want = "    func main() {\n        ***\n    }"
+	if got := f.store.lastInvocation(t).OutputPreview; got != want {
+		t.Fatalf("recorded preview = %q, want %q -- every indent kept, the secret's line masked", got, want)
+	}
+	if res.OutputPreview != want {
+		t.Fatalf("result preview = %q, want %q", res.OutputPreview, want)
+	}
+}
+
+func TestPipelineStepWithMisshapenCredentialsIsRefused(t *testing.T) {
+	// The masker has to know every value it masks. Credentials in a shape the
+	// gate cannot read -- secrets as a list, a secret that is not a string, a
+	// token that is not a string -- are refused before anything runs, rather
+	// than dispatched with values the record might not mask. The record of the
+	// refusal is masked anyway: the masker reads every string, whatever shape
+	// it arrived in, including where key redaction cannot see it.
+	for name, mutate := range map[string]func(map[string]any){
+		"secrets as a list": func(a map[string]any) { a["secrets"] = []any{pipelineSecretValue} },
+		"a secret that is not a string": func(a map[string]any) {
+			a["secrets"] = map[string]any{"NPM_AUTH": map[string]any{"value": pipelineSecretValue}}
+		},
+		"a token that is not a string": func(a map[string]any) { a["token"] = []any{pipelineCloneToken} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newPipelineFleet(t)
+			req := pipelineRequest()
+			mutate(req.Args)
+			req.Args["cloneUrl"] = "https://x-access-token:" + pipelineCloneToken + "@github.com/o/r.git#" + pipelineSecretValue
+			res, err := f.d.Dispatch(asPipelineExecutor(), req)
+			mustRefuse(t, f, res, err, "bad_request")
+			args, _ := json.Marshal(f.store.lastInvocation(t).ArgsRedacted)
+			for _, leaked := range []string{pipelineCloneToken, pipelineSecretValue} {
+				if strings.Contains(string(args), leaked) {
+					t.Fatalf("the refused call's record carries a credential value: %s", args)
+				}
+			}
+		})
+	}
+
+	// THE POSITIVE CONTROL: a map of strings -- the shape a Go caller builds --
+	// is read, dispatched, and masked.
+	f := newPipelineFleet(t)
+	f.preview = "npm auth " + pipelineSecretValue
+	req := pipelineRequest()
+	req.Args["secrets"] = map[string]string{"NPM_AUTH": pipelineSecretValue}
+	res, err := f.d.Dispatch(asPipelineExecutor(), req)
+	if err != nil || !res.OK {
+		t.Fatalf("result = %+v err = %v, want map[string]string secrets accepted", res, err)
+	}
+	if got := f.store.lastInvocation(t).OutputPreview; got != "npm auth ***" {
+		t.Fatalf("recorded preview = %q, want the map[string]string secret masked", got)
 	}
 }
 

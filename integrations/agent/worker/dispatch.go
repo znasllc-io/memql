@@ -339,7 +339,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 			// exactly no side effect, so moving on is a re-pick rather than a
 			// second execution.
 			last := idx+1 == len(plan.Candidates)
-			if plan.Policy.Fallback == FallbackNextMatching && !last {
+			// The owner's fallback for an agent's call; always the next
+			// matching machine for a pipeline step (fallbackFor, RULING R19).
+			if fallbackFor(req, plan.Policy) == FallbackNextMatching && !last {
 				d.logger.Info("worker router: candidate refused before start, trying the next",
 					"owner_user_id", req.OwnerUserId,
 					"registration_id", cand.RegistrationId,
@@ -352,13 +354,18 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 				continue
 			}
 			d.recordInvocation(ctx, req, cand.RegistrationId, startedAt, d.clock(), res, res.classifyOutcome(), record)
-			return res, nil
+			// This return and the one below carry the MACHINE's words, so they
+			// are where a pipeline step's credentials are masked out of what
+			// the caller is handed (maskPipelineResult). The record is handed
+			// the raw result and masks its own copy, so neither mask leans on
+			// the other.
+			return maskPipelineResult(req, res), nil
 		}
 
 		// The call reached the machine. Whatever it returned, this is where
 		// the routing stops -- an exec that failed mid-run may have run.
 		d.recordInvocation(ctx, req, cand.RegistrationId, startedAt, d.clock(), res, res.classifyOutcome(), record)
-		return res, nil
+		return maskPipelineResult(req, res), nil
 	}
 
 	// Unreachable while the loop returns on every path; kept as the honest
@@ -403,12 +410,6 @@ func (d *Dispatcher) attempt(
 	res.WorkerId = cand.RegistrationId
 	res.NodeId = nodeId
 	res.Labels = maps.Clone(cand.Labels)
-	// A pipeline step's credentials stay out of what the caller is handed back
-	// to show, as they stay out of the record (recordInvocation).
-	if m := pipelineCredentialMasker(req); m != nil {
-		res.OutputPreview = m.Replace(res.OutputPreview)
-		res.ErrorMessage = m.Replace(res.ErrorMessage)
-	}
 	return res, outcome
 }
 
@@ -445,6 +446,17 @@ func (d *Dispatcher) attemptLocal(
 			OK:           false,
 			ErrorCode:    "worker_disconnected",
 			ErrorMessage: "machine " + cand.Label() + " is no longer connected to this replica",
+		}, ForwardRefusedBeforeStart
+	}
+	// The machine's own consent, re-read here because this replica is the one
+	// dispatching (machineAllowsPipelines, RULING R20) -- the same check the
+	// forward's receiver makes when a sibling dispatches instead.
+	if req.Purpose == PurposePipeline && !machineAllowsPipelines(w) {
+		return Result{
+			OK:        false,
+			ErrorCode: codePipelinesNotAllowed,
+			ErrorMessage: "machine " + cand.Label() + " does not advertise " + PipelinesLabel + "=" + PipelinesAllowed +
+				" on its connection here: its own policy does not allow pipeline steps",
 		}, ForwardRefusedBeforeStart
 	}
 
@@ -870,8 +882,10 @@ func (d *Dispatcher) recordInvocation(
 	errorMessage := res.ErrorMessage
 	// A pipeline step's clone token and secrets are masked by VALUE as well as
 	// by key: argsRedacted, outputPreview and errorMessage never carry them,
-	// wherever in the call they appeared (pipeline_purpose.go). Masked before
-	// the preview is clamped, so a value cut in half by the clamp is not.
+	// wherever in the call they appeared (pipeline_purpose.go). The result
+	// arrives here RAW -- the caller's copy is masked at Dispatch's return --
+	// so this mask is the record's own. Masked before the preview is clamped,
+	// so a value cut in half by the clamp is not.
 	if m := pipelineCredentialMasker(req); m != nil {
 		if argsRedacted != nil {
 			if masked, ok := maskCredentials(argsRedacted, m).(map[string]any); ok {

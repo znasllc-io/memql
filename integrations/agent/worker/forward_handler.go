@@ -182,6 +182,17 @@ func (h *ForwardHandler) HandleForwardedRequest(
 			"the connected machine is owned by a different user than the assertion names")
 		return
 	}
+	// THE MACHINE'S CONSENT, re-read where it is dispatched (RULING R20). The
+	// sender routed on the row; this replica holds the connection the machine
+	// advertised its policy on, so this is where its own word is read.
+	// Refused BEFORE START, so the sender moves the step on to a machine that
+	// does consent.
+	if req.GetPurpose() == PurposePipeline && !machineAllowsPipelines(w) {
+		h.sendRefusal(send, requestId, codePipelinesNotAllowed,
+			"the machine does not advertise "+PipelinesLabel+"="+PipelinesAllowed+
+				" on its connection here: its own policy does not allow pipeline steps")
+		return
+	}
 
 	capability := req.GetCapability()
 	timeout := time.Duration(req.GetTimeoutSec()) * time.Second

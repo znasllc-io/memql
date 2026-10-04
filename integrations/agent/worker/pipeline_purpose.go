@@ -50,6 +50,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	workerservice "github.com/znasllc-io/memql/component/worker"
 )
 
 // PurposePipeline marks a dispatch made for a pipeline run rather than by an
@@ -84,7 +85,41 @@ const (
 	// codePreferencesLookupFailed refuses a pipeline step whose owner's kill
 	// switch could not be read.
 	codePreferencesLookupFailed = "preferences_lookup_failed"
+	// codeBadRequest refuses a pipeline step whose credentials arrive in a
+	// shape the masker cannot be sure of (pipelineCredentialShape).
+	codeBadRequest = "bad_request"
+	// codePipelinesNotAllowed refuses, BEFORE START, a pipeline step for a
+	// machine whose live registration does not carry pipelines=allowed on the
+	// replica about to dispatch to it (machineAllowsPipelines).
+	codePipelinesNotAllowed = "pipelines_not_allowed"
 )
+
+// fallbackFor is the fallback the dispatch loop applies when a candidate
+// refuses before start (RULING R19).
+//
+// The owner's routing policy decides it for an AGENT's call: an owner who
+// stores `fallback: none` wants a refusal reported rather than routed around.
+// A pipeline step always moves on while a candidate remains. It has its own
+// two consents, the design is that a machine on a sibling replica is skipped
+// and never failed (D10), and a refusal before start ran nothing -- so moving
+// on is a re-pick, not a second execution, whoever asked.
+func fallbackFor(req Request, policy Policy) string {
+	if req.Purpose == PurposePipeline {
+		return FallbackNextMatching
+	}
+	return policy.Fallback
+}
+
+// machineAllowsPipelines reads the machine owner's consent where it is the
+// MACHINE's own word (RULING R20): the labels its cockpit advertised on the
+// connection this replica holds -- never operator labels, which live only on
+// the row and which the owner can set on a machine whose policy says no. The
+// router matched the ROW, up to a heartbeat old; the replica that dispatches
+// re-reads the live registration, so a machine whose policy stopped allowing
+// pipelines, or never did, is refused before anything reaches it.
+func machineAllowsPipelines(w *workerservice.Worker) bool {
+	return w.LabelsSnapshot()[PipelinesLabel] == PipelinesAllowed
+}
 
 // purposeBinding is RULE 0, asked before every other gate and on BOTH halves of
 // a forward: the sender before it routes (preDispatchCheck), and the receiving
@@ -149,8 +184,8 @@ func purposeRefusal(req Request) (gateResult, bool) {
 }
 
 // pipelineGate is preDispatchCheck for the pipeline purpose, after rule 0 has
-// settled WHAT may be dispatched. Its order is who, whose, where, and then the
-// owner's off switch.
+// settled WHAT may be dispatched. Its order is who, whose, where, what the step
+// carries, and then the owner's off switch.
 func (d *Dispatcher) pipelineGate(ctx context.Context, req Request) gateResult {
 	required := actionRequiredScope("workerHost", PipelineStepAction)
 	refuse := func(msg string) gateResult {
@@ -188,6 +223,22 @@ func (d *Dispatcher) pipelineGate(ctx context.Context, req Request) gateResult {
 	if req.RequireLabels[PipelinesLabel] != PipelinesAllowed {
 		return refuse(fmt.Sprintf("a pipeline dispatch requires %s=%s: a machine runs pipeline steps only when its own policy says so",
 			PipelinesLabel, PipelinesAllowed))
+	}
+
+	// WHAT IT CARRIES. The record and the result are masked for every
+	// credential the step carries, so the credentials must be in a shape whose
+	// every value is known; anything else is refused rather than dispatched
+	// with values a mask might miss. Checked before the off switch is read: a
+	// malformed request costs no database read.
+	if err := pipelineCredentialShape(req.Args); err != nil {
+		return gateResult{
+			deny:               true,
+			requiredCapability: required.Capability,
+			requiredScope:      required.Scope,
+			errorCode:          codeBadRequest,
+			errorMessage:       err.Error(),
+			outcome:            "failure",
+		}
 	}
 
 	// THE OFF SWITCH. Unlike the agent path, an UNREADABLE switch refuses. The
@@ -262,38 +313,57 @@ const (
 	pipelineCredentialMask = "***"
 )
 
+// pipelineCredentialShape refuses credentials the gate cannot be sure it has
+// read in full: a token that is not a string, or secrets that are not a map of
+// names to string values. The error names the offending shape and the secret's
+// NAME, never a value -- the value may be the very thing being protected.
+func pipelineCredentialShape(args map[string]any) error {
+	switch token := args["token"].(type) {
+	case nil, string:
+	default:
+		return fmt.Errorf("pipeline_step token must be a string, not %T", token)
+	}
+	switch secrets := args["secrets"].(type) {
+	case nil, map[string]string:
+	case map[string]any:
+		for name, v := range secrets {
+			if _, ok := v.(string); !ok {
+				return fmt.Errorf("pipeline_step secret %q must be a string, not %T", name, v)
+			}
+		}
+	default:
+		return fmt.Errorf("pipeline_step secrets must be a map of names to string values, not %T", secrets)
+	}
+	return nil
+}
+
 // pipelineCredentialMasker masks every credential a pipeline_step's arguments
 // carry, or is nil when the call is not a pipeline_step or carries no value
-// long enough to mask. A multi-line value is masked whole and line by line, so
-// output that re-wraps it still masks.
+// long enough to mask.
+//
+// It reads every string under the token and the secrets, WHATEVER their shape:
+// the gate refuses a shape it cannot read (pipelineCredentialShape), but the
+// refused call is still recorded, and its record must be masked too. A
+// multi-line value is masked whole and line by line, so output that re-wraps it
+// still masks. Each piece is masked by what it SAYS -- trimmed, and only when
+// that is at least pipelineCredentialMinLen -- so a line that is blank once
+// trimmed, an indent inside a key, never masks every run of spaces in the
+// output, and an indented line still masks when printed with other
+// indentation.
 func pipelineCredentialMasker(req Request) *strings.Replacer {
 	if req.Tool != "workerHost" || req.Action != PipelineStepAction {
 		return nil
 	}
 	seen := map[string]bool{}
 	add := func(v string) {
-		for _, candidate := range append([]string{v}, strings.Split(v, "\n")...) {
-			candidate = strings.TrimSuffix(candidate, "\r")
-			if len(candidate) >= pipelineCredentialMinLen {
-				seen[candidate] = true
+		for _, piece := range append([]string{v}, strings.Split(v, "\n")...) {
+			if piece = strings.TrimSpace(piece); len(piece) >= pipelineCredentialMinLen {
+				seen[piece] = true
 			}
 		}
 	}
-	if token, ok := req.Args["token"].(string); ok {
-		add(token)
-	}
-	switch secrets := req.Args["secrets"].(type) {
-	case map[string]any:
-		for _, v := range secrets {
-			if s, ok := v.(string); ok {
-				add(s)
-			}
-		}
-	case map[string]string:
-		for _, v := range secrets {
-			add(v)
-		}
-	}
+	eachString(req.Args["token"], add)
+	eachString(req.Args["secrets"], add)
 	if len(seen) == 0 {
 		return nil
 	}
@@ -314,6 +384,43 @@ func pipelineCredentialMasker(req Request) *strings.Replacer {
 		pairs = append(pairs, v, pipelineCredentialMask)
 	}
 	return strings.NewReplacer(pairs...)
+}
+
+// eachString hands every string inside v to fn, whatever the nesting.
+func eachString(v any, fn func(string)) {
+	switch t := v.(type) {
+	case string:
+		fn(t)
+	case map[string]any:
+		for _, x := range t {
+			eachString(x, fn)
+		}
+	case map[string]string:
+		for _, x := range t {
+			fn(x)
+		}
+	case []any:
+		for _, x := range t {
+			eachString(x, fn)
+		}
+	case []string:
+		for _, x := range t {
+			fn(x)
+		}
+	}
+}
+
+// maskPipelineResult masks a pipeline_step's credentials out of the text a
+// result carries back to its caller: the machine's output preview and error
+// message, which a failed clone or an echoing command can fill with them. The
+// record masks its own copy (recordInvocation), so neither depends on the
+// other having run.
+func maskPipelineResult(req Request, res Result) Result {
+	if m := pipelineCredentialMasker(req); m != nil {
+		res.OutputPreview = m.Replace(res.OutputPreview)
+		res.ErrorMessage = m.Replace(res.ErrorMessage)
+	}
+	return res
 }
 
 // maskCredentials returns v with every string inside it masked. Maps and
