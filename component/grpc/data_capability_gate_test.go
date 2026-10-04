@@ -259,10 +259,11 @@ func TestExecuteQueryGate_HasExactlyOneCallSite(t *testing.T) {
 }
 
 // TestNodeBootstrapIsNotOnTheGatedPath is the other half of the AC 3 proof:
-// component/node -- the package holding the Engine.Execute call at
-// bootstrap.go:105 -- does not import the handler package the gate lives in,
-// so the gate is structurally unreachable from node bootstrap. Nothing is
-// bypassed because nothing arrives.
+// component/node -- the package holding the engine call in bootstrap.go's
+// discoverParentAddress, which DiscoverPeerAddress hands the
+// *memql.MemQLEngine directly -- does not import the handler package the gate
+// lives in, so the gate is structurally unreachable from node bootstrap.
+// Nothing is bypassed because nothing arrives.
 func TestNodeBootstrapIsNotOnTheGatedPath(t *testing.T) {
 	root := repoRootForGateTest(t)
 
@@ -271,8 +272,8 @@ func TestNodeBootstrapIsNotOnTheGatedPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", bootstrap, err)
 	}
-	if !strings.Contains(string(body), "Engine.Execute(") {
-		t.Fatal("component/node/bootstrap.go no longer calls Engine.Execute; " +
+	if !strings.Contains(string(body), "engine.Execute(ctx, parentTopologyQuery)") {
+		t.Fatal("component/node/bootstrap.go no longer reads the topology through the engine it is handed; " +
 			"re-verify that node bootstrap is still off the handler path")
 	}
 
