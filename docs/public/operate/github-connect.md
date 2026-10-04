@@ -470,6 +470,8 @@ the clusters belong to different people.
 
 - [Deployables](deployables.md) -- what a deployable is and how one is composed
 - [Packages](packages.md) -- the source, the analysis and the pipeline
+- [Pipelines](pipelines.md) -- a repository's checks, which this app delivers
+  and reports as check runs
 - [Inbound delivery](inbound-delivery.md) -- the webhook seam and its signatures
 - [Environment variables](env-vars.md) -- where these six sit among the rest
 - [OIDC federation](auth/oidc-federation.md) -- sign-in, which this is not
