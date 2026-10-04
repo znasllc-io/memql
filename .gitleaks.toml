@@ -102,7 +102,7 @@ paths = [
 ]
 
 [[allowlists]]
-description    = "Azurite well-known dev storage account key (memql#806). Public constant documented by Microsoft at https://learn.microsoft.com/azure/storage/common/storage-use-azurite#well-known-storage-account-and-key -- not a production credential. Every Azurite install ships this same literal key. Also in the local k3d overlay (deploy/k8s/overlays/local/) and seed-secrets script (scripts/k3d/)."
+description    = "Azurite well-known dev storage account key (memql#806). Public constant documented by Microsoft at https://learn.microsoft.com/azure/storage/common/storage-use-azurite#well-known-storage-account-and-key -- not a production credential. Every Azurite install ships this same literal key. Also in the local k3d overlay (deploy/k8s/overlays/local/) and seed-secrets script (scripts/k3d/), and in the Azure Blob integration's own tests, which run against an Azurite container: commit 098747237 (memql#4782) put the connection string in the run instructions of integrations/azureblob/blocks_azurite_test.go, and that historical finding is one of the six that kept the full-history lane red from 2026-09-06 (memql#5663). Path-scoped like `memql_dev` above, and widened rather than unscoped for the same reason: the key is fine where Azurite is the target, and still trips the scanner in production code or a cloud overlay, where it would mean a cluster pointed at an emulator's default credential."
 condition      = "AND"
 regexTarget    = "match"
 regexes        = ['''Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq''']
@@ -111,6 +111,7 @@ paths = [
   '''^scripts/dev/.*''',
   '''^scripts/k3d/.*''',
   '''^deploy/k8s/overlays/local/.*''',
+  '''^integrations/azureblob/.*_test\.go$''',
 ]
 
 [[allowlists]]
@@ -202,3 +203,18 @@ regexes = ['''gh[ur]_ROTATED_[a-z]+_[0-9]{4}''']
 description = "Fake GitHub App private key in the seed-secrets test (epic memql#4912). NOT a credential: `bm90LWEtcmVhbC1wcml2YXRlLWtleQ==` is base64 for the ASCII string `not-a-real-private-key`, the value `scripts/k3d/seed_secrets_github_app_test.go` feeds the seeder so it can assert all six MEMQL_GITHUB_APP_* keys are written together and blanked together. A real key is a multi-kilobyte PEM; this is 22 characters that say what they are when decoded. The test already spells it as two concatenated halves for exactly this reason, and that did not clear the finding, because `gitleaks git .` scans COMMITS and the introducing commit spelled it whole -- which is what this entry is for (memql#3484). Value-keyed with no `paths`: the literal identifies itself, so a path constraint would only resurface the finding the moment the test moves."
 regexTarget = "match"
 regexes = ['''bm90LWEtcmVhbC1w[A-Za-z0-9+/=]*''']
+
+[[allowlists]]
+description = "Fake custom-domain verification token in the custom-domain tests (memql#4802, #4803, #4804; cleared for history in memql#5663). NOT a credential, twice over. The literal is `tok-` plus the counting sequence `abcdef0123456789`, the fixture a pending_dns binding carries in `integrations/customdomain/dns_test.go` and the OS deployables tests, and a real token is 43 base64url characters over 32 crypto/rand bytes (`mintToken` in integrations/customdomain/integration.go). And a real one is not a secret either: the person publishes it in a public DNS TXT record by design, and what its entropy buys is that nobody can PREDICT one before it is minted. `generic-api-key` matched the fixture on the entropy of the counting sequence next to the word `token`. Value-keyed with no `paths` (memql#3484): the literal identifies itself, it appears in three files of commit 5616bacc8, and `gitleaks git .` scans COMMITS, so the finding outlives any later spelling of the fixture."
+regexTarget = "match"
+regexes = ['''tok-abcdef0123456789''']
+
+[[allowlists]]
+description = "Fake account-domain verification token from the OS accounts test harness (memql#5188; cleared for history in memql#5663). NOT a credential: `memql-verify-abc123` is the `_memql-verify` record's name with the placeholder `abc123` on the end, the fixture value of `domainToken` in `clients/os/test/accounts/harness.tsx` at commit a50f593a8. A real token is minted the same way as a custom domain's (43 base64url characters over 32 crypto/rand bytes) and is published in public DNS by design. The harness has since rebuilt the fixture from words that say it is fake, and records why: a fixture should not look like a secret, because dismissing one as a false positive teaches everybody that the rule is noise. That fixes the TREE and cannot fix the commit, which is what this entry is for -- keyed on this one literal, so the rule stays live for every other value, and a fixture that looks real anywhere else still trips it. Value-keyed with no `paths` (memql#3484): the literal identifies itself, and a path constraint would resurface the finding the moment the harness moves."
+regexTarget = "match"
+regexes = ['''memql-verify-abc123''']
+
+[[allowlists]]
+description = "MemQL OS materializer app's settings-store key in its first, dotted spelling (cleared for history in memql#5663). NOT a credential: `memql.os.materializer.v1` is the localStorage KEY NAME the materializer app wrote its settings under at commit 6ac02bd6a, the string a browser looks a document up by, not anything in the document. It is the same kind of literal as the `memql-os-<app>-v1` entry above; the dotted form was the only one in the tree, `generic-api-key` read `const STORAGE_KEY = \"...\"` with that shape as a token, and `clients/os/src/apps/materializer/settings.ts` has since moved to the hyphenated house spelling that entry covers. The rename fixed the TREE; `gitleaks git .` scans COMMITS, so the dotted literal stays reachable in history, which is what this entry is for. Value-keyed with no `paths` (memql#3484), and the dots are escaped so it matches this one key and nothing shaped like it."
+regexTarget = "match"
+regexes = ['''memql\.os\.materializer\.v1''']
