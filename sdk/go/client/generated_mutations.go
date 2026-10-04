@@ -8030,7 +8030,7 @@ func MarkResponsibilityIntakePendingBuild(args MarkResponsibilityIntakePendingAr
 	return b.String()
 }
 
-// MarkStoreRedacted -- Stamp the shop/redact purge. The row stays: it is the audit record that a purge happened, and the domain must not be re-registered silently.
+// MarkStoreRedacted -- Stamp the shop/redact purge. The row stays: it is the audit record that a purge happened, and the domain must not be re-registered silently -- only a reinstall Shopify verified clears it (markStoreReconnected), and that reinstall is audited.
 //
 // Bound concept: v1:shopify:store (machine-readable: BoundConcepts["markStoreRedacted"] in generated_concepts.go).
 type MarkStoreRedactedArgs struct {

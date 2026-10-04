@@ -3421,7 +3421,8 @@ QueryClient.prototype.shopifyAccountConnectBegin = function (this: QueryClient, 
 };
 
 /** Begin Connect Shopify for a storefront's store (design 12.4, D1, D10): answer the URL the browser navigates to -- Shopify's approve page for the shop the server resolved -- with a single-use state bound to the caller.
-The app Shopify is asked to approve is the PENDING one a save left, when there is one, otherwise the store's current app and its webhook secret; with neither the reason is shopify_app_not_saved and nothing is written. The state (v1:identity:githubConnectState, purpose shopify_connect) names the shop, the site, the app's client id and which secret verifies the callback, and lives ten minutes. The plaintext state appears only inside authorizeUrl; only its digest is stored. The redirect is this cluster's own identity service, never anything the request said. */
+The app Shopify is asked to approve is the PENDING one a save left, when there is one, otherwise the store's current app and its webhook secret; with neither the reason is shopify_app_not_saved and nothing is written. The state (v1:identity:githubConnectState, purpose shopify_connect) names the shop, the site, the app's client id and which secret verifies the callback, and lives ten minutes. The plaintext state appears only inside authorizeUrl; only its digest is stored. The redirect is this cluster's own identity service, never anything the request said.
+Reserved to a cluster owner (memql#5638), at Begin and again at the callback. */
 export interface ShopifyConnectBeginArgs {
   /** The storefront deployable. The shop is resolved on the server from the package run that last published it. */
   siteId: string;
@@ -3620,7 +3621,8 @@ QueryClient.prototype.shopifyRunComplianceJobs = function (this: QueryClient, ar
 };
 
 /** Save the Shopify app's client ID and secret from a storefront's Store panel (design 12.3, D7).
-PENDING ONLY (D12). The client ID lands as the globalVariable SHOPIFY_<ID>_PENDING_CLIENT_ID and the secret, sealed on the server, as the globalSecret SHOPIFY_<ID>_PENDING_CLIENT_SECRET. The store row, its live appClientId and the secret that verifies its webhooks are never touched: saving proves nothing about the shop, so it can move nothing a webhook is checked with. They change only after the shop's own staff approve Connect Shopify. */
+PENDING ONLY (D12). The client ID lands as the globalVariable SHOPIFY_<ID>_PENDING_CLIENT_ID and the secret, sealed on the server, as the globalSecret SHOPIFY_<ID>_PENDING_CLIENT_SECRET. The store row, its live appClientId and the secret that verifies its webhooks are never touched: saving proves nothing about the shop, so it can move nothing a webhook is checked with. They change only after the shop's own staff approve Connect Shopify.
+Reserved to a cluster owner (memql#5638): any other caller is refused before anything is read. */
 export interface ShopifyStoreAppSaveArgs {
   /** The storefront deployable whose store the app belongs to. */
   siteId: string;
@@ -3670,7 +3672,7 @@ QueryClient.prototype.shopifyStoreHealth = function (this: QueryClient, args: Sh
 };
 
 /** Use a pasted Storefront API token for a storefront's store, or clear the one it has (design 12.5, D8).
-Refused `store_in_use` unless the caller is a cluster owner or can write EVERY site bound to the store, serving or preview: a store's token is served under each of their hostnames. A token is checked with one Storefront request before it is sealed; an empty token clears the reference so the next Connect mints one, and is refused while a live storefront is bound to the store. */
+Reserved to a cluster owner (memql#5638), who may change the token served under every site bound to the store. A token is checked with one Storefront request before it is sealed; an empty token clears the reference so the next Connect mints one, and is refused while a live storefront is bound to the store. */
 export interface ShopifyStorefrontTokenSetArgs {
   /** The storefront deployable whose store the token is for. */
   siteId: string;
