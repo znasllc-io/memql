@@ -27,23 +27,103 @@ import (
 // pipeline's own deploy_failed and this sentence, which the OS already
 // renders; promoting either to a code is a change that adds its copy too.
 
-// placementTargets reads every placement's target into one of edge's two,
-// refusing an unknown value. It returns a NEW map, because the request's map
-// belongs to its caller.
+// placementTargets checks every placement's target, refusing an unknown value.
+// It returns a NEW map, because the request's map belongs to its caller.
+//
+// AN OMITTED TARGET STAYS OMITTED (memql#5601). It is the serving version for
+// publishing, but it is not the same answer as an explicit "serving": at the
+// confirm gate an omitted target keeps what the run recorded when it opened,
+// and an explicit one replaces it (withRecordedCandidates).
 func placementTargets(placements map[string]Placement) (map[string]Placement, error) {
 	if placements == nil {
 		return nil, nil
 	}
 	out := make(map[string]Placement, len(placements))
 	for name, p := range placements {
-		target, err := edge.ParseTarget(string(p.Target))
-		if err != nil {
-			return nil, fmt.Errorf("placements[%q]: %w", name, err)
+		if p.Target != "" {
+			target, err := edge.ParseTarget(string(p.Target))
+			if err != nil {
+				return nil, fmt.Errorf("placements[%q]: %w", name, err)
+			}
+			p.Target = target
 		}
-		p.Target = target
 		out[name] = p
 	}
 	return out, nil
+}
+
+// withRecordedCandidates gives every recorded candidate whose placement names
+// no target back its candidate target. An explicit target is left alone:
+// that is the person's answer at the gate. It returns a NEW map.
+func withRecordedCandidates(placements map[string]Placement, recorded []string) map[string]Placement {
+	if len(recorded) == 0 {
+		return placements
+	}
+	out := make(map[string]Placement, len(placements)+len(recorded))
+	for name, p := range placements {
+		out[name] = p
+	}
+	for _, name := range recorded {
+		p := out[name]
+		if p.Target == "" {
+			p.Target = edge.TargetCandidate
+			out[name] = p
+		}
+	}
+	return out
+}
+
+// candidateNames is the deployables placements publish as candidates, sorted,
+// so the value recorded on the run has one spelling. A skipped app publishes
+// nothing, so it is not one.
+func candidateNames(placements map[string]Placement) []string {
+	out := []string{}
+	for name, p := range placements {
+		if p.Target == edge.TargetCandidate && !p.Skip {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sameNames reports whether two name lists hold the same names.
+func sameNames(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, n := range a {
+		seen[n] = true
+	}
+	for _, n := range b {
+		if !seen[n] {
+			return false
+		}
+	}
+	return true
+}
+
+// openRun opens a NEW run, recording the candidates its placements name.
+//
+// A RETRY KEEPS THE LOST RUN'S CANDIDATES. A retry restarts the run that was
+// lost, from its own bytes, so it publishes the way that run would have: an
+// omitted target takes the earlier run's recorded one, exactly as a confirm
+// does at the gate. An earlier run that cannot be read, or that belongs to
+// another package, contributes nothing here -- the fetch refuses the retry on
+// its own terms.
+func (d *Deps) openRun(ctx context.Context, req *DeployRequest, seed deploymentSeed) error {
+	if from := strings.TrimSpace(req.FromDeploymentId); from != "" {
+		prior, err := d.Store.deploymentById(ctx, from)
+		if err != nil {
+			return err
+		}
+		if prior != nil && sameShortId(rowString(prior, "packageId"), req.PackageId) {
+			req.Placements = withRecordedCandidates(req.Placements, rowStrings(prior, "candidates"))
+		}
+	}
+	seed.Candidates = candidateNames(req.Placements)
+	return d.Store.openDeployment(ctx, seed)
 }
 
 // refuseUnservedCandidates refuses a run that asks for a candidate where no

@@ -266,13 +266,31 @@ decision about the run, not about the software.
   run that published only candidates does not record the source's
   `deployedVersion` either, so the source still reads as having an update to
   ship.
-- **A `shopify_storefront` has no candidate version.** Its two destinations
-  serve one published build ([storefront-preview.md](storefront-preview.md)),
-  so a candidate would be served by nothing. A run asking for one is refused
-  after the analysis and before anything is built, uploaded or bound, and the
-  engine refuses, from any route, a storefront candidate that is not the
-  version it already serves (`storefront_has_no_candidate`).
-- **Any other value is refused** before a run opens.
+- **A candidate is a `spa` and `static` feature.** A `shopify_storefront`
+  serves ONE build on both of its destinations, Testing and Production, each
+  against its own store ([storefront-preview.md](storefront-preview.md)), so
+  a storefront candidate would be served by nothing. A run asking for one is
+  refused after the analysis and before anything is built, uploaded or bound,
+  and the engine refuses, from any route, a storefront candidate that is not
+  the version it already serves (`storefront_has_no_candidate`).
+- **A candidate run carries no DSL change.** Staging a changed MemQL domain
+  rolls every node onto it for every visitor, while a candidate leaves the
+  public on the serving build -- so a run with any candidate whose DSL
+  differs from what the cluster runs is refused before the build. Publish it
+  to the serving version, or deploy the DSL first in a run with every app
+  skipped and then publish the candidate.
+- **The target survives the confirm gate.** A run records its candidates when
+  it opens (`candidates` on the run row). At the gate, a target the
+  confirming call names wins -- choosing there, with the plan on screen, is
+  the ordinary flow -- and a target it leaves out keeps the recorded one, so
+  a run opened as a candidate never falls back to the serving version. A
+  retry of a lost run keeps that run's candidates the same way.
+- **The candidate is not the auto-deploy baseline.** An automatic run
+  publishes to the serving version and confirms itself only against the last
+  run that published to the public; a run that published only candidates is
+  skipped, so a plan approved only as a candidate parks the next push.
+- **Any other value is refused** before a run opens, and so is a `target`
+  that is not a string (`null` reads as unset).
 
 ---
 

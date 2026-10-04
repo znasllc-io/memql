@@ -2160,6 +2160,8 @@ mutation packageDeployment openPackageDeployment {
     nodeId         string
     /// The deployables this run was started for. Empty is the whole source.
     scopedTo       []string
+    /// The deployables this run publishes as their candidate version (memql#5601).
+    candidates     []string
     /// The run this one was started from, when it is a retry.
     fromDeploymentId string
     /// The package's account tie, copied by the pipeline off the package row (memql#5303).
@@ -2167,7 +2169,7 @@ mutation packageDeployment openPackageDeployment {
     startedAt      datetime!
   }
   insert {
-    accept { sourceVersion, requestedBy, nodeId, scopedTo, fromDeploymentId, accountId }
+    accept { sourceVersion, requestedBy, nodeId, scopedTo, candidates, fromDeploymentId, accountId }
     stamp {
       id:           args.deploymentId
       packageId:    args.packageId
@@ -2292,13 +2294,18 @@ mutation packageDeployment requestPackageDeploymentCancel {
 }
 
 
-/// Re-stamp which deployables a run is for. Pipeline writer.
+/// Re-stamp which deployables a run is for, and which of them it publishes as candidates. Pipeline
+/// writer.
 ///
 /// Scope is stamped at open from the placements the first call carried, and re-stamped HERE when a
 /// parked run is confirmed -- because the gate is the moment a person answers which apps they
 /// meant. A compose gate opens with no placements at all (the analyze is about the whole source)
 /// and closes with the skips somebody ticked, so a run whose scope were fixed at open would report
 /// progress on apps it had been told not to build.
+///
+/// `candidates` is the same answer about targets (memql#5601): what the gate decided, an explicit
+/// target on the confirming call winning over the one recorded at open and an omitted one keeping
+/// it. Accepted rather than stamped, so a re-stamp that names no candidates keeps the recorded ones.
 ///
 /// Its own mutation rather than an argument on advancePackageDeployment: advancing is a stage
 /// change and this is not, and a caller able to move a run's stage while rewriting what it is about
@@ -2315,10 +2322,14 @@ mutation packageDeployment recordPackageDeploymentScope {
   args {
     deploymentId  string!
     scopedTo      []string!
+    candidates    []string
   }
   update {
-    id:       args.deploymentId
-    scopedTo: args.scopedTo
+    accept { candidates }
+    stamp {
+      id:       args.deploymentId
+      scopedTo: args.scopedTo
+    }
   }
 }
 

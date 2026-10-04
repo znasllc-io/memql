@@ -300,6 +300,7 @@ shape packageDeployment packageDeploymentFull {
   deployables
   snapshotArtifactId
   scopedTo
+  candidates
   fromDeploymentId
   buildLogTail
   builtOn

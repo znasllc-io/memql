@@ -444,8 +444,20 @@ func prepareDeployment(ctx context.Context, d *Deps, req DeployRequest) (map[str
 		// apps they meant: a compose gate opens with no placements at all and
 		// closes with the skips somebody ticked, so a scope fixed at open
 		// would have the run report progress on apps it was told not to build.
-		if len(scope) > 0 {
-			if serr := d.Store.recordScope(ctx, deploymentId, scope); serr != nil {
+		//
+		// AND THE TARGETS (memql#5601): an explicit target on this call wins,
+		// an omitted one keeps what the run recorded at open, and the result is
+		// re-stamped when it differs -- so a run opened as a candidate cannot
+		// fall toward the serving version because the confirm left it out.
+		recorded := rowStrings(resumed, "candidates")
+		req.Placements = withRecordedCandidates(req.Placements, recorded)
+		candidates := candidateNames(req.Placements)
+		if len(scope) > 0 || !sameNames(candidates, recorded) {
+			stamped := scope
+			if len(stamped) == 0 {
+				stamped = rowStrings(resumed, "scopedTo")
+			}
+			if serr := d.Store.recordScope(ctx, deploymentId, stamped, candidates); serr != nil {
 				return nil, nil, req, serr
 			}
 		}
@@ -475,7 +487,7 @@ func prepareDeployment(ctx context.Context, d *Deps, req DeployRequest) (map[str
 				// refused rather than quietly shipping other bytes.
 			}
 		}
-	} else if err := d.Store.openDeployment(ctx, deploymentSeed{
+	} else if err := d.openRun(ctx, &req, deploymentSeed{
 		DeploymentId: deploymentId,
 		PackageId:    req.PackageId,
 		OwnerUserId:  ownerUserId,

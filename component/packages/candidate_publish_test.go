@@ -268,3 +268,132 @@ func TestACandidateRunWhoseDslIsUnchangedPublishesWithoutARoll(t *testing.T) {
 		t.Fatalf("published %v, want one candidate", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The target survives the confirm gate (memql#5601)
+// ---------------------------------------------------------------------------
+//
+// A run is opened and later confirmed by a SECOND call, and placements used to
+// be read from the confirming call alone -- so a run opened as a candidate and
+// confirmed by a call that left the target out published to every visitor.
+// The contract: the run records its candidates when it opens, the way it
+// records its scope; at the gate an EXPLICIT target on the confirming call
+// wins, because that is where a person decides with the plan in front of them,
+// and an OMITTED one keeps what was recorded. A run can therefore never fall
+// toward the serving version because a second call was less specific.
+
+const parkedCandidateRun = "v1:platform:packageDeployment:parked-candidate"
+
+func confirmParked(t *testing.T, recorded []any, placements map[string]Placement) *harness {
+	t.Helper()
+	h := newHarness(t, spaOnlyPackage(), ownerPackage())
+	extra := map[string]any{}
+	if recorded != nil {
+		extra["candidates"] = recorded
+	}
+	h.engine.rows["query packageDeploymentById"] = []map[string]any{parkedRun(parkedCandidateRun, "v1:platform:package:abc", extra)}
+	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
+		PackageId:    "v1:platform:package:abc",
+		Actor:        plainUser(),
+		Confirmed:    true,
+		DeploymentId: parkedCandidateRun,
+		Placements:   placements,
+	}); err != nil {
+		t.Fatalf("confirming the parked run: %v", err)
+	}
+	return h
+}
+
+func TestARunRecordsItsCandidatesWhenItOpens(t *testing.T) {
+	h := newHarness(t, spaOnlyPackage(), ownerPackage())
+	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
+		PackageId:  "v1:platform:package:abc",
+		Actor:      plainUser(),
+		Placements: candidatePlacements(),
+	}); err != nil {
+		t.Fatalf("opening the run: %v", err)
+	}
+	open := statementContaining(h.engine.queries, "mutation openPackageDeployment")
+	if !strings.Contains(open, `candidates: ["docs"]`) {
+		t.Fatalf("the opened run does not record docs as a candidate:\n%s", open)
+	}
+}
+
+func TestAConfirmThatOmitsTheTargetKeepsTheRecordedCandidate(t *testing.T) {
+	h := confirmParked(t, []any{"docs"}, map[string]Placement{
+		"storefront": {Skip: true},
+		"docs":       {Hostname: "docs.example.com"},
+	})
+	if got := h.publisher.targets; len(got) != 1 || got[0] != edge.TargetCandidate {
+		t.Fatalf("a run opened as a candidate and confirmed without a target published %v, want the candidate", got)
+	}
+}
+
+func TestAnExplicitTargetAtTheConfirmWins(t *testing.T) {
+	h := confirmParked(t, []any{"docs"}, map[string]Placement{
+		"storefront": {Skip: true},
+		"docs":       {Hostname: "docs.example.com", Target: edge.TargetServing},
+	})
+	if got := h.publisher.targets; len(got) != 1 || got[0] != edge.TargetServing {
+		t.Fatalf("an explicit serving target at the gate published %v, want the serving version", got)
+	}
+	restamp := statementContaining(h.engine.queries, "mutation recordPackageDeploymentScope")
+	if !strings.Contains(restamp, `candidates: []`) {
+		t.Fatalf("the gate's answer was not recorded on the run:\n%s", restamp)
+	}
+}
+
+// The OS flow: open the run to see the plan, then choose at the gate.
+func TestARunOpenedWithNoTargetCanBeConfirmedAsACandidate(t *testing.T) {
+	h := confirmParked(t, nil, map[string]Placement{
+		"storefront": {Skip: true},
+		"docs":       {Hostname: "docs.example.com", Target: edge.TargetCandidate},
+	})
+	if got := h.publisher.targets; len(got) != 1 || got[0] != edge.TargetCandidate {
+		t.Fatalf("a candidate chosen at the gate published %v", got)
+	}
+	restamp := statementContaining(h.engine.queries, "mutation recordPackageDeploymentScope")
+	if !strings.Contains(restamp, `candidates: ["docs"]`) {
+		t.Fatalf("the candidate chosen at the gate was not recorded on the run:\n%s", restamp)
+	}
+}
+
+// A RETRY RESTARTS THE RUN THAT WAS LOST, and that run was a candidate run: a
+// retry whose placements leave the target out publishes the candidate again
+// rather than putting the build in front of the public.
+func TestARetryKeepsTheLostRunsCandidates(t *testing.T) {
+	h := newHarness(t, spaOnlyPackage(), ownerPackage())
+	first, err := Deploy(context.Background(), h.deps, DeployRequest{
+		PackageId:  "v1:platform:package:abc",
+		Actor:      plainUser(),
+		Confirmed:  true,
+		Placements: candidatePlacements(),
+	})
+	if err != nil {
+		t.Fatalf("first deploy: %v", err)
+	}
+	h.engine.rows[`query packageDeploymentById(deploymentId: "`+first.DeploymentId+`")`] = []map[string]any{{
+		"id":                 first.DeploymentId,
+		"packageId":          "v1:platform:package:abc",
+		"status":             StatusAbandoned,
+		"sourceVersion":      "sha-abc123",
+		"snapshotArtifactId": "blob://packages/snapshots/snap.tar.gz",
+		"candidates":         []any{"docs"},
+	}}
+	h.publisher.targets = nil
+	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
+		PackageId:        "v1:platform:package:abc",
+		Actor:            plainUser(),
+		Confirmed:        true,
+		FromDeploymentId: first.DeploymentId,
+		Placements: map[string]Placement{
+			"storefront": {Skip: true},
+			"docs":       {Hostname: "docs.example.com"},
+		},
+	}); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if got := h.publisher.targets; len(got) != 1 || got[0] != edge.TargetCandidate {
+		t.Fatalf("the retry of a candidate run published %v, want the candidate", got)
+	}
+}

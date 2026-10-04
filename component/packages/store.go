@@ -325,6 +325,10 @@ func (s *store) writeDeploymentOpening(writeCtx context.Context, d deploymentSee
 	if scoped == nil {
 		scoped = []string{}
 	}
+	candidates := d.Candidates
+	if candidates == nil {
+		candidates = []string{}
+	}
 	// THE ACCOUNT RIDES ALONG ONLY WHEN THERE IS ONE. It is copied off the
 	// package row, never chosen here, and an untied package's run must be
 	// written exactly as it was before the field existed -- an explicit ""
@@ -334,7 +338,7 @@ func (s *store) writeDeploymentOpening(writeCtx context.Context, d deploymentSee
 		account = fmt.Sprintf(", accountId: %s", langparser.QuoteString(v))
 	}
 	return s.writeInternal(writeCtx, fmt.Sprintf(
-		"mutation openPackageDeployment(deploymentId: %s, packageId: %s, sourceVersion: %s, requestedBy: %s, automatic: %t, nodeId: %s, scopedTo: %s, fromDeploymentId: %s%s, startedAt: %s)",
+		"mutation openPackageDeployment(deploymentId: %s, packageId: %s, sourceVersion: %s, requestedBy: %s, automatic: %t, nodeId: %s, scopedTo: %s, candidates: %s, fromDeploymentId: %s%s, startedAt: %s)",
 		langparser.QuoteString(d.DeploymentId),
 		langparser.QuoteString(d.PackageId),
 		langparser.QuoteString(d.SourceVersion),
@@ -342,6 +346,7 @@ func (s *store) writeDeploymentOpening(writeCtx context.Context, d deploymentSee
 		d.Automatic,
 		langparser.QuoteString(d.NodeId),
 		jsonLiteral(scoped),
+		jsonLiteral(candidates),
 		langparser.QuoteString(d.FromDeploymentId),
 		account,
 		langparser.QuoteString(d.StartedAt.UTC().Format(time.RFC3339)),
@@ -425,13 +430,18 @@ func (s *store) recordReport(ctx context.Context, deploymentId string, rep *Repo
 // Called when a PARKED run is confirmed, because the gate is where a person
 // answers which apps they meant: the compose gate opens with no placements at
 // all and closes with the skips somebody ticked.
-func (s *store) recordScope(ctx context.Context, deploymentId string, scopedTo []string) error {
+// recordScope re-stamps a parked run's scope and candidates with what the
+// confirm gate decided (memql#4953, memql#5601).
+func (s *store) recordScope(ctx context.Context, deploymentId string, scopedTo, candidates []string) error {
 	if scopedTo == nil {
 		scopedTo = []string{}
 	}
+	if candidates == nil {
+		candidates = []string{}
+	}
 	return s.writeInternal(ctx, fmt.Sprintf(
-		"mutation recordPackageDeploymentScope(deploymentId: %s, scopedTo: %s)",
-		langparser.QuoteString(deploymentId), jsonLiteral(scopedTo)))
+		"mutation recordPackageDeploymentScope(deploymentId: %s, scopedTo: %s, candidates: %s)",
+		langparser.QuoteString(deploymentId), jsonLiteral(scopedTo), jsonLiteral(candidates)))
 }
 
 // closeDeployment writes the terminal row.
@@ -823,6 +833,10 @@ type deploymentSeed struct {
 	// ScopedTo names the deployables this run is FOR; empty is the whole
 	// source (memql#4953).
 	ScopedTo []string
+	// Candidates names the deployables this run publishes as their candidate
+	// version (memql#5601) -- recorded at open so a confirmation that leaves
+	// the target out keeps it.
+	Candidates []string
 	// FromDeploymentId is the run this one was started from, when it is a
 	// retry (memql#4955).
 	FromDeploymentId string
