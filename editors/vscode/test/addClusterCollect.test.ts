@@ -195,7 +195,7 @@ test("no collected field is an AI credential, and the schema says so", () => {
     `a collected field looks like an AI credential: ${fields.join(", ")}`);
   // And the same over the two lists a screen actually renders from, since a
   // field could be offered without a default.
-  for (const action of ["install", "installGuided", "repair"] as const) {
+  for (const action of ["install", "repair"] as const) {
     assert.ok(!requiredFields(action).some((f) => /provider|key|vendor|secret/i.test(f)),
       `${action} requires a field that looks like an AI credential`);
   }

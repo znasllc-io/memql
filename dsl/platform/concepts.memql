@@ -177,6 +177,7 @@ concept inboundRequest {
   signatureVerified bool @description("Whether the HMAC signature was checked and matched. Supplied by the receiver through stageInboundRequest rather than stamped; an absent value reads as false. Only ever true, or false for a source explicitly configured scheme='none'; a FAILED check is refused at the edge and never staged, so this records which sources are running unverified rather than which requests failed.")
   receivedAt    datetime @description("When the receiver accepted the request.")
   headersJson   string @description("Allowlisted non-secret delivery headers as a JSON object with lowercase keys. Header values are metadata, not proof of identity; body HMAC does not sign them.")
+  verifiedBy    enum("env", "registered", "connector") @description("Which tier's secret verified the delivery (memql#5795): an operator's env pin, a source the cluster registered for itself, or the connector that owns the source. The dispatcher applies a row whose source a connector claims only when this is 'connector', so a store connected between staging and dispatch never receives a body another secret verified as its own. Kept from the delivery that created the row. Absent on a row the mailbox reader staged and on rows staged before the field existed, which are dispatched as before: only server-side code can stage a row.")
   processedAt   datetime @description("When the product finished handling the row.")
   lastError     string  @description("Most recent product-side handling error, truncated to 4KB. Empty on success.")
 }

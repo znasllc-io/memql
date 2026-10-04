@@ -308,6 +308,12 @@ mutation outboundRequest updateOutboundRequestStatus {
 // stable idempotency key, not exactly-once processing, and a product
 // automation has to branch on status before doing work.
 //
+// verifiedBy (memql#5795) is @createOnly for the same reason status is,
+// seen from the dispatcher: dispatchInboundToConnector fires once, on
+// node.created, and reads the tier off that payload, so a re-stage of the
+// same signed payload must not rewrite which secret verified the row that
+// was dispatched.
+//
 // @serverOnly (memql#5707 review): the row's `source` and `headersJson`
 // drive dispatchInboundToConnector all the way to a connector's privacy
 // purge, so the row's provenance must be a server-side reader's -- the
@@ -328,7 +334,7 @@ mutation outboundRequest updateOutboundRequestStatus {
 /// the way to a connector's privacy purge, so the writer must be the receiver (or the NDR poller),
 /// each staging under internal origin, and never a client choosing a source name and a topic
 /// header. Only the wire bar expresses that.
-@createOnly("status", "headersJson", "receivedAt")
+@createOnly("status", "headersJson", "receivedAt", "verifiedBy")
 @serverOnly
 mutation inboundRequest stageInboundRequest {
   args {
@@ -340,10 +346,11 @@ mutation inboundRequest stageInboundRequest {
     headersJson        string
     dedupeKey          string
     signatureVerified  bool
+    verifiedBy         string
     receivedAt         string
   }
   insert {
-    accept { source, medium, body, contentType, headersJson, dedupeKey, signatureVerified, receivedAt }
+    accept { source, medium, body, contentType, headersJson, dedupeKey, signatureVerified, verifiedBy, receivedAt }
     stamp {
       id: args.requestId
       status: "received"

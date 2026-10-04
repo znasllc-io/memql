@@ -125,12 +125,6 @@ export function languageReferenceParts(input: LanguageReferenceInput): RegionPar
   return { head: headHtml, body: bodyHtml(input), actions: "" };
 }
 
-/** The page as one string, for the tests and anything else that reads it whole. */
-export function renderLanguageReferencePage(input: LanguageReferenceInput): string {
-  const parts = languageReferenceParts(input);
-  return parts.head + parts.body;
-}
-
 function bodyHtml(input: LanguageReferenceInput): string {
   const { grammar, vocabulary } = input;
   if (input.identity.source === "extension") return notConnectedHtml(input);

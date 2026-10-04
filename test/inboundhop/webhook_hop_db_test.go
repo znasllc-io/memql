@@ -120,6 +120,11 @@ func TestWebhookReceiptAndDispatchAcrossEngines(t *testing.T) {
 	if !maps.Equal(staged, want) {
 		t.Fatalf("staged delivery headers %v, want %v", staged, want)
 	}
+	// The store's own secret verified it, and the row says so: the
+	// dispatcher applies a claimed source's row only when it does.
+	if tier := rowString(row, "verifiedBy"); tier != "connector" {
+		t.Fatalf("the staged row records verifiedBy %q, want connector", tier)
+	}
 	// Transfer only the durable event over a serialization boundary, then
 	// replace the receipt-side connector with B's independent instance.
 	encoded, err := json.Marshal(row)
@@ -204,6 +209,120 @@ func TestAnUnparseableStagedHeaderRowIsStampedFailed(t *testing.T) {
 	}
 	if reason := rowString(after, "lastError"); reason != "invalid staged delivery headers" {
 		t.Errorf("lastError = %q, want the reason the dispatcher stamps", reason)
+	}
+}
+
+// The receipt-time window memql#5795 closes, end to end. An env pin admitted
+// a delivery under `shopify-<storeId>` while no such store existed; the store
+// is connected before the row is dispatched. The row says the ENV tier
+// verified it, so the shipped automation refuses it -- stamped failed, no
+// privacy job -- although the connector now claims the source. The control is
+// the same delivery verified by the connector, which does queue the job, so
+// the refusal is the only thing standing between the env-signed body and the
+// store's privacy queue.
+func TestAnEnvVerifiedRowForAStoreSourceIsRefusedAtDispatch(t *testing.T) {
+	a, db := engineOverPostgres(t)
+	if a == nil {
+		return
+	}
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	storeID := "tier-" + suffix
+	shop := storeID + ".myshopify.com"
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DELETE FROM "MemoryNodes" WHERE payload::text LIKE $1 OR id LIKE $1`, "%"+suffix+"%")
+	})
+	for _, q := range []string{
+		call("createStore", map[string]string{"storeId": storeID, "domain": shop, "name": "Tier test", "adminTokenRef": "unused", "webhookSecretRef": "unused"}),
+		call("setStoreStatus", map[string]string{"storeId": storeID, "status": shopify.StatusPaused}),
+	} {
+		if _, err := a.Execute(seedCtx(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	conn := shopify.NewConnector(a, nil, shopify.NewStoreRegistry(a, a.ResolveSystemSecret), shopify.NewAdminClient())
+	if err := memqlsync.Bind(conn); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { memqlsync.UnbindForTest(shopify.ConnectorName) })
+	dispatch := dispatcherOn(t, a)
+
+	jobsFor := func() int {
+		var n int
+		if err := db.QueryRow(`SELECT count(*) FROM "MemoryNodes" WHERE concept='v1:shopify:complianceJob' AND payload::text LIKE $1`, "%"+storeID+"%").Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	headers := langparser.QuoteString(`{"x-shopify-topic":"` + shopify.TopicDataRequest + `","x-shopify-shop-domain":"` + shop + `"}`)
+	stage := func(tag, tier string) string {
+		requestID := "inb-" + tag + "-" + suffix
+		body := fmt.Sprintf(`{"shop_domain":%q,"customer":{"id":991},"data_request":{"id":"%s-%s"}}`, shop, tag, suffix)
+		if _, err := a.Execute(seedCtx(), fmt.Sprintf(`mutation stageInboundRequest(requestId: %s, source: %s, medium: "webhook", `+
+			`body: %s, headersJson: %s, signatureVerified: true, verifiedBy: %s, receivedAt: "2026-10-04T12:00:00Z")`,
+			langparser.QuoteString(requestID), langparser.QuoteString("shopify-"+storeID), langparser.QuoteString(body),
+			headers, langparser.QuoteString(tier))); err != nil {
+			t.Fatalf("stage %s: %v", tag, err)
+		}
+		_, _ = dispatch(stagedRow(t, a, requestID))
+		return requestID
+	}
+
+	refused := stage("env", "env")
+	if status := rowString(stagedRow(t, a, refused), "status"); status != "failed" {
+		t.Fatalf("an env-verified row for a store's source is %q after dispatch, want failed", status)
+	}
+	if n := jobsFor(); n != 0 {
+		t.Fatalf("an env-verified row queued %d privacy jobs for the store", n)
+	}
+
+	accepted := stage("connector", "connector")
+	if status := rowString(stagedRow(t, a, accepted), "status"); status != "processed" {
+		t.Fatalf("the control, verified by the connector, is %q after dispatch, want processed", status)
+	}
+	if n := jobsFor(); n != 1 {
+		t.Fatalf("the control queued %d privacy jobs, want 1 -- without it the refusal above proves nothing", n)
+	}
+}
+
+// A staged row carrying NONE of the optional delivery fields -- no
+// headersJson, no receivedAt, no verifiedBy, which is what the mailbox reader
+// stages and what every row staged before those fields existed looks like --
+// still reaches the dispatcher. The automation passes each one to the builtin,
+// whose fields are strings, so an absent value must arrive as "" rather than
+// as a null the builtin refuses before it runs. Proved on a store's own
+// source, where the dispatcher stamps the row: a refused call would leave it
+// `received`.
+func TestARowWithoutOptionalDeliveryFieldsIsStillDispatched(t *testing.T) {
+	a, db := engineOverPostgres(t)
+	if a == nil {
+		return
+	}
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	storeID := "bare-" + suffix
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DELETE FROM "MemoryNodes" WHERE payload::text LIKE $1 OR id LIKE $1`, "%"+suffix+"%")
+	})
+	if _, err := a.Execute(seedCtx(), call("createStore", map[string]string{"storeId": storeID, "domain": storeID + ".myshopify.com",
+		"name": "Bare row test", "adminTokenRef": "unused", "webhookSecretRef": "unused"})); err != nil {
+		t.Fatal(err)
+	}
+	conn := shopify.NewConnector(a, nil, shopify.NewStoreRegistry(a, a.ResolveSystemSecret), shopify.NewAdminClient())
+	if err := memqlsync.Bind(conn); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { memqlsync.UnbindForTest(shopify.ConnectorName) })
+
+	requestID := "inb-bare-" + suffix
+	if _, err := a.Execute(seedCtx(), fmt.Sprintf(`mutation stageInboundRequest(requestId: %s, source: %s, medium: "webhook", body: "{}")`,
+		langparser.QuoteString(requestID), langparser.QuoteString("shopify-"+storeID))); err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+	run, err := dispatcherOn(t, a)(stagedRow(t, a, requestID))
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if status := rowString(stagedRow(t, a, requestID), "status"); status == "received" {
+		t.Fatalf("a row without the optional delivery fields was never dispatched (run %s); the builtin refused its arguments", run.Status)
 	}
 }
 

@@ -15,7 +15,9 @@ use common.builtins.{ datasyncDispatchInbound, datasyncReconcileDomains }
 // executor that is missing fails every inbound row from every source.
 
 /// Offer every staged inbound delivery to the connector its source names. The connector decides
-/// whether the delivery is its own; a source nothing serves is skipped, not failed.
+/// whether the delivery is its own; a source nothing serves is skipped, not failed. The optional
+/// delivery fields are passed as the row has them, absent included: a mailbox-reader row carries no
+/// headersJson, and a row staged before verifiedBy existed carries no tier.
 @trigger(event="node.created", concept="v1:platform:inboundRequest")
 automation dispatchInboundToConnector {
   args {
@@ -24,13 +26,15 @@ automation dispatchInboundToConnector {
     body   any
     headersJson any
     receivedAt any
+    verifiedBy any
   }
   dispatch := builtin datasyncDispatchInbound(
     inboundRequestId: args.id,
     source: args.source,
     body: args.body,
     headersJson: args.headersJson,
-    receivedAt: args.receivedAt
+    receivedAt: args.receivedAt,
+    verifiedBy: args.verifiedBy
   )
 }
 

@@ -8,22 +8,11 @@
 // PURE PROJECTION: the panel gathers the inputs (graph load, `sudo -n` probe,
 // receipt read) and this module only words them, so the wording is testable
 // under bare `node --test` (cmd/memql-lsp/vscodeimportrule_test.go).
-//
-// `PreflightItem` is the older row shape the rebuild and update checklists
-// (rebuildPreflight.ts, updatePreflight.ts) still use; the install form uses
-// `PreflightCheck`.
 
 import type { ImageSource } from "../install/receipt.js";
 
-export interface PreflightItem {
-  label: string;
-  /** "ok" renders quiet; "attention" renders emphasised. Never a blocker -- the run itself enforces. */
-  state: "ok" | "attention";
-  detail: string;
-}
-
 export interface PreflightInputs {
-  action: "install" | "installGuided" | "repair";
+  action: "install" | "repair";
   /** The graph document's fate: step count, or why it could not be read. */
   graph: { ok: true; steps: number; needsElevation: boolean } | { ok: false; error: string };
   /** Whether sudo would run without asking (or the process is root). */
@@ -103,9 +92,4 @@ export function preflightChecks(inputs: PreflightInputs): PreflightCheck[] {
   }
 
   return checks;
-}
-
-/** Whether the checks allow the run to start at all (the installer's own files are there). */
-export function preflightBlocks(checks: readonly PreflightCheck[]): boolean {
-  return checks.some((check) => check.tone === "error");
 }

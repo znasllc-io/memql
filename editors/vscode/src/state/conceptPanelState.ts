@@ -45,16 +45,15 @@ export class ConceptPanelState<T> {
   private cursor = "";
   private selection: string | undefined;
   private rowDetail: T | null = null;
-  private errorMessage = "";
 
   // Persistent "live updates are off" notice -- deliberately a SEPARATE
-  // field from errorMessage, not a reuse of it. errorMessage is transient:
-  // loadPage()/resolveSelection() clear it on every success, because a
-  // fresh good row-list load supersedes a stale data-fetch error. The
-  // live-updates notice must survive exactly that -- a CDC subscription
-  // failing does not stop ordinary queries from succeeding on the same
-  // healthy connection, so the very next successful loadPage() would wipe
-  // an errorMessage-based notice within moments of it appearing, leaving
+  // field from the read errors, not a reuse of them. Those are transient:
+  // loadPage()/resolveSelection() clear them on every success, because a
+  // fresh good read supersedes a stale data-fetch error. The live-updates
+  // notice must survive exactly that -- a CDC subscription failing does not
+  // stop ordinary queries from succeeding on the same healthy connection, so
+  // the very next successful loadPage() would wipe a read-error notice
+  // within moments of it appearing, leaving
   // the panel looking fully live when it silently is not. This field is
   // touched by exactly two call sites: setLiveUpdatesDegraded() (the
   // subscribe attempt threw) and clearLiveUpdatesDegraded() (a later
@@ -72,9 +71,9 @@ export class ConceptPanelState<T> {
   // Whether the selected row's detail has answered for the current selection.
   private detailSettled = false;
 
-  // The last PAGE read's failure, apart from a detail read's. `errorMessage`
-  // is shared by both, and a page that says "couldn't load rows" because a
-  // single row's detail failed would be wrong about the list.
+  // The last PAGE read's failure, apart from a detail read's: a page that says
+  // "couldn't load rows" because a single row's detail failed would be wrong
+  // about the list.
   private listErrorMessage = "";
   // And the selected row's detail read's failure, for the same reason.
   private detailErrorMessage = "";
@@ -117,10 +116,6 @@ export class ConceptPanelState<T> {
 
   get detail(): T | null {
     return this.rowDetail;
-  }
-
-  get error(): string {
-    return this.errorMessage;
   }
 
   get liveUpdatesError(): string {
@@ -173,7 +168,6 @@ export class ConceptPanelState<T> {
     this.cursor = "";
     this.selection = undefined;
     this.rowDetail = null;
-    this.errorMessage = "";
     this.listSettled = false;
     this.detailSettled = false;
     this.listErrorMessage = "";
@@ -181,7 +175,7 @@ export class ConceptPanelState<T> {
   }
 
   // setLiveUpdatesDegraded / clearLiveUpdatesDegraded record whether the CDC
-  // subscription behind live refresh is currently up. Unlike errorMessage,
+  // subscription behind live refresh is currently up. Unlike the read errors,
   // nothing else in this class writes liveUpdatesDegradedMessage -- a
   // successful loadPage() or resolveSelection() must NOT silently erase a
   // "live updates are off" notice just because an unrelated ordinary query
@@ -192,14 +186,6 @@ export class ConceptPanelState<T> {
 
   clearLiveUpdatesDegraded(): void {
     this.liveUpdatesDegradedMessage = "";
-  }
-
-  // setConnectionError records a synchronous "not connected" condition. It
-  // takes no generation, unlike the async paths below -- there is no await
-  // for a fresher call to race against, since the caller detects "not
-  // connected" and calls this before ever starting a fetch.
-  setConnectionError(message: string): void {
-    this.errorMessage = message;
   }
 
   // loadPage awaits `fetch()` and appends its page to the row list, unless:
@@ -222,14 +208,12 @@ export class ConceptPanelState<T> {
       if (!this.listLatest.isCurrent(token)) return false;
       this.rows = this.rows.concat(page.rows);
       this.cursor = page.nextCursor;
-      this.errorMessage = "";
       this.listErrorMessage = "";
       this.listSettled = true;
       return true;
     } catch (err) {
       if (!this.listLatest.isCurrent(token)) return false;
-      this.errorMessage = err instanceof Error ? err.message : String(err);
-      this.listErrorMessage = this.errorMessage;
+      this.listErrorMessage = err instanceof Error ? err.message : String(err);
       this.listSettled = true;
       return true;
     } finally {
@@ -267,14 +251,12 @@ export class ConceptPanelState<T> {
       const detail = await fetch();
       if (!this.selectionLatest.isCurrent(token)) return false;
       this.rowDetail = detail;
-      this.errorMessage = "";
       this.detailErrorMessage = "";
       this.detailSettled = true;
       return true;
     } catch (err) {
       if (!this.selectionLatest.isCurrent(token)) return false;
-      this.errorMessage = err instanceof Error ? err.message : String(err);
-      this.detailErrorMessage = this.errorMessage;
+      this.detailErrorMessage = err instanceof Error ? err.message : String(err);
       this.rowDetail = null;
       this.detailSettled = true;
       return true;

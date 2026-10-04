@@ -4,8 +4,8 @@
 // a remote cluster. It could not tell an operator who has no cluster at all
 // that installing one is an option, and -- worse -- it could not tell one who
 // already has a cluster that they do. This module is the evidence half of
-// memql#3412; the menu the "+" renders from the verdict is at the bottom of
-// this file, and the VS Code wiring is in src/extension.ts.
+// memql#3412; what the Add a cluster page offers for a verdict is
+// `landingView` in src/state/addCluster.ts.
 //
 // THREE PROPERTIES ARE LOAD-BEARING.
 //
@@ -16,7 +16,7 @@
 //     would miss the hand-built cluster and then cheerfully offer to install
 //     over the top of it, which is how a working parity cluster gets replaced
 //     by a fresh one.
-//  2. THE HEALTH PROBE IS A DIAL, NOT A DOCKER QUERY. Rendering a menu must
+//  2. THE HEALTH PROBE IS A DIAL, NOT A DOCKER QUERY. Drawing the landing must
 //     not require Docker to be running, must not shell out, and must not wait
 //     on `k3d cluster list`. It asks the front door whether it answers, over
 //     the same WebSocket bridge the connection layer dials, with a short
@@ -24,19 +24,19 @@
 //
 //     THE FOURTH SIGNAL IS THE ONE EXCEPTION, and it is bounded to the one
 //     path where being wrong destroys data (memql#5118, D8). When BOTH
-//     evidence sources say nothing the menu offers Install -- and an install
+//     evidence sources say nothing the landing offers Install -- and an install
 //     over a k3d cluster somebody already had adopts its database. So before
 //     offering that, and only then, presence asks `k3d cluster list` through
-//     the detect capability. Every other verdict still opens the menu with no
+//     the detect capability. Every other verdict still opens the landing with no
 //     shell-out at all, and this one adds no round trip on top of another:
 //     `absent` is precisely the case that does not dial. A listing that fails
 //     or hangs answers the same as an empty one, which keeps Install offered
 //     on the machine that genuinely has nothing.
 //  3. A SLOW PROBE DEGRADES, IT DOES NOT HANG. The deadline is raced HERE
 //     rather than trusted to the probe, so an injected or future probe that
-//     never settles still yields `installed-unreachable` and the menu still
-//     opens. The verdict exists to choose between three menus; being wrong for
-//     a second costs a menu item, whereas blocking the button costs the
+//     never settles still yields `installed-unreachable` and the landing still
+//     opens. The verdict exists to choose what the landing offers; being wrong
+//     for a second costs a choice, whereas blocking the button costs the
 //     feature.
 //
 //     BUT ONE MISS IS NOT A VERDICT. The first TLS handshake from the editor's
@@ -55,7 +55,6 @@ import { WebSocket as NodeWebSocket } from "ws";
 
 import { composeEndpointFromDomain, webSocketUrlFor } from "../connection/endpoint.js";
 import { defaultReceiptPath, readReceipt, recordedStackTag, type Receipt } from "../install/receipt.js";
-import { offersReconnect } from "./reconnect.js";
 import { readClustersFileSafe } from "./file.js";
 import type { ClusterConfig } from "./model.js";
 
@@ -77,7 +76,7 @@ export type PresenceVerdict =
    * It is not `absent`, because something is here and installing over it
    * adopts its database. It is not `installed-*` either, because there is no
    * receipt: nothing knows what is on this machine, so repair and uninstall
-   * have nothing to reverse. Its acts are adopt or delete, and the menu says
+   * have nothing to reverse. Its acts are adopt or delete, and the landing says
    * which cluster it is talking about.
    */
   | "present-unreceipted";
@@ -152,7 +151,7 @@ export const PROBE_TRIES = 2;
 /**
  * How long a verdict is reused.
  *
- * Long enough that opening the menu twice in a row does not dial twice, short
+ * Long enough that opening the page twice in a row does not dial twice, short
  * enough that a cluster started (or stopped) in the meantime is noticed
  * without anyone reaching for Refresh. Install and uninstall do not wait for
  * it -- they call invalidate(), because they are the two events that change
@@ -333,7 +332,7 @@ export interface PresenceOptions {
  *
  * NO PROBE WITHOUT EVIDENCE. There is nothing to dial when nothing is
  * installed, the verdict is `absent` either way, and dialing anyway would put
- * a network round trip in front of the menu for the one operator who most
+ * a network round trip in front of the landing for the one operator who most
  * needs it to open promptly -- the one with no cluster at all.
  *
  * Never rejects. Every caller is a UI affordance whose alternative to a
@@ -391,7 +390,7 @@ export async function detectPresence(opts: PresenceOptions): Promise<PresenceRes
  * Runs `work`, answering false if it rejects or outlives the deadline.
  *
  * The deadline is enforced here rather than left to the probe because "never
- * hangs the menu" is a property of this module, not a promise extracted from
+ * hangs the landing" is a property of this module, not a promise extracted from
  * whatever function was injected. The abandoned promise is left to settle on
  * its own -- the default probe tears its socket down on the same deadline, and
  * an injected one has nothing to tear down.
@@ -534,7 +533,7 @@ export class ClusterPresence {
    * MUST be called when an install or an uninstall completes: those are the
    * two events that change the answer deterministically, and waiting out a
    * 30-second window afterwards would show an operator who just installed a
-   * cluster the menu for someone who has none.
+   * cluster the landing for someone who has none.
    */
   invalidate(): void {
     this.cached = undefined;
@@ -561,159 +560,20 @@ export class ClusterPresence {
 }
 
 // ---------------------------------------------------------------------------
-// the menu the verdict produces
+// the acts a verdict can lead to
 // ---------------------------------------------------------------------------
 
 /**
- * What the "+" can offer.
+ * What the Add a cluster page can be opened on.
  *
- * `install` and `installGuided` are separate actions rather than one action
- * with a mode flag, because the choice is made BEFORE any work starts and
- * changes what the first screen asks for: Automatic runs each step's capability
- * and then verifies it, Guided renders the command, waits, and polls the same
- * verify. Same graph, same verdict of done -- different screen.
- *
- * `uninstall` is the gap memql#3471 closes. `cli.js uninstall` has existed
- * since the substrate epic (#3357); nothing in the editor could reach it, so a
- * local cluster could be repaired but never removed from the machine.
+ * Which of these a machine is offered is the landing's decision
+ * (state/addCluster.ts, `landingView`), made from the verdict above.
  */
 export type AddClusterAction =
   | "install"
-  | "installGuided"
   | "connect"
   | "reconnect"
   | "repair"
   | "uninstall"
   /** Register the cluster that is already here, without installing over it. */
   | "adopt";
-
-export interface AddClusterChoice {
-  action: AddClusterAction;
-  label: string;
-  detail: string;
-}
-
-/**
- * The card that consumes the verdict (memql#3741).
- *
- * Distinct from CONNECT, which is the REMOTE registration form. This one asks
- * nothing: the machine already knows the domain, either from the install
- * receipt or from the installer's own default, and the entry is composed from
- * it. See clusters/reconnect.ts.
- */
-const RECONNECT: AddClusterChoice = {
-  action: "reconnect",
-  label: "Connect to the local cluster",
-  detail: "It is already on this machine. MemQL uses what the install recorded -- nothing to type.",
-};
-
-const CONNECT: AddClusterChoice = {
-  action: "connect",
-  label: "Connect to an existing cluster...",
-  detail: "Register a cluster you already have -- local, staging or production.",
-};
-
-const UNINSTALL: AddClusterChoice = {
-  action: "uninstall",
-  label: "Uninstall the local cluster...",
-  detail: "Remove it from this machine. You will see exactly what goes first.",
-};
-
-/**
- * What a live cluster with NO RECEIPT is offered (memql#5118, D8).
- *
- * NO INSTALL AND NO REPAIR. Installing would adopt this cluster's database
- * under a fresh receipt -- the exact failure the fourth signal exists to stop
- * -- and repair has nothing to reverse, because nothing recorded what is on
- * this machine. So there are two honest acts: use it as it is, or take it away
- * deliberately.
- */
-const ADOPT: AddClusterChoice = {
-  action: "adopt",
-  label: "Connect to the cluster that is already here",
-  detail:
-    `A cluster named ${LOCAL_CLUSTER_NAME} exists that this installer did not create. ` +
-    "Register it and use it as it is.",
-};
-
-/**
- * The delete, which is the uninstall form with its data box.
- *
- * It is the one path in the wizard that removes a cluster MemQL did not
- * create, and it asks for a typed phrase first -- which is why the label says
- * so rather than reading like the ordinary uninstall beside it.
- */
-const DELETE_UNRECEIPTED: AddClusterChoice = {
-  action: "uninstall",
-  label: "Delete the cluster and its data...",
-  detail:
-    "Take it off this machine. You will be asked to type a phrase first, " +
-    "because nothing here recorded what it holds.",
-};
-
-/**
- * What the "+" offers, given the verdict.
- *
- * INSTALL APPEARS FOR `absent` AND FOR NOTHING ELSE. That is the whole point
- * of the evidence pass: an install run over a cluster that already exists is
- * not a wasted click, it is a k3d cluster and a hosts block and a trust-store
- * CA rebuilt underneath a working parity stack. Both install variants obey it.
- *
- * UNINSTALL IS THE EXACT COMPLEMENT: offered for both verdicts that say
- * something is here, and never for `absent`, where there is nothing to remove.
- *
- * ORDER IS THE ONLY RECOMMENDATION A CARD LIST CAN MAKE, so the first entry is
- * what the operator most likely came for. On `installed-unreachable` that is
- * repair -- they came to fix a broken cluster, not to register a second one.
- *
- * The one-item-means-no-picker rule this function used to carry is gone with
- * the quick pick that needed it: `installed-healthy` now has two entries, and
- * the caller renders cards rather than a picker either way (memql#3472).
- */
-export function addClusterMenu(
-  verdict: PresenceVerdict,
-  registered: boolean,
-): AddClusterChoice[] {
-  const reconnect = offersReconnect(verdict, registered) ? [RECONNECT] : [];
-  switch (verdict) {
-    case "absent":
-      return [
-        {
-          action: "install",
-          label: "Install a local cluster",
-          detail: "Recommended. Build a local MemQL cluster on this machine.",
-        },
-        {
-          action: "installGuided",
-          label: "Install a local cluster -- guided",
-          detail:
-            "Same steps, but each command is shown for you to run yourself. " +
-            "Use this when a step needs elevation you would rather grant by hand.",
-        },
-        CONNECT,
-      ];
-    case "installed-unreachable":
-      // Repair first: an operator looking at a cluster that will not answer
-      // came to fix it. Reconnecting is what they do next, or instead.
-      return [
-        {
-          action: "repair",
-          label: "Repair the local cluster",
-          detail: "A local cluster is installed but is not answering.",
-        },
-        ...reconnect,
-        UNINSTALL,
-        CONNECT,
-      ];
-    case "installed-healthy":
-      // Reconnect FIRST when it is offered at all: a healthy cluster that is
-      // not in the list is a cluster the operator removed the row for, and
-      // putting it back is the only reason they opened this menu.
-      return [...reconnect, CONNECT, UNINSTALL];
-    case "present-unreceipted":
-      // ADOPT FIRST, because it is almost always what they want: a developer
-      // who ran `make up` before they ever opened this wizard has a working
-      // cluster and came here to point the editor at it.
-      return [ADOPT, CONNECT, DELETE_UNRECEIPTED];
-  }
-}

@@ -38,7 +38,7 @@ test("loadPage appends rows and advances the cursor", async () => {
   assert.equal(changed, true);
   assert.deepEqual(state.nodes, [{ id: "a" }, { id: "b" }]);
   assert.equal(state.nextCursor, "cursor-1");
-  assert.equal(state.error, "");
+  assert.equal(state.listError, "");
 });
 
 test("a fresh reset() wins over a late-resolving stale loadPage()", async () => {
@@ -84,11 +84,11 @@ test("a late-resolving stale loadPage() rejection does not plant an error over a
   const freshLoad = state.loadPage(() => fresh.promise);
   fresh.resolve({ rows: [{ id: "fresh" }], nextCursor: "" });
   await freshLoad;
-  assert.equal(state.error, "");
+  assert.equal(state.listError, "");
 
   stale.reject(new Error("stale boom"));
   assert.equal(await staleLoad, false);
-  assert.equal(state.error, "", "the stale rejection must not turn the fresh state into an error");
+  assert.equal(state.listError, "", "the stale rejection must not turn the fresh state into an error");
   assert.deepEqual(state.nodes, [{ id: "fresh" }]);
 });
 
@@ -98,7 +98,7 @@ test("a non-stale loadPage() rejection sets the error message", async () => {
   const changed = await state.loadPage(() => Promise.reject(new Error("boom")));
 
   assert.equal(changed, true);
-  assert.equal(state.error, "boom");
+  assert.equal(state.listError, "boom");
   assert.deepEqual(state.nodes, []);
 });
 
@@ -206,7 +206,7 @@ test("a superseded selection's rejection does not plant an error over the newer 
 
   forA.reject(new Error("row-a fetch failed"));
   assert.equal(await resolveA, false);
-  assert.equal(state.error, "", "row A's stale rejection must not surface as the panel's error");
+  assert.equal(state.detailError, "", "row A's stale rejection must not surface as the panel's error");
   assert.deepEqual(state.detail, { id: "detail-b" });
 });
 
@@ -223,17 +223,6 @@ test("reset() discards an in-flight selection the same way it discards an in-fli
   assert.equal(await resolve, false);
   assert.equal(state.detail, null, "reset() must leave detail cleared, not painted by the stale settle");
   assert.equal(state.selectedRowId, undefined);
-});
-
-test("setConnectionError records the message without touching rows or selection", () => {
-  const state = new ConceptPanelState<{ id: string }>();
-  state.beginSelection("row-1");
-
-  state.setConnectionError("Not connected.");
-
-  assert.equal(state.error, "Not connected.");
-  assert.equal(state.selectedRowId, "row-1");
-  assert.deepEqual(state.nodes, []);
 });
 
 test("reset() clears rows, cursor, selection, detail, and error", async () => {
@@ -253,39 +242,40 @@ test("reset() clears rows, cursor, selection, detail, and error", async () => {
   assert.equal(state.nextCursor, "");
   assert.equal(state.selectedRowId, undefined);
   assert.equal(state.detail, null);
-  assert.equal(state.error, "");
+  assert.equal(state.listError, "");
+  assert.equal(state.detailError, "");
 });
 
 // liveUpdatesDegradedMessage guards the "live updates are off" notice
 // (concept-panel review finding, task 10): it must survive exactly what
-// errorMessage does not, or the notice flashes and disappears the moment
+// the read errors do not, or the notice flashes and disappears the moment
 // any ordinary query next succeeds on the same connection -- the "silently
 // appearing static" failure mode the notice exists to prevent.
 
-test("setLiveUpdatesDegraded records the notice independently of state.error", () => {
+test("setLiveUpdatesDegraded records the notice independently of the read errors", () => {
   const state = new ConceptPanelState<{ id: string }>();
 
   state.setLiveUpdatesDegraded("live updates unavailable: boom");
 
   assert.equal(state.liveUpdatesError, "live updates unavailable: boom");
-  assert.equal(state.error, "", "the degraded notice must not also populate the transient error field");
+  assert.equal(state.listError, "", "the degraded notice must not also populate the transient error field");
 });
 
-test("a successful loadPage() clears state.error but does NOT clear the live-updates degraded notice", async () => {
+test("a successful loadPage() clears the list error but does NOT clear the live-updates degraded notice", async () => {
   const state = new ConceptPanelState<{ id: string }>();
   state.setLiveUpdatesDegraded("live updates unavailable: boom");
 
   // A prior ordinary error, for contrast -- this one MUST be cleared by a
   // successful load, same as always.
   await state.loadPage(() => Promise.reject(new Error("prior fetch error")));
-  assert.equal(state.error, "prior fetch error");
+  assert.equal(state.listError, "prior fetch error");
 
   const changed = await state.loadPage(() =>
     Promise.resolve({ rows: [{ id: "a" }], nextCursor: "" }),
   );
 
   assert.equal(changed, true);
-  assert.equal(state.error, "", "a successful loadPage() clears the transient error as usual");
+  assert.equal(state.listError, "", "a successful loadPage() clears the transient error as usual");
   assert.equal(
     state.liveUpdatesError,
     "live updates unavailable: boom",
@@ -294,7 +284,7 @@ test("a successful loadPage() clears state.error but does NOT clear the live-upd
   );
 });
 
-test("a successful resolveSelection() clears state.error but does NOT clear the live-updates degraded notice", async () => {
+test("a successful resolveSelection() clears the detail error but does NOT clear the live-updates degraded notice", async () => {
   const state = new ConceptPanelState<{ id: string }>();
   state.setLiveUpdatesDegraded("live updates unavailable: boom");
 

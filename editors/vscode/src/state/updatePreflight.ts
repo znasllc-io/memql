@@ -40,20 +40,6 @@ export interface UpdatePreflightInputs extends RebuildPreflightInputs {
   update?: UpdateState;
 }
 
-/**
- * Whether the check has found something that makes the run pointless.
- *
- * TWO CASES ONLY, and both are things the SCRIPT refuses before it fetches: an
- * operation already under way, and no branch to update to. Everything else --
- * uncommitted work, a divergence, an unreachable remote -- is a MAYBE that only
- * the run can settle, and withholding the act on a maybe would withhold one
- * whose outcome is very often success.
- */
-export function updateIsBlocked(update: UpdateState | undefined): boolean {
-  if (update === undefined) return false;
-  return update.inProgress !== "" || update.branch === "";
-}
-
 /** Everything the pull-and-rebuild screen states. */
 export function updateCheck(i: UpdatePreflightInputs): RebuildCheck {
   const facts: CheckFact[] = [{ label: "Source", value: i.checkoutDir, mono: true }];

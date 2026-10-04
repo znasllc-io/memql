@@ -184,10 +184,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	requestID := requestIDFor(name, identityKeyFor(src, r.Header, body))
 	mutation := fmt.Sprintf(
 		`mutation stageInboundRequest(requestId: %s, source: %s, medium: "webhook", body: %s, `+
-			`contentType: %s, headersJson: %s, dedupeKey: %s, signatureVerified: %t, receivedAt: %s)`,
+			`contentType: %s, headersJson: %s, dedupeKey: %s, signatureVerified: %t, verifiedBy: %s, receivedAt: %s)`,
 		memqlString(requestID), memqlString(name), memqlString(string(body)),
 		memqlString(r.Header.Get("Content-Type")), memqlString(headers), memqlString(dedupeKey), verified,
-		memqlString(received.Format(time.RFC3339)))
+		memqlString(src.verifiedBy), memqlString(received.Format(time.RFC3339)))
 
 	if _, err := h.engine.Execute(systemActorContext(r.Context()), mutation); err != nil {
 		// The delivery was valid; we simply could not record it. 503 is the
@@ -281,6 +281,7 @@ func (h *Handler) resolveSource(ctx context.Context, name string) (SourceConfig,
 				"source", name, "connector", c.Name(), "env", "MEMQL_INBOUND_SOURCE_"+envSuffix(name)+"_*")
 			return SourceConfig{}, false
 		}
+		src.verifiedBy = memqlsync.VerifiedByEnv
 		return src, true
 	}
 	// THE REGISTERED TIER, after the environment and before the connectors.
@@ -299,6 +300,7 @@ func (h *Handler) resolveSource(ctx context.Context, name string) (SourceConfig,
 				return SourceConfig{}, false
 			}
 			src.Name = name
+			src.verifiedBy = memqlsync.VerifiedByRegistered
 			return src, true
 		}
 	}
@@ -324,6 +326,7 @@ func (h *Handler) resolveSource(ctx context.Context, name string) (SourceConfig,
 		SignaturePrefix: src.SignaturePrefix,
 		DedupeHeader:    src.DedupeHeader,
 		ForwardHeaders:  src.ForwardHeaders,
+		verifiedBy:      memqlsync.VerifiedByConnector,
 	}, true
 }
 

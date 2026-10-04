@@ -90,10 +90,13 @@ survive, this is the shortest correct path and the one to prefer. It destroys
 and re-creates the cluster, so it is not a procedure for anything else -- see
 [Crossing a barrier on a remote cluster](#crossing-a-barrier-on-a-remote-cluster).
 
-- [ ] Uninstall the cluster (the extension's **Uninstall** action, behind its
-      removal preview; or `make down PURGE=1` in the checkout).
-- [ ] Install again at the new tag (the extension's **Create deployment**; or
-      `make up` in a checkout moved to the new tag).
+- [ ] Uninstall the cluster (the extension's **MemQL: Uninstall Local
+      Cluster...**, whose page lists what goes before anything does -- turn on
+      **Delete the cluster's data** for a cluster the extension did not create;
+      or `make down PURGE=1` in the checkout).
+- [ ] Install again at the new tag (the extension's **MemQL: Install Local
+      Cluster...**, choosing the tag under **More options**; or `make up` in a
+      checkout moved to the new tag).
 
 The install graph registers the operator stack and provisions the CNPG cluster
 as part of a normal first install, so there is nothing barrier-specific to do.

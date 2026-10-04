@@ -26,20 +26,8 @@
 
 import * as os from "node:os";
 
-import type { RemovalElevation, RemovalItemView } from "@znasllc-io/memql-view-kit";
+import type { RemovalElevation } from "@znasllc-io/memql-view-kit";
 import { maskHomePath } from "./secrets.js";
-
-/**
- * The row type, re-exported so a caller of this mapping needs one import.
- *
- * It used to be REDECLARED here, because the view-kit export was still on its
- * own branch and a copy was the only way to be pure over a plain value. The
- * export has landed, so the copy is gone: two declarations of one row shape are
- * two things to keep in step, and the field they would have drifted on first is
- * `elevation`, whose whole point is that a value missing from the view model is
- * a warning the operator never sees.
- */
-export type { RemovalElevation, RemovalItemView };
 
 /**
  * The half of `PlannedStep` (session.ts, #3469) this mapping reads.
@@ -52,12 +40,8 @@ export interface PreviewStep {
   id: string;
   description: string;
   action: "run" | "skip";
-  /** Why it will be skipped. Empty for a step that will run. */
-  reason: string;
   /** The artifact pre-existed the install, so it stays. */
   preserved: boolean;
-  /** What will be removed, ALREADY in words -- e.g. `cluster memql`. */
-  target: string;
   /**
    * What removing this artifact will ask of the operator.
    *
@@ -80,57 +64,6 @@ export interface PreviewStep {
   sharedReason: string;
 }
 
-/** The half of `UninstallPreview` (session.ts, #3469) this mapping reads. */
-export interface PreviewInput {
-  /** The steps that will actually remove something. */
-  removals: readonly PreviewStep[];
-  /** Artifacts the install found already present. They stay. */
-  preserved: readonly PreviewStep[];
-}
-
-/**
- * The reason shown when a preserved step carries none of its own.
- *
- * THIS IS A GUARD, NOT THE EXPECTED PATH. `previewUninstall` populates a
- * preserved step's reason at the source, where the receipt's pre-existence
- * verdict is actually in hand, so in practice every preserved row arrives with
- * a better sentence than this one and this constant goes unused. It survives
- * anyway because the invariant it protects belongs to THIS function: a
- * preserved row must never render bare, since a preserved artifact with no
- * stated reason reads as a removal that quietly failed -- the precise opposite
- * of what happened, which is that the installer found it already here and is
- * deliberately declining to touch it.
- *
- * Deleting it would make that property depend on a different module keeping
- * its own discipline. `reason` is typed `string`, so an empty one stays
- * representable no matter what today's producer does.
- */
-const DEFAULT_PRESERVED_REASON = "it existed before the install";
-
-/**
- * The rows the uninstall preview renders.
- *
- * REMOVALS FIRST, THEN PRESERVED, each in the order the preview already carries
- * them. Those arrays are partitioned and ordered by `previewUninstall` out of
- * the uninstall graph's own topological order -- which is NOT the reverse of
- * the install order, since mkcert has to outlive the CA it is needed to
- * uninstall. Re-sorting here would silently replace a real ordering with a
- * plausible-looking one; the renderer does not sort either. What comes back is
- * what the operator reads, top to bottom.
- */
-export function removalPreviewItems(preview: PreviewInput): RemovalItemView[] {
-  const items: RemovalItemView[] = [];
-  for (const step of preview.removals) {
-    if (isArtifactless(step)) continue;
-    items.push(itemFor(step));
-  }
-  for (const step of preview.preserved) {
-    if (isArtifactless(step)) continue;
-    items.push(itemFor(step));
-  }
-  return items;
-}
-
 /**
  * A step with nothing behind it.
  *
@@ -143,56 +76,6 @@ export function removalPreviewItems(preview: PreviewInput): RemovalItemView[] {
  */
 function isArtifactless(step: PreviewStep): boolean {
   return step.action === "skip" && !step.preserved;
-}
-
-function itemFor(step: PreviewStep): RemovalItemView {
-  const item: RemovalItemView = {
-    id: step.id,
-    label: label(step),
-    kind: step.preserved ? "preserved" : "removed",
-    // SET ON EVERY ROW, "none" included. The preview IS the confirmation, so
-    // this list is the only moment the operator consents -- and two of the
-    // seven uninstall steps stop and ask for something outside MemQL's own
-    // footprint (removeHostsBlock takes root to edit the system hosts file,
-    // removeLocalCA takes a trust-store prompt to withdraw a CA the browsers
-    // trust). A row that omitted the value would render no marker at all, which
-    // reads as "this needs nothing" -- consent obtained for a prompt the
-    // operator was never shown.
-    elevation: step.elevation,
-  };
-  if (step.preserved) {
-    item.reason = step.reason.trim() !== "" ? step.reason : DEFAULT_PRESERVED_REASON;
-  }
-  return item;
-}
-
-/**
- * What the step is about, plus which thing it is about.
- *
- * `target` arrives ALREADY rendered ("cluster memql-local", "path
- * /home/dev/.memql/bin/k3d"), phrased off the very params the removal will be
- * given. Re-rendering it from params here would be a second phrasing to keep in
- * step with the first, and the failure would be a preview naming something
- * other than what gets removed -- so it is passed through untouched.
- *
- * It also does the work the description cannot: three of the uninstall graph's
- * seven steps remove a `binary`, and while their descriptions differ, it is the
- * target that says WHICH file is going. When the preview has no target the
- * description stands alone -- an empty "()" would advertise a value nobody has.
- */
-function label(step: PreviewStep): string {
-  // Descriptions are sentences in the graph document ("Delete the local k3d
-  // cluster."), and a list item that ends in a full stop before its
-  // parenthetical reads as two fragments. The trailing stop comes off.
-  const described = step.description.trim().replace(/\.+$/, "");
-  // Home masked (memql#4194, audit 32): the preview is the consent screen and
-  // stays fully informative as `~/.memql/...`; the account name adds nothing.
-  const target = maskHomePath(step.target.trim(), os.homedir());
-  if (described !== "" && target !== "") return `${described} (${target})`;
-  // A row with no words at all is unreadable, and an unreadable row is an
-  // artifact the operator cannot consent to. The step id is a poor name but it
-  // is always there.
-  return described || target || step.id;
 }
 
 // ---------------------------------------------------------------------------

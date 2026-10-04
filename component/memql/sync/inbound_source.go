@@ -58,6 +58,16 @@ type InboundSource struct {
 	SecretRef string
 }
 
+// The tiers that can verify an inbound delivery, as the receiver stamps them
+// on the staged row's verifiedBy (memql#5795). The dispatcher applies a row
+// whose source a connector claims only when VerifiedByConnector verified it:
+// the connector reads such a row as signed by its own secret for that tenant.
+const (
+	VerifiedByEnv        = "env"
+	VerifiedByRegistered = "registered"
+	VerifiedByConnector  = "connector"
+)
+
 // SourceName composes the inbound source segment for one of a
 // connector's tenants.
 //

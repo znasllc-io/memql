@@ -68,6 +68,15 @@ test("nothing stored anywhere is neither", () => {
   assert.equal(facts.signedIn, false);
 });
 
+test("an issuer and a client id are not a session", () => {
+  // They name WHERE tokens come from; they are not a token. Counting them is
+  // what let a cluster with no credential look ready and then fail at the
+  // handshake (memql#3383).
+  const facts = factsFrom(cluster({ issuer: "https://identity.memql.localhost", clientId: "cockpit" }), none);
+  assert.equal(facts.session, false);
+  assert.equal(facts.signedIn, false);
+});
+
 test("a personal access token is never a session, even beside a refresh token", () => {
   assert.equal(factsFrom(cluster({ token: "mql_pat_x" }), { ...none, secretRefresh: "RT" }).session, false);
 });
