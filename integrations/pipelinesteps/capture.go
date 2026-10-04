@@ -33,8 +33,11 @@ import (
 //     Library. It is the record: every line, whole, up to ArchiveMax bytes,
 //     then one line saying how many bytes were dropped. A line the store
 //     refused -- capped or paced -- is still archived.
-//   - The TAIL is the last 40 store lines, for a failed step's inline excerpt
-//     (pl.StepResult.LogTail).
+//   - The TAIL is the last 40 store lines within 16 KiB, for a failed step's
+//     inline excerpt (pl.StepResult.LogTail). Its byte budget is set here,
+//     at the one producer both the cluster and the fleet path share: the
+//     runner writes the step's outcome as JSON into a Job annotation, and
+//     Kubernetes caps all of an object's annotations at 256 KiB.
 //
 // Every output line is CLEANED once, before it goes anywhere: NUL bytes are
 // dropped (Postgres refuses them in text and in jsonb), invalid UTF-8 becomes
@@ -106,9 +109,10 @@ type CaptureResult struct {
 	ArchivePath string
 	// ArchiveBytes is the archive's size, its truncation line included.
 	ArchiveBytes int64
-	// Tail is the last 40 store lines joined by "\n", masked: lines of at
-	// most 4096 bytes as the store has them, so when the last line of output
-	// is longer, the tail holds its end.
+	// Tail is the last store lines joined by "\n", masked: at most 40 of
+	// them and at most 16 KiB, the oldest dropped whole to fit. Lines are as
+	// the store has them (at most 4096 bytes), so when the last line of
+	// output is longer, the tail holds its end.
 	Tail string
 	// Artifacts is the decoded tar.gz of the step's frame; nil when no
 	// complete frame was decoded within ArtifactMax.
@@ -132,6 +136,10 @@ const (
 	captureStoreLineBytes = 4096
 	// captureTailLines is the tail's length (pl.StepResult.LogTail).
 	captureTailLines = 40
+	// captureTailBytes is the tail's byte budget. JSON can spend six bytes
+	// on one ('<' is \u003c), so 16 KiB of tail marshals to at most about
+	// 96 KiB, well inside the 256 KiB every annotation of a Job shares.
+	captureTailBytes = 16 << 10
 	// captureDefaultStoreRate is StoreRate's default.
 	captureDefaultStoreRate = 200
 	// captureMaskMinBytes is the shortest secret value that is masked.
@@ -445,7 +453,33 @@ func (c *Capture) tailString() string {
 	for i := 0; i < c.tailLen; i++ {
 		parts = append(parts, c.tail[(start+i)%captureTailLines])
 	}
-	return strings.Join(parts, "\n")
+	return captureTail(parts, captureTailBytes)
+}
+
+// captureTail joins store lines, oldest first, within budget bytes. The
+// oldest lines are dropped whole until the rest fits; a single line still
+// over the budget keeps its END -- a failed step's last words are at the end
+// -- cut forward to where a rune starts.
+func captureTail(pieces []string, budget int) string {
+	if budget <= 0 || len(pieces) == 0 {
+		return ""
+	}
+	size := len(pieces) - 1 // the newlines between them
+	for _, p := range pieces {
+		size += len(p)
+	}
+	for len(pieces) > 1 && size > budget {
+		size -= len(pieces[0]) + 1
+		pieces = pieces[1:]
+	}
+	if last := pieces[0]; len(pieces) == 1 && len(last) > budget {
+		cut := len(last) - budget
+		for cut < len(last) && !utf8.RuneStart(last[cut]) {
+			cut++
+		}
+		return last[cut:]
+	}
+	return strings.Join(pieces, "\n")
 }
 
 // clean is the one repair every line gets: NUL dropped, invalid UTF-8

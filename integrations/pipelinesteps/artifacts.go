@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"path"
 	"sort"
 	"strings"
@@ -40,6 +41,16 @@ import (
 //     past it is refused by its header rather than inflated; and the entry
 //     and file counts are bounded too, so a frame of a million empty files
 //     can become neither a million allocations nor a million Library files.
+//   - A header's size is a CLAIM. A negative one makes the archive
+//     unreadable; a header-only entry (a directory, a link, a device, a FIFO)
+//     costs nothing whatever it claims, because archive/tar reads no data for
+//     one; and an entry's buffer grows with the bytes that actually arrive,
+//     so a claim bounds a read and never sizes an allocation.
+//   - The whole decompressed STREAM is bounded too. archive/tar consumes PAX
+//     and GNU long-name headers inside the one Next call that returns the
+//     entry behind them -- each up to 1 MiB, as many as the archive holds --
+//     so neither the entry count nor the byte total sees them; a stream
+//     longer than its entries could account for is refused as too large.
 //
 // A refused entry costs only itself: it is skipped and reported, and the
 // rest of the archive is still read.
@@ -93,7 +104,20 @@ const (
 	extractMaxEntries = 4 * extractMaxFiles
 	// extractMaxReported bounds the skipped entries listed by name.
 	extractMaxReported = 32
+	// extractEntryOverhead is what one entry may add to the tar stream
+	// beyond its data: its 512-byte header, up to 511 bytes padding the data
+	// to a block, and a long name or PAX header of up to about 3 KiB.
+	extractEntryOverhead = 4 << 10
+	// extractStreamSlack covers the end-of-archive blocks and the zeros tar
+	// pads its last record with (10 KiB at the default blocking factor).
+	extractStreamSlack = 64 << 10
+	// extractBodyChunk is the first buffer an entry's bytes go into; it
+	// doubles as bytes arrive, up to the entry's claimed size.
+	extractBodyChunk = 64 << 10
 )
+
+// errExtractStream refuses a decompressed stream past its budget.
+var errExtractStream = fmt.Errorf("%w: the archive's tar stream is longer than its entries can account for", ErrArtifactsTooLarge)
 
 // ExtractArtifacts unpacks a tar.gz within limits: regular files only, no
 // absolute paths, no "..", total bytes <= maxBytes; declared paths that
@@ -118,7 +142,7 @@ func ExtractArtifacts(tgz []byte, declared []string, maxBytes int64) (files []Ar
 		return nil, nil, fmt.Errorf("pipelinesteps: the artifacts are not a gzip archive: %w", err)
 	}
 	defer gz.Close()
-	tr := tar.NewReader(gz)
+	tr := tar.NewReader(&extractBudgetReader{r: gz, left: extractStreamBudget(maxBytes)})
 
 	var (
 		skipped SkippedEntriesError
@@ -143,16 +167,23 @@ func ExtractArtifacts(tgz []byte, declared []string, maxBytes int64) (files []Ar
 		// that one entry, which the name check below makes too.
 		insecure := hdr != nil && errors.Is(nerr, tar.ErrInsecurePath)
 		if nerr != nil && !insecure {
-			return nil, nil, fmt.Errorf("pipelinesteps: the artifact archive cannot be read: %w", nerr)
+			return nil, nil, extractReadError("", nerr)
 		}
 		entries++
 		if entries > extractMaxEntries {
 			return nil, nil, fmt.Errorf("%w: the artifact archive holds more than %d entries", ErrArtifactsTooLarge, extractMaxEntries)
 		}
-		if hdr.Size > maxBytes-total {
+		if hdr.Size < 0 {
+			return nil, nil, fmt.Errorf("pipelinesteps: the artifact archive cannot be read: %q declares a negative size", hdr.Name)
+		}
+		size := hdr.Size
+		if extractHeaderOnly(hdr.Typeflag) {
+			size = 0 // archive/tar reads no data for it, whatever the field says
+		}
+		if size > maxBytes-total {
 			return nil, nil, fmt.Errorf("%w: the artifacts expand past %d bytes", ErrArtifactsTooLarge, maxBytes)
 		}
-		total += hdr.Size
+		total += size
 
 		name, why := extractEntryName(hdr.Name)
 		if why == "" && insecure {
@@ -180,9 +211,9 @@ func ExtractArtifacts(tgz []byte, declared []string, maxBytes int64) (files []Ar
 		if !seen && len(files) >= extractMaxFiles {
 			return nil, nil, fmt.Errorf("%w: the artifacts hold more than %d files", ErrArtifactsTooLarge, extractMaxFiles)
 		}
-		body := make([]byte, hdr.Size)
-		if _, rerr := io.ReadFull(tr, body); rerr != nil {
-			return nil, nil, fmt.Errorf("pipelinesteps: the artifact archive cannot be read at %q: %w", hdr.Name, rerr)
+		body, rerr := extractBody(tr, size)
+		if rerr != nil {
+			return nil, nil, extractReadError(hdr.Name, rerr)
 		}
 		if seen {
 			files[at].Bytes = body // a later entry for the same path replaces it, as tar does
@@ -209,6 +240,80 @@ func ExtractArtifacts(tgz []byte, declared []string, maxBytes int64) (files []Ar
 		return files, missing, &skipped
 	}
 	return files, missing, nil
+}
+
+// extractReadError is a read that failed: the stream's budget refusal as
+// itself (it is ErrArtifactsTooLarge), anything else as an unreadable
+// archive.
+func extractReadError(name string, err error) error {
+	if errors.Is(err, ErrArtifactsTooLarge) {
+		return err
+	}
+	if name == "" {
+		return fmt.Errorf("pipelinesteps: the artifact archive cannot be read: %w", err)
+	}
+	return fmt.Errorf("pipelinesteps: the artifact archive cannot be read at %q: %w", name, err)
+}
+
+// extractStreamBudget is how long a decompressed tar stream may be for
+// maxBytes of data: the data, every entry's overhead, and the end.
+func extractStreamBudget(maxBytes int64) int64 {
+	const overhead = extractMaxEntries*extractEntryOverhead + extractStreamSlack
+	if maxBytes > math.MaxInt64-overhead {
+		return math.MaxInt64
+	}
+	return maxBytes + overhead
+}
+
+// extractBudgetReader is the decompressed stream, refused past its budget.
+type extractBudgetReader struct {
+	r    io.Reader
+	left int64
+}
+
+func (b *extractBudgetReader) Read(p []byte) (int, error) {
+	if b.left < 0 {
+		return 0, errExtractStream
+	}
+	if int64(len(p)) > b.left {
+		p = p[:b.left+1] // one byte past the budget, to learn whether there is one
+	}
+	n, err := b.r.Read(p)
+	b.left -= int64(n)
+	if b.left < 0 {
+		return n, errExtractStream
+	}
+	return n, err
+}
+
+// extractHeaderOnly is archive/tar's own set of entry types that carry no
+// data in the stream.
+func extractHeaderOnly(flag byte) bool {
+	switch flag {
+	case tar.TypeLink, tar.TypeSymlink, tar.TypeChar, tar.TypeBlock, tar.TypeDir, tar.TypeFifo:
+		return true
+	}
+	return false
+}
+
+// extractBody reads an entry's size bytes into a buffer that grows only as
+// bytes arrive: the header's claim bounds the read, and an entry that claims
+// a gigabyte and holds a kilobyte costs a kilobyte before it is refused.
+func extractBody(r io.Reader, size int64) ([]byte, error) {
+	body := make([]byte, 0, int(min(size, extractBodyChunk)))
+	for int64(len(body)) < size {
+		if len(body) == cap(body) {
+			grown := make([]byte, len(body), int(min(size, 2*int64(cap(body)))))
+			copy(grown, body)
+			body = grown
+		}
+		n, err := io.ReadFull(r, body[len(body):cap(body)])
+		body = body[:len(body)+n]
+		if err != nil {
+			return nil, err // the data stopped short of the claim, or the stream's budget ran out
+		}
+	}
+	return body, nil
 }
 
 // extractEntryName validates one entry name and answers it cleaned, or why

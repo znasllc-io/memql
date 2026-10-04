@@ -3,6 +3,7 @@ package pipelinesteps
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -746,5 +747,68 @@ func TestCaptureReportsAnArchiveThatCannotBeWritten(t *testing.T) {
 	}
 	if again, err2 := c.Close(); err2 == nil || again.Lines != 1 {
 		t.Errorf("second Close = (%+v, %v), want the first answer again", again, err2)
+	}
+}
+
+func TestCaptureTailFitsTheAnnotationBudget(t *testing.T) {
+	// The tail rides in the step's outcome, which the runner writes as JSON
+	// into a Job annotation -- and Kubernetes caps ALL of an object's
+	// annotations at 256 KiB. JSON escapes '<' in six bytes, so forty
+	// 4096-byte lines of them would marshal to almost a megabyte.
+	c, _ := newCaptureForTest(t, CaptureOptions{})
+	line := strings.Repeat("<", 4096)
+	for i := 0; i < 40; i++ {
+		c.Feed(captureKubeLine(captureTestClock, line))
+	}
+	c.Feed(captureKubeLine(captureTestClock, "the last words"))
+	res := closeCaptureForTest(t, c)
+
+	if len(res.Tail) > 16<<10 {
+		t.Errorf("tail is %d bytes, over its 16 KiB budget", len(res.Tail))
+	}
+	marshaled, err := json.Marshal(res.Tail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(marshaled) > 128<<10 {
+		t.Errorf("the tail marshals to %d bytes: not well under the 256 KiB annotation cap", len(marshaled))
+	}
+	// The newest lines are the ones kept, and kept whole.
+	if !strings.HasSuffix(res.Tail, "\nthe last words") {
+		t.Errorf("tail ends %q, want the last line", res.Tail[max(0, len(res.Tail)-40):])
+	}
+	for i, l := range strings.Split(res.Tail, "\n") {
+		if l != line && l != "the last words" {
+			t.Errorf("tail line %d is a %d-byte fragment, want whole store lines", i, len(l))
+		}
+	}
+}
+
+func TestCaptureTailCutLandsOnARuneBoundary(t *testing.T) {
+	// Whole store lines are dropped oldest first until the tail fits; one
+	// line still over the budget keeps its END, cut where a rune starts.
+	cases := []struct {
+		name   string
+		pieces []string
+		budget int
+		want   string
+	}{
+		{"the oldest lines go first", []string{"aaaa", "bbbb", "cc\u00e9\u00e9"}, 7, "cc\u00e9\u00e9"},
+		{"a tail that fits is whole", []string{"a", "b"}, 3, "a\nb"},
+		{"one line over the budget keeps its end", []string{"aaaa", "bbbbbbbbbb"}, 5, "bbbbb"},
+		{"the cut moves forward to a rune start", []string{"xx\u00e9\u00e9"}, 3, "\u00e9"},
+		{"no lines", nil, 10, ""},
+		{"no budget", []string{"abc"}, 0, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := captureTail(tc.pieces, tc.budget)
+			if got != tc.want {
+				t.Errorf("captureTail = %q, want %q", got, tc.want)
+			}
+			if !utf8.ValidString(got) || len(got) > tc.budget {
+				t.Errorf("captureTail = %q: %d bytes, valid UTF-8 %v, budget %d", got, len(got), utf8.ValidString(got), tc.budget)
+			}
+		})
 	}
 }

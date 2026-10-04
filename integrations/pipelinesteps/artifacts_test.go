@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -21,6 +23,9 @@ type extractTestEntry struct {
 	devmajor int64
 	devminor int64
 	pax      map[string]string
+	// size is the size field of a header-only entry (a directory, a link,
+	// a device), which archive/tar writes and reads back as given.
+	size int64
 }
 
 // extractTestTgz builds the tar.gz the step wrapper's `tar -czf -` would
@@ -49,6 +54,8 @@ func extractTestTgz(t *testing.T, entries []extractTestEntry) []byte {
 		}
 		if typ == tar.TypeReg {
 			hdr.Size = int64(len(e.body))
+		} else {
+			hdr.Size = e.size
 		}
 		if err := tw.WriteHeader(hdr); err != nil {
 			t.Fatalf("fixture header %q: %v", e.name, err)
@@ -355,6 +362,185 @@ func TestExtractArtifactsStopsAtItsLimits(t *testing.T) {
 		}
 		if files != nil {
 			t.Errorf("files = %v, want none", extractTestPaths(files))
+		}
+	})
+}
+
+// extractTestNegativeSize is a directory whose header declares -claim bytes,
+// then dist/big declaring claim. With data the file really holds claim zero
+// bytes; without, the stream simply ends after its header. archive/tar reads
+// no data for a directory but returns its size field as written.
+func extractTestNegativeSize(t *testing.T, claim int64, withData bool) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{Name: "dist/", Typeflag: tar.TypeDir, Mode: 0o755, Size: -claim}); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: "dist/big", Typeflag: tar.TypeReg, Mode: 0o644, Size: claim}); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	if withData {
+		zeros := make([]byte, 1<<20)
+		for written := int64(0); written < claim; written += int64(len(zeros)) {
+			if _, err := tw.Write(zeros); err != nil {
+				t.Fatalf("fixture: %v", err)
+			}
+		}
+		if err := tw.Close(); err != nil {
+			t.Fatalf("fixture: %v", err)
+		}
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("fixture: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func TestExtractArtifactsRefusesANegativeSize(t *testing.T) {
+	t.Run("a negative-size directory lends the file after it no budget", func(t *testing.T) {
+		// 4 MiB of zeros under a 1 MiB limit: a running total the directory
+		// pushed down would let the file through whole.
+		files, _, err := ExtractArtifacts(extractTestNegativeSize(t, 4<<20, true), []string{"dist"}, 1<<20)
+		if err == nil || files != nil {
+			t.Fatalf("files = %v, err = %v: want the archive refused", extractTestPaths(files), err)
+		}
+	})
+
+	t.Run("a 2^50-byte claim behind one allocates nothing", func(t *testing.T) {
+		// A 221-byte archive: allocating from the claim is a makeslice panic.
+		files, _, err := ExtractArtifacts(extractTestNegativeSize(t, 1<<50, false), []string{"dist"}, 1<<20)
+		if err == nil || files != nil {
+			t.Fatalf("files = %v, err = %v: want the archive refused", extractTestPaths(files), err)
+		}
+	})
+
+	t.Run("a negative size makes the archive unreadable, whatever follows it", func(t *testing.T) {
+		tgz := extractTestTgz(t, []extractTestEntry{
+			{name: "dist/", typeflag: tar.TypeDir, size: -1},
+			{name: "dist/a.txt", body: "a"},
+		})
+		files, _, err := ExtractArtifacts(tgz, []string{"dist"}, 1<<20)
+		var skipped *SkippedEntriesError
+		if err == nil || files != nil || errors.Is(err, ErrArtifactsTooLarge) || errors.As(err, &skipped) {
+			t.Fatalf("files = %v, err = %v: want an unreadable archive", extractTestPaths(files), err)
+		}
+	})
+
+	t.Run("a header-only entry's size field costs nothing", func(t *testing.T) {
+		// archive/tar reads no data for a directory, a link or a device
+		// whatever its size field says, and some tars record a hard link's
+		// target size there: counting it would refuse an honest archive.
+		tgz := extractTestTgz(t, []extractTestEntry{
+			{name: "dist/", typeflag: tar.TypeDir, size: 2 << 20},
+			{name: "dist/a.txt", body: "a"},
+		})
+		files, _, err := ExtractArtifacts(tgz, []string{"dist"}, 1<<20)
+		if err != nil || !reflect.DeepEqual(extractTestPaths(files), []string{"dist/a.txt"}) {
+			t.Fatalf("files = %v, err = %v: want dist/a.txt", extractTestPaths(files), err)
+		}
+	})
+}
+
+func TestExtractArtifactsAllocatesFromDataNotClaims(t *testing.T) {
+	// A header claiming 256 MiB, inside a 512 MiB limit, then 1 KiB of data
+	// and the end of the stream: the claim may bound the read, never the
+	// allocation.
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{Name: "dist/big", Typeflag: tar.TypeReg, Mode: 0o644, Size: 256 << 20}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(make([]byte, 1024)); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil { // the tar is left unclosed: the stream ends inside the entry
+		t.Fatal(err)
+	}
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	files, _, err := ExtractArtifacts(buf.Bytes(), []string{"dist"}, 512<<20)
+	runtime.ReadMemStats(&after)
+
+	if err == nil || files != nil {
+		t.Fatalf("files = %v, err = %v: want a truncated entry refused", extractTestPaths(files), err)
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 16<<20 {
+		t.Fatalf("extracting allocated %d bytes for 1 KiB of data: the header's claim sized the buffer", grew)
+	}
+}
+
+// extractTestMetaHeaderChain is one 1-byte file behind n PAX extended headers
+// of almost 1 MiB each: archive/tar consumes the whole chain inside the ONE
+// Next call that returns the file.
+func extractTestMetaHeaderChain(t *testing.T, n int) []byte {
+	t.Helper()
+	var raw bytes.Buffer
+	tw := tar.NewWriter(&raw)
+	if err := tw.WriteHeader(&tar.Header{Name: "dist/a", Typeflag: tar.TypeReg, Mode: 0o644, Size: 1,
+		PAXRecords: map[string]string{"comment": strings.Repeat("a", (1<<20)-64)}, Format: tar.FormatPAX}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte("A")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	b := raw.Bytes()
+	if b[156] != tar.TypeXHeader {
+		t.Fatalf("fixture: first block is type %q, want a PAX header", b[156])
+	}
+	paxLen, err := strconv.ParseInt(strings.Trim(string(b[124:136]), " \x00"), 8, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := b[:512+((paxLen+511)/512)*512]
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	for i := 0; i < n; i++ {
+		if _, err := gz.Write(header); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := gz.Write(b[len(header):]); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestExtractArtifactsBoundsTheWholeStream(t *testing.T) {
+	t.Run("a chain of meta headers is refused by the stream's budget", func(t *testing.T) {
+		// Neither the entry count nor the byte total sees a meta header. 24
+		// of them is 24 MiB of tar stream for one 1-byte file: past what a
+		// 1 MiB limit's entries could account for.
+		files, missing, err := ExtractArtifacts(extractTestMetaHeaderChain(t, 24), []string{"dist"}, 1<<20)
+		if !errors.Is(err, ErrArtifactsTooLarge) {
+			t.Fatalf("err = %v, want ErrArtifactsTooLarge", err)
+		}
+		if files != nil || missing != nil {
+			t.Errorf("files = %v, missing = %v, want nothing beside a refusal", extractTestPaths(files), missing)
+		}
+	})
+
+	t.Run("honest long names stay inside it", func(t *testing.T) {
+		// The positive control: a thousand files whose 300-byte names each
+		// need a PAX header extract under the same 1 MiB limit.
+		entries := make([]extractTestEntry, 0, 1000)
+		for i := 0; i < 1000; i++ {
+			entries = append(entries, extractTestEntry{name: fmt.Sprintf("dist/%s%04d", strings.Repeat("n", 291), i), body: "x"})
+		}
+		files, _, err := ExtractArtifacts(extractTestTgz(t, entries), []string{"dist"}, 1<<20)
+		if err != nil || len(files) != 1000 {
+			t.Fatalf("%d files, err = %v: want all 1000", len(files), err)
 		}
 	})
 }
