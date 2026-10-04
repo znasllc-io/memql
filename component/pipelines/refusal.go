@@ -98,6 +98,10 @@ const (
 	CodeArtifactTooLarge = "pipeline_artifact_too_large"
 	CodeArtifactMissing  = "pipeline_artifact_missing"
 	CodeLogCapped        = "pipeline_log_capped"
+	// The runner proves the step network is isolated before its first step
+	// on a replica; a cluster whose policy engine does not enforce the
+	// pipelines namespace's NetworkPolicy starts no step at all.
+	CodeIsolationUnenforced = "pipeline_isolation_unenforced"
 )
 
 var codeClasses = map[string]Class{
@@ -116,21 +120,22 @@ var codeClasses = map[string]Class{
 	CodeForkRefused:       ClassRefusal,
 	CodeDisconnected:      ClassRefusal,
 
-	CodeRunnerUnavailable: ClassFailure,
-	CodeExecutorError:     ClassFailure,
-	CodeSecretMissing:     ClassFailure,
-	CodeStepTimeout:       ClassFailure,
-	CodeRunCeiling:        ClassFailure,
-	CodeNoMachineForNeed:  ClassFailure,
-	CodeFleetDisabled:     ClassFailure,
-	CodeJobRejected:       ClassFailure,
-	CodeJobUnschedulable:  ClassFailure,
-	CodeImagePullFailed:   ClassFailure,
-	CodeCloneFailed:       ClassFailure,
-	CodeServiceFailed:     ClassFailure,
-	CodeStepCancelled:     ClassFailure,
-	CodeNodeLost:          ClassFailure,
-	CodeArtifactTooLarge:  ClassFailure,
+	CodeRunnerUnavailable:   ClassFailure,
+	CodeExecutorError:       ClassFailure,
+	CodeSecretMissing:       ClassFailure,
+	CodeStepTimeout:         ClassFailure,
+	CodeRunCeiling:          ClassFailure,
+	CodeNoMachineForNeed:    ClassFailure,
+	CodeFleetDisabled:       ClassFailure,
+	CodeJobRejected:         ClassFailure,
+	CodeJobUnschedulable:    ClassFailure,
+	CodeImagePullFailed:     ClassFailure,
+	CodeCloneFailed:         ClassFailure,
+	CodeServiceFailed:       ClassFailure,
+	CodeStepCancelled:       ClassFailure,
+	CodeNodeLost:            ClassFailure,
+	CodeArtifactTooLarge:    ClassFailure,
+	CodeIsolationUnenforced: ClassFailure,
 
 	CodeStageBlocked:      ClassSkip,
 	CodeNotAffected:       ClassSkip,
