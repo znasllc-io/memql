@@ -129,18 +129,35 @@ var pipelinesSizing = map[string]struct {
 	"local":       {ceiling: "4", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi"},
 }
 
-// wantRunnerGrants is the runner's whole grant, as group/resource -> verbs.
+// wantRunnerGrants is the runner's whole grant, as group/resource -> verbs:
+// exactly the calls it makes, every one of them through
+// integrations/pipelinesteps/kube.go -- the step's runner, the orphan-Secret
+// sweep and the isolation proof alike -- and nothing it does not (review M3).
 //
-// What each line is for: the runner creates a Job per step attempt, watches it,
-// patches its own heartbeat and outcome annotations onto it, deletes it once
-// the agent has acknowledged the result and sweeps a cancelled run's Jobs with
-// one deletecollection; it reads the Job's pod to classify a failure and that
-// pod's log to capture the output; and it writes one Secret per Job (the clone
-// token and the step's resolved secrets), removes it the same two ways, and
-// lists the Secrets by its label to sweep one no Job ever came to own.
+//	batch/jobs create            CreateJob: a step's Job, the isolation probe's
+//	           get               GetJob: a step's status, adopting a Job, the
+//	                             sweep asking whether a Secret's Job exists, and
+//	                             CreateJob's read-back when the Job was there
+//	           patch             AnnotateJob: the heartbeat, a claim, how the
+//	                             step ended, its outcome
+//	           delete            DeleteJob: the ack, the probe's own cleanup
+//	           deletecollection  DeleteRun: a cancelled run's Jobs, by label
+//	pods       list              JobPods: a Job's pods, by the job-name label --
+//	                             never one pod by name, and never a watch
+//	pods/log   get               FollowLog (follow=true is a get) and TailLog
+//	secrets    create            CreateSecret: a step's Secret, the probe's
+//	           get               SecretCloneToken, ProbeTarget
+//	           list              ManagedSecrets: the sweep's list by label, as
+//	                             metadata alone
+//	           patch             SetCloneToken, OwnSecret
+//	           delete            DeleteSecret
+//	           deletecollection  DeleteRun: a cancelled run's Secrets
+//
+// No list or watch of Jobs and no get or watch of a pod: the runner polls the
+// one Job it holds by name, and finds its pods by label.
 var wantRunnerGrants = map[string][]string{
-	"batch/jobs": {"create", "get", "list", "watch", "patch", "delete", "deletecollection"},
-	"/pods":      {"get", "list", "watch"},
+	"batch/jobs": {"create", "get", "patch", "delete", "deletecollection"},
+	"/pods":      {"list"},
 	"/pods/log":  {"get"},
 	"/secrets":   {"create", "get", "list", "patch", "delete", "deletecollection"},
 }
@@ -403,6 +420,71 @@ func TestPipelinesRoleGrantsJobsThereAndNothingElse(t *testing.T) {
 					if o.Namespace == pipelinesNamespace && o.Name != "memql-pipelines-runner" {
 						t.Errorf("%s/%s renders in %s. That namespace carries the runner's grant and nothing else.",
 							o.Kind, o.Name, pipelinesNamespace)
+					}
+				}
+			}
+		})
+	}
+}
+
+// engineAccount is the ServiceAccount every engine Deployment runs as, the
+// runner's included.
+const engineAccount = "memql-engine"
+
+// reachesTheEngine reports whether a binding's subject grants the engine
+// identity what the binding binds: by its ServiceAccount's name (in any
+// namespace, which only widens what is caught), as the user its token
+// authenticates as, or through a group every ServiceAccount in its namespace,
+// or every authenticated caller, belongs to.
+func reachesTheEngine(s rbacSubject) bool {
+	switch s.Kind {
+	case "ServiceAccount":
+		return s.Name == engineAccount
+	case "User":
+		return s.Name == "system:serviceaccount:"+cloudNamespace+":"+engineAccount
+	case "Group":
+		switch s.Name {
+		case "system:serviceaccounts", "system:serviceaccounts:" + cloudNamespace, "system:authenticated":
+			return true
+		}
+	}
+	return false
+}
+
+// TestNoClusterRoleBindingReachesTheEngineIdentity (review M3): the pipelines
+// grant is safe because it is a Role, bound in memql-pipelines alone. The
+// check above finds a cluster-wide copy of it by NAME only; a
+// ClusterRoleBinding of the engine identity under any other name would hand
+// every engine node -- the workbench, whose token creates the step Jobs,
+// among them -- whatever its ClusterRole holds, in every namespace. So no
+// ClusterRoleBinding in any overlay's render may reach memql-engine at all.
+func TestNoClusterRoleBindingReachesTheEngineIdentity(t *testing.T) {
+	for _, overlay := range pipelinesOverlays {
+		t.Run(overlay, func(t *testing.T) {
+			objs := renderedObjects(t, overlay)
+
+			// The reachable positive: the runner's RoleBinding names the engine,
+			// and the matcher finds it there, so a clean result below is about
+			// the cluster-wide bindings and not a matcher that matches nothing.
+			var runner rbacBinding
+			theOne(t, objs, "RoleBinding", "memql-pipelines-runner").decode(t, &runner)
+			if !slices.ContainsFunc(runner.Subjects, reachesTheEngine) {
+				t.Fatalf("the runner's RoleBinding subjects %+v do not read as the engine identity; this gate's matcher "+
+					"would miss a ClusterRoleBinding of it too", runner.Subjects)
+			}
+
+			for _, o := range objs {
+				if o.Kind != "ClusterRoleBinding" {
+					continue
+				}
+				var binding rbacBinding
+				o.decode(t, &binding)
+				for _, s := range binding.Subjects {
+					if reachesTheEngine(s) {
+						t.Errorf("ClusterRoleBinding/%s binds ClusterRole %q to %s %q, which reaches the %s identity every "+
+							"engine Deployment runs as: a cluster-wide grant to the workbench that creates step Jobs, in "+
+							"every namespace. The engine's grants are Roles, each in its own namespace.",
+							o.Name, binding.RoleRef.Name, s.Kind, s.Name, engineAccount)
 					}
 				}
 			}

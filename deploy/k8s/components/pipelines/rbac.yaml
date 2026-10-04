@@ -2,19 +2,26 @@
 #
 # WHAT IT GRANTS, AND WHY EACH LINE. The workbench node turns a compiled step
 # into a Job here and sees it through, through component/deploycontrol.ClusterAPI
-# (net/http and the pod's projected token -- no client-go, no kubectl):
+# (net/http and the pod's projected token -- no client-go, no kubectl). Every
+# call it makes is in integrations/pipelinesteps/kube.go -- the step's runner,
+# the orphan-Secret sweep and the isolation proof alike -- and the grant is
+# exactly those calls, verb for verb (review M3):
 #
-#   batch/jobs  create, get, list, watch, patch, delete, deletecollection
-#               one Job per step attempt; watched to completion; patched with
-#               the runner's heartbeat and the step's outcome (which is how
-#               another workbench replica adopts a Job whose runner went away);
-#               deleted once the agent acknowledged the result; a cancelled
-#               run's Jobs swept with one deletecollection by label.
-#   pods        get, list, watch
-#               the Job's pod: its phase and container states classify a
-#               failure (an image that cannot be pulled, a clone that failed).
+#   batch/jobs  create, get, patch, delete, deletecollection
+#               one Job per step attempt, and the isolation probe's; read back
+#               by name while it runs and when another workbench replica adopts
+#               it (the runner polls the one Job it holds, so it neither lists
+#               nor watches); patched with the runner's heartbeat and the step's
+#               outcome; deleted once the agent acknowledged the result; a
+#               cancelled run's Jobs swept with one deletecollection by label.
+#   pods        list
+#               the Job's pods, found by the job-name label: their phase and
+#               container states classify a failure (an image that cannot be
+#               pulled, a clone that failed) and the probe's listener. Never one
+#               pod by name, and never a watch.
 #   pods/log    get
-#               the step's output, followed while it runs.
+#               the step's output, followed while it runs (a followed log is a
+#               get), and the tails of the clone, the services and the probe.
 #   secrets     create, get, list, patch, delete, deletecollection
 #               one Secret per Job: the clone token and the step's resolved
 #               secrets, created before the Job and removed with it; the Job
@@ -26,7 +33,8 @@
 #               Secret but the runner's, so list reaches nothing get did not.
 #
 # No `*`, no resourceNames (Job and Secret names are derived per attempt, and
-# RBAC cannot pin `create` to a name), no update, and no ClusterRole. Nothing
+# RBAC cannot pin `create` to a name), no update, no ClusterRole, and no
+# ClusterRoleBinding of memql-engine anywhere (render_pipelines_test.go). Nothing
 # here reaches outside memql-pipelines, and the namespace holds no Secret but
 # the ones the runner writes: no platform credential is reachable through it.
 #
@@ -51,10 +59,10 @@ metadata:
 rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
-    verbs: ["create", "get", "list", "watch", "patch", "delete", "deletecollection"]
+    verbs: ["create", "get", "patch", "delete", "deletecollection"]
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["list"]
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]

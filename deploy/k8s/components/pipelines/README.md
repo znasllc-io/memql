@@ -133,13 +133,14 @@ can run.
 
 ## The grant
 
-`memql-pipelines-runner` holds exactly what the runner calls:
+`memql-pipelines-runner` holds exactly what the runner calls, every call of
+which is in `integrations/pipelinesteps/kube.go`:
 
 | Resource | Verbs | Why |
 |---|---|---|
-| `batch/jobs` | create, get, list, watch, patch, delete, deletecollection | one Job per step attempt; its heartbeat and outcome annotations; deleted once the agent has the result; a cancelled run swept by label |
-| `pods` | get, list, watch | the Job's pod classifies a failure (image pull, clone) |
-| `pods/log` | get | the step's output, followed while it runs |
+| `batch/jobs` | create, get, patch, delete, deletecollection | one Job per step attempt, and the isolation probe's; read back by name (the runner polls the Job it holds, so it never lists or watches Jobs); its heartbeat and outcome annotations; deleted once the agent has the result; a cancelled run swept by label |
+| `pods` | list | the Job's pods, by the job-name label: they classify a failure (image pull, clone) and hold the probe's listener |
+| `pods/log` | get | the step's output, followed while it runs, and the tails of the clone, the services and the probe |
 | `secrets` | create, get, list, patch, delete, deletecollection | one Secret per Job: the clone token and the step's resolved secrets; listed (by label, metadata alone) by the sweep that deletes a Secret no Job ever came to own |
 
 It is bound to **`memql-engine`**, the ServiceAccount every engine Deployment
@@ -148,7 +149,8 @@ and both vendors' workload identity federation trusts `memql-engine` by name.
 That is the precedent [`custom-domain-rbac.yaml`](../../base/custom-domain-rbac.yaml)
 set. What confines the grant is the namespace — it holds only in
 `memql-pipelines`, where the mesh runs nothing — and the binary: only the
-workbench contains the runner. There is no ClusterRole.
+workbench contains the runner. There is no ClusterRole, and no
+ClusterRoleBinding anywhere in an overlay's render reaches `memql-engine`.
 
 ## The step
 
@@ -223,9 +225,10 @@ docker buildx imagetools inspect docker.io/library/buildpack-deps:bookworm-scm
 ## Gates
 
 - [`../../overlays/render_pipelines_test.go`](../../overlays/render_pipelines_test.go)
-  renders all three overlays: placement, the grant verb for verb, the binding,
-  the step identity, the network policy, the ceiling and limits as stated and
-  pinned values (Jobs only in the quota), the cache per overlay, the
+  renders all three overlays: placement, the grant verb for verb, the binding
+  (and that no ClusterRoleBinding reaches the engine's identity), the step
+  identity, the network policy, the ceiling and limits as stated and pinned
+  values (Jobs only in the quota), the cache per overlay, the
   binds-on-first-use mark (local only), and the workbench's env. It also
   renders the ArgoCD bootstrap, with the remote upstream install swapped for a
   local stand-in, and asserts `argocd-cm` carries the claim health script that
