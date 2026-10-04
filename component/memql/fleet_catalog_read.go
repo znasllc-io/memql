@@ -19,11 +19,12 @@ package memql
 // exactly as confidently as an open one.
 //
 // SCOPED TO THE CALLER, and that is not a convenience. A model call carries
-// the caller's prompts and routes only to their machines (memql#4678); a
-// catalog showing somebody else's would promise a model the router will never
-// use, and would also enumerate another user's hardware. So this read answers
-// for the CALLER'S OWN machines, plus the shared-inference set every user may
-// legitimately reach for cluster work.
+// the caller's prompts and routes only to their machines and to machines lent
+// to them (memql#4678, epic memql#5344); a catalog showing anybody else's would
+// promise a model the router will never use, and would also enumerate another
+// user's hardware. So this read answers for the CALLER'S OWN machines plus
+// every machine lent to them (design G8) -- which includes every machine lent
+// to everyone -- and, with no acting person, for the shared-inference set.
 
 import (
 	"context"
@@ -303,22 +304,35 @@ func (e *MemQLEngine) evaluateInferenceStatusExpression(ctx context.Context) ([]
 	}}, nil
 }
 
-// fleetCatalogForCaller reads the caller's own machines, merged with the
-// shared-inference set.
+// fleetCatalogForCaller reads the caller's catalog: their own machines and
+// every machine lent to them, or, with no acting person, the shared-inference
+// set system work may use.
 //
-// MERGED, NOT UNIONED BLINDLY: a model both sets offer appears ONCE, with the
+// ONE READ, NOT TWO (memql#5660). It read the person's catalog and then the
+// shared one and merged them. Since design G8 the person's catalog already
+// holds every machine the shared one does -- a machine lent to everyone is
+// lent to every person -- so the second read repeated the cross-owner read on
+// every Providers page load and every first-run gate, for an answer already in
+// hand. FleetCatalogReader states the contract this relies on, and
+// fleetcatalog's TestAPersonsCatalogContainsTheSharedCatalog holds the reader
+// to it. It is also the catalog the router decides on (fleetEntry), so the
+// page and the router now read the same thing even when the cross-owner read
+// fails: both keep the person's own machines, where this used to refuse the
+// whole read.
+//
+// FOLDED PER MODEL: a model several machines offer appears ONCE, with the
 // machine lists concatenated. Two entries for one model would render as two
 // rows on the Providers page for something the router treats as one thing.
 func (e *MemQLEngine) fleetCatalogForCaller(ctx context.Context) ([]FleetModel, error) {
-	actingUserId := actingUserFromContext(ctx)
+	actingUserId := strings.TrimSpace(actingUserFromContext(ctx))
 
 	byModel := map[string]*FleetModel{}
 	seenMachine := map[string]bool{}
 
 	add := func(models []FleetModel) {
 		for _, m := range models {
-			// A larger total from the other source must not rehabilitate
-			// an active count that was invalid in its original report.
+			// A larger total from another entry must not rehabilitate an
+			// active count that was invalid in its original report.
 			if m.Params > 0 && m.ActiveParams > m.Params {
 				m.ActiveParams = 0
 			}
@@ -360,21 +374,14 @@ func (e *MemQLEngine) fleetCatalogForCaller(ctx context.Context) ([]FleetModel, 
 		}
 	}
 
-	if strings.TrimSpace(actingUserId) != "" {
-		mine, err := e.providers.FleetCatalog(ctx, actingUserId)
-		if err != nil {
-			return nil, fmt.Errorf("fleet catalog: %w", err)
-		}
-		add(mine)
-	}
-	// The shared set is readable by everyone because everyone's SYSTEM work
-	// may land on it. It is not the same as reading another user's fleet: its
-	// owners opted these machines in to cluster use.
-	shared, err := e.providers.FleetCatalog(ctx, "")
+	models, err := e.providers.FleetCatalog(ctx, actingUserId)
 	if err != nil {
-		return nil, fmt.Errorf("shared fleet catalog: %w", err)
+		if actingUserId == "" {
+			return nil, fmt.Errorf("shared fleet catalog: %w", err)
+		}
+		return nil, fmt.Errorf("fleet catalog: %w", err)
 	}
-	add(shared)
+	add(models)
 
 	out := make([]FleetModel, 0, len(byModel))
 	for _, m := range byModel {

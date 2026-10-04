@@ -14,11 +14,13 @@ package worker
 // four minutes ago describes a closed laptop exactly as confidently as an open
 // one.
 //
-// TWO CATALOGS, NOT ONE, and they answer different questions. A user's
-// catalog is what THEIR machines offer; the shared catalog is what machines
-// their owners opted in to cluster work offer. Merging them would be the
-// cross-user routing memql#4678 exists to prevent, arriving through a read
-// instead of through a dispatch.
+// TWO CATALOGS, NOT ONE, and they answer different questions. A person's
+// catalog is what THEIR machines offer plus what is lent to them under both
+// consents (design G8) -- which includes every machine lent to everyone; the
+// shared catalog, for a call with no acting person, is only what is lent to
+// everyone. Answering a person from anything wider would be the cross-user
+// routing memql#4678 exists to prevent, arriving through a read instead of
+// through a dispatch.
 
 import (
 	"context"
