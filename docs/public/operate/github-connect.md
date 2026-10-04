@@ -12,8 +12,10 @@ owner: znas
 **Audience:** operators setting a cluster up, and anyone answering "why does
 Deployables ask me for a token".
 **Design:** `docs/superpowers/specs/2026-09-03-github-connect-design.md`
-(decisions C1-C8), and program decisions P10 and P11 in
-`docs/superpowers/specs/2026-09-02-deployables-program-design.md`.
+(decisions C1-C8), program decisions P10 and P11 in
+`docs/superpowers/specs/2026-09-02-deployables-program-design.md`, and D4 of
+`docs/superpowers/specs/2026-09-16-pipelines-program-design.md`, which widens
+C8 for pipelines.
 
 A person connects GitHub once, anywhere in the product, and from then on picks a
 repository from a list instead of typing a URL and pasting a token. The pasted
@@ -75,11 +77,12 @@ What happens when it is pressed:
 
 **The manifest is the cluster's, and nothing a browser sends can change it.** It
 is composed from `MEMQL_DOMAIN` on the identity node and is exactly the
-registration the manual steps below describe: contents read and metadata read
-(decision C8), authorization requested during installation, installable on any
-account, the callback the cluster derives for itself. What comes back is checked
-against it: an app carrying any permission the manifest did not ask for is
-refused and its credentials are not kept.
+registration the manual steps below describe: the permissions and events in
+[that table](#creating-the-github-app) (reads on the repositories people choose,
+and checks write), authorization requested during installation, installable on
+any account, the callback the cluster derives for itself. What comes back is
+checked against it: an app carrying any permission the manifest did not ask for,
+or a read come back as a write, is refused and its credentials are not kept.
 
 **Where the six values live.** In the two instance-wide stores every node already
 reads, under the same six names the deployment would use: the app id, slug and
@@ -97,12 +100,13 @@ refusal it always was rather than being quietly completed from rows.
 
 **The webhook.** On a domain GitHub can reach, the app is registered with its
 webhook active, pointed at `https://api.<domain>/inbound/github` and subscribed
-to pushes, and the bff admits that source using the app's own stored webhook
-secret -- none of the `MEMQL_INBOUND_SOURCE_GITHUB_*` lines below are needed for
-an app registered this way. On a name that can never resolve publicly
-(`*.localhost`, `*.local`, `*.test`, `*.internal`, a bare host, an IP address)
-the webhook is registered **off**, with an inert placeholder address, and the
-ten-minute poll notices pushes instead. See [Locally](#locally).
+to the five events in the table below, and the bff admits that source using the
+app's own stored webhook secret -- none of the `MEMQL_INBOUND_SOURCE_GITHUB_*`
+lines below are needed for an app registered this way. On a name that can never
+resolve publicly (`*.localhost`, `*.local`, `*.test`, `*.internal`, a bare host,
+an IP address) the webhook is registered **off**, with an inert placeholder
+address and no events, and polling notices pushes instead. The permissions are
+the same either way. See [Locally](#locally).
 
 **Removing it.** Deployables -> Settings -> Sources -> GitHub App -> Remove, for
 an app registered from the product. It clears the six stored values, so every
@@ -150,16 +154,37 @@ under Settings -> Developer settings -> GitHub Apps):
 | **Webhook -> Active** | checked |
 | **Webhook URL** | `https://api.<domain>/inbound/github` |
 | **Webhook secret** | generate one; it is `MEMQL_GITHUB_APP_WEBHOOK_SECRET` below |
+| **Repository permissions -> Checks** | Read and write |
 | **Repository permissions -> Contents** | Read-only |
+| **Repository permissions -> Merge queues** | Read-only |
 | **Repository permissions -> Metadata** | Read-only (GitHub selects this for you) |
-| **Subscribe to events** | Push |
+| **Repository permissions -> Pull requests** | Read-only |
+| **Subscribe to events** | Check run, Merge group, Pull request, Push, Release |
 | **Where can this app be installed** | your choice |
 
-Nothing else. **Contents read and metadata read is the whole ask** (decision
-C8), which is what makes the authorization screen short enough to read. A later
-capability that needs more -- an agent opening a pull request -- requests it as
-its own permission change, which GitHub then surfaces to every installation for
-re-approval.
+Nothing else. **Every permission is a read on the repositories people choose,
+except checks**, which is how a pipeline run reports back (decision C8, widened
+by the pipelines record's D4):
+
+| Permission | Why it is asked |
+|---|---|
+| Contents read | Deployables fetches a source, and a pipeline run reads the tree at the commit it runs. GitHub delivers `push` and `release` under it |
+| Metadata read | GitHub grants it with any repository permission |
+| Checks write | A pipeline run reports a check run on the commit it ran: queued, in progress, then its result, with the stage table as the summary. The one write the app holds |
+| Pull requests read | The heads a pull-request run is for, whether GitHub delivers them as `pull_request` events or the poll reads them |
+| Merge queues read | GitHub subscribes an app to `merge_group` only when it holds this; a merge queue's run is the full suite on the exact tree that lands |
+
+A push lights the update cue and starts the default branch's pipeline run; a
+pull request, a merge group and a published release each start a pipeline
+run; `check_run` is how a re-run pressed on GitHub reaches the cluster.
+`check_suite` is not in the list because GitHub subscribes every app holding
+checks write to it.
+
+A later capability that needs more -- an agent opening a pull request --
+requests it as its own permission change, which GitHub then surfaces to every
+installation for re-approval. Pipelines were such a change:
+[Upgrading an app registered before pipelines](#upgrading-an-app-registered-before-pipelines)
+is what it asks of an app that already exists.
 
 GitHub uses this same registered callback for authorization and post-install
 landings. Identity relays the callback to
@@ -250,9 +275,40 @@ body, and without the line the row's `headersJson` is `{}`. It is the same
 list an app registered from the product stages with no configuration at all,
 so the two ways of setting up the webhook stage the same row.
 
-The webhook carries **pushes**, which is what lights the update cue on a
-deployable. It deliberately does not drive anything else; see
-[what stays current, and how](#what-stays-current-and-how).
+The webhook carries **pushes**, which light the update cue on a deployable, and
+the **pull requests, merge groups, releases and re-run requests** pipelines
+start runs from. Both read the same staged rows; the update cue reads pushes
+only.
+It deliberately drives nothing else -- not the `installation` events GitHub
+sends every app; see [what stays current, and how](#what-stays-current-and-how).
+
+---
+
+## Upgrading an app registered before pipelines
+
+An app registered before pipelines -- from the product or by hand -- asks for
+contents and metadata read and subscribes to pushes. It goes on working for
+everything Deployables does. Pipelines need the wider ask above, and GitHub
+never widens an app by itself:
+
+1. At GitHub, open the app's settings: Settings -> Developer settings -> GitHub
+   Apps -> the app -> **Permissions & events** (in the organization's Settings,
+   for an app registered under an organization).
+2. Under **Repository permissions**, set **Checks** to Read and write, and
+   **Pull requests** and **Merge queues** to Read-only.
+3. Under **Subscribe to events**, check **Check run**, **Merge group**, **Pull
+   request** and **Release** beside **Push**. On an app whose webhook is off (a
+   local cluster's), skip this step: it receives nothing, and the permissions
+   are all it needs.
+4. Save. GitHub asks every account the app is installed on to approve the new
+   permissions, and an owner of each account accepts them.
+
+Until an account accepts, its installation keeps the permissions it had.
+Fetching keeps working and a push still starts a pipeline run, but every
+check-run write answers 403: the run records its check as refused, carries the
+note `pipeline_check_permission_missing`, and runs to its end all the same.
+Accepting is the whole repair, and the next run reports its check. Nothing on
+the cluster changes: the six values stay as they are, and nobody reconnects.
 
 ---
 
@@ -381,10 +437,16 @@ cluster makes -- exchanging the code -- goes out to GitHub, not in from it.
 **Webhooks do not**, because GitHub cannot reach a laptop. The polling fallback
 covers it: every ten minutes, each repo-sourced package's upstream head is
 compared against what is deployed. So an update cue appears within ten minutes
-locally instead of within seconds. Nothing else differs. An app registered from
-the product on such a domain is created with its webhook off for exactly this
-reason; if the cluster later moves to a public domain, turn the webhook on in
-the app's settings at GitHub and point it at `https://api.<domain>/inbound/github`.
+locally instead of within seconds. A pipeline polls as well: it reads the
+default branch's head and the open pull requests' heads, so a run starts on the
+poll after a push rather than on a delivery, and what is only ever delivered --
+a merge group, a release, a re-run pressed on GitHub -- starts none. An app
+registered from the product on such a domain is created with its webhook off and
+no events for exactly this reason, and with the same permissions, because a
+polled run still reports its check run. If the cluster later moves to a public
+domain, turn the webhook on in the app's settings at GitHub, point it at
+`https://api.<domain>/inbound/github`, and subscribe it to the five events in
+[the table above](#creating-the-github-app).
 
 ---
 

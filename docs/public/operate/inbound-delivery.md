@@ -86,15 +86,26 @@ choose here: it is `MEMQL_GITHUB_APP_WEBHOOK_SECRET`, the GitHub App's own
 webhook secret, so the app signs with it and this receiver verifies with it. The
 name must be `github` rather than `gh`, because that is the segment
 `MEMQL_PACKAGES_WEBHOOK_SOURCE` defaults to and therefore the one the packages
-feed reads deliveries from.
+feed reads deliveries from. Pipelines read the same deliveries, from the same
+rows: the app's one webhook carries the pushes the update cue reads and the
+pull requests, merge groups, releases and re-run requests a pipeline run starts
+from, so there is no second source to configure.
 
 ```bash
 MEMQL_INBOUND_SOURCE_ALLOWLIST=github
 MEMQL_INBOUND_SOURCE_GITHUB_SIGNATURE_SCHEME=hmac-sha256-hex
 MEMQL_INBOUND_SOURCE_GITHUB_SIGNATURE_HEADER=X-Hub-Signature-256
 MEMQL_INBOUND_SOURCE_GITHUB_SIGNATURE_PREFIX=sha256=
+MEMQL_INBOUND_SOURCE_GITHUB_DEDUPE_HEADER=X-GitHub-Delivery
+MEMQL_INBOUND_SOURCE_GITHUB_FORWARD_HEADERS=X-GitHub-Event,X-GitHub-Delivery,X-GitHub-Hook-ID
 MEMQL_INBOUND_SOURCE_GITHUB_SECRET=<the same value as MEMQL_GITHUB_APP_WEBHOOK_SECRET>
 ```
+
+The dedupe key is GitHub's delivery id, the one its own delivery log shows. The
+forwarded headers put the event name on the row, because GitHub sends it only
+in `X-GitHub-Event` and never in the body. An app registered from the product
+needs none of these lines: the bff admits its source with the app's stored
+secret and these same values.
 
 A Stripe-shaped one, whose single header carries both the timestamp and the
 digest (`Stripe-Signature: t=1614556800,v1=<hex>`):

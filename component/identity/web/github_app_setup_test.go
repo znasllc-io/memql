@@ -143,8 +143,13 @@ func TestALiveSetupStateGetsTheFormThatPostsTheManifestToGitHub(t *testing.T) {
 		manifest.URL != "https://os.lab.example.com" {
 		t.Errorf("manifest = %+v", manifest)
 	}
-	if len(manifest.DefaultPermissions) != 2 || manifest.DefaultPermissions["contents"] != "read" {
+	if len(manifest.DefaultPermissions) != 5 || manifest.DefaultPermissions["contents"] != "read" || manifest.DefaultPermissions["checks"] != "write" {
 		t.Errorf("permissions = %v", manifest.DefaultPermissions)
+	}
+	// The last sentence of ours somebody reads before GitHub asks, so it says
+	// the whole of what the app may do, the one write included.
+	if !strings.Contains(body, "It can read the repositories you choose and report checks on them, and nothing else.") {
+		t.Error("the page does not say what the app may do")
 	}
 	if !strings.Contains(body, "github-app-setup.js") {
 		t.Error("the page does not load the script that submits the form")

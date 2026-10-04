@@ -36,7 +36,7 @@ templ GitHubAppSetup(data GitHubAppSetupData) {
 			<h1 class="card-title">Continue to GitHub</h1>
 			<p class="text-muted">
 				GitHub will ask you to create an app named { data.AppName } under { data.Owner }.
-				It can read the repositories you choose, and nothing else.
+				It can read the repositories you choose and report checks on them, and nothing else.
 			</p>
 			<form method="post" action={ templ.SafeURL(data.PostURL) } data-github-app-setup>
 				<input type="hidden" name="manifest" value={ data.Manifest }/>

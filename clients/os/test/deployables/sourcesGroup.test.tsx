@@ -49,6 +49,9 @@ describe("Deployables Settings manages accounts independently of sources", () =>
     mount({ githubApp: { configured: false, canSetup: true } });
     const app = await screen.findByRole("region", { name: "GitHub" });
     expect(within(app).getByRole("button", { name: "Set up GitHub" })).toBeTruthy();
+    // What the owner is told the app may do is what its manifest asks for:
+    // reads, and the one write that reports checks.
+    expect(within(app).getByText(/creates a GitHub App that reads the repositories people choose and reports checks on them\./)).toBeTruthy();
     expect(screen.getByRole("region", { name: "GitHub accounts settings" })).toBeTruthy();
   });
 
