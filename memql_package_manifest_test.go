@@ -58,12 +58,8 @@ import (
 // ci.yml's db-tests lane runs.
 const (
 	manifestToolchainRepository = "ghcr.io/znasllc-io/memql-toolchain"
-	// manifestToolchainFirstTag is the one reference the toolchain may carry
-	// that is not a digest: the tag build-toolchain-image.yml's first dispatch
-	// publishes, named until that digest exists.
-	manifestToolchainFirstTag  = manifestToolchainRepository + ":1.0.0"
-	manifestPostgresRepository = "ghcr.io/znasllc-io/ci-timescaledb"
-	manifestPostgresService    = "postgres"
+	manifestPostgresRepository  = "ghcr.io/znasllc-io/ci-timescaledb"
+	manifestPostgresService     = "postgres"
 )
 
 // The stages and steps of memql-package.yaml, by name. Each step mirrors a lane
@@ -451,19 +447,15 @@ func TestEngineManifestPostgresServiceIsPinnedByDigest(t *testing.T) {
 	}
 }
 
-// The toolchain image is pinned by digest. Until build-toolchain-image.yml has
-// run on main there is no digest to pin, and the manifest names the first tag;
-// that one reference skips, and every other one that is not a digest fails.
+// The toolchain image is pinned by digest: the one build-toolchain-image.yml's
+// run summary printed. A tag can be re-pushed (with allow_overwrite); a digest
+// names one image for good.
 func TestEngineManifestToolchainImageIsPinnedByDigest(t *testing.T) {
 	image := engineManifest(t).Pipeline.Image
-	if image == manifestToolchainFirstTag {
-		t.Skip("memql-toolchain is named by tag until build-toolchain-image.yml has run on main; pin its digest (follow-up to epic memql#5478)")
-	}
 	m := manifestImageByDigest.FindStringSubmatch(image)
 	if m == nil || m[1] != manifestToolchainRepository {
-		t.Fatalf("pipeline.image is %q; it must be %s@sha256:<digest>, the digest build-toolchain-image.yml's run summary prints. "+
-			"Only the first tag, %s, may stand in for it, and only until that digest exists.",
-			image, manifestToolchainRepository, manifestToolchainFirstTag)
+		t.Fatalf("pipeline.image is %q; it must be %s@sha256:<digest>, the digest build-toolchain-image.yml's run summary prints",
+			image, manifestToolchainRepository)
 	}
 }
 
