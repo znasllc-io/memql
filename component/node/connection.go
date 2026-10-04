@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -370,6 +371,23 @@ func (pc *peerConnection) tryReauth(ctx context.Context, cause error) bool {
 	return true
 }
 
+// helloSendError turns a failed NodeHello send into the error that says why.
+// SendMsg reports a stream the peer has already ended as a bare io.EOF, and
+// the status carrying the reason -- an auth refusal, a draining node -- is
+// delivered only to RecvMsg. A peer that refuses fast enough wins that race,
+// and the bare EOF hides the refusal from isAuthRejection: the connection
+// backs off and re-presents the refused token, and if the race is lost every
+// time it never gets a new one (the memql#1521 stuck loop, by timing).
+func helloSendError(stream nodev1.NodeService_StreamClient, sendErr error) error {
+	if !errors.Is(sendErr, io.EOF) {
+		return sendErr
+	}
+	if _, err := stream.Recv(); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return sendErr
+}
+
 // connectOnce establishes a single connection attempt.
 func (pc *peerConnection) connectOnce(parentCtx context.Context, onMessage func(*nodev1.NodeServerMessage)) error {
 	pc.mu.Lock()
@@ -473,7 +491,7 @@ func (pc *peerConnection) connectOnce(parentCtx context.Context, onMessage func(
 		},
 	}
 	if err := stream.Send(hello); err != nil {
-		return err
+		return helloSendError(stream, err)
 	}
 
 	// AI work is scoped to this attempt; the general mesh outbox remains

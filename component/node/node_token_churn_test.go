@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -403,4 +404,38 @@ func ageBootMint(identity *Identity) {
 	identity.mintMu.Lock()
 	identity.lastMintAttempt = time.Now().Add(-2 * nodeRemintMinInterval)
 	identity.mintMu.Unlock()
+}
+
+// raceLostStream is a NodeService client stream whose hello send lost the race
+// with the peer's refusal: Send reports a bare io.EOF and the status is held
+// for Recv, as grpc-go delivers it.
+type raceLostStream struct {
+	nodev1.NodeService_StreamClient
+	status error
+}
+
+func (s raceLostStream) Send(*nodev1.NodeClientMessage) error { return io.EOF }
+
+func (s raceLostStream) Recv() (*nodev1.NodeServerMessage, error) { return nil, s.status }
+
+// TestHelloSendError_RecoversTheRefusalTheSendLost: a peer that refuses before
+// the hello is written leaves the refusal on Recv. CI hit this on the first
+// run of TestPeerConnection_KeyRotationRecoversWithOneMint: the bare EOF read
+// as a dropped connection, the refused token was presented again, and with
+// the race lost every time the connection would never get a new token.
+func TestHelloSendError_RecoversTheRefusalTheSendLost(t *testing.T) {
+	refusal := status.Error(codes.Unauthenticated, "invalid or expired token: verifier: unknown kid")
+	stream := raceLostStream{status: refusal}
+
+	err := helloSendError(stream, stream.Send(nil))
+	assert.Equal(t, refusal, err)
+	assert.True(t, isAuthRejection(err))
+
+	// A stream that ended with nothing to say keeps the send's own error.
+	quiet := raceLostStream{status: io.EOF}
+	assert.Equal(t, io.EOF, helloSendError(quiet, io.EOF))
+
+	// Any other send failure is already the answer; Recv is not consulted.
+	other := errors.New("transport is closing")
+	assert.Equal(t, other, helloSendError(stream, other))
 }
