@@ -587,6 +587,12 @@ function OpenPreviews({
 /**
  * Versions available for testing. Storefronts include the current build:
  * testing the same files with a separate sandbox is a useful first preview.
+ *
+ * A VERSION DEPLOYED AS THE CANDIDATE IS ONE OF THEM (memql#5601). Its run
+ * records `candidateRef` and never `bundleRef`, so reading bundleRef alone
+ * could never offer it back once withdrawn -- or once a later candidate
+ * replaced it -- and the version would exist in storage with no way to
+ * exercise it again.
  */
 export function publishedVersions(runs: readonly DeploymentRow[], site: SiteRow): string[] {
   const seen = new Set<string>();
@@ -598,10 +604,12 @@ export function publishedVersions(runs: readonly DeploymentRow[], site: SiteRow)
   for (const run of runs) {
     for (const outcome of run.deployables) {
       if (outcome.siteId !== site.id && outcome.name !== site.packageDeployableName) continue;
-      const ref = (outcome.bundleRef ?? "").trim();
-      if (ref === "" || ref === site.bundleRef || seen.has(ref)) continue;
-      seen.add(ref);
-      out.push(ref);
+      for (const raw of [outcome.bundleRef ?? "", outcome.candidateRef ?? ""]) {
+        const ref = raw.trim();
+        if (ref === "" || ref === site.bundleRef || seen.has(ref)) continue;
+        seen.add(ref);
+        out.push(ref);
+      }
     }
   }
   return out;

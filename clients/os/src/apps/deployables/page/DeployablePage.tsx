@@ -8,7 +8,7 @@ import { OpenLogsButton } from "../../../logs/OpenLogs";
 import { useAccountOptions } from "../../accounts/tie";
 import { usePackageActions, useSiteLifecycle } from "../packages/actions";
 import { ProblemNotice } from "../packages/ReportView";
-import { everyOtherAppSkipped, type Placement } from "../packages/calls";
+import { everyOtherAppSkipped, type DeployTarget, type Placement } from "../packages/calls";
 import { deploymentFromRow, type DeploymentRow, type PackageRow } from "../packages/rows";
 import type { PartsHeld } from "../parts";
 import { deployedByLabel, deployerOf, type NameOf } from "../people";
@@ -16,7 +16,7 @@ import { usePackageDeployments } from "../packages/usePackages";
 import { ownerLabel, siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
 import { confirmationWordFor } from "../words";
-import { actsFor, runForApp, siblingRunInFlight, type ActName } from "./acts";
+import { actsFor, candidateBlockedReason, candidateTargetOffered, runForApp, siblingRunInFlight, type ActName } from "./acts";
 import { usePreviewReadiness, usePreviewWrites } from "../preview/usePreview";
 import { DeployableWorkspace, type WorkspaceDetail } from "./DeployableWorkspace";
 import { DetailDialog } from "./DetailDialog";
@@ -134,6 +134,24 @@ export function DeployablePage({
   const accounts = useAccountOptions();
   const flipped = useBundleFlip(site);
   const headActions = usePackageActions();
+
+  // WHERE THE GATE'S VERSION GOES (memql#5601): the live version -- the
+  // default, and what every deploy did before -- or the candidate, which keeps
+  // the live site serving what it serves while the new one is previewed. Held
+  // per GATE: a new parked run, or another deployable, starts at the default
+  // again, so an answer given to one gate never confirms the next.
+  const parkedRunId = run !== null && run.status === "awaiting_confirm" ? run.id : "";
+  const [deployTarget, setDeployTarget] = useState<DeployTarget>("serving");
+  // Which answer the last confirm from this page sent, so a refusal of a
+  // candidate lands beside the choice while the gate is still the question.
+  const [confirmedAs, setConfirmedAs] = useState<DeployTarget | null>(null);
+  useEffect(() => {
+    setDeployTarget("serving");
+    setConfirmedAs(null);
+  }, [site.id, parkedRunId]);
+  const offerCandidate = candidateTargetOffered({ site, pkg, run, can });
+  const candidateBlocked = offerCandidate ? candidateBlockedReason(run) : "";
+  const gateTarget: DeployTarget = offerCandidate && candidateBlocked === "" ? deployTarget : "serving";
   const lifecycle = useSiteLifecycle();
   const [zipOpen, setZipOpen] = useState(false);
 
@@ -179,6 +197,7 @@ export function DeployablePage({
     can,
     deleting,
     releasing: site.hostname,
+    deployTarget: gateTarget,
     preview:
       previewReadiness === null
         ? null
@@ -223,6 +242,7 @@ export function DeployablePage({
         if (pkg !== null && run !== null) void headActions.cancel(pkg.id, run.id).then(reseed);
         return;
       case "Deploy":
+      case "Deploy as candidate":
       case "Deploy the update":
       case "Redeploy":
       case "Retry the deploy":
@@ -234,9 +254,17 @@ export function DeployablePage({
         // already given, and a Retry's report described bytes the click did
         // not ship. Still scoped to this page's app, or confirming from here
         // would deploy every sibling the source declares.
+        //
+        // AND IT NAMES ITS TARGET, the live version included (memql#5601). The
+        // engine records a target when a run opens and, at the confirm, an
+        // explicit one wins while an omitted one reuses what was recorded --
+        // so a Deploy that left it out could confirm, as a candidate, a run
+        // somebody else opened as one, under a button promising the live site.
         if (pkg !== null && run !== null && run.status === "awaiting_confirm") {
+          const target: DeployTarget = named === "Deploy as candidate" ? "candidate" : "serving";
+          setConfirmedAs(target);
           void headActions
-            .deploy(pkg.id, { confirm: true, placements: onlyThisApp(pkg, site), deploymentId: run.id })
+            .deploy(pkg.id, { confirm: true, placements: onlyThisApp(pkg, site, target), deploymentId: run.id })
             .then(reseed);
           return;
         }
@@ -291,6 +319,9 @@ export function DeployablePage({
   }
 
   const busy = lifecycle.busy || headActions.busy;
+  // A refused candidate confirm, while the gate it answered is still open,
+  // belongs beside the choice rather than at the top of the page.
+  const refusalAtChoice = offerCandidate && confirmedAs === "candidate" && headActions.refusal !== null;
   const acts: Act[] = reading.acts.map((spec) => ({
     label: spec.name,
     tone: spec.tone,
@@ -419,7 +450,7 @@ export function DeployablePage({
             )}
           </Chips>
 
-          {headActions.refusal ? (
+          {headActions.refusal && !refusalAtChoice ? (
             <ProblemNotice problem={{ ...headActions.refusal, fatal: true }} tone="error" />
           ) : null}
 
@@ -438,6 +469,13 @@ export function DeployablePage({
             timelineError={deployments?.snapshot.error ?? ""} onRetryRead={reseed}
             onInspect={setDetail} onOpenSource={() => pkg && onOpenSource(pkg.id)}
             lifecycle={lifecycle}
+            deployChoice={offerCandidate ? {
+              target: gateTarget,
+              onChoose: setDeployTarget,
+              hostname: site.hostname,
+              blocked: candidateBlocked,
+              refusal: refusalAtChoice ? headActions.refusal : null,
+            } : undefined}
           />
 
           {/* A refusal renders IN SURFACE, beside the rail -- never a toast,
@@ -570,8 +608,14 @@ function ConfirmRow({
  * skipped BY NAME -- including ones the owner turned off, which the engine has
  * no other way to know about.
  */
-function onlyThisApp(pkg: PackageRow, site: SiteRow): Record<string, Placement> {
-  return everyOtherAppSkipped(pkg.declares, site.packageDeployableName);
+function onlyThisApp(pkg: PackageRow, site: SiteRow, target?: DeployTarget): Record<string, Placement> {
+  const placements = everyOtherAppSkipped(pkg.declares, site.packageDeployableName);
+  // THE CONFIRM NAMES THIS APP'S TARGET (memql#5601); the analysis that opens
+  // the gate names none, because the answer is given at the gate.
+  if (target !== undefined && site.packageDeployableName !== "") {
+    placements[site.packageDeployableName] = { hostname: "", accountId: "", ownDomain: "", target };
+  }
+  return placements;
 }
 
 /**

@@ -11,7 +11,7 @@ import { Button, Caption, Notice, useLiveView } from "../../../kit";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { accountNameFrom, type AccountRow } from "../../accounts/rows";
 import { domainFromRow, isListedDomain } from "../domains";
-import { shortVersion, sourceLabel, type DeploymentRow, type PackageRow } from "../packages/rows";
+import { publishedAsCandidate, shortVersion, sourceLabel, type DeploymentRow, type PackageRow } from "../packages/rows";
 import { boundStoreId, previewStoreId, bundleForm, type SiteRow } from "../rows";
 import { kindLabel } from "../targets";
 import { useCustomDomains } from "../useCustomDomains";
@@ -21,11 +21,14 @@ import { PreviewSection } from "../preview/PreviewSection";
 import { NO_PARTS, type PartsHeld } from "../parts";
 import { AttentionMarker } from "../../../attention/Attention";
 import { useStore } from "../store/useStore";
+import { DeployTargetChoice, type DeployChoice } from "./DeployTargetChoice";
 
 export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "runtime" | "traffic" | "store";
 
-export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDomains, canStore, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, lifecycle, canSources = false, onUpdate }: {
+export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDomains, canStore, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, lifecycle, canSources = false, onUpdate, deployChoice }: {
   canSources?: boolean; onUpdate?: () => void;
+  /** Where a parked gate's version goes (memql#5601), when the gate may choose. */
+  deployChoice?: DeployChoice;
   site: SiteRow; pkg: PackageRow | null; run: DeploymentRow | null; accounts: AccountRow[];
   /** This source's whole timeline, for the versions this deployable has published. */
   runs?: readonly DeploymentRow[];
@@ -40,6 +43,10 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
   const input: RailInput = { mode: "standing", site, pkg, run, app: site.packageDeployableName };
   const build = railFor(input).stages.find(s => s.id === "build");
   const failed = run !== null && ["failed", "refused", "abandoned", "cancelled"].includes(run.status);
+  // THE ATTEMPT THAT WENT OUT AS THE CANDIDATE (memql#5601) says so in its own
+  // words: "Finished" alone would read as a new live version, and the one
+  // thing that matters about this attempt is that the live site did not move.
+  const candidateAttempt = run !== null && run.status === "succeeded" && publishedAsCandidate(run, site.packageDeployableName);
   const knownTimeline = timelineState === "live" || timelineState === "ready";
   return <>
     <div className="deployable-workspace-heading"><Caption>{kindLabel(site.kind)}</Caption></div>
@@ -85,7 +92,8 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
       <header><h3>Versions</h3></header>
       {pkg ? <AvailableVersion key={pkg.id} pkg={pkg} onUpdate={onUpdate} /> : null}
       <Versions site={site} runs={runs ?? []} canPublish={can?.publish ?? false} lifecycle={lifecycle} />
-      {pkg ? <div className="deployable-version-row"><span><Hammer size={14} aria-hidden />Latest attempt</span><div><strong>{run ? attemptWord(run.status) : knownTimeline ? "No attempt yet" : "History unavailable"}</strong><small>{run ? [shortVersion(run.sourceVersion), build?.reason].filter(Boolean).join(" · ") : timelineState === "loading" || timelineState === "seeding" ? <InlineSkeleton label="Loading deployment history" /> : "Deploy an update to start a new attempt"}</small></div>{run ? <IconButton label="Latest attempt details" onClick={() => onInspect(run.status === "awaiting_confirm" ? "whatItIs" : "build")}><Info size={16} aria-hidden /></IconButton> : null}</div> : null}
+      {pkg ? <div className="deployable-version-row"><span><Hammer size={14} aria-hidden />Latest attempt</span><div><strong>{run ? candidateAttempt ? "Deployed as candidate" : attemptWord(run.status) : knownTimeline ? "No attempt yet" : "History unavailable"}</strong><small>{run ? [shortVersion(run.sourceVersion), candidateAttempt ? "the live site is unchanged" : build?.reason].filter(Boolean).join(" · ") : timelineState === "loading" || timelineState === "seeding" ? <InlineSkeleton label="Loading deployment history" /> : "Deploy an update to start a new attempt"}</small></div>{run ? <IconButton label="Latest attempt details" onClick={() => onInspect(run.status === "awaiting_confirm" ? "whatItIs" : "build")}><Info size={16} aria-hidden /></IconButton> : null}</div> : null}
+      {deployChoice ? <DeployTargetChoice {...deployChoice} /> : null}
       {failed && site.status === "live" ? <Caption>The latest attempt did not replace the published version.</Caption> : null}
       {pkg && timelineError ? <Notice tone="error" sentence="Deployment history could not be read." detail={timelineError}><Button onClick={onRetryRead}>Try again</Button></Notice> : null}
     </section>

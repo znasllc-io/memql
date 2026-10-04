@@ -8642,6 +8642,29 @@ a.os-button {
   margin-top: 6px;
 }
 
+/* ---- the confirm gate's "Deploy as" choice (memql#5601) ----
+ * A row of the Versions section like the attempt it follows, but its body is
+ * a choice whose cards explain themselves -- so the label holds to the first
+ * card's line rather than centring on a block two cards tall, and the cards
+ * keep a readable measure instead of running the width of a wide window. */
+.deployable-version-row.deployable-deploy-target {
+  align-items: start;
+}
+.deployable-deploy-target > span {
+  padding-top: 9px;
+}
+.deployable-deploy-target-body {
+  display: grid;
+  gap: 8px;
+  max-width: 34rem;
+  min-width: 0;
+}
+@container (max-width: 480px) {
+  .deployable-deploy-target > span {
+    padding-top: 0;
+  }
+}
+
 /* Motion is emphasis, never information: the strip carries its whole meaning
  * standing still, so there is nothing here to disable. Stated so the next
  * person does not add a grow-in animation to sixty columns. */

@@ -152,6 +152,14 @@ export interface DeployableOutcome {
   siteId: string;
   hostname: string;
   bundleRef: string;
+  /**
+   * Set INSTEAD of `bundleRef` when this run published the app as its
+   * CANDIDATE version (memql#5601): the live site kept serving what it served,
+   * and a rollback to this run re-points nothing. Never both. Normalized to ""
+   * by `deploymentFromRow`; optional only so an outcome built by hand (the
+   * compose stop's stand-in for a run that has none) need not name it.
+   */
+  candidateRef?: string;
   version: string;
   created: boolean;
   refusal?: { code: string; message: string; scope?: string };
@@ -242,6 +250,32 @@ export function runIsScopedToApp(run: DeploymentRow | null, app: string): boolea
   return run.scopedTo.includes(app);
 }
 
+/**
+ * Whether this run published `app` as its CANDIDATE version (memql#5601): the
+ * app's outcome names a candidateRef, so what the site serves did not change.
+ */
+export function publishedAsCandidate(run: DeploymentRow | null, app: string): boolean {
+  if (run === null || app === "") return false;
+  return run.deployables.some((o) => o.name === app && (o.candidateRef ?? "") !== "");
+}
+
+/**
+ * Whether a run's publishes were ALL candidates -- at least one candidate and
+ * no serving version -- the engine's own reading (component/packages/
+ * candidate.go `candidatesOnly`). Such a run changed nothing a visitor is
+ * served: it records no deployedVersion, and rolling back to it would
+ * re-point nothing, so it is never offered as a place to roll back to.
+ */
+export function publishedOnlyCandidates(run: DeploymentRow | null): boolean {
+  if (run === null) return false;
+  let candidates = 0;
+  for (const o of run.deployables) {
+    if (o.bundleRef !== "") return false;
+    if ((o.candidateRef ?? "") !== "") candidates += 1;
+  }
+  return candidates > 0;
+}
+
 /** Where a run built. `surface` is one of the three the engine declares. */
 export interface BuiltOn {
   surface: string;
@@ -319,6 +353,7 @@ export function deploymentFromRow(row: Row): DeploymentRow {
         siteId: rowString(outcome, "siteId"),
         hostname: rowString(outcome, "hostname"),
         bundleRef: rowString(outcome, "bundleRef"),
+        candidateRef: rowString(outcome, "candidateRef"),
         version: rowString(outcome, "version"),
         created: boolOr(outcome, "created", false),
       })),
