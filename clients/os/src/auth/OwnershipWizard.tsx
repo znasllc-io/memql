@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Fingerprint } from "lucide-react";
 import { Mark } from "../chrome/Mark";
 import { OrganizationTitle } from "./OrganizationTitle";
+import { SetupTheme } from "./SetupTheme";
 import { Wizard } from "../kit/Wizard";
 import { Field, Select } from "../kit/controls";
 import { oauthFields, value, type IdentityData } from "./nativeIdentity";
@@ -46,6 +47,7 @@ export function OwnershipWizard({ data, busy, error, submit }: {
       <p>Once signed in, OS will continue with the existing inference setup.</p></div>,
   ];
   return <Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title="Welcome to MemQL OS" lead="Set up this installation and verify cluster ownership."
+    asideFooter={<SetupTheme />}
     label="Ownership setup" open={String(step)} onOpen={id => setStep(Number(id))}
     steps={["Cluster owner", "Your installation", "Account access", local ? "Register passkey" : "Verify email", ...(local ? [] : ["Register passkey"])].map((name, i) => ({ id: String(i), name,
       state: i < step ? "done" : i === step ? "open" : "ahead", body: bodies[i] }))}

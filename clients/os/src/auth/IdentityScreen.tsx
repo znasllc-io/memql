@@ -5,6 +5,7 @@ import { useAuth } from "./AuthProvider";
 import { nativeIdentity, oauthFields, value, IdentityRequestError, type IdentityPage } from "./nativeIdentity";
 import { Wizard } from "../kit/Wizard";
 import { OwnershipWizard } from "./OwnershipWizard";
+import { SetupTheme } from "./SetupTheme";
 import { loginWithPasskey, registerPasskey } from "./passkeys";
 import { Field, Button, Head } from "../kit/controls";
 import { IdentityAccount } from "../apps/identity/IdentityAccount";
@@ -108,6 +109,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
       window.location.assign(destination);
     });
     return <div className="os-identity-gate"><Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title="Finish ownership setup"
+      asideFooter={<SetupTheme />}
       lead={data.Local === true ? "Your passkey is required. No email verification is used on this local installation." : "Email verified. Register a passkey before you can enter MemQL OS."}
       label="Ownership setup" open="passkey" onOpen={() => {}}
       steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, state: i === steps.length - 1 ? "open" : "done", body: <><p>Create a passkey with your device or security key. Your browser will ask you to confirm.</p><p>Canceling leaves setup incomplete. You can retry this step.</p></> }))}

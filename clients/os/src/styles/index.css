@@ -8738,6 +8738,28 @@ a.os-button {
      an 18px title's centre and a 15px one's. */
   padding-top: 47px;
 }
+.os-wizard-aside-footer {
+  margin-top: 18px;
+}
+.os-setup-theme {
+  margin: 0;
+  min-width: 0;
+}
+.os-setup-theme .os-choice-row {
+  flex-wrap: wrap;
+  margin: 0;
+}
+.os-setup-theme .os-choice {
+  position: relative;
+}
+.os-setup-theme .os-choice:has(:checked) {
+  background: var(--os-accent-soft);
+  border-color: var(--os-accent);
+}
+.os-setup-theme .os-choice:has(:focus-visible) {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 2px;
+}
 .os-wizard-stage-title {
   margin: 0;
   font-size: var(--os-text-md);
