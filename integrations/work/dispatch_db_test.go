@@ -175,6 +175,86 @@ func TestDispatchDB_SweepRecoversDueTimersAndInferenceWaits(t *testing.T) {
 	}
 }
 
+// replicaAdmission is one agent replica's dispatcher as far as its admission:
+// it re-reads the run it claimed behind the journal's privileged read and
+// admits it only where the agent does -- CanDispatchStoredRun, which the
+// agent's fence (app/work_run_fence.go) ends at, and for a waiting run decides
+// alone. An admitted dispatch is the run executing on this replica.
+type replicaAdmission struct {
+	engine   *memqlengine.MemQLEngine
+	mu       sync.Mutex
+	claimed  []string
+	admitted []string
+}
+
+func (d *replicaAdmission) Dispatch(ctx context.Context, req DispatchRequest) {
+	d.mu.Lock()
+	d.claimed = append(d.claimed, req.RunId)
+	d.mu.Unlock()
+	j, err := automations.LoadRunJournal(ctx, d.engine, req.RunId)
+	if err != nil || IsDriverOwnedRun(j.TriggeredBy) || !req.CanDispatchStoredRun(j.GoalId, j.Status, j.WaitingOn, time.Now()) {
+		return
+	}
+	d.mu.Lock()
+	d.admitted = append(d.admitted, req.RunId)
+	d.mu.Unlock()
+}
+
+// TestDispatchDB_ADueRetryIsServedByExactlyOneOfTwoReplicas (memql#5664). Two
+// agent replicas share one Postgres claim table, as two pods do, and each runs
+// the waiting sweep -- the cron lease moves, and two passes can overlap. A run
+// the failure path parked on a DUE `retry` must execute on exactly one of
+// them. It executed on neither: the replica that won the claim refused the
+// waiting run at its admission, then held the claim for its lease, so the
+// other replica could not take it either -- and when the lease lapsed the
+// next pass claimed it and refused it again.
+func TestDispatchDB_ADueRetryIsServedByExactlyOneOfTwoReplicas(t *testing.T) {
+	db, a := sweepDB(t)
+	eng := dispatchDBEngine(t, db)
+	b := New(eng, slog.New(slog.NewTextHandler(io.Discard, nil)), func() *bun.DB { return db })
+	b.admitRow = a.admitRow
+	a.engine = eng
+	now := time.Now().UTC()
+	// The claim table is the database's own, not the test schema's, so the run
+	// id is unique to this run of the test.
+	runId := runConcept + ":retry-" + bareRunId(newRowId(runConcept))
+	owner := actorCtx("retry-owner")
+	if err := a.store().createRunRow(owner, runSeed{RunId: runId, AutomationName: "probe", TemplateFingerprint: "probe", Status: runStatusWaiting, Mode: modeLive, ReplayPolicy: "strict", StartedAt: now.Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.store().updateRun(owner, runId, map[string]any{"waitingOn": map[string]any{
+		"kind": waitKindRetry, "subject": "fetch", "since": now.Add(-2 * time.Minute).Format(time.RFC3339Nano),
+		"resumeAt": now.Add(-time.Minute).Format(time.RFC3339Nano), "reason": "the far side reported itself temporarily unavailable",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	replicas := map[string]*replicaAdmission{}
+	for name, r := range map[string]*Integration{"a": a, "b": b} {
+		d := &replicaAdmission{engine: eng}
+		replicas[name] = d
+		r.SetDispatcher(d)
+		r.SetRunClaimer(automations.NewClusterExecutionGuard(func() *bun.DB { return db }, logger).StrictClaimer())
+	}
+	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns"))
+	for _, r := range []*Integration{a, b} {
+		if _, err := r.SweepWaiting(maintenance, time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var claimed, admitted []string
+	for _, d := range replicas {
+		claimed = append(claimed, d.claimed...)
+		admitted = append(admitted, d.admitted...)
+	}
+	if len(claimed) != 1 {
+		t.Fatalf("the run was claimed %d times across two replicas sharing one claim table, want once: %v", len(claimed), claimed)
+	}
+	if len(admitted) != 1 {
+		t.Fatalf("the due retry executed on %d replicas, want exactly one: the replica that claimed it refused it at its admission and holds the claim for its lease", len(admitted))
+	}
+}
+
 // TestDispatchDB_SweepLeavesAProcedureReplayRunToItsRunner is the unit test's
 // finding against the REAL recovery read: runsInFlight projects the payload
 // into the row the sweep judges, and the replay runner's trigger has to survive
