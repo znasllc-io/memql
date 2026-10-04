@@ -20,7 +20,7 @@ import (
 
 // kubeReq is one request the fake API server received.
 type kubeReq struct {
-	Method, Path, Query, ContentType, Body string
+	Method, Path, Query, ContentType, Accept, Body string
 }
 
 func (r kubeReq) String() string {
@@ -52,7 +52,7 @@ func newKubeFake(t *testing.T, answers map[string]kubeAnswer) (*Kube, *kubeFake)
 	f := &kubeFake{answers: answers}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		req := kubeReq{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, ContentType: r.Header.Get("Content-Type"), Body: string(body)}
+		req := kubeReq{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, ContentType: r.Header.Get("Content-Type"), Accept: r.Header.Get("Accept"), Body: string(body)}
 		f.mu.Lock()
 		f.reqs = append(f.reqs, req)
 		a, ok := f.answers[r.Method+" "+r.URL.Path]
@@ -563,6 +563,44 @@ func TestDeleteRunRefusesABlankRun(t *testing.T) {
 
 func kubePod(name string, created time.Time) Pod {
 	return Pod{Metadata: ObjectMeta{Name: name, CreationTimestamp: created}, Status: PodStatus{Phase: "Running"}}
+}
+
+// TestManagedSecretsListsMetadataByTheManagedByLabel (fix round 1): the
+// orphan sweep reads the runner's Secrets a page at a time, by the label
+// every one carries, as metadata alone -- the answer is the API server's
+// PartialObjectMetadataList, in the shape measured on k3s v1.35 -- so none of
+// their values cross the wire.
+func TestManagedSecretsListsMetadataByTheManagedByLabel(t *testing.T) {
+	created := time.Date(2026, 10, 4, 12, 52, 57, 0, time.UTC)
+	kube, fake := newKubeFake(t, map[string]kubeAnswer{"GET " + kubeSecrets: {code: 200, body: `{"kind":"PartialObjectMetadataList",` +
+		`"apiVersion":"meta.k8s.io/v1","metadata":{"resourceVersion":"735","continue":"tok-2"},"items":[` +
+		`{"kind":"PartialObjectMetadata","apiVersion":"meta.k8s.io/v1","metadata":{"name":"` + kubeJobName + `-env",` +
+		`"namespace":"steps-ns","creationTimestamp":"2026-10-04T12:52:57Z","labels":{"app.kubernetes.io/managed-by":"memql-workbench"}}},` +
+		`{"kind":"PartialObjectMetadata","apiVersion":"meta.k8s.io/v1","metadata":{"name":"mp-000000000000000000000002-env",` +
+		`"namespace":"steps-ns","creationTimestamp":"2026-10-04T12:52:57Z","ownerReferences":[{"apiVersion":"batch/v1","kind":"Job",` +
+		`"name":"mp-000000000000000000000002","uid":"uid-2"}]}}]}`}})
+
+	secrets, next, err := kube.ManagedSecrets(context.Background(), 2, "tok-1")
+
+	if err != nil || next != "tok-2" || len(secrets) != 2 {
+		t.Fatalf("ManagedSecrets = %d Secrets, next %q, %v; want two and the next page's token", len(secrets), next, err)
+	}
+	if secrets[0].Name != kubeJobName+"-env" || !secrets[0].CreationTimestamp.Equal(created) || len(secrets[0].OwnerReferences) != 0 ||
+		secrets[1].Name != "mp-000000000000000000000002-env" || len(secrets[1].OwnerReferences) != 1 {
+		t.Errorf("ManagedSecrets = %+v, want each Secret's name, creation and owners", secrets)
+	}
+	fake.wantRequests(t, "GET "+kubeSecrets+"?continue=tok-1&labelSelector=app.kubernetes.io%2Fmanaged-by%3Dmemql-workbench&limit=2")
+	if accept := fake.requests()[0].Accept; accept != "application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1" {
+		t.Errorf("Accept = %q, want metadata alone", accept)
+	}
+
+	t.Run("an empty page asks for nothing", func(t *testing.T) {
+		kube, fake := newKubeFake(t, map[string]kubeAnswer{})
+		if _, _, err := kube.ManagedSecrets(context.Background(), 0, ""); err == nil {
+			t.Error("a page of no Secrets was asked for")
+		}
+		fake.wantRequests(t)
+	})
 }
 
 // TestJobPodIsTheNewestPodOfTheJob: the pod is found by the job-name label the

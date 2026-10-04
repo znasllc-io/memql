@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -347,6 +348,8 @@ func (c *rtCluster) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	case p == kubeSecrets && r.Method == http.MethodPost:
 		c.createSecret(w, body)
+	case p == kubeSecrets && r.Method == http.MethodGet:
+		c.listSecrets(w, r)
 	case p == kubeSecrets && r.Method == http.MethodDelete:
 		c.deleteCollection(w, q.Get("labelSelector"), false)
 	case strings.HasPrefix(p, kubeSecrets+"/"):
@@ -565,8 +568,55 @@ func (c *rtCluster) createSecret(w http.ResponseWriter, body []byte) {
 	}
 	c.rv++
 	s.Metadata.ResourceVersion = strconv.Itoa(c.rv)
+	s.Metadata.CreationTimestamp = c.clock.Now()
 	c.secrets[s.Metadata.Name] = s
 	rtJSON(w, 201, s)
+}
+
+// listSecrets answers a list of Secrets as the API server answers one asked
+// for metadata alone (measured on k3s v1.35, ClusterAPI.ListMetadata): the
+// label selector applied, at most limit items in name order, and a continue
+// token while more remain. A list that would carry the Secrets' values fails
+// the test.
+func (c *rtCluster) listSecrets(w http.ResponseWriter, r *http.Request) {
+	if accept := r.Header.Get("Accept"); accept != "application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1" {
+		c.t.Errorf("Secrets listed with Accept %q: the answer would carry their values", accept)
+	}
+	q := r.URL.Query()
+	key, value, ok := strings.Cut(q.Get("labelSelector"), "=")
+	if !ok {
+		c.t.Errorf("Secrets listed by %q, not by one label: that would list every Secret in the namespace", q.Get("labelSelector"))
+	}
+	limit, err := strconv.Atoi(q.Get("limit"))
+	if err != nil || limit < 1 {
+		c.t.Errorf("Secrets listed with limit %q: an unbounded list", q.Get("limit"))
+		limit = 1 << 30
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var names []string
+	for name, s := range c.secrets {
+		if s.Metadata.Labels[key] == value && name > q.Get("continue") {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	type item struct {
+		Metadata ObjectMeta `json:"metadata"`
+	}
+	list := struct {
+		Kind     string            `json:"kind"`
+		Metadata map[string]string `json:"metadata"`
+		Items    []item            `json:"items"`
+	}{Kind: "PartialObjectMetadataList", Metadata: map[string]string{}, Items: []item{}}
+	for i, name := range names {
+		if i == limit {
+			list.Metadata["continue"] = names[i-1]
+			break
+		}
+		list.Items = append(list.Items, item{Metadata: c.secrets[name].Metadata})
+	}
+	rtJSON(w, 200, list)
 }
 
 func (c *rtCluster) getSecret(w http.ResponseWriter, name string) {
@@ -1116,6 +1166,7 @@ func (h *rtHarness) logs() *rtLogs {
 func (h *rtHarness) newRunner(cfg Config) *Runner {
 	r := NewRunner(cfg, h.c.kube, func() LineSink { return h.sink }, h.lib, h.tokens)
 	r.now = h.clock.Now
+	r.reapEvery = 0 // the orphan sweep is its own tests' (TestRunnerReapsOrphanedSecrets)
 	r.tempDir = h.dir
 	r.openCapture = func(o CaptureOptions) (*Capture, error) {
 		return newCapture(o, h.clock.Now, newCaptureBucket(1<<20, h.clock.Now()))
@@ -2580,6 +2631,135 @@ func TestRunnerCountsTheWaitAgainstTheTimeout(t *testing.T) {
 		rtWantCode(t, res, pl.OutcomeFailed, pl.CodeStepTimeout)
 		if want := "within its deadline of 5m0s, what was left of its 15m0s timeout once it had waited 10m0s to start"; !strings.Contains(res.Failure.Message, want) {
 			t.Errorf("failure %q, want it to say %q", res.Failure.Message, want)
+		}
+	})
+}
+
+// TestRunnerReapsOrphanedSecrets (fix round 1): a step Secret no Job ever
+// owned holds a clone token and the step's secrets, and nothing else would
+// collect it. Once it is older than the run's ceiling and the Job TTL past it,
+// with its Job gone, the sweep deletes it -- and nothing else: not a young
+// one, not an owned one, not one whose Job exists, not one the runner did not
+// make, not one whose name is not a step's.
+func TestRunnerReapsOrphanedSecrets(t *testing.T) {
+	// Old enough is older than the run's ceiling and the Job TTL past it;
+	// young is a minute short of it.
+	old := rtT0.Add(-(rtConfig().RunCeiling + rtConfig().JobTTL + time.Minute))
+	young := rtT0.Add(-(rtConfig().RunCeiling + rtConfig().JobTTL - time.Minute))
+	secret := func(job string, created time.Time, mutate ...func(*Secret)) Secret {
+		s := BuildSecret(rtConfig(), rtRun(), job, rtCloneToken)
+		s.Metadata.CreationTimestamp = created
+		for _, m := range mutate {
+			m(&s)
+		}
+		return s
+	}
+	jobName := func(i int) string { return fmt.Sprintf("mp-%024x", i) }
+
+	t.Run("what it deletes and what it keeps", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		owned := func(s *Secret) {
+			s.Metadata.OwnerReferences = []OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: "x", UID: "uid-x"}}
+		}
+		unlabelled := func(s *Secret) { delete(s.Metadata.Labels, LabelManagedBy) }
+		renamed := func(s *Secret) { s.Metadata.Name = "deploy-key-env" }
+		h.c.putSecret(secret(jobName(1), old)) // an orphan
+		h.c.putSecret(secret(jobName(2), young))
+		h.c.putSecret(secret(jobName(3), old, owned))
+		h.c.putSecret(secret(jobName(4), old)) // its Job exists
+		h.c.putJob(Job{Metadata: ObjectMeta{Name: jobName(4)}}, &rtScript{states: []rtState{{}}})
+		h.c.putSecret(secret(jobName(5), old, unlabelled))
+		h.c.putSecret(secret(jobName(6), old, renamed))
+
+		if n := h.r.reap(); n != 1 {
+			t.Errorf("the sweep deleted %d Secrets, want the one orphan", n)
+		}
+		if h.c.hasSecret(SecretName(jobName(1))) {
+			t.Error("the orphan was kept")
+		}
+		for _, name := range []string{SecretName(jobName(2)), SecretName(jobName(3)), SecretName(jobName(4)), SecretName(jobName(5)), "deploy-key-env"} {
+			if !h.c.hasSecret(name) {
+				t.Errorf("%s was deleted", name)
+			}
+		}
+	})
+
+	t.Run("a sweep deletes at most fifty", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		const orphans = 150
+		for i := 1; i <= orphans; i++ {
+			h.c.putSecret(secret(jobName(i), old))
+		}
+
+		if n := h.r.reap(); n != 50 {
+			t.Errorf("the sweep deleted %d Secrets, want its bound, 50", n)
+		}
+		left := 0
+		for i := 1; i <= orphans; i++ {
+			if h.c.hasSecret(SecretName(jobName(i))) {
+				left++
+			}
+		}
+		if left != orphans-50 {
+			t.Errorf("%d orphans left, want %d for the next sweeps", left, orphans-50)
+		}
+		if n := h.r.reap(); n != 50 {
+			t.Errorf("the next sweep deleted %d, want 50 more", n)
+		}
+	})
+
+	t.Run("a sweep reads at most a thousand Secrets", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		for i := 1; i <= 1000; i++ {
+			h.c.putSecret(secret(jobName(i), young))
+		}
+		beyond := jobName(1001)
+		h.c.putSecret(secret(beyond, old))
+
+		if n := h.r.reap(); n != 0 {
+			t.Errorf("the sweep deleted %d Secrets, want none: the orphan is past its last page", n)
+		}
+		if n := len(h.c.requestsFor(http.MethodGet, kubeSecrets)); n != 10 {
+			t.Errorf("the sweep read %d pages, want ten of a hundred", n)
+		}
+		if !h.c.hasSecret(SecretName(beyond)) {
+			t.Error("the orphan past the sweep's last page was reached")
+		}
+	})
+
+	t.Run("a sweep rides on Run, at most once per interval on a replica", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		h.c.putSecret(secret(jobName(1), old))
+		h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "ok")))
+		reaped := make(chan int, 4)
+		h.r.reapEvery, h.r.onReaped = reapInterval, func(n int) { reaped <- n }
+		swept := func() int {
+			t.Helper()
+			select {
+			case n := <-reaped:
+				return n
+			case <-time.After(10 * time.Second):
+				t.Fatal("no sweep ended")
+			}
+			return 0
+		}
+		lists := func() int { return len(h.c.requestsFor(http.MethodGet, kubeSecrets)) }
+
+		h.run(t, rtRun())
+		if n := swept(); n != 1 || h.c.hasSecret(SecretName(jobName(1))) {
+			t.Fatalf("the first Run's sweep deleted %d, want the orphan", n)
+		}
+		h.run(t, rtRun())
+		h.clock.Advance(reapInterval - time.Second)
+		h.run(t, rtRun())
+		if n := lists(); n != 1 {
+			t.Errorf("%d sweeps within the interval, want one", n)
+		}
+		h.clock.Advance(time.Second)
+		h.run(t, rtRun())
+		swept()
+		if n := lists(); n != 2 {
+			t.Errorf("%d sweeps once the interval had passed, want a second", n)
 		}
 	})
 }

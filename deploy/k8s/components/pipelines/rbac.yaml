@@ -15,9 +15,15 @@
 #               failure (an image that cannot be pulled, a clone that failed).
 #   pods/log    get
 #               the step's output, followed while it runs.
-#   secrets     create, get, patch, delete, deletecollection
+#   secrets     create, get, list, patch, delete, deletecollection
 #               one Secret per Job: the clone token and the step's resolved
-#               secrets, created before the Job and removed with it.
+#               secrets, created before the Job and removed with it; the Job
+#               made its owner (patch), the token freshened while the step
+#               waits for a slot (patch) and read back by a runner that took
+#               the Job over (get); and listed, by the runner's label and as
+#               metadata alone, by the sweep that deletes a Secret no Job ever
+#               came to own once nothing can want it. The namespace holds no
+#               Secret but the runner's, so list reaches nothing get did not.
 #
 # No `*`, no resourceNames (Job and Secret names are derived per attempt, and
 # RBAC cannot pin `create` to a name), no update, and no ClusterRole. Nothing
@@ -54,7 +60,7 @@ rules:
     verbs: ["get"]
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["create", "get", "patch", "delete", "deletecollection"]
+    verbs: ["create", "get", "list", "patch", "delete", "deletecollection"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

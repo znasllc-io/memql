@@ -442,6 +442,43 @@ func TestStreamErrorBodyIsCappedAndASuccessBodyIsTheCallers(t *testing.T) {
 	})
 }
 
+// TestListMetadataAsksForMetadataAlone: a list made through ListMetadata asks
+// for a PartialObjectMetadataList and for nothing else, so a list of Secrets
+// never carries their values -- and a server that cannot answer the form
+// refuses rather than sending the objects whole. Everything else is Do's: the
+// bearer, the body, a non-2xx as a *StatusError.
+func TestListMetadataAsksForMetadataAlone(t *testing.T) {
+	var accept, auth, path string
+	status := http.StatusOK
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		accept, auth, path = r.Header.Get("Accept"), r.Header.Get("Authorization"), r.URL.RequestURI()
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, `{"kind":"PartialObjectMetadataList","items":[]}`)
+	}))
+	defer srv.Close()
+	api := NewClusterAPIWith(srv.URL, "tok", srv.Client())
+
+	out, err := api.ListMetadata(context.Background(), "api/v1/namespaces/ns/secrets?labelSelector=a%3Db&limit=2")
+	if err != nil || string(out) != `{"kind":"PartialObjectMetadataList","items":[]}` {
+		t.Fatalf("ListMetadata = %q, %v; want the body", out, err)
+	}
+	if accept != "application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1" {
+		t.Errorf("Accept = %q, want the PartialObjectMetadataList form alone", accept)
+	}
+	if auth != "Bearer tok" || path != "/api/v1/namespaces/ns/secrets?labelSelector=a%3Db&limit=2" {
+		t.Errorf("Authorization %q, path %q; want the bearer and the path as given", auth, path)
+	}
+
+	status = http.StatusNotAcceptable
+	var se *StatusError
+	if _, err := api.ListMetadata(context.Background(), "api/v1/x"); !errors.As(err, &se) || se.Code != http.StatusNotAcceptable {
+		t.Errorf("a refusal = %v, want a *StatusError carrying 406", err)
+	}
+	if _, err := api.Do(context.Background(), http.MethodGet, "api/v1/x", "", nil); err == nil || accept != "application/json" {
+		t.Errorf("Do after ListMetadata sent Accept %q, want plain JSON: the form is ListMetadata's alone", accept)
+	}
+}
+
 // TestIsConflictAndIsForbiddenQuota pins what each predicate answers for what the API
 // server actually says. They read the CODE and, for a quota, the sentence too: a 403 is
 // also what a missing Role answers, and the runner waits on the one and fails on the other.

@@ -136,12 +136,13 @@ var pipelinesSizing = map[string]struct {
 // the agent has acknowledged the result and sweeps a cancelled run's Jobs with
 // one deletecollection; it reads the Job's pod to classify a failure and that
 // pod's log to capture the output; and it writes one Secret per Job (the clone
-// token and the step's resolved secrets) and removes it the same two ways.
+// token and the step's resolved secrets), removes it the same two ways, and
+// lists the Secrets by its label to sweep one no Job ever came to own.
 var wantRunnerGrants = map[string][]string{
 	"batch/jobs": {"create", "get", "list", "watch", "patch", "delete", "deletecollection"},
 	"/pods":      {"get", "list", "watch"},
 	"/pods/log":  {"get"},
-	"/secrets":   {"create", "get", "patch", "delete", "deletecollection"},
+	"/secrets":   {"create", "get", "list", "patch", "delete", "deletecollection"},
 }
 
 // renderedObject is one document of a rendered overlay: its identity, plus the

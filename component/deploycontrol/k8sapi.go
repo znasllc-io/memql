@@ -275,6 +275,23 @@ func (e *ClusterAPI) Do(ctx context.Context, method, path, contentType string, b
 	return e.do(ctx, method, path, contentType, body)
 }
 
+// metadataListAccept asks the API server to answer a list with each object's
+// metadata alone: a meta.k8s.io/v1 PartialObjectMetadataList, whatever the
+// listed kind. No plain-JSON fallback follows it, so a server that cannot
+// answer the form refuses (406) rather than sending the objects whole.
+const metadataListAccept = "application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1"
+
+// ListMetadata issues a GET of a collection, as Do does, asking for the
+// objects' metadata alone (metadataListAccept): a list of Secrets carries
+// none of their values. Measured against a v1.35 k3s API server
+// (2026-10-04): the answer is a PartialObjectMetadataList whose items hold
+// metadata only, labelSelector, limit and continue apply as to a full list,
+// and metadata.continue is absent on the last page. `path` is as for Do,
+// query string included.
+func (e *ClusterAPI) ListMetadata(ctx context.Context, path string) ([]byte, error) {
+	return e.doAccepting(ctx, http.MethodGet, path, metadataListAccept, "", nil)
+}
+
 // net_JoinHostPort brackets an IPv6 literal. Spelled out rather than importing
 // net for one call, and named to read as what it is.
 func net_JoinHostPort(host, port string) string {
@@ -329,9 +346,17 @@ func (e *ClusterAPI) newRequest(ctx context.Context, method, path, contentType s
 // \"system:serviceaccount:memql:memql-deploy\" cannot patch resource") is the
 // single most useful thing an operator can be handed when the RBAC is wrong.
 func (e *ClusterAPI) do(ctx context.Context, method, path, contentType string, body []byte) ([]byte, error) {
+	return e.doAccepting(ctx, method, path, "", contentType, body)
+}
+
+// doAccepting is do with the Accept header replaced, unless accept is empty.
+func (e *ClusterAPI) doAccepting(ctx context.Context, method, path, accept, contentType string, body []byte) ([]byte, error) {
 	req, err := e.newRequest(ctx, method, path, contentType, body)
 	if err != nil {
 		return nil, err
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
 	}
 	resp, err := e.client.Do(req)
 	if err != nil {

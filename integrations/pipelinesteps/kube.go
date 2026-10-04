@@ -288,6 +288,42 @@ func (k *Kube) DeleteRun(ctx context.Context, runID string) (int, error) {
 	return matched, errors.Join(jobsErr, secretsErr)
 }
 
+// ManagedSecrets is one page of the Secrets the runner made, by the
+// LabelManagedBy label: at most limit of them, from the continue token cont
+// ("" for the first page), with next the token of the page after it ("" after
+// the last). Their metadata alone: the API server is asked for a
+// PartialObjectMetadataList (ClusterAPI.ListMetadata), so none of their
+// values cross the wire for this.
+func (k *Kube) ManagedSecrets(ctx context.Context, limit int, cont string) (secrets []ObjectMeta, next string, err error) {
+	if limit < 1 {
+		return nil, "", fmt.Errorf("pipelinesteps: a page of %d Secrets asks for nothing", limit)
+	}
+	q := url.Values{"labelSelector": {LabelManagedBy + "=" + ManagedBy}, "limit": {strconv.Itoa(limit)}}
+	if cont != "" {
+		q.Set("continue", cont)
+	}
+	out, err := k.api.ListMetadata(ctx, k.corePath("secrets", "")+"?"+q.Encode())
+	if err != nil {
+		return nil, "", err
+	}
+	var list struct {
+		Metadata struct {
+			Continue string `json:"continue"`
+		} `json:"metadata"`
+		Items []struct {
+			Metadata ObjectMeta `json:"metadata"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(out, &list); err != nil {
+		return nil, "", fmt.Errorf("pipelinesteps: reading the list of step Secrets: %w", err)
+	}
+	secrets = make([]ObjectMeta, 0, len(list.Items))
+	for _, item := range list.Items {
+		secrets = append(secrets, item.Metadata)
+	}
+	return secrets, list.Metadata.Continue, nil
+}
+
 // JobPod is the Job's pod, found by the job-name label the Job controller
 // puts on it: the newest when more than one answers (a leftover of a deleted
 // Job of the same name), nil before the controller has created one.

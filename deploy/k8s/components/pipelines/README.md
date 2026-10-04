@@ -140,7 +140,7 @@ can run.
 | `batch/jobs` | create, get, list, watch, patch, delete, deletecollection | one Job per step attempt; its heartbeat and outcome annotations; deleted once the agent has the result; a cancelled run swept by label |
 | `pods` | get, list, watch | the Job's pod classifies a failure (image pull, clone) |
 | `pods/log` | get | the step's output, followed while it runs |
-| `secrets` | create, get, patch, delete, deletecollection | one Secret per Job: the clone token and the step's resolved secrets |
+| `secrets` | create, get, list, patch, delete, deletecollection | one Secret per Job: the clone token and the step's resolved secrets; listed (by label, metadata alone) by the sweep that deletes a Secret no Job ever came to own |
 
 It is bound to **`memql-engine`**, the ServiceAccount every engine Deployment
 runs as, not to a workbench-only account: the workbench also makes model calls,
