@@ -727,6 +727,9 @@ func workStepFromRow(row map[string]any) WorkStep {
 		s.Stage = rowString(call, "stage")
 		s.Name = rowString(call, "name")
 		s.Packages = rowStrings(call, "packages")
+		if skip, ok := call["skip"].(map[string]any); ok {
+			s.Skip = &pipelines.Skip{Code: rowString(skip, "code"), Reason: rowString(skip, "reason")}
+		}
 	}
 	if result, ok := row["result"].(map[string]any); ok {
 		s.Reason = rowString(result, "reason")

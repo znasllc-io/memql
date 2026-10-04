@@ -60,6 +60,17 @@ const (
 // or the run has ended under somebody else's hand.
 var errLeaseLost = errors.New("pipelines: this replica no longer holds the run's lease")
 
+// errRunFinished is a write refused because the run has ended under THIS
+// replica's own hand: the heartbeat that ticks once more after the conclusion
+// has nothing to renew, and nothing was lost.
+var errRunFinished = errors.New("pipelines: the run has concluded")
+
+// driveStopped reports an error that is the drive's own end rather than a
+// failure to report: the lease lost, or the run concluded.
+func driveStopped(err error) bool {
+	return errors.Is(err, errLeaseLost) || errors.Is(err, errRunFinished)
+}
+
 // driveRegistry is the runs this node drives now. A run is reserved here
 // BEFORE it is claimed, so two of this node's own events for one run can
 // never start two drives of it, and released only when its drive returns.
@@ -69,6 +80,9 @@ type driveRegistry struct {
 	// started counts the drives this node has started and not finished,
 	// claimed or not (spawnDrive).
 	started sync.WaitGroup
+	// aborts are the runs whose drive on this node stopped short, and when
+	// recovery may take each up again (recover.go).
+	aborts map[string]abortRecord
 
 	// gateMu admits ONE of this node's drives to a gate at a time
 	// (driverGate).
@@ -119,6 +133,22 @@ func (l *lease) lose() {
 }
 
 func (l *lease) isLost() bool { return l.lost.Load() }
+
+// stoppable is ctx bounded by d AND by the drive's stop -- a cancel or a lost
+// lease -- whichever comes first: a call to GitHub never outlives the drive
+// that made it, and never waits without end (a tarball client has no timeout
+// of its own; its caller's context bounds it).
+func (dr *runDriver) stoppable(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	bounded, cancel := context.WithTimeout(ctx, d)
+	go func() {
+		select {
+		case <-dr.lease.stop:
+			cancel()
+		case <-bounded.Done():
+		}
+	}()
+	return bounded, cancel
+}
 
 // isCancelled reports a cancel this drive must carry out: asked, and the
 // lease still this node's.
@@ -252,9 +282,12 @@ func (dr *runDriver) underLease(ctx context.Context, fn func(gctx context.Contex
 		if err != nil {
 			return err
 		}
-		if r == nil || r.Finished() || r.DriverNodeID != dr.d.NodeID {
+		if r == nil || r.DriverNodeID != dr.d.NodeID {
 			dr.loseLease(r)
 			return errLeaseLost
+		}
+		if r.Finished() {
+			return errRunFinished
 		}
 		if dr.lease.isLost() {
 			return errLeaseLost
@@ -276,11 +309,12 @@ func (dr *runDriver) stillHolds(ctx context.Context) bool {
 	if err != nil {
 		return true
 	}
-	if r == nil || r.Finished() || r.DriverNodeID != dr.d.NodeID {
+	if r == nil || r.DriverNodeID != dr.d.NodeID {
 		dr.loseLease(r)
 		return false
 	}
-	return true
+	// A run this replica concluded is held and over: nothing more to write.
+	return !r.Finished()
 }
 
 // loseLease records, once, that another replica holds the run.
@@ -298,10 +332,11 @@ func (dr *runDriver) loseLease(current *Run) {
 	dr.lease.lose()
 }
 
-// heartbeat renews the lease every HeartbeatEvery until ctx ends or the lease
-// is lost. It keeps renewing after a cancel: concluding a cancelled run takes
-// a moment, and a lease left to go stale in it would let another replica take
-// the run over mid-conclusion.
+// heartbeat renews the lease every HeartbeatEvery until ctx ends, the lease is
+// lost, or the run has concluded. It keeps renewing after a cancel and through
+// the conclusion: concluding takes a moment -- calls to GitHub among it -- and
+// a lease left to go stale there would let another replica take the run over
+// mid-conclusion.
 func (dr *runDriver) heartbeat(ctx context.Context) {
 	t := time.NewTicker(dr.d.HeartbeatEvery)
 	defer t.Stop()
@@ -311,34 +346,36 @@ func (dr *runDriver) heartbeat(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		if dr.lease.isLost() {
+		if dr.lease.isLost() || !dr.renew(ctx) {
 			return
 		}
-		dr.renew(ctx)
 	}
 }
 
 // renew is one heartbeat: the gated read-modify-write of driverHeartbeatAt,
-// the cancel request read off the same row, and the work run's own beat.
-func (dr *runDriver) renew(ctx context.Context) {
+// the cancel request read off the same row, and the work run's own beat. It
+// answers false when there is nothing left to renew: the lease is lost, or the
+// run concluded.
+func (dr *runDriver) renew(ctx context.Context) bool {
 	cancelAsked := false
 	err := dr.underLease(ctx, func(gctx context.Context, current Run) error {
 		cancelAsked = current.CancelRequested
 		return dr.d.Store.UpdateRun(gctx, current.OwnerUserID, current.ID, RunPatch{DriverHeartbeatAt: ptr(dr.d.now())})
 	})
 	switch {
-	case errors.Is(err, errLeaseLost):
-		return
+	case errors.Is(err, errLeaseLost), errors.Is(err, errRunFinished):
+		return false
 	case err != nil:
 		// Not a lost lease: a gate or a write that failed. The next beat
 		// tries again; four in a row and another replica may take over,
 		// which the beat after that will see.
 		dr.d.Logger.Warn("pipelines: a lease renewal failed; the next one retries",
 			"component", "pipelinerun", logger.Subject(RunConcept, dr.runID), "error", err)
-		return
+		return true
 	}
 	if cancelAsked {
 		dr.lease.cancel()
 	}
 	dr.work().Heartbeat(ctx)
+	return true
 }

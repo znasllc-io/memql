@@ -75,6 +75,10 @@ type Deps struct {
 	// HeartbeatEvery is how often a driver renews its lease; zero is
 	// leaseRenewEvery (30 s). A test shortens it to watch a lease be lost.
 	HeartbeatEvery time.Duration
+
+	// publishBackoff is the wait before each retry of a concluded run's
+	// check-run write; nil is finalPublishBackoff. A test shortens it.
+	publishBackoff []time.Duration
 }
 
 // Integration is the `pipelines` plug-in.

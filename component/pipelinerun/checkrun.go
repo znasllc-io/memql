@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/znasllc-io/memql/component/packages"
 	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/component/pipelines"
 )
@@ -210,16 +212,78 @@ func (dr *runDriver) publish(ctx context.Context) {
 	if !dr.havePipeline || !dr.stillHolds(ctx) {
 		return
 	}
-	w := publishCheckRun(ctx, dr.d, dr.p, dr.run, ReportFor(dr.p, dr.run, dr.report()))
-	if w.Err != nil {
+	callCtx, done := dr.stoppable(ctx, githubCallTimeout)
+	w := publishCheckRun(callCtx, dr.d, dr.p, dr.run, ReportFor(dr.p, dr.run, dr.report()))
+	done()
+	if w.Err != nil && !dr.lease.isLost() && !dr.lease.isCancelled() {
 		dr.log.Warn("pipelines: the run's check run was not moved",
 			"checkRunState", w.State, "error", dr.mask(w.Err.Error()))
 	}
-	if patch, changed := w.Patch(dr.run); changed {
-		if err := dr.writeRun(ctx, patch); err != nil && !errors.Is(err, errLeaseLost) {
+	patch, changed := w.Patch(dr.run)
+	if w.ID > 0 {
+		// The drive's own copy learns a check run created now at once,
+		// whatever the row write below does: every later write moves THIS
+		// check run, rather than creating another beside it because one row
+		// write did not land. The conclusion records it on the row if this
+		// write did not.
+		dr.run.CheckRunID = w.ID
+	}
+	if changed {
+		if err := dr.writeRun(ctx, patch); err != nil && !driveStopped(err) {
 			dr.log.Warn("pipelines: the check run's state was not recorded on the run", "error", err)
 		}
 	}
+}
+
+// publishFinal writes a concluded run's check run: bounded, and tried again
+// while the failure may be transient, because a required check left showing
+// a finished run unfinished holds a merge until somebody notices. A refusal
+// is final at once -- a 403 (the app lacks checks: write), a grant that no
+// longer reaches the repository, no app at all -- and so is a lost lease.
+func (dr *runDriver) publishFinal(ctx context.Context, final Run) CheckRunWrite {
+	report := ReportFor(dr.p, final, dr.report())
+	backoff := dr.d.publishBackoff
+	if backoff == nil {
+		backoff = finalPublishBackoff
+	}
+	for attempt := 0; ; attempt++ {
+		callCtx, done := context.WithTimeout(ctx, githubCallTimeout)
+		w := publishCheckRun(callCtx, dr.d, dr.p, final, report)
+		done()
+		if w.ID > 0 {
+			final.CheckRunID, dr.run.CheckRunID = w.ID, w.ID
+		}
+		if w.Err == nil || !transientCheckRunFailure(w) || attempt >= len(backoff) || dr.lease.isLost() {
+			if w.Err != nil {
+				dr.log.Warn("pipelines: the concluded run's check run was not written",
+					"checkRunState", w.State, "attempts", attempt+1, "error", dr.mask(w.Err.Error()))
+			}
+			return w
+		}
+		time.Sleep(backoff[attempt])
+	}
+}
+
+// finalPublishBackoff is the wait before each retry of a concluded run's
+// check-run write.
+var finalPublishBackoff = []time.Duration{2 * time.Second, 8 * time.Second}
+
+// transientCheckRunFailure reports a check-run write that failed for a
+// reason a retry could change: not GitHub's 403, not a grant the source no
+// longer holds, not a cluster with no app.
+func transientCheckRunFailure(w CheckRunWrite) bool {
+	if w.Err == nil || w.State != CheckRunUnavailable {
+		return false
+	}
+	var refusal *packages.Refusal
+	switch {
+	case errors.As(w.Err, &refusal),
+		errors.Is(w.Err, githubapp.ErrNotConfigured),
+		errors.Is(w.Err, githubapp.ErrNotInstalled),
+		errors.Is(w.Err, errNoGitHub):
+		return false
+	}
+	return true
 }
 
 // report is every step of a driven run as the check run reports it, each log

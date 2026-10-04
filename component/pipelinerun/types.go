@@ -115,6 +115,11 @@ type WorkStep struct {
 	// step that selects none. A resumed step is re-sent with THIS slice, not
 	// one recomputed from a timing table that may have moved since.
 	Packages []string
+	// Skip is the skip the plan gave the step (call.skip), nil for a step the
+	// plan ran. A resumed driver keeps it whatever a compare read now says:
+	// a step that was planned to run, and so may have been sent, is not
+	// settled as skipped behind the runner's back.
+	Skip *pipelines.Skip
 	// Reason is a skipped or cancelled step's reason (result.reason).
 	Reason string
 }

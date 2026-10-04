@@ -64,7 +64,9 @@ func keepForRun(p string) bool {
 // into the plan this run executes, or answers the refusal that fails the run.
 func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.Refusal) {
 	d, p, run := dr.d, dr.p, dr.run
-	tree, err := d.GitHub.Tree(ctx, dr.token, p.Repository, run.SHA, keepForRun, maxTreeBytes)
+	treeCtx, treeDone := dr.stoppable(ctx, treeReadTimeout)
+	tree, err := d.GitHub.Tree(treeCtx, dr.token, p.Repository, run.SHA, keepForRun, maxTreeBytes)
+	treeDone()
 	switch {
 	case errors.Is(err, ErrTreeTooLarge):
 		return pipelines.Plan{}, pipelines.Refuse(packages.CodeSourceTooLarge, "",
@@ -139,7 +141,9 @@ func (dr *runDriver) changes(ctx context.Context) ([]string, bool) {
 	if base == "" {
 		return nil, false
 	}
-	files, complete, err := dr.d.GitHub.Compare(ctx, dr.token, dr.p.Repository, base, dr.run.SHA)
+	compareCtx, compareDone := dr.stoppable(ctx, githubCallTimeout)
+	files, complete, err := dr.d.GitHub.Compare(compareCtx, dr.token, dr.p.Repository, base, dr.run.SHA)
+	compareDone()
 	if err != nil || !complete {
 		reason := "GitHub stopped listing the changed files"
 		if err != nil {

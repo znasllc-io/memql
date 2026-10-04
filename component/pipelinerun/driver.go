@@ -55,6 +55,12 @@ const (
 	stepGrace = 10 * time.Minute
 	// executorCancelTimeout bounds Executor.Cancel.
 	executorCancelTimeout = 30 * time.Second
+	// githubCallTimeout bounds one call to GitHub the drive waits on: a token
+	// mint, a compare, a check-run write.
+	githubCallTimeout = 2 * time.Minute
+	// treeReadTimeout bounds the tarball read, which carries a repository's
+	// whole Go source.
+	treeReadTimeout = 10 * time.Minute
 	// workTemplatePrefix names a pipeline's work template: the run's
 	// automationName is "pipeline:<pipeline name>".
 	workTemplatePrefix = "pipeline:"
@@ -195,8 +201,26 @@ func (i *Integration) claimAndDrive(runID string) {
 		i: i, d: d, lease: l, runID: runID, run: run,
 		log: d.Logger.With("component", "pipelinerun", logger.Subject(RunConcept, runID), "node", d.NodeID),
 	}
-	dr.drive(ctx)
+	switch dr.drive(ctx) {
+	case driveConcluded:
+		i.forgetAborts(runID)
+	case driveAborted:
+		i.noteAbort(runID, d.now())
+	}
 }
+
+// driveOutcome is how a drive ended, for the node's recovery backoff.
+type driveOutcome int
+
+const (
+	// driveConcluded: the run has its conclusion.
+	driveConcluded driveOutcome = iota
+	// driveAborted: a write or read the run cannot go on without failed; the
+	// run stays claimed by this node for recovery to take up again.
+	driveAborted
+	// driveLost: another replica holds the run now.
+	driveLost
+)
 
 // runDriver is one drive of one run, on the replica holding its lease.
 type runDriver struct {
@@ -219,6 +243,10 @@ type runDriver struct {
 
 	stages []stageTracks
 	tracks []*stepTrack
+	// abandonedInFlight: this drive ends steps a previous driver handed to
+	// the runner without re-sending them, so the runner must be told to stop
+	// them (reopenFromRows, conclude). The drive's goroutine only.
+	abandonedInFlight bool
 
 	execCtx    context.Context
 	cancelExec context.CancelFunc
@@ -249,8 +277,11 @@ func refusedWith(r *pipelines.Refusal) verdict {
 }
 
 // drive takes the run from claimed to concluded. The heartbeat renews the
-// lease beside it; a cancel stops the runner's in-flight work at once.
-func (dr *runDriver) drive(ctx context.Context) {
+// lease beside it -- through the conclusion too, which calls GitHub and may
+// take a while; a lease left to go stale there would let another replica take
+// the run over mid-conclusion -- and a cancel stops the runner's in-flight
+// work at once.
+func (dr *runDriver) drive(ctx context.Context) driveOutcome {
 	dr.execCtx, dr.cancelExec = context.WithCancel(context.WithoutCancel(ctx))
 	if dr.run.CancelRequested {
 		dr.lease.cancel()
@@ -276,19 +307,18 @@ func (dr *runDriver) drive(ctx context.Context) {
 		}
 	}()
 
-	v, ok := dr.steer(ctx)
-	if ok && v.conclusion == ConclusionCancelled {
-		dr.cancelRunner()
+	outcome := driveAborted
+	if v, ok := dr.steer(ctx); ok && dr.conclude(ctx, v) {
+		outcome = driveConcluded
 	}
 	stopBeat()
 	beating.Wait()
-	if ok {
-		dr.conclude(ctx, v)
-	}
 	close(watched)
-	if !dr.lease.isLost() {
-		dr.cancelExec()
+	if dr.lease.isLost() {
+		return driveLost
 	}
+	dr.cancelExec()
+	return outcome
 }
 
 // cancelRunner tells the executor to stop every step of the run it still has
@@ -319,24 +349,36 @@ func (dr *runDriver) steer(ctx context.Context) (verdict, bool) {
 		dr.abort("reading the run's pipeline", err)
 		return verdict{}, false
 	}
+	if p != nil {
+		dr.p, dr.havePipeline = *p, true
+	}
+	// A cancel is answered first: whatever else is true of the run, the
+	// person asked it to stop.
+	if dr.lease.isCancelled() {
+		return verdict{conclusion: ConclusionCancelled, workMessage: "The run was cancelled."}, true
+	}
 	if p == nil {
 		return refusedWith(pipelines.Refuse(pipelines.CodeDisconnected, "",
 			"This run's pipeline no longer exists, so nothing can run it. Connect the source's pipeline again and re-run.")), true
 	}
-	dr.p, dr.havePipeline = *p, true
 	if !p.Active() && dr.run.Status == StatusQueued {
 		// A run already started runs to its end; one that has not, does not.
 		return refusedWith(pipelines.Refuse(pipelines.CodeDisconnected, "",
 			"This run's pipeline was disconnected before the run started, so it was not run. Reconnect the pipeline to run this commit again.")), true
 	}
-	if dr.lease.isCancelled() {
-		return verdict{conclusion: ConclusionCancelled, workMessage: "The run was cancelled."}, true
-	}
 
 	// The grant: every token is minted through the owner's connection, which
-	// proves it still reaches the repository.
-	token, installation, err := d.GitHub.InstallationToken(ctx, p.CredentialID, p.OwnerUserID, p.Repository)
-	if err != nil {
+	// proves it still reaches the repository. Bounded, and given up the moment
+	// the run is cancelled or lost: a call to GitHub never holds a drive.
+	tokenCtx, tokenDone := dr.stoppable(ctx, githubCallTimeout)
+	token, installation, err := d.GitHub.InstallationToken(tokenCtx, p.CredentialID, p.OwnerUserID, p.Repository)
+	tokenDone()
+	switch {
+	case dr.lease.isLost():
+		return verdict{}, false
+	case dr.lease.isCancelled():
+		return verdict{conclusion: ConclusionCancelled, workMessage: "The run was cancelled."}, true
+	case err != nil:
 		return refusedWith(grantRefusal(p.Repository, err)), true
 	}
 	dr.token, dr.installation = token, installation
@@ -353,16 +395,16 @@ func (dr *runDriver) steer(ctx context.Context) (verdict, bool) {
 		dr.publish(ctx) // "Preparing the run"
 	}
 
-	// The plan.
+	// The plan. A read the drive stopped answers a refusal that is only the
+	// stop's echo, so the stop is asked about first.
 	plan, refusal := dr.readPlan(ctx)
-	if dr.lease.isLost() {
+	switch {
+	case dr.lease.isLost():
 		return verdict{}, false
-	}
-	if refusal != nil {
-		return refusedWith(refusal), true
-	}
-	if dr.lease.isCancelled() {
+	case dr.lease.isCancelled():
 		return verdict{conclusion: ConclusionCancelled, workMessage: "The run was cancelled."}, true
+	case refusal != nil:
+		return refusedWith(refusal), true
 	}
 	if len(plan.Stages) == 0 {
 		// No stage applies to this run: a success with nothing to run, and
@@ -390,7 +432,7 @@ func (dr *runDriver) steer(ctx context.Context) (verdict, bool) {
 // abort logs why a drive stopped short. A lost lease was logged where it was
 // found.
 func (dr *runDriver) abort(what string, err error) {
-	if errors.Is(err, errLeaseLost) {
+	if driveStopped(err) {
 		return
 	}
 	dr.log.Warn("pipelines: the drive stopped "+what+"; the run stays claimed, and recovery takes it up again",
@@ -439,12 +481,8 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 		// again writes the same ids, and nothing has run to lose.
 	}
 
-	if !dr.stillHolds(ctx) {
-		return nil, false
-	}
-	decls := dr.decls()
-	w, err := d.Journal.Begin(ctx, workjournal.Work{
-		OwnerUserID: dr.p.OwnerUserID,
+	work := workjournal.Work{
+		OwnerUserID: dr.run.OwnerUserID,
 		Template:    workTemplatePrefix + dr.p.Name,
 		Statement:   fmt.Sprintf("Run %s on %s (%s)", dr.p.Name, shortSHA(dr.run.SHA), dr.run.Event),
 		// The run key, scoped to the pipeline as RunIDFor scopes the run row:
@@ -460,11 +498,31 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 			"event":         string(dr.run.Event),
 			"attempt":       max(dr.run.Attempt, 1),
 		},
-		Steps:        decls,
+		Steps:        dr.decls(),
 		QueueSteps:   true,
 		RequestedVia: "pipeline",
 		TriggeredBy:  pipelines.WorkTriggerPrefix + string(dr.run.Mode),
-	})
+	}
+	// The work is NAMED on the run row before it is opened: a replica that
+	// stops between the two leaves a row naming work that may not exist yet,
+	// which a resume opens (no step rows: Begin again, the same ids), and
+	// never work that nothing names -- a pipeline's work run is its runner's
+	// own, and no sweep would ever close it.
+	goalID, runID, err := workjournal.IDs(work)
+	if err != nil {
+		dr.abort("naming the run's work", err)
+		return nil, false
+	}
+	if err := dr.writeRun(ctx, RunPatch{
+		WorkRunID: ptr(runID), WorkGoalID: ptr(goalID), Stages: ptr(dr.stageSummaries()),
+	}); err != nil {
+		dr.abort("recording the run's work run", err)
+		return nil, false
+	}
+	if !dr.stillHolds(ctx) {
+		return nil, false
+	}
+	w, err := d.Journal.Begin(ctx, work)
 	if err != nil || w == nil {
 		if err == nil {
 			err = errors.New("the journal opened nothing")
@@ -473,27 +531,26 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 		return nil, false
 	}
 	dr.workRun.Store(w)
-	if err := dr.writeRun(ctx, RunPatch{
-		WorkRunID: ptr(w.RunID()), WorkGoalID: ptr(w.GoalID()), Stages: ptr(dr.stageSummaries()),
-	}); err != nil {
-		dr.abort("recording the run's work run", err)
-		return nil, false
-	}
 	dr.setFacts()
 	return nil, true
 }
 
 // decls are the plan's steps as the journal declares them, in plan order: an
 // exec step each, deterministic, waiting on the previous stage's steps. The
-// call names the manifest step and, for a step that selects packages, the
-// slice it was given -- names only, never a secret value -- so a resumed
-// driver re-sends the slice the plan began with.
+// call names the manifest step and carries what the plan DECIDED about it
+// that a later read could decide differently -- the package slice a step was
+// given, and the skip it was planned with -- names and sentences only, never
+// a secret value, so a resumed driver carries out the plan the run began with
+// rather than one computed from a timing table or a compare that moved since.
 func (dr *runDriver) decls() []workjournal.StepDecl {
 	out := make([]workjournal.StepDecl, 0, len(dr.tracks))
 	for _, t := range dr.tracks {
 		call := map[string]any{"construct": "pipeline", "name": t.step.Name, "stage": t.step.Stage}
 		if len(t.step.Packages) > 0 {
 			call["packages"] = slices.Clone(t.step.Packages)
+		}
+		if t.step.Skip != nil {
+			call["skip"] = map[string]any{"code": t.step.Skip.Code, "reason": t.step.Skip.Reason}
 		}
 		out = append(out, workjournal.StepDecl{
 			Key:       t.step.Key,
@@ -507,11 +564,13 @@ func (dr *runDriver) decls() []workjournal.StepDecl {
 }
 
 // resume lays the step rows a previous driver wrote over the plan read again:
-// a step with a receipt keeps it and is not run again, a step running with no
-// receipt is re-sent with the same attempt, and a step given packages runs
-// THAT slice. It answers why the run cannot be resumed, or "": a step the
-// rows hold and the plan does not is work the run began and could no longer
-// account for.
+// a step with a receipt keeps it and is not run again, and every other step is
+// carried out as its ROW says the run planned it -- the slice it was given,
+// and whether it was a skip. So a step that was running with no receipt is
+// re-sent, with the same attempt, even when the plan read now would skip it:
+// it was handed to the runner, and its outcome is the run's. It answers why
+// the run cannot be resumed, or "": a step the rows hold and the plan does
+// not is work the run began and could no longer account for.
 func (dr *runDriver) resume(rows []WorkStep) string {
 	stored := make(map[string]WorkStep, len(rows))
 	for _, row := range rows {
@@ -527,15 +586,17 @@ func (dr *runDriver) resume(rows []WorkStep) string {
 			continue
 		}
 		t.attempt = max(row.Attempt, 1)
+		t.sent = row.Status == WorkStepRunning
 		if len(row.Packages) > 0 {
 			t.step.Packages = slices.Clone(row.Packages)
-			t.step.Skip = nil
 		}
-		switch {
-		case row.Finished():
+		t.step.Skip = nil
+		if row.Skip != nil {
+			skip := *row.Skip
+			t.step.Skip = &skip
+		}
+		if row.Finished() {
 			t.set(stateFromRow(t.snapshot(), row))
-		case row.Status == WorkStepRunning:
-			t.resend = true
 		}
 	}
 	var missing []string
@@ -585,6 +646,7 @@ func (dr *runDriver) adoptRows(rows []WorkStep) {
 		t := &stepTrack{
 			step:    pipelines.Step{Key: row.Key, Stage: stage, Name: name, Kind: pipelines.StepCommand},
 			attempt: max(row.Attempt, 1),
+			sent:    row.Status == WorkStepRunning,
 			state:   StepState{Key: row.Key, Stage: stage, Name: name, Status: StepPending},
 		}
 		if row.Finished() {
@@ -631,12 +693,17 @@ func (dr *runDriver) settleStoredWork(ctx context.Context, rec receipt) bool {
 // their order: an intent written through them restates each step's type,
 // kind and place, and leaves its call and dependencies as the plan that
 // queued it wrote them -- a declaration the journal does not hold would write
-// the default type over the row's.
+// the default type over the row's. Its callers settle every unfinished step
+// without re-sending it, so a step the runner was handed and never answered
+// for is ABANDONED here, and the runner is told to stop it (conclude).
 func (dr *runDriver) reopenFromRows(rows []WorkStep) bool {
 	dr.adoptRows(rows)
 	decls := make([]workjournal.StepDecl, 0, len(dr.tracks))
 	for _, t := range dr.tracks {
 		decls = append(decls, workjournal.StepDecl{Key: t.step.Key, Kind: workjournal.KindDeterministic, StepType: "exec"})
+		if t.sent && !t.finished() {
+			dr.abandonedInFlight = true
+		}
 	}
 	w := dr.d.Journal.Reopen(dr.run.OwnerUserID, dr.run.WorkGoalID, dr.run.WorkRunID, decls, dr.run.StartedAt)
 	if w == nil {
@@ -681,9 +748,11 @@ type stageTracks struct {
 type stepTrack struct {
 	step    pipelines.Step
 	attempt int
-	// resend: the rows say running with no receipt -- a previous driver sent
-	// it, and the runner may still be at it.
-	resend bool
+	// sent: the rows say running with no receipt -- a previous driver handed
+	// it to the runner, which may still be at it. Re-sent with the same
+	// attempt when the run goes on; when the run ends instead, the runner is
+	// told to stop it.
+	sent bool
 	// handle is the step's journal handle once its intent is written. Only
 	// the goroutine settling the step touches it.
 	handle *workjournal.Step
@@ -1076,15 +1145,21 @@ func cancelReceipt() receipt {
 
 // receiptFor reads the executor's answer into a receipt: the outcome, the
 // failure, where it ran, how long it took, its log and artifacts, and the
-// metadata a person reads beside it. Every text the runner wrote is masked.
+// metadata a person reads beside it. EVERY string the runner wrote is masked
+// before it is kept -- a code and a status as much as a message, a job name
+// and a machine label as much as a log line: none of them is the driver's to
+// vouch for, and each reaches a row, the check run or a log line.
 func (dr *runDriver) receiptFor(res pipelines.StepResult, elapsed time.Duration) receipt {
+	masks := dr.maskValues()
+	mask := func(s string) string { return pipelines.MaskSecrets(strings.TrimSpace(s), masks) }
 	rec := receipt{
 		durationMs:      durationOf(res, elapsed),
-		binding:         bindingOf(res.Where),
-		logFileID:       strings.TrimSpace(res.LogFileID),
-		artifactFileIDs: slices.Clone(res.ArtifactFileIDs),
-		logTail:         res.LogTail,
+		binding:         bindingOf(res.Where, mask),
+		logFileID:       mask(res.LogFileID),
+		artifactFileIDs: maskAll(res.ArtifactFileIDs, mask),
+		logTail:         res.LogTail, // masked when the check run quotes it (report)
 	}
+	status := mask(string(res.Status))
 	switch res.Status {
 	case pipelines.OutcomeSucceeded:
 		rec.status, rec.report = WorkStepDone, StepSucceeded
@@ -1097,17 +1172,17 @@ func (dr *runDriver) receiptFor(res pipelines.StepResult, elapsed time.Duration)
 	default:
 		rec.status, rec.report = WorkStepFailed, StepFailed
 		rec.code = pipelines.CodeExecutorError
-		rec.message = fmt.Sprintf("The runner answered an outcome this driver does not know (%q).", dr.mask(string(res.Status)))
+		rec.message = fmt.Sprintf("The runner answered an outcome this driver does not know (%q).", status)
 	}
 	if res.Failure != nil {
-		rec.code, rec.message = strings.TrimSpace(res.Failure.Code), dr.mask(res.Failure.Message)
+		rec.code, rec.message = mask(res.Failure.Code), mask(res.Failure.Message)
 	}
 	if rec.message == "" && rec.status == WorkStepFailed {
 		rec.message = exitMessage(res.ExitCode)
 	}
 	notes := make([]map[string]any, 0, len(res.Notes))
 	for _, n := range res.Notes {
-		notes = append(notes, map[string]any{"code": n.Code, "message": dr.mask(n.Message)})
+		notes = append(notes, map[string]any{"code": mask(n.Code), "message": mask(n.Message)})
 	}
 	metadata := map[string]any{
 		"exitCode":  res.ExitCode,
@@ -1117,9 +1192,28 @@ func (dr *runDriver) receiptFor(res pipelines.StepResult, elapsed time.Duration)
 	if len(notes) > 0 {
 		metadata["notes"] = notes
 	}
-	rec.result = map[string]any{"status": string(res.Status), "metadata": metadata}
-	dr.observe(res.Timings)
+	rec.result = map[string]any{"status": status, "metadata": metadata}
+	// A package path is written to the pipeline's timing table: one that
+	// would need masking is no package path, and is not kept.
+	timings := make(map[string]float64, len(res.Timings))
+	for path, seconds := range res.Timings {
+		if mask(path) == strings.TrimSpace(path) {
+			timings[path] = seconds
+		}
+	}
+	dr.observe(timings)
 	return rec
+}
+
+// maskAll is each of values through mask, blanks dropped.
+func maskAll(values []string, mask func(string) string) []string {
+	var out []string
+	for _, v := range values {
+		if m := mask(v); m != "" {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // durationOf is the step's time as the runner measured it, from its own
@@ -1135,19 +1229,23 @@ func durationOf(res pipelines.StepResult, waited time.Duration) int64 {
 	return max(waited.Milliseconds(), 1)
 }
 
-// bindingOf is where a step ran, as the step's binding records it; an empty
-// field is left out rather than written blank.
-func bindingOf(w pipelines.Where) map[string]any {
+// bindingOf is where a step ran, as the step's binding records it, every
+// value through mask; an empty field is left out rather than written blank.
+func bindingOf(w pipelines.Where, mask func(string) string) map[string]any {
 	out := map[string]any{}
 	for name, value := range map[string]string{
 		"surface": w.Surface, "nodeId": w.NodeID, "jobName": w.JobName, "workerId": w.WorkerID,
 	} {
-		if v := strings.TrimSpace(value); v != "" {
+		if v := mask(value); v != "" {
 			out[name] = v
 		}
 	}
 	if len(w.MachineLabels) > 0 {
-		out["machineLabels"] = maps.Clone(w.MachineLabels)
+		labels := make(map[string]string, len(w.MachineLabels))
+		for k, v := range w.MachineLabels {
+			labels[mask(k)] = mask(v)
+		}
+		out["machineLabels"] = labels
 	}
 	if len(out) == 0 {
 		return nil
@@ -1167,11 +1265,17 @@ func exitMessage(code int) string {
 // The verdict and the conclusion
 // ---------------------------------------------------------------------------
 
-// verdictOfSteps is how the steps ended: cancelled when the run was, failed
-// when any step did not pass, success otherwise.
+// verdictOfSteps is how the steps ended: cancelled when the run was and the
+// cancel cut something short, failed when any step did not pass, success
+// otherwise. A cancel that arrives after every step has ended has nothing to
+// stop, and the check run reports what the steps did.
 func (dr *runDriver) verdictOfSteps() verdict {
 	if dr.lease.isCancelled() {
-		return verdict{conclusion: ConclusionCancelled, workMessage: "The run was cancelled."}
+		for _, t := range dr.tracks {
+			if s := t.snapshot(); s.Status == StepCancelled || !t.finished() {
+				return verdict{conclusion: ConclusionCancelled, workMessage: "The run was cancelled."}
+			}
+		}
 	}
 	for _, t := range dr.tracks {
 		s := t.snapshot()
@@ -1191,12 +1295,13 @@ func (dr *runDriver) verdictOfSteps() verdict {
 // the run unfinished, to be recovered and concluded again, rather than a work
 // run open that no sweep closes (a pipeline's run is its runner's own). Only
 // the row's write is under the gate, as one fresh read and one write: the
-// work run's close and the call to GitHub come before it, outside, behind the
-// fresh-read fence every unguarded write of a drive takes. A successful FULL
-// run then teaches the pipeline its packages' timings.
-func (dr *runDriver) conclude(ctx context.Context, v verdict) {
+// work run's close and the calls to GitHub come before it, outside, behind
+// the fresh-read fence every unguarded write of a drive takes, while the
+// heartbeat keeps the lease (drive). A successful FULL run then teaches the
+// pipeline its packages' timings. It answers whether the run is concluded.
+func (dr *runDriver) conclude(ctx context.Context, v verdict) bool {
 	if !dr.stillHolds(ctx) {
-		return
+		return false
 	}
 	if dr.work() == nil && strings.TrimSpace(dr.run.WorkRunID) != "" {
 		why := "The run was cancelled before this step finished."
@@ -1205,12 +1310,22 @@ func (dr *runDriver) conclude(ctx context.Context, v verdict) {
 		}
 		if !dr.settleStoredWork(ctx, receipt{status: WorkStepCancelled, report: StepCancelled, message: why,
 			result: map[string]any{"reason": why}}) {
-			return
+			return false
 		}
 	}
+	// What this conclusion leaves in flight is stopped: everything, on a
+	// cancel; the steps a predecessor handed the runner and this drive
+	// abandoned, on any other ending. Never on a lost lease -- that work is
+	// the new driver's to re-attach to.
+	if dr.lease.isLost() {
+		return false
+	}
+	if v.conclusion == ConclusionCancelled || dr.abandonedInFlight {
+		dr.cancelRunner()
+	}
+
 	now := dr.d.now()
 	stages := dr.stageSummaries()
-
 	final := dr.run
 	final.Status, final.Conclusion, final.FinishedAt, final.Stages = StatusCompleted, v.conclusion, now, stages
 	patch := RunPatch{
@@ -1225,6 +1340,11 @@ func (dr *runDriver) conclude(ctx context.Context, v verdict) {
 		patch.RefusalCode, patch.RefusalMessage, patch.RefusalScope = ptr(v.refusal.Code), ptr(v.refusal.Detail), ptr(v.refusal.Scope)
 	}
 
+	// The fence again, before the writes that take no gate: settling the
+	// stored work above may be what found the lease gone.
+	if !dr.stillHolds(ctx) {
+		return false
+	}
 	switch v.conclusion {
 	case ConclusionSuccess:
 		dr.work().Succeeded(ctx, map[string]any{"conclusion": v.conclusion, "stages": stageList(stages)})
@@ -1233,14 +1353,9 @@ func (dr *runDriver) conclude(ctx context.Context, v verdict) {
 	default:
 		dr.work().Failed(ctx, v.workCode, v.workMessage)
 	}
-
 	var written *CheckRunWrite
 	if dr.havePipeline {
-		w := publishCheckRun(ctx, dr.d, dr.p, final, ReportFor(dr.p, final, dr.report()))
-		if w.Err != nil {
-			dr.log.Warn("pipelines: the concluded run's check run was not written",
-				"checkRunState", w.State, "error", dr.mask(w.Err.Error()))
-		}
+		w := dr.publishFinal(ctx, final)
 		written = &w
 	}
 
@@ -1249,12 +1364,24 @@ func (dr *runDriver) conclude(ctx context.Context, v verdict) {
 			if cr, changed := written.Patch(current); changed {
 				patch.CheckRunID, patch.CheckRunState, patch.Notes = cr.CheckRunID, cr.CheckRunState, cr.Notes
 			}
+			if id := dr.run.CheckRunID; id > 0 && id != current.CheckRunID && patch.CheckRunID == nil {
+				// A check run this drive created whose id never reached the
+				// row: the row learns it now, or the next re-run's reader
+				// finds no check run to name.
+				patch.CheckRunID = ptr(id)
+			}
+			if written.State == CheckRunUnavailable && written.Err != nil {
+				// The final report did not land, after its retries: a check
+				// run left showing the run unfinished is not "written", and
+				// the row must not say it is.
+				patch.CheckRunState = ptr(CheckRunUnavailable)
+			}
 		}
 		return dr.d.Store.UpdateRun(gctx, current.OwnerUserID, current.ID, patch)
 	})
 	if err != nil {
 		dr.abort("concluding the run", err)
-		return
+		return false
 	}
 	applyRunPatch(&dr.run, patch)
 	dr.log.Info("pipelines: the run concluded", "conclusion", v.conclusion, "code", v.workCode)
@@ -1263,6 +1390,7 @@ func (dr *runDriver) conclude(ctx context.Context, v verdict) {
 			dr.log.Warn("pipelines: the run's package timings were not merged into the pipeline's table", "error", err)
 		}
 	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -1284,7 +1412,7 @@ func (dr *runDriver) writeRun(ctx context.Context, patch RunPatch) error {
 // progress records the stages as they stand and moves the check run.
 func (dr *runDriver) progress(ctx context.Context) {
 	if err := dr.writeRun(ctx, RunPatch{Stages: ptr(dr.stageSummaries())}); err != nil {
-		if !errors.Is(err, errLeaseLost) {
+		if !driveStopped(err) {
 			dr.log.Warn("pipelines: the run's stage table was not recorded", "error", err)
 		}
 		return

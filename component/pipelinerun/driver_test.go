@@ -98,6 +98,9 @@ func (dh *driveHarness) configureDriver(integ *Integration, node string) {
 			return "", fmt.Errorf("secret %q not found", name)
 		}
 		d.HeartbeatEvery = time.Hour
+		// A final check-run write retried at the production pace would make
+		// every test that fails one wait ten seconds.
+		d.publishBackoff = []time.Duration{time.Millisecond, time.Millisecond}
 	})
 	integ.EnableDriver()
 }
@@ -1245,36 +1248,52 @@ func TestARecoveredRunRefusedOnResumeClosesItsPredecessorsWork(t *testing.T) {
 	}
 }
 
-// The plan a resumed run reads again is laid over its rows: a receipt is
-// kept, a running step is re-sent, and a step the plan gave packages runs
-// THAT slice -- a timing table merged since may have split them otherwise.
-func TestResumeRestoresTheSliceEachStepWasGiven(t *testing.T) {
+// The plan a resumed run reads again is laid over its rows, and where they
+// differ the ROW wins: a receipt is kept; a step runs the slice its row was
+// queued with -- a timing table merged since may have split them otherwise --
+// and is a skip exactly when its row says the plan skipped it, whatever a
+// compare read now says.
+func TestResumeCarriesOutThePlanTheRowsRecord(t *testing.T) {
 	dr := &runDriver{run: Run{SHA: shaA}}
+	notAffected := &pipelines.Skip{Code: pipelines.CodeNotAffected, Reason: "No change under bucket os."}
 	dr.buildTracks(pipelines.Plan{Stages: []pipelines.PlanStage{{
 		Name: "tests",
 		Steps: []pipelines.Step{
 			{Key: "tests.go#1", Stage: "tests", Name: "go", Packages: []string{"a"}, Shard: pipelines.ShardRef{Index: 1, Count: 2}},
 			{Key: "tests.go#2", Stage: "tests", Name: "go", Packages: []string{"b", "c"}, Shard: pipelines.ShardRef{Index: 2, Count: 2}},
-			{Key: "tests.os", Stage: "tests", Name: "os", Skip: &pipelines.Skip{Code: pipelines.CodeNotAffected, Reason: "no change"}},
+			// Planned now as skips, and run when the run began: the compare
+			// could not be read then.
+			{Key: "tests.os", Stage: "tests", Name: "os", Skip: notAffected},
+			{Key: "tests.web", Stage: "tests", Name: "web", Skip: notAffected},
+			// Planned now to run, and a skip when the run began.
+			{Key: "tests.docs", Stage: "tests", Name: "docs"},
 		},
 	}}})
 	why := dr.resume([]WorkStep{
 		{Key: "tests.go#1", Status: WorkStepDone, Attempt: 1, Packages: []string{"a", "b"}, DurationMs: 9},
 		{Key: "tests.go#2", Status: WorkStepRunning, Attempt: 1, Packages: []string{"c"}},
-		{Key: "tests.os", Status: WorkStepPending, Attempt: 1},
+		{Key: "tests.os", Status: WorkStepRunning, Attempt: 1},
+		{Key: "tests.web", Status: WorkStepPending, Attempt: 1},
+		{Key: "tests.docs", Status: WorkStepPending, Attempt: 1, Skip: &pipelines.Skip{Code: pipelines.CodeNotAffected, Reason: "No change under bucket docs."}},
 	})
 	if why != "" {
 		t.Fatalf("the rows and the plan agree: %s", why)
 	}
-	one, two, os := dr.tracks[0], dr.tracks[1], dr.tracks[2]
+	one, two, os, web, docs := dr.tracks[0], dr.tracks[1], dr.tracks[2], dr.tracks[3], dr.tracks[4]
 	if !one.finished() || one.snapshot().Status != StepSucceeded || one.snapshot().DurationMs != 9 {
 		t.Errorf("a receipt is kept: %+v", one.snapshot())
 	}
-	if !two.resend || two.finished() || !slices.Equal(two.step.Packages, []string{"c"}) {
-		t.Errorf("a running step is re-sent with the slice it was given: resend %v packages %v", two.resend, two.step.Packages)
+	if !two.sent || two.finished() || !slices.Equal(two.step.Packages, []string{"c"}) {
+		t.Errorf("a running step is re-sent with the slice it was given: sent %v packages %v", two.sent, two.step.Packages)
 	}
-	if os.step.Skip == nil || os.finished() {
-		t.Errorf("a pending step runs as the plan says")
+	if !os.sent || os.step.Skip != nil {
+		t.Errorf("a step that was handed to the runner is re-sent, not skipped behind its back: sent %v skip %+v", os.sent, os.step.Skip)
+	}
+	if web.step.Skip != nil {
+		t.Errorf("a step the run began by running is run: %+v", web.step.Skip)
+	}
+	if docs.step.Skip == nil || docs.step.Skip.Reason != "No change under bucket docs." {
+		t.Errorf("a step the run began by skipping is skipped, for the reason it was: %+v", docs.step.Skip)
 	}
 
 	diverged := dr.resume([]WorkStep{{Key: "tests.go#3", Status: WorkStepRunning}})

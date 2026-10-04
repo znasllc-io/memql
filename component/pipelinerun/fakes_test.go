@@ -820,8 +820,11 @@ type fakeWork struct {
 	goals map[string]map[string]any
 	runs  map[string]map[string]any
 	steps map[string]map[string]any
-	// refuse fails every call, as an engine that refuses the writes would.
-	refuse error
+	// refuse fails every call, as an engine that refuses the writes would;
+	// refuseCall fails only the calls to one mutation, with refuseErr.
+	refuse     error
+	refuseCall string
+	refuseErr  error
 }
 
 // journalCall is one write the journal made.
@@ -855,6 +858,9 @@ func (w *fakeWork) Execute(ctx context.Context, query string) (any, error) {
 	defer w.mu.Unlock()
 	if w.refuse != nil {
 		return nil, w.refuse
+	}
+	if w.refuseErr != nil && fn.Name == w.refuseCall {
+		return nil, w.refuseErr
 	}
 	w.calls = append(w.calls, journalCall{
 		Name: fn.Name, Args: fn.Args, Actor: actor, Internal: auth.OriginFromContext(ctx).IsInternal(), Raw: query,

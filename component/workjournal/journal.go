@@ -249,12 +249,11 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 	}
 
 	started := j.now().UTC()
-	goalID := deriveID("goal", template, w.GoalKey)
 	runKey := strings.TrimSpace(w.RunKey)
 	if runKey == "" {
 		runKey = fmt.Sprintf("%d", started.UnixNano())
 	}
-	runID := deriveID("run", template, w.GoalKey+"|"+runKey)
+	goalID, runID := workIDs(template, w.GoalKey, runKey)
 
 	ctx = auth.ContextWithUserActor(ctx, owner)
 
@@ -311,6 +310,28 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 		arg("status", "active"),
 	))
 	return run, nil
+}
+
+// IDs is the goal id and the run id Begin derives for w, with nothing written.
+// A runner that must NAME its work before opening it -- the pipelines driver
+// records them on its own row first, so a replica that stops between the two
+// can never leave a work run that nothing names, and that no sweep would ever
+// close -- asks here, and Begin then opens exactly these. An empty RunKey is
+// refused: Begin derives one from the clock, which no caller can predict.
+func IDs(w Work) (goalID, runID string, err error) {
+	template := strings.TrimSpace(w.Template)
+	runKey := strings.TrimSpace(w.RunKey)
+	if template == "" || runKey == "" {
+		return "", "", fmt.Errorf("workjournal: a template and a run key are what the ids are derived from")
+	}
+	goalID, runID = workIDs(template, w.GoalKey, runKey)
+	return goalID, runID, nil
+}
+
+// workIDs is the one derivation of a goal's and a run's ids, shared by Begin
+// and IDs so the two cannot drift.
+func workIDs(template, goalKey, runKey string) (goalID, runID string) {
+	return deriveID("goal", template, goalKey), deriveID("run", template, goalKey+"|"+runKey)
 }
 
 // queue writes every declared step at `pending` (Work.QueueSteps): the same

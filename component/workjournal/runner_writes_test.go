@@ -135,6 +135,48 @@ func TestBeginRecordsWhoTriggeredTheRun(t *testing.T) {
 	}
 }
 
+// TestIDsAreTheIdsBeginOpens. A runner that names its work before opening it
+// (the pipelines driver records the ids on its own row first) must name
+// exactly the rows Begin then writes -- the goal, the run, and through the run
+// every step -- and nothing is written by asking.
+func TestIDsAreTheIdsBeginOpens(t *testing.T) {
+	w := pipelineWork()
+	w.RunKey = "2"
+	engine := &countingEngine{}
+	goalID, runID, err := IDs(w)
+	if err != nil || goalID == "" || runID == "" {
+		t.Fatalf("IDs: %q %q %v", goalID, runID, err)
+	}
+	if len(engine.calls) != 0 {
+		t.Fatalf("asking writes nothing")
+	}
+	run, err := New(engine, nil, "node-1").Begin(context.Background(), w)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if run.GoalID() != goalID || run.RunID() != runID {
+		t.Errorf("Begin opened goal %q run %q; IDs named %q %q", run.GoalID(), run.RunID(), goalID, runID)
+	}
+	if got := onlyCallNamed(t, engine.calls, "createWorkGoal")["goalId"]; got != goalID {
+		t.Errorf("the goal written is %v", got)
+	}
+	if got := onlyCallNamed(t, engine.calls, "createWorkRun")["runId"]; got != runID {
+		t.Errorf("the run written is %v", got)
+	}
+
+	// Another attempt of the same goal is another run of the same goal.
+	w.RunKey = "3"
+	goal3, run3, _ := IDs(w)
+	if goal3 != goalID || run3 == runID {
+		t.Errorf("attempt 3: goal %q (want %q), run %q (want a new one)", goal3, goalID, run3)
+	}
+	// A run key Begin would take from the clock cannot be named in advance.
+	w.RunKey = "  "
+	if _, _, err := IDs(w); err == nil {
+		t.Errorf("an unpredictable run key is refused")
+	}
+}
+
 // TestQueueStepsWritesEveryDeclaredStepPendingAtOpen. A pipeline's later
 // stages must exist as rows before they run -- the run page draws them as the
 // stops ahead (D13) -- so every declared step is written at `pending` when the
