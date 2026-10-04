@@ -139,8 +139,9 @@ func (r *WorkRemedy) Replan(ctx context.Context, runId, ownerUserId, stepKey, re
 	// level the prompt asked for and the shipped reasoningParks rule decides
 	// what happens when no door can serve it. Nothing here names a model. The
 	// call belongs to the run -- integrations/work put it on the context -- so
-	// it is journaled on the run and charged to its ceilings.
-	out, err := r.loop.engine.InvokeAI(ctx, "replanGap", data)
+	// it is journaled on the run and charged to its ceilings; it is made as
+	// the planner's system actor, as every authoring prompt here is.
+	out, err := r.loop.engine.InvokeAI(systemActorContext(ctx), "replanGap", data)
 	if err != nil {
 		if memql.IsProviderUnavailable(err) {
 			// No door could serve the call, so nothing was spent, and a door

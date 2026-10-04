@@ -24,9 +24,20 @@ package automations
 // into machinery this node does not have, on a run another node owns.
 //
 // So the act lands on the RUN, as a `waiting` state naming what it waits for,
-// and the sweep that already re-dispatches stale runs picks it up on the node
-// that can serve it. That is the same shape parkOnInference already uses, and
-// it is the shape that survives two replicas.
+// and the node that can serve it picks it up: a due retry reaches an agent
+// replica through the sweep's recovery dispatch, and a replan or repair
+// reaches a planner replica through the run's own `waiting` event, the sweep
+// standing behind it -- each under a claim (integrations/work). That is the
+// same shape parkOnInference already uses, and it is the shape that survives
+// two replicas.
+//
+// # Every act that runs the work again spends the RUN's retry budget
+//
+// Retry, repair and replan each count one retry against the run's
+// spent.retries, in the write that parks it, and past the goal's
+// ceilings.maxRetries the run asks a person instead (memql#5664). The budget
+// was once read off the failed step's retry(n), which made ActRetry
+// unreachable; the step's own loop is the stall signal and nothing else.
 //
 // # What an unwired classifier does: nothing
 //
