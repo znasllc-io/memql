@@ -102,29 +102,21 @@ type hopProcess struct {
 	die       context.CancelFunc
 }
 
-// kill ends the process: its links are cut, and then its runs end -- each a
-// cancel whose every effect the cut links refuse, as a process's death ends
-// them with no effect at all.
-func (p *hopProcess) kill(t *testing.T) {
+// endRuns ends the process's runs of the steps through the runner's own
+// cancel -- CancelRun, which a gone process's cut links leave nothing but
+// that -- and waits until the runner holds none of them.
+func (p *hopProcess) endRuns(t *testing.T, steps []hopStepRef) {
 	t.Helper()
-	p.die()
-	p.cancelRuns()
-	rtWaitUntil(t, p.node+"'s gone process's runs to end", func() bool { return p.runs() == 0 })
-}
-
-func (p *hopProcess) cancelRuns() {
-	p.runner.mu.Lock()
-	defer p.runner.mu.Unlock()
-	for e := range p.runner.inflight {
-		e.cancel()
+	for _, s := range steps {
+		_, _ = p.runner.CancelRun(context.Background(), CancelRequest{RunID: s.run})
+	}
+	for _, s := range steps {
+		rtWaitUntil(t, p.node+"'s runs of "+s.job+" to end", func() bool { return !p.runner.holds(s.job) })
 	}
 }
 
-func (p *hopProcess) runs() int {
-	p.runner.mu.Lock()
-	defer p.runner.mu.Unlock()
-	return len(p.runner.inflight)
-}
+// hopStepRef is a step the hop has run: its pipelines run and its Job.
+type hopStepRef struct{ run, job string }
 
 // hopLink is a process's connection to the API server. Once the process is
 // gone every request is refused, and those in flight -- a followed log among
@@ -254,6 +246,7 @@ type runnerHop struct {
 	mu    sync.Mutex
 	procs map[string]*hopProcess // the process answering for each replica now
 	all   []*hopProcess
+	steps []hopStepRef // every step executed
 }
 
 // newRunnerHop is the executor and two replicas, workbench-a and
@@ -316,6 +309,31 @@ func (w *runnerHop) process(node string) *hopProcess {
 	return w.procs[node]
 }
 
+// execute runs the step through the executor, as the pipeline's driver does,
+// and remembers it, so a process's runs of it can be ended through the
+// runner's own cancel.
+func (w *runnerHop) execute(req pl.StepRequest) <-chan pl.StepResult {
+	w.mu.Lock()
+	w.steps = append(w.steps, hopStepRef{run: req.RunID, job: JobName(req.RunID, req.StepKey, req.Attempt)})
+	w.mu.Unlock()
+	return executeAsync(w.e, w.ctx, req)
+}
+
+func (w *runnerHop) executed() []hopStepRef {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]hopStepRef(nil), w.steps...)
+}
+
+// kill ends a process: its links are cut, and then its runs end -- each by a
+// cancel whose every effect the cut links refuse, as a process's death ends
+// them with no effect at all.
+func (w *runnerHop) kill(p *hopProcess) {
+	w.t.Helper()
+	p.die()
+	p.endRuns(w.t, w.executed())
+}
+
 // restart is a container restart of the replica's process, in its pod: the
 // process holding the step goes away -- nothing it does reaches the API
 // server, the Library or the log store again, and its runs end -- and its
@@ -326,24 +344,22 @@ func (w *runnerHop) restart(node string) {
 	w.t.Helper()
 	gone, fresh := w.process(node), w.start(node)
 	w.mesh.bounce(node, hopHandler(hopRunnerAdapter{fresh.runner}))
-	gone.kill(w.t)
+	w.kill(gone)
 	w.mu.Lock()
 	w.procs[node] = fresh
 	w.mu.Unlock()
 }
 
 // end stops what a test left running, before the API server closes: every
-// Execute, then every process's runs.
+// Execute, then every process's runs, through the runner's own cancel.
 func (w *runnerHop) end() {
 	w.stop()
 	w.mu.Lock()
 	all := append([]*hopProcess(nil), w.all...)
 	w.mu.Unlock()
+	steps := w.executed()
 	for _, p := range all {
-		p.cancelRuns()
-	}
-	for _, p := range all {
-		rtWaitUntil(w.t, p.node+"'s runs to end", func() bool { return p.runs() == 0 })
+		p.endRuns(w.t, steps)
 		p.die()
 		p.transport.CloseIdleConnections()
 	}
@@ -446,7 +462,7 @@ func TestExecuteHopRealRunnersAdoptAStepAwayFromTheReplicaThatWentSilent(t *test
 		}, "workbench-a"},
 		{"its pod dies, and the peer table sees it DEGRADED", func(w *runnerHop, step *hopStep) {
 			w.mesh.lose("workbench-a")
-			w.process("workbench-a").kill(w.t)
+			w.kill(w.process("workbench-a"))
 			step.printing.Store(true)
 			// workbench-b waits out workbench-a's claim. The executor's
 			// clock stands still: the loss itself forwarded the step again.
@@ -460,7 +476,7 @@ func TestExecuteHopRealRunnersAdoptAStepAwayFromTheReplicaThatWentSilent(t *test
 			step := &hopStep{}
 			w.h.c.script(job, step.script(job))
 
-			done := executeAsync(w.e, w.ctx, req)
+			done := w.execute(req)
 			// workbench-a's heartbeat has recorded on the Job how far it
 			// captured the step, and the step's first line.
 			rtWaitUntil(t, "workbench-a to capture the step's first lines", func() bool {
@@ -533,7 +549,7 @@ func TestExecuteHopRealRunnersTakeALostReplyFromTheJob(t *testing.T) {
 	step.printing.Store(true)
 	w.h.c.script(job, step.script(job))
 
-	done := executeAsync(w.e, w.ctx, req)
+	done := w.execute(req)
 	rtWaitUntil(t, "workbench-a to capture the step's output", func() bool {
 		return w.holder(job) == "workbench-a" && w.annotations(job)[AnnotLogCursor] == hopStamp(hopLines[len(hopLines)-1])
 	})
