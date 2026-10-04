@@ -1011,7 +1011,9 @@ func TestFleetStepFilesWhatACancelledStepCaptured(t *testing.T) {
 
 	// The run's cancel is a cancelled step's answer (Executor.Cancel's
 	// contract), so artifacts too large to keep are a note beside it, never a
-	// failure that turns it into a failed step.
+	// failure that turns it into a failed step -- and a note carries a
+	// note-class code (pl.StepResult.Notes): artifacts missing, too large to
+	// keep, never the failure's own code.
 	for _, c := range []struct{ name, out string }{
 		{"cancelled as the machine answered its artifacts too large, it stays cancelled",
 			`{"exitCode":0,"durationMs":10,"artifactsTooLarge":true}`},
@@ -1035,13 +1037,16 @@ func TestFleetStepFilesWhatACancelledStepCaptured(t *testing.T) {
 
 			var said []string
 			for _, n := range res.Notes {
-				if n.Code == pl.CodeArtifactTooLarge {
+				if class, _ := pl.ClassOf(n.Code); class != pl.ClassNote {
+					t.Errorf("a note carries %s, a %s-class code: %+v", n.Code, class, n)
+				}
+				if n.Code == pl.CodeArtifactMissing && strings.Contains(n.Message, "too large to keep") {
 					said = append(said, n.Message)
 				}
 			}
 			if len(said) != 1 || res.ExitCode != -1 {
-				t.Errorf("exit %d, notes %+v; want the cancel's -1 and one %s note saying the artifacts were not kept",
-					res.ExitCode, res.Notes, pl.CodeArtifactTooLarge)
+				t.Errorf("exit %d, notes %+v; want the cancel's -1 and one %s note saying the artifacts were too large to keep",
+					res.ExitCode, res.Notes, pl.CodeArtifactMissing)
 			}
 			if _, ok := lib.named(logFileName(req.StepKey)); !ok || res.LogFileID == "" {
 				t.Errorf("Library = %+v, want the cancelled step's log", lib.files)

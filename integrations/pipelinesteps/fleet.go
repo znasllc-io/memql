@@ -428,7 +428,7 @@ func (f *Fleet) storeReturnedArtifacts(ctx context.Context, files stepFiles, out
 		return
 	}
 	tooLarge := func(why string) {
-		files.artifactFact(res, notes, pl.Failure{Code: pl.CodeArtifactTooLarge, Message: "the step's artifacts were not stored: " + why})
+		files.artifactFact(res, notes, pl.Failure{Code: pl.CodeArtifactTooLarge, Message: artifactsNotStored + why})
 	}
 	if out.ArtifactsTooLarge {
 		tooLarge("the machine that ran the step found them larger than it sends back")
