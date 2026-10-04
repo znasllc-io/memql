@@ -31,6 +31,12 @@
 # A strategic-merge patch on the upstream install's argocd-cm, which ships with
 # no data; no namespace here, for the reason repo-server-exec-timeout.yaml has
 # none (the kustomization's `namespace: argocd` is applied after the patches).
+#
+# THE SAME FILE IS ALSO A JSON MERGE PATCH. scripts/k3d/up.sh merges it into an
+# Argo CD that was installed before it existed (`kubectl patch configmap
+# argocd-cm --type merge --patch-file`), so keep it a plain ConfigMap fragment
+# that reads the same both ways: no list-style JSON patch, no `$patch`
+# directives.
 apiVersion: v1
 kind: ConfigMap
 metadata:

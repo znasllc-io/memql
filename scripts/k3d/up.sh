@@ -402,7 +402,15 @@ function install_argocd() {
             # on to register an Application nothing was there to sync. The wait
             # is idempotent and returns immediately when it really is ready, so
             # the only thing skipping it ever bought was the wrong answer.
+            #
+            # SKIPPING THE APPLY MUST NOT SKIP THE SETTINGS (memql#5492). The
+            # apply stays skipped -- it would re-fetch the upstream install.yaml
+            # over the network on every bring-up -- but the bootstrap's argocd-cm
+            # setting is merged into the live ConfigMap here, so a cluster made
+            # before that setting existed gets it on its next `make up` instead
+            # of never: see merge_argocd_settings.
             info "ArgoCD already installed in namespace '${ARGOCD_NAMESPACE}' -- skipping the apply."
+            merge_argocd_settings
             wait_for_argocd
             return 0
         fi
@@ -412,6 +420,36 @@ function install_argocd() {
     kubectl apply -k "${REPO_ROOT}/deploy/argocd/bootstrap" >&2
 
     wait_for_argocd
+}
+
+# merge_argocd_settings -- the bootstrap's argocd-cm setting, merged into an
+# Argo CD that is already installed (memql#5492).
+#
+# The setting is deploy/argocd/bootstrap/pvc-health.yaml: the
+# PersistentVolumeClaim health check that reads the local pipelines cache --
+# unbound until the first pipeline step mounts it -- as Healthy rather than
+# holding the whole Application at Progressing. A fresh install gets it
+# through `kubectl apply -k` above; this is the same file, for a cluster whose
+# install predates it.
+#
+# A JSON MERGE PATCH OF THAT FILE, because it touches only the keys the file
+# names: every other argocd-cm key, and the app.kubernetes.io/part-of=argocd
+# label Argo CD finds its settings by, stay exactly as they are (verified
+# offline with `kubectl patch --local`). Re-running it is a no-op.
+#
+# NOT FATAL. It changes how Argo CD reports one claim's health, not whether
+# the cluster comes up, so a failure is a warning that names the consequence
+# and the command that repairs it; the next `make up` tries again.
+function merge_argocd_settings() {
+    local settings="${REPO_ROOT}/deploy/argocd/bootstrap/pvc-health.yaml"
+    info "Merging deploy/argocd/bootstrap/pvc-health.yaml into the live argocd-cm..."
+    if ! kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm \
+        --type merge --patch-file "${settings}" >&2; then
+        warn "could not merge ${settings} into argocd-cm; until it is, Argo CD reads the unbound"
+        warn "pipelines cache as Progressing and the Application never reports Healthy. Repair with:"
+        warn "  kubectl -n ${ARGOCD_NAMESPACE} patch configmap argocd-cm --type merge --patch-file ${settings}"
+    fi
+    return 0
 }
 
 # all_deployments -- every Deployment in the namespace, as `deployment.apps/x`

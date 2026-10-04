@@ -112,10 +112,12 @@ can run.
   ([`deploy/argocd/bootstrap/pvc-health.yaml`](../../../argocd/bootstrap/pvc-health.yaml))
   that reads a marked Pending claim as Healthy and gives every other claim Argo
   CD's own answer. The cloud claims are not marked: there a Pending cache can
-  mean its class does not exist, which must keep reading Progressing. An
-  existing dev cluster picks the customization up when the bootstrap is
-  applied again (`kubectl apply -k deploy/argocd/bootstrap`); `make up` applies
-  it on a fresh one.
+  mean its class does not exist, which must keep reading Progressing.
+  `make up` gives every dev cluster the customization: a fresh one through the
+  bootstrap's `kubectl apply -k`, an existing one -- where up.sh skips that
+  apply rather than re-fetch the upstream install -- by merging
+  `pvc-health.yaml` into the live `argocd-cm` with a JSON merge patch, which
+  leaves every other key and label as it is.
 - **The ceiling is a count of Jobs**, enforced atomically by the API server
   across every workbench replica. A step that meets a full quota is refused
   with `exceeded quota` and the runner waits, bounded by the run's wall-clock

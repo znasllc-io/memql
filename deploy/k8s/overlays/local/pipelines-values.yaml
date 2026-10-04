@@ -46,9 +46,9 @@ spec:
 # The mark is what ../../../argocd/bootstrap/pvc-health.yaml reads: Pending
 # plus memql.io/binds-on-first-use=true is Healthy. LOCAL ONLY: on a cloud
 # cluster a Pending cache can mean its class does not exist (no Blob CSI
-# driver), which must keep reading Progressing. An existing dev cluster's
-# Argo CD picks the customization up when deploy/argocd/bootstrap is applied
-# again; a fresh `make up` applies it.
+# driver), which must keep reading Progressing. `make up` gives every dev
+# cluster the customization: a fresh one through the bootstrap, an existing
+# one by merging pvc-health.yaml into its argocd-cm (scripts/k3d/up.sh).
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
