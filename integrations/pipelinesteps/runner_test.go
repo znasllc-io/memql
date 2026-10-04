@@ -3257,26 +3257,38 @@ func TestTheAgentsGraceOutlastsSettling(t *testing.T) {
 // clone and every service are tailed within ONE window, however many
 // services it has: a kubelet that answers none of them costs the window
 // once, never once per service, so settling stays within its budget.
+//
+// It measures the DIFFERENCE between the same failed step with its tails
+// answered and with all seven blocked, both under whatever load the machine
+// is carrying: one shared window adds about one window, a window per tail
+// would add seven. An absolute bound on the whole run measured the load too,
+// and failed under a full parallel `make test`.
 func TestRunnerTailsShareOneWindow(t *testing.T) {
-	h := newRunnerHarness(t)
-	h.r.tailsTimeout = 300 * time.Millisecond
-	run := rtRun()
-	run.Services = map[string]pl.Service{}
-	for _, name := range []string{"a", "b", "c", "d", "e", "f"} {
-		run.Services[name] = pl.Service{Image: "redis:7"}
+	const window = 300 * time.Millisecond
+	settle := func(block bool) (*rtHarness, pl.StepResult, time.Duration) {
+		h := newRunnerHarness(t)
+		h.r.tailsTimeout = window
+		run := rtRun()
+		run.Services = map[string]pl.Service{}
+		for _, name := range []string{"a", "b", "c", "d", "e", "f"} {
+			run.Services[name] = pl.Service{Image: "redis:7"}
+		}
+		h.c.script(testJobName, rtFinishingScript(testJobName, 1, captureKubeLine(rtAt(1100), "failing")))
+		h.c.with(func(c *rtCluster) { c.blockTails = block })
+		start := time.Now()
+		res := h.run(t, run)
+		return h, res, time.Since(start)
 	}
-	h.c.script(testJobName, rtFinishingScript(testJobName, 1, captureKubeLine(rtAt(1100), "failing")))
-	h.c.with(func(c *rtCluster) { c.blockTails = true })
 
-	start := time.Now()
-	res := h.run(t, run)
-	took := time.Since(start)
+	_, _, answered := settle(false)
+	h, res, blocked := settle(true)
 
 	if res.Status != pl.OutcomeFailed || res.ExitCode != 1 {
 		t.Fatalf("result = %+v, want the step's own failure", res)
 	}
-	if took > 1500*time.Millisecond {
-		t.Errorf("settling took %v with seven tails unanswered, want one 300ms window, not one each", took)
+	if extra := blocked - answered; extra > 3*window {
+		t.Errorf("seven unanswered tails added %v to settling (%v blocked, %v answered), want about one %v window, not one each",
+			extra, blocked, answered, window)
 	}
 	if archive := string(h.file(t, "tests-go-tests-2.log").Bytes); strings.Count(archive, "could not be read") != 7 {
 		t.Errorf("archive = %q, want each of the seven tails noted as not read", archive)
