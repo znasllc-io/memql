@@ -220,6 +220,8 @@ func (r *Runner) Run(ctx context.Context, run StepRun) pl.StepResult {
 // Status says where a step's Job stands: absent, finished with its outcome,
 // running under a fresh claim, or stale. A step this replica is running
 // before its Job exists -- waiting for a slot under the ceiling -- is running.
+// Running and stale name the node whose claim is on the Job, when one is: the
+// agent forwards a stale step again away from it.
 func (r *Runner) Status(ctx context.Context, req StatusRequest) StatusReply {
 	if !isStepJobName(req.JobName) {
 		return StatusReply{State: StateAbsent}
@@ -243,10 +245,11 @@ func (r *Runner) Status(ctx context.Context, req StatusRequest) StatusReply {
 	if out, ok := persisted(job); ok {
 		return StatusReply{State: StateFinished, Result: &out}
 	}
-	if _, at, ok := holder(job); ok && r.fresh(at) {
-		return StatusReply{State: StateRunning}
+	node, at, claimed := holder(job)
+	if claimed && r.fresh(at) {
+		return StatusReply{State: StateRunning, Runner: node}
 	}
-	return StatusReply{State: StateStale}
+	return StatusReply{State: StateStale, Runner: node}
 }
 
 // Ack deletes a step's Job and Secret once the agent holds the outcome; what

@@ -3494,8 +3494,8 @@ func TestStatusStates(t *testing.T) {
 	}{
 		{"no Job is absent", nil, StatusReply{State: StateAbsent}},
 		{"a persisted outcome is finished, with it", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0), AnnotOutcome: mustJSON(t, outcome)}, StatusReply{State: StateFinished, Result: &outcome}},
-		{"a fresh claim is running", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0.Add(-10*time.Second))}, StatusReply{State: StateRunning}},
-		{"a claim older than HeartbeatStale is stale", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0.Add(-46*time.Second))}, StatusReply{State: StateStale}},
+		{"a fresh claim is running, on its node", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0.Add(-10*time.Second))}, StatusReply{State: StateRunning, Runner: rtOther}},
+		{"a claim older than HeartbeatStale is stale, naming the node that went quiet", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0.Add(-46*time.Second))}, StatusReply{State: StateStale, Runner: rtOther}},
 		{"an unclaimed Job is stale", map[string]string{}, StatusReply{State: StateStale}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
