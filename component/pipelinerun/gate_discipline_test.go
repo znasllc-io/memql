@@ -214,6 +214,29 @@ func TestEveryGatedPathKeepsTheGateDiscipline(t *testing.T) {
 		waitDrives(t, dh.integ)
 	})
 
+	t.Run("a push supersedes its pull request's earlier run", func(t *testing.T) {
+		// The first delivery's run of #42, still queued: no agent claimed it.
+		var earlier Run
+		for _, r := range dh.store.allRuns() {
+			if r.PullRequest == 42 && r.Mode == pipelines.ModeAffected && !r.Finished() {
+				earlier = r
+			}
+		}
+		if earlier.ID == "" {
+			t.Fatalf("no unfinished run of #42 is left to supersede: %+v", dh.store.allRuns())
+		}
+		before := len(dh.gate.seen())
+		res := trigger(t, dh.harness, "pull_request", "d-pr-push", prDelivery(t, "synchronize", 42, shaD, repoName, testInstallation))
+		if len(res.Opened) != 1 {
+			t.Fatalf("opened %+v", res)
+		}
+		sawKey(t, before, OpenGateKey(res.Opened[0].RunKey))
+		sawKey(t, before, RunGateKey(earlier.ID))
+		if got, _ := dh.store.run(earlier.ID); got.Conclusion != ConclusionCancelled || got.CancelledBy != "superseded by "+res.Opened[0].ID {
+			t.Errorf("the superseded run is concluded cancelled, by the push's run: %s by %q", got.Conclusion, got.CancelledBy)
+		}
+	})
+
 	t.Run("connect, reconnect elsewhere, disconnect", func(t *testing.T) {
 		h := connectHarness(t, connectManifest)
 		before := len(h.gate.seen())

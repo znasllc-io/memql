@@ -80,6 +80,11 @@ func (i *Integration) open(ctx context.Context, d Deps, p Pipeline, o Opening) (
 // connection for one create, not for a mint. When GitHub refuses the create
 // (403) or no token could be had, the run opens anyway with checkRunState
 // saying so.
+//
+// A pull request's new head SUPERSEDES the pull request's earlier runs
+// (supersede.go): they are read before the gate, while the new run does not
+// exist yet, and asked to stop once the gate is released -- each ask takes
+// that run's own gate, and may write its check run.
 func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o Opening, token string) (OpenResult, error) {
 	if d.Store == nil {
 		return OpenResult{}, errNoStore
@@ -119,6 +124,9 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 	if token == "" {
 		token, tokenErr = checkRunToken(ctx, d, p)
 	}
+	// Before the run exists, so a run another opener creates meanwhile is
+	// never this opening's to stop (supersede.go).
+	earlier := supersedable(ctx, d, p, o, mode)
 
 	var result OpenResult
 	err = d.gate(ctx, OpenGateKey(key), func(gctx context.Context) error {
@@ -188,6 +196,10 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 		result = OpenResult{Run: run, Opened: true}
 		return nil
 	})
+	if err == nil && result.Opened {
+		// The gate is released: only now may a run be asked to stop.
+		i.supersede(ctx, d, result.Run, earlier)
+	}
 	return result, err
 }
 

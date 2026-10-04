@@ -54,6 +54,9 @@ type memStore struct {
 	// Injected failures.
 	failCreateRun error
 	failUpdateRun error
+	// failRunsForPullRequest is every RunsUnfinishedForPullRequest call's
+	// answer when set.
+	failRunsForPullRequest error
 
 	// afterCreatePipeline runs after each CreatePipeline lands, outside the
 	// store's lock: what another writer does right after a connect.
@@ -286,6 +289,27 @@ func (s *memStore) RunsForPipelineSHA(_ context.Context, pipelineID, sha string)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].QueuedAt.After(out[j].QueuedAt) })
+	return out, nil
+}
+
+// RunsUnfinishedForPullRequest is pipelineRunsUnfinishedForPullRequest: one
+// pipeline's runs of one pull request that are queued or in progress, in
+// EVERY mode and in no order. The mode is the caller's rule, not the read's,
+// so a full run carrying the pull request comes back here as it does from the
+// DSL, and only the caller's rule keeps it running.
+func (s *memStore) RunsUnfinishedForPullRequest(_ context.Context, pipelineID string, pullRequest int) ([]Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failRunsForPullRequest != nil {
+		return nil, s.failRunsForPullRequest
+	}
+	var out []Run
+	for _, r := range s.runs {
+		if pullRequest > 0 && sameID(r.PipelineID, pipelineID) && r.PullRequest == pullRequest &&
+			(r.Status == StatusQueued || r.Status == StatusInProgress) {
+			out = append(out, r)
+		}
+	}
 	return out, nil
 }
 

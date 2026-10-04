@@ -264,6 +264,20 @@ func TestTheDSLStoreOverRealRows(t *testing.T) {
 	if open, err := store.RunsUnfinished(ctx); err != nil || !hasRun(open, run.ID) {
 		t.Errorf("pipelineRunsUnfinished: %v", err)
 	}
+	// What a push to #42 supersedes, read as the opening reads it (fresh):
+	// the pipeline's bare id against the canonical relationship stored, the
+	// number against the int createPipelineRun wrote.
+	fresh := memqlengine.ContextWithFreshRead(ctx)
+	if pr, err := store.RunsUnfinishedForPullRequest(fresh, p.ID, 42); err != nil || len(pr) != 1 || pr[0].ID != run.ID ||
+		pr[0].PullRequest != 42 || pr[0].Mode != pipelines.ModeAffected {
+		t.Errorf("pipelineRunsUnfinishedForPullRequest(#42): %+v %v", pr, err)
+	}
+	if pr, err := store.RunsUnfinishedForPullRequest(fresh, p.ID, 43); err != nil || len(pr) != 0 {
+		t.Errorf("another pull request's number reads none of #42's runs: %+v %v", pr, err)
+	}
+	if pr, err := store.RunsUnfinishedForPullRequest(fresh, "pr10a-other-pipeline-"+suffix, 42); err != nil || len(pr) != 0 {
+		t.Errorf("another pipeline's #42 reads none of this one's runs: %+v %v", pr, err)
+	}
 	if mineRun, err := store.RunForOwner(signedIn(owner), run.ID); err != nil || mineRun == nil {
 		t.Errorf("the owner reads their run: %+v %v", mineRun, err)
 	}
@@ -297,6 +311,9 @@ func TestTheDSLStoreOverRealRows(t *testing.T) {
 		len(claimed.Stages) != 1 || claimed.Stages[0].Steps != 2 {
 		t.Errorf("claim read back = %+v", claimed)
 	}
+	if pr, err := store.RunsUnfinishedForPullRequest(memqlengine.ContextWithFreshRead(ctx), p.ID, 42); err != nil || !hasRun(pr, run.ID) {
+		t.Errorf("a run in progress is one a push supersedes: %+v %v", pr, err)
+	}
 
 	// ---- a cancel request, then the conclusion, clearing what it clears ----
 	if err := store.UpdateRun(ctx, r.OwnerUserID, run.ID, RunPatch{CancelRequested: ptr(true), CancelledBy: ptr(owner)}); err != nil {
@@ -322,6 +339,9 @@ func TestTheDSLStoreOverRealRows(t *testing.T) {
 	}
 	if open, err := store.RunsUnfinished(ctx); err != nil || hasRun(open, run.ID) {
 		t.Errorf("a completed run is not unfinished: %v", err)
+	}
+	if pr, err := store.RunsUnfinishedForPullRequest(memqlengine.ContextWithFreshRead(ctx), p.ID, 42); err != nil || hasRun(pr, run.ID) {
+		t.Errorf("a completed run is not one a push supersedes: %+v %v", pr, err)
 	}
 
 	// ---- recovery's other read: a concluded run whose final check run did

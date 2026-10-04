@@ -76,6 +76,12 @@ type Store interface {
 	RunByCheckRun(ctx context.Context, repository string, checkRunID int64) (*Run, error)
 	// RunsUnfinished answers oldest first: recovery's read (Task 10b).
 	RunsUnfinished(ctx context.Context) ([]Run, error)
+	// RunsUnfinishedForPullRequest is every queued or in-progress run of one
+	// pipeline's pull request, in EVERY mode and in no order: what a new push
+	// to the pull request supersedes (supersede.go), whose caller applies
+	// the mode rule. A pull request numbered 0 or less is no pull request,
+	// and reads nothing.
+	RunsUnfinishedForPullRequest(ctx context.Context, pipelineID string, pullRequest int) ([]Run, error)
 	// RunsFinalCheckRunUnavailable is every run concluded at or after since
 	// whose final check run did not land (checkRunState unavailable), newest
 	// first: what recovery republishes.
