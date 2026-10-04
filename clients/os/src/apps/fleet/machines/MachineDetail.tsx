@@ -300,7 +300,7 @@ function PipelineStepsAnswer({ machine }: { machine: MachineRow }) {
           Setting <code>allow: true</code> lets it run pipeline steps, and its <code>repos</code> list names the
           repositories it accepts. An empty list accepts any.
         </p>
-        <p>Labels you set in Fleet cannot change this.</p>
+        <p>Labels you set in Fleet cannot allow it.</p>
       </InfoDetail>
     </>
   );

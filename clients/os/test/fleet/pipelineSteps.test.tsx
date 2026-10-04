@@ -100,5 +100,10 @@ describe("the machine's detail", () => {
     for (const words of ["policy.yaml", "pipelines", "allow: true", "repos"]) {
       expect(detail).toContain(words);
     }
+    // ...and what Fleet cannot do, said no wider than it is. An operator
+    // label wins the routing merge (component/worker MergeLabels), so one can
+    // keep steps OFF a machine; what no label can do is let one on.
+    expect(detail).toContain("Labels you set in Fleet cannot allow it.");
+    expect(detail).not.toContain("cannot change this");
   });
 });
