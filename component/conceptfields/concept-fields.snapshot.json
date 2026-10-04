@@ -4425,7 +4425,8 @@
         "sentAt",
         "status",
         "subject",
-        "target"
+        "target",
+        "targetSecret"
       ],
       "required": [
         "body",

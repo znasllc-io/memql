@@ -2,6 +2,7 @@ package outbound
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -75,6 +76,14 @@ type ExecutionClaimer interface {
 // orphaned by a dead claimant is re-winnable so the row is never wedged
 // (memql#2548).
 type Worker struct {
+	// Secrets resolves a v1:platform:globalSecret by NAME to its plaintext
+	// value (memql#5480). A webhook row whose URL is a credential -- a
+	// Discord webhook carries its token in the path -- names the secret in
+	// targetSecret instead of carrying the URL, and the worker reads the
+	// value here at send time. Set by app wiring after NewWorker; nil on a
+	// node that wired none, where such a row fails naming its secret.
+	Secrets func(ctx context.Context, name string) (string, error)
+
 	engine     Engine
 	claimer    ExecutionClaimer
 	bus        *events.Bus
@@ -267,13 +276,17 @@ func (w *Worker) processRow(ctx context.Context, row map[string]any, scanStatus 
 			return
 		}
 	}
-	transport, policyErr := w.admit(req)
+	transport, delivery, policyErr := w.admit(ctx, req)
 	if policyErr != nil {
 		w.stampFailed(ctx, req, policyErr)
 		return
 	}
 	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "sending")`, langparser.QuoteString(req.ID)))
-	err := transport.Deliver(ctx, req)
+	// delivery goes to the transport and nowhere else: for a secret target
+	// (memql#5480) it is the one value holding the resolved URL. Every stamp
+	// and log line in this function reads req, whose Target is the
+	// descriptor secret:<NAME>.
+	err := transport.Deliver(ctx, delivery)
 	if err == nil {
 		w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "sent", lastError: "", sentAt: %s)`,
 			langparser.QuoteString(req.ID), langparser.QuoteString(now.Format(time.RFC3339))))
@@ -333,33 +346,81 @@ func (w *Worker) mediumEnabledHere(medium string) bool {
 // admit applies the deploy-layer policy (ADR 4.3): known medium with a
 // wired transport, allowlisted target, bounded payload. A policy miss
 // is a permanent failure -- loud, never a silent backlog.
-func (w *Worker) admit(req Request) (Transport, error) {
+//
+// It also returns the request the transport is to deliver. That is req
+// itself, except for a secret target (memql#5480), where it is a copy whose
+// Target is the URL the named secret holds. The caller keeps req for every
+// stamp and log line, so the row, its audit and its errors carry the
+// descriptor secret:<NAME> and never the URL.
+func (w *Worker) admit(ctx context.Context, req Request) (Transport, Request, error) {
 	transport, ok := w.transports[req.Medium]
 	if !ok || transport == nil {
-		return nil, fmt.Errorf("medium %q has no transport wired", req.Medium)
+		return nil, req, fmt.Errorf("medium %q has no transport wired", req.Medium)
 	}
 	if len(req.Payload) > w.cfg.MaxPayloadBytes {
-		return nil, fmt.Errorf("payload %d bytes exceeds cap %d", len(req.Payload), w.cfg.MaxPayloadBytes)
+		return nil, req, fmt.Errorf("payload %d bytes exceeds cap %d", len(req.Payload), w.cfg.MaxPayloadBytes)
+	}
+	if req.TargetSecret != "" && req.Medium != "webhook" {
+		// Refused before the secret is read. Its value is a webhook URL, and
+		// nothing another medium could do with it would be a delivery.
+		return nil, req, fmt.Errorf("target secret %s names a webhook URL, but the row's medium is %q", req.TargetSecret, req.Medium)
 	}
 	switch req.Medium {
 	case "email":
 		if len(w.cfg.EmailAllowlist) == 0 {
-			return nil, fmt.Errorf("medium disabled by deployment config (MEMQL_OUTBOUND_EMAIL_ALLOWLIST empty)")
+			return nil, req, fmt.Errorf("medium disabled by deployment config (MEMQL_OUTBOUND_EMAIL_ALLOWLIST empty)")
 		}
 		if !emailAllowed(req.Target, w.cfg.EmailAllowlist) {
-			return nil, fmt.Errorf("target %q not in email allowlist", req.Target)
+			return nil, req, fmt.Errorf("target %q not in email allowlist", req.Target)
 		}
 	case "webhook":
 		if len(w.cfg.WebhookAllowlist) == 0 {
-			return nil, fmt.Errorf("medium disabled by deployment config (MEMQL_OUTBOUND_WEBHOOK_ALLOWLIST empty)")
+			return nil, req, fmt.Errorf("medium disabled by deployment config (MEMQL_OUTBOUND_WEBHOOK_ALLOWLIST empty)")
+		}
+		if req.TargetSecret != "" {
+			delivery, err := w.resolveSecretTarget(ctx, req)
+			if err != nil {
+				return nil, req, err
+			}
+			return transport, delivery, nil
 		}
 		if !webhookAllowed(req.Target, w.cfg.WebhookAllowlist) {
-			return nil, fmt.Errorf("target %q not in webhook allowlist", req.Target)
+			return nil, req, fmt.Errorf("target %q not in webhook allowlist", req.Target)
 		}
 	default:
-		return nil, fmt.Errorf("unknown medium %q", req.Medium)
+		return nil, req, fmt.Errorf("unknown medium %q", req.Medium)
 	}
-	return transport, nil
+	return transport, req, nil
+}
+
+// resolveSecretTarget reads the URL a secret target names (memql#5480) and
+// returns the copy of req the transport delivers. Every refusal names the
+// secret and never the value, because whatever this returns is stamped into
+// lastError and logged, and the value is a credential. That is also why the
+// allowlist refusal does not quote its target the way a plain row's does.
+//
+// A secret that does not resolve fails the row rather than scheduling a
+// retry. A secret nobody stored, an empty one and a node with no resolver all
+// wait on an operator, not on the backoff, and the stager learns of it now
+// instead of after MEMQL_OUTBOUND_MAX_ATTEMPTS.
+func (w *Worker) resolveSecretTarget(ctx context.Context, req Request) (Request, error) {
+	if w.Secrets == nil {
+		return req, fmt.Errorf("webhook: target secret %s did not resolve: no secret resolver is wired on this node", req.TargetSecret)
+	}
+	value, err := w.Secrets(ctx, req.TargetSecret)
+	if err != nil {
+		return req, fmt.Errorf("webhook: target secret %s did not resolve: %w", req.TargetSecret, err)
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return req, fmt.Errorf("webhook: target secret %s did not resolve: its value is empty", req.TargetSecret)
+	}
+	if !webhookAllowed(value, w.cfg.WebhookAllowlist) {
+		return req, errors.New("webhook: target not in allowlist")
+	}
+	delivery := req
+	delivery.Target = value
+	return delivery, nil
 }
 
 func (w *Worker) stampFailed(ctx context.Context, req Request, policyErr error) {
@@ -397,13 +458,14 @@ func backoffFor(attempt int) time.Duration {
 
 func requestFromRow(row map[string]any) Request {
 	return Request{
-		ID:        getString(row, "id"),
-		Medium:    getString(row, "medium"),
-		Target:    getString(row, "target"),
-		Subject:   getString(row, "subject"),
-		Payload:   getString(row, "body"),
-		DedupeKey: getString(row, "dedupeKey"),
-		Attempts:  getInt(row, "attempts"),
+		ID:           getString(row, "id"),
+		Medium:       getString(row, "medium"),
+		Target:       getString(row, "target"),
+		Subject:      getString(row, "subject"),
+		Payload:      getString(row, "body"),
+		TargetSecret: getString(row, "targetSecret"),
+		DedupeKey:    getString(row, "dedupeKey"),
+		Attempts:     getInt(row, "attempts"),
 	}
 }
 

@@ -550,6 +550,22 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// and product automations draining a source, whose tree-loaded step
 		// context carries internal origin; none of them is a client.
 		{Path: "platform/mutations.memql", Name: "updateInboundRequestStatus"}: true,
+		// memql#5480. A webhook delivery whose URL is a credential (a Discord
+		// webhook's token is in its path) names the globalSecret holding it,
+		// and the outbound worker POSTs the row's body to whatever that secret
+		// resolves to. A client that could stage one could aim a body of its
+		// choosing at any URL a cluster owner stored. actor.userId scoping
+		// would not help: the row has no owner, and an owner stamp would not
+		// change which secret it names. The writer is the pipelines notify
+		// stage, after it has checked the person's right to the channel naming
+		// the secret.
+		{Path: "platform/mutations.memql", Name: "stageOutboundRequestToSecret"}: true,
+		// Its by-id read, which is how the notify stage learns the delivery
+		// went. v1:platform:outboundRequest declares no tier (memql#5804), so a
+		// client-reachable by-id read would hand any caller any delivery's
+		// body, and there is no owner on the row for an actor.userId filter to
+		// compare against. Server-side Go is the only reader.
+		{Path: "platform/queries.memql", Name: "outboundRequestById"}: true,
 		// epic memql#4805. The custom-domain create, plus the six writes its
 		// reconciliation sweep makes on an operator's behalf.
 		//

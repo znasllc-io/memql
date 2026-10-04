@@ -247,6 +247,42 @@ mutation outboundRequest stageOutboundRequest {
   }
 }
 
+// ---- mutations/v1/platform/stageOutboundRequestToSecret.memql ----
+
+/// Stage a webhook delivery whose URL is a secret (memql#5480): a Discord webhook's token is in its
+/// path, so the URL itself is a credential and must never sit on this row. The row names the
+/// globalSecret instead (targetSecret) and target carries the descriptor secret:<NAME>; the outbound
+/// worker resolves the value at send time, checks it against the deployment's webhook allowlist and
+/// POSTs to it. Idempotent by requestId like stageOutboundRequest.
+///
+/// @serverOnly rather than actor.userId scoping: a client able to stage a row naming any secret could
+/// make the worker POST a body of its choosing to whatever URL a cluster owner stored, and scoping the
+/// row to the caller would not change which secret it names. The writers are server-side Go -- the
+/// pipelines notify stage -- after they have checked the caller's right to the channel that names the
+/// secret.
+@serverOnly
+@createOnly("status", "attempts")
+mutation outboundRequest stageOutboundRequestToSecret {
+  args {
+    requestId     string!
+    targetSecret  string!
+    subject       string
+    body          string!
+    dedupeKey     string
+    requestedBy   string
+  }
+  insert {
+    accept { targetSecret, subject, body, dedupeKey, requestedBy }
+    stamp {
+      id: args.requestId
+      medium: "webhook"
+      target: "secret:" + args.targetSecret
+      status: "pending"
+      attempts: 0
+    }
+  }
+}
+
 // ---- mutations/v1/platform/updateOutboundRequestStatus.memql ----
 
 // updateOutboundRequestStatus

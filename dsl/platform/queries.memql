@@ -162,6 +162,22 @@ query outboundRequest outboundRequestsByStatus {
   shape   outboundRequestFull
 }
 
+// ---- queries/v1/platform/outboundRequestById.memql ----
+
+/// One outbound request by its id (memql#5480): how the pipelines notify stage learns whether the
+/// delivery it staged was sent. @serverOnly because the concept declares no tier yet (memql#5804):
+/// until it does, a client-reachable by-id read would hand any caller any delivery's body. Nor is
+/// actor.userId scoping the fix: the row carries no owner to compare it against, and its reader is
+/// server-side Go asking as the system, not as a person.
+@serverOnly
+query outboundRequest outboundRequestById {
+  args {
+    requestId  string!
+  }
+  filter  row => row.id == args.requestId
+  shape   outboundRequestFull
+}
+
 // ---- queries/v1/platform/inboundRequestsByStatus.memql ----
 
 /// Inbound requests in a given handling status, oldest first (memql#2957). Products drain

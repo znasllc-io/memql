@@ -255,7 +255,62 @@ startup delay are env config resolved at construction; tests call
   latency-sensitive and it predates this worker); converging it onto the
   outbox is possible later but out of scope.
 
-## 7. References
+## 7. Secret targets (memql#5480)
+
+Added after this ADR shipped, for the pipelines notify stage, which
+announces runs on Discord.
+
+**Why.** A Discord webhook URL carries its token in its path, so the URL
+itself is a credential. Section 4.3's first invariant (no secrets in rows)
+rules out putting it in `target`, and anything that holds the URL can post
+to the channel.
+
+**The descriptor.** Such a row names the `v1:platform:globalSecret` whose
+value is the URL, in `targetSecret`, and `target` holds only the descriptor
+`secret:<NAME>`. The row, its audit and every error therefore name the
+secret and never the URL. The one writer is `stageOutboundRequestToSecret`,
+which is `@serverOnly`: a client able to stage such a row could aim a body
+of its choosing at whatever URL a cluster owner stored.
+`outboundRequestById` (`@serverOnly`) is how the notify stage learns that
+its delivery was sent.
+
+**The resolver.** `Worker.Secrets` resolves a secret's name to its value.
+App wiring sets it to `MemQLEngine.ResolveSystemSecret`, the same resolver
+the plug-in context hands integrations. `admit` runs it after the claim, like
+the rest of the target policy:
+
+- `targetSecret` on a medium other than `webhook` fails the row before the
+  secret is read.
+- No resolver, a lookup error or an empty value fails the row permanently,
+  with `webhook: target secret <NAME> did not resolve`. Each of these waits
+  on an operator, not on the backoff.
+- The resolved URL must pass the same `MEMQL_OUTBOUND_WEBHOOK_ALLOWLIST` as
+  any webhook target. A Discord channel needs `https://discord.com/api/webhooks/`
+  listed. A miss reads `webhook: target not in allowlist`, without quoting the
+  target the way a plain row's refusal does.
+
+The URL then exists only in the copy of the request handed to the transport.
+Every stamp and log line reads the row, whose target is the descriptor.
+
+**The redaction.** `net/http` wraps a failed request in `*url.Error`, whose
+message embeds the request URL. That covers both a client failure (a refused
+dial, a timeout) and a URL that will not parse when the request is built.
+`redactURLError` keeps the operation and the cause and drops the URL
+(`webhook: Post: dial tcp ...: connection refused`). It applies to every
+webhook row, because the transport cannot tell which of its URLs is a
+credential.
+
+**What it does not close.** `v1:platform:outboundRequest` declares no row
+tier (memql#5804). Any signed-in caller can still read every row through
+`outboundRequestsByStatus`, which shows a secret row's body and the secret's
+name but never its URL. Any signed-in caller can also stamp any row's status
+through `updateOutboundRequestStatus`, which can requeue a sent secret row
+(replaying its own body to its own channel) or mark it sent or failed.
+And the client-reachable `stageOutboundRequest` is idempotent by
+`requestId`: a signed-in caller can re-stage onto a secret row's id, and
+the read-merge keeps `targetSecret` under the caller's body.
+
+## 8. References
 
 - memql#2521 (capability ask), memql#1259 / mesh-delivery-substrate-adr.md
   (delivery-contract vocabulary)
