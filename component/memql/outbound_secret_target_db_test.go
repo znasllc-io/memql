@@ -16,10 +16,11 @@ import (
 // outbound worker's own tests drive it against a fake engine, which makes every
 // DSL half of that contract true by construction: that the stamp's
 // "secret:" + args.targetSecret writes the descriptor, that outboundRequestFull
-// carries targetSecret to the worker, and that a client is refused both
-// server-only constructs. component/outbound is not in the db-tests lane
-// (memql#3030), so those halves are pinned here, on the shared engine this
-// package's DSL-over-real-rows tests already boot.
+// carries targetSecret to the worker, that a client is refused both
+// server-only constructs, and that the client-reachable stageOutboundRequest
+// cannot keep a secret target while replacing the body. component/outbound is
+// not in the db-tests lane (memql#3030), so those halves are pinned here, on
+// the shared engine this package's DSL-over-real-rows tests already boot.
 
 const outboundRequestConcept = "v1:platform:outboundRequest"
 
@@ -64,4 +65,38 @@ func TestStageOutboundRequestToSecretStagesTheDescriptor(t *testing.T) {
 	_, err = eng.Execute(owner, `query outboundRequestById(requestId: "`+reqId+`")`)
 	require.Error(t, err, "a client read a delivery by id")
 	require.Contains(t, err.Error(), "server-only")
+}
+
+// TestAClientReStageCannotKeepASecretTarget: stageOutboundRequest is
+// client-reachable and idempotent by requestId, so a signed-in caller can
+// re-stage onto a secret row's id. The read-merge keeps every field a write
+// omits, so without the empty stamp the row would keep its targetSecret under
+// the caller's body, and once requeued the worker would POST that body to the
+// secret's URL. What the re-stage must leave is an ordinary row whose target,
+// the descriptor, no allowlist admits.
+func TestAClientReStageCannotKeepASecretTarget(t *testing.T) {
+	eng, db, ctx := sharedReadMergeEngine(t)
+	internal := auth.ContextWithInternalOrigin(ctx)
+	reqId := "out5480-" + uniqueSuffix("secret-restage")
+
+	canonicalId := runMutation(t, internal, eng, "stageOutboundRequestToSecret", map[string]any{
+		"requestId":    reqId,
+		"targetSecret": "DISCORD_RELEASES",
+		"body":         `{"content":"run 42 passed"}`,
+	})
+	require.Equal(t, "DISCORD_RELEASES", latestPayload(t, internal, db, outboundRequestConcept, canonicalId)["targetSecret"],
+		"precondition: the server stage named the secret")
+
+	const foreignBody = `{"content":"not from this pipeline"}`
+	person := auth.ContextWithClientOrigin(auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: "writer-5480", Role: auth.RoleWriter}))
+	runMutation(t, person, eng, "stageOutboundRequest", map[string]any{
+		"requestId": reqId,
+		"medium":    "webhook",
+		"target":    "secret:DISCORD_RELEASES",
+		"body":      foreignBody,
+	})
+	stored := latestPayload(t, internal, db, outboundRequestConcept, canonicalId)
+	require.Equal(t, foreignBody, stored["body"], "precondition: the client re-stage landed on the same row")
+	require.Empty(t, stored["targetSecret"],
+		"a client re-stage kept the secret target, so the worker would POST the caller's body to the URL the secret holds")
 }

@@ -220,6 +220,17 @@ mutation missingCapability updateMissingCapabilityStatus {
 // still refreshing the deliverable content (target/subject/body/dedupeKey).
 // The other worker-owned fields (lastError/nextAttemptAt/sentAt) are not
 // written here at all, so the read-merge already preserves them.
+//
+// The stamp also writes targetSecret, always empty (memql#5480).
+// stageOutboundRequestToSecret stages a webhook row naming the globalSecret
+// that holds its URL, and only server code may call it. This mutation is
+// client-reachable and idempotent by requestId, so without the empty stamp a
+// signed-in caller who re-staged onto a secret row's id would keep its
+// targetSecret through the read-merge while swapping in a body of their own,
+// requeue the row with updateOutboundRequestStatus, and have the worker POST
+// that body to the secret's URL. Cleared, such a re-stage leaves an ordinary
+// row whose target is the descriptor secret:<NAME>, which no allowlist
+// admits: the worker fails it loudly instead of delivering it.
 
 /// Stage an outbound delivery (memql#2521): insert a v1:platform:outboundRequest row with
 /// status='pending' for the engine outbound worker to drain. Credentials are never part of the row;
@@ -243,6 +254,7 @@ mutation outboundRequest stageOutboundRequest {
       id: args.requestId
       status: "pending"
       attempts: 0
+      targetSecret: ""
     }
   }
 }

@@ -270,7 +270,13 @@ value is the URL, in `targetSecret`, and `target` holds only the descriptor
 `secret:<NAME>`. The row, its audit and every error therefore name the
 secret and never the URL. The one writer is `stageOutboundRequestToSecret`,
 which is `@serverOnly`: a client able to stage such a row could aim a body
-of its choosing at whatever URL a cluster owner stored.
+of its choosing at whatever URL a cluster owner stored. The client-reachable
+`stageOutboundRequest` stamps `targetSecret` empty on every write, because
+it is idempotent by `requestId`. Without that stamp a signed-in caller could
+re-stage onto a secret row's id, keep `targetSecret` through the read-merge
+under a body of their own, requeue the row, and have the worker deliver it.
+Cleared, the re-stage leaves an ordinary row whose target is the descriptor,
+which no allowlist admits, so the row fails loudly.
 `outboundRequestById` (`@serverOnly`) is how the notify stage learns that
 its delivery was sent.
 
@@ -306,9 +312,6 @@ tier (memql#5804). Any signed-in caller can still read every row through
 name but never its URL. Any signed-in caller can also stamp any row's status
 through `updateOutboundRequestStatus`, which can requeue a sent secret row
 (replaying its own body to its own channel) or mark it sent or failed.
-And the client-reachable `stageOutboundRequest` is idempotent by
-`requestId`: a signed-in caller can re-stage onto a secret row's id, and
-the read-merge keeps `targetSecret` under the caller's body.
 
 ## 8. References
 
