@@ -220,16 +220,20 @@ No step pod has a Docker daemon. A step that builds or runs containers names the
 A step runs under its effective timeout: the lesser of its own (`timeout:`, 20
 minutes when it names none, at most 2 hours) and what is left of its run's
 wall-clock ceiling (`MEMQL_PIPELINES_RUN_MAX_MINUTES`, 120 minutes by default,
-counted from when the run started). Whichever bound it is names the failure,
+counted from when the run started) when its Job is created. Whichever bound it
+is names the failure,
 `pipeline_step_timeout` or `pipeline_run_ceiling`, and a step whose run has less
 than a second of its ceiling left is not started (`pipeline_run_ceiling`).
 
-**Time queued counts.** The effective timeout counts from the moment the agent
-hands the step to the cluster. A wait for a free slot under the ceiling, or for
-a forward to reach a runner, is spent from it: the Job is created with what is
-left as its `activeDeadlineSeconds`, and a step with nothing left when a slot
-frees fails with its deadline code having never started. A deadline failure on a
-step that waited says how long it waited.
+**Time queued is the run's, not the step's.** A step's own timeout counts from
+its Job's creation. Before that -- waiting for a free slot under the ceiling,
+for a forward to reach a runner, or for the isolation proof -- only the run's
+ceiling bounds the wait, so a stage wider than the ceiling runs every step, a
+slot at a time, for as long as the run's ceiling allows. The Job is created
+with the lesser of the step's timeout and what is left of the run's ceiling as
+its `activeDeadlineSeconds`. A step still waiting when the run reaches its
+ceiling fails `pipeline_run_ceiling` without ever starting, and its message says
+what it was waiting for.
 
 A step stopped at its deadline reports exit code -1, whatever its command did as
 it was stopped; a step whose command ended before the deadline keeps its own
@@ -241,8 +245,10 @@ The namespace's ResourceQuota counts Jobs (`count/jobs.batch`): one Job is one
 running step, and the API server counts it atomically across every workbench
 replica. A step that finds the quota full waits, says so once in its log
 (`memql: waiting for a free slot under the pipelines ceiling`), and tries again
-every 10 seconds while its own time runs. A finished Job counts until the
-agent's acknowledgement deletes it, or its TTL does.
+every 10 seconds until a slot frees or its run reaches its ceiling. A finished
+Job counts until the agent's acknowledgement deletes it. The agent sends that
+acknowledgement up to 5 times, waiting twice as long before each send, and if
+every send is lost, the Job's TTL deletes it 30 minutes after it finished.
 
 The LimitRange is the one place a step's size is decided: the runner sets no
 resources, and every container of the pod -- `cache-prep`, `clone` and each
@@ -273,8 +279,11 @@ gives each node (`--node-osdisk-size 32`). That disk holds the OS, every image
 and the mesh as well as the steps' ephemeral storage, and at the ceiling both of
 `cloud`'s steps can land on one node, so 8Gi a container is sized for two steps
 beside the rest. A step's pod is bounded by the sum of its containers' limits:
-a step with no services takes at most 8Gi in all, and each service it names
-adds another 8Gi to that sum, while its workspace stays within its own 8Gi. An
+a step with no services is held to 8Gi in all, and each service it names adds
+another 8Gi to that sum, while its workspace stays within its own 8Gi. The
+kubelet enforces these by looking, not by refusing a write: it measures usage
+periodically (a volume's about once a minute), so a step can write past its
+bound for up to about a minute before it is evicted. An
 operator who provisions nodes with larger disks raises both values -- the
 LimitRange's default ephemeral-storage limit and
 `MEMQL_PIPELINES_WORKSPACE_LIMIT` -- in their own overlay; the render gate
@@ -350,30 +359,51 @@ another pod -- and it creates no step until the proof passes.
 
 - **The probe** is one Indexed Job in the namespace: index 0 listens, index 1
   connects. It takes one slot of the ceiling, so it waits for room as a step
-  does, out of the creating step's own time.
+  does, bounded by the creating step's run's ceiling.
 - **After a 5-second settle** -- a new pod's egress can be open for its first
   second or two while the policy engine programs it -- the connector makes three
   attempts one second apart, each at the cluster's DNS, which the policy allows,
   and at the listener.
-- **The verdict.** Connected on any attempt: not isolated. Refused or timed out
-  on every attempt, while DNS answered every attempt and the listener stayed
-  Ready: isolated. (A policy engine may reject a denied connection rather than
-  drop it, which the connector sees as refused; a listener that stayed Ready
-  would have accepted any connection that reached it.) Anything else is
-  inconclusive, and inconclusive is never a pass.
+- **The verdict.** Connected on any attempt: not isolated. Isolated takes all
+  three of these:
+  - every listener attempt was refused or timed out;
+  - DNS answered every attempt;
+  - the listener held throughout.
+
+  The listener has held when, read again once the connector has ended, all of
+  this is true:
+  - it is the same pod, matched by its UID, so a replacement with the same name
+    is caught;
+  - it is not being deleted, not marked for disruption, and not ended;
+  - its container is running and Ready, with no restart;
+  - its pod's Ready condition is True;
+  - its node's kubelet still answers through the API server (one bounded log
+    read, which a lost node cannot answer).
+
+  A policy engine may reject a denied connection rather than drop it, which the
+  connector sees as refused; a listener that held would have accepted any
+  connection that reached it. Anything else is inconclusive, and inconclusive
+  is never a pass.
 
 A pass is trusted for an hour on that replica; its next create after the hour
 proves again. A proof that did not pass is not kept: the step that asked for it
 is refused `pipeline_isolation_unenforced` -- no Secret and no Job are created,
-so nothing ran -- with a message naming the fix and what the proof saw, and the
-replica's next create proves again. Steps created at the same moment on one
+so nothing ran -- and the replica's next create proves again. The message says
+what the proof saw. For a namespace found open, it names the fix. For a proof
+that could not decide, it says the proof is tried again before the next step,
+and that if this persists the operator should check that the cluster's network
+policy engine is running and that cluster DNS (kube-system) answers. Steps
+created at the same moment on one
 replica share one proof. Adopting a step another replica started creates
 nothing new, and never waits on the proof.
 
 It refuses rather than warns because a step is a repository's code: on a cluster
 that does not enforce the policy, it could reach the cloud's instance-metadata
 endpoint (on AKS, a source of tokens for the node's identity), the mesh's
-in-cluster `/metrics` and the database's Service.
+in-cluster `/metrics` and the database's Service. The proof tests one pod
+reaching another inside the namespace, which the ingress rule alone can refuse;
+it does not exercise the egress rule's exceptions ([Known
+limitations](#known-limitations)).
 
 **On AKS as `azure-provision.sh` creates it, every step is refused.** The script
 passes no `--network-policy`, so the cluster runs no network policy engine: the
@@ -458,7 +488,7 @@ pipelines and is online, the step is refused `pipeline_no_machine_for_need`, and
 nothing ran. A machine whose own policy refuses the step once it arrives (its
 `repos` does not list the repository, say) fails it
 `pipeline_no_machine_for_need` with the machine's sentence: a refusal on the
-machine is not re-picked. Each dispatch is recorded like an agent's call, as a
+machine is not re-picked (memql#5812). Each dispatch is recorded like an agent's call, as a
 `v1:worker:invocation` of `workerHost.pipeline_step` naming no agent, filed under
 the work run and the step.
 
@@ -667,10 +697,10 @@ Nothing waits forever, and each party waits longer than the one inside it:
 
 | Who | Gives up at | Then |
 |---|---|---|
-| The step's Job | its `activeDeadlineSeconds`: what was left of the effective timeout when it was created | the step fails with its deadline code |
+| The step's Job | its `activeDeadlineSeconds`: the lesser of the step's timeout and what was left of the run's ceiling when it was created | the step fails with its deadline code |
 | The runner, settling a step that ended | 3 minutes 30 seconds in all: recording how it ended (10 s), reading the log to its end (30 s), the clone's and services' tails (20 s), the Library writes (2 min) and recording the outcome on the Job (30 s), each phase in a window of its own | a Library that does not answer costs the step its files, never the outcome recorded on the Job |
-| The agent | the effective timeout plus 4 minutes 30 seconds: the runner's settling and one more minute | one last status read decides. A recorded outcome is taken; a Job still held, or never created (no slot came, or the request never reached a runner), reads as the deadline code; a holder gone quiet, or no answer, reads `pipeline_node_lost`. Whatever it reads, the Job is deleted |
-| The seam's driver | the step's own timeout plus 10 minutes | `pipeline_step_timeout` |
+| The agent | while the step's Job does not exist, the run's ceiling plus 4 minutes 30 seconds; once it does, the Job's creation plus the step's timeout plus 4 minutes 30 seconds, never past the run's ceiling plus 4 minutes 30 seconds. The 4 minutes 30 seconds are the runner's settling and one more minute | one last status read decides. A recorded outcome is taken; a Job still held reads as its deadline code; a Job never created (no slot came before the run's ceiling, or the request never reached a runner) reads `pipeline_run_ceiling`; a holder gone quiet, or no answer, reads `pipeline_node_lost`. Whatever it reads, the Job is deleted |
+| The seam's driver | the run's ceiling plus 10 minutes | `pipeline_run_ceiling` |
 | A fleet dispatch | the effective timeout plus 5 minutes | by then the machine has stopped the command at the timeout, and the step failed with its deadline code |
 
 ---
@@ -717,7 +747,7 @@ Registered in `scripts/secrets/manifest.yaml` under the `pipelines` component.
 |---|---|---|---|
 | `MEMQL_PIPELINES_NAMESPACE` | `memql-pipelines` | workbench | The namespace the runner creates step Jobs and their Secrets in. It must be the one the pipelines component grants the engine's identity Jobs in, `memql-pipelines`: any other value makes every create a 403, and every step fails `pipeline_runner_unavailable`. The component's `memql-pipelines` ConfigMap sets it |
 | `MEMQL_PIPELINES_CLONE_IMAGE` | none | workbench | The image `clone` and `cache-prep` run, which needs `git`, `base64` and `tr`. Pin it by digest: it is handed the repository token. Unset, the node cannot run steps, and every step sent to it fails `pipeline_runner_unavailable`. The ConfigMap pins `docker.io/library/buildpack-deps:bookworm-scm` by its multi-arch index digest |
-| `MEMQL_PIPELINES_RUN_MAX_MINUTES` | `120` | agent, workbench | A run's wall-clock ceiling, clamped to 5..1440. A step is given only what is left of it, and fails `pipeline_run_ceiling` when that runs out. The workbench's orphan-Secret sweep waits this long plus the Job TTL |
+| `MEMQL_PIPELINES_RUN_MAX_MINUTES` | `120` | agent, workbench | A run's wall-clock ceiling, clamped to 5..1440. It bounds how long a step may wait for a slot, and a step's Job is given no more than what is left of it; past it the step fails `pipeline_run_ceiling`. The agent's value sets each run's deadline. The workbench's value times only its orphan-Secret sweep, which waits this long plus the Job TTL, so a workbench value smaller than the agent's can sweep the Secret of a step still waiting (memql#5823) |
 | `MEMQL_PIPELINES_LOG_STORE_MAX_LINES` | `2000` | workbench (a cluster step), agent (a fleet step) | How many lines of one step reach the log store, clamped to 100..100000, before one `pipeline_log_capped` line. The Library's log keeps every line |
 | `MEMQL_PIPELINES_ARTIFACT_MAX_BYTES` | `67108864` (64 MiB) | workbench (a cluster step), agent (a fleet step) | The cap on one step's decoded artifact archive, clamped to 1 MiB..256 MiB. Past it nothing is stored, and the step fails `pipeline_artifact_too_large` |
 | `MEMQL_PIPELINES_WORKSPACE_LIMIT` | `20Gi` | workbench | The size limit of every step's `/workspace`, a whole number of `Ki`, `Mi`, `Gi` or `Ti`; anything else is the default. It must equal the LimitRange's default ephemeral-storage limit ([Steps at once, and their size](#steps-at-once-and-their-size)), and the component's ConfigMap sets it so in every overlay |
@@ -744,8 +774,8 @@ run's page and, for a failed step, the check run, with its sentence.
 
 | Code | Kind | Meaning | What to do |
 |---|---|---|---|
-| `pipeline_step_timeout` | failure | The step ran past its effective timeout and was stopped; or it waited for a slot until nothing was left, and never started; or nothing reported it by its timeout and the grace past it | Raise the step's `timeout:` (at most `2h`) or split the work. A step that waited says how long: the ceiling was full, so run fewer steps at once or raise the overlay's ceiling |
-| `pipeline_run_ceiling` | failure | The run's wall-clock ceiling bounded the step: it was stopped when the ceiling ran out, or not started because the run had used it | Shorten the run, or raise `MEMQL_PIPELINES_RUN_MAX_MINUTES` |
+| `pipeline_step_timeout` | failure | The step ran past its own timeout, counted from its Job's creation, and was stopped; or nothing reported it by that deadline and the grace past it; or, on a fleet machine, the machine's own `max_timeout_sec` stopped it first, which the message names | Raise the step's `timeout:` (at most `2h`) or split the work. For a fleet step that its machine's cap stopped, raise that machine's `max_timeout_sec` |
+| `pipeline_run_ceiling` | failure | The run's wall-clock ceiling bounded the step. It was stopped when the ceiling ran out; or it was not started because the run had used the ceiling; or it was still waiting for a free slot when the run reached it; or nothing reported it by the ceiling and the 10 minutes past it | Shorten the run, run fewer steps at once (a stage wider than the overlay's ceiling waits its turn), or raise `MEMQL_PIPELINES_RUN_MAX_MINUTES` |
 | `pipeline_isolation_unenforced` | failure | The workbench replica could not prove `memql-pipelines` isolated, so it created nothing: the step is refused, with what the proof saw | Enable a network policy engine on the cluster (on AKS, `az aks update --network-policy`), then re-run |
 | `pipeline_image_pull_failed` | failure | An image of the step's pod -- the step's, a service's, the clone image -- could not be pulled. The pod pulls with no credential, and the first failed pull decides, so a registry's passing error fails the step too | Check the reference, and that the registry allows anonymous pulls (a GHCR package must be public); re-run after a passing error |
 | `pipeline_clone_failed` | failure | The commit could not be fetched: the clone exited non-zero, the clone token could not be minted, or a fleet machine's fetch failed. The clone's last lines are in the step's log | Check that the GitHub App's installation still reaches the repository, and that the commit exists |
@@ -899,7 +929,7 @@ Each of these is understood, and accepted for this release.
   which is then cancelled. Re-run it.
 - **A superseded run's check run reads only "Cancelled".** The reason -- the
   newer run that superseded it -- is on the run row (`cancelledBy`) and its page
-  in MemQL OS, not on GitHub.
+  in MemQL OS, not on GitHub (memql#5814).
 - **GitHub may briefly show the superseded attempt.** After a force-push back,
   the newer attempt's check run is created before the superseded attempt's is
   concluded cancelled, so a pull request showing the latest-completed check run
@@ -933,6 +963,53 @@ Each of these is understood, and accepted for this release.
   The old replica may take the step's outcome and have its Job deleted before the
   new driver hands the same attempt over again, which then finds no Job and
   starts a fresh one. The answer is the second run's; the cost is a runner.
+- **The engine's grant reaches every engine pod.** The runner's Role is bound
+  to `memql-engine`, the ServiceAccount every engine Deployment runs as,
+  because the workbench's model calls federate as that account. Only the
+  workbench contains the runner, but a binary is not a boundary. Any engine pod
+  holds a `memql-engine` token, the edge and mcp among them, which face the
+  internet. A compromised one can create a Job in `memql-pipelines` and read
+  the Secrets of the steps in flight there: their clone tokens and resolved
+  secrets. This is an accepted risk for this release. A workbench-only account,
+  or an admission policy that admits only the runner's Jobs, narrows it
+  (memql#5811).
+- **The isolation proof tests pod to pod, not the egress exceptions.** The
+  proof's negative is that the connector cannot reach the listener. The
+  namespace's ingress deny-all satisfies that as fully as the connector's
+  egress rules do, so the proof never exercises the egress rule's `except`
+  list, which keeps a step off the instance-metadata endpoints, WireServer and
+  the mesh. Two kinds of cluster pass the proof while a step can still reach
+  the mesh: one whose policy engine enforces ingress but mishandles egress, and
+  one whose pod or service range lies outside RFC 1918 (100.64.0.0/10, say)
+  (memql#5810).
+- **The cloud cache on Azure Blob NFS is unmeasured.** Two things are untested
+  (memql#5813):
+  - cache-prep, which runs as root with every capability dropped, creates the
+    cache's directory and sets mode 1777 on it, and nobody has checked that
+    Blob NFS allows either. If it does not, every cloud step that declares a
+    cache fails at cache-prep. (On any class, cache-prep cannot open a claim
+    root that another user owns and keeps closed to others.)
+  - Blob NFS has no NLM locking, while concurrent steps of one repository and
+    trust on two nodes share one Go build and module cache.
+- **A narrowed machine attracts other repositories' steps.** Routing reads a
+  machine's `pipelines=allowed`, not its `repos` list. So a machine narrowed to
+  some repositories is picked for others too, and refuses them when they arrive
+  ([The fleet](#the-fleet); memql#5812).
+- **A fleet step inherits the worker's shell limits.** The first time a Cockpit
+  runs a `workerHost.exec` call, it applies the shell policy's `max_*` limits to
+  its own process. Every process it starts after that inherits them until it
+  restarts, a pipeline step included (znasllc-io/memql-cockpit#484).
+- **A multi-line secret's short lines are not masked one by one.** Masking
+  covers each secret whole, trimmed, and each of its lines, trimmed. Like the
+  check run's masking, it drops any form shorter than 4 bytes. So a secret
+  printed one short line at a time is masked only where its longer lines appear.
+- **A queued step can wait on more than one replica.** While a step waits for
+  a slot, any workbench replica may answer its status. One that does not hold
+  it answers that it has no such step, and after its patience (3, 6, 12, then
+  24 minutes) the agent sends the step again. One step can then wait on
+  several replicas at once. They converge on one Job, because the second create
+  finds the first's, but each mints a clone token and retries its create every
+  10 seconds (memql#5821).
 - **A cancel can miss a step still waiting for a slot.** A cancel deletes every
   Job the run has and stops every step its agent has in flight. A step still
   waiting for a slot on a workbench replica, forwarded by an agent replica that
