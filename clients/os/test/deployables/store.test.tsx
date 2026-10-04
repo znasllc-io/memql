@@ -114,6 +114,10 @@ describe("the store is a connection on the deployable, not a build setting", () 
     { store: DEV_STORE, testingOnly: true, needsSetup: false },
     { store: { ...DEV_STORE, adminTokenRef: "" }, testingOnly: false, needsSetup: true },
     { store: { ...DEV_STORE, storefrontTokenRef: "" }, testingOnly: true, needsSetup: true },
+    // A TOKEN UNDER ANOTHER NAME IS NOT CONNECTED (memql#5626): the edge
+    // publishes a store's Storefront token only from the secret named for that
+    // store, so a storefront bound to this one reads no token at all.
+    { store: { ...STORE, storefrontTokenRef: "EXAMPLE_STOREFRONT_TOKEN" }, testingOnly: false, needsSetup: true },
   ])("shows the bound store's connection readiness ($testingOnly, $needsSetup)", async ({ store, testingOnly, needsSetup }) => {
     const connection = fakeConnection({ ...BOUND, stores: [store], sites: [{ ...SHOP, binding: testingOnly ? {} : { storeId: store.id }, previewBinding: testingOnly ? { storeId: store.id } : {} }] });
     mount(connection);
@@ -297,7 +301,7 @@ describe("the development store", () => {
 describe("the credential references", () => {
   it("shows the NAME of each secret and fetches no value", async () => {
     const { connection, pane } = await openStore(BOUND);
-    await waitFor(() => expect(within(pane).getByText("EXAMPLE_STOREFRONT_TOKEN")).toBeTruthy());
+    await waitFor(() => expect(within(pane).getByText("SHOPIFY_STORE-EXAMPLE_STOREFRONT_TOKEN")).toBeTruthy());
     expect(within(pane).getByText("EXAMPLE_ADMIN_TOKEN")).toBeTruthy();
     expect(within(pane).getByText("EXAMPLE_WEBHOOK_SECRET")).toBeTruthy();
     // THE CONTROL: nothing anywhere resolves one. The edge dereferences the

@@ -5,6 +5,7 @@ import {
   Caption,
   Check,
   ChoiceStack,
+  CopyField,
   Field,
   Input,
   Notice,
@@ -14,7 +15,7 @@ import {
   type ChoiceOption,
 } from "../../../kit";
 import { siteName, type SiteRow } from "../rows";
-import { storeLongLabel, storeNote } from "./rows";
+import { storeLongLabel, storeNote, storefrontTokenSecretName } from "./rows";
 import { BLANK_STORE, useStoreList, type NewStore, type StoreWrites } from "./useStore";
 
 // CHOOSING THE STORE A STOREFRONT FRONTS (epic memql#5530, issue memql#5539).
@@ -50,9 +51,16 @@ import { BLANK_STORE, useStoreList, type NewStore, type StoreWrites } from "./us
 // the token in a call string, which is rendered into logs on a parse error --
 // and would show it on a screen. The placeholders and the caption say so
 // where somebody is about to type, not in a refusal afterwards.
+//
+// THE STOREFRONT TOKEN'S NAME IS NOT A CHOICE (memql#5626). The edge serves a
+// store's Storefront token only from the secret named for that store,
+// `SHOPIFY_<STOREID>_STOREFRONT_TOKEN`, and the engine refuses any other. The
+// field used to take free text -- with a placeholder suggesting a name the
+// edge would never serve -- so it shows the one name now, read-only and
+// copyable, because the person still has to create the secret under it.
 
 const NAMES_NOT_TOKENS =
-  "Each of the three is the NAME of a cluster secret, not the token itself. Create the secret first, then name it here.";
+  "The two credential fields each take the NAME of a cluster secret, never the token itself. Create the secret first, then name it here.";
 
 export function StorePicker({
   site,
@@ -89,7 +97,10 @@ export function StorePicker({
   );
 
   const domain = draft.domain.trim();
-  const canRegister = domain !== "" && draft.storefrontTokenRef.trim() !== "";
+  // The id the store will be registered under, and so the one name its
+  // Storefront token can have.
+  const storefrontRef = domain === "" ? "" : storefrontTokenSecretName(slugOf(domain));
+  const canRegister = domain !== "";
   const canAttach = chosen !== "" && chosen !== currentStoreId;
 
   async function register() {
@@ -97,7 +108,7 @@ export function StorePicker({
     // never changes. A random id would make the same store attachable twice
     // under two rows, and every mirrored row is scoped by store id.
     const storeId = slugOf(domain);
-    const ok = await writes.createStore({ ...draft, storeId, domain });
+    const ok = await writes.createStore({ ...draft, storeId, domain, storefrontTokenRef: storefrontTokenSecretName(storeId) });
     if (!ok) return;
     const bound = await writes.bindSite(site.id, storeId);
     if (bound) onDone();
@@ -145,15 +156,19 @@ export function StorePicker({
               />
             </Field>
             <Field label="Storefront token">
-              <Input
-                id="os-store-storefront-ref"
-                label="The name of the secret holding the Storefront API token"
-                value={draft.storefrontTokenRef}
-                onChange={(storefrontTokenRef) => setDraft((d) => ({ ...d, storefrontTokenRef }))}
-                placeholder="ACME_STOREFRONT_TOKEN"
-                code
-              />
+              {storefrontRef === "" ? (
+                <Caption>Named after the store once its domain is entered.</Caption>
+              ) : (
+                <CopyField
+                  id="os-store-storefront-ref"
+                  value={storefrontRef}
+                  label="the name of the secret the Storefront API token is read from"
+                />
+              )}
             </Field>
+            {storefrontRef === "" ? null : (
+              <Caption>The storefront is served the token sealed under exactly this name, so create the secret under it.</Caption>
+            )}
             <Field label="Admin token">
               <Input
                 id="os-store-admin-ref"
@@ -248,10 +263,7 @@ export function StorePicker({
                 If the second is refused the store still exists and you can attach it from the list.
               </Caption>
             ) : (
-              <Caption>
-                A domain and a Storefront token name are the least a storefront needs. The rest can
-                follow.
-              </Caption>
+              <Caption>A domain is the least a store needs here. The rest can follow.</Caption>
             )}
           </>
         ) : (

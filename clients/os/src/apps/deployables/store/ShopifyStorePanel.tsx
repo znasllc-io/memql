@@ -14,6 +14,7 @@ import type { DeploymentRow } from "../packages/rows";
 import { RefusalNotice } from "../preview/PreviewSection";
 import { usePreviewReadiness, usePreviewWrites } from "../preview/usePreview";
 import type { StorePanelProps } from "./StorePanel";
+import { storeConnected, storeLabel, storefrontTokenMisnamed, storefrontTokenSecretName, type StoreRow } from "./rows";
 import { useStore, useStoreList, useStoreWrites } from "./useStore";
 
 type Destination = "testing" | "production";
@@ -67,8 +68,19 @@ function ShopifyStoreContent({ site, canBind, trail, back, onWritten }: Props) {
       </> },
       { id: "review", name: "Review", state: step === "review" ? "open" : "ahead", body: <Panel label="Connection"><Facts><Fact label="Store" value={selected?.label ?? ""} /><Fact label="Use" value={destination === "testing" ? "Testing" : "Production"} /><Fact label="Website" value={destination === "testing" ? readiness.readiness?.testingUrl ?? "" : `https://${site.hostname}/`} /></Facts><p className="os-caption">This store supplies the catalog and checkout for {destination === "testing" ? "Testing" : "Production"}. The other website keeps its store.</p>{selectedStore?.isDevelopment ? <p className="os-caption">Sandbox store — purchases follow Shopify’s test-store rules.</p> : null}</Panel> },
     ]} />;
-  const productionReady = Boolean(production.store?.adminTokenRef && production.store?.storefrontTokenRef);
-  const testingReady = Boolean(testing.store?.adminTokenRef && testing.store?.storefrontTokenRef);
+  // CONNECTED MEANS THE EDGE CAN SERVE IT (memql#5626): both references, and
+  // the Storefront one under the store's own name -- the only one the edge
+  // publishes. Both references being present was the whole test before, and a
+  // store registered under any other name read Connected here while its
+  // storefront could read no token at all.
+  const productionReady = storeConnected(production.store);
+  const testingReady = storeConnected(testing.store);
+  // Each store whose token sits under another name, ONCE even if both
+  // websites use it: the remedy is one reconnect, not two.
+  const misnamed = [production.store, testing.store].filter(
+    (store, i, all): store is StoreRow => store !== null && storefrontTokenMisnamed(store) && all.findIndex((other) => other?.id === store.id) === i,
+  );
+
   const readingBindings = [production, testing].some(reading => reading.state === "reading" && !reading.store) || (Boolean(boundStoreId(site)) && production.state === "unread") || (Boolean(previewStoreId(site)) && testing.state === "unread");
   const state = readingBindings ? "" : production.store ? productionReady ? "Connected" : "Setup needed" : testing.store ? testingReady ? "Testing" : "Setup needed" : "Design preview";
   return <section className="os-action-pane"><div className="os-action-body os-app-stack"><Head title="Store" breadcrumbs={trail} back={back} />{notices}
@@ -79,6 +91,7 @@ function ShopifyStoreContent({ site, canBind, trail, back, onWritten }: Props) {
       </RecordList>}
       <div><button type="button" className="os-link" onClick={openSettings}>Manage Shopify connections in Settings</button></div>
     </Panel>
+    {misnamed.map((store) => <Notice key={store.id} tone="warn" sentence={`The Storefront token for ${storeLabel(store)} is registered under a different name, so the storefront cannot read it.`} next={`Reconnect the store to seal it as ${storefrontTokenSecretName(store.id)}.`}><Button onClick={openSettings}>Reconnect in Settings</Button></Notice>)}
     {readiness.readiness?.goLiveRefusal.code ? <RefusalNotice refusal={readiness.readiness.goLiveRefusal} storefront={false} onOpenStore={() => {}} compact /> : null}
     <p className="os-caption">Both websites share the same design. Connect either to any of your stores, including the same sandbox. An unconnected website shows design preview.</p>
   </div><ActionBar state={busy ? "Connecting" : state} tone={busy || readingBindings ? "busy" : productionReady ? "live" : "paused"} acts={[{ label: "Back", text: true, onAct: back.onSelect }]} /></section>;

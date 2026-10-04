@@ -16,7 +16,7 @@ import { boundStoreId, previewStoreId, bundleForm, type SiteRow } from "../rows"
 import { kindLabel } from "../targets";
 import { useCustomDomains } from "../useCustomDomains";
 import { railFor, type RailInput } from "./rail";
-import { storeLabel } from "../store/rows";
+import { storeConnected, storeLabel } from "../store/rows";
 import { PreviewSection } from "../preview/PreviewSection";
 import { NO_PARTS, type PartsHeld } from "../parts";
 import { AttentionMarker } from "../../../attention/Attention";
@@ -127,7 +127,10 @@ function StorePiece({ storeId, testingId, siteId, onClick }: { storeId: string; 
   const bound = useStore(storeId);
   const testing = useStore(testingId);
   const connection = storeId ? bound : testing;
-  const connected = Boolean(connection.store?.adminTokenRef && connection.store?.storefrontTokenRef);
+  // One reading of "connected", the Store page's: both references, and the
+  // Storefront token under the store's own name -- the only one the edge
+  // serves (memql#5626).
+  const connected = storeConnected(connection.store);
   const detail =
     !storeId && !testingId
       ? "Not connected"

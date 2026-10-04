@@ -632,7 +632,7 @@ describe("the Source stop", () => {
     // where the store is read and changed.
     await openStop(page, "What it is");
     expect(within(screen.getByRole("dialog")).queryByText("example.myshopify.com")).toBeNull();
-    expect(within(page).queryByText("EXAMPLE_STOREFRONT_TOKEN")).toBeNull();
+    expect(within(page).queryByText("SHOPIFY_STORE-EXAMPLE_STOREFRONT_TOKEN")).toBeNull();
     // AND NOTHING ANYWHERE FETCHES A SECRET'S VALUE. The panel that does show
     // the three references shows their NAMES; this is the control that says
     // so for the whole surface, and it is why the assertion survived the move
