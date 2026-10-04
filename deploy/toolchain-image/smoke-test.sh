@@ -13,8 +13,8 @@
 #   1. Every tool a step reaches for runs.   go, node, npm, protoc, git, make,
 #                                            psql, pg_isready, curl, tar, gzip,
 #                                            base64, unzip, jq, python3 and its
-#                                            yaml module. A miss exits non-zero
-#                                            naming the tool.
+#                                            yaml module, kubectl. A miss exits
+#                                            non-zero naming the tool.
 #   2. Go and protoc are the versions this repository pins, read from WHERE it
 #      pins them (go.work's toolchain line, scripts/dev/proto-gen.sh's
 #      PROTOC_VERSION) rather than from a third copy here. A pinned image
@@ -24,9 +24,11 @@
 #      packages accept >=20, ci.yml uses 20 and 22), so the declaration is the
 #      source, and the check proves the image runs what it says, not Debian's
 #      Node 18 or a copy that went wrong.
-#   3. Go compiles and protoc resolves the well-known types this repository's
-#      protos import. A version string proves the binary starts; these prove
-#      the toolchain is whole (GOROOT, protoc's include directory).
+#   3. Go compiles, protoc resolves the well-known types this repository's
+#      protos import, and kubectl renders a kustomization that uses a
+#      component, as this repository's overlays do. A version string proves
+#      the binary starts; these prove the toolchain is whole (GOROOT, protoc's
+#      include directory, a kustomize new enough for `components:`).
 #   4. It runs as uid 1000, not root, starts in /workspace, and /workspace,
 #      /cache and $HOME are writable.
 #   5. The artifact framing round-trips: the step wrapper ships declared
@@ -89,7 +91,7 @@ set -euo pipefail
 for probe in "go version" "node --version" "npm --version" "protoc --version" \
 	"git --version" "make --version" "psql --version" "pg_isready --version" \
 	"curl --version" "tar --version" "gzip --version" "base64 --version" "unzip -v" \
-	"jq --version" "python3 --version"; do
+	"jq --version" "python3 --version" "kubectl version --client"; do
 	tool="${probe%% *}"
 	command -v "$tool" >/dev/null || { echo "ERROR: ${tool} is not on PATH" >&2; exit 1; }
 	# Word-split on purpose: the probe is a command and its flag.
@@ -134,7 +136,7 @@ SCRIPT
 }
 
 function assert_toolchain_builds() {
-	info "(3) Go compiles, and protoc resolves the well-known types..."
+	info "(3) Go compiles, protoc resolves the well-known types, kubectl renders a component..."
 	in_image <<'SCRIPT' || fail "the tools start but the toolchain cannot build"
 set -euo pipefail
 cd "$(mktemp -d)"
@@ -154,6 +156,35 @@ message Probe { google.protobuf.Timestamp at = 1; }
 PROTO
 protoc --proto_path=. --descriptor_set_out=/dev/null probe.proto
 echo "  protoc with google/protobuf/timestamp.proto: OK"
+# The overlays compose `components:` (kustomize v3.7+); Debian's own kubectl,
+# 1.20.2, refuses the field, so this is the check that the copied one does not.
+mkdir -p base component overlay
+cat > base/kustomization.yaml <<'YAML'
+resources: [configmap.yaml]
+YAML
+cat > base/configmap.yaml <<'YAML'
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: smoke}
+data: {probe: "1"}
+YAML
+cat > component/kustomization.yaml <<'YAML'
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+labels:
+  - pairs: {example.com/smoke: component}
+YAML
+cat > overlay/kustomization.yaml <<'YAML'
+resources: [../base]
+components: [../component]
+YAML
+rendered="$(kubectl kustomize overlay)"
+grep -q 'example.com/smoke: component' <<<"$rendered" || {
+	echo "ERROR: kubectl kustomize did not apply the component:" >&2
+	echo "$rendered" >&2
+	exit 1
+}
+echo "  kubectl kustomize with a component: OK"
 SCRIPT
 }
 

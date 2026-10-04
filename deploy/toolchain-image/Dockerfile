@@ -12,6 +12,8 @@
 #   Go        1.27.1   go.work's `toolchain` line, which overrides every go.mod
 #   Node      22 LTS   node:22-bookworm-slim
 #   protoc    33.4     scripts/dev/proto-gen.sh's PROTOC_VERSION
+#   kubectl   1.32.13  scripts/k3d/up.sh's K3S_VERSION, the deploy target's
+#                      Kubernetes
 #   git, make, bash, curl, tar, gzip, unzip, jq, python3 (with PyYAML),
 #   coreutils, ca-certificates, and postgresql-client (psql, pg_isready)
 #
@@ -65,6 +67,17 @@ FROM golang:1.27.1@sha256:512690a5660563b57d37ecc31129e7f136e831db2aed24a1dbeb8a
 # Node 22 on bookworm, like the base below, so the copied binaries run against
 # the C library they were built against.
 FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS node-dist
+
+# kubectl: the official image, by digest, copied out by stage name like Go and
+# Node so Dependabot sees it. The deploy render tests (the render halves under
+# deploy/k8s, and scripts/k3d/up_rendered_manifest_test.go) render the overlays
+# with `kubectl kustomize` when no standalone kustomize is on PATH, and skip
+# without either -- 147 of them, measured. GitHub's runner image carries both.
+# v1.32.13 is the Kubernetes the local deploy target runs (scripts/k3d/up.sh's
+# K3S_VERSION, held at 1.32 for ArgoCD's schema). Its embedded kustomize,
+# v5.5.0, renders the `components:` these overlays use, which Debian's own
+# kubectl, 1.20.2, cannot. The binary is static, so it runs on the base below.
+FROM registry.k8s.io/kubectl:v1.32.13@sha256:fbfd671cd51f0be98174170f2000cbb97d2788e2270bc1697323d401558307e1 AS kubectl-dist
 
 # protoc, fetched from its release and checked against a pinned SHA-256 per
 # architecture before it is unpacked. The stage runs on the BUILD platform
@@ -147,6 +160,7 @@ COPY --from=node-dist /usr/local/lib/node_modules /usr/local/lib/node_modules
 # binary, so the two land side by side under /usr/local.
 COPY --from=protoc-dist /opt/protoc/bin/protoc /usr/local/bin/protoc
 COPY --from=protoc-dist /opt/protoc/include /usr/local/include
+COPY --from=kubectl-dist /bin/kubectl /usr/local/bin/kubectl
 
 RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
@@ -167,7 +181,8 @@ USER 1000:1000
 
 # A broken copy fails the build here; deploy/toolchain-image/smoke-test.sh is
 # the full check, and the release lane runs it before anything is pushed.
-RUN go version && node --version && protoc --version && git --version && psql --version
+RUN go version && node --version && protoc --version && git --version && psql --version && \
+    kubectl version --client
 
 LABEL org.opencontainers.image.title="memql-toolchain" \
       org.opencontainers.image.description="The container MemQL pipeline steps run in: Go, Node, protoc, git, make and the PostgreSQL client on Debian bookworm, as uid 1000" \
