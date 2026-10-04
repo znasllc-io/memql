@@ -828,9 +828,10 @@ describe("a share changed somewhere else while the dialog is open", () => {
     // Save cannot put the old draft back over the new share without a decision.
     expect(saveButton(dialog).disabled).toBe(true);
     expect(within(dialog).getByText("Choose which sharing to keep.")).toBeTruthy();
-    // The disabled Save lost the keyboard; it went to the notice, inside the
-    // modal, and never to a control whose Enter would decide for them.
-    expect(document.activeElement).toBe(within(dialog).getByText(MOVED).closest(".fleet-share-moved"));
+    // The disabled Save lost the keyboard; it went to the notice -- a named
+    // group, inside the modal -- and never to a control whose Enter would
+    // decide for them.
+    expect(document.activeElement).toBe(within(dialog).getByRole("group", { name: MOVED }));
     fireEvent.click(saveButton(dialog));
     await settle();
     expect(conn.query.fleetSetSharing).not.toHaveBeenCalled();
@@ -886,12 +887,31 @@ describe("a share changed somewhere else while the dialog is open", () => {
     expect(within(dialog).getByText("This shows the new sharing.")).toBeTruthy();
     expect(within(dialog).getByText("Nothing changed yet.")).toBeTruthy();
     expect(saveButton(dialog).disabled).toBe(true);
+    // Focus was on the choice in force, and it goes with it: a ring left on
+    // "Only me" beside a selection on Everyone would point at two answers.
+    expect(document.activeElement).toBe(radio(dialog, /^Everyone in this cluster/));
 
     // The first edit makes the draft the person's, and the note goes with it:
     // "this shows the new sharing" would no longer be true.
     fireEvent.click(radio(dialog, /^Only me/));
     expect(within(dialog).queryByText("This shows the new sharing.")).toBeNull();
     expect(within(dialog).getByText("Unsaved changes")).toBeTruthy();
+  });
+
+  it("leaves focus where the person put it when a follow does not touch it", async () => {
+    const stored = { mode: "people", userIds: ["ana"] };
+    const { rerender } = mount(studio(stored), {
+      directory: directory({ current: current([{ id: "ana", name: "Ana Ruiz", known: true, inDirectory: true }]) }),
+    });
+    await settle();
+    const dialog = await openDialog();
+    const box = search(dialog);
+    box.focus();
+    rerender(studio({ ...stored, userIds: ["ana", "bo"] }));
+    await settle();
+    expect(chipTexts(dialog)).toEqual(["Ana Ruiz", "Bo Chen"]);
+    expect(within(dialog).getByText("This shows the new sharing.")).toBeTruthy();
+    expect(document.activeElement).toBe(box);
   });
 
   it("asks nothing when the draft already says what is now stored", async () => {

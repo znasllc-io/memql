@@ -154,6 +154,7 @@ export function ShareDialog({
   const machineId = useId();
   const searchId = useId();
   const listId = useId();
+  const movedId = useId();
   const optionId = (index: number) => `${listId}-option-${index}`;
 
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -173,7 +174,7 @@ export function ShareDialog({
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(-1);
   const [refused, setRefused] = useState(false);
-  const [pendingFocus, setPendingFocus] = useState<number | "search" | "save" | "mode" | null>(null);
+  const [pendingFocus, setPendingFocus] = useState<number | "search" | "save" | "mode" | "follow" | null>(null);
   // What the last add or remove did, and what changed elsewhere, for a screen
   // reader: a chip appearing or going, or a choice moving under the person, is
   // otherwise silent to anybody who cannot see it.
@@ -204,6 +205,7 @@ export function ShareDialog({
       setStart(storedShare(machine));
       setFollowed(true);
       setAnnounced("Sharing was changed somewhere else. This now shows the new sharing.");
+      setPendingFocus("follow");
     } else if (draftDiffers(draft, machine)) {
       setAnnounced("Sharing was changed somewhere else. Choose which sharing to keep.");
     }
@@ -398,6 +400,18 @@ export function ShareDialog({
   useEffect(() => {
     if (pendingFocus === null) return;
     const root = dialogRef.current;
+    if (pendingFocus === "follow") {
+      // A FOLLOW MOVES THE CHOICE, NOT THE PERSON. Focus on one of the choices
+      // goes with the choice in force, so focus and selection do not point at
+      // two different cards; focus whose control the follow took away (a
+      // chip no longer on the list) lands there too. Anywhere else -- the
+      // search, a chip still standing -- it stays where the person put it.
+      const held = document.activeElement;
+      const stays = held instanceof HTMLElement && root?.contains(held) && held.getAttribute("role") !== "radio";
+      if (!stays) root?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus();
+      setPendingFocus(null);
+      return;
+    }
     const target =
       pendingFocus === "search"
         ? document.getElementById(searchId)
@@ -700,12 +714,14 @@ export function ShareDialog({
         // always on screen, beside the Save it is about.
         <div className="fleet-share-band">
           {asking ? (
-            <div ref={movedRef} tabIndex={-1} className="fleet-share-moved">
+            // A NAMED GROUP, because it can take focus (see the fixup above),
+            // and focus landing on an unnamed box would be read as nothing.
+            <div ref={movedRef} tabIndex={-1} role="group" aria-labelledby={movedId} className="fleet-share-moved">
               {/* WHAT IT IS NOW, in the panel's own words, so the choice is
                   between two things the person can see: the new share here,
                   their draft above it. Neither act writes anything -- the
                   write stays on the floor's one Save (DESIGN.md rule 12). */}
-              <Notice tone="warn" sentence="Sharing changed somewhere else while this was open.">
+              <Notice tone="warn" sentence={<span id={movedId}>Sharing changed somewhere else while this was open.</span>}>
                 <p className="os-caption">
                   Now: <span className="fleet-share-moved-now">{sharingSummary(machine, true, nameOf)}</span>
                 </p>
