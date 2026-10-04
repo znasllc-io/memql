@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,8 +21,8 @@ import (
 // store_dsl.go -- the production Store, over dsl/pipelines' constructs.
 //
 // EVERY CONSTRUCT NAME THIS PACKAGE CALLS IS BELOW, and nowhere else: a
-// rename in dsl/pipelines is one edit here, and a test renders every call and
-// hands it to the real parser.
+// rename in dsl/pipelines is one edit here, and a test reads the .memql files
+// and holds every rendered call -- construct and argument names -- to them.
 const (
 	// Person-facing reads, owner-scoped by their own filters.
 	qPipelinesForOwner    = "pipelinesForOwner"    // ()
@@ -72,13 +71,17 @@ type dslStore struct {
 // callerRead runs a person-facing read under whatever actor ctx carries --
 // the caller's. Unstamped: these constructs are not @serverOnly, and the
 // owner conjunct in their filters is what decides the rows.
-func (s *dslStore) callerRead(ctx context.Context, query string) ([]map[string]any, error) {
+func (s *dslStore) callerRead(ctx context.Context, name string, args map[string]any) ([]map[string]any, error) {
 	if s == nil || s.engine == nil {
 		return nil, errNoStore
 	}
+	query, err := render("query", name, args)
+	if err != nil {
+		return nil, err
+	}
 	res, err := s.engine.Execute(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("pipelines: %s: %w", constructOf(query), err)
+		return nil, fmt.Errorf("pipelines: %s: %w", name, err)
 	}
 	return rowsOf(res), nil
 }
@@ -87,8 +90,12 @@ func (s *dslStore) callerRead(ctx context.Context, query string) ([]map[string]a
 // REPLACES whatever actor ctx carried: a delivery, a schedule or a driver has
 // no person behind it, and a person-facing caller that reaches one of these
 // has already been judged by an owner-scoped read of its own.
-func (s *dslStore) systemRead(ctx context.Context, query string) ([]map[string]any, error) {
-	return s.executeInternal(auth.ContextWithSystemActor(ctx, systemActorName), query)
+func (s *dslStore) systemRead(ctx context.Context, name string, args map[string]any) ([]map[string]any, error) {
+	query, err := render("query", name, args)
+	if err != nil {
+		return nil, err
+	}
+	return s.executeInternal(auth.ContextWithSystemActor(ctx, systemActorName), name, query)
 }
 
 // ownerWrite runs a write under owner's borrowed authority. The mutations
@@ -96,11 +103,15 @@ func (s *dslStore) systemRead(ctx context.Context, query string) ([]map[string]a
 // empty owner is refused here, before anything is written: auth's helper
 // leaves ctx untouched for a blank id, which would write the row under
 // whichever actor the caller happened to carry.
-func (s *dslStore) ownerWrite(ctx context.Context, owner, query string) error {
+func (s *dslStore) ownerWrite(ctx context.Context, owner, name string, args map[string]any) error {
 	if strings.TrimSpace(owner) == "" {
-		return fmt.Errorf("pipelines: %s: the row's owner is unknown, and a pipelines row is written only under its owner's authority", constructOf(query))
+		return fmt.Errorf("pipelines: %s: the row's owner is unknown, and a pipelines row is written only under its owner's authority", name)
 	}
-	_, err := s.executeInternal(auth.ContextWithUserActor(ctx, strings.TrimSpace(owner)), query)
+	query, err := render("mutation", name, args)
+	if err != nil {
+		return err
+	}
+	_, err = s.executeInternal(auth.ContextWithUserActor(ctx, strings.TrimSpace(owner)), name, query)
 	return err
 }
 
@@ -110,15 +121,28 @@ func (s *dslStore) ownerWrite(ctx context.Context, owner, query string) error {
 // memql#2989; internal_origin_test.go counts this site). Every server-only
 // read and every write funnels through here; the actor was chosen by the
 // caller above, which is the whole of what the stamp does NOT decide.
-func (s *dslStore) executeInternal(actorCtx context.Context, query string) ([]map[string]any, error) {
+func (s *dslStore) executeInternal(actorCtx context.Context, name, query string) ([]map[string]any, error) {
 	if s == nil || s.engine == nil {
 		return nil, errNoStore
 	}
 	res, err := s.engine.Execute(auth.ContextWithInternalOrigin(actorCtx), query)
 	if err != nil {
-		return nil, fmt.Errorf("pipelines: %s: %w", constructOf(query), err)
+		return nil, fmt.Errorf("pipelines: %s: %w", name, err)
 	}
 	return rowsOf(res), nil
+}
+
+// render is "<kind> <name>(<args>)" through langparser.RenderCall, the one
+// renderer for a MemQL call composed in Go: named arguments in sorted order,
+// every value JSON-encoded so none can break out of its literal (QuoteString's
+// escape set, never %q's). An argument absent from args is not rendered,
+// which is how an optional one is omitted.
+func render(kind, name string, args map[string]any) (string, error) {
+	call, err := langparser.RenderCall(name, args)
+	if err != nil {
+		return "", fmt.Errorf("pipelines: rendering %s: %w", name, err)
+	}
+	return kind + " " + call, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +150,7 @@ func (s *dslStore) executeInternal(actorCtx context.Context, query string) ([]ma
 // ---------------------------------------------------------------------------
 
 func (s *dslStore) PackageForCaller(ctx context.Context, packageID string) (*PackageSource, error) {
-	rows, err := s.callerRead(ctx, call("query", qPackageByID, argString("packageId", packageID)))
+	rows, err := s.callerRead(ctx, qPackageByID, map[string]any{"packageId": bareID(packageID)})
 	if err != nil || len(rows) == 0 {
 		return nil, err
 	}
@@ -135,24 +159,26 @@ func (s *dslStore) PackageForCaller(ctx context.Context, packageID string) (*Pac
 }
 
 func (s *dslStore) PipelineForOwner(ctx context.Context, pipelineID string) (*Pipeline, error) {
-	return onePipeline(s.callerRead(ctx, call("query", qPipelineForOwner, argString("pipelineId", bareID(pipelineID)))))
+	return onePipeline(s.callerRead(ctx, qPipelineForOwner, map[string]any{"pipelineId": bareID(pipelineID)}))
 }
 
 func (s *dslStore) PipelineForPackage(ctx context.Context, packageID string) (*Pipeline, error) {
-	return onePipeline(s.callerRead(ctx, call("query", qPipelineForPackage, argString("packageId", bareID(packageID)))))
+	return onePipeline(s.callerRead(ctx, qPipelineForPackage, map[string]any{"packageId": bareID(packageID)}))
 }
 
 func (s *dslStore) PipelinesForOwner(ctx context.Context) ([]Pipeline, error) {
-	return allPipelines(s.callerRead(ctx, call("query", qPipelinesForOwner)))
+	return allPipelines(s.callerRead(ctx, qPipelinesForOwner, nil))
 }
 
 func (s *dslStore) RunForOwner(ctx context.Context, runID string) (*Run, error) {
-	return oneRun(s.callerRead(ctx, call("query", qPipelineRunForOwner, argString("runId", bareID(runID)))))
+	return oneRun(s.callerRead(ctx, qPipelineRunForOwner, map[string]any{"runId": bareID(runID)}))
 }
 
 func (s *dslStore) RunsForOwner(ctx context.Context, pipelineID string) ([]Run, error) {
 	// The pipeline is optional: absent lists every pipeline's runs.
-	return allRuns(s.callerRead(ctx, call("query", qPipelineRunsForOwner, argStringIfSet("pipelineId", bareID(pipelineID)))))
+	args := map[string]any{}
+	setIfSet(args, "pipelineId", bareID(pipelineID))
+	return allRuns(s.callerRead(ctx, qPipelineRunsForOwner, args))
 }
 
 // ---------------------------------------------------------------------------
@@ -160,43 +186,44 @@ func (s *dslStore) RunsForOwner(ctx context.Context, pipelineID string) ([]Run, 
 // ---------------------------------------------------------------------------
 
 func (s *dslStore) PipelinesForRepository(ctx context.Context, repository string) ([]Pipeline, error) {
-	return allPipelines(s.systemRead(ctx, call("query", qPipelinesForRepository,
-		argString("repository", normalizeRepository(repository)))))
+	return allPipelines(s.systemRead(ctx, qPipelinesForRepository, map[string]any{"repository": normalizeRepository(repository)}))
 }
 
 func (s *dslStore) PipelinesPolled(ctx context.Context) ([]Pipeline, error) {
-	return allPipelines(s.systemRead(ctx, call("query", qPipelinesPolled)))
+	return allPipelines(s.systemRead(ctx, qPipelinesPolled, nil))
 }
 
 func (s *dslStore) PipelineByID(ctx context.Context, pipelineID string) (*Pipeline, error) {
-	return onePipeline(s.systemRead(ctx, call("query", qPipelineByID, argString("pipelineId", bareID(pipelineID)))))
+	return onePipeline(s.systemRead(ctx, qPipelineByID, map[string]any{"pipelineId": bareID(pipelineID)}))
 }
 
 func (s *dslStore) RunsForKey(ctx context.Context, runKey string) ([]Run, error) {
-	return allRuns(s.systemRead(ctx, call("query", qPipelineRunsForKey, argString("runKey", runKey))))
+	return allRuns(s.systemRead(ctx, qPipelineRunsForKey, map[string]any{"runKey": runKey}))
 }
 
 func (s *dslStore) RunsForPipelineSHA(ctx context.Context, pipelineID, sha string) ([]Run, error) {
-	return allRuns(s.systemRead(ctx, call("query", qPipelineRunsForPipelineSha,
-		argString("pipelineId", bareID(pipelineID)),
-		argString("sha", strings.ToLower(strings.TrimSpace(sha))))))
+	return allRuns(s.systemRead(ctx, qPipelineRunsForPipelineSha, map[string]any{
+		"pipelineId": bareID(pipelineID),
+		"sha":        strings.ToLower(strings.TrimSpace(sha)),
+	}))
 }
 
 func (s *dslStore) RunByCheckRun(ctx context.Context, repository string, checkRunID int64) (*Run, error) {
 	if checkRunID <= 0 {
 		return nil, nil
 	}
-	return oneRun(s.systemRead(ctx, call("query", qPipelineRunByCheckRun,
-		argString("repository", normalizeRepository(repository)),
-		argString("checkRunId", strconv.FormatInt(checkRunID, 10)))))
+	return oneRun(s.systemRead(ctx, qPipelineRunByCheckRun, map[string]any{
+		"repository": normalizeRepository(repository),
+		"checkRunId": formatID(checkRunID),
+	}))
 }
 
 func (s *dslStore) RunsUnfinished(ctx context.Context) ([]Run, error) {
-	return allRuns(s.systemRead(ctx, call("query", qPipelineRunsUnfinished)))
+	return allRuns(s.systemRead(ctx, qPipelineRunsUnfinished, nil))
 }
 
 func (s *dslStore) RunByID(ctx context.Context, runID string) (*Run, error) {
-	return oneRun(s.systemRead(ctx, call("query", qPipelineRunByID, argString("runId", bareID(runID)))))
+	return oneRun(s.systemRead(ctx, qPipelineRunByID, map[string]any{"runId": bareID(runID)}))
 }
 
 // ---------------------------------------------------------------------------
@@ -214,59 +241,54 @@ func (s *dslStore) CreatePipeline(ctx context.Context, p Pipeline) error {
 	if compute == "" {
 		compute = pipelines.ComputeCluster
 	}
-	return s.ownerWrite(ctx, p.OwnerUserID, call("mutation", mCreatePipeline,
-		argString("pipelineId", bareID(p.ID)),
-		argString("packageId", bareID(p.PackageID)),
-		argStringIfSet("accountId", bareID(p.AccountID)),
-		argString("name", p.Name),
-		argString("repository", normalizeRepository(p.Repository)),
-		argStringIfSet("defaultBranch", p.DefaultBranch),
-		argString("installationId", formatID(p.InstallationID)),
-		argString("credentialId", bareID(p.CredentialID)),
-		argString("delivery", p.Delivery),
-		argString("compute", string(compute)),
-		argValue("secretNames", stringList(p.SecretNames)),
-		argValueIf(len(p.ChannelIDs) > 0, "channelIds", stringList(p.ChannelIDs)),
-	))
+	args := map[string]any{
+		"pipelineId":     bareID(p.ID),
+		"packageId":      bareID(p.PackageID),
+		"name":           p.Name,
+		"repository":     normalizeRepository(p.Repository),
+		"installationId": formatID(p.InstallationID),
+		"credentialId":   bareID(p.CredentialID),
+		"delivery":       p.Delivery,
+		"compute":        string(compute),
+		"secretNames":    stringList(p.SecretNames),
+	}
+	setIfSet(args, "accountId", bareID(p.AccountID))
+	setIfSet(args, "defaultBranch", p.DefaultBranch)
+	if len(p.ChannelIDs) > 0 {
+		args["channelIds"] = stringList(p.ChannelIDs)
+	}
+	return s.ownerWrite(ctx, p.OwnerUserID, mCreatePipeline, args)
 }
 
 // UpdatePipeline writes the named fields of patch and nothing else.
 func (s *dslStore) UpdatePipeline(ctx context.Context, owner, pipelineID string, patch PipelinePatch) error {
-	args := []string{argString("pipelineId", bareID(pipelineID))}
-	if patch.Name != nil {
-		args = append(args, argString("name", *patch.Name))
-	}
-	if patch.DefaultBranch != nil {
-		args = append(args, argString("defaultBranch", *patch.DefaultBranch))
-	}
-	if patch.Delivery != nil {
-		args = append(args, argString("delivery", *patch.Delivery))
-	}
+	args := map[string]any{"pipelineId": bareID(pipelineID)}
+	setNamed(args, "name", patch.Name)
+	setNamed(args, "defaultBranch", patch.DefaultBranch)
+	setNamed(args, "delivery", patch.Delivery)
+	setNamed(args, "status", patch.Status)
 	if patch.Compute != nil {
-		args = append(args, argString("compute", string(*patch.Compute)))
-	}
-	if patch.Status != nil {
-		args = append(args, argString("status", *patch.Status))
+		args["compute"] = string(*patch.Compute)
 	}
 	if patch.SecretNames != nil {
-		args = append(args, argValue("secretNames", stringList(*patch.SecretNames)))
+		args["secretNames"] = stringList(*patch.SecretNames)
 	}
 	if patch.ChannelIDs != nil {
-		args = append(args, argValue("channelIds", stringList(*patch.ChannelIDs)))
+		args["channelIds"] = stringList(*patch.ChannelIDs)
 	}
 	if patch.Heads != nil {
-		args = append(args, argValue("heads", stringMap(*patch.Heads)))
+		args["heads"] = stringMap(*patch.Heads)
 	}
 	if patch.Timings != nil {
-		args = append(args, argValue("timings", floatMap(*patch.Timings)))
+		args["timings"] = floatMap(*patch.Timings)
 	}
 	if patch.TimingsRunID != nil {
-		args = append(args, argString("timingsRunId", bareID(*patch.TimingsRunID)))
+		args["timingsRunId"] = bareID(*patch.TimingsRunID)
 	}
 	if patch.TimingsUpdatedAt != nil {
-		args = append(args, argString("timingsUpdatedAt", formatTime(*patch.TimingsUpdatedAt)))
+		args["timingsUpdatedAt"] = formatTimeIfSet(*patch.TimingsUpdatedAt)
 	}
-	return s.ownerWrite(ctx, owner, call("mutation", mUpdatePipeline, args...))
+	return s.ownerWrite(ctx, owner, mUpdatePipeline, args)
 }
 
 // CreateRun opens a run with every open-time field. An empty optional field
@@ -277,214 +299,146 @@ func (s *dslStore) CreateRun(ctx context.Context, r Run) error {
 	if queued.IsZero() {
 		queued = time.Now().UTC()
 	}
-	return s.ownerWrite(ctx, r.OwnerUserID, call("mutation", mCreatePipelineRun,
-		argString("runId", bareID(r.ID)),
-		argString("pipelineId", bareID(r.PipelineID)),
-		argStringIfSet("accountId", bareID(r.AccountID)),
-		argString("repository", normalizeRepository(r.Repository)),
-		argString("sha", strings.ToLower(strings.TrimSpace(r.SHA))),
-		argString("mode", string(r.Mode)),
-		argString("event", string(r.Event)),
-		argString("runKey", r.RunKey),
-		argInt("attempt", int64(r.Attempt)),
-		argString("trigger", r.Trigger),
-		argStringIfSet("rerunOf", bareID(r.RerunOf)),
-		argStringIfSet("deliveryId", r.DeliveryID),
-		argIntIfSet("pullRequest", int64(r.PullRequest)),
-		argStringIfSet("headBranch", r.HeadBranch),
-		argStringIfSet("baseSha", strings.ToLower(strings.TrimSpace(r.BaseSHA))),
-		argStringIfSet("title", r.Title),
-		argStringIfSet("version", r.Version),
-		argString("status", r.Status),
-		argStringIfSet("conclusion", r.Conclusion),
-		argStringIfSet("refusalCode", r.RefusalCode),
-		argStringIfSet("refusalMessage", r.RefusalMessage),
-		argStringIfSet("refusalScope", r.RefusalScope),
-		argStringIfSet("checkRunId", formatIDIfSet(r.CheckRunID)),
-		argStringIfSet("checkRunState", r.CheckRunState),
-		argValueIf(len(r.Notes) > 0, "notes", noteList(r.Notes)),
-		argString("queuedAt", formatTime(queued)),
-		argStringIfSet("finishedAt", formatTimeIfSet(r.FinishedAt)),
-		argIntIfSet("durationMs", r.DurationMs),
-	))
+	args := map[string]any{
+		"runId":      bareID(r.ID),
+		"pipelineId": bareID(r.PipelineID),
+		"repository": normalizeRepository(r.Repository),
+		"sha":        strings.ToLower(strings.TrimSpace(r.SHA)),
+		"mode":       string(r.Mode),
+		"event":      string(r.Event),
+		"runKey":     r.RunKey,
+		"attempt":    int64(r.Attempt),
+		"trigger":    r.Trigger,
+		"status":     r.Status,
+		"queuedAt":   formatTime(queued),
+	}
+	setIfSet(args, "accountId", bareID(r.AccountID))
+	setIfSet(args, "rerunOf", bareID(r.RerunOf))
+	setIfSet(args, "deliveryId", r.DeliveryID)
+	setIfSet(args, "headBranch", r.HeadBranch)
+	setIfSet(args, "baseSha", strings.ToLower(strings.TrimSpace(r.BaseSHA)))
+	setIfSet(args, "title", r.Title)
+	setIfSet(args, "version", r.Version)
+	setIfSet(args, "conclusion", r.Conclusion)
+	setIfSet(args, "refusalCode", r.RefusalCode)
+	setIfSet(args, "refusalMessage", r.RefusalMessage)
+	setIfSet(args, "refusalScope", r.RefusalScope)
+	setIfSet(args, "checkRunId", formatIDIfSet(r.CheckRunID))
+	setIfSet(args, "checkRunState", r.CheckRunState)
+	setIfSet(args, "finishedAt", formatTimeIfSet(r.FinishedAt))
+	if r.PullRequest > 0 {
+		args["pullRequest"] = int64(r.PullRequest)
+	}
+	if len(r.Notes) > 0 {
+		args["notes"] = noteList(r.Notes)
+	}
+	if r.DurationMs > 0 {
+		args["durationMs"] = r.DurationMs
+	}
+	return s.ownerWrite(ctx, r.OwnerUserID, mCreatePipelineRun, args)
 }
 
 // UpdateRun writes the named fields of patch and nothing else.
 func (s *dslStore) UpdateRun(ctx context.Context, owner, runID string, patch RunPatch) error {
-	args := []string{argString("runId", bareID(runID))}
-	str := func(name string, v *string) {
-		if v != nil {
-			args = append(args, argString(name, *v))
-		}
-	}
-	at := func(name string, v *time.Time) {
-		if v != nil {
-			args = append(args, argString(name, formatTimeIfSet(*v)))
-		}
-	}
-	str("status", patch.Status)
-	str("conclusion", patch.Conclusion)
-	str("refusalCode", patch.RefusalCode)
-	str("refusalMessage", patch.RefusalMessage)
-	str("refusalScope", patch.RefusalScope)
+	args := map[string]any{"runId": bareID(runID)}
+	setNamed(args, "status", patch.Status)
+	setNamed(args, "conclusion", patch.Conclusion)
+	setNamed(args, "refusalCode", patch.RefusalCode)
+	setNamed(args, "refusalMessage", patch.RefusalMessage)
+	setNamed(args, "refusalScope", patch.RefusalScope)
+	setNamed(args, "checkRunState", patch.CheckRunState)
+	setNamed(args, "workRunId", patch.WorkRunID)
+	setNamed(args, "driverNodeId", patch.DriverNodeID)
+	setNamed(args, "cancelledBy", patch.CancelledBy)
 	if patch.CheckRunID != nil {
-		args = append(args, argString("checkRunId", formatIDIfSet(*patch.CheckRunID)))
+		args["checkRunId"] = formatIDIfSet(*patch.CheckRunID)
 	}
-	str("checkRunState", patch.CheckRunState)
 	if patch.Notes != nil {
-		args = append(args, argValue("notes", noteList(*patch.Notes)))
+		args["notes"] = noteList(*patch.Notes)
 	}
-	str("workRunId", patch.WorkRunID)
 	if patch.WorkGoalID != nil {
-		args = append(args, argString("workGoalId", bareID(*patch.WorkGoalID)))
+		args["workGoalId"] = bareID(*patch.WorkGoalID)
 	}
-	str("driverNodeId", patch.DriverNodeID)
-	at("driverHeartbeatAt", patch.DriverHeartbeatAt)
+	if patch.DriverHeartbeatAt != nil {
+		args["driverHeartbeatAt"] = formatTimeIfSet(*patch.DriverHeartbeatAt)
+	}
 	if patch.CancelRequested != nil {
-		args = append(args, argValue("cancelRequested", *patch.CancelRequested))
+		args["cancelRequested"] = *patch.CancelRequested
 	}
-	str("cancelledBy", patch.CancelledBy)
 	if patch.Stages != nil {
-		args = append(args, argValue("stages", stageList(*patch.Stages)))
+		args["stages"] = stageList(*patch.Stages)
 	}
-	at("startedAt", patch.StartedAt)
-	at("finishedAt", patch.FinishedAt)
+	if patch.StartedAt != nil {
+		args["startedAt"] = formatTimeIfSet(*patch.StartedAt)
+	}
+	if patch.FinishedAt != nil {
+		args["finishedAt"] = formatTimeIfSet(*patch.FinishedAt)
+	}
 	if patch.DurationMs != nil {
-		args = append(args, argInt("durationMs", *patch.DurationMs))
+		args["durationMs"] = *patch.DurationMs
 	}
-	return s.ownerWrite(ctx, owner, call("mutation", mUpdatePipelineRun, args...))
+	return s.ownerWrite(ctx, owner, mUpdatePipelineRun, args)
 }
 
 // ---------------------------------------------------------------------------
-// Rendering a call
+// Argument values
 // ---------------------------------------------------------------------------
 //
-// A Go caller's only write channel is MemQL TEXT, so every value is rendered
-// as a literal: strings through langparser.QuoteString (never %q, whose
-// escapes the lexer refuses), objects with every key quoted and sorted, lists
-// and numbers in the one spelling the parser reads. A blank rendered argument
-// is dropped, which is how an optional one is omitted.
+// Every collection is built NON-NIL here: RenderCall JSON-encodes, and a nil
+// slice or map encodes as `null`, a spelling the parser refuses (edition 2026)
+// and a type no concept field accepts.
 
-// call renders "<kind> <name>(<args>)", dropping blank arguments.
-func call(kind, name string, args ...string) string {
-	kept := make([]string, 0, len(args))
-	for _, a := range args {
-		if a != "" {
-			kept = append(kept, a)
-		}
+// setIfSet puts a string argument only when it is not blank: an optional
+// field nobody set is omitted, never written empty.
+func setIfSet(args map[string]any, name, value string) {
+	if strings.TrimSpace(value) != "" {
+		args[name] = value
 	}
-	return kind + " " + name + "(" + strings.Join(kept, ", ") + ")"
 }
 
-func argString(name, value string) string { return name + ": " + langparser.QuoteString(value) }
-
-func argStringIfSet(name, value string) string {
-	if strings.TrimSpace(value) == "" {
-		return ""
+// setNamed puts a patch field when the patch names it, its empty value
+// included -- that is how a read-merge write clears a field.
+func setNamed(args map[string]any, name string, value *string) {
+	if value != nil {
+		args[name] = *value
 	}
-	return argString(name, value)
 }
 
-func argInt(name string, value int64) string { return name + ": " + strconv.FormatInt(value, 10) }
-
-func argIntIfSet(name string, value int64) string {
-	if value == 0 {
-		return ""
-	}
-	return argInt(name, value)
+func stringList(values []string) []string {
+	out := make([]string, 0, len(values))
+	return append(out, values...)
 }
 
-func argValue(name string, value any) string { return name + ": " + literal(value) }
-
-func argValueIf(ok bool, name string, value any) string {
-	if !ok {
-		return ""
-	}
-	return argValue(name, value)
-}
-
-// literal renders a value the call strings carry. Anything it does not know
-// renders as an empty string literal rather than as Go's %v, which the
-// parser would refuse at execute time with the whole write lost.
-func literal(v any) string {
-	switch x := v.(type) {
-	case string:
-		return langparser.QuoteString(x)
-	case bool:
-		return strconv.FormatBool(x)
-	case int:
-		return strconv.Itoa(x)
-	case int64:
-		return strconv.FormatInt(x, 10)
-	case float64:
-		if math.IsNaN(x) || math.IsInf(x, 0) {
-			return "0"
-		}
-		// 'f', never an exponent: 1e-07 is not a number literal the
-		// lexer reads.
-		return strconv.FormatFloat(x, 'f', -1, 64)
-	case []any:
-		parts := make([]string, 0, len(x))
-		for _, item := range x {
-			parts = append(parts, literal(item))
-		}
-		return "[" + strings.Join(parts, ", ") + "]"
-	case map[string]any:
-		keys := make([]string, 0, len(x))
-		for k := range x {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		parts := make([]string, 0, len(keys))
-		for _, k := range keys {
-			parts = append(parts, langparser.QuoteString(k)+": "+literal(x[k]))
-		}
-		return "{" + strings.Join(parts, ", ") + "}"
-	}
-	return `""`
-}
-
-func stringList(values []string) []any {
-	out := make([]any, 0, len(values))
-	for _, v := range values {
-		out = append(out, v)
-	}
-	return out
-}
-
-func stringMap(m map[string]string) map[string]any {
-	out := make(map[string]any, len(m))
+func stringMap(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
 	for k, v := range m {
 		out[k] = v
 	}
 	return out
 }
 
-func floatMap(m map[string]float64) map[string]any {
-	out := make(map[string]any, len(m))
+// floatMap is a timing table as an argument. A NaN or an infinity has no JSON
+// spelling and would refuse the whole write, so such an entry is dropped: an
+// unmeasured package weighs pipelines.UnknownSeconds at the next split, which
+// is the truth about it.
+func floatMap(m map[string]float64) map[string]float64 {
+	out := make(map[string]float64, len(m))
 	for k, v := range m {
-		out[k] = v
+		if !math.IsNaN(v) && !math.IsInf(v, 0) {
+			out[k] = v
+		}
 	}
 	return out
 }
 
-func noteList(notes []Note) []any {
-	out := make([]any, 0, len(notes))
-	for _, n := range notes {
-		out = append(out, map[string]any{"code": n.Code, "message": n.Message})
-	}
-	return out
+func noteList(notes []Note) []Note {
+	out := make([]Note, 0, len(notes))
+	return append(out, notes...)
 }
 
-func stageList(stages []StageSummary) []any {
-	out := make([]any, 0, len(stages))
-	for _, st := range stages {
-		out = append(out, map[string]any{
-			"name": st.Name, "status": st.Status, "durationMs": st.DurationMs,
-			"steps": int64(st.Steps), "failed": int64(st.Failed),
-		})
-	}
-	return out
+func stageList(stages []StageSummary) []StageSummary {
+	out := make([]StageSummary, 0, len(stages))
+	return append(out, stages...)
 }
 
 // formatID renders a GitHub id the concepts store as text.
@@ -508,7 +462,8 @@ func formatTimeIfSet(t time.Time) string {
 	return formatTime(t)
 }
 
-// constructOf names the construct a rendered call addresses, for an error.
+// constructOf names the construct a rendered call addresses, for a test or a
+// log line.
 func constructOf(query string) string {
 	q := strings.TrimSpace(query)
 	if _, rest, ok := strings.Cut(q, " "); ok {

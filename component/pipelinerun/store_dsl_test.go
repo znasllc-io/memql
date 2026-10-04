@@ -2,6 +2,7 @@ package pipelinerun
 
 import (
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -85,7 +86,9 @@ func everyStoreCall(s Store, value string) []struct {
 		Notes: []Note{{Code: value, Message: value}}, QueuedAt: now, FinishedAt: now, DurationMs: 1234,
 	}
 	heads := map[string]string{"branch:" + value: value, "pr:12": value}
-	timings := map[string]float64{value: 1.5, "example.test/a": 0.0000001, "b": 1e21}
+	// An exponent spelling, and a NaN no JSON can carry: the NaN is dropped
+	// rather than refusing the whole write.
+	timings := map[string]float64{value: 1.5, "example.test/a": 0.0000001, "b": 1e21, "nan": math.NaN()}
 	stages := []StageSummary{{Name: value, Status: value, DurationMs: 9, Steps: 3, Failed: 1}}
 	return []struct {
 		name string
@@ -301,11 +304,12 @@ func TestTheRenderedCallsSayWhatTheRowsAre(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := engine.recorded()
+	// RenderCall's form: arguments in sorted order, values JSON-encoded.
 	want := []string{
-		`mutation createPipelineRun(runId: "r1", pipelineId: "p1", repository: "acme/shop", sha: "` + shaA + `", mode: "affected", event: "pull_request", runKey: "acme/shop@` + shaA + `:affected:pull_request", attempt: 1, trigger: "webhook", status: "queued", checkRunState: "refused", notes: [{"code": "pipeline_check_permission_missing", "message": "m"}], queuedAt: "2026-10-03T12:00:00Z")`,
+		`mutation createPipelineRun(attempt: 1, checkRunState: "refused", event: "pull_request", mode: "affected", notes: [{"code":"pipeline_check_permission_missing","message":"m"}], pipelineId: "p1", queuedAt: "2026-10-03T12:00:00Z", repository: "acme/shop", runId: "r1", runKey: "acme/shop@` + shaA + `:affected:pull_request", sha: "` + shaA + `", status: "queued", trigger: "webhook")`,
 		`query pipelineRunsForOwner()`,
-		`query pipelineRunByCheckRun(repository: "acme/shop", checkRunId: "42")`,
-		`mutation updatePipeline(pipelineId: "p1", heads: {"branch:main": "` + shaA + `", "pr:2": "` + shaB + `"})`,
+		`query pipelineRunByCheckRun(checkRunId: "42", repository: "acme/shop")`,
+		`mutation updatePipeline(heads: {"branch:main":"` + shaA + `","pr:2":"` + shaB + `"}, pipelineId: "p1")`,
 	}
 	if len(calls) != len(want) {
 		t.Fatalf("calls = %d, want %d", len(calls), len(want))
