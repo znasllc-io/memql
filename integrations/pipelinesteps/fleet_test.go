@@ -1253,7 +1253,9 @@ func TestFleetStepBoundsItsFailureAsTheClusterDoes(t *testing.T) {
 // failureMaxBytes. Cut first, a secret straddling the cut keeps its head,
 // which no masker can know for the secret.
 func TestFleetStepMasksItsFailureBeforeCuttingIt(t *testing.T) {
-	const secret = "S3CRET-straddling-the-failure-cut"
+	// planted, not "secret": a literal assigned to a name like that is what
+	// gitleaks' generic-api-key rule matches.
+	const planted = "S3CRET-straddling-the-failure-cut"
 	for _, c := range []struct {
 		name   string
 		answer func(said string) worker.Result
@@ -1276,7 +1278,7 @@ func TestFleetStepMasksItsFailureBeforeCuttingIt(t *testing.T) {
 				}}
 				f, _, _, _ := newTestFleet(t, d)
 				req := fleetReq()
-				req.Secrets["STRADDLING_TOKEN"] = secret
+				req.Secrets["STRADDLING_TOKEN"] = planted
 				res := runFleet(t, f, req)
 				wantFailure(t, res, c.status, c.code)
 				return res.Failure.Message
@@ -1285,11 +1287,11 @@ func TestFleetStepMasksItsFailureBeforeCuttingIt(t *testing.T) {
 			// the secret can begin six bytes before the cut.
 			const probe = "probe"
 			head := len(run(probe)) - len(probe)
-			msg := run(strings.Repeat("x", failureMaxBytes-head-6) + secret + strings.Repeat("y", 64))
+			msg := run(strings.Repeat("x", failureMaxBytes-head-6) + planted + strings.Repeat("y", 64))
 
-			for n := 1; n <= len(secret); n++ {
-				if strings.HasSuffix(msg, secret[:n]) {
-					t.Fatalf("the sentence ends %q, the head of the secret: it was cut before it was masked", secret[:n])
+			for n := 1; n <= len(planted); n++ {
+				if strings.HasSuffix(msg, planted[:n]) {
+					t.Fatalf("the sentence ends %q, the head of the secret: it was cut before it was masked", planted[:n])
 				}
 			}
 			if !strings.Contains(msg, "***") || len(msg) > failureMaxBytes {
