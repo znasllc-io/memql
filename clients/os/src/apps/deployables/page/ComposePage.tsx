@@ -27,6 +27,7 @@ import {
   deploymentFromRow,
   shortRepo,
   sourceLabel,
+  type AnalysisReport,
   type DeployableOutcome,
   type DeploymentRow,
   type PackageRow,
@@ -57,7 +58,7 @@ import {
   type ComposePath,
   type ComposePhase,
 } from "./compose";
-import { everyOtherAppSkipped } from "../packages/calls";
+import { everyOtherAppSkipped, type Placement } from "../packages/calls";
 import { BuildStop } from "./stops/Build";
 import { CiHandoff } from "./stops/compose/CiHandoff";
 import { Rail } from "./RailView";
@@ -619,7 +620,7 @@ export function ComposePage(props: ComposePageProps) {
     // bytes their report described are fetched again.
     await pkgActions.deploy(packageId, {
       confirm: true,
-      placements: placementsFrom(placementApps, placementAddresses, clusterDomain),
+      placements: withServingTargets(placementsFrom(placementApps, placementAddresses, clusterDomain), report),
       ...(run !== null && run.status === "awaiting_confirm" ? { deploymentId: run.id } : {}),
     });
     reseed();
@@ -1298,6 +1299,27 @@ function stopsFor(
  * design's table, and a second answer beside it would be a second table. All
  * this decides is which row of it a phase is on.
  */
+/**
+ * Every app this confirm publishes, named "serving" -- the ones the flow does
+ * not show included (memql#5601).
+ *
+ * A whole-source gate reviewed here asks only about the apps that have no
+ * address yet; an app that already serves rides along with no placement, and
+ * an omitted target keeps whatever the run recorded when it opened. So a run
+ * opened elsewhere as a candidate would publish that app as one with nothing
+ * here saying so. This flow never offers a candidate, so every app it does
+ * not skip says what it publishes to. An app the analysis refused publishes
+ * nothing and is left alone.
+ */
+function withServingTargets(placements: Record<string, Placement>, report: AnalysisReport | null): Record<string, Placement> {
+  const out = { ...placements };
+  for (const d of report?.deployables ?? []) {
+    if (d.name === "" || d.problem !== undefined || out[d.name] !== undefined) continue;
+    out[d.name] = { hostname: "", accountId: "", ownDomain: "", target: "serving" };
+  }
+  return out;
+}
+
 function actionFor(phase: ComposePhase, readyToAnalyze: boolean, readyToDeploy: boolean): HeadAction | null {
   switch (phase) {
     case "composing":

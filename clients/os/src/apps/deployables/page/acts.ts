@@ -342,23 +342,32 @@ export function candidateTargetOffered(input: Pick<ActsInput, "site" | "pkg" | "
 /**
  * Why the gate's version cannot be deployed as the candidate, or "".
  *
- * A PLAN THAT SHIPS MEMQL CANNOT BE HELD BACK. The package's MemQL is staged
+ * A PLAN THAT CHANGES THE CLUSTER'S MEMQL CANNOT BE HELD BACK. MemQL is staged
  * and rolled for the WHOLE cluster whatever an app's target is, so a candidate
- * deploy of it would change what every visitor is served the moment it lands
- * -- and the engine refuses one. The parked run's report is what knows: it
- * lists every MemQL domain the package ships (`dslDomains`), and the gate is
- * where it is read. A reserved domain is a fatal problem that never parks, so
- * it is not counted.
+ * deploy of a MemQL change would reach every visitor the moment it lands --
+ * and the engine refuses one. The parked run's report says whether the plan
+ * changes the active set (`dslChanges`), and the answer is read here:
  *
- * SHIPS, NOT CHANGES, and that is the honest limit of what the report says:
- * whether the MemQL differs from what the cluster runs is decided at the
- * staging stage, after this question. The engine's refusal, if it comes,
- * renders in place with its own remedy.
+ *   - true: unavailable, and the reason is the change;
+ *   - false: offered, though the package ships MemQL -- a product bundle
+ *     usually ships its MemQL unchanged, and hiding the choice there would
+ *     hide it in the common case;
+ *   - absent (an older run, or an analysis that did not say): the
+ *     conservative reading, unavailable whenever the package ships MemQL at
+ *     all. A reserved domain is a fatal problem that never parks, so it is
+ *     not counted.
+ *
+ * The engine's refusal, if it comes anyway, renders in place with its remedy.
  */
 export function candidateBlockedReason(run: DeploymentRow | null): string {
-  const domains = (run?.report?.dslDomains ?? []).filter((d) => d.reserved !== true).map((d) => d.domain);
+  const report = run?.report ?? null;
+  if (report?.dslChanges === false) return "";
+  if (report?.dslChanges === true) {
+    return "Not available for this version: it changes the MemQL this cluster runs, which takes effect for everyone as soon as it is deployed.";
+  }
+  const domains = (report?.dslDomains ?? []).filter((d) => d.reserved !== true).map((d) => d.domain);
   if (domains.length === 0) return "";
-  return `Not available for this version: it includes MemQL (${domains.join(", ")}), which takes effect for the whole cluster as soon as it is deployed.`;
+  return `Not available for this version: it includes MemQL (${domains.join(", ")}), and any change to it takes effect for the whole cluster as soon as it is deployed.`;
 }
 
 /** The gate, mentioned beside a state word that stays true. */

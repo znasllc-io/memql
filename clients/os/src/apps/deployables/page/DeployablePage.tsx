@@ -9,7 +9,7 @@ import { useAccountOptions } from "../../accounts/tie";
 import { usePackageActions, useSiteLifecycle } from "../packages/actions";
 import { ProblemNotice } from "../packages/ReportView";
 import { everyOtherAppSkipped, type DeployTarget, type Placement } from "../packages/calls";
-import { deploymentFromRow, type DeploymentRow, type PackageRow } from "../packages/rows";
+import { deploymentFromRow, recordedAsCandidate, type DeploymentRow, type PackageRow } from "../packages/rows";
 import type { PartsHeld } from "../parts";
 import { deployedByLabel, deployerOf, type NameOf } from "../people";
 import { usePackageDeployments } from "../packages/usePackages";
@@ -137,18 +137,24 @@ export function DeployablePage({
 
   // WHERE THE GATE'S VERSION GOES (memql#5601): the live version -- the
   // default, and what every deploy did before -- or the candidate, which keeps
-  // the live site serving what it serves while the new one is previewed. Held
-  // per GATE: a new parked run, or another deployable, starts at the default
-  // again, so an answer given to one gate never confirms the next.
+  // the live site serving what it serves while the new one is previewed.
+  //
+  // A GATE OPENS ON WHAT ITS RUN RECORDED. A run opened as a candidate keeps
+  // that at the confirm unless the confirm says otherwise, so a gate showing
+  // "Live version" over such a run would be showing the opposite of what an
+  // unchanged click used to do. Held per GATE: a new parked run, or another
+  // deployable, starts from its own record again, so an answer given to one
+  // gate never confirms the next.
   const parkedRunId = run !== null && run.status === "awaiting_confirm" ? run.id : "";
-  const [deployTarget, setDeployTarget] = useState<DeployTarget>("serving");
+  const recordedTarget: DeployTarget = parkedRunId !== "" && recordedAsCandidate(run, app) ? "candidate" : "serving";
+  const [deployTarget, setDeployTarget] = useState<DeployTarget>(recordedTarget);
   // Which answer the last confirm from this page sent, so a refusal of a
   // candidate lands beside the choice while the gate is still the question.
   const [confirmedAs, setConfirmedAs] = useState<DeployTarget | null>(null);
   useEffect(() => {
-    setDeployTarget("serving");
+    setDeployTarget(recordedTarget);
     setConfirmedAs(null);
-  }, [site.id, parkedRunId]);
+  }, [site.id, parkedRunId, recordedTarget]);
   const offerCandidate = candidateTargetOffered({ site, pkg, run, can });
   const candidateBlocked = offerCandidate ? candidateBlockedReason(run) : "";
   const gateTarget: DeployTarget = offerCandidate && candidateBlocked === "" ? deployTarget : "serving";

@@ -201,6 +201,14 @@ export interface DeploymentRow {
    * (memql#4953).
    */
   scopedTo: string[];
+  /**
+   * The deployables this run publishes as their CANDIDATE version (memql#5601),
+   * recorded when it opens and re-stamped at the confirm. At the gate an
+   * explicit target on the confirming call wins and an omitted one keeps this,
+   * so it is what a gate opens on. Filled by `deploymentFromRow` -- [] for a
+   * run written before the field -- and optional only for hand-built rows.
+   */
+  candidates?: string[];
   /** The run this one was started from, when it is a retry (memql#4955). */
   fromDeploymentId: string;
   createdAt: string;
@@ -251,6 +259,16 @@ export function runIsScopedToApp(run: DeploymentRow | null, app: string): boolea
 }
 
 /**
+ * Whether a run RECORDED `app` as one it publishes as a candidate (memql#5601)
+ * -- what a parked gate opens on, since an omitted target at the confirm keeps
+ * it. Distinct from `publishedAsCandidate`, which reads what a run DID.
+ */
+export function recordedAsCandidate(run: DeploymentRow | null, app: string): boolean {
+  if (run === null || app === "") return false;
+  return (run.candidates ?? []).includes(app);
+}
+
+/**
  * Whether this run published `app` as its CANDIDATE version (memql#5601): the
  * app's outcome names a candidateRef, so what the site serves did not change.
  */
@@ -289,6 +307,12 @@ export interface AnalysisReport {
   sourceVersion?: string;
   deployables?: ReportDeployable[];
   dslDomains?: ReportDomain[];
+  /**
+   * Whether this plan would CHANGE the MemQL set the cluster runs (memql#5601):
+   * true, false, or absent when the analysis did not say. The engine refuses a
+   * candidate run whose MemQL changes, because staging it reaches everyone.
+   */
+  dslChanges?: boolean;
   goPacks?: ReportGoPack[];
   problems?: ReportProblem[];
   ok?: boolean;
@@ -369,6 +393,7 @@ export function deploymentFromRow(row: Row): DeploymentRow {
     finishedAt: rowString(flat, "finishedAt"),
     heartbeatAt: rowString(flat, "heartbeatAt"),
     scopedTo: listOf<string>(flat, "scopedTo"),
+    candidates: listOf<unknown>(flat, "candidates").filter((n): n is string => typeof n === "string" && n !== ""),
     fromDeploymentId: rowString(flat, "fromDeploymentId"),
     createdAt: rowString(flat, "createdAt"),
   };

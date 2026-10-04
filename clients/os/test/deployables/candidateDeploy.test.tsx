@@ -6,14 +6,16 @@ vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connectio
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { ComposePage } from "../../src/apps/deployables/page/ComposePage";
 import { HistoryView } from "../../src/apps/deployables/page/HistoryView";
 import { DeployablePage } from "../../src/apps/deployables/page/DeployablePage";
-import { packageFromRow } from "../../src/apps/deployables/packages/rows";
+import { deploymentFromRow as runFromRow, packageFromRow } from "../../src/apps/deployables/packages/rows";
 import { placementsPayload } from "../../src/apps/deployables/packages/calls";
 import {
   deploymentFromRow,
   publishedAsCandidate,
   publishedOnlyCandidates,
+  recordedAsCandidate,
   type DeploymentRow,
   type PackageRow,
 } from "../../src/apps/deployables/packages/rows";
@@ -94,6 +96,13 @@ describe("the run's outcome", () => {
     });
     expect(run.deployables[0]?.candidateRef).toBe("blob://sites/site-web/v3/");
     expect(run.deployables[0]?.bundleRef).toBe("");
+  });
+
+  it("reads the deployables a run records as candidates, and none on an older run", () => {
+    expect(deploymentFromRow({ id: "dep-c", status: "awaiting_confirm", candidates: ["web", 7, ""] }).candidates).toEqual(["web"]);
+    expect(deploymentFromRow({ id: "dep-old", status: "awaiting_confirm" }).candidates).toEqual([]);
+    expect(recordedAsCandidate(deploymentFromRow({ id: "dep-c", candidates: ["web"] }), "web")).toBe(true);
+    expect(recordedAsCandidate(deploymentFromRow({ id: "dep-c", candidates: ["web"] }), "shop")).toBe(false);
   });
 
   it("normalizes candidateRef at the read boundary, as it does bundleRef", () => {
@@ -221,8 +230,10 @@ describe("the bar at the gate", () => {
       ...PARKED,
       report: { dslDomains: [{ domain: "billing", constructs: { query: 3 }, files: 2 }], deployables: [], problems: [], ok: true },
     };
+    // NOT KNOWN WHETHER IT CHANGES (no dslChanges on the report): the
+    // conservative reading, because the engine refuses a change.
     expect(candidateBlockedReason(withDsl)).toMatch(/MemQL \(billing\)/);
-    expect(candidateBlockedReason(withDsl)).toMatch(/whole cluster/);
+    expect(candidateBlockedReason(withDsl)).toMatch(/any change to it takes effect for the whole cluster/);
     expect(actsFor({ site: WEB, pkg: PKG, run: withDsl, can: ALL_PARTS, deployTarget: "candidate" }).acts.map((a) => a.name)).toEqual([
       "Cancel",
       "Deploy",
@@ -230,6 +241,25 @@ describe("the bar at the gate", () => {
     // A report with no MemQL, or none at all, blocks nothing.
     expect(candidateBlockedReason(PARKED)).toBe("");
     expect(candidateBlockedReason({ ...PARKED, report: { dslDomains: [], deployables: [], problems: [], ok: true } })).toBe("");
+  });
+
+  it("asks the report whether the MemQL CHANGES, when it says", () => {
+    // The engine refuses a candidate only when the plan would change the
+    // active MemQL set, and a product bundle usually ships its MemQL
+    // unchanged -- so "ships" alone would hide the choice in the common case.
+    const ships = { dslDomains: [{ domain: "billing", constructs: { query: 3 }, files: 2 }], deployables: [], problems: [], ok: true };
+    const unchanged = { ...PARKED, report: { ...ships, dslChanges: false } };
+    const changed = { ...PARKED, report: { ...ships, dslChanges: true } };
+    expect(candidateBlockedReason(unchanged)).toBe("");
+    expect(candidateBlockedReason(changed)).toMatch(/it changes the MemQL this cluster runs/);
+    expect(actsFor({ site: WEB, pkg: PKG, run: unchanged, can: ALL_PARTS, deployTarget: "candidate" }).acts.map((a) => a.name)).toEqual([
+      "Cancel",
+      "Deploy as candidate",
+    ]);
+    expect(actsFor({ site: WEB, pkg: PKG, run: changed, can: ALL_PARTS, deployTarget: "candidate" }).acts.map((a) => a.name)).toEqual([
+      "Cancel",
+      "Deploy",
+    ]);
   });
 
   it("ignores a candidate choice where it is not offered", () => {
@@ -418,12 +448,43 @@ describe("the gate on a live deployable's page", () => {
     expect(barActs()).toEqual(["Cancel", "Deploy"]);
   });
 
-  it("shows the candidate as unavailable, with why, for a version that ships MemQL", async () => {
+  it("opens on the choice the run recorded, so a run opened as a candidate shows as one", async () => {
+    const opened = runRow({ ...GATE, id: "dep-parked", candidates: ["web"] });
+    const connection = openPage({ deployments: { "pkg-acme": [opened, SERVED_V2] } });
+    await atTheGate();
+    expect(option("Candidate").getAttribute("aria-checked")).toBe("true");
+    expect(barActs()).toEqual(["Cancel", "Deploy as candidate"]);
+    // ...and the person can still choose otherwise, which the confirm says.
+    await click(option("Live version"));
+    await click(barAct("Deploy"));
+    expect(connection.callsNamed("packageDeploy")).toEqual([
+      'builtin packageDeploy(packageId: "pkg-acme", confirm: true, placements: {web: {target: "serving"}}, deploymentId: "dep-parked")',
+    ]);
+  });
+
+  it("offers the candidate for a version whose MemQL does not change what the cluster runs", async () => {
+    const unchanged = runRow({ ...GATE, id: "dep-parked", report: { ...REPORT, dslDomains: [{ domain: "billing", constructs: { query: 2 }, files: 1 }], dslChanges: false } });
+    openPage({ deployments: { "pkg-acme": [unchanged, SERVED_V2] } });
+    await atTheGate();
+    expect(option("Candidate").getAttribute("aria-disabled")).toBeNull();
+    await click(option("Candidate"));
+    expect(barActs()).toEqual(["Cancel", "Deploy as candidate"]);
+  });
+
+  it("shows the candidate as unavailable, with why, for a version that changes the cluster's MemQL", async () => {
+    const changes = runRow({ ...GATE, id: "dep-parked", report: { ...REPORT, dslDomains: [{ domain: "billing", constructs: { query: 2 }, files: 1 }], dslChanges: true } });
+    openPage({ deployments: { "pkg-acme": [changes, SERVED_V2] } });
+    await atTheGate();
+    expect(option("Candidate").getAttribute("aria-disabled")).toBe("true");
+    expect(option("Candidate").textContent).toContain("it changes the MemQL this cluster runs");
+  });
+
+  it("shows the candidate as unavailable, with why, for a version that ships MemQL nobody has compared", async () => {
     const withDsl = runRow({ ...GATE, id: "dep-parked", report: { ...REPORT, dslDomains: [{ domain: "billing", constructs: { query: 2 }, files: 1 }] } });
     openPage({ deployments: { "pkg-acme": [withDsl, SERVED_V2] } });
     await atTheGate();
     expect(option("Candidate").getAttribute("aria-disabled")).toBe("true");
-    expect(option("Candidate").textContent).toContain("it includes MemQL (billing), which takes effect for the whole cluster");
+    expect(option("Candidate").textContent).toContain("it includes MemQL (billing), and any change to it takes effect for the whole cluster");
     await click(option("Candidate"));
     expect(option("Live version").getAttribute("aria-checked")).toBe("true");
     expect(barActs()).toEqual(["Cancel", "Deploy"]);
@@ -497,5 +558,52 @@ describe("the source's history", () => {
     // would re-point nothing either.
     expect(within(attempt("2222222")).queryByRole("button", { name: /Roll back/ })).toBeNull();
     expect(within(attempt("1111111")).getByRole("button", { name: "Roll back to 1111111" })).toBeTruthy();
+  });
+});
+
+describe("the compose flow's confirm", () => {
+  it("names a target for every app it publishes, the ones it does not show included", async () => {
+    // A WHOLE-SOURCE GATE, reviewed through compose: `storefront` is new and
+    // asked where it lives; `web` already serves and is not shown. Omitting a
+    // target keeps what the run recorded when it opened, so a confirm that
+    // named none could publish `web` as a candidate with nothing on screen
+    // saying so. Compose never offers a candidate, so it says "serving".
+    const two = { ...REPORT, deployables: [{ ...REPORT.deployables[0]!, name: "storefront", path: "storefront" }, REPORT.deployables[0]!] };
+    const source = { ...ACME_ROW, declares: [{ name: "storefront", kind: "spa" }, { name: "web", kind: "spa" }] };
+    const parked = runRow({ id: "dep-whole", status: "awaiting_confirm", scopedTo: [], candidates: ["web"], report: two, finishedAt: "" });
+    const connection = fakeConnection({ sites: [WEB_ROW], packages: [source], deployments: { "pkg-acme": [parked] } });
+    h.connection = connection;
+    const pkg = packageFromRow(source);
+    render(
+      withSession(
+        <ComposePage
+          clusterDomain="memql.example.com"
+          can={ALL_PARTS}
+          isClusterOwner
+          viewerUserId="u-me"
+          credentials={[]}
+          source={pkg}
+          parked={{ pkg, run: runFromRow(parked) }}
+          placed={["web"]}
+          siteFeed={{ state: "live", error: "" }}
+          placedSources={[{ packageId: "pkg-acme", name: "web", siteId: "site-web" }]}
+          onBack={vi.fn()}
+        />,
+      ),
+    );
+    const act = async (name: string) => {
+      await waitFor(() => expect([...document.querySelectorAll(".os-actbar-acts button")].some((b) => b.textContent?.trim() === name)).toBe(true));
+      await click([...document.querySelectorAll<HTMLButtonElement>(".os-actbar-acts button")].find((b) => b.textContent?.trim() === name));
+    };
+    await act("Choose addresses");
+    const field = (await screen.findByLabelText("The name storefront answers at")) as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    setter.call(field, "shop");
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    await act("Deploy");
+    const confirm = connection.callsNamed("packageDeploy").find((c) => c.includes("confirm: true")) ?? "";
+    expect(confirm).toContain('storefront: {accountId: "self", domains: [], hostname: "shop.memql.example.com", target: "serving"}');
+    expect(confirm).toContain('web: {target: "serving"}');
+    expect(confirm).toContain('deploymentId: "dep-whole"');
   });
 });
