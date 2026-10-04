@@ -677,6 +677,14 @@ ingestion for one merchant while their deliveries keep being staged.
   `refused` is a floor. Anything above zero is a legal request Shopify will
   not resend -- see [Upgrading from the per-store compliance
   URL](#upgrading-from-the-per-store-compliance-url).
+- **uninstalledAt** -- set while Shopify reports the app uninstalled from the
+  store. The store ingests nothing whatever its status says, and its
+  storefronts are served as unavailable, until a reinstall clears it -- see
+  [app/uninstalled](#appuninstalled).
+- **health.subscriptions.notGranted** -- the generated topics this store's
+  grant cannot hold, so the daily pass does not ask for them. A standing fact
+  about the connection, like a domain's `not granted` phase; widening the grant
+  and reconnecting is what changes it.
 - A domain whose generated query the origin rejects outright, or whose page
   costs more than the 1,000-point ceiling, is not retried on the next tick:
   a rejection is reported once and the domain waits its own cadence; a
