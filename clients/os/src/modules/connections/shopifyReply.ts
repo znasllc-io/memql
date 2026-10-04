@@ -24,7 +24,6 @@ export function shopifyMessage(reason: string): string {
     store_redacted: "This store is no longer available.",
     site_not_writable: "You do not have access to change this storefront.",
     app_credentials_invalid: "Check the Shopify app's client ID and secret.",
-    store_in_use: "This store is shared with deployables you cannot change.",
     storefront_token_invalid: "Shopify did not accept this Storefront API token.",
     installed: "Select Connect Shopify to finish connecting this storefront.",
   } as Record<string, string>)[reason] ?? `Shopify could not finish this step (${reason || "no result"}).`;

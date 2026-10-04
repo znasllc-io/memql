@@ -60,6 +60,24 @@ const (
 	workRerunSourceMissing  = "source_journal_unavailable"
 )
 
+// workResumeArgsRefused is the code a run is failed with when its resume was
+// refused on its args contract (memql#5664).
+const workResumeArgsRefused = "resume_args_refused"
+
+// workResumeRefusal is the code a refused resume fails its run with, or "" for
+// one the dispatcher reports and leaves. A resume refused on its args contract
+// is decided before any step runs and binds the same variables to the same
+// contract on every attempt, so the run fails with the contract in its
+// message: left at `running`, the abandoned sweep would close it a minute
+// later with a sentence about a node going away. A refusal that came with an
+// execution was the executor's to close, and any other is reported as before.
+func workResumeRefusal(exec *automations.AutomationExecution, err error) string {
+	if exec == nil && errors.Is(err, automations.ErrResumeArgsContract) {
+		return workResumeArgsRefused
+	}
+	return ""
+}
+
 // workRerunServable decides whether THIS dispatch may serve the re-run the row
 // carries (epic memql#5414).
 //
@@ -136,6 +154,10 @@ func workRerunRefusal(j *automations.RunJournal) (string, error) {
 	}
 	switch spec.Reason {
 	case automations.RerunReasonRerun, automations.RerunReasonHeadMove:
+	case automations.RerunReasonReplan:
+		// A re-planned run's first execution on its new template (memql#5664):
+		// served exactly as a re-run is, from the first step the run never
+		// reached.
 	case automations.RerunReasonBranch:
 		if j.Mode != common.RunModeFork || strings.TrimSpace(j.ForkedFromRunId) == "" {
 			return workRerunReasonInvalid, fmt.Errorf("run %s carries a branch request but is not a fork of another run", j.RunId)

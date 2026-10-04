@@ -45,10 +45,19 @@ reader to honour by mistake. Every reader maps a value it does not know to
 `owner`, so an engine older than a mode reads it as private rather than as
 open, and a `people` share that names nobody is read as `owner` too.
 
-Group membership is read **on every call**, from the same membership rows that
-decide what a person can see elsewhere in the product. Removing somebody from
-a group, or archiving the group, ends their use of the machine on their next
-call, on every replica. Nothing is cached.
+Group membership comes from the same membership rows that decide what a person
+can see elsewhere in the product. Removing somebody from a group, or archiving
+the group, ends their use of the machine on their next call, on every replica.
+
+The replica that plans a call reads membership **on every call**. The replica
+holding a lent machine's stream re-checks every call forwarded to it, and keeps
+one answer per person rather than reading again each time
+([memql#5660](https://github.com/znasllc-io/memql/issues/5660)): any change to
+a membership or a group, written on any replica, empties it everywhere, and no
+answer is kept longer than **30 seconds** — the bound if that change never
+reaches the replica, because it was cut off from the others when the change
+was written. That is far inside the window a call already admitted is allowed
+to finish in (see [What stopping does](#what-stopping-does)).
 
 ---
 
@@ -146,6 +155,16 @@ list of names is consent for those people, and the cluster's own work is
 nobody on the list. The routing plan says so in as many words: "Its owner has
 shared it with specific people, not with the cluster's own work."
 
+**An automation acting for a person is not the cluster's own work.** One that
+runs under a listed person's borrowed authority carries *their* identity, and
+it may use every machine lent to them — **lending to a person lends to all of
+their work, automated or not.** Only an automation running as itself, under
+the cluster's synthetic identity, is held to machines lent to everyone, and
+such an identity never matches a person on a list, even when the automation's
+name spells somebody's id. Decided by the owner on 2026-10-04
+([memql#5662](https://github.com/znasllc-io/memql/issues/5662)); it is the
+behaviour the routing already had, now written down as a rule.
+
 ---
 
 ## What the owner sees afterwards
@@ -170,7 +189,9 @@ change could quietly widen.
 
 The cluster's own work is every call with no acting person, or with the
 cluster's synthetic identity (an automation or a maintenance sweep) — never
-"another person". The type the fold is built on cannot express a prompt. Other
+"another person". An automation acting under a person's borrowed authority is
+that person's work, and is counted as theirs. The type the fold is built on
+cannot express a prompt. Other
 people are **counted and never named**: the row carries `calls`, `people`,
 `otherCalls`, `otherPeople`, `systemCalls` and calls per level, and nothing
 else. With a one-person share the count of other people implies that person,
@@ -231,6 +252,24 @@ it is offered, rather than in this document.
   everyone, with B, or with a group B is an active member of — and the
   machine itself agreed. Machines lent to you may serve your calls, with your
   own machines always preferred first.
+- **Work done under your authority is yours.** An automation acting under
+  your borrowed authority uses what is lent to you, exactly as your own calls
+  do (see [The cluster's own work](#the-clusters-own-work)).
+- **A call pinned to one machine may name a machine lent to you.** "Ask it
+  something" on a machine's page, or any call that names the machine that must
+  run it, reaches your own machines and every machine lent to you under both
+  consents — and nothing else. A pin never falls through to another machine,
+  and system work cannot pin: neither a call with no acting person nor one
+  under an identity the cluster made for itself (an automation running as
+  itself, a connector, the operator credential) may name a machine, even one
+  lent to everyone. A pin to a machine that is not lent to you is
+  refused with the pin's own sentence ("unavailable or not eligible for this
+  call; check that it is yours or lent to you, online, and offers the model
+  with the required context"), which reads the same for a machine that is
+  offline, one that is somebody else's, and one that does not exist. Decided
+  by the owner on 2026-10-04
+  ([memql#5662](https://github.com/znasllc-io/memql/issues/5662)); before
+  that, a pin reached your own machines only.
 - **System work** reaches only machines lent to everyone, with both consents.
 
 When a person's own machines and a lent one could both serve a call, **the
@@ -299,6 +338,19 @@ but the owner. It does not: `v1:worker:registration` declares the composite
 on it — so a cluster owner could lend hardware they do not own, and un-lend
 hardware somebody else had lent. On the one row whose entire content is a
 person's consent, that escape is wrong.
+
+Making the mutation `@serverOnly` closed one route and left the tier as it
+was. The raw `insert()` literal names no construct, so it never consults
+`@serverOnly`, and neither does the `update { }` body of an inline or authored
+mutation, so a cluster owner could still lend another person's machine that
+way, to anyone (memql#5658). The engine now refuses, at the single write
+chokepoint, any write that changes `sharing` without internal origin. That
+covers every caller, the owner included, because `fleetSetSharing` is where the
+people and groups named are checked. It also refuses moving an existing
+machine's owner, which would otherwise be the same write in two steps: take
+the machine, then lend it as its owner. The tier itself is unchanged, so the
+operator's cluster-wide view of the fleet still works, and so do the live
+updates behind it.
 
 Removing a machine keeps the cluster-owner arm, and the difference is the
 point: offboarding somebody's laptop is an operator act the Fleet's operator

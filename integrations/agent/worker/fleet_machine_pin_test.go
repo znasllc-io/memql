@@ -50,7 +50,7 @@ func TestPinnedFleetCallReachesOnlySelectedMachineAcrossReplicaHop(t *testing.T)
 }
 
 func TestPinnedFleetRefusesWithoutDispatchingAnAlternate(t *testing.T) {
-	for _, why := range []string{"offline", "revoked", "missing model", "context too small", "policy excluded", "not owned", "system caller", "shared foreign machine", "disconnected before start"} {
+	for _, why := range []string{"offline", "revoked", "missing model", "context too small", "policy excluded", "not owned", "system caller", "foreign machine not lent", "disconnected before start"} {
 		t.Run(why, func(t *testing.T) {
 			f, h, remoteCalls, alternateCalls := pinnedFleetHarness(t)
 			req := memqlengine.FleetCallRequest{ActingUserId: h.owner, RegistrationId: "laptop", ModelId: hopModel, Kind: memqlengine.FleetKindChat}
@@ -73,12 +73,15 @@ func TestPinnedFleetRefusesWithoutDispatchingAnAlternate(t *testing.T) {
 				req.RegistrationId = "someone-elses-machine"
 			case "system caller":
 				req.ActingUserId = ""
-			case "shared foreign machine":
-				shared := *selected
-				shared.OwnerUserId = "v1:identity:user:bob"
-				shared.SharingMode, shared.InferenceServe = workerservice.SharingModeCluster, workerservice.InferenceServeCluster
+			case "foreign machine not lent":
+				// Somebody else's machine its owner kept to themselves. A pin
+				// reaches a machine lent to the caller (memql#5662) and
+				// nothing else: fleet_lent_pin_test.go holds the lent cases.
+				foreign := *selected
+				foreign.OwnerUserId = "v1:identity:user:bob"
+				foreign.SharingMode, foreign.InferenceServe = workerservice.SharingModeOwner, workerservice.InferenceServeCluster
 				h.store.machines = h.store.machines[:1]
-				f.router = NewRouter(&sharedFleet{fakeFleet: h.store.fakeFleet, all: []Candidate{shared}}, testLogger(), fleetNow)
+				f.router = NewRouter(&sharedFleet{fakeFleet: h.store.fakeFleet, all: []Candidate{foreign}}, testLogger(), fleetNow)
 			case "disconnected before start":
 				h.link.handler.registry.Remove("laptop")
 			}

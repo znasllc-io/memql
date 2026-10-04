@@ -16,5 +16,9 @@ func (a *App) integrationsPlanner() {
 	a.integrationsCore()
 	a.setupPlannerIntegration()
 	a.wireWorkCompiler()
+	// After compile: the run-event subscription wireWorkCompiler makes is
+	// what hands a classified failure's replan or repair wait to this node
+	// (memql#5664).
+	a.wireWorkFailurePath()
 	a.Logger.Info("planner integration providers registered")
 }

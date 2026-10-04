@@ -224,7 +224,10 @@ export function effortWord(effort: string): string {
  *
  * THE ACT KEEPS ITS NAME: "Run again" becomes "running draft again as version
  * 3" and then the version appears. A head move with nothing stale never lands
- * here -- nothing runs -- so "going back" always has steps behind it.
+ * here -- nothing runs -- so "going back" always has steps behind it. A
+ * re-plan is the failure path's act, not a person's (memql#5664): the run
+ * continues on the new plan from its first step not yet reached, so nothing
+ * is "run again".
  */
 export function rerunInFlightWords(reason: string, stepKey: string, version: number | null): string {
   const step = stepKey === "" ? "a step" : stepKey;
@@ -233,6 +236,8 @@ export function rerunInFlightWords(reason: string, stepKey: string, version: num
       return `went back in ${step}; running the steps that depend on it again`;
     case "branch":
       return `running from ${step} on; the steps before it are reused`;
+    case "replan":
+      return `re-planned after a failure; continuing with the new plan from ${step}`;
     default:
       return version === null ? `running ${step} again` : `running ${step} again as version ${version}`;
   }

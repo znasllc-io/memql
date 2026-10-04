@@ -295,6 +295,9 @@ describe("the wire form of a placement", () => {
       accountId: "self",
       ownDomain: "",
       domains: ["shop.acme.com"],
+      // An app that deploys says where its build goes (memql#5601): the run
+      // keeps a recorded target when the confirm omits one.
+      target: "serving",
     });
   });
 

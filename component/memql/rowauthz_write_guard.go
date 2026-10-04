@@ -34,7 +34,9 @@ package memql
 //   - NOT creates. A create has no target row to resolve an owner from,
 //     so its problem is STAMPING rather than guarding: a raw `insert(`
 //     can still forge the owner field on a new row. That is memql#3059 /
-//     task #3175.
+//     task #3175. The cluster-owner tier has no owner field to stamp, so
+//     its create is judged on its own, in create_rank_floor.go
+//     (memql#5624).
 //   - NOT writes that reach the store without passing executeWrite at
 //     all -- the boot seeder's direct concept.Create is task #3176.
 //

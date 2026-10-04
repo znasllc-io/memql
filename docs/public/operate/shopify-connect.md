@@ -34,7 +34,21 @@ Connected storefronts also inherit the store's pinned API version in
 setting can override that version; normal connection setup needs no manual entry.
 A connection is separate from a deployment: removing a personal saved connection
 keeps existing store bindings, credentials and deployed websites. Uninstalling the
-app at Shopify is a different action and can revoke access there.
+app at Shopify is a different action and revokes access there.
+
+## Uninstall and reinstall
+
+When a store's staff uninstall the app in Shopify, MemQL marks the store
+disconnected. Websites connected to it show the store as unavailable instead of
+serving a catalog, the store stops mirroring, and it leaves your list of
+connected stores. Its mirrored data stays until Shopify's `shop/redact` request
+48 hours later, which purges it.
+
+To reconnect, add the store again from **Settings → Connections → Shopify**. The
+store's staff approve the app in Shopify, and MemQL restores the store, including
+one Shopify already purged. Websites bound to it reconnect without being bound
+again. MemQL checks the store's Storefront token and obtains a new one only when
+Shopify refuses the old one.
 
 ## Sandbox first, client store later
 
@@ -81,8 +95,12 @@ expected deliverables are tracked in
 
 The shared storefront flow requests `unauthenticated_read_product_listings`,
 `unauthenticated_read_checkouts`, `unauthenticated_write_checkouts`,
-`unauthenticated_read_customers`, `read_products`, `read_inventory`,
+`unauthenticated_read_customers`, `write_products`, `read_inventory`,
 `read_locations`, and `read_orders`. Register those scopes on the app.
+It asks for `write_products` rather than `read_products` because product-content
+delivery writes product metafields; `write_products` includes the catalog reads.
+Only a missing Storefront scope refuses a connection, so a grant without
+`write_products` still connects and product-content delivery fails later.
 The complete Shopify mirror has additional optional scope requirements; connecting
 a storefront does not request finance, staff, payment-method, or historical-order
 access for that wider mirror.
@@ -102,7 +120,12 @@ code and images contain no shared app secret.
 
 Register `https://identity.<domain>/auth/shopify/callback` as the redirect URL.
 Identity relays the unchanged signed query to the OS completion route so the
-originating browser session can be checked. Local testing uses the equivalent
+originating browser session can be checked. In the app's configuration, point the
+three privacy topics and `app/uninstalled` at the app-level endpoint
+`https://api.<domain>/inbound/shopify`. Without `app/uninstalled` an uninstall
+goes unnoticed: the store keeps reading as connected, and its websites are marked
+unavailable only once `shop/redact` purges it. The
+[connector runbook](shopify-connector.md) says what each topic does. Local testing uses the equivalent
 `identity.memql.localhost` and `os.memql.localhost` hosts. Shopify's server-to-server
 webhooks additionally require a reachable HTTPS endpoint; local DNS alone does not
 provide one. Complete the investigation before exposing a local tunnel or enabling

@@ -192,13 +192,15 @@ func TestWorkerInvocationRetentionSweepStillRetiresARowUnderTheTier(t *testing.T
 // zero, and a retention window nobody is enforcing is indistinguishable from a
 // retention window with nothing to do. There is no second symptom to notice.
 //
-// The write half is the part that would be a severe regression if the ruling
-// were wrong, so it is asserted rather than argued: the concept declares
-// `clusterOwner`, and if that gated CREATES then every sign-in, every session
-// and every role change would stop being recorded. The write guard resolves a
-// TARGET ROW, so it covers updates and deletes and not creates
-// (rowauthz_write_guard.go says so); this is the test that makes that sentence
-// evidence.
+// The write half is the part that would be a severe regression if it went
+// wrong, so it is asserted rather than argued. The tier now DOES judge a
+// create (memql#5624): a cluster owner or server code. Every sign-in, session
+// and role change keeps being recorded because the writers that record them
+// are server code and say so -- component/identity's EngineAuditSink and the
+// integration audit writers stamp internal origin on the one createAuditEvent
+// they compose, over the caller's own context. This test writes in exactly that
+// shape, and shows the same call WITHOUT the stamp, straight from the person,
+// is refused: that was a trail entry anyone signed in could forge.
 func TestAuditEventSweepReadsUnderTheMaintenancePrincipalAndCreatesStillWork(t *testing.T) {
 	eng, db, _ := sharedReadMergeEngine(t)
 
@@ -221,14 +223,13 @@ func TestAuditEventSweepReadsUnderTheMaintenancePrincipalAndCreatesStillWork(t *
 
 	// ---- THE WRITE, under an ORDINARY user. This is what the identity service
 	// does on every sign-in: it records an event about a user, from that user's
-	// request context, with actorUserId as DATA rather than as an owner stamp.
+	// request context, with actorUserId as DATA rather than as an owner stamp --
+	// and, since memql#5624, with internal origin stamped for that one write.
 	//
 	// runMutation fails the test on any error, which is the assertion: if the
-	// clusterOwner tier gated CREATES, every sign-in, session and role change
-	// would stop being recorded. The audit trail's own doc says the write guard
-	// covers updates and deletes only, and this is what keeps that sentence
-	// evidence rather than a claim.
-	storedId := runMutation(t, rowAuthzCallerCtx(actorUser), eng, "createAuditEvent", map[string]any{
+	// create floor refused the audit writers' shape, every sign-in, session and
+	// role change would stop being recorded.
+	storedId := runMutation(t, auth.ContextWithInternalOrigin(rowAuthzCallerCtx(actorUser)), eng, "createAuditEvent", map[string]any{
 		"eventId":     eventId,
 		"occurredAt":  "2026-01-01T00:00:00.000Z",
 		"category":    "auth",
@@ -236,6 +237,23 @@ func TestAuditEventSweepReadsUnderTheMaintenancePrincipalAndCreatesStillWork(t *
 		"actorUserId": actorUser,
 		"outcome":     "success",
 	})
+
+	// And the same write straight from the person is REFUSED: a trail entry the
+	// actor wrote about themselves is a forgery, whatever actorUserId it names.
+	forged, err := runSiteMutation(t, rowAuthzCallerCtx(actorUser), eng, "createAuditEvent", map[string]any{
+		"eventId":     "forged-" + eventId,
+		"occurredAt":  "2026-01-01T00:00:00.000Z",
+		"category":    "auth",
+		"action":      "signin_succeeded",
+		"actorUserId": "somebody-else-" + suffix,
+		"outcome":     "success",
+	})
+	if err == nil {
+		t.Fatalf("an ordinary user's own createAuditEvent landed as %q: the trail is forgeable by anyone signed in", forged)
+	}
+	if !strings.Contains(err.Error(), "memql#5624") {
+		t.Fatalf("the forged createAuditEvent was refused, but not by the create floor: %v", err)
+	}
 
 	// actorUserId stays CALLER-SUPPLIED, which is the load-bearing half of why
 	// this concept cannot take an owner tier: re-stamping it from the actor

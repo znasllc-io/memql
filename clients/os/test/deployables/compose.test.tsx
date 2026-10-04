@@ -630,7 +630,7 @@ describe("the compose flow: where each app will live", () => {
     expect(confirmed).toContain("confirm: true");
     // The hostname the person chose, and the client half defaulted to the
     // cluster's own account (memql#5303, D12).
-    expect(confirmed).toContain('placements: {storefront: {accountId: "self", domains: [], hostname: "shop.memql.example.com"}}');
+    expect(confirmed).toContain('placements: {storefront: {accountId: "self", domains: [], hostname: "shop.memql.example.com", target: "serving"}}');
   });
 
   it("carries a SKIP all the way to packageDeploy", async () => {
@@ -656,7 +656,7 @@ describe("the compose flow: where each app will live", () => {
     expect(confirmed).toContain("skip: true");
     // ...and the skipped app is not given an address it was never asked for,
     // nor the client default the deployed one gets.
-    expect(confirmed).toContain('storefront: {accountId: "self", domains: [], hostname: "shop.memql.example.com"}');
+    expect(confirmed).toContain('storefront: {accountId: "self", domains: [], hostname: "shop.memql.example.com", target: "serving"}');
     expect(confirmed).not.toContain('web: {hostname');
     expect(confirmed).not.toContain('web: {accountId');
   });

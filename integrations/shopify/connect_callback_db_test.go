@@ -82,7 +82,8 @@ func TestTheCallbackJudgesThePersonAtTheCallbackAgainstARealEngine(t *testing.T)
 			"displayName": "Callback Dev", "primaryEmail": dev + "@connect.example.test", "role": string(role), "active": true,
 		})
 	}
-	setRole(auth.RoleDeveloper)
+	// A cluster owner: the per-storefront flow is theirs alone (memql#5638, G9).
+	setRole(auth.RoleOwner)
 	seed("v1:platform:site", mine, map[string]any{
 		"ownerUserId": dev, "title": mine, "hostname": mine + ".connect.example.test", "status": "draft",
 		"kind": "shopify_storefront", "bundleRef": "blob://sites/" + mine + "/v1/",
@@ -105,8 +106,8 @@ func TestTheCallbackJudgesThePersonAtTheCallbackAgainstARealEngine(t *testing.T)
 		t.Fatalf("seed the store: %v", err)
 	}
 
-	// The real save, then the real begin, as the developer.
-	devCtx := actorCtx(dev, auth.RoleDeveloper)
+	// The real save, then the real begin, as the person -- a cluster owner.
+	devCtx := actorCtx(dev, auth.RoleOwner)
 	if _, err := eng.Execute(devCtx, fmt.Sprintf(`builtin shopifyStoreAppSave(siteId: %s, clientId: "cb-client", clientSecret: %s)`,
 		langparser.QuoteString(mine), langparser.QuoteString(appSecret))); err != nil {
 		t.Fatalf("save: %v", err)
@@ -153,20 +154,21 @@ func TestTheCallbackJudgesThePersonAtTheCallbackAgainstARealEngine(t *testing.T)
 		return grant, result
 	}
 
-	// The reachable positive: the developer who began passes step 8 and the
-	// code is exchanged with the pending pair.
+	// The reachable positive: the owner who began passes step 8 and the code is
+	// exchanged with the pending pair.
 	grant, result := authorizeAs()
-	if result != "" || grant.Role != string(auth.RoleDeveloper) || grant.AccessToken != callbackAdminToken || grant.StoreID != storeID {
-		t.Fatalf("the developer's callback: result %q grant %v", result, grant)
+	if result != "" || grant.Role != string(auth.RoleOwner) || grant.AccessToken != callbackAdminToken || grant.StoreID != storeID {
+		t.Fatalf("the owner's callback: result %q grant %v", result, grant)
 	}
 	if token.count() != 1 || token.forms[0].Get("client_id") != "cb-client" || token.forms[0].Get("client_secret") != appSecret {
 		t.Fatalf("the exchange: %d requests %v", token.count(), token.forms)
 	}
 
 	// Demoted between begin and callback: permission_lost, and the code never
-	// reaches Shopify. An admin holds no store part and ranks below the store's
-	// read floor; a writer holds neither.
-	for _, role := range []auth.Role{auth.RoleAdmin, auth.RoleWriter} {
+	// reaches Shopify. A developer holds the store part and is below the owner
+	// floor; an admin holds no store part and ranks below the store's read
+	// floor; a writer holds neither.
+	for _, role := range []auth.Role{auth.RoleDeveloper, auth.RoleAdmin, auth.RoleWriter} {
 		setRole(role)
 		before := token.count()
 		if grant, result := authorizeAs(); result != connectReasonPermissionLost || grant.AccessToken != "" {
@@ -178,9 +180,9 @@ func TestTheCallbackJudgesThePersonAtTheCallbackAgainstARealEngine(t *testing.T)
 	}
 
 	// And back: the refusal was the role, not the rows.
-	setRole(auth.RoleDeveloper)
+	setRole(auth.RoleOwner)
 	if _, result := authorizeAs(); result != "" {
-		t.Fatalf("the developer again: %q", result)
+		t.Fatalf("the owner again: %q", result)
 	}
 }
 
@@ -291,18 +293,20 @@ func TestAFirstConnectIsJudgedOnTheStoreTierBeforeAnyWrite(t *testing.T) {
 		"deployables": []any{map[string]any{"name": "storefront", "siteId": "v1:platform:site:" + site}},
 	})
 
-	// A capability grant cannot bypass the store's read tier, including Save.
+	// A capability grant cannot bypass the owner floor (memql#5638, G9), which
+	// answers before the store's read tier is asked, Save included.
 	writerCtx := actorCtx(writer, auth.RoleWriter)
-	denied := builtinReply(t, eng, writerCtx, fmt.Sprintf(`builtin shopifyStoreAppSave(siteId: %s, clientId: "fc-client", clientSecret: "fc-app-secret")`, langparser.QuoteString(site)))
-	if denied["reason"] != connectReasonPermissionLost {
-		t.Fatalf("writer saved pending credentials: %v", denied)
+	if _, err := eng.Execute(writerCtx, fmt.Sprintf(`builtin shopifyStoreAppSave(siteId: %s, clientId: "fc-client", clientSecret: "fc-app-secret")`,
+		langparser.QuoteString(site))); err == nil || !strings.Contains(err.Error(), "reserved to a cluster owner") {
+		t.Fatalf("a writer granted the store part saved pending credentials: %v", err)
 	}
 	if pending, err := conn.pendingClientID(context.Background(), storeID); err != nil || pending != "" {
 		t.Fatalf("refused save wrote credentials: %q %v", pending, err)
 	}
-	// Start as a developer, then lose the role before completing the callback.
-	setRole(auth.RoleDeveloper)
-	writerCtx = actorCtx(writer, auth.RoleDeveloper)
+	// Start as a cluster owner, then lose the role before completing the
+	// callback.
+	setRole(auth.RoleOwner)
+	writerCtx = actorCtx(writer, auth.RoleOwner)
 	if out := builtinReply(t, eng, writerCtx, fmt.Sprintf(`builtin shopifyStoreAppSave(siteId: %s, clientId: "fc-client", clientSecret: "fc-app-secret")`,
 		langparser.QuoteString(site))); out["reason"] != connectReasonOK {
 		t.Fatalf("save: %v", out)
@@ -328,12 +332,14 @@ func TestAFirstConnectIsJudgedOnTheStoreTierBeforeAnyWrite(t *testing.T) {
 		return result
 	}
 
-	setRole(auth.RoleWriter)
-	if got := authorizeAs(); got != connectReasonPermissionLost {
-		t.Fatalf("a writer who cannot read stores finished a first Connect's checks: %q", got)
+	for _, role := range []auth.Role{auth.RoleWriter, auth.RoleDeveloper} {
+		setRole(role)
+		if got := authorizeAs(); got != connectReasonPermissionLost {
+			t.Fatalf("a %s finished a first Connect's checks: %q", role, got)
+		}
 	}
 	if token.count() != 0 {
-		t.Error("the code reached Shopify for a person the attach would refuse")
+		t.Error("the code reached Shopify for a person the floor refuses")
 	}
 	var stores, sealed int
 	if err := raw.QueryRowContext(context.Background(),
@@ -354,8 +360,8 @@ func TestAFirstConnectIsJudgedOnTheStoreTierBeforeAnyWrite(t *testing.T) {
 
 	// And the reachable positive over the same rows: at the floor, the same
 	// person passes.
-	setRole(auth.RoleDeveloper)
+	setRole(auth.RoleOwner)
 	if got := authorizeAs(); got != "" {
-		t.Fatalf("a developer's first Connect: %q", got)
+		t.Fatalf("an owner's first Connect: %q", got)
 	}
 }

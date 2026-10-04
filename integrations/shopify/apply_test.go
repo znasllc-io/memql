@@ -228,8 +228,19 @@ func TestApplyIsANoOpForAnUnknownStoreAndAnUnmirroredTopic(t *testing.T) {
 		t.Errorf("unknown store: writes=%d err=%v -- a removed store must not fail a delivery Shopify retries for four hours", len(writes), err)
 	}
 
-	if writes, err := h.conn.Apply(context.Background(), delivery("app/uninstalled", "gid://shopify/Shop/1")); err != nil || len(writes) != 0 {
+	if writes, err := h.conn.Apply(context.Background(), delivery("app/scopes_update", "gid://shopify/Shop/1")); err != nil || len(writes) != 0 {
 		t.Errorf("unmirrored topic: writes=%d err=%v", len(writes), err)
+	}
+
+	// app/uninstalled is not unmirrored any more (memql#5638): it disconnects
+	// the store, but only on the APP-LEVEL source, where it is declared and
+	// bound by the signed body (uninstall_test.go). On a per-store URL, which a
+	// managed store's app secret also verifies, it is still the no-op above.
+	if writes, err := h.conn.Apply(context.Background(), delivery(TopicAppUninstalled, "gid://shopify/Shop/1")); err != nil || len(writes) != 0 {
+		t.Errorf("app/uninstalled on a per-store source: writes=%d err=%v", len(writes), err)
+	}
+	if n := len(h.engine.callsTo("markStoreUninstalled")); n != 0 {
+		t.Errorf("app/uninstalled on a per-store source disconnected the store (%d writes)", n)
 	}
 }
 

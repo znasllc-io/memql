@@ -105,6 +105,18 @@ func (a *App) setupWorkerService() {
 		worker.NewRegistrationWatcher(svc.Registry(), svc.NodeId(), a.Logger),
 	))
 
+	// THE MEMBERSHIP CACHE'S INVALIDATION (memql#5660). The replica-hop
+	// receiver (wireWorkerForwarding's ForwardHandler) reads a person's groups
+	// through worker.CachedGroups, and the cache answers from memory only
+	// while this subscriber is subscribed: every change to a membership or a
+	// group, written on any replica, empties it. Leaving this line out is
+	// safe -- every call reads the membership rows again -- and only slower.
+	a.Dependencies = append(a.Dependencies, worker.NewMembershipCacheSubscriber(
+		a.Logger,
+		a.eventBus,
+		worker.InstalledMembershipCache(),
+	))
+
 	a.Logger.Info("worker service registered on agent node")
 }
 

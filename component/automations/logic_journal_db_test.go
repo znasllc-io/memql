@@ -115,8 +115,22 @@ func registerLogic(t *testing.T, engine *memql.MemQLEngine, src string) string {
 	return name
 }
 
-func TestLogicJournal_DB_DirectWritingLogicLeavesARun(t *testing.T) {
+// TestLogicJournal_DB runs this file's cases on ONE private engine
+// (memql#5668). Every case changes the engine -- it installs its own logic
+// runner and registers a logic under a stamped name -- so none of them may
+// borrow the package's shared engine (journal_db_test.go). They can share one
+// with each other, scoped to this parent, because each case installs its
+// runner before its first call and calls only the logic it registered. No
+// test outside this parent ever holds the engine, so nothing a case leaves on
+// it reaches one.
+func TestLogicJournal_DB(t *testing.T) {
 	engine := openTestEngine(t)
+	t.Run("DirectWritingLogicLeavesARun", func(t *testing.T) { logicJournalDirectWritingLogicLeavesARun(t, engine) })
+	t.Run("ReadOnlyLogicLeavesNoRun", func(t *testing.T) { logicJournalReadOnlyLogicLeavesNoRun(t, engine) })
+	t.Run("LogicInsideARunJournalsAsItsSteps", func(t *testing.T) { logicJournalLogicInsideARunJournalsAsItsSteps(t, engine) })
+}
+
+func logicJournalDirectWritingLogicLeavesARun(t *testing.T, engine *memql.MemQLEngine) {
 	probe := &dbLogicProbe{engine: engine}
 	engine.SetLogicRunner(NewLogicRunner(engine, probe, nil))
 	name := registerLogic(t, engine, fmt.Sprintf(`logic logicJournalWrites%d {
@@ -146,8 +160,7 @@ func TestLogicJournal_DB_DirectWritingLogicLeavesARun(t *testing.T) {
 	}
 }
 
-func TestLogicJournal_DB_ReadOnlyLogicLeavesNoRun(t *testing.T) {
-	engine := openTestEngine(t)
+func logicJournalReadOnlyLogicLeavesNoRun(t *testing.T, engine *memql.MemQLEngine) {
 	probe := &dbLogicProbe{engine: engine}
 	engine.SetLogicRunner(NewLogicRunner(engine, probe, nil))
 	name := registerLogic(t, engine, fmt.Sprintf(`logic logicJournalReads%d {
@@ -164,8 +177,7 @@ func TestLogicJournal_DB_ReadOnlyLogicLeavesNoRun(t *testing.T) {
 	}
 }
 
-func TestLogicJournal_DB_LogicInsideARunJournalsAsItsSteps(t *testing.T) {
-	engine := openTestEngine(t)
+func logicJournalLogicInsideARunJournalsAsItsSteps(t *testing.T, engine *memql.MemQLEngine) {
 	stamp := time.Now().UnixNano()
 	probe := &dbLogicProbe{engine: engine, logics: map[string]bool{}}
 	engine.SetLogicRunner(NewLogicRunner(engine, probe, nil))

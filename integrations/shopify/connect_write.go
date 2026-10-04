@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"errors"
 	"strings"
 	"time"
 
@@ -78,7 +79,11 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 	c.stores.Invalidate()
 	defer c.stores.Invalidate()
 
-	prior, found, err := c.storeByID(opCtx, storeID)
+	// FRESH, as well as by id (12.9): this node's result cache answers until a
+	// sibling's broadcast evicts it, and an uninstall another replica just
+	// recorded is what step 12b clears (memql#5638). Read stale, the reinstall
+	// would leave the store disconnected.
+	prior, found, err := c.storeByID(memql.ContextWithFreshRead(opCtx), storeID)
 	if err != nil {
 		c.logger.Warn("shopify: Connect could not read the store it was about to keep", "store", storeID, "error", err.Error())
 		return connectReasonExchangeFailed, ""
@@ -154,8 +159,31 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 		c.clearPendingApp(opCtx, storeID, state.ClientID, grant.ClientSecret, person)
 	}
 
-	// 13. A Storefront token only for a store with none.
+	// 12b. A verified reinstall of a store Shopify reported uninstalled, or one
+	// shop/redact purged, is the shop's new consent, and the store works again
+	// (memql#5638). What the uninstall and the purge recorded is cleared here,
+	// once the fresh grant is on the row, and the reinstall is audited beside
+	// the purge's own event. A failure leaves the store disconnected, which
+	// Connect again repairs.
+	if found && (prior.UninstalledAt != "" || prior.RedactedAt != "") {
+		if err := c.markReconnected(ctx, opCtx, storeID, prior, person); err != nil {
+			c.logger.Warn("shopify: Connect kept the new grant and could not clear the store's disconnection", "store", storeID, "error", err.Error())
+			return connectReasonExchangeFailed, result
+		}
+	}
+
+	// 13. A Storefront token for a store with none -- or with one the store
+	// now refuses (memql#5638). An uninstall may have revoked the token Connect
+	// minted, and a reconnect that kept it unchecked left the storefront
+	// broken. A token is replaced only when it cannot serve: Shopify refused it,
+	// the sealed value cannot be read, or the reference names a secret the edge
+	// will not publish. A check that merely failed keeps it, because each mint
+	// counts toward the shop's limit of 100 and only Shopify can delete one.
 	storefrontRef := prior.StorefrontTokenRef
+	if storefrontRef != "" && !c.storefrontTokenUsable(opCtx, storeID, state.ShopDomain, prior, storefrontRef) {
+		c.logger.Info("shopify: Connect found the store's Storefront token unusable and mints another", "store", storeID)
+		storefrontRef = ""
+	}
 	if storefrontRef == "" {
 		ref, ok := c.mintStorefrontToken(opCtx, storeID, state.ShopDomain, grant.AccessToken, person)
 		if !ok {
@@ -174,6 +202,7 @@ func (c *Connector) writeConnect(ctx context.Context, state *componentIdentity.G
 	// the connection; it lands on the store's subscription health.
 	kept := prior
 	kept.ID, kept.AdminTokenRef, kept.StorefrontTokenRef, kept.APIVersion = storeID, adminRef, storefrontRef, generated.APIVersion
+	kept.UninstalledAt, kept.RedactedAt = "", ""
 	if kept.Domain == "" {
 		kept.Domain = state.ShopDomain
 	}
@@ -298,6 +327,81 @@ func (c *Connector) pendingIs(ctx context.Context, storeID, clientID, clientSecr
 	}
 	have, want := sha256.Sum256([]byte(current)), sha256.Sum256([]byte(clientSecret))
 	return subtle.ConstantTimeCompare(have[:], want[:]) == 1
+}
+
+// markReconnected is step 12b: the store's disconnection cleared, and the
+// reinstall audited with what it cleared. A purge left the store paused with
+// nothing mirrored, so a purged store goes back to configured; a store that was
+// only uninstalled keeps the status an operator gave it.
+func (c *Connector) markReconnected(ctx, opCtx context.Context, storeID string, prior Store, person string) error {
+	args := map[string]any{"storeId": storeID}
+	if prior.RedactedAt != "" {
+		args["status"] = StatusConfigured
+	}
+	if _, err := c.engine.Execute(opCtx, renderCall("markStoreReconnected", args)); err != nil {
+		return err
+	}
+	at := c.now().UTC()
+	detail := map[string]any{"shopDomain": prior.Domain}
+	if prior.UninstalledAt != "" {
+		detail["uninstalledAt"] = prior.UninstalledAt
+	}
+	if prior.RedactedAt != "" {
+		detail["redactedAt"] = prior.RedactedAt
+	}
+	call := renderCall("createAuditEvent", map[string]any{
+		"eventId":     "aud" + MirrorRowID(storeID, "shopify_store_reinstalled\x00"+person+"\x00"+at.Format(time.RFC3339Nano)),
+		"occurredAt":  at.Format(time.RFC3339),
+		"category":    "configuration",
+		"action":      "shopify_store_reinstalled",
+		"actorUserId": person,
+		"targetType":  "shopifyStore",
+		"targetId":    storeID,
+		"detail":      detail,
+		"outcome":     "success",
+	})
+	if _, err := c.engine.Execute(operatorContext(ctx), call); err != nil {
+		// Loud, and it does not undo the reinstall, for auditConnect's reason.
+		c.logger.Error("shopify: could not write a reinstall audit event", "store", storeID, "error", err)
+	}
+	c.stores.Invalidate()
+	return nil
+}
+
+// storefrontTokenUsable is step 13's question about a token a reconnect would
+// keep: can it still serve the store's storefronts? No when the reference names
+// a secret the edge will not publish (only the store's own Storefront token
+// name is published, memql#5626), when the sealed value cannot be read, or when
+// the store REFUSES it. A check that fails any other way -- a timeout, a 5xx --
+// says nothing about the token, so the token is kept rather than a mint spent.
+// The token is sent in a header and never logged.
+func (c *Connector) storefrontTokenUsable(ctx context.Context, storeID, shop string, prior Store, ref string) bool {
+	if ref != storeSecretName(storeID, suffixStorefrontToken) {
+		return false
+	}
+	token, err := c.stores.Secret(ctx, ref)
+	if err != nil || strings.TrimSpace(token) == "" {
+		return false
+	}
+	endpoint := c.storefrontEndpoint
+	if endpoint == nil {
+		endpoint = StorefrontEndpoint
+	}
+	store := storeWithVersion(prior)
+	if store.Domain == "" {
+		store.Domain = shop
+	}
+	url, err := endpoint(store.Domain, store.APIVersion)
+	if err != nil {
+		return true
+	}
+	var out struct {
+		Shop struct {
+			Name string `json:"name"`
+		} `json:"shop"`
+	}
+	var refused storefrontRefusal
+	return !errors.As(storefrontCall(ctx, url, token, `{ shop { name } }`, nil, &out), &refused)
 }
 
 // mintStorefrontToken is step 13: mint, seal, and point the store at it

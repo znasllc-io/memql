@@ -53,9 +53,16 @@ import (
 // The cockpit's half keeps its two values. `inference.serve: cluster` now
 // reads "this machine may serve people other than its owner"; WHICH people is
 // the owner's half. A people share is never a cluster share: the cluster's own
-// work -- automations, maintenance, anything with no acting person -- reaches
-// only machines lent to everyone (design G3), because a list of names is
-// consent for those people and automations are nobody on the list.
+// work -- an automation or a maintenance sweep running as itself, anything with
+// no acting person -- reaches only machines lent to everyone (design G3),
+// because a list of names is consent for those people and the cluster's own
+// work is nobody on the list.
+//
+// AN AUTOMATION ACTING FOR A PERSON IS THAT PERSON'S WORK (decided 2026-10-04,
+// memql#5662). One running under a listed person's borrowed authority carries
+// THEIR id, so every reader admits it as them and it uses what is lent to
+// them: lending to a person lends to all of their work, automated or not. Only
+// a synthetic `system:` identity is the cluster's own work.
 
 // SharingMode values on registration.sharing.mode.
 const (
@@ -265,7 +272,10 @@ func (s Sharing) Admits(p *Person) bool {
 		// comparison that matched one to a listed person by the text after its
 		// last colon would lend a machine to an automation because its name
 		// happened to equal somebody's id. Only a machine lent to everyone
-		// serves the cluster's own work (design G3), by construction.
+		// serves the cluster's own work (design G3), by construction. An
+		// automation under a person's BORROWED authority never reaches this
+		// branch: it carries that person's id and is admitted as them
+		// (memql#5662).
 		return s.Mode == SharingModeCluster
 	}
 	switch s.Mode {

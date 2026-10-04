@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"time"
 
 	"github.com/znasllc-io/memql/app"
+	"github.com/znasllc-io/memql/component/database"
 	memoryNodesDatabase "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -76,9 +80,10 @@ func runMigrateSubcommand(args []string) int {
 	// failed migration would otherwise leave this Job exiting 0 and the deploy
 	// proceeding onto a broken schema behind a green gate (#671). Consult the
 	// recorded error and exit non-zero so make deploy's gate aborts (and
-	// auto-rolls-back) instead.
-	if errChecker, ok := dbDep.(interface{ MigrationError() error }); ok {
-		if err := errChecker.MigrationError(); err != nil {
+	// auto-rolls-back) instead -- after giving a migration that deferred the
+	// rest of its work the attempts it needs (awaitMigrations).
+	if db, ok := dbDep.(restartableDatabase); ok {
+		if err := awaitMigrations(context.Background(), logger, db, migrateDeferredAttempts, migrateDeferredPause); err != nil {
 			fmt.Fprintf(os.Stderr, "migrate: migration failed: %v\n", err)
 			return 1
 		}
@@ -86,6 +91,57 @@ func runMigrateSubcommand(args []string) int {
 
 	logger.Info("migrate: database migrations applied (or already current)")
 	return 0
+}
+
+// migrateDeferredAttempts bounds the attempts the subcommand runs while a
+// migration defers the rest of its work. Each one makes progress, so this is a
+// backstop against a migration that never finishes rather than a budget one is
+// expected to approach: at the default MEMORY_NODES_DATABASE_MIGRATION_TIMEOUT_MS
+// it is ten minutes of attempts.
+const migrateDeferredAttempts = 20
+
+// migrateDeferredPause separates those attempts, so a migration that defers at
+// once -- an attempt too short for even one of its steps -- cannot spin.
+const migrateDeferredPause = time.Second
+
+// restartableDatabase is the database dependency as awaitMigrations drives it:
+// every dependency starts and stops, and the database also reports how its
+// last migration attempt went.
+type restartableDatabase interface {
+	Start(ctx context.Context)
+	Stop(ctx context.Context)
+	MigrationError() error
+}
+
+// awaitMigrations returns the migration outcome, stopping and starting the
+// database for another attempt while a migration has deferred the rest of its
+// work to the next one (database.ErrMigrationDeferred). That error means the
+// migration stopped with its steps committed and nothing left running -- the
+// readiness history collapse does it when its walk outlasts one attempt
+// (memql#5604) -- and a node answers it on its monitor tick. This subcommand
+// has no tick, and exiting non-zero would leave the migrate Job's backoffLimit
+// to decide whether a long walk finishes, with `make up` failing at its
+// migrate step while the walk was making progress. Any other outcome returns
+// at once.
+func awaitMigrations(ctx context.Context, logger *slog.Logger, db restartableDatabase, attempts int, pause time.Duration) error {
+	for attempt := 1; ; attempt++ {
+		err := db.MigrationError()
+		if err == nil || !errors.Is(err, database.ErrMigrationDeferred) {
+			return err
+		}
+		if attempt >= attempts {
+			return fmt.Errorf("a migration was still deferring its work after %d attempts: %w", attempts, err)
+		}
+		logger.Info("migrate: a migration deferred the rest of its work; starting the next attempt",
+			"attempt", attempt+1, "of", attempts, "deferral", err.Error())
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(pause):
+		}
+		db.Stop(ctx)
+		db.Start(ctx)
+	}
 }
 
 const migrateUsage = `usage: memql migrate

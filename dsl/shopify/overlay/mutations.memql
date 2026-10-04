@@ -110,7 +110,9 @@ mutation store recordStoreHealth {
 }
 
 /// Stamp the shop/redact purge. The row stays: it is the audit record that
-/// a purge happened, and the domain must not be re-registered silently.
+/// a purge happened, and the domain must not be re-registered silently --
+/// only a reinstall Shopify verified clears it (markStoreReconnected), and
+/// that reinstall is audited.
 mutation store markStoreRedacted {
   args {
     storeId     string!
@@ -120,6 +122,61 @@ mutation store markStoreRedacted {
     id:         args.storeId
     redactedAt: args.redactedAt
     status:     "paused"
+  }
+}
+
+/// Record that Shopify reported this app uninstalled from the store
+/// (app/uninstalled, verified on the app-level endpoint against the app's
+/// secret and bound by the signed shop domain). The store is disconnected
+/// from here on: `uninstalledAt` is what ingestion and the edge read, and the
+/// Admin grant Shopify has ended is dropped from the row. The mirror and the
+/// Storefront token reference stay -- shop/redact purges the mirror 48 hours
+/// later, and a reinstall re-checks the token before minting another.
+///
+/// Server-only, and actor.userId scoping is not the fix: the caller is the
+/// connector acting on a delivery the app's secret signed, for no user. A
+/// client-callable version would let a caller take a live store's
+/// storefronts offline.
+@serverOnly
+mutation store markStoreUninstalled {
+  args {
+    storeId        string!
+    uninstalledAt  datetime!
+  }
+  update {
+    accept { uninstalledAt }
+    stamp {
+      id:            args.storeId
+      adminTokenRef: ""
+    }
+  }
+}
+
+/// Clear what an uninstall and a shop/redact purge recorded, once a reinstall
+/// has been verified: the shop's staff approved the app again, Shopify signed
+/// the callback, and the store holds a fresh grant. `status` is passed only
+/// after a purge, which left the store paused with nothing mirrored; a store
+/// that was only uninstalled keeps the status it had. The purge's own audit
+/// event, and the reinstall's, are the record of both.
+///
+/// Server-only, and actor.userId scoping is not the fix: the caller is
+/// Connect Shopify's verified callback writing as the deployment, and nothing
+/// a caller's identity says proves Shopify approved a reinstall. A
+/// client-callable version would let a caller erase the record of a purge, or
+/// put a disconnected store's storefronts back online with a dead grant.
+@serverOnly
+mutation store markStoreReconnected {
+  args {
+    storeId  string!
+    status   string
+  }
+  update {
+    accept { status }
+    stamp {
+      id:            args.storeId
+      uninstalledAt: ""
+      redactedAt:    ""
+    }
   }
 }
 

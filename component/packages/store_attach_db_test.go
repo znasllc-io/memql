@@ -43,7 +43,7 @@ type publishSkipped struct {
 	published []string
 }
 
-func (p *publishSkipped) PublishBundle(_ context.Context, siteId string, _ edge.Bundle) (PublishResult, error) {
+func (p *publishSkipped) PublishBundle(_ context.Context, siteId string, _ edge.Bundle, _ edge.Target) (PublishResult, error) {
 	p.published = append(p.published, siteId)
 	return PublishResult{SiteId: siteId, BundleRef: "blob://sites/x/v1/", Version: "v1"}, nil
 }
@@ -83,8 +83,9 @@ func TestAStorefrontDeployAttachesOnlyAStoreTheCallerMayAttach(t *testing.T) {
 	})
 
 	mustExecute(t, eng, tieSeederCtx(), fmt.Sprintf(
-		`mutation createStore(storeId: %s, domain: %s, storefrontTokenRef: "SHOPIFY_STOREFRONT_TOKEN")`,
-		langparser.QuoteString(storeId), langparser.QuoteString(domain)))
+		`mutation createStore(storeId: %s, domain: %s, storefrontTokenRef: %s)`,
+		langparser.QuoteString(storeId), langparser.QuoteString(domain),
+		langparser.QuoteString(memqlengine.StorefrontTokenSecretName(storeId))))
 	// A new deployable names the organization it belongs to; both callers
 	// below may deploy into it, so the store is the only thing that differs.
 	mustExecute(t, eng, tieSeederCtx(), fmt.Sprintf(

@@ -282,9 +282,10 @@ func (c *Connector) InboundSource(ctx context.Context, name string) (memqlsync.I
 
 // StoreFor resolves the store a staged delivery belongs to.
 //
-// Per-store source names are authoritative. The managed app-level privacy
-// source instead resolves the signed shop_domain and verifies app ownership.
-// An unknown source never falls back to an unsigned shop-domain header.
+// Per-store source names are authoritative. The managed app-level source --
+// the privacy topics and app/uninstalled -- instead resolves the signed shop
+// domain and verifies app ownership (managedAppLevelStore). An unknown source
+// never falls back to an unsigned shop-domain header.
 // ClaimsInboundSource answers whether name is one of this connector's
 // sources -- its own app-level name, or `shopify-<storeId>` for a store that
 // exists -- without resolving any secret (memqlsync.InboundSourceClaimer).
@@ -322,7 +323,7 @@ func (c *Connector) ClaimsInboundSource(ctx context.Context, name string) (bool,
 
 func (c *Connector) StoreFor(ctx context.Context, req memqlsync.InboundRequest) (Store, bool) {
 	if req.Source == ConnectorName {
-		return c.managedComplianceStore(ctx, req)
+		return c.managedAppLevelStore(ctx, req)
 	}
 	prefix := ConnectorName + "-"
 	if strings.HasPrefix(req.Source, prefix) {

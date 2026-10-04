@@ -4548,6 +4548,7 @@
         "buildLogTail",
         "builtOn",
         "cancelRequested",
+        "candidates",
         "deployables",
         "dslVersion",
         "error",
@@ -4744,6 +4745,7 @@
         "settings",
         "shopperForms",
         "status",
+        "storeSettings",
         "systemOwned",
         "title"
       ],
@@ -7928,6 +7930,7 @@
         "status",
         "storefrontTokenRef",
         "subscriptionsCheckedAt",
+        "uninstalledAt",
         "webhookSecretRef"
       ],
       "required": [

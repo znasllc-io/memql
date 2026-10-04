@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/edge"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/packages/githubapp"
 )
@@ -126,7 +128,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"packageId":        "string (required) -- the package to deploy",
 				"confirm":          "boolean -- pass true to proceed past the always-present confirm gate",
 				"background":       "boolean -- return the persisted analysis run ID immediately; requires confirm:false and no deploymentId",
-				"placements":       "object -- deployable name -> {hostname, accountId, ownDomain, skip}; hostname is required on a deployable's FIRST deploy unless skip is true, accountId defaults to the package organization and is persisted at creation, while ownDomain is applied after the site exists, and skip:true leaves that deployable out of the run entirely (memql#4930) -- recorded as skipped, with nothing built and nothing it already serves touched",
+				"placements":       "object -- deployable name -> {hostname, accountId, ownDomain, skip, target}; hostname is required on a deployable's FIRST deploy unless skip is true, accountId defaults to the package organization and is persisted at creation, while ownDomain is applied after the site exists, and skip:true leaves that deployable out of the run entirely (memql#4930) -- recorded as skipped, with nothing built and nothing it already serves touched. target (memql#5601) is \"serving\" (the default) or \"candidate\": a candidate is published as the site's candidateRef, served only under a preview grant, with bundleRef and the public view untouched; a shopify_storefront has no candidate version and refuses it, and any other value refuses the request",
 				"deploymentId":     "string -- confirm the PARKED run of this id rather than starting a new one (memql#4954). Ignored unless it names a run of this package waiting at the gate; anything else opens a new run",
 				"fromDeploymentId": "string -- retry an earlier run from the bytes it already fetched (task memql#4902) rather than fetching the source again",
 			},
@@ -314,6 +316,14 @@ func (i *Integration) handleAnalyze(ctx context.Context, args map[string]any, _ 
 func (i *Integration) handleDeploy(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	deps, err := i.resolve()
 	if err != nil {
+		return nil, err
+	}
+	// A TARGET OF THE WRONG TYPE IS REFUSED HERE, before anything opens
+	// (memql#5601). placementsArg reads it with stringArg, which answers ""
+	// for a non-string, and "" is the serving version -- so `target: true`
+	// would otherwise publish to every visitor a build its sender meant as a
+	// candidate.
+	if err := placementTargetTypes(args, "placements"); err != nil {
 		return nil, err
 	}
 	deploy := Deploy
@@ -1035,6 +1045,33 @@ func boolArg(args map[string]any, key string) bool {
 	return false
 }
 
+// placementTargetTypes refuses a placement whose `target` is present and not a
+// string. JSON null passes: it is the platform's unset value, the same as an
+// absent key, and reads as the serving version like one.
+func placementTargetTypes(args map[string]any, key string) error {
+	raw, _ := args[key].(map[string]any)
+	names := make([]string, 0, len(raw))
+	for name := range raw {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		fields, ok := raw[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		target, present := fields["target"]
+		if !present || target == nil {
+			continue
+		}
+		if _, isString := target.(string); !isString {
+			return fmt.Errorf("placements[%q].target is a %T; it is the string %q or %q, and a target of any other type is refused rather than read as the serving version",
+				name, target, edge.TargetServing, edge.TargetCandidate)
+		}
+	}
+	return nil
+}
+
 // placementsArg reads the D8 wire shape: an object of deployable name to
 // {hostname, accountId, ownDomain, skip}, every key optional, values trimmed.
 //
@@ -1065,6 +1102,9 @@ func placementsArg(args map[string]any, key string) map[string]Placement {
 			OwnDomain: strings.TrimSpace(stringArg(fields, "ownDomain")),
 			Domains:   placementDomains(fields),
 			Skip:      boolArg(fields, "skip"),
+			// Carried as written and read by the pipeline (placementTargets),
+			// which refuses an unknown value before a run opens.
+			Target: edge.Target(strings.TrimSpace(stringArg(fields, "target"))),
 		}
 	}
 	return out

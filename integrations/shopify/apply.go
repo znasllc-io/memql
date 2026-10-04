@@ -123,6 +123,15 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 		}
 		return nil, c.enqueueComplianceJob(ctx, store, topic, req)
 	}
+	if isUninstallTopic(topic) && req.Source == ConnectorName {
+		// The app's own topic, declared app-level beside the privacy topics
+		// and bound the same way (managedAppLevelStore), so a PAUSED store is
+		// disconnected too (memql#5638). On a per-store source it stays the
+		// unmirrored-topic no-op below: a managed store's per-store URL
+		// verifies with the app's secret as well, and a captured app-level
+		// delivery replayed there would stage as a new row.
+		return nil, c.applyUninstall(ctx, store, req)
+	}
 	if !store.Ingests() {
 		// A paused store still STAGES -- the receiver recorded the
 		// delivery -- so a pause loses telemetry rather than events, and

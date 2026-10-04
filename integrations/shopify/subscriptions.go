@@ -83,14 +83,18 @@ type Subscription struct {
 // health verbatim, because "nothing changed" and "we could not tell" are
 // different states and an operator needs to see which one this was.
 type SubscriptionReport struct {
-	StoreID  string    `json:"storeId"`
-	Desired  int       `json:"desired"`
-	Existing int       `json:"existing"`
-	Created  []string  `json:"created,omitempty"`
-	Updated  []string  `json:"updated,omitempty"`
-	Removed  []string  `json:"removed,omitempty"`
-	Failed   []string  `json:"failed,omitempty"`
-	At       time.Time `json:"at"`
+	StoreID  string   `json:"storeId"`
+	Desired  int      `json:"desired"`
+	Existing int      `json:"existing"`
+	Created  []string `json:"created,omitempty"`
+	Updated  []string `json:"updated,omitempty"`
+	Removed  []string `json:"removed,omitempty"`
+	Failed   []string `json:"failed,omitempty"`
+	// NotGranted is the generated topics this store's grant cannot hold, so
+	// they were not asked for. A standing fact about the connection, like a
+	// domain's `not granted` phase, rather than a failure.
+	NotGranted []string  `json:"notGranted,omitempty"`
+	At         time.Time `json:"at"`
 }
 
 // EnsureSubscriptions implements sync.Connector: brings every configured
@@ -132,8 +136,18 @@ func (c *Connector) EnsureSubscriptionsForStore(ctx context.Context, store Store
 	}
 	report.Existing = len(existing)
 
+	// THE GRANT DECIDES WHAT IS ASKED FOR (memql#5638). A store connected
+	// through Connect Shopify holds the managed scopes, and most generated
+	// topics route to concepts none of them reads: Shopify refuses each such
+	// creation, the refusal lands on the store's health, and the daily pass
+	// asks again. A topic left out here is also one this store does not want,
+	// so a subscription of ours for it is removed below like any other.
 	desired := map[string]bool{}
 	for _, topic := range generated.SubscribedTopics {
+		if len(topicScopesMissingFor(store, topic)) > 0 {
+			report.NotGranted = append(report.NotGranted, topic)
+			continue
+		}
 		desired[topic] = true
 	}
 	report.Desired = len(desired)
@@ -346,13 +360,14 @@ func (c *Connector) recordSubscriptionHealth(ctx context.Context, store Store, r
 		health[k] = v
 	}
 	health["subscriptions"] = map[string]any{
-		"desired":  report.Desired,
-		"existing": report.Existing,
-		"created":  toAny(report.Created),
-		"updated":  toAny(report.Updated),
-		"removed":  toAny(report.Removed),
-		"failed":   toAny(report.Failed),
-		"at":       report.At.Format(time.RFC3339),
+		"desired":    report.Desired,
+		"existing":   report.Existing,
+		"created":    toAny(report.Created),
+		"updated":    toAny(report.Updated),
+		"removed":    toAny(report.Removed),
+		"failed":     toAny(report.Failed),
+		"notGranted": toAny(report.NotGranted),
+		"at":         report.At.Format(time.RFC3339),
 	}
 	call := renderCall("recordStoreHealth", map[string]any{
 		"storeId":                store.ID,

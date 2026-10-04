@@ -127,6 +127,12 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 			return nil, err
 		}
 		current := currentArtifactHash(kind, storedHash, rowMap(approval, "subject"))
+		if current != storedHash && work.IsFailureQuestion(approval["options"]) && legacyFailureHash(storedHash, rowMap(approval, "subject"), runId) {
+			// A failure question raised before memql#5664, whose hash was
+			// over another map (work.LegacyFailureHashes): the same failure,
+			// still unedited, so the decision may land.
+			current = storedHash
+		}
 		if kind == work.ApprovalKindProcedurePromotion {
 			// The one kind whose artifact is a ROW that keeps changing after
 			// the approval is raised: a re-lift rewrites the construct's
@@ -200,7 +206,19 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		}), nil
 	}
 
-	resumed, err := i.resumeParkedRun(writeCtx, runId, approvalId, decision, now)
+	// AN ANSWER CAN BE A STOP. A failure-path question offers Retry and
+	// Abandon (work.FailureApproval) and is decided `answered`, the choice
+	// riding the answer -- so reading the decision alone would carry on with
+	// work the person had just chosen to stop.
+	runDecision := decision
+	if decision == "answered" && work.AnswerAbandons(approval["options"], answer) {
+		runDecision = decisionAbandoned
+	}
+	var retry *failureRetry
+	if work.IsFailureQuestion(approval["options"]) {
+		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: strings.TrimSpace(ac.UserId)}
+	}
+	resumed, err := i.resumeParkedRun(writeCtx, runId, approvalId, runDecision, retry, now)
 	if err != nil {
 		// The DECISION landed. Failing the whole call now would tell the
 		// caller their answer was not recorded when it was, and a retry
@@ -241,40 +259,36 @@ func withTrainingOutcome(payload map[string]any, goalId, runId string, escalated
 }
 
 // currentArtifactHash answers "what does the thing being approved hash to
-// NOW", and the answer depends on where the stored hash came from.
+// NOW". The rule is component/work's CurrentArtifactHash, beside the builders
+// every approval is raised with, so the raise side and this side cannot drift
+// apart again: the failure path's approvals were raised with a hash over one
+// map and checked here against another, and every approve and every answer on
+// them was refused as "artifact changed" (memql#5664).
 //
-//   - For kinds whose hash is DERIVED from the subject (budget, feedback, and
-//     a planReview with no explicit hash), recomputing over the stored subject
-//     is the check: a subject edited since the approval was raised hashes
-//     differently and the resume refuses.
-//
-//   - For `sideEffect` the stored hash is safety.ApprovalCorrelationKey over
-//     the redacted DESCRIPTOR, which is not a function of the stored subject
-//     and cannot be recomputed from a row. It is passed through unchanged, and
-//     the modified-artifact protection for that kind lives where the artifact
-//     actually is: the NEXT dispatch of a changed command computes a DIFFERENT
-//     correlation key, finds no approved row under it, and raises a fresh
-//     pending approval. Approving one command can therefore never run another
-//     -- which is the guarantee, arrived at by construction rather than by a
-//     comparison this function is not in a position to make.
-//
-// Returning storedHash for that case is deliberate and is what makes the
-// distinction visible: the alternative -- recomputing over the subject for
-// every kind -- would make every sideEffect decision fail as "changed", every
-// time, and the safety gate's inbox would be undecidable.
+// `sideEffect` is the case worth restating here, because this is where it
+// would be broken: its stored hash is safety.ApprovalCorrelationKey over the
+// redacted DESCRIPTOR, not a function of the stored subject, so it is passed
+// through, and the modified-artifact protection for it lives where the
+// artifact is -- the next dispatch of a changed command computes a different
+// key, finds no approved row under it, and raises a fresh approval.
+// Recomputing over the subject for every kind would make every sideEffect
+// decision fail as "changed" and the safety gate's inbox undecidable.
 func currentArtifactHash(kind, storedHash string, subject map[string]any) string {
-	switch kind {
-	case work.ApprovalKindSideEffect, work.ApprovalKindScopeElevation, work.ApprovalKindSkillMint:
-		return storedHash
+	return work.CurrentArtifactHash(kind, storedHash, subject)
+}
+
+// legacyFailureHash reports whether stored is the hash a failure question was
+// raised with before memql#5664 (work.LegacyFailureHashes), for any spelling
+// of the run's id: the executor hashed the id it ran under, and the row reads
+// it back in whatever form the engine returns.
+func legacyFailureHash(stored string, subject map[string]any, runId string) bool {
+	bare := memql.BareShortId(runId)
+	for _, h := range work.LegacyFailureHashes(subject, runId, bare, runConcept+":"+bare) {
+		if h == stored {
+			return true
+		}
 	}
-	if len(subject) == 0 {
-		// No subject to recompute over. Treating an absent subject as a
-		// mismatch would refuse every approval raised before the subject was
-		// recorded; treating it as a match is what the stored hash already
-		// asserts.
-		return storedHash
-	}
-	return work.ArtifactHash(subject)
+	return false
 }
 
 // resumeParkedRun takes the run off its wait, or stops it.
@@ -287,7 +301,9 @@ func currentArtifactHash(kind, storedHash string, subject map[string]any) string
 //   - rejected -> the run FAILS with errorCode approval_rejected. Leaving it
 //     `waiting` would park it forever: a rejected approval has no timer, so
 //     the timer sweep never resumes it and the abandoned sweep deliberately
-//     leaves waiting runs alone. Someone said no, and the run stops.
+//     leaves waiting runs alone. Someone said no, and the run stops. An
+//     answer choosing Abandon (decisionAbandoned) is the same no, said
+//     through a question's options, and stops the run the same way.
 //   - the run is not actually parked on THIS approval -> nothing is written.
 //     A stale decision must not un-park a run that has since moved on.
 //
@@ -295,7 +311,17 @@ func currentArtifactHash(kind, storedHash string, subject map[string]any) string
 // `human` symptom and the loop decides what the run does about it; the run's
 // terminal status here is the honest executor-free reading of "deny fails the
 // step as human" (design section E).
-func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, decision string, now time.Time) (bool, error) {
+//
+// A FAILURE-PATH QUESTION'S RETRY IS A REQUEST OF ITS OWN (memql#5664). retry
+// is set only for a question the failure path raised (work.IsFailureQuestion),
+// and then the run is released under a re-run request on the step it failed
+// at (failureRetryRequest), decided by the person who answered. Released bare,
+// the run met the claim the failing execution still held -- a lease of four
+// minutes from its dispatch, and a person answers within that as a rule --
+// every agent lost it, no second event came, and the sweep closed the run as
+// abandoned. Every other approval is released bare, as before: what it parked
+// is a step waiting on a person, not a failure to run again.
+func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, decision string, retry *failureRetry, now time.Time) (bool, error) {
 	if runId == "" {
 		return false, nil
 	}
@@ -325,20 +351,85 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 		// the run would read as parked while running.
 		"waitingOn": map[string]any{},
 	}
-	if decision == "rejected" {
+	switch decision {
+	case "rejected", decisionAbandoned:
 		fields["status"] = runStatusFailed
 		fields["errorCode"] = "approval_rejected"
 		fields["errorMessage"] = "a person rejected the approval this run was parked on"
+		if decision == decisionAbandoned {
+			fields["errorMessage"] = "a person chose to abandon this run when asked about its failure"
+		}
 		fields["finishedAt"] = rfc(now)
-	} else {
+	default:
 		fields["status"] = runStatusRunning
 		fields["heartbeatAt"] = rfc(now)
+		if retry != nil {
+			if request, stale, ok := i.failureRetryRequest(ctx, run, runId, *retry, now); ok {
+				fields["rerun"] = request
+				fields["staleSteps"] = stale
+			}
+		}
 	}
 	if err := st.updateRun(ctx, runId, fields); err != nil {
 		return false, err
 	}
 	return true, nil
 }
+
+// failureRetry is what releasing a run off a failure-path question says beyond
+// `running`: the step the run failed at, and who decided to try it again.
+type failureRetry struct {
+	stepKey   string
+	decidedBy string
+}
+
+// failureRetryRequest is the re-run request a failure question's Retry
+// releases its run under: the step the run failed at -- the top-level step a
+// nested key belongs to -- and every step after it, each as its next version,
+// the completed prefix served and never run again. It is the request a
+// person's rerunStep writes (rerun.go), so the agents serve it on that path,
+// under a once-claim of its own.
+//
+// ok is false for a run no request can be written for, and the run is then
+// released bare, as it was before: a run that is not the executor's to run
+// again (actRun.requireExecutable -- a goalless scheduler journal among them,
+// which the event path never dispatches), a question naming no step, or one
+// naming a step the run never recorded. A version read that fails is the same
+// answer, said in the log: the decision has landed, and a run left on a
+// decided question would wait for an answer nobody can give again.
+func (i *Integration) failureRetryRequest(ctx context.Context, row map[string]any, runId string, retry failureRetry, now time.Time) (map[string]any, []string, bool) {
+	run := actRun{row: row, id: runId, owner: rowString(row, "ownerUserId"), order: topLevelOrder(rowStringSlice(row, "stepOrder"))}
+	key := topLevelStepKey(retry.stepKey)
+	if key == "" || run.requireExecutable() != nil || run.requireTopLevel(key) != nil {
+		return nil, nil, false
+	}
+	versions, err := i.readVersions(ctx, runId, run.order)
+	if err != nil {
+		i.log().Warn("work: the run's versions could not be read; releasing it without a request of its own",
+			"component", "work.approval", "run", runId, "step", key, "err", err)
+		return nil, nil, false
+	}
+	plan, err := work.PlanRerun(run.order, versions.byKey, key)
+	if err != nil {
+		return nil, nil, false
+	}
+	return rerunRequest(rerunReasonRerun, key, work.Override{}, plan.Versions, nil, "", retry.decidedBy, now), plan.Stale, true
+}
+
+// topLevelStepKey is the run's own step a key belongs to: the key itself, or
+// the first segment of a nested one (`for_x/0/touch` belongs to `for_x`).
+func topLevelStepKey(key string) string {
+	key = strings.TrimSpace(key)
+	if before, _, nested := strings.Cut(key, "/"); nested {
+		return before
+	}
+	return key
+}
+
+// decisionAbandoned is not a decision anybody records -- the approval row
+// says `answered` -- but what an answer choosing work.FailureAnswerAbandon
+// means for the run parked on it: the run stops, as it does on a rejection.
+const decisionAbandoned = "answered:abandon"
 
 // ---------------------------------------------------------------------------
 // The safety gate's sink

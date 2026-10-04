@@ -42,11 +42,11 @@ func TestARunThatReachedItsCeilingParksOnABudgetApproval(t *testing.T) {
 	run.Fail(aCeilingRefusal())
 	j.closeRun(context.Background(), run, "head")
 
-	if len(exec.calls) != 2 {
-		t.Fatalf("expected the approval then the wait; got %d calls: %v", len(exec.calls), exec.calls)
+	if len(writesIn(exec.calls)) != 2 {
+		t.Fatalf("expected the approval then the wait; got %d writes: %v", len(writesIn(exec.calls)), exec.calls)
 	}
 
-	name, approval := argsOf(t, exec.calls[0])
+	name, approval := argsOf(t, writesIn(exec.calls)[0])
 	if name != "createWorkApproval" {
 		t.Fatalf("the approval must be written FIRST -- a run parked on an approval id that does not exist waits on nothing; got %s", name)
 	}
@@ -80,7 +80,7 @@ func TestTheParkedRunRecordsTheCeilingAndTheSpend(t *testing.T) {
 	run.Fail(aCeilingRefusal())
 	j.closeRun(context.Background(), run, "head")
 
-	name, args := argsOf(t, exec.calls[1])
+	name, args := argsOf(t, writesIn(exec.calls)[1])
 	if name != "updateWorkRun" {
 		t.Fatalf("expected the run update; got %s", name)
 	}
@@ -117,7 +117,7 @@ func TestACeilingParkCarriesNoResumeAt(t *testing.T) {
 	run.Fail(aCeilingRefusal())
 	j.closeRun(context.Background(), run, "")
 
-	_, args := argsOf(t, exec.calls[1])
+	_, args := argsOf(t, writesIn(exec.calls)[1])
 	waiting, _ := args["waitingOn"].(map[string]any)
 	if _, present := waiting["resumeAt"]; present {
 		t.Errorf("a ceiling park must not carry resumeAt: %v", waiting)
@@ -135,7 +135,7 @@ func TestARunCeilingDoesNotParkAsAShutDoor(t *testing.T) {
 	run.Fail(aCeilingRefusal())
 	j.closeRun(context.Background(), run, "")
 
-	_, approval := argsOf(t, exec.calls[0])
+	_, approval := argsOf(t, writesIn(exec.calls)[0])
 	if approval["kind"] == work.ApprovalKindInferenceUnavailable {
 		t.Fatal("a run ceiling parked as a shut inference door; the two ceilings must stay tellable apart")
 	}
@@ -164,5 +164,67 @@ func TestAnOrdinaryFailureIsNotACeilingPark(t *testing.T) {
 				t.Fatal("an ordinary failure parked on a budget approval")
 			}
 		}
+	}
+}
+
+// writesIn is the journal's writes, in order, without the reads the park makes
+// first: the order under assertion above is the approval before the wait.
+func writesIn(calls []string) []string {
+	var out []string
+	for _, c := range calls {
+		if !strings.HasPrefix(strings.TrimSpace(c), "query ") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// A CEILING PARK KEEPS THE RUN'S RETRY COUNT (memql#5664). updateWorkRun's
+// merge is shallow, and the park wrote `spent` with the ceiling's figures and
+// nothing else -- so it erased spent.retries, and a run approved past its
+// ceiling started its retry budget again at zero. The park now carries what
+// the run had stored, read fresh as the retry budget is, under the figures.
+func TestACeilingParkKeepsTheRetriesTheRunSpent(t *testing.T) {
+	exec := &budgetAnsweringExecutor{run: map[string]any{
+		"id": "v1:work:run:r9", "spent": map[string]any{"retries": 2, "events": 4, "modelCalls": 1},
+	}}
+	j := newWorkJournal(exec, nil)
+	run := &AutomationExecution{ID: "v1:work:run:r9", StepOrder: []string{"step-b"}}
+	run.Fail(aCeilingRefusal())
+	j.closeRun(context.Background(), run, "head")
+
+	_, args := argsOf(t, lastCallNamed(t, exec.calls, "updateWorkRun"))
+	spent, _ := args["spent"].(map[string]any)
+	if fmt.Sprint(spent["retries"]) != "2" {
+		t.Fatalf("spent = %v: the park erased the run's retry count, so its budget would start again at zero", spent)
+	}
+	if fmt.Sprint(spent["events"]) != "4" {
+		t.Errorf("spent = %v: a counter the park does not own must survive it", spent)
+	}
+	if fmt.Sprint(spent["modelCalls"]) != "3" {
+		t.Errorf("spent = %v: the refusal's own figures are the newer ones and win", spent)
+	}
+	if exec.stale != 0 {
+		t.Errorf("the stored spend was read through this node's result cache %d time(s)", exec.stale)
+	}
+}
+
+// A STORED SPEND THAT CANNOT BE READ IS LEFT ALONE. Writing the ceiling's
+// figures over it would erase the retry count; leaving `spent` out of the park
+// keeps every stored counter, and the breach is still on the approval and the
+// wait.
+func TestACeilingParkThatCannotReadTheSpendLeavesItAlone(t *testing.T) {
+	exec := &budgetAnsweringExecutor{failRun: true}
+	j := newWorkJournal(exec, nil)
+	run := &AutomationExecution{ID: "v1:work:run:r9", StepOrder: []string{"step-b"}}
+	run.Fail(aCeilingRefusal())
+	j.closeRun(context.Background(), run, "head")
+
+	_, args := argsOf(t, lastCallNamed(t, exec.calls, "updateWorkRun"))
+	if _, written := args["spent"]; written {
+		t.Fatalf("the park wrote spent = %v over a spend it could not read", args["spent"])
+	}
+	if args["status"] != "waiting" {
+		t.Fatalf("status = %v, want the run parked all the same", args["status"])
 	}
 }

@@ -131,13 +131,14 @@ func dryRunTrustTestEngine(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
 // if journalling is ever re-enabled for sandbox runs, THIS test catches it,
 // and the one above catches it being promotable.
 func TestDryRunWritesNoWorkJournal(t *testing.T) {
-	eng, db := dryRunTrustTestEngine(t)
-	ctx := context.Background()
-
+	// Ask the tree before booting: a skip costs nothing, and the engine boot
+	// it used to pay first was a whole db-gated engine (memql#5668).
 	src, ok := memql.DSLConstructSource(slog.New(slog.NewTextHandler(io.Discard, nil)), "automation", trustProbeAutomation)
 	if !ok {
 		t.Skipf("automation %q is not in the tree in this build", trustProbeAutomation)
 	}
+	eng, db := dryRunTrustTestEngine(t)
+	ctx := context.Background()
 
 	// Time-mark the run. A GLOBAL count would be racy: test/conformance's
 	// conf_1727 builds a NON-sandbox executor against this same DB and writes

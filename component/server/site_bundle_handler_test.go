@@ -27,14 +27,16 @@ type fakeBundlePublisher struct {
 	calls     int
 	gotSiteID string
 	gotBundle map[string][]byte
+	gotTarget string
 	result    SiteBundlePublishResponse
 	err       error
 }
 
-func (f *fakeBundlePublisher) Publish(_ context.Context, siteID string, files map[string][]byte) (SiteBundlePublishResponse, error) {
+func (f *fakeBundlePublisher) Publish(_ context.Context, siteID string, files map[string][]byte, target string) (SiteBundlePublishResponse, error) {
 	f.calls++
 	f.gotSiteID = siteID
 	f.gotBundle = files
+	f.gotTarget = target
 	if f.err != nil {
 		return SiteBundlePublishResponse{}, f.err
 	}
@@ -229,6 +231,65 @@ func TestSiteBundleHandler_SuccessfulPublish(t *testing.T) {
 	}
 	if resp.Version != "vabc123" || resp.BundleRef != "blob://sites/s1/vabc123/" {
 		t.Errorf("response = %+v, want version/bundleRef from Publish's Result", resp)
+	}
+	// NO TARGET IS THE SERVING VERSION, which is what this route published
+	// before the parameter existed (memql#5601) -- every CI job written
+	// against it keeps doing exactly that.
+	if pub.gotTarget != SiteBundleTargetServing {
+		t.Errorf("Publish target = %q, want %q when the request names none", pub.gotTarget, SiteBundleTargetServing)
+	}
+}
+
+// ?target=candidate publishes the build as the site's CANDIDATE version
+// (memql#5601): candidateRef moves, bundleRef and the public view do not. The
+// response names the candidate under its own key, so a CI log that keeps the
+// response as its rollback record never mistakes a candidate for what serves.
+func TestSiteBundleHandler_CandidateTargetReachesThePublisher(t *testing.T) {
+	pub := &fakeBundlePublisher{result: SiteBundlePublishResponse{Version: "vnext", CandidateRef: "blob://sites/s1/vnext/", Target: SiteBundleTargetCandidate}}
+	h := testSiteBundleHandler(pub)
+
+	body, ct := buildMultipartBundle(t, []bundleFile{{"index.html", []byte("<html>next</html>")}})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, serviceAccountRequest(t, "/sites/s1/bundles?target=candidate", body, ct))
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (body=%q)", rec.Code, rec.Body.String())
+	}
+	if pub.gotTarget != SiteBundleTargetCandidate {
+		t.Fatalf("Publish target = %q, want %q", pub.gotTarget, SiteBundleTargetCandidate)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if raw["candidateRef"] != "blob://sites/s1/vnext/" || raw["target"] != "candidate" {
+		t.Errorf("response = %v, want candidateRef and target", raw)
+	}
+	if _, present := raw["bundleRef"]; present {
+		t.Errorf("a candidate publish answered a bundleRef, which reads as the version that serves: %v", raw)
+	}
+}
+
+// AN UNKNOWN TARGET IS A 400, BEFORE THE BODY IS READ. A bundle is up to
+// 500 MB, and reading it to refuse a misspelt parameter is the waste the
+// authorization check already avoids; reading the parameter as the serving
+// version would publish to every visitor a build somebody asked to keep from
+// them.
+func TestSiteBundleHandler_UnknownTargetIs400BeforeTheBodyIsRead(t *testing.T) {
+	for _, target := range []string{"staging", "CANDIDATE", "preview"} {
+		pub := &fakeBundlePublisher{}
+		h := testSiteBundleHandler(pub)
+		// A body that is not multipart at all: reaching the parser would answer
+		// the "invalid multipart form" 400, not the target's.
+		req := serviceAccountRequest(t, "/sites/s1/bundles?target="+target, strings.NewReader("not multipart"), "text/plain")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "target") {
+			t.Errorf("target %q answered %d %q, want a 400 naming the target", target, rec.Code, rec.Body.String())
+		}
+		if pub.calls != 0 {
+			t.Errorf("target %q reached Publish", target)
+		}
 	}
 }
 

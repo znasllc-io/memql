@@ -69,25 +69,31 @@ func (a *App) wireWorkCompiler() {
 }
 
 // wireWorkFailurePath joins the two acts a classified failure needs the
-// planner for, and subscribes the healer that has never had a caller
-// (epic memql#5127, design D12).
+// planner for: a plan miss's re-plan and a contract miss's repair (epic
+// memql#5127, design D12).
 //
 // # Why here
 //
 // Section H of the work-spine record: "the planner node keeps compile, the
 // reactive loop and the sweeps; the agent node runs steps." A replan re-emits
-// a plan, which is compile machinery, and repair records against a run the
-// sweep is holding -- both belong on the node that already owns those.
+// a plan and installs it through compile's own path, and a repair writes the
+// re-run request the agent serves -- both belong on the node that holds the
+// compile machinery. It runs after wireWorkCompiler, whose subscription to the
+// run's events is what hands a remedy wait to this node the moment the
+// failure path writes it, whichever node holds the sweep's cron lease
+// (integrations/work's HandleRunEvent).
 //
-// # The healer was complete, never ran, and looked complete
+// It had NO CALLER (memql#5664), so every replan and repair wait stayed
+// parked for ever.
 //
-// integrations/planner/work_heal.go's own header records the shape of the gap
-// it was written to close: the emitter existed, the mesh routing rule existed,
-// the tests existed, and NewRepairLoop had no non-test caller. Writing the
-// subscriber did not close it, because nothing constructed the subscriber
-// either. This call is the last link, and it is why "a precondition miss
-// raises a planReview" is a claim about a running system rather than about a
-// package.
+// # The claim comes first
+//
+// A remedy wait's event reaches every planner replica, and a replan is a
+// reasoning-level model call that installs a template: served once per replica
+// it is paid for and installed once per replica. integrations/work serves a
+// remedy only under a cross-replica claim, and refuses with none, so the
+// cluster guard's strict claimer is installed here, before the remedy. This
+// node runs no steps, so the claimer reaches no dispatch.
 func (a *App) wireWorkFailurePath() {
 	if a.plannerIntegration == nil {
 		return
@@ -102,6 +108,12 @@ func (a *App) wireWorkFailurePath() {
 	if !ok || pi == nil {
 		return
 	}
+	if a.clusterGuard == nil {
+		a.Logger.Warn("work failure path not wired: no cluster execution guard on this planner node, and a remedy served unclaimed would re-plan a run once per replica; replan and repair waits stay parked",
+			"component", "work")
+		return
+	}
+	work.SetRunClaimer(a.clusterGuard.StrictClaimer())
 	// The remedy: replan and repair. A nil remedy leaves those two waits
 	// PARKED rather than abandoned, which is visible; the alternative --
 	// treating "I cannot remedy this" as "somebody else will" -- is how a run
@@ -109,13 +121,29 @@ func (a *App) wireWorkFailurePath() {
 	// another replica.
 	if remedy := pi.WorkRemedy(work); remedy != nil {
 		work.SetRemedy(remedy)
-		a.Logger.Info("work failure path wired: a plan miss re-plans the gap keeping the completed prefix, and a contract miss records the violation and resumes",
+		a.Logger.Info("work failure path wired: a plan miss re-plans the gap and installs the new template keeping the completed prefix, and a contract miss re-runs the failed step with the violation as guidance",
 			"component", "work")
 	}
+}
 
-	// The healer: a precondition miss becomes a planReview approval, never a
-	// silent edit (design D5).
-	//
+// wireWorkHealer subscribes the healer: a precondition miss becomes typed
+// patches on a planReview approval, never a silent edit (design D5).
+//
+// IT IS DELIBERATELY NOT CALLED, and memql#5664 left it so rather than wire it
+// with the remedy it used to share a function with. Two things stand between
+// it and a cluster:
+//
+//   - `healing.precondition.missed` is BROADCAST to every replica
+//     (component/node/routing.go, `healing.#`), and the healer takes no claim,
+//     so with two planner replicas every miss would cost two proposal calls
+//     and raise two approvals.
+//   - The miss also fails its step, which the failure path classifies as
+//     `environment` and parks on a planReview approval of its own. A second,
+//     patch-carrying planReview for the same miss is two questions about one
+//     failure, and which one releases the run is not settled.
+//
+// The healer itself is complete and tested in integrations/planner.
+func (a *App) wireWorkHealer(pi *planner.PlannerIntegration, work *workintegration.Integration) {
 	// ITS PROVIDER NOW COMES FROM THE ROUTER (epic memql#5127, design D2).
 	// The note that used to stand here said this site and safety's would be
 	// re-pointed together because they are the same shape -- a leaf package

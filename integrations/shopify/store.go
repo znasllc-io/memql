@@ -36,6 +36,10 @@ type Store struct {
 	Health             map[string]any
 	OwnerUserID        string
 	RedactedAt         string
+	// UninstalledAt is set while the store is disconnected: Shopify reported
+	// this app uninstalled from it (memql#5638), and a verified reinstall
+	// clears it. See Ingests and applyUninstall.
+	UninstalledAt string
 	// IsDevelopment is v1:shopify:store.isDevelopment (epic memql#5530): the
 	// store a storefront is EXERCISED against rather than the one shoppers
 	// reach. It is attached and mirrored like any other, so nothing in this
@@ -69,7 +73,16 @@ const (
 // paused store still STAGES: the receiver keeps recording what arrived, so a
 // pause loses telemetry rather than events, and resuming does not need a
 // backfill.
+//
+// An UNINSTALLED store does not ingest whatever its status says
+// (memql#5638): Shopify has ended its grant, so every backfill, sweep and
+// subscription pass would be refused, and an operator's Resume must not
+// arm a store the merchant removed the app from. The status is left as the
+// operator set it, which is what a reinstall returns to.
 func (s Store) Ingests() bool {
+	if s.UninstalledAt != "" {
+		return false
+	}
 	return s.Status == StatusConfigured || s.Status == StatusBackfilling || s.Status == StatusLive
 }
 
@@ -286,6 +299,7 @@ func storeFromRow(p map[string]any) (Store, bool) {
 		Status:               mapString(p, "status"),
 		OwnerUserID:          mapString(p, "ownerUserId"),
 		RedactedAt:           mapString(p, "redactedAt"),
+		UninstalledAt:        mapString(p, "uninstalledAt"),
 		ScopesGranted:        mapStringSlice(p, "scopesGranted"),
 		IsDevelopment:        mapBool(p, "isDevelopment"),
 		DevelopmentOfStoreID: shortID(mapString(p, "developmentOfStoreId")),

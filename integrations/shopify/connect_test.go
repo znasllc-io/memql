@@ -423,7 +423,7 @@ func TestSavingTheAppWritesPendingCredentialsAndNothingLive(t *testing.T) {
 		"appClientId": "live-client", "adminTokenRef": "SHOPIFY_ACME-WIDGETS_ADMIN_TOKEN",
 		"webhookSecretRef": "SHOPIFY_ACME-WIDGETS_WEBHOOK_SECRET",
 	})
-	out := invoke(t, devCtx(), h.integ.handleStoreAppSave, map[string]any{
+	out := invoke(t, ownerConnectCtx(), h.integ.handleStoreAppSave, map[string]any{
 		"siteId": "s1", "clientId": connectClientID, "clientSecret": connectSecret,
 	})
 	if out["reason"] != connectReasonOK {
@@ -480,7 +480,7 @@ func TestSeedSecretWritesAtTheOneRowCarryingTheName(t *testing.T) {
 	h := newConnectHarness(t)
 	name := storeSecretName(connectStoreID, suffixPendingClientSecret)
 	h.engine.setRows(namedRowsQuery(conceptGlobalSecret, name), []map[string]any{{"id": "v1:platform:globalSecret:sec-planted-by-hand", "name": name}})
-	out := invoke(t, devCtx(), h.integ.handleStoreAppSave, map[string]any{
+	out := invoke(t, ownerConnectCtx(), h.integ.handleStoreAppSave, map[string]any{
 		"siteId": "s1", "clientId": connectClientID, "clientSecret": connectSecret,
 	})
 	if out["reason"] != connectReasonOK {
@@ -518,7 +518,7 @@ func TestAStorefrontTokenIsCheckedThenSealed(t *testing.T) {
 	h.store(map[string]any{"adminTokenRef": "A", "apiVersion": "2026-07"})
 	h.engine.setRows("sitesBoundToStore", []map[string]any{{"id": connectSiteID, "status": "draft", "binding": map[string]any{"storeId": connectStoreID}}})
 
-	out := invoke(t, devCtx(), h.integ.handleStorefrontTokenSet, map[string]any{"siteId": "s1", "token": connectToken})
+	out := invoke(t, ownerConnectCtx(), h.integ.handleStorefrontTokenSet, map[string]any{"siteId": "s1", "token": connectToken})
 	if out["reason"] != connectReasonOK {
 		t.Fatalf("token set: %v", out)
 	}
@@ -555,7 +555,7 @@ func TestAnEmptyTokenClearsTheReference(t *testing.T) {
 	h.store(map[string]any{"storefrontTokenRef": "SHOPIFY_ACME-WIDGETS_STOREFRONT_TOKEN"})
 	h.engine.setRows("sitesBoundToStore", []map[string]any{{"id": connectSiteID, "status": "draft", "binding": map[string]any{"storeId": connectStoreID}}})
 
-	out := invoke(t, devCtx(), h.integ.handleStorefrontTokenSet, map[string]any{"siteId": "s1", "token": ""})
+	out := invoke(t, ownerConnectCtx(), h.integ.handleStorefrontTokenSet, map[string]any{"siteId": "s1", "token": ""})
 	if out["reason"] != connectReasonOK {
 		t.Fatalf("clear: %v", out)
 	}
@@ -667,7 +667,7 @@ func TestAFailedWriteNamesNoSecret(t *testing.T) {
 			if tc.token {
 				fn = h.integ.handleStorefrontTokenSet
 			}
-			_, err := fn(devCtx(), tc.args, 0)
+			_, err := fn(ownerConnectCtx(), tc.args, 0)
 			if err == nil {
 				t.Fatal("a failed write was answered as a success")
 			}
@@ -684,7 +684,7 @@ func TestARefusedTokenLogsNoResponseBody(t *testing.T) {
 	h := newConnectHarness(t)
 	h.store(map[string]any{"adminTokenRef": "A"})
 	h.storefront.status = http.StatusUnauthorized
-	out := invoke(t, devCtx(), h.integ.handleStorefrontTokenSet, map[string]any{"siteId": "s1", "token": connectToken})
+	out := invoke(t, ownerConnectCtx(), h.integ.handleStorefrontTokenSet, map[string]any{"siteId": "s1", "token": connectToken})
 	if out["reason"] != connectReasonStorefrontTokenInvalid {
 		t.Fatalf("reason = %v", out["reason"])
 	}

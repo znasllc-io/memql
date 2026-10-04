@@ -132,22 +132,33 @@ func (s *store) inboundRequestById(ctx context.Context, id string) (map[string]a
 }
 
 // lastSucceededDeployment is the newest run of this package that actually
-// finished, or nil.
+// finished and published to the public, or nil.
 //
 // Folded from the package's own timeline rather than asked for by a query of
 // its own: packageDeployments is already newest-first and bounded at fifty,
 // which is more than enough to find the last success -- and a fifty-run gap
 // with no success in it is a package whose auto-deploy should be parking
 // anyway.
+//
+// A RUN THAT PUBLISHED ONLY CANDIDATES IS SKIPPED (memql#5601). This is the
+// auto-confirm baseline, the plan fingerprint does not carry the target, and
+// an automatic run publishes to the SERVING version -- so a plan somebody
+// approved only as a candidate would otherwise confirm itself to the public
+// on the next push. An outcome list that cannot be read is not skipped: that
+// run is judged as it always was.
 func (s *store) lastSucceededDeployment(ctx context.Context, packageId string) (map[string]any, error) {
 	rows, err := s.deploymentsForPackage(ctx, packageId)
 	if err != nil {
 		return nil, err
 	}
 	for _, row := range rows {
-		if rowString(row, "status") == "succeeded" {
-			return row, nil
+		if rowString(row, "status") != "succeeded" {
+			continue
 		}
+		if outcomes, oerr := deployableOutcomes(row); oerr == nil && candidatesOnly(outcomes) {
+			continue
+		}
+		return row, nil
 	}
 	return nil, nil
 }
@@ -314,6 +325,10 @@ func (s *store) writeDeploymentOpening(writeCtx context.Context, d deploymentSee
 	if scoped == nil {
 		scoped = []string{}
 	}
+	candidates := d.Candidates
+	if candidates == nil {
+		candidates = []string{}
+	}
 	// THE ACCOUNT RIDES ALONG ONLY WHEN THERE IS ONE. It is copied off the
 	// package row, never chosen here, and an untied package's run must be
 	// written exactly as it was before the field existed -- an explicit ""
@@ -323,7 +338,7 @@ func (s *store) writeDeploymentOpening(writeCtx context.Context, d deploymentSee
 		account = fmt.Sprintf(", accountId: %s", langparser.QuoteString(v))
 	}
 	return s.writeInternal(writeCtx, fmt.Sprintf(
-		"mutation openPackageDeployment(deploymentId: %s, packageId: %s, sourceVersion: %s, requestedBy: %s, automatic: %t, nodeId: %s, scopedTo: %s, fromDeploymentId: %s%s, startedAt: %s)",
+		"mutation openPackageDeployment(deploymentId: %s, packageId: %s, sourceVersion: %s, requestedBy: %s, automatic: %t, nodeId: %s, scopedTo: %s, candidates: %s, fromDeploymentId: %s%s, startedAt: %s)",
 		langparser.QuoteString(d.DeploymentId),
 		langparser.QuoteString(d.PackageId),
 		langparser.QuoteString(d.SourceVersion),
@@ -331,6 +346,7 @@ func (s *store) writeDeploymentOpening(writeCtx context.Context, d deploymentSee
 		d.Automatic,
 		langparser.QuoteString(d.NodeId),
 		jsonLiteral(scoped),
+		jsonLiteral(candidates),
 		langparser.QuoteString(d.FromDeploymentId),
 		account,
 		langparser.QuoteString(d.StartedAt.UTC().Format(time.RFC3339)),
@@ -414,13 +430,18 @@ func (s *store) recordReport(ctx context.Context, deploymentId string, rep *Repo
 // Called when a PARKED run is confirmed, because the gate is where a person
 // answers which apps they meant: the compose gate opens with no placements at
 // all and closes with the skips somebody ticked.
-func (s *store) recordScope(ctx context.Context, deploymentId string, scopedTo []string) error {
+// recordScope re-stamps a parked run's scope and candidates with what the
+// confirm gate decided (memql#4953, memql#5601).
+func (s *store) recordScope(ctx context.Context, deploymentId string, scopedTo, candidates []string) error {
 	if scopedTo == nil {
 		scopedTo = []string{}
 	}
+	if candidates == nil {
+		candidates = []string{}
+	}
 	return s.writeInternal(ctx, fmt.Sprintf(
-		"mutation recordPackageDeploymentScope(deploymentId: %s, scopedTo: %s)",
-		langparser.QuoteString(deploymentId), jsonLiteral(scopedTo)))
+		"mutation recordPackageDeploymentScope(deploymentId: %s, scopedTo: %s, candidates: %s)",
+		langparser.QuoteString(deploymentId), jsonLiteral(scopedTo), jsonLiteral(candidates)))
 }
 
 // closeDeployment writes the terminal row.
@@ -812,6 +833,10 @@ type deploymentSeed struct {
 	// ScopedTo names the deployables this run is FOR; empty is the whole
 	// source (memql#4953).
 	ScopedTo []string
+	// Candidates names the deployables this run publishes as their candidate
+	// version (memql#5601) -- recorded at open so a confirmation that leaves
+	// the target out keeps it.
+	Candidates []string
 	// FromDeploymentId is the run this one was started from, when it is a
 	// retry (memql#4955).
 	FromDeploymentId string
@@ -840,13 +865,19 @@ type DeployableOutcome struct {
 	// BuiltOn is where THIS app was built. Per-app as well as per-run,
 	// because a package whose apps built on different surfaces is exactly
 	// the case the run-level summary cannot describe.
-	BuiltOn   BuiltOn  `json:"builtOn,omitzero"`
-	SiteId    string   `json:"siteId,omitempty"`
-	Hostname  string   `json:"hostname,omitempty"`
-	BundleRef string   `json:"bundleRef,omitempty"`
-	Version   string   `json:"version,omitempty"`
-	Created   bool     `json:"created,omitempty"`
-	Refusal   *Problem `json:"refusal,omitempty"`
+	BuiltOn   BuiltOn `json:"builtOn,omitzero"`
+	SiteId    string  `json:"siteId,omitempty"`
+	Hostname  string  `json:"hostname,omitempty"`
+	BundleRef string  `json:"bundleRef,omitempty"`
+	// CandidateRef is set INSTEAD of BundleRef when this run published the
+	// deployable as its candidate version (memql#5601). Never both: rollback
+	// re-points every outcome's BundleRef, and a candidate recorded there
+	// would make "roll back to this run" serve a version the run never
+	// served.
+	CandidateRef string   `json:"candidateRef,omitempty"`
+	Version      string   `json:"version,omitempty"`
+	Created      bool     `json:"created,omitempty"`
+	Refusal      *Problem `json:"refusal,omitempty"`
 
 	// The placement halves a first deploy applied (epic memql#4885, D8), and
 	// the ones it could not. AccountId and OwnDomain are set only when the

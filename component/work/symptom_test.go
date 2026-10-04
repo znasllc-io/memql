@@ -198,10 +198,10 @@ func TestClassifyByRules_NoOpinionIsTheModelCall(t *testing.T) {
 
 func TestActFor_TheFiveActs(t *testing.T) {
 	for _, tc := range []struct {
-		sym     Symptom
-		attempt int
-		max     int
-		want    Act
+		sym   Symptom
+		spent int
+		max   int
+		want  Act
 	}{
 		{SymptomTransient, 1, 3, ActRetry},
 		{SymptomTransient, 3, 3, ActAsk}, // budget exhausted -> a person
@@ -211,9 +211,61 @@ func TestActFor_TheFiveActs(t *testing.T) {
 		{SymptomPlan, 1, 3, ActReplan},
 		{SymptomHuman, 1, 3, ActAsk},
 	} {
-		if got := ActFor(tc.sym, tc.attempt, tc.max); got != tc.want {
-			t.Errorf("ActFor(%s, attempt=%d, max=%d) = %q, want %q", tc.sym, tc.attempt, tc.max, got, tc.want)
+		if got := ActFor(tc.sym, tc.spent, tc.max); got != tc.want {
+			t.Errorf("ActFor(%s, spent=%d, max=%d) = %q, want %q", tc.sym, tc.spent, tc.max, got, tc.want)
 		}
+	}
+}
+
+// BOTH EDGES OF THE RUN-WIDE RETRY BUDGET (memql#5664). The act was handed
+// the failed step's attempt and the step's retry(n) -- `1+n < n` -- so no
+// transient failure ever retried. Fed the run's spend and the run's budget,
+// the last retry inside the budget is taken and the first one past it asks.
+func TestActFor_RetriesInsideTheRunBudgetAndAsksPastIt(t *testing.T) {
+	for _, sym := range []Symptom{SymptomTransient, SymptomContract, SymptomPlan} {
+		again := ActFor(sym, 0, DefaultMaxRetries)
+		if !SpendsRetry(again) {
+			t.Fatalf("%s with the whole budget left = %q, want an act that runs the work again", sym, again)
+		}
+		if got := ActFor(sym, DefaultMaxRetries-1, DefaultMaxRetries); got != again {
+			t.Errorf("%s with one retry left = %q, want %q: the budget's last retry is still inside it", sym, got, again)
+		}
+		if got := ActFor(sym, DefaultMaxRetries, DefaultMaxRetries); got != ActAsk {
+			t.Errorf("%s with the budget spent = %q, want ask: past the budget a person decides", sym, got)
+		}
+	}
+	// A budget of nothing -- what a caller that could not read the budget
+	// passes -- asks at once rather than looping.
+	if got := ActFor(SymptomTransient, 0, 0); got != ActAsk {
+		t.Errorf("ActFor(transient, 0, 0) = %q, want ask", got)
+	}
+}
+
+// The act and the retries ceiling must agree on where the budget ends: a run
+// the act would retry is one CheckCeilings says is inside its budget, and
+// vice versa.
+func TestActFor_AgreesWithTheRetriesCeiling(t *testing.T) {
+	for max := 1; max <= 4; max++ {
+		for spent := 0; spent <= 5; spent++ {
+			inside := CheckCeilings(Ceilings{MaxRetries: max}, Spent{Retries: spent}, 0) == nil
+			retries := ActFor(SymptomTransient, spent, max) == ActRetry
+			if inside != retries {
+				t.Errorf("spent=%d max=%d: the ceiling says inside=%v, the act says retry=%v", spent, max, inside, retries)
+			}
+		}
+	}
+}
+
+// ZERO IS UNSET, never "nothing allowed" and never "unbounded".
+func TestRetryBudget_DefaultsAnUnsetCeiling(t *testing.T) {
+	if got := RetryBudget(Ceilings{}); got != DefaultMaxRetries {
+		t.Fatalf("RetryBudget(unset) = %d, want %d", got, DefaultMaxRetries)
+	}
+	if got := RetryBudget(Ceilings{MaxRetries: 7}); got != 7 {
+		t.Fatalf("RetryBudget(7) = %d", got)
+	}
+	if SpendsRetry(ActHeal) || SpendsRetry(ActAsk) {
+		t.Fatal("heal and ask wait on a person and spend no retry")
 	}
 }
 

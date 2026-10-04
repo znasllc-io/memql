@@ -433,8 +433,12 @@ describe("the Head's action, by state", () => {
     // what the code beside it claimed, which is why nothing failed while every
     // confirmation minted a second run and left the answered gate open for a
     // sweep to mislabel 90 seconds later.
+    //
+    // AND IT NAMES ITS TARGET, the live version (memql#5601): at the confirm an
+    // explicit target wins and an omitted one reuses whatever the run recorded
+    // when it opened, so a Deploy that left it out could confirm a candidate.
     expect(connection.callsNamed("packageDeploy")).toEqual([
-      'builtin packageDeploy(packageId: "pkg-acme", confirm: true, deploymentId: "dep-parked")',
+      'builtin packageDeploy(packageId: "pkg-acme", confirm: true, placements: {storefront: {target: "serving"}}, deploymentId: "dep-parked")',
     ]);
   });
 
@@ -632,7 +636,7 @@ describe("the Source stop", () => {
     // where the store is read and changed.
     await openStop(page, "What it is");
     expect(within(screen.getByRole("dialog")).queryByText("example.myshopify.com")).toBeNull();
-    expect(within(page).queryByText("EXAMPLE_STOREFRONT_TOKEN")).toBeNull();
+    expect(within(page).queryByText("SHOPIFY_STORE-EXAMPLE_STOREFRONT_TOKEN")).toBeNull();
     // AND NOTHING ANYWHERE FETCHES A SECRET'S VALUE. The panel that does show
     // the three references shows their NAMES; this is the control that says
     // so for the whole surface, and it is why the assertion survived the move

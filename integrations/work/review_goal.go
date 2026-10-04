@@ -174,7 +174,7 @@ func (i *Integration) recoverReviewDecision(ctx context.Context, approvalID, dec
 			return nil, err
 		}
 	}
-	resumed, err := i.resumeParkedRun(ownerActor(ctx, rowString(approval, "ownerUserId")), rowString(approval, "runId"), approvalID, decision, i.clock().UTC())
+	resumed, err := i.resumeParkedRun(ownerActor(ctx, rowString(approval, "ownerUserId")), rowString(approval, "runId"), approvalID, decision, nil, i.clock().UTC())
 	if err != nil {
 		return nil, err
 	}

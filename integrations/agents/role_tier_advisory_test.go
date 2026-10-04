@@ -71,6 +71,10 @@ func TestAgentRoleTierIsPromptAdvisoryOnly(t *testing.T) {
 	// is a claim someone checked; a NEW line is a claim nobody has.
 	known := map[string]string{
 		"rowauthz_may_write.go | (decl.Tier != langparser.RowAuthzPublic && decl.Tier != langparser.RowAuthzClusterOwner) {": "RowAuthzDecl concept visibility tier used to refuse row-dependent authorization without a row; never agentRole.tier",
+		// memql#5624 made the CREATE half of the cluster-owner tier real: a
+		// create on any @rowAuthz(clusterOwner) concept admits only that tier's
+		// audience, so the floor asks which tier the CONCEPT declares.
+		"create_rank_floor.go | if decl == nil || decl.Tier != langparser.RowAuthzClusterOwner {": "RowAuthzDecl concept visibility tier selecting the concepts whose creates the cluster-owner floor judges; never agentRole.tier",
 
 		// The alignment changed when epic memql#5127 removed the longer
 		// RecommendedPolicySlug field from this literal and gofmt re-aligned

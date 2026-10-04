@@ -459,10 +459,6 @@ const COPY: Record<string, RefusalCopy> = {
     title: "This store is not connected yet",
     next: "Connect Shopify first, then paste a Storefront token if you need one.",
   },
-  store_in_use: {
-    title: "Another storefront you cannot change uses this store",
-    next: "Ask a cluster owner to change this store's Storefront token.",
-  },
   storefront_token_required: {
     title: "A live storefront needs this store's Storefront token",
     next: "Paste a new token instead of clearing it.",
@@ -849,7 +845,6 @@ const NOT_A_FAULT: ReadonlySet<string> = new Set([
   "store_redacted",
   "app_credentials_invalid",
   "store_not_connected",
-  "store_in_use",
   "storefront_token_required",
   "storefront_token_invalid",
   "shopify_app_not_saved",

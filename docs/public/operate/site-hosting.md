@@ -443,11 +443,41 @@ curl -sS -X POST "https://api.memql.localhost/sites/shop/bundles" \
 A successful publish answers `201` with the version it produced:
 
 ```json
-{ "version": "v3f9a2b1c7d4", "bundleRef": "blob://sites/shop/v3f9a2b1c7d4/" }
+{ "version": "v3f9a2b1c7d4", "bundleRef": "blob://sites/shop/v3f9a2b1c7d4/", "target": "serving" }
 ```
 
 **Log that response.** It is your rollback record -- see
 [Rollback](#rollback) below.
+
+**Publish as the candidate instead** with the optional `target` query parameter
+(memql#5601) -- a parameter on this one documented endpoint, not a second
+route:
+
+```bash
+curl -sS -X POST "https://api.memql.localhost/sites/shop/bundles?target=candidate" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  "${args[@]}"
+```
+
+The bytes are uploaded under their own version prefix exactly as before, and
+then the site's **candidate** version is pointed at them (`setSiteCandidate`)
+rather than its serving one: `bundleRef`, and so every visitor, is untouched,
+and a preview grant is served the new version on a draft site and on a live
+one. The response names the candidate under its own key, so a log that keeps it
+as a rollback record never mistakes it for what serves:
+
+```json
+{ "version": "v8c41d07e2a9b", "candidateRef": "blob://sites/shop/v8c41d07e2a9b/", "target": "candidate" }
+```
+
+`target` is `serving` (the default, and what an absent parameter means) or
+`candidate`; anything else is a `400` before the body is read. A candidate is
+a `spa` and `static` feature: a `shopify_storefront` site serves one build on
+Testing and Production, each against its own store
+([storefront-preview.md](storefront-preview.md)), and refuses a candidate that
+is not the version it already serves (`storefront_has_no_candidate`). That refusal comes from the row
+write, after the upload, so the uploaded version stays in storage unused --
+the same orphaning a failed row flip always leaves.
 
 The endpoint refuses a bundle with no `index.html` before uploading
 anything, and bounds both the site id and every file path against

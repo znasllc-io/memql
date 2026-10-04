@@ -97,7 +97,7 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		"app":                         "identity integration wiring at boot; no request in scope",
 		"component/auth":              "defines the stamp, and resolves an identity from claims before any actor exists",
 		"component/automations":       "trusted automation dispatch; the untrusted branch stamps CLIENT (memql#2879)",
-		"component/identity":          "identity store internals, server-initiated",
+		"component/identity":          "identity store internals, server-initiated; and the audit sink (EngineAuditSink), whose one stamp is on the createAuditEvent it composes, because that cluster-owner-tier create admits only a cluster owner or server code and the sink records every caller's decisions (memql#5624)",
 		"component/identity/adminops": "identity-admin write surface -- REQUEST-DERIVED, one of the two exceptions here; its precondition (every path is downstream of the owner/admin gate in the same function) is asserted by component/identity/adminops/gate_test.go, memql#3324",
 		"component/identity/pat":      "personal-access-token store, server-initiated",
 		// The campaigns sending engine and the event-email rule runtime (epic
@@ -284,10 +284,13 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// memql#5165 D2): no principal owns them, so a client-origin write
 		// has no owned tier to pass through and is refused with the row
 		// silently not moving. The two writers are @serverOnly for the same
-		// reason. ONE STAMPING SITE, in store.go's SystemActorContext, and
-		// every capability is downstream of guards.go -- the caller's own
-		// capability and rank are checked against their AccessContext before
-		// anything here writes, which is what bounds the stamp.
+		// reason. ONE STAMPING SITE for the rows, in store.go's
+		// SystemActorContext, and every capability is downstream of guards.go
+		// -- the caller's own capability and rank are checked against their
+		// AccessContext before anything here writes, which is what bounds the
+		// stamp. A SECOND, in audit.go, on the one createAuditEvent each
+		// decision writes: auditEvent's create admits a cluster owner or
+		// server code (memql#5624), and an admin managing groups is neither.
 		"integrations/groups": "the group and membership writers -- their rows are unowned, so a client-origin write has no tier to pass through; one stamping site, downstream of the per-caller capability and rank guards (epic memql#5165)",
 		// REQUEST-DERIVED, and the FOURTH exception. Ownership transfer
 		// (memql#4838): one stamp, in reassignRow, on the single Execute that
@@ -310,9 +313,9 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// is asserted rather than asserted-in-prose:
 		// integrations/identity/internal_origin_precondition_test.go.
 		//
-		// The audit write beside it is deliberately NOT stamped:
-		// createAuditEvent is not @serverOnly and the actor it records is this
-		// caller, so the ordinary path admits it.
+		// The audit write beside it is not stamped and needs no stamp: the
+		// caller is a cluster owner by the gate above, which is the audience
+		// auditEvent's create admits (memql#5624).
 		"integrations/identity": "ownership transfer (memql#4838) -- one inline stamp, downstream of a cluster-owner gate; rank-strict withdraws the cluster-owner escape it would otherwise use",
 		// REQUEST-DERIVED, and the same shape as the two above. The three role
 		// builtins (epic memql#5166) write through `createRole` and
@@ -329,9 +332,12 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// rank no rung holds, a slug no role or alias claims, every grant one
 		// the caller holds -- and each has a test asserting its refusal code.
 		//
-		// The audit write beside them is deliberately NOT stamped, for the
-		// reason integrations/identity gives: createAuditEvent is not
-		// @serverOnly and the actor it records is this caller.
+		// The audit write beside them IS stamped (memql#5624), inline on the
+		// one createAuditEvent auditRole and auditGrant compose. It was left
+		// unstamped on the belief that the concept's tier admitted the caller;
+		// nothing judged a create on that tier then, and now the judge admits
+		// a cluster owner or server code -- and the admins who author roles
+		// and grants are neither.
 		"integrations/rbac": "role authoring (epic memql#5166) -- inline stamps on the three role builtins, each downstream of a create/update-on-role capability check in the same function; createRole and createCapability are @serverOnly so this IS the guarded path",
 		// REQUEST-DERIVED, and the THIRD exception. The redeem path
 		// (component/identity/http/webauthn_recovery.go) calls Store.Resolve on
@@ -575,6 +581,17 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		"component/server/fileversion":      "library file-version supersede store -- REQUEST-DERIVED; preconditions (stamp is required by @serverOnly, dies inside one call, no write names an owner, and the package holds no reads) asserted by component/server/fileversion/store_internal_origin_test.go, memql#4806",
 		"integrations/library/reviewstore":  "document feedback store -- REQUEST-DERIVED; library first admits the current artifact AND backing document under the original caller. Only comment reads and appends borrow that verified document owner; revision and author are checked under the same shared lock as editing. Cross-replica and access-denial tests in integrations/library/review_replica_test.go",
 		"integrations/library/versionstore": "document version store -- REQUEST-DERIVED; original caller ownership reads stay outside the package, the two writes are serverOnly and accept no owner; preconditions in integrations/library/versionstore/store_test.go",
+		// THE AUDIT WRITERS (memql#5624). v1:identity:auditEvent is a
+		// cluster-owner-tier concept, and its create now admits a cluster
+		// owner or server code and nobody else. Each of these packages records
+		// a decision its caller made -- training a file, publishing a site --
+		// under that caller, who need be neither, so each stamps internal
+		// origin on the ONE createAuditEvent it composes, inline as the
+		// argument to that Execute. The statement is fixed and every value in
+		// it quoted, so the mark reaches that construct and dies at the call.
+		// Nothing else in either package is stamped.
+		"integrations/library":  "the train audit event -- one inline stamp on the createAuditEvent auditTrain composes, the cluster-owner-tier create a person training their own file is otherwise refused (memql#5624)",
+		"component/sitepublish": "the publish audit event -- one inline stamp on the createAuditEvent audit composes, the cluster-owner-tier create a person publishing their own site is otherwise refused (memql#5624)",
 		// The first two are boot-time and server-initiated. The third,
 		// readiness_write.go, is REQUEST-DERIVED on one path -- readinessRecompute
 		// is reachable by a cluster owner -- and is earned by two preconditions

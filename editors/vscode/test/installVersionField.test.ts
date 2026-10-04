@@ -185,9 +185,13 @@ test("the choices say what they are, with no paragraph of hint under the field",
   // The sixty-word hint that explained manifests, node images and tags is
   // gone: Latest says it is the latest, and the from-source lane's own label
   // carries its cost.
-  const html = collectHtml(["v0.20.3"]);
+  //
+  // The listing's newest is the pin, as it is the day the pin moves. This form
+  // is not seeded from the listing, so its value is the pin, and a listed tag
+  // older than the pin sorts BELOW it and stops being first (memql#5632).
+  const html = collectHtml([DEFAULT_STACK_TAG]);
   const options = versionOptions(html);
-  assert.equal(options[0]!.label, "Latest (v0.20.3)");
+  assert.equal(options[0]!.label, `Latest (${DEFAULT_STACK_TAG})`);
   assert.match(options.find((o) => o.value === "main")!.label, /slower/);
   assert.doesNotMatch(html, /node images|manifests|several minutes/);
 });

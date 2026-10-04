@@ -164,6 +164,33 @@ screen. No screen seals a token by hand: Connect Shopify seals them on the
 server, and the environment seed below does for a cluster's first store. Name a
 row one of them wrote.
 
+**A store names its own Storefront token, and the edge publishes only that**
+(memql#5626). A storefront's runtime document carries the Storefront token to
+every visitor, so the token must be the store's OWN:
+`SHOPIFY_<STOREID>_STOREFRONT_TOKEN` (the id upper-cased, hyphens kept) -- the
+name Connect, a pasted token and the seed all seal it under. Three places hold
+that line:
+
+- **The write.** `createStore` and `updateStore` refuse a `storefrontTokenRef`
+  naming any other secret, with a sentence naming the expected one. An empty
+  reference is a store whose token is not set yet, and clearing is allowed.
+  A new store's id must be one Connect derives -- lower-case letters, digits,
+  `_` and `-`, starting with a letter or digit, at most 56 characters -- since
+  `Acme` beside `acme` would share one secret name.
+- **The edge.** A reference naming anything else -- the store's Admin token,
+  another store's token, any other cluster secret -- is never looked up: the
+  storefront reads `connectionState: "unavailable"`. A store written before
+  the write rule keeps working as a row; the edge logs a warning when it
+  resolves it, once an hour per site and store, naming the reference, the
+  expected name and the repair: seal the token again through Connect or the
+  Store panel, which writes it under the right name.
+- **The console.** `sitePreviewReadiness` reports `storeHasStorefrontToken`
+  and `previewStoreHasStorefrontToken`: whether each destination's store names
+  its own token. That, not a non-empty reference, is "connected".
+
+The name is the check because nothing else marks a Storefront token: every
+Shopify secret, the Admin token included, is sealed with kind `vendor_api_key`.
+
 **A store row and a site binding are one record.** The storefront's binding
 NAMES this row -- `binding: {storeId}` on `v1:platform:site` -- and does not
 copy it. The edge resolves the myshopify.com domain and the Storefront token
@@ -257,12 +284,21 @@ merchant.
 ## Step 4 -- what happens next
 
 **Subscriptions.** On boot and daily at 03:15, the connector registers every
-mirrored topic for every ingesting store: HTTPS delivery to
-`https://api.<your-domain>/inbound/shopify-<storeId>`, at the pinned API
-version, with `includeFields` trimmed to `id`, `admin_graphql_api_id` and
-`updated_at`. It updates subscriptions whose URL, version or fields have
-drifted, and removes its own that the allowlist no longer wants. Another
-app's subscriptions are not visible to this app and are never touched.
+mirrored topic the store's grant covers, for every ingesting store: HTTPS
+delivery to `https://api.<your-domain>/inbound/shopify-<storeId>`, at the
+pinned API version, with `includeFields` trimmed to `id`,
+`admin_graphql_api_id` and `updated_at`. It updates subscriptions whose URL,
+version or fields have drifted, and removes its own that the allowlist or the
+grant no longer wants. Another app's subscriptions are not visible to this app
+and are never touched.
+
+A topic is outside the grant when the store holds none of the scopes its
+domain reads under -- the rule reconciliation uses to skip a domain. A store
+connected through Connect Shopify holds the storefront's scopes only, so the
+customer, fulfillment-order, return and discount topics are not asked for;
+Shopify would refuse each one. They are listed on the store's health as
+`subscriptions.notGranted`, a standing fact about the connection rather than a
+failure. A store whose grant was never recorded is asked for every topic.
 
 The daily pass is not tidiness. Shopify retries a failed delivery eight times
 over four hours and then **deletes the subscription** after eight consecutive
@@ -339,6 +375,42 @@ privacy delivery on a per-store URL is held to the same body check, and a
 **paused** store still queues its privacy jobs -- a pause stops the mirror,
 not the merchant's obligations.
 
+### app/uninstalled
+
+Declare `app/uninstalled` beside the three, at the same app-level endpoint
+`https://api.<your-domain>/inbound/shopify`. It is not a privacy topic, but it
+is the app's own, and it is bound the same way: the shop is the one the
+**signed** body names (`myshopify_domain`, since the payload is the Shop
+resource), the `X-Shopify-Shop-Domain` header may not disagree with it, and
+the store must be one this app installed. On a per-store URL the topic is
+ignored: a managed store's per-store deliveries are signed with the same
+secret, so a captured one would replay there.
+
+When it arrives the store is **disconnected**:
+
+- `uninstalledAt` is stamped on the store row. The store ingests nothing while
+  it is set, whatever its status says, and the edge serves its storefronts
+  with `connectionState: "unavailable"` and no token;
+- the Admin grant Shopify ended is dropped from the row (`adminTokenRef`
+  cleared) and its sealed secret blanked;
+- the store owner's saved connection to it reads `disconnected`, so it leaves
+  the list of connected stores in Settings -> Connections;
+- it is audited as `shopify_app_uninstalled`.
+
+The mirror stays: purging is `shop/redact`'s, 48 hours later. Shopify retries
+an undelivered webhook for four hours, so an `app/uninstalled` can arrive after
+the shop has already reinstalled. The store's current grant is asked one
+question first, under the lock a reinstall holds, and a grant that answers
+means a reinstall superseded the uninstall: nothing changes, audited as
+`shopify_app_uninstall_superseded`.
+
+A **reinstall** through Connect Shopify is the shop's new consent. Once the
+callback has the fresh grant on the row it clears `uninstalledAt` -- and, for a
+store `shop/redact` purged, `redactedAt`, returning the store to `configured`
+with nothing mirrored -- and audits it as `shopify_store_reinstalled`, naming
+what it cleared. It also asks the store whether the Storefront token it kept
+still works, and mints another only when the store refuses it.
+
 ### Upgrading from the per-store compliance URL
 
 Earlier versions of this step pointed the three topics at the per-store
@@ -395,10 +467,12 @@ Shopify. An hourly automation runs the ones whose hold has elapsed.
   `shopify_customer_redacted`, and scheduled rather than immediate so a
   merchant's own grace period applies.
 - **`shop/redact`** purges the store's whole mirror and its sync state after
-  a 48-hour hold, then pauses the store row. Before purging it re-checks
-  whether the store is reachable again: an uninstall an operator reverses
-  within the hold must not cost the mirror. Audited as
-  `shopify_shop_redacted` (or `shopify_shop_redact_skipped`).
+  a 48-hour hold, then pauses the store row and stamps `redactedAt`. Before
+  purging it re-checks whether the store is reachable again: an uninstall an
+  operator reverses within the hold must not cost the mirror. Audited as
+  `shopify_shop_redacted` (or `shopify_shop_redact_skipped`). A purged store
+  is served as unavailable, like an uninstalled one, until a verified
+  reinstall clears it (see [app/uninstalled](#appuninstalled)).
 
 Redaction is the **one write to a mirror that is not an apply**. Everything
 else converges the mirror onto what the origin says; redaction deliberately
@@ -603,6 +677,14 @@ ingestion for one merchant while their deliveries keep being staged.
   `refused` is a floor. Anything above zero is a legal request Shopify will
   not resend -- see [Upgrading from the per-store compliance
   URL](#upgrading-from-the-per-store-compliance-url).
+- **uninstalledAt** -- set while Shopify reports the app uninstalled from the
+  store. The store ingests nothing whatever its status says, and its
+  storefronts are served as unavailable, until a reinstall clears it -- see
+  [app/uninstalled](#appuninstalled).
+- **health.subscriptions.notGranted** -- the generated topics this store's
+  grant cannot hold, so the daily pass does not ask for them. A standing fact
+  about the connection, like a domain's `not granted` phase; widening the grant
+  and reconnecting is what changes it.
 - A domain whose generated query the origin rejects outright, or whose page
   costs more than the 1,000-point ceiling, is not retried on the next tick:
   a rejection is reported once and the domain waits its own cadence; a

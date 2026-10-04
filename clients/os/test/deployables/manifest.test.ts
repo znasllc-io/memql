@@ -12,7 +12,7 @@ describe("manifest deployment configuration", () => {
     const draft=addressFromManifest(app,"organization");
     expect(draft).toEqual({slug:"quiet-cedar",accountId:"organization",ownDomain:"shop.example.com, www.example.com"});
     const wire=placementsPayload(placementsFrom([app.name],{[app.name]:draft},"memql.localhost"));
-    expect(wire).toEqual({storefront:{hostname:"quiet-cedar.memql.localhost",accountId:"organization",domains:["shop.example.com","www.example.com"]}});
+    expect(wire).toEqual({storefront:{hostname:"quiet-cedar.memql.localhost",accountId:"organization",domains:["shop.example.com","www.example.com"],target:"serving"}});
   });
   it("sends explicit opt-out after clearing manifest domains", () => {
     const draft={...addressFromManifest(app,"organization"),ownDomain:""};

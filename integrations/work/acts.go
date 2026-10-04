@@ -56,6 +56,9 @@ const (
 	rerunReasonRerun    = "rerun"
 	rerunReasonHeadMove = "headMove"
 	rerunReasonBranch   = "branch"
+	// rerunReasonReplan is a re-planned run's first execution on its new
+	// template (memql#5664, InstallReplan).
+	rerunReasonReplan = "replan"
 )
 
 // ActRefusal is an act refused for a reason a surface can name.

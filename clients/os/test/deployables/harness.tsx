@@ -927,7 +927,10 @@ export const STORE: Row = {
   name: "Example Shop",
   appClientId: "app-1234",
   adminTokenRef: "EXAMPLE_ADMIN_TOKEN",
-  storefrontTokenRef: "EXAMPLE_STOREFRONT_TOKEN",
+  // THE STORE'S OWN NAME, the only one the edge publishes a Storefront token
+  // from (memql#5626); a fixture under any other name is a store whose
+  // storefront reads no token, and the surfaces say so.
+  storefrontTokenRef: "SHOPIFY_STORE-EXAMPLE_STOREFRONT_TOKEN",
   webhookSecretRef: "EXAMPLE_WEBHOOK_SECRET",
   apiVersion: "2026-07",
   protectedDataLevel: "level1",
@@ -942,7 +945,7 @@ export const DEV_STORE: Row = {
   domain: "example-dev.myshopify.com",
   name: "Example Shop (development)",
   adminTokenRef: "EXAMPLE_DEV_ADMIN_TOKEN",
-  storefrontTokenRef: "EXAMPLE_DEV_STOREFRONT_TOKEN",
+  storefrontTokenRef: "SHOPIFY_STORE-EXAMPLE-DEV_STOREFRONT_TOKEN",
   webhookSecretRef: "EXAMPLE_DEV_WEBHOOK_SECRET",
   apiVersion: "2026-07",
   protectedDataLevel: "none",
@@ -1280,8 +1283,12 @@ export function previewReadinessRow(over: Partial<Row> & { siteId: string }): Ro
     storeDomain: "",
     storeReadable: false,
     storeIsDevelopment: false,
+    // Whether the edge serves each store's Storefront token (memql#5626):
+    // false with no store attached, which is what this default describes.
+    storeHasStorefrontToken: false,
     previewStoreId: "",
     previewStoreDomain: "",
+    previewStoreHasStorefrontToken: false,
     testingUrl: "https://test--shop.memql.example.com/",
     canPreview: false,
     canPromote: false,
