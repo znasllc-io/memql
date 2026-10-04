@@ -132,7 +132,9 @@ type fakePublisher struct {
 	// is a site created with no binding (an unattached storefront draft).
 	createdStores []string
 	published     []string
-	repointed     []string
+	// targets is the version each PublishBundle wrote, in order (memql#5601).
+	targets   []edge.Target
+	repointed []string
 	// bound records every BindSiteToStore as "<siteId> -> <storeId>", which is
 	// how the redeploy cases assert that an unchanged manifest writes nothing
 	// and a changed one writes exactly once.
@@ -161,7 +163,7 @@ func (p *fakePublisher) EnsureSite(_ context.Context, req EnsureSiteRequest) (st
 	return "v1:platform:site:" + req.DeployableName, req.Hostname, true, nil
 }
 
-func (p *fakePublisher) PublishBundle(_ context.Context, siteId string, bundle edge.Bundle) (PublishResult, error) {
+func (p *fakePublisher) PublishBundle(_ context.Context, siteId string, bundle edge.Bundle, target edge.Target) (PublishResult, error) {
 	if p.err != nil {
 		return PublishResult{}, p.err
 	}
@@ -169,6 +171,7 @@ func (p *fakePublisher) PublishBundle(_ context.Context, siteId string, bundle e
 		p.onPublish(bundle)
 	}
 	p.published = append(p.published, siteId)
+	p.targets = append(p.targets, target)
 	return PublishResult{SiteId: siteId, BundleRef: "blob://sites/x/v1/", Version: "v1"}, nil
 }
 

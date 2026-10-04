@@ -43,7 +43,7 @@ type publishSkipped struct {
 	published []string
 }
 
-func (p *publishSkipped) PublishBundle(_ context.Context, siteId string, _ edge.Bundle) (PublishResult, error) {
+func (p *publishSkipped) PublishBundle(_ context.Context, siteId string, _ edge.Bundle, _ edge.Target) (PublishResult, error) {
 	p.published = append(p.published, siteId)
 	return PublishResult{SiteId: siteId, BundleRef: "blob://sites/x/v1/", Version: "v1"}, nil
 }

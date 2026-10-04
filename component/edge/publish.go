@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path"
 	"sort"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -26,15 +27,104 @@ type BlobWriter interface {
 	Put(ctx context.Context, key string, data []byte) error
 }
 
-// SiteStore is the one mutation the publisher performs.
+// Target is which of a site's two versions a publish writes (memql#5601).
+//
+// A site has a SERVING version (bundleRef), which every visitor is served, and
+// may have a CANDIDATE version (candidateRef), which only a request carrying a
+// preview grant is served (preview.go). Every publish route used to write the
+// serving version, so the only way to put version N+1 beside a live N was to
+// serve N+1 to the public and roll back. A target is what lets a publish say
+// which field it writes -- and it chooses a FIELD, never an environment, which
+// is why TestNoEnvironmentBranchingInEngineCode has nothing to say about it.
+type Target string
+
+const (
+	// TargetServing writes bundleRef: the publish every route made before a
+	// target existed, and what every visitor is served.
+	TargetServing Target = "serving"
+	// TargetCandidate writes candidateRef and leaves bundleRef -- and so the
+	// public view -- exactly where it was.
+	TargetCandidate Target = "candidate"
+)
+
+// ParseTarget reads a target off the wire. EMPTY IS THE SERVING VERSION,
+// because that is what every caller meant before the field existed; anything
+// unrecognised is REFUSED rather than read as serving, because the one
+// direction this must never fail in is putting in front of shoppers a version
+// somebody asked to keep away from them.
+func ParseTarget(raw string) (Target, error) {
+	switch t := Target(strings.TrimSpace(raw)); t {
+	case "":
+		return TargetServing, nil
+	case TargetServing, TargetCandidate:
+		return t, nil
+	}
+	return "", fmt.Errorf("edge: unknown publish target %q -- a publish writes the %q version or the %q one", raw, TargetServing, TargetCandidate)
+}
+
+// valid reports whether t is one of the two targets. The zero value is NOT:
+// a Go caller names its target, and only the wire defaults one (ParseTarget).
+func (t Target) valid() bool { return t == TargetServing || t == TargetCandidate }
+
+// SiteStore is the one mutation the publisher performs: pointing one of a
+// site's two versions at a bundle that is already uploaded.
+//
+// THREE STORES IMPLEMENT IT, ONE PER ROUTE, and they differ only in WHOSE
+// authority the write runs under: the CI route's synthetic owner
+// (engineSiteStore below), the Library deploy's caller
+// (component/sitepublish), and the package pipeline's caller after its
+// organization checks (component/packages). Which FIELD a target writes is not
+// theirs to decide -- every one of them issues PointVersionStatement.
 type SiteStore interface {
-	UpdateBundleRef(ctx context.Context, siteID, bundleRef string) error
+	PointVersion(ctx context.Context, siteID string, target Target, ref string) error
 }
 
 // Result is what a successful publish produced.
 type Result struct {
-	Version   string
+	Version string
+	// BundleRef is the uploaded version's reference (blob://sites/<id>/<v>/).
+	// It is the site's bundleRef after a TargetServing publish and its
+	// candidateRef after a TargetCandidate one -- Target says which.
 	BundleRef string
+	Target    Target
+}
+
+// PointVersionStatement renders the one write that points a site's target
+// version at ref: updateSiteBundle for the serving version, setSiteCandidate
+// for the candidate. artifactID is optional provenance, passed through to the
+// mutation, which accepts it; empty omits it so the read-merge keeps what is
+// stored.
+//
+// ONE FUNCTION FOR EVERY ROUTE, so "a candidate publish never writes
+// bundleRef" is true in one place rather than three. Both mutations are
+// update()s and need the site row to exist, which is what every route already
+// requires.
+func PointVersionStatement(siteID string, target Target, ref, artifactID string) (string, error) {
+	var b strings.Builder
+	switch target {
+	case TargetServing:
+		b.WriteString("mutation updateSiteBundle(siteId: ")
+		b.WriteString(langparser.QuoteString(siteID))
+		b.WriteString(", bundleRef: ")
+	case TargetCandidate:
+		// setSiteCandidate, not updateSiteBundle with a second field: its
+		// guard (component/memql/platform_site_preview_guard.go) is what
+		// refuses a candidate equal to the serving version and a candidate on
+		// a storefront, and its capability is `preview` -- preparing a version
+		// is one grant, putting it in front of the public is another.
+		b.WriteString("mutation setSiteCandidate(siteId: ")
+		b.WriteString(langparser.QuoteString(siteID))
+		b.WriteString(", candidateRef: ")
+	default:
+		return "", fmt.Errorf("edge: unknown publish target %q", target)
+	}
+	b.WriteString(langparser.QuoteString(ref))
+	if strings.TrimSpace(artifactID) != "" {
+		b.WriteString(", artifactId: ")
+		b.WriteString(langparser.QuoteString(artifactID))
+	}
+	b.WriteString(")")
+	return b.String(), nil
 }
 
 // Publisher is the write side of a site's bundle -- the whole reason this
@@ -94,14 +184,21 @@ func version(b Bundle) string {
 }
 
 // Publish uploads the whole bundle under a NEW version prefix and only then
-// flips the row.
+// points the target version at it.
 //
 // THE ORDER IS THE FEATURE. A failure at any point during the upload leaves
 // the row pointing at the previous version, whose bytes are untouched -- so a
 // half-uploaded bundle is never reachable, and there is no cleanup path to get
 // wrong. Overwriting a prefix in place would make a deploy non-atomic AND
 // destroy the bytes rollback needs.
-func (p *Publisher) Publish(ctx context.Context, siteID string, b Bundle) (Result, error) {
+//
+// The target is checked FIRST, before a byte moves: an unknown one is a caller
+// bug, and uploading a bundle only to refuse the row write would leave bytes
+// nobody asked to keep.
+func (p *Publisher) Publish(ctx context.Context, siteID string, b Bundle, target Target) (Result, error) {
+	if !target.valid() {
+		return Result{}, fmt.Errorf("edge: refusing to publish to %s: unknown target %q", siteID, target)
+	}
 	if len(b) == 0 {
 		return Result{}, fmt.Errorf("edge: refusing to publish an empty bundle to %s", siteID)
 	}
@@ -128,14 +225,14 @@ func (p *Publisher) Publish(ctx context.Context, siteID string, b Bundle) (Resul
 	}
 
 	ref := "blob://" + prefix
-	if err := p.sites.UpdateBundleRef(ctx, siteID, ref); err != nil {
+	if err := p.sites.PointVersion(ctx, siteID, target, ref); err != nil {
 		// The bytes are uploaded and orphaned. That is the RIGHT failure:
 		// storage is cheap, and the alternative -- flipping the row first --
 		// serves a bundle that may not be fully there.
-		return Result{}, fmt.Errorf("edge: pointing %s at %s: %w", siteID, ref, err)
+		return Result{}, fmt.Errorf("edge: pointing %s's %s version at %s: %w", siteID, target, ref, err)
 	}
 
-	return Result{Version: v, BundleRef: ref}, nil
+	return Result{Version: v, BundleRef: ref, Target: target}, nil
 }
 
 // AzureUploader is the one method this adapter needs from an Azure blob
@@ -200,8 +297,9 @@ func bundleFileContentType(name string, data []byte) string {
 }
 
 // systemEdgePublishActor is a synthetic cluster-owner identity for the one
-// clusterOwner-tier write this file issues: updateSiteBundle
-// (dsl/platform/mutations.memql), which SiteStore.UpdateBundleRef calls --
+// clusterOwner-tier write this file issues: PointVersionStatement's
+// updateSiteBundle, or setSiteCandidate for a candidate publish
+// (dsl/platform/mutations.memql), which engineSiteStore.PointVersion calls --
 // the site concept carries @rowAuthz(clusterOwner) (dsl/platform/concepts.memql),
 // same tier as the siteByHostname read edge.go issues.
 //
@@ -217,7 +315,7 @@ func bundleFileContentType(name string, data []byte) string {
 // the fuller reasoning this mirrors.
 //
 // Safe to stamp unconditionally on every call: by the time
-// engineSiteStore.UpdateBundleRef runs, the calling HTTP handler
+// engineSiteStore.PointVersion runs, the calling HTTP handler
 // (component/server.SiteBundleHandler) has already verified the request
 // carries a class="service_account" credential. That check is the actual
 // authorization gate; this identity exists only to carry the clusterOwner
@@ -226,8 +324,9 @@ func bundleFileContentType(name string, data []byte) string {
 // synthetic actor has relative to whatever authorized the resolver's caller.
 const systemEdgePublishActor = "system:edge-publish"
 
-// engineSiteStore is the production SiteStore: it points a site at a new
-// bundle by calling the updateSiteBundle mutation through the engine.
+// engineSiteStore is the CI route's SiteStore: it points a site's serving or
+// candidate version at a new bundle by issuing PointVersionStatement through
+// the engine.
 type engineSiteStore struct {
 	engine Engine
 }
@@ -239,22 +338,23 @@ func NewEngineSiteStore(engine Engine) SiteStore {
 	return &engineSiteStore{engine: engine}
 }
 
-// UpdateBundleRef calls the updateSiteBundle mutation under a synthetic
-// cluster-owner actor -- see systemEdgePublishActor's comment for why a
-// second synthetic identity exists here rather than reusing edge.go's.
+// PointVersion issues PointVersionStatement under a synthetic cluster-owner
+// actor -- see systemEdgePublishActor's comment for why a second synthetic
+// identity exists here rather than reusing edge.go's.
 //
-// The invocation keyword is "mutation", the word the .memql construct is
+// The invocation keyword is "mutation", the word the .memql constructs are
 // declared with too (`mutation site updateSiteBundle { ... }`, D13;
 // component/campaigns/store.go's call() helper uses the same keyword). The
 // call does not repeat the bound concept name -- that binding is resolved
 // from the construct's own signature at load time, the same way edge.go's
 // "query siteByHostname(...)" names no concept either.
-func (s *engineSiteStore) UpdateBundleRef(ctx context.Context, siteID, bundleRef string) error {
-	ctx = publishActorContext(ctx)
-	q := fmt.Sprintf("mutation updateSiteBundle(siteId: %s, bundleRef: %s)",
-		langparser.QuoteString(siteID), langparser.QuoteString(bundleRef))
-	if _, err := s.engine.Execute(ctx, q); err != nil {
-		return fmt.Errorf("edge: mutation updateSiteBundle for %s: %w", siteID, err)
+func (s *engineSiteStore) PointVersion(ctx context.Context, siteID string, target Target, ref string) error {
+	q, err := PointVersionStatement(siteID, target, ref, "")
+	if err != nil {
+		return err
+	}
+	if _, err := s.engine.Execute(publishActorContext(ctx), q); err != nil {
+		return fmt.Errorf("edge: pointing the %s version of %s: %w", target, siteID, err)
 	}
 	return nil
 }

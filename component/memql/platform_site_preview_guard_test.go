@@ -608,3 +608,65 @@ func TestAStorefrontCanTestTheSameBuildAgainstItsSandbox(t *testing.T) {
 		})
 	}
 }
+
+// A STOREFRONT TAKES NO NEW CANDIDATE VERSION (memql#5601). A storefront has
+// two destinations over ONE published build -- Production and its test--
+// Testing alias -- and the edge serves bundleRef on both, so a candidate on a
+// storefront is served by nothing. A candidate publish reaches this guard as
+// setSiteCandidate from three routes, and the CI route writes as a SYSTEM
+// actor, so the refusal is judged before the system-actor exemption: the
+// exemption exists for the seed materializer, which sets no candidate.
+func TestAStorefrontIsRefusedANewCandidateByEveryActor(t *testing.T) {
+	for _, actor := range []string{"v1:identity:user:operator", "system:edge-publish"} {
+		t.Run(actor, func(t *testing.T) {
+			for _, status := range []string{"draft", "live"} {
+				err := runPreviewGuard(t, previewGuardDelta{
+					priorExisted:   true,
+					priorStatus:    status,
+					priorKind:      storefrontSiteKind,
+					priorBundleRef: "blob://sites/s/v/1/",
+					payload:        map[string]any{"id": "s", "candidateRef": "blob://sites/s/v/2/"},
+					actor:          actor,
+				})
+				if err == nil {
+					t.Fatalf("a %s storefront accepted a candidate version from %s", status, actor)
+				}
+				if !strings.Contains(err.Error(), PreviewRefusalStorefrontHasNoCandidate) {
+					t.Errorf("the refusal does not name %q: %v", PreviewRefusalStorefrontHasNoCandidate, err)
+				}
+			}
+		})
+	}
+}
+
+// THE REACHABLE POSITIVES, and the bricking trap. A storefront row written
+// before the Testing destination existed may still carry a candidate, and
+// every write to it inherits that candidate through the read-merge -- so an
+// INHERITED candidate must pass, or that row could never be renamed again.
+// Clearing one passes, and a spa takes a candidate exactly as it did.
+func TestTheStorefrontCandidateRuleJudgesOnlyANewCandidate(t *testing.T) {
+	for name, d := range map[string]previewGuardDelta{
+		"a storefront's inherited candidate": {
+			priorExisted: true, priorStatus: "live", priorKind: storefrontSiteKind,
+			priorBundleRef: "blob://sites/s/v/1/", priorCandidate: "blob://sites/s/v/0/",
+			payload: map[string]any{"id": "s", "title": "renamed", "candidateRef": "blob://sites/s/v/0/"},
+		},
+		"clearing a storefront's candidate": {
+			priorExisted: true, priorStatus: "live", priorKind: storefrontSiteKind,
+			priorBundleRef: "blob://sites/s/v/1/", priorCandidate: "blob://sites/s/v/0/",
+			payload: map[string]any{"id": "s", "candidateRef": ""},
+		},
+		"a spa's new candidate": {
+			priorExisted: true, priorStatus: "live", priorKind: "spa",
+			priorBundleRef: "blob://sites/s/v/1/",
+			payload:        map[string]any{"id": "s", "candidateRef": "blob://sites/s/v/2/"},
+			actor:          "system:edge-publish",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := runPreviewGuard(t, d); err != nil {
+				t.Fatalf("refused: %v", err)
+			}
+		})
+	}
+}

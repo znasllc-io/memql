@@ -111,7 +111,9 @@ That route takes a `class="service_account"` JWT and nothing else -- a
 signed-in person's session gets a `403`, not a `401`. The full worked example,
 including why every file rides its own multipart part named for its path within
 the bundle, is in [site-hosting.md](site-hosting.md); the credential itself is
-[service-account-jwt.md](auth/service-account-jwt.md).
+[service-account-jwt.md](auth/service-account-jwt.md). Adding
+`?target=candidate` publishes the build as the site's candidate version instead
+of the serving one ([below](#publishing-the-candidate-version-instead)).
 
 The Live stop then waits for the first push, which arrives as the `bundleRef`
 flip the site row already broadcasts. Nothing polls.
@@ -233,6 +235,43 @@ is recorded beside it as `accountId` and `ownDomain`.
 a bound domain stays "waiting on your DNS records" until both records check
 out. The verification, the two records and the certificate are the custom-domain
 flow ([front-door.md](front-door.md)).
+
+### Publishing the candidate version instead
+
+A placement may also carry **`target`** (memql#5601): `"serving"`, the default
+and what every run did before the field existed, or `"candidate"`:
+
+```
+placements: {
+  "web": { "target": "candidate" }
+}
+```
+
+A candidate run builds and uploads exactly as any other, then writes the
+version as the site's **`candidateRef`** through `setSiteCandidate` and leaves
+`bundleRef` -- and so every visitor -- where it was. A preview grant is served
+the candidate, on a draft deployable and on a live one, while the public goes on
+getting the serving version; promoting it is `promoteSiteCandidate`, as for a
+candidate set any other way. It is a placement rather than a manifest field for
+`skip`'s reason: whether this run's build goes in front of the public is a
+decision about the run, not about the software.
+
+- **The part is `preview`, not `publish`.** The run needs `deploy` as ever, and
+  writing the candidate needs `execute app:deployables/preview` on the
+  deployable's organization -- the part whose definition is "publish a candidate
+  version".
+- **The outcome says which.** A candidate publish records `candidateRef` on the
+  run's outcome, never `bundleRef`, so rolling back to that run re-points
+  nothing for that app: the run left the serving version where it found it. A
+  run that published only candidates does not record the source's
+  `deployedVersion` either, so the source still reads as having an update to
+  ship.
+- **A `shopify_storefront` has no candidate version.** Its two destinations
+  serve one published build ([storefront-preview.md](storefront-preview.md)),
+  so a candidate would be served by nothing. A run asking for one is refused
+  after the analysis and before anything is built, uploaded or bound, and the
+  engine refuses the write from any route with `storefront_has_no_candidate`.
+- **Any other value is refused** before a run opens.
 
 ---
 

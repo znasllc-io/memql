@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/edge"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/packages/githubapp"
 )
@@ -126,7 +127,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"packageId":        "string (required) -- the package to deploy",
 				"confirm":          "boolean -- pass true to proceed past the always-present confirm gate",
 				"background":       "boolean -- return the persisted analysis run ID immediately; requires confirm:false and no deploymentId",
-				"placements":       "object -- deployable name -> {hostname, accountId, ownDomain, skip}; hostname is required on a deployable's FIRST deploy unless skip is true, accountId defaults to the package organization and is persisted at creation, while ownDomain is applied after the site exists, and skip:true leaves that deployable out of the run entirely (memql#4930) -- recorded as skipped, with nothing built and nothing it already serves touched",
+				"placements":       "object -- deployable name -> {hostname, accountId, ownDomain, skip, target}; hostname is required on a deployable's FIRST deploy unless skip is true, accountId defaults to the package organization and is persisted at creation, while ownDomain is applied after the site exists, and skip:true leaves that deployable out of the run entirely (memql#4930) -- recorded as skipped, with nothing built and nothing it already serves touched. target (memql#5601) is \"serving\" (the default) or \"candidate\": a candidate is published as the site's candidateRef, served only under a preview grant, with bundleRef and the public view untouched; a shopify_storefront has no candidate version and refuses it, and any other value refuses the request",
 				"deploymentId":     "string -- confirm the PARKED run of this id rather than starting a new one (memql#4954). Ignored unless it names a run of this package waiting at the gate; anything else opens a new run",
 				"fromDeploymentId": "string -- retry an earlier run from the bytes it already fetched (task memql#4902) rather than fetching the source again",
 			},
@@ -1065,6 +1066,9 @@ func placementsArg(args map[string]any, key string) map[string]Placement {
 			OwnDomain: strings.TrimSpace(stringArg(fields, "ownDomain")),
 			Domains:   placementDomains(fields),
 			Skip:      boolArg(fields, "skip"),
+			// Carried as written and read by the pipeline (placementTargets),
+			// which refuses an unknown value before a run opens.
+			Target: edge.Target(strings.TrimSpace(stringArg(fields, "target"))),
 		}
 	}
 	return out

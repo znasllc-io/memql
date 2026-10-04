@@ -49,11 +49,13 @@ func (f *fakeBlobStore) hasPrefix(ref string) bool {
 }
 
 // fakeSiteStore is a SiteStore seeded with a starting bundleRef per site id.
-// writes counts every UpdateBundleRef call, which is how
+// writes counts every PointVersion call, which is how
 // TestSuccessfulPublishFlipsTheRowOnce proves the row is written exactly
 // once per Publish, not once per uploaded file. err, when set, makes
-// UpdateBundleRef fail without touching refs -- TestFailedRowFlip... uses
+// PointVersion fail without touching refs -- TestFailedRowFlip... uses
 // it to prove the orphaned-bytes half of Publish's atomicity contract.
+// Only the serving version is modelled; candidate_publish_test.go's
+// versionRow models both.
 type fakeSiteStore struct {
 	refs   map[string]string
 	writes int
@@ -68,10 +70,13 @@ func newFakeSiteStore(seed map[string]string) *fakeSiteStore {
 	return &fakeSiteStore{refs: refs}
 }
 
-func (f *fakeSiteStore) UpdateBundleRef(_ context.Context, siteID, bundleRef string) error {
+func (f *fakeSiteStore) PointVersion(_ context.Context, siteID string, target Target, bundleRef string) error {
 	f.writes++
 	if f.err != nil {
 		return f.err
+	}
+	if target != TargetServing {
+		return fmt.Errorf("fakeSiteStore models the serving version only, got %q", target)
 	}
 	f.refs[siteID] = bundleRef
 	return nil
@@ -104,7 +109,7 @@ func TestFailedUploadLeavesThePreviousVersionLive(t *testing.T) {
 	p := NewPublisher(store, sites)
 
 	store.failAfter = 2 // die partway through
-	if _, err := p.Publish(t.Context(), "s1", bundleWith(4)); err == nil {
+	if _, err := p.Publish(t.Context(), "s1", bundleWith(4), TargetServing); err == nil {
 		t.Fatal("Publish succeeded despite an upload failure")
 	}
 
@@ -118,7 +123,7 @@ func TestSuccessfulPublishFlipsTheRowOnce(t *testing.T) {
 	sites := newFakeSiteStore(map[string]string{"s1": "blob://sites/s1/v1/"})
 	p := NewPublisher(store, sites)
 
-	res, err := p.Publish(t.Context(), "s1", bundleWith(3))
+	res, err := p.Publish(t.Context(), "s1", bundleWith(3), TargetServing)
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -140,8 +145,8 @@ func TestRollbackPointsAtBytesThatStillExist(t *testing.T) {
 	sites := newFakeSiteStore(map[string]string{"s1": "blob://sites/s1/v1/"})
 	p := NewPublisher(store, sites)
 
-	first, _ := p.Publish(t.Context(), "s1", bundleWith(2))
-	if _, err := p.Publish(t.Context(), "s1", bundleWith(2)); err != nil {
+	first, _ := p.Publish(t.Context(), "s1", bundleWith(2), TargetServing)
+	if _, err := p.Publish(t.Context(), "s1", bundleWith(2), TargetServing); err != nil {
 		t.Fatal(err)
 	}
 
@@ -164,7 +169,7 @@ func TestFailedRowFlipOrphansTheUploadedBytesRatherThanRollingThemBack(t *testin
 	p := NewPublisher(store, sites)
 
 	b := bundleWith(3)
-	if _, err := p.Publish(t.Context(), "s1", b); err == nil {
+	if _, err := p.Publish(t.Context(), "s1", b, TargetServing); err == nil {
 		t.Fatal("Publish succeeded despite a row-flip failure")
 	}
 	if got := sites.bundleRef("s1"); got != "blob://sites/s1/v1/" {
@@ -201,7 +206,7 @@ func TestVersionDiffersOverDifferentContent(t *testing.T) {
 
 func TestPublishRefusesAnEmptyBundle(t *testing.T) {
 	p := NewPublisher(newFakeBlobStore(), newFakeSiteStore(nil))
-	if _, err := p.Publish(t.Context(), "s1", Bundle{}); err == nil {
+	if _, err := p.Publish(t.Context(), "s1", Bundle{}, TargetServing); err == nil {
 		t.Fatal("Publish accepted an empty bundle")
 	}
 }
@@ -212,7 +217,7 @@ func TestPublishRefusesAnEmptyBundle(t *testing.T) {
 func TestPublishRefusesABundleWithNoIndexHTML(t *testing.T) {
 	p := NewPublisher(newFakeBlobStore(), newFakeSiteStore(nil))
 	b := Bundle{"assets/app.js": []byte("console.log('hi')")}
-	if _, err := p.Publish(t.Context(), "s1", b); err == nil {
+	if _, err := p.Publish(t.Context(), "s1", b, TargetServing); err == nil {
 		t.Fatal("Publish accepted a bundle with no index.html")
 	}
 }
@@ -222,7 +227,7 @@ func TestPublishUploadsUnderTheReturnedVersionPrefix(t *testing.T) {
 	sites := newFakeSiteStore(map[string]string{"s1": "blob://sites/s1/v1/"})
 	p := NewPublisher(store, sites)
 
-	res, err := p.Publish(t.Context(), "s1", bundleWith(2))
+	res, err := p.Publish(t.Context(), "s1", bundleWith(2), TargetServing)
 	if err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
@@ -332,8 +337,8 @@ func TestEngineSiteStoreRunsUnderASyntheticClusterOwnerActor(t *testing.T) {
 	fe := &fakeEngine{}
 	s := NewEngineSiteStore(fe)
 
-	if err := s.UpdateBundleRef(context.Background(), "s1", "blob://sites/s1/v1/"); err != nil {
-		t.Fatalf("UpdateBundleRef: %v", err)
+	if err := s.PointVersion(context.Background(), "s1", TargetServing, "blob://sites/s1/v1/"); err != nil {
+		t.Fatalf("PointVersion: %v", err)
 	}
 
 	ac, ok := auth.AccessFromContext(fe.gotCtx)
@@ -352,8 +357,8 @@ func TestEngineSiteStoreUsesItsOwnSyntheticIdentityNotEdgeGos(t *testing.T) {
 	fe := &fakeEngine{}
 	s := NewEngineSiteStore(fe)
 
-	if err := s.UpdateBundleRef(context.Background(), "s1", "blob://sites/s1/v1/"); err != nil {
-		t.Fatalf("UpdateBundleRef: %v", err)
+	if err := s.PointVersion(context.Background(), "s1", TargetServing, "blob://sites/s1/v1/"); err != nil {
+		t.Fatalf("PointVersion: %v", err)
 	}
 
 	ac, _ := auth.AccessFromContext(fe.gotCtx)
@@ -373,8 +378,8 @@ func TestEngineSiteStoreCallsUpdateSiteBundleAsAMutation(t *testing.T) {
 	fe := &fakeEngine{}
 	s := NewEngineSiteStore(fe)
 
-	if err := s.UpdateBundleRef(context.Background(), "s1", "blob://sites/s1/v2/"); err != nil {
-		t.Fatalf("UpdateBundleRef: %v", err)
+	if err := s.PointVersion(context.Background(), "s1", TargetServing, "blob://sites/s1/v2/"); err != nil {
+		t.Fatalf("PointVersion: %v", err)
 	}
 
 	if !strings.HasPrefix(fe.gotQuery, "mutation updateSiteBundle(") {
@@ -394,8 +399,8 @@ func TestEngineSiteStoreQuotesArguments(t *testing.T) {
 	fe := &fakeEngine{}
 	s := NewEngineSiteStore(fe)
 
-	if err := s.UpdateBundleRef(context.Background(), `s1".injected`, "blob://x/"); err != nil {
-		t.Fatalf("UpdateBundleRef: %v", err)
+	if err := s.PointVersion(context.Background(), `s1".injected`, TargetServing, "blob://x/"); err != nil {
+		t.Fatalf("PointVersion: %v", err)
 	}
 	if !strings.Contains(fe.gotQuery, `\"`) {
 		t.Errorf("query %q does not look like an escaped siteId", fe.gotQuery)
@@ -405,7 +410,7 @@ func TestEngineSiteStoreQuotesArguments(t *testing.T) {
 func TestEngineSiteStoreSurfacesEngineError(t *testing.T) {
 	s := NewEngineSiteStore(&fakeEngine{err: errors.New("boom")})
 
-	if err := s.UpdateBundleRef(context.Background(), "s1", "blob://sites/s1/v1/"); err == nil {
-		t.Fatal("UpdateBundleRef swallowed an engine error")
+	if err := s.PointVersion(context.Background(), "s1", TargetServing, "blob://sites/s1/v1/"); err == nil {
+		t.Fatal("PointVersion swallowed an engine error")
 	}
 }

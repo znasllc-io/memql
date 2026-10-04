@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/znasllc-io/memql/component/edge"
 	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/core/logger"
 )
@@ -289,6 +290,15 @@ type Placement struct {
 	// reader asking "why is there no site for this" wants one answer shape,
 	// not two.
 	Skip bool
+	// Target is which of the site's versions this run's build becomes
+	// (memql#5601): the serving version, which is the default and what every
+	// run did before the field existed, or the CANDIDATE, which writes
+	// candidateRef and leaves bundleRef -- and so every visitor -- where it
+	// was. A placement-time choice for skip's reason. Empty until
+	// prepareDeployment reads it; an unknown value refuses the request before
+	// a run opens, and a storefront refuses the candidate after analysis,
+	// because a storefront has no candidate version (refuseUnservedCandidates).
+	Target edge.Target
 }
 
 // DeployOutcome is what a run produced.
@@ -394,6 +404,16 @@ func StartAnalysis(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutc
 }
 
 func prepareDeployment(ctx context.Context, d *Deps, req DeployRequest) (map[string]any, *DeployOutcome, DeployRequest, error) {
+	// THE PLACEMENTS ARE READ BEFORE ANYTHING IS OPENED. An unknown target is a
+	// request this pipeline cannot honour in either direction -- reading it as
+	// the serving version would put in front of the public a build somebody
+	// asked to keep from them -- so it is refused before a run row exists.
+	placements, err := placementTargets(req.Placements)
+	if err != nil {
+		return nil, nil, req, err
+	}
+	req.Placements = placements
+
 	pkg, err := d.Store.packageById(ctx, req.PackageId)
 	if err != nil {
 		return nil, nil, req, err
@@ -698,6 +718,16 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 			describeDomains(rep.DslDomains))
 	}
 
+	// ---- candidates only where a candidate is served (memql#5601) ----
+	//
+	// After the analysis, because the KIND decides and the analysis is what
+	// knows it; before the build, the stage and every site write, because a
+	// storefront's publish re-points its store bindings first, and a binding
+	// reaches the live site the moment it is written.
+	if err := refuseUnservedCandidates(rep, req.Placements); err != nil {
+		return err
+	}
+
 	// ---- confirm (D12) ----
 	//
 	// An AUTO run answers the gate itself when the plan has not changed
@@ -784,6 +814,15 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	out.Deployables = outcomes
 	if perr != nil {
 		return perr
+	}
+
+	// A RUN THAT ONLY PUBLISHED CANDIDATES DEPLOYED NOTHING (memql#5601).
+	// deployedVersion is the source currently LIVE, and every visitor is
+	// served exactly what they were before this run -- so it is not
+	// recorded, and the auto-deploy feed goes on seeing the update as
+	// unshipped, which it is.
+	if candidatesOnly(outcomes) {
+		return nil
 	}
 
 	// Compare with the observation at the ORIGINAL fetch, including across

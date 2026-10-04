@@ -840,13 +840,19 @@ type DeployableOutcome struct {
 	// BuiltOn is where THIS app was built. Per-app as well as per-run,
 	// because a package whose apps built on different surfaces is exactly
 	// the case the run-level summary cannot describe.
-	BuiltOn   BuiltOn  `json:"builtOn,omitzero"`
-	SiteId    string   `json:"siteId,omitempty"`
-	Hostname  string   `json:"hostname,omitempty"`
-	BundleRef string   `json:"bundleRef,omitempty"`
-	Version   string   `json:"version,omitempty"`
-	Created   bool     `json:"created,omitempty"`
-	Refusal   *Problem `json:"refusal,omitempty"`
+	BuiltOn   BuiltOn `json:"builtOn,omitzero"`
+	SiteId    string  `json:"siteId,omitempty"`
+	Hostname  string  `json:"hostname,omitempty"`
+	BundleRef string  `json:"bundleRef,omitempty"`
+	// CandidateRef is set INSTEAD of BundleRef when this run published the
+	// deployable as its candidate version (memql#5601). Never both: rollback
+	// re-points every outcome's BundleRef, and a candidate recorded there
+	// would make "roll back to this run" serve a version the run never
+	// served.
+	CandidateRef string   `json:"candidateRef,omitempty"`
+	Version      string   `json:"version,omitempty"`
+	Created      bool     `json:"created,omitempty"`
+	Refusal      *Problem `json:"refusal,omitempty"`
 
 	// The placement halves a first deploy applied (epic memql#4885, D8), and
 	// the ones it could not. AccountId and OwnDomain are set only when the

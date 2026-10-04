@@ -73,7 +73,10 @@ type rowSiteStore struct {
 	bundleRef string
 }
 
-func (s *rowSiteStore) UpdateBundleRef(_ context.Context, _, bundleRef string) error {
+func (s *rowSiteStore) PointVersion(_ context.Context, _ string, target Target, bundleRef string) error {
+	if target != TargetServing {
+		return fmt.Errorf("rowSiteStore models the serving version only, got %q", target)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.bundleRef = bundleRef
@@ -126,7 +129,7 @@ func TestPublishedBundleIsServedAndRollbackRestoresThePrevious(t *testing.T) {
 	v1, err := pub.Publish(context.Background(), site.ID, Bundle{
 		"index.html":    []byte("<!doctype html><title>v1</title>"),
 		"assets/app.js": []byte("console.log('v1')"),
-	})
+	}, TargetServing)
 	if err != nil {
 		t.Fatalf("publish v1: %v", err)
 	}
@@ -142,7 +145,7 @@ func TestPublishedBundleIsServedAndRollbackRestoresThePrevious(t *testing.T) {
 	v2, err := pub.Publish(context.Background(), site.ID, Bundle{
 		"index.html":    []byte("<!doctype html><title>v2</title>"),
 		"assets/app.js": []byte("console.log('v2')"),
-	})
+	}, TargetServing)
 	if err != nil {
 		t.Fatalf("publish v2: %v", err)
 	}
@@ -160,7 +163,7 @@ func TestPublishedBundleIsServedAndRollbackRestoresThePrevious(t *testing.T) {
 
 	// ROLLBACK. Nothing is re-uploaded: the row is set back to the ref it
 	// held before, which is the same write updateSiteBundle performs.
-	if err := row.UpdateBundleRef(context.Background(), site.ID, v1.BundleRef); err != nil {
+	if err := row.PointVersion(context.Background(), site.ID, TargetServing, v1.BundleRef); err != nil {
 		t.Fatalf("rollback: %v", err)
 	}
 	site.BundleRef = row.ref()
@@ -210,7 +213,7 @@ func TestStorefrontKindGetsTheSPAFallback(t *testing.T) {
 	}
 	if _, err := pub.Publish(context.Background(), site.ID, Bundle{
 		"index.html": []byte("<!doctype html><title>storefront</title>"),
-	}); err != nil {
+	}, TargetServing); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 	site.BundleRef = row.ref()

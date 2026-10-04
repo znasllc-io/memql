@@ -72,6 +72,10 @@ const (
 	// PreviewRefusalSystemOwned -- the platform's own site is exempt from this whole
 	// axis, as it is from the status axis and the settings axis.
 	PreviewRefusalSystemOwned = "site_is_system_owned"
+	// PreviewRefusalStorefrontHasNoCandidate -- a storefront serves one published
+	// build on both of its destinations, so a candidate version would be served by
+	// nothing (memql#5601).
+	PreviewRefusalStorefrontHasNoCandidate = "storefront_has_no_candidate"
 )
 
 // PreviewBoundStore is what a caller could learn about the store a binding names.
@@ -149,6 +153,31 @@ func SiteCandidateRefusal(serving, candidate string) PreviewRefusal {
 		Code:    PreviewRefusalCandidateIsServing,
 		Message: "that version is the one already serving, so there would be nothing to exercise and nothing to promote.",
 		Remedy:  "Publish a new version and set it as the candidate.",
+	}
+}
+
+// SiteStorefrontCandidateRefusal answers whether `candidate` may be set as the candidate
+// version of a deployable whose stored candidate is `prior` (memql#5601).
+//
+// A STOREFRONT HAS NO CANDIDATE VERSION. It has two destinations over ONE
+// published build -- Production at its hostname, Testing at its test-- alias,
+// each against its own store -- and the edge serves bundleRef on both
+// (component/edge/preview.go). A storefront candidate would be served by
+// nothing: a publish that reported success and showed its build nowhere.
+//
+// ONLY A NEW CANDIDATE IS JUDGED. A storefront row from before the Testing
+// destination may still carry one, and every write to that row inherits it
+// through the read-merge; refusing the inherited value would make the row
+// unwritable. Clearing one is always allowed.
+func SiteStorefrontCandidateRefusal(storefront bool, prior, candidate string) PreviewRefusal {
+	candidate = strings.TrimSpace(candidate)
+	if !storefront || candidate == "" || candidate == strings.TrimSpace(prior) {
+		return PreviewRefusal{}
+	}
+	return PreviewRefusal{
+		Code:    PreviewRefusalStorefrontHasNoCandidate,
+		Message: "a storefront has no candidate version: its Testing destination serves the published build against the testing store, so a candidate would be served by nothing.",
+		Remedy:  "Publish the version as the serving version, which reaches Testing and Production together, and roll back if it should not serve.",
 	}
 }
 

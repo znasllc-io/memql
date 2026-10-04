@@ -63,19 +63,29 @@ func (a *App) mountSiteBundleEndpoints(uploader server.FileUploader, container s
 
 // sitePublisherAdapter adapts *edge.Publisher to server.BundlePublisher --
 // the module-boundary crossing mountSiteBundleEndpoints' doc comment
-// describes. A plain type conversion in both directions: edge.Bundle IS
-// map[string][]byte under the hood, and edge.Result's two fields are
-// SiteBundlePublishResponse's two fields, so there is no real translation
-// work here, just satisfying two independently-declared interfaces that
-// happen to describe the same shape from either side of the module split.
+// describes. Close to a plain type conversion: edge.Bundle IS
+// map[string][]byte under the hood, and the target crosses as the same word
+// on both sides. The one decision here is the response's: an uploaded
+// version's ref is reported as `bundleRef` only when it became the serving
+// version, and as `candidateRef` when it became the candidate (memql#5601).
 type sitePublisherAdapter struct{ pub *edge.Publisher }
 
-func (a sitePublisherAdapter) Publish(ctx context.Context, siteID string, files map[string][]byte) (server.SiteBundlePublishResponse, error) {
-	res, err := a.pub.Publish(ctx, siteID, edge.Bundle(files))
+func (a sitePublisherAdapter) Publish(ctx context.Context, siteID string, files map[string][]byte, target string) (server.SiteBundlePublishResponse, error) {
+	t, err := edge.ParseTarget(target)
 	if err != nil {
 		return server.SiteBundlePublishResponse{}, err
 	}
-	return server.SiteBundlePublishResponse{Version: res.Version, BundleRef: res.BundleRef}, nil
+	res, err := a.pub.Publish(ctx, siteID, edge.Bundle(files), t)
+	if err != nil {
+		return server.SiteBundlePublishResponse{}, err
+	}
+	out := server.SiteBundlePublishResponse{Version: res.Version, Target: string(res.Target)}
+	if res.Target == edge.TargetCandidate {
+		out.CandidateRef = res.BundleRef
+	} else {
+		out.BundleRef = res.BundleRef
+	}
+	return out, nil
 }
 
 // siteBundleBlobWriter adapts the already-constructed uploader to
@@ -93,7 +103,7 @@ func (a sitePublisherAdapter) Publish(ctx context.Context, siteID string, files 
 // whose bytes were never written, 404ing the site for everyone who visits
 // it, and the CI caller that published it would see 201 Created. Failing
 // loud here is SAFE precisely because of Publisher.Publish's own atomicity
-// guarantee: UpdateBundleRef is only ever reached after every Put succeeds,
+// guarantee: PointVersion is only ever reached after every Put succeeds,
 // so a Put that fails immediately never touches the row -- the site keeps
 // serving whatever it was serving before.
 //

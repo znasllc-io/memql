@@ -547,7 +547,7 @@ func (p *enginePublisher) EnsureSite(ctx context.Context, req EnsureSiteRequest)
 	return siteId, req.Hostname, true, nil
 }
 
-func (p *enginePublisher) PublishBundle(ctx context.Context, siteId string, bundle edge.Bundle) (PublishResult, error) {
+func (p *enginePublisher) PublishBundle(ctx context.Context, siteId string, bundle edge.Bundle, target edge.Target) (PublishResult, error) {
 	if err := p.requireSiteAction(ctx, siteId, "deploy"); err != nil {
 		return PublishResult{}, err
 	}
@@ -558,7 +558,7 @@ func (p *enginePublisher) PublishBundle(ctx context.Context, siteId string, bund
 		p.blobs,
 		packageSiteWriter{publisher: p},
 	)
-	res, err := publisher.Publish(ctx, siteId, bundle)
+	res, err := publisher.Publish(ctx, siteId, bundle, target)
 	if err != nil {
 		return PublishResult{}, err
 	}
@@ -604,13 +604,28 @@ func (p *enginePublisher) requireSiteAction(ctx context.Context, siteID, action 
 // The package pipeline has a real caller. Preserve that actor through the
 // final write and recheck authority after uploads, rather than using the edge
 // publisher's synthetic service-account writer.
+//
+// THE PART RECHECKED FOLLOWS THE TARGET (memql#5601). The serving version is
+// the `deploy` part, as it always was; the candidate is `preview` -- "publish a
+// candidate version" is that part's own definition, and setSiteCandidate
+// carries it -- so a person may prepare a version for a preview without being
+// able to put one in front of the public. PublishBundle has already checked
+// `deploy` for the run's upload either way.
 type packageSiteWriter struct{ publisher *enginePublisher }
 
-func (s packageSiteWriter) UpdateBundleRef(ctx context.Context, siteID, bundleRef string) error {
-	if err := s.publisher.requireSiteAction(ctx, siteID, "deploy"); err != nil {
+func (s packageSiteWriter) PointVersion(ctx context.Context, siteID string, target edge.Target, ref string) error {
+	action := "deploy"
+	if target == edge.TargetCandidate {
+		action = "preview"
+	}
+	if err := s.publisher.requireSiteAction(ctx, siteID, action); err != nil {
 		return err
 	}
-	_, err := s.publisher.engine.Execute(ctx, fmt.Sprintf("mutation updateSiteBundle(siteId: %s, bundleRef: %s)", langparser.QuoteString(siteID), langparser.QuoteString(bundleRef)))
+	q, err := edge.PointVersionStatement(siteID, target, ref, "")
+	if err != nil {
+		return err
+	}
+	_, err = s.publisher.engine.Execute(ctx, q)
 	return err
 }
 
