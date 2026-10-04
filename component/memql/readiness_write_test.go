@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/envregistry"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/readiness"
 )
 
@@ -327,6 +328,27 @@ func TestRenderCarriesTheReasonOnlyWhenUnknown(t *testing.T) {
 	}
 	if strings.Contains(call, "reason") {
 		t.Errorf("a known verdict rendered a reason argument: %s", call)
+	}
+}
+
+// THE DECLARED FLAGS RIDE ON THE ROW the way core does: always rendered, true
+// or false, so the call names every fact the row will carry. The call must
+// still PARSE -- a rendered call that does not is a write that fails at
+// execute time on every node, with nothing but a log line to say so.
+func TestRenderCarriesTheDeclaredFlags(t *testing.T) {
+	r := readiness.NodeReport{Module: "pipelines", NodeId: "agent-1", NodeType: "agent", State: readiness.NotApplicable,
+		Optional: true, Dismissable: true, ReportedAt: inferenceNow}
+	call, err := renderRecordModuleReadiness(r, readinessRowID(r.Module, r.NodeId))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`core: false`, `optional: true`, `dismissable: true`, `state: "notApplicable"`} {
+		if !strings.Contains(call, want) {
+			t.Errorf("the rendered call lacks %s: %s", want, call)
+		}
+	}
+	if _, err := langparser.ParseExpression(call); err != nil {
+		t.Fatalf("the rendered call does not parse:\n  %s\n  %v", call, err)
 	}
 }
 

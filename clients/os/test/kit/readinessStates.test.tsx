@@ -23,7 +23,7 @@ import { installSeededAccess } from "../seededAccess";
 import type { Verdict } from "../../src/system/readinessFold";
 
 function verdict(module: string, state: Verdict["state"], lanes: Verdict["lanes"] = []): Verdict {
-  return { module, state, core: false, disagreement: [], nodes: [], lanes, unknown: [], stale: [], aside: [] };
+  return { module, state, core: false, optional: false, dismissable: false, disagreement: [], nodes: [], lanes, unknown: [], stale: [], aside: [] };
 }
 
 function readiness(loaded: boolean, verdicts: Verdict[]): Readiness {

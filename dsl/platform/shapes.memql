@@ -322,6 +322,8 @@ shape moduleReadiness moduleReadinessFull {
   state
   reason
   core
+  optional
+  dismissable
   lanes
   reportedAt
   row.createdAt

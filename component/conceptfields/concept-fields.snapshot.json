@@ -4349,10 +4349,12 @@
       "file": "platform/concepts.memql",
       "fields": [
         "core",
+        "dismissable",
         "lanes",
         "module",
         "nodeId",
         "nodeType",
+        "optional",
         "reason",
         "reportedAt",
         "state"
@@ -4380,8 +4382,10 @@
       "fields": [
         "core",
         "disagreement",
+        "dismissable",
         "module",
         "nodes",
+        "optional",
         "stale",
         "state",
         "unknown"

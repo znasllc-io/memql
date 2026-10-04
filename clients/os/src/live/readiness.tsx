@@ -48,6 +48,10 @@ export interface Readiness {
  * and sends a person to a form -- the one direction a default must never take
  * over a row that said nothing. Exported for its own test; the feed is the
  * only production caller.
+ *
+ * The three declared flags read `=== true`, so a row written before
+ * `optional` and `dismissable` existed -- which carries neither key -- says
+ * neither, which is what the module it describes declared.
  */
 export function reportFromRow(row: Row): NodeReport | null {
   const r = row as Record<string, unknown>;
@@ -61,6 +65,8 @@ export function reportFromRow(row: Row): NodeReport | null {
     state: String(r.state ?? "unknown") as NodeReport["state"],
     ...(reason !== undefined ? { reason } : {}),
     core: r.core === true,
+    optional: r.optional === true,
+    dismissable: r.dismissable === true,
     lanes: Array.isArray(r.lanes) ? (r.lanes as NodeReport["lanes"]) : [],
     reportedAt: String(r.reportedAt ?? ""),
   };

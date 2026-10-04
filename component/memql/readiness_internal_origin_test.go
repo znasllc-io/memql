@@ -89,7 +89,7 @@ func TestRenderedReadinessWriteNamesOnlyTheReport(t *testing.T) {
 	for _, want := range []string{
 		`rowId: "v1:platform:moduleReadiness:storage--node-a"`,
 		`module: "storage"`, `nodeId: "node-a"`, `nodeType: "bff"`,
-		`state: "partial"`, `core: true`, `reportedAt: "2026-09-06T12:00:00Z"`,
+		`state: "partial"`, `core: true`, `optional: false`, `dismissable: false`, `reportedAt: "2026-09-06T12:00:00Z"`,
 		`"name":"MEMQL_A"`, `"present":true`, `"source":"env"`,
 	} {
 		if !strings.Contains(call, want) {

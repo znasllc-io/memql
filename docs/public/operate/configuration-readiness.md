@@ -190,6 +190,30 @@ The rules, all enforced at boot rather than in review:
   a person reads when an app will not open.
 - `optionalSlots` count toward "somebody has started this", never toward
   completeness.
+- **`optional: true` marks a module nothing needs**: a feature an owner may
+  choose to set up. It is never `core` -- the first-run wizard walks every core
+  module -- so a module declaring both refuses boot.
+- **`dismissable: true` lets a person answer "Not now"** to an optional
+  module's setup prompt, and requires `optional`: a module something needs
+  cannot be waved away.
+
+Pipelines is the optional module today:
+
+```yaml
+  - name: pipelines
+    optional: true
+    dismissable: true
+    description: "Pipelines run a repository's checks from its memql-package.yaml and report them on GitHub."
+    hostedBy:
+      nodeTypes: [agent]
+    evaluator: "integration:pipelines"
+```
+
+`core`, `optional` and `dismissable` are the module's declaration rather than a
+node's verdict, so every readiness row carries them whatever its state, and the
+folded verdict carries them even when no node has reported. A node without the
+named integration reports `notApplicable`, so until some node carries it the
+verdict reads *Not reported* -- never *Not set up*.
 
 The shell carries a copy of the module ids and descriptions
 (`clients/os/src/system/modules.ts`), pinned to this manifest by
