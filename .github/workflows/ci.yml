@@ -557,6 +557,9 @@ jobs:
               # in the direction that reddens `main` for the next author.
               - 'component/procedure/testdata/**'
               - 'component/procedure/reference/**'
+              # The pipelines leaf's fixtures (epic memql#5477): recorded GitHub
+              # deliveries and Go-tree archives, read only by its own Go tests.
+              - 'component/pipelines/testdata/**'
               # Configuration readiness fixtures, read by the fold tests in
               # component/memql/readiness AND by the TypeScript mirror. The
               # test gate that consumes them runs in db-tests, which gates on

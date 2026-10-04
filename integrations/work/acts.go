@@ -148,14 +148,20 @@ func (r actRun) requireFinished() error {
 	return refuse(codeRunNotFinished, "run %s is %s; a run is changed only after it has stopped, never under a live execution", r.id, status)
 }
 
-// requireExecutable refuses a run the executor cannot run again. An app
-// session's RECORDING is the record of a session, not an automation:
+// requireExecutable refuses a run the executor cannot run again. A PIPELINE'S
+// run is its runner's (isPipelineRun, epic memql#5477): the dispatcher never
+// takes it, so a re-run written onto it would sit at `running` with nobody
+// executing it, and the pipelines driver re-runs a run as the pipeline run's
+// next attempt -- so the refusal names pipelinesRerun, the act that does. An
+// app session's RECORDING is the record of a session, not an automation:
 // dispatched, it would fail on a template nobody registered, and the failed
 // status would take the recording out of the procedure corpus it belongs to.
 // A run that never chose a template has nothing to run, and a run with no goal
 // is one the dispatcher leaves to the scheduler that owns it.
 func (r actRun) requireExecutable() error {
 	switch name := rowString(r.row, "automationName"); {
+	case isPipelineRun(rowString(r.row, "triggeredBy")):
+		return refuse(codeRunNotExecutable, "run %s belongs to a pipeline run, which the pipelines runner executes; re-run the pipeline run with pipelinesRerun", r.id)
 	case name == appSessionTemplate:
 		where := ""
 		if parent := rowString(r.row, "parentRunId"); parent != "" {

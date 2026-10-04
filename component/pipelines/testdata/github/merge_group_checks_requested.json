@@ -1,0 +1,17 @@
+{
+  "action": "checks_requested",
+  "merge_group": {
+    "head_sha": "b19c6b22ab1f138a3a69ed266fc59fb07c59f5ad",
+    "head_ref": "refs/heads/gh-readonly-queue/main/pr-42-772c6a1d531d6f34ca4bc594a70987215f3ce1c8",
+    "base_sha": "772c6a1d531d6f34ca4bc594a70987215f3ce1c8",
+    "base_ref": "refs/heads/main",
+    "head_commit": {
+      "id": "b19c6b22ab1f138a3a69ed266fc59fb07c59f5ad",
+      "message": "Merge pull request #42 from Acme-Corp/cart-badge\n\nShow the cart count on the badge",
+      "timestamp": "2026-10-03T09:14:07Z"
+    }
+  },
+  "repository": { "full_name": "Acme-Corp/Storefront", "default_branch": "main", "private": false },
+  "installation": { "id": 51234567 },
+  "sender": { "login": "octocat" }
+}

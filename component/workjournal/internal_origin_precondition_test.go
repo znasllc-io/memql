@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 )
@@ -77,6 +78,85 @@ func TestBeginRefusesABlankOwnerAndWritesNothing(t *testing.T) {
 	}
 }
 
+// THE SAME GATE ON THE SECOND WAY TO A HANDLE. Reopen hands a resumed driver a
+// handle on a run another replica opened, so it is a way past Begin -- and the
+// allowlist entry's claim is about every call site, not only Begin's. With no
+// owner, no goal or no run to name there is no handle, and the nil one every
+// method tolerates writes nothing all the way down.
+func TestReopenRefusesWithoutItsOwnerAndWritesNothing(t *testing.T) {
+	engine := &countingEngine{}
+	j := New(engine, nil, "node-1")
+
+	for name, ids := range map[string][3]string{
+		"a blank owner": {"   ", "goal-1", "run-1"},
+		"a blank goal":  {"user-1", "", "run-1"},
+		"a blank run":   {"user-1", "goal-1", " "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			run := j.Reopen(ids[0], ids[1], ids[2], work().Steps, time.Now())
+			if run != nil {
+				t.Fatal("Reopen returned a usable run")
+			}
+			run.Heartbeat(context.Background())
+			step := run.Step(context.Background(), "extract")
+			step.Finish(context.Background(), Receipt{Status: "done"})
+			step.Cancelled(context.Background(), "why")
+			run.Cancelled(context.Background(), "code", "message")
+			run.Succeeded(context.Background(), nil)
+		})
+	}
+	if len(engine.calls) != 0 {
+		t.Fatalf("calls = %v, want none", engine.calls)
+	}
+}
+
+// Every write a RUNNER-OWNED run adds (epic memql#5477) carries the stamp and
+// the owner's actor too: the queued steps, the heartbeat, the full receipt,
+// both cancels, and every write made through a reopened handle. Without the
+// stamp each @serverOnly write is refused with a WARN and nothing else.
+func TestEveryRunnerWriteCarriesInternalOriginAndTheOwnersActor(t *testing.T) {
+	engine := &countingEngine{}
+	j := New(engine, nil, "node-1")
+
+	w := work()
+	w.QueueSteps = true
+	w.TriggeredBy = "pipeline:full"
+	run, err := j.Begin(context.Background(), w)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	run.Heartbeat(context.Background())
+	run.Step(context.Background(), "extract").Finish(context.Background(), Receipt{
+		Status: "done", DurationMs: 10, Binding: map[string]any{"surface": "cluster"},
+		LogFileID: "v1:library:file:log", ArtifactFileIDs: []string{"v1:library:file:a"},
+	})
+	run.Step(context.Background(), "summarize").Cancelled(context.Background(), "stopped")
+	run.Cancelled(context.Background(), "pipeline_cancelled", "stopped")
+
+	reopened := j.Reopen("user-1", run.GoalID(), run.RunID(), w.Steps, time.Now())
+	reopened.Heartbeat(context.Background())
+	reopened.Step(context.Background(), "extract").Finish(context.Background(), Receipt{Status: "failed", Code: "x", Message: "y"})
+	reopened.Failed(context.Background(), "x", "y")
+
+	pending := 0
+	for _, q := range engine.calls {
+		if strings.HasPrefix(q, "mutation createWorkStep(") && strings.Contains(q, `status: "pending"`) {
+			pending++
+		}
+	}
+	if pending != len(w.Steps) {
+		t.Fatalf("queued %d steps, want %d -- the queued writes are not covered", pending, len(w.Steps))
+	}
+	for i, internal := range engine.origins {
+		if !internal {
+			t.Fatalf("call %d (%s) did not carry internal origin", i, firstWord(engine.calls[i]))
+		}
+		if engine.owners[i] != "user-1" {
+			t.Fatalf("call %d (%s) ran as %q, want the owner", i, firstWord(engine.calls[i]), engine.owners[i])
+		}
+	}
+}
+
 // Every write this package makes carries the stamp. Without it the function
 // validator refuses each @serverOnly mutation with a WARN and nothing else,
 // which is the silent-failure shape the allowlist entry describes.
@@ -143,8 +223,15 @@ func TestANilJournalIsSafeAllTheWayDown(t *testing.T) {
 	step.Done(context.Background(), nil)
 	step.Failed(context.Background(), "x", "y")
 	step.Skipped(context.Background(), "z")
+	step.Finish(context.Background(), Receipt{Status: "done"})
+	step.Cancelled(context.Background(), "z")
+	run.Heartbeat(context.Background())
 	run.Succeeded(context.Background(), nil)
 	run.Failed(context.Background(), "x", "y")
+	run.Cancelled(context.Background(), "x", "y")
+	if reopened := j.Reopen("user-1", "goal-1", "run-1", nil, time.Now()); reopened != nil {
+		t.Fatal("Reopen on a nil journal returned a usable run")
+	}
 }
 
 func TestNewWithNoEngineYieldsANilJournal(t *testing.T) {

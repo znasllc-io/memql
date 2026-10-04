@@ -100,10 +100,17 @@ type NodeReport struct {
 	NodeType string `json:"nodeType"`
 	State    State  `json:"state"`
 	// Reason is set only when State is Unknown, from the Reason* vocabulary.
-	Reason     string       `json:"reason,omitempty"`
-	Core       bool         `json:"core"`
-	Lanes      []LaneReport `json:"lanes"`
-	ReportedAt time.Time    `json:"reportedAt"`
+	Reason string `json:"reason,omitempty"`
+	// Core, Optional and Dismissable are the module's DECLARATION, copied
+	// from the manifest onto every row the node writes, whatever its verdict
+	// -- a notApplicable row carries them too. Optional marks a module nothing
+	// needs; Dismissable lets a person answer "Not now" to it (pipelines
+	// program design record, D15).
+	Core        bool         `json:"core"`
+	Optional    bool         `json:"optional"`
+	Dismissable bool         `json:"dismissable"`
+	Lanes       []LaneReport `json:"lanes"`
+	ReportedAt  time.Time    `json:"reportedAt"`
 }
 
 // NodeLiveness is what the fold needs from a v1:cluster:node row.
@@ -123,9 +130,14 @@ type NodeVerdict struct {
 
 // Verdict is the cluster-wide answer for one module.
 type Verdict struct {
-	Module       string        `json:"module"`
-	State        State         `json:"state"`
+	Module string `json:"module"`
+	State  State  `json:"state"`
+	// Core, Optional and Dismissable are the module's declaration, read off
+	// its reports (see Fold). They ride on every verdict, unreported included:
+	// an optional module nobody has set up is still optional.
 	Core         bool          `json:"core"`
+	Optional     bool          `json:"optional"`
+	Dismissable  bool          `json:"dismissable"`
 	Disagreement []string      `json:"disagreement"`
 	Nodes        []NodeVerdict `json:"nodes"`
 	// Unknown names every LIVE node whose row says it could not evaluate,
@@ -192,6 +204,12 @@ func rank(s State) int {
 //     every live row is unknown, which is the honest answer and the one that
 //     lets the core gate open rather than hold on a read that broke.
 //
+// The declared flags -- core, optional, dismissable -- are read BEFORE any of
+// that, from every report of the module: they are the manifest's words copied
+// onto each row, not a node's vote, so a row that casts no vote still says
+// them. Any report saying a flag is enough, so a rollout that declares one
+// reads it as soon as one new node has written.
+//
 // Modules appear in name order, so two folds over the same rows are equal.
 func Fold(reports []NodeReport, nodes []NodeLiveness, now time.Time) []Verdict {
 	live := map[string]bool{}
@@ -203,6 +221,8 @@ func Fold(reports []NodeReport, nodes []NodeLiveness, now time.Time) []Verdict {
 	kept := map[string][]NodeReport{}
 	unknown := map[string][]string{}
 	core := map[string]bool{}
+	optional := map[string]bool{}
+	dismissable := map[string]bool{}
 	seen := map[string]bool{}
 	var order []string
 	for _, r := range reports {
@@ -211,6 +231,8 @@ func Fold(reports []NodeReport, nodes []NodeLiveness, now time.Time) []Verdict {
 			order = append(order, r.Module)
 		}
 		core[r.Module] = core[r.Module] || r.Core
+		optional[r.Module] = optional[r.Module] || r.Optional
+		dismissable[r.Module] = dismissable[r.Module] || r.Dismissable
 		if !live[r.NodeId] || r.State == NotApplicable {
 			continue
 		}
@@ -223,7 +245,8 @@ func Fold(reports []NodeReport, nodes []NodeLiveness, now time.Time) []Verdict {
 	sort.Strings(order)
 	out := make([]Verdict, 0, len(order))
 	for _, module := range order {
-		v := Verdict{Module: module, Core: core[module], Disagreement: []string{}, Nodes: []NodeVerdict{}, Unknown: []string{}, Stale: []string{}}
+		v := Verdict{Module: module, Core: core[module], Optional: optional[module], Dismissable: dismissable[module],
+			Disagreement: []string{}, Nodes: []NodeVerdict{}, Unknown: []string{}, Stale: []string{}}
 		if ids := unknown[module]; len(ids) > 0 {
 			sort.Strings(ids)
 			v.Unknown = ids

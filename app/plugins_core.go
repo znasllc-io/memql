@@ -72,6 +72,15 @@ import (
 	// integration registered NOWHERE only warns, while one registered with a
 	// capability MISSING fails boot.
 	_ "github.com/znasllc-io/memql/component/packages"
+	// Pipelines (epic memql#5477) live in the ROOT module beside packages,
+	// whose GitHub App client and grant path they borrow -- integrations/
+	// cannot import component/packages back. Registered on every node type
+	// for packages' reason: the six builtins are declared in dsl/pipelines,
+	// which every binary loads, and a capability present in the DSL and
+	// absent from the registry is a boot-time resolution failure. Every node
+	// opens runs (a bff a webhook's, an agent the poll's); only an agent
+	// drives one, and that half is wired beside the agent's integrations.
+	_ "github.com/znasllc-io/memql/component/pipelinerun"
 	// The log store's `logs` plug-in (epic memql#4893) lives in component/, in
 	// the ROOT module, for the reason packages does: it is engine internals.
 	// The eight builtins it executes are declared in dsl/observability, which

@@ -81,6 +81,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/pipelines"
 )
 
 // runClaimTTL is the claim lease.
@@ -130,8 +131,8 @@ type DispatchRequest struct {
 	// TriggeredBy is the run's triggeredBy, as the event or the sweep's row
 	// read carried it. Unlike Status it is not a hint: createWorkRun writes it
 	// once and updateWorkRun does not accept it, so every copy of it is the
-	// stored value. It is what marks a procedure's replay run
-	// (ProcedureReplayTriggerPrefix).
+	// stored value. It is what marks a run another runner owns (runnerOwned):
+	// a procedure's replay run or a pipeline's run.
 	TriggeredBy string
 }
 
@@ -160,13 +161,41 @@ func isProcedureReplay(triggeredBy string) bool {
 	return strings.HasPrefix(strings.TrimSpace(triggeredBy), ProcedureReplayTriggerPrefix)
 }
 
+// isPipelineRun reports a triggeredBy the pipelines driver wrote:
+// `pipeline:<mode>` (pipelines.WorkTriggerPrefix, the one spelling of the
+// prefix; epic memql#5477). The driver opens the run through the work journal
+// on an agent node and executes its steps against the registered executor,
+// under a lease of its own on the pipelines run.
+func isPipelineRun(triggeredBy string) bool {
+	return strings.HasPrefix(strings.TrimSpace(triggeredBy), pipelines.WorkTriggerPrefix)
+}
+
+// runnerOwned reports a run another runner EXECUTES: a learned procedure's
+// replay run or a pipeline's run. The dispatcher's admission never takes one,
+// on either of its checks -- the template executor has nothing to load for
+// either, and taking one runs its steps a second time.
+func runnerOwned(triggeredBy string) bool {
+	return isProcedureReplay(triggeredBy) || isPipelineRun(triggeredBy)
+}
+
+// runnerOwnsRecovery reports a run whose runner judges its LIVENESS as well,
+// so the sweep must not judge it at all: a pipeline's run. The pipelines
+// driver claims a silent run back under its own lease and resumes it from the
+// journal, so the sweep abandoning or re-dispatching the work run would
+// contradict a judgment already made elsewhere. A procedure's replay run is
+// runner-owned but not this: its heartbeat is still the sweep's to judge.
+func runnerOwnsRecovery(triggeredBy string) bool {
+	return isPipelineRun(triggeredBy)
+}
+
 // CanDispatchStoredRun rechecks an event or explicit recovery request against
 // the authoritative row. Ordinary journals belong to their scheduler; only
 // the sweep can take one over. A waiting run is eligible solely for a due
 // inference retry explicitly requested by that sweep, never a stale event. A
-// procedure's replay run is never eligible (ProcedureReplayTriggerPrefix).
+// run another runner owns -- a procedure's replay, a pipeline's run -- is
+// never eligible (runnerOwned).
 func (r DispatchRequest) CanDispatchStoredRun(goalId, status string, waitingOn map[string]any, now time.Time) bool {
-	if isProcedureReplay(r.TriggeredBy) {
+	if runnerOwned(r.TriggeredBy) {
 		return false
 	}
 	if status == runStatusRunning {
@@ -328,12 +357,15 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 	if d == nil {
 		return false
 	}
-	if isProcedureReplay(req.TriggeredBy) {
-		// Refused BEFORE the claim: the run is its replay runner's
-		// (ProcedureReplayTriggerPrefix), and a lease taken for it would be
+	if runnerOwned(req.TriggeredBy) {
+		// Refused BEFORE the claim: the run is its runner's -- a procedure's
+		// replay runner (ProcedureReplayTriggerPrefix) or the pipelines driver
+		// (pipelines.WorkTriggerPrefix) -- and a lease taken for it would be
 		// one this node never uses. Silent, because the refusal is the design
-		// rather than an incident: the caller -- the sweep's backstop -- goes
-		// on to judge the run by its heartbeat and says what it did.
+		// rather than an incident: on an event there is nothing to say, and on
+		// recovery the caller -- the sweep's backstop -- goes on to judge a
+		// replay run by its heartbeat and says what it did. A pipeline's run
+		// never reaches the backstop at all (runnerOwnsRecovery).
 		return false
 	}
 	claimer := i.runClaimerRef()

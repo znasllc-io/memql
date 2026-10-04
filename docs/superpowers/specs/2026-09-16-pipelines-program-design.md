@@ -470,3 +470,122 @@ label and its program priority.
 | 3, the substrate | #5478 | #5492 namespace, RBAC and overlay values; #5493 the Job runner; #5494 fleet routing by need; #5495 logs and artifacts; #5496 lifecycle, retention and the images; #5497 the cluster-e2e leg |
 | 4, MemQL OS | #5479 | #5498 seeds and capabilities; #5499 the Runs tab; #5500 the run page; #5501 the source page; #5502 the connect rail; #5503 the Settings readiness item |
 | 5, delivery | #5480 | #5504 channels and the notify stage; #5505 verify-rollout; #5506 M1; #5507 M2; #5508 M3; #5509 M4 |
+
+## 9. Implementation notes (epic 2)
+
+Recorded when epic 2 (#5477) landed. The decisions above stand as written;
+these notes say where the implementation reads one more narrowly, where it
+corrects a fact, and what its plan decided where this record left a choice
+open. The operator's account is `docs/public/operate/pipelines.md`.
+
+- **The run key carries the event (amends D4).** A run is keyed on
+  (repository, SHA, mode, event), `owner/name@<sha>:<mode>:<event>`
+  (`component/pipelines`, `RunKey`). Keyed on (repository, SHA, mode), the
+  merge queue's full run and the push that lands its commit -- both full, one
+  SHA once merged -- would collapse into one run, and the push's deploy and
+  notify stages would never execute. A webhook and a poll for one head stay one
+  run, because the poll synthesizes the same event: `push` for the default
+  branch, `pull_request` for a pull request's head. A check run is written per
+  run attempt, not per SHA: the queue's run and the push's are two on one
+  commit, and a re-run writes another.
+- **`release` joins D5's table** (documentation program record D15): `release`
+  published runs full, and `MEMQL_VERSION` is the tag for a release and the
+  head SHA otherwise. Two rows widen to what GitHub delivers: `pull_request`
+  reopened runs affected beside opened and synchronize, and `check_suite`
+  rerequested re-runs the pipeline's newest run at that SHA, as `check_run`
+  rerequested re-runs the run its check reports. Which stages a push runs is
+  the manifest's `on`, not this table.
+- **The event is read from the signed body's shape.** `X-GitHub-Event` is not
+  covered by the HMAC, so it is a cross-check; a delivery whose header
+  disagrees with its body is ignored.
+- **Section 2, two corrections.** (1) An installation is not a stored row. The
+  row is a person's GitHub Connect authorization, a `v1:platform:sourceCredential`
+  grant; the installation covering a repository is asked of GitHub when needed,
+  and an installation token is minted through the source owner's grant on
+  every use, after `verifyGrantRepository` confirms the grant still reaches
+  the repository. A pipeline records the grant it mints under and the
+  installation it was connected under, and a delivery from any other
+  installation opens nothing; a pasted token cannot drive a pipeline. A
+  delivery through no installation -- a repository webhook, which Deployables'
+  update feed documents on the same inbound seam -- is ignored, never an error,
+  so the trigger automation does not fail on every push it posts. (2) The
+  workbench does not clone. Deployables fetches a source through GitHub's
+  tarball API and hands the workbench a tar.gz of the tree, inline or by blob
+  reference; a pipeline run reads the tree the same way, keeping only
+  `memql-package.yaml`, `go.mod`, `go.work` and `*.go`.
+- **`select:` gains `dbGated` and `full` (D8).** "The trees the platform knows
+  need a database" has no other source for a customer repository, so
+  `select.dbGated` declares them and `only:` takes `db-gated` or
+  `not-db-gated`. The D7 example needs a `dbGated` line: `only: db-gated`
+  without one is refused, `pipeline_select_invalid`. `select.full` names globs
+  whose change selects everything, beside the built-in `go.mod`, `go.sum`,
+  `go.work`, `go.work.sum`, the manifest and vendored code.
+- **Services carry `env` and `ready` (D7, D10).** A Postgres sidecar needs a
+  bootstrap password, and `ready` is the shell probe the runner waits on before
+  the step's command starts. `env` is plain configuration; a secret stays a
+  reference on the step.
+- **Compute is a pipeline field (D8, D10, D14):** `cluster`, the default, or
+  `cluster_and_fleet`. A step naming a need on a cluster-only pipeline fails
+  the compile with `pipeline_fleet_not_consented`, scoped to the step.
+- **Step keys are `<stage>.<step>`, and `<stage>.<step>#<i>` for a shard (D7).**
+  The work spine reads a `/` in a step key as a nested step -- a row of a logic
+  a statement called -- in its loaders, its head rules and the Nexus drawing. A
+  refusal's scope stays `stage/step`, a path into the manifest rather than a
+  key.
+- **Stages run strictly in the order written, and the first failed stage
+  blocks every later one (D7).** `needs` must name earlier stages and is
+  recorded rather than scheduled on: every step depends on every step of the
+  stage before it, and a step after a failed stage is skipped
+  `pipeline_stage_blocked`. `on` takes events as well as modes -- the D7
+  example's `on: [push]` is an event -- and a stage `on` excludes is absent from
+  the plan rather than skipped. Timeouts run from 1 minute to 2 hours, 20
+  minutes by default (D11); shards are at most 8.
+- **A bucket's `!` glob means except.** A path is in a bucket when one of its
+  plain globs matches and none of its `!` globs does, and a list of only `!`
+  globs is refused. This departs on purpose from `dorny/paths-filter`, which
+  ORs a filter's patterns so that a `!` widens it; a manifest's author reads `!`
+  as except. A single glob keeps the CI bridge's grammar
+  (`scripts/ci/pathsfilter.go`), plus `?`.
+- **Selection reads the Go import graph from source.** The driver holds a
+  tarball, not a toolchain, so section 1's `go list -deps` becomes `go/parser`
+  over every `.go` file: the union over build tags, test imports included, a
+  superset of any one build's graph, which is the safe direction. A file that
+  does not parse, a compare that failed or listed 300 files, and an empty
+  change list each mean everything. An import of a path under one of the
+  tree's own modules stays an edge when no package answers it, and a changed
+  path whose directory holds no package seeds every package importing the path
+  that directory would have: a change that deletes a package selects what
+  still imports it, rather than nothing. Shards balance on a timing table
+  merged from every successful full run.
+- **Where a run is driven (D11).** The trigger opens a `queued` run where it
+  fires, the bff for a webhook and an agent replica for the poll; an agent
+  replica claims it under a row lease (renewed every 30 seconds, stale after
+  120) and drives it, and the every-minute poll claims runs nobody claimed and
+  runs whose driver went silent. A pipeline's work run is its runner's
+  (`triggeredBy: pipeline:<mode>`): the work dispatcher never takes it, the
+  spine's waiting sweep skips it, and Nexus's re-run and branch refuse it in
+  favour of `pipelinesRerun`.
+- **One pipeline per source, and one per repository (D12).** A pipeline hangs
+  off a `v1:platform:package`, its id derived from the package's, and its owner
+  is the package's owner, whose grant mints every token. A repository has one
+  active pipeline: two would write two same-named check runs on every commit,
+  so connect refuses a second source's with `pipeline_already_connected`,
+  checked again under the repository's gate before the write, and the remedy it
+  names is to disconnect the other source's pipeline (or work from that
+  source). A disconnected pipeline blocks nothing, and its runs stay as
+  history.
+- **The first poll records a baseline (D4)** and opens nothing; runs start with
+  the next change, as they do under webhook delivery by construction.
+- **The check run (D4):** named `MemQL / <pipeline name>`, its `external_id`
+  the run's id, its details link `https://os.<domain>/?pipelineRun=<run id>`,
+  which the OS reads at boot from epic 4. A 403 on a check-run write -- an
+  installation that has not accepted `checks: write` -- records
+  `checkRunState: refused` and the note `pipeline_check_permission_missing` on
+  the run, and never stops it.
+- **A fork's refusal writes a check run (D6)**, completed with conclusion
+  failure and titled "Refused: pull request from a fork": a neutral conclusion
+  would satisfy a required check.
+- **No default runner ships with epic 2 (D10).** With no executor registered, a
+  command step fails `pipeline_runner_unavailable`; the substrate (epic 3,
+  #5478) registers the runner. A notify step is skipped
+  `pipeline_notify_unavailable` until epic 5 (#5480).

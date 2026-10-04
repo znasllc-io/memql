@@ -126,7 +126,12 @@ func evaluateLane(ctx context.Context, r readinessResolvers, lane envregistry.La
 // probe resolver rather than reading the source.
 func evaluateModule(ctx context.Context, r readinessResolvers, mod envregistry.Module, nodeId, nodeType string, now time.Time) readiness.NodeReport {
 	ctx = readinessEvaluateContext(ctx)
-	out := readiness.NodeReport{Module: mod.Name, NodeId: nodeId, NodeType: nodeType, Core: mod.Core, Lanes: []readiness.LaneReport{}, ReportedAt: now}
+	// The declaration (core, optional, dismissable) is copied before any
+	// verdict is reached, so every return below -- notApplicable included --
+	// carries it; the fold reads it off rows that cast no vote.
+	out := readiness.NodeReport{Module: mod.Name, NodeId: nodeId, NodeType: nodeType,
+		Core: mod.Core, Optional: mod.Optional, Dismissable: mod.Dismissable,
+		Lanes: []readiness.LaneReport{}, ReportedAt: now}
 	if r.Hosted != nil && !r.Hosted(mod) {
 		out.State = readiness.NotApplicable
 		return out

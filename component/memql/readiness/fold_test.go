@@ -24,6 +24,14 @@ type foldFixture struct {
 		// and what the normalisation below compares against.
 		Unknown []string `json:"unknown"`
 		Stale   []string `json:"stale"`
+		// Optional and Dismissable are OPTIONAL in a fixture the same way: the
+		// fifteen older cases predate both flags, none of their reports
+		// carries either, and an absent flag means false -- which is compared,
+		// not skipped. `core` is deliberately not stated in an expectation:
+		// every older case's reports carry it, so it could only be asserted by
+		// rewriting them; TestTheDeclaredFlagsAreAnyReportsWord holds it.
+		Optional    bool `json:"optional"`
+		Dismissable bool `json:"dismissable"`
 	} `json:"expect"`
 }
 
@@ -35,8 +43,8 @@ func TestFoldFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) < 15 {
-		t.Fatalf("expected at least 15 fold fixtures, found %d -- the parity set is incomplete", len(paths))
+	if len(paths) < 17 {
+		t.Fatalf("expected at least 17 fold fixtures, found %d -- the parity set is incomplete", len(paths))
 	}
 	for _, path := range paths {
 		raw, err := os.ReadFile(path)
@@ -58,6 +66,10 @@ func TestFoldFixtures(t *testing.T) {
 				}
 				if !reflect.DeepEqual(got[i].Disagreement, want.Disagreement) {
 					t.Errorf("verdict %d disagreement: got %v, want %v", i, got[i].Disagreement, want.Disagreement)
+				}
+				if got[i].Optional != want.Optional || got[i].Dismissable != want.Dismissable {
+					t.Errorf("verdict %d flags: got optional=%v dismissable=%v, want optional=%v dismissable=%v",
+						i, got[i].Optional, got[i].Dismissable, want.Optional, want.Dismissable)
 				}
 				for _, list := range []struct {
 					name      string
@@ -217,6 +229,61 @@ func TestTheSetAsideListsAreNeverNull(t *testing.T) {
 	for _, want := range []string{`"unknown":[]`, `"stale":[]`} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("the verdict does not carry %s: %s", want, raw)
+		}
+	}
+}
+
+// THE THREE DECLARED FLAGS ARE THE MANIFEST'S WORDS, NOT A NODE'S VOTE. core,
+// optional and dismissable come from the module's declaration, so the verdict
+// carries them whatever the votes say: from a row that is notApplicable, from
+// a row that is not live, and from a module no live node voted on at all --
+// which is exactly the pipelines item before its integration reports
+// (unreported, and still optional). Any report saying so is enough, the rule
+// core has always had, so a rollout that makes a module optional reads
+// optional as soon as one new node has written.
+func TestTheDeclaredFlagsAreAnyReportsWord(t *testing.T) {
+	now := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	live := func(id string) NodeLiveness { return NodeLiveness{NodeId: id, Health: "healthy", LastSeen: now} }
+	got := Fold([]NodeReport{
+		// Not applicable everywhere: no vote, and the flags still ride.
+		{Module: "pipelines", NodeId: "agent-a", NodeType: "agent", State: NotApplicable, Optional: true, Dismissable: true, ReportedAt: now},
+		{Module: "pipelines", NodeId: "bff-a", NodeType: "bff", State: NotApplicable, Optional: true, Dismissable: true, ReportedAt: now},
+		// One new node says core; the other row predates the flag.
+		{Module: "storage", NodeId: "bff-a", NodeType: "bff", State: Configured, Core: true, ReportedAt: now},
+		{Module: "storage", NodeId: "bff-b", NodeType: "bff", State: Configured, ReportedAt: now},
+		// A DEAD node's row is no vote, and its declaration still counts.
+		{Module: "workbench", NodeId: "gone", NodeType: "agent", State: Unconfigured, Optional: true, ReportedAt: now},
+		{Module: "workbench", NodeId: "agent-a", NodeType: "agent", State: Configured, ReportedAt: now},
+	}, []NodeLiveness{live("agent-a"), live("bff-a"), live("bff-b")}, now)
+	want := map[string]struct {
+		state                       State
+		core, optional, dismissable bool
+	}{
+		"pipelines": {Unreported, false, true, true},
+		"storage":   {Configured, true, false, false},
+		"workbench": {Configured, false, true, false},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d verdicts, want %d: %+v", len(got), len(want), got)
+	}
+	for _, v := range got {
+		w := want[v.Module]
+		if v.State != w.state || v.Core != w.core || v.Optional != w.optional || v.Dismissable != w.dismissable {
+			t.Errorf("%s: got state=%s core=%v optional=%v dismissable=%v, want state=%s core=%v optional=%v dismissable=%v",
+				v.Module, v.State, v.Core, v.Optional, v.Dismissable, w.state, w.core, w.optional, w.dismissable)
+		}
+	}
+
+	// ALWAYS ON THE WIRE, the way core is: a reader tells "not optional" from
+	// "this engine predates the flag" by the engine version, never by a key
+	// that is sometimes missing.
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"optional":false`, `"dismissable":false`, `"optional":true`, `"dismissable":true`} {
+		if !strings.Contains(string(raw), key) {
+			t.Errorf("the verdicts do not carry %s: %s", key, raw)
 		}
 	}
 }

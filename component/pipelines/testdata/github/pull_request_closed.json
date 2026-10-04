@@ -1,0 +1,23 @@
+{
+  "action": "closed",
+  "number": 42,
+  "pull_request": {
+    "number": 42,
+    "state": "closed",
+    "merged": true,
+    "title": "Show the cart count on the badge",
+    "head": {
+      "ref": "cart-badge",
+      "sha": "4d3a8f9483a084a44043bd93b16a4b4414d0c3cc",
+      "repo": { "full_name": "Acme-Corp/Storefront" }
+    },
+    "base": {
+      "ref": "main",
+      "sha": "772c6a1d531d6f34ca4bc594a70987215f3ce1c8",
+      "repo": { "full_name": "Acme-Corp/Storefront" }
+    }
+  },
+  "repository": { "full_name": "Acme-Corp/Storefront", "default_branch": "main", "private": false },
+  "installation": { "id": 51234567 },
+  "sender": { "login": "octocat" }
+}

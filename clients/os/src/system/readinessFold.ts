@@ -53,7 +53,15 @@ export interface NodeReport {
   state: ReadinessState;
   /** Set only when state is "unknown": fleetReadFailed | integrationProbeFailed. */
   reason?: string;
+  /**
+   * The module's DECLARATION, copied from the manifest onto every row
+   * whatever its state. `optional`: nothing needs the module. `dismissable`:
+   * a person may answer "Not now" to it (the pipelines record, D15). A row
+   * written before either flag existed carries neither, which reads false.
+   */
   core?: boolean;
+  optional?: boolean;
+  dismissable?: boolean;
   lanes?: LaneReport[];
   reportedAt: string;
 }
@@ -90,7 +98,14 @@ export interface AsideVerdict {
 export interface Verdict {
   module: string;
   state: ReadinessState;
+  /**
+   * The module's declaration, read off every report of it, voting or not --
+   * so an optional module nobody has set up is still optional while its
+   * state is `unreported`.
+   */
   core: boolean;
+  optional: boolean;
+  dismissable: boolean;
   disagreement: string[];
   nodes: NodeVerdict[];
   /**
@@ -156,20 +171,29 @@ function rank(s: ReadinessState): number {
  *     not being set up are different answers, and only one of them should send
  *     somebody to a form.
  *
+ * The declared flags -- core, optional, dismissable -- are read BEFORE any of
+ * that, from every report of the module: they are the manifest's words copied
+ * onto each row, not a node's vote, so a row that casts no vote still says
+ * them. Any report saying a flag is enough.
+ *
  * Modules come back in name order, so two folds over the same rows are equal.
  */
 export function foldReadiness(reports: NodeReport[], nodes: NodeLiveness[], now: Date): Verdict[] {
   const live = new Set(nodes.filter((n) => nodeIsLive(n, now)).map((n) => n.nodeId));
   const kept = new Map<string, NodeReport[]>();
   const unknown = new Map<string, NodeReport[]>();
-  const core = new Map<string, boolean>();
+  const declared = new Map<string, { core: boolean; optional: boolean; dismissable: boolean }>();
   const order: string[] = [];
   for (const r of reports) {
-    if (!core.has(r.module)) {
+    let flags = declared.get(r.module);
+    if (flags === undefined) {
       order.push(r.module);
-      core.set(r.module, false);
+      flags = { core: false, optional: false, dismissable: false };
+      declared.set(r.module, flags);
     }
-    if (r.core) core.set(r.module, true);
+    if (r.core) flags.core = true;
+    if (r.optional) flags.optional = true;
+    if (r.dismissable) flags.dismissable = true;
     if (!live.has(r.nodeId) || r.state === "notApplicable") continue;
     const into = r.state === "unknown" ? unknown : kept;
     const list = into.get(r.module) ?? [];
@@ -185,9 +209,12 @@ export function foldReadiness(reports: NodeReport[], nodes: NodeLiveness[], now:
       ...staleRows.map((r) => asideOf(r, "stale")),
       ...unknownRows.map((r) => asideOf(r, "unknown")),
     ];
+    const flags = declared.get(module);
     const base = {
       module,
-      core: core.get(module) ?? false,
+      core: flags?.core ?? false,
+      optional: flags?.optional ?? false,
+      dismissable: flags?.dismissable ?? false,
       unknown: unknownRows.map((r) => r.nodeId),
       stale: staleRows.map((r) => r.nodeId),
       aside,

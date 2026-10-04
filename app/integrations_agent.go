@@ -32,6 +32,11 @@ func (a *App) integrationsAgent() {
 	// the work plug-in it installs itself on.
 	a.wireWorkRunDispatcher()
 
+	// The agent node DRIVES pipeline runs (epic memql#5477): after
+	// integrationsCore(), whose wirePipelines() gave the plug-in its gate,
+	// GitHub port, node id and journal -- every port a driver needs.
+	a.wirePipelinesDriver()
+
 	a.Logger.Info("agent integration providers registered")
 }
 

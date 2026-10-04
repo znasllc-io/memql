@@ -2,10 +2,12 @@ package campaigns
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
@@ -42,18 +44,27 @@ import (
 // deployment-level decisions, all made in env, all made by whoever would
 // have held the admin role anyway.
 //
-// So the gate is the CONFIGURATION rather than the caller:
+// So the gate is the ORIGIN and the CONFIGURATION rather than a role:
 //
+//  0. the call must arrive with internal origin -- the shipped automation's
+//     step context, which the executor stamps on a tree-loaded automation and
+//     on nothing a client sends -- or it is refused before the row is read;
 //  1. the inbound row's source must appear in MEMQL_CAMPAIGNS_FEEDBACK_SOURCES;
 //  2. the row must carry signatureVerified=true, so a source configured
 //     scheme='none' can never drive a suppression;
 //  3. every address and every verdict comes out of the signed body.
 //
-// The most a caller can do by invoking this on an arbitrary row id is cause
-// a webhook the operator already trusted to be processed again, which is
-// idempotent. Gating on admin instead would have meant every deployment
-// minting a service-account credential for an automation to present -- real
-// operator burden buying no property this does not already have.
+// The first is there because a builtin is reachable by name from any
+// signed-in client's query, and re-processing a delivery is NOT the no-op it
+// looks like. The suppression it writes is idempotent; what surrounds it is
+// not. Every pass counts its reports into the sending ramp's per-domain
+// reputation window again (reputation.go) and appends another consent event
+// for each hard bounce and complaint, so a client looping one real bounce row
+// -- and the staged rows are readable, so their ids are not secret -- could
+// talk the ramp out of a healthy domain and fill the consent stream with
+// verdicts nobody reported twice. Gating on admin instead would have meant
+// every deployment minting a service-account credential for an automation to
+// present; origin is the same property with no credential at all.
 //
 // # Nothing is dropped quietly
 //
@@ -64,7 +75,16 @@ import (
 // SNS handshake -- stamps `processed` and says what it was, because
 // recording that as a failure would teach an operator to ignore failures.
 
+// errIngestFeedbackClientOrigin is the feedback ingester reached by anything
+// but the shipped automation.
+var errIngestFeedbackClientOrigin = errors.New("campaigns.ingestFeedback: provider feedback is ingested by the engine's own automation and refuses a call from a client")
+
 func (w *Worker) handleIngestFeedback(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	// Gate 0, BEFORE the row is read: a refusal after a read is a read that
+	// happened.
+	if !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, errIngestFeedbackClientOrigin
+	}
 	requestID := strings.TrimSpace(argString(args, "inboundRequestId"))
 	if requestID == "" {
 		return nil, fmt.Errorf("campaigns.ingestFeedback: inboundRequestId is required")
@@ -298,11 +318,12 @@ func (s *Store) InboundRequestByID(ctx context.Context, requestID string) (Inbou
 //
 // updateInboundRequestStatus is @serverOnly (memql#5707 follow-up), so the
 // write goes through execServerOnly. The automation reaches the ingester on
-// an internal-origin step context, but campaignIngestFeedback is also a
-// builtin a client may call directly -- it is gated by configuration, not
-// origin -- and on that path the context is the client's. The status written
-// is always the outcome of THIS function's own processing of the row, never
-// a value the caller chose, which is what the stamp vouches for.
+// an internal-origin step context, and the ingester refuses every other caller
+// before it reads the row (handleIngestFeedback), so by the time this runs the
+// origin is already internal; the stamp is applied here anyway, inline, so the
+// write does not lean on what a caller's context happened to inherit. The
+// status written is always the outcome of THIS function's own processing of
+// the row, never a value a caller chose, which is what the stamp vouches for.
 func (s *Store) SetInboundStatus(ctx context.Context, requestID, status, lastError string) error {
 	args := []arg{
 		{"requestId", requestID},

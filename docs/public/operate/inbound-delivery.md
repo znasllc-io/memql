@@ -86,15 +86,26 @@ choose here: it is `MEMQL_GITHUB_APP_WEBHOOK_SECRET`, the GitHub App's own
 webhook secret, so the app signs with it and this receiver verifies with it. The
 name must be `github` rather than `gh`, because that is the segment
 `MEMQL_PACKAGES_WEBHOOK_SOURCE` defaults to and therefore the one the packages
-feed reads deliveries from.
+feed reads deliveries from. Pipelines read the same deliveries, from the same
+rows: the app's one webhook carries the pushes the update cue reads and the
+pull requests, merge groups, releases and re-run requests a pipeline run starts
+from, so there is no second source to configure.
 
 ```bash
 MEMQL_INBOUND_SOURCE_ALLOWLIST=github
 MEMQL_INBOUND_SOURCE_GITHUB_SIGNATURE_SCHEME=hmac-sha256-hex
 MEMQL_INBOUND_SOURCE_GITHUB_SIGNATURE_HEADER=X-Hub-Signature-256
 MEMQL_INBOUND_SOURCE_GITHUB_SIGNATURE_PREFIX=sha256=
+MEMQL_INBOUND_SOURCE_GITHUB_DEDUPE_HEADER=X-GitHub-Delivery
+MEMQL_INBOUND_SOURCE_GITHUB_FORWARD_HEADERS=X-GitHub-Event,X-GitHub-Delivery,X-GitHub-Hook-ID
 MEMQL_INBOUND_SOURCE_GITHUB_SECRET=<the same value as MEMQL_GITHUB_APP_WEBHOOK_SECRET>
 ```
+
+The dedupe key is GitHub's delivery id, the one its own delivery log shows. The
+forwarded headers put the event name on the row, because GitHub sends it only
+in `X-GitHub-Event` and never in the body. An app registered from the product
+needs none of these lines: the bff admits its source with the app's stored
+secret and these same values.
 
 A Stripe-shaped one, whose single header carries both the timestamp and the
 digest (`Stripe-Signature: t=1614556800,v1=<hex>`):
@@ -139,7 +150,11 @@ any other `failed` with a reason naming the tier. That covers the case the
 receiver cannot see: a delivery an env pin admitted while no store had that id,
 dispatched after the store was connected. A row with no `verifiedBy` -- one the
 mailbox reader staged, or one staged before the field existed -- is dispatched
-as before.
+as before, provided the receiver verified it: a claimed row with
+`signatureVerified=false` is stamped `failed` too, whatever its tier says.
+Both are read off the staged row by the dispatcher itself, never from the
+automation's arguments (see [what a connector's `Apply`
+returns](#what-a-connectors-apply-returns)).
 
 ```bash
 MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_SIGNATURE_SCHEME=hmac-sha256-base64
@@ -175,8 +190,9 @@ dispatchInboundToConnector      an engine automation on inboundRequest.created
 ```
 
 `Apply` receives the row's fields as an `InboundRequest` — `Source`,
-`Topic`, `Body`, `Headers`, `ReceivedAt` and the staged row's id — and
-returns the rows it wants written. It does **not** write them itself: the
+`Body`, `Headers`, `ReceivedAt` and the staged row's id; `Topic` is empty,
+because a staged row carries none and the origin's event name, when it sends
+one, is in the headers — and returns the rows it wants written. It does **not** write them itself: the
 runtime does, under the connector's own actor, and refuses any write whose
 version is older than what MemQL already holds (recording it as `stale`).
 That is what stops an out-of-order webhook regressing a mirror.
@@ -190,6 +206,15 @@ left exactly as staged, `received`, for whatever automation serves that source.
 That holds even when its staged `headersJson` or `receivedAt` cannot be read.
 The dispatcher parses them only after a connector claims the row, and a claimed
 row that does not parse is stamped `failed` with the reason before `Apply` runs.
+
+**The dispatcher reads the row itself.** The automation hands
+`datasyncDispatchInbound` the staged row's id and nothing else; the source, the
+body, the headers, the receipt time, the verifying tier and the signature
+verdict all come from the row, which only the receiver (or the mailbox reader)
+can write. A call that did not come from the engine's own automation is refused
+before the row is read, because a builtin answers to its name in any signed-in
+client's query. So a connector applies a delivery a secret verified, and
+nothing a caller supplies.
 
 See [data origins](../concepts/data-origins.md) for the contract and
 `integrations/CLAUDE.md` for the recipe.

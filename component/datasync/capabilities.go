@@ -64,16 +64,10 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
 			Name:        "dispatchInbound",
-			Description: "Route one staged inbound request to the connector its source names, apply the returned mirror writes behind the version guard, and stamp the request. A no-op for a source no connector serves.",
+			Description: "Route one staged inbound request to the connector its source names, apply the returned mirror writes behind the version guard, and stamp the request. Refuses a call without internal origin; reads the delivery from the staged row, and applies a claimed source's row only when the connector's secret verified it. A no-op for a source no connector serves.",
 			Handler:     i.handleDispatchInbound,
 			ArgsSchema: map[string]string{
-				"inboundRequestId": "string - staged v1:platform:inboundRequest row id",
-				"source":           "string - the /inbound/{source} name the delivery arrived under",
-				"body":             "string - the verified raw request body",
-				"topic":            "string - optional delivery topic",
-				"headersJson":      "string - allowlisted delivery metadata as JSON",
-				"receivedAt":       "string - original receipt time in RFC3339",
-				"verifiedBy":       "string - the tier whose secret verified the delivery (env, registered, connector); a claimed source's row is applied only for connector",
+				"inboundRequestId": "string (required) - staged v1:platform:inboundRequest row id; its source, body, metadata, verifying tier and signature verdict are read from the row",
 			},
 		},
 		{
@@ -120,13 +114,14 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 
 // requireInternalOrigin is the gate of the two automation-driven builtins,
 // checked BEFORE any argument is read. A builtin cannot be @serverOnly, so
-// per the root CLAUDE.md its gate lives in the handler: dispatchInbound takes
-// a source, a body and a headersJson and hands them to a connector, which for
-// Shopify reaches a privacy purge, so a client -- or a product bundle's logic
-// -- calling it with chosen arguments would be the same door
-// stageInboundRequest's @serverOnly closed (memql#5707 review). The
-// automation executor stamps internal origin on a trusted automation's step
-// context (originForSource), which is how dispatchInboundToConnector and the
+// per the root CLAUDE.md its gate lives in the handler: dispatchInbound hands
+// a staged delivery to a connector, which for Shopify reaches a privacy purge.
+// It takes no delivery from its caller -- only the row id, the row read by the
+// dispatcher itself (handleDispatchInbound) -- but a client re-dispatching a
+// real row by id would still re-run a connector's Apply and re-stamp the row,
+// which is the operator's record of what happened to it. The automation
+// executor stamps internal origin on a trusted automation's step context
+// (originForSource), which is how dispatchInboundToConnector and the
 // reconcile cron reach these; nothing else may.
 func requireInternalOrigin(ctx context.Context, name string) error {
 	if !auth.OriginFromContext(ctx).IsInternal() {
@@ -135,27 +130,36 @@ func requireInternalOrigin(ctx context.Context, name string) error {
 	return nil
 }
 
+// handleDispatchInbound is HANDED A ROW ID AND NOTHING ELSE (epic memql#5477).
+// It used to take the source, the body, the headers, the receipt time and the
+// verifying tier as arguments, so whatever could call it chose the delivery a
+// connector saw -- and the tier check below it judged a value its caller
+// supplied. Now every one of them is read from the STAGED row, which only the
+// receiver (or the mailbox reader) can write, under internal origin.
 func (i *Integration) handleDispatchInbound(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if err := requireInternalOrigin(ctx, "dispatchInbound"); err != nil {
 		return nil, err
 	}
-	source := strings.TrimSpace(argString(args, "source"))
+	requestID := strings.TrimSpace(argString(args, "inboundRequestId"))
+	if requestID == "" {
+		return nil, fmt.Errorf("datasync: dispatchInbound needs the staged row's inboundRequestId")
+	}
+	staged, found, err := i.dispatcher.Staged(ctx, requestID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("datasync: no inbound request is staged as %q", requestID)
+	}
+	source := strings.TrimSpace(staged.Source)
 	if source == "" {
 		return resultNode("skipped", "no source on the staged row")
 	}
-	// The staged metadata is parsed INSIDE DispatchStaged, after the
-	// connector lookup, so a row of a source no connector serves stays the
-	// no-op Dispatch's contract promises whatever its metadata says; a
-	// served row that does not parse is stamped `failed` there.
-	res, err := i.dispatcher.DispatchStaged(ctx, StagedRequest{
-		RequestId:   argString(args, "inboundRequestId"),
-		Source:      source,
-		Topic:       argString(args, "topic"),
-		Body:        []byte(argString(args, "body")),
-		HeadersJSON: argString(args, "headersJson"),
-		ReceivedAt:  argString(args, "receivedAt"),
-		VerifiedBy:  argString(args, "verifiedBy"),
-	})
+	// The row is judged INSIDE DispatchStaged, after the connector lookup, so
+	// a row of a source no connector serves stays the no-op Dispatch's
+	// contract promises whatever its tier, its verdict or its metadata say; a
+	// served row that fails any of them is stamped `failed` there.
+	res, err := i.dispatcher.DispatchStaged(ctx, staged)
 	if err != nil {
 		// Returned rather than swallowed: the automation step records it,
 		// and the request row has already been stamped `failed` with the

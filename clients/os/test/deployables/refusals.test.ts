@@ -326,3 +326,86 @@ describe("refusal copy coverage", () => {
     expect(toneFor("secret_name_ambiguous")).toBe("error");
   });
 });
+
+// PIPELINES (epic memql#5477). Each code's CLASS -- refusal, failure, skip or
+// note -- is declared once, in component/pipelines/refusal.go, and read from
+// there rather than restated: a skip copied into a list here is the list that
+// drifts. The coverage gate above already holds every code to having copy;
+// this holds the copy to what each class promises a reader.
+const pipelinesRefusalPath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../../component/pipelines/refusal.go",
+);
+
+/** code -> class ("Refusal" | "Failure" | "Skip" | "Note"), off the Go source. */
+function pipelineClasses(): Map<string, string> {
+  const source = readFileSync(pipelinesRefusalPath, "utf8");
+  const codeOf = new Map<string, string>();
+  for (const m of source.matchAll(/^\s*(Code\w+)\s*=\s*"(pipeline_[a-z_]+)"/gm)) codeOf.set(m[1]!, m[2]!);
+  const out = new Map<string, string>();
+  for (const m of source.matchAll(/^\s*(Code\w+):\s*Class(\w+),/gm)) {
+    const code = codeOf.get(m[1]!);
+    if (code !== undefined) out.set(code, m[2]!);
+  }
+  return out;
+}
+
+describe("pipeline refusal copy", () => {
+  it("reads every pipeline code's class from the engine, and fails rather than skips when it cannot", () => {
+    expect(existsSync(pipelinesRefusalPath), `${pipelinesRefusalPath} is not where this test expects it`).toBe(true);
+    const classes = pipelineClasses();
+    // A REACHABLE POSITIVE for each class, so a regexp that stopped matching
+    // one of them cannot pass the cases below by examining nothing.
+    for (const cls of ["Refusal", "Failure", "Skip", "Note"]) {
+      expect([...classes.values()], `no pipeline code of class ${cls} was read`).toContain(cls);
+    }
+    // ...and the scan covers the catalogue the coverage gate reads.
+    const catalogued = cataloguedCodes().filter((code) => code.startsWith("pipeline_"));
+    expect([...classes.keys()].sort()).toEqual(catalogued);
+  });
+
+  it("gives every refusal and failure a next step", () => {
+    for (const [code, cls] of pipelineClasses()) {
+      const copy = copyFor(code);
+      expect(copy?.title, `${code} has no headline`).toBeTruthy();
+      if (cls === "Refusal" || cls === "Failure") {
+        expect(copy?.next, `${code} is a ${cls.toLowerCase()} with no next step`).toBeTruthy();
+      }
+    }
+  });
+
+  it("never paints a skip or a note in the fault colour", () => {
+    for (const [code, cls] of pipelineClasses()) {
+      if (cls === "Skip" || cls === "Note") expect(toneFor(code), code).toBe("warn");
+    }
+    // A failure where a step executes is still a fault.
+    for (const code of ["pipeline_step_timeout", "pipeline_image_pull_failed", "pipeline_stage_invalid"]) {
+      expect(toneFor(code), code).toBe("error");
+    }
+  });
+
+  it("parks no pipeline code on the deploy rail", () => {
+    // A pipeline's codes land on the pipeline RUN and its check run, never on
+    // a deploy (component/packages/refusal.go). A stop for one would send
+    // somebody to repair a deployable that is fine.
+    for (const code of pipelineClasses().keys()) {
+      expect(refusalStopForCode(code), code).toBeUndefined();
+    }
+  });
+
+  it("keeps the runner's own sentences for where a step executes", () => {
+    // Supplied by the runner's session (epic memql#5478) and pinned by name,
+    // so a later edit to one headline cannot quietly move it onto another.
+    expect(copyFor("pipeline_step_timeout")?.title).toBe("The step ran past its time limit and was stopped");
+    expect(copyFor("pipeline_step_timeout")?.next).toContain("memql-package.yaml");
+    expect(copyFor("pipeline_run_ceiling")?.next).toContain("MEMQL_PIPELINES_RUN_MAX_MINUTES");
+    expect(copyFor("pipeline_no_machine_for_need")?.title).toBe("No online machine of yours offers what this step needs");
+    expect(copyFor("pipeline_fleet_disabled")?.next).toContain("Fleet");
+    expect(copyFor("pipeline_clone_failed")?.next).toContain("GitHub App");
+    expect(copyFor("pipeline_log_capped")?.next).toContain("Library");
+    expect(copyFor("pipeline_artifact_missing")?.title).toBe("A declared artifact path matched no file");
+    expect(copyFor("pipeline_isolation_unenforced")?.next).toContain("network policy");
+    // And the engine's: a fork is refused with somewhere to go instead.
+    expect(copyFor("pipeline_fork_refused")?.next).toContain("Push the branch");
+  });
+});

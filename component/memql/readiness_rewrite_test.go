@@ -24,6 +24,11 @@ func TestReadinessRewriteNeeded(t *testing.T) {
 		{"identical and fresh is skipped", fresh, same, false},
 		{"a changed state writes", fresh, func() readiness.NodeReport { n := same; n.State = readiness.State("degraded"); return n }(), true},
 		{"a changed core flag writes", fresh, func() readiness.NodeReport { n := same; n.Core = false; return n }(), true},
+		// The other two declared flags are restated the moment they change,
+		// for core's reason: a release that makes a module optional must not
+		// wait out the restatement floor before the shell can tell.
+		{"a changed optional flag writes", fresh, func() readiness.NodeReport { n := same; n.Optional = true; return n }(), true},
+		{"a changed dismissable flag writes", fresh, func() readiness.NodeReport { n := same; n.Dismissable = true; return n }(), true},
 		// An unknown row names WHICH resolver could not answer, and a different
 		// resolver failing is a different fact for the operator reading it.
 		{"a changed reason writes", func() *readiness.NodeReport {

@@ -50,8 +50,9 @@ func (e *MemQLEngine) readinessIdentity() (string, string) {
 // a re-evaluation appends a new VERSION of one logical row rather than a
 // second row -- the same reason the cluster singletons sit at literal ids.
 // readinessRewriteFloor bounds how long an unchanged verdict may stand without
-// being restated. Below it, a rewrite that would carry the same state, core
-// flag and lanes as the row already holds is SKIPPED: the fleet's steady state
+// being restated. Below it, a rewrite that would carry the same state, the
+// same declared flags (core, optional, dismissable) and the same lanes as the
+// row already holds is SKIPPED: the fleet's steady state
 // used to append a version per module per node on every trigger (772k
 // v1:platform:moduleReadiness versions for a few dozen live ids on
 // a production instance, 2026-09-13), and every one of those rows was news to nobody.
@@ -67,7 +68,10 @@ func readinessRewriteNeeded(prev *readiness.NodeReport, next readiness.NodeRepor
 	if prev == nil {
 		return true
 	}
-	if prev.State != next.State || prev.Reason != next.Reason || prev.Core != next.Core || !readinessLanesEqual(prev.Lanes, next.Lanes) {
+	if prev.State != next.State || prev.Reason != next.Reason || !readinessLanesEqual(prev.Lanes, next.Lanes) {
+		return true
+	}
+	if prev.Core != next.Core || prev.Optional != next.Optional || prev.Dismissable != next.Dismissable {
 		return true
 	}
 	return now.Sub(prev.ReportedAt) >= readinessRewriteFloor
@@ -143,7 +147,8 @@ func readinessRowID(module, nodeId string) string {
 // lanes ride as a JSON literal, which the parser accepts as a list of objects.
 //
 // `reason` is rendered only when the report carries one (an Unknown verdict),
-// so a known verdict's call is byte-for-byte what it was before the field.
+// so a known verdict's call names no reason at all. The three declared flags
+// -- core, optional, dismissable -- are always rendered, true or false.
 func renderRecordModuleReadiness(r readiness.NodeReport, rowId string) (string, error) {
 	lanes := r.Lanes
 	if lanes == nil {
@@ -158,7 +163,7 @@ func renderRecordModuleReadiness(r readiness.NodeReport, rowId string) (string, 
 		reason = ", reason: " + langparser.QuoteString(r.Reason)
 	}
 	return fmt.Sprintf(
-		"mutation recordModuleReadiness(rowId: %s, module: %s, nodeId: %s, nodeType: %s, state: %s%s, core: %t, lanes: %s, reportedAt: %s)",
+		"mutation recordModuleReadiness(rowId: %s, module: %s, nodeId: %s, nodeType: %s, state: %s%s, core: %t, optional: %t, dismissable: %t, lanes: %s, reportedAt: %s)",
 		langparser.QuoteString(rowId),
 		langparser.QuoteString(r.Module),
 		langparser.QuoteString(r.NodeId),
@@ -166,6 +171,8 @@ func renderRecordModuleReadiness(r readiness.NodeReport, rowId string) (string, 
 		langparser.QuoteString(string(r.State)),
 		reason,
 		r.Core,
+		r.Optional,
+		r.Dismissable,
 		string(raw),
 		langparser.QuoteString(r.ReportedAt.UTC().Format(time.RFC3339)),
 	), nil

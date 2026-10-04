@@ -103,6 +103,9 @@ type fakeConnector struct {
 	applyWrites []memqlsync.MirrorWrite
 	applyErr    error
 	applyCalls  int
+	// applied is every delivery Apply was handed, so a test can say WHICH
+	// body and headers reached the connector, not only that some did.
+	applied []memqlsync.InboundRequest
 
 	// propagate is consulted per call with the attempt number, so a test
 	// can script "fail twice then succeed".
@@ -127,9 +130,10 @@ func (c *fakeConnector) EnsureSubscriptions(context.Context) error {
 	return memqlsync.NotImplemented(c.name, "EnsureSubscriptions")
 }
 
-func (c *fakeConnector) Apply(context.Context, memqlsync.InboundRequest) ([]memqlsync.MirrorWrite, error) {
+func (c *fakeConnector) Apply(_ context.Context, req memqlsync.InboundRequest) ([]memqlsync.MirrorWrite, error) {
 	c.mu.Lock()
 	c.applyCalls++
+	c.applied = append(c.applied, req)
 	c.mu.Unlock()
 	if c.applyErr != nil {
 		return nil, c.applyErr

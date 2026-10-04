@@ -234,3 +234,38 @@ func TestReportsCarryTheirNodeAndModule(t *testing.T) {
 		t.Fatalf("reportedAt is zero")
 	}
 }
+
+// THE DECLARATION RIDES ON EVERY ROW, WHATEVER THE VERDICT. optional and
+// dismissable are copied from the manifest the way core is, so the fold reads
+// them off a notApplicable row as readily as off a vote -- and the pipelines
+// item is notApplicable on every node until its integration registers a
+// status capability, which is when "optional" matters most: nobody has set it
+// up, and the shell must still know it may be waved away.
+func TestReportsCarryTheModuleDeclaration(t *testing.T) {
+	pipelines := envregistry.Module{Name: "pipelines", Optional: true, Dismissable: true, Description: "d",
+		Evaluator: envregistry.EvaluatorIntegrationPrefix + "pipelines",
+		HostedBy:  envregistry.HostedBy{NodeTypes: []string{"agent"}}}
+
+	// Hosted, with no integration registered: the shipped state today.
+	got := evalOne(t, fakeResolvers(nil, nil, nil), pipelines)
+	if got.State != readiness.NotApplicable {
+		t.Fatalf("an integration this node does not carry must read notApplicable, got %s", got.State)
+	}
+	if !got.Optional || !got.Dismissable || got.Core {
+		t.Fatalf("the declaration did not ride on a notApplicable row: %+v", got)
+	}
+
+	// Not hosted here at all: the early return carries it too.
+	r := fakeResolvers(nil, nil, nil)
+	r.Hosted = func(envregistry.Module) bool { return false }
+	got = evalOne(t, r, pipelines)
+	if got.State != readiness.NotApplicable || !got.Optional || !got.Dismissable {
+		t.Fatalf("a node that does not host the module dropped its declaration: %+v", got)
+	}
+
+	// And a module that declares neither says neither.
+	got = evalOne(t, fakeResolvers(nil, nil, nil), twoSlotModule)
+	if got.Optional || got.Dismissable {
+		t.Fatalf("a module declaring neither flag reported one: %+v", got)
+	}
+}

@@ -288,5 +288,5 @@ describe("the body alone", () => {
 });
 
 function vFor(module: string, state: "configured" | "unconfigured" | "partial" | "unreported") {
-  return { module, state, core: true, disagreement: [] as string[], nodes: [], lanes: [], unknown: [] as string[], stale: [] as string[], aside: [] };
+  return { module, state, core: true, optional: false, dismissable: false, disagreement: [] as string[], nodes: [], lanes: [], unknown: [] as string[], stale: [] as string[], aside: [] };
 }

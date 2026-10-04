@@ -58,6 +58,7 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	_, _ = s.siteById(ctx, "s")
 	_, _ = s.packagesByRepoUrl(ctx, "u")
 	_, _ = s.packagesTrackingRepos(ctx)
+	_, _ = s.inboundRequestById(ctx, "i")
 	_, _, _ = s.artifactBytes(ctx, "a", nil)
 
 	_ = s.advance(ctx, "d", StatusBuilding)
@@ -92,7 +93,7 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	// issues at the gate, so the guard decides it for the caller.
 	_ = s.disableDeployables(ctx, "p", []string{"web"})
 
-	reads := []string{"packageById", "packageDeploymentById", "sitesForPackage", "siteById", "packagesByRepoUrl", "packagesTrackingRepos", "libraryArtifactById"}
+	reads := []string{"packageById", "packageDeploymentById", "sitesForPackage", "siteById", "packagesByRepoUrl", "packagesTrackingRepos", "inboundRequestById", "libraryArtifactById"}
 	writes := []string{"advancePackageDeployment", "recordPackageDeployedVersion", "recordPackageName",
 		"recordPackageUpstreamVersion", "recordSitePackageOrigin", "setPackageStatus", "setSiteStatus",
 		"recordPackageDeploymentReport", "createSourceCredential", "touchSourceCredential",

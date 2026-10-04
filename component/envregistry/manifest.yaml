@@ -3363,11 +3363,14 @@ variables:
 # A module is a named set of lanes over the entries above, or a named evaluator. A module
 # is configured when any one lane has every slot present, partial when some slot is present
 # and no lane is complete, unconfigured when none is. Presence, never a value. `core` marks
-# the modules the first-run wizard walks. `hostedBy` names the nodes that report a verdict;
-# a node not matching reports notApplicable. `configurableFrom` is what the Set up group
-# offers: a button into the OS surface that writes it, or the variable names to set in the
-# deployment. Decoded STRICTLY (component/envregistry/modules.go): an unknown key refuses
-# boot, and every slot must name an entry above.
+# the modules the first-run wizard walks. `optional` marks a module nothing needs -- a
+# feature an owner may choose to set up -- and is never core; `dismissable` lets a person
+# answer "Not now" to it and requires `optional` (pipelines program design record, D15).
+# `hostedBy` names the nodes that report a verdict; a node not matching reports
+# notApplicable. `configurableFrom` is what the Set up group offers: a button into the OS
+# surface that writes it, or the variable names to set in the deployment. Decoded STRICTLY
+# (component/envregistry/modules.go): an unknown key refuses boot, and every slot must name
+# an entry above.
 modules:
   - name: ai
     core: true
@@ -3431,3 +3434,15 @@ modules:
       - name: default
         configurableFrom: deployment
         slots: [MEMQL_MCP_PUBLIC_URL, MEMQL_NODE_BOOTSTRAP_TOKEN, MEMQL_IDENTITY_VERIFIER_BASE_URL]
+  # Optional and dismissable (pipelines program design record, D15): nothing needs a
+  # pipeline, so the first-run wizard does not walk it and a person may answer "Not now".
+  # Hosted by the agent, where the pipeline driver runs. Until the pipelines integration
+  # registers its status capability on a node, that node reports notApplicable, and the
+  # fold reads the module as not reported rather than not set up.
+  - name: pipelines
+    optional: true
+    dismissable: true
+    description: "Pipelines run a repository's checks from its memql-package.yaml and report them on GitHub."
+    hostedBy:
+      nodeTypes: [agent]
+    evaluator: "integration:pipelines"
