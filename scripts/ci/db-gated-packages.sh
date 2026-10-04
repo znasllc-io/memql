@@ -229,6 +229,21 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # right store and a wrong one alike. What the complement now means, having
 # looked: the package moves from go-checks to db-tests whole, and its unit
 # suites run beside a database they ignore.
+#
+# epic memql#5477 (issue #5491) added `test/pipelinehop`, the seam's
+# cross-node evidence: a GitHub delivery staged on one engine through the real
+# inbound receiver and the shipped trigger automation opens a run that a
+# SECOND engine claims and drives, the two sharing only Postgres, the advisory
+# gate on it and the events the routing rules let across. Every claim in it is
+# about real rows and a real lock -- one run per run key under the gate, the
+# lease the run row records, the work spine the driver writes -- and a
+# single-node fake would pass a driver that never left the node it was opened
+# on. It crosses component/inbound, component/automations and
+# component/pipelinerun, so it sits under test/ in the root module beside
+# test/inboundhop, and a db-gated test outside this lane only ever runs on the
+# machine of whoever happened to have Postgres up. What the complement now
+# means, having looked: the package holds nothing but this test and its
+# routing assertion, so it moves from go-checks to db-tests whole.
 readonly DB_GATED_TREES=(
 	"app"
 	"component/memql"
@@ -261,6 +276,7 @@ readonly DB_GATED_TREES=(
 	"examples/referencepack"
 	"packs"
 	"test/inboundhop"
+	"test/pipelinehop"
 )
 
 # KNOWN_GO_MOD_DIRS is every directory this script knows carries a `go.mod`,
