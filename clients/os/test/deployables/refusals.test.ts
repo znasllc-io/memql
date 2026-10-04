@@ -405,6 +405,8 @@ describe("pipeline refusal copy", () => {
     expect(copyFor("pipeline_log_capped")?.next).toContain("Library");
     expect(copyFor("pipeline_artifact_missing")?.title).toBe("A declared artifact path matched no file");
     expect(copyFor("pipeline_isolation_unenforced")?.next).toContain("network policy");
+    expect(copyFor("pipeline_timings_unreadable")?.title).toBe("The step's Go test timings could not be read from its log");
+    expect(copyFor("pipeline_outcome_trimmed")?.next).toContain("Library");
     // And the engine's: a fork is refused with somewhere to go instead.
     expect(copyFor("pipeline_fork_refused")?.next).toContain("Push the branch");
   });

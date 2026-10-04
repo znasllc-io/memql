@@ -102,6 +102,13 @@ const (
 	CodeArtifactTooLarge = "pipeline_artifact_too_large"
 	CodeArtifactMissing  = "pipeline_artifact_missing"
 	CodeLogCapped        = "pipeline_log_capped"
+	// A step's Go test timings could not be read from its log: its packages
+	// keep their earlier weights.
+	CodeTimingsUnreadable = "pipeline_timings_unreadable"
+	// A step's outcome was cut to fit where it is recorded (a Job
+	// annotation): some artifact file ids or Go timings were left out of it,
+	// never the files themselves.
+	CodeOutcomeTrimmed = "pipeline_outcome_trimmed"
 	// The runner proves the step network is isolated before its first step
 	// on a replica; a cluster whose policy engine does not enforce the
 	// pipelines namespace's NetworkPolicy starts no step at all.
@@ -146,9 +153,11 @@ var codeClasses = map[string]Class{
 	CodeNotAffected:       ClassSkip,
 	CodeNotifyUnavailable: ClassSkip,
 
-	CodeCheckPermission: ClassNote,
-	CodeArtifactMissing: ClassNote,
-	CodeLogCapped:       ClassNote,
+	CodeCheckPermission:   ClassNote,
+	CodeArtifactMissing:   ClassNote,
+	CodeLogCapped:         ClassNote,
+	CodeTimingsUnreadable: ClassNote,
+	CodeOutcomeTrimmed:    ClassNote,
 }
 
 // Codes is every code this package can produce, sorted.

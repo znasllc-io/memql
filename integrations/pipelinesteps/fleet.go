@@ -192,7 +192,11 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 	}
 	res.Notes = append(res.Notes, files.notes...)
 	if run.GoTimings {
-		res.Timings = f.goTimings(run, closed.ArchivePath)
+		var note *pl.Failure
+		if res.Timings, note = f.goTimings(closed.ArchivePath); note != nil {
+			note.Message = mask(note.Message)
+			res.Notes = append(res.Notes, *note)
+		}
 	}
 	return res, nil
 }
@@ -432,23 +436,15 @@ func (f *Fleet) artifacts(run StepRun, out *fleetOutput, files *stepFiles) (kept
 	return kept, false
 }
 
-// goTimings reads the passing Go packages' times out of the archived log.
-func (f *Fleet) goTimings(run StepRun, archive string) map[string]float64 {
+// goTimings reads the passing Go packages' times out of the archived log, as
+// the cluster path does (goTestTimings); a log it cannot read is a note.
+func (f *Fleet) goTimings(archive string) (map[string]float64, *pl.Failure) {
 	file, err := os.Open(archive)
 	if err != nil {
-		return nil
+		return nil, &pl.Failure{Code: pl.CodeTimingsUnreadable, Message: "the step's Go test timings could not be read from its log: " + err.Error()}
 	}
 	defer file.Close()
-	timings, err := pl.ParseGoTestOutput(file)
-	if err != nil {
-		f.logger.Debug("pipelines: a fleet step's Go timings could not be read",
-			slog.String("runId", run.RunID), slog.String("stepKey", run.StepKey), slog.String("error", err.Error()))
-		return nil
-	}
-	if len(timings) == 0 {
-		return nil
-	}
-	return timings
+	return goTestTimings(file)
 }
 
 func (f *Fleet) lineSink() LineSink {

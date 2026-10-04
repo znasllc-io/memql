@@ -704,6 +704,27 @@ func TestFleetStepReadsGoTimings(t *testing.T) {
 	if res := runFleet(t, f2, req); len(res.Timings) != 0 {
 		t.Errorf("Timings = %v for a step that is not a Go test step", res.Timings)
 	}
+
+	// A result line the reader cannot take is a note, as on the cluster path
+	// (fix round 2, minor 3) -- never the step's failure, and masked like
+	// everything the step printed.
+	d3 := &fakeDispatcher{answer: func(_ context.Context, req worker.Request) (worker.Result, error) {
+		req.OnStreamChunk(chunk("stdout", "ok  \tgithub.com/acme/widget/"+plantedNPM+"\t"+strings.Repeat("9", 400)+"s\n"))
+		return worker.Result{OK: true, OutputJSON: `{"exitCode":0,"durationMs":10}`}, nil
+	}}
+	f3, _, _, _ := newTestFleet(t, d3)
+	req3 := fleetReq()
+	req3.Step.Artifacts = nil
+	res = runFleet(t, f3, req3)
+	var note *pl.Failure
+	for i := range res.Notes {
+		if res.Notes[i].Code == pl.CodeTimingsUnreadable {
+			note = &res.Notes[i]
+		}
+	}
+	if res.Status != pl.OutcomeSucceeded || note == nil || !strings.Contains(note.Message, "Go test timings") || strings.Contains(note.Message, plantedNPM) {
+		t.Errorf("result %s with notes %+v, want a success with a masked %s note", res.Status, res.Notes, pl.CodeTimingsUnreadable)
+	}
 }
 
 // gateStore is the slice of the dispatcher's store its gate and router read:

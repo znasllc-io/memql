@@ -736,6 +736,16 @@ const COPY: Record<string, RefusalCopy> = {
     title: "The live log stopped at its line limit",
     next: "Open the full log, which is in the Library.",
   },
+  pipeline_timings_unreadable: {
+    // A NOTE: the step's outcome stands; only the timing table missed a sample.
+    title: "The step's Go test timings could not be read from its log",
+    next: "Nothing to do: its packages keep their earlier timings until a run measures them again.",
+  },
+  pipeline_outcome_trimmed: {
+    // A NOTE: the record of the step was cut to fit, never its files.
+    title: "Some file ids or timings were left out of the step's recorded result",
+    next: "The files themselves are in the Library, filed under this run and step.",
+  },
 };
 
 /**
@@ -827,13 +837,16 @@ const NOT_A_FAULT: ReadonlySet<string> = new Set([
   // Pipelines'. Every SKIP and every NOTE, by class (component/pipelines/
   // refusal.go): a step not run because nothing it covers changed, because an
   // earlier stage failed or because nothing can notify yet; a check GitHub
-  // refused, an artifact path that matched nothing, a live log at its limit.
+  // refused, an artifact path that matched nothing, a live log at its limit,
+  // timings that could not be read, a recorded result cut to fit.
   "pipeline_not_affected",
   "pipeline_stage_blocked",
   "pipeline_notify_unavailable",
   "pipeline_check_permission_missing",
   "pipeline_artifact_missing",
   "pipeline_log_capped",
+  "pipeline_timings_unreadable",
+  "pipeline_outcome_trimmed",
   // And the ones whose cause is somebody's DECISION rather than a fault: a
   // fork's policy, a secret or the fleet the owner has not allowed, computer
   // use switched off, a pipeline disconnected, a step cancelled. A manifest

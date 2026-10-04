@@ -209,7 +209,7 @@ func (s *step) fitOutcome(res *pl.StepResult, notes *noteList) {
 func keepMost(res *pl.StepResult, notes *noteList, n int, cut func(r *pl.StepResult, k int) string) bool {
 	try := func(k int) (pl.StepResult, noteList, bool) {
 		r, trial := *res, *notes
-		trial.addFirst(pl.CodeArtifactMissing, cut(&r, k))
+		trial.addFirst(pl.CodeOutcomeTrimmed, cut(&r, k))
 		r.Notes = trial.list()
 		return r, trial, outcomeBytes(r) <= outcomeMaxBytes
 	}
@@ -295,17 +295,14 @@ func (s *step) cappedNote() string {
 }
 
 // goTimings reads each passing Go package's wall time out of the step's
-// archived log (pl.ParseGoTestOutput, the seam's one reader), for a step that
-// runs Go tests. A log it cannot read is a note: the timings only steer how
-// later runs are sharded, so they never fail a step.
+// archived log, for a step that runs Go tests (goTestTimings, the fleet
+// path's reader too); a log it cannot read is a note.
 func (s *step) goTimings(res *pl.StepResult, archive []byte, notes *noteList) {
-	timings, err := pl.ParseGoTestOutput(bytes.NewReader(archive))
-	switch {
-	case err != nil:
-		notes.add(pl.CodeArtifactMissing, "the step's Go test timings could not be read from its log: "+err.Error())
-	case len(timings) > 0:
-		res.Timings = timings
+	timings, note := goTestTimings(bytes.NewReader(archive))
+	if note != nil {
+		notes.add(note.Code, note.Message)
 	}
+	res.Timings = timings
 }
 
 // storeArtifacts stores the step's artifacts, one Library file each, named by

@@ -1,6 +1,7 @@
 package pipelinesteps
 
 import (
+	"io"
 	"maps"
 	"slices"
 	"sort"
@@ -82,6 +83,23 @@ func splitEnvironment(req pl.StepRequest) (env, secrets map[string]string) {
 // the archive can be 64 MiB, so it is read for the steps that print them.
 func wantsGoTimings(step pl.Step) bool {
 	return len(step.Packages) > 0 || strings.Contains(step.Run, "go test")
+}
+
+// goTestTimings reads each passing Go package's wall time out of a step's
+// archived log with the seam's one reader (pl.ParseGoTestOutput) -- for both
+// of a step's paths, the cluster's and a fleet machine's. A log it cannot read
+// for them is a note (pl.CodeTimingsUnreadable), never the step's failure: the
+// timings only steer how later runs are sharded. The note quotes the log, so
+// the caller masks it.
+func goTestTimings(archive io.Reader) (map[string]float64, *pl.Failure) {
+	timings, err := pl.ParseGoTestOutput(archive)
+	switch {
+	case err != nil:
+		return nil, &pl.Failure{Code: pl.CodeTimingsUnreadable, Message: "the step's Go test timings could not be read from its log: " + err.Error()}
+	case len(timings) == 0:
+		return nil, nil
+	}
+	return timings, nil
 }
 
 // secretValues is every value a step's output must be masked for: the

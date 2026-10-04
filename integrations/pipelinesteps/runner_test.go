@@ -3807,7 +3807,7 @@ func TestRunnerReadsGoTimings(t *testing.T) {
 			if !reflect.DeepEqual(res.Timings, c.want) {
 				t.Errorf("Timings = %v, want %v", res.Timings, c.want)
 			}
-			noted := len(res.Notes) == 1 && res.Notes[0].Code == pl.CodeArtifactMissing && strings.Contains(res.Notes[0].Message, "Go test timings")
+			noted := len(res.Notes) == 1 && res.Notes[0].Code == pl.CodeTimingsUnreadable && strings.Contains(res.Notes[0].Message, "Go test timings")
 			if noted != c.note || (!c.note && len(res.Notes) != 0) {
 				t.Errorf("notes = %+v, want a note of the unreadable timings: %v", res.Notes, c.note)
 			}
@@ -3866,7 +3866,7 @@ func TestRunnerFitsItsOutcomeInAJobAnnotation(t *testing.T) {
 			}
 		}
 		want := fmt.Sprintf("%d of the step's %d artifact file ids were left out of its outcome", files-kept, files)
-		if len(res.Notes) == 0 || !strings.HasPrefix(res.Notes[0].Message, want) || res.Notes[0].Code != pl.CodeArtifactMissing {
+		if len(res.Notes) == 0 || !strings.HasPrefix(res.Notes[0].Message, want) || res.Notes[0].Code != pl.CodeOutcomeTrimmed {
 			t.Errorf("notes = %+v, want the first to say %q", res.Notes, want)
 		}
 	})
@@ -3895,7 +3895,7 @@ func TestRunnerFitsItsOutcomeInAJobAnnotation(t *testing.T) {
 			}
 		}
 		want := fmt.Sprintf("the Go test timings of %d of the step's %d passing packages were left out of its outcome", packages-kept, packages)
-		if len(res.Notes) == 0 || !strings.HasPrefix(res.Notes[0].Message, want) {
+		if len(res.Notes) == 0 || !strings.HasPrefix(res.Notes[0].Message, want) || res.Notes[0].Code != pl.CodeOutcomeTrimmed {
 			t.Errorf("notes = %+v, want the first to say %q", res.Notes, want)
 		}
 	})
