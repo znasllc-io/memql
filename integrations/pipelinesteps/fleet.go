@@ -97,13 +97,14 @@ func NewFleet(cfg Config, d FleetDispatcher, library LibraryStore, tokens TokenM
 	}
 }
 
-// fleetOutput is the cockpit's pipeline_step result.
+// fleetOutput is the cockpit's pipeline_step result. Its artifactsMissing is
+// not read: which declared paths matched nothing is decided here, from what
+// arrived, as the cluster's runner decides it (stepFiles.storeArtifacts).
 type fleetOutput struct {
-	ExitCode           *int     `json:"exitCode"`
-	DurationMs         int64    `json:"durationMs"`
-	ArtifactsTgzBase64 string   `json:"artifactsTgzBase64"`
-	ArtifactsMissing   []string `json:"artifactsMissing"`
-	ArtifactsTooLarge  bool     `json:"artifactsTooLarge"`
+	ExitCode           *int   `json:"exitCode"`
+	DurationMs         int64  `json:"durationMs"`
+	ArtifactsTgzBase64 string `json:"artifactsTgzBase64"`
+	ArtifactsTooLarge  bool   `json:"artifactsTooLarge"`
 }
 
 // RunStep runs one step on a machine that offers what it needs.
@@ -117,7 +118,6 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 		return refusal, nil
 	}
 	values := secretValues(run, token)
-	mask := func(s string) string { return pl.MaskSecrets(s, values) }
 
 	dir, err := os.MkdirTemp(f.tempDir, "memql-pipeline-step-")
 	if err != nil {
@@ -138,6 +138,10 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 		return failedResult(pl.CodeExecutorError, "The step's log could not be opened on this node: "+err.Error()), nil
 	}
 	defer capture.Close()
+	// Text the machine or the step wrote is masked as the capture masks a line
+	// -- the cluster's masking, its repair included -- and for every form of a
+	// secret the seam masks besides (pl.MaskSecrets: a value's trimmed forms).
+	mask := func(s string) string { return pl.MaskSecrets(capture.Mask(s), values) }
 	lines := &fleetLines{capture: capture, pending: map[string][]byte{}}
 
 	started := f.now()
@@ -162,42 +166,17 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 		capture.Note(fmt.Sprintf("memql: the step ran on machine %s, held by replica %s", result.WorkerId, result.NodeId))
 	}
 
-	files := &stepFiles{library: f.library, run: run, mask: mask}
-	artifacts, tooLarge := f.artifacts(run, out, files)
-	if tooLarge {
-		if res.Status == pl.OutcomeSucceeded {
-			// A failure-class code: the step fails with it, and keeps the
-			// exit status its command chose.
-			res.Status = pl.OutcomeFailed
-			res.Failure = &pl.Failure{Code: pl.CodeArtifactTooLarge, Message: fmt.Sprintf(
-				"The step's artifacts are larger than this cluster keeps (%d bytes), so none was stored.", f.cfg.ArtifactMaxBytes)}
-		} else {
-			// The command's own failure is the answer; the dropped artifacts
-			// are said where the step's log says everything else.
-			capture.Note("memql: the step's artifacts were larger than this cluster keeps and were dropped")
-		}
+	// The step's files reach the Library as a Job's do on the cluster
+	// (settle.go): the log, then the artifacts, every note masked and bounded
+	// where it is added, and the outcome bounded the same way.
+	files := stepFiles{library: f.library, run: run, mask: mask, node: "agent node",
+		log: f.logger.With(slog.String("runId", run.RunID), slog.String("workRunId", run.WorkRunID), slog.String("stepKey", run.StepKey))}
+	notes := &noteList{mask: mask}
+	if _, archive, read := files.closeLog(capture, &res, notes, completeLogNote(f.cfg.LogStoreMaxLines)); read {
+		files.fileLog(ctx, archive, &res, notes)
 	}
-
-	closed, cerr := capture.Close()
-	if cerr != nil {
-		f.logger.Warn("pipelines: a fleet step's log archive could not be written in full",
-			slog.String("runId", run.RunID), slog.String("stepKey", run.StepKey), slog.String("error", cerr.Error()))
-	}
-	res.LogTail, res.LogLines, res.LogCapped = closed.Tail, closed.Lines, closed.StoreCapped
-	res.LogFileID = files.storeLog(ctx, closed.ArchivePath)
-	res.ArtifactFileIDs = files.storeArtifacts(ctx, artifacts)
-	if closed.StoreCapped {
-		res.Notes = append(res.Notes, pl.Failure{Code: pl.CodeLogCapped, Message: fmt.Sprintf(
-			"The live log of this step stops at %d lines; the complete log is in the Library.", f.cfg.LogStoreMaxLines)})
-	}
-	res.Notes = append(res.Notes, files.notes...)
-	if run.GoTimings {
-		var note *pl.Failure
-		if res.Timings, note = f.goTimings(closed.ArchivePath); note != nil {
-			note.Message = mask(note.Message)
-			res.Notes = append(res.Notes, *note)
-		}
-	}
+	f.storeArtifacts(ctx, files, out, &res, notes)
+	fitOutcome(&res, notes)
 	return res, nil
 }
 
@@ -404,50 +383,44 @@ func (f *Fleet) classify(ctx context.Context, req pl.StepRequest, run StepRun, r
 	}
 }
 
-// artifacts reads the step's artifacts out of the machine's answer, within
-// this cluster's cap. tooLarge is an archive past its limits, on the machine
-// or here: nothing of it is kept.
-func (f *Fleet) artifacts(run StepRun, out *fleetOutput, files *stepFiles) (kept []ArtifactFile, tooLarge bool) {
-	if len(run.Artifacts) == 0 || out == nil {
-		return nil, false
+// storeArtifacts files the artifacts the machine packed through the cluster
+// runner's own helpers (stepFiles). An archive past this cluster's cap, or
+// past what the machine sends back, fails the step as one past the cluster's
+// does. The machine sends no archive when the declared paths matched nothing,
+// so then each of them is noted as matching nothing.
+func (f *Fleet) storeArtifacts(ctx context.Context, files stepFiles, out *fleetOutput, res *pl.StepResult, notes *noteList) {
+	if len(files.run.Artifacts) == 0 || out == nil {
+		return
+	}
+	tooLarge := func(why string) {
+		files.artifactFact(res, notes, pl.Failure{Code: pl.CodeArtifactTooLarge, Message: "the step's artifacts were not stored: " + why})
 	}
 	if out.ArtifactsTooLarge {
-		return nil, true
+		tooLarge("the machine that ran the step found them larger than it sends back")
+		return
 	}
-	var missing []string
-	missing = append(missing, out.ArtifactsMissing...)
-	if encoded := strings.TrimSpace(out.ArtifactsTgzBase64); encoded != "" {
-		// A gzip stream is no larger than what it holds plus framing, so an
-		// archive far past the cap compressed is past it uncompressed: refused
-		// before it is decoded rather than after.
-		if int64(base64.StdEncoding.DecodedLen(len(encoded))) > f.cfg.ArtifactMaxBytes+f.cfg.ArtifactMaxBytes/64+extractStreamSlack {
-			return nil, true
+	encoded := strings.TrimSpace(out.ArtifactsTgzBase64)
+	if encoded == "" {
+		var declared []string
+		for _, p := range extractPatterns(files.run.Artifacts) {
+			declared = append(declared, p.declared)
 		}
-		tgz, err := base64.StdEncoding.DecodeString(encoded)
-		if err != nil {
-			files.note("the machine's artifact archive is not base64, so no artifact was stored: %v", err)
-			return nil, false
-		}
-		var gone []string
-		kept, gone, tooLarge = files.extractedArtifacts(tgz, run.Artifacts, f.cfg.ArtifactMaxBytes)
-		if tooLarge {
-			return nil, true
-		}
-		missing = append(missing, gone...)
+		files.noteMissing(notes, declared)
+		return
 	}
-	files.missingNote(run.Artifacts, missing)
-	return kept, false
-}
-
-// goTimings reads the passing Go packages' times out of the archived log, as
-// the cluster path does (goTestTimings); a log it cannot read is a note.
-func (f *Fleet) goTimings(archive string) (map[string]float64, *pl.Failure) {
-	file, err := os.Open(archive)
+	// A gzip stream is no larger than what it holds plus framing, so an
+	// archive far past the cap compressed is past it uncompressed: refused
+	// before it is decoded rather than after.
+	if int64(base64.StdEncoding.DecodedLen(len(encoded))) > f.cfg.ArtifactMaxBytes+f.cfg.ArtifactMaxBytes/64+extractStreamSlack {
+		tooLarge(fmt.Sprintf("the machine's archive of them is larger than this cluster keeps (%d bytes)", f.cfg.ArtifactMaxBytes))
+		return
+	}
+	tgz, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return nil, &pl.Failure{Code: pl.CodeTimingsUnreadable, Message: "the step's Go test timings could not be read from its log: " + err.Error()}
+		notes.add(pl.CodeArtifactMissing, "the step's artifacts were not stored: the machine's archive of them is not base64: "+err.Error())
+		return
 	}
-	defer file.Close()
-	return goTestTimings(file)
+	files.storeArtifacts(ctx, tgz, f.cfg.ArtifactMaxBytes, res, notes)
 }
 
 func (f *Fleet) lineSink() LineSink {

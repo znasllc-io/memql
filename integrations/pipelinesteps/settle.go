@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"mime"
 	"os"
 	"path"
@@ -22,7 +23,8 @@ import (
 
 // settle.go -- a decided or cancelled step settled: its log read to the end,
 // its files into the owner's Library, its outcome persisted on the Job (split
-// out of runner.go).
+// out of runner.go). How a step's files reach the Library (stepFiles) is the
+// fleet path's too: one implementation for both surfaces.
 
 // ---------------------------------------------------------------------------
 // Settling a step
@@ -108,7 +110,7 @@ func (s *step) settle(dec pl.StepResult, pod *Pod, f *follower) pl.StepResult {
 	defer cancelLib()
 	cr := s.storeLog(libCtx, &res, notes)
 	s.storeArtifacts(libCtx, cr, &res, notes)
-	s.fitOutcome(&res, notes)
+	fitOutcome(&res, notes)
 	persistCtx, cancelPersist := s.persistContext()
 	defer cancelPersist()
 	s.persist(persistCtx, res)
@@ -167,8 +169,8 @@ func (s *step) tail(ctx context.Context, pod, container, who string, lines int) 
 // owner's Library all the same, bound to the run and the step -- and the Go
 // timings next, by package path; each cut is said in a note at the head of
 // the list. The log's file id is never cut. What remains is bounded where it
-// is made, and fits.
-func (s *step) fitOutcome(res *pl.StepResult, notes *noteList) {
+// is made, and fits. A fleet step's outcome is bounded the same way.
+func fitOutcome(res *pl.StepResult, notes *noteList) {
 	res.Notes = notes.list()
 	if outcomeBytes(*res) <= outcomeMaxBytes {
 		return
@@ -256,24 +258,12 @@ func (s *step) persist(ctx context.Context, res pl.StepResult) {
 // storeLog closes the capture and stores its archive in the owner's Library,
 // filling in the result's log fields.
 func (s *step) storeLog(ctx context.Context, res *pl.StepResult, notes *noteList) CaptureResult {
-	cr, err := s.capture.Close()
-	if err != nil {
-		notes.add(pl.CodeArtifactMissing, "the step's log archive could not be written whole, so its Library copy may stop early: "+err.Error())
-	}
-	res.LogTail, res.LogLines, res.LogCapped = cr.Tail, cr.Lines, cr.StoreCapped
-	if cr.StoreCapped {
-		notes.add(pl.CodeLogCapped, s.cappedNote())
-	}
-	body, err := os.ReadFile(cr.ArchivePath)
+	files := s.files()
+	cr, archive, read := files.closeLog(s.capture, res, notes, s.cappedNote())
 	s.removeArchive()
-	if err != nil {
-		notes.add(pl.CodeArtifactMissing, "the step's log was not stored in the Library: its archive could not be read: "+err.Error())
-		return cr
+	if read {
+		files.fileLog(ctx, archive, res, notes)
 	}
-	if s.run.GoTimings {
-		s.goTimings(res, body, notes)
-	}
-	res.LogFileID = s.store(ctx, logFileName(s.run.StepKey), archiveMIME, body, "the step's log", notes)
 	return cr
 }
 
@@ -281,11 +271,11 @@ func (s *step) storeLog(ctx context.Context, res *pl.StepResult, notes *noteList
 // copy holds instead: the complete log, unless the step was adopted and its
 // archive could not be shown to begin at the step's first line (ruling R36).
 func (s *step) cappedNote() string {
-	stops := fmt.Sprintf("the live log of this step stops at %d lines; ", s.r.cfg.LogStoreMaxLines)
+	stops := liveLogStops(s.r.cfg.LogStoreMaxLines)
 	held := "the log archived to the Library holds what the node's log still held of the step's output when this replica re-attached to the step"
 	switch s.head {
 	case headWhole:
-		return stops + "the complete log is archived to the Library"
+		return completeLogNote(s.r.cfg.LogStoreMaxLines)
 	case headLost:
 		return stops + "the log archived to the Library starts where the node's log did when this replica re-attached to the step"
 	case headMissing:
@@ -294,46 +284,123 @@ func (s *step) cappedNote() string {
 	return stops + held
 }
 
-// goTimings reads each passing Go package's wall time out of the step's
-// archived log, for a step that runs Go tests (goTestTimings, the fleet
-// path's reader too); a log it cannot read is a note.
-func (s *step) goTimings(res *pl.StepResult, archive []byte, notes *noteList) {
-	timings, note := goTestTimings(bytes.NewReader(archive))
-	if note != nil {
-		notes.add(note.Code, note.Message)
-	}
-	res.Timings = timings
+// liveLogStops is how a capped log's note begins: where the live log stops.
+func liveLogStops(storeMaxLines int) string {
+	return fmt.Sprintf("the live log of this step stops at %d lines; ", storeMaxLines)
+}
+
+// completeLogNote is a capped log's note when the Library's copy is the whole
+// log: a step followed from its first line, as every fleet step is.
+func completeLogNote(storeMaxLines int) string {
+	return liveLogStops(storeMaxLines) + "the complete log is archived to the Library"
 }
 
 // storeArtifacts stores the step's artifacts, one Library file each, named by
 // their path.
 func (s *step) storeArtifacts(ctx context.Context, cr CaptureResult, res *pl.StepResult, notes *noteList) {
+	files := s.files()
 	if cr.ArtifactNote != nil {
-		s.artifactFact(res, notes, *cr.ArtifactNote)
+		files.artifactFact(res, notes, *cr.ArtifactNote)
 	}
 	if cr.Artifacts == nil {
 		return
 	}
-	files, missing, err := ExtractArtifacts(cr.Artifacts, s.run.Artifacts, s.r.cfg.ArtifactMaxBytes)
+	files.storeArtifacts(ctx, cr.Artifacts, s.r.cfg.ArtifactMaxBytes, res, notes)
+}
+
+// files files this Run's step through this replica's Library and log.
+func (s *step) files() stepFiles {
+	return stepFiles{library: s.r.library, run: s.run, mask: s.mask, log: s.log, node: "workbench node"}
+}
+
+// ---------------------------------------------------------------------------
+// A step's files, whichever surface ran it
+// ---------------------------------------------------------------------------
+
+// stepFiles files one step's log and artifacts in its owner's Library, bound
+// to the work run and the step. The runner settling a Job and the fleet path
+// filing what a machine sent back both go through it (#5494), so a step's
+// files are named, typed, noted and masked the same way whichever surface ran
+// it: every note goes through a noteList -- masked where it is added, so a
+// note quoting the step's text is masked whole once it is written, and
+// bounded -- and a name the step chose is masked before it is cut.
+type stepFiles struct {
+	library LibraryStore
+	run     StepRun
+	// mask cleans and masks text the step controls: its file names, and the
+	// Library's answers quoting them.
+	mask func(string) string
+	log  *slog.Logger
+	// node names the node filing them, for the note a node with no Library
+	// leaves: "workbench node" or "agent node".
+	node string
+}
+
+// closeLog closes a step's capture and reads its archive: the result's log
+// fields filled in, a store copy that hit its cap noted with capped -- what
+// the Library's copy holds -- and an archive that could not be written whole,
+// or read, noted. read is false when there is no archive to file.
+func (f stepFiles) closeLog(c *Capture, res *pl.StepResult, notes *noteList, capped string) (cr CaptureResult, archive []byte, read bool) {
+	cr, err := c.Close()
+	if err != nil {
+		notes.add(pl.CodeArtifactMissing, "the step's log archive could not be written whole, so its Library copy may stop early: "+err.Error())
+	}
+	res.LogTail, res.LogLines, res.LogCapped = cr.Tail, cr.Lines, cr.StoreCapped
+	if cr.StoreCapped {
+		notes.add(pl.CodeLogCapped, capped)
+	}
+	archive, err = os.ReadFile(cr.ArchivePath)
+	if err != nil {
+		notes.add(pl.CodeArtifactMissing, "the step's log was not stored in the Library: its archive could not be read: "+err.Error())
+		return cr, nil, false
+	}
+	return cr, archive, true
+}
+
+// fileLog files a step's archived log: each passing Go package's wall time
+// read out of it, for a step that runs Go tests (goTestTimings; a log it
+// cannot read for them is a note), and the log stored in the owner's Library.
+func (f stepFiles) fileLog(ctx context.Context, archive []byte, res *pl.StepResult, notes *noteList) {
+	if f.run.GoTimings {
+		timings, note := goTestTimings(bytes.NewReader(archive))
+		if note != nil {
+			notes.add(note.Code, note.Message)
+		}
+		res.Timings = timings
+	}
+	res.LogFileID = f.store(ctx, logFileName(f.run.StepKey), archiveMIME, archive, "the step's log", notes)
+}
+
+// storeArtifacts extracts a step's artifact archive within maxBytes and stores
+// each file in the owner's Library, named by its path. An archive past its
+// limits fails the step (artifactFact); an entry the extractor refused, and a
+// declared path that matched nothing, are notes.
+func (f stepFiles) storeArtifacts(ctx context.Context, tgz []byte, maxBytes int64, res *pl.StepResult, notes *noteList) {
+	files, missing, err := ExtractArtifacts(tgz, f.run.Artifacts, maxBytes)
 	var skipped *SkippedEntriesError
 	switch {
 	case errors.Is(err, ErrArtifactsTooLarge):
-		s.artifactFact(res, notes, pl.Failure{Code: pl.CodeArtifactTooLarge,
+		f.artifactFact(res, notes, pl.Failure{Code: pl.CodeArtifactTooLarge,
 			Message: "the step's artifacts were not stored: " + strings.TrimPrefix(err.Error(), pl.CodeArtifactTooLarge+": ")})
 		return
 	case errors.As(err, &skipped):
-		notes.add(pl.CodeArtifactMissing, s.skippedNote(skipped))
+		notes.add(pl.CodeArtifactMissing, f.skippedNote(skipped))
 	case err != nil:
 		notes.add(pl.CodeArtifactMissing, "the step's artifacts were not stored: "+err.Error())
 		return
 	}
-	for _, p := range missing {
-		notes.add(pl.CodeArtifactMissing, "the declared artifact path "+s.quote(p)+" matched no file")
-	}
-	for _, f := range files {
-		if id := s.store(ctx, artifactFileName(f.Path), artifactMIME(f.Path), f.Bytes, "the artifact "+s.quote(f.Path), notes); id != "" {
+	f.noteMissing(notes, missing)
+	for _, file := range files {
+		if id := f.store(ctx, artifactFileName(file.Path), artifactMIME(file.Path), file.Bytes, "the artifact "+f.quote(file.Path), notes); id != "" {
 			res.ArtifactFileIDs = append(res.ArtifactFileIDs, id)
 		}
+	}
+}
+
+// noteMissing notes each declared artifact path that matched no file.
+func (f stepFiles) noteMissing(notes *noteList, paths []string) {
+	for _, p := range paths {
+		notes.add(pl.CodeArtifactMissing, "the declared artifact path "+f.quote(p)+" matched no file")
 	}
 }
 
@@ -341,21 +408,21 @@ func (s *step) storeArtifacts(ctx context.Context, cr CaptureResult, res *pl.Ste
 // code: a note changes nothing; a failure-class code fails the step even when
 // its command succeeded -- the command's exit code stays as it was, and an
 // earlier typed failure keeps its place.
-func (s *step) artifactFact(res *pl.StepResult, notes *noteList, f pl.Failure) {
-	if class, _ := pl.ClassOf(f.Code); class != pl.ClassFailure {
-		notes.add(f.Code, f.Message)
+func (f stepFiles) artifactFact(res *pl.StepResult, notes *noteList, fact pl.Failure) {
+	if class, _ := pl.ClassOf(fact.Code); class != pl.ClassFailure {
+		notes.add(fact.Code, fact.Message)
 		return
 	}
 	res.Status = pl.OutcomeFailed
 	if res.Failure == nil {
-		res.Failure = &pl.Failure{Code: f.Code, Message: cutBytes(s.mask(f.Message), failureMaxBytes)}
+		res.Failure = &pl.Failure{Code: fact.Code, Message: cutBytes(f.mask(fact.Message), failureMaxBytes)}
 	}
 }
 
 // skippedNote names the entries the extractor refused, within a note's
 // bounds: the names are the step's, masked, and each cut to
 // entryNameMaxBytes.
-func (s *step) skippedNote(e *SkippedEntriesError) string {
+func (f stepFiles) skippedNote(e *SkippedEntriesError) string {
 	total := len(e.Entries) + e.More
 	var b strings.Builder
 	if total == 1 {
@@ -366,7 +433,7 @@ func (s *step) skippedNote(e *SkippedEntriesError) string {
 	const room = len(", and 99999 more")
 	listed := 0
 	for _, entry := range e.Entries {
-		name := s.mask(entry.Name)
+		name := f.mask(entry.Name)
 		if cut := cutBytes(name, entryNameMaxBytes); cut != name {
 			name = cut + "..."
 		}
@@ -388,20 +455,20 @@ func (s *step) skippedNote(e *SkippedEntriesError) string {
 
 // store stores one file in the owner's Library and answers its id, or "" with
 // a note saying why it was not stored: never a failure of the step.
-func (s *step) store(ctx context.Context, name, mimeType string, body []byte, what string, notes *noteList) string {
-	if s.r.library == nil {
-		notes.add(pl.CodeArtifactMissing, what+" was not stored: this workbench node has no Library to store it in")
+func (f stepFiles) store(ctx context.Context, name, mimeType string, body []byte, what string, notes *noteList) string {
+	if f.library == nil {
+		notes.add(pl.CodeArtifactMissing, what+" was not stored: this "+f.node+" has no Library to store it in")
 		return ""
 	}
-	got, err := s.r.library.StoreRunFile(ctx, RunFile{
-		OwnerUserID: s.run.OwnerUserID, WorkRunID: s.run.WorkRunID, StepKey: s.run.StepKey,
+	got, err := f.library.StoreRunFile(ctx, RunFile{
+		OwnerUserID: f.run.OwnerUserID, WorkRunID: f.run.WorkRunID, StepKey: f.run.StepKey,
 		Name: name, MimeType: mimeType, Bytes: body,
 	})
 	switch {
 	case err != nil:
 		// The name is the step's, and the Library's error may quote it: the
 		// node's log gets them masked, like the note.
-		s.log.Warn("pipelines: a step's file could not be stored in the Library", "file", s.mask(name), "error", s.mask(err.Error()))
+		f.log.Warn("pipelines: a step's file could not be stored in the Library", "file", f.mask(name), "error", f.mask(err.Error()))
 		notes.add(pl.CodeArtifactMissing, what+" was not stored in the Library: "+err.Error())
 	case got.Omitted != "":
 		notes.add(pl.CodeArtifactMissing, what+" was not stored in the Library: "+got.Omitted)
@@ -412,6 +479,9 @@ func (s *step) store(ctx context.Context, name, mimeType string, body []byte, wh
 	}
 	return ""
 }
+
+// quote is text the step controls, masked and quoted.
+func (f stepFiles) quote(text string) string { return strconv.Quote(f.mask(text)) }
 
 // ---------------------------------------------------------------------------
 // Cancelled, failed, refused

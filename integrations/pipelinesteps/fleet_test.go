@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -479,7 +480,7 @@ func TestFleetStepCapturesTheMachinesOutput(t *testing.T) {
 
 	want := []string{"line one", "line two", "2026-01-01T00:00:00Z a line that starts like a stamp",
 		"warn: xyz", "the secret is ***", "no newline at the end"}
-	log, ok := lib.named(runLogFileName(req.StepKey))
+	log, ok := lib.named(logFileName(req.StepKey))
 	if !ok {
 		t.Fatalf("no log archive among %v", lib.files)
 	}
@@ -592,7 +593,7 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 		d := &fakeDispatcher{answer: answer(output(""))}
 		f, lib, _, _ := newTestFleet(t, d)
 		lib.omit = map[string]string{"coverage.out": "the owner's Library is over its quota"}
-		lib.fail = map[string]error{runLogFileName("tests.go-tests#2"): errors.New("blob storage timed out")}
+		lib.fail = map[string]error{logFileName("tests.go-tests#2"): errors.New("blob storage timed out")}
 		res := runFleet(t, f, fleetReq())
 		if res.Status != pl.OutcomeSucceeded || res.LogFileID != "" {
 			t.Fatalf("result = %+v, want a success with no log file", res)
@@ -623,6 +624,201 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 			t.Errorf("Library = %d files, want only the log", len(lib.files))
 		}
 	})
+
+	t.Run("no archive: every declared path matched nothing", func(t *testing.T) {
+		// The machine sends no archive when no declared path matched a file.
+		d := &fakeDispatcher{answer: answer(`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"",` +
+			`"artifactsMissing":["coverage.out","dist/report.json","missing.txt"]}`)}
+		f, lib, _, _ := newTestFleet(t, d)
+		res := runFleet(t, f, fleetReq())
+		if res.Status != pl.OutcomeSucceeded || len(lib.files) != 1 {
+			t.Fatalf("result = %+v with %d Library files, want a success with only the log", res, len(lib.files))
+		}
+		if len(res.Notes) != 3 {
+			t.Fatalf("notes = %+v, want one for each declared path", res.Notes)
+		}
+		for i, p := range fleetReq().Step.Artifacts {
+			if n := res.Notes[i]; n.Code != pl.CodeArtifactMissing || !strings.Contains(n.Message, strconv.Quote(p)) {
+				t.Errorf("note %d = %+v, want the %s note naming %q", i, n, pl.CodeArtifactMissing, p)
+			}
+		}
+	})
+
+	t.Run("a command that failed keeps its exit code beside the failure", func(t *testing.T) {
+		// As on the cluster: the artifacts' failure-class code is the step's
+		// failure, and the command's exit status stays as it chose.
+		d := &fakeDispatcher{answer: answer(`{"exitCode":2,"durationMs":10,"artifactsTooLarge":true,"artifactsMissing":[]}`)}
+		f, _, _, _ := newTestFleet(t, d)
+		res := runFleet(t, f, fleetReq())
+		if res.Status != pl.OutcomeFailed || res.ExitCode != 2 || res.Failure == nil || res.Failure.Code != pl.CodeArtifactTooLarge {
+			t.Fatalf("result = %+v (failure %+v), want failed %s with the command's exit 2", res, res.Failure, pl.CodeArtifactTooLarge)
+		}
+	})
+
+	t.Run("an archive past the cap is refused before it is decoded", func(t *testing.T) {
+		// Base64 of zeros: no gzip at all, so only the size check can say it is
+		// too large -- decoded, it would read as an archive that is not one.
+		d := &fakeDispatcher{answer: answer(`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"` +
+			strings.Repeat("A", 90000) + `","artifactsMissing":[]}`)}
+		f, _, _, _ := newTestFleet(t, d)
+		f.cfg.ArtifactMaxBytes = 4
+		res := runFleet(t, f, fleetReq())
+		if res.Status != pl.OutcomeFailed || res.Failure == nil || res.Failure.Code != pl.CodeArtifactTooLarge {
+			t.Fatalf("result = %+v (failure %+v), want failed %s", res, res.Failure, pl.CodeArtifactTooLarge)
+		}
+	})
+
+	t.Run("an agent node with no Library notes each file it could not store", func(t *testing.T) {
+		d := &fakeDispatcher{answer: answer(output(""))}
+		f, _, _, _ := newTestFleet(t, d)
+		f.library = nil
+		res := runFleet(t, f, fleetReq())
+		if res.Status != pl.OutcomeSucceeded || res.LogFileID != "" || len(res.ArtifactFileIDs) != 0 {
+			t.Fatalf("result = %+v, want a success with no files", res)
+		}
+		var said []string
+		for _, n := range res.Notes {
+			said = append(said, n.Message)
+		}
+		all := strings.Join(said, " | ")
+		for _, want := range []string{"the step's log was not stored: this agent node has no Library to store it in",
+			`the artifact "coverage.out" was not stored: this agent node has no Library to store it in`} {
+			if !strings.Contains(all, want) {
+				t.Errorf("notes %q do not say %q", all, want)
+			}
+		}
+	})
+
+	t.Run("a log past the store's cap says the Library has all of it", func(t *testing.T) {
+		d := &fakeDispatcher{answer: func(_ context.Context, req worker.Request) (worker.Result, error) {
+			req.OnStreamChunk(chunk("stdout", "one\ntwo\nthree\n"))
+			return worker.Result{OK: true, OutputJSON: `{"exitCode":0,"durationMs":10}`, WorkerId: "reg-1", NodeId: "agent-b"}, nil
+		}}
+		f, lib, _, _ := newTestFleet(t, d)
+		f.cfg.LogStoreMaxLines = 2
+		req := fleetReq()
+		req.Step.Artifacts = nil
+		res := runFleet(t, f, req)
+		if !res.LogCapped || len(res.Notes) != 1 || res.Notes[0].Code != pl.CodeLogCapped ||
+			res.Notes[0].Message != "the live log of this step stops at 2 lines; the complete log is archived to the Library" {
+			t.Fatalf("result = %+v, want the log capped and one note saying the Library has the whole log", res)
+		}
+		if log, ok := lib.named(logFileName(req.StepKey)); !ok || !strings.Contains(string(log.Bytes), "three") {
+			t.Errorf("the archived log lacks the line past the store's cap")
+		}
+	})
+
+	t.Run("the outcome is bounded as the cluster's is", func(t *testing.T) {
+		const files = 400
+		var entries []extractTestEntry
+		for i := 0; i < files; i++ {
+			entries = append(entries, extractTestEntry{name: fmt.Sprintf("dist/f%04d.txt", i), body: "x"})
+		}
+		many := base64.StdEncoding.EncodeToString(extractTestTgz(t, entries))
+		d := &fakeDispatcher{answer: answer(`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"` + many + `","artifactsMissing":[]}`)}
+		f, _, _, _ := newTestFleet(t, d)
+		f.library = &rtLibrary{idPad: "-" + strings.Repeat("i", 800)}
+		req := fleetReq()
+		req.Step.Artifacts = []string{"dist/*"}
+		res := runFleet(t, f, req)
+		if kept := len(res.ArtifactFileIDs); kept == 0 || kept == files {
+			t.Fatalf("%d of %d artifact file ids kept, want as many as fit", kept, files)
+		}
+		if n := outcomeBytes(res); n > outcomeMaxBytes {
+			t.Errorf("the outcome is %d bytes, over outcomeMaxBytes (%d)", n, outcomeMaxBytes)
+		}
+		if len(res.Notes) == 0 || res.Notes[0].Code != pl.CodeOutcomeTrimmed || !strings.Contains(res.Notes[0].Message, "artifact file ids") {
+			t.Errorf("notes = %+v, want the first to say how many artifact file ids were left out", res.Notes)
+		}
+	})
+}
+
+// TestFleetStepMasksTheMachinesWordsForEveryFormOfASecret: what a machine says
+// about a step -- the error it answered with -- is masked as the capture masks
+// a line of the step's log, its repair included (a NUL the capture drops
+// cannot keep a secret's bytes apart), and for every form of a secret the seam
+// masks besides (a stored value's trimmed form).
+func TestFleetStepMasksTheMachinesWordsForEveryFormOfASecret(t *testing.T) {
+	padded := "  padded-" + strings.Repeat("p", 12) + "  "
+	for _, c := range []struct{ name, said, secret string }{
+		{"a secret a NUL splits", "git said npm-zz\x00" + strings.Repeat("z", 10) + " was rejected", plantedNPM},
+		{"a stored value's trimmed form", "git said " + strings.TrimSpace(padded) + " was rejected", strings.TrimSpace(padded)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+				return worker.Result{OK: false, ErrorCode: "exec_failed", ErrorMessage: c.said, WorkerId: "reg-1", NodeId: "agent-b"}, nil
+			}}
+			f, _, _, _ := newTestFleet(t, d)
+			req := fleetReq()
+			req.Secrets["PADDED_TOKEN"] = padded
+			res := runFleet(t, f, req)
+			wantFailure(t, res, pl.OutcomeFailed, pl.CodeExecutorError)
+			if strings.Contains(strings.ReplaceAll(res.Failure.Message, "\x00", ""), c.secret) || !strings.Contains(res.Failure.Message, "***") {
+				t.Errorf("failure %q, want the machine's words with the secret %q masked", res.Failure.Message, c.secret)
+			}
+		})
+	}
+}
+
+// TestFleetStepMasksASecretInAnArtifactEntryName: an artifact entry's name is
+// the step's to choose, and the note beside the step quotes a refused one --
+// a note that rides the step's result to the run's rows and its check run.
+// The fleet files a machine's artifacts through the runner's own helpers
+// (settle.go), so the note is masked as the cluster's is: the name masked
+// before it is cut, and the note masked whole once it is written, quoting and
+// all.
+func TestFleetStepMasksASecretInAnArtifactEntryName(t *testing.T) {
+	// A secret holding what quoting writes: a name carrying its unescaped
+	// form is spelled as the secret once the note quotes it.
+	quoted := `quo\"ted-` + strings.Repeat("q", 12)
+	for _, c := range []struct {
+		name   string
+		entry  string
+		secret string // what must appear in no note
+		masked string // what the note says instead
+	}{
+		{"a secret in a refused entry's name", "secrets/" + plantedNPM + ".txt", plantedNPM, "secrets/***.txt"},
+		// The secret straddles the cut at 256 bytes: cut first, and the six
+		// bytes of it before the cut survive where no masker can know them.
+		{"a secret straddling the cut of a long name", "dist/" + strings.Repeat("n", 245) + plantedNPM + strings.Repeat("n", 20000),
+			plantedNPM[:6], "nnn***nnn"},
+		{"a secret the note's quoting spells out", `secrets/quo"ted-` + strings.Repeat("q", 12), quoted, `"secrets/***"`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tgz := extractTestTgz(t, []extractTestEntry{
+				{name: "coverage.out", body: "mode: set\n"},
+				{name: c.entry, body: "x"},
+			})
+			d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+				return worker.Result{OK: true, WorkerId: "reg-1", NodeId: "agent-b", OutputJSON: `{"exitCode":0,"durationMs":10,` +
+					`"artifactsTgzBase64":"` + base64.StdEncoding.EncodeToString(tgz) + `","artifactsMissing":[]}`}, nil
+			}}
+			f, lib, _, _ := newTestFleet(t, d)
+			req := fleetReq()
+			req.Step.Artifacts = []string{"coverage.out"}
+			req.Secrets["QUOTED_TOKEN"] = quoted
+
+			res := runFleet(t, f, req)
+
+			if res.Status != pl.OutcomeSucceeded || res.Failure != nil {
+				t.Fatalf("result = %+v (failure %+v), want a success: a refused entry is a note", res, res.Failure)
+			}
+			if _, ok := lib.named("coverage.out"); !ok {
+				t.Errorf("the declared artifact beside the refused entry was not stored: %+v", lib.files)
+			}
+			var said []string
+			for _, n := range res.Notes {
+				said = append(said, n.Message)
+			}
+			all := strings.Join(said, " | ")
+			if strings.Contains(all, c.secret) {
+				t.Errorf("notes %.600q... carry the secret %q", all, c.secret)
+			}
+			if !strings.Contains(all, c.masked) {
+				t.Errorf("notes %.600q... do not quote the refused entry as %q", all, c.masked)
+			}
+		})
+	}
 }
 
 // TestFleetStepFailuresAreTyped: how a machine-side ending reads.
@@ -845,7 +1041,7 @@ func TestFleetStepFeedsAnOverlongPartialLineAsALineOfItsOwn(t *testing.T) {
 	req := fleetReq()
 	req.Step.Artifacts = nil
 	res := runFleet(t, f, req)
-	log, ok := lib.named(runLogFileName(req.StepKey))
+	log, ok := lib.named(logFileName(req.StepKey))
 	if !ok {
 		t.Fatal("no log archive")
 	}

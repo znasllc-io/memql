@@ -542,7 +542,7 @@ func (r *hopRunner) finish(name string, run StepRun) []byte {
 		return j.outcome
 	}
 	c.library = append(c.library, RunFile{OwnerUserID: run.OwnerUserID, WorkRunID: run.WorkRunID,
-		StepKey: run.StepKey, Name: runLogFileName(run.StepKey), MimeType: "text/plain; charset=utf-8"})
+		StepKey: run.StepKey, Name: logFileName(run.StepKey), MimeType: "text/plain; charset=utf-8"})
 	j.outcome = mustMarshal(pl.StepResult{
 		Status:    pl.OutcomeSucceeded,
 		Where:     pl.Where{Surface: "cluster", NodeID: r.node, JobName: name},

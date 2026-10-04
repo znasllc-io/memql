@@ -996,9 +996,6 @@ func (s *step) mask(text string) string {
 	return s.capture.Mask(text)
 }
 
-// quote is text the step controls, masked and quoted.
-func (s *step) quote(text string) string { return strconv.Quote(s.mask(text)) }
-
 func (s *step) mintToken() (string, error) {
 	if s.r.tokens == nil {
 		return "", errors.New("this workbench node has no token minter")
