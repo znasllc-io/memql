@@ -110,14 +110,18 @@ local one -- so the list of them leads. Each row says its state in a word --
 Connected, Sign in, Connecting, Not running (a local cluster), Can't reach, Not
 set up -- and shows a version only when it tells something (a newer release, or
 a cluster older than this extension expects). The cluster in use is marked.
-With no clusters the view offers the two ways to get one -- install a local
-cluster, or connect to one -- and when a local cluster is running on this
-computer but is not in the list, it offers to connect to that one instead.
-Repair is in the view's title menu when a local cluster is present. The
-install, repair and uninstall flows open with a "Before it runs" checklist
-(graph loaded, whether your password will be needed, where the provider key
-path comes from) before anything starts, show honest per-step progress during,
-and put the full run log in the `MemQL Install` output channel.
+With no clusters the view offers the two ways to get one -- **Install Local
+Cluster** and **Connect to a Cluster** -- and when a local cluster is running on
+this computer but is not in the list, it offers **Connect** to that one instead.
+The view's title menu carries **Install Local Cluster...** when there is no
+local cluster and **Repair Local Cluster** when there is. Before an install,
+repair or uninstall starts, its page lists the checks (the installer, whether
+your password will be needed) with one word each. While it runs, every one of
+them uses the same progress screen: the MemQL mark, a bar that only moves
+forward (weighted by how long each step usually takes), the running step in a
+few words ("Creating the cluster", "Starting services 5 of 9"), `Step n of m ·
+m:ss`, and **Show logs** for the live log with **Copy** and **Open in Output**.
+The full log also goes to the `MemQL Install` output channel.
 
 Constructs and Data are the two halves of one question, and keeping them apart
 is what the naming is for: a query is a definition, the rows it returns are
@@ -165,19 +169,19 @@ Full rationale: [the Deployments surface design](https://github.com/znasllc-io/m
 
 ## Deployments
 
-The **selected** cluster's deployment runs, newest first. One cluster, flat.
+The **selected** cluster's history, newest first. One cluster, flat.
 
 ```
-DEPLOYMENTS   memql.localhost · Connected · v0.19.1
-|- upgrade   v0.16.1 -> v0.17.0   succeeded   2d ago
-\- install                        succeeded   9d ago
+DEPLOYMENTS   memql.localhost · Connected · v0.23.5
+|- Updated     v0.23.4 → v0.23.5 · 1d ago
+\- Installed   v0.23.4 · 8d ago
 ```
 
 **Which cluster** is the one this editor has in hand, and it is named in the
-view's description -- the line beside the view's own name, carrying its health
-and its version, plus `· update vX.Y.Z available` when there is one. Switching
-the selection in **Clusters** switches this view with it. With nothing selected
-the view is empty and says so, with the two ways out of that state:
+view's description -- the line beside the view's own name, carrying its state
+and its version, plus `· vX.Y.Z available` when there is a newer release.
+Switching the selection in **Clusters** switches this view with it. With nothing
+selected the view is empty and says so, with the two ways out of that state:
 
 ```
 Not connected to a cluster.
@@ -185,26 +189,46 @@ Install Local Cluster
 Connect to a Cluster
 ```
 
+When a local cluster is on this computer, the first of the two reads **Show
+Local Cluster** instead. A selected cluster that needs a sign-in says *Sign in
+to see this cluster's history.* with **Sign In**, and one that does not answer
+says *Can't reach this cluster.* with **Show Details**.
+
 There is no `local` wrapper row (memql#4426). It used to be there so that a
 machine with nothing installed had somewhere to start; that entry point now
 lives in three places instead -- the welcome above, the Clusters welcome, and
 **Install Local Cluster...** in this view's title menu -- and the instance's own
-actions (Repair, Rebuild From Checkout, Uninstall, Open Checkout Folder) moved to
-the title menu with it. Nothing lost a route.
+actions (Change Version, Rebuild From Checkout, Pull and Rebuild, Open Checkout
+Folder, Repair Local Cluster, Uninstall Local Cluster) moved to the title menu
+with it, each shown only when it is legal. Nothing lost a route.
 
 **An instance** is a MemQL you operate. It is derived rather than declared:
 `local` is whatever is on this machine (an install receipt, a `local: true`
 registry row, and whether the front door answers), and every other
 `clusters.yaml` entry is a remote one.
 
+**The cluster's page** is **Show Deployments**, in the view's title bar. It
+carries the cluster's name and version, its MemQL OS address with **Open**,
+**History** (every run a row that opens it), and **Details**, collapsed: for a
+local cluster the source folder, branch and commit, whether its images are
+released or built from your checkout, and its domain; for a remote one the
+deployment running, the one prepared and the one **Roll back** returns to. A
+local cluster also says whether it is up to date. A remote cluster adds
+**Rollouts** (each rollout in flight with its own **Promote** and **Abort...**)
+and **Next version** (**Prepare v0.24.1** patch, minor and major). The action
+bar holds the state in words and the acts legal from it, at most three with one
+button; any others are behind **More...**.
+
 **Selecting a run opens it.** The detail page states what the run was, what it
-moved the cluster between, how it ended and why, when it started and finished
-and how long it took, and its steps (or, for a remote deployment, its node
-types). Its buttons are the instance's own role-gated actions, ordered for what
-you are looking at: a failed run leads with **Repair**, a cluster running
-checkout images leads with **Rebuild From Checkout**, and a remote deployment
-offers the deploy-control actions your role admits. No verb appears there that
-the instance page would not also offer.
+moved the cluster between, when it started and how long it took, and its steps
+(or, for a remote deployment, its **Services**: each node type's version and
+replicas). A failed step's log opens beneath it. A record offers navigation,
+not the cluster's whole set of acts: a local run that failed or was interrupted
+offers **Retry**, which is the act it came from (the same version change,
+rebuild or repair), and only when that act is legal now; the remote deployment
+**Roll back** would return to offers **Roll back to** it; and while another run
+is going on this machine, the page offers **Show current run** and nothing that
+could start a second one beside it.
 
 **A run** is something that changed an instance's deployed state. Local runs are
 recorded in `~/.memql/runs/`, one file per run, rewritten after every step, so a
@@ -213,45 +237,65 @@ Remote runs are not recorded locally at all: they are `v1:cluster:deployment`
 rows and the cluster is their record.
 
 The two are not the same granularity, and the page says so: a local run's items
-are install steps, and a remote run's are **node types** -- the per-tier version,
+are install steps, and a remote run's are **services** -- the per-tier version,
 replicas and image digest a deployment declared.
 
 ### What an instance offers
 
-| Action | local, nothing installed | local, installed | remote |
-|---|---|---|---|
-| Create deployment | the full install graph | move to another release tag | deploy |
-| Repair | -- | re-run the graph | -- |
-| Rebuild from checkout | -- | k3d.dev over the recorded checkout | -- |
-| Uninstall | -- | the uninstall graph, behind its preview | -- |
-| Cut version / Promote / Rollout / Roll back | -- | -- | by role |
+| Action | local, nothing installed | local, installed | local, not installed by this editor | remote |
+|---|---|---|---|---|
+| Install | the full install graph | -- | -- | -- |
+| Change version | -- | the install graph at another release tag | -- | -- |
+| Repair | -- | re-run the install graph | -- | -- |
+| Rebuild from checkout | -- | with a recorded checkout | -- | -- |
+| Pull and rebuild | -- | with a checkout on a branch | -- | -- |
+| Uninstall | -- | the uninstall graph, behind its page | a delete, behind the typed phrase | -- |
+| Reconnect | -- | when it is not in your list | -- | -- |
+| Connect | -- | -- | adds it to your list as it is | -- |
+| Deploy, Prepare, Promote, Abort, Roll back | -- | -- | -- | by role |
 
-The local-cluster wizard supports **linux/amd64 and darwin/arm64**. On other platforms
-Create deployment, Repair, Upgrade and Uninstall refuse at the platform gate --
-they do not list a tag that cannot run, and they do not touch hosts, mkcert or
-the receipt. The checkout development path is documented in the quickstart.
+A cluster that is on this machine with no install record -- a `make up` one,
+typically -- reads *This computer has a MemQL cluster that this editor didn't
+install.* and offers **Connect** and **Delete...**: there is nothing to repair
+or replay, because nothing recorded how it was made.
 
-**Re-running the install graph is the repair, and it is also the upgrade.**
-Every step verifies before it acts and skips whatever is already satisfied, so
-one graph serves all three: an install does everything, a repair does whatever
-is missing, and a deployment to another tag moves the checkout and reconciles.
-Before it starts, the page shows which steps will actually change something --
-usually two of fifteen -- because a run reporting fifteen steps looks like a
-reinstall to whoever is watching it.
+The local-cluster installer supports **linux/amd64 and darwin/arm64**. On other
+platforms the Add a cluster page says this computer can't run a local cluster
+and offers only **Connect to a cluster**, and Repair, Change version and
+Uninstall refuse at the platform gate -- they do not list a tag that cannot run,
+and they do not touch hosts, mkcert or the receipt. The checkout development
+path is documented in the quickstart.
+
+**Re-running the install graph is the repair, and it is also the version
+change.** Every step verifies before it acts and skips whatever is already
+satisfied, so one graph serves all three: an install does everything, a repair
+does whatever is missing, and a change of version moves the checkout and
+reconciles. Before it starts, **Change version** lists under *What changes* the
+steps that will actually do something -- usually two -- and says how many others
+are checked and left as they are, because a run reporting sixteen steps looks
+like a reinstall to whoever is watching it. A newer release than the one running
+is offered on the page as **Update to vX.Y.Z...**.
 
 **Rebuild from checkout is a fourth, separate one-step graph.** A wizard install
 runs released images pulled at a tag; the checkout it cloned is inert until
 something builds from it. Rebuild does: it builds the node images from that
 checkout, imports them, points the cluster's Application at them (keeping the
-database operand where it is), and restarts. From then on the instance row reads
-`checkout <commit> (<n> uncommitted)` instead of a version, and the Connection
-page says so. An install, upgrade or repair returns the cluster to released
-images -- and says so before it runs.
+database operand where it is), and restarts. Its page shows the source folder
+and commit, says what will not be applied (changes under `deploy/`), and takes
+an optional list of services to rebuild. From then on the cluster's version
+reads `Your build <commit>` and its Details say **Built from your checkout**,
+with the uncommitted file count. A version change or repair returns the cluster
+to released images -- and says so before it runs.
+
+**Pull and rebuild** pulls the checkout's branch from its origin and then
+rebuilds. When the branch carries commits of yours that are not on the origin,
+the **Merge with my commits** switch decides whether the pull may merge them or
+stops; with it off, the pull stops rather than merging.
 
 **Initial installation recommends the latest available release.** The version
 picker also permits an explicit tag or the source-build lane. The offline fallback
 uses the extension's pinned release. Review the chosen version and operation
-before starting; later deployment actions have their own selection flow.
+before starting; later version changes have their own page.
 
 ### Remote instances, and the three states a deploy pipeline can be in
 
@@ -259,21 +303,36 @@ The page probes the cluster's deployment status when it opens and renders
 exactly one of:
 
 - **the actions**, when the pipeline answered;
-- **no deploy pipeline is configured**, in the engine's own words. This is the
-  ordinary state of an engine-only cluster -- the orchestration lives in a
-  product repository, and local clusters are operated with `make up` rather than
-  the deploy console;
-- **status is not visible at your role**, because that read is owner/admin
-  gated. Deployment history is ordinary rows and is unaffected.
+- **Deployments aren't set up for this cluster.** This is the ordinary state of
+  an engine-only cluster -- the orchestration lives in a product repository,
+  and local clusters are operated with `make up` rather than deploy control.
+  The engine's own words are under Details;
+- **Your role can't view deployment status.** That read is owner/admin
+  gated; deployment history is ordinary rows and is unaffected.
 
 None of the three is an error. A row of buttons that turned out to be refused
 would be the error; naming the state is not. What the extension hides is hidden
 as a **courtesy** -- the engine decides, and a refusal names the role required.
+A destructive deploy act (Abort, Roll back) asks you to type its target before
+it runs.
 
 ## Onboarding: getting a cluster into this editor
 
-Two routes, and they are for opposite situations. The **+** on the Clusters view
-offers both.
+**MemQL: Add Cluster**, or the **+** on the Clusters view, opens one page: its
+tab reads **Add a cluster**, and **Install MemQL**, **Repair MemQL** or
+**Uninstall MemQL** while it is doing one of those. It looks at this computer
+first -- an install receipt, a `local: true` entry, and whether that cluster
+answers -- and offers only what the evidence supports:
+
+| On this computer | The page offers |
+|---|---|
+| no local cluster | **Install MemQL on this computer**, **Connect to a cluster** |
+| a local cluster in your list | **Sign in** (or **Open MemQL OS** once signed in), **Repair**, **Uninstall**, **Connect to another cluster** -- with **Repair** first when it is not responding |
+| a local cluster not in your list | **Connect to it**, **Uninstall**, **Connect to another cluster** -- and **Repair** first when it is not responding |
+| a `make up` cluster, with no install record | the same, without **Repair**: nothing recorded how it was made |
+| a computer the installer does not support | one sentence and **Connect to a cluster** |
+
+Two of those are the routes in, and they are for opposite situations.
 
 ### Install a local cluster
 
@@ -281,23 +340,28 @@ Builds one on this machine: a k3d cluster, an ArgoCD that reconciles it, the
 hosts entries and the mkcert certificate that make `memql.localhost` resolve and
 serve TLS, and an owner account bootstrapped from the answers on the form.
 
+**The form asks three things**: first name, last name and email. **More
+options** holds the domain and the version, and its summary reads
+`memql.localhost · Latest (vX.Y.Z)` while it is closed. **Checks** below lists
+the installer and, when one will be needed, your password, with one word each.
+
 **The version field recommends Latest, and Latest is preselected.** The list is
 read from the repository at page-open time, newest first, and its first entry
-reads `Latest -- vX.Y.Z (recommended)`. Take it unless you have a reason not to:
-a release's deploy manifests and its node images are cut together at one tag, so
-the newest release is the one whose halves are known to match. The extension
-also carries a pinned release constant, but its only job now is to be the answer
-when the repository cannot be reached -- on a plane, behind a proxy, with no
-`git` -- and the field degrades to a text box prefilled with it.
+reads `Latest (vX.Y.Z)`. Take it unless you have a reason not to: a release's
+deploy manifests and its node images are cut together at one tag, so the newest
+release is the one whose halves are known to match. The extension also carries a
+pinned release constant, but its only job now is to be the answer when the
+repository cannot be reached -- on a plane, behind a proxy, with no `git` -- and
+the field degrades to a text box prefilled with it.
 
 Choosing a specific older tag is supported and unremarkable; the field is a
 picker precisely so that "the release with the fix I am waiting on" is an answer
 you can give.
 
 **`main` is not a version. It is a lane, and it costs minutes.** The entry reads
-`main -- build from source (for MemQL developers)` and it is for one situation:
-you have repository access and you want to run the engine as it is on `main`
-right now, before any release carries it. Choosing it:
+`Build from source (main, slower)` and it is for one situation: you have
+repository access and you want to run the engine as it is on `main` right now,
+before any release carries it. Choosing it:
 
 - checks out `main` instead of a tag;
 - **builds the node images from that checkout** with Docker and imports them
@@ -311,18 +375,39 @@ paired with the newest *release's* node images, a deliberate skew that delivered
 manifest and script fixes but not engine ones. It no longer does, and any prose
 you find describing that skew is stale.
 
-A `main` install shows as **checkout mode** on its Deployments row, with the
-commit it was built at and how many files were dirty. `Rebuild from checkout`
-on that row rebuilds and rolls it forward without reinstalling.
+A `main` install's version reads `main @ <commit>` on its Deployments page.
+**Rebuild from checkout...** there rebuilds it and rolls it forward without
+reinstalling, and **Pull and rebuild...** pulls `main` first.
 
-### Add an existing cluster
+**Install asks for your computer password once**, in an input titled **MemQL
+needs your password**, before anything runs. Dismissing it runs nothing and
+returns to the form with what you typed; a password refused three times does the
+same, and says so.
+
+**The run is the progress screen**, described under
+[the five views](#the-five-views-and-which-question-each-answers). **Cancel**
+reads *Stopping after the current step* until the step finishes, then offers
+**Back** and **Resume**. A failed step turns the bar red and names the step in
+the negative ("Couldn't create the cluster"); one notice gives the reason and
+the fix, as a command with **Run in terminal** (which types it into a terminal
+without pressing Enter), and the log opens at the failed step. Once every other
+step has finished, the bar offers **Retry** when retrying can help. There is no
+guided mode: the remedy command is the manual path.
+
+**The done screen** reads **MemQL is installed**, with the address and MemQL OS,
+and the recovery key masked behind **Show** and **Copy**. It is shown once, and
+leaving the screen without copying it asks first. **Sign in** is the button,
+with **Set up a passkey** beside it while the owner has no passkey.
+
+### Connect to a cluster
 
 Registers a cluster that already exists somewhere else. **Nothing is installed
 and nothing on the cluster is touched** -- this writes an entry in
 `~/.memql/clusters.yaml` saying how to reach it.
 
 **It asks two things: a name and a domain.** Everything else is derived from the
-domain, and the hint under it shows the derivation as you type:
+domain, and the line under it shows the derivation as you type (`Connects to
+api.example.com:443`):
 
 | From `example.com` | derives |
 |---|---|
@@ -330,11 +415,11 @@ domain, and the hint under it shows the derivation as you type:
 | sign-in / JWKS | `https://identity.example.com` |
 | MemQL OS | `https://os.example.com` |
 
-**Advanced** holds two fields you will usually not open. **Endpoint** is
+**More options** holds two fields you will usually not open. **Endpoint** is
 prefilled with the derivation and only needs changing for a front door that is
-not at `api.<domain>:443`; an edit there wins. **Token** is for pasting an
-identity-issued access token, and the ordinary answer is to leave it empty and
-run **MemQL: Sign In**, which mints one through your browser. A personal access
+not at `api.<domain>:443`; an edit there wins. **Access token (optional)** is
+for pasting an identity-issued access token, and the ordinary answer is to leave
+it empty and sign in, which mints one through your browser. A personal access
 token (`mql_pat_...`) is refused with an explanation: the mesh verifies bearers
 against the identity service's JWKS feed, so a PAT fails before any lookup.
 
@@ -344,17 +429,17 @@ anything under `.localhost` (including `memql.localhost`), `127.0.0.0/8` and
 create the hosts entries, the certificate or the cluster that would make one
 answer. Registering one produces an entry pointing at a front door that does not
 exist, and the failure arrives much later as a connection error naming a
-hostname you typed yourself. Use **Install a local cluster** instead; that flow
-takes `memql.localhost` as its own default, because it is about to make it
-resolve.
+hostname you typed yourself. The form says *That's this computer* and sends you
+back to the local cluster; **Install MemQL on this computer** takes
+`memql.localhost` as its own default, because it is about to make it resolve.
 
-**Saving probes first, and a failed probe does not stop you.** On a valid form
-the extension fetches `https://identity.<domain>/.well-known/jwks.json` and
-checks the endpoint is reachable. If it answers, the cluster is registered
-silently. If it does not, you get the endpoint and the reason, nothing is
-written, and the button becomes **Save anyway** -- because a cluster that is
-stopped, behind a VPN you have not connected, or still deploying is one you may
-perfectly well want registered now.
+**Connecting probes first, and a failed probe does not stop you.** On a valid
+form the extension fetches `https://identity.<domain>/.well-known/jwks.json` and
+checks the endpoint is reachable. If it answers, the cluster is added and the
+page shows its address with **Sign in** as the one button. If it does not, you
+get the endpoint and the reason, nothing is written, and the button becomes
+**Add anyway** -- because a cluster that is stopped, behind a VPN you have not
+connected, or still deploying is one you may perfectly well want registered now.
 
 ## Clusters
 
@@ -367,7 +452,10 @@ Sign in as its one inline act; a connected row carries Open MemQL OS.
 
 The cluster in use is connected again when the window opens, whenever a stored
 session can do it, and a dropped connection is retried a few times over about
-two minutes before the row says it cannot reach the cluster.
+two minutes -- the row reads Connecting meanwhile -- before the row says it
+cannot reach the cluster and a notification offers **Reconnect**. A session
+that ended instead offers **Sign in**. A refused credential stops the retries
+at once rather than looping against the refusal.
 
 **Signing in needs nothing configured on either side.** Every identity node
 carries this editor as a built-in first-party OAuth client (`memql-vscode`), so
@@ -383,12 +471,13 @@ browser can still finish. Nothing is registered with the cluster at any point,
 and the editor always signs in as itself: a `client_id` in `clusters.yaml`
 belongs to whichever tool wrote it (the Cockpit writes its own) and is not used.
 
-**A local install must be driven from a local window.** "Install a local
-cluster" writes hosts entries, issues an mkcert certificate into *this
+**A local install must be driven from a local window.** Installing a local
+cluster writes hosts entries, issues an mkcert certificate into *this
 machine's* trust store and serves the cluster at `*.memql.localhost`. From a
 remote window those all land on the remote host while your browser is on your
 own, and `.localhost` resolves to loopback for whichever machine asks -- so the
-credential links the wizard hands you open a tab that cannot connect. Install
+credential links the install hands you open a tab that cannot connect. The
+install form in a remote window says so and offers only **Cancel**. Install
 locally, then register the cluster from wherever you like.
 
 **Readers and writers can sign in for Productivity Tools.** The core extension
@@ -400,27 +489,47 @@ unrecognized cluster role is refused with an explanation.
 Operator-facing detail:
 [Connecting an Editor](https://github.com/znasllc-io/memql/blob/main/docs/public/operate/auth/connecting-editors.md).
 
-**Remove takes the row, not the cluster.** It drops the entry from
-`~/.memql/clusters.yaml`, deletes the credential this editor stored, and closes
-the connection if it was the live one. **Nothing on the machine is touched**:
-the cluster keeps running and its data is untouched, and the confirmation says
-so.
+**Remove takes the row, not the cluster.** **Remove Cluster From List** (the
+row's context menu, or **Remove from list** on the cluster page) drops the entry
+from `~/.memql/clusters.yaml`, deletes the credential this editor stored, and
+closes the connection if it was the live one. **Nothing on the machine is
+touched**: the cluster keeps running and its data is untouched, and the
+confirmation says so in its one line -- *The cluster keeps running on this
+computer. You can add it back from +.* for a local cluster.
 
 **And there is a way back with nothing to re-type.** When a local cluster is on
-the machine but not in the list, the **+** offers *Connect to the local cluster*:
-it composes the entry from what the install recorded, or from the installer's
-own default domain when the receipt is gone, and signs you in. No form at any
-point.
+the machine but not in the list, the Add a cluster page offers **Connect to it**
+(and the palette **MemQL: Connect to Local Cluster**): it composes the entry
+from what the install recorded, or from the installer's own default domain when
+the receipt is gone, and signs you in. No form at any point.
 
-**Uninstall** is a Deployments action, on the local instance row. It reverses
-the install receipt -- the k3d cluster, the hosts-file entries, the mkcert CA,
-the pinned tools -- and there is no undo, because a deleted k3d cluster takes
-its database with it. It confirms against an itemised dry run rather than a
-yes/no prompt: every artifact the receipt names, what will happen to it, and
-which steps will ask for elevation. Anything the install *found* rather than
-created is listed as **preserved** and left alone.
+**Uninstall** is **Uninstall Local Cluster...**: in the Deployments view's title
+menu with the local cluster selected, on the Add a cluster page, and in the
+palette -- never on a Clusters row. It reverses the install receipt -- the k3d
+cluster, the hosts-file entries, the downloaded MemQL files -- and there is no
+undo, because a deleted k3d cluster takes its database with it. The
+**Uninstall MemQL** page is the confirmation, not a yes/no prompt:
 
-Remove and Uninstall are separate commands, in separate views, with separate
+- **Will be removed** names each artifact by what it is (the cluster, the
+  downloaded MemQL files, the local addresses) and says which one asks for your
+  password. Anything the install *found* rather than created is listed as
+  **Kept** and left alone.
+- **Also remove** offers the shared tools -- k3d, kubectl, the local certificate
+  authority and mkcert -- as switches, all off, each with a line saying what else
+  it is good for. mkcert can only be switched on once the certificate authority
+  is, and turning the authority off turns mkcert off with it.
+- **Data** appears for a cluster this editor did not create (a `make up` one, or
+  one an install adopted). That cluster is kept unless **Delete the cluster's
+  data**, a red switch, is on and `delete memql data` is typed beneath it. Only
+  then does the button read **Uninstall and delete data**, and the cluster moves
+  to **Will be removed**. Turning the switch off clears the phrase.
+
+Cancel, or leaving the page, turns every switch back off. A receipt the page
+cannot read says *Couldn't work out what would be removed.* rather than that
+nothing is installed. The removal runs on the same progress screen as an
+install.
+
+Remove and Uninstall are separate commands, in separate places, with separate
 confirmations, and that separation is the point: one is a routine edit to a
 list and the other is irreversible.
 
@@ -477,9 +586,10 @@ the seeded-versus-trained distinction.
 catalog reports a path relative to the CLUSTER's tree, and a remote cluster is
 usually not the checkout you have open, so the page named the path and stopped
 there. But the cluster that loaded the construct also serves the file, over its
-pack browser -- so the page offers **View source from cluster**, which opens it
-as a read-only `memql-cluster://` document: at the signature, badged `RO`, with
-one header lens back to these details.
+pack browser -- so the page's **Open source** opens it from there, as a
+read-only `memql-cluster://` document: at the signature, badged `RO`, with one
+header lens back to these details. (When the file is in your workspace, the
+same **Open source** opens your copy.)
 
 That document gets `memql` highlighting and **no diagnostics**, which is
 deliberate rather than incomplete. The language server is an offline process
@@ -494,24 +604,23 @@ against a different one you have since connected to.
 
 ### A concept's rows
 
-A **concept** is a schema, so its detail page carries one more action nothing
-else does: **Browse rows in MemQL OS**, which opens that concept's rows at
-`?concept=<id>` in the cluster's MemQL OS. It is the return leg of the
-handoff: MemQL OS hands a definition to the editor, and the editor hands a
-concept's rows back. The address is resolved the same way **Open MemQL OS**
-resolves it -- from MemQL OS's own site row when there is a connection to read
-it over, composed from the cluster's domain when there is not. No other kind has
-rows, so no other kind draws the button; the absence is the statement, exactly
-as it is for Run below.
-
-The Data view is still where rows are browsed inside the editor. This is a
-door, not a replacement for it.
+A **concept** is a schema, so its detail page carries one more group nothing
+else does: **Rows**, with **Browse rows**, which opens that concept's rows in
+the editor (the same page the Data view opens), and **Open in MemQL OS**, which
+opens them at `?concept=<id>` in the cluster's MemQL OS. The second is the
+return leg of the handoff: MemQL OS hands a definition to the editor, and the
+editor hands a concept's rows back. The address is resolved the same way **Open
+MemQL OS** resolves it -- from MemQL OS's own site row when there is a
+connection to read it over, composed from the cluster's domain when there is
+not. No other kind has rows, so no other kind draws the group; the absence is
+the statement, exactly as it is for Run below.
 
 ### Running from the catalog
 
-**query, mutation, logic and tool** run from the detail page, through exactly
-the run path a CodeLens uses -- the same argument form, the same preflight, the
-same Result view, and the same write confirmation. Browsing a catalog is not a
+**query, mutation, logic and tool** run from the detail page -- **Run**, and
+**Run with arguments** when the construct takes any -- through exactly the run
+path a CodeLens uses: the same argument form, the same preflight, the same
+Result view, and the same write confirmation. Browsing a catalog is not a
 quieter way to write to production: a mutation against a non-local cluster
 still asks (memql#3309).
 
@@ -522,7 +631,7 @@ browses. `ListConstructs` carries that trigger (memql#3805), so the detail page
 opens the same automation form a `.memql` file's CodeLens does, with the same
 row picker and the same event synthesis.
 
-Its button reads **Run automation...** rather than **Run**, and the ellipsis is
+Its button reads **Run...** rather than **Run**, and the ellipsis is
 load-bearing: for the other four kinds a click invokes, while here it opens a
 form that ends in firing a real event on a real cluster. An automation the
 cluster reports no trigger for is manual-run -- a real, describable form -- so
@@ -619,43 +728,50 @@ sixteen pixels, a mark meaning "we do not know" is indistinguishable from one
 meaning "something is wrong here", and a disconnection must not look like a
 problem with your file.
 
-**A CodeLens** above each signature, beside the Run lens, naming the state and
-offering what can be done about it:
+**One CodeLens** above each signature, beside the Run lens, naming the state in
+words and, when the state has actions, opening a quick pick of exactly those
+actions, each with the line that says what it does:
 
 ```
-untrained   Dry-run   Try in session   Stage   Promote
-drifted     Dry-run   Try in session   Stage   Promote (updates the trained version)
-staged      Re-stage   Train (make it live for everyone)   Demote
-trained     Demote
-seeded      (no action -- changing it needs a rollout)
-edited      Rebuild from checkout   (a local cluster only; a remote one needs a rollout)
+Not on cluster          Dry run, Try in this session, Stage, Promote
+Differs from cluster    Dry run, Try in this session, Stage, Promote (replaces the live version)
+Staged · only you       Re-stage, Promote (make it live for everyone), Demote
+Live                    Demote
+Built in                (no action: changing it needs a rebuild or a rollout)
+Edited · needs rebuild  Rebuild from checkout   (a local cluster)
+Edited · needs rollout  (no action: a remote cluster needs a rollout)
 ```
 
-The order on the first two rows is the **escalation**: a session that ends, a
-private one that does not, and one everybody gets.
+The order on the first two rows is the **escalation**: a check that changes
+nothing, a session that ends, a private copy that does not, and one everybody
+gets. A construct defined for this session only adds `· this session` to its
+lens.
 
 **`edited` is the one state whose lens depends on the cluster rather than on
 the construct.** The other six describe what the cluster knows; this one
 describes what would apply the difference, and the answer differs by locality.
-So its sentence names the cluster -- "seeded constructs change by rollout" is
+So its tooltip names the cluster -- "seeded constructs change by rollout" is
 abstract until it says which cluster is going to need one -- and its only
-button, on a local cluster, is the Deployments command `Rebuild from checkout`
-rather than a seventh training action. A remote cluster gets the words and no
-button: a disabled control would suggest the editor could do it if only
-something were different.
+action, on a local cluster, is the Deployments command **Rebuild from
+checkout** rather than a seventh training action. A remote cluster gets the
+words and no action: a disabled control would suggest the editor could do it if
+only something were different.
 
-The state label is not a command. It is a fact about the construct, and making
-it clickable would leave a developer wondering what clicking it does. A
+A lens with no actions is not a command. It is a fact about the construct, and
+making it clickable would leave a developer wondering what clicking it does. A
 `seeded` construct gets no disabled buttons either -- a control that cannot
 work is not drawn.
 
-**A status-bar item** for the active document: `3 untrained · 1 drifted · 2
-edited`. It reports only what needs attention, so a file whose constructs are
-all trained shows nothing -- an item that is always present saying "12 trained"
-is one you stop reading, and it would take the warning with it. `edited` is in
-the reported set because it is the same complaint about a different tier: *I
-changed this and the cluster is still running what it booted with.* Its hover
-is where *saving does not promote anything* is said in words.
+**A status-bar item** for the active document: `6 not live`, with the parts in
+its hover (`3 not on cluster`, `1 differs from cluster`, `2 edited`). It reports
+only what needs attention, so a file whose constructs are all live shows
+nothing -- an item that is always present saying "12 live" is one you stop
+reading, and it would take the warning with it. `edited` is in the reported set
+because it is the same complaint about a different tier: *I changed this and
+the cluster is still running what it booted with.* Its hover is where *saving
+does not promote anything* is said in words. Clicking it, or **MemQL: Show
+Constructs Not Live on Cluster**, lists those constructs and moves the cursor to
+the one you pick.
 
 **Nothing runs automatically.** No promote-on-save, no train-on-save. The
 extension already holds that line for runs, and a promotion is a strictly
@@ -665,28 +781,29 @@ larger commitment than a run.
 
 | Action | What it does | Scope |
 |---|---|---|
-| **Dry-run** | compiles and binds in the engine's sandbox against a read-only clone of the live registry | nothing is mutated; safe against production |
-| **Try in session** | makes the construct callable by name | this connection only, dropped at disconnect |
+| **Dry run** | compiles and binds in the engine's sandbox against a read-only clone of the live registry | nothing is mutated; safe against production |
+| **Try in this session** | makes the construct callable by name | this connection only, dropped at disconnect |
 | **Stage** | persists it and registers it into your own durable tier | you only; survives restart and reconnect; owner-or-developer |
 | **Promote** | persists it, registers it cluster-wide, propagates to every node | durable; survives restart; owner-only |
 | **Demote** | withdraws it, from whichever tier it is in | owner-only for a trained construct |
 
-**Train is Promote.** The lens over a staged construct labels it *Train (make
-it live for everyone)* because that is the consequence, but there is no separate
-command: the engine sees the construct is staged for you and flips the same
-persisted row rather than writing a second one.
+**Training a staged construct is Promote.** The quick pick over a staged
+construct describes it as *Make it live for everyone* because that is the
+consequence, but there is no separate command: the engine sees the construct is
+staged for you and flips the same persisted row rather than writing a second
+one.
 
 **A concept cannot be staged**, and the refusal names it. A concept registers
 into the one shared concept registry, so there is no owner-scoped form of it --
 train the concept, then stage the constructs bound to it.
 
-Dry-run diagnostics land **at the construct**, and clear on the next run.
+Dry run diagnostics land **at the construct**, and clear on the next run.
 
 **Promote carries the closure, not just the construct.** Promoting a query
 whose spec is untrained must not half-land, so what is being committed is shown
 before it is committed.
 
-**Try in session is visibly temporary**, in the confirmation and in the lens.
+**Try in this session is visibly temporary**, in the confirmation and in the lens.
 Mistaking it for a promote is the most expensive confusion this surface can
 cause, because the difference between the two is the whole design. **Stage** is
 the durable answer to that temporariness: same owner-scoping, same invisibility
@@ -916,23 +1033,31 @@ the test suite (`test/clusterForm.test.ts`, `test/clusterStatus.test.ts`,
    credentials scrubbed) for channel and panel text.
 3. **Credential inputs are never prefilled.** The token boxes show empty
    whatever is stored; the prompt says that something is stored; an empty
-   answer keeps it. Removing a credential is sign-out's job, which also clears
-   the SecretStorage half. (`src/clusters/form.ts` is the seam.)
+   answer keeps it. Removing a credential is sign-out's job, which clears what
+   this editor stored and leaves another tool's sign-in alone.
+   (`src/clusters/form.ts` is the seam.)
 4. **Reveal-once credentials are shown by explicit click, once, and nowhere
-   else.** The recovery key renders only after "Reveal the recovery key" on
-   the install done screen; it never reaches the run log, the receipt, or any
-   channel (`src/install/recoveryKey.ts` is the narrow, tested seam -- do not
-   widen it). The device code is the deliberate exception: the user must read
+   else.** The recovery key renders masked on the install done screen and
+   only **Show** reveals it (**Copy** works without revealing it); it never
+   reaches the run log, the receipt, or any channel
+   (`src/install/recoveryKey.ts` is the narrow, tested seam -- do not widen
+   it). The device code is the deliberate exception: the user must read
    it, so it stays on the progress line and its notification.
 5. **Addresses are detail, not decoration.** The cluster list and QuickPick
    show state + version; the endpoint lives in the row tooltip and on the
-   Connection page. Internal node ids stay in tooltips. The signed-in email
-   appears on the Connection page only.
+   cluster page. Internal node ids stay in tooltips. The signed-in email
+   appears on the cluster page only.
 6. **Values stay out of hovers.** The Runs tree shows argument NAMES and
-   SHAPES; the values are in the configurations file, one command away.
-7. **Files that hold credentials are 0600.** `clusters.yaml` (plaintext
-   access token, shared with the Cockpit), the install receipt and the run
-   logs are written owner-only, and their writes pass the withholding gates.
+   SHAPES; the values are in `.memql/runs.json`, one command away (**Edit
+   Saved Runs**).
+7. **The editor's credentials live in VS Code's SecretStorage**: the access
+   token, the refresh token, the expiry, and the client the refresh token was
+   issued to. A sign-in writes no token to `clusters.yaml`; a token found
+   there (pasted by hand, or left by an older extension) is still used, and
+   moves into SecretStorage, leaving the file, at its first refresh. **Files
+   that can hold credentials are 0600**: `clusters.yaml`, the install receipt
+   and the run logs are written owner-only, and their writes pass the
+   withholding gates.
 8. **The sudo password is asked by VS Code's own input, held in memory for
    the one run, never exported to an env var or a file**
    (`src/install/sudoAgent.ts` documents the trade).
@@ -959,7 +1084,7 @@ to your built binary, and open a folder of `.memql` files.
 
 ### The context keys (contributor notes)
 
-Three context keys drive every `when` clause in `package.json` that is not
+These context keys drive every `when` clause in `package.json` that is not
 simply `view == ...`. Each has exactly ONE writer, and adding a second writer
 to any of them is a race whose winner depends on listener registration order.
 
@@ -967,16 +1092,22 @@ to any of them is a race whose winner depends on listener registration order.
 |---|---|---|
 | `memql.clusterSelected` | This editor has a cluster in hand: dialling one, holding one, or tried and refused | `ConnectionManager` |
 | `memql.connected` | That cluster's transport is up right now | `ConnectionManager` |
-| `memql.deploymentsInstance` | What the selected cluster IS: `memqlLocalInstance`, `memqlLocalInstanceAbsent`, `memqlRemoteInstance`, or unset | `DeploymentsTreeProvider` |
+| `memql.connectionState` | The connection in one word: `none`, `connecting` (a dropped connection retrying included), `connected`, `signIn`, `unreachable`, `notConfigured` | `ConnectionManager` |
+| `memql.localClusterPresent` | A MemQL local cluster exists on this machine, listed or not | `src/extension.ts`, from the presence check |
+| `memql.deploymentsInstance` | What the selected cluster IS: `memqlLocalInstance`, `memqlLocalInstanceAbsent`, `memqlLocalInstanceUnreceipted`, `memqlRemoteInstance`, or unset | `DeploymentsTreeProvider` |
+| `memql.deploymentsHasCheckout` / `memql.deploymentsHasBranch` | The selected local cluster has a recorded checkout / that checkout is on a branch | `DeploymentsTreeProvider` |
 
-**The first two are the connection, and only the manager publishes them**
-(memql#4424). It is the one object that knows when either changes, so it maps
-its own state through `src/state/connectionContext.ts` -- a pure, table-tested
-module -- and writes the pair through an injected sink. `ConnectionManager`
-itself must stay free of `vscode` imports, so the `setContext` call lives in
-`src/extension.ts`; the DECISION does not. Every provider is injected with a
-reader of the same mapping rather than asking the manager itself, so a view
-cannot disagree with the workbench about whether a welcome should be showing.
+**The first three are the connection, and only the manager publishes them**
+(memql#4424). It is the one object that knows when any of them changes, so it
+maps its own state through `src/state/connectionContext.ts` -- a pure,
+table-tested module -- and writes them through an injected sink.
+`memql.connectionState` is what lets a welcome tell a sign-in problem from an
+outage, offering **Sign In** for one and **Show Details** for the other.
+`ConnectionManager` itself must stay free of `vscode` imports, so the
+`setContext` call lives in `src/extension.ts`; the DECISION does not. Every
+provider is injected with a reader of the same mapping rather than asking the
+manager itself, so a view cannot disagree with the workbench about whether a
+welcome should be showing.
 
 `clusterSelected` is **not** "clusters.yaml names a `selectedCluster`". A
 registry entry with no dial behind it is a name in a file, and the views keyed
@@ -986,9 +1117,10 @@ connection has nothing to draw. A cluster that was chosen and did NOT answer is
 fact about something, and it belongs in a view's rows and description, not in an
 empty state.
 
-**The third describes the selection, not the connection** (memql#4426), and the
-Deployments view is its one writer for the same reason the manager owns the
-others: it is the only thing that computes the catalog. It exists because the
+**`memql.deploymentsInstance` describes the selection, not the connection**
+(memql#4426), and the Deployments view is its one writer, with the two checkout
+keys beside it, for the same reason the manager owns the others: it is the only
+thing that computes the catalog. It exists because the
 instance actions moved to the view TITLE menu when the instance row went, and
 `view/title` clauses are evaluated with no `viewItem` in scope -- so the row's
 contextValue vocabulary had to become a key to survive. It is written on every

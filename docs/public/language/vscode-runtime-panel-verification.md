@@ -176,13 +176,13 @@ curl -s https://identity.memql.localhost/.well-known/memql-config.json
 # {"identityUrl":"https://identity.memql.localhost","grpcEndpoint":"api.memql.localhost:443","clientId":"cockpit","clusterName":"local"}
 ```
 
-`identityUrl` is `issuer`, `clientId` is `client_id`, and `grpcEndpoint` is
-`endpoint` -- a bare `host[:port]` naming the front door, which is exactly the
-form the extension accepts. It was not always: until memql#3399 this field read
-`https://bff.memql.localhost`, a URL at a host with no ingress, and the two wrong
-guesses in the note below are the ones it handed the reader. Both halves are now
-pinned to one shared statement of the contract
-(`test/fixtures/discovery-endpoint-contract.json`).
+`identityUrl` is `issuer` and `grpcEndpoint` is `endpoint` -- a bare
+`host[:port]` naming the front door. `clientId` names the Cockpit's own client;
+the editor always signs in as `memql-vscode` and does not read it. It was not
+always so: until memql#3399 this field read `https://bff.memql.localhost`, a URL
+at a host with no ingress, and the wrong host in the note below is the one it
+handed the reader. Both halves are now pinned to one shared statement of the
+contract (`test/fixtures/discovery-endpoint-contract.json`).
 
 ### 5. Write two cluster entries
 
@@ -201,8 +201,7 @@ clusters:
     domain: memql.localhost
     endpoint: api.memql.localhost:443
     issuer: https://identity.memql.localhost   # optional -- derived from domain when absent
-    client_id: cockpit                       # optional -- sent as client_id on refresh
-    token: <the access_token from /oauth/token>   # REQUIRED. A JWT, not a PAT.
+    token: <the access_token from /oauth/token>   # A JWT, not a PAT -- ingest only
     refresh_token: <the refresh_token from the same response -- ingest only>
     local: true
   - name: vscode-nonlocal
@@ -210,7 +209,6 @@ clusters:
     domain: memql.localhost
     endpoint: api.memql.localhost:443
     issuer: https://identity.memql.localhost
-    client_id: cockpit
     token: <a SECOND access_token -- see below>
     refresh_token: <its matching refresh_token>
 selected_cluster: vscode-local
@@ -219,10 +217,13 @@ selected_cluster: vscode-local
 Three things about those entries are not guessable, and each is a wrong guess
 somebody has already made:
 
-- **`endpoint` is a bare `host[:port]`, never a URL.** `connection/endpoint.ts`
-  rejects a scheme outright: *endpoint scheme must be ws:// or wss://, got
-  "https://"*. The natural thing to paste -- the `https://` domain the Cockpit
-  uses, sitting in this same file -- is exactly what fails.
+- **`endpoint` is a `host[:port]` or an `https://` address, and nothing
+  else.** Both name the same front door: `connection/endpoint.ts` maps
+  `https://` (and `http://`) to its socket twin on the same origin, which is
+  why the `https://api.memql.localhost` the Cockpit writes in this same file
+  dials. Any other scheme is refused in plain words. Until 0.6.2 a URL form was
+  refused outright, so a cluster the Cockpit had written could be signed in to
+  and then not connected to.
 - **The host is `api.<domain>`, not `bff.<domain>`.** There is no
   `bff.memql.localhost` ingress. The front door is `api-front-door`, which
   routes the HTTP paths -- `/memql/ws`, `/healthz` -- to
@@ -232,7 +233,9 @@ somebody has already made:
   drops a false on its next write, so the two tools would churn the file
   against each other. A quoted `local: "true"` is not accepted as true either.
 
-**Give each entry its own token pair.** Sign in twice. The refresh exchange
+**Give each entry its own token pair.** Sign in twice. (Signing in through the
+extension instead writes nothing here: the tokens go to `SecretStorage`, keyed
+by the entry's name, and the hand-pasted keys are not needed.) The refresh exchange
 *rotates* the refresh token -- the presented one is consumed, with only a
 30-second grace window on the previous value -- so a pair shared between two
 entries survives the first exchange and then stops working on the other.
@@ -244,15 +247,16 @@ Access tokens carry a **900-second TTL**. Renewal is not manual: set
 before each connect, and in place on a live stream via the SDK's re-auth hook,
 so a long session is never re-credentialed by hand (memql#3385).
 
-`refresh_token` then **disappears from the file, by design**. It is a 30-day
-credential and this file is plaintext and shared, so the key is an ingest path
-only: on the first successful exchange the rotated token moves into VS Code's
-`SecretStorage` and the plaintext key is deleted. The access token stays in the
-file -- it is short-lived, and the Cockpit needs to see it. A `refresh_token`
-that has vanished after your first connect was taken into custody, not lost.
+`token` and `refresh_token` then **disappear from the file, by design**. The
+editor keeps its credentials in VS Code's `SecretStorage` -- the refresh token
+is a 30-day credential and this file is plaintext and shared -- so both keys
+are an ingest path only: on the first successful exchange the rotated tokens
+move into `SecretStorage` and the plaintext keys are deleted. Keys that have
+vanished after your first refresh were taken into custody, not lost. The
+Cockpit keeps its own sign-in and is not affected.
 
-An expired credential renders as a **yellow key** with a `CREDENTIAL EXPIRED:`
-tooltip -- deliberately a different picture from the red dot an unreachable
+An expired credential renders as a **yellow key** with *Your session ended.* in
+its tooltip -- deliberately a different picture from the red dot an unreachable
 cluster gets, because "your token ran out" and "the cluster went away" have
 completely different next actions.
 
@@ -272,8 +276,9 @@ Full narrative: [Visual Studio Code and Cursor Runtime Panel](vscode-runtime-pan
 
 - [ ] The MemQL icon appears in the activity bar and reads cleanly at 24x24
 - [ ] Clusters lists both entries from `~/.memql/clusters.yaml`
-- [ ] Selecting one connects, and the icon turns to a filled green circle
-- [ ] Concepts lists domains, and expanding one lists its concepts
+- [ ] Clicking one connects, the icon turns to a filled green circle, and the
+      row is marked as the cluster in use
+- [ ] Data lists domains, and expanding one lists its concepts
 - [ ] Clicking a concept opens a tab, rows render, and **Load more** pages
       correctly
 - [ ] Clicking a row shows its full nested detail -- payload, provenance and
@@ -306,18 +311,25 @@ times while every automated test was green.
       `clusters.yaml` rather than leaving the old credential on disk
 - [ ] Comments and unknown fields already in `clusters.yaml` survive a write
       (the Cockpit shares this file)
-- [ ] A cluster with no endpoint shows the yellow warning "not configured"
-      state; one with no credential, or a `mql_pat_` / `mql_wkr_` value in
-      `token`, shows the yellow key and names the wrong class BEFORE any dial
+- [ ] A cluster with no endpoint shows the yellow warning and **Not set up**;
+      one with no credential, or a `mql_pat_` / `mql_wkr_` value in `token`,
+      shows the yellow key and names the wrong class BEFORE any dial
 - [ ] A failed connection shows the red error icon with the message on hover,
-      and an expired credential shows the yellow key with `CREDENTIAL EXPIRED:`
-      -- the two are different icons
-- [ ] After the first successful connect, `refresh_token` is gone from
+      and an expired credential shows the yellow key with *Your session
+      ended.* -- the two are different icons
+- [ ] After the first refresh, `token` and `refresh_token` are gone from
       `clusters.yaml` and the session keeps working (custody moved to
       SecretStorage)
+- [ ] Stop the cluster (or drop the network) under a live connection: the row
+      reads **Connecting** while the extension retries, for about two minutes,
+      then **Can't reach** (or **Not running**) with a notification offering
+      **Reconnect**. Bring the cluster back within the window and it reconnects
+      with no click
+- [ ] Reload the window with a signed-in cluster in use: it connects again with
+      no click
 - [ ] A session left running past 900 seconds does not drop -- the access token
       is renewed without a reconnect
-- [ ] **Disconnect** returns the icon to the hollow circle and empties Concepts
+- [ ] **Disconnect** clears the green icon and empties Constructs and Data
 
 ### Sign-in and sign-out (memql#3401)
 
@@ -326,24 +338,32 @@ they are the one part of this checklist you can run **without** hand-pasting a
 token into `clusters.yaml`. Take one cluster entry through them with its `token`
 and `refresh_token` keys deliberately blank.
 
-- [ ] **MemQL: Sign In** (the cluster's context menu, or the palette) opens a
-      cancellable progress notification reading `signing in to <cluster>` and
-      opens a browser at the cluster's `identity.<domain>` login page
+- [ ] **Sign in** (the row's inline act, its context menu, the cluster page or
+      the palette) puts no dialog in front of the browser: one cancellable
+      progress notification, **MemQL: Signing in to <cluster>**, whose line
+      moves through *Opening your browser*, *Waiting for you in the browser*
+      and *Finishing sign-in*, and a browser at the cluster's sign-in page.
+      With MemQL OS already signed in there, it finishes without typing
+- [ ] The browser tab says **You're signed in** only once the editor has the
+      session; a sign-in that fails after the callback says **Sign-in didn't
+      finish** instead
+- [ ] With a `client_id: cockpit` line in the entry (the Cockpit writes one),
+      sign-in and refresh still work -- the editor signs in as itself and never
+      uses another tool's client
 - [ ] Signing in there returns to the editor without a manual paste, and the tree's
       yellow key clears
-- [ ] `clusters.yaml` now carries a `token:` and a `client_id:` for that cluster,
-      and does **not** carry a `refresh_token:` -- custody moved to SecretStorage
+- [ ] `clusters.yaml` carries no `token:`, `refresh_token:` or `client_id:` for
+      that cluster afterwards -- the editor's sign-in lives in SecretStorage
 - [ ] Cancelling the progress notification mid-flow shows nothing louder than a
       cancellation message: no red error toast, and no credential is written
-- [ ] Selecting a cluster whose dial fails **on the credential** offers a
-      **Sign in** button on the error toast; one that fails because it is
-      unreachable, or which names neither an `issuer` nor a `domain`, offers
-      only the message -- a button whose sole outcome is another error is not
-      shown
-- [ ] **MemQL: Sign Out** removes both `token:` and `refresh_token:` from
-      `clusters.yaml`, drops a live connection to that cluster, and says
-      `Run "MemQL: Sign In" to authenticate again`
-- [ ] After Sign Out the tree shows the yellow key ("no credential"), not the red
+- [ ] Clicking a cluster whose credential is missing or expired opens its page
+      with **Sign in** as the button, and the row carries **Sign in** inline; a
+      cluster that is unreachable offers **Retry**, and one that names neither
+      an `issuer` nor a `domain` offers **Edit** -- a button whose sole outcome
+      is another error is not shown
+- [ ] **MemQL: Sign Out** removes what the editor stored for that cluster,
+      drops a live connection to it, and says *Signed out of <cluster>.*
+- [ ] After Sign Out the tree shows the yellow key and **Sign in**, not the red
       error dot
 - [ ] **Refresh after expiry:** with a signed-in cluster connected, wait past the
       access token's 900-second TTL (or shorten
@@ -352,13 +372,14 @@ and `refresh_token` keys deliberately blank.
       loading -- the token is renewed in place, with no reconnect and no prompt
 - [ ] Delete the cluster's refresh-token secret (sign out, then hand-write only a
       long-expired `token:` back into `clusters.yaml`) and connect: the tree
-      shows the yellow key with `CREDENTIAL EXPIRED:` and the offered recovery is
-      Sign In
-- [ ] **MemQL: Sign In With a Device Code** (palette only) opens the approval
-      page with the `XXXX-XXXX` code pre-filled, keeps the code and
-      verification URL on the progress line, and shows exactly ONE action
-      message (Copy Code / Open Approval Page) that does NOT reappear after a
-      button is clicked (memql#4595). Approving at
+      shows the yellow key with *Your session ended.* and the offered recovery
+      is **Sign in**
+- [ ] **MemQL: Sign In With a Code** (the palette, the row's context menu, or
+      **Sign in with a code** on the cluster page) opens the approval page with
+      the `XXXX-XXXX` code pre-filled, keeps the code and verification URL on
+      the progress line, and shows exactly ONE action message (**Copy code** /
+      **Open page**) that does NOT reappear after a button is clicked
+      (memql#4595). Approving at
       `https://identity.<domain>/device` completes the sign-in on the editor
       side
 - [ ] **MemQL: Sign In** falls back to a device code on a host that cannot do
@@ -366,18 +387,24 @@ and `refresh_token` keys deliberately blank.
       limitations only -- a refused loopback bind, or no browser at all
       (memql#4594); a firewall that refuses the bind is the cheapest
       arrangement. The switch shows on the progress line
-      (`switching to a device code...`) and the ONE action message explains it
+      (*Switching to a code*) and the ONE action message explains it
       (memql#4595) -- there is no separate "falling back" toast -- and then the
       same `XXXX-XXXX` code appears. A host that *can* do loopback must still
       open a browser: the fallback firing unconditionally would be its own
       defect
 - [ ] **A slow browser sign-in is NOT abandoned** (memql#4594): start
-      **MemQL: Sign In** and leave the browser page unfinished past the old
-      two-minute mark -- the progress notification stays (after a quiet minute
-      it names the cancel + `MemQL: Sign In With a Device Code` exits), NO device code
-      appears, and completing the page at minute nine still signs the editor
-      in. Only past ten minutes does it end, as a warning naming
-      `MemQL: Sign In With a Device Code`
+      **MemQL: Sign In** and leave the browser page unfinished. After 30
+      seconds a notification (*Still waiting for your browser...*) and the
+      cluster page offer **Use a code instead**; NO device code appears unless
+      you take it, the progress notification stays, and completing the page at
+      minute nine still signs the editor in. Taking the offer runs the code
+      beside the browser, and whichever finishes first signs you in. Only past
+      ten minutes does the browser wait end, as a warning offering **Use a code
+      instead**
+- [ ] Against a cluster that does not accept the editor's client (an engine
+      older than the built-in client), sign-in fails within seconds, before a
+      browser page is left on "Bad Request", with a sentence saying the cluster
+      doesn't accept sign-in from VS Code
 - [ ] Renaming a signed-in cluster (**MemQL: Edit Cluster**, change the name)
       leaves it signed in (memql#3515). Rename it, then reconnect: no
       credential prompt. The stranded half is invisible by construction --
@@ -476,9 +503,10 @@ them from one cluster.
 Remove and Uninstall are the pair to check most carefully, because the risk in
 this surface is reading one as the other:
 
-- [ ] The trash can beside a cluster row is **Remove**, and its confirmation
-      spends a line saying that nothing is uninstalled and no data on the
-      cluster is touched
+- [ ] **Remove Cluster From List**, in the last group of a row's context menu,
+      is **Remove**, and its confirmation spends its one line on what does NOT
+      happen: the cluster keeps running on this computer (a local one), or
+      nothing on the cluster changes (a remote one)
 - [ ] Remove drops the entry from `clusters.yaml`, deletes the stored
       credential, and disconnects if that cluster was the live connection
 - [ ] Removing the selected cluster clears `selected_cluster` rather than
@@ -527,19 +555,21 @@ One property is worth checking rather than assuming:
 
 Open a `.memql` file with a runnable construct (a query is the easiest).
 
-- [ ] A **Run** CodeLens renders above the construct's signature, and a
-      **Run with...** lens beside it
+- [ ] One run CodeLens renders above the construct's signature: **Run** for a
+      construct with no arguments, **Run...** (which opens the argument form)
+      for one with any
 - [ ] The lens tooltip names what will actually run
-- [ ] A `@disabled` construct's lens reads **Run (@disabled)**, and its tooltip
+- [ ] A `@disabled` construct's lens reads **Run (disabled)**, and its tooltip
       names the remedy rather than only the condition (memql#3333)
 - [ ] Nothing runs on open and nothing runs on save -- the lens is an
       affordance, and only a click fires it
 - [ ] **Run** on a no-argument construct executes and opens a result tab
 - [ ] Result rows render through each concept's own `@displayCard`, and a
       concept with none falls back to the row id
-- [ ] Clicking a result row opens it in the Concepts surface
-- [ ] **Run with...** opens the argument form, with a field per declared arg
-      and the declared types enforced
+- [ ] Clicking a result row opens it in its concept's rows page (the one the
+      Data view opens)
+- [ ] **Run...** opens the argument form, with a field per declared arg and the
+      declared types enforced
 - [ ] An `@autoInjected` field is marked individually, with a per-field caption
       -- there is no blanket form-level notice disclaiming the whole form
       (memql#3333)
@@ -576,9 +606,10 @@ Open a `.memql` file with a runnable construct (a query is the easiest).
       `.memql/runs.json` in the workspace
 - [ ] The **Runs** view lists it
 - [ ] Its inline play button re-runs it with the saved arguments
-- [ ] Its inline delete button removes it, from the view and from the file
-- [ ] **Open Run Configurations File** opens `.memql/runs.json`
-- [ ] Editing that file by hand and hitting Refresh shows the change
+- [ ] **Delete Saved Run...** in its context menu asks first, then removes it,
+      from the view and from the file
+- [ ] **Edit Saved Runs** (the view's title bar) opens `.memql/runs.json`
+- [ ] Editing that file by hand shows the change in the view with no refresh
 - [ ] Re-running a saved configuration whose construct no longer exists fails
       with a legible message rather than a stack trace
 
@@ -586,7 +617,7 @@ Open a `.memql` file with a runnable construct (a query is the easiest).
 
 Open a file containing an `automation`.
 
-- [ ] A **Run automation...** CodeLens renders above it
+- [ ] A **Run...** CodeLens renders above it
 - [ ] The form opens on the mode the trigger implies: `schedule` for a
       `@trigger(schedule=...)`, `row` for a concept-triggered one, `json`
       otherwise
@@ -617,13 +648,13 @@ Open a file containing an `automation`.
 - [ ] Saving the automation run as a configuration, then re-running it from the
       Runs view, refills the form and fires the same payload
 
-## 5. Deployments, and the connection page (memql#3733)
+## 5. Deployments, and the cluster page (memql#3733)
 
 The Cluster tab is gone. Topology -- the pod grid, the replica tally, the
-orphan verdicts -- is cluster state, and the console owns it; **Open Console**,
-on the Clusters row and on the connection page, is one click away. What
-replaced it is split in two: Deployments answers "what do I operate", and the
-connection page answers "what does this editor dial, and as whom".
+orphan verdicts -- is cluster state, and MemQL OS owns it; **Open MemQL OS**,
+on the Clusters row and on the cluster page, is one click away. What replaced
+it is split in two: Deployments answers "what do I operate", and the cluster
+page answers "what does this editor dial, and as whom".
 
 ### 5a. The Deployments view (rewritten by memql#4426)
 
@@ -632,25 +663,29 @@ and no instance row of any kind -- the instance's facts are the view's
 description and its actions are in the title menu.
 
 - [ ] With **no cluster selected**: the view is empty and shows the welcome
-      -- "Not connected. Select a cluster to see its deployments." -- carrying
-      **Select Cluster** and **Install a local cluster**, and the view has no
-      description
+      -- *Not connected to a cluster.* -- carrying **Install Local Cluster**
+      (**Show Local Cluster** when a local cluster is on this computer) and
+      **Connect to a Cluster**, and the view has no description
 - [ ] Selecting a cluster populates it; the description reads
-      `<name> · healthy · <version>`, and the version is the tag the install
+      `<name> · Connected · <version>`, and the version is the tag the install
       recorded
 - [ ] With TWO clusters registered, switching the selection in Clusters switches
       this view with it, and none of the other cluster's runs remain
-- [ ] A cluster that is installed and not answering keeps its rows and its
-      description reads `· not answering ·` -- selected-but-unreachable is NOT
-      the empty state and must not show the welcome
-- [ ] A version that cannot be worked out renders as the word `unknown`, never
-      as a blank
-- [ ] A newer release available adds `· update <version> available` to the
-      description
+- [ ] A local cluster that is installed and not answering keeps its rows and its
+      description reads `· Not running ·` (`· Can't reach ·` for a remote
+      one) -- selected-but-unreachable is NOT the empty state and must not show
+      the welcome. A cluster that needs a sign-in shows *Sign in to see this
+      cluster's history.* with **Sign In**
+- [ ] A version that cannot be worked out is left out of the description,
+      never printed as `unknown` or a blank between separators
+- [ ] A newer release available adds `· <version> available` to the
+      description of a cluster running released images, and never to one
+      running your own build
 - [ ] A selected cluster with no runs shows its description and no rows -- not
       the welcome, and not an empty-state placeholder
-- [ ] Run rows are newest first and carry the verb, the version transition, the
-      status and a relative time
+- [ ] Run rows are newest first and carry the verb in the past tense
+      (**Installed**, **Updated**, **Rebuilt**, **Update failed**), the version
+      transition and a relative time
 - [ ] A run started from this editor appears in the tree BEFORE its first step
       reports, and its steps fill in live
 - [ ] Kill the editor mid-run, reopen: the run is still listed, and names exactly
@@ -661,65 +696,83 @@ description and its actions are in the title menu.
 ### 5a-i. Where the instance went (memql#4426)
 
 Every action the `local` row used to carry must still be reachable. All of them
-are now in the view's **title menu** (the `...` in the view's header).
+are now in the view's **title menu** (the `...` in the view's header), each
+shown only when it is legal.
 
 - [ ] With an INSTALLED local cluster selected, the title menu offers
-      **Open Local Checkout**, **Rebuild Local Cluster From Checkout**,
-      **Repair Local Cluster** and **Uninstall Local Cluster...**
+      **Change Version...**, **Repair Local Cluster** and **Uninstall Local
+      Cluster...**, plus **Rebuild From Checkout...** and **Open Checkout
+      Folder** when a checkout is recorded, and **Pull and Rebuild...** when
+      that checkout is on a branch. Uninstall is in a group of its own, last
 - [ ] With a machine that has NO local cluster selected, it offers
-      **Create Deployment...** and none of the four above
-- [ ] With a REMOTE cluster selected, it offers none of the five -- an action
-      whose only outcome is a refusal must not be drawn
+      **Install Local Cluster...** and none of the above
+- [ ] With a REMOTE cluster selected, it offers none of the local actions -- an
+      action whose only outcome is a refusal must not be drawn
 - [ ] With nothing selected, it offers none of them
-- [ ] **Open Local Deployment** in the title menu opens the instance page for
-      the SELECTED cluster -- check this with a remote cluster selected, since
+- [ ] **Show Deployments** in the view's title bar opens the page for the
+      SELECTED cluster -- check this with a remote cluster selected, since
       opening the local one instead is the failure that looks right
 
 ### 5a-ii. Opening one deployment (memql#4427)
 
 - [ ] Clicking a run row opens its detail page -- it is not inert
-- [ ] The page states the kind, the version transition, the status, the start,
-      the finish and the duration
+- [ ] The page states the kind, the version transition, the start and the
+      duration, and its bar carries the outcome in a word
 - [ ] A run still in flight shows NO duration and NO finish time, rather than
       zeros
-- [ ] A failed run names the step that failed and what it said
+- [ ] A failed run names what went wrong and the step it failed in, and that
+      step's log opens beneath it
 - [ ] A local run's items are headed **Steps**; a remote deployment's are headed
-      **Node types**
-- [ ] A run with no recorded items says which no-items case it is, rather than
-      showing an empty list
-- [ ] The buttons are the instance's own actions: a failed local run leads with
-      **Repair**, a checkout-mode cluster leads with **Rebuild from checkout**,
-      and no button appears that the instance page would not also offer
-- [ ] On a remote deployment, the deploy-control buttons match your role, and
-      pressing one reports the engine's own outcome line on this page
-- [ ] **Back** returns to the instance overview
+      **Services**, each with its version and replicas
+- [ ] A run with no recorded items says so (*No steps were recorded.*), rather
+      than showing an empty list
+- [ ] A local run that failed or was interrupted offers **Retry**, which runs
+      the act it came from (the same version change, rebuild or repair) -- and
+      offers nothing when that act is not legal now. A run that succeeded
+      offers no acts at all
+- [ ] On a remote cluster, the deployment **Roll back** would return to offers
+      **Roll back to <version>...** on its own page, and no other deployment's
+      page does
+- [ ] While another run is going on this machine, the page offers **Show
+      current run** and nothing that could start a second run
+- [ ] The head's back link returns to the cluster's page
 
-### 5b. Deploying a local cluster to another tag
+### 5b. Changing a local cluster's version
 
-- [ ] **Create deployment** on an installed instance offers the release tags
-      from the checkout's origin, newest first, with **nothing pre-selected**
-- [ ] With no network, the list is absent, the reason is printed, and the text
-      box still accepts a tag
+- [ ] **Change Version...** on an installed cluster opens **Change version**:
+      the current version, and a list of the published MemQL releases, newest
+      first, the newest marked **Latest** and the running one **Current**,
+      with **nothing pre-selected**. **Other...** takes a typed tag
+- [ ] With no network, the list is absent and a **Version** box, with
+      *Couldn't load the list of versions.* under it, still accepts a tag
 - [ ] A mistyped tag (`0.18.0`, `latest`) is refused under the box, before
       anything runs
-- [ ] The preview names which steps will change something (the checkout and the
-      reconcile) and which are expected to skip
-- [ ] Picking the tag the cluster is already on is allowed, and says so
-- [ ] The run reports every step; the ones already satisfied report as skipped
-- [ ] Docker not running fails at `detect`, **in the page with its guidance** --
-      not as a notification toast
-- [ ] A failed step offers Retry (when retrying could help) and no *Switch to
-      guided* control
+- [ ] Choosing the version the cluster is already on is allowed, and says
+      *Already on <version>. This re-applies it, the same as Repair.*
+- [ ] Choosing a version lists, under **What changes**, the steps that will do
+      something (switching the source, applying the version) and says how many
+      others are checked and left as they are; the button reads **Change to
+      <version>**
+- [ ] A newer release than the running one is also offered on the cluster's page
+      as **Update to <version>...**
+- [ ] The run uses the progress screen (*Changing version*, or *Updating
+      MemQL* for **Update to <version>...**), and the steps already satisfied
+      are skipped
+- [ ] Docker not running fails at the first step, **in the page with its
+      guidance** -- not as a notification toast
+- [ ] A failed step offers **Retry** (when retrying could help) and no guided
+      mode
 
 ### 5c. Repair and uninstall, from Deployments
 
 - [ ] Repair and Uninstall appear in the Deployments view TITLE menu with an
       installed local cluster selected (memql#4426 moved them off the instance
       row, which no longer exists), and on **no** Clusters row
-- [ ] Uninstall still confirms against the itemised dry run
-- [ ] An artifact the install FOUND rather than created is listed as
-      **preserved**, is left on the machine, and appears as `preserved` in the
-      run record afterwards
+- [ ] Uninstall opens the **Uninstall MemQL** page, the same one the Add a
+      cluster page opens, and nothing is removed until its button is pressed
+- [ ] An artifact the install FOUND rather than created is listed as **Kept**,
+      is left on the machine, and appears as `preserved` in the run record
+      afterwards
 
 ### 5cc. Rebuild from checkout on a wizard-installed cluster (memql#4246)
 
@@ -728,70 +781,78 @@ the cluster is running RELEASED images. A rebuild takes minutes and changes
 which images the cluster runs -- do not run it against a parity cluster
 somebody else is using.
 
-- [ ] **Rebuild Local Cluster From Checkout** appears in the Deployments title
-      menu with an installed local cluster selected, and with nothing else
-      selected; a machine with no recorded checkout does not offer it
-- [ ] The preflight shows all six lines -- Docker, Checkout, Git state, Nodes,
-      Image source, Duration -- and each one names a fact you can check
-- [ ] **Image source** is a NOTE on a released-lane cluster and says it switches
-      to checkout-built images; run it a second time and the same line is quiet
-- [ ] Editing something under `deploy/` in the checkout turns **Git state** into
-      a note saying manifests do not ride a rebuild
-- [ ] Stop Docker: **Docker** becomes a note naming the fix, before anything runs
-- [ ] Leaving the node field empty rebuilds every app node; typing `bff, agent`
+- [ ] **Rebuild From Checkout...** appears in the Deployments title menu with an
+      installed local cluster selected, and with nothing else selected; a
+      machine with no recorded checkout does not offer it
+- [ ] The **Rebuild from checkout** page reads *Checking the source* briefly,
+      then shows the source folder and the commit (with the uncommitted count),
+      and says *The cluster switches to your own build.* on a released-lane
+      cluster
+- [ ] Editing something under `deploy/` in the checkout adds a notice that
+      changes under `deploy/` aren't applied, and only code is rebuilt
+- [ ] Stop Docker: a notice says *Docker isn't running.* with **Check again**,
+      the bar reads *Can't rebuild yet*, and nothing runs
+- [ ] Leaving **Services** empty rebuilds every app node; typing `bff, agent`
       rebuilds those two, and the toast afterwards names what was actually built
-- [ ] The run reports through the same progress rows an install does, and the
-      heading says *Rebuilding the local cluster from its checkout*
+- [ ] The run uses the same progress screen an install does
 - [ ] Afterwards the Deployments view description reads
-      `<name> · healthy · checkout <commit>` (with the uncommitted count when
-      there is one) instead of a version and with no `update ... available`
-      clause, and the Connection page's **image source** says
-      `checkout (built locally)`
-- [ ] A construct you edited before the rebuild stops reading `edited` without
-      touching the file -- the catalog refreshed
-- [ ] Now open **Repair**: its preflight carries an **Image source** note saying
-      the run returns the cluster to released images. The same sentence appears
-      in the confirmation for **Upgrade to \<version\>**
+      `<name> · Connected · Your build <commit>` with no `available` clause,
+      and the cluster's page Details say **Built from your checkout**
+- [ ] A construct you edited before the rebuild stops reading
+      `Edited · needs rebuild` without touching the file -- the catalog
+      refreshed
+- [ ] Now open **Repair**: its checks list **Images** as **Replaced**, saying
+      your checkout build is replaced by the release and that Rebuild from
+      checkout brings it back. **Change version** on the same cluster says
+      *Your own build is replaced with released <version> images.*
 - [ ] A failed rebuild lands on the failure screen with the step's own reason,
-      and **Retry** re-runs the REBUILD -- not a deployment. There is no
-      *Switch to guided* control: guided is a wizard concept, and a rebuild is
-      one unprivileged step
-- [ ] **Create deployment** on a checkout-mode cluster states, above its Start
-      button, that the move returns the cluster to released images -- the tag
-      path crosses the lane too, and asks for no confirmation
+      and **Retry** re-runs the REBUILD -- not a version change
+- [ ] **Pull and Rebuild...** on a checkout that is on a branch shows the
+      branch, how many commits there are to pull, your own commits not on the
+      origin, and uncommitted files; **Merge with my commits** is a switch,
+      off. A merge in progress in the folder blocks it with *Can't pull yet*
 
 ### 5d. A remote instance
 
 - [ ] Its runs read from the cluster, newest first, and their items are labelled
-      **Node types** -- never "Steps" -- with version, replicas and digest
-- [ ] A remote this editor is not connected to still lists, with its version
-      `unknown` rather than hidden -- in the CLUSTERS view, which continues to
-      show every registered cluster; the Deployments view narrowed to the
-      selection in memql#4426 and shows only the one you are on
-- [ ] Exactly one of the three pipeline states renders: the actions, "no deploy
-      pipeline is configured" in the engine's own words, or "status is not
-      visible at your role"
-- [ ] Only the actions your role permits are drawn -- and a refusal from the
-      engine names the role required, verbatim, with its audit id
-- [ ] A destructive action requires typing its confirmation phrase, and a
-      mismatch refuses
+      **Services** -- never "Steps" -- with version and replicas
+- [ ] A remote this editor is not connected to still lists in the CLUSTERS view,
+      with its state word, rather than hidden; the Deployments view narrowed to
+      the selection in memql#4426 and shows only the one you are on
+- [ ] Exactly one of the three pipeline states renders: the actions,
+      *Deployments aren't set up for this cluster.*, or *Your role can't view
+      deployment status.*, with the engine's own words under **Details**
+- [ ] Only the actions your role permits are drawn -- **Deploy** and **Roll
+      back to <version>...** on the bar, **Promote** and **Abort...** on each
+      rollout's row under **Rollouts**, **Prepare <version>** under **Next
+      version** -- and a refusal from the engine names the role required,
+      verbatim, with its audit id
+- [ ] Abort and Roll back require typing their target, and a mismatch refuses
 
-### 5e. The connection page
+### 5e. The cluster page
 
-- [ ] Selecting a Clusters row opens it, titled with the cluster's name
-- [ ] It shows the endpoint, the issuer (marked *derived* when the entry carries
-      none), and whether the cluster answered
-- [ ] A cluster this editor has NOT dialled reads `not dialled from this editor`
-      -- not "unreachable"
-- [ ] Signed in: the email and role come from the live session
-- [ ] The token shows a **duration** and says it renews itself; leave the page
-      open for a minute and the duration updates without reopening it
-- [ ] **Open Console** opens the cluster's MemQL OS shell -- its own site row
-      when connected, the composed `os.<domain>/` when not
-- [ ] **Remove from list** on a LOCAL cluster says the cluster keeps running and
-      names Deployments as where to uninstall it
-- [ ] After removing it, the **+** offers *Connect to the local cluster*, and
-      taking it asks for nothing at all before the cluster is back in the list
+- [ ] Clicking a Clusters row that is connected, or needs a sign-in, opens the
+      cluster page, titled with the cluster's name; **Show Cluster Details**
+      opens it from the context menu or the palette
+- [ ] It shows the address and MemQL OS, **Installed: On this computer** for a
+      local cluster, and its version in the head when it says something
+- [ ] Signed in and connected: **Signed in as** shows the email and role from
+      the live session, and appears only while a connection is up
+- [ ] The bar carries the state in words with at most three acts:
+      **Sign out**, **Disconnect**, **Open MemQL OS** when connected; **Sign in
+      with a code** and **Sign in** when a sign-in is needed (with **Create
+      owner passkey** on a local cluster's first run); **Show details**,
+      **Repair**, **Retry** for a local cluster that is not running
+- [ ] Signing in moves the bar to **Signing in** with *Waiting for you in the
+      browser*, and after 30 seconds **Use a code instead** appears beside
+      **Cancel**
+- [ ] **Open MemQL OS** opens the cluster's MemQL OS -- its own site row when
+      connected, the composed `os.<domain>/` when not
+- [ ] **Remove from list** on a LOCAL cluster says the cluster keeps running on
+      this computer and can be added back from **+**
+- [ ] After removing it, the page says the cluster is no longer in your list,
+      and the **+** offers **Connect to it**, which asks for nothing at all
+      before the cluster is back in the list
 
 ## 6. Cross-cutting
 

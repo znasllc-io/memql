@@ -51,7 +51,7 @@ Work down this list and stop at the first line that is true.
    against a one-shot `127.0.0.1` listener.
 5. **You are on a headless box, in a container, or behind a network where the
    browser cannot reach `127.0.0.1`.** Use the **device code** flow -- in the
-   editor, **MemQL: Sign In With a Device Code**. See
+   editor, **MemQL: Sign In With a Code**. See
    [Reaching the device grant from the editor](#reaching-the-device-grant-from-the-editor).
 6. **You are a script talking to the identity service itself.** Use a **PAT**.
    Note the hard limit below: a PAT does not authenticate against mesh nodes.
@@ -258,24 +258,42 @@ does not half-serve the flow.
 
 ## The editor's sign-in
 
-The VS Code extension exposes **MemQL: Sign In** and **MemQL: Sign Out** on each
-cluster in the Clusters view (`memql.clusters.signIn` / `memql.clusters.signOut`),
-plus **MemQL: Sign In With a Device Code** in the palette.
+The VS Code extension offers **Sign in** wherever a cluster needs it, in one
+click and with no dialog in front of the browser: the cluster's row in the
+Clusters view (its one inline act), its context menu, the cluster page, and the
+notification that says the session ended (`memql.clusters.signIn`). **MemQL:
+Sign Out** is on the row's context menu and the cluster page, and **MemQL: Sign
+In With a Code** (`memql.clusters.signInWithCode`) on the context menu, the
+cluster page and the palette. The editor always signs in as its own built-in
+client, `memql-vscode`, never with a `client_id` another tool wrote to
+`clusters.yaml`; see [Connecting an Editor](connecting-editors.md).
 
 The flow needs an **issuer**, which is a different fact from the endpoint the
 stream dials -- `identity.<domain>` versus `api.<domain>`. A cluster naming
-neither an `issuer` nor a `domain` has nowhere to sign in to, which is why a dial
-that fails on the credential offers a **Sign in** button only when both
+neither an `issuer` nor a `domain` has nowhere to sign in to, which is why a
+failed sign-in there offers **Edit** rather than another attempt, and a dial
+that fails on the credential offers **Sign in** only when both
 `signInCanRecover` (the failure is one a fresh token fixes) and `canSignIn` (an
 issuer exists) hold. The context-menu command itself is always present.
 
-Where the resulting tokens live is a deliberate split:
+Once signed in, the editor reconnects by itself: when a window opens, and after
+a dropped connection, which it retries for about two minutes before offering
+**Reconnect**. A refused credential stops the retries at once.
 
-| Credential | Stored in | Why |
-|---|---|---|
-| Access token | `~/.memql/clusters.yaml`, `token:` | Short-lived, and the MemQL Cockpit reads the same file. A cluster the extension has signed in to but which carries no credential at all would read, to the Cockpit, as a cluster nobody has signed in to |
-| Refresh token | VS Code `SecretStorage`, keyed per cluster | A 30-day credential has no business in a plaintext shared file. `clusters.yaml`'s `refresh_token:` key is an INGEST path only -- on the first successful exchange the token moves into `SecretStorage` and the plaintext key is deleted |
-| Access-token expiry | `SecretStorage`, beside the refresh token | Redundant for today's JWT (`exp` is inside it); it exists so an opaque access token could still be renewed proactively |
+The editor keeps every credential it holds in VS Code `SecretStorage`, keyed
+per cluster:
+
+| Credential | Why it is there |
+|---|---|
+| Access token | Short-lived, but still a bearer. `clusters.yaml` is plaintext and shared with the MemQL Cockpit, which keeps a sign-in of its own |
+| Refresh token | A 30-day credential has no business in a plaintext shared file |
+| Access-token expiry | Redundant for today's JWT (`exp` is inside it); it exists so an opaque access token could still be renewed proactively |
+| The client the refresh token was issued to | Presented on refresh, so a token is always refreshed by the client it belongs to |
+
+`clusters.yaml`'s `token:` and `refresh_token:` keys are an INGEST path only: a
+value found there (pasted by hand, or left by an older extension) is used, and
+on the first successful exchange the tokens move into `SecretStorage` and the
+plaintext keys are deleted. A sign-in writes no token to the file.
 
 `SecretStorage` cannot be enumerated -- there is `get`, `store` and `delete` and
 no way to ask what keys exist -- so the store keeps its own index of the clusters
@@ -295,10 +313,17 @@ Both are wired (memql#3515):
 
 ### Reaching the device grant from the editor
 
-**MemQL: Sign In With a Device Code** (`memql.clusters.signInWithCode`, palette
-only) runs the device grant deliberately, skipping loopback. Use it when you
-already know this host cannot do a browser round trip -- otherwise you sit
-through the callback deadline first only to be told so.
+**MemQL: Sign In With a Code** (`memql.clusters.signInWithCode`) runs the device
+grant deliberately, skipping loopback. Use it when you already know this host
+cannot do a browser round trip.
+
+**MemQL: Sign In** offers the same grant without giving up on the browser:
+after 30 seconds with no callback, a notification and the cluster page offer
+**Use a code instead**, which runs the device grant BESIDE the browser flow.
+The loopback listener stays up, so whichever finishes first signs you in. And
+before the browser opens at all, the authorization request is checked with the
+identity service, so a cluster that refuses the editor's client or its redirect
+says so in seconds rather than after the callback deadline.
 
 **MemQL: Sign In** reaches the same grant by itself when the browser round trip
 proves impossible (memql#3515) -- both commands run through one sign-in shell
@@ -320,8 +345,8 @@ routinely outlives any deadline -- and the auto-switch fired under a live tab,
 closed the listener that tab was about to redirect to, and stacked a second
 flow's notifications over the first. The callback deadline is now ten minutes
 (the magic-link TTL scale), the progress notification stays cancellable the
-whole time and explains itself after a quiet minute, and a timeout is reported
-as a warning whose advice names `MemQL: Sign In With a Device Code` for the host that
+whole time, **Use a code instead** is on offer from 30 seconds, and a timeout is
+reported as a warning offering **Use a code instead** for the host that
 genuinely cannot receive the callback.
 
 It also deliberately does **not** trigger on `cancelled` (the user stopped it),
@@ -462,8 +487,8 @@ Stated here so nobody plans against it:
   data model.
 - ~~**The editor's "+" Install / Repair actions do not run an
   installer.**~~ Superseded. The extension now runs the install /
-  repair graph in-process: the "+" Add Cluster panel and the cluster
-  panel's Repair action both call `runInstall`
+  repair graph in-process: the "+" Add a cluster page and the cluster
+  page's Repair action both call `runInstall`
   (`editors/vscode/src/install/session.ts`), the same entry point the
   CLI's own install command uses. Repair is not a separate mode --
   every step verifies first and skips when already satisfied, so
