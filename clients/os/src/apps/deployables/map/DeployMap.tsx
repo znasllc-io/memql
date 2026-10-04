@@ -10,9 +10,10 @@ import { MapControls } from "../../../kit/MapControls";
 import { Caption } from "../../../kit";
 import type { ArrivalKind, ArrivalTick } from "../../../live/arrival";
 import type { SiteRow } from "../rows";
-import { EMPTY_LAYOUT, layout, nodeCentre, type MapLayout, type MapNode } from "./layout";
+import { EMPTY_LAYOUT, layout, nodeCentre, type MapChecks, type MapLayout, type MapNode } from "./layout";
 import { transformOf } from "../../../kit/viewport";
 import { usePanZoom } from "../../../kit/usePanZoom";
+import "../pipelines/checks.css";
 
 // The deploy map: what serves where, as a shape.
 //
@@ -39,12 +40,15 @@ const GLYPHS: Record<string, string> = {
 
 export function DeployMap({
   sites,
+  checks,
   ticks,
   state,
   selectedNodeId,
   onSelect,
 }: {
   sites: readonly SiteRow[];
+  /** What each checked source's default branch says, by package id (epic memql#5479). */
+  checks?: ReadonlyMap<string, MapChecks>;
   /** Arrival cues by SITE id -- the same ones the list beside this shows. */
   ticks: Map<string, ArrivalTick>;
   state: LiveState;
@@ -54,7 +58,8 @@ export function DeployMap({
   const { unseen } = useAttention({ appId: "deployables" });
   const targets = new Set(unseen.map(item => item.target));
   const markedSites = new Set(sites.filter(site => targets.has(updateTarget(site.packageId))).map(site => site.id));
-  const model: MapLayout = useMemo(() => (sites.length === 0 ? EMPTY_LAYOUT : layout(sites)), [sites]);
+  const model: MapLayout = useMemo(() => (sites.length === 0 ? EMPTY_LAYOUT : layout(sites, checks)), [sites, checks]);
+  const hasChecks = model.nodes.some((node) => node.kind === "checks");
 
   // A DEGRADED FEED MUST NOT READ AS A HEALTHY FLEET. A map is a picture of
   // now; when the subscription is behind, the picture is of some earlier now,
@@ -111,7 +116,10 @@ export function DeployMap({
 
   return (
     <div className="os-deploy-map" data-behind={behind || undefined}>
-      <MapHeading title="Deployment map"><p>Choose a deployable to open its details. Shared sources highlight the deployables connected to them.</p></MapHeading>
+      <MapHeading title="Deployment map">
+        <p>Choose a deployable to open its details. Shared sources highlight the deployables connected to them.</p>
+        {hasChecks ? <p>Checks reads the newest run on a source's default branch. Choose it to open that source.</p> : null}
+      </MapHeading>
       <div className="os-map-frame" ref={frameRef}>
         <svg
           className="os-deploy-map-canvas"
@@ -157,8 +165,11 @@ export function DeployMap({
               <MapNodeShape
                 key={node.id}
                 node={node}
-                attention={node.siteIds.some(id => markedSites.has(id))}
-                tick={tickFor(node, ticks)}
+                // A CHECKS NODE TAKES NEITHER SITE SIGNAL. The unseen-update
+                // marker and the arrival cue are about the deployables; the
+                // checks are about runs, and a publish is not a run finishing.
+                attention={node.kind !== "checks" && node.siteIds.some(id => markedSites.has(id))}
+                tick={node.kind === "checks" ? null : tickFor(node, ticks)}
                 selected={selectedNodeId === node.id}
                 inSelectedCluster={node.siteIds.some((id) => selectedSites.includes(id))}
                 onActivate={() => activate(node)}
@@ -242,13 +253,21 @@ function MapNodeShape({
       {node.kind === "site" ? (
         <circle className="os-deploy-node-dot" data-status={node.status || "draft"} cx={14} cy={14} r={4} />
       ) : null}
+      {/* A checks node's dot is its run's outcome, and NO RUN IS NO DOT: the
+          dot language draws nothing for what is not known, rather than a
+          muted dot that reads as a run nobody can see. */}
+      {node.kind === "checks" && node.status !== "" ? (
+        <circle className="os-deploy-node-dot" data-status={node.status} cx={14} cy={14} r={4} />
+      ) : null}
       {attention ? <circle className="os-attention-map-dot" cx={node.w - 2} cy={2} r={4} aria-label="Unseen change" /> : null}
       {glyph ? (
         <text className="os-deploy-node-glyph" x={node.w - 10} y={18} textAnchor="end">
           {glyph}
         </text>
       ) : null}
-      <text className="os-deploy-node-label" x={node.kind === "site" ? 26 : 10} y={18}>
+      {/* A checks node keeps the dot's slot whether or not it has one, so its
+          label does not move when the first run lands. */}
+      <text className="os-deploy-node-label" x={node.kind === "site" || node.kind === "checks" ? 26 : 10} y={18}>
         {node.label}
       </text>
       {node.sublabel === "" ? null : (
@@ -279,6 +298,9 @@ function ariaLabelFor(node: MapNode): string {
       return `Deployable ${node.full}, ${node.status || "status unknown"}${node.siteKind ? `, ${node.siteKind}` : ""}`;
     case "bundle":
       return `Bundle ${node.label}${node.siteIds.length > 1 ? `, serving ${node.siteIds.length} deployables` : ""}: ${node.full}`;
+    case "checks":
+      // `full` is "<source>: <reading>", untruncated.
+      return `Checks for ${node.full}`;
     default:
       return `Library artifact ${node.full}`;
   }

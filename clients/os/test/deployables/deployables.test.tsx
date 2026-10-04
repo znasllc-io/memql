@@ -809,8 +809,10 @@ describe("the Source stop", () => {
       const source = await openSourceView(page);
       // NOT /^Deploy/ -- the back button reads "Deployables" and matches it.
       expect(within(source).queryByRole("button", { name: /^Deploy (the|this)|^Deploy$/ })).toBeNull();
+      // The bar's one act is the source's OWN: this GitHub repository has no
+      // pipeline, so it offers to connect one (epic memql#5479). Never a deploy.
       const bar = document.querySelector(".os-actbar");
-      expect(bar === null ? [] : [...bar.querySelectorAll("button")].map((b) => b.textContent)).toEqual([]);
+      expect(bar === null ? [] : [...bar.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Connect pipeline"]);
     });
 
     it("says, before the confirmation, that nothing is live when nothing is", async () => {

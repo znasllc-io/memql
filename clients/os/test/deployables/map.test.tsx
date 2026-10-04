@@ -19,9 +19,12 @@ import {
   click,
   emit,
   fakeConnection,
+  siteRow,
   withSession,
   type FakeConnection,
+  type FakeSeed,
 } from "./harness";
+import { PACKAGE_ID, VIEWER, minutesAgo, packageRow, pipelineRow, runRow } from "./pipelines/fixtures";
 
 // The deploy map: what it draws, how it is steered, and the one rule that keeps
 // it cheap -- no three.js anywhere under clients/os.
@@ -577,5 +580,79 @@ describe("overview statistics", () => {
     expect(value("Unknown")).toBe("1");
     await emit(connection, SITE_CONCEPT, { ...SHOP, status: "disabled" });
     await waitFor(() => expect(value("Unknown")).toBe("0"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A source's checks (epic memql#5479, issue memql#5501)
+// ---------------------------------------------------------------------------
+//
+// "The Deployment map on Overview draws the same Checks node": after the
+// bundle a checked source built, reading its default branch's newest run,
+// and choosing it opens the SOURCE -- never the deployable it sits beside.
+
+describe("a source's checks on the map", () => {
+  const APP = siteRow({ id: "site-store", hostname: "store.memql.example.com", bundleRef: "blob://sites/site-store/v2/", packageId: PACKAGE_ID, packageDeployableName: "storefront" });
+  const MAIN_FAILED = runRow({ id: "r-main", ownerUserId: VIEWER, event: "push", headBranch: "main", queuedAt: minutesAgo(10) });
+  // Newer, and on another branch: it must not stand in for the default branch.
+  const CART_PASSED = runRow({ id: "r-cart", ownerUserId: VIEWER, headBranch: "cart", conclusion: "success", queuedAt: minutesAgo(2),
+    stages: [{ name: "checks", status: "passed" }, { name: "tests", status: "passed" }] });
+
+  function checkedSeed(over: Partial<FakeSeed> = {}): FakeSeed {
+    return { sites: [APP], packages: [packageRow()], pipelines: [pipelineRow()], pipelineRuns: [MAIN_FAILED, CART_PASSED], ...over };
+  }
+
+  it("draws a Checks node after the bundle, reading the default branch's newest run", async () => {
+    mount(fakeConnection(checkedSeed()));
+    const node = await screen.findByLabelText("Checks for acme/shop: Failed on main, at tests");
+    expect(node.getAttribute("data-kind")).toBe("checks");
+    expect(node.querySelector(".os-deploy-node-label")?.textContent).toBe("Checks");
+    expect(node.querySelector(".os-deploy-node-sub")?.textContent).toBe("Failed on main, at tests");
+    expect(node.querySelector(".os-deploy-node-dot")?.getAttribute("data-status")).toBe("failed");
+    // The help says what it is for, inside the heading's information control
+    // rather than standing on the map.
+    expect(document.querySelector(".os-map-heading .os-info-dialog")?.textContent ?? "").toContain("Choose it to open that source");
+  });
+
+  it("says so when the default branch has not run, and draws no dot for it", async () => {
+    mount(fakeConnection(checkedSeed({ pipelineRuns: [] })));
+    const node = await screen.findByLabelText("Checks for acme/shop: No runs yet");
+    expect(node.querySelector(".os-deploy-node-dot")).toBeNull();
+  });
+
+  it("draws none for a disconnected pipeline, nor for a cluster with no pipeline", async () => {
+    const view = mount(fakeConnection(checkedSeed({ pipelines: [pipelineRow({ status: "disconnected" })] })));
+    await screen.findByLabelText("Host store.memql.example.com");
+    expect(document.querySelector(".os-deploy-node[data-kind='checks']")).toBeNull();
+    view.unmount();
+    mount(fakeConnection(checkedSeed({ pipelines: [] })));
+    await screen.findByLabelText("Host store.memql.example.com");
+    expect(document.querySelector(".os-deploy-node[data-kind='checks']")).toBeNull();
+    // ...and the help says nothing about a node that is not there.
+    expect(document.querySelector(".os-map-heading .os-info-dialog")?.textContent ?? "").not.toContain("Choose it to open that source");
+  });
+
+  it("opens the source when chosen -- not the deployable it stands beside -- and selects nothing", async () => {
+    const navigate = vi.fn();
+    const store = memStore();
+    const app = (section: string) =>
+      withSession(<DeployablesApp sectionId={section} navigate={navigate} askContext={vi.fn()} store={store} />, { role: "owner", userId: VIEWER });
+    h.connection = fakeConnection(checkedSeed());
+    const view = render(app("map"));
+    await click(await screen.findByLabelText(/^Checks for acme\/shop/));
+    expect(navigate).toHaveBeenCalledWith("sources", { fromContent: true });
+    expect(navigate).not.toHaveBeenCalledWith("deployables", expect.anything());
+    expect(document.querySelector(".os-deploy-node[data-selected]")).toBeNull();
+    // Where the navigation lands: the source's own page, on the Sources tab.
+    view.rerender(app("sources"));
+    expect(await screen.findByRole("region", { name: "Source shop" })).toBeTruthy();
+  });
+
+  it("opens the source from the keyboard too", async () => {
+    const navigate = vi.fn();
+    mount(fakeConnection(checkedSeed()), { navigate });
+    fireEvent.keyDown(await screen.findByLabelText(/^Checks for acme\/shop/), { key: "Enter" });
+    expect(navigate).toHaveBeenCalledWith("sources", { fromContent: true });
+    expect(navigate).not.toHaveBeenCalledWith("deployables", expect.anything());
   });
 });

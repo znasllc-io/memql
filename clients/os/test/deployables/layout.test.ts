@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   COLUMN_X,
   HOST_CHARS,
+  NODE_W,
   NO_DOMAIN_LABEL,
   SUB_CHARS,
   ellipsize,
@@ -10,6 +11,7 @@ import {
   middleEllipsize,
   nodeCentre,
   shortHost,
+  type MapChecks,
   type MapNode,
 } from "../../src/apps/deployables/map/layout";
 import { siteFromRow } from "../../src/apps/deployables/rows";
@@ -249,5 +251,118 @@ describe("truncation", () => {
     expect(byId(m.nodes, "host:memql.example.com:shop.memql.example.com").full).toBe(
       "shop.memql.example.com",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A source's checks (epic memql#5479, D14)
+// ---------------------------------------------------------------------------
+//
+// "The Deployment map on Overview draws the same Checks node": one per source
+// per domain group, in a fifth column after what the source built, reading
+// the default branch's newest run. The words are handed in -- the layout
+// draws what it is given -- so these fixtures name them.
+
+const STORE_APP = siteRow({ id: "site-store", hostname: "store.memql.example.com", bundleRef: "blob://sites/site-store/v2/", packageId: "pkg-shop", packageDeployableName: "storefront" });
+const ADMIN_APP = siteRow({ id: "site-admin", hostname: "admin.memql.example.com", bundleRef: "blob://sites/site-admin/v2/", packageId: "pkg-shop", packageDeployableName: "admin" });
+const PASSED: MapChecks = { sublabel: "Passed on main", status: "passed", source: "acme/shop" };
+
+function checked(rows: Parameters<typeof siteFromRow>[0][], readings: Record<string, MapChecks> = { "pkg-shop": PASSED }) {
+  return layout(rows.map(siteFromRow), new Map(Object.entries(readings)));
+}
+
+describe("a source's checks", () => {
+  const m = checked([STORE_APP, ADMIN_APP, SHOP]);
+  const checksId = "checks:memql.example.com:pkg-shop";
+
+  it("is ONE node per source, in a fifth column, the four before it where they always were", () => {
+    expect(COLUMN_X.slice(0, 4)).toEqual([0, 220, 460, 700]);
+    const nodes = m.nodes.filter((n) => n.kind === "checks");
+    expect(nodes.map((n) => n.id)).toEqual([checksId]);
+    const node = byId(m.nodes, checksId);
+    expect(node.x).toBe(COLUMN_X[4]);
+    expect(node.label).toBe("Checks");
+    expect(node.sublabel).toBe("Passed on main");
+    expect(node.status).toBe("passed");
+    expect(node.packageId).toBe("pkg-shop");
+    expect([...node.siteIds].sort()).toEqual(["site-admin", "site-store"]);
+  });
+
+  it("is read out with the source it is about, whole", () => {
+    expect(byId(m.nodes, checksId).full).toBe("acme/shop: Passed on main");
+  });
+
+  it("takes an edge from each app's bundle -- the thing the source built", () => {
+    const into = m.edges.filter((e) => e.to === checksId);
+    expect(into.map((e) => e.from).sort()).toEqual([
+      "bundle:memql.example.com:blob://sites/site-admin/v2/",
+      "bundle:memql.example.com:blob://sites/site-store/v2/",
+    ]);
+    expect(into.map((e) => e.siteId).sort()).toEqual(["site-admin", "site-store"]);
+  });
+
+  it("sits between the bands it serves, like a shared bundle", () => {
+    const node = byId(m.nodes, checksId);
+    const store = byId(m.nodes, "site:site-store");
+    const admin = byId(m.nodes, "site:site-admin");
+    expect(nodeCentre(node).y).toBeCloseTo((nodeCentre(store).y + nodeCentre(admin).y) / 2, 5);
+  });
+
+  it("draws none for a deployable no source made, and none for a source with no reading", () => {
+    // SHOP has no packageId; a source the readings do not name has no active
+    // pipeline, which is what the absence means.
+    expect(m.nodes.filter((n) => n.kind === "checks").flatMap((n) => n.siteIds)).not.toContain("site-shop");
+    expect(checked([STORE_APP, ADMIN_APP], {}).nodes.filter((n) => n.kind === "checks")).toEqual([]);
+  });
+
+  it("leaves the map it always drew alone when there are no readings at all", () => {
+    expect(layout([STORE_APP, ADMIN_APP, SHOP].map(siteFromRow), new Map())).toEqual(layout([STORE_APP, ADMIN_APP, SHOP].map(siteFromRow)));
+    expect(layout([SHOP].map(siteFromRow)).nodes.every((n) => n.packageId === "")).toBe(true);
+  });
+
+  it("names no source on any other kind of node", () => {
+    expect(m.nodes.filter((n) => n.kind !== "checks").every((n) => n.packageId === "")).toBe(true);
+  });
+
+  it("takes its edge from the site itself when the site serves no bundle yet", () => {
+    const bare = siteRow({ id: "site-new", hostname: "new.memql.example.com", bundleRef: "", packageId: "pkg-shop" });
+    const drawn = checked([bare]);
+    expect(drawn.edges.filter((e) => e.to === checksId).map((e) => e.from)).toEqual(["site:site-new"]);
+  });
+
+  it("is drawn once per domain group, never by an edge across groups", () => {
+    const apex = siteRow({ id: "site-apex-app", hostname: "shop.example.org", bundleRef: "blob://sites/site-apex-app/v1/", packageId: "pkg-shop" });
+    const drawn = checked([STORE_APP, apex]);
+    expect(drawn.nodes.filter((n) => n.kind === "checks").map((n) => n.id).sort()).toEqual([
+      "checks:example.org:pkg-shop",
+      "checks:memql.example.com:pkg-shop",
+    ]);
+    for (const edge of drawn.edges) {
+      expect(byId(drawn.nodes, edge.from).group).toBe(byId(drawn.nodes, edge.to).group);
+    }
+  });
+
+  it("finds a source by its short id, however the site row spells it, and opens it by the site row's own", () => {
+    const canonical = siteRow({ ...STORE_APP, id: "site-store", packageId: "v1:platform:package:pkg-shop" });
+    const node = checked([canonical]).nodes.find((n) => n.kind === "checks");
+    expect(node?.packageId).toBe("v1:platform:package:pkg-shop");
+  });
+
+  it("fits the reading to the box and keeps it whole for the read-out", () => {
+    const long: MapChecks = { sublabel: "Failed on feature/a-branch-name-that-runs-on, at tests", status: "failed", source: "acme/shop" };
+    const node = checked([STORE_APP], { "pkg-shop": long }).nodes.find((n) => n.kind === "checks")!;
+    expect(node.sublabel.length).toBeLessThanOrEqual(SUB_CHARS);
+    expect(node.sublabel.endsWith("…")).toBe(true);
+    expect(node.full).toBe(`acme/shop: ${long.sublabel}`);
+  });
+
+  it("widens its group, and the canvas, to hold the fifth column", () => {
+    const group = m.groups.find((g) => g.label === "memql.example.com")!;
+    expect(group.w).toBe(COLUMN_X[4] + NODE_W);
+    for (const node of m.nodes) expect(node.x + node.w).toBeLessThanOrEqual(m.width);
+  });
+
+  it("lays out the same whatever order the rows arrive in", () => {
+    expect(checked([SHOP, ADMIN_APP, STORE_APP])).toEqual(m);
   });
 });

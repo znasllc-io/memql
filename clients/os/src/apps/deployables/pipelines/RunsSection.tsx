@@ -12,6 +12,7 @@ import { sourceName } from "../list";
 import type { PackageRow } from "../packages/rows";
 import type { PartsHeld } from "../parts";
 import { Mark } from "./Mark";
+import { Phrases } from "./Phrases";
 import { isFinished, runFromRow, runRingFingerprint, sameId, type PipelineRow, type RunRow } from "./rows";
 import {
   branchesOf, filterIsNarrowing, filterRuns, groupByDay, NO_RUN_FILTER, OUTCOME_FACETS, type OutcomeKey, type RunFilter,
@@ -139,25 +140,6 @@ export function RunsSection(props: RunsSectionProps) {
 
   return <RunsList {...props} all={all} older={older} setOlder={setOlder} filter={filter} setFilter={setFilter} sourceOf={sourceOf}
     pipelineName={pipelineName} onOpen={(runId) => setView({ kind: "run", runId })} />;
-}
-
-/**
- * An outcome's detail ("2 stages, deploy skipped, 3m 9s"), wrapping only
- * BETWEEN its phrases: a narrow column broke "3m 9s" across two lines, which
- * reads as two facts.
- */
-function Phrases({ text }: { text: string }) {
-  const parts = text.split(", ");
-  return (
-    <>
-      {parts.map((part, i) => (
-        <span key={i}>
-          <span className="pipeline-nowrap">{part}</span>
-          {i < parts.length - 1 ? ", " : ""}
-        </span>
-      ))}
-    </>
-  );
 }
 
 function RunsList({ runs, feed, pipelines, all, older, setOlder, filter, setFilter, sourceOf, pipelineName, onOpen, onOpenSources }: RunsSectionProps & {

@@ -2,7 +2,7 @@ import { PENDING_DEPLOYMENT_STATUSES } from "./packages/rows";
 import { useEffect, useMemo, useState } from "react";
 import { Concepts, type LiveSnapshot, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Notice, roleAdmits } from "../../kit";
+import { Notice, roleAdmits, useAppReach } from "../../kit";
 import { useDeployableParts } from "./parts";
 import { useSession } from "../../chrome/access";
 import { useLiveView } from "../../live/liveView";
@@ -207,8 +207,14 @@ function DeployablesAppContent({
   const pipelineRows = pipelines?.snapshot.rows ?? [];
   // Whether both pipelines feeds have answered: before that a source's Checks
   // say nothing at all, because "no pipeline" read before the read landed is a
-  // claim, not a fact.
-  const pipelinesSettled = pipelines?.snapshot.state === "live" && runs?.snapshot.state === "live";
+  // claim, not a fact. A read that FAILED is live with an error and no rows,
+  // which is not an answer either: taken as "no pipeline" it would offer
+  // Connect pipeline to a source that has one. It is said as the failure.
+  const pipelinesError = pipelines?.snapshot.error || runs?.snapshot.error || "";
+  const pipelinesSettled = pipelines?.snapshot.state === "live" && runs?.snapshot.state === "live" && pipelinesError === "";
+  // "All runs" goes to the Runs tab, so it is offered only to somebody the tab
+  // is drawn for (`read app:deployables/runs`).
+  const runsReachable = useAppReach("deployables").sections.includes("runs");
 
   const [openRequest, setOpenRequest] = useState<{ siteId: string; revision: number; detail?: "store"; result?: string } | undefined>();
   // A run to open on the Runs tab -- a check run's details link, a link from
@@ -362,8 +368,9 @@ function DeployablesAppContent({
           pipelines={pipelines}
           runs={runs}
           pipelinesSettled={pipelinesSettled}
+          pipelinesError={pipelinesError}
           connectFlow={connectFlow}
-          onOpenRuns={openRunsFor}
+          onOpenRuns={runsReachable ? openRunsFor : undefined}
           sites={measuredSource}
           packages={packages}
           parked={parked}
@@ -399,8 +406,9 @@ function DeployablesAppContent({
           pipelines={pipelines}
           runs={runs}
           pipelinesSettled={pipelinesSettled}
+          pipelinesError={pipelinesError}
           connectFlow={connectFlow}
-          onOpenRuns={openRunsFor}
+          onOpenRuns={runsReachable ? openRunsFor : undefined}
           sites={measuredSource}
           packages={packages}
           parked={parked}

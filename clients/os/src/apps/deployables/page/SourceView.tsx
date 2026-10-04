@@ -12,6 +12,7 @@ import { AvailableVersion } from "./AvailableVersion";
 import { GitBranch, History } from "lucide-react";
 
 import { Caption, Fact, Facts, Head, Panel } from "../../../kit";
+import { InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { formatMoment } from "../../../kit/format";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { shortVersion, type PackageRow } from "../packages/rows";
@@ -20,7 +21,9 @@ import { siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
 import { deploymentStateWord, siteStateWord, stateChip } from "../words";
 import { AutoDeploySwitch, CredentialChip, PackageLifecycle } from "./stops/Source";
+import { ChecksPart, pipelineFact } from "../pipelines/ChecksPart";
 import type { PipelineRow, RunRow } from "../pipelines/rows";
+import { runsOfPipeline, upstreamChecks } from "../pipelines/runs";
 
 // SourceView -- a source is a THING, with its own page (epic memql#4937, D4).
 //
@@ -53,6 +56,18 @@ import type { PipelineRow, RunRow } from "../pipelines/rows";
 // to activate an app from its source, and "click the app, read that it is
 // inactive, press Activate" is that way. The rows read the same state words
 // the list and the bar do.
+//
+// ===========================================================================
+// ITS PIPELINE IS SAID TO ITS OWNER, AND TO NOBODY ELSE (epic memql#5479)
+// ===========================================================================
+// A GitHub repository source gains a Pipeline fact, what Latest upstream's
+// checks said, a Checks part between the facts and the apps, ", checks on" on
+// the bar, and the bar's pipeline act. Every one of them reads the pipelines
+// feeds, and those are OWNER-SCOPED: a cluster owner opening a colleague's
+// source, or an account member opening a shared one, is answered nothing. For
+// them "Not connected" would be a fact this page invented, so the page says
+// nothing about checks at all -- the same silence a ZIP source gets, for
+// which there is nothing to say.
 
 export function SourceView({
   pkg,
@@ -74,6 +89,7 @@ export function SourceView({
   pipeline = null,
   pipelineRuns = [],
   pipelinesSettled = false,
+  pipelinesError = "",
   canConnect = false,
   onOpenRun,
   onOpenRuns,
@@ -117,10 +133,16 @@ export function SourceView({
   deployedBy: string;
   /** The source's pipeline (epic memql#5479), or null when it has none -- or none the viewer may read. */
   pipeline?: PipelineRow | null;
-  /** The pipeline's runs, newest first. */
+  /** The pipeline's runs, in any order. */
   pipelineRuns?: readonly RunRow[];
   /** Whether the pipelines feeds have answered; before that nothing is said about checks. */
   pipelinesSettled?: boolean;
+  /**
+   * Why the pipelines feeds could not answer -- a read's error, or that the
+   * connection is down -- or "". While it is set nothing about checks is
+   * claimed, and the Checks part says so rather than staying a loading shape.
+   */
+  pipelinesError?: string;
   /** Whether this session holds the `connect` part. */
   canConnect?: boolean;
   onOpenRun?: (runId: string) => void;
@@ -128,9 +150,6 @@ export function SourceView({
   onConnectPipeline?: () => void;
   onPipelineSettings?: () => void;
 }) {
-  // PLACEHOLDER (Task 8 renders the pipeline props: the Checks part, the
-  // Pipeline fact, Latest upstream's checks and the bar's pipeline acts).
-  void [pipeline, pipelineRuns, pipelinesSettled, canConnect, onOpenRun, onOpenRuns, onConnectPipeline, onPipelineSettings];
   const accounts = useAccountOptions();
   const label = sourceName(pkg);
   const connections = useSourceConnections();
@@ -144,6 +163,17 @@ export function SourceView({
   const undeployed = pkg.declares.filter((d) => !deployedNames.has(d.name));
   const inactive = undeployed.filter((d) => pkg.disabledDeployables.includes(d.name)).length;
   const total = apps.length + undeployed.length;
+
+  // THE PIPELINE, for its owner (see the header). `settled` is the feeds
+  // having answered WITHOUT an error: a read that failed answers no pipeline,
+  // and a page that took that for "none" would offer Connect pipeline to a
+  // source that has one.
+  const checked = pkg.sourceKind === "repo" && mine;
+  const settled = pipelinesSettled && pipelinesError === "";
+  const runs = pipeline === null ? [] : runsOfPipeline(pipelineRuns, pipeline.id);
+  const checksOn = checked && settled && pipeline?.status === "active";
+  const latest = pkg.latestKnownVersion === "" ? "" : shortVersion(pkg.latestKnownVersion);
+  const upstream = checked && settled ? upstreamChecks(runs, pipeline, pkg.latestKnownVersion, pkg.deployedVersion) : "";
 
   // ===========================================================================
   // A SOURCE HAS NO DEPLOY, AND THAT IS THE POINT
@@ -161,10 +191,26 @@ export function SourceView({
   // deployable, done on that deployable's page -- or, for one the source only
   // declares, on the compose flow its row opens.
   //
-  // The bar stays, with no acts: it still reads what this source IS and how
-  // many of its apps are live, which is what somebody who opened it came to
-  // find out.
-  const acts: Act[] = onReview === undefined ? [] : [{ label: pendingStatus === "awaiting_confirm" ? "Review" : "Resume setup", tone: "primary", onAct: onReview }];
+  // The bar stays, and reads what this source IS and how many of its apps are
+  // live, which is what somebody who opened it came to find out. Its acts are
+  // the source's own: the way back into a run parked at its gate, and its
+  // pipeline's -- never a deploy.
+  const review: Act | null = onReview === undefined ? null : { label: pendingStatus === "awaiting_confirm" ? "Review" : "Resume setup", tone: "primary", onAct: onReview };
+
+  // THE PIPELINE'S ACT, one at a time: Pipeline settings for a pipeline that
+  // runs, Connect pipeline for a source with none or one disconnected. Absent
+  // until the feeds answer -- an act offered on a reading that has not landed
+  // is the act this page would take back -- and for an archived source, which
+  // opens no runs. A gate waiting on somebody is the more urgent act, so beside
+  // Review this is text; alone, it is the bar's one button.
+  const pipelineAct: Pick<Act, "label" | "onAct"> | null =
+    !checked || !settled || !canConnect || pkg.status === "archived" ? null
+    : pipeline?.status === "active" ? (onPipelineSettings ? { label: "Pipeline settings", onAct: onPipelineSettings } : null)
+    : onConnectPipeline ? { label: "Connect pipeline", onAct: onConnectPipeline } : null;
+  const acts: Act[] = [
+    ...(pipelineAct === null ? [] : [review === null ? { ...pipelineAct, tone: "primary" as const } : { ...pipelineAct, text: true }]),
+    ...(review === null ? [] : [review]),
+  ];
 
   return (
     <div className="os-deploy-pane deployable-source-view" data-os-page-context={JSON.stringify({ page: "Source", packageId: pkg.id, source: label })}>
@@ -185,17 +231,31 @@ export function SourceView({
             {pkg.sourceKind === "repo" ? <Fact label="GitHub target" value={provenance.binding ? `${provenance.target} (${provenance.binding.accountType === "Organization" ? "organization" : "personal account"})` : `${provenance.target} (from repository URL)`} /> : null}
             {pkg.sourceKind === "repo" ? <Fact label="Repository" value={pkg.repoUrl} /> : <Fact label="ZIP in Files" value={pkg.artifactId} />}
             {pkg.sourceKind === "repo" ? <Fact label="Tracking" value={pkg.repoRef === "" ? "default branch" : pkg.repoRef} /> : null}
+            {checked ? (
+              <Fact
+                label="Pipeline"
+                value={settled ? pipelineFact(pipeline, runs) : pipelinesError !== "" ? "Could not be read" : <InlineSkeleton label="Loading the pipeline" />}
+              />
+            ) : null}
             <Fact label="Deployed" value={pkg.deployedVersion === "" ? "" : shortVersion(pkg.deployedVersion)} mono />
+            {/* WHAT THAT COMMIT'S CHECKS SAID, beside it (D14): "checks
+                passed, not yet deployed" is the reading that says a newer
+                version is ready to go. The commit stays in the data voice and
+                the words do not. */}
             <Fact
               label="Latest upstream"
-              value={pkg.latestKnownVersion === "" ? "" : shortVersion(pkg.latestKnownVersion)}
-              mono
+              value={upstream === "" ? latest : <><span className="os-mono">{latest}</span>, {upstream}</>}
+              mono={upstream === ""}
             />
             <Fact label="Added" value={formatMoment(pkg.createdAt)} />
             {deployedBy === "" ? null : <Fact label="Deployed by" value={deployedBy} />}
           </Facts>
 
           <AvailableVersion key={pkg.id} pkg={pkg} />
+
+          {checked ? (
+            <ChecksPart pipeline={pipeline} runs={runs} settled={settled} error={pipelinesError} onOpenRun={onOpenRun} onOpenRuns={onOpenRuns} />
+          ) : null}
 
           {/* WHAT IT DECLARES, not only what it deployed.
               A site row is written only for an app that actually deployed, so
@@ -271,6 +331,8 @@ export function SourceView({
         detail={`${total} app${total === 1 ? "" : "s"}${live > 0 ? `, ${live} live` : ""}${
           inactive > 0 ? `, ${inactive} inactive` : ""
         }${undeployed.length - inactive > 0 ? `, ${undeployed.length - inactive} not deployed` : ""}${
+          checksOn ? ", checks on" : ""
+        }${
           pkg.autoDeploy ? " -- deploys itself when the plan is unchanged" : ""
         }`}
         tone={pkg.status === "archived" ? "none" : live > 0 ? "live" : "none"}

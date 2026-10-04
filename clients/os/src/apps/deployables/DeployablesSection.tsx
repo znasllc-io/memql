@@ -74,7 +74,7 @@ import { PipelinePage } from "./pipelines/PipelinePage";
 import { RunPage } from "./pipelines/RunPage";
 import { pipelineForPackage, runsOfPipeline } from "./pipelines/runs";
 import { sameId, type PipelineRow, type RunRow } from "./pipelines/rows";
-import { branchWords, shortSha } from "./pipelines/words";
+import { runTitle } from "./pipelines/words";
 
 // The Deployables section (epic memql#4937, design section A): FOUR SIBLING
 // VIEWS, one at a time, one Head each.
@@ -142,7 +142,7 @@ const ROOT_LABEL: Readonly<Record<SectionRoot, string>> = { deployables: "Deploy
 export function DeployablesSection({
   root = "deployables",
   active = true, navigation, openRequest, connectResult, sourceOpenRequest,
-  pipelines, runs, pipelinesSettled = false, connectFlow, onOpenRuns,
+  pipelines, runs, pipelinesSettled = false, pipelinesError = "", connectFlow, onOpenRuns,
   sites,
   packages,
   parked,
@@ -170,6 +170,8 @@ export function DeployablesSection({
   pipelines?: LiveView<PipelineRow> | null;
   runs?: LiveView<RunRow> | null;
   pipelinesSettled?: boolean;
+  /** Why the pipelines feeds could not answer, or "": said on a source's page rather than read as "no pipeline". */
+  pipelinesError?: string;
   /** The connect rail's answers, held at the app root. */
   connectFlow?: ConnectFlow;
   /** Open the Runs tab refined to one pipeline. */
@@ -395,7 +397,7 @@ export function DeployablesSection({
             runsState={runs?.snapshot.state ?? "disconnected"}
             pipeline={pipeline}
             sourceName={label}
-            breadcrumbs={[...sourceCrumbs, { label: run ? branchWords(run) || shortSha(run.sha) : "Run" }]}
+            breadcrumbs={[...sourceCrumbs, { label: run ? runTitle(run) : "Run" }]}
             back={{ label, onSelect: toSource }}
             can={can}
             onOpenRun={(runId) => setView({ kind: "run", packageId: pkg.id, runId })}
@@ -414,8 +416,9 @@ export function DeployablesSection({
             can={can}
             backLabel={label}
             onBack={toSource}
+            breadcrumbs={[...sourceCrumbs, { label: "Pipeline" }]}
             onChange={() => { connectFlow?.start(pkg.id, pipeline); setView({ kind: "connect", packageId: pkg.id }); }}
-            onOpenRuns={() => onOpenRuns?.(pipeline.id)}
+            onOpenRuns={onOpenRuns ? () => onOpenRuns(pipeline.id) : undefined}
           />
         );
       }
@@ -429,6 +432,7 @@ export function DeployablesSection({
           backLabel={label}
           onBack={toSource}
           onDone={toSource}
+          trail={sourceCrumbs}
         />
       );
     }
@@ -510,9 +514,10 @@ export function DeployablesSection({
         pipeline={pipeline}
         pipelineRuns={pipeline === null ? [] : runsOfPipeline(runRows, pipeline.id)}
         pipelinesSettled={pipelinesSettled && connectFlow !== undefined}
+        pipelinesError={pipelinesError}
         canConnect={can.connect}
         onOpenRun={(runId) => setView({ kind: "run", packageId: pkg.id, runId })}
-        onOpenRuns={pipeline === null ? undefined : () => onOpenRuns?.(pipeline.id)}
+        onOpenRuns={pipeline === null || !onOpenRuns ? undefined : () => onOpenRuns(pipeline.id)}
         onConnectPipeline={connectFlow === undefined ? undefined : () => { connectFlow.start(pkg.id, pipeline); setView({ kind: "connect", packageId: pkg.id }); }}
         onPipelineSettings={pipeline === null ? undefined : () => setView({ kind: "pipeline", packageId: pkg.id })}
         attempts={parkedRows.filter((d) => d.packageId === pkg.id && d.status === "awaiting_confirm").length}
