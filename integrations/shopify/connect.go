@@ -50,7 +50,6 @@ const (
 	connectReasonAppCredentialsInvalid   = "app_credentials_invalid"
 	connectReasonSecretNameAmbiguous     = "secret_name_ambiguous"
 	connectReasonStoreNotConnected       = "store_not_connected"
-	connectReasonStoreInUse              = "store_in_use"
 	connectReasonStorefrontTokenRequired = "storefront_token_required"
 	connectReasonStorefrontTokenInvalid  = "storefront_token_invalid"
 	connectReasonShopifyAppNotSaved      = "shopify_app_not_saved"
@@ -346,6 +345,25 @@ func callerUserID(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("shopify: Connect Shopify needs a signed-in caller")
 }
 
+// requireClusterOwner is the floor on the per-storefront Connect writes
+// (memql#5638, G9): shopifyStoreAppSave, shopifyConnectBegin and
+// shopifyStorefrontTokenSet. They take a person's own Shopify app credentials
+// and pasted Storefront tokens, and MemQL OS no longer calls them -- people
+// connect a store through Settings -> Connections, where Shopify's own launch
+// and the operator's registered app are the only inputs
+// (shopifyAccountConnectBegin). They stay for a cluster owner repairing a store
+// by hand, and for any product bundle still calling them, and for nobody else.
+//
+// In the handler because a builtin carries no @requiresRank; the store part
+// the engine asks before the handler runs stays the first gate. A floor that
+// cannot be read refuses.
+func requireClusterOwner(ctx context.Context, builtin string) error {
+	if ac, ok := auth.AccessFromContext(ctx); ok && ac.IsClusterOwner() {
+		return nil
+	}
+	return fmt.Errorf("shopify: %s is reserved to a cluster owner; connect a store through Settings -> Connections", builtin)
+}
+
 // ---------------------------------------------------------------------------
 // shopifyConnectStatus (12.2)
 // ---------------------------------------------------------------------------
@@ -398,6 +416,9 @@ func (i *Integration) handleStoreAppSave(ctx context.Context, args map[string]an
 	c := i.connector
 	actor, err := callerUserID(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if err := requireClusterOwner(ctx, "shopifyStoreAppSave"); err != nil {
 		return nil, err
 	}
 	target, reason, err := c.ResolveConnectSite(ctx, argString(args, "siteId"))
@@ -479,6 +500,9 @@ func (i *Integration) handleConnectBegin(ctx context.Context, args map[string]an
 	c := i.connector
 	actor, err := callerUserID(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if err := requireClusterOwner(ctx, "shopifyConnectBegin"); err != nil {
 		return nil, err
 	}
 	target, reason, err := c.ResolveConnectSite(ctx, argString(args, "siteId"))
@@ -610,6 +634,9 @@ func (i *Integration) handleStorefrontTokenSet(ctx context.Context, args map[str
 	if err != nil {
 		return nil, err
 	}
+	if err := requireClusterOwner(ctx, "shopifyStorefrontTokenSet"); err != nil {
+		return nil, err
+	}
 	target, reason, err := c.ResolveConnectSite(ctx, argString(args, "siteId"))
 	if err != nil {
 		return nil, err
@@ -623,22 +650,13 @@ func (i *Integration) handleStorefrontTokenSet(ctx context.Context, args map[str
 		return connectReply(connectReasonStoreNotConnected, ConnectTarget{})
 	}
 
+	// A store's token is served under every site bound to it, so changing it
+	// is an act on each of them -- which the caller, a cluster owner since
+	// memql#5638, may perform on all of them. The sites are still read: an
+	// empty token is refused while a live one is bound.
 	sites, err := c.sitesBoundTo(ctx, target.StoreID)
 	if err != nil {
 		return nil, err
-	}
-	// A store's token is served under every site bound to it, so changing it
-	// is an act on each of them.
-	if ac, _ := auth.AccessFromContext(ctx); !ac.IsClusterOwner() {
-		for _, site := range sites {
-			ok, err := c.mayWriteRow(ctx, conceptPlatformSite, mapString(site, "id"))
-			if err != nil {
-				return nil, err
-			}
-			if !ok {
-				return connectReply(connectReasonStoreInUse, ConnectTarget{})
-			}
-		}
 	}
 
 	opCtx := operatorContext(ctx)

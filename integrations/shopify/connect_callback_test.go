@@ -126,7 +126,9 @@ func newCallbackHarness(t *testing.T) *callbackHarness {
 		h.shops = append(h.shops, shop)
 		return h.token.server.URL + "/admin/oauth/access_token"
 	}
-	h.user(auth.RoleDeveloper, true)
+	// A cluster owner: the per-storefront flow is theirs alone (memql#5638,
+	// G9), and step 8 re-asks it of the person at the callback.
+	h.user(auth.RoleOwner, true)
 	return h
 }
 
@@ -345,9 +347,9 @@ func TestAuthorizeReachesShopifyOnlyWhenEveryCheckHolds(t *testing.T) {
 	h := newCallbackHarness(t)
 	grant, result := h.integ.connector.AuthorizeShopifyConnect(ctx, callbackState(credentialSourcePending), callbackCode)
 	if result != "" {
-		t.Fatalf("a developer's own storefront refused %q", result)
+		t.Fatalf("a cluster owner's own storefront refused %q", result)
 	}
-	if grant.StoreID != connectStoreID || grant.AccessToken != callbackAdminToken || grant.Role != string(auth.RoleDeveloper) || len(grant.Scopes) != len(ConnectScopes()) {
+	if grant.StoreID != connectStoreID || grant.AccessToken != callbackAdminToken || grant.Role != string(auth.RoleOwner) || len(grant.Scopes) != len(ConnectScopes()) {
 		t.Fatalf("grant = %v", grant)
 	}
 	if h.token.count() != 1 || len(h.engine.writes()) != 0 {
@@ -357,7 +359,7 @@ func TestAuthorizeReachesShopifyOnlyWhenEveryCheckHolds(t *testing.T) {
 	// borrowed, never internal.
 	var asPerson bool
 	for _, call := range h.engine.callsNamed("siteById") {
-		if call.userId == connectDev && call.role == auth.RoleDeveloper && !call.internal {
+		if call.userId == connectDev && call.role == auth.RoleOwner && !call.internal {
 			asPerson = true
 		}
 	}
@@ -376,6 +378,7 @@ func TestAuthorizeReachesShopifyOnlyWhenEveryCheckHolds(t *testing.T) {
 		{name: "the site now publishes another shop", arrange: func(h *callbackHarness) { h.run(connectSiteID, "other-shop.myshopify.com") }, want: connectReasonStateInvalid},
 		{name: "the store was purged", arrange: func(h *callbackHarness) { h.store(map[string]any{"redactedAt": "2026-09-01T00:00:00Z"}) }, want: connectReasonStateInvalid},
 		{name: "the person is gone or inactive", arrange: func(h *callbackHarness) { h.user(auth.RoleDeveloper, false) }, want: connectReasonPermissionLost},
+		{name: "the person is a developer now", arrange: func(h *callbackHarness) { h.user(auth.RoleDeveloper, true) }, want: connectReasonPermissionLost},
 		{name: "the person is a writer now", arrange: func(h *callbackHarness) { h.user(auth.RoleWriter, true) }, want: connectReasonPermissionLost},
 		{name: "the person is an admin now", arrange: func(h *callbackHarness) { h.user(auth.RoleAdmin, true) }, want: connectReasonPermissionLost},
 		{name: "the person can no longer write the site", arrange: func(h *callbackHarness) { h.engine.denyWriter = connectDev }, want: connectReasonPermissionLost},

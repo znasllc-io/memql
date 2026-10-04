@@ -39,7 +39,7 @@ func (h *connectHarness) currentApp(clientID string) {
 func begin(t *testing.T, h *connectHarness, args map[string]any) map[string]any {
 	t.Helper()
 	t.Setenv("MEMQL_IDENTITY_BASE_URL", connectIdentityBase)
-	return invoke(t, devCtx(), h.integ.handleConnectBegin, args)
+	return invoke(t, ownerConnectCtx(), h.integ.handleConnectBegin, args)
 }
 
 var stateInURL = regexp.MustCompile(`[?&]state=([^&]+)`)
@@ -231,9 +231,10 @@ func TestBeginWithNoBrowserSessionIsAnErrorNotAState(t *testing.T) {
 	h := newConnectHarness(t)
 	h.pendingApp(connectClientID)
 	t.Setenv("MEMQL_IDENTITY_BASE_URL", connectIdentityBase)
-	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: connectDev, Role: auth.RoleDeveloper})
-	if _, err := h.integ.handleConnectBegin(ctx, map[string]any{"siteId": "s1"}, 0); err == nil {
-		t.Fatal("begin answered a call with no browser session")
+	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: connectDev, Role: auth.RoleOwner})
+	_, err := h.integ.handleConnectBegin(ctx, map[string]any{"siteId": "s1"}, 0)
+	if err == nil || !strings.Contains(err.Error(), "browser session") {
+		t.Fatalf("begin answered a call with no browser session: %v", err)
 	}
 	if got := h.engine.callsNamed("createGithubConnectState"); len(got) != 0 {
 		t.Fatalf("a state was written: %v", got)
@@ -246,8 +247,9 @@ func TestBeginWithNoIdentityBaseURLIsAnErrorNotAState(t *testing.T) {
 	h := newConnectHarness(t)
 	h.pendingApp(connectClientID)
 	t.Setenv("MEMQL_IDENTITY_BASE_URL", "")
-	if _, err := h.integ.handleConnectBegin(devCtx(), map[string]any{"siteId": "s1"}, 0); err == nil {
-		t.Fatal("begin answered with no identity base URL")
+	_, err := h.integ.handleConnectBegin(ownerConnectCtx(), map[string]any{"siteId": "s1"}, 0)
+	if err == nil || !strings.Contains(err.Error(), "MEMQL_IDENTITY_BASE_URL") {
+		t.Fatalf("begin answered with no identity base URL: %v", err)
 	}
 	if got := h.engine.callsNamed("createGithubConnectState"); len(got) != 0 {
 		t.Fatalf("a state was written: %v", got)

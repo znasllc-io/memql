@@ -57,7 +57,7 @@ func newWriteHarness(t *testing.T) *writeHarness {
 
 func (h *writeHarness) grant() componentIdentity.ShopifyConnectGrant {
 	return componentIdentity.ShopifyConnectGrant{
-		StoreID: connectStoreID, AccessToken: callbackAdminToken, ClientSecret: connectSecret, Scopes: ConnectScopes(), Role: string(auth.RoleDeveloper),
+		StoreID: connectStoreID, AccessToken: callbackAdminToken, ClientSecret: connectSecret, Scopes: ConnectScopes(), Role: string(auth.RoleOwner),
 	}
 }
 
@@ -269,8 +269,8 @@ func TestAFirstConnectKeepsEverythingItWasGiven(t *testing.T) {
 		t.Fatalf("updateSiteStoreBinding ran %d times, want 1", len(attaches))
 	}
 	a := attaches[0]
-	if a.userId != connectDev || a.role != auth.RoleDeveloper || a.internal {
-		t.Errorf("the attach ran as %+v, want the developer under their own role", a)
+	if a.userId != connectDev || a.role != auth.RoleOwner || a.internal {
+		t.Errorf("the attach ran as %+v, want the person under their own role", a)
 	}
 	if !strings.Contains(a.query, `storeId: "`+connectStoreID+`"`) || !strings.Contains(a.query, `siteId: "s1"`) {
 		t.Errorf("the attach names %s", a.query)

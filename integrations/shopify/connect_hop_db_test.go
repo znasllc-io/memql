@@ -218,7 +218,7 @@ func TestConnectShopifyBeginsOnOneEngineAndFinishesOnAnother(t *testing.T) {
 		}
 	}
 	seed("v1:identity:user", dev, map[string]any{
-		"displayName": "Hop Dev", "primaryEmail": dev + "@hop.example.test", "role": string(auth.RoleDeveloper), "active": true,
+		"displayName": "Hop Dev", "primaryEmail": dev + "@hop.example.test", "role": string(auth.RoleOwner), "active": true,
 	})
 	// The browser the developer signed in with (D16): its session is the one
 	// every call below names (actorCtx's sid), and its refresh cookie is what
@@ -246,7 +246,8 @@ func TestConnectShopifyBeginsOnOneEngineAndFinishesOnAnother(t *testing.T) {
 		"deployables": []any{map[string]any{"name": "storefront", "siteId": "v1:platform:site:" + site}},
 	})
 
-	devCtx := actorCtx(dev, auth.RoleDeveloper)
+	// The per-storefront flow is a cluster owner's (memql#5638, G9).
+	devCtx := actorCtx(dev, auth.RoleOwner)
 	call := func(ctx context.Context, format string, args ...any) map[string]any {
 		t.Helper()
 		out := builtinReply(t, engA, ctx, fmt.Sprintf(format, args...))
