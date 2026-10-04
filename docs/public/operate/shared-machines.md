@@ -300,6 +300,19 @@ on it — so a cluster owner could lend hardware they do not own, and un-lend
 hardware somebody else had lent. On the one row whose entire content is a
 person's consent, that escape is wrong.
 
+Making the mutation `@serverOnly` closed one route and left the tier as it
+was. The raw `insert()` literal names no construct, so it never consults
+`@serverOnly`, and neither does the `update { }` body of an inline or authored
+mutation, so a cluster owner could still lend another person's machine that
+way, to anyone (memql#5658). The engine now refuses, at the single write
+chokepoint, any write that changes `sharing` without internal origin. That
+covers every caller, the owner included, because `fleetSetSharing` is where the
+people and groups named are checked. It also refuses moving an existing
+machine's owner, which would otherwise be the same write in two steps: take
+the machine, then lend it as its owner. The tier itself is unchanged, so the
+operator's cluster-wide view of the fleet still works, and so do the live
+updates behind it.
+
 Removing a machine keeps the cluster-owner arm, and the difference is the
 point: offboarding somebody's laptop is an operator act the Fleet's operator
 view already implies, while giving their hardware to somebody is not.

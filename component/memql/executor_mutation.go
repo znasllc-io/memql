@@ -1129,6 +1129,18 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		ownerBefore.restore(payload)
 	}
 
+	// A MACHINE'S SHARING IS ITS OWNER'S CONSENT (memql#5658), server-written
+	// only. Here rather than beside the construct ladder above for one reason:
+	// it also judges the OWNER, and the owner this write lands is only final
+	// after the stamps just above. Before canonicalization, so it compares the
+	// owner tolerantly (registrationOwnerChanged). See
+	// worker_sharing_write_guard.go.
+	if conceptMeta.Name == WorkerRegistrationConcept {
+		if err := validateWorkerConsentServerOnly(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+	}
+
 	// Annotation-driven PII scrub (memql#1711). A mutation tagged
 	// @scrubPii (the hard-delete / data-deletion path) clears EVERY field
 	// the bound concept declares with @pii, derived from the schema at

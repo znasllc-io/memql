@@ -112,8 +112,12 @@ concept registration {
   // stored beside a real one must be refused, not kept. Written ONLY by
   // setWorkerSharing, which only fleetSetSharing renders, which resolves the
   // machine through the caller's own -- so the only person who can lend a
-  // machine is its owner (memql#5327, M-2). Revoking takes effect on the NEXT
-  // resolution: a call already in flight completes, because stopping a
+  // machine is its owner (memql#5327, M-2). The engine holds that for every
+  // other write too: executeWrite refuses a change to this block without
+  // internal origin, raw insert() and inline update{} included, because the
+  // tier's cluster-owner escape would otherwise admit them (memql#5658,
+  // component/memql/worker_sharing_write_guard.go). Revoking takes effect on
+  // the NEXT resolution: a call already in flight completes, because stopping a
   // generation mid-token would lose work somebody is waiting for and change
   // nothing about the prompt already sent.
   sharing {
