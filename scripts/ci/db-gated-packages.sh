@@ -382,6 +382,24 @@ readonly DB_GATED_TREES=(
 #
 # `integrations/compose` is NOT here, for `integrations/work`'s reason: it is
 # a package inside the existing `integrations` module.
+#
+# epic memql#5477 added `component/pipelines`, Pipelines' PURE half -- the
+# manifest's pipeline: block, the compiled plan, the event-to-mode table, the
+# affected set and the executor contract the substrate's runner implements.
+# It is a module for procedure's reason and no other: the substrate's runner
+# lives in the `integrations` module, which cannot import a root-module
+# package with GOWORK=off. What the complement now means, MEASURED:
+#
+#	go list github.com/znasllc-io/memql/... | grep -cE 'component/pipelines$'
+#	  1
+#	scripts/ci/db-gated-packages.sh --complement | grep -cE 'component/pipelines$'
+#	  1
+#
+# It is enumerated in workspace mode and sits in the complement, so its tests
+# run in THIS lane. It is NOT db-gated and must not join DB_GATED_TREES: its
+# purity_test.go makes "reaches no database" a build-graph fact.
+# `component/pipelinerun`, the engine side, is a root-module package and is
+# covered by the root pattern like any other.
 readonly KNOWN_GO_MOD_DIRS=(
 	"."
 	"component/actions"
@@ -417,6 +435,7 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"component/node/gen"
 	"component/observe"
 	"component/outbound"
+	"component/pipelines"
 	"component/planner"
 	"component/procedure"
 	"component/provenance"
