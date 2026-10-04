@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -45,6 +46,14 @@ const (
 	backoffBase   = 30 * time.Second
 	backoffFactor = 4
 	backoffCap    = time.Hour
+
+	// SecretNamePattern is the form a secret target's NAME must take
+	// (memql#5480). The engine's resolver interpolates the name into its
+	// lookup query, so the worker refuses any other name before it resolves
+	// anything. stageOutboundRequestToSecret's targetSecret arg carries the
+	// same @pattern, and TestOutboundSecretNamePatternMatchesTheDSL at the
+	// repository root holds the two together.
+	SecretNamePattern = `^[A-Z][A-Z0-9_]{0,63}$`
 )
 
 // Engine is the narrow engine surface the worker needs. Returns any
@@ -223,7 +232,7 @@ func (w *Worker) loop(ctx context.Context) {
 // drainOnce scans pending + due retrying rows and processes each. The
 // synchronously testable unit (cron-leader test precedent).
 func (w *Worker) drainOnce(ctx context.Context) {
-	sysCtx := systemActorContext(ctx)
+	sysCtx := SystemActorContext(ctx)
 	for _, status := range []string{"pending", "retrying"} {
 		res, err := w.engine.Execute(sysCtx, fmt.Sprintf(`query outboundRequestsByStatus(status: %s)`, langparser.QuoteString(status)))
 		if err != nil {
@@ -276,9 +285,16 @@ func (w *Worker) processRow(ctx context.Context, row map[string]any, scanStatus 
 			return
 		}
 	}
-	transport, delivery, policyErr := w.admit(ctx, req)
-	if policyErr != nil {
-		w.stampFailed(ctx, req, policyErr)
+	transport, delivery, admitErr := w.admit(ctx, req)
+	if admitErr != nil {
+		if isRetryLater(admitErr) {
+			// Nothing was sent, but the attempt is spent: the row takes the
+			// delivery backoff and counts against MaxAttempts, so a failure
+			// that never clears still ends the row (ADR 4.1).
+			w.recordFailure(ctx, req, admitErr, now)
+			return
+		}
+		w.stampFailed(ctx, req, admitErr)
 		return
 	}
 	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "sending")`, langparser.QuoteString(req.ID)))
@@ -293,6 +309,12 @@ func (w *Worker) processRow(ctx context.Context, row map[string]any, scanStatus 
 		w.logger.Info("outbound worker: delivered", "id", req.ID, "medium", req.Medium, "attempt", req.Attempts+1)
 		return
 	}
+	w.recordFailure(ctx, req, err, now)
+}
+
+// recordFailure stamps a failed attempt: failed when err is permanent or the
+// attempts are spent, retrying on the bounded backoff otherwise (ADR 4.1).
+func (w *Worker) recordFailure(ctx context.Context, req Request, err error, now time.Time) {
 	attempts := req.Attempts + 1
 	if IsPermanent(err) || attempts >= w.cfg.MaxAttempts {
 		// lastError is rendered with langparser.QuoteString, NOT %q
@@ -360,6 +382,13 @@ func (w *Worker) admit(ctx context.Context, req Request) (Transport, Request, er
 	if len(req.Payload) > w.cfg.MaxPayloadBytes {
 		return nil, req, fmt.Errorf("payload %d bytes exceeds cap %d", len(req.Payload), w.cfg.MaxPayloadBytes)
 	}
+	if req.TargetSecret != "" && !secretNameRe.MatchString(req.TargetSecret) {
+		// First, so that every later message naming the secret names one
+		// that passed. The name is not repeated: it failed the one rule that
+		// makes it safe to put in the resolver's query, and the row already
+		// shows it to anyone who needs to look.
+		return nil, req, fmt.Errorf("webhook: target secret refused: its name does not match %s", SecretNamePattern)
+	}
 	if req.TargetSecret != "" && req.Medium != "webhook" {
 		// Refused before the secret is read. Its value is a webhook URL, and
 		// nothing another medium could do with it would be a delivery.
@@ -400,16 +429,23 @@ func (w *Worker) admit(ctx context.Context, req Request) (Transport, Request, er
 // allowlist refusal does not quote its target the way a plain row's does.
 //
 // A secret that does not resolve fails the row rather than scheduling a
-// retry. A secret nobody stored, an empty one and a node with no resolver all
-// wait on an operator, not on the backoff, and the stager learns of it now
-// instead of after MEMQL_OUTBOUND_MAX_ATTEMPTS.
+// retry. A secret nobody stored, one that cannot be decrypted, an empty one
+// and a node with no resolver all wait on an operator, not on the backoff,
+// and the stager learns of it now instead of after
+// MEMQL_OUTBOUND_MAX_ATTEMPTS. The resolver's misses and decrypt failures are
+// told apart by the engine's predicates, never by their text. Any other
+// lookup error -- a timeout, a dropped connection, an engine still booting --
+// may pass on its own, and is retried like a refused connection (ADR 4.1).
 func (w *Worker) resolveSecretTarget(ctx context.Context, req Request) (Request, error) {
 	if w.Secrets == nil {
 		return req, fmt.Errorf("webhook: target secret %s did not resolve: no secret resolver is wired on this node", req.TargetSecret)
 	}
 	value, err := w.Secrets(ctx, req.TargetSecret)
 	if err != nil {
-		return req, fmt.Errorf("webhook: target secret %s did not resolve: %w", req.TargetSecret, err)
+		if memql.IsVariableNotFound(err) || memql.IsSecretUndecryptable(err) {
+			return req, fmt.Errorf("webhook: target secret %s did not resolve: %w", req.TargetSecret, err)
+		}
+		return req, retryLater(fmt.Errorf("webhook: target secret %s could not be read: %w", req.TargetSecret, err))
 	}
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -422,6 +458,25 @@ func (w *Worker) resolveSecretTarget(ctx context.Context, req Request) (Request,
 	delivery.Target = value
 	return delivery, nil
 }
+
+// retryLaterError marks a failure admit met before anything was sent that may
+// pass on its own: a secret target whose lookup failed rather than missed
+// (memql#5480). processRow gives it the delivery backoff instead of stamping
+// it failed.
+type retryLaterError struct{ err error }
+
+func (e *retryLaterError) Error() string { return e.err.Error() }
+func (e *retryLaterError) Unwrap() error { return e.err }
+
+func retryLater(err error) error { return &retryLaterError{err: err} }
+
+func isRetryLater(err error) bool {
+	var r *retryLaterError
+	return errors.As(err, &r)
+}
+
+// secretNameRe compiles SecretNamePattern once.
+var secretNameRe = regexp.MustCompile(SecretNamePattern)
 
 func (w *Worker) stampFailed(ctx context.Context, req Request, policyErr error) {
 	// lastError via QuoteString (memql#3035). A policy refusal names the
@@ -604,9 +659,15 @@ func parseTimeOrZero(s string) time.Time {
 	return time.Time{}
 }
 
-// systemActorContext stamps engine roundtrips from the worker with a
-// system identity (planner precedent).
-func systemActorContext(ctx context.Context) context.Context {
+// SystemActorContext stamps engine roundtrips from the worker with a
+// system identity (planner precedent): every drain scan, every status stamp
+// and every secret target's lookup runs under it, with no internal origin.
+//
+// Exported for app's database test (memql#5480), which reads a sealed
+// globalSecret through the engine's real resolver under exactly this
+// identity: a row tier added to globalSecret that shut this actor out would
+// otherwise fail every secret target at run time, with nothing red before.
+func SystemActorContext(ctx context.Context) context.Context {
 	return auth.ContextWithToken(ctx, &auth.TokenInfo{
 		Subject: systemOutboundActor,
 		Claims: map[string]any{

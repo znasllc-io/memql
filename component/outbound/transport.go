@@ -121,17 +121,27 @@ type WebhookTransport struct {
 }
 
 // NewWebhookTransport constructs the webhook transport with the
-// deploy-configured request timeout and allowlist.
+// deploy-configured request timeout and allowlist. Its client follows no
+// redirect, and Deliver enforces that on whatever client it is handed.
 func NewWebhookTransport() *WebhookTransport {
 	cfg := LoadConfig()
 	return &WebhookTransport{
-		Client:    &http.Client{Timeout: cfg.HTTPTimeout},
+		Client:    &http.Client{Timeout: cfg.HTTPTimeout, CheckRedirect: refuseRedirect},
 		Allowlist: cfg.WebhookAllowlist,
 	}
 }
 
+// refuseRedirect is the webhook client's redirect policy: follow none
+// (memql#5480). The allowlist judged the URL a row targets and nothing a
+// response points at, and on a redirect net/http sends the request on to the
+// new host with the full original URL as its Referer -- for a secret target,
+// the token. ErrUseLastResponse hands the 3xx itself back to Deliver, whose
+// status switch makes it a permanent failure.
+func refuseRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
 // Deliver POSTs the payload. 2xx is success; 408/429/5xx and transport
-// errors are retryable; every other status is permanent.
+// errors are retryable; every other status, a redirect included, is
+// permanent.
 func (t *WebhookTransport) Deliver(ctx context.Context, req Request) error {
 	if t == nil || t.Client == nil {
 		return errors.New("webhook transport: client not wired")
@@ -166,7 +176,11 @@ func (t *WebhookTransport) Deliver(ctx context.Context, req Request) error {
 	if req.DedupeKey != "" {
 		httpReq.Header.Set("X-Memql-Dedupe-Key", req.DedupeKey)
 	}
-	resp, err := t.Client.Do(httpReq)
+	// A copy, so that no redirect is followed whatever client this transport
+	// was built with: the policy is the transport's, not its constructor's.
+	client := *t.Client
+	client.CheckRedirect = refuseRedirect
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("webhook: %w", redactURLError(err))
 	}

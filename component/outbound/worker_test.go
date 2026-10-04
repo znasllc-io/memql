@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // memql#2521 -- the outbound-delivery worker. Products stage
@@ -823,15 +825,19 @@ func TestSecretTargetDeliversToTheResolvedURL(t *testing.T) {
 	}
 }
 
-// TestSecretTargetThatDoesNotResolveFailsNamingTheSecret: a secret that cannot
-// be read is not a transient condition the backoff can wait out. The row fails
-// once, and its lastError names the secret, which is what an operator fixes.
+// TestSecretTargetThatDoesNotResolveFailsNamingTheSecret: a secret nobody
+// stored, one that cannot be decrypted, an empty one, and a node with no
+// resolver are not transient conditions the backoff can wait out: each waits
+// on an operator. The row fails once, and its lastError names the secret,
+// which is what the operator fixes. The two resolver errors are recognised by
+// the engine's own predicates, never by their text.
 func TestSecretTargetThatDoesNotResolveFailsNamingTheSecret(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		secrets *fakeSecrets // nil: no resolver is wired on this node
 	}{
-		{"the resolver errors", &fakeSecrets{err: errors.New(`secret "DISCORD_X" not found`)}},
+		{"nobody stored the secret", &fakeSecrets{err: fmt.Errorf("secret %q: %w", "DISCORD_X", memql.ErrVariableNotFound)}},
+		{"the secret cannot be decrypted", &fakeSecrets{err: fmt.Errorf("secret %q: %w", "DISCORD_X", memql.ErrSecretUndecryptable)}},
 		{"the secret is empty", &fakeSecrets{value: ""}},
 		{"the secret is blank", &fakeSecrets{value: " \n"}},
 		{"no resolver is wired", nil},
@@ -987,5 +993,125 @@ func TestPlainWebhookRowNeverConsultsTheSecretResolver(t *testing.T) {
 	}
 	if tr.count() != 1 || tr.delivered[0].Target != "https://hooks.internal.example/notify" {
 		t.Fatalf("a plain row must deliver to its own target, got %+v", tr.delivered)
+	}
+}
+
+// TestSecretTargetLookupFailureIsRetried: a lookup that failed rather than
+// missed -- a timeout, a dropped connection, an engine still booting -- may
+// pass on its own, so the row takes the delivery backoff the way a refused
+// connection does (ADR 4.1): retrying, the attempt counted, nothing sent, and
+// failed once the attempts run out. Its lastError names the secret and keeps
+// the cause.
+func TestSecretTargetLookupFailureIsRetried(t *testing.T) {
+	cause := errors.New(`failed to query secret "DISCORD_X": read tcp 10.0.0.7:5432: i/o timeout`)
+	eng := &fakeEngine{pending: []map[string]any{secretRow("v1:platform:outboundRequest:s1")}}
+	tr := &fakeTransport{}
+	w, _ := newSecretTargetWorker(eng, tr, &fakeSecrets{err: cause})
+
+	w.drainOnce(context.Background())
+
+	if tr.count() != 0 {
+		t.Fatal("a secret that could not be read must never reach the transport")
+	}
+	stamps := eng.stamped()
+	if len(stamps) != 1 || !strings.Contains(stamps[0], `status: "retrying"`) ||
+		!strings.Contains(stamps[0], "attempts: 1") || !strings.Contains(stamps[0], "nextAttemptAt:") {
+		t.Fatalf("a failed lookup is retried: one retrying stamp, the attempt counted, a due time; got %v", stamps)
+	}
+	lastError := stringArg(t, stamps[0], "lastError")
+	if !strings.Contains(lastError, "webhook: target secret DISCORD_X could not be read") || !strings.Contains(lastError, "i/o timeout") {
+		t.Fatalf("lastError must name the secret and keep the cause, got %q", lastError)
+	}
+
+	row := secretRow("v1:platform:outboundRequest:s2")
+	row["status"] = "retrying"
+	row["attempts"] = 2 // MaxAttempts is 3, so this attempt is the last
+	row["nextAttemptAt"] = time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	eng = &fakeEngine{retrying: []map[string]any{row}}
+	w, _ = newSecretTargetWorker(eng, tr, &fakeSecrets{err: cause})
+
+	w.drainOnce(context.Background())
+
+	if stamps := eng.stamped(); len(stamps) != 1 || !strings.Contains(stamps[0], `status: "failed"`) || !strings.Contains(stamps[0], "attempts: 3") {
+		t.Fatalf("a lookup still failing on the last attempt fails the row, got %v", stamps)
+	}
+}
+
+// TestSecretTargetRedirectIsNotFollowed: the allowlist judged the secret's URL
+// and nothing a response points at, and following a 3xx would send the request
+// on to a host nobody listed, with the full secret URL -- token and all -- as
+// its Referer. The 3xx is a permanent failure, and the redirect's target hears
+// nothing.
+func TestSecretTargetRedirectIsNotFollowed(t *testing.T) {
+	resolved := discordWebhookPrefix + "123/" + discordToken
+	var mu sync.Mutex
+	var seen []string
+	client := webhookStandIn(t, func(rw http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Method+" "+r.Host+r.URL.Path)
+		mu.Unlock()
+		if r.URL.Path == "/landing" {
+			rw.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.Redirect(rw, r, "https://example.com/landing", http.StatusFound)
+	})
+	eng := &fakeEngine{pending: []map[string]any{secretRow("v1:platform:outboundRequest:s1")}}
+	w, logs := newSecretTargetWorker(eng, &WebhookTransport{Client: client, Allowlist: []string{discordWebhookPrefix}}, &fakeSecrets{value: resolved})
+
+	w.drainOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 1 || seen[0] != "POST discord.com/api/webhooks/123/"+discordToken {
+		t.Fatalf("only the secret's own URL may be asked, once; the stand-in saw %d request(s)", len(seen))
+	}
+	stamps := eng.stamped()
+	last := stamps[len(stamps)-1]
+	if !strings.Contains(last, `status: "failed"`) {
+		t.Fatalf("a redirect is a permanent failure, got %q", last)
+	}
+	if got := stringArg(t, last, "lastError"); got != "webhook: status 302" {
+		t.Fatalf("lastError = %q, want %q", got, "webhook: status 302")
+	}
+	assertNoWebhookURL(t, "the log", logs.String(), resolved)
+}
+
+// TestSecretTargetNameOutsideThePatternIsRefused: the engine's resolver
+// interpolates the name into its lookup, so a name outside SecretNamePattern
+// is refused before anything is resolved. The refusal names the rule and not
+// the name: a name that failed the rule that makes it safe to put in a query
+// is not repeated anywhere.
+func TestSecretTargetNameOutsideThePatternIsRefused(t *testing.T) {
+	for _, name := range []string{"discord_x", `X" || payload.name != "`, "9DISCORD", "D" + strings.Repeat("X", 64)} {
+		t.Run(name, func(t *testing.T) {
+			row := secretRow("v1:platform:outboundRequest:s1")
+			row["targetSecret"] = name
+			row["target"] = "secret:" + name
+			eng := &fakeEngine{pending: []map[string]any{row}}
+			tr := &fakeTransport{}
+			secrets := &fakeSecrets{value: discordWebhookPrefix + "123/" + discordToken}
+			w, logs := newSecretTargetWorker(eng, tr, secrets)
+
+			w.drainOnce(context.Background())
+
+			if tr.count() != 0 {
+				t.Fatal("a row whose secret name breaks the rule must never reach the transport")
+			}
+			if asked := secrets.names(); len(asked) != 0 {
+				t.Fatalf("the resolver was asked for a name outside the rule: %d lookup(s)", len(asked))
+			}
+			stamps := eng.stamped()
+			if len(stamps) != 1 || !strings.Contains(stamps[0], `status: "failed"`) {
+				t.Fatalf("a name outside the rule is a permanent failure, stamped once as failed; got %v", stamps)
+			}
+			want := "webhook: target secret refused: its name does not match " + SecretNamePattern
+			if got := stringArg(t, stamps[0], "lastError"); got != want {
+				t.Fatalf("lastError = %q, want %q", got, want)
+			}
+			if strings.Contains(logs.String(), name) {
+				t.Fatalf("the log repeats the refused name:\n%s", logs.String())
+			}
+		})
 	}
 }

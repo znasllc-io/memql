@@ -223,14 +223,16 @@ mutation missingCapability updateMissingCapabilityStatus {
 //
 // The stamp also writes targetSecret, always empty (memql#5480).
 // stageOutboundRequestToSecret stages a webhook row naming the globalSecret
-// that holds its URL, and only server code may call it. This mutation is
-// client-reachable and idempotent by requestId, so without the empty stamp a
-// signed-in caller who re-staged onto a secret row's id would keep its
-// targetSecret through the read-merge while swapping in a body of their own,
-// requeue the row with updateOutboundRequestStatus, and have the worker POST
-// that body to the secret's URL. Cleared, such a re-stage leaves an ordinary
-// row whose target is the descriptor secret:<NAME>, which no allowlist
-// admits: the worker fails it loudly instead of delivering it.
+// that holds its URL, and this mutation is idempotent by requestId, so a
+// re-stage onto a secret row's id would otherwise keep its targetSecret
+// through the read-merge under a body of the caller's choosing, and the
+// worker would POST that body to the secret's URL. From a client the engine
+// refuses such a re-stage outright (component/memql/
+// outbound_secret_target_write_guard.go); the stamp is what answers a caller
+// the guard admits, an internal-origin one such as a product automation's
+// step. Cleared, its re-stage leaves an ordinary row whose target is the
+// descriptor secret:<NAME>, which no allowlist admits: the worker fails it
+// loudly instead of delivering it.
 
 /// Stage an outbound delivery (memql#2521): insert a v1:platform:outboundRequest row with
 /// status='pending' for the engine outbound worker to drain. Credentials are never part of the row;
@@ -271,13 +273,17 @@ mutation outboundRequest stageOutboundRequest {
 /// make the worker POST a body of its choosing to whatever URL a cluster owner stored, and scoping the
 /// row to the caller would not change which secret it names. The writers are server-side Go -- the
 /// pipelines notify stage -- after they have checked the caller's right to the channel that names the
-/// secret.
+/// secret. @serverOnly bars only this named call; the engine's write guard
+/// (component/memql/outbound_secret_target_write_guard.go) refuses the same row arriving any other
+/// way without internal origin, a raw insert() included. The name is held to
+/// ^[A-Z][A-Z0-9_]{0,63}$ because the resolver interpolates it into its lookup, and the worker
+/// re-checks the rule before it resolves anything.
 @serverOnly
 @createOnly("status", "attempts")
 mutation outboundRequest stageOutboundRequestToSecret {
   args {
     requestId     string!
-    targetSecret  string!
+    targetSecret  string!  @pattern("^[A-Z][A-Z0-9_]{0,63}$")
     subject       string
     body          string!
     dedupeKey     string

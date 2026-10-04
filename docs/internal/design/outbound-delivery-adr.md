@@ -268,28 +268,54 @@ to the channel.
 **The descriptor.** Such a row names the `v1:platform:globalSecret` whose
 value is the URL, in `targetSecret`, and `target` holds only the descriptor
 `secret:<NAME>`. The row, its audit and every error therefore name the
-secret and never the URL. The one writer is `stageOutboundRequestToSecret`,
-which is `@serverOnly`: a client able to stage such a row could aim a body
-of its choosing at whatever URL a cluster owner stored. The client-reachable
-`stageOutboundRequest` stamps `targetSecret` empty on every write, because
-it is idempotent by `requestId`. Without that stamp a signed-in caller could
-re-stage onto a secret row's id, keep `targetSecret` through the read-merge
-under a body of their own, requeue the row, and have the worker deliver it.
-Cleared, the re-stage leaves an ordinary row whose target is the descriptor,
-which no allowlist admits, so the row fails loudly.
-`outboundRequestById` (`@serverOnly`) is how the notify stage learns that
-its delivery was sent.
+secret and never the URL. `outboundRequestById` (`@serverOnly`) is how the
+notify stage learns that its delivery was sent.
+
+**Who may write one.** Whoever writes a secret row chooses what is posted to
+a channel a cluster owner configured, so only server-side Go may: the notify
+stage, through `stageOutboundRequestToSecret` under internal origin.
+`@serverOnly` on that mutation bars only the named call. A raw `insert()`
+never consults it, and the concept declares no row tier, so the engine holds
+the line itself. `validateOutboundSecretTargetWrite`
+(`component/memql/outbound_secret_target_write_guard.go`) sits at the
+post-read-merge seam every write path shares. Without internal origin it
+refuses any write that sets, changes or clears `targetSecret`, or that changes
+what a row naming a secret sends (`medium`, `target`, `subject`, `body`,
+`dedupeKey`, `requestedBy`). The delivery status fields stay open: the worker
+stamps them under its own system actor, and nothing in them chooses where a
+POST goes or what it says.
+
+The client-reachable `stageOutboundRequest` also stamps `targetSecret` empty
+on every write. The guard already refuses a client's re-stage onto a secret
+row's id; the stamp covers the callers the guard admits, which run with
+internal origin, such as a product automation's step. Their re-stage leaves
+an ordinary row whose target, the descriptor, no allowlist admits.
 
 **The resolver.** `Worker.Secrets` resolves a secret's name to its value.
 App wiring sets it to `MemQLEngine.ResolveSystemSecret`, the same resolver
-the plug-in context hands integrations. `admit` runs it after the claim, like
-the rest of the target policy:
+the plug-in context hands integrations, and the worker calls it under
+`outbound.SystemActorContext`. app's
+`TestOutboundSecretTargetsResolveUnderTheWorkersActor` reads a sealed secret
+that way against a real database, so a row tier on `globalSecret` that shut
+the actor out turns that test red. `admit` runs the resolver after the claim,
+like the rest of the target policy:
 
+- A name outside `^[A-Z][A-Z0-9_]{0,63}$` fails the row before anything
+  else, because the resolver interpolates the name into its lookup query.
+  The mutation's `@pattern` refuses the same names at staging; the worker
+  re-checks because a row can reach it without meeting that arg. The refusal
+  names the rule, not the name.
 - `targetSecret` on a medium other than `webhook` fails the row before the
   secret is read.
-- No resolver, a lookup error or an empty value fails the row permanently,
-  with `webhook: target secret <NAME> did not resolve`. Each of these waits
-  on an operator, not on the backoff.
+- A secret nobody stored, one that does not decrypt, an empty value, or no
+  resolver at all fails the row permanently, with
+  `webhook: target secret <NAME> did not resolve`. Each of these waits on an
+  operator. The engine's `IsVariableNotFound` and `IsSecretUndecryptable`
+  identify them; the error's text is never read.
+- Any other lookup error is retried on the delivery backoff and counts
+  against `MEMQL_OUTBOUND_MAX_ATTEMPTS`, like a refused connection (4.1).
+  That covers a timeout, a dropped connection and an engine still booting.
+  `lastError` reads `webhook: target secret <NAME> could not be read: <cause>`.
 - The resolved URL must pass the same `MEMQL_OUTBOUND_WEBHOOK_ALLOWLIST` as
   any webhook target. A Discord channel needs `https://discord.com/api/webhooks/`
   listed. A miss reads `webhook: target not in allowlist`, without quoting the
@@ -297,6 +323,12 @@ the rest of the target policy:
 
 The URL then exists only in the copy of the request handed to the transport.
 Every stamp and log line reads the row, whose target is the descriptor.
+
+**No redirects.** The webhook transport follows none, whatever client it is
+built with. The allowlist judged the URL a row targets, not whatever a
+response points at. On a redirect, `net/http` would also send the request on
+with the full original URL as its `Referer`, which for a secret target
+includes the token. A 3xx is a permanent failure (`webhook: status 302`).
 
 **The redaction.** `net/http` wraps a failed request in `*url.Error`, whose
 message embeds the request URL. That covers both a client failure (a refused
@@ -308,10 +340,12 @@ credential.
 
 **What it does not close.** `v1:platform:outboundRequest` declares no row
 tier (memql#5804). Any signed-in caller can still read every row through
-`outboundRequestsByStatus`, which shows a secret row's body and the secret's
-name but never its URL. Any signed-in caller can also stamp any row's status
-through `updateOutboundRequestStatus`, which can requeue a sent secret row
-(replaying its own body to its own channel) or mark it sent or failed.
+`outboundRequestsByStatus`. For a secret row that shows the body and the
+secret's name, never its URL. The status fields the guard leaves open for
+the worker are also open to any signed-in caller, through
+`updateOutboundRequestStatus`. Requeueing a sent secret row replays its own
+body to its own channel. Marking a row sent or failed misleads whoever is
+waiting on it.
 
 ## 8. References
 

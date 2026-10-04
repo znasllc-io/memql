@@ -558,7 +558,10 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// would not help: the row has no owner, and an owner stamp would not
 		// change which secret it names. The writer is the pipelines notify
 		// stage, after it has checked the person's right to the channel naming
-		// the secret.
+		// the secret. This bars the named call only; a raw insert() never
+		// consults @serverOnly, and component/memql's
+		// outbound_secret_target_write_guard.go refuses the same row arriving
+		// that way.
 		{Path: "platform/mutations.memql", Name: "stageOutboundRequestToSecret"}: true,
 		// Its by-id read, which is how the notify stage learns the delivery
 		// went. v1:platform:outboundRequest declares no tier (memql#5804), so a

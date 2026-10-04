@@ -1063,6 +1063,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 	}
+	// SECRET TARGETS are server-written only (memql#5480), at the same seam
+	// for the ladder's reasons: the rule is about a CHANGE, so it needs the
+	// stored row and the final one -- after the read-merge, which carries a
+	// row's targetSecret through a write that never names it, so a judge of
+	// the delta alone would pass a foreign body under someone else's secret.
+	// See outbound_secret_target_write_guard.go.
+	if conceptMeta.Name == conceptPlatformOutboundRequest {
+		if err := validateOutboundSecretTargetWrite(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+	}
 
 	// ROW-AUTHZ OWNER STAMP for writes that bypassed the mutation
 	// template (memql#3175, carrying memql#3059). The other half of
