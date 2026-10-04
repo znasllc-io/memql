@@ -13,6 +13,13 @@
 #            the excepted ranges. (An API server with a PUBLIC endpoint is on
 #            the internet like any other host; the step holds no credential
 #            for it -- step-serviceaccount.yaml.)
+#            One PUBLIC address is excepted too: 168.63.129.16, Azure's
+#            WireServer. Every Azure VM reaches it, and on AKS it serves the
+#            node's goal state and, through the host agent, provisioning
+#            material -- a published path from code in a pod to the node's
+#            bootstrap credentials. A step needs none of it: it resolves names
+#            through cluster DNS above, never through the WireServer. Off
+#            Azure the address is a stranger's, and excepting it costs nothing.
 #
 # ENFORCEMENT IS THE CLUSTER'S, not this object's. k3s (the local cluster)
 # enforces NetworkPolicy out of the box. An AKS cluster enforces it only when it
@@ -40,4 +47,4 @@ spec:
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
-            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16]
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 168.63.129.16/32]

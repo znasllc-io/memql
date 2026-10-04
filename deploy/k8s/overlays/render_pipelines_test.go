@@ -516,14 +516,15 @@ type networkPolicySpec struct {
 }
 
 // TestPipelinesNetworkPolicyIsolatesTheNamespace pins what a step can reach:
-// cluster DNS, and the internet minus every private and link-local range -- so
-// not the mesh, the database, another pod, a node or the cloud's
-// instance-metadata endpoint, while `git fetch`, a module proxy and a package
+// cluster DNS, and the internet minus every private and link-local range and
+// Azure's WireServer (168.63.129.16) -- so not the mesh, the database, another
+// pod, a node, the cloud's instance-metadata endpoint or the WireServer's
+// provisioning material, while `git fetch`, a module proxy and a package
 // registry still work. Nothing may connect IN. (What the object cannot pin is
 // enforcement: that needs a network policy engine in the cluster -- the
 // component's README says where there is one.)
 func TestPipelinesNetworkPolicyIsolatesTheNamespace(t *testing.T) {
-	wantExcept := []string{"10.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16"}
+	wantExcept := []string{"10.0.0.0/8", "168.63.129.16/32", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16"}
 
 	for _, overlay := range pipelinesOverlays {
 		t.Run(overlay, func(t *testing.T) {
