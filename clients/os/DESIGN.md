@@ -139,10 +139,12 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   moon, sun and monitor icons. It needs no visible heading or option labels;
   retain accessible names, tooltips, keyboard operation and visible focus.
   This does not remove the labels that identify form fields.
-- Standalone identity pages share `IdentityLayout`: the theme toggle sits at
-  the upper left through sign-in, setup, verification, recovery, legal and
-  error states. Reuse `kit/ThemeSwitch` and the stored OS preference; never
-  add a separate selector to each form or to identity panels inside the OS.
+- Identity and cluster setup pages share `kit/EntryLayout`: the theme toggle
+  stays at the upper left through sign-in, ownership setup, inference setup,
+  verification, recovery, legal and error states, including the page shown to
+  people waiting for an owner to finish setup. Reuse `kit/ThemeSwitch` and the
+  stored OS preference; never add a separate selector to each form or to
+  identity panels inside the OS.
 - Remove redundant labels, helper text, outlines and decoration. Keep copy
   when it explains a consequence or helps the current decision. A skill's
   general suggestions never override these repository rules or the brief.

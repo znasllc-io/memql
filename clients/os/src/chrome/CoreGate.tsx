@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 
 import { Button, Rail, type Stop } from "../kit";
+import { EntryLayout } from "../kit/EntryLayout";
 import { canConfigure } from "../kit/ReadinessStates";
 import { useSetupFacts } from "../apps/setup/context";
 import { InferenceStop } from "../apps/setup/InferenceStop";
@@ -143,7 +144,7 @@ export function CoreGate({ onSignOut, children }: { onSignOut: () => void; child
   }));
 
   return (
-    <div className="os-core-gate" data-os-core-gate="held">
+    <EntryLayout><main className="os-core-gate" data-os-core-gate="held">
       <div className="os-core-gate-column">
         <span className="os-core-gate-mark" aria-hidden>
           <Mark className="os-ask-mark" />
@@ -181,7 +182,7 @@ export function CoreGate({ onSignOut, children }: { onSignOut: () => void; child
           <Button onClick={onSignOut}>Sign out</Button>
         </div>
       </div>
-    </div>
+    </main></EntryLayout>
   );
 
   function bodyFor(stop: SetupStop) {
@@ -220,7 +221,7 @@ export function CoreGate({ onSignOut, children }: { onSignOut: () => void; child
  */
 function ToldVariant({ onSignOut }: { onSignOut: () => void }) {
   return (
-    <div className="os-core-gate" data-os-core-gate="told">
+    <EntryLayout><main className="os-core-gate" data-os-core-gate="told">
       <div className="os-core-gate-column">
         <span className="os-core-gate-mark" aria-hidden>
           <Mark className="os-ask-mark" />
@@ -234,7 +235,7 @@ function ToldVariant({ onSignOut }: { onSignOut: () => void }) {
           <Button onClick={onSignOut}>Sign out</Button>
         </div>
       </div>
-    </div>
+    </main></EntryLayout>
   );
 }
 

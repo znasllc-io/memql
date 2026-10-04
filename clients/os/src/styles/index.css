@@ -8741,6 +8741,17 @@ a.os-button {
 .os-wizard-aside-footer {
   margin-top: 18px;
 }
+.os-entry-layout {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--os-ground);
+  color: var(--os-ink);
+}
+.os-entry-preferences { flex: none; padding: 20px 20px 0; }
+.os-entry-layout > .os-wizard { flex: 1; min-height: 0; }
 .os-theme-switch {
   position: relative;
   display: inline-grid;
@@ -13448,21 +13459,16 @@ button.os-cluster-mesh-peer:focus-visible {
    while looking at it. */
 
 .os-core-gate {
-  position: absolute;
-  inset: 0;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   justify-content: center;
   background: var(--os-ground);
   color: var(--os-ink);
-  /* Top-anchored, and the number was set by looking: at a tenth of the
-     viewport the column sat in the top third of a 900px screen with a third of
-     the page empty beneath it. Fourteen brings it toward the optical centre
-     while still leaving the rail room to grow DOWNWARD rather than pushing the
-     mark somebody is reading away from their cursor -- which is the whole
-     reason this is not centred. Clamped at both ends so a laptop and a 4K
-     display both get a column that starts where the eye lands. */
-  padding: clamp(48px, 14vh, 160px) 24px 96px;
+  /* The entry header owns the theme control above this scrollable pane.
+     Keep the column top-anchored so expanding a stop grows downward. */
+  padding: clamp(32px, 8vh, 110px) 24px 96px;
 }
 
 .os-core-gate-column {
