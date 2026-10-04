@@ -14,8 +14,8 @@ import {
   ROW_HEIGHT,
   STACKED_ROW_HEIGHT,
   logLayout,
+  rowHeightAt,
   stackBelow,
-  stackedRowHeight,
   wideFrom,
 } from "../../src/logs/LogLine";
 import { useLogRowLayout } from "../../src/logs/useLogRowLayout";
@@ -87,15 +87,17 @@ const WIDE_16 = wideFrom("comfortable", 16);
 const STACK_20 = stackBelow("comfortable", 20);
 const WIDE_20 = wideFrom("comfortable", 20);
 const ONE_LINE = ROW_HEIGHT.comfortable;
+const ONE_LINE_20 = rowHeightAt("medium", "comfortable", 20);
+const STACKED_20 = rowHeightAt("narrow", "comfortable", 20);
 
 describe("the layouts' boundaries", () => {
   it("are the measured widths, at 16px and 20px roots", () => {
     // The widths the captures were taken at. A change to either measure is
     // a change to these, and the captures have to be taken again.
-    expect([STACK_16, WIDE_16]).toEqual([677, 1199]);
-    expect([STACK_20, WIDE_20]).toEqual([820, 1461]);
-    expect([stackBelow("compact", 16), wideFrom("compact", 16)]).toEqual([629, 1111]);
-    expect([stackBelow("compact", 20), wideFrom("compact", 20)]).toEqual([763, 1356]);
+    expect([STACK_16, WIDE_16]).toEqual([667, 1182]);
+    expect([STACK_20, WIDE_20]).toEqual([810, 1445]);
+    expect([stackBelow("compact", 16), wideFrom("compact", 16)]).toEqual([621, 1098]);
+    expect([stackBelow("compact", 20), wideFrom("compact", 20)]).toEqual([755, 1342]);
   });
 
   it.each([16, 20])("divide the widths into the three layouts at a %ipx root", (rootPx) => {
@@ -124,11 +126,22 @@ describe("the layouts' boundaries", () => {
     }
   });
 
-  it("size a stacked row for its font, from the default's proportions", () => {
-    expect(stackedRowHeight("comfortable", 16)).toBe(STACKED_ROW_HEIGHT.comfortable);
-    expect(stackedRowHeight("compact", 16)).toBe(STACKED_ROW_HEIGHT.compact);
-    expect(stackedRowHeight("comfortable", 20)).toBe(60);
-    expect(stackedRowHeight("compact", 24)).toBe(60);
+  it("size every row for its font, scaling only the text in it", () => {
+    // At the default root, the heights the rows have always had.
+    expect(rowHeightAt("wide", "comfortable", 16)).toBe(ROW_HEIGHT.comfortable);
+    expect(rowHeightAt("medium", "compact", 16)).toBe(ROW_HEIGHT.compact);
+    expect(rowHeightAt("narrow", "comfortable", 16)).toBe(STACKED_ROW_HEIGHT.comfortable);
+    expect(rowHeightAt("narrow", "compact", 16)).toBe(STACKED_ROW_HEIGHT.compact);
+    // A line's text is its mark's line, the root font size: the row grows by
+    // what the font grows by, and keeps the same room around it.
+    expect(rowHeightAt("medium", "comfortable", 20)).toBe(34);
+    expect(rowHeightAt("medium", "compact", 24)).toBe(30);
+    // Two stacked lines grow by both lines -- and shrink by them too under a
+    // small font, never by the room, so the row still holds what is in it.
+    expect(rowHeightAt("narrow", "comfortable", 20)).toBe(56);
+    expect(rowHeightAt("narrow", "compact", 24)).toBe(55);
+    expect(rowHeightAt("narrow", "comfortable", 12)).toBe(40);
+    expect(rowHeightAt("narrow", "compact", 9)).toBe(27);
   });
 });
 
@@ -139,14 +152,14 @@ describe("an app's Logs section", () => {
     [16, WIDE_16 - 1, "medium", ONE_LINE],
     [16, WIDE_16, "wide", ONE_LINE],
     [16, 0, "wide", ONE_LINE],
-    [20, STACK_20 - 1, "narrow", stackedRowHeight("comfortable", 20)],
-    [20, STACK_20, "medium", ONE_LINE],
-    [20, WIDE_20 - 1, "medium", ONE_LINE],
-    [20, WIDE_20, "wide", ONE_LINE],
+    [20, STACK_20 - 1, "narrow", STACKED_20],
+    [20, STACK_20, "medium", ONE_LINE_20],
+    [20, WIDE_20 - 1, "medium", ONE_LINE_20],
+    [20, WIDE_20, "wide", ONE_LINE_20],
     // A larger font moves both boundaries out: a list that is WIDE at the
     // default is MEDIUM under Chrome's "Large", and one that is MEDIUM stacks.
-    [20, WIDE_16, "medium", ONE_LINE],
-    [20, STACK_16, "narrow", stackedRowHeight("comfortable", 20)],
+    [20, WIDE_16, "medium", ONE_LINE_20],
+    [20, STACK_16, "narrow", STACKED_20],
   ])("at a %ipx root, lays a %ipx list out %s", async (rootPx, width, layout, height) => {
     document.documentElement.style.fontSize = `${rootPx}px`;
     listWidth = width;
@@ -247,11 +260,15 @@ describe("the Logs app's Search", () => {
 describe("the stylesheet", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const css = readFileSync(join(here, "../../src/styles/index.css"), "utf8");
+  /** Every declaration index.css gives `selector` alone, across its rules. */
   function block(selector: string): string {
-    const at = css.indexOf(`\n${selector} {`);
-    if (at === -1) throw new Error(`no rule in index.css for selector: ${selector}`);
-    const open = css.indexOf("{", at);
-    return css.slice(open + 1, css.indexOf("}", open));
+    const bodies: string[] = [];
+    for (let at = css.indexOf(`\n${selector} {`); at !== -1; at = css.indexOf(`\n${selector} {`, at + 1)) {
+      const open = css.indexOf("{", at);
+      bodies.push(css.slice(open + 1, css.indexOf("}", open)));
+    }
+    if (bodies.length === 0) throw new Error(`no rule in index.css for selector: ${selector}`);
+    return bodies.join("\n");
   }
 
   // The decision is the code's and the arrangements are the stylesheet's;
@@ -277,6 +294,38 @@ describe("the stylesheet", () => {
     expect(block(".os-logs-attrs")).toContain("flex: 0 1 40%;");
     expect(block(".os-logs-attrs")).toContain("min-width: 0;");
     expect(block(".os-logs-attrs")).not.toContain("margin-left: auto");
+  });
+
+  it("gives the space between cells to the cells, so an empty one costs nothing", () => {
+    // A flex gap stands between two cells whatever their width: an attribute
+    // cell squeezed to nothing would still take its gap from the message.
+    expect(block(".os-logs-line")).not.toMatch(/(^|[\s;])gap:/);
+    expect(block(".os-logs-line")).toContain("--os-logs-gap: 10px;");
+    expect(css).toContain(".os-logs-time,\n.os-logs-level,\n.os-logs-component {\n  margin-right: var(--os-logs-gap);");
+    // Inside the attributes, where their own overflow clips it.
+    expect(block(".os-logs-attrs")).toContain("text-indent: var(--os-logs-gap);");
+    // Before the mark, inside its cell -- and an empty cell is not laid out.
+    expect(block(".os-logs-subject-cell")).toContain("padding-left: var(--os-logs-gap);");
+    expect(block(".os-logs-subject-cell:empty")).toContain("display: none;");
+  });
+
+  it("lets the mark's line follow its font", () => {
+    // 16px at its default 11px, as a ratio: a pixel line would clip the
+    // descenders the mark's own overflow keeps inside it under a larger font.
+    expect(block(".os-logs-subject")).toContain("line-height: calc(16 / 11);");
+  });
+
+  it("fixes the mark's column in WIDE, at the mark's bound, for every line", () => {
+    const cell = block('.os-logs-list[data-layout="wide"] .os-logs-subject-cell');
+    expect(cell).toContain("width: calc(var(--os-logs-gap) + 18ch + 16px);");
+    // Its characters are the mark's, so the column is exactly the bound.
+    expect(cell).toContain("font-family: var(--os-font-mono);");
+    expect(cell).toContain("font-size: var(--os-text-xs);");
+    // A line with no mark keeps the column's start: its attributes run on
+    // through the absent mark's column rather than leaving it blank.
+    const unmarked = block('.os-logs-list[data-layout="wide"] .os-logs-attrs:has(+ .os-logs-subject-cell:empty)');
+    expect(unmarked).toContain("flex-basis: calc(40% + var(--os-logs-gap) + 18ch + 16px);");
+    expect(unmarked).toContain("max-width: calc(40% + var(--os-logs-gap) + 18ch + 16px);");
   });
 
   it("puts the message first in MEDIUM", () => {

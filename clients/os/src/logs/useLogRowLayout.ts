@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
-import { ROW_HEIGHT, logLayout, stackedRowHeight, type LogDensity, type LogLayout } from "./LogLine";
+import { ROW_HEIGHT, logLayout, rowHeightAt, type LogDensity, type LogLayout } from "./LogLine";
 
 export interface LogRowLayout {
   /** The list's root: hand it to the `.os-logs-list` element. */
@@ -32,10 +32,10 @@ interface Arrangement {
  *
  * THE MEASURES FOLLOW THE READER'S FONT. The cells are sized in characters of
  * rem-sized fonts, so a browser set to a larger font needs a wider list for
- * the same arrangement, and a taller row for the two stacked lines: the root
- * font size is read with the width, each time the list is measured -- when it
- * mounts and whenever it resizes. A font changed under a list that keeps its
- * width is read at its next resize.
+ * the same arrangement, and taller rows for its lines: the root font size is
+ * read with the width, each time the list is measured -- when it mounts and
+ * whenever it resizes. A font changed under a list that keeps its width is
+ * read at its next resize.
  *
  * ONLY THE ANSWER IS STATE, as in kit/useWide: the layout and the row height,
  * set only when a measurement disagrees with them, so a resize that changes
@@ -61,7 +61,7 @@ export function useLogRowLayout(density: LogDensity): LogRowLayout {
     const read = (): void => {
       const rootPx = rootFontPx();
       const layout = logLayout(el.getBoundingClientRect().width, density, rootPx);
-      const rowHeight = layout === "narrow" ? stackedRowHeight(density, rootPx) : ROW_HEIGHT[density];
+      const rowHeight = rowHeightAt(layout, density, rootPx);
       if (held.current.layout === layout && held.current.rowHeight === rowHeight) return;
       held.current = { layout, rowHeight };
       setArrangement(held.current);
