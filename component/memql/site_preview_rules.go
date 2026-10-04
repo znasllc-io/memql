@@ -95,10 +95,11 @@ type PreviewBoundStore struct {
 	// Empty when the store was not readable, in which case the refusal names
 	// the id instead -- an honest "this one, which you cannot see".
 	Domain string
-	// HasStorefrontToken is whether the store row names a Storefront token
-	// (storefrontTokenRef non-empty), meaningful only when Readable. A store
-	// without one is not connected: the edge would serve an empty token and
-	// the storefront's catalog would not load.
+	// HasStorefrontToken is whether the store row names its OWN Storefront
+	// token -- the one secret the edge will publish for it
+	// (NamesItsOwnStorefrontToken, memql#5626) -- meaningful only when
+	// Readable. A store naming none, or naming any other secret, is not
+	// connected: the edge serves no token and the catalog does not load.
 	HasStorefrontToken bool
 }
 
@@ -183,7 +184,7 @@ func SiteStorefrontCandidateRefusal(storefront bool, prior, serving, candidate s
 	return PreviewRefusal{
 		Code:    PreviewRefusalStorefrontHasNoCandidate,
 		Message: "a storefront has no separate candidate version: its Testing destination serves the published build against the testing store, so a version that is not the published one would be served by nothing.",
-		Remedy:  "Publish the version as the serving version, which reaches Testing and Production together, and roll back if it should not serve.",
+		Remedy:  "Publish it as the serving version: a storefront serves one build on Testing and Production, each against its own store. Candidate versions are for spa and static apps.",
 	}
 }
 

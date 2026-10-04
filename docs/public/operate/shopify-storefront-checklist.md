@@ -256,10 +256,10 @@ that is asserted by a test that greps the served document, and again by the
 cluster-e2e leg against a document a real cluster really served.
 
 - [ ] The store row's `storefrontTokenRef` is `SHOPIFY_<STOREID>_STOREFRONT_TOKEN`,
-      the name Connect seals the token under. The edge publishes no other
-      secret for a store (memql#5626): a ref naming anything else is refused
-      before it is looked up, the `storefront` block reads `unavailable`, and
-      the edge logs which ref it refused
+      the name Connect seals the token under. `createStore` and `updateStore`
+      refuse any other name, and the edge publishes no other secret for a store
+      (memql#5626): a store from before that rule reads `unavailable`, and the
+      edge's warning names the reference and the repair
       ([the Shopify connector](shopify-connector.md)).
 
 ## 8. What headless loses from a Liquid theme

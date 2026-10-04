@@ -130,7 +130,7 @@ func TestReadinessAndTheGuardGiveTheSameGoLiveRefusal(t *testing.T) {
 	}
 
 	tokenless, connected := "parity-tokenless-"+suffix, "parity-connected-"+suffix
-	for store, token := range map[string]string{tokenless: "", connected: "SHOPIFY_STOREFRONT_TOKEN"} {
+	for store, token := range map[string]string{tokenless: "", connected: memql.StorefrontTokenSecretName(connected)} {
 		q := fmt.Sprintf(`mutation createStore(storeId: %s, domain: %s`,
 			langparser.QuoteString(store), langparser.QuoteString(store+".myshopify.com"))
 		if token != "" {
@@ -143,6 +143,10 @@ func TestReadinessAndTheGuardGiveTheSameGoLiveRefusal(t *testing.T) {
 	}
 
 	integ := NewIntegration(parityEngine{eng}, Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// hasToken is readiness's storeHasStorefrontToken (memql#5626): whether the
+	// bound store names its OWN Storefront token, the one secret the edge
+	// will publish -- the fact MemQL OS reads instead of a non-empty ref.
+	var hasToken bool
 	readiness := func(siteId string) (bool, string) {
 		t.Helper()
 		nodes, err := integ.handleReadiness(owner, map[string]any{"siteId": siteId}, 0)
@@ -150,23 +154,26 @@ func TestReadinessAndTheGuardGiveTheSameGoLiveRefusal(t *testing.T) {
 			t.Fatalf("readiness for %s: %v (%d nodes)", siteId, err, len(nodes))
 		}
 		var out struct {
-			CanGoLive     bool `json:"canGoLive"`
-			GoLiveRefusal struct {
+			CanGoLive               bool `json:"canGoLive"`
+			StoreHasStorefrontToken bool `json:"storeHasStorefrontToken"`
+			GoLiveRefusal           struct {
 				Code string `json:"code"`
 			} `json:"goLiveRefusal"`
 		}
 		if err := json.Unmarshal(nodes[0].Payload, &out); err != nil {
 			t.Fatalf("readiness payload: %v", err)
 		}
+		hasToken = out.StoreHasStorefrontToken
 		return out.CanGoLive, out.GoLiveRefusal.Code
 	}
 
 	for _, tc := range []struct {
 		name, store, wantCode string
+		wantToken             bool
 	}{
-		{"an unattached storefront", "", ""},
-		{"a storefront bound to a store with no Storefront token", tokenless, ""},
-		{"a storefront bound to a connected store", connected, ""},
+		{"an unattached storefront", "", "", false},
+		{"a storefront bound to a store with no Storefront token", tokenless, "", false},
+		{"a storefront bound to a connected store", connected, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			siteId := "v1:platform:site:parity-" + fmt.Sprintf("%d", time.Now().UnixNano())
@@ -183,6 +190,9 @@ func TestReadinessAndTheGuardGiveTheSameGoLiveRefusal(t *testing.T) {
 			}
 
 			canGoLive, code := readiness(siteId)
+			if hasToken != tc.wantToken {
+				t.Errorf("readiness storeHasStorefrontToken = %v, want %v", hasToken, tc.wantToken)
+			}
 			guard := exec(owner, fmt.Sprintf(`mutation updateSiteStatus(siteId: %s, status: "live")`, langparser.QuoteString(siteId)))
 
 			if code != tc.wantCode {
@@ -248,8 +258,9 @@ func TestReadinessAndTheGuardAgreeForACallerWhoCannotReadTheStore(t *testing.T) 
 		}
 	}
 
-	must(seeder, fmt.Sprintf(`mutation createStore(storeId: %s, domain: %s, storefrontTokenRef: "SHOPIFY_STOREFRONT_TOKEN")`,
-		langparser.QuoteString(store), langparser.QuoteString(store+".myshopify.com")))
+	must(seeder, fmt.Sprintf(`mutation createStore(storeId: %s, domain: %s, storefrontTokenRef: %s)`,
+		langparser.QuoteString(store), langparser.QuoteString(store+".myshopify.com"),
+		langparser.QuoteString(memql.StorefrontTokenSecretName(store))))
 	must(seeder, fmt.Sprintf(`mutation writeGrant(grantId: %s, subjectKind: "user", subjectId: %s, verb: "execute", resourceType: "app:deployables/publish", effect: "allow", grantedBy: "sitepreview-parity-seeder")`,
 		langparser.QuoteString(grantId), langparser.QuoteString(writerId)))
 	// A writer creates a site inside an organization they belong to.

@@ -73,9 +73,6 @@ type Handler struct {
 	// first use, because a lazy build on a public, unauthenticated path is a
 	// data race with a public trigger.
 	shopperRate *shopperBucket
-	// tokenRefusals throttles the log line a refused Storefront token
-	// reference writes (runtimeconfig.go, memql#5626).
-	tokenRefusals *refusalLog
 }
 
 var _ http.Handler = (*Handler)(nil)
@@ -97,7 +94,6 @@ func NewHandler(opts Options) *Handler {
 		previews:       newPreviewCache(),
 		hashCache:      newBundleCache(cspHashCacheBytes),
 		shopperRate:    newShopperBucket(shopperRatePerMinute()),
-		tokenRefusals:  newRefusalLog(),
 	}
 }
 

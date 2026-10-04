@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // The edge publishes a store's Storefront token to every visitor, which is
@@ -97,14 +98,9 @@ func TestTheEdgePublishesOnlyTheBoundStoresOwnStorefrontToken(t *testing.T) {
 	}
 	for name, ref := range refused {
 		t.Run(name, func(t *testing.T) {
-			var logs bytes.Buffer
 			secrets := &recordingSecrets{}
 			site := storefrontNaming(ref)
-			h := NewHandler(Options{
-				Resolver:       staticResolver{site: site},
-				SecretResolver: secrets.resolve,
-				Logger:         slog.New(slog.NewTextHandler(&logs, nil)),
-			})
+			h := NewHandler(Options{Resolver: staticResolver{site: site}, SecretResolver: secrets.resolve})
 
 			body := serveConfigWithLog(t, h, site)
 
@@ -122,32 +118,15 @@ func TestTheEdgePublishesOnlyTheBoundStoresOwnStorefrontToken(t *testing.T) {
 				t.Errorf("a refused token must read as an unavailable connection, never as connected "+
 					"or as an unbound design preview: %s", body)
 			}
-			if !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), ref) {
-				t.Errorf("the refusal was not logged with the ref it refused:\n%s", logs.String())
-			}
-
-			// ONE LINE, NOT ONE PER PAGE LOAD. Every visit to the storefront
-			// asks for this document, so a refusal logged per request would
-			// bury the line it is.
-			lines := strings.Count(logs.String(), "level=WARN")
-			serveConfigWithLog(t, h, site)
-			if again := strings.Count(logs.String(), "level=WARN"); again != lines {
-				t.Errorf("a second request logged the same refusal again (%d -> %d lines)", lines, again)
-			}
 		})
 	}
 
 	// THE REACHABLE POSITIVE: the same handler shape publishes the store's own
 	// token, so every refusal above is the gate and not a broken resolver.
 	t.Run("the store's own token", func(t *testing.T) {
-		var logs bytes.Buffer
 		secrets := &recordingSecrets{}
 		site := storefrontNaming(StorefrontTokenSecretName(tokenRefStoreID))
-		h := NewHandler(Options{
-			Resolver:       staticResolver{site: site},
-			SecretResolver: secrets.resolve,
-			Logger:         slog.New(slog.NewTextHandler(&logs, nil)),
-		})
+		h := NewHandler(Options{Resolver: staticResolver{site: site}, SecretResolver: secrets.resolve})
 		body := serveConfigWithLog(t, h, site)
 		if !strings.Contains(body, clusterSecrets["SHOPIFY_ACME_STOREFRONT_TOKEN"]) {
 			t.Fatalf("the store's own Storefront token was not published: %s", body)
@@ -158,10 +137,71 @@ func TestTheEdgePublishesOnlyTheBoundStoresOwnStorefrontToken(t *testing.T) {
 		if asked := secrets.names(); len(asked) != 1 || asked[0] != "SHOPIFY_ACME_STOREFRONT_TOKEN" {
 			t.Errorf("the secret store was asked for %v, want exactly the store's own token", asked)
 		}
-		if strings.Contains(logs.String(), "level=WARN") {
-			t.Errorf("publishing the store's own token logged a refusal:\n%s", logs.String())
-		}
 	})
+}
+
+// THE OPERATOR IS TOLD WHY, AT RESOLVE TIME, ONCE. The served document says
+// "unavailable" to every visitor and must not say which secret was named, so
+// the reason -- and the act that clears it -- goes to the log when the edge
+// resolves the store. Once an hour per site, store and reference: the cache
+// refills every thirty seconds on every replica, and a line per refill would
+// bury itself.
+func TestTheResolverWarnsOnceWithTheRemedyWhenAStoreNamesAnotherSecret(t *testing.T) {
+	site := &Site{
+		ID: "s-legacy", Hostname: "shop.acme.example.com", Kind: storefrontKind, Status: "live",
+		Binding: map[string]any{"storeId": "acme"}, PreviewBinding: map[string]any{"storeId": "acme-dev"},
+	}
+	ex := &destinationExec{
+		stubExec: &stubExec{rows: map[string]*Site{site.Hostname: site}},
+		stores: map[string]*BoundStore{
+			// Registered by hand before the write guard, under a free-text name.
+			"acme":     {ID: "acme", Domain: "acme.myshopify.com", StorefrontTokenRef: "ACME_STOREFRONT_TOKEN"},
+			"acme-dev": {ID: "acme-dev", Domain: "acme-dev.myshopify.com", StorefrontTokenRef: StorefrontTokenSecretName("acme-dev")},
+		},
+	}
+	var logs bytes.Buffer
+	r := NewResolver(ex, time.Minute).(*resolver)
+	r.logger = slog.New(slog.NewTextHandler(&logs, nil))
+
+	if _, err := r.Resolve(context.Background(), site.Hostname); err != nil {
+		t.Fatal(err)
+	}
+	got := logs.String()
+	for _, says := range []string{"level=WARN", "s-legacy", "acme", "ACME_STOREFRONT_TOKEN", "SHOPIFY_ACME_STOREFRONT_TOKEN", "Connect Shopify"} {
+		if !strings.Contains(got, says) {
+			t.Errorf("the resolve-time warning does not carry %q:\n%s", says, got)
+		}
+	}
+	if strings.Contains(got, "acme-dev.myshopify.com") || strings.Count(got, "level=WARN") != 1 {
+		t.Errorf("want exactly one warning, about the misnamed store only:\n%s", got)
+	}
+
+	r.Invalidate(site.Hostname)
+	if _, err := r.Resolve(context.Background(), site.Hostname); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(logs.String(), "level=WARN"); n != 1 {
+		t.Errorf("a cache refill logged the same warning again (%d lines)", n)
+	}
+}
+
+// A STORE WHOSE ID CANNOT NAME A TOKEN gets the remedy for that, not "name
+// SHOPIFY__STOREFRONT_TOKEN".
+func TestTheResolverWarnsAboutAStoreIdThatNamesNoToken(t *testing.T) {
+	site := &Site{ID: "s-upper", Hostname: "shop.upper.example.com", Kind: storefrontKind, Status: "live", Binding: map[string]any{"storeId": "Acme"}}
+	ex := &destinationExec{
+		stubExec: &stubExec{rows: map[string]*Site{site.Hostname: site}},
+		stores:   map[string]*BoundStore{"Acme": {ID: "Acme", Domain: "acme.myshopify.com", StorefrontTokenRef: "SHOPIFY_ACME_STOREFRONT_TOKEN"}},
+	}
+	var logs bytes.Buffer
+	r := NewResolver(ex, time.Minute).(*resolver)
+	r.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	if _, err := r.Resolve(context.Background(), site.Hostname); err != nil {
+		t.Fatal(err)
+	}
+	if got := logs.String(); !strings.Contains(got, "store id") || strings.Contains(got, "SHOPIFY__STOREFRONT_TOKEN") {
+		t.Errorf("the warning does not explain the store id:\n%s", got)
+	}
 }
 
 // THE PREVIEW STORE IS JUDGED AS ITSELF. Under a Testing grant the edge serves

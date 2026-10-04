@@ -150,7 +150,7 @@ func refuseUnservedCandidates(rep *Report, placements map[string]Placement) erro
 			continue
 		}
 		return fmt.Errorf(
-			"deployable %q is a shopify_storefront, and a storefront has no candidate version: its Testing destination serves the published build against the testing store, so a candidate would be served by nothing. Publish it as the serving version, which reaches Testing and Production together, or leave it out of this run",
+			"deployable %q is a shopify_storefront, and a storefront has no candidate version: it serves one build on Testing and Production, each against its own store, so a candidate would be served by nothing. Candidates are for spa and static apps; publish the storefront as the serving version, or leave it out of this run",
 			dep.Name)
 	}
 	return nil

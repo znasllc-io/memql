@@ -164,18 +164,32 @@ screen. No screen seals a token by hand: Connect Shopify seals them on the
 server, and the environment seed below does for a cluster's first store. Name a
 row one of them wrote.
 
-**The edge publishes one secret per store, and checks it is that one**
+**A store names its own Storefront token, and the edge publishes only that**
 (memql#5626). A storefront's runtime document carries the Storefront token to
-every visitor, so the edge resolves `storefrontTokenRef` only when it names the
-store's OWN token, `SHOPIFY_<STOREID>_STOREFRONT_TOKEN` (the id upper-cased,
-hyphens kept) -- the name Connect, a pasted token and the seed all seal it
-under. A ref naming anything else -- the store's Admin token, another store's
-token, any other cluster secret -- is never looked up: the storefront reads
-`connectionState: "unavailable"`, and the edge logs one warning an hour naming
-the site, the store and the ref. The repair is to seal the token again through
-Connect or the Store panel, which writes it under the right name. The name is
-the check because nothing else marks a Storefront token: every Shopify secret,
-the Admin token included, is sealed with kind `vendor_api_key`.
+every visitor, so the token must be the store's OWN:
+`SHOPIFY_<STOREID>_STOREFRONT_TOKEN` (the id upper-cased, hyphens kept) -- the
+name Connect, a pasted token and the seed all seal it under. Three places hold
+that line:
+
+- **The write.** `createStore` and `updateStore` refuse a `storefrontTokenRef`
+  naming any other secret, with a sentence naming the expected one. An empty
+  reference is a store whose token is not set yet, and clearing is allowed.
+  A new store's id must be one Connect derives -- lower-case letters, digits,
+  `_` and `-`, starting with a letter or digit, at most 56 characters -- since
+  `Acme` beside `acme` would share one secret name.
+- **The edge.** A reference naming anything else -- the store's Admin token,
+  another store's token, any other cluster secret -- is never looked up: the
+  storefront reads `connectionState: "unavailable"`. A store written before
+  the write rule keeps working as a row; the edge logs a warning when it
+  resolves it, once an hour per site and store, naming the reference, the
+  expected name and the repair: seal the token again through Connect or the
+  Store panel, which writes it under the right name.
+- **The console.** `sitePreviewReadiness` reports `storeHasStorefrontToken`
+  and `previewStoreHasStorefrontToken`: whether each destination's store names
+  its own token. That, not a non-empty reference, is "connected".
+
+The name is the check because nothing else marks a Storefront token: every
+Shopify secret, the Admin token included, is sealed with kind `vendor_api_key`.
 
 **A store row and a site binding are one record.** The storefront's binding
 NAMES this row -- `binding: {storeId}` on `v1:platform:site` -- and does not

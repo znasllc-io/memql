@@ -94,7 +94,7 @@ func BoundStoreAsDeployment(ctx context.Context, execute func(context.Context, s
 		Readable:           true,
 		IsDevelopment:      boolFromAny(rows[0]["isDevelopment"]),
 		Domain:             stringFromAny(rows[0]["domain"]),
-		HasStorefrontToken: strings.TrimSpace(stringFromAny(rows[0]["storefrontTokenRef"])) != "",
+		HasStorefrontToken: NamesItsOwnStorefrontToken(storeId, stringFromAny(rows[0]["storefrontTokenRef"])),
 	}, nil
 }
 

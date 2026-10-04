@@ -7,8 +7,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/znasllc-io/memql/component/config"
 	"github.com/znasllc-io/memql/component/frontdoor"
@@ -225,67 +223,8 @@ func (h *Handler) serveRuntimeConfig(w http.ResponseWriter, r *http.Request, sit
 	if r.Method == http.MethodHead {
 		return // Version checks never read credentials or construct a response body.
 	}
-	h.noteRefusedStorefrontTokenRef(site)
 	doc := runtimeConfigForSite(r.Context(), site, os.Getenv, config.IdentityAuthEnabled(), h.secretResolver)
 	_ = json.NewEncoder(w).Encode(doc)
-}
-
-// noteRefusedStorefrontTokenRef logs, at most once an hour for each site,
-// store and ref, that the store a request is served against names a secret
-// other than its own Storefront token (memql#5626).
-//
-// THE REFUSAL ITSELF IS NOT HERE. storefrontForSite refuses on the same
-// predicate whether or not anything is logged, so the gate cannot be lost by a
-// caller that never reaches this line. This is only the operator's half: the
-// document says "unavailable" to every visitor and must not say why, so the
-// reason goes to the log -- and once, because every page load of a storefront
-// asks for this document and a line per request would bury the line it is.
-func (h *Handler) noteRefusedStorefrontTokenRef(site *Site) {
-	if site == nil || site.Kind != storefrontKind || !storefrontTokenRefRefused(site.Store) {
-		return
-	}
-	ref := strings.TrimSpace(site.Store.StorefrontTokenRef)
-	if !h.tokenRefusals.due(site.ID + "\x00" + site.Store.ID + "\x00" + ref) {
-		return
-	}
-	h.logger.Warn("edge: refused to publish a storefront token: the store names a secret that is not its own Storefront token",
-		"component", "edge", "siteId", site.ID, "storeId", site.Store.ID,
-		"storefrontTokenRef", ref, "expected", StorefrontTokenSecretName(site.Store.ID))
-}
-
-// tokenRefusalLogWindow is how long one refusal stays logged before the same
-// site, store and ref are logged again.
-const tokenRefusalLogWindow = time.Hour
-
-// refusalLog remembers when each refusal was last logged.
-//
-// THE KEYS COME FROM ROWS, not from requests -- a site id, a store id and the
-// ref the store row names -- so nothing a visitor sends can grow the map. It is
-// bounded anyway, and dropping it whole is right for the reason previewCache
-// gives: there is nothing here worth an eviction policy.
-type refusalLog struct {
-	mu   sync.Mutex
-	seen map[string]time.Time
-}
-
-func newRefusalLog() *refusalLog { return &refusalLog{seen: map[string]time.Time{}} }
-
-// due reports whether key should be logged now, and records that it was.
-func (l *refusalLog) due(key string) bool {
-	if l == nil {
-		return true
-	}
-	now := time.Now()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if at, ok := l.seen[key]; ok && now.Sub(at) < tokenRefusalLogWindow {
-		return false
-	}
-	if len(l.seen) > 1000 {
-		l.seen = map[string]time.Time{}
-	}
-	l.seen[key] = now
-	return true
 }
 
 // runtimeConfigForSite builds the document. env and authEnabled are
@@ -388,21 +327,20 @@ const storefrontKind = "shopify_storefront"
 
 // StorefrontTokenSecretName is the v1:platform:globalSecret name a store's
 // Storefront API token is sealed under: SHOPIFY_<STOREID>_STOREFRONT_TOKEN,
-// the id upper-cased and kept as it is otherwise (a hyphen stays a hyphen).
+// or "" for an id that is not a valid store id (lower-case letters, digits,
+// '_' and '-' -- what Connect derives from the myshopify.com domain).
 //
-// IT IS THE ONLY SECRET THE EDGE WILL PUBLISH FOR A STORE (memql#5626).
-// Connect Shopify, the pasted-token path and the first-boot seed all seal the
-// token under this name (integrations/shopify's storeSecretName), and
-// integrations/shopify's own test fails if that convention moves without this
-// one. The NAME is the marker because nothing else is: every Shopify secret,
-// the Admin token included, is sealed with kind "vendor_api_key", so a rule
-// admitting a secret by its kind would admit the Admin token.
+// IT IS THE ONLY SECRET THE EDGE WILL PUBLISH FOR A STORE (memql#5626), and
+// the rule is the engine's (component/memql's StorefrontTokenSecretName), so
+// the store write guard that refuses any other reference and this edge that
+// refuses to resolve one cannot disagree. Connect Shopify, the pasted-token
+// path and the first-boot seed seal the token under the same name
+// (integrations/shopify's storeSecretName), held to this one by the parity
+// test in app/. The NAME is the marker because nothing else is: every Shopify
+// secret, the Admin token included, is sealed with kind "vendor_api_key", so a
+// rule admitting a secret by its kind would admit the Admin token.
 func StorefrontTokenSecretName(storeID string) string {
-	storeID = strings.TrimSpace(storeID)
-	if storeID == "" {
-		return ""
-	}
-	return "SHOPIFY_" + strings.ToUpper(storeID) + "_STOREFRONT_TOKEN"
+	return memql.StorefrontTokenSecretName(storeID)
 }
 
 // storefrontTokenRefRefused reports whether store names a Storefront token
@@ -449,9 +387,9 @@ func storefrontForSite(ctx context.Context, site *Site, resolveSecret SecretReso
 	// cluster secret is refused here, before the lookup, and the connection
 	// reads "unavailable" -- the same answer an unreadable secret gets, so the
 	// document says nothing about which secret was named. The reason goes to
-	// the log (noteRefusedStorefrontTokenRef). Store rows are written by a
-	// cluster owner or server code today, which keeps the ref honest; this is
-	// what keeps the edge from depending on that.
+	// the log when the store is resolved (resolve.go). The store write guard
+	// refuses such a reference too (component/memql/shopify_store_guard.go);
+	// this is what keeps the edge from depending on it.
 	if storefrontTokenRefRefused(site.Store) {
 		return out
 	}

@@ -471,11 +471,11 @@ as a rollback record never mistakes it for what serves:
 ```
 
 `target` is `serving` (the default, and what an absent parameter means) or
-`candidate`; anything else is a `400` before the body is read. A
-`shopify_storefront` site refuses a candidate that is not the version it
-already serves (`storefront_has_no_candidate`): its Testing destination serves
-the published build ([storefront-preview.md](storefront-preview.md)), so any
-other version would be served by nothing. That refusal comes from the row
+`candidate`; anything else is a `400` before the body is read. A candidate is
+a `spa` and `static` feature: a `shopify_storefront` site serves one build on
+Testing and Production, each against its own store
+([storefront-preview.md](storefront-preview.md)), and refuses a candidate that
+is not the version it already serves (`storefront_has_no_candidate`). That refusal comes from the row
 write, after the upload, so the uploaded version stays in storage unused --
 the same orphaning a failed row flip always leaves.
 

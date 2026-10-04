@@ -95,15 +95,20 @@ configuration, public Storefront token resolution, Shopify content-security
 policy origins, and shopper-form store context follow that selected store.
 Admin tokens and webhook secrets never enter the browser configuration.
 
-`sitePreviewReadiness(siteId)` reports the Testing URL and availability.
-Non-storefront candidate previews retain their existing behavior. Storefronts
-use the shared published build instead of `candidateRef`, so a storefront takes
-no separate candidate version (memql#5601): a package deploy's
-`target: candidate` placement is refused for a storefront, and
+`sitePreviewReadiness(siteId)` reports the Testing URL and availability, and
+whether each destination's store names its own Storefront token
+(`storeHasStorefrontToken`, `previewStoreHasStorefrontToken`) -- the one secret
+the edge publishes for a store, so the console never treats a store as
+connected while it serves nothing.
+
+**Testing and Production serve ONE build, each against its own store.** That
+is the storefront model, decided on 2026-09-25: there is no candidate version
+of a storefront. Candidates -- a version published beside the serving one and
+shown only under a preview -- are a `spa` and `static` feature
+([Deployables](deployables.md#publishing-the-candidate-version-instead)). A
+package deploy's `target: candidate` placement is refused for a storefront, and
 `setSiteCandidate` and `POST /sites/{id}/bundles?target=candidate` refuse any
-version but the one it already serves, with `storefront_has_no_candidate`. A
-version is tried on Testing by publishing it, which reaches both destinations,
-and rolled back if it should not serve.
+version but the one it already serves, with `storefront_has_no_candidate`.
 
 Site runtime settings are shared between destinations. Values that belong to
 ONE STORE -- the Customer Account API client of that store's Headless channel,

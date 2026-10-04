@@ -116,6 +116,11 @@ type writeMeta struct {
 	// reason: a CHANGE of the preview store is what the store part and the
 	// readability check judge (Connect Shopify 009).
 	priorPreviewBindingStoreId string
+	// priorStorefrontTokenRef is v1:shopify:store.storefrontTokenRef, for the
+	// same reason again: the store guard judges a reference this write
+	// CHANGES, and a store written before it with another name must stay
+	// writable (memql#5626, shopify_store_guard.go).
+	priorStorefrontTokenRef string
 	// priorKind is v1:platform:site.kind, which decides whether the go-live
 	// guard has a question to ask at all -- an spa or a static site has no
 	// store binding and is never refused by it.
@@ -971,6 +976,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			if b, ok := priorPayload["previewBinding"].(map[string]any); ok {
 				meta.priorPreviewBindingStoreId = stringFromAny(b[bindingStoreIdKey])
 			}
+			meta.priorStorefrontTokenRef = stringFromAny(priorPayload["storefrontTokenRef"])
 			// Capture the PRIOR client domain (epic memql#5165) for the
 			// reason above it: the walk's reset is a comparison against
 			// the stored value, which the merged payload has already
@@ -1490,6 +1496,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := e.validateSitePreview(ctx, payload, meta.priorExisted, meta.priorSystemOwned,
 			meta.priorStatus, meta.priorKind, meta.priorBundleRef, meta.priorCandidateRef,
 			meta.priorBindingStoreId, actor); err != nil {
+			return nil, meta, err
+		}
+	}
+
+	// v1:shopify:store names its OWN Storefront token or none (memql#5626):
+	// the edge publishes a store's token only from the secret the store's id
+	// names, so a reference to anything else would read as connected and
+	// serve nothing. A comparison against the PRIOR row and a rule about ids,
+	// neither expressible in a mutation body. See shopify_store_guard.go.
+	if conceptMeta.Name == conceptShopifyStore {
+		if err := validateShopifyStoreWrite(payload, id, meta.priorExisted, meta.priorStorefrontTokenRef); err != nil {
 			return nil, meta, err
 		}
 	}
