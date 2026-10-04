@@ -115,6 +115,15 @@ func serverOnlyWrites() []struct {
 				CampaignID: "c1", DeliveryID: "d1", Kind: "open", OccurredAt: time.Now().UTC(),
 			})
 		}},
+		// Not this domain's mutation -- platform's -- but this store issues it,
+		// and it is @serverOnly (memql#5707 follow-up). The ingester is a
+		// builtin a client may call directly (it is gated by configuration, not
+		// origin), so it cannot rely on the automation's step context to carry
+		// the stamp: without it a client-called ingest would do the work and
+		// then fail to record that it had.
+		{"updateInboundRequestStatus", func(s *Store, ctx context.Context) error {
+			return s.SetInboundStatus(ctx, "inb-1", "processed", "")
+		}},
 	}
 }
 
