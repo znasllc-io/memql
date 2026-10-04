@@ -336,6 +336,12 @@ func (i *Integration) InstallReplan(ctx context.Context, ownerUserId, runId stri
 		return err
 	}
 	fields := reopenFields(i.clock().UTC())
+	// A re-run request the failed execution was serving names a step of the
+	// template being replaced, and a run that parks keeps its request so the
+	// replica resuming it serves it (closeHeadArgs): left in place it would
+	// be served against the new template, whose steps it does not name. The
+	// re-plan supersedes it, as a close does.
+	fields["rerun"] = map[string]any{}
 	fields["automationName"] = t.AutomationName
 	fields["templateConstructId"] = t.TemplateConstructId
 	if t.TemplateFingerprint != "" {

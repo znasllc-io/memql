@@ -40,6 +40,9 @@ func TestInstallReplanRecordsTheTemplateAndReopensTheRun(t *testing.T) {
 	if w, _ := args["waitingOn"].(map[string]any); w == nil || len(w) != 0 {
 		t.Errorf("waitingOn = %v, want cleared: a running run that still names a wait is one every sweep keeps serving", args["waitingOn"])
 	}
+	if r, _ := args["rerun"].(map[string]any); r == nil || len(r) != 0 {
+		t.Errorf("rerun = %v, want cleared: a request naming a step of the replaced template must not be served against the new one", args["rerun"])
+	}
 	if args["heartbeatAt"] == nil || args["heartbeatAt"] == "" {
 		t.Error("the reopened run carries no fresh heartbeat; the abandoned sweep would call it lost before an agent took it")
 	}
