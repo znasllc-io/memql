@@ -61,6 +61,10 @@ type hopBackend interface {
 	// putOrphan creates a Job of a run with no runner holding it -- the
 	// shape a driver that lost its lease leaves behind.
 	putOrphan(run StepRun)
+	// stall wedges the named replica's runner while the replica stays
+	// healthy in the mesh: its heartbeats stop and no step it is given
+	// progresses, though it still answers a status from the cluster.
+	stall(node string)
 }
 
 // ---------------------------------------------------------------------------
@@ -78,11 +82,14 @@ type hopReplica struct {
 	// lost names the requests whose replies a stream flap lost: the request
 	// rode the reconnecting outbox, the reply went out on the old attempt.
 	lost map[string]bool
+	// dropNextStep loses the next pipelineStep sent to the replica on the
+	// way: it never arrives, and nothing tells the sender.
+	dropNextStep bool
 }
 
 type hopSend struct {
 	node, action, requestID string
-	pinned                  string
+	pinned, excluded        string
 }
 
 // hopMesh is a Forwarder over in-process replicas.
@@ -108,22 +115,27 @@ func (m *hopMesh) SelfNodeId() string   { return exAgent }
 func (m *hopMesh) SelfNodeType() string { return "agent" }
 
 func (m *hopMesh) Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin string) (*nodev1.WorkbenchForwardResponse, string, error) {
-	return m.forward(ctx, req, pin, 0)
+	return m.forward(ctx, req, pin, "", 0)
 }
 
-func (m *hopMesh) ForwardWatched(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin string, every time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
+func (m *hopMesh) ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, every time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
 	if every <= 0 {
 		every = 5 * time.Millisecond
 	}
-	return m.forward(ctx, req, pin, every)
+	return m.forward(ctx, req, pin, exclude, every)
 }
 
-// pick is the router's choice: the pinned replica while it is one this node
-// would send to, else the first that is.
-func (m *hopMesh) pickLocked(pin string) *hopReplica {
-	var first *hopReplica
+// pickLocked is the router's choice: the pinned replica while it is one this
+// node would send to, else the first that is -- passing over the excluded
+// one while another is healthy, as the router does.
+func (m *hopMesh) pickLocked(pin, exclude string) *hopReplica {
+	var first, excluded *hopReplica
 	for _, r := range m.replicas {
 		if !r.healthy {
+			continue
+		}
+		if exclude != "" && r.id == exclude {
+			excluded = r
 			continue
 		}
 		if pin != "" && r.id == pin {
@@ -133,12 +145,15 @@ func (m *hopMesh) pickLocked(pin string) *hopReplica {
 			first = r
 		}
 	}
-	return first
+	if first != nil {
+		return first
+	}
+	return excluded
 }
 
-func (m *hopMesh) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin string, watch time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
+func (m *hopMesh) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, watch time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
 	m.mu.Lock()
-	r := m.pickLocked(pin)
+	r := m.pickLocked(pin, exclude)
 	if r == nil {
 		m.mu.Unlock()
 		return nil, "", workbench.ErrNoWorkbenchPeer
@@ -148,8 +163,13 @@ func (m *hopMesh) forward(ctx context.Context, req *nodev1.WorkbenchForwardReque
 	}
 	ch := make(chan *nodev1.WorkbenchForwardResponse, 1)
 	m.inflight[req.RequestId] = ch
-	m.sends = append(m.sends, hopSend{node: r.id, action: req.GetAction(), requestID: req.GetRequestId(), pinned: pin})
+	m.sends = append(m.sends, hopSend{node: r.id, action: req.GetAction(), requestID: req.GetRequestId(),
+		pinned: pin, excluded: exclude})
 	alive := r.alive
+	if req.GetAction() == workbench.PipelineStepAction && r.dropNextStep {
+		// Lost on the way: the replica never reads it.
+		r.dropNextStep, alive = false, false
+	}
 	m.mu.Unlock()
 	defer func() {
 		m.mu.Lock()
@@ -243,6 +263,13 @@ func (m *hopMesh) lose(node string) {
 	m.mu.Unlock()
 }
 
+// dropNextStepTo loses the next step forward on its way to the replica.
+func (m *hopMesh) dropNextStepTo(node string) {
+	m.mu.Lock()
+	m.replica(node).dropNextStep = true
+	m.mu.Unlock()
+}
+
 // flap bounces the stream to a replica that stays healthy: every reply to a
 // request in flight on it is lost, and requests sent after are answered. The
 // peer table never notices, which is why the watched forward cannot.
@@ -302,13 +329,14 @@ func newHopCluster(nodes ...string) *hopCluster {
 	}
 	for _, n := range nodes {
 		life, die := context.WithCancel(context.Background())
-		c.runners[n] = &hopRunner{node: n, cluster: c, life: life, die: die}
+		c.runners[n] = &hopRunner{node: n, cluster: c, life: life, die: die, stalled: make(chan struct{})}
 	}
 	return c
 }
 
 func (c *hopCluster) runner(node string) workbench.PipelineRunner { return c.runners[node] }
 func (c *hopCluster) kill(node string)                            { c.runners[node].die() }
+func (c *hopCluster) stall(node string)                           { close(c.runners[node].stalled) }
 
 func (c *hopCluster) releaseChan(job string) chan struct{} {
 	c.mu.Lock()
@@ -370,15 +398,39 @@ func (c *hopCluster) putOrphan(run StepRun) {
 }
 
 // hopRunner keeps the runner's multi-replica contract over the shared
-// cluster, with a life of its own that kill ends.
+// cluster, with a life of its own that kill ends, and a stall that wedges it
+// while its replica stays up.
 type hopRunner struct {
 	node    string
 	cluster *hopCluster
 	life    context.Context
 	die     context.CancelFunc
+	stalled chan struct{}
+}
+
+func (r *hopRunner) isStalled() bool {
+	select {
+	case <-r.stalled:
+		return true
+	default:
+		return false
+	}
+}
+
+// wedged is a stalled runner's Run: it touches nothing and answers nothing
+// until its context or its replica ends.
+func (r *hopRunner) wedged(ctx context.Context) []byte {
+	select {
+	case <-ctx.Done():
+	case <-r.life.Done():
+	}
+	return nil
 }
 
 func (r *hopRunner) RunStep(ctx context.Context, args []byte) []byte {
+	if r.isStalled() {
+		return r.wedged(ctx)
+	}
 	var run StepRun
 	if err := json.Unmarshal(args, &run); err != nil {
 		return mustMarshal(pl.StepResult{Status: pl.OutcomeFailed, ExitCode: -1,
@@ -438,6 +490,8 @@ func (r *hopRunner) own(ctx context.Context, name string, run StepRun) []byte {
 				return
 			case <-r.life.Done():
 				return
+			case <-r.stalled:
+				return
 			case <-t.C:
 				c.mu.Lock()
 				if j := c.jobs[name]; j != nil && j.runner == r.node {
@@ -450,7 +504,12 @@ func (r *hopRunner) own(ctx context.Context, name string, run StepRun) []byte {
 	released := c.releaseChan(name)
 	for {
 		select {
+		case <-r.stalled:
+			return r.wedged(ctx)
 		case <-released:
+			if r.isStalled() {
+				return r.wedged(ctx)
+			}
 			return r.finish(name, run)
 		case <-ctx.Done():
 			return r.cancelled(name)
@@ -524,9 +583,9 @@ func (r *hopRunner) Status(_ context.Context, args []byte) ([]byte, string) {
 		_ = json.Unmarshal(j.outcome, &res)
 		return mustMarshal(StatusReply{State: StateFinished, Result: &res}), ""
 	case time.Since(j.beat) < c.stale:
-		return mustMarshal(StatusReply{State: StateRunning}), ""
+		return mustMarshal(StatusReply{State: StateRunning, Runner: j.runner}), ""
 	}
-	return mustMarshal(StatusReply{State: StateStale}), ""
+	return mustMarshal(StatusReply{State: StateStale, Runner: j.runner}), ""
 }
 
 func (r *hopRunner) Ack(_ context.Context, args []byte) string {
@@ -694,4 +753,75 @@ func TestCancelHopDeletesTheRunsJobsOnEveryReplica(t *testing.T) {
 	otherJob := JobName(other.RunID, other.StepKey, other.Attempt)
 	awaitCond(t, func() bool { left := cluster.jobsLeft(); return len(left) == 1 && left[0] == otherJob },
 		"the cancelled run's Jobs were not all deleted, or another run's Job went with them")
+}
+
+// TestExecuteHopForwardsAwayFromTheReplicaThatWentQuiet: the runner holding a
+// step's Job wedges on a replica the mesh still thinks healthy -- its
+// heartbeat stops and nothing it is handed progresses, so the watched forward
+// sees no loss. The stale status names that replica, and the step is
+// forwarded AWAY from it: workbench-b adopts the Job, though workbench-a is
+// still the first healthy replica a plain pick would hand it straight back to.
+func TestExecuteHopForwardsAwayFromTheReplicaThatWentQuiet(t *testing.T) {
+	e, mesh, cluster := newHop(t)
+	clock := withClock(e)
+	e.stalePatience = time.Minute
+	req := exRequest()
+	job := JobName(req.RunID, req.StepKey, req.Attempt)
+
+	done := executeAsync(e, context.Background(), req)
+	awaitCond(t, func() bool { return cluster.holder(job) == "workbench-a" }, "workbench-a never created the step's Job")
+	cluster.stall("workbench-a")
+	// The patience since the forward has run out: the next stale reading --
+	// once workbench-a's heartbeat ages -- is believed.
+	clock.advance(time.Minute)
+
+	awaitCond(t, func() bool { return cluster.holder(job) == "workbench-b" },
+		"workbench-b never adopted the Job: the step was handed back to the replica that went quiet")
+	cluster.release(job)
+	res := awaitResult(t, done, "workbench-b finished the adopted step")
+	if res.Status != pl.OutcomeSucceeded || res.Where.NodeID != "workbench-b" {
+		t.Fatalf("result = %+v, want workbench-b's outcome", res)
+	}
+	steps := mesh.sent(workbench.PipelineStepAction)
+	if len(steps) != 2 || steps[0].node != "workbench-a" || steps[1].node != "workbench-b" || steps[1].excluded != "workbench-a" {
+		t.Fatalf("step forwards = %+v, want the first to workbench-a and the re-forward to workbench-b, excluding workbench-a", steps)
+	}
+	if created, logs := cluster.jobsCreated(), cluster.logFiles(); len(created) != 1 || len(logs) != 1 {
+		t.Fatalf("Jobs created %v, logs %d; want one of each", created, len(logs))
+	}
+}
+
+// TestExecuteHopReforwardsAStepWhoseRequestNeverArrived: the forward is lost
+// on its way to workbench-a -- nothing arrives, nothing answers, and the mesh
+// still sees a healthy replica, so the watched forward waits on. The status
+// reads absent; past the patience the step is forwarded again, and a runner
+// makes the Job.
+func TestExecuteHopReforwardsAStepWhoseRequestNeverArrived(t *testing.T) {
+	e, mesh, cluster := newHop(t)
+	clock := withClock(e)
+	e.stalePatience = time.Minute
+	req := exRequest()
+	job := JobName(req.RunID, req.StepKey, req.Attempt)
+	mesh.dropNextStepTo("workbench-a")
+
+	done := executeAsync(e, context.Background(), req)
+	awaitCond(t, func() bool { return len(mesh.sent(workbench.PipelineStatusAction)) >= 3 },
+		"the lost step's status was never read")
+	if created := cluster.jobsCreated(); len(created) != 0 {
+		t.Fatalf("Jobs created %v from a request that never arrived", created)
+	}
+	clock.advance(time.Minute)
+	awaitCond(t, func() bool { return cluster.holder(job) != "" },
+		"a Job absent past the patience was never forwarded again")
+	cluster.release(job)
+	res := awaitResult(t, done, "the re-forwarded step finished")
+	if res.Status != pl.OutcomeSucceeded {
+		t.Fatalf("result = %+v, want the step's outcome", res)
+	}
+	if steps := mesh.sent(workbench.PipelineStepAction); len(steps) != 2 {
+		t.Fatalf("step forwards = %+v, want the lost one and one re-forward", steps)
+	}
+	if created := cluster.jobsCreated(); len(created) != 1 {
+		t.Fatalf("Jobs created %v, want one", created)
+	}
 }

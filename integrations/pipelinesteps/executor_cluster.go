@@ -26,8 +26,12 @@ import (
 // step's status is read every statusEvery: a heartbeat gone stale is the
 // replica gone while the mesh still thinks it healthy, and a finished status
 // is the outcome whose reply a stream flap lost -- neither of which the
-// watched forward can see. The outcome, however it arrives, is acked so the
-// Job and its Secret go now rather than at their TTL.
+// watched forward can see -- and a Job still absent long after the forward
+// is one whose request may never have reached a runner, so it is forwarded
+// again too (the runner finds or creates the Job by its name). A stale
+// re-forward steers AWAY from the replica whose runner went quiet. The
+// outcome, however it arrives, is acked so the Job and its Secret go now
+// rather than at their TTL.
 //
 // Nothing waits forever. Past the step's effective deadline and lostGrace,
 // one last status decides how the step is reported, and its Job is deleted.
@@ -55,6 +59,9 @@ type clusterStep struct {
 	pendingSince time.Time
 	// reached says some replica answered something about this step.
 	reached bool
+	// absentForwards counts the forwards an absent Job has caused; each
+	// waits twice as long as the one before (absentBackoffMax doublings).
+	absentForwards int
 	// noPeerSince is when an unbroken run of "no workbench replica" began.
 	noPeerSince time.Time
 	// servedBy is the last replica known to have served the step.
@@ -75,7 +82,7 @@ func (e *Executor) runCluster(ctx context.Context, run StepRun, timeout time.Dur
 			pl.Where{Surface: surfaceCluster, JobName: job})
 	}
 	s := &clusterStep{e: e, run: run, args: args, job: job, timeout: timeout}
-	s.forward(ctx)
+	s.forward(ctx, "")
 
 	status := time.NewTicker(e.statusEvery)
 	defer status.Stop()
@@ -101,7 +108,7 @@ func (e *Executor) runCluster(ctx context.Context, run StepRun, timeout time.Dur
 			retry = time.After(delay)
 		case <-retry:
 			retry = nil
-			s.forward(ctx)
+			s.forward(ctx, "")
 		case <-status.C:
 			if res, done := s.poll(ctx); done {
 				return res
@@ -113,17 +120,18 @@ func (e *Executor) runCluster(ctx context.Context, run StepRun, timeout time.Dur
 }
 
 // forward sends the step, unpinned -- any healthy replica may create or
-// adopt the Job -- under a fresh request id, and makes it the live forward.
-func (s *clusterStep) forward(ctx context.Context) {
+// adopt the Job -- under a fresh request id, away from exclude while another
+// healthy replica exists, and makes it the live forward.
+func (s *clusterStep) forward(ctx context.Context, exclude string) {
 	ch := make(chan forwardEnd, 1)
-	s.pending, s.pendingSince = ch, time.Now()
+	s.pending, s.pendingSince = ch, s.e.now()
 	req, err := s.e.request(workbench.PipelineStepAction, s.run.RunID, s.run.StepKey, s.args, s.run.TimeoutSeconds)
 	if err != nil {
 		ch <- forwardEnd{err: err}
 		return
 	}
 	go func() {
-		resp, servedBy, err := s.e.fwd.ForwardWatched(ctx, req, "", s.e.peerWatch)
+		resp, servedBy, err := s.e.fwd.ForwardWatchedExcluding(ctx, req, "", exclude, s.e.peerWatch)
 		ch <- forwardEnd{resp: resp, servedBy: servedBy, err: err}
 	}()
 }
@@ -148,7 +156,7 @@ func (s *clusterStep) ended(ctx context.Context, end forwardEnd) (pl.StepResult,
 	case errors.Is(end.err, workbench.ErrNoWorkbenchPeer):
 		if s.noPeerSince.IsZero() {
 			// Said once when it begins, not on every retry.
-			s.noPeerSince = time.Now()
+			s.noPeerSince = s.e.now()
 			log.Warn("pipelines: no workbench replica is reachable for a step; trying again until one is")
 		}
 	default:
@@ -162,7 +170,7 @@ func (s *clusterStep) ended(ctx context.Context, end forwardEnd) (pl.StepResult,
 // waits on to its deadline instead: its Job may be running, and a replica
 // coming back adopts it.
 func (s *clusterStep) noPeerTooLong() (pl.StepResult, bool) {
-	if s.reached || s.noPeerSince.IsZero() || time.Since(s.noPeerSince) < s.e.noPeerPatience {
+	if s.reached || s.noPeerSince.IsZero() || s.e.now().Sub(s.noPeerSince) < s.e.noPeerPatience {
 		return pl.StepResult{}, false
 	}
 	return s.where(failedResult(pl.CodeRunnerUnavailable, fmt.Sprintf(
@@ -191,8 +199,9 @@ func (s *clusterStep) answer(ctx context.Context, resp *nodev1.WorkbenchForwardR
 }
 
 // poll reads the step's status from any replica -- every replica answers
-// from the Job -- and acts on it: a finished step's outcome is taken, a stale
-// heartbeat forwards the step again.
+// from the Job -- and acts on it: a finished step's outcome is taken; a stale
+// heartbeat forwards the step again, away from the replica that went quiet;
+// a Job still absent long after the forward forwards it again too.
 func (s *clusterStep) poll(ctx context.Context) (pl.StepResult, bool) {
 	reply, servedBy, ok := s.e.status(ctx, s.run, s.job)
 	if !ok {
@@ -213,14 +222,31 @@ func (s *clusterStep) poll(ctx context.Context) (pl.StepResult, bool) {
 		s.e.ack(ctx, s.run, s.job)
 		return s.fill(res, servedBy), true
 	case StateStale:
-		if s.pending == nil || time.Since(s.pendingSince) < s.e.stalePatience {
+		if s.pending == nil || s.e.now().Sub(s.pendingSince) < s.e.stalePatience {
 			// A re-forward is already on its way, or the last one may still
-			// be adopting the Job.
+			// be adopting the Job (accepted as ruling R29b).
 			return pl.StepResult{}, false
 		}
 		s.e.logger.Warn("pipelines: the runner holding a step's Job went quiet; forwarding the step again so another replica adopts it",
-			slog.String("runId", s.run.RunID), slog.String("stepKey", s.run.StepKey), slog.String("jobName", s.job))
-		s.forward(ctx)
+			slog.String("runId", s.run.RunID), slog.String("stepKey", s.run.StepKey), slog.String("jobName", s.job),
+			slog.String("quietOn", reply.Runner))
+		s.forward(ctx, reply.Runner)
+	case StateAbsent:
+		// No Job long after the forward: the request may never have reached
+		// a runner (lost to a stream drop on the way). Forwarding again is
+		// safe -- a runner finds or creates the Job by its name -- but a Job
+		// is most often absent because its runner is waiting for a free slot
+		// under the ceiling, which another forward cannot speed up, so each
+		// forward an absence causes waits twice as long as the one before.
+		wait := s.e.stalePatience << min(s.absentForwards, absentBackoffMax)
+		if s.pending == nil || s.e.now().Sub(s.pendingSince) < wait {
+			return pl.StepResult{}, false
+		}
+		s.absentForwards++
+		s.e.logger.Warn("pipelines: no runner has made a step's Job since it was forwarded; forwarding it again",
+			slog.String("runId", s.run.RunID), slog.String("stepKey", s.run.StepKey), slog.String("jobName", s.job),
+			slog.Int("forwards", s.absentForwards))
+		s.forward(ctx, "")
 	}
 	return pl.StepResult{}, false
 }

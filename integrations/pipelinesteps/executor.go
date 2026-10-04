@@ -32,10 +32,12 @@ import (
 // lesser of its own timeout and what is left of its run's wall-clock ceiling.
 
 // Forwarder is the agent's road to a workbench replica: integrations/
-// workbench's ForwardRouter on an agent node, a fake mesh in a test. Its
-// SelfNodeId and SelfNodeType stamp the assertion's origin.
+// workbench's ForwardRouter on an agent node, a fake mesh in a test. A step is
+// forwarded WATCHED, steering away from excludeNodeId while another healthy
+// replica exists; status, ack and cancel are plain forwards. SelfNodeId and
+// SelfNodeType stamp the assertion's origin.
 type Forwarder interface {
-	ForwardWatched(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId string, interval time.Duration) (*nodev1.WorkbenchForwardResponse, string, error)
+	ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId, excludeNodeId string, interval time.Duration) (*nodev1.WorkbenchForwardResponse, string, error)
 	Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId string) (*nodev1.WorkbenchForwardResponse, string, error)
 	SelfNodeId() string
 	SelfNodeType() string
@@ -73,11 +75,16 @@ const (
 	// workbench answers each at once, from the Job.
 	workbenchCallTimeout = 10 * time.Second
 	// stalePatience is how long after a forward a stale heartbeat is taken
-	// as the replica holding the Job having gone. Shorter would forward
-	// again while the replica just forwarded to is still adopting the Job --
+	// as the replica holding the Job having gone, and an absent Job as the
+	// forward never having reached a runner. Shorter would forward again
+	// while the replica just forwarded to is still adopting the Job --
 	// proving the pipelines namespace is isolated first can take two and a
 	// half minutes.
 	stalePatience = 3 * time.Minute
+	// absentBackoffMax caps the doublings of stalePatience for a Job that
+	// stays absent: one most often absent because its runner is waiting for
+	// a free slot under the ceiling, which another forward cannot speed up.
+	absentBackoffMax = 3
 	// cancelAttempts bounds the run-wide delete's retries.
 	cancelAttempts = 5
 )
@@ -93,7 +100,9 @@ type Executor struct {
 	fleet  FleetRouter
 	logger *slog.Logger
 
-	// now is the clock the run's ceiling is measured on.
+	// now is the executor's clock: the run's ceiling is measured on it, and
+	// so is every patience between forwards. Timers stay real; what a test
+	// controls through it is when a patience has run out.
 	now func() time.Time
 
 	statusEvery    time.Duration
@@ -385,15 +394,21 @@ func cancelledResult(message string) pl.StepResult {
 		Failure: &pl.Failure{Code: pl.CodeStepCancelled, Message: message}}
 }
 
+// The sentences a step stopped by its context reports, one per cause.
+const (
+	runCancelledMessage   = "The run was cancelled while the step ran; the step was stopped."
+	driverDeadlineMessage = "The driver stopped waiting for the step past its deadline; the step was stopped."
+	driveEndedMessage     = "The step was stopped before it reported: the drive running it ended. It was cancelled."
+)
+
 // stoppedResult is how a step whose context ended reports: the run's cancel,
 // the driver's own deadline, or the drive ending around it.
 func stoppedResult(ctx context.Context, deadlineCode string) pl.StepResult {
 	switch {
 	case errors.Is(context.Cause(ctx), errRunCancelled):
-		return cancelledResult("The run was cancelled while the step ran; the step was stopped.")
+		return cancelledResult(runCancelledMessage)
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return failedResult(cmp.Or(deadlineCode, pl.CodeStepTimeout),
-			"The driver stopped waiting for the step past its deadline; the step was stopped.")
+		return failedResult(cmp.Or(deadlineCode, pl.CodeStepTimeout), driverDeadlineMessage)
 	}
-	return cancelledResult("The step was stopped before it reported: the drive running it ended. It was cancelled.")
+	return cancelledResult(driveEndedMessage)
 }

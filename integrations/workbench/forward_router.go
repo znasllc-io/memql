@@ -116,7 +116,7 @@ func (r *ForwardRouter) SelfNodeType() string {
 // it with the pin, and that comparison is the difference between a recorded
 // re-provision and the silent split this change exists to remove.
 func (r *ForwardRouter) Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId string) (*nodev1.WorkbenchForwardResponse, string, error) {
-	return r.forward(ctx, req, pinnedNodeId, 0)
+	return r.forward(ctx, req, pinnedNodeId, "", 0)
 }
 
 // ForwardWatched is Forward plus a liveness watch, for a request that runs for
@@ -138,20 +138,34 @@ func (r *ForwardRouter) Forward(ctx context.Context, req *nodev1.WorkbenchForwar
 //
 // A non-positive interval means defaultPeerWatchInterval.
 func (r *ForwardRouter) ForwardWatched(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId string, interval time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
+	return r.ForwardWatchedExcluding(ctx, req, pinnedNodeId, "", interval)
+}
+
+// ForwardWatchedExcluding is ForwardWatched that steers away from one
+// replica: excludeNodeId is passed over while any other healthy replica
+// exists, and chosen only when it is the one healthy replica left -- a hop
+// that can go somewhere is better than none.
+//
+// It is how a pipeline step is forwarded again when the runner holding its
+// Job went quiet on a replica the mesh still thinks healthy (epic memql#5478):
+// handing the step back to the replica it went quiet on would wait out
+// another round of patience for nothing, while any other replica adopts the
+// Job by its name.
+func (r *ForwardRouter) ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId, excludeNodeId string, interval time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
 	if interval <= 0 {
 		interval = defaultPeerWatchInterval
 	}
-	return r.forward(ctx, req, pinnedNodeId, interval)
+	return r.forward(ctx, req, pinnedNodeId, excludeNodeId, interval)
 }
 
 // forward is Forward and ForwardWatched: watch == 0 waits for the reply or ctx
 // alone, and a positive watch also re-checks the serving replica on that
 // cadence.
-func (r *ForwardRouter) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId string, watch time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
+func (r *ForwardRouter) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId, excludeNodeId string, watch time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
 	if r == nil || r.peerMgr == nil {
 		return nil, "", ErrNoWorkbenchPeer
 	}
-	peer := r.pickWorkbenchPeer(pinnedNodeId)
+	peer := r.pickWorkbenchPeer(pinnedNodeId, excludeNodeId)
 	if peer == nil {
 		return nil, "", ErrNoWorkbenchPeer
 	}
@@ -287,11 +301,11 @@ func (r *ForwardRouter) Dispatch(resp *nodev1.WorkbenchForwardResponse) {
 // replica gone there is no better information here, and the node-loss bookkeeping
 // (releasing the orphaned row, provisioning a successor) belongs to the caller,
 // which is the layer that can see both node ids.
-func (r *ForwardRouter) pickWorkbenchPeer(existingNodeId string) *node.PeerEntry {
+func (r *ForwardRouter) pickWorkbenchPeer(existingNodeId, excludeNodeId string) *node.PeerEntry {
 	if r.peerMgr == nil {
 		return nil
 	}
-	return selectWorkbenchPeer(r.peerMgr.ByType(node.NodeTypeWorkbench), existingNodeId, healthyWorkbenchPeer)
+	return selectWorkbenchPeerExcluding(r.peerMgr.ByType(node.NodeTypeWorkbench), existingNodeId, excludeNodeId, healthyWorkbenchPeer)
 }
 
 // selectWorkbenchPeer is the selection itself, separated from where the
@@ -305,20 +319,40 @@ func (r *ForwardRouter) pickWorkbenchPeer(existingNodeId string) *node.PeerEntry
 // without the predicate as a parameter the affinity rule would be the one part
 // of this file with no coverage.
 func selectWorkbenchPeer(peers []*node.PeerEntry, existingNodeId string, reachable func(*node.PeerEntry) bool) *node.PeerEntry {
+	return selectWorkbenchPeerExcluding(peers, existingNodeId, "", reachable)
+}
+
+// selectWorkbenchPeerExcluding is selectWorkbenchPeer passing over one
+// replica: excludeNodeId is skipped while any other reachable replica exists
+// -- even when it is also the pin, because the caller excluding it has
+// learned something the pin has not -- and chosen only when it is the one
+// reachable replica left. An empty exclude excludes nothing.
+func selectWorkbenchPeerExcluding(peers []*node.PeerEntry, existingNodeId, excludeNodeId string, reachable func(*node.PeerEntry) bool) *node.PeerEntry {
 	pinned := strings.TrimSpace(existingNodeId)
-	var anyHealthy *node.PeerEntry
+	exclude := strings.TrimSpace(excludeNodeId)
+	var anyHealthy, excluded *node.PeerEntry
 	for _, p := range peers {
 		if !reachable(p) {
 			continue
 		}
-		if pinned != "" && p.Info.GetNodeId() == pinned {
+		id := p.Info.GetNodeId()
+		if exclude != "" && id == exclude {
+			if excluded == nil {
+				excluded = p
+			}
+			continue
+		}
+		if pinned != "" && id == pinned {
 			return p
 		}
 		if anyHealthy == nil {
 			anyHealthy = p
 		}
 	}
-	return anyHealthy
+	if anyHealthy != nil {
+		return anyHealthy
+	}
+	return excluded
 }
 
 // healthyWorkbenchPeer is the reachability predicate: known, healthy, and with

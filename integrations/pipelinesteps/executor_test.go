@@ -3,7 +3,6 @@ package pipelinesteps
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -46,6 +45,34 @@ func exConfig() Config {
 
 func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
+// exClock is an executor clock a test moves by hand. Every patience the
+// executor measures between forwards elapses only when the test advances it,
+// however loaded the machine running the test is; timers stay real.
+type exClock struct {
+	mu sync.Mutex
+	at time.Time
+}
+
+func (c *exClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.at
+}
+
+func (c *exClock) advance(d time.Duration) {
+	c.mu.Lock()
+	c.at = c.at.Add(d)
+	c.mu.Unlock()
+}
+
+// withClock gives e an advanceable clock starting at exNow. Call it before
+// the executor runs anything.
+func withClock(e *Executor) *exClock {
+	c := &exClock{at: exNow}
+	e.now = c.now
+	return c
+}
+
 // newTestExecutor is an executor on the fixed clock, with every interval
 // small enough for a test and the give-up far enough away that only a test
 // about it reaches it.
@@ -68,6 +95,7 @@ func newTestExecutor(fwd Forwarder, fleet FleetRouter) *Executor {
 type exForward struct {
 	req     *nodev1.WorkbenchForwardRequest
 	pin     string
+	exclude string
 	watched bool
 	// ended is closed when the forward stopped waiting because its context
 	// ended -- the moment a real router sends WorkbenchForwardCancel.
@@ -92,16 +120,16 @@ type scriptedWorkbench struct {
 func (w *scriptedWorkbench) SelfNodeId() string   { return exAgent }
 func (w *scriptedWorkbench) SelfNodeType() string { return "agent" }
 
-func (w *scriptedWorkbench) ForwardWatched(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin string, _ time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
-	return w.forward(ctx, req, pin, true)
+func (w *scriptedWorkbench) ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, _ time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
+	return w.forward(ctx, req, pin, exclude, true)
 }
 
 func (w *scriptedWorkbench) Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin string) (*nodev1.WorkbenchForwardResponse, string, error) {
-	return w.forward(ctx, req, pin, false)
+	return w.forward(ctx, req, pin, "", false)
 }
 
-func (w *scriptedWorkbench) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin string, watched bool) (*nodev1.WorkbenchForwardResponse, string, error) {
-	f := &exForward{req: req, pin: pin, watched: watched, ended: make(chan struct{})}
+func (w *scriptedWorkbench) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, watched bool) (*nodev1.WorkbenchForwardResponse, string, error) {
+	f := &exForward{req: req, pin: pin, exclude: exclude, watched: watched, ended: make(chan struct{})}
 	w.mu.Lock()
 	w.forwards = append(w.forwards, f)
 	var script func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error)
@@ -628,8 +656,13 @@ func TestExecuteReforwardsWhenTheReplicaIsLostOrStale(t *testing.T) {
 
 	t.Run("the Job's heartbeat went stale", func(t *testing.T) {
 		wb := &scriptedWorkbench{}
+		var clock *exClock
 		wb.status = func(n int, _ *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
-			return stateResponse(StateStale), "workbench-b", nil
+			if n == 1 {
+				// The patience runs out exactly once, on the first reading.
+				clock.advance(time.Minute)
+			}
+			return staleResponse("workbench-a"), "workbench-b", nil
 		}
 		wb.step = func(n int, f *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
 			if n == 1 {
@@ -638,20 +671,31 @@ func TestExecuteReforwardsWhenTheReplicaIsLostOrStale(t *testing.T) {
 			return outcomeResponse(exOutcome("workbench-b")), "workbench-b", nil
 		}
 		e := newTestExecutor(wb, nil)
-		res, err := e.Execute(context.Background(), exRequest())
-		if err != nil || res.Status != pl.OutcomeSucceeded {
-			t.Fatalf("Execute = %+v, %v; want the adopting replica's outcome", res, err)
+		clock = withClock(e)
+		e.stalePatience = time.Minute
+		res := awaitResult(t, executeAsync(e, context.Background(), exRequest()), "the stale Job was forwarded again")
+		if res.Status != pl.OutcomeSucceeded {
+			t.Fatalf("result = %+v; want the adopting replica's outcome", res)
 		}
 		wantReforwarded(t, wb)
+		// AWAY FROM the replica whose runner went quiet: the status named it.
+		if steps := wb.sent(workbench.PipelineStepAction); steps[0].exclude != "" || steps[1].exclude != "workbench-a" {
+			t.Errorf("excluded %q then %q, want nothing on the first forward and workbench-a -- where the runner "+
+				"went quiet -- on the re-forward", steps[0].exclude, steps[1].exclude)
+		}
 	})
 
-	t.Run("a stale reading right after a re-forward waits for the adopter", func(t *testing.T) {
+	t.Run("a stale reading inside the patience is the adoption on its way", func(t *testing.T) {
 		// A replica adopting the Job proves isolation, then annotates it; a
 		// stale reading inside that window is the adoption still on its way,
-		// not a second loss -- so no third forward within the patience.
+		// not a second loss -- so no further forward within the patience. The
+		// patience is the executor's clock, which this test alone moves, so
+		// no amount of load on the machine running it can end it early.
+		polls := make(chan struct{}, 1024)
 		wb := &scriptedWorkbench{}
 		wb.status = func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
-			return stateResponse(StateStale), "workbench-b", nil
+			polls <- struct{}{}
+			return staleResponse("workbench-a"), "workbench-b", nil
 		}
 		released := make(chan struct{})
 		wb.step = func(n int, f *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
@@ -662,19 +706,106 @@ func TestExecuteReforwardsWhenTheReplicaIsLostOrStale(t *testing.T) {
 			return outcomeResponse(exOutcome("workbench-b")), "workbench-b", nil
 		}
 		e := newTestExecutor(wb, nil)
-		e.stalePatience = 300 * time.Millisecond
-		e.statusEvery = 5 * time.Millisecond
+		clock := withClock(e)
+		e.stalePatience = time.Minute
+		e.statusEvery = 2 * time.Millisecond
 		done := executeAsync(e, context.Background(), exRequest())
-		time.Sleep(60 * time.Millisecond) // a dozen polls, every one stale
+		awaitPolls(t, polls, 10)
 		if n := len(wb.sent(workbench.PipelineStepAction)); n != 1 {
-			t.Fatalf("step forwards = %d after stale readings inside the patience, want 1", n)
+			t.Fatalf("step forwards = %d after ten stale readings inside the patience, want 1", n)
 		}
-		// Past the patience the stale readings are believed: one re-forward.
+		// Past the patience the stale readings are believed: one re-forward,
+		// and none after it while the clock stands still again.
+		clock.advance(time.Minute)
 		awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineStepAction)) == 2 },
 			"stale readings past the patience never re-forwarded the step")
+		awaitPolls(t, polls, 10)
+		if n := len(wb.sent(workbench.PipelineStepAction)); n != 2 {
+			t.Fatalf("step forwards = %d: the re-forward was itself forwarded again inside its own patience", n)
+		}
 		close(released)
 		awaitResult(t, done, "the re-forward answered")
 	})
+}
+
+// awaitPolls waits for n more status readings.
+func awaitPolls(t *testing.T, polls <-chan struct{}, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		select {
+		case <-polls:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d of %d status readings arrived", i, n)
+		}
+	}
+}
+
+func staleResponse(runner string) *nodev1.WorkbenchForwardResponse {
+	return &nodev1.WorkbenchForwardResponse{PayloadJson: mustMarshal(StatusReply{State: StateStale, Runner: runner})}
+}
+
+// TestExecuteReforwardsAStepWhoseJobStaysAbsent: a Job no runner has made
+// long after the forward is a request that may never have reached one (lost
+// to a stream drop on the way), so the step is forwarded again -- a runner
+// finds or creates the Job by its name. An absent Job is most often one
+// waiting for a free slot under the ceiling, which another forward cannot
+// speed up, so each forward an absence causes waits twice as long.
+func TestExecuteReforwardsAStepWhoseJobStaysAbsent(t *testing.T) {
+	polls := make(chan struct{}, 1024)
+	wb := &scriptedWorkbench{}
+	wb.status = func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+		polls <- struct{}{}
+		return stateResponse(StateAbsent), "workbench-b", nil
+	}
+	released := make(chan struct{})
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(released) }) })
+	wb.step = func(n int, f *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+		if n < 3 {
+			return nil, "", nil // lost on the way: nothing answers it
+		}
+		// The third forward reaches a runner, which answers once the test
+		// has seen it sent -- so the step stays in flight, and polled, until
+		// then.
+		<-released
+		return outcomeResponse(exOutcome("workbench-a")), "workbench-a", nil
+	}
+	e := newTestExecutor(wb, nil)
+	clock := withClock(e)
+	e.stalePatience = time.Minute
+	e.statusEvery = 2 * time.Millisecond
+	done := executeAsync(e, context.Background(), exRequest())
+	steps := func() int { return len(wb.sent(workbench.PipelineStepAction)) }
+
+	awaitPolls(t, polls, 10)
+	if n := steps(); n != 1 {
+		t.Fatalf("step forwards = %d inside the patience, want 1: an absent Job is first a runner minting, proving or queueing", n)
+	}
+	clock.advance(time.Minute)
+	awaitCond(t, func() bool { return steps() == 2 }, "a Job absent past the patience was never forwarded again")
+
+	// The second forward waits twice as long: one patience is not enough.
+	clock.advance(time.Minute)
+	awaitPolls(t, polls, 10)
+	if n := steps(); n != 2 {
+		t.Fatalf("step forwards = %d one patience after the re-forward, want 2: each absence-driven forward waits twice as long", n)
+	}
+	clock.advance(time.Minute)
+	awaitCond(t, func() bool { return steps() == 3 }, "the absence was never forwarded again after twice the patience")
+	release.Do(func() { close(released) })
+
+	res := awaitResult(t, done, "the third forward answered")
+	if res.Status != pl.OutcomeSucceeded {
+		t.Fatalf("result = %+v, want the outcome the runner reached on the third forward", res)
+	}
+	for i, f := range wb.sent(workbench.PipelineStepAction) {
+		if f.exclude != "" || f.pin != "" {
+			t.Errorf("forward %d pinned %q excluding %q; an absent Job names no replica to avoid", i+1, f.pin, f.exclude)
+		}
+		if a, b := stepRunOf(t, f), stepRunOf(t, wb.sent(workbench.PipelineStepAction)[0]); a.Attempt != b.Attempt || a.StepKey != b.StepKey {
+			t.Errorf("forward %d names another attempt or step: a runner would create a second Job", i+1)
+		}
+	}
 }
 
 func wantReforwarded(t *testing.T, wb *scriptedWorkbench) {
@@ -787,12 +918,18 @@ func TestExecuteGivesUpPastTheDeadline(t *testing.T) {
 	}
 
 	t.Run("no workbench replica for longer than the patience", func(t *testing.T) {
+		var clock *exClock
 		none := func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
 			return nil, "", workbench.ErrNoWorkbenchPeer
 		}
-		wb := &scriptedWorkbench{step: none, status: none}
+		step := func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+			clock.advance(10 * time.Second) // each try costs the executor's clock ten seconds
+			return nil, "", workbench.ErrNoWorkbenchPeer
+		}
+		wb := &scriptedWorkbench{step: step, status: none}
 		e := newTestExecutor(wb, nil)
-		e.noPeerPatience = 30 * time.Millisecond
+		clock = withClock(e)
+		e.noPeerPatience = 30 * time.Second
 		res := awaitResult(t, executeAsync(e, context.Background(), exRequest()), "no replica was ever reachable")
 		wantFailure(t, res, pl.OutcomeFailed, pl.CodeRunnerUnavailable)
 		if n := len(wb.sent(workbench.PipelineStepAction)); n < 2 {
@@ -948,8 +1085,9 @@ func TestExecuteStopsWhenItsContextEnds(t *testing.T) {
 	awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineStepAction)) == 1 }, "the step was never forwarded")
 	stop()
 	res := awaitResult(t, done, "the context ended")
-	if res.Status != pl.OutcomeCancelled {
-		t.Fatalf("result = %+v, want cancelled", res)
+	if res.Status != pl.OutcomeCancelled || res.Failure == nil || res.Failure.Message != driveEndedMessage {
+		t.Fatalf("result = %+v (failure %+v), want cancelled with the drive-ended sentence %q: the run was not "+
+			"cancelled, its caller stopped waiting", res, res.Failure, driveEndedMessage)
 	}
 	select {
 	case <-wb.sent(workbench.PipelineStepAction)[0].ended:
@@ -989,13 +1127,12 @@ func TestCancelledStepsAreTheRunsNotTheCallers(t *testing.T) {
 		t.Fatalf("Cancel: %v", err)
 	}
 	res := awaitResult(t, done, "the run was cancelled")
-	if res.Failure == nil || !strings.Contains(res.Failure.Message, "cancelled") {
-		t.Fatalf("result = %+v, want a sentence saying the run was cancelled", res)
+	if res.Status != pl.OutcomeCancelled || res.Failure == nil || res.Failure.Code != pl.CodeStepCancelled ||
+		res.Failure.Message != runCancelledMessage {
+		t.Fatalf("result = %+v (failure %+v), want cancelled with the run's own sentence %q -- not the one a caller "+
+			"that stopped waiting gets", res, res.Failure, runCancelledMessage)
 	}
 	if e.inflightCount("run-7f3a") != 0 {
 		t.Error("the cancelled step is still tracked: a later cancel would reach a context nothing waits on")
-	}
-	if errors.Is(errRunCancelled, context.Canceled) {
-		t.Error("errRunCancelled must be its own cause, not context.Canceled")
 	}
 }

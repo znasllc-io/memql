@@ -139,6 +139,11 @@ type StatusRequest struct {
 type StatusReply struct {
 	State  string         `json:"state"`
 	Result *pl.StepResult `json:"result,omitempty"`
+	// Runner is the node id whose heartbeat is on the Job (AnnotRunner's
+	// node), when the state is running or stale. A stale one names the
+	// replica whose runner went quiet, which the agent forwards the step
+	// AWAY from when it forwards it again.
+	Runner string `json:"runner,omitempty"`
 }
 
 // AckRequest tells the runner the agent holds the outcome, so the Job and its
