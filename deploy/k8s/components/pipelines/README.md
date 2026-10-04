@@ -159,9 +159,10 @@ A step is code from a repository, in an image the platform did not build:
 - Pod Security `baseline` refuses a privileged, host-path or host-network pod
   in the namespace at admission, whatever spec reaches the API server.
 - The network policy admits nothing in and lets out only cluster DNS and the
-  internet minus `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` and
-  `169.254.0.0/16`: not the mesh, the database, another pod, a node or the
-  cloud's instance-metadata endpoint.
+  internet minus `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
+  `169.254.0.0/16` and `168.63.129.16/32`: not the mesh, the database, another
+  pod, a node, the cloud's instance-metadata endpoint or Azure's WireServer
+  (a public address that, on AKS, serves a node's provisioning material).
 
 **A NetworkPolicy is enforced by the cluster, not by the object.** k3s, the
 local cluster, enforces it out of the box. An AKS cluster enforces it only when

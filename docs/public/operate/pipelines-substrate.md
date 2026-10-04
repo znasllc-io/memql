@@ -247,12 +247,15 @@ The network policy `memql-pipelines-isolate` selects every pod in the namespace:
 - **In: nothing.** No rule admits a connection to a step or its services. A step
   reaches its own services on `localhost`, which no network policy governs.
 - **Out: cluster DNS and the internet.** UDP and TCP port 53 into `kube-system`,
-  and `0.0.0.0/0` except `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` and
-  `169.254.0.0/16`. A step can fetch from GitHub, a module proxy or a package
-  registry. It cannot reach the mesh, the database, another pod, a node or the
-  cloud's instance-metadata endpoint (`169.254.169.254`). An API server with a
-  public endpoint is on the internet like any other host; the step holds no
-  credential for it.
+  and `0.0.0.0/0` except `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
+  `169.254.0.0/16` and `168.63.129.16/32`. A step can fetch from GitHub, a
+  module proxy or a package registry. It cannot reach the mesh, the database,
+  another pod, a node, the cloud's instance-metadata endpoint
+  (`169.254.169.254`) or Azure's WireServer (`168.63.129.16`, a public address
+  that on AKS serves a node's goal state and provisioning material; a step
+  resolves names through cluster DNS and needs nothing from it). An API server
+  with a public endpoint is on the internet like any other host; the step holds
+  no credential for it.
 
 A network policy is enforced by the cluster's network policy engine, not by the
 object, which is why [the isolation proof](#the-isolation-proof) runs before any
