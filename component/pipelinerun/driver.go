@@ -408,7 +408,6 @@ func (dr *runDriver) abort(what string, err error) {
 func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdict, bool) {
 	d := dr.d
 	dr.buildTracks(plan)
-	decls := dr.decls()
 
 	if strings.TrimSpace(dr.run.WorkRunID) != "" {
 		rows, err := d.Store.WorkSteps(memql.ContextWithFreshRead(ctx), dr.run.WorkRunID)
@@ -417,17 +416,23 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 			return nil, false
 		}
 		if len(rows) > 0 {
-			w := d.Journal.Reopen(dr.p.OwnerUserID, dr.run.WorkGoalID, dr.run.WorkRunID, decls, dr.run.StartedAt)
+			if why := dr.resume(rows); why != "" {
+				if !dr.reopenFromRows(rows) {
+					return nil, false
+				}
+				v := dr.diverged(ctx, why)
+				return &v, true
+			}
+			// Declared AFTER resume, so a step's call names the slice the
+			// rows gave it back: a re-sent step's intent restates its row,
+			// it does not overwrite it with a slice recomputed since.
+			w := d.Journal.Reopen(dr.run.OwnerUserID, dr.run.WorkGoalID, dr.run.WorkRunID, dr.decls(), dr.run.StartedAt)
 			if w == nil {
 				dr.abort("reopening the run's work run", errors.New("the run row names no work goal to reopen"))
 				return nil, false
 			}
 			dr.workRun.Store(w)
 			dr.setFacts()
-			if why := dr.resume(rows); why != "" {
-				v := dr.diverged(ctx, rows, why)
-				return &v, true
-			}
 			return nil, true
 		}
 		// A work run with no step rows never queued its steps: opening it
@@ -437,6 +442,7 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 	if !dr.stillHolds(ctx) {
 		return nil, false
 	}
+	decls := dr.decls()
 	w, err := d.Journal.Begin(ctx, workjournal.Work{
 		OwnerUserID: dr.p.OwnerUserID,
 		Template:    workTemplatePrefix + dr.p.Name,
@@ -546,11 +552,11 @@ func (dr *runDriver) resume(rows []WorkStep) string {
 }
 
 // diverged ends a resumed run whose plan, read again, is not the plan its
-// work began: the steps are the ROWS', and every one without a receipt fails
-// pipeline_node_lost -- the driver that knew the plan is gone -- so the run
-// fails rather than report a pass for work it can no longer account for.
-func (dr *runDriver) diverged(ctx context.Context, rows []WorkStep, why string) verdict {
-	dr.adoptRows(rows)
+// work began: the steps are the ROWS' (reopenFromRows), and every one without
+// a receipt fails pipeline_node_lost -- the driver that knew the plan is gone
+// -- so the run fails rather than report a pass for work it can no longer
+// account for.
+func (dr *runDriver) diverged(ctx context.Context, why string) verdict {
 	message := "The agent that was driving this run stopped, and " + why +
 		", so the run cannot be resumed as it was planned. Re-run it."
 	dr.log.Warn("pipelines: a resumed run's plan is not the plan its work began; its unfinished steps fail",
@@ -609,25 +615,35 @@ func (dr *runDriver) settleStoredWork(ctx context.Context, rec receipt) bool {
 		dr.abort("reading the work run's steps to close them", err)
 		return false
 	}
+	if !dr.reopenFromRows(rows) {
+		return false
+	}
+	for _, t := range dr.tracks {
+		if !t.finished() {
+			dr.settle(ctx, t, rec)
+		}
+	}
+	return true
+}
+
+// reopenFromRows makes the work run's step rows this drive's steps
+// (adoptRows) and reopens the work run with the ROWS' own declarations, in
+// their order: an intent written through them restates each step's type,
+// kind and place, and leaves its call and dependencies as the plan that
+// queued it wrote them -- a declaration the journal does not hold would write
+// the default type over the row's.
+func (dr *runDriver) reopenFromRows(rows []WorkStep) bool {
 	dr.adoptRows(rows)
-	// The declarations the journal needs to address each row are the rows'
-	// own: an intent written with them restates the step's type, kind and
-	// place, and leaves its call and dependencies as the plan wrote them.
 	decls := make([]workjournal.StepDecl, 0, len(dr.tracks))
 	for _, t := range dr.tracks {
 		decls = append(decls, workjournal.StepDecl{Key: t.step.Key, Kind: workjournal.KindDeterministic, StepType: "exec"})
 	}
 	w := dr.d.Journal.Reopen(dr.run.OwnerUserID, dr.run.WorkGoalID, dr.run.WorkRunID, decls, dr.run.StartedAt)
 	if w == nil {
-		dr.abort("reopening the run's work run to close it", errors.New("the run row names no work goal to reopen"))
+		dr.abort("reopening the run's work run", errors.New("the run row names no work goal to reopen"))
 		return false
 	}
 	dr.workRun.Store(w)
-	for _, t := range dr.tracks {
-		if !t.finished() {
-			dr.settle(ctx, t, rec)
-		}
-	}
 	return true
 }
 

@@ -1321,6 +1321,104 @@ func TestAResumedRunWhosePlanChangedFailsNodeLost(t *testing.T) {
 	if slices.Contains(dh.exec.sentKeys(), "tests.lint2") {
 		t.Errorf("nothing of the changed plan runs")
 	}
+	// Settled through the rows' own declarations: an intent restates each
+	// step as the plan that queued it wrote it, never the default type.
+	for _, c := range dh.work.callsNamed("createWorkStep") {
+		if argString(c.Args, "stepType") != "exec" {
+			t.Errorf("%s's intent writes stepType %q over the row's exec", argString(c.Args, "key"), argString(c.Args, "stepType"))
+		}
+	}
+	if row := dh.work.stepRow("tests.lint"); argObject(row, "call")["name"] != "lint" {
+		t.Errorf("the row's call is left as the plan wrote it: %v", row["call"])
+	}
+}
+
+// A sharded step's slice depends on the timing table, which a full run
+// elsewhere may rewrite while this run is stranded. The replica taking over
+// re-sends each shard with the slice its row was QUEUED with -- recomputed,
+// one package would run twice and another never -- and leaves the row's
+// call saying so.
+func TestAResumedShardRunsTheSliceItWasGiven(t *testing.T) {
+	dh := newDriveHarness(t, `formatVersion: 1
+name: shop
+pipeline:
+  image: ghcr.io/acme/toolchain@sha256:abc
+  select:
+    go: import-graph
+  stages:
+    - name: tests
+      steps:
+        - name: go
+          run: go test $MEMQL_PACKAGES
+          packages: affected
+          shards: 2
+`)
+	dh.github.mu.Lock()
+	tree := dh.github.trees[repoName+"@"+shaA]
+	for _, pkg := range []string{"a", "b", "c"} {
+		tree[pkg+"/"+pkg+".go"] = &fstest.MapFile{Data: []byte("package " + pkg + "\n")}
+	}
+	dh.github.mu.Unlock()
+	p, _ := dh.store.pipeline(dh.p.ID)
+	p.Timings = map[string]float64{"acme.test/shop/a": 10, "acme.test/shop/b": 1, "acme.test/shop/c": 1}
+	dh.store.addPipeline(p)
+
+	release := make(chan struct{})
+	var tries atomic.Int64
+	dh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		if tries.Add(1) <= 2 {
+			<-release // agent-a's two shards, in flight when it stops
+		}
+		return passed(req), nil
+	}
+	run := dh.openRun(t, pushOpening())
+	dh.integ.HandleRunEvent(graphEvent(events.TopicGraphNodeCreated, run))
+	dh.awaitEntered(t, "tests.go#1", "tests.go#2")
+
+	// Stranded -- and meanwhile a full run elsewhere rewrote the table, so a
+	// plan compiled now splits the packages the other way.
+	dh.store.mu.Lock()
+	r := dh.store.runs[run.ID]
+	r.DriverHeartbeatAt = testNow.Add(-3 * time.Minute)
+	dh.store.runs[run.ID] = r
+	dh.store.mu.Unlock()
+	p.Timings = map[string]float64{"acme.test/shop/a": 1, "acme.test/shop/b": 10, "acme.test/shop/c": 1}
+	dh.store.addPipeline(p)
+
+	other := dh.peer("agent-b")
+	if err := other.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitDrives(t, other)
+	close(release)
+	waitDrives(t, dh.integ)
+
+	sent := dh.exec.sent()
+	if len(sent) != 4 {
+		t.Fatalf("each shard is sent by agent-a and re-sent by agent-b: %v", dh.exec.sentKeys())
+	}
+	original := map[string][]string{}
+	for _, req := range sent[:2] {
+		original[req.StepKey] = req.Step.Packages
+	}
+	// The root package is unmeasured, so it weighs pipelines.UnknownSeconds.
+	if !slices.Equal(original["tests.go#1"], []string{"acme.test/shop/a"}) ||
+		!slices.Equal(original["tests.go#2"], []string{"acme.test/shop", "acme.test/shop/b", "acme.test/shop/c"}) {
+		t.Fatalf("the first split follows the first table: %v", original)
+	}
+	for _, req := range sent[2:] {
+		if !slices.Equal(req.Step.Packages, original[req.StepKey]) {
+			t.Errorf("%s is re-sent with %v; it was given %v", req.StepKey, req.Step.Packages, original[req.StepKey])
+		}
+	}
+	for key, want := range original {
+		if got := argStrings(argObject(dh.work.stepRow(key), "call"), "packages"); !slices.Equal(got, want) {
+			t.Errorf("%s's row still names the slice it was given: %v, want %v", key, got, want)
+		}
+	}
+	if got, _ := dh.store.run(run.ID); got.Conclusion != ConclusionSuccess || got.DriverNodeID != "agent-b" {
+		t.Errorf("run = %s by %q", got.Conclusion, got.DriverNodeID)
+	}
 }
 
 // ---------------------------------------------------------------------------

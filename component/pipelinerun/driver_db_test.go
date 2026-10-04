@@ -51,6 +51,8 @@ const dbDriveManifest = `formatVersion: 1
 name: shop
 pipeline:
   image: ghcr.io/acme/toolchain@sha256:abc
+  select:
+    go: import-graph
   stages:
     - name: checks
       steps:
@@ -64,6 +66,9 @@ pipeline:
           secrets: [SHOP_TOKEN]
         - name: lint
           run: golangci-lint run
+        - name: go
+          run: go test $MEMQL_PACKAGES
+          packages: all
 `
 
 func TestARunIsDrivenOverRealRows(t *testing.T) {
@@ -123,7 +128,7 @@ func TestARunIsDrivenOverRealRows(t *testing.T) {
 	exec.answer = func(ctx context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
 		// On shaB, the first replica's tests steps are held in flight until
 		// it has stopped; the second replica's re-sends answer at once.
-		if req.SHA == shaB && strings.HasPrefix(req.StepKey, "tests.") && held.Add(1) <= 2 {
+		if req.SHA == shaB && strings.HasPrefix(req.StepKey, "tests.") && held.Add(1) <= 3 {
 			<-release
 		}
 		return passed(req), nil
@@ -168,19 +173,27 @@ func TestARunIsDrivenOverRealRows(t *testing.T) {
 			run.Status, run.Conclusion, run.DriverNodeID, run.RefusalCode, run.RefusalMessage)
 	}
 	if run.StartedAt.IsZero() || run.FinishedAt.IsZero() || run.WorkRunID == "" || run.WorkGoalID == "" || len(run.Stages) != 2 ||
-		run.Stages[0].Status != StagePassed || run.Stages[1].Steps != 2 {
+		run.Stages[0].Status != StagePassed || run.Stages[1].Steps != 3 {
 		t.Errorf("run row = %+v", run)
 	}
 	steps, err := store.WorkSteps(memqlengine.ContextWithFreshRead(ctx), run.WorkRunID)
 	if err != nil {
 		t.Fatalf("workStepsForRun: %v", err)
 	}
-	if got := workStepSummary(steps); got != "checks.vet:done:1, tests.lint:done:1, tests.unit:done:1" {
+	if got := workStepSummary(steps); got != "checks.vet:done:1, tests.go:done:1, tests.lint:done:1, tests.unit:done:1" {
 		t.Errorf("the work run's steps, read back through the work spine = %s", got)
 	}
 	for _, s := range steps {
 		if s.Stage == "" || s.Name == "" || s.DurationMs != 42000 {
 			t.Errorf("%s: the step's call and receipt are on its row: %+v", s.Key, s)
+		}
+		if want := []string(nil); s.Key == "tests.go" {
+			want = []string{"acme.test/shop"}
+			if !slices.Equal(s.Packages, want) {
+				t.Errorf("the packages step's slice is on its row's call: %v", s.Packages)
+			}
+		} else if len(s.Packages) != 0 {
+			t.Errorf("%s selects no packages: %v", s.Key, s.Packages)
 		}
 	}
 	workRun := workRunRow(t, store, run.WorkRunID)
@@ -211,7 +224,7 @@ func TestARunIsDrivenOverRealRows(t *testing.T) {
 		t.Fatalf("open: %+v %v", stranded, err)
 	}
 	a.HandleRunEvent(graphEvent(events.TopicGraphNodeCreated, stranded.Run))
-	awaitKeys(t, exec, shaB, "tests.unit", "tests.lint")
+	awaitKeys(t, exec, shaB, "tests.unit", "tests.lint", "tests.go")
 
 	// The first replica falls silent: its lease goes stale.
 	held1 := mustRun(t, store, stranded.Run.ID)
@@ -234,7 +247,7 @@ func TestARunIsDrivenOverRealRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workStepsForRun: %v", err)
 	}
-	if got := workStepSummary(resumed); got != "checks.vet:done:1, tests.lint:done:1, tests.unit:done:1" {
+	if got := workStepSummary(resumed); got != "checks.vet:done:1, tests.go:done:1, tests.lint:done:1, tests.unit:done:1" {
 		t.Errorf("the resumed work run's steps = %s", got)
 	}
 	counts := map[string]int{}
@@ -246,8 +259,11 @@ func TestARunIsDrivenOverRealRows(t *testing.T) {
 		if req.Attempt != 1 || req.WorkRunID != taken.WorkRunID {
 			t.Errorf("%s: a re-send is the same attempt of the same work run: %d %q", req.StepKey, req.Attempt, req.WorkRunID)
 		}
+		if req.StepKey == "tests.go" && !slices.Equal(req.Step.Packages, []string{"acme.test/shop"}) {
+			t.Errorf("tests.go is sent with its slice: %v", req.Step.Packages)
+		}
 	}
-	if counts["checks.vet"] != 1 || counts["tests.unit"] != 2 || counts["tests.lint"] != 2 {
+	if counts["checks.vet"] != 1 || counts["tests.unit"] != 2 || counts["tests.lint"] != 2 || counts["tests.go"] != 2 {
 		t.Errorf("the finished step is kept and the running ones re-sent: %v", counts)
 	}
 }
