@@ -650,6 +650,36 @@ func (r *Runner) CancelRun(ctx context.Context, req CancelRequest) (int, error)
 - [ ] **Step 4: Run** `go test github.com/znasllc-io/memql/integrations/pipelinesteps/... -count=1 -race` -- PASS.
 - [ ] **Step 5: Commit** `Issue #5493: the workbench runner -- create or adopt, heartbeat, follow, capture, persist the outcome on the Job before replying`.
 
+### Task 6b: the runner proves the namespace is isolated before it runs a step (#5493)
+
+Ledger Ruling R12. On AKS as provisioned (no `--network-policy`) the memql-pipelines NetworkPolicy is inert: a step could reach IMDS (the kubelet identity), the mesh's in-cluster-only `/metrics` and the database Service. The runner therefore PROVES isolation empirically, with a reachable positive, before the first step it runs on each replica, and refuses every step while the proof fails.
+
+**Files:**
+- Create: `integrations/pipelinesteps/isolation.go`, `isolation_test.go`
+- Modify: `integrations/pipelinesteps/runner.go` (gate `Run` on the proof), `jobspec.go` (the two probe Jobs as pure builders)
+
+**Interfaces:**
+
+```go
+// IsolationProof is cached per Runner: a pass is trusted for cfg.IsolationTTL (1 h);
+// a failure or an inconclusive probe is re-tried on the next Run (never cached as a pass).
+type IsolationVerdict struct {
+	Isolated bool
+	Detail   string // human sentence for the refusal message and the log
+	At       time.Time
+}
+
+func (r *Runner) proveIsolation(ctx context.Context) IsolationVerdict
+func BuildIsolationListener(cfg Config, name string) Job               // clone image; `nc -lk -p 8080` or busybox httpd; no service account token; labels LabelManagedBy + memql.io/probe=listener
+func BuildIsolationConnector(cfg Config, name, targetIP string) Job    // clone image; exits 0 when it CAN connect to targetIP:8080 within 5 s, 1 when it cannot
+```
+
+Algorithm: create the listener Job, wait until its pod has a podIP and is Running (bounded 90 s; inconclusive otherwise); create the connector Job with that IP; wait for its terminal state (bounded 60 s). Connector exit 1 (could not connect) -> Isolated. Exit 0 -> NOT isolated: every step is refused `pl.CodeIsolationUnenforced` (the seam adds the constant; until it does use the literal "pipeline_isolation_unenforced" behind a TODO-free constant in this package that a later commit swaps) with the Detail naming the fix (enable a network policy engine; on AKS `az aks update --network-policy`). Both probe Jobs are deleted after the verdict (defer, background propagation). The probe Jobs count against the ceiling quota; on `IsForbiddenQuota` the probe waits like a step does.
+
+- [ ] Tests (fake API server): `TestIsolationProofPassesWhenTheConnectorCannotConnect`, `TestIsolationProofRefusesStepsWhenTheConnectorConnects`, `TestIsolationProofIsCachedOnlyOnPass`, `TestIsolationProofDeletesItsProbeJobs`, `TestIsolationProofInconclusiveIsNotAPass`.
+- [ ] Verified live once on a THROWAWAY k3d cluster (never the shared `memql` one): with the component's NetworkPolicy applied the proof passes; with it deleted the proof refuses.
+- [ ] Commit `Issue #5493: the runner proves memql-pipelines is isolated before it runs a step`.
+
 ### Task 7: integrations/workbench -- the forwarded pipeline actions, peer-loss, and the docker need (#5493, #5494)
 
 **Files:**
