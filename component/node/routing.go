@@ -768,6 +768,14 @@ func defaultRoutingRules() []RoutingRule {
 		// v1:campaigns:delivery, engagementEvent and recipient are
 		// deliberately NOT here; each is a recorded exclusion with its
 		// reason in RoutingExclusions().
+		// Series move once per occurrence or human action; their next date
+		// and blocked/paused state must reach another replica's client.
+		{Pattern: "graph.node.created.v1:campaigns:newsletterBinding", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:campaigns:newsletterBinding", TargetType: ""},
+		{Pattern: "graph.node.created.v1:campaigns:testSettings", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:campaigns:testSettings", TargetType: ""},
+		{Pattern: "graph.node.created.v1:campaigns:campaignSeries", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:campaigns:campaignSeries", TargetType: ""},
 		{Pattern: "graph.node.created.v1:campaigns:campaign", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:campaigns:campaign", TargetType: ""},
 		{Pattern: "graph.node.created.v1:campaigns:audience", TargetType: ""},
@@ -796,6 +804,18 @@ func defaultRoutingRules() []RoutingRule {
 	out = append(out, core...)
 	out = append(out, extraRules...)
 	return out
+}
+
+// RoutingRules is the effective routing table: the built-in rules followed by
+// every rule registered through RegisterRoutingRule, in the order
+// evaluateRouting reads them. Exported so the platform graph can record the
+// table (cmd/platformgraph, memql#5727) rather than a copy of it; the slice is
+// the caller's own.
+//
+// What it holds depends on what the calling binary links: a rule registered
+// from a package's init() is present only when that package is compiled in.
+func RoutingRules() []RoutingRule {
+	return defaultRoutingRules()
 }
 
 // routingDecision represents the outcome of evaluating routing rules for an event.

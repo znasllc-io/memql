@@ -296,8 +296,9 @@ Three things worth knowing before you run it:
   cluster-owned -- an empty `ownerUserId`, which is what the seeded OS site
   carries. See `component/memql/platform_site_hostname_policy.go`.
 - **A user's hostname must be `<slug>.<domain>`** -- slug `[a-z0-9-]{3,40}`,
-  cluster-unique, and not one of `api`, `identity`, `mcp`, `os`, `portal`, `www`,
-  `admin`, `mail` or the apex, under the domain the cluster serves (derived
+  cluster-unique, and not one of `api`, `identity`, `mcp`, `os`, `vscode`,
+  `www`, `admin`, `mail`, `portal`, `voice`, `turn` or the apex, under the <!-- retired-vocabulary-ok: `portal` is a reserved site label in squatReservedSiteLabels -->
+  domain the cluster serves (derived
   through `component/frontdoor`, so it cannot disagree with the front door's
   own hosts). Any other hostname stays cluster-owner-only; a CLIENT's own
   domain is bound through the custom-domain flow, which verifies two DNS
@@ -529,10 +530,19 @@ happens when nothing else matched. The full order
    **`static`**: `404` -- a mistyped path in a multi-page site should be
    visible, not silently rendered as the home page.
 
+The fallback applies to routes, not missing static files. Missing scripts,
+stylesheets, images, fonts, JSON, manifests, XML, text files, and paths below
+`/_astro/` return an uncached 404. Existing files still win before this check;
+extensionless product routes and dotted route values such as `/people/jane.doe`
+can still use client-side routing. Invalid UTF-8, NUL, and backslash paths
+are refused with 400; malformed HTTP URLs may be rejected by the front proxy
+or HTTP parser before they reach the site handler.
+
 HTML and mutable asset URLs are served with `public, no-cache,
 must-revalidate` so ordinary navigation reaches the current deployment.
-Only assets with a verified SHA-256 filename component (12–64 hexadecimal
-characters) receive `public, max-age=31536000, immutable`. Other bundler
+Assets with a verified SHA-256 filename component (12–64 hexadecimal
+characters), or a URL qualified by the selected immutable bundle version,
+receive `public, max-age=31536000, immutable`. Other unqualified bundler
 fingerprint formats use the safe revalidation policy.
 
 ---
@@ -890,6 +900,7 @@ answers a different question.
 | Response | `Cache-Control` | Validator |
 |---|---|---|
 | Assets with a verified SHA-256 filename component (12–64 hex characters) | `public, max-age=31536000, immutable` | strong `ETag` |
+| Static assets at a URL qualified by the selected published bundle version | `public, max-age=31536000, immutable` | strong `ETag` |
 | All HTML, route fallbacks, and other mutable assets (JS, CSS, service workers, JSON) | `public, no-cache, must-revalidate` | strong `ETag` |
 | `runtime-config.json` | `no-store` | none |
 | A 404 | `no-cache, no-store, must-revalidate` | none |
@@ -903,6 +914,32 @@ archive timestamps can survive a release unchanged.
 These headers apply to static sites, SPAs, and Shopify storefronts. Dynamic
 and proxy responses keep their own policies.
 
+**Bundler assets can use version-qualified URLs without trusting their
+filename hashes.** For a bundle in the publisher's content-addressed blob
+layout, the edge qualifies external `/_astro/` script and link URLs in HTML
+as `/_memql/assets/<opaque-bundle-version>/<asset-path>`. Relative JavaScript
+imports and CSS references retain that prefix. Inline script bytes remain
+unchanged, preserving their CSP hashes. Ordinary asset URLs retain their
+existing revalidation policy; a hash-looking filename alone earns nothing.
+Root-absolute references inside JavaScript or CSS are not rewritten.
+
+The qualified path reads only the bundle already selected for that site's
+public request or authorized preview. It cannot select another site's files,
+an unpublished candidate, or a historical bundle. After a deploy, an old
+qualified URL returns an uncached 404 rather than different bytes; an old
+page needing a chunk it has not cached must reload, as with other removed
+assets. Private previews retain `no-store`, including qualified assets.
+Mutable `file://` trees and arbitrary blob prefixes do not receive these URLs.
+
+**Public text bundle responses negotiate gzip.** HTML, JavaScript, CSS,
+static JSON, XML, SVG, manifests, and text files support `Accept-Encoding:
+gzip`; both identity and compressed responses carry `Vary: Accept-Encoding`
+and distinct strong ETags. A gzip HEAD has the same headers as its GET and
+no body. Range requests use the identity representation; a gzip `If-Range`
+validator cannot select a range from those different bytes. Runtime
+configuration, private previews, identity and API proxies, binary media,
+and the refresh script keep their existing responses without added compression.
+
 **Open pages also follow deployment changes (since 0.23.0).** The edge inserts
 one small same-origin script into every HTML document, including prerendered
 routes and SPA fallbacks. The original inline script bytes and CSP hashes stay
@@ -912,7 +949,7 @@ the engine changes that identifier. Testing and Production check their own
 origin and effective store binding independently.
 
 The script checks with a bodyless, non-cacheable `HEAD /runtime-config.json`
-on load, browser-history restoration, SPA navigation, return to the tab, and
+on browser-history restoration, SPA navigation, return to the tab, and
 every 30 seconds while visible. These background polls neither resolve store
 credentials nor write visitor traffic records. After two checks agree on a
 changed deployment, the browser automatically replaces the current document,
@@ -920,6 +957,9 @@ keeping its route, other query parameters, and fragment. A temporary query
 marker bypasses old document cache entries and is removed after loading.
 Unchanged releases do not reload. HTML validators include the embedded
 identifier, so an old document cannot receive a false 304 after a change.
+The initial document already supplies its version, so startup and ordinary
+link clicks do not issue another probe. Leaving a page suspends pending
+confirmations until browser-history restoration.
 
 A failed or offline check leaves the working page intact and retries after
 connectivity returns. Hidden tabs wait until visible. Form edits defer the
@@ -964,18 +1004,20 @@ That is a property of the layout rather than a promise:
 
 - Long-lived assets have a filename digest verified against their bytes. A
   changed body must use a different verified filename to retain that policy.
+- Version-qualified assets bind their URL to the selected content-addressed
+  bundle. A different bundle gets different URLs; obsolete URLs never serve
+  the new bundle's bytes.
 - HTML, route fallbacks, and unverified assets use `public, no-cache,
   must-revalidate`; `runtime-config.json` uses `no-store`. Site resolution
   uses change-feed invalidation with a short TTL backstop.
 - This applies once the new policy reaches clients. A CDN containing an older
   response marked immutable may need a one-time purge during migration.
 
-**Key on the request URI as usual, and add nothing.** The edge sets no
-`Vary`, and that is a decision rather than an omission: the two things that
-change a response are the request's host (which selects the site) and its
-scheme, both of which are already components of every cache key. A blanket
-`Vary` added "to be safe" fragments entries that would otherwise be shared
-and quietly destroys the hit ratio the immutable policy exists to earn.
+**Key on the request URI and honor `Vary: Accept-Encoding` for public text
+files.** Compression is the only additional negotiated representation. Host
+and scheme are already components of every cache key, so the edge adds no
+blanket `Vary: Host`, `User-Agent`, or `*`. Runtime configuration remains
+`no-store` and is not compressed.
 
 **Do not put the identity service behind the same CDN.** Its JWKS endpoint
 sends `Cache-Control: public, max-age=300`, so a cache in that path serves

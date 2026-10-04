@@ -6,11 +6,11 @@ import { DEFAULT_STACK_REPO, DEFAULT_STACK_TAG } from "../src/install/stackPin.j
 import { listReleaseTags } from "../src/install/tags.js";
 import { refusedPlatformGuidance } from "../src/state/installProgress.js";
 import {
+  collectScreen,
   latestLabel,
-  renderCollectScreen,
   versionChoiceList,
   withCurrentInSortedPosition,
-} from "../src/webview/installScreens.js";
+} from "../src/webview/addClusterScreens.js";
 
 // installVersionField.test.ts -- znasllc-io/memql#3882.
 //
@@ -46,7 +46,7 @@ test("the newest listed release is labelled Latest, and its VALUE is that real t
   const list = versionChoiceList(["v0.20.3", "v0.19.1"], "v0.19.1");
   assert.equal(list[0]!.value, "v0.20.3");
   assert.equal(list[0]!.label, latestLabel("v0.20.3"));
-  assert.match(list[0]!.label, /recommended/);
+  assert.match(list[0]!.label, /^Latest \(v0\.20\.3\)$/);
 
   // ...and it appears ONCE: the labelled entry replaces the bare row.
   assert.equal(list.filter((c) => c.value === "v0.20.3").length, 1);
@@ -105,7 +105,7 @@ test("the offline fallback is a real published release, so it can actually insta
 
 /** The `<option>` rows of the VERSION select only, as value/selected/label. */
 function versionOptions(html: string): { value: string; selected: boolean; label: string }[] {
-  const open = html.indexOf('<select id="f-version"');
+  const open = html.search(/<select[^>]*id="f-version"/);
   assert.notEqual(open, -1, "the version field did not render as a picker");
   const block = html.slice(open, html.indexOf("</select>", open));
   return [...block.matchAll(/<option value="([^"]*)"( selected)?>([^<]*)</g)].map((m) => ({
@@ -116,12 +116,13 @@ function versionOptions(html: string): { value: string; selected: boolean; label
 }
 
 function collectHtml(choices: string[]): string {
-  return renderCollectScreen({
+  return collectScreen({
     action: "install",
     values: collectForm().inputs,
     errors: [],
     versionChoices: choices,
-  });
+    moreOpen: false,
+  }).body;
 }
 
 test("the rendered picker puts Latest first AND marks it selected", () => {
@@ -131,12 +132,13 @@ test("the rendered picker puts Latest first AND marks it selected", () => {
   // thing and does another, and every unit test below would still pass.
   const s = collectForm();
   s.seedVersionFromListing("v0.20.3");
-  const html = renderCollectScreen({
+  const html = collectScreen({
     action: "install",
     values: s.inputs,
     errors: [],
     versionChoices: ["v0.20.3", "v0.19.1", "v0.18.0"],
-  });
+    moreOpen: false,
+  }).body;
 
   // SCOPED TO THE VERSION SELECT. The collect screen renders the AI-provider
   // choice too, and a page-wide match counts its options as versions.
@@ -161,7 +163,7 @@ test("the rendered picker puts Latest first AND marks it selected", () => {
 test("the rendered main entry names no release, and says what it IS", () => {
   const html = collectHtml(["v0.20.3", "v0.19.1"]);
   const main = versionOptions(html).find((o) => o.value === "main")!;
-  assert.match(main.label, /build from source/);
+  assert.match(main.label, /Build from source/);
   assert.doesNotMatch(main.label, /v0\.\d+\.\d+/, "the skew label named a release; it must not now");
   assert.equal(main.selected, false, "main must never be preselected");
 });
@@ -170,8 +172,8 @@ test("an empty listing renders a TEXT BOX prefilled with the offline fallback", 
   // The degrade-to-typing path: git ls-remote needs a network and a git, and an
   // operator on a plane has neither and still has a cluster to install.
   const html = collectHtml([]);
-  assert.doesNotMatch(html, /<select id="f-version"/, "no listing means no picker");
-  assert.match(html, new RegExp(`<input id="f-version"[^>]*value="${DEFAULT_STACK_TAG}"`));
+  assert.doesNotMatch(html, /<select[^>]*id="f-version"/, "no listing means no picker");
+  assert.match(html, new RegExp(`<input[^>]*id="f-version"[^>]*value="${DEFAULT_STACK_TAG}"`));
   assert.doesNotMatch(
     html,
     /value="main"/,
@@ -179,12 +181,35 @@ test("an empty listing renders a TEXT BOX prefilled with the offline fallback", 
   );
 });
 
-test("the version hint states both what Latest is and what main costs", () => {
+test("the choices say what they are, with no paragraph of hint under the field", () => {
+  // The sixty-word hint that explained manifests, node images and tags is
+  // gone: Latest says it is the latest, and the from-source lane's own label
+  // carries its cost.
   const html = collectHtml(["v0.20.3"]);
-  assert.match(html, /Latest is preselected/);
-  assert.match(html, /BUILDS the node images/);
-  assert.match(html, /Docker/);
-  assert.match(html, /several minutes/);
+  const options = versionOptions(html);
+  assert.equal(options[0]!.label, "Latest (v0.20.3)");
+  assert.match(options.find((o) => o.value === "main")!.label, /slower/);
+  assert.doesNotMatch(html, /node images|manifests|several minutes/);
+});
+
+test("the version sits behind More options, summarised while it is closed", () => {
+  // Only what the person must decide is in view: the owner. The domain and
+  // the version have good answers already.
+  const s = collectForm();
+  s.seedVersionFromListing("v0.20.3");
+  const closed = collectScreen({ action: "install", values: s.inputs, errors: [], versionChoices: ["v0.20.3"], moreOpen: false });
+  assert.match(closed.body, /More options/);
+  assert.match(closed.body, /memql\.localhost · Latest \(v0\.20\.3\)/);
+  assert.match(closed.body, /id="more-options" hidden/);
+  // A version problem opens it: an error in a closed disclosure is one nobody sees.
+  const wrong = collectScreen({
+    action: "install",
+    values: s.inputs,
+    errors: [{ field: "version", message: "Enter a version." }],
+    versionChoices: [],
+    moreOpen: false,
+  });
+  assert.doesNotMatch(wrong.body, /id="more-options" hidden/);
 });
 
 test("the pin is what the field starts on -- as the OFFLINE FALLBACK", () => {
@@ -318,5 +343,5 @@ test("Create deployment on an unsupported platform refuses instead of listing ta
   assert.deepEqual(listing.tags, []);
   assert.equal(listing.refusedPlatform, true);
   assert.match(listing.error, /linux\/amd64/);
-  assert.match(listing.error, /will not change that/);
+  assert.match(listing.error, /Retrying won.t change that/);
 });

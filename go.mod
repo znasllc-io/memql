@@ -13,9 +13,11 @@ require (
 	github.com/uptrace/bun v1.2.18
 	github.com/uptrace/bun/dialect/pgdialect v1.2.18
 	github.com/uptrace/bun/driver/pgdriver v1.2.18
+	github.com/yuin/goldmark v1.8.6
 	github.com/znasllc-io/memql/component/events v0.0.0
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
 	github.com/znasllc-io/memql/component/healing v0.0.0
+	github.com/znasllc-io/memql/component/node/gen v0.0.0
 	github.com/znasllc-io/memql/component/observe v0.0.0-00010101000000-000000000000
 	github.com/znasllc-io/memql/component/procedure v0.0.0
 	golang.org/x/sync v0.23.0
@@ -90,7 +92,7 @@ require (
 	github.com/pion/stun/v4 v4.0.1 // indirect
 	github.com/pion/transport/v5 v5.1.1 // indirect
 	github.com/pion/turn/v5 v5.1.2 // indirect
-	github.com/pion/webrtc/v4 v4.2.21 // indirect
+	github.com/pion/webrtc/v4 v4.2.22 // indirect
 	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/puzpuzpuz/xsync/v4 v4.5.0 // indirect
@@ -101,10 +103,8 @@ require (
 	github.com/twitchtv/twirp v8.1.3+incompatible // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	github.com/yuin/goldmark v1.8.6 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
-	github.com/znasllc-io/memql/component/node/gen v0.0.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect

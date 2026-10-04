@@ -19,6 +19,10 @@ recognising.
 
 ---
 
+Materializer collects the brief, sources, and output settings. Its finished
+files open directly in the chosen editor for review and editing. ZIP outputs
+use the regular authenticated download path and remain intact.
+
 ## The two flows, and when each engages
 
 | Flow | What happens | When it runs |
@@ -37,6 +41,13 @@ Both flows end the same way: an OAuth authorization code, redeemed at
 `POST /oauth/token` for an access token and a refresh token, which the extension
 stores for you.
 
+VS Code for the Web uses device approval with PKCE; a browser extension cannot
+bind a native loopback listener. Enter the cluster domain in **MemQL: Add
+Cluster**, then sign in. The web extension keeps its cluster list in the editor
+profile and credentials in VS Code SecretStorage. Native local-cluster
+installation remains a desktop operation. Desktop and web support macOS and
+Linux; Windows is outside the supported platform matrix.
+
 ---
 
 ## The built-in client: `memql-vscode`
@@ -52,7 +63,7 @@ installed, and `MEMQL_IDENTITY_OAUTH_DCR_ENABLED` has nothing to do with it.
 | Redirect URI | `http://127.0.0.1/callback` | Loopback only, and **portless** -- see below |
 | Client type | Public (no secret) | The extension ships to every user's machine, so a baked-in secret would be a secret in name only |
 | PKCE | Required (S256) | What actually binds the authorization code to the process that asked for it |
-| Role floor | developer and above | The editor is a management surface -- see [Who may connect](#who-may-connect) |
+| Sign-in access | A recognized cluster role | Productivity and development share one connection; individual operations keep their own permissions |
 
 **The portless redirect URI is load-bearing.** The loopback listener takes
 whatever ephemeral port the kernel hands it, so the URI the browser returns to
@@ -80,29 +91,26 @@ hinders editor sign-in.
 
 ## Who may connect
 
-Sign-in from an editor requires the **developer role or above** on the cluster:
+The MemQL extension connects both development tools and Productivity Tools.
+Readers and writers can sign in without being made developers.
 
-| Role | May connect an editor |
-|---|---|
-| owner | yes |
-| admin | yes |
-| developer | yes |
-| writer | no |
-| reader | no |
-| (no cluster-wide role) | no |
+| Role | May connect an editor | Typical authority after connecting |
+|---|---|---|
+| owner | yes | Cluster ownership and authorized document work |
+| admin | yes | Administration and authorized document work; no DSL authoring by default |
+| developer | yes | Development and authorized document work |
+| writer | yes | View, edit, and comment on authorized documents |
+| reader | yes | View authorized documents |
+| assignable custom role | yes | Only the capabilities granted to that role |
+| missing or unrecognized role | no | Ask an owner or admin to check account access |
 
-The editor manages the cluster -- it edits DSL, runs constructs and drives
-deploy controls -- so the floor is a property of what the editor **is**, not a
-general OAuth setting. There is no environment variable for it. Admin is
-included deliberately: an admin operates the console's admin surfaces, and
-refusing them the editor while admitting them there would be incoherent.
-
-**A refused person sees a sentence naming their role**, in the editor, in both
-flows:
-
-> MemQL for Visual Studio Code and Cursor manages this cluster. Your role on it is reader, and signing
-> in from an editor needs developer or above. Ask a cluster owner or admin to
-> raise your role.
+**Signing in does not change a role or grant additional capabilities.** Backend
+checks still govern each operation and each document. A reader cannot save a
+file or add feedback merely because the editor connected. A writer cannot
+manage a cluster or author DSL merely because Productivity Tools shares the
+core extension's connection. Organization and row access remain in force.
+Native cluster installation is available only on supported desktop hosts; it
+is a separate user action, not a side effect of connecting to another cluster.
 
 Every refusal writes an audit event (`editor_signin_refused_role`, category
 `identity`) carrying the client id, the role required and the role held.
@@ -126,26 +134,37 @@ default nobody reviewed.
 
 ## The `clusters.yaml` fields that matter
 
-The extension's registry lives at `~/.memql/clusters.yaml`.
+The desktop registry lives at `~/.memql/clusters.yaml`. MemQL and Cockpit share
+cluster definitions, with a cross-process lock and atomic writes that preserve
+unknown fields. Selecting an editor connection does not redirect a Cockpit
+worker or change its enrollment.
 
 | Field | What it is | Who writes it |
 |---|---|---|
 | `domain` | The cluster's domain. Everything else derives from it | you |
 | `issuer` | The identity service URL. Defaults to `https://identity.<domain>` | you, only for a non-standard front door |
 | `endpoint` | The gRPC front door. Defaults to `api.<domain>:443` | you, only for a non-standard front door |
-| `token` | The identity-issued JWT access token | **sign-in** |
-| `refresh_token` | Renews the access token as it expires | **sign-in** |
-| `clientId` | An OAuth client id to use **instead of** `memql-vscode` | you, and only if you mean it |
+| `token` / `refresh_token` | Credentials belonging to another registry client, when present | The client that owns them; editor sign-in uses SecretStorage |
+| `client_id` | Another tool's OAuth client (the Cockpit writes `cockpit`). The editor does not use it | the tool that owns it |
 
-In the normal path you set a name and a domain, run **MemQL: Sign In**, and
-touch nothing else. `token` and `refresh_token` are things sign-in writes; hand-
-editing them is for an unattended setup, not for a person at a keyboard.
+Set a name and a domain, then run **MemQL: Sign In**. Editor access and refresh
+tokens stay in VS Code SecretStorage; a locked or unavailable secret store
+produces an actionable error instead of falling back to a plaintext file.
+Signing out of the editor clears its credentials, leaving Cockpit's session
+and worker connection alone.
 
-**`clientId` is an override, and it is usually wrong to set one.** It exists for
-two cases: an operator who configured a custom static client in
-`MEMQL_IDENTITY_REGISTERED_CLIENTS`, and an entry left over from before this
-feature that still carries an id minted by the old registration path. Both keep
-working -- the value is simply read -- and nothing migrates or rewrites the file.
+**The editor always signs in as `memql-vscode`.** `clusters.yaml` is shared with
+the MemQL Cockpit, which records its own client there (`client_id: cockpit`,
+registered for the Cockpit's own callback path). A `client_id` in the file
+belongs to the tool that wrote it, so the editor never signs in or refreshes
+with it. It keeps the client each refresh token was issued to beside that token
+in its own secret storage, and presents it on refresh.
+
+**MemQL Productivity Tools** consumes the core extension's versioned connection
+API. It has no separate sign-in, cluster registry, or credential store. An open
+document retains the cluster and connection it came from; switching clusters
+cannot retarget its save. A reconnect requires comparing the latest revision
+before a stale edit can be saved. See [productivity tools](../../language/vscode.md#productivity-tools).
 
 ---
 
@@ -163,12 +182,22 @@ answer.
 Update the engine and the extension. If you cannot yet, use the
 [interim workaround](#interim-workaround-for-clusters-that-predate-this-feature).
 
+### "This cluster doesn't accept sign-in from VS Code."
+
+Before it opens a browser, the editor asks the identity service whether it
+accepts the sign-in request, the way MemQL OS does. This message is its answer
+when identity refused the client or its redirect URI. The cluster does not carry
+`memql-vscode` (the engine predates the built-in client), or a shadowing
+`MEMQL_IDENTITY_REGISTERED_CLIENTS` entry lost the portless redirect URI (see
+below). Identity logs each refusal at INFO as `authorize refused`, with the
+client id and redirect URI, and MemQL OS now shows the refusal's own heading
+("Invalid redirect URI", "Unknown client") rather than "Bad Request".
+
 ### `Unknown client` on the consent page, or `invalid_client` from `/device/code`
 
-The cluster does not carry `memql-vscode`. Either the engine predates the
-built-in client, or a `clientId` in `clusters.yaml` is naming something this
-cluster does not have. Check that field first -- an override left behind by an
-old sign-in is the common cause.
+The cluster does not carry `memql-vscode`: the engine predates the built-in
+client. Update the engine, or use the
+[interim workaround](#interim-workaround-for-clusters-that-predate-this-feature).
 
 ### `Invalid redirect URI`
 
@@ -180,7 +209,8 @@ The registered redirect URI has stopped being portless, which breaks the RFC
 ### Sign-in was refused and named my role
 
 That is the [role floor](#who-may-connect). Ask a cluster owner or admin to
-raise your role to developer or above.
+check that your account has a recognized cluster role. Readers and writers can
+connect; changing a role to developer is not necessary for document work.
 
 ### `dial ... failed (missingCredential)` after signing in
 
@@ -215,8 +245,9 @@ clusters:
     clientId: memql-vscode
 ```
 
-`clientId` here makes an extension that still self-registers skip `/register`
-entirely.
+`clientId` here makes an extension old enough to self-register skip `/register`
+entirely. A current extension ignores it and signs in as `memql-vscode`
+regardless.
 
 **Two caveats.** This is a full replacement of the client rather than a
 pre-seeding of it, so `MEMQL_IDENTITY_REGISTERED_CLIENTS` must list every other
@@ -234,3 +265,32 @@ floor applies, and the `clientId` override, so the default is what runs.
 - [Sign-in Paths](sign-in-paths.md) -- the five ways to obtain a credential
 - [Identity Service](identity-service.md) -- operator env vars, and the DCR decision
 - [Access Model](access-model.md) -- the role spectrum the floor reads
+
+
+Materializer's Compose and template-binding forms require an organization.
+Saving a completed email composition as a recipe retains that organization,
+the email output type, and the selected reference files. Explicit content and
+image-inclusion choices are preserved: an inspiration image does not silently
+become an image to embed. Query sources resolve again when the recipe runs;
+reference files are read through the runner's current cluster permissions.
+
+### Include images in a generated email
+
+In **Create Email from Examples**, first choose the organization and references.
+In **Images to include**, select logos or photos that should appear in the email;
+leave screenshots of example layouts unselected. Selecting a ZIP here makes its
+supported image members eligible for inclusion. Ordinary ZIP opening still
+only downloads it intact.
+
+MemQL reads and freezes the selected bytes before AI work starts. The resulting
+editable HTML carries included images, so preview and scheduled sends do not
+need permission-bearing Library URLs or a separate image host. Source, Preview,
+and Split continue to share the same draft. The human still saves or publishes
+the reviewed Campaigns revision; generation never sends a message.
+
+Included PNG/JPEG/GIF images are bounded to eight images and 1 MiB total; the
+complete email template remains bounded to 2 MiB. Larger example images can
+remain design references. SMTP/Graph sending converts embedded images to inline attachments; ACS uses CID
+attachments. Microsoft currently labels ACS inline attachments a preview feature; validate
+rendering with your recipient clients before enabling production sending.
+See [Microsoft's inline attachment documentation](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/email/send-email-advanced/send-email-with-inline-attachments).

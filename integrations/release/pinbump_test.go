@@ -109,7 +109,9 @@ func TestRewritePinRefusesAnythingOtherThanExactlyOneMatch(t *testing.T) {
 // pinFake builds a fakeGitHub that also serves the pin-bump endpoints.
 func pinFake(t *testing.T, content string) *fakeGitHub {
 	t.Helper()
-	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "mainhead")
+	// VERSION reads the patch a Cut of this fixture computes, so the tests
+	// that drive the follow-on through Cut reach it rather than the refusal.
+	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "mainhead").withVersionFile("1.0.1\n")
 	f.pinContent = content
 	return f
 }

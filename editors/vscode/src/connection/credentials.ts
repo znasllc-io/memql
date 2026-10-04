@@ -38,35 +38,10 @@
 // the same place, so a LIVE stream re-auths without reconnecting at all.
 //
 // -----------------------------------------------------------------------------
-// WHERE THE SECRETS LIVE, and why the two halves differ
-// -----------------------------------------------------------------------------
-//
-// clusters.yaml is plaintext and SHARED with the MemQL Cockpit, which owns the
-// file. That ownership is exactly why the extension cannot simply move all
-// credentials into VS Code's SecretStorage: the Cockpit would then read a
-// cluster entry with no credential at all, and a registry two tools disagree
-// about is worse than one they share. So the split follows the blast radius of
-// each secret:
-//
-//   ACCESS TOKEN (`token:`)  -- stays in the shared file. It is a 15-minute
-//     credential, it is what the Cockpit needs to see, and the file is where
-//     an operator seeds it. A refreshed one is written straight back so the
-//     Cockpit and the extension keep agreeing.
-//
-//   REFRESH TOKEN -- SecretStorage, keyed per cluster. This is a THIRTY-DAY
-//     credential (DefaultRefreshTokenTTLSeconds = 2_592_000) that mints access
-//     tokens on demand, which is precisely the thing the issue flagged as
-//     unacceptable to leave lying in plaintext. `refresh_token:` in the file is
-//     an INGEST path only: the resolver presents it once, and on the first
-//     successful exchange it stores the ROTATED token in SecretStorage and
-//     DELETES the plaintext key. If SecretStorage is unavailable the plaintext
-//     copy is used and left alone -- clearing the only copy of a credential we
-//     have nowhere to put would be worse than the exposure.
-//
-// The storage mechanics themselves -- the keys, the index that makes an
-// un-enumerable SecretStorage sweepable, sign-in and sign-out -- live in
-// src/auth/store.ts. This module only resolves and renews.
-//
+// The editor owns its SecretStorage credentials. Cockpit owns a separate OAuth
+// client and credential store. Both share cluster metadata; neither refreshes
+// or revokes the other's session. Legacy registry tokens can be read once and
+// are cleared after SecretStorage takes custody. New tokens never go to YAML.
 // -----------------------------------------------------------------------------
 // memql#3404 -- NOT SPINNING
 // -----------------------------------------------------------------------------
@@ -101,6 +76,7 @@ import {
   ClusterCredentialStore,
   type SecretStore,
 } from "../auth/store.js";
+import { refreshClientId } from "../auth/wellKnownClient.js";
 import type { ClusterConfig } from "../clusters/model.js";
 import { identityBaseUrlFor } from "./endpoint.js";
 
@@ -144,9 +120,7 @@ export function jwtExpirySeconds(token: string): number | undefined {
   const payload = parts[1];
   if (payload === undefined || payload === "") return undefined;
   try {
-    const decoded = Buffer.from(payload, "base64url").toString("utf8");
-    // Buffer.from is lenient about non-base64 input (it skips what it cannot
-    // decode), so the JSON parse below is the real gate.
+    const decoded = new TextDecoder().decode(Uint8Array.from(atob(payload.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0)));
     const claims = JSON.parse(decoded) as Record<string, unknown>;
     const exp = claims.exp;
     return typeof exp === "number" && Number.isFinite(exp) ? exp : undefined;
@@ -164,6 +138,13 @@ export interface HttpRequestInit {
    * body -- an empty string included -- so this cannot be modelled as "" .
    */
   body?: string;
+  /**
+   * `manual` for a probe whose answer is the status itself (the sign-in
+   * pre-validation): a redirect is then reported, not followed.
+   */
+  redirect?: "follow" | "manual" | "error";
+  /** Bounds a probe; the real fetch honours it, test doubles may ignore it. */
+  signal?: AbortSignal;
 }
 
 export interface HttpResponseLike {
@@ -240,10 +221,12 @@ export interface CredentialDeps {
 // -----------------------------------------------------------------------------
 // Messages
 //
-// Exported so the Clusters tree can say the same thing at rest that the
-// connection attempt says on failure. An operator who reads two different
-// explanations of one condition learns less than one who reads the same
-// sentence twice.
+// These are the RECORD of a refusal: a failed connect's message goes to the
+// MemQL Connection output, where the person who opens "Show details" reads it.
+// The row, the page and the toast say the state in a few words of their own
+// (clusters/status.ts) and offer the fix as a button, so nothing here is shown
+// cut to fit a toast any more. They still end with the fix, and never with an
+// instruction to hand-edit clusters.yaml, which Sign in replaced.
 // -----------------------------------------------------------------------------
 
 export function wrongTokenClassMessage(clusterName: string, tokenClass: TokenClass): string {
@@ -255,32 +238,20 @@ export function wrongTokenClassMessage(clusterName: string, tokenClass: TokenCla
     `The credential stored for cluster "${clusterName}" is ${what}, which cannot authenticate against a bff. ` +
     "Mesh nodes verify bearers against the identity service's JWKS feed and have no lookup path for these tokens, " +
     "so they are rejected before any check on the value itself. " +
-    "Store an identity-issued JWT access token in the `token` field of clusters.yaml instead."
+    "Sign in to replace it with an identity-issued JWT access token."
   );
 }
 
 export function missingCredentialMessage(clusterName: string): string {
-  return (
-    `Cluster "${clusterName}" has no credential. Run "MemQL: Sign In" to get one -- it writes both ` +
-    "`token` and `refresh_token` for you, so the extension can renew as it expires. " +
-    "Sign-in from an editor needs the developer role or above on the cluster, and is refused with a " +
-    "message naming your role if you have less. " +
-    "Hand-editing `token` with an identity-issued JWT access token still works for an unattended setup."
-  );
+  return `Cluster "${clusterName}" has no stored sign-in, so there was nothing to connect with. Sign in to connect.`;
 }
 
 export function notConfiguredMessage(clusterName: string): string {
-  return (
-    `Cluster "${clusterName}" is not configured. Set an endpoint, and a \`token\` holding an ` +
-    "identity-issued JWT access token."
-  );
+  return `Cluster "${clusterName}" has no address to connect to. Edit it to add its domain.`;
 }
 
 function expiredMessage(clusterName: string, detail: string): string {
-  return (
-    `The access token for cluster "${clusterName}" has expired and could not be renewed: ${detail} ` +
-    "Store a fresh `token` (and `refresh_token`) in clusters.yaml."
-  );
+  return `The session for cluster "${clusterName}" expired and could not be renewed: ${detail} Sign in again.`;
 }
 
 // The refresh token itself was refused, so nothing stored can be renewed and
@@ -332,7 +303,7 @@ export class CredentialResolver implements CredentialSource {
       return { ok: false, reason: "notConfigured", message: notConfiguredMessage(cluster.name) };
     }
 
-    const token = (cluster.token ?? "").trim();
+    const token = (await this.store.readAccessToken(cluster.name) ?? cluster.token ?? "").trim();
     const tokenClass = classifyToken(token);
     if (tokenClass === "pat" || tokenClass === "workerToken") {
       // Refused BEFORE the dial. Letting this through buys a handshake failure
@@ -439,12 +410,17 @@ export class CredentialResolver implements CredentialSource {
       };
     }
 
+    // THE CLIENT THE TOKEN WAS ISSUED TO, as recorded beside it -- never the
+    // registry's `client_id`. That field belongs to whichever tool wrote the
+    // entry (the Cockpit writes `cockpit`), and presenting it refreshed an
+    // editor token as another tool's client; identity accepts that today only
+    // because it checks registration and not issuance (wellKnownClient.ts).
+    const clientId = refreshClientId(await this.store.readClientId(cluster.name));
     const body: Record<string, string> = {
       grant_type: "refresh_token",
       refresh_token: refreshToken,
+      client_id: clientId,
     };
-    const clientId = (cluster.clientId ?? "").trim();
-    if (clientId !== "") body.client_id = clientId;
 
     let response: HttpResponseLike;
     try {
@@ -493,6 +469,10 @@ export class CredentialResolver implements CredentialSource {
     // A SecretStorage that refuses a write must not cost us the connection; it
     // only means the plaintext copy stays where it is (custodyTaken === false).
     const custodyTaken = await this.store.writeRefreshToken(cluster.name, rotated);
+    // The rotated token belongs to the client that just presented it, so the
+    // record travels with it -- including for a token taken in from the file,
+    // which had none until now.
+    if (custodyTaken) await this.store.writeClientId(cluster.name, clientId);
 
     // The lifetime the server just reported, kept beside the refresh token so
     // an access token that is not a readable JWT can still be renewed before it
@@ -505,10 +485,11 @@ export class CredentialResolver implements CredentialSource {
       await this.store.writeExpiry(cluster.name, Math.floor(this.now() / 1000) + expiresIn);
     }
 
-    if (this.persist !== undefined) {
+    const accessStored = await this.store.writeAccessToken(cluster.name, accessToken);
+    if (this.persist !== undefined && accessStored) {
       try {
         await this.persist(cluster.name, {
-          token: accessToken,
+          token: "",
           clearStoredRefreshToken: custodyTaken,
         });
       } catch {
@@ -601,7 +582,7 @@ export const staticCredentials: CredentialSource = new CredentialResolver();
  * not be able to miss the other.
  */
 export function defaultFetch(url: string, init: HttpRequestInit): Promise<HttpResponseLike> {
-  return fetch(url, init) as unknown as Promise<HttpResponseLike>;
+  return fetch(url, { ...init, credentials: "omit", redirect: "error" }) as unknown as Promise<HttpResponseLike>;
 }
 
 // oauthError turns a failure body into the sentence an operator can act on.

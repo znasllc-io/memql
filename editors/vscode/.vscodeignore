@@ -5,6 +5,8 @@ test/**
 test-host/**
 dist-test/**
 dist-host/**
+gallery/**
+dist-gallery/**
 tsconfig.json
 tsconfig.test.json
 tsconfig.host.json
@@ -18,3 +20,5 @@ esbuild.host.js
 node_modules/**
 
 site/**
+
+out/*-meta.json

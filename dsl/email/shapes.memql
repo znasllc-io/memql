@@ -1,0 +1,24 @@
+/// Restricted encrypted storage projection, consumed by the capture integration.
+@row
+shape capturedMessage capturedEmailStored {
+  row.id
+  row.createdAt
+  encryptedValue
+}
+
+@row
+shape connectionState emailConnectionStateStored {
+  row.id
+  row.createdAt
+  encryptedValue
+}
+
+@row
+shape sendOperation emailSendOperationStored {
+  row.id
+  row.createdAt
+  accountId
+  status
+  nextPollAt
+  encryptedValue
+}

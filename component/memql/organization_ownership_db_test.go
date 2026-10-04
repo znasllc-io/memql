@@ -64,7 +64,15 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 	for _, tc := range cases {
 		id := strings.ReplaceAll(tc.concept, ":", "-") + "-" + suffix
 		tc.payload["ownerUserId"] = "forged-other-user"
-		if err := organizationInsert(t, engine, actor, tc.concept, id, tc.payload); err != nil {
+		if tc.concept == "v1:campaigns:template" {
+			if err := organizationInsert(t, engine, actor, tc.concept, id, tc.payload); err == nil {
+				t.Fatal("raw template write bypassed the revision-checked capability")
+			}
+			// The capability's internal write still stamps the original actor.
+			if _, err := engine.Execute(auth.ContextWithInternalOrigin(actor), fmt.Sprintf(`mutation createTemplate(templateId: %s, accountId: %s, name: "Template", subject: "Subject", textBody: "Hello", versionTime: "2029-01-01T00:00:00Z")`, langparser.QuoteString(id), langparser.QuoteString(acme))); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := organizationInsert(t, engine, actor, tc.concept, id, tc.payload); err != nil {
 			t.Fatalf("%s: %v", tc.concept, err)
 		}
 		var rows []memorynodes.MemoryNode
@@ -128,15 +136,15 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 			t.Fatalf("named %s attribution failed: %v", concept, p)
 		}
 	}
-	if err := organizationInsert(t, engine, rankActorCtx(operator, auth.RoleOwner), "v1:campaigns:audience", "operator-audience-"+suffix, map[string]any{"name": "Default", "ownerUserId": operator}); err != nil {
-		t.Fatal(err)
+	if err := organizationInsert(t, engine, rankActorCtx(operator, auth.RoleOwner), "v1:campaigns:audience", "operator-audience-"+suffix, map[string]any{"name": "Default", "ownerUserId": operator}); err == nil || !strings.Contains(err.Error(), "organization_required") {
+		t.Fatalf("operator omitted organization: %v", err)
 	}
 	var own []memorynodes.MemoryNode
 	if err := db.NewSelect().Model(&own).Where("concept = ?", "v1:campaigns:audience").Where("id = ?", "v1:campaigns:audience:operator-audience-"+suffix).OrderExpr(`"createdAt" DESC`).Limit(1).Scan(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(own) != 1 || BareShortId(stringFromAny(accountRowPayload(own[0])["accountId"])) != "self" {
-		t.Fatal("operator default not persisted as self")
+	if len(own) != 0 {
+		t.Fatal("organization-less operator record was persisted")
 	}
 	if err := organizationInsert(t, engine, rankActorCtx(multi, auth.RoleWriter), "v1:campaigns:audience", "ambiguous-"+suffix, map[string]any{"name": "Ambiguous"}); err == nil {
 		t.Fatal("multiple memberships silently defaulted")
@@ -146,6 +154,20 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 	}
 	if err := organizationInsert(t, engine, actor, "v1:campaigns:audience", "forged-"+suffix, map[string]any{"name": "Forbidden", "accountId": beta}); err == nil {
 		t.Fatal("foreign account create succeeded")
+	}
+	// Shared test configuration/results are written by governed capabilities
+	// under their initiating actor and read by the same organization boundary.
+	for _, row := range []struct {
+		concept, id string
+		payload     map[string]any
+	}{
+		{"v1:campaigns:testSettings", "test-settings-" + suffix, map[string]any{"accountId": acme, "audienceId": audience}},
+		{"v1:campaigns:campaign", "test-run-" + suffix, map[string]any{"accountId": acme, "name": "Test run", "audienceId": audience, "templateId": template, "testSourceCampaignId": campaign, "status": "draft"}},
+	} {
+		row.payload["ownerUserId"] = member
+		if err := organizationInsert(t, engine, auth.ContextWithInternalOrigin(actor), row.concept, row.id, row.payload); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// A fresh receiver gets only a verified forwarded identity and re-reads
 	// membership rows. It has none of the originating request's account memo.
@@ -166,22 +188,29 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	read := func() int {
-		ctx := auth.ContextWithAccess(context.Background(), remote)
-		result, err := receiver.Execute(ctx, fmt.Sprintf(`query campaignById(campaignId: %s)`, langparser.QuoteString(campaign)))
-		if err != nil {
-			t.Fatal(err)
+	read := func(want int) {
+		t.Helper()
+		for _, query := range []string{
+			fmt.Sprintf(`query campaignById(campaignId: %s)`, langparser.QuoteString(campaign)),
+			fmt.Sprintf(`query campaignTestSettings(accountId: %s)`, langparser.QuoteString(acme)),
+			fmt.Sprintf(`query campaignTestRuns(campaignId: %s)`, langparser.QuoteString(campaign)),
+		} {
+			ctx := auth.ContextWithAccess(context.Background(), remote)
+			result, err := receiver.Execute(ctx, query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(MaterializeRows(result)); got != want {
+				t.Fatalf("organization read after hop: %s: got %d rows, want %d", query, got, want)
+			}
 		}
-		return len(MaterializeRows(result))
 	}
-	if read() != 1 {
-		t.Fatal("authorized same-org colleague cannot read creator's campaign after hop")
-	}
+	read(1)
 	// Another authorized person may edit organization work without becoming
 	// its owner. Test both a named actor-stamping mutation and a raw upsert;
 	// createdBy still attributes this new version to its actual writer.
 	peer := rankActorCtx(multi, auth.RoleWriter)
-	if _, err := receiver.Execute(peer, fmt.Sprintf(`mutation updateTemplate(templateId: %s, name: "Peer edit", subject: "Edited", textBody: "Edited")`, langparser.QuoteString(template))); err != nil {
+	if _, err := receiver.Execute(auth.ContextWithInternalOrigin(peer), fmt.Sprintf(`mutation updateTemplate(status: "draft", versionTime: "2030-01-01T00:00:00Z", templateId: %s, name: "Peer edit", subject: "Edited", textBody: "Edited")`, langparser.QuoteString(template))); err != nil {
 		t.Fatal(err)
 	}
 	if err := organizationInsert(t, receiver, peer, "v1:campaigns:audience", audience, map[string]any{"name": "Peer raw edit", "ownerUserId": multi}); err != nil {
@@ -202,9 +231,7 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 		t.Fatal("authorized receiver stream denied organization event")
 	}
 	seedMembership(t, engine, "g-"+acme, multi, "removed")
-	if read() != 0 {
-		t.Fatal("removed member retained campaign access on other replica")
-	}
+	read(0)
 	if AdmitSubscriptionRow(streamCtx, remote, "v1:campaigns:campaign", campaign, eventPayload) != SubscriptionDeny {
 		t.Fatal("open receiver stream retained revoked organization membership")
 	}

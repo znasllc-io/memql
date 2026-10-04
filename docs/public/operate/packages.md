@@ -832,3 +832,101 @@ and the log -- not where the stop is.
 | The auto-deploy switch and the plan comparison | `component/packages/autodeploy.go` |
 | The Fleet route (a seam, with no consumer) | `component/packages/fleetbuild.go` |
 | The surface | `clients/os/src/apps/deployables/` |
+
+
+## Campaign email configuration
+
+The same `memql-package.yaml` can carry public email choices alongside its
+Deployables. The optional `campaigns` section contains one Azure configuration
+and an organization binding for each domain:
+
+```yaml
+campaigns:
+  azure:
+    tenantId: 11111111-1111-1111-1111-111111111111
+    subscriptionId: 22222222-2222-2222-2222-222222222222
+    resourceGroup: client-email
+    dataLocation: United States
+  domains:
+    - organization: example.com
+      domain: example.com
+      emailService: example-email
+      communicationService: example-delivery
+      sender:
+        username: news
+        displayName: Example
+        replyTo: support@example.com
+      dns:
+        - purpose: Domain
+          name: example.com
+          type: TXT
+          value: ms-domain-verification=provider-supplied-value
+          ttl: 3600
+```
+
+`organization` is a portable label, normally the organization's domain. It is
+not a cluster row ID and grants no access. Each organization has its own
+services, domain and sender. Optional `createResourceGroup: true` requires
+`resourceGroupLocation`; omit them to select an existing group. DNS purposes are
+`Domain`, `SPF`, `DKIM` and `DKIM2`; copy the actual provider records. Merge SPF
+with the existing policy, rather than publishing a second SPF record. There is
+no MX change: campaign sending does not create a receiving mailbox.
+
+An owner or developer can use **Campaigns → Settings → Package configuration**
+to load a file, review one package organization, and import it into the explicitly
+selected organization on this cluster. Import saves setup choices; it never
+creates Azure resources, sends email, changes DNS, transfers resource ownership,
+or accepts a claimed verification status. The existing wizard obtains Microsoft
+consent once for the cluster, provisions reviewed resources, verifies DNS live,
+and creates the selected sender. A working connection with different resources
+or a different active sender is refused until explicitly reviewed/disconnected.
+
+**Export configuration** reads the selected organization's current Azure DNS
+records and merges its public configuration into the loaded file. All declared
+Deployables, builds, assets, store bindings, addresses and other organizations
+remain. Load the existing package first when it is not supplied by the installed
+instance; exporting without one starts a campaign-only package. Export downloads
+the file for review and commit to the instance/product repository. Deployables'
+address export also preserves the campaign section.
+
+Tokens, access keys, client secrets, unsubscribe keys and “verified” flags are
+not manifest fields and are rejected. Credentials stay encrypted in the cluster
+secret store. A package file is portable configuration, not an authorization
+backup; another installation must obtain its own consent and check ownership.
+Resources tagged for a different cluster or organization are never adopted just
+because the file names them. The unsubscribe key and URL are installation
+infrastructure, described in [Campaign sending](campaign-sending.md#installation-defaults).
+
+### Installation defaults from the product repository
+
+To supply the file during setup, the instance composes a ConfigMap named
+`memql-package` with a `memql-package.yaml` key. A repository-root Kustomization
+can generate it directly from the package file:
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+configMapGenerator:
+  - name: memql-package
+    files: [memql-package.yaml]
+    options:
+      disableNameSuffixHash: true
+```
+
+Apply this Kustomization during bring-up, or generate a ConfigMap snapshot for
+both overlays with `kubectl kustomize .`. Keep that generated file beside its
+own Kustomization in a child directory, check it against regenerated output in
+CI, and compose that child directory from both overlays. Nested Kustomizations
+cannot reference their own ancestor root; keep the normal load restrictions
+instead of disabling them to reach this file. The package YAML remains the
+single authored source. Engine
+nodes mount this optional ConfigMap at `/etc/memql/package`; they read it afresh
+when setup is opened. Kubernetes projection updates may take a short time.
+Missing files mean no defaults; invalid files produce a setup error.
+
+The mounted choices prefill an unconfigured cluster and a matching organization's
+form. They never overwrite a saved connection, so edits are reviewed through
+explicit import. Publishing a website package does not grant permission to
+provision email; email import/setup is a separate explicit action. Changes to
+campaign declarations also change the package plan fingerprint and require review
+when an automatic website deployment encounters them.

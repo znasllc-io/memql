@@ -137,6 +137,7 @@ package.json
 !sdk/ts/package.json
 !sdk/ts-viewkit/package.json
 !clients/os/package.json
+!editors/productivity/package.json
 package-lock.json
 !sdk/ts/package-lock.json
 !sdk/ts-viewkit/package-lock.json
@@ -146,6 +147,7 @@ package-lock.json
 # reproducible in CI and in the image build. The negation below names a file
 # that IS tracked, per the rule above.
 !clients/os/package-lock.json
+!editors/productivity/package-lock.json
 node_modules/
 
 # The shell's build output. Produced by `make os-build` (vite) and copied into
@@ -223,3 +225,9 @@ docs/public/reference/_generated/*
 
 # Local-only Cockpit installer artifact override (never credentials).
 clients/os/local-cockpit-test.json
+
+# VS Code web extension-host test downloads
+.vscode-test-web/
+
+# VS Code host-test downloads (not extension source).
+/.vscode-test/

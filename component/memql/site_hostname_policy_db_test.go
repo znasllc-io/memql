@@ -127,6 +127,12 @@ func runSiteMutation(t *testing.T, ctx context.Context, eng *MemQLEngine, name s
 // test can assert on a REFUSAL rather than only on a success.
 func createSiteRaw(t *testing.T, ctx context.Context, eng *MemQLEngine, args map[string]any) (string, error) {
 	t.Helper()
+	// These fixtures explicitly choose the installation organization, just
+	// as the operator now must. Membership-scoped cases retain their own choice.
+	ac, _ := auth.AccessFromContext(ctx)
+	if _, supplied := args["accountId"]; !supplied && ac != nil && !ac.Synthetic && organizationOperator(ctx) {
+		args["accountId"] = "self"
+	}
 	return runSiteMutation(t, ctx, eng, "createSite", args)
 }
 
@@ -430,13 +436,14 @@ func TestSiteSeededBySystemActorStaysClusterOwnedAcrossReMaterialization(t *test
 	id := "site-seed-" + uniqueSuffix("site")
 	ctx := systemSiteCtx()
 	args := map[string]any{
-		"siteId":      id,
-		"hostname":    "portal." + siteTestDomain,
-		"bundleRef":   "file:///app/os",
-		"status":      "live",
-		"apiProxy":    true,
-		"systemOwned": true,
-		"title":       "MemQL Portal",
+		"siteId":               id,
+		"hostname":             "portal." + siteTestDomain,
+		"bundleRef":            "file:///app/os",
+		"status":               "live",
+		"apiProxy":             true,
+		"systemOwned":          true,
+		"title":                "MemQL Portal",
+		"extensionRuntimePath": "/editor/",
 	}
 
 	storedId, err := createSiteRaw(t, ctx, eng, args)
@@ -450,6 +457,9 @@ func TestSiteSeededBySystemActorStaysClusterOwnedAcrossReMaterialization(t *test
 			t.Fatalf("re-materialization %d was refused: %v", i+1, err)
 		}
 		payload := latestPayload(t, ctx, db, conceptPlatformSite, storedId)
+		if payload["extensionRuntimePath"] != "/editor/" {
+			t.Fatalf("seeded runtime declaration was lost by createSite: %v", payload["extensionRuntimePath"])
+		}
 		if owner := strings.TrimSpace(stringFromAny(payload["ownerUserId"])); owner != "" {
 			t.Fatalf("after re-materialization %d the seeded site is owned by %q, want "+
 				"CLUSTER-OWNED (empty). The portal is the platform's row -- an owner here means "+

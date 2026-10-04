@@ -1,17 +1,12 @@
-// Opening a file hands off to VS Code (spec D3) -- there is no in-OS editor
-// by design. The URL shape is the portal's existing handoff (memql#4251)
-// with kind=artifact; the extension side lands in its own epic, so the
-// fallback message is the permanent UX for "nothing answered".
+// File content opens in the configured VS Code host. Browser is the default;
+// installed VS Code and Cursor use their extension URI handlers.
+
+import { editorArtifactURL } from "./editorPreference";
 
 export const VSCODE_HANDOFF_TIMEOUT_MS = 2500;
 
-export function artifactHandoffUrl(clusterDomain: string, artifactId: string): string {
-  return (
-    "vscode://znasllc.memql/open?v=1" +
-    `&cluster=${encodeURIComponent(clusterDomain)}` +
-    "&kind=artifact" +
-    `&id=${encodeURIComponent(artifactId)}`
-  );
+export function artifactHandoffUrl(clusterDomain: string, artifactId: string, name?: string): string {
+  return editorArtifactURL(clusterDomain, artifactId, name);
 }
 
 /**
@@ -33,15 +28,30 @@ export function conceptHandoffUrl(clusterDomain: string, conceptId: string): str
 }
 
 export interface HandoffPorts {
-  /** Fires the vscode: URL (injectable so tests never navigate). */
+  /** Opens the editor URL (injectable so tests never navigate). */
   navigate: (url: string) => void;
+  /** Reserve a new tab within a user gesture before an asynchronous metadata read. */
+  reserve?: () => { navigate: (url: string) => void; close: () => void };
   /** setTimeout-compatible scheduler (injectable time). */
   schedule: (fn: () => void, ms: number) => () => void;
 }
 
 export const browserHandoffPorts: HandoffPorts = {
+  reserve: () => {
+    const tab = window.open("about:blank", "_blank");
+    if (!tab) throw new Error("Allow this app to open a new tab, then open the file again.");
+    tab.opener = null;
+    const referrer = tab.document.createElement("meta");
+    referrer.name = "referrer"; referrer.content = "no-referrer";
+    tab.document.head.append(referrer);
+    return { navigate: url => tab.location.replace(url), close: () => tab.close() };
+  },
   navigate: (url) => {
-    window.location.href = url;
+    if (url.startsWith("https://")) {
+      window.open(url, "_blank", "noopener,noreferrer");
+    } else {
+      window.location.href = url;
+    }
   },
   schedule: (fn, ms) => {
     const t = setTimeout(fn, ms);
@@ -58,8 +68,11 @@ export function openInVsCode(
   artifactId: string,
   onNoAnswer: () => void,
   ports: HandoffPorts = browserHandoffPorts,
+  name?: string,
 ): () => void {
-  ports.navigate(artifactHandoffUrl(clusterDomain, artifactId));
+  const url = artifactHandoffUrl(clusterDomain, artifactId, name);
+  ports.navigate(url);
+  if (url.startsWith("https://")) return () => {};
   return ports.schedule(() => {
     if (!document.hidden) onNoAnswer();
   }, VSCODE_HANDOFF_TIMEOUT_MS);
@@ -79,10 +92,11 @@ export function openHandoff(
   ports: HandoffPorts = browserHandoffPorts,
 ): () => void {
   ports.navigate(url);
+  if (url.startsWith("https://")) return () => {};
   return ports.schedule(() => {
     if (!document.hidden) onNoAnswer();
   }, VSCODE_HANDOFF_TIMEOUT_MS);
 }
 
 export const VSCODE_NO_ANSWER_MESSAGE =
-  "VS Code did not answer. Is it installed, with the MemQL extension signed in to this cluster?";
+  "The editor did not answer. Check that it is installed with MemQL and MemQL Productivity Tools, or choose the browser in Files settings.";

@@ -308,7 +308,7 @@ func TestCredentialResolutionIsOwnerScopedOverRealRows(t *testing.T) {
 
 	// ---- A registers a package fetching under it ----
 	mustExecute(t, eng, ctxA, fmt.Sprintf(
-		`mutation createPackage(packageId: %s, name: "acme", sourceKind: "repo", repoUrl: %s, credentialId: %s)`,
+		`mutation createPackage(accountId: "self", packageId: %s, name: "acme", sourceKind: "repo", repoUrl: %s, credentialId: %s)`,
 		langparser.QuoteString(pkgA), langparser.QuoteString(repoUrl), langparser.QuoteString(credentialId)))
 	rowA, err := s.packageById(ctxA, pkgA)
 	if err != nil || rowA == nil {
@@ -393,7 +393,7 @@ func TestCredentialResolutionIsOwnerScopedOverRealRows(t *testing.T) {
 	// (2) B registers a package naming A's credential: refused by name,
 	// before any request, and skipped by the poll.
 	mustExecute(t, eng, ctxB, fmt.Sprintf(
-		`mutation createPackage(packageId: %s, name: "acme-b", sourceKind: "repo", repoUrl: %s, credentialId: %s)`,
+		`mutation createPackage(accountId: "self", packageId: %s, name: "acme-b", sourceKind: "repo", repoUrl: %s, credentialId: %s)`,
 		langparser.QuoteString(pkgB), langparser.QuoteString(repoUrl+"-b"), langparser.QuoteString(credentialId)))
 	rowB := mustPackage(t, s, ctxB, pkgB)
 	gh.reset()

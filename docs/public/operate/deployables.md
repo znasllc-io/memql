@@ -534,12 +534,15 @@ derivation the OS host uses).
 - It must not be reserved.
 
 **The reserved set is derived, not listed.** It is `frontdoor.Roles()` (`api`,
-`identity`, `mcp`) plus the platform's own `os`, plus the retired `portal`, `www`, `admin` and
-`mail`. Deriving it means a new role can never become claimable by forgetting
-to add it here. The last three are different in kind: nothing serves them
-today, and that is precisely why they are held -- they are the labels a person
-reads as the organization's rather than a tenant's, and `mail` is where a mail
-host would land if one is ever added.
+`identity`, `mcp`) plus `frontdoor.PlatformSites()` (`os`, `vscode`), plus the
+six held labels in `squatReservedSiteLabels`
+(`component/memql/platform_site_hostname_policy.go`). Deriving it means a new
+role or platform site can never become claimable by forgetting to add it here.
+The held six are different in kind. `www`, `admin`, `mail` and `portal` are <!-- retired-vocabulary-ok: `portal` is a reserved site label in squatReservedSiteLabels -->
+served by nothing, and that is precisely why they are held -- they are the
+labels a person reads as the organization's rather than a tenant's, and `mail`
+is where a mail host would land if one is ever added. `voice` and `turn` are
+the LiveKit signaling and TURN hosts of [Ask and voice](ask-and-voice.md).
 
 Any other hostname -- a custom apex, a different domain -- stays
 **cluster-owner-only**, as before -- but no longer hand-certified. A client's

@@ -139,6 +139,12 @@ func (e *MemQLEngine) refuseOrganizationActionCapability(ctx context.Context, fn
 // lacks and prior carries was REMOVED, which is a change like any other: a
 // hook's field write with an absent value deletes the field.
 func (e *MemQLEngine) validateOrganizationSensitiveChanges(ctx context.Context, concept string, prior, next map[string]any) error {
+	// Tests are engine-owned instructions. Even an organization operator must
+	// use the governed actions; a raw row write cannot retarget a queued test.
+	if !auth.OriginFromContext(ctx).IsInternal() && (concept == "v1:campaigns:testSettings" ||
+		concept == "v1:campaigns:campaign" && (stringFromAny(prior["testSourceCampaignId"]) != "" || stringFromAny(next["testSourceCampaignId"]) != "")) {
+		return fmt.Errorf("campaign tests must be changed through their governed actions")
+	}
 	if concept != "v1:platform:site" && concept != "v1:platform:package" {
 		return nil
 	}

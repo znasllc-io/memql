@@ -226,7 +226,12 @@ const CONSTRUCT: CatalogConstruct = {
 };
 
 // The panel only calls these from a click, and this file never clicks.
-const DEPS = { viewSourceFromCluster: () => Promise.resolve(), browseRows: () => Promise.resolve() };
+const DEPS = {
+  viewSourceFromCluster: () => Promise.resolve(),
+  browseRows: () => Promise.resolve(),
+  openInOs: () => Promise.resolve(),
+  run: () => Promise.resolve(),
+};
 
 const CONTEXT = { subscriptions: [] as { dispose(): unknown }[] } as unknown as ExtensionContext;
 

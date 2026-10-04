@@ -24,9 +24,9 @@ import type { ReleaseListing } from "../src/version/releaseCache.js";
 import { newLocalRun, type Instance, type Run } from "../src/state/deployments.js";
 import {
   buildCatalog,
+  instanceConnectionWord,
   runDuration,
   runsForSelected,
-  selectedInstanceContext,
   selectedViewDescription,
   type CatalogInputs,
 } from "../src/state/deploymentsCatalog.js";
@@ -171,77 +171,69 @@ function instanceOf(over: Partial<Instance> = {}): Instance {
     kind: "local",
     presence: "installed-healthy",
     connected: true,
+    registered: true,
     version: "v0.19.1",
+    versionLabel: "v0.19.1",
     ...over,
   };
 }
 
-test("the description names the cluster, its health and its version", () => {
-  assert.equal(selectedViewDescription(instanceOf(), undefined), "local · healthy · v0.19.1");
+test("the heading names the cluster, where this editor stands, and its version", () => {
+  assert.equal(selectedViewDescription(instanceOf(), undefined, "connected"), "local · Connected · v0.19.1");
 });
 
-test("an update is its own segment, and says so", () => {
-  // NOT the row's wording. A tree row appends the clause to the version and
-  // reads `v0.19.1 - v0.20.0 available`, which is one field; here the version
-  // is its own segment, so a bare `v0.20.0 available` beside `v0.19.1` would
-  // read as two versions with no statement about either.
-  assert.equal(
-    selectedViewDescription(instanceOf(), LISTING),
-    "local · healthy · v0.19.1 · update v0.20.0 available"
+test("the owner's case: a signed-out local cluster says Sign in, and its branch build, never 'unknown'", () => {
+  // Reproduced from the old heading, which said "local · not answering ·
+  // unknown" for exactly this machine.
+  const description = selectedViewDescription(
+    instanceOf({ version: undefined, versionLabel: "main @ 3f2a9c1" }),
+    undefined,
+    "signIn",
   );
+  assert.equal(description, "local · Sign in · main @ 3f2a9c1");
+  assert.ok(!description.includes("unknown"));
+  assert.ok(!description.includes("not answering"));
+});
+
+test("an update is its own segment", () => {
+  assert.equal(selectedViewDescription(instanceOf(), LISTING, "connected"), "local · Connected · v0.19.1 · v0.20.0 available");
 });
 
 test("a cluster already on the newest release says nothing extra", () => {
   assert.equal(
-    selectedViewDescription(instanceOf({ version: "v0.20.0" }), LISTING),
-    "local · healthy · v0.20.0"
+    selectedViewDescription(instanceOf({ version: "v0.20.0", versionLabel: "v0.20.0" }), LISTING, "connected"),
+    "local · Connected · v0.20.0",
   );
 });
 
-test("an unreachable selected cluster keeps its heading and says it is not answering", () => {
-  // Design D2's distinction, at the description level: selected-but-unreachable
-  // is not the empty state, and this line is where the Deployments view carries
-  // it.
+test("a dropped local cluster whose front door is silent reads Not running", () => {
   assert.equal(
-    selectedViewDescription(instanceOf({ presence: "installed-unreachable" }), undefined),
-    "local · not answering · v0.19.1"
+    selectedViewDescription(instanceOf({ presence: "installed-unreachable" }), undefined, "unreachable"),
+    "local · Not running · v0.19.1",
   );
 });
 
 test("a machine with nothing installed makes no version claim", () => {
   assert.equal(
-    selectedViewDescription(instanceOf({ presence: "absent", version: undefined }), LISTING),
-    "local · not installed"
+    selectedViewDescription(instanceOf({ presence: "absent", version: undefined, versionLabel: undefined }), LISTING),
+    "local · Not installed",
   );
 });
 
-test("an unresolvable version prints the word, never a blank", () => {
-  // `displayVersion`'s rule, carried into the heading: a blank reads as a fact
-  // about the cluster ("it has no version") when it is a fact about the read.
+test("a version nothing names is left out, not printed as 'unknown'", () => {
   assert.equal(
-    selectedViewDescription(instanceOf({ version: undefined }), undefined),
-    "local · healthy · unknown"
+    selectedViewDescription(instanceOf({ version: undefined, versionLabel: undefined }), undefined, "connected"),
+    "local · Connected",
   );
 });
 
-test("a checkout-mode cluster names the checkout, and is offered no update", () => {
-  // memql#4246's rule at the heading level. The recorded release is not what
-  // the cluster is running, so "an update to it is available" would be a claim
-  // about a version it is not on.
+test("a cluster running its own build says so, and is offered no release update", () => {
   const description = selectedViewDescription(
-    instanceOf({
-      imageSource: "checkout",
-      rebuild: {
-        commit: "abc1234def",
-        ref: "main",
-        dirtyCount: 4,
-        nodes: "",
-        recordedAt: "2026-08-14T10:00:00Z",
-      },
-    }),
-    LISTING
+    instanceOf({ imageSource: "checkout", versionLabel: "Your build abc1234" }),
+    LISTING,
+    "connected",
   );
-  assert.equal(description, "local · healthy · checkout abc1234 (4 uncommitted)");
+  assert.equal(description, "local · Connected · Your build abc1234");
   assert.ok(!description.includes("available"), "a checkout build was offered a release update");
 });
 
@@ -249,26 +241,20 @@ test("no selection means no heading", () => {
   assert.equal(selectedViewDescription(undefined, LISTING), "");
 });
 
-test("a remote cluster's heading names it, not the local one", () => {
+test("a remote cluster's heading names it, and says Can't reach rather than 'not answering'", () => {
   assert.equal(
-    selectedViewDescription(instanceOf({ name: "staging", kind: "remote", version: "v0.9.2" }), undefined),
-    "staging · healthy · v0.9.2"
+    selectedViewDescription(instanceOf({ name: "staging", kind: "remote", versionLabel: "v0.9.2" }), undefined, "unreachable"),
+    "staging · Can't reach · v0.9.2",
   );
 });
 
-// ---------------------------------------------------------------------------
-// the title menu's scope
-// ---------------------------------------------------------------------------
-
-test("the instance context key carries the row vocabulary, and empties with the selection", () => {
-  // The three values are the ones the row's contextValue carried; the fourth
-  // case -- nothing selected -- is "" rather than a guess, because inventing a
-  // value is how "no cluster" would come to mean "local" and put Uninstall in
-  // front of an operator with nothing to uninstall.
-  assert.equal(selectedInstanceContext(instanceOf()), "memqlLocalInstance");
-  assert.equal(selectedInstanceContext(instanceOf({ presence: "absent" })), "memqlLocalInstanceAbsent");
-  assert.equal(selectedInstanceContext(instanceOf({ kind: "remote" })), "memqlRemoteInstance");
-  assert.equal(selectedInstanceContext(undefined), "");
+test("a connection the heading is handed through its facts reads the same way", () => {
+  const instance = instanceOf();
+  assert.equal(instanceConnectionWord(instance, { clusterName: "local", connected: false, word: "signIn" }), "signIn");
+  assert.equal(instanceConnectionWord(instance, { clusterName: "local", connected: true }), "connected");
+  assert.equal(instanceConnectionWord(instance, { clusterName: "local", connected: false }), "unreachable");
+  assert.equal(instanceConnectionWord(instance, { clusterName: "staging", connected: true }), "none");
+  assert.equal(instanceConnectionWord(instance, undefined), "none");
 });
 
 // ---------------------------------------------------------------------------

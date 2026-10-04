@@ -1,0 +1,27 @@
+/// An encrypted message captured by an explicitly configured test transport.
+/// There is no Internet receipt or external delivery implied by this record.
+/// Bodies and recipient addresses are decrypted only by the gated email capability.
+@displayCard(primary="id", secondary="createdAt")
+@rowAuthz(clusterOwner)
+concept capturedMessage {
+  encryptedValue string! @description("Encrypted message, including recipient and authentication links. Never broadcast as plaintext.")
+}
+
+/// Encrypted Azure sign-in or organization transport state. Read through the
+/// gated email capabilities only; plaintext credentials never enter the feed.
+// @no-displayCard: Private encrypted connection state has no human-facing identity; the gated setup capability supplies its display fields.
+@rowAuthz(clusterOwner)
+concept connectionState {
+  encryptedValue string!
+}
+
+/// Private provider receipt. The integration checks organization authority before
+/// projecting status; addresses, message content and credentials are not stored.
+// @no-displayCard: Internal transport journal; the gated connection detail shows processing status.
+@rowAuthz(clusterOwner)
+concept sendOperation {
+  accountId string!
+  status string!
+  nextPollAt datetime!
+  encryptedValue string!
+}

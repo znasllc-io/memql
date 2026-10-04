@@ -112,8 +112,8 @@ func TestSharedShopifyConnectionAcrossNodes(t *testing.T) {
 		t.Fatalf("begin: %v", out)
 	}
 	u, _ := url.Parse(out["authorizeUrl"].(string))
-	if got := u.Query().Get("scope"); got != "unauthenticated_read_product_listings,unauthenticated_read_checkouts,unauthenticated_write_checkouts,unauthenticated_read_customers,read_products,read_inventory,read_locations,read_orders" {
-		t.Fatalf("shared connection requested unrelated mirror permissions: %s", got)
+	if got := u.Query().Get("scope"); got != "unauthenticated_read_product_listings,unauthenticated_read_checkouts,unauthenticated_write_checkouts,unauthenticated_read_customers,write_products,read_inventory,read_locations,read_orders" {
+		t.Fatalf("shared connection must grant product-metafield delivery without unrelated mirror permissions: %s", got)
 	}
 	states := &identity.Store{Engine: b}
 	state, err := states.LookupGithubConnectState(context.Background(), identity.HashConnectState(u.Query().Get("state")))

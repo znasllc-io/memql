@@ -1,0 +1,199 @@
+{
+  "name": "memql-productivity-tools",
+  "displayName": "MemQL Productivity Tools",
+  "description": "Documents, campaign templates, PDFs and human-reviewed suggestions connected to MemQL.",
+  "version": "0.1.2",
+  "publisher": "znasllc",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/znasllc-io/memql.git",
+    "directory": "editors/productivity"
+  },
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "icon": "icons/memql.png",
+  "main": "./out/extension.js",
+  "browser": "./out/webExtension.js",
+  "extensionDependencies": [
+    "znasllc.memql"
+  ],
+  "activationEvents": [
+    "onFileSystem:memql-file",
+    "onUri"
+  ],
+  "capabilities": {
+    "virtualWorkspaces": {
+      "supported": true
+    },
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Offline editing is available. Connecting to MemQL requires a trusted workspace."
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "memql.productivity.newTemplate",
+        "title": "New Email Template",
+        "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.previewTemplate",
+        "title": "Preview Email Template",
+        "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.openFile",
+        "title": "Open File from MemQL",
+        "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.compareLatest",
+        "title": "Compare with Latest Revision",
+        "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.useComparedRevision",
+        "title": "Use Compared Revision as Save Base",
+        "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.markdown.source",
+        "title": "Markdown Source",
+        "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.markdown.reading",
+        "title": "Markdown Reading View",
+        "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.markdown.split",
+        "title": "Markdown Split View",
+        "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.template.source",
+        "title": "Email Template Source",
+        "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.template.preview",
+        "title": "Email Template Preview",
+        "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.template.split",
+        "title": "Email Template Split View",
+        "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.templateFromExamples",
+        "title": "Create Email from Examples",
+        "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.resumeEmailComposition",
+        "title": "Open Last Email Composition",
+        "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.checkTools",
+        "title": "Check Editor Tools",
+        "category": "MemQL"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "memql.productivity.pdf",
+        "displayName": "MemQL PDF",
+        "selector": [
+          {
+            "filenamePattern": "*.pdf"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "memql.productivity.markdown",
+        "displayName": "MemQL Markdown",
+        "selector": [
+          {
+            "filenamePattern": "*.md"
+          },
+          {
+            "filenamePattern": "*.markdown"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "memql.productivity.email",
+        "displayName": "MemQL Email Template",
+        "selector": [
+          {
+            "filenamePattern": "*.email.json"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "jsonValidation": [
+      {
+        "fileMatch": [
+          "*.email.json"
+        ],
+        "url": "./media/email.schema.json"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "memql.productivity.markdown.reading",
+          "when": "editorLangId == markdown",
+          "group": "navigation"
+        },
+        {
+          "command": "memql.productivity.markdown.split",
+          "when": "editorLangId == markdown",
+          "group": "navigation"
+        },
+        {
+          "command": "memql.productivity.template.preview",
+          "when": "resourceFilename =~ /\\.email\\.json$/",
+          "group": "navigation"
+        },
+        {
+          "command": "memql.productivity.template.split",
+          "when": "resourceFilename =~ /\\.email\\.json$/",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc --noEmit && node esbuild.js",
+    "vscode:prepublish": "npm run compile",
+    "test": "node esbuild.test.js && node --test dist-test/*.test.js",
+    "package": "npm run compile && npx --yes @vscode/vsce@latest package --no-dependencies"
+  },
+  "dependencies": {
+    "@znasllc-io/memql-sdk-core": "file:../../sdk/ts",
+    "markdown-it": "14.3.1",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "6.3.289"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.2.0",
+    "@types/node": "^20.11.0",
+    "@types/vscode": "~1.91.0",
+    "esbuild": "^0.28.1",
+    "jsdom": "26.1.0",
+    "typescript": "^5.4.0"
+  }
+}

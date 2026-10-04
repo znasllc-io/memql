@@ -32,6 +32,9 @@ const runtimeConfigPath = "/runtime-config.json"
 // Additive-only shape: an older cached bundle must keep working against a
 // newer node, so a field is added, never a required one removed.
 type RuntimeConfig struct {
+	// EmailAppEnabled controls the operator test inbox in OS, independently of delivery.
+	EmailAppEnabled bool `json:"emailAppEnabled"`
+
 	// IdentityURL is the browser-reachable identity-service origin. Read from
 	// the same env every verifier-consuming node already carries --
 	// component/envregistry/domain.go's ApplyDomainDerivations sets it once at
@@ -261,6 +264,7 @@ func runtimeConfigForSite(ctx context.Context, site *Site, env func(string) stri
 	}
 
 	return RuntimeConfig{
+		EmailAppEnabled:    strings.ToLower(strings.TrimSpace(env("MEMQL_EMAIL_APP_ENABLED"))) != "false",
 		IdentityURL:        identityURL,
 		IdentityAPIBaseURL: "",
 		OAuthClientID:      clientIDForHostname(hostname, env("MEMQL_IDENTITY_REGISTERED_CLIENTS")),

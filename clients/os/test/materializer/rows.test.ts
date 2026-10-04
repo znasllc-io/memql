@@ -1,3 +1,4 @@
+import { recipeFacts } from "../../src/apps/materializer/actions";
 import { describe, expect, it } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -173,8 +174,8 @@ describe("the words", () => {
 });
 
 describe("acts follow the state", () => {
-  const noDraft = { sourceCount: 0, hasContent: false, hasFormat: true, submitting: false };
-  const ready = { sourceCount: 2, hasContent: false, hasFormat: true, submitting: false };
+  const noDraft = { sourceCount: 0, hasContent: false, hasFormat: true, hasOrganization: true, submitting: false };
+  const ready = { sourceCount: 2, hasContent: false, hasFormat: true, hasOrganization: true, submitting: false };
 
   // AN ILLEGAL ACT IS ABSENT, NEVER DISABLED.
   it("offers nothing to compose without content or sources, and says why on the bar", () => {
@@ -304,5 +305,22 @@ describe("a template row", () => {
     expect(t.placeholders).toHaveLength(1);
     expect(t.placeholders[0]?.name).toBe("quarter");
     expect(t.placeholders[0]?.required).toBe(true);
+  });
+});
+
+
+describe("email reference recipes", () => {
+  it("retains the organization, output kind, and explicit resource choices", () => {
+    const row = compositionRow({ accountIds: ["client-a"], outputKind: "email_template", format: "json", sources: [
+      {kind: "library_file", ref: "resources", label: "brand.zip", content: true, includeImages: true},
+      {kind: "library_file", ref: "example", label: "example.png", content: true, includeImages: false},
+      {kind: "query", ref: "query products()", label: "Products"},
+    ] });
+    const recipe = recipeFacts(compositionFromRow(row), sourcesOf(row));
+    expect(recipe).toMatchObject({ accountIds: ["client-a"], outputKind: "email_template", format: "json", sourceSelectors: [
+      {kind: "library_file", selector: "resources", label: "brand.zip", content: true, includeImages: true},
+      {kind: "library_file", selector: "example", label: "example.png", content: true, includeImages: false},
+      {kind: "concept_query", selector: "query products()", label: "Products"},
+    ] });
   });
 });

@@ -7,12 +7,23 @@ go 1.26.1
 toolchain go1.27.1
 
 require (
+	github.com/uptrace/bun v1.2.18
+	github.com/uptrace/bun/dialect/pgdialect v1.2.18
+	github.com/uptrace/bun/driver/pgdriver v1.2.18
 	github.com/znasllc-io/memql/component/auth v0.0.0
 	github.com/znasllc-io/memql/component/database v0.0.0
 	github.com/znasllc-io/memql/component/language v0.0.0
 	github.com/znasllc-io/memql/component/memql v0.0.0
 	github.com/znasllc-io/memql/component/secret v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
+)
+
+require (
+	github.com/aymerick/douceur v0.2.0 // indirect
+	github.com/go-pdf/fpdf v0.9.0 // indirect
+	github.com/gorilla/css v1.0.1 // indirect
+	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
+	github.com/yuin/goldmark v1.8.6 // indirect
 )
 
 require (
@@ -44,15 +55,13 @@ require (
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/tmthrgd/go-hex v0.0.0-20190904060850-447a3041c3bc // indirect
-	github.com/uptrace/bun v1.2.18 // indirect
-	github.com/uptrace/bun/dialect/pgdialect v1.2.18 // indirect
-	github.com/uptrace/bun/driver/pgdriver v1.2.18 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
 	github.com/znasllc-io/memql/component/actions v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/compose v0.0.0
 	github.com/znasllc-io/memql/component/config v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/envregistry v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/events v0.0.0 // indirect
@@ -124,3 +133,5 @@ replace github.com/znasllc-io/memql/dsl => ../../dsl
 replace github.com/znasllc-io/memql/component/frontdoor => ../../component/frontdoor
 
 replace github.com/znasllc-io/memql/component/metrics => ../../component/metrics
+
+replace github.com/znasllc-io/memql/component/compose => ../../component/compose

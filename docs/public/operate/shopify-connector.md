@@ -339,6 +339,40 @@ privacy delivery on a per-store URL is held to the same body check, and a
 **paused** store still queues its privacy jobs -- a pause stops the mirror,
 not the merchant's obligations.
 
+### Upgrading from the per-store compliance URL
+
+Earlier versions of this step pointed the three topics at the per-store
+`/inbound/shopify-<storeId>`. For a store connected through **Connect
+Shopify** (the managed app), that URL now **refuses** all three: the managed
+app signs a store's per-store deliveries with the same secret as the
+app-level ones, so a captured privacy delivery would replay onto it. A
+cluster still configured the old way therefore refuses every privacy request
+for those stores -- and Shopify, having had its `202` from the receiver, does
+not send a refused one again.
+
+You cannot miss it:
+
+- the storefront's **Store** panel opens with an error naming how many were
+  refused and the exact URL to configure;
+- `shopifyStoreHealth` reports `privacyDeliveries` per store (see
+  [What the numbers mean](#what-the-numbers-mean));
+- each refused delivery's staged `v1:platform:inboundRequest` row is
+  `failed`, and its `lastError` names the app-level URL;
+- each is audited as `shopify_privacy_delivery_refused` (outcome `blocked`,
+  target the store) and logged at ERROR.
+
+The fix is on Shopify's side only: in the app's configuration (Dev Dashboard,
+or Partner Dashboard for an app created there), set `customers/data_request`,
+`customers/redact` and `shop/redact` to
+`https://api.<your-domain>/inbound/shopify`. Nothing on the cluster changes.
+Every refusal counted before the fix is a request the automation did NOT
+honour; its staged row keeps the signed body (the customer id and Shopify's
+request id), which is what following it up by hand starts from.
+
+A store connected with its **own** custom app, rather than through Connect,
+is unaffected: its per-store URL keeps accepting the three topics, verified
+by that store's own webhook secret.
+
 What each one does:
 
 The three arrive as ordinary webhooks and are turned into
@@ -391,8 +425,9 @@ Four MemQL-origin concepts project today:
 | `v1:commerce:creditLimit` | `memql.creditLimit`, `.creditLimitStatus` | Company location | private |
 
 A row change appends a `v1:platform:outboxEntry` in the write's own
-transaction; the runtime's drain worker hands it to the connector, which maps
-it to `metafieldsSet` (or, above 250 metafields, a staged
+transaction; the runtime's drain worker hands its row reference to the connector.
+The connector reads the current source row under its own identity on every
+attempt, including retries, and maps it to `metafieldsSet` (or, above 250 metafields, a staged
 `bulkOperationRunMutation`).
 
 **A Shopify `userError` dead-letters. It does not retry.** A validation
@@ -400,8 +435,14 @@ failure arrives inside a 200 response and will fail identically forever;
 retrying it is how a queue stops draining while every individual attempt
 looks transient -- so the connector returns it as `sync.Permanent` and the
 drain dead-letters it immediately rather than spending its attempt budget.
-Dead-lettered entries are in `outboxDeadLetters(connector: "shopify")` and on
+Dead-lettered entries are in `outboxDeadLetters(target: "shopify")` and on
 the MemQL OS Cluster app's Data origins section.
+
+Use the outbox entry's delivery outcome and the actual Shopify metafields as
+delivery evidence. The current drain does not update `productContent.status`,
+so a row may still say `draft` after delivery. For public product copy, also
+verify that the Storefront API returns the new `memql` metafields; a successful
+Admin write alone does not establish storefront visibility.
 
 Accepting a quote is the other write: `draftOrderCreate` with the company as
 `purchasingEntity`, the company's payment terms, a PO number, and
@@ -517,7 +558,9 @@ MemQL OS → Deployables → the storefront → **Store**. Per store: status, th
 granted scopes against the allowlist's needs, the protected-data level, the
 last subscription reconcile and what it changed, the cost bucket, and every
 domain's sync state with its drift counters. The development store paired to
-it, when there is one, reads beneath.
+it, when there is one, reads beneath. Privacy deliveries refused on the
+store's own URL, when there are any, read FIRST, as an error naming the URL
+to configure.
 
 Backfilling, reconciling and pausing an individual DOMAIN are not here: they
 belong to every connector, so the **Data origins** surface owns them and this
@@ -551,6 +594,15 @@ ingestion for one merchant while their deliveries keep being staged.
   without it. Learned from the origin's answers since the node started, so
   it is empty until a sweep or a delivery has run, and each replica learns
   it once.
+- **privacyDeliveries** -- `refused` is how many privacy deliveries arrived
+  on the store's per-store URL and were refused because a managed-app store
+  takes them only at the app-level URL; `lastRefusedAt` is the latest;
+  `appLevelUrl` is the URL to configure instead. Counted from the store's
+  audit trail (`shopify_privacy_delivery_refused`), so it is the same on
+  every replica. `capped: true` means the walk stopped at its bound and
+  `refused` is a floor. Anything above zero is a legal request Shopify will
+  not resend -- see [Upgrading from the per-store compliance
+  URL](#upgrading-from-the-per-store-compliance-url).
 - A domain whose generated query the origin rejects outright, or whose page
   costs more than the 1,000-point ceiling, is not retried on the next tick:
   a rejection is reported once and the domain waits its own cadence; a
@@ -589,7 +641,9 @@ a real one. It is the end-to-end proof, in the order things can break:
    and it is invisible from inside the cluster.
 6. **Metafield push.** Write a `productContent` row for that product and wait
    for the drain. The metafield should appear on the product in the Shopify
-   admin under the `memql` namespace, and the row's status should be `live`.
+   admin under the `memql` namespace, and its outbox entry should be `delivered`.
+   Check the same value through the Storefront API before calling public copy
+   live; `productContent.status` is not delivery evidence.
 7. **Storefront.** Work the first section of
    [the storefront checklist](shopify-storefront-checklist.md): the Headless
    channel's tokens, a product query, a cart, and the hand-off to

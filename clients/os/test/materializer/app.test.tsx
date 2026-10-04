@@ -1,10 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { useOs } from "../../src/chrome/state";
-import { withOs } from "../setup/harness";
 
-const h = vi.hoisted(() => ({ connection: null as unknown }));
+const h = vi.hoisted(() => ({ connection: null as unknown, download: vi.fn(async () => {}) }));
+vi.mock("../../src/apps/files/actions/download", () => ({ downloadArtifact: h.download }));
 
 vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
@@ -49,14 +48,13 @@ function mount(connection: Conn, sectionId = "composer", settings: Record<string
 describe("the composer", () => {
   it("says what it is waiting for rather than offering a control that would be refused", async () => {
     mount(fakeConnection());
-    // With no source, statement or draft, the bar explains what is needed.
+    // With no source or brief, the bar explains what is needed.
     expect(await screen.findByText(/Describe what to make/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Materialize" })).toBeNull();
   });
 
   it.each([
     ["What do you want made?", "statement", "Write a sample inventory."],
-    ["Draft", "draft", "Inventory: apples 3, pears 5."],
   ])("materializes from %s without requiring a graph source", async (label, field, value) => {
     const conn = fakeConnection({ materializeReply: { compositionId: "content-only" } as unknown as Row });
     mount(conn);
@@ -64,11 +62,27 @@ describe("the composer", () => {
     fireEvent.change(screen.getByLabelText(label), { target: { value: "   " } });
     expect(screen.queryByRole("button", { name: "Materialize" })).toBeNull();
     fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fireEvent.click(screen.getByLabelText("Organization"));
+    fireEvent.click(await screen.findByRole("option", { name: "Client A" }));
     fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     const args = conn.query.composeMaterialize.mock.calls[0]?.[0] ?? {};
-    expect(args).toMatchObject({ name: "Inventory", [field]: value });
+    expect(args).toMatchObject({ name: "Inventory", [field]: value, accountIds: ["client-a"] });
     expect(args).not.toHaveProperty("sources");
+    expect(args).not.toHaveProperty("draft");
+    expect(screen.queryByLabelText("Draft")).toBeNull();
+  });
+
+  it("requires an explicit organization before composing, even when there is only one", async () => {
+    const conn = fakeConnection();
+    mount(conn);
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Welcome" } });
+    fireEvent.change(screen.getByLabelText("What do you want made?"), { target: { value: "Use our reference image." } });
+    expect(screen.queryByRole("button", { name: "Materialize" })).toBeNull();
+    expect(conn.query.composeMaterialize).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText("Organization"));
+    fireEvent.click(await screen.findByRole("option", { name: "Client A" }));
+    expect(screen.getByRole("button", { name: "Materialize" })).toBeTruthy();
   });
 
   it("offers the marked concepts first and says which are not marked", async () => {
@@ -129,6 +143,8 @@ describe("the composer", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /invoice/ }));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Q3 report" } });
+    fireEvent.click(screen.getByLabelText("Organization"));
+    fireEvent.click(await screen.findByRole("option", { name: "Client A" }));
     fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
 
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalled());
@@ -154,6 +170,8 @@ describe("the composer", () => {
     });
     mount(conn);
     fireEvent.click(await screen.findByRole("button", { name: /invoice/ }));
+    fireEvent.click(screen.getByLabelText("Organization"));
+    fireEvent.click(await screen.findByRole("option", { name: "Client A" }));
     fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
 
     expect(await screen.findByText(/Give it a name first/)).toBeTruthy();
@@ -171,6 +189,8 @@ describe("the composer", () => {
     mount(conn);
     fireEvent.click(await screen.findByRole("button", { name: /invoice/ }));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Q3" } });
+    fireEvent.click(screen.getByLabelText("Organization"));
+    fireEvent.click(await screen.findByRole("option", { name: "Client A" }));
     fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
 
     expect(await screen.findByText(/not readable by you/)).toBeTruthy();
@@ -191,26 +211,49 @@ describe("the composer", () => {
 });
 
 describe("the provenance chain", () => {
-  it("opens Files with the backing file identity from the ready output", async () => {
-    h.connection = fakeConnection({ compositions: [compositionRow({ id: "c-output", outputFileId: "f-output" })] });
-    function Destination() {
-      const { state } = useOs();
-      const destination = Object.values(state.shell.windows).find((window) => window.appId === "files");
-      return <output data-testid="file-destination">{JSON.stringify(destination)}</output>;
-    }
-    render(withSession(withOs(<>
-      <MaterializerApp
-        sectionId="composer"
-        navigate={() => {}}
-        askContext={() => {}}
-        intent={{ id: "open", payload: { compositionId: "c-output" } }}
-        store={memoryStore()}
-      />
-      <Destination />
-    </>, "owner")));
-    fireEvent.click(await screen.findByRole("button", { name: "Open Q3 report in Files" }));
-    await waitFor(() => expect(JSON.parse(screen.getByTestId("file-destination").textContent ?? "{}"))
-      .toMatchObject({ appId: "files", sectionId: "browse", intent: { payload: { fileId: "f-output" } } }));
+  it("opens the generated file in the browser editor with its current Library name", async () => {
+    const conn = fakeConnection({ compositions: [compositionRow({ id: "c-output", outputFileId: "f-output" })],
+      outputArtifact: { id: "artifact-output" } as Row,
+      outputFile: { id: "f-output", name: "Q3 report.pdf", mimeType: "application/pdf", size: 900 } as Row });
+    h.connection = conn;
+    const tab = { navigate: vi.fn(), close: vi.fn() };
+    const ports = { reserve: vi.fn(() => tab), navigate: vi.fn(), schedule: vi.fn(() => () => {}) };
+    render(withSession(<MaterializerApp sectionId="composer" navigate={() => {}} askContext={() => {}}
+      intent={{ id: "open", payload: { compositionId: "c-output" } }} store={memoryStore()} handoffPorts={ports} />));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Q3 report" }));
+    expect(ports.reserve).toHaveBeenCalledOnce();
+    await waitFor(() => expect(tab.navigate).toHaveBeenCalledOnce());
+    const link = new URL(tab.navigate.mock.calls[0]![0]);
+    expect(link.origin).toBe("https://vscode.memql.example.com");
+    expect(link.searchParams.get("resource")).toBe("memql-file://memql.example.com/artifacts/artifact-output/Q3%20report.pdf");
+    expect(conn.query.libraryArtifactBySourceConceptRef).toHaveBeenCalledWith({ sourceConceptRef: "f-output" });
+    expect(tab.close).not.toHaveBeenCalled();
+  });
+
+  it("downloads a generated ZIP intact even when its displayed name has no extension", async () => {
+    h.connection = fakeConnection({ compositions: [compositionRow({ id: "archive", outputFileId: "bundle", deployableKind: "site" })],
+      outputArtifact: { id: "bundle-artifact" } as Row,
+      outputFile: { id: "bundle", name: "Site resources", mimeType: "application/zip", size: 40 } as Row });
+    const tab = { navigate: vi.fn(), close: vi.fn() };
+    render(withSession(<MaterializerApp sectionId="composer" navigate={() => {}} askContext={() => {}}
+      intent={{ id: "open", payload: { compositionId: "archive" } }} store={memoryStore()}
+      handoffPorts={{ reserve: () => tab, navigate: vi.fn(), schedule: () => () => {} }} />));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Q3 report" }));
+    await waitFor(() => expect(h.download).toHaveBeenCalledWith(expect.objectContaining({ artifactId: "bundle-artifact", fileId: "bundle", name: "Site resources" })));
+    expect(tab.close).toHaveBeenCalledOnce();
+    expect(tab.navigate).not.toHaveBeenCalled();
+  });
+
+  it("closes the reserved editor tab and shows a missing output without guessing its identity", async () => {
+    h.connection = fakeConnection({ compositions: [compositionRow({ id: "missing", outputFileId: "absent" })] });
+    const tab = { navigate: vi.fn(), close: vi.fn() };
+    render(withSession(<MaterializerApp sectionId="composer" navigate={() => {}} askContext={() => {}}
+      intent={{ id: "open", payload: { compositionId: "missing" } }} store={memoryStore()}
+      handoffPorts={{ reserve: () => tab, navigate: vi.fn(), schedule: () => () => {} }} />));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Q3 report" }));
+    expect(await screen.findByText(/not available in your Library yet/)).toBeTruthy();
+    expect(tab.close).toHaveBeenCalledOnce();
+    expect(tab.navigate).not.toHaveBeenCalled();
   });
 
   // OPENED THROUGH THE INTENT rather than by clicking the list row,
@@ -590,5 +633,62 @@ describe("record list count and action boundaries", () => {
     await screen.findByText("Readable recipe");
     expect(view.container.querySelector(".os-head .os-head-meta")).toBeNull();
     expect(view.container.querySelector(".os-subhead-meta")?.textContent).toBe("1");
+  });
+});
+
+
+describe("organization and reference metadata", () => {
+  it("saves an email recipe without dropping its reference bundle or client", async () => {
+    const conn = fakeConnection({ compositions: [compositionRow({id: "email-result", accountIds: ["client-a"], outputKind: "email_template", format: "json", sources: [
+      {kind: "library_file", ref: "bundle", label: "brand.zip", content: true, includeImages: true},
+      {kind: "library_file", ref: "example", label: "reference.png", content: true, includeImages: false},
+    ]})] });
+    h.connection = conn;
+    render(withSession(<MaterializerApp sectionId="composer" navigate={vi.fn()} askContext={() => {}}
+      intent={{id: "open-email", payload: {compositionId: "email-result"}}} store={memoryStore()} />));
+    fireEvent.click(await screen.findByRole("button", {name: "Save as recipe"}));
+    await waitFor(() => expect(conn.query.createComposeRecipe).toHaveBeenCalledOnce());
+    expect(conn.query.createComposeRecipe.mock.calls[0]?.[0]).toMatchObject({accountIds: ["client-a"], outputKind: "email_template", format: "json", sourceSelectors: [
+      {kind: "library_file", selector: "bundle", label: "brand.zip", content: true, includeImages: true},
+      {kind: "library_file", selector: "example", label: "reference.png", content: true, includeImages: false},
+    ]});
+  });
+
+  it("keeps template form entries when the cluster refuses the binding", async () => {
+    const conn = fakeConnection({writeError: new Error("File access changed"), files: [
+      {id: "artifact-shell", kind: "file", sourceConceptRef: "brand-file", title: "Brand shell.docx"},
+    ]});
+    mount(conn, "templates");
+    fireEvent.click(screen.getByRole("button", {name: "Bind a file"}));
+    fireEvent.change(screen.getByLabelText("Name"), {target: {value: "Brand shell"}});
+    fireEvent.click(screen.getByLabelText("Library file"));
+    fireEvent.click(await screen.findByRole("option", {name: "Brand shell.docx"}));
+    fireEvent.click(screen.getByLabelText("Organization"));
+    fireEvent.click(await screen.findByRole("option", {name: "Client A"}));
+    fireEvent.click(screen.getByRole("button", {name: "Bind it"}));
+    await screen.findByText("File access changed");
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Brand shell");
+    expect(screen.getByLabelText("Library file").textContent).toContain("Brand shell.docx");
+  });
+
+  it("selects a named file and stores the organization when binding a template", async () => {
+    const conn = fakeConnection({files: [
+      {id: "artifact-shell", kind: "file", sourceConceptRef: "brand-file", title: "Brand shell.docx"},
+      {id: "artifact-zip", kind: "file", sourceConceptRef: "bundle", title: "assets.zip"},
+      {id: "artifact-old", kind: "file", sourceConceptRef: "old", title: "Old shell.docx", archived: true},
+    ]});
+    mount(conn, "templates");
+    fireEvent.click(screen.getByRole("button", {name: "Bind a file"}));
+    fireEvent.change(screen.getByLabelText("Name"), {target: {value: "Brand shell"}});
+    fireEvent.click(screen.getByLabelText("Library file"));
+    fireEvent.click(await screen.findByRole("option", {name: "Brand shell.docx"}));
+    expect(screen.queryByRole("option", {name: "assets.zip"})).toBeNull();
+    expect(screen.queryByRole("option", {name: "Old shell.docx"})).toBeNull();
+    expect(screen.queryByRole("button", {name: "Bind it"})).toBeNull();
+    fireEvent.click(screen.getByLabelText("Organization"));
+    fireEvent.click(await screen.findByRole("option", {name: "Client A"}));
+    fireEvent.click(screen.getByRole("button", {name: "Bind it"}));
+    await waitFor(() => expect(conn.query.createComposeTemplate).toHaveBeenCalledOnce());
+    expect(conn.query.createComposeTemplate.mock.calls[0]?.[0]).toMatchObject({accountIds: ["client-a"], fileId: "brand-file"});
   });
 });

@@ -1,25 +1,24 @@
-// The three states a remote instance's deploy pipeline can be in (memql#3740).
+// The three states a remote cluster's deploy pipeline can be in (memql#3740),
+// and what the remote page says about each.
 //
-// NONE OF THEM IS AN ERROR, which is the whole design and the reason each one
-// is reachable here. A row of buttons that turn out to be refused would be the
-// error; naming the state is not.
-//
-// The distinction the tests exist to protect is between the two FAILURES.
-// "Your role cannot see this" and "this cluster has no deploy pipeline" both
-// arrive as a failed status read, and they ask completely different things of
-// the operator: one is a permissions conversation, the other is the ordinary
-// condition of every engine-only cluster. Telling them apart by matching on
-// prose would break the first time the wording is improved, which is why the
-// read carries a typed reason.
+// NONE OF THEM IS AN ERROR, which is the whole design. "Your role cannot see
+// this" and "this cluster has no deploy pipeline" both arrive as a failed
+// status read and ask different things of the operator, so the read carries a
+// typed reason. And NOT CONNECTED IS NEITHER: the old page headed an editor
+// that was merely signed out "No deploy pipeline is configured for this
+// cluster". That is now the bar's job, with Sign in on it.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import { roleVisibility } from "../src/deploy/actions.js";
 import type { StatusRead } from "../src/deploy/controller.js";
-import { pipelineState } from "../src/deploy/pipelineState.js";
+import { rolloutsInFlight } from "../src/deploy/controls.js";
+import { remoteChoices, remoteOverviewBar } from "../src/deploy/instanceActions.js";
+import { pipelineState, type PipelineState } from "../src/deploy/pipelineState.js";
 import type { Instance } from "../src/state/deployments.js";
-import { renderRemoteInstance } from "../src/webview/deploymentScreens.js";
+import type { ConnectionWord } from "../src/state/deploymentsCatalog.js";
+import { remoteOverviewScreen, type ActOutcome } from "../src/webview/deploymentScreens.js";
 
 const NOW = Date.parse("2026-08-14T12:00:00Z");
 const REMOTE: Instance = {
@@ -27,6 +26,7 @@ const REMOTE: Instance = {
   kind: "remote",
   presence: "installed-healthy",
   version: "v0.9.2",
+  versionLabel: "v0.9.2",
   connected: true,
 };
 
@@ -36,253 +36,151 @@ function read(over: Partial<StatusRead> = {}): StatusRead {
   return { status: null, message: "", reason: "unavailable", ...over } as StatusRead;
 }
 
-test("a status that answered is the pipeline being present", () => {
-  const state = pipelineState(
-    read({ status: { version: "2026.8.1" } as never, reason: "ok" }),
-    OWNER,
-  );
+function status(rollouts: { name: string; phase: string }[] = []): StatusRead["status"] {
+  return { rollouts } as never;
+}
+
+test("a status that answered is the pipeline being present, with nothing to say", () => {
+  const state = pipelineState(read({ status: status(), reason: "ok" }), OWNER);
   assert.equal(state.kind, "present");
   assert.equal(state.actions.length, 4);
+  assert.equal(state.line, "");
 });
 
-test("an engine-only cluster reads as no pipeline, in the engine's own words", () => {
-  // The commonest state for anyone running this repository: the orchestration
-  // moved to the product repo, and deploycontrol refuses docker-local outright.
-  const state = pipelineState(
-    read({
-      message:
-        "deployment status unavailable (FAILED_PRECONDITION) -- local clusters are operated via `make up` (k3d + ArgoCD), not the deploy console",
-      reason: "unavailable",
-    }),
-    OWNER,
-  );
+test("an engine-only cluster reads as no pipeline: one short line, the engine's words kept for Details", () => {
+  const engine =
+    "deployment status unavailable (FAILED_PRECONDITION) -- local clusters are operated via `make up` (k3d + ArgoCD), not the deploy console";
+  const state = pipelineState(read({ message: engine, reason: "unavailable" }), OWNER);
   assert.equal(state.kind, "notConfigured");
-  assert.match(state.detail, /local clusters are operated via/);
-  // Not reworded: the operator may need to match it against a log line.
-  assert.match(state.detail, /FAILED_PRECONDITION/);
-  // And no buttons. An action whose own status read failed is an action with
-  // nothing to act on.
+  assert.equal(state.line, "Deployments aren't set up for this cluster.");
+  assert.equal(state.engineMessage, engine);
   assert.deepEqual(state.actions, []);
 });
 
 test("the role gate is its own state, and an owner does not make it go away", () => {
-  // The read is what was refused. This page reports what the ENGINE said; it
-  // does not conclude from a role table that the refusal must have been wrong.
   const state = pipelineState(read({ message: "requires the owner or admin cluster role", reason: "permissionDenied" }), OWNER);
   assert.equal(state.kind, "notVisible");
-  assert.match(state.detail, /owner or admin/);
+  assert.equal(state.line, "Your role can't view deployment status.");
+  assert.match(state.engineMessage, /owner or admin/);
   assert.deepEqual(state.actions, []);
 });
 
-test("a developer whose read was refused still lands in notVisible, not notConfigured", () => {
-  const state = pipelineState(
-    read({ message: "requires the owner or admin cluster role", reason: "permissionDenied" }),
-    roleVisibility("developer"),
-  );
-  assert.equal(state.kind, "notVisible");
-});
-
 test("a present pipeline draws only what the role holds", () => {
-  const developer = pipelineState(read({ status: {} as never, reason: "ok" }), roleVisibility("developer"));
+  const developer = pipelineState(read({ status: status(), reason: "ok" }), roleVisibility("developer"));
   assert.deepEqual(developer.actions.map((a) => a.id).sort(), ["cutVersion", "deploy"]);
-
-  const admin = pipelineState(read({ status: {} as never, reason: "ok" }), roleVisibility("admin"));
+  const admin = pipelineState(read({ status: status(), reason: "ok" }), roleVisibility("admin"));
   assert.equal(admin.actions.some((a) => a.id === "rolloutAction"), true);
-  // Rollback is owner-only in the service, and this mirrors it exactly.
   assert.equal(admin.actions.some((a) => a.id === "rollback"), false);
-
-  const writer = pipelineState(read({ status: {} as never, reason: "ok" }), roleVisibility("writer"));
-  assert.deepEqual(writer.actions, []);
-});
-
-test("a role that could not be read is offered everything, with the engine deciding", () => {
-  const state = pipelineState(read({ status: {} as never, reason: "ok" }), roleVisibility(undefined));
-  assert.equal(state.actions.length, 4);
-  // And the page says so, rather than implying the buttons are permissions.
-  assert.match(state.detail, /courtesy/);
+  assert.deepEqual(pipelineState(read({ status: status(), reason: "ok" }), roleVisibility("writer")).actions, []);
 });
 
 test("an ok read with no status is still not a pipeline", () => {
-  // Belt and braces: `reason` and `status` disagreeing is a contract violation
-  // somewhere upstream, and the safe reading is the one that offers no buttons.
   const state = pipelineState(read({ status: null, reason: "ok" }), OWNER);
   assert.equal(state.kind, "notConfigured");
   assert.deepEqual(state.actions, []);
 });
 
-test("a failure with no message still says something", () => {
-  const state = pipelineState(read({ message: "", reason: "unavailable" }), OWNER);
-  assert.equal(state.kind, "notConfigured");
-  assert.notEqual(state.detail, "");
+test("the rollouts the read reported are carried by name, and only those part-way through can be acted on", () => {
+  const state = pipelineState(
+    read({
+      status: status([
+        { name: "bff", phase: "Paused" },
+        { name: "agent", phase: "Healthy" },
+        { name: "cognition", phase: "Progressing" },
+        { name: "", phase: "Paused" },
+      ]),
+      reason: "ok",
+    }),
+    OWNER,
+  );
+  // Carried whole (the page names each one it draws); narrowed where an act is
+  // built (deploy/controls.ts), so a promote never goes out with a blank name.
+  assert.deepEqual(
+    state.rollouts.map((rollout) => rollout.name),
+    ["bff", "agent", "cognition", ""],
+  );
+  assert.deepEqual(
+    rolloutsInFlight(state.rollouts).map((rollout) => rollout.name),
+    ["bff", "cognition"],
+  );
+  assert.deepEqual(pipelineState(read({ message: "x", reason: "unavailable" }), OWNER).rollouts, []);
 });
 
 // -----------------------------------------------------------------------------
-// what the page actually draws
+// what the remote page draws
 // -----------------------------------------------------------------------------
 
-test("each of the three states renders, and the engine's sentence survives verbatim", () => {
-  const refusal =
-    "deployment status requires the owner or admin cluster role. Topology and deployment history above are ordinary concept rows and are unaffected.";
-  const notVisible = renderRemoteInstance({
-    diagnosticsOpen: false,
-    instance: REMOTE,
+function page(connection: ConnectionWord, pipeline: PipelineState | undefined, over: { outcome?: ActOutcome; instance?: Instance } = {}): string {
+  const instance = over.instance ?? REMOTE;
+  const input = { instance, connection, upgrade: { kind: "none" as const, reason: "" }, pipeline, visibility: OWNER, runs: [] };
+  const parts = remoteOverviewScreen({
+    instance,
+    bar: remoteOverviewBar(input),
+    choices: remoteChoices(input),
+    connection,
     runs: [],
-    pipeline: pipelineState(read({ message: refusal, reason: "permissionDenied" }), roleVisibility("developer")),
     nowMs: NOW,
-    outcome: "",
-    error: "",
-    releases: undefined,
-    upgrade: { kind: "none", reason: "not under test" },
+    pipeline,
+    upgrade: { kind: "none", reason: "" },
+    ...(over.outcome === undefined ? {} : { outcome: over.outcome }),
+    detailsOpen: false,
   });
-  // VERBATIM. The sentence names the role that would have worked, and a
-  // paraphrase is one more thing that can be wrong.
-  assert.ok(notVisible.includes(refusal));
-  assert.doesNotMatch(notVisible, /data-deploy=/);
+  // The kit escapes an apostrophe; the assertions read the words.
+  return (parts.head + parts.body + parts.actions).replace(/&#39;/g, "'");
+}
 
-  const notConfigured = renderRemoteInstance({
-    diagnosticsOpen: false,
-    instance: REMOTE,
-    runs: [],
-    pipeline: pipelineState(read({ message: "local clusters are operated via `make up`", reason: "unavailable" }), OWNER),
-    nowMs: NOW,
-    outcome: "",
-    error: "",
-    releases: undefined,
-    upgrade: { kind: "none", reason: "not under test" },
-  });
-  assert.match(notConfigured, /No deploy pipeline is configured/);
-  assert.doesNotMatch(notConfigured, /data-deploy=/);
-
-  const present = renderRemoteInstance({
-    diagnosticsOpen: false,
-    instance: REMOTE,
-    runs: [],
-    pipeline: pipelineState(read({ status: {} as never, reason: "ok" }), OWNER),
-    nowMs: NOW,
-    outcome: "",
-    error: "",
-    releases: undefined,
-    upgrade: { kind: "none", reason: "not under test" },
-  });
-  assert.match(present, /data-deploy="rollback"/);
+test("signed out is Sign in, never 'No deploy pipeline is configured'", () => {
+  const html = page("signIn", undefined);
+  assert.ok(!/deploy pipeline/i.test(html));
+  assert.ok(!html.includes("aren't set up"));
+  assert.ok(html.includes("Sign in to see history."));
+  assert.ok(html.includes(`data-act="signIn"`));
+  assert.ok(html.includes("Not signed in"));
 });
 
-test("an unreachable remote still lists, with its version drawn as unknown", () => {
-  const html = renderRemoteInstance({
-    diagnosticsOpen: false,
-    instance: { name: "staging", kind: "remote", presence: "installed-unreachable", connected: false },
-    runs: [],
-    pipeline: pipelineState(read({ message: "not connected", reason: "unavailable" }), OWNER),
-    nowMs: NOW,
-    outcome: "",
-    error: "",
-    releases: undefined,
-    upgrade: { kind: "none", reason: "not under test" },
-  });
-  // Listed, not hidden -- and the version says the word rather than nothing,
-  // so "we could not work it out" is never read as "it has none".
-  assert.match(html, /staging/);
-  assert.match(html, /unknown/);
+test("not connected offers Connect, and says the history needs it", () => {
+  const html = page("none", undefined);
+  assert.ok(html.includes("Connect to see history."));
+  assert.ok(html.includes(`data-act="connect"`));
 });
 
-test("a remote run's node-type breakdown lives in Diagnostics, still labelled Node types", () => {
-  // TWO CLAIMS, AND memql#4456 ADDED THE SECOND. The first is unchanged: a
-  // local run's items are script executions and a remote run's are per-tier
-  // spec rows, and the label is the only place that asymmetry is visible --
-  // so it travels with them into Diagnostics rather than being left behind.
-  //
-  // The second is the demotion itself. Rendering every historical run's
-  // replicas and digests inline turned a five-row history into fifty rows of
-  // hex; they are one click away now, and the closed-state assertion below is
-  // what says so. Nothing is deleted -- the support case still has all of it.
-  const html = renderRemoteInstance({
-    diagnosticsOpen: true,
-    instance: REMOTE,
-    runs: [
-      {
-        id: "d2",
-        instance: "staging",
-        kind: "rollout",
-        toVersion: "v0.9.2",
-        startedAt: "2026-08-13T00:00:00Z",
-        status: "succeeded",
-        items: [
-          { label: "bff", status: "ok", detail: "v0.9.2 (inherited) - 2 replicas - digest abcdef012345" },
-          { label: "cognition", status: "ok", detail: "v0.9.5 (pinned) - 1 replica" },
-        ],
-      },
-    ],
-    pipeline: pipelineState(read({ status: {} as never, reason: "ok" }), OWNER),
-    nowMs: NOW,
-    outcome: "",
-    error: "",
-    releases: undefined,
-    upgrade: { kind: "none", reason: "not under test" },
-  });
-  assert.match(html, /Node types/);
-  assert.doesNotMatch(html, /&gt;Steps&lt;|>Steps</);
-  assert.match(html, /bff/);
-  assert.match(html, /2 replicas/);
-  assert.match(html, /digest abcdef012345/);
-  assert.match(html, /\(pinned\)/);
-  // The whole point of the demotion: closed, the page does not carry them.
-  const closed = renderRemoteInstance({
-    diagnosticsOpen: false,
-    instance: REMOTE,
-    runs: [
-      {
-        id: "d2",
-        instance: "staging",
-        kind: "rollout",
-        toVersion: "v0.9.2",
-        startedAt: "2026-08-13T00:00:00Z",
-        status: "succeeded",
-        items: [
-          { label: "bff", status: "ok", detail: "v0.9.2 (inherited) - 2 replicas - digest abcdef012345" },
-        ],
-      },
-    ],
-    pipeline: pipelineState(read({ status: {} as never, reason: "ok" }), OWNER),
-    nowMs: NOW,
-    outcome: "",
-    error: "",
-    releases: undefined,
-    upgrade: { kind: "none", reason: "not under test" },
-  });
-  assert.doesNotMatch(closed, /digest abcdef012345/);
-  assert.match(closed, /Show diagnostics/);
+test("each pipeline state says one short line, and the engine's sentence stays in Details", () => {
+  const engine = "deployment status unavailable (FAILED_PRECONDITION)";
+  const notConfigured = page("connected", pipelineState(read({ message: engine, reason: "unavailable" }), OWNER));
+  assert.ok(notConfigured.includes("Deployments aren't set up for this cluster."));
+  // Present, but under Details rather than as the page's words.
+  const details = notConfigured.indexOf('id="dp-details"');
+  assert.ok(details > 0 && notConfigured.indexOf("FAILED_PRECONDITION") > details);
+  assert.ok(!notConfigured.includes("The engine decides every one of these"), "developer doctrine reached the page");
+
+  const notVisible = page("connected", pipelineState(read({ message: "requires the owner or admin cluster role", reason: "permissionDenied" }), roleVisibility("developer")));
+  assert.ok(notVisible.includes("Your role can't view deployment status."));
 });
 
-test("an outcome line is rendered as the engine wrote it, error or not", () => {
-  const refused = renderRemoteInstance({
-    diagnosticsOpen: false,
-    instance: REMOTE,
-    runs: [],
-    pipeline: pipelineState(read({ status: {} as never, reason: "ok" }), OWNER),
-    nowMs: NOW,
-    outcome: "ERROR: rollback_deployment requires the owner cluster role (audit ae-1)",
-    error: "",
-    releases: undefined,
-    upgrade: { kind: "none", reason: "not under test" },
+test("an outcome is one sentence on the page, its audit reference under Details", () => {
+  const html = page("connected", pipelineState(read({ status: status(), reason: "ok" }), OWNER), {
+    outcome: { tone: "error", line: "You need the owner role to roll back.", auditId: "ae-1", signIn: false },
   });
-  assert.match(refused, /requires the owner cluster role/);
-  assert.match(refused, /audit ae-1/);
-  assert.match(refused, /class="error"/);
+  assert.ok(html.includes("You need the owner role to roll back."));
+  assert.ok(html.indexOf("ae-1") > html.indexOf('id="dp-details"'));
+  assert.ok(!/SUCCESS:|ERROR:/.test(html), "a log-shaped line reached the page");
+});
+
+test("an expired session's outcome offers Sign in beside the sentence", () => {
+  const html = page("connected", pipelineState(read({ status: status(), reason: "ok" }), OWNER), {
+    outcome: { tone: "error", line: "Your session has expired.", auditId: "", signIn: true },
+  });
+  const notice = html.slice(html.indexOf("Your session has expired."));
+  assert.ok(notice.includes(`data-act="signIn"`));
 });
 
 test("everything a remote page draws is escaped", () => {
-  const html = renderRemoteInstance({
-    diagnosticsOpen: false,
+  const html = page("connected", pipelineState(read({ message: "<script>alert(1)</script>", reason: "unavailable" }), OWNER), {
     instance: { name: "<img src=x>", kind: "remote", presence: "installed-healthy", connected: true },
-    runs: [],
-    pipeline: pipelineState(read({ message: "<script>alert(1)</script>", reason: "unavailable" }), OWNER),
-    nowMs: NOW,
-    outcome: "<b>x</b>",
-    error: "",
-    releases: undefined,
-    upgrade: { kind: "none", reason: "not under test" },
+    outcome: { tone: "info", line: "<b>x</b>", auditId: "<i>", signIn: false },
   });
   assert.doesNotMatch(html, /<\/?script/i);
   assert.doesNotMatch(html, /<img /);
+  assert.doesNotMatch(html, /<b>x/);
   assert.match(html, /&lt;img src=x&gt;/);
 });

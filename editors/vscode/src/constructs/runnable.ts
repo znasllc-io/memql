@@ -346,9 +346,15 @@ export const COMMAND_RUN_AUTOMATION = "memql.run.automation";
 //
 // NOTHING HERE EXECUTES ANYTHING. A CodeLens renders an affordance; the
 // command fires only on a click. There is no run-on-open and no run-on-save
-// anywhere in the extension -- run configurations live in the workspace, so a
+// anywhere in the extension -- saved runs live in the workspace, so a
 // repository can ship one, and a repository must never be able to make the
 // editor talk to a cluster by being opened.
+//
+// ONE RUN LENS PER CONSTRUCT. It used to be two ("Run" and "Run with..."),
+// beside up to five training lenses, on one line. A construct that takes no
+// arguments gets "Run", which runs; one that takes any gets "Run...", which
+// opens the argument form -- where Run is one more click with the optional
+// ones left empty, and where the call can be saved.
 export function lensPlansFor(
   uri: string,
   constructs: readonly RunnableConstruct[],
@@ -356,18 +362,18 @@ export function lensPlansFor(
   const out: LensPlan[] = [];
   for (const c of constructs) {
     if (!usesArgForm(c.kind)) {
-      // An automation gets ONE lens, and it opens the form rather than
-      // running anything: there is no declared payload schema, so there is no
-      // "just run it" that would not be the extension inventing an event.
-      // Even the schedule case -- which genuinely fires with an empty event --
-      // goes through the form, because that form is where the developer is
-      // told the DEPLOYED definition is what will run.
+      // An automation's lens opens the form rather than running anything:
+      // there is no declared payload schema, so there is no "just run it"
+      // that would not be the extension inventing an event. Even the schedule
+      // case -- which genuinely fires with an empty event -- goes through the
+      // form, because that form is where the developer is told the DEPLOYED
+      // definition is what will run.
       const automationTarget: AutomationTarget = { uri, name: c.name };
       if (c.trigger !== undefined) automationTarget.trigger = c.trigger;
       if (c.disabled === true) automationTarget.disabled = true;
       out.push({
         range: c.signatureRange,
-        title: c.disabled === true ? "Run automation (@disabled)..." : "Run automation...",
+        title: c.disabled === true ? "Run (disabled)..." : "Run...",
         tooltip: automationTooltip(c),
         command: COMMAND_RUN_AUTOMATION,
         automationTarget,
@@ -375,18 +381,12 @@ export function lensPlansFor(
       continue;
     }
     const target: RunTarget = { uri, kind: c.kind, name: c.name, args: c.args };
+    const form = c.args.length > 0;
     out.push({
       range: c.signatureRange,
-      title: c.disabled === true ? "Run (@disabled)" : "Run",
+      title: `${c.disabled === true ? "Run (disabled)" : "Run"}${form ? "..." : ""}`,
       tooltip: runTooltip(c),
-      command: COMMAND_RUN,
-      target,
-    });
-    out.push({
-      range: c.signatureRange,
-      title: "Run with...",
-      tooltip: "Open the argument form for this construct.",
-      command: COMMAND_RUN_WITH,
+      command: form ? COMMAND_RUN_WITH : COMMAND_RUN,
       target,
     });
   }
@@ -409,36 +409,29 @@ export function lensPlansFor(
 // removing the annotation in the buffer is enough. A tool or automation runs
 // the DEPLOYED definition, so only a redeploy helps.
 function disabledPrefix(kind: RunnableKind): string {
-  const remedy = isSessionDefinable(kind)
-    ? "Remove the annotation in this buffer and the run will use the enabled definition."
-    : "It runs the DEPLOYED definition, so it stays refused until the annotation is removed and redeployed.";
-  return `This ${kind} is @disabled: the loader skips it, so a run can only be refused. ${remedy}`;
+  return isSessionDefinable(kind)
+    ? "Disabled: remove @disabled here to run it."
+    : "Disabled: remove @disabled and deploy it to run it.";
 }
 
 function runTooltip(c: RunnableConstruct): string {
   if (c.disabled === true) return disabledPrefix(c.kind);
-  const required = c.args.filter((a) => a.required).length;
   if (c.kind === "tool") {
-    // Said on the lens as well as in the result banner: by the time the
-    // banner is on screen the developer has already read the result.
-    return "Run the DEPLOYED tool. A tool is bound to a Go-backed handler and cannot be defined from this buffer.";
+    // Said on the lens as well as on the result: by the time the result is on
+    // screen the developer has already read it.
+    return c.args.length > 0
+      ? "Opens the form to run the deployed tool. Edits here don't apply."
+      : "Runs the deployed tool. Edits here don't apply.";
   }
-  if (required > 0) {
-    return `Run this ${c.kind} against the selected cluster. ${required} required argument${required === 1 ? "" : "s"} -- the form opens when any is unset.`;
-  }
-  return `Run this ${c.kind} against the selected cluster, from this buffer, without saving.`;
+  return c.args.length > 0
+    ? `Opens the form to run this ${c.kind} with the code in this file.`
+    : `Runs this ${c.kind} with the code in this file.`;
 }
 
 // The automation tooltip says the deployed definition runs BEFORE the click,
-// as the tool one does -- by the time the result banner is on screen the
-// developer has already read the trace.
+// as the tool one does -- by the time the result is on screen the developer
+// has already read the trace.
 function automationTooltip(c: RunnableConstruct): string {
   if (c.disabled === true) return disabledPrefix(c.kind);
-  const where =
-    c.trigger?.schedule !== undefined && c.trigger.schedule !== "" && (c.trigger.event ?? "") === ""
-      ? "It is time-driven, so the run fires it now with an empty event."
-      : c.trigger?.concept !== undefined && c.trigger.concept !== ""
-        ? `Build the trigger event from a row of ${c.trigger.concept}, or paste one.`
-        : "Build the trigger event by pasting its payload.";
-  return `Run the DEPLOYED automation with a synthetic trigger event. An automation cannot be session-defined, so this never runs your buffer. ${where}`;
+  return "Opens a form to fire the deployed automation. Edits here don't apply.";
 }

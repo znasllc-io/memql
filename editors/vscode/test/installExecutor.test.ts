@@ -167,6 +167,7 @@ function graphOf(steps: Array<Record<string, unknown>>, kind: "install" | "unins
       description: "d",
       steps: steps.map((s) => ({
         script: "install.detect",
+        label: "Working",
         description: "d",
         readOnly: true,
         elevation: "none",

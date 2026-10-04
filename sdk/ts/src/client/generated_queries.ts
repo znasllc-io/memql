@@ -1870,6 +1870,28 @@ QueryClient.prototype.campaignEngagementRefs = function (this: QueryClient, args
   return this.executeNamed("campaignEngagementRefs", buildCampaignEngagementRefs(args), opts);
 };
 
+/** Current repeating instruction for this blueprint; organization authorization applies. */
+// Bound concept: v1:campaigns:campaignSeries (machine-readable: BoundConcepts["campaignSeriesForCampaign"] in generated_concepts.ts).
+export interface CampaignSeriesForCampaignArgs {
+  campaignId: string;
+}
+
+export function buildCampaignSeriesForCampaign(args: CampaignSeriesForCampaignArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  return "query campaignSeriesForCampaign(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSeriesForCampaign(args: CampaignSeriesForCampaignArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSeriesForCampaign = function (this: QueryClient, args: CampaignSeriesForCampaignArgs = {} as CampaignSeriesForCampaignArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSeriesForCampaign", buildCampaignSeriesForCampaign(args), opts);
+};
+
 /** How many of this campaign's skipped deliveries carry one of the named skip reasons. A list rather than one reason per call because the skipped bucket is reported in three groups and three counts beat seven round trips. */
 // Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["campaignSkipCountByReason"] in generated_concepts.ts).
 export interface CampaignSkipCountByReasonArgs {
@@ -1892,6 +1914,50 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignSkipCountByReason = function (this: QueryClient, args: CampaignSkipCountByReasonArgs = {} as CampaignSkipCountByReasonArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignSkipCountByReason", buildCampaignSkipCountByReason(args), opts);
+};
+
+/** Recent test runs for this campaign; counters and deliveries belong to these runs alone. */
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaignTestRuns"] in generated_concepts.ts).
+export interface CampaignTestRunsArgs {
+  campaignId: string;
+}
+
+export function buildCampaignTestRuns(args: CampaignTestRunsArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  return "query campaignTestRuns(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignTestRuns(args: CampaignTestRunsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignTestRuns = function (this: QueryClient, args: CampaignTestRunsArgs = {} as CampaignTestRunsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignTestRuns", buildCampaignTestRuns(args), opts);
+};
+
+/** Shared testing audience for the selected organization. */
+// Bound concept: v1:campaigns:testSettings (machine-readable: BoundConcepts["campaignTestSettings"] in generated_concepts.ts).
+export interface CampaignTestSettingsArgs {
+  accountId: string;
+}
+
+export function buildCampaignTestSettings(args: CampaignTestSettingsArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "query campaignTestSettings(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignTestSettings(args: CampaignTestSettingsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignTestSettings = function (this: QueryClient, args: CampaignTestSettingsArgs = {} as CampaignTestSettingsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignTestSettings", buildCampaignTestSettings(args), opts);
 };
 
 /** The caller's campaigns, newest first. The portal's campaign list. Owned: the row set is gated by `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` server-side for legacy untied rows; organization-owned rows follow current membership and app permissions. Optional status filter narrows to one lifecycle bucket; omit it to see everything. */
@@ -2538,6 +2604,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.compositionsForRecipe = function (this: QueryClient, args: CompositionsForRecipeArgs = {} as CompositionsForRecipeArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("compositionsForRecipe", buildCompositionsForRecipe(args), opts);
+};
+
+/** Owned output receipts for one executing run, used by document revision review. */
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositionsForRun"] in generated_concepts.ts).
+export interface CompositionsForRunArgs {
+  runId: string;
+}
+
+export function buildCompositionsForRun(args: CompositionsForRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query compositionsForRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    compositionsForRun(args: CompositionsForRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.compositionsForRun = function (this: QueryClient, args: CompositionsForRunArgs = {} as CompositionsForRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("compositionsForRun", buildCompositionsForRun(args), opts);
 };
 
 /** Consent event stream for one subscriber, newest first. Export answers status/date/source from these rows: current status is the latest kind. The concept tier and organization boundary authorize every returned row. */
@@ -5157,6 +5245,116 @@ declare module "./query.js" {
 
 QueryClient.prototype.neverSold = function (this: QueryClient, args: NeverSoldArgs = {} as NeverSoldArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("neverSold", buildNeverSold(args), opts);
+};
+
+/** Read one prior grant so a retried public submission cannot restamp its date. */
+// Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["newsletterConsentById"] in generated_concepts.ts).
+export interface NewsletterConsentByIdArgs {
+  eventId: string;
+}
+
+export function buildNewsletterConsentById(args: NewsletterConsentByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("eventId: " + renderMemQLValue(args.eventId));
+  return "query newsletterConsentById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    newsletterConsentById(args: NewsletterConsentByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.newsletterConsentById = function (this: QueryClient, args: NewsletterConsentByIdArgs = {} as NewsletterConsentByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("newsletterConsentById", buildNewsletterConsentById(args), opts);
+};
+
+/** Organization-authorized newsletter configuration for one deployable. */
+// Bound concept: v1:campaigns:newsletterBinding (machine-readable: BoundConcepts["newsletterForSite"] in generated_concepts.ts).
+export interface NewsletterForSiteArgs {
+  siteId: string;
+}
+
+export function buildNewsletterForSite(args: NewsletterForSiteArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  return "query newsletterForSite(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    newsletterForSite(args: NewsletterForSiteArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.newsletterForSite = function (this: QueryClient, args: NewsletterForSiteArgs = {} as NewsletterForSiteArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("newsletterForSite", buildNewsletterForSite(args), opts);
+};
+
+/** Current durable signup and captured address, authorized by its organization. */
+// Bound concept: v1:campaigns:newsletterSignup (machine-readable: BoundConcepts["newsletterSignupById"] in generated_concepts.ts).
+export interface NewsletterSignupByIdArgs {
+  signupId: string;
+}
+
+export function buildNewsletterSignupById(args: NewsletterSignupByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("signupId: " + renderMemQLValue(args.signupId));
+  return "query newsletterSignupById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    newsletterSignupById(args: NewsletterSignupByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.newsletterSignupById = function (this: QueryClient, args: NewsletterSignupByIdArgs = {} as NewsletterSignupByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("newsletterSignupById", buildNewsletterSignupById(args), opts);
+};
+
+/** Latest welcome outcomes; on-demand because signup volume is shopper-driven. */
+// Bound concept: v1:campaigns:newsletterSignup (machine-readable: BoundConcepts["newsletterWelcomesForAudience"] in generated_concepts.ts).
+export interface NewsletterWelcomesForAudienceArgs {
+  audienceId: string;
+}
+
+export function buildNewsletterWelcomesForAudience(args: NewsletterWelcomesForAudienceArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "query newsletterWelcomesForAudience(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    newsletterWelcomesForAudience(args: NewsletterWelcomesForAudienceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.newsletterWelcomesForAudience = function (this: QueryClient, args: NewsletterWelcomesForAudienceArgs = {} as NewsletterWelcomesForAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("newsletterWelcomesForAudience", buildNewsletterWelcomesForAudience(args), opts);
+};
+
+/** Organization-authorized deployable bindings for an audience. */
+// Bound concept: v1:campaigns:newsletterBinding (machine-readable: BoundConcepts["newslettersForAudience"] in generated_concepts.ts).
+export interface NewslettersForAudienceArgs {
+  audienceId: string;
+}
+
+export function buildNewslettersForAudience(args: NewslettersForAudienceArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "query newslettersForAudience(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    newslettersForAudience(args: NewslettersForAudienceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.newslettersForAudience = function (this: QueryClient, args: NewslettersForAudienceArgs = {} as NewslettersForAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("newslettersForAudience", buildNewslettersForAudience(args), opts);
 };
 
 /** Latest-per-(deploymentId, nodeType) deploymentNodeSpec rows for one deploymentId -- the deployment's current per-node-type spec set (version / replicas / imageDigest). asOf latest collapses the append-only spec stream to current state per node type. Engine-as-spine resolution of an empty version is the consumer's job. Epic 2 / #2094. */
@@ -11028,6 +11226,30 @@ QueryClient.prototype.suppressionByDigest = function (this: QueryClient, args: S
   return this.executeNamed("suppressionByDigest", buildSuppressionByDigest(args), opts);
 };
 
+/** ENGINE: lookup an organization-scoped suppression by its server-derived composite key. */
+// Bound concept: v1:campaigns:suppression (machine-readable: BoundConcepts["suppressionForOrganization"] in generated_concepts.ts).
+export interface SuppressionForOrganizationArgs {
+  suppressionId: string;
+  accountId: string;
+}
+
+export function buildSuppressionForOrganization(args: SuppressionForOrganizationArgs): string {
+  const parts: string[] = [];
+  parts.push("suppressionId: " + renderMemQLValue(args.suppressionId));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "query suppressionForOrganization(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    suppressionForOrganization(args: SuppressionForOrganizationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.suppressionForOrganization = function (this: QueryClient, args: SuppressionForOrganizationArgs = {} as SuppressionForOrganizationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("suppressionForOrganization", buildSuppressionForOrganization(args), opts);
+};
+
 /** List the calling owner's active v1:actions:surface registry entries for the capability->surface resolver (Phase 2 #1737). Owned tier. */
 // Bound concept: v1:actions:surface (machine-readable: BoundConcepts["surfacesForOwner"] in generated_concepts.ts).
 export interface SurfacesForOwnerArgs {
@@ -11472,6 +11694,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.warmupStateForIdentity = function (this: QueryClient, args: WarmupStateForIdentityArgs = {} as WarmupStateForIdentityArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("warmupStateForIdentity", buildWarmupStateForIdentity(args), opts);
+};
+
+/** Exact caller-owned approval receipt, including decided approvals for recovery. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalForOwner"] in generated_concepts.ts).
+export interface WorkApprovalForOwnerArgs {
+  approvalId: string;
+}
+
+export function buildWorkApprovalForOwner(args: WorkApprovalForOwnerArgs): string {
+  const parts: string[] = [];
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  return "query workApprovalForOwner(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workApprovalForOwner(args: WorkApprovalForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workApprovalForOwner = function (this: QueryClient, args: WorkApprovalForOwnerArgs = {} as WorkApprovalForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workApprovalForOwner", buildWorkApprovalForOwner(args), opts);
 };
 
 /** The caller's pending approvals, newest first. Owned. `row.decision == ""` is the pending state, and it matches because createWorkApproval STAMPS the empty string rather than leaving the key absent. */

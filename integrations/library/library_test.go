@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -417,8 +418,8 @@ func unwrap(t *testing.T, nodes []memorynodes.MemoryNode) editResult {
 func TestEditDocument_TwoEditsRetainBothVersions(t *testing.T) {
 	eng := newStubEngine()
 	eng.seedDocument(seededDoc())
-	i := NewIntegration(eng)
-	ctx := context.Background()
+	i := newEditTestIntegration(eng)
+	ctx := editTestContext()
 
 	// First edit -> version 1.
 	out1, err := i.handleEditDocument(ctx, map[string]any{
@@ -502,8 +503,8 @@ func TestTouchArtifact_PreservesLabelsAcrossEdit(t *testing.T) {
 		"labels":           []any{"reports", "q3"},
 	})
 
-	i := NewIntegration(eng)
-	ctx := context.Background()
+	i := newEditTestIntegration(eng)
+	ctx := editTestContext()
 
 	// Edit the document -- handleEditDocument calls touchArtifact at the end
 	// to re-stamp the index row's updatedAt watermark.
@@ -549,8 +550,8 @@ func TestTouchArtifact_SkipsReStampOnReadFailure(t *testing.T) {
 	})
 	eng.failArtifactSourceRefLookup = true
 
-	i := NewIntegration(eng)
-	if _, err := i.handleEditDocument(context.Background(), map[string]any{
+	i := newEditTestIntegration(eng)
+	if _, err := i.handleEditDocument(editTestContext(), map[string]any{
 		"documentId": "doc-1",
 		"content":    "edited once",
 		"authorKind": "user",
@@ -605,8 +606,8 @@ func TestMergeLabel_ComparesTrimmed(t *testing.T) {
 func TestEditDocument_OptimisticConflict(t *testing.T) {
 	eng := newStubEngine()
 	eng.seedDocument(seededDoc())
-	i := NewIntegration(eng)
-	ctx := context.Background()
+	i := newEditTestIntegration(eng)
+	ctx := editTestContext()
 
 	// Establish v1.
 	if _, err := i.handleEditDocument(ctx, map[string]any{
@@ -650,8 +651,8 @@ func TestEditDocument_OptimisticConflict(t *testing.T) {
 func TestAssistantEdit_LandsAssistantAuthorKind(t *testing.T) {
 	eng := newStubEngine()
 	eng.seedDocument(seededDoc())
-	i := NewIntegration(eng)
-	ctx := context.Background()
+	i := newEditTestIntegration(eng)
+	ctx := editTestContext()
 
 	out, err := i.handleEditDocumentAsAssistant(ctx, map[string]any{
 		"documentId":      "doc-1",
@@ -685,8 +686,8 @@ func TestAssistantEdit_LandsAssistantAuthorKind(t *testing.T) {
 func TestRestore_AppendsNewLatestEqualToChosen(t *testing.T) {
 	eng := newStubEngine()
 	eng.seedDocument(seededDoc())
-	i := NewIntegration(eng)
-	ctx := context.Background()
+	i := newEditTestIntegration(eng)
+	ctx := editTestContext()
 
 	// Build history: v1 ("apple"), v2 ("banana").
 	if _, err := i.handleEditDocument(ctx, map[string]any{
@@ -751,9 +752,9 @@ func TestEditDocument_OwnerThreadedFromRow(t *testing.T) {
 	doc := seededDoc()
 	doc["ownerUserId"] = "real-owner"
 	eng.seedDocument(doc)
-	i := NewIntegration(eng)
+	i := newEditTestIntegration(eng)
 
-	if _, err := i.handleEditDocument(context.Background(), map[string]any{
+	if _, err := i.handleEditDocument(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "real-owner", Role: auth.RoleWriter}), map[string]any{
 		"documentId": "doc-1", "content": "x", "authorId": "someone-else",
 		"ownerUserId": "attacker-supplied", // must be ignored
 	}, 0); err != nil {
@@ -828,10 +829,10 @@ func TestEditDocument_RefusesOwnerlessDocument(t *testing.T) {
 			eng := newStubEngine()
 			doc := seededDoc()
 			eng.seedDocument(doc)
-			i := NewIntegration(eng)
+			i := newEditTestIntegration(eng)
 
 			// Real history, written while the document still HAS an owner.
-			if _, err := i.handleEditDocument(context.Background(), map[string]any{
+			if _, err := i.handleEditDocument(editTestContext(), map[string]any{
 				"documentId": "doc-1", "content": "apple", "authorId": "user-a",
 			}, 0); err != nil {
 				t.Fatalf("seeding a version: %v", err)
@@ -848,7 +849,7 @@ func TestEditDocument_RefusesOwnerlessDocument(t *testing.T) {
 
 			// An inbound caller who is NOT the document owner. If the handler
 			// proceeded, the stamp would land on this identity.
-			ctx := auth.ContextWithUserActor(context.Background(), "inbound-caller")
+			ctx := auth.ContextWithUserActor(editTestContext(), "inbound-caller")
 
 			if err := tc.call(i, ctx, versionId); err == nil {
 				t.Fatal("handler accepted an ownerless document; it must refuse rather than " +
@@ -930,9 +931,9 @@ func countCalls(eng *stubEngine, name string) int {
 func TestAddArtifactLabel_AddsNewLabel(t *testing.T) {
 	eng := newStubEngine()
 	eng.seedArtifact(seededArtifact())
-	i := NewIntegration(eng)
+	i := newEditTestIntegration(eng)
 
-	out, err := i.handleAddArtifactLabel(context.Background(), map[string]any{
+	out, err := i.handleAddArtifactLabel(editTestContext(), map[string]any{
 		"artifactId": testArtifactId,
 		"label":      "urgent",
 	}, 0)
@@ -955,9 +956,9 @@ func TestAddArtifactLabel_AddsNewLabel(t *testing.T) {
 func TestAddArtifactLabel_IdempotentOnExistingLabel(t *testing.T) {
 	eng := newStubEngine()
 	eng.seedArtifact(seededArtifact())
-	i := NewIntegration(eng)
+	i := newEditTestIntegration(eng)
 
-	out, err := i.handleAddArtifactLabel(context.Background(), map[string]any{
+	out, err := i.handleAddArtifactLabel(editTestContext(), map[string]any{
 		"artifactId": testArtifactId,
 		"label":      "reports", // already present
 	}, 0)
@@ -982,9 +983,9 @@ func TestAddArtifactLabel_IdempotentOnExistingLabel(t *testing.T) {
 func TestRemoveArtifactLabel_RemovesExistingLabel(t *testing.T) {
 	eng := newStubEngine()
 	eng.seedArtifact(seededArtifact())
-	i := NewIntegration(eng)
+	i := newEditTestIntegration(eng)
 
-	out, err := i.handleRemoveArtifactLabel(context.Background(), map[string]any{
+	out, err := i.handleRemoveArtifactLabel(editTestContext(), map[string]any{
 		"artifactId": testArtifactId,
 		"label":      "reports",
 	}, 0)
@@ -1007,9 +1008,9 @@ func TestRemoveArtifactLabel_RemovesExistingLabel(t *testing.T) {
 func TestRemoveArtifactLabel_IdempotentOnAbsentLabel(t *testing.T) {
 	eng := newStubEngine()
 	eng.seedArtifact(seededArtifact())
-	i := NewIntegration(eng)
+	i := newEditTestIntegration(eng)
 
-	out, err := i.handleRemoveArtifactLabel(context.Background(), map[string]any{
+	out, err := i.handleRemoveArtifactLabel(editTestContext(), map[string]any{
 		"artifactId": testArtifactId,
 		"label":      "not-there",
 	}, 0)
@@ -1032,22 +1033,22 @@ func TestRemoveArtifactLabel_IdempotentOnAbsentLabel(t *testing.T) {
 func TestArtifactLabel_RefusesBlankLabel(t *testing.T) {
 	eng := newStubEngine()
 	eng.seedArtifact(seededArtifact())
-	i := NewIntegration(eng)
+	i := newEditTestIntegration(eng)
 
 	for _, tc := range []struct {
 		name string
 		call func() error
 	}{
 		{"add empty", func() error {
-			_, err := i.handleAddArtifactLabel(context.Background(), map[string]any{"artifactId": testArtifactId, "label": ""}, 0)
+			_, err := i.handleAddArtifactLabel(editTestContext(), map[string]any{"artifactId": testArtifactId, "label": ""}, 0)
 			return err
 		}},
 		{"add whitespace", func() error {
-			_, err := i.handleAddArtifactLabel(context.Background(), map[string]any{"artifactId": testArtifactId, "label": "   "}, 0)
+			_, err := i.handleAddArtifactLabel(editTestContext(), map[string]any{"artifactId": testArtifactId, "label": "   "}, 0)
 			return err
 		}},
 		{"remove empty", func() error {
-			_, err := i.handleRemoveArtifactLabel(context.Background(), map[string]any{"artifactId": testArtifactId, "label": ""}, 0)
+			_, err := i.handleRemoveArtifactLabel(editTestContext(), map[string]any{"artifactId": testArtifactId, "label": ""}, 0)
 			return err
 		}},
 	} {
@@ -1087,14 +1088,14 @@ func TestArtifactLabel_RefusesUnknownOrOwnerlessArtifact(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			eng := newStubEngine()
 			tc.seed(eng)
-			i := NewIntegration(eng)
+			i := newEditTestIntegration(eng)
 
-			if _, err := i.handleAddArtifactLabel(context.Background(), map[string]any{
+			if _, err := i.handleAddArtifactLabel(editTestContext(), map[string]any{
 				"artifactId": testArtifactId, "label": "x",
 			}, 0); err == nil {
 				t.Fatal("addArtifactLabel accepted an inaccessible artifact; it must refuse")
 			}
-			if _, err := i.handleRemoveArtifactLabel(context.Background(), map[string]any{
+			if _, err := i.handleRemoveArtifactLabel(editTestContext(), map[string]any{
 				"artifactId": testArtifactId, "label": "x",
 			}, 0); err == nil {
 				t.Fatal("removeArtifactLabel accepted an inaccessible artifact; it must refuse")
@@ -1117,10 +1118,10 @@ func TestArtifactLabel_OwnerThreadedFromRow(t *testing.T) {
 	a := seededArtifact()
 	a["ownerUserId"] = "real-owner"
 	eng.seedArtifact(a)
-	i := NewIntegration(eng)
+	i := newEditTestIntegration(eng)
 
 	// The inbound ctx carries a DIFFERENT actor entirely.
-	ctx := auth.ContextWithUserActor(context.Background(), "someone-else")
+	ctx := auth.ContextWithUserActor(editTestContext(), "someone-else")
 
 	if _, err := i.handleAddArtifactLabel(ctx, map[string]any{
 		"artifactId": testArtifactId, "label": "urgent",
@@ -1141,9 +1142,9 @@ func TestArtifactLabel_OwnerThreadedFromRow(t *testing.T) {
 func TestArtifactLabel_PreservesOtherFieldsOnWrite(t *testing.T) {
 	eng := newStubEngine()
 	eng.seedArtifact(seededArtifact())
-	i := NewIntegration(eng)
+	i := newEditTestIntegration(eng)
 
-	if _, err := i.handleAddArtifactLabel(context.Background(), map[string]any{
+	if _, err := i.handleAddArtifactLabel(editTestContext(), map[string]any{
 		"artifactId": testArtifactId, "label": "urgent",
 	}, 0); err != nil {
 		t.Fatalf("add: %v", err)
@@ -1180,9 +1181,9 @@ func TestArtifactLabel_SurvivesBlankOptionalEnums(t *testing.T) {
 	a["format"] = ""
 	a["validationStatus"] = ""
 	eng.seedArtifact(a)
-	i := NewIntegration(eng)
+	i := newEditTestIntegration(eng)
 
-	if _, err := i.handleAddArtifactLabel(context.Background(), map[string]any{
+	if _, err := i.handleAddArtifactLabel(editTestContext(), map[string]any{
 		"artifactId": testArtifactId, "label": "urgent",
 	}, 0); err != nil {
 		t.Fatalf("add with blank optional enums: %v -- writeArtifactLabels must OMIT a blank "+
@@ -1248,4 +1249,14 @@ func TestIntArgNarrowsSafely(t *testing.T) {
 			}
 		})
 	}
+}
+
+func editTestContext() context.Context {
+	return auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "user-a", Role: auth.RoleWriter})
+}
+func newEditTestIntegration(engine memql.IntegrationEngineAccess) *Integration {
+	i := NewIntegration(engine)
+	var gate sync.Mutex
+	i.versionGate = func(context.Context, string) (func(), error) { gate.Lock(); return gate.Unlock, nil }
+	return i
 }

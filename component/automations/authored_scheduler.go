@@ -443,5 +443,10 @@ func AuthorContext(ctx context.Context, ownerUserId string) context.Context {
 	return auth.ContextWithAccess(ctx, &auth.AccessContext{
 		UserId: ownerUserId,
 		Role:   auth.RoleWriter,
+		// This role is a stand-in, not the author's current organization
+		// authority. The receiving engine must resolve the real principal,
+		// including revocations, just as it does for campaign workers.
+		Unranked:    true,
+		RoleStandIn: true,
 	})
 }

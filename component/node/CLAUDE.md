@@ -26,15 +26,15 @@ In the default build (no tags), BFF code is included.
 
 ## Node Types
 
-| Type | Build Tag | Purpose | Components |
-|------|-----------|---------|------------|
-| **bff** | (none, default) | Backend for frontend | Engine + PeerManager + EventBridge + NodeServer + WorkerDialer + AiForwardRouter |
-| **voice** | `voice` | Voice transport (audio WS, LiveKit) | Engine + PeerManager + EventBridge + Polyphon transport + NodeServer |
-| **cognition** | `cognition` | Cognition pipeline | Engine + PeerManager + EventBridge + Polyphon + NodeServer |
-| **agent** | `agent` | Task execution, AI | Engine + PeerManager + EventBridge + AI + Tools + NodeServer |
-| **planner** | `planner` | Task planning | Engine + PeerManager + EventBridge + NodeServer |
-| **workbench** | `workbench` | Sandboxed per-Plan workspace host | Engine + PeerManager + EventBridge + NodeServer (`bootstrap_workbench.go`, `compiled_workbench.go`) |
-| **mcp** | `mcp` | MCP protocol surface | Engine + PeerManager + EventBridge + NodeServer (`bootstrap_mcp.go`, `compiled_mcp.go`) |
+The role set is DATA: `roles.go` holds one `NodeRole{Type, Description, Mesh}`
+per role -- identity, bff, mcp, agent, planner, workbench, edge -- and every
+other spelling of the set is held to it. `ValidNodeTypes` is derived from the
+`Mesh` column; `roles_test.go` pins identity and edge as the non-mesh pair and
+holds `app/build_<type>.go`, `ENGINE_NODE_TYPES` and the root `arch.yaml` to
+the table, and `scripts/ci/node_type_lists_test.go` holds the rest (the
+deny-lists, `compiled_<type>.go`, the CI and release matrices, the
+Deployments) to the build files. `cmd/platformgraph` writes the table into the
+embedded platform graph (memql#5727). Change a role there, not here.
 
 ---
 
@@ -44,6 +44,7 @@ In the default build (no tags), BFF code is included.
 component/node/
 ├── CLAUDE.md              # This file
 ├── identity.go            # NodeType enum, Identity struct, env var parsing
+├── roles.go               # NodeRole table: the role set, its descriptions, the mesh column
 ├── lifecycle.go           # NodeLifecycle state machine (Starting/Ready/Draining/Stopped, #1268)
 ├── node.proto             # NodeService proto (23 message types)
 ├── generate.go            # protoc go:generate directive

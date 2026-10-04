@@ -634,3 +634,18 @@ builtin packageSourceRegister {
   accountId string!
   autoDeploy bool
 }
+
+/// Public configuration only. Import records a draft after explicit organization
+/// selection; Microsoft consent, provisioning and live DNS verification remain
+/// in email setup. Export merges into the supplied manifest, preserving apps.
+@sdk
+@executor("integration.packages.campaigns")
+@args(profile="object")
+@description("Inspect, export or import campaign configuration in memql-package.yaml. Signed-in owner or developer only. Contains no credentials or verified status. Import requires confirmed true and binds the chosen organization label to an authorized destination accountId.")
+builtin packageCampaigns {
+  action string!
+  manifest string
+  accountId string
+  organization string
+  confirmed boolean
+}

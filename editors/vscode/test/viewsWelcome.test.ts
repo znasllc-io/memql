@@ -26,6 +26,7 @@ import * as path from "node:path";
 
 import {
   CLUSTER_SELECTED_KEY,
+  LOCAL_CLUSTER_PRESENT_KEY,
   NOT_CONNECTED_REFUSAL,
 } from "../src/state/connectionContext.js";
 
@@ -52,11 +53,15 @@ interface Manifest {
 const manifest = JSON.parse(fs.readFileSync(MANIFEST, "utf8")) as Manifest;
 const welcomes = manifest.contributes.viewsWelcome;
 
-/** The three views a cluster's data flows into. Runs is deliberately not here. */
-const GATED = ["memqlDeployments", "memqlConstructs", "memqlData"] as const;
+/**
+ * The views a cluster's data flows into that share one welcome. Runs is
+ * deliberately not here, and Deployments has its own (below): it says which
+ * act is right, install or select, from whether a local cluster exists.
+ */
+const GATED = ["memqlConstructs", "memqlData"] as const;
 
 function welcomeFor(view: string): WelcomeEntry[] {
-  return welcomes.filter((entry) => entry.view === view);
+  return welcomes.filter((entry) => entry.view === view && !(entry.when ?? "").startsWith("isWeb")).map(entry => ({ ...entry, when: entry.when?.replace(/^!isWeb && \((.*)\)$/, "$1") }));
 }
 
 /** The command ids a welcome's markdown links reach. */
@@ -64,27 +69,27 @@ function linkedCommands(contents: string): string[] {
   return [...contents.matchAll(/\(command:([A-Za-z0-9_.]+)\)/g)].map((m) => m[1]);
 }
 
+/** The welcome a view shows with no cluster in hand: the one keyed on the selection. */
+function noClusterWelcome(view: string): WelcomeEntry[] {
+  return welcomeFor(view).filter((entry) => entry.when === `!${CLUSTER_SELECTED_KEY}`);
+}
+
 for (const view of GATED) {
   test(`${view} carries a welcome keyed on !${CLUSTER_SELECTED_KEY}`, () => {
-    const entries = welcomeFor(view);
-    assert.equal(entries.length, 1, `expected exactly one welcome for ${view}`);
     // The clause is asserted whole rather than merely "mentions the key",
     // because `memql.clusterSelected` without the `!` is the same typo class as
     // a misspelling and reads correctly at a glance: it would show the welcome
     // exactly when there IS a cluster.
-    assert.equal(entries[0].when, `!${CLUSTER_SELECTED_KEY}`, `${view}'s welcome clause`);
+    assert.equal(noClusterWelcome(view).length, 1, `expected exactly one no-cluster welcome for ${view}`);
   });
 
   test(`${view}'s welcome opens with the shared sentence and offers Select Cluster`, () => {
-    const entry = welcomeFor(view)[0];
+    const entry = noClusterWelcome(view)[0];
     assert.ok(
-      entry.contents.startsWith("Not connected."),
+      entry.contents.startsWith("Not connected to a cluster."),
       `${view}'s welcome does not open with the shared refusal: ${entry.contents}`
     );
-    // ONE SENTENCE, then links. The three read the same because they describe
-    // the same condition; only the noun changes ("its deployments", "its
-    // constructs", "its data"), which is the "consistent message that varies a
-    // bit per view" the epic was filed for.
+    // ONE SENTENCE, then links.
     const [sentence] = entry.contents.split("\n");
     assert.ok(
       sentence.length < 80,
@@ -103,60 +108,134 @@ test("the welcomes and the runs refusal say the same first words", () => {
   // one session must recognise them as one message rather than two policies.
   const opening = NOT_CONNECTED_REFUSAL.split(".")[0];
   for (const view of GATED) {
-    assert.ok(welcomeFor(view)[0].contents.startsWith(opening));
+    assert.ok(noClusterWelcome(view)[0].contents.startsWith(opening));
+  }
+  for (const entry of deploymentsUnselected()) {
+    assert.ok(entry.contents.startsWith(opening), entry.contents);
+  }
+});
+
+/** The Deployments welcomes shown with no cluster selected. */
+function deploymentsUnselected(): WelcomeEntry[] {
+  return welcomeFor("memqlDeployments").filter((entry) => (entry.when ?? "").startsWith(`!${CLUSTER_SELECTED_KEY}`));
+}
+
+test("with no cluster selected, Deployments says one line and the right act", () => {
+  // TWO WELCOMES, ONE LINE EACH, split on whether a local cluster exists: the
+  // old one offered Install on a machine that already had one.
+  const entries = deploymentsUnselected();
+  assert.equal(entries.length, 2);
+  const present = entries.find((e) => e.when === `!${CLUSTER_SELECTED_KEY} && memql.localClusterPresent`);
+  const absent = entries.find((e) => e.when === `!${CLUSTER_SELECTED_KEY} && !memql.localClusterPresent`);
+  assert.ok(present && absent, "the two welcomes are keyed on whether a local cluster is present");
+  // A local cluster that is here but not selected -- or not even in the list,
+  // which Select Cluster cannot reach -- opens on its own page, whose primary
+  // is Connect, Reconnect or Sign in as its state asks.
+  assert.deepEqual(linkedCommands(present.contents), ["memql.deployments.open", "memql.clusters.select"]);
+  assert.deepEqual(linkedCommands(absent.contents), ["memql.deployments.createDeployment", "memql.clusters.select"]);
+  for (const entry of entries) assert.equal(entry.contents.split("\n")[0], "Not connected to a cluster.");
+});
+
+test("a selected cluster whose history cannot be read says what it needs, never nothing", () => {
+  // An empty tree under a selected cluster is either "no history yet" or "sign
+  // in to see it", and the welcome says which rather than leaving a blank view.
+  const signIn = welcomeFor("memqlDeployments").find((e) => (e.when ?? "").includes("memql.connectionState == signIn"));
+  assert.ok(signIn, "no sign-in welcome");
+  assert.ok((signIn.when ?? "").startsWith(CLUSTER_SELECTED_KEY));
+  assert.deepEqual(linkedCommands(signIn.contents), ["memql.deployments.signIn"]);
+  const empty = welcomeFor("memqlDeployments").find((e) => (e.when ?? "").includes("memql.connectionState == connected"));
+  assert.equal(empty?.contents, "No history yet.");
+});
+
+test("every connection state that can leave a selected cluster's history empty has a welcome line", () => {
+  // A blank view under a heading is the one thing a disconnected read must
+  // never look like. The history of a cluster this editor cannot read is
+  // empty for a reason, and the welcome says which.
+  const states = ["connected", "signIn", "connecting", "unreachable", "notConfigured"];
+  for (const state of states) {
+    const entry = welcomeFor("memqlDeployments").find(
+      (e) => e.when === `${CLUSTER_SELECTED_KEY} && memql.connectionState == ${state}`,
+    );
+    assert.ok(entry, `no welcome for ${state}`);
+    assert.equal(entry.contents.split("\n")[0]!.length <= 40, true, `${state}: more than one short line`);
   }
 });
 
 test("only the Deployments welcome carries the install entry point", () => {
-  // WHERE THE `local` ROW'S JOB WENT (design D4). The Deployments view used to
-  // render a `local` row even on a machine with nothing installed, purely so an
-  // operator had somewhere to start. That row is gone; this link is one of the
-  // three places its job moved to, and the other two are the Clusters welcome
-  // and the view title menu.
-  //
-  // Constructs and Data do NOT get it: neither is where an operator would look
-  // to install a cluster, and a third copy of the offer would make the
-  // consistent sentence three different sentences.
+  // WHERE THE `local` ROW'S JOB WENT (design D4): the Deployments welcome, the
+  // Clusters welcome and the view title menu. Constructs and Data do NOT get
+  // it: neither is where an operator would look to install a cluster.
   assert.ok(
-    linkedCommands(welcomeFor("memqlDeployments")[0].contents).includes(
-      "memql.deployments.createDeployment"
-    ),
+    deploymentsUnselected().some((entry) => linkedCommands(entry.contents).includes("memql.deployments.createDeployment")),
     "the Deployments welcome lost the install entry point"
   );
+  // Constructs and Data offer what a person with no cluster in hand can do
+  // about it -- select one, or add one when there is none to select (a
+  // Select Cluster alone opened an empty picker on a machine with no
+  // clusters). Neither is where somebody looks to install a cluster.
   for (const view of ["memqlConstructs", "memqlData"] as const) {
     assert.deepEqual(
-      linkedCommands(welcomeFor(view)[0].contents),
-      ["memql.clusters.select"],
-      `${view}'s welcome offers more than selecting a cluster`
+      linkedCommands(noClusterWelcome(view)[0].contents),
+      ["memql.clusters.select", "memql.clusters.add"],
+      `${view}'s no-cluster welcome offers the wrong acts`
     );
   }
 });
 
-test("the Clusters welcome is unchanged and stays unconditional", () => {
-  // It is the SELECTOR: the one view that must say something useful when there
-  // is no cluster to select, so it is keyed on nothing and renders whenever its
-  // tree is empty. Gating it on `!memql.clusterSelected` would be circular --
+test("the Clusters welcome says whether a local cluster is already here", () => {
+  // It is the SELECTOR: the one view that must say something useful when
+  // there is no cluster to select, so it is never keyed on the connection --
   // a user with no clusters at all could never reach the offer to add one.
+  // It IS keyed on what is on this machine: a local cluster that is running
+  // but not in the list (removed from it, or built with `make up`) is one
+  // click from connected, and leading with "Install" there would offer to
+  // build a second one over it.
   const entries = welcomeFor("memqlClusters");
-  assert.equal(entries.length, 1);
-  assert.equal(entries[0].when, undefined, "the Clusters welcome grew a when clause");
-  assert.deepEqual(linkedCommands(entries[0].contents).sort(), [
-    "memql.clusters.add",
-    "memql.deployments.createDeployment",
-  ]);
+  assert.equal(entries.length, 2);
+  const none = entries.find((e) => e.when === `!${LOCAL_CLUSTER_PRESENT_KEY}`);
+  const present = entries.find((e) => e.when === LOCAL_CLUSTER_PRESENT_KEY);
+  assert.ok(none !== undefined && present !== undefined, "one welcome for each answer of the presence key");
+  for (const entry of entries) {
+    assert.ok(!(entry.when ?? "").includes(CLUSTER_SELECTED_KEY), "the Clusters welcome is keyed on the connection");
+  }
+
+  assert.ok(none.contents.startsWith("No clusters yet.\n"));
+  assert.deepEqual(linkedCommands(none.contents), ["memql.deployments.createDeployment", "memql.clusters.add"]);
+
+  assert.ok(present.contents.startsWith("A local cluster is running on this computer.\n"));
+  assert.deepEqual(linkedCommands(present.contents), ["memql.clusters.connectLocal", "memql.clusters.add"]);
+
+  // One line and its buttons: no doctrine, no retired names.
+  for (const entry of entries) {
+    const [line] = entry.contents.split("\n");
+    assert.ok(line.length < 60, `the welcome is a paragraph: ${line}`);
+    assert.doesNotMatch(entry.contents, /portal/i);
+  }
 });
 
 test("Runs has no connection-gated welcome", () => {
   // THE EXCEPTION, asserted as an absence. Runs lists `runs.json` from the
   // workspace -- files a developer wrote and a repository can ship -- and a
   // welcome keyed on the connection would replace them with a message about a
-  // cluster. It gates `memql.runs.execute` instead.
+  // cluster. It gates the Run act instead.
   for (const entry of welcomeFor("memqlRuns")) {
     assert.ok(
-      !(entry.when ?? "").includes(CLUSTER_SELECTED_KEY),
+      !(entry.when ?? "").includes(CLUSTER_SELECTED_KEY) && !(entry.when ?? "").includes("memql.connect"),
       "the Runs view grew a connection-gated welcome"
     );
   }
+});
+
+test("Runs says why it is empty: no saved runs, or no folder to save them in", () => {
+  // It used to be a blank panel with two icons in either case.
+  const entries = welcomeFor("memqlRuns");
+  const byWhen = new Map(entries.map((entry) => [entry.when, entry]));
+  const noRuns = byWhen.get("workbenchState != empty");
+  const noFolder = byWhen.get("workbenchState == empty");
+  assert.ok(noRuns !== undefined, "no welcome for a folder with no saved runs");
+  assert.ok(noFolder !== undefined, "no welcome for a window with no folder");
+  assert.deepEqual(linkedCommands(noRuns.contents), ["memql.runs.open"]);
+  assert.deepEqual(linkedCommands(noFolder.contents), ["vscode.openFolder"]);
 });
 
 test("every welcome names a view that exists and a command that is contributed", () => {
@@ -166,11 +245,20 @@ test("every welcome names a view that exists and a command that is contributed",
   const views = new Set(
     Object.values(manifest.contributes.views).flat().map((entry) => entry.id)
   );
-  const commands = new Set(manifest.contributes.commands.map((entry) => entry.command));
+  // Plus the editor's own command a welcome links to.
+  const commands = new Set([...manifest.contributes.commands.map((entry) => entry.command), "vscode.openFolder"]);
   for (const entry of welcomes) {
     assert.ok(views.has(entry.view), `welcome for unknown view ${entry.view}`);
     for (const command of linkedCommands(entry.contents)) {
       assert.ok(commands.has(command), `${entry.view}'s welcome links uncontributed ${command}`);
     }
   }
+});
+
+
+test("browser welcome connects without offering a native installation", () => {
+  const browser = welcomes.filter(entry => entry.view === "memqlClusters" && entry.when?.startsWith("isWeb"));
+  assert.equal(browser.length, 1);
+  assert.deepEqual(linkedCommands(browser[0].contents), ["memql.clusters.add"]);
+  for (const entry of welcomes.filter(entry => entry.contents.includes("Install Local Cluster"))) assert.match(entry.when ?? "", /!isWeb/);
 });

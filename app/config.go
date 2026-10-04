@@ -198,19 +198,25 @@ func (a *App) configAndAuth() {
 		"expected_audience", verifierCfg.EffectiveAudience(),
 	)
 
-	authMiddleware := verifier.HTTPMiddleware(a.identityVerifier, verifier.MiddlewareOptions{
-		Logger:      a.Logger,
-		PublicPaths: server.PublicPaths(),
-		// Third tier (memql#3062): reachable without a MemQL bearer because the
-		// route verifies a vendor HMAC itself. Bounded to one path segment, and
-		// only on a path the mux routes to that handler (memql#3128).
-		SelfAuthenticatedPaths: server.SelfAuthenticatedPaths(),
-		UnauthorizedHandler: func(w http.ResponseWriter, r *http.Request) {
-			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-		},
-	})
-	a.middlewares = append(a.middlewares, authMiddleware)
+	a.middlewares = append(a.middlewares, a.identityHTTPMiddleware())
 	a.Logger.Info("identity verifier HTTP middleware configured")
+}
+
+// identityHTTPMiddleware captures route declarations when the completed mux is
+// wrapped, after databaseAndConcepts anchors packs. Capturing in configAndAuth
+// would omit the shopper routes on a fresh process and reject them with 401
+// before their handler's site/owner/store authorization can run.
+func (a *App) identityHTTPMiddleware() server.MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return verifier.HTTPMiddleware(a.identityVerifier, verifier.MiddlewareOptions{
+			Logger:                 a.Logger,
+			PublicPaths:            server.PublicPaths(),
+			SelfAuthenticatedPaths: server.SelfAuthenticatedPaths(),
+			UnauthorizedHandler: func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			},
+		})(next)
+	}
 }
 
 // validateRequiredEnv loads the secrets/variable registry and exits the

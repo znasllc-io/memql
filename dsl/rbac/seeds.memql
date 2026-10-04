@@ -299,6 +299,13 @@ seed capability cap-developer-read-app-accounts-logs { roleSlug: "developer"  ve
 seed capability cap-admin-read-app-accounts-logs { roleSlug: "admin"  verb: "read"  resourceType: "app:accounts/logs"  predefined: true }
 
 // ---- app:campaigns (registry floor: no floor) ----
+@description("owner: inspect the restricted Email test inbox.")
+seed capability cap-owner-read-app-email { roleSlug: "owner" verb: "read" resourceType: "app:email" predefined: true }
+seed capability cap-owner-read-app-email-logs { roleSlug: "owner" verb: "read" resourceType: "app:email/logs" predefined: true }
+seed capability cap-developer-read-app-email-logs { roleSlug: "developer" verb: "read" resourceType: "app:email/logs" predefined: true }
+seed capability cap-admin-read-app-email-logs { roleSlug: "admin" verb: "read" resourceType: "app:email/logs" predefined: true }
+@description("developer: inspect the restricted Email test inbox.")
+seed capability cap-developer-read-app-email { roleSlug: "developer" verb: "read" resourceType: "app:email" predefined: true }
 @description("owner: open the campaigns app -- reproduces the OS registry floor no floor (memql#5300).")
 seed capability cap-owner-read-app-campaigns { roleSlug: "owner"  verb: "read"  resourceType: "app:campaigns"  predefined: true }
 @description("developer: open the campaigns app -- reproduces the OS registry floor no floor (memql#5300).")

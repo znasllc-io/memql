@@ -231,6 +231,25 @@ function report_pr() {
          | select((.status//.state)=="QUEUED" or (.status//.state)=="IN_PROGRESS")
          | select(((.name//.context) as $n | $req | index($n)) != null)] | length')"
 
+    # The POSITIVE question, asked per required context: is it in the rollup
+    # with a SUCCESS? The two counts above cannot answer it -- a context that is
+    # ABSENT is neither failed nor pending, so it counts zero in both (see the
+    # note above guard_readiness). One line per context that is not green:
+    # `<context>\tABSENT`, or `<context>\t<the states it is in>`. A check run
+    # carries `.conclusion` (empty while it runs); a commit status carries
+    # `.state`. Any one SUCCESS entry satisfies a context; a red or running
+    # twin beside it is still refused, by the counts above.
+    REQUIRED_UNSETTLED="$(printf '%s' "$j" | jq -r --argjson req "$req_json" '
+        [.statusCheckRollup[]?] as $rollup
+        | $req[] as $r
+        | [$rollup[] | select((.name//.context) == $r)] as $mine
+        | if ($mine | length) == 0 then "\($r)\tABSENT"
+          elif any($mine[]; (.conclusion // .state) == "SUCCESS") then empty
+          else "\($r)\t\([$mine[]
+                 | if (.conclusion // "") != "" then .conclusion
+                   else (.state // .status // "UNKNOWN") end] | unique | join("/"))"
+          end')"
+
     # Print every red check, marking which of them the ruleset requires -- the
     # distinction the guard now turns on, so it must be visible in the report
     # and not only in the refusal.
@@ -243,6 +262,21 @@ function report_pr() {
                then "    FAILED (REQUIRED): \($n)"
                else "    failed (not required): \($n)" end] | .[]'
     fi
+
+    # And every required context that is not green for any OTHER reason. --check
+    # returns before the guard, so this is the only place a reader running it
+    # learns that the one check the ruleset requires does not exist yet; the
+    # counts line above would read "0 failed" and nothing else. A context that
+    # is plainly red was printed just above and is not repeated.
+    local ctx st
+    while IFS=$'\t' read -r ctx st; do
+        [[ -n "$ctx" ]] || continue
+        case "$st" in
+            ABSENT)            printf '    NOT REPORTED (REQUIRED): %s\n' "$ctx" ;;
+            FAILURE|TIMED_OUT) ;;
+            *)                 printf '    NOT PASSED (REQUIRED): %s (%s)\n' "$ctx" "$st" ;;
+        esac
+    done <<<"${REQUIRED_UNSETTLED}"
 }
 
 # guard_readiness refuses on the two conditions a bypass must never paper over.
@@ -286,9 +320,26 @@ function report_pr() {
 # merge, and `ci-required` is an `if: always()` aggregate over all of them, so
 # its own green is the statement that everything required has settled.
 #
+# ITS GREEN, NOT ITS SILENCE. The guard used to refuse on a required check
+# that had FAILED or was PENDING, and nothing else. But `ci-required` has
+# `needs:` on every other lane, and GitHub does not create a job's check run
+# until its needs have finished -- so for most of a CI run the one check the
+# ruleset requires is ABSENT from the rollup. Absent is neither failed nor
+# pending, both counts were zero, and the guard passed. Observed 2026-09-28:
+# `--pr=5709` printed "3 passed, 0 failed, 13 pending", warned that 13
+# non-required checks were still running, and merged memql#5709 through the
+# bypass with every db-tests shard pending and no `ci-required` check run on
+# the head commit. The ruleset would have waited for it; the bypass skips the
+# ruleset, so this guard is the only thing that waits. It now asks the
+# positive question -- is every required context PRESENT with a SUCCESS? --
+# and names each one that is not. A cancelled or skipped aggregate is refused
+# the same way (GitHub itself accepts SKIPPED for a required check): an
+# aggregate that did not run has said nothing about the lanes beneath it.
+#
 # When the required-check set could not be read, REQUIRED_KNOWN is "no" and
-# this falls back to refusing on any red check. An intersection against an
-# unknown set is empty, and an empty intersection would pass every red build.
+# this falls back to refusing on any red or running check. An intersection
+# against an unknown set is empty, and an empty intersection would pass every
+# red build.
 function guard_readiness() {
     [[ "$PR_STATE" == "OPEN" ]] || { log_error "pull request is ${PR_STATE}, not OPEN"; exit 3; }
 
@@ -305,6 +356,21 @@ function guard_readiness() {
     fi
     if [[ "${blocking_pending}" -gt 0 ]]; then
         log_error "refusing: ${blocking_pending} ${scope} still running. Re-run when CI has settled."
+        exit 3
+    fi
+    # Not red and not running is not the same as green. Every required context
+    # must be PRESENT with a SUCCESS, and each one that is not is named.
+    if [[ "${REQUIRED_KNOWN:-no}" == "yes" && -n "${REQUIRED_UNSETTLED:-}" ]]; then
+        local ctx st
+        while IFS=$'\t' read -r ctx st; do
+            [[ -n "$ctx" ]] || continue
+            if [[ "$st" == "ABSENT" ]]; then
+                log_error "refusing: ${ctx} has not reported yet -- re-run when CI has settled."
+            else
+                log_error "refusing: ${ctx} is ${st}, not SUCCESS -- re-run it and wait for a pass."
+            fi
+        done <<<"${REQUIRED_UNSETTLED}"
+        log_error "a required check must be PRESENT and green. The bypass skips the ruleset that would otherwise wait for it, so this script is the only thing that does."
         exit 3
     fi
     # Red lanes the ruleset does not require do not block, but they are never

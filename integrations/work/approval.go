@@ -9,8 +9,10 @@ import (
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/safety"
 	work "github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // approval.go -- the human gate, from both ends (design record section D,
@@ -35,6 +37,9 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	if err != nil {
 		return nil, err
 	}
+	if run, running := common.RunFromContext(ctx); ac.Synthetic || ac.Unranked || (running && run.RunId != "") {
+		return nil, fmt.Errorf("work: an approval requires a person's interactive decision, not a running job")
+	}
 	approvalId := argString(args, "approvalId")
 	if approvalId == "" {
 		return nil, fmt.Errorf("work: decideApproval needs an approvalId")
@@ -46,6 +51,15 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		return nil, fmt.Errorf("work: decision %q is not approved, rejected or answered", decision)
 	}
 
+	if i.decisionGate == nil {
+		return nil, fmt.Errorf("work: approval coordination is unavailable")
+	}
+	release, err := i.decisionGate(ctx, approvalId)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	ctx = memql.ContextWithFreshRead(ctx)
 	st := i.store()
 
 	// Resolve the approval through the CALLER's own pending list. That list
@@ -59,16 +73,24 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	}
 	var approval map[string]any
 	for _, row := range pending {
-		if rowString(row, "id") == approvalId {
+		if memql.BareShortId(rowString(row, "id")) == memql.BareShortId(approvalId) {
 			approval = row
 			break
 		}
 	}
 	if approval == nil {
+		if recovered, err := i.recoverReviewDecision(ctx, approvalId, decision); err != nil {
+			return nil, err
+		} else if recovered != nil {
+			return i.resultNode(recovered), nil
+		}
 		return nil, fmt.Errorf("work: no pending approval %q is readable by this caller -- it may already have been decided, or it belongs to somebody else", approvalId)
 	}
 
 	kind := rowString(approval, "kind")
+	if kind == work.ApprovalKindPlanReview && rowString(rowMap(approval, "subject"), "reviewType") != "" && decision == "answered" {
+		return nil, fmt.Errorf("work: this draft request needs an approval or a rejection")
+	}
 	storedHash := rowString(approval, "artifactHash")
 	runId := rowString(approval, "runId")
 	owner := rowString(approval, "ownerUserId")
@@ -101,6 +123,9 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// its typed error is what the refusal re-raises verbatim so a caller can
 	// tell "the artifact changed" from anything else.
 	if decision != "rejected" {
+		if err := i.validatePlanReview(ctx, kind, rowMap(approval, "subject")); err != nil {
+			return nil, err
+		}
 		current := currentArtifactHash(kind, storedHash, rowMap(approval, "subject"))
 		if kind == work.ApprovalKindProcedurePromotion {
 			// The one kind whose artifact is a ROW that keeps changing after
@@ -134,7 +159,7 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// came off the approval row this caller already read under their own
 	// actor.
 	writeCtx := ownerActor(ctx, owner)
-	if err := st.decideApprovalRow(writeCtx, approvalId, decision, strings.TrimSpace(ac.UserId), now, answer); err != nil {
+	if err := st.decideApprovalRow(writeCtx, approvalId, decision, strings.TrimSpace(ac.UserId), now, answer, approvalVersionAfter(approval["createdAt"], now)); err != nil {
 		return nil, err
 	}
 
@@ -282,14 +307,14 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 	if run == nil {
 		return false, fmt.Errorf("work: run %q is not readable", runId)
 	}
-	if rowString(run, "status") != runStatusWaiting {
+	if rowString(run, "status") != runStatusWaiting || run["cancelRequested"] == true {
 		return false, nil
 	}
 	// The wait must name THIS approval. waitingOn.subject is the id the run
 	// parked on; a run waiting on something else is not this decision's to
 	// release.
 	if waiting := rowMap(run, "waitingOn"); waiting != nil {
-		if subject, ok := waiting["subject"].(string); ok && trim(subject) != "" && trim(subject) != approvalId {
+		if subject, ok := waiting["subject"].(string); ok && trim(subject) != "" && memql.BareShortId(trim(subject)) != memql.BareShortId(approvalId) {
 			return false, nil
 		}
 	}
@@ -501,4 +526,14 @@ func subjectFrom(desc safety.ActionDescriptor) map[string]any {
 		subject["args"] = p.Args
 	}
 	return subject
+}
+
+// Decisions must sort after the proposal even when another replica's clock is
+// behind its author. A shared lock alone cannot repair a non-latest version.
+func approvalVersionAfter(value any, now time.Time) time.Time {
+	prior, ok := value.(time.Time)
+	if !ok {
+		prior, _ = time.Parse(time.RFC3339Nano, fmt.Sprint(value))
+	}
+	return memql.VersionTimeAfter(prior, now)
 }

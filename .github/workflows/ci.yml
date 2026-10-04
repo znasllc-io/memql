@@ -188,6 +188,11 @@ jobs:
               - 'examples/research-desk/research/memql.toml'
               - '**/*.md'
               - '**/*.memql'
+              # The docs bundle's boundary allowlist (memql#5717). The root
+              # package's docs_public_boundary_test.go READS it, and a stale
+              # entry fails that gate, so deleting an entry on its own must run
+              # the lane that proves the link it covered is gone.
+              - 'docs/public_boundary_allowlist.toml'
               # .claude/settings.json is TRACKED on purpose (the .gitignore
               # negation, memql#3344) and scripts/dev/repo_hygiene_test.go
               # asserts it stays non-ignored via sharedClaudeState. That test
@@ -494,6 +499,7 @@ jobs:
               - 'docs/public/overview/proving-scorecard.md'
               - 'docs/public/overview/proving/scorecard/**'
             go:
+              - 'integrations/email/azure-application.json' # delegated-sign-in permission contract
               - '**/*.go'
               # Embedded navigation contract drives engine authorization and record resolution.
               - 'component/memql/os_navigation.json'
@@ -617,6 +623,9 @@ jobs:
               # Editor palette tests compare against the authoritative brand.
               - 'brand/tokens.css'
               - 'editors/vscode/**'
+              - 'editors/productivity/**'
+              - 'editors/browser/**'
+              - 'editors/README.md'
               - 'cmd/memql-lsp/**'
               - 'scripts/vscode/**'
               - 'sdk/ts/**'
@@ -2034,6 +2043,11 @@ jobs:
       # and a red test is red the first time.
       - name: extension unit tests
         run: make vscode-test
+      - name: hosted browser editor build and checks
+        run: |
+          node editors/browser/build.mjs
+          npm --prefix editors/browser run typecheck
+          npm --prefix editors/browser test
       # DELIBERATELY NOT PASSING --skip-deps, even though the step above has
       # already built the workspace deps (memql#3340). This step used to pass
       # ONLY because of that: package.sh built no `file:` dependency of its own,
@@ -2148,6 +2162,64 @@ jobs:
         env:
           MEMQL_VSCODE_VERSION: ${{ matrix.vscode }}
         run: bash scripts/vscode/host-test.sh --skip-deps
+
+  productivity-extension-host:
+    name: productivity-extension-host (${{ matrix.os }}, ${{ matrix.host }}, ${{ matrix.version }})
+    timeout-minutes: 25
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.vscode == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, host: web, version: stable }
+          - { os: macos-latest, host: web, version: stable }
+          - { os: ubuntu-latest, host: desktop, version: stable }
+          - { os: macos-latest, host: desktop, version: stable }
+          - { os: ubuntu-latest, host: desktop, version: '1.91.0' }
+          - { os: macos-latest, host: desktop, version: '1.91.0' }
+    env:
+      MEMQL_VSCODE_VERSION: ${{ matrix.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            editors/vscode/package-lock.json
+            editors/productivity/package-lock.json
+      - name: build shared SDKs
+        run: bash scripts/vscode/deps.sh
+      - name: build and test both extensions
+        run: |
+          npm ci --no-audit --no-fund --prefix editors/vscode
+          npm ci --no-audit --no-fund --prefix editors/productivity
+          npm --prefix editors/vscode run compile
+          npm --prefix editors/productivity run compile
+          npm --prefix editors/productivity test
+      - name: browser runtime dependencies
+        if: matrix.host == 'web'
+        working-directory: editors/vscode
+        run: npx playwright install --with-deps chromium
+      - name: desktop runtime dependencies
+        if: runner.os == 'Linux' && matrix.host == 'desktop'
+        run: |
+          scripts/ci/retry.sh -- timeout 120 sudo apt-get update
+          scripts/ci/retry.sh -- timeout 300 sudo apt-get install -y xvfb libnss3 libgbm1 libxkbfile1 libsecret-1-0 libasound2t64
+      - name: browser host
+        if: matrix.host == 'web'
+        run: node editors/productivity/test/runner.cjs
+      - name: Linux desktop host
+        if: runner.os == 'Linux' && matrix.host == 'desktop'
+        run: xvfb-run -a node editors/productivity/test/runner.cjs --desktop
+      - name: macOS desktop host
+        if: runner.os == 'macOS' && matrix.host == 'desktop'
+        run: node editors/productivity/test/runner.cjs --desktop
+      - name: package Productivity Tools with desktop and web entry points
+        if: matrix.host == 'web' && runner.os == 'Linux'
+        run: npm --prefix editors/productivity run package
 
   # THE lane that makes the module boundary real (memql#3240, design D3).
   #
@@ -2401,6 +2473,7 @@ jobs:
       - proving
       - vscode-extension
       - vscode-extension-host
+      - productivity-extension-host
       - module-boundaries
       - bash32-smoke
     runs-on: ubuntu-latest

@@ -12,17 +12,17 @@ import (
 
 // propagate_test.go -- the push channel (#4396).
 
-func contentEntry(fields map[string]any) memqlsync.OutboxEntry {
-	// storeId rides the PAYLOAD, because the contract's OutboxEntry has no
-	// tenant field -- the runtime appends the row's own fields, and a
-	// multi-tenant connector reads its scope from them.
+func contentEntry(h *testHarness, fields map[string]any) memqlsync.OutboxEntry {
+	// The source row holds the tenant and fields. The real drain sends only
+	// its reference, so a test supplying a payload would miss a broken read.
 	payload := map[string]any{"productGid": "gid://shopify/Product/1", "storeId": testStoreID}
 	for k, v := range fields {
 		payload[k] = v
 	}
+	h.engine.setRows("productContentForPropagation", []map[string]any{payload})
 	return memqlsync.OutboxEntry{
 		Id: "obx1", Concept: "v1:commerce:productContent", RowId: "pc1",
-		Action: memqlsync.OutboxUpsert, Payload: payload,
+		Action:         memqlsync.OutboxUpsert,
 		IdempotencyKey: "v1:commerce:productContent|pc1|1|shopify",
 	}
 }
@@ -43,7 +43,7 @@ func TestOneEntryBecomesOneMetafieldsSet(t *testing.T) {
 		},
 	})
 
-	if _, err := h.conn.Propagate(context.Background(), contentEntry(map[string]any{"summary": "A linen shirt"})); err != nil {
+	if _, err := h.conn.Propagate(context.Background(), contentEntry(h, map[string]any{"summary": "A linen shirt"})); err != nil {
 		t.Fatal(err)
 	}
 	if h.admin.countOp("ShopifyMetafieldsSet") != 1 {
@@ -75,7 +75,7 @@ func TestAUserErrorDeadLettersRatherThanRetrying(t *testing.T) {
 	okDefinitions(h)
 	h.admin.userError("ShopifyMetafieldsSet", "metafieldsSet", "Value is invalid for type json")
 
-	_, err := h.conn.Propagate(context.Background(), contentEntry(map[string]any{"summary": "x"}))
+	_, err := h.conn.Propagate(context.Background(), contentEntry(h, map[string]any{"summary": "x"}))
 	if err == nil {
 		t.Fatal("a userError inside a 200 was reported as success -- the trap of this API")
 	}
@@ -95,7 +95,7 @@ func TestATransportFailureRetriesRatherThanDeadLettering(t *testing.T) {
 	h.admin.httpStatus("ShopifyMetafieldsSet", http.StatusBadGateway)
 	h.conn.admin.MaxRetries = 0
 
-	_, err := h.conn.Propagate(context.Background(), contentEntry(map[string]any{"summary": "x"}))
+	_, err := h.conn.Propagate(context.Background(), contentEntry(h, map[string]any{"summary": "x"}))
 	if err == nil {
 		t.Fatal("a 502 was reported as success")
 	}
@@ -106,7 +106,7 @@ func TestATransportFailureRetriesRatherThanDeadLettering(t *testing.T) {
 
 func TestAnEntryWithNothingToPushIsDeliveredNotDeadLettered(t *testing.T) {
 	h := newHarness(t)
-	result, err := h.conn.Propagate(context.Background(), contentEntry(nil))
+	result, err := h.conn.Propagate(context.Background(), contentEntry(h, nil))
 	if err != nil {
 		t.Fatalf("an empty row is not a failure: %v", err)
 	}

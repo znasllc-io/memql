@@ -813,7 +813,7 @@ func TestRuntimeSurfaceIsTrustGated(t *testing.T) {
 		t.Fatal("contributes.views.memql is empty; the view container moved and this guard has silently stopped protecting anything")
 	}
 	for _, v := range views {
-		if v.When != workspaceTrustWhenClause {
+		if !trustRequired(v.When) {
 			t.Errorf("view %q declares when %q, want %q; without it an untrusted workspace shows this view (and the activity-bar container holding it) permanently empty, since extension.ts registers no provider until trust is granted",
 				v.ID, v.When, workspaceTrustWhenClause)
 		}
@@ -839,7 +839,7 @@ func TestRuntimeSurfaceIsTrustGated(t *testing.T) {
 				cmd, cmd, workspaceTrustWhenClause)
 			continue
 		}
-		if when != workspaceTrustWhenClause {
+		if !trustRequired(when) {
 			t.Errorf("command %q declares palette when %q, want %q", cmd, when, workspaceTrustWhenClause)
 		}
 	}
@@ -868,4 +868,9 @@ func rangeAdmits(op string, floor, resolved [3]int) bool {
 		return resolved[0] == floor[0] && resolved[1] == floor[1] && resolved[2] >= floor[2]
 	}
 	return false
+}
+
+// Host restrictions may narrow availability but cannot remove workspace trust.
+func trustRequired(when string) bool {
+	return when == "isWorkspaceTrusted" || when == "!isWeb && isWorkspaceTrusted" || when == "!isWeb && (isWorkspaceTrusted)"
 }

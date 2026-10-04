@@ -15,7 +15,7 @@ import (
 
 func organizationOwnedConcept(concept string) bool {
 	switch concept {
-	case "v1:campaigns:audience", "v1:campaigns:recipient", "v1:campaigns:template", "v1:campaigns:senderIdentity", "v1:campaigns:campaign", "v1:campaigns:delivery", "v1:campaigns:engagementEvent", "v1:campaigns:consentEvent", "v1:campaigns:emailRule", "v1:platform:site", "v1:platform:package", "v1:platform:packageDeployment", "v1:identity:group", "v1:identity:groupMembership":
+	case "v1:campaigns:testSettings", "v1:campaigns:newsletterBinding", "v1:campaigns:newsletterSignup", "v1:campaigns:campaignSeries", "v1:campaigns:audience", "v1:campaigns:recipient", "v1:campaigns:template", "v1:campaigns:senderIdentity", "v1:campaigns:campaign", "v1:campaigns:delivery", "v1:campaigns:engagementEvent", "v1:campaigns:consentEvent", "v1:campaigns:emailRule", "v1:platform:site", "v1:platform:package", "v1:platform:packageDeployment", "v1:identity:group", "v1:identity:groupMembership":
 		return true
 	}
 	return false
@@ -30,7 +30,7 @@ func organizationOperator(ctx context.Context) bool {
 // never from the requested account. Multiple memberships require a choice.
 func organizationDefaultAccount(operator bool, scope *accountScope) (string, error) {
 	if operator {
-		return "self", nil
+		return "", fmt.Errorf("organization_required: select the organization this record belongs to")
 	}
 	choices := map[string]bool{}
 	if scope != nil {
@@ -122,6 +122,14 @@ func organizationReferences(concept string) map[string]string {
 	switch concept {
 	case "v1:campaigns:campaign", "v1:campaigns:emailRule":
 		return map[string]string{"audienceId": "v1:campaigns:audience", "templateId": "v1:campaigns:template", "senderIdentityId": "v1:campaigns:senderIdentity"}
+	case "v1:campaigns:testSettings":
+		return map[string]string{"audienceId": "v1:campaigns:audience"}
+	case "v1:campaigns:newsletterBinding":
+		return map[string]string{"siteId": "v1:platform:site", "audienceId": "v1:campaigns:audience", "templateId": "v1:campaigns:template", "senderIdentityId": "v1:campaigns:senderIdentity"}
+	case "v1:campaigns:newsletterSignup":
+		return map[string]string{"newsletterId": "v1:campaigns:newsletterBinding", "recipientId": "v1:campaigns:recipient", "audienceId": "v1:campaigns:audience", "templateId": "v1:campaigns:template", "senderIdentityId": "v1:campaigns:senderIdentity"}
+	case "v1:campaigns:campaignSeries":
+		return map[string]string{"sourceCampaignId": "v1:campaigns:campaign"}
 	case "v1:campaigns:recipient":
 		return map[string]string{"audienceId": "v1:campaigns:audience"}
 	case "v1:campaigns:delivery":
@@ -318,7 +326,7 @@ func (e *MemQLEngine) validateOrganizationTransfer(ctx context.Context, concept,
 	if e.database() == nil {
 		return fmt.Errorf("organization_unavailable: dependent records cannot be checked")
 	}
-	for _, childConcept := range []string{"v1:campaigns:campaign", "v1:campaigns:emailRule", "v1:campaigns:recipient", "v1:campaigns:delivery", "v1:campaigns:engagementEvent", "v1:campaigns:consentEvent", "v1:platform:packageDeployment", "v1:identity:groupMembership"} {
+	for _, childConcept := range []string{"v1:campaigns:newsletterBinding", "v1:campaigns:newsletterSignup", "v1:campaigns:campaignSeries", "v1:campaigns:campaign", "v1:campaigns:emailRule", "v1:campaigns:recipient", "v1:campaigns:delivery", "v1:campaigns:engagementEvent", "v1:campaigns:consentEvent", "v1:platform:packageDeployment", "v1:identity:groupMembership"} {
 		for field, parent := range organizationReferences(childConcept) {
 			if parent != concept {
 				continue

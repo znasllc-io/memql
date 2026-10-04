@@ -9,6 +9,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -150,6 +151,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // returns the path class of what it did -- the one fact the record needs that
 // cannot be read off the response.
 func (h *Handler) serve(w http.ResponseWriter, r *http.Request, site *Site) string {
+	// Isolated renderer origins serve public bundle assets only. They never
+	// expose sessions, runtime config, previews, uploads or API proxies.
+	if site.ResourceParentHost != "" {
+		root := extensionRuntimePath(site)
+		if site.Status != "live" || root == "" || path.Clean(r.URL.Path) != r.URL.Path || !strings.HasPrefix(r.URL.Path, root+"assets/") || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+			http.NotFound(w, r)
+			return pathClassUnserved
+		}
+		r = r.Clone(r.Context())
+		r.Header.Del("Cookie")
+		r.Header.Del("Authorization")
+		return h.serveResolved(w, r, site)
+	}
 	// THE PREVIEW ENTRY POINTS, AHEAD OF EVERYTHING (epic memql#5531). They are
 	// answered by the edge ITSELF rather than proxied, and they sit above the
 	// status switch, so a link to a DRAFT deployable's preview is redeemable --
@@ -245,7 +259,15 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request, site *Site) stri
 // preview binding's, and from here there is no code path that can tell the
 // difference.
 func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Site) string {
+	if !utf8.ValidString(r.URL.Path) || strings.ContainsAny(r.URL.Path, "\x00\\") {
+		noCache(w)
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return pathClassUnserved
+	}
 	w.Header().Set(deploymentVersionHeader, deploymentVersion(site))
+	if strings.HasPrefix(r.URL.Path, versionedAssetPath) {
+		return h.serveVersionedAsset(w, r, site)
+	}
 	if r.URL.Path == siteRefreshPath {
 		serveSiteRefresh(w, r)
 		return pathClassConfig
@@ -283,7 +305,7 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 	// Exact-path identity JSON, ahead of the bundle / SPA fallback.
 	// A miss here is how a Mac browser's coalesced POST /oauth/token
 	// used to get index.html 200 (memql#4154).
-	if isIdentityXHRPath(r.URL.Path) {
+	if isIdentityXHRPath(r.URL.Path) || isIdentityUIRequest(r) || isIdentityPasskeyRequest(r) {
 		h.serveIdentityXHR(w, r, site)
 		return pathClassProxy
 	}
@@ -317,19 +339,19 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 		// twice per request.
 		etag, hasETag := assetETagFor(fsys, name, site.BundleRef)
 		h.setContentSecurityPolicy(w, r, site, fsys, name, etag, hasETag)
-		h.serveFile(w, r, fsys, name, etag, hasETag)
+		h.serveFile(w, r, fsys, name, etag, hasETag, filePolicy{assetPrefix: assetPrefixFor(site), suppressRefresh: extensionRuntimePath(site) != "" && strings.HasPrefix(r.URL.Path, extensionRuntimePath(site))})
 		return classifyServed(name, false)
 	}
 
 	// The last rung of D11's order, and the only place the tail is decided.
-	if fallsBackToIndex(site) {
+	if site.ResourceParentHost == "" && fallsBackToIndex(site) && !staticAssetName(r.URL.Path) && !strings.HasPrefix(r.URL.Path, "/_astro/") {
 		if _, err := fs.Stat(fsys, "index.html"); err == nil {
 			// The fallback serves a DOCUMENT, so it needs its hashes exactly
 			// as the root does. Without this every client-side route breaks
 			// on a hard reload while the root keeps working.
 			etag, hasETag := assetETagFor(fsys, "index.html", site.BundleRef)
 			h.setContentSecurityPolicy(w, r, site, fsys, "index.html", etag, hasETag)
-			h.serveFile(w, r, fsys, "index.html", etag, hasETag)
+			h.serveFile(w, r, fsys, "index.html", etag, hasETag, filePolicy{assetPrefix: assetPrefixFor(site), suppressRefresh: extensionRuntimePath(site) != "" && strings.HasPrefix(r.URL.Path, extensionRuntimePath(site))})
 			return pathClassFallback
 		}
 	}
@@ -413,7 +435,7 @@ func resolveAsset(fsys fs.FS, urlPath string) (string, bool) {
 	return "", false
 }
 
-func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, name, etag string, hasETag bool) {
+func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, name, etag string, hasETag bool, policy filePolicy) {
 	// THE VALIDATOR IS COMPUTED BEFORE THE FILE IS OPENED (memql#4545) --
 	// by the CALLER now, which also hands it to the CSP builder so it is
 	// derived once rather than twice (see the call site).
@@ -449,19 +471,26 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, 
 	// every caller of serveFile including any added later -- a `no-store`
 	// somebody sets anywhere upstream is honoured for the same reason.
 	if !alreadyPrivate(w) {
-		// Every mutable URL must reach this handler again after a release. Only
-		// a filename digest VERIFIED against its bytes earns immutable caching.
+		// A mutable URL must reach this handler again after a release. A verified
+		// filename digest or an authorized bundle-qualified URL earns immutable.
 		w.Header().Set("Cache-Control", "public, no-cache, must-revalidate")
-		if contentAddressedAsset(fsys, name) {
+		if policy.immutable || contentAddressedAsset(fsys, name) {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 			w.Header().Del("Pragma")
 			w.Header().Del("Expires")
 		}
 	}
 	version := w.Header().Get(deploymentVersionHeader)
-	refreshDocument := isHTMLDocument(name) && version != ""
+	refreshDocument := isHTMLDocument(name) && version != "" && !policy.suppressRefresh
 	if refreshDocument && hasETag {
-		etag = strongETag(etag, "site-refresh-v1", version)
+		etag = strongETag(etag, "site-refresh-v2", version, policy.assetPrefix)
+	}
+	compressed := gzipFile(w, r, name)
+	if compressed {
+		w.Header().Set("Content-Encoding", "gzip")
+		if hasETag {
+			etag = strongETag(etag, "gzip-v1")
+		}
 	}
 	if hasETag {
 		w.Header().Set("ETag", etag)
@@ -476,11 +505,29 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, 
 		data, err := refreshingDocument(fsys, name, version)
 		if err != nil {
 			w.Header().Del("ETag")
+			w.Header().Del("Content-Encoding")
 			noCache(w)
 			http.NotFound(w, r)
 			return
 		}
+		data = versionAssetLinks(data, policy.assetPrefix)
+		if compressed {
+			serveGzipFile(w, r, name, data)
+			return
+		}
 		http.ServeContent(w, r, path.Base(name), time.Time{}, bytes.NewReader(data))
+		return
+	}
+	if compressed {
+		data, err := fs.ReadFile(fsys, name)
+		if err != nil {
+			w.Header().Del("ETag")
+			w.Header().Del("Content-Encoding")
+			noCache(w)
+			http.NotFound(w, r)
+			return
+		}
+		serveGzipFile(w, r, name, data)
 		return
 	}
 

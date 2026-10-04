@@ -13,7 +13,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "target": "ES2021",
-    "lib": ["ES2021"],
+    "lib": ["ES2021", "DOM"],
     "outDir": "out",
     "rootDir": "src",
     "sourceMap": true,

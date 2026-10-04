@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // Declares which HTTP routes may be reachable without authentication, and on
@@ -263,7 +265,31 @@ func SelfAuthenticatedPaths() []string {
 	// so, because this is the layer that would silently 401 a token
 	// carrying a slash.
 	paths := append(InboundWebhookPaths(), UnsubscribePaths()...)
-	return append(paths, TrackingPaths()...)
+	paths = append(paths, TrackingPaths()...)
+	return append(paths, ShopperSelfAuthenticatedPaths()...)
+}
+
+// ShopperSelfAuthenticatedPaths returns only the exact routes declared by packs.
+// The bearer verifier steps aside so ShopperHandler can validate the edge stamp
+// against the site's owner, enabled surface and store bindings. No prefix is
+// exempted: a new route must first be declared, and deeper paths stay protected.
+// This registry is populated during pack anchoring; take the snapshot only after
+// that boot phase, when the HTTP middleware is applied to the completed mux.
+func ShopperSelfAuthenticatedPaths() []string {
+	var paths []string
+	for _, entry := range memql.ShopperSurface() {
+		var prefix string
+		switch entry.Kind {
+		case "form":
+			prefix = memql.ShopperFormPathPrefix
+		case "read":
+			prefix = memql.ShopperReadPathPrefix
+		default:
+			continue // An extension uses its form's existing route.
+		}
+		paths = append(paths, pathsWithBase(prefix+entry.Pack+"/"+entry.Name)...)
+	}
+	return paths
 }
 
 // ContractRoutes returns the request paths HandlerWithOptions registers.

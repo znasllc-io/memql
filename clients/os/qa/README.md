@@ -227,3 +227,17 @@ and `cobalt` in both `dark` and `light`. Add `&window=1` to inspect the pattern
 behind the shell's window surface; also inspect a narrow viewport. All themes
 share the approved Fold geometry (3.1% / 1.7% ground–ink mixes). There are no
 nodes, lines, canvas or animation. The palette and numeral remain the theme's.
+
+Recurring campaigns use `campaign-repeat-empty`, `campaign-repeat-active`, and
+`campaign-repeat-blocked`. Add `width=narrow` for the constrained panel. Open
+**Set up repeating sends** on the empty view to inspect the date/cadence form.
+
+Newsletter signup fixtures: `campaign-newsletter-empty` and `campaign-newsletter-active`. Open the plus control to review setup; use `width=narrow` for the compact layout.
+
+Azure email setup: `azure-email-dns`, `azure-email-provisioning`, and
+`azure-email-empty` use the shared Campaigns/Settings domain wizard. Open the
+domain row (or Add sending domain on the empty view). Inspect both modes and
+`width=narrow`: DNS names and values use the same copyable strips as Deployables
+domain binding; the footer stays reachable and prior steps reopen. Provisioning
+shows an elapsed wait and continues automatically using the fixture connection.
+These views never contact Azure or change DNS.

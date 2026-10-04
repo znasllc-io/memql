@@ -1,0 +1,22 @@
+.campaigns-settings { min-width: 0; container-type: inline-size; }
+.campaigns-preferences { margin: 0; min-width: 0; }
+.campaigns-preference {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(12rem, 16rem);
+  align-items: center;
+  gap: 12px 32px;
+  padding-block: 14px;
+}
+.campaigns-preference + .campaigns-preference { border-top: 1px solid var(--os-line); }
+.campaigns-preference-name { font-weight: 500; }
+.campaigns-preference .os-caption { max-width: 65ch; margin: 4px 0 0; }
+.campaigns-preference .os-form-field { min-width: 0; }
+.campaigns-preference .os-form-field > .os-form-field-label { display: none; }
+.campaigns-preference .os-select-wrap { width: 100%; }
+.campaigns-settings .os-panel > .os-caption { margin: 0; }
+@container (max-width: 560px) {
+  .campaigns-preference { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .campaigns-preference .os-form-field { max-width: 20rem; }
+}
+
+.campaigns-settings:has(.os-wizard, .os-action-pane) { height: 100%; }

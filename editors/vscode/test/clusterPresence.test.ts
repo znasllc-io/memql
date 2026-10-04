@@ -21,6 +21,8 @@ import {
   DEFAULT_LOCAL_ENDPOINT,
   addClusterMenu,
   detectPresence,
+  PROBE_TIMEOUT_MS,
+  PROBE_TRIES,
   probeEndpointFor,
   verdictFor,
   type PresenceEvidence,
@@ -148,7 +150,8 @@ const TABLE: Row[] = [
     probe: fixedProbe(false),
     want: "installed-unreachable",
     wantEvidence: { receipt: true, registry: false, liveCluster: false },
-    wantProbed: [DEFAULT_LOCAL_ENDPOINT],
+    // One miss is not a verdict: the probe is tried once more first.
+    wantProbed: [DEFAULT_LOCAL_ENDPOINT, DEFAULT_LOCAL_ENDPOINT],
   },
   {
     name: "REGISTRY ONLY + the endpoint answers is INSTALLED-HEALTHY (the `make up` cluster)",
@@ -166,7 +169,7 @@ const TABLE: Row[] = [
     probe: fixedProbe(false),
     want: "installed-unreachable",
     wantEvidence: { receipt: false, registry: true, liveCluster: false },
-    wantProbed: [LOCAL_ENTRY.endpoint],
+    wantProbed: [LOCAL_ENTRY.endpoint, LOCAL_ENTRY.endpoint],
   },
   {
     name: "BOTH sources + the endpoint answers is INSTALLED-HEALTHY",
@@ -186,7 +189,7 @@ const TABLE: Row[] = [
     probe: fixedProbe(false),
     want: "installed-unreachable",
     wantEvidence: { receipt: true, registry: true, liveCluster: false },
-    wantProbed: [LOCAL_ENTRY.endpoint],
+    wantProbed: [LOCAL_ENTRY.endpoint, LOCAL_ENTRY.endpoint],
   },
   {
     name: "a probe that NEVER ANSWERS degrades to INSTALLED-UNREACHABLE",
@@ -674,4 +677,78 @@ test("an artifact a step FOUND already present is still evidence", async () => {
 
   assert.equal(result.verdict, "installed-unreachable");
   assert.deepEqual(result.evidence, { receipt: true, registry: false, liveCluster: false });
+});
+
+// -----------------------------------------------------------------------------
+// One miss is not a verdict, and a miss says why
+// -----------------------------------------------------------------------------
+//
+// THE FIELD FAILURE: the Deployments view said "not answering" for a front
+// door that answered a shell in 42 ms. The first TLS handshake from the
+// extension host can be slow, the budget was 1.5 s, and the reason was logged
+// nowhere.
+
+test("the probe budget is about four seconds, tried twice", () => {
+  assert.equal(PROBE_TIMEOUT_MS, 4_000);
+  assert.equal(PROBE_TRIES, 2);
+});
+
+test("a first miss is tried again, and a second-try answer is healthy", async () => {
+  let calls = 0;
+  const result = await detectPresence({
+    clustersPath: CLUSTERS_PATH,
+    receiptPath: RECEIPT_PATH,
+    readReceiptFile: () => Promise.resolve(null),
+    readClusters: clustersWith([LOCAL_ENTRY]),
+    probe: async () => {
+      calls += 1;
+      return calls === 2;
+    },
+    probeTimeoutMs: 25,
+  });
+  assert.equal(result.verdict, "installed-healthy");
+  assert.equal(calls, 2);
+});
+
+test("the reason for a miss is reported, once, after the last try", async () => {
+  const failures: Array<[string, string]> = [];
+  await detectPresence({
+    clustersPath: CLUSTERS_PATH,
+    receiptPath: RECEIPT_PATH,
+    readReceiptFile: () => Promise.resolve(null),
+    readClusters: clustersWith([LOCAL_ENTRY]),
+    probe: async () => ({ answered: false, reason: "connect ECONNREFUSED 127.0.0.1:443" }),
+    probeTimeoutMs: 25,
+    onProbeFailure: (endpoint, reason) => failures.push([endpoint, reason]),
+  });
+  assert.deepEqual(failures, [[LOCAL_ENTRY.endpoint, "connect ECONNREFUSED 127.0.0.1:443"]]);
+});
+
+test("a probe that never answers is reported as a timeout", async () => {
+  const failures: string[] = [];
+  await detectPresence({
+    clustersPath: CLUSTERS_PATH,
+    receiptPath: RECEIPT_PATH,
+    readReceiptFile: () => Promise.resolve(null),
+    readClusters: clustersWith([LOCAL_ENTRY]),
+    probe: HANGING_PROBE,
+    probeTimeoutMs: 25,
+    onProbeFailure: (_endpoint, reason) => failures.push(reason),
+  });
+  assert.equal(failures.length, 1);
+  assert.match(failures[0] ?? "", /no answer within 25 ms/);
+});
+
+test("with no receipt, the version is the one clusters.yaml records", async () => {
+  // A cluster built with `make up`: no receipt, and a version the registry
+  // learned. The Deployments view used to say "unknown" for it.
+  const result = await detectPresence({
+    clustersPath: CLUSTERS_PATH,
+    receiptPath: RECEIPT_PATH,
+    readReceiptFile: () => Promise.resolve(null),
+    readClusters: clustersWith([{ ...LOCAL_ENTRY, version: "main" }]),
+    probe: fixedProbe(true),
+    probeTimeoutMs: 25,
+  });
+  assert.equal(result.version, "main");
 });

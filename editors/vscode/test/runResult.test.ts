@@ -86,30 +86,37 @@ test("groupRowsByConcept -- an empty result is an empty group list", () => {
 // Banners
 // -----------------------------------------------------------------------------
 
-test("resultBannerFor -- a tool result says the DEPLOYED definition ran", () => {
+test("resultBannerFor -- a tool result says the deployed tool ran", () => {
   const banner = resultBannerFor({ ranDeployedDefinition: true, injected: false, kind: "tool" });
   assert.equal(banner, TOOL_RESULT_BANNER);
-  assert.match(banner, /DEPLOYED/);
-  assert.match(banner, /not this buffer/);
+  assert.match(banner, /Deployed tool/);
+  assert.match(banner, /don't apply/);
 });
 
-test("resultBannerFor -- a freshly injected run says the buffer ran and nothing was saved", () => {
+test("resultBannerFor -- a freshly injected run says the editor's code ran and nothing was saved", () => {
   const banner = resultBannerFor({ ranDeployedDefinition: false, injected: true, kind: "query" });
   assert.equal(banner, BUFFER_RESULT_BANNER);
-  assert.match(banner, /Nothing was saved or deployed/);
+  assert.match(banner, /From this editor/);
+  assert.match(banner, /not saved/);
 });
 
-test("resultBannerFor -- a reused injection still says the buffer ran", () => {
-  // The distinction matters: "not re-injected" must not read as "not your
-  // code". The bundle was unchanged, so what ran is still the buffer.
+test("resultBannerFor -- a reused injection says the same: the editor's code ran", () => {
+  // "Not re-sent" must not read as "not your code". The bundle was unchanged,
+  // so what ran is still the buffer -- and whether it was re-sent is the run
+  // path's business, not the reader's.
   const banner = resultBannerFor({ ranDeployedDefinition: false, injected: false, kind: "query" });
   assert.equal(banner, REUSED_INJECTION_BANNER);
-  assert.match(banner, /as previously session-defined/);
+  assert.equal(banner, BUFFER_RESULT_BANNER);
 });
 
-test("the three banners are distinct", () => {
-  const set = new Set([TOOL_RESULT_BANNER, BUFFER_RESULT_BANNER, REUSED_INJECTION_BANNER]);
+test("the editor, the deployed tool and the deployed version are three different words", () => {
+  const set = new Set([TOOL_RESULT_BANNER, BUFFER_RESULT_BANNER, CATALOG_RESULT_BANNER]);
   assert.equal(set.size, 3);
+  // Short enough for a meta line, and no shouting.
+  for (const banner of set) {
+    assert.ok(banner.length <= 40, banner);
+    assert.doesNotMatch(banner, /[A-Z]{3,}/);
+  }
 });
 
 // -----------------------------------------------------------------------------

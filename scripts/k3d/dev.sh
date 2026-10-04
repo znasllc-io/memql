@@ -541,12 +541,15 @@ function build_node() {
 # fail partway and asserts that nothing was imported. Inlined in main() that
 # assertion could only be made against the whole script.
 function build_and_import_nodes() {
-    local node index=0
+    local node index=0 total=$#
     local ids=()
 
     # Build every image before touching the cluster; preserve each build's
     # own ID while later builds can take minutes and mutable tags can change.
+    # Each pass reports its count as it goes (cap_progress), which is what a
+    # progress bar follows through the longest part of a rebuild.
     for node in "$@"; do
+        cap_progress "Building images" "${#ids[@]}" "$total"
         LOCAL_IMAGE_BUILT_ID=""
         build_node "$node"
         ids+=("$LOCAL_IMAGE_BUILT_ID")
@@ -561,6 +564,7 @@ function build_and_import_nodes() {
     done
     index=0
     for node in "$@"; do
+        cap_progress "Importing images" "$index" "$total"
         install_node "$node" "${ids[$index]}"
         index=$((index + 1))
     done
@@ -1165,6 +1169,9 @@ function main() {
             info "Carrier override: ${CARRIER_NODES[*]} (from ${CARRIER_REPO})"
         fi
         build_and_import_nodes "${nodes_to_build[@]}"
+        # Everything from here to the end is getting the cluster onto the new
+        # images: the ingress, the pointer, the restarts and the wait for them.
+        cap_progress "Restarting services"
 
         # Editor rebuilds use this path without another make up. Reconcile
         # only after successful builds, so a build failure cannot roll ingress.

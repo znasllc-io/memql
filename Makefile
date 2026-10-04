@@ -441,7 +441,7 @@ db-failover-litmus:
 # ---------------------------------------------------------------------------
 
 ##@ Test & SDK
-.PHONY: test test-v test-cover sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-deps vscode-test vscode-site-build vscode-test-host os-install os-typecheck os-test os-build os-clean
+.PHONY: test test-v test-cover sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-deps vscode-test vscode-site-build browser-editor-build vscode-test-host os-install os-typecheck os-test os-build os-clean
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
 ## query / mutation / logic under dsl/**/*.memql and emits typed
@@ -475,35 +475,57 @@ sdk-gen-check:
 	$(GO) run ./scripts/sdk-gen --check --dsl=dsl --out=sdk/go/client --ts-out=sdk/ts/src/client
 
 # ARCH_MODEL_OUT lets the drift gate regenerate to a temp file through THIS
-# target, so the flag set exists exactly once in the repo. Declared above the
-# doc block so it does not separate the '## ' summary from its target, which
-# would drop arch-model out of `make help` (TestMakeHelpCompleteness).
+# target, so the flag set exists exactly once in the repo. ARCH_MODEL_CALLS=1
+# on the command line adds --calls: the gate's on-demand call graph
+# (memql#5727), never the committed artifact. `:=`, not `?=`, so an
+# ARCH_MODEL_CALLS exported in someone's shell cannot put the call graph back
+# into the file they commit. Declared above the doc block so they do not
+# separate the '## ' summary from its target, which would drop arch-model out of
+# `make help` (TestMakeHelpCompleteness).
 ARCH_MODEL_OUT ?= component/architecture/embedded/topology.model.json
+ARCH_MODEL_CALLS :=
 
 ## Regenerate the checked-in architecture model
-## (component/architecture/embedded/topology.model.json), which the cockpit's
-## Topology tab consumes.
+## (component/architecture/embedded/topology.model.json): services, packages,
+## types and the DSL automation trigger graph.
 ##
-## THE FLAGS ARE LOAD-BEARING (memql#2844). --calls is not a default, and the
-## artifact contains the call graph: 121k edges with it, 21k without. Before
-## this target nothing recorded that, so `go run ./cmd/memql-arch` -- the
-## documented command -- produced a file 100k edges smaller than the one in
-## git, and the resulting 900k-line diff made refreshing the model impossible
-## in practice. --reproducible blanks generated_at and the absolute workspace
-## path so the output depends only on the code.
+## STRUCTURAL ONLY (memql#5727, owner decision 7). The CHA call graph was
+## 63.9 of the file's 81.3 MB and nothing read it, so --calls is off for the
+## committed artifact; TestArchitectureModelIsNotStale builds it on demand
+## (ARCH_MODEL_CALLS=1) to check it. --reproducible blanks generated_at and the
+## absolute workspace path so the output depends only on the code (memql#2844).
 arch-model:
-	$(GO) run ./cmd/memql-arch --root . --types --calls --automations --cluster memql \
-		--reproducible --out $(ARCH_MODEL_OUT)
+	$(GO) run ./cmd/memql-arch --root . --types --automations --cluster memql \
+		--reproducible $(if $(ARCH_MODEL_CALLS),--calls) --out $(ARCH_MODEL_OUT)
 
-## CI gate: regenerate the architecture model and diff against the checked-in
-## copy. Fails if the code changed without the model being refreshed -- the
-## drift that left ToggleComputerUseEnabledArgs.UserId in the model in 13
+## CI gate: regenerate the architecture model and check the checked-in copy
+## against it. Fails if the code changed without the model being refreshed --
+## the drift that left ToggleComputerUseEnabledArgs.UserId in the model in 13
 ## places after #2840 removed it. Pair with `make arch-model` locally to fix.
 ##
 ## Also enforced by TestArchitectureModelIsNotStale so it runs in the ordinary
 ## `go test ./...` lane, which needs no workflow change.
 arch-model-check:
 	$(GO) test -count=1 -run TestArchitectureModelIsNotStale ./component/architecture/
+
+# PLATFORM_GRAPH_OUT lets TestPlatformGraphIsNotStale regenerate to a temp file
+# through THIS target, as ARCH_MODEL_OUT does for the model.
+PLATFORM_GRAPH_OUT ?= component/architecture/embedded/platform.graph.json
+
+## Regenerate the checked-in platform graph
+## (component/architecture/embedded/platform.graph.json): the node roles and
+## their packages, the deploy base's Deployments and Services, the gRPC
+## services, the front door, the mesh routing table, the concepts, the
+## automations and the OS navigation (memql#5727). The docs diagrams and the
+## OS's Cluster map read it. Regenerate after changing any of those.
+platform-graph:
+	$(GO) run ./cmd/platformgraph --root . --out $(PLATFORM_GRAPH_OUT)
+
+## CI gate: fail when the committed platform graph asserts something the tree
+## no longer has, or has fallen too far behind it. Pair with
+## `make platform-graph` locally to fix.
+platform-graph-check:
+	$(GO) test -count=1 -run 'TestPlatformGraph' ./
 
 ## Regenerate the whole front door: the HOSTS first, then the PATHS inside
 ## them. Order matters -- the hosts generator writes the api Ingress that the
@@ -617,6 +639,21 @@ docs-grammar:
 docs-grammar-check:
 	$(GO) test -count=1 -run 'TestGrammarPageIsGenerated|TestVocabularyPageIsGenerated' .
 
+## Build the release docs bundle, docs-<VERSION>.tgz at the repo root, from
+## docs/public (bundle contract v2, memql#5717): the published pages with
+## their links rewritten to site routes, the concept catalog, manifest.json,
+## llms.txt, llms-full.txt and the sitemap fragment. Needs full git history --
+## every page is dated by its last commit -- so a shallow clone is refused. The
+## release lane (publish-docs-bundle.yml) runs the same script at the tag.
+docs-bundle:
+	bash scripts/docs/build-docs-bundle.sh --version=$(VERSION)
+
+## Check docs/public against the public boundary, writing nothing: every link
+## on a published page must name another published page or leave the site.
+## The same check docs_public_boundary_test.go runs on every pull request.
+docs-bundle-check:
+	bash scripts/docs/build-docs-bundle.sh --version=$(VERSION) --check
+
 ## Classify authoring-surface breaks against the committed baseline
 ## (component/language/surface/2026.json).
 ##
@@ -708,6 +745,10 @@ vscode-deps:
 vscode-test: vscode-deps
 	cd editors/vscode && npm ci --no-audit --no-fund && npm test
 
+## Build the hosted browser editor with both MemQL extensions included.
+browser-editor-build:
+	node editors/browser/build.mjs
+
 ## Build the VS Code landing page into editors/vscode/site/dist and check it.
 ## Same commands the image's spa-build stage runs (memql#5518): the page is a
 ## built-in platform site the edge serves at vscode.<domain>, so a local build
@@ -764,7 +805,7 @@ test-cover:
 # ---------------------------------------------------------------------------
 
 ##@ Quality & codegen
-.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check concept-snapshot concept-snapshot-check docs-matrix docs-matrix-check docs-grammar docs-grammar-check memqlbreaking memqlbreaking-capture
+.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check platform-graph platform-graph-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check concept-snapshot concept-snapshot-check docs-matrix docs-matrix-check docs-grammar docs-grammar-check docs-bundle docs-bundle-check memqlbreaking memqlbreaking-capture
 
 ## Run go vet on all packages
 vet:

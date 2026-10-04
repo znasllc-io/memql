@@ -16,14 +16,22 @@
 // the host in plain Node and is deliberately not bundled -- see its header.
 const esbuild = require("esbuild");
 const fs = require("fs");
+const path = require("path");
+const childProcess = require("child_process");
 
 // Wipe dist-host/ first, for the reason esbuild.js wipes out/: a stale bundle
 // from an older checkout is still perfectly requireable, so it would run
 // silently instead of failing.
 fs.rmSync("dist-host", { recursive: true, force: true });
 
+const helperPath = path.join(__dirname, "dist-host", "registry-helper");
+fs.mkdirSync(path.dirname(helperPath), { recursive: true });
+childProcess.execFileSync("go", ["build", "-o", helperPath, "./cmd/memql-lsp"], { cwd: path.resolve(__dirname, "../.."), stdio: "inherit" });
+
 esbuild
   .build({
+    inject: [path.join(__dirname, "test/support/registryHelper.ts")],
+    define: { __MEMQL_REGISTRY_TEST_HELPER__: JSON.stringify(helperPath) },
     entryPoints: ["test-host/index.ts"],
     bundle: true,
     outdir: "dist-host",

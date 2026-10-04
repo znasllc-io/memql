@@ -24,6 +24,8 @@ type materializeEngine struct {
 	files         map[string]map[string]any
 	calls         []string
 	source        map[string]any
+	account       map[string]any
+	recipe        map[string]any
 	failReady     bool
 	failFileReady bool
 	afterFile     func()
@@ -88,6 +90,10 @@ func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.E
 		row = e.files[stringOf(args["fileId"])]
 	case "sourceRows":
 		row = e.source
+	case "clientAccountById":
+		row = e.account
+	case "composeRecipeById":
+		row = e.recipe
 	case "cancelGoal":
 		return memql.NewResultWithOutput(map[string]any{"runsAsked": 1}), nil
 	case "createGoal":
@@ -508,5 +514,39 @@ func TestMaterializeCancellationAfterFilingDoesNotOverwriteCancelled(t *testing.
 		if row["status"] != "cancelled" {
 			t.Fatalf("late cancellation overwritten: %v", row)
 		}
+	}
+}
+
+func TestBriefOnlyRecipeStartsMaterializerWithSavedClient(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	opener := &directMaterializeGoal{}
+	i.SetGoalOpener(opener)
+	e.account = map[string]any{"id": "client-a", "status": "active"}
+	e.recipe = map[string]any{"id": "brief-recipe", "name": "Welcome", "format": "json", "outputKind": "email_template", "description": "Create a welcoming email for our new subscribers.", "accountIds": []any{"client-a"}}
+	if _, err := i.handleRunRecipe(materializeContext(), map[string]any{"recipeId": "brief-recipe"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if opener.calls != 1 || opener.goal.AutomationName != "materializeFile" || len(opener.goal.AccountIds) != 1 || opener.goal.AccountIds[0] != "client-a" {
+		t.Fatalf("recipe lost its scope or work runtime: %+v", opener)
+	}
+	for _, input := range e.inputs {
+		raw, err := json.Marshal(input["request"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var saved executionRequest
+		if err := json.Unmarshal(raw, &saved); err != nil {
+			t.Fatal(err)
+		}
+		if saved.Args.Statement != e.recipe["description"] || saved.Args.OutputKind != "email_template" {
+			t.Fatalf("recipe changed the saved brief or output kind: %+v", saved.Args)
+		}
+	}
+	delete(e.recipe, "description")
+	if _, err := i.handleRunRecipe(materializeContext(), map[string]any{"recipeId": "brief-recipe"}, 0); err == nil || !strings.Contains(err.Error(), "brief") {
+		t.Fatalf("empty recipe started work: %v", err)
+	}
+	if opener.calls != 1 {
+		t.Fatal("empty recipe opened another goal")
 	}
 }

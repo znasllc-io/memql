@@ -57,6 +57,7 @@ function contractExitCodes(): number[] {
 function step(over: Partial<StepProgress> = {}): StepProgress {
   return {
     id: "toolK3d",
+    label: "",
     description: "Place the pinned k3d binary",
     state: "pending",
     reason: "",
@@ -164,10 +165,13 @@ test("each reachable exit code gets its own explanation", () => {
   // Six, not four. 2/3/4/5 are the contract's classifications; 0 and 1 reach a
   // failed outcome without being one, and both are real.
   const codes = [0, 1, 2, 3, 4, 5];
-  const headlines = codes.map((c) => failureGuidance(c).headline);
-  assert.equal(new Set(headlines).size, codes.length, `codes share wording: ${headlines.join(" | ")}`);
-  assert.match(failureGuidance(4).advice, /prerequisite|missing/i);
-  assert.match(failureGuidance(3).headline, /refus/i);
+  // 1 and 5 may share a headline ("The step failed.") -- what differs, and
+  // what the person acts on, is the ADVICE: a catch-all points at the log, an
+  // operation failure says a retry often helps.
+  const said = codes.map((c) => `${failureGuidance(c).headline} ${failureGuidance(c).advice}`);
+  assert.equal(new Set(said).size, codes.length, `codes share wording: ${said.join(" | ")}`);
+  assert.match(failureGuidance(4).headline, /missing/i);
+  assert.match(failureGuidance(3).headline, /protect/i);
 });
 
 // A step that needs root classifies as exit 4 -- correctly, since nothing is
@@ -179,10 +183,14 @@ test("exit 4 carrying a remedy is explained as elevation, not as a missing packa
   const withRemedy = failureGuidance(4, "sudo /path/to/hosts-entries.sh --action=add");
 
   assert.notEqual(withRemedy.headline, bare.headline);
-  assert.match(withRemedy.headline, /privilege|password|root|administrator/i);
+  assert.match(withRemedy.headline, /administrator access/);
   // The operator has to be told to go and RUN the thing, not to go and find one.
-  assert.match(withRemedy.advice, /terminal/i);
-  assert.doesNotMatch(withRemedy.advice, /install the missing prerequisite/i);
+  assert.equal(withRemedy.advice, "Run the command in a terminal, then retry.");
+  assert.doesNotMatch(withRemedy.advice, /install the missing/i);
+  // THE CONTRADICTION (memql#5118 audit): the advice used to say the
+  // installer "cannot ask for your password" -- on a page that had just
+  // asked for it.
+  assert.doesNotMatch(`${withRemedy.headline} ${withRemedy.advice}`, /cannot ask for your password|background process/);
   assert.equal(withRemedy.retryable, true);
 });
 
@@ -200,8 +208,8 @@ test("exit 0 is explained, because it is how most real failures arrive", () => {
   // edge case. It previously fell to the default branch and told the operator
   // MemQL "cannot say what it means" about the case it understands best.
   const g = failureGuidance(0);
-  assert.match(g.headline, /ran without error|not in the state/i);
-  assert.ok(!/cannot say/i.test(g.advice), "exit 0 still reaching the unknown-code branch");
+  assert.match(g.headline, /check didn't pass/);
+  assert.ok(!/doesn't know/i.test(g.advice), "exit 0 still reaching the unknown-code branch");
   assert.equal(g.retryable, true);
 });
 
@@ -210,7 +218,7 @@ test("exit 1 is explained as the catch-all, not as unknown", () => {
   // emits a failure envelope for any non-zero abort, so 1 is where an
   // unclassified failure and a `set -e` death both land.
   const g = failureGuidance(1);
-  assert.ok(!/cannot say/i.test(g.advice), "exit 1 still reaching the unknown-code branch");
+  assert.ok(!/doesn't know/i.test(g.advice), "exit 1 still reaching the unknown-code branch");
   assert.equal(g.retryable, true);
 });
 
@@ -219,7 +227,7 @@ test("a bad parameter is named as MemQL's fault, not the operator's", () => {
   // Exit 2 means the installer passed something wrong. Telling the operator to
   // check their answers would send them to fix something they did not break.
   const g = failureGuidance(2);
-  assert.match(g.advice, /fault in MemQL/i);
+  assert.match(g.advice, /fault in MemQL, not your computer/);
   assert.equal(g.retryable, false);
 });
 
@@ -229,16 +237,16 @@ test("exit 3 with an unsupported-platform sentence is refused-platform, not arti
   // action: the wizard cannot run here, and Repair / another tag will not help
   // (memql#4294).
   const generic = failureGuidance(3);
-  assert.match(generic.headline, /refus/i);
-  assert.match(generic.advice, /artifact|declined/i);
+  assert.match(generic.headline, /protect something already on this computer/);
+  assert.match(generic.advice, /log says what it kept/);
   assert.equal(generic.retryable, false);
 
   const detail =
     "unsupported platform darwin/amd64: the local cluster installer targets linux/amd64, darwin/arm64";
   const platform = failureGuidance(3, "", detail);
   assert.notEqual(platform.headline, generic.headline);
-  assert.match(platform.headline, /supported platform/i);
-  assert.match(platform.advice, /will not change that/);
+  assert.match(platform.headline, /can't run a local MemQL cluster/);
+  assert.match(platform.advice, /Retrying won't change that/);
   assert.doesNotMatch(platform.advice, /picking another tag will help/i);
   assert.equal(platform.retryable, false);
   assert.deepEqual(platform, refusedPlatformGuidance(detail));
@@ -269,12 +277,13 @@ test("an unrecognised exit code is reported as unrecognised", () => {
   // front of an operator at the moment they are relying on it.
   const g = failureGuidance(99);
   assert.match(g.headline, /99/);
-  assert.match(g.advice, /not one of the codes|cannot say/i);
+  assert.match(g.advice, /doesn't know what that code means/);
+  assert.doesNotMatch(g.advice, /capability|contract/);
 });
 
 test("no exit code at all reads as stopped rather than failed", () => {
   const g = failureGuidance(null);
-  assert.match(g.headline, /did not run to completion/i);
+  assert.match(g.headline, /didn't finish/);
   assert.equal(g.retryable, true);
 });
 
@@ -309,17 +318,26 @@ test("a timed-out step is explained, not disclaimed", () => {
   // "cannot say what it means" about a code MemQL assigned itself -- to an
   // operator whose install just stopped dead after ten minutes.
   const g = failureGuidance(124);
-  assert.match(g.headline, /ran out of time|stopped/i);
-  assert.ok(!/cannot say/i.test(g.advice), "124 still reaching the unknown-code branch");
+  assert.match(g.headline, /timed out after 10 minutes/, "the default ceiling, when a step names none");
+  assert.ok(!/doesn't know/i.test(g.advice), "124 still reaching the unknown-code branch");
   assert.equal(g.retryable, true);
+});
+
+test("a timeout names the step's OWN ceiling, not a figure written in the guidance", () => {
+  // THE DEFECT (memql#5118 audit): the advice said "the ten minutes any one
+  // step is allowed" for the cluster step (thirty minutes) and the image build
+  // (forty-five).
+  assert.match(failureGuidance(124, "", "", { timeoutSeconds: 1800 }).headline, /30 minutes/);
+  assert.match(failureGuidance(124, "", "", { timeoutSeconds: 2700 }).headline, /45 minutes/);
+  assert.doesNotMatch(failureGuidance(124, "", "", { timeoutSeconds: 1800 }).headline, /ten|10 minutes/);
 });
 
 test("a step that could not be started is named as an installer fault", () => {
   // 127 is also ours: runner.ts reports it when the script cannot be launched.
   // That is a broken package, not a broken machine, and retrying cannot help.
   const g = failureGuidance(127);
-  assert.ok(!/cannot say/i.test(g.advice), "127 still reaching the unknown-code branch");
-  assert.match(g.advice, /fault in this MemQL build|MemQL build/i);
+  assert.ok(!/doesn't know/i.test(g.advice), "127 still reaching the unknown-code branch");
+  assert.match(g.advice, /Reinstall the MemQL extension/);
   assert.equal(g.retryable, false);
 });
 
@@ -338,7 +356,7 @@ test("every code the installer can produce is claimed -- derived, not listed", (
 
   for (const code of reachable) {
     assert.ok(
-      !/cannot say/i.test(failureGuidance(code).advice),
+      !/doesn't know/i.test(failureGuidance(code).advice),
       `exit ${code} is reachable but unexplained`,
     );
   }
@@ -346,5 +364,16 @@ test("every code the installer can produce is claimed -- derived, not listed", (
   // And the branch still exists for a code that genuinely is not ours: guessing
   // would put confident wrong advice in front of an operator relying on it.
   assert.ok(!reachable.has(99));
-  assert.match(failureGuidance(99).advice, /cannot say/i);
+  assert.match(failureGuidance(99).advice, /doesn't know/i);
+});
+
+test("no guidance says what a reader cannot act on", () => {
+  // The words that used to reach the page: the contract, the executor's
+  // verify, a retired portal, a double hyphen for a dash.
+  for (const code of [null, 0, 1, 2, 3, 4, 5, 124, 127, 128, 99]) {
+    for (const remedy of ["", "sudo x"]) {
+      const g = failureGuidance(code, remedy);
+      assert.doesNotMatch(`${g.headline} ${g.advice}`, /capability|contract|verify|envelope|exit code|portal|--/);
+    }
+  }
 });

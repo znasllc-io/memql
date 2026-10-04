@@ -46,12 +46,14 @@ const MIN_VISIBLE_SHARE = 0.012;
 export function SendBar({
   campaign,
   stats,
+  showEngagement = true,
 }: {
   campaign: CampaignRow;
   /** The server-computed breakdown, when it has been read. Null is normal --
    *  the band is drawn from the campaign row alone, which is what lets it fill
    *  live during a send. */
   stats: CampaignStats | null;
+  showEngagement?: boolean;
 }) {
   const breakdown = sendBreakdown(campaign);
 
@@ -98,7 +100,7 @@ export function SendBar({
         ))}
       </ul>
 
-      <Engagement campaign={campaign} stats={stats} sent={sentCount(breakdown)} />
+      {showEngagement ? <Engagement campaign={campaign} stats={stats} sent={sentCount(breakdown)} /> : null}
     </div>
   );
 }

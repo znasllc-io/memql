@@ -6,6 +6,7 @@
     {
       "id": "removeCluster",
       "script": "install.removeArtifact",
+      "label": "Removing the cluster",
       "description": "Removing the cluster and everything running inside it.",
       "params": {
         "kind": "stack"
@@ -21,6 +22,7 @@
     {
       "id": "removeCheckout",
       "script": "install.removeArtifact",
+      "label": "Removing downloaded files",
       "description": "Removing the MemQL files this install downloaded.",
       "params": {
         "kind": "checkout",
@@ -40,6 +42,7 @@
     {
       "id": "removeHostsBlock",
       "script": "install.removeArtifact",
+      "label": "Removing local addresses",
       "description": "Removing the cluster's web addresses from the system hosts file, leaving every other entry alone.",
       "params": {
         "kind": "hostsEntries",
@@ -59,6 +62,7 @@
     {
       "id": "removeLocalCA",
       "script": "install.removeArtifact",
+      "label": "Removing certificates",
       "description": "Withdrawing this machine's local certificate authority from the system trust stores and deleting the certificate it issued.",
       "params": {
         "kind": "mkcertCA",
@@ -80,6 +84,7 @@
     {
       "id": "removeToolK3d",
       "script": "install.removeArtifact",
+      "label": "Removing tools",
       "description": "Removing k3d, now that the cluster it runs is gone.",
       "params": {
         "kind": "binary",
@@ -101,6 +106,7 @@
     {
       "id": "removeToolKubectl",
       "script": "install.removeArtifact",
+      "label": "Removing tools",
       "description": "Removing kubectl, now that the cluster it talks to is gone.",
       "params": {
         "kind": "binary",
@@ -122,6 +128,7 @@
     {
       "id": "removeToolMkcert",
       "script": "install.removeArtifact",
+      "label": "Removing tools",
       "description": "Removing mkcert, now that the certificate authority it manages is gone.",
       "params": {
         "kind": "binary",

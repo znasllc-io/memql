@@ -51,7 +51,9 @@ import (
 // answer campaignById gives. The audience was never a check; it was a search
 // key, and there is nothing left on this path that needs the audience itself.
 
-func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+var errCampaignRateLimited = errors.New("campaigns.sendToRecipient: the send-rate limit is exhausted; try again shortly")
+
+func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, receipt *singleSendReceipt, snapshot *Template, expectedEmailDigest string) ([]memorynodes.MemoryNode, error) {
 	templateID := memql.BareShortId(strings.TrimSpace(argString(args, "templateId")))
 	recipientID := memql.BareShortId(strings.TrimSpace(argString(args, "recipientId")))
 	senderIdentityID := memql.BareShortId(strings.TrimSpace(argString(args, "senderIdentityId")))
@@ -80,6 +82,15 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 	if !found {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: template %q is not readable", templateID)
 	}
+	if snapshot != nil {
+		if bare(snapshot.ID) != bare(tmpl.ID) || !sameOrganization(snapshot.AccountID, tmpl.AccountID) || snapshot.Status != "ready" {
+			return nil, errors.New("campaigns.sendToRecipient: reviewed welcome snapshot does not match its template")
+		}
+		tmpl = *snapshot
+	}
+	if tmpl.Status != "ready" {
+		return nil, errors.New("campaigns.sendToRecipient: publish the reviewed template before sending")
+	}
 
 	recipient, found, err := w.store.RecipientByID(ctx, recipientID)
 	if err != nil {
@@ -92,6 +103,10 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 		// would be an existence oracle over every operator's recipients,
 		// reachable by anybody who can call the builtin.
 		return nil, fmt.Errorf("campaigns.sendToRecipient: recipient %q is not readable", recipientID)
+	}
+
+	if expectedEmailDigest != "" && EmailDigest(recipient.Email) != expectedEmailDigest {
+		return nil, errors.New("campaigns.sendToRecipient: the recipient address changed after signup; the original consent does not cover the new address")
 	}
 
 	if err := w.requireSendAuthority(ctx, recipient.AccountID); err != nil {
@@ -146,7 +161,7 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 	if digest == "" {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: recipient %q has no usable address", recipientID)
 	}
-	if sup, suppressed, err := w.store.SuppressionByDigest(w.systemActorContext(ctx), digest); err != nil {
+	if sup, suppressed, err := w.store.SuppressionForSend(w.systemActorContext(ctx), campaign.AccountID, digest); err != nil {
 		// A failed lookup must NOT read as "not suppressed". Refusing is the
 		// only safe answer: a delayed message is recoverable, one sent to
 		// somebody who opted out is not.
@@ -171,7 +186,9 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 		})
 	}
 
-	token, err := MintUnsubscribeToken(w.cfg.UnsubscribeSecret, ownerUserID, recipient.ID, campaign.ID)
+	// A rule is not a persisted campaign. Keep its ID out of the unsubscribe
+	// campaign relationship; the signed organization and digest identify the opt-out.
+	token, err := MintUnsubscribeToken(w.cfg.UnsubscribeSecret, UnsubscribePayload{OwnerUserID: ownerUserID, RecipientID: recipient.ID, AccountID: campaign.AccountID, EmailDigest: digest})
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: cannot mint an unsubscribe token: %w", err)
 	}
@@ -188,7 +205,16 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 	}
 
 	if !w.allowSend() {
-		return nil, errors.New("campaigns.sendToRecipient: the send-rate limit is exhausted; try again shortly")
+		return nil, errCampaignRateLimited
+	}
+	// Record the attempt before contacting the transport. After this point a
+	// timeout or a node loss is uncertain, and replay must never send it again.
+	if receipt != nil {
+		msg.IntentID = "campaign-single:" + receipt.id
+		receipt.accountID = campaign.AccountID
+		if err := w.saveSingleSendReceipt(ctx, receipt, "attempting", nil); err != nil {
+			return nil, err
+		}
 	}
 	now := w.nowUTC()
 	sendCtx, cancel := context.WithTimeout(ctx, w.cfg.SendTimeout)

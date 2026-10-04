@@ -234,6 +234,8 @@ MEMQL_INBOUND_SOURCE_ALLOWLIST=github
 MEMQL_INBOUND_SOURCE_GITHUB_SIGNATURE_SCHEME=hmac-sha256-hex
 MEMQL_INBOUND_SOURCE_GITHUB_SIGNATURE_HEADER=X-Hub-Signature-256
 MEMQL_INBOUND_SOURCE_GITHUB_SIGNATURE_PREFIX=sha256=
+MEMQL_INBOUND_SOURCE_GITHUB_DEDUPE_HEADER=X-GitHub-Delivery
+MEMQL_INBOUND_SOURCE_GITHUB_FORWARD_HEADERS=X-GitHub-Event,X-GitHub-Delivery,X-GitHub-Hook-ID
 MEMQL_INBOUND_SOURCE_GITHUB_SECRET=<the same value as MEMQL_GITHUB_APP_WEBHOOK_SECRET>
 ```
 
@@ -241,6 +243,12 @@ The secret is the same value twice on purpose: the app signs with it and the
 receiver verifies with it. A source that is allowlisted but does not resolve to a
 usable policy is dropped and answers 404 -- never admitted unverified. Full
 reference: [inbound delivery](inbound-delivery.md).
+
+`FORWARD_HEADERS` is what puts the event on the staged row: GitHub names the
+event (`push`, `ping`, `installation`) only in `X-GitHub-Event`, never in the
+body, and without the line the row's `headersJson` is `{}`. It is the same
+list an app registered from the product stages with no configuration at all,
+so the two ways of setting up the webhook stage the same row.
 
 The webhook carries **pushes**, which is what lights the update cue on a
 deployable. It deliberately does not drive anything else; see

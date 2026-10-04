@@ -9,8 +9,6 @@ owner: znas
 
 # Audio Streaming Architecture
 
-> **Last Updated:** 2026-09-06
-
 MemQL has one audio path: **streaming transcription over gRPC**, carried
 by the `AiTranscribeStream*` message family on `MemqlService.Stream`. A
 client opens a session, pumps audio bytes, reads partial transcripts as

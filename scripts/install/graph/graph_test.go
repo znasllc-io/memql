@@ -497,7 +497,7 @@ func TestRetainedMustBeArgued(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			step := map[string]any{
-				"id": "a", "script": "install.detect", "description": "d",
+				"id": "a", "script": "install.detect", "label": "Checking", "description": "d",
 				"elevation": "none", "verify": map[string]any{"kind": "resultTrue", "field": "result.ok"},
 			}
 			for k, v := range tc.step {
@@ -523,7 +523,7 @@ func TestSharedMustSayWhatElseItIsFor(t *testing.T) {
 	_, err := Load([]byte(mustJSON(map[string]any{
 		"name": "uninstall", "kind": "uninstall", "description": "d",
 		"steps": []any{map[string]any{
-			"id": "a", "script": "install.removeArtifact", "description": "d",
+			"id": "a", "script": "install.removeArtifact", "label": "Removing", "description": "d",
 			"reverses": "toolK3d", "elevation": "none", "shared": true,
 			"verify": map[string]any{"kind": "resultTrue", "field": "result.removed"},
 		}},
@@ -539,7 +539,7 @@ func TestRetainedAndSharedBelongToTheirOwnGraphs(t *testing.T) {
 	_, err := Load([]byte(mustJSON(map[string]any{
 		"name": "install", "kind": "install", "description": "d",
 		"steps": []any{map[string]any{
-			"id": "a", "script": "install.detect", "description": "d",
+			"id": "a", "script": "install.detect", "label": "Checking", "description": "d",
 			"readOnly": true, "elevation": "none", "shared": true, "sharedReason": "r",
 			"verify": map[string]any{"kind": "scriptOk"},
 		}},

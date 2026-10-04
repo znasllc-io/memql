@@ -173,8 +173,20 @@ func newConnectHarness(t *testing.T) *connectHarness {
 	t.Setenv("MEMQL_MASTER_KEY", strings.Repeat("ab", 32))
 	engine := &connectEngine{fakeEngine: newFakeEngine(), writable: map[string]bool{"s1": true}}
 	storefront := newFakeStorefront(t)
+	// The time attribute is dropped so an assertion on h.logs reads only the
+	// level, message and attributes: a wall-clock timestamp whose millisecond
+	// field is .401 would otherwise read as the HTTP status leaking.
 	logs := &bytes.Buffer{}
-	conn := NewConnector(engine, slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})), NewStoreRegistry(engine, nil), NewAdminClient())
+	handler := slog.NewTextHandler(logs, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if len(groups) == 0 && a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	})
+	conn := NewConnector(engine, slog.New(handler), NewStoreRegistry(engine, nil), NewAdminClient())
 	conn.connectAppGate = func(context.Context, string) (func(), error) { return func() {}, nil }
 	conn.now = func() time.Time { return time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC) }
 	conn.storefrontEndpoint = func(domain, version string) (string, error) {
@@ -192,7 +204,7 @@ func newConnectHarness(t *testing.T) *connectHarness {
 // site makes siteById answer one row the developer owns.
 func (h *connectHarness) site(id, kind string) {
 	h.engine.setRows("siteById", []map[string]any{{
-		"id": id, "kind": kind, "status": "draft", "ownerUserId": connectDev,
+		"id": id, "accountId": "self", "kind": kind, "status": "draft", "ownerUserId": connectDev,
 		"packageId": "v1:platform:package:p1", "packageDeployableName": "storefront",
 	}})
 }
@@ -594,8 +606,14 @@ func TestTheConnectScopeListIsPinned(t *testing.T) {
 		t.Fatalf("StorefrontScopes = %v, want %v -- the runbook prints this list and Connect refuses without it", StorefrontScopes, want)
 	}
 	all := ConnectScopes()
-	if !reflect.DeepEqual(all[:len(want)], want) || !reflect.DeepEqual(all[len(want):], generated.Scopes) {
-		t.Fatalf("ConnectScopes = %v, want the Storefront scopes then generated.Scopes", all)
+	admin := append([]string(nil), generated.Scopes...)
+	for idx, scope := range admin {
+		if scope == "read_products" {
+			admin[idx] = "write_products"
+		}
+	}
+	if !reflect.DeepEqual(all[:len(want)], want) || !reflect.DeepEqual(all[len(want):], admin) {
+		t.Fatalf("ConnectScopes = %v, want the Storefront scopes then mirror scopes with product write access", all)
 	}
 	// A copy: a caller appending to it must not change the list.
 	all[0] = "mutated"

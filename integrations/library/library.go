@@ -32,21 +32,15 @@
 //	                           Restore is forward-only: it never
 //	                           destroys history.
 //
-// Authorization model: owner-threaded. The owning user is read from the
-// backing document ROW (not the actor) -- consistent with the existing
-// Library mutations, which take ownerUserId from the row's owner because
-// promotion / edit runs server-side on the owner's behalf. The append
-// runs under a synthetic user actor (withUserActor) so the engine's
-// actor-required gate is satisfied and the appended rows are owned by
-// the document's owner. The caller (the BFF edit endpoint for the user
-// path, the agent tool loop for the assistant path) is responsible for
-// the higher-level "may this actor edit this document" decision before
-// dispatch; the row-owner threading guarantees the appended history is
-// always attributed to the document's owner regardless.
+// Document edits retain the caller's identity through every read and write.
+// The generated-output lookup and engine write admission enforce ownership and
+// current write permissions. A shared PostgreSQL lock, fresh reads and monotonic
+// timestamps protect versions across replicas and clock skew.
 package library
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -62,6 +56,7 @@ import (
 	"github.com/znasllc-io/memql/component/workjournal"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/core/num"
+	"github.com/znasllc-io/memql/integrations/library/versionstore"
 )
 
 // resultConcept is the synthetic MemoryNode concept the capabilities
@@ -72,7 +67,10 @@ const resultConcept = "integration:library:result"
 // Integration is the Library edit capability surface. Holds the engine
 // handle so it can re-enter Execute for the read-then-write dance.
 type Integration struct {
-	engine memql.IntegrationEngineAccess
+	engine          memql.IntegrationEngineAccess
+	reviewGoals     ReviewGoalOpener
+	versionGate     func(context.Context, string) (func(), error)
+	fileVersionGate func(context.Context, string) (func(), error)
 
 	// --- the analysis / search / train half (memql#4342) ---
 	//
@@ -103,8 +101,22 @@ type Integration struct {
 
 // NewIntegration wires the engine handle. The factory is in plugin.go;
 // this constructor is exposed for tests that supply a stub engine.
-func NewIntegration(engine memql.IntegrationEngineAccess) *Integration {
-	return &Integration{engine: engine}
+func NewIntegration(engine memql.IntegrationEngineAccess, database ...func() *sql.DB) *Integration {
+	gate := func(ctx context.Context, key string) (func(), error) {
+		var db *sql.DB
+		if len(database) > 0 && database[0] != nil {
+			db = database[0]()
+		}
+		return memql.AcquireWriteGate(ctx, db, key)
+	}
+	return &Integration{engine: engine,
+		versionGate: func(ctx context.Context, key string) (func(), error) {
+			return gate(ctx, "library-document:"+memql.BareShortId(key))
+		},
+		fileVersionGate: func(ctx context.Context, key string) (func(), error) {
+			return gate(ctx, "library-file:"+memql.BareShortId(key))
+		},
+	}
 }
 
 // IntegrationName implements memql.IntegrationProvider.
@@ -113,20 +125,26 @@ func (i *Integration) IntegrationName() string { return "library" }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "requestDocumentRevision", Description: "Prepare a revision request awaiting human approval.", Handler: i.handleRequestDocumentRevision},
+		{Name: "documentRevisionStatus", Description: "Read an owned revision request and its saved draft.", Handler: i.handleDocumentRevisionStatus},
+		{Name: "executeDocumentRevision", Description: "Execute an exact approved revision in its owning Nexus run.", Handler: i.handleExecuteDocumentRevision},
+		{Name: "documentReview", Description: "Read comments on an accessible document.", Handler: i.handleDocumentReview},
+		{Name: "addDocumentComment", Description: "Add feedback bound to a saved document revision.", Handler: i.handleAddDocumentComment},
 		{
 			Name:        "editDocument",
 			Description: "Append a new version of a Library document with new content (memql#1229 user edit / memql#1231 assistant edit). Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant), and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency: pass expectedVersion to fail the edit when the document moved on under you. ownerUserId is threaded from the document row, not the caller.",
 			Handler:     i.handleEditDocument,
 			ArgsSchema: map[string]string{
-				"documentId":      "string (required) -- the logical document id (the backing v1:library:generatedOutput id)",
-				"content":         "string -- the new full content body (markdown / text). Set this OR attachmentId.",
-				"attachmentId":    "string -- v1:common:attachment id when the new version is file-backed. Set this OR content.",
-				"note":            "string -- optional short note describing the change",
-				"authorKind":      "string -- 'user' (default) or 'assistant'",
-				"authorId":        "string -- the editing user id (authorKind=user) or agent id (authorKind=assistant)",
-				"expectedVersion": "number -- optional optimistic-concurrency token; the latest versionNumber the caller saw",
-				"producedByRunId": "string -- optional v1:work:run id when an assistant edit came through a run",
-				"partitionId":     "string -- optional space id the edit happened in",
+				"documentId":       "string (required) -- the logical document id (the backing v1:library:generatedOutput id)",
+				"content":          "string -- the new full content body (markdown / text). Set this OR attachmentId.",
+				"attachmentId":     "string -- v1:common:attachment id when the new version is file-backed. Set this OR content.",
+				"note":             "string -- optional short note describing the change",
+				"authorKind":       "string -- 'user' (default) or 'assistant'",
+				"authorId":         "string -- the editing user id (authorKind=user) or agent id (authorKind=assistant)",
+				"expectedVersion":  "number -- optional optimistic-concurrency token; the latest versionNumber the caller saw",
+				"expectedRevision": "string -- the backing document createdAt returned by the read; detects changes outside version history",
+				"producedByRunId":  "string -- optional v1:work:run id when an assistant edit came through a run",
+				"partitionId":      "string -- optional space id the edit happened in",
 			},
 		},
 		{
@@ -286,6 +304,7 @@ type editResult struct {
 	VersionId    string `json:"versionId,omitempty"`
 	NewVersion   int    `json:"newVersion,omitempty"`
 	PriorVersion int    `json:"priorVersion,omitempty"`
+	Revision     string `json:"revision,omitempty"`
 	AuthorKind   string `json:"authorKind,omitempty"`
 	Conflict     bool   `json:"conflict,omitempty"`
 	Reason       string `json:"reason,omitempty"`
@@ -316,11 +335,22 @@ func (i *Integration) handleEditDocument(ctx context.Context, args map[string]an
 	producedByRunId := strings.TrimSpace(asString(args["producedByRunId"]))
 	partitionId := strings.TrimSpace(asString(args["partitionId"]))
 	expectedVersion, hasExpected := intArg(args["expectedVersion"])
+	expectedRevision := strings.TrimSpace(asString(args["expectedRevision"]))
 
 	// Resolve the backing generatedOutput to thread the owner + carry
 	// the document spine (title / source / format) onto both the new
 	// version's re-insert and -- when no history exists yet -- to seed
 	// version 1's owner. The documentId IS the generatedOutput id.
+	subject, ok := auth.SubjectFromContext(ctx)
+	if !ok || !auth.CapableFor(ctx, subject, auth.VerbCreate, auth.ResourceData) {
+		return nil, fmt.Errorf("you do not have permission to edit this document")
+	}
+	release, err := i.versionGate(ctx, documentId)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	ctx = memql.ContextWithFreshRead(ctx)
 	doc, err := i.loadGeneratedOutput(ctx, documentId)
 	if err != nil {
 		return nil, fmt.Errorf("library.editDocument: load document %q: %w", documentId, err)
@@ -333,10 +363,9 @@ func (i *Integration) handleEditDocument(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("library.editDocument: document %q has no owner -- cannot attribute the edit", documentId)
 	}
 
-	// Read the current history under the owner actor to compute the next
-	// version number + parent pointer. The owner-threaded actor keeps
-	// the read inside the owned-row authz model.
-	ownerCtx := withUserActor(ctx, ownerUserId)
+	// Keep the original caller for history and writes; a readable row never
+	// grants its owner's authority to another caller.
+	ownerCtx := ctx
 	latest, latestNum, err := i.latestVersion(ownerCtx, documentId)
 	if err != nil {
 		return nil, fmt.Errorf("library.editDocument: read history for %q: %w", documentId, err)
@@ -347,7 +376,7 @@ func (i *Integration) handleEditDocument(ctx context.Context, args map[string]an
 	// under them -- reject rather than silently clobbering the diverged
 	// history with a stale base. (The history itself is never lost; this
 	// just refuses to ADD a version on top of an unexpected base.)
-	if hasExpected && expectedVersion != latestNum {
+	if (hasExpected && expectedVersion != latestNum) || (expectedRevision != "" && expectedRevision != timestampField(doc, "createdAt")) {
 		return wrapResult(editResult{
 			DocumentId:   documentId,
 			PriorVersion: latestNum,
@@ -361,6 +390,7 @@ func (i *Integration) handleEditDocument(ctx context.Context, args map[string]an
 		parentVersionId = stringField(latest, "id")
 	}
 	nextNum := latestNum + 1
+	versionAt := nextDocumentTime(doc, latest)
 
 	versionId := string(id.New().MustFromMap(map[string]any{
 		"kind":       "documentVersion",
@@ -370,6 +400,7 @@ func (i *Integration) handleEditDocument(ctx context.Context, args map[string]an
 	}))
 
 	if err := i.appendVersion(ownerCtx, appendArgs{
+		versionAt:       versionAt,
 		versionId:       versionId,
 		documentId:      documentId,
 		versionNumber:   nextNum,
@@ -387,7 +418,7 @@ func (i *Integration) handleEditDocument(ctx context.Context, args map[string]an
 
 	// Re-insert the backing generatedOutput (same id, new node version)
 	// so the artifact index + Library viewer reflect the latest content.
-	if err := i.updateBackingContent(ownerCtx, doc, content, attachmentId); err != nil {
+	if err := i.updateBackingContent(ownerCtx, doc, content, attachmentId, versionAt); err != nil {
 		return nil, fmt.Errorf("library.editDocument: update backing content: %w", err)
 	}
 	// Bump the artifact index watermark (idempotent re-stamp).
@@ -397,6 +428,7 @@ func (i *Integration) handleEditDocument(ctx context.Context, args map[string]an
 		DocumentId:   documentId,
 		VersionId:    versionId,
 		NewVersion:   nextNum,
+		Revision:     versionAt,
 		PriorVersion: latestNum,
 		AuthorKind:   authorKind,
 	})
@@ -435,6 +467,16 @@ func (i *Integration) handleRestoreDocumentVersion(ctx context.Context, args map
 	}
 	authorId := strings.TrimSpace(asString(args["authorId"]))
 
+	subject, ok := auth.SubjectFromContext(ctx)
+	if !ok || !auth.CapableFor(ctx, subject, auth.VerbCreate, auth.ResourceData) {
+		return nil, fmt.Errorf("you do not have permission to edit this document")
+	}
+	release, err := i.versionGate(ctx, documentId)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	ctx = memql.ContextWithFreshRead(ctx)
 	doc, err := i.loadGeneratedOutput(ctx, documentId)
 	if err != nil {
 		return nil, fmt.Errorf("library.restoreDocumentVersion: load document %q: %w", documentId, err)
@@ -446,7 +488,7 @@ func (i *Integration) handleRestoreDocumentVersion(ctx context.Context, args map
 	if strings.TrimSpace(ownerUserId) == "" {
 		return nil, fmt.Errorf("library.restoreDocumentVersion: document %q has no owner", documentId)
 	}
-	ownerCtx := withUserActor(ctx, ownerUserId)
+	ownerCtx := ctx
 
 	// Read the chosen source version (its content) + the current latest
 	// (for the next number + parent pointer). Both come from the same
@@ -479,6 +521,7 @@ func (i *Integration) handleRestoreDocumentVersion(ctx context.Context, args map
 		parentVersionId = stringField(latest, "id")
 	}
 	nextNum := latestNum + 1
+	versionAt := nextDocumentTime(doc, latest)
 
 	versionId := string(id.New().MustFromMap(map[string]any{
 		"kind":       "documentVersion",
@@ -489,6 +532,7 @@ func (i *Integration) handleRestoreDocumentVersion(ctx context.Context, args map
 	}))
 
 	if err := i.appendVersion(ownerCtx, appendArgs{
+		versionAt:       versionAt,
 		versionId:       versionId,
 		documentId:      documentId,
 		versionNumber:   nextNum,
@@ -502,7 +546,7 @@ func (i *Integration) handleRestoreDocumentVersion(ctx context.Context, args map
 		return nil, fmt.Errorf("library.restoreDocumentVersion: append version: %w", err)
 	}
 
-	if err := i.updateBackingContent(ownerCtx, doc, content, attachmentId); err != nil {
+	if err := i.updateBackingContent(ownerCtx, doc, content, attachmentId, versionAt); err != nil {
 		return nil, fmt.Errorf("library.restoreDocumentVersion: update backing content: %w", err)
 	}
 	i.touchArtifact(ownerCtx, doc)
@@ -511,6 +555,7 @@ func (i *Integration) handleRestoreDocumentVersion(ctx context.Context, args map
 		DocumentId:   documentId,
 		VersionId:    versionId,
 		NewVersion:   nextNum,
+		Revision:     versionAt,
 		PriorVersion: latestNum,
 		AuthorKind:   "system",
 	})
@@ -816,13 +861,10 @@ func wrapLabelResult(r artifactLabelResult) ([]memorynodes.MemoryNode, error) {
 
 // appendArgs bundles the documentVersion append fields.
 //
-// No ownerUserId: appendDocumentVersion stamps it from actor.userId
-// (memql#2989). Both callers run the append under the backing
-// document's owner (`ownerCtx`), which is where that value now comes
-// from, and both refuse to proceed when the document has no owner --
-// withUserActor returns ctx UNCHANGED for a blank owner, so without
-// that guard the version would be attributed to the inbound caller.
+// No ownerUserId: the mutation stamps it from the original caller after an
+// owned-row read and write authorization. Internal origin stays in versionstore.
 type appendArgs struct {
+	versionAt       string
 	versionId       string
 	documentId      string
 	versionNumber   int
@@ -837,42 +879,33 @@ type appendArgs struct {
 }
 
 func (i *Integration) appendVersion(ctx context.Context, a appendArgs) error {
-	q := fmt.Sprintf(
-		`mutation appendDocumentVersion(versionId: %s, documentId: %s, versionNumber: %d, content: %s, attachmentId: %s, authorKind: %s, authorId: %s, note: %s, parentVersionId: %s, producedByRunId: %s, partitionId: %s)`,
-		langparser.QuoteString(a.versionId), langparser.QuoteString(a.documentId), a.versionNumber, langparser.QuoteString(a.content), langparser.QuoteString(a.attachmentId),
-		langparser.QuoteString(a.authorKind), langparser.QuoteString(a.authorId), langparser.QuoteString(a.note), langparser.QuoteString(a.parentVersionId), langparser.QuoteString(a.producedByRunId), langparser.QuoteString(a.partitionId),
-	)
-	_, err := i.engine.Execute(ctx, q)
+	_, err := versionstore.Append(ctx, i.engine, map[string]any{
+		"versionId": a.versionId, "documentId": a.documentId, "versionNumber": a.versionNumber,
+		"content": a.content, "attachmentId": a.attachmentId, "authorKind": a.authorKind,
+		"authorId": a.authorId, "note": a.note, "parentVersionId": a.parentVersionId,
+		"producedByRunId": a.producedByRunId, "partitionId": a.partitionId, "versionAt": a.versionAt,
+	})
 	return err
 }
 
 // updateBackingContent re-inserts the generatedOutput row (same id) with
 // the new latest content, carrying the existing spine fields forward.
-func (i *Integration) updateBackingContent(ctx context.Context, doc map[string]any, content, attachmentId string) error {
+func (i *Integration) updateBackingContent(ctx context.Context, doc map[string]any, content, attachmentId, versionAt string) error {
 	source := stringField(doc, "source")
 	if source == "" {
 		source = "agent_generated"
 	}
 	format := stringField(doc, "format")
 	// ownerUserId is NOT passed: updateGeneratedOutputContent stamps it
-	// from actor.userId (memql#2989). Both callers pass ownerCtx, built
-	// with withUserActor from the row's own ownerUserId after refusing to
-	// proceed on a blank one, so the re-inserted row keeps the same owner.
-	q := fmt.Sprintf(
-		`mutation updateGeneratedOutputContent(outputId: %s, title: %s, summary: %s, body: %s, attachmentId: %s, format: %s, mimeType: %s, source: %s, partitionId: %s, producedByRunId: %s, producedByAgentId: %s)`,
-		langparser.QuoteString(stringField(doc, "id")),
-		langparser.QuoteString(stringField(doc, "title")),
-		langparser.QuoteString(stringField(doc, "summary")),
-		langparser.QuoteString(content),
-		langparser.QuoteString(attachmentId),
-		langparser.QuoteString(format),
-		langparser.QuoteString(stringField(doc, "mimeType")),
-		langparser.QuoteString(source),
-		langparser.QuoteString(stringField(doc, "partitionId")),
-		langparser.QuoteString(stringField(doc, "producedByRunId")),
-		langparser.QuoteString(stringField(doc, "producedByAgentId")),
-	)
-	_, err := i.engine.Execute(ctx, q)
+	// from actor.userId. Both handlers retain the original caller after the
+	// owned-row read, so the re-insert keeps ownership without escalation.
+	_, err := versionstore.UpdateContent(ctx, i.engine, map[string]any{
+		"outputId": stringField(doc, "id"), "title": stringField(doc, "title"),
+		"summary": stringField(doc, "summary"), "body": content, "attachmentId": attachmentId,
+		"format": format, "mimeType": stringField(doc, "mimeType"), "source": source,
+		"partitionId": stringField(doc, "partitionId"), "producedByRunId": stringField(doc, "producedByRunId"),
+		"producedByAgentId": stringField(doc, "producedByAgentId"), "versionAt": versionAt,
+	})
 	return err
 }
 
@@ -989,12 +1022,10 @@ func (i *Integration) currentArtifactCarryForward(ctx context.Context, sourceRef
 	}, true
 }
 
-// loadGeneratedOutput reads the backing document row. Runs under a
-// system actor for the lookup (the row may be needed before the owner
-// is known); the actual edit writes run under the owner actor.
+// loadGeneratedOutput reads under the original caller, preserving row admission.
 func (i *Integration) loadGeneratedOutput(ctx context.Context, documentId string) (map[string]any, error) {
 	q := fmt.Sprintf(`query generatedOutputById(outputId: %s)`, langparser.QuoteString(documentId))
-	raw, err := i.engine.Execute(systemActorContext(ctx), q)
+	raw, err := i.engine.Execute(ctx, q)
 	if err != nil {
 		return nil, err
 	}
@@ -1243,4 +1274,23 @@ func extractRows(raw any) []map[string]any {
 		return []map[string]any{v}
 	}
 	return nil
+}
+
+// nextDocumentTime follows both the backing row and its most recent history.
+func nextDocumentTime(doc, latest map[string]any) string {
+	at := time.Now()
+	for _, row := range []map[string]any{doc, latest} {
+		prior, _ := time.Parse(time.RFC3339Nano, timestampField(row, "createdAt"))
+		at = memql.VersionTimeAfter(prior, at)
+	}
+	return at.Format(time.RFC3339Nano)
+}
+
+// Materialized engine rows carry time.Time; wire rows carry RFC3339 text.
+// The revision protocol uses the same UTC spelling for both representations.
+func timestampField(row map[string]any, field string) string {
+	if value, ok := row[field].(time.Time); ok {
+		return value.UTC().Format(time.RFC3339Nano)
+	}
+	return stringField(row, field)
 }

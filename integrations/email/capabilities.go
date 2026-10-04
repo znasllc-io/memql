@@ -16,6 +16,7 @@ import (
 // sendEmail capability to the MemQL DSL; product branches render their
 // own bodies and call this capability to deliver.
 type Integration struct {
+	azure  *azureSetup
 	sender Sender
 	logger *slog.Logger
 	// engine is the write side, and it is optional. A node that resolves no
@@ -47,6 +48,8 @@ func (i *Integration) IntegrationName() string { return "email" }
 // Capabilities returns DSL-callable email operations.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "azureSetup", Description: "Connect an organization to Azure email with delegated Microsoft sign-in.", Handler: i.handleAzureSetup},
+		{Name: "inbox", Description: "Read the restricted captured test inbox.", Handler: i.handleInbox, ArgsSchema: map[string]string{}},
 		{
 			Name:        "sendEmail",
 			Description: "Deliver a transactional email. Caller supplies the rendered subject / text / html body.",

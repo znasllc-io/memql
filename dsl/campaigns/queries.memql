@@ -1,3 +1,5 @@
+use common.traits.{ statusIsActive, statusIsPending }
+
 // campaigns domain -- caller-scoped reads.
 //
 // The engine applies current organization membership and app permissions to
@@ -19,6 +21,7 @@ query campaign campaigns {
     status  string
   }
   filter    row => true
+                && (row.testSourceCampaignId == nil || row.testSourceCampaignId == "")
                 && (args.status == nil || row.status == args.status)
   sort      "row.createdAt", "desc"
   paginate  50
@@ -217,6 +220,17 @@ query suppression suppressionByDigest {
   }
   filter  row => row.id == args.emailDigest && actor.isClusterOwner == true
   shape   suppressionFull
+}
+
+/// ENGINE: lookup an organization-scoped suppression by its server-derived composite key.
+@actor
+query suppression suppressionForOrganization {
+  args {
+    suppressionId string!
+    accountId string!
+  }
+  filter row => row.id == args.suppressionId && row.accountId == args.accountId && actor.isClusterOwner == true
+  shape suppressionFull
 }
 
 /// ENGINE (owner-scoped): ONE PAGE of the audience a send is working through, oldest first --
@@ -551,4 +565,113 @@ query emailRule emailRuleById {
   }
   filter  row => row.id == args.emailRuleId
   shape   emailRuleFull
+}
+
+/// Internal replay check; actor.userId alone cannot make this a sending API.
+@actor
+@serverOnly
+query singleSendReceipt campaignSingleSendById {
+  args { receiptId string! }
+  filter row => row.id == args.receiptId && row.ownerUserId == actor.userId
+  shape campaignSingleSendFull
+}
+
+/// Current repeating instruction for this blueprint; organization authorization applies.
+@actor
+query campaignSeries campaignSeriesForCampaign {
+  args { campaignId string! }
+  filter row => row.sourceCampaignId == args.campaignId
+  sort "row.createdAt", "desc"
+  paginate 1
+  shape campaignSeriesFull
+}
+
+/// Internal scan across organizations. actor.userId cannot scope the scheduler's work;
+/// each result is locked, reread and authorized under its recorded person before use.
+@actor
+@serverOnly
+query campaignSeries dueCampaignSeries {
+  args { dueAt datetime! }
+  filter row => actor.isClusterOwner == true && statusIsActive(row) && row.nextAt <= args.dueAt
+  sort "row.createdAt", "asc"
+  paginate 100
+  shape campaignSeriesFull
+}
+
+
+/// Organization-authorized newsletter configuration for one deployable.
+@actor
+query newsletterBinding newsletterForSite {
+  args { siteId string! }
+  filter row => row.siteId == args.siteId
+  sort "row.createdAt", "desc"
+  paginate 1
+  shape newsletterBindingFull
+}
+
+/// Organization-authorized deployable bindings for an audience.
+@actor
+query newsletterBinding newslettersForAudience {
+  args { audienceId string! }
+  filter row => row.audienceId == args.audienceId
+  sort "row.createdAt", "desc"
+  paginate 100
+  shape newsletterBindingFull
+}
+
+/// Current durable signup and captured address, authorized by its organization.
+@actor
+query newsletterSignup newsletterSignupById {
+  args { signupId string! }
+  filter row => row.id == args.signupId
+  shape newsletterSignupFull
+}
+
+/// Latest welcome outcomes; on-demand because signup volume is shopper-driven.
+@actor
+query newsletterSignup newsletterWelcomesForAudience {
+  args { audienceId string! }
+  filter row => row.audienceId == args.audienceId
+  sort "row.createdAt", "desc"
+  paginate 50
+  shape newsletterSignupFull
+}
+
+/// Internal cross-organization scan. actor.userId does not identify the
+/// recipients; each result is reread under its recorded person's current authority.
+@actor
+@serverOnly
+query newsletterSignup pendingNewsletterWelcomes {
+  filter row => actor.isClusterOwner == true && statusIsPending(row)
+  sort "row.createdAt", "asc"
+  paginate 100
+  shape newsletterSignupFull
+}
+
+/// Read one prior grant so a retried public submission cannot restamp its date.
+@actor
+query consentEvent newsletterConsentById {
+  args { eventId string! }
+  filter row => row.id == args.eventId
+  shape consentEventFull
+}
+
+/// Shared testing audience for the selected organization.
+@actor
+query testSettings campaignTestSettings {
+  args { accountId string! }
+  filter row => row.accountId == args.accountId
+  sort "row.createdAt", "desc"
+  paginate 1
+  shape campaignTestSettingsFull
+}
+
+/// Recent test runs for this campaign; counters and deliveries belong to these runs alone.
+@actor
+query campaign campaignTestRuns {
+  args { campaignId string! }
+  filter row => row.testSourceCampaignId == args.campaignId
+  sort "row.createdAt", "desc"
+  paginate 50
+  shape campaignFull
 }

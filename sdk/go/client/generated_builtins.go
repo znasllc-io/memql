@@ -161,6 +161,155 @@ func CampaignActivateEmailRuleBuild(args CampaignActivateEmailRuleArgs) string {
 	return b.String()
 }
 
+// CampaignConfigureNewsletter -- Configure this deployable's organization newsletter. Enabling also enables its existing shopper-form carrier; disabling affects only this newsletter.
+type CampaignConfigureNewsletterArgs struct {
+	SiteId           string
+	AudienceId       string
+	TemplateId       string
+	SenderIdentityId string
+	ConsentText      string
+	Enabled          bool
+	ExpectedRevision string
+}
+
+// CampaignConfigureNewsletter calls the engine builtin campaignConfigureNewsletter.
+func (qc *QueryClient) CampaignConfigureNewsletter(ctx context.Context, args CampaignConfigureNewsletterArgs) (*Result, error) {
+	call := CampaignConfigureNewsletterBuild(args)
+	return qc.executeNamed(ctx, "campaignConfigureNewsletter", call)
+}
+
+func CampaignConfigureNewsletterBuild(args CampaignConfigureNewsletterArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignConfigureNewsletter(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("senderIdentityId: ")
+	b.WriteString(quoteMemQL(args.SenderIdentityId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("consentText: ")
+	b.WriteString(quoteMemQL(args.ConsentText))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("enabled: ")
+	b.WriteString(fmt.Sprintf("%v", args.Enabled))
+	if args.ExpectedRevision != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRevision: ")
+		b.WriteString(quoteMemQL(args.ExpectedRevision))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignConfigureSeries -- Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series.
+type CampaignConfigureSeriesArgs struct {
+	CampaignId string
+	// Enum: save | pause | resume
+	Action           string
+	IntervalWeeks    int
+	FirstSendAt      string
+	TimeZone         string
+	ExpectedRevision string
+}
+
+// CampaignConfigureSeries calls the engine builtin campaignConfigureSeries.
+func (qc *QueryClient) CampaignConfigureSeries(ctx context.Context, args CampaignConfigureSeriesArgs) (*Result, error) {
+	call := CampaignConfigureSeriesBuild(args)
+	return qc.executeNamed(ctx, "campaignConfigureSeries", call)
+}
+
+func CampaignConfigureSeriesBuild(args CampaignConfigureSeriesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignConfigureSeries(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	if args.IntervalWeeks != 0 {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("intervalWeeks: ")
+		b.WriteString(fmt.Sprintf("%v", args.IntervalWeeks))
+	}
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("firstSendAt: ")
+	b.WriteString(quoteMemQL(args.FirstSendAt))
+	if args.TimeZone != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("timeZone: ")
+		b.WriteString(quoteMemQL(args.TimeZone))
+	}
+	if args.ExpectedRevision != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRevision: ")
+		b.WriteString(quoteMemQL(args.ExpectedRevision))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignConfigureTestAudience -- Save the organization's shared testing audience. Must name an active audience in that organization; an empty audienceId disconnects it. Changes require the current revision.
+type CampaignConfigureTestAudienceArgs struct {
+	AccountId        string
+	AudienceId       string
+	ExpectedRevision string
+}
+
+// CampaignConfigureTestAudience calls the engine builtin campaignConfigureTestAudience.
+func (qc *QueryClient) CampaignConfigureTestAudience(ctx context.Context, args CampaignConfigureTestAudienceArgs) (*Result, error) {
+	call := CampaignConfigureTestAudienceBuild(args)
+	return qc.executeNamed(ctx, "campaignConfigureTestAudience", call)
+}
+
+func CampaignConfigureTestAudienceBuild(args CampaignConfigureTestAudienceArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignConfigureTestAudience(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 38 {
+		b.WriteString(", ")
+	}
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if args.ExpectedRevision != "" {
+		if b.Len() > 38 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRevision: ")
+		b.WriteString(quoteMemQL(args.ExpectedRevision))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignImportRecipients -- Import recipients into an audience from a CSV file already uploaded to the Library (memql#4822). The file is read SERVER-SIDE under the caller's own actor, so a file the caller cannot read is a file this cannot import -- the artifact id is not a capability. The header row must carry an `email` column (case-insensitive; `displayName` and `name` are also recognized) and EVERY OTHER COLUMN lands verbatim in the recipient's `fields` map, reachable from a template as {{fields.<key>}}. Per row: the address is normalized and shape-validated, deduplicated against the audience's existing recipients AND against earlier rows of the same file (first occurrence wins). The import refuses WHOLE when the resulting roster would exceed MEMQL_CAMPAIGNS_MAX_AUDIENCE -- it never silently truncates, because a partially-imported list is one nobody knows is partial. Returns {added, duplicates, invalid, total} plus up to 20 sample invalid lines with their line numbers, so the operator's next action is fixing the file rather than guessing at it. Each added recipient also gets a consent grant event with source 'import'.
 type CampaignImportRecipientsArgs struct {
 	// The audience to import into. The caller must be able to read it.
@@ -262,6 +411,90 @@ func CampaignRetireEmailRuleBuild(args CampaignRetireEmailRuleArgs) string {
 	return b.String()
 }
 
+// CampaignRetryNewsletterWelcome -- Recheck a blocked welcome under its original owner's current authority. A saved delivery attempt prevents resubmission even when its outcome is uncertain.
+type CampaignRetryNewsletterWelcomeArgs struct {
+	SignupId         string
+	ExpectedRevision string
+}
+
+// CampaignRetryNewsletterWelcome calls the engine builtin campaignRetryNewsletterWelcome.
+func (qc *QueryClient) CampaignRetryNewsletterWelcome(ctx context.Context, args CampaignRetryNewsletterWelcomeArgs) (*Result, error) {
+	call := CampaignRetryNewsletterWelcomeBuild(args)
+	return qc.executeNamed(ctx, "campaignRetryNewsletterWelcome", call)
+}
+
+func CampaignRetryNewsletterWelcomeBuild(args CampaignRetryNewsletterWelcomeArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignRetryNewsletterWelcome(")
+	b.WriteString("signupId: ")
+	b.WriteString(quoteMemQL(args.SignupId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignSaveTemplate -- Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail.
+type CampaignSaveTemplateArgs struct {
+	// Stable caller-generated template ID; reuse on an uncertain creation response.
+	TemplateId string
+	// Owning organization; immutable after creation.
+	AccountId string
+	// Template name.
+	Name string
+	// The reviewed email file: subject, textBody, htmlBody.
+	Content map[string]any
+	// Exact createdAt from templateById; empty only when creating.
+	ExpectedRevision string
+	// save (default), publish, or archive. Publishing is an explicit human action.
+	Action string
+}
+
+// CampaignSaveTemplate calls the engine builtin campaignSaveTemplate.
+func (qc *QueryClient) CampaignSaveTemplate(ctx context.Context, args CampaignSaveTemplateArgs) (*Result, error) {
+	call := CampaignSaveTemplateBuild(args)
+	return qc.executeNamed(ctx, "campaignSaveTemplate", call)
+}
+
+func CampaignSaveTemplateBuild(args CampaignSaveTemplateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSaveTemplate(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("content: ")
+	b.WriteString(renderMemQLValue(args.Content))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	if args.Action != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("action: ")
+		b.WriteString(quoteMemQL(args.Action))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignScheduleSend -- Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Requires the same organization update permission as starting one by hand.
 type CampaignScheduleSendArgs struct {
 	// The campaign to schedule. The caller needs update permission in its organization.
@@ -286,6 +519,44 @@ func CampaignScheduleSendBuild(args CampaignScheduleSendArgs) string {
 	}
 	b.WriteString("scheduledAt: ")
 	b.WriteString(quoteMemQL(args.ScheduledAt))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignSendingReadiness -- Check current organization sending permission, the selected sender and unsubscribe setup without sending mail. A campaignId reads that campaign's saved organization and sender. Otherwise select accountId and senderIdentityId explicitly. Readiness is not evidence of delivery and is rechecked when sending.
+type CampaignSendingReadinessArgs struct {
+	CampaignId       string
+	AccountId        string
+	SenderIdentityId string
+}
+
+// CampaignSendingReadiness calls the engine builtin campaignSendingReadiness.
+func (qc *QueryClient) CampaignSendingReadiness(ctx context.Context, args CampaignSendingReadinessArgs) (*Result, error) {
+	call := CampaignSendingReadinessBuild(args)
+	return qc.executeNamed(ctx, "campaignSendingReadiness", call)
+}
+
+func CampaignSendingReadinessBuild(args CampaignSendingReadinessArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSendingReadiness(")
+	if args.CampaignId != "" {
+		b.WriteString("campaignId: ")
+		b.WriteString(quoteMemQL(args.CampaignId))
+	}
+	if args.AccountId != "" {
+		if b.Len() > 33 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
+	if args.SenderIdentityId != "" {
+		if b.Len() > 33 {
+			b.WriteString(", ")
+		}
+		b.WriteString("senderIdentityId: ")
+		b.WriteString(quoteMemQL(args.SenderIdentityId))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -328,6 +599,39 @@ func CampaignStatsBuild(args CampaignStatsArgs) string {
 	b.WriteString("builtin campaignStats(")
 	b.WriteString("campaignId: ")
 	b.WriteString(quoteMemQL(args.CampaignId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignTestAudienceSend -- Queue a separate test run through the ordinary campaign worker, using this organization's configured testing audience. Works in every source lifecycle, including an active series, whose saved instruction is used without advancing its schedule. Requires the same published template and sending readiness as a live run. Replaying requestId returns the original run without resending.
+type CampaignTestAudienceSendArgs struct {
+	CampaignId string
+	RequestId  string
+	// The testing audience reviewed by the caller. Must still match the organization's saved setting; never replaces the saved setting.
+	AudienceId string
+}
+
+// CampaignTestAudienceSend calls the engine builtin campaignTestAudienceSend.
+func (qc *QueryClient) CampaignTestAudienceSend(ctx context.Context, args CampaignTestAudienceSendArgs) (*Result, error) {
+	call := CampaignTestAudienceSendBuild(args)
+	return qc.executeNamed(ctx, "campaignTestAudienceSend", call)
+}
+
+func CampaignTestAudienceSendBuild(args CampaignTestAudienceSendArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignTestAudienceSend(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -621,7 +925,9 @@ type ComposeMaterializeArgs struct {
 	Statement string
 	// markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of.
 	Format string
-	// What to compose from: a list of {kind, ref, label} where kind is concept_row | library_file | query. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each.
+	// email_template produces a validated .email.json with subject, editable HTML, and plain-text alternative; requires format json. Empty creates an ordinary document. The result is a draft, never published or sent automatically.
+	OutputKind string
+	// What to compose from: a list of {kind, ref, label, content?} where kind is concept_row | library_file | query. Set content=true only for a library_file to capture its bytes as reference input, including bounded inspection of supported ZIP members. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each.
 	Sources []map[string]any
 	// A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly.
 	Draft string
@@ -662,6 +968,13 @@ func ComposeMaterializeBuild(args ComposeMaterializeArgs) string {
 	}
 	b.WriteString("format: ")
 	b.WriteString(quoteMemQL(args.Format))
+	if args.OutputKind != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("outputKind: ")
+		b.WriteString(quoteMemQL(args.OutputKind))
+	}
 	if args.Sources != nil {
 		if b.Len() > 27 {
 			b.WriteString(", ")
@@ -1058,7 +1371,7 @@ func DecideApprovalBuild(args DecideApprovalArgs) string {
 	return b.String()
 }
 
-// EditDocument -- Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. ownerUserId is threaded from the document row, never the caller. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231).
+// EditDocument -- Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. The caller retains their own authority for reads and writes. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231).
 type EditDocumentArgs struct {
 	DocumentId   string
 	Content      string
@@ -1067,6 +1380,7 @@ type EditDocumentArgs struct {
 	// Enum: user | assistant | system
 	AuthorKind       string
 	AuthorId         string
+	ExpectedRevision string
 	ExpectedVersion  int
 	ProducedByPlanId string
 	PartitionId      string
@@ -1118,6 +1432,13 @@ func EditDocumentBuild(args EditDocumentArgs) string {
 		b.WriteString("authorId: ")
 		b.WriteString(quoteMemQL(args.AuthorId))
 	}
+	if args.ExpectedRevision != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRevision: ")
+		b.WriteString(quoteMemQL(args.ExpectedRevision))
+	}
 	if args.ExpectedVersion != 0 {
 		if b.Len() > 21 {
 			b.WriteString(", ")
@@ -1156,6 +1477,63 @@ func (qc *QueryClient) EffectiveCapabilitiesForActor(ctx context.Context, args E
 func EffectiveCapabilitiesForActorBuild(args EffectiveCapabilitiesForActorArgs) string {
 	_ = args
 	return "builtin effectiveCapabilitiesForActor()"
+}
+
+// EmailAzureSetup -- Configure one Microsoft Azure connection for the cluster with accountId self, then manage each organization's domain and sender using that saved connection. Owner or developer only. Credentials stay encrypted on the cluster.
+type EmailAzureSetupArgs struct {
+	AccountId string
+	Action    string
+	SessionId string
+	Options   map[string]any
+}
+
+// EmailAzureSetup calls the engine builtin emailAzureSetup.
+func (qc *QueryClient) EmailAzureSetup(ctx context.Context, args EmailAzureSetupArgs) (*Result, error) {
+	call := EmailAzureSetupBuild(args)
+	return qc.executeNamed(ctx, "emailAzureSetup", call)
+}
+
+func EmailAzureSetupBuild(args EmailAzureSetupArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin emailAzureSetup(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	if args.SessionId != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sessionId: ")
+		b.WriteString(quoteMemQL(args.SessionId))
+	}
+	if args.Options != nil {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("options: ")
+		b.WriteString(renderMemQLValue(args.Options))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// EmailInbox -- Read the last 100 captured test messages from the last seven days. Owner or developer only; capture must be explicitly configured. This is a sensitive test inbox, not evidence of Internet delivery.
+type EmailInboxArgs struct {
+}
+
+// EmailInbox calls the engine builtin emailInbox.
+func (qc *QueryClient) EmailInbox(ctx context.Context, args EmailInboxArgs) (*Result, error) {
+	call := EmailInboxBuild(args)
+	return qc.executeNamed(ctx, "emailInbox", call)
+}
+
+func EmailInboxBuild(args EmailInboxArgs) string {
+	_ = args
+	return "builtin emailInbox()"
 }
 
 // FleetModelProbe -- Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions.
@@ -1894,6 +2272,96 @@ func LibraryAddArtifactLabelBuild(args LibraryAddArtifactLabelArgs) string {
 	return b.String()
 }
 
+// LibraryAddDocumentComment -- Save feedback against the exact saved revision. A repeated requestId returns the original receipt; changed content under that requestId is refused.
+type LibraryAddDocumentCommentArgs struct {
+	ArtifactId       string
+	ExpectedVersion  int
+	ExpectedRevision string
+	Anchor           map[string]any
+	Body             string
+	RequestId        string
+}
+
+// LibraryAddDocumentComment calls the engine builtin libraryAddDocumentComment.
+func (qc *QueryClient) LibraryAddDocumentComment(ctx context.Context, args LibraryAddDocumentCommentArgs) (*Result, error) {
+	call := LibraryAddDocumentCommentBuild(args)
+	return qc.executeNamed(ctx, "libraryAddDocumentComment", call)
+}
+
+func LibraryAddDocumentCommentBuild(args LibraryAddDocumentCommentArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryAddDocumentComment(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedVersion: ")
+	b.WriteString(fmt.Sprintf("%v", args.ExpectedVersion))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("anchor: ")
+	b.WriteString(renderMemQLValue(args.Anchor))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("body: ")
+	b.WriteString(quoteMemQL(args.Body))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryDocumentReview -- Read revision-bound feedback after checking current access to the artifact.
+type LibraryDocumentReviewArgs struct {
+	ArtifactId string
+}
+
+// LibraryDocumentReview calls the engine builtin libraryDocumentReview.
+func (qc *QueryClient) LibraryDocumentReview(ctx context.Context, args LibraryDocumentReviewArgs) (*Result, error) {
+	call := LibraryDocumentReviewBuild(args)
+	return qc.executeNamed(ctx, "libraryDocumentReview", call)
+}
+
+func LibraryDocumentReviewBuild(args LibraryDocumentReviewArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryDocumentReview(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryDocumentRevisionStatus -- Read the exact owned proposal, approval, run and output draft.
+type LibraryDocumentRevisionStatusArgs struct {
+	RequestId string
+}
+
+// LibraryDocumentRevisionStatus calls the engine builtin libraryDocumentRevisionStatus.
+func (qc *QueryClient) LibraryDocumentRevisionStatus(ctx context.Context, args LibraryDocumentRevisionStatusArgs) (*Result, error) {
+	call := LibraryDocumentRevisionStatusBuild(args)
+	return qc.executeNamed(ctx, "libraryDocumentRevisionStatus", call)
+}
+
+func LibraryDocumentRevisionStatusBuild(args LibraryDocumentRevisionStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryDocumentRevisionStatus(")
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryRemoveArtifactLabel -- Remove a label from a Library artifact index row. Idempotent -- a label already absent is left alone and nothing is written. Same owner-threaded load/write shape as libraryAddArtifactLabel.
 type LibraryRemoveArtifactLabelArgs struct {
 	ArtifactId string
@@ -1916,6 +2384,56 @@ func LibraryRemoveArtifactLabelBuild(args LibraryRemoveArtifactLabelArgs) string
 	}
 	b.WriteString("label: ")
 	b.WriteString(quoteMemQL(args.Label))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryRequestDocumentRevision -- Capture selected current feedback and open a Nexus run waiting for approval.
+type LibraryRequestDocumentRevisionArgs struct {
+	ArtifactId       string
+	ExpectedVersion  int
+	ExpectedRevision string
+	CommentIds       []string
+	Instruction      string
+	RequestId        string
+}
+
+// LibraryRequestDocumentRevision calls the engine builtin libraryRequestDocumentRevision.
+func (qc *QueryClient) LibraryRequestDocumentRevision(ctx context.Context, args LibraryRequestDocumentRevisionArgs) (*Result, error) {
+	call := LibraryRequestDocumentRevisionBuild(args)
+	return qc.executeNamed(ctx, "libraryRequestDocumentRevision", call)
+}
+
+func LibraryRequestDocumentRevisionBuild(args LibraryRequestDocumentRevisionArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryRequestDocumentRevision(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedVersion: ")
+	b.WriteString(fmt.Sprintf("%v", args.ExpectedVersion))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("commentIds: ")
+	b.WriteString(renderMemQLValue(args.CommentIds))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("instruction: ")
+	b.WriteString(quoteMemQL(args.Instruction))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2509,6 +3027,59 @@ func PackageArchiveBuild(args PackageArchiveArgs) string {
 	return b.String()
 }
 
+// PackageCampaigns -- Public configuration only. Import records a draft after explicit organization selection; Microsoft consent, provisioning and live DNS verification remain in email setup. Export merges into the supplied manifest, preserving apps.
+type PackageCampaignsArgs struct {
+	Action       string
+	Manifest     string
+	AccountId    string
+	Organization string
+	Confirmed    bool
+	ConfirmedSet bool // set true to send confirmed; required because zero-value bool is ambiguous
+}
+
+// PackageCampaigns calls the engine builtin packageCampaigns.
+func (qc *QueryClient) PackageCampaigns(ctx context.Context, args PackageCampaignsArgs) (*Result, error) {
+	call := PackageCampaignsBuild(args)
+	return qc.executeNamed(ctx, "packageCampaigns", call)
+}
+
+func PackageCampaignsBuild(args PackageCampaignsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin packageCampaigns(")
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	if args.Manifest != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("manifest: ")
+		b.WriteString(quoteMemQL(args.Manifest))
+	}
+	if args.AccountId != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
+	if args.Organization != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("organization: ")
+		b.WriteString(quoteMemQL(args.Organization))
+	}
+	if args.ConfirmedSet {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("confirmed: ")
+		b.WriteString(fmt.Sprintf("%v", args.Confirmed))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // PackageCancelDeployment -- Ask a running deployment to stop (epic memql#4937). It flags the row and ends nothing: the node running the attempt reads the flag at its next stage boundary and closes the run `cancelled`, which is what keeps the timeline from claiming a run stopped while its build is still running somewhere. Refuses a run that is already terminal, and refuses one at or past `staging_dsl` -- from the roll on there is no cancel, because a roll restarts the cluster onto staged MemQL and stopping half way through is the one outcome worse than either finishing or not starting. `cancelled` is its own terminal status and NOT a flavour of `failed`: nothing broke and nothing was published. Returns {deploymentId, status, cancelRequested}.
 type PackageCancelDeploymentArgs struct {
 	// The v1:platform:package the run belongs to.
@@ -3033,7 +3604,7 @@ func RecordFeedbackBuild(args RecordFeedbackArgs) string {
 	return b.String()
 }
 
-// ReleaseCut -- Cut a new release of MemQL: compute the next version from the repository's existing vX.Y.Z tags, create the tag at main's head, and publish a GitHub Release -- which is what fires the image-build cascade. Owner role only, enforced in Go before any network call. Returns the version, the Release URL and the base sha. Requires MEMQL_RELEASE_REPO and the MEMQL_GITHUB_RELEASE_TOKEN credential.
+// ReleaseCut -- Cut a new release of MemQL: compute the next version from the repository's existing vX.Y.Z tags, create the tag at main's head, and publish a GitHub Release -- which is what fires the image-build cascade. Refuses with version_file_stale unless the repo-root VERSION file at main's head already reads the version being cut; VERSION arrives by pull request before the cut. Owner role only, enforced in Go before any network call. Returns the version, the Release URL and the base sha. Requires MEMQL_RELEASE_REPO and the MEMQL_GITHUB_RELEASE_TOKEN credential.
 type ReleaseCutArgs struct {
 	// Which part of the newest existing version to increment. major and minor zero the parts below them.
 	// Enum: major | minor | patch
@@ -3043,7 +3614,7 @@ type ReleaseCutArgs struct {
 	// Also open a pull request bumping the VS Code extension's DEFAULT_STACK_TAG to the new tag. A PR that cannot be opened is recorded as a note on the release row and never fails the cut, which has already published by then.
 	BumpExtensionPin    bool
 	BumpExtensionPinSet bool // set true to send bumpExtensionPin; required because zero-value bool is ambiguous
-	// Compute the plan -- next version and base sha -- and write nothing, create nothing, publish nothing. The first validation of a freshly seeded credential should use this.
+	// Compute the plan -- next version and base sha -- and run every check that comes before the first write, a stale VERSION included, but write nothing, create nothing, publish nothing. It makes only reads, so it proves the token can read the repository and cannot prove it may create tags or Releases. Between cuts it answers version_file_stale until the pull request setting VERSION to the next release has merged. The first validation of a freshly seeded credential should use this.
 	DryRun    bool
 	DryRunSet bool // set true to send dryRun; required because zero-value bool is ambiguous
 }

@@ -42,6 +42,7 @@ import {
 import { useLibraryFeeds } from "./useLibrary";
 import { useUploadTasks } from "./useUploadTasks";
 import { useSession } from "../../chrome/access";
+import { readEditorPreference, saveEditorPreference, type EditorPreference } from "../../items/editorPreference";
 
 // Files: the Library on the desktop (epic #4721). A live folder tree over the
 // caller's content-bearing rows, a list that announces changes once and
@@ -436,6 +437,7 @@ function FilesSettingsSection({
   update: (patch: Partial<FilesSettings>) => void;
 }) {
   const { readiness } = useSession();
+  const [editor, setEditor] = useState<EditorPreference>(readEditorPreference);
   return (
     <div className="os-settings">
       <Head title="Files settings" />
@@ -450,6 +452,18 @@ function FilesSettingsSection({
         readiness={readiness}
       />
       <Panel label="Files settings">
+        <fieldset className="os-field-group">
+          <legend>Open files in</legend>
+          <div className="os-choice-row" role="radiogroup" aria-label="File editor">
+            {([['browser', 'VS Code in browser'], ['vscode', 'VS Code on this machine'], ['cursor', 'Cursor on this machine']] as const).map(([value, label]) => (
+              <button key={value} type="button" role="radio" className="os-choice" aria-checked={editor === value}
+                onClick={() => { setEditor(value); saveEditorPreference(value); }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="os-caption">ZIP files download to this machine.</p>
+        </fieldset>
         <fieldset className="os-field-group">
           <legend>Open the list on</legend>
           <div className="os-choice-row" role="radiogroup" aria-label="Default sort">

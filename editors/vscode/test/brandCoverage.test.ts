@@ -123,6 +123,24 @@ function documents(source: string): string[] {
   return out;
 }
 
+/**
+ * Every page-kit document a source file builds: each `pageDocument(` call.
+ *
+ * A panel on the page kit (src/webview/ui/document.ts) holds no doctype of its
+ * own -- `pageDocument()` builds the whole document, brand block included --
+ * so each CALL is a document, and it is branded by construction because
+ * document.ts is (asserted below). Counting calls keeps the sweep's total
+ * steady while panels migrate: a doctype template swapped for a call is one
+ * document for one. Comment lines are skipped, so prose that names the
+ * function is not mistaken for a document.
+ */
+function kitDocuments(source: string): number {
+  return source
+    .split("\n")
+    .filter((line) => !/^\s*(\/\/|\*)/.test(line))
+    .reduce((sum, line) => sum + (line.match(/\bpageDocument\(/g) ?? []).length, 0);
+}
+
 /** Does this document reach brandStyleBlock(), directly or via a local helper? */
 function documentIsBranded(document: string, helpers: Map<string, string>): boolean {
   if (document.includes(BRAND_CALL)) return true;
@@ -238,15 +256,27 @@ test("the sweep sees all eight panel files and ten documents", () => {
     ],
     "ADDED OR REMOVED A PANEL? Update this list and the document count below. Failing here on a legitimately-added panel is the intended cost: a new panel is exactly when somebody should be made to look at whether it wears the brand.",
   );
-  const total = names.reduce(
-    (sum, name) => sum + documents(read(path.join(PANEL_DIR, name))).length,
-    0,
-  );
+  const total = names.reduce((sum, name) => {
+    const text = read(path.join(PANEL_DIR, name));
+    return sum + documents(text).length + kitDocuments(text);
+  }, 0);
   assert.equal(
     total,
     10,
-    "eight files, ten panel classes, ten documents -- automationPanel.ts and runPanel.ts host two each. If you added a panel class, bump this; if this dropped without you touching a panel, the document scan has stopped matching and the sweep below is no longer looking at anything.",
+    "eight files, ten panel classes, ten documents -- automationPanel.ts and runPanel.ts host two each. A doctype template and a pageDocument() call each count as one, so moving a panel onto the page kit leaves this alone. If you added a panel class, bump this; if this dropped without you touching a panel, the document scan has stopped matching and the sweep below is no longer looking at anything.",
   );
+});
+
+test("a pageDocument() call is a branded document, because the kit's own document is", () => {
+  // What lets the sweep count a call as branded without looking inside it:
+  // the one template behind every call reaches the tokens itself.
+  const kitDocument = read(path.join(PANEL_DIR, "ui", "document.ts"));
+  const built = documents(kitDocument);
+  assert.equal(built.length, 1, "document.ts builds exactly one document");
+  assert.deepEqual(panelsMissingBrand([{ name: "ui/document.ts", text: kitDocument }]), []);
+
+  assert.equal(kitDocuments(`this.live = new LiveView(t, (p, s) => pageDocument({ nonce, ...p }));`), 1);
+  assert.equal(kitDocuments(`// pageDocument() builds the whole document\nimport { pageDocument } from "./ui/document.js";`), 0);
 });
 
 test("every panel document inlines the brand tokens", () => {
@@ -262,7 +292,7 @@ test("every panel document inlines the brand tokens", () => {
 });
 
 test("the *Screens.ts fragment modules are exempt because they build no document", () => {
-  // EXEMPT BY CONSTRUCTION, not by name. These four modules produce HTML
+  // EXEMPT BY CONSTRUCTION, not by name. These modules produce HTML
   // FRAGMENTS that are interpolated into a panel's document, so they inherit
   // that document's <style> block and have nowhere of their own to put one.
   // Asserting that they emit no document is what keeps the exemption honest:
@@ -274,17 +304,23 @@ test("the *Screens.ts fragment modules are exempt because they build no document
     .filter((name) => name.endsWith("Screens.ts"))
     .sort();
   assert.deepEqual(screens, [
+    "addClusterScreens.ts",
+    "automationScreens.ts",
+    "conceptScreens.ts",
     "constructScreens.ts",
     "deploymentScreens.ts",
     "installScreens.ts",
     "languageReferenceScreens.ts",
+    "runScreens.ts",
   ]);
   for (const name of screens) {
+    const text = read(path.join(PANEL_DIR, name));
     assert.deepEqual(
-      documents(read(path.join(PANEL_DIR, name))),
+      documents(text),
       [],
       `${name} builds a full document -- it is a surface now, so it needs its own brandStyleBlock() and a place in the sweep`,
     );
+    assert.equal(kitDocuments(text), 0, `${name} builds a page-kit document -- it is a surface now, so it needs a place in the sweep`);
   }
 });
 
@@ -306,7 +342,12 @@ const CONSTRUCT: CatalogConstruct = {
   source: "",
 };
 
-const DEPS = { viewSourceFromCluster: () => Promise.resolve(), browseRows: () => Promise.resolve() };
+const DEPS = {
+  viewSourceFromCluster: () => Promise.resolve(),
+  browseRows: () => Promise.resolve(),
+  openInOs: () => Promise.resolve(),
+  run: () => Promise.resolve(),
+};
 
 const CONTEXT = { subscriptions: [] as { dispose(): unknown }[] } as unknown as ExtensionContext;
 

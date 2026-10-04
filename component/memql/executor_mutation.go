@@ -760,6 +760,36 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		}
 	}
 
+	// Fixed-template review identities are server attestations. Protect both
+	// inserts and updates, including raw writes that bypass @serverOnly names.
+	if !auth.OriginFromContext(ctx).IsInternal() &&
+		(conceptMeta.Name == "v1:work:goal" || conceptMeta.Name == "v1:work:run" || conceptMeta.Name == "v1:work:approval") &&
+		strings.HasPrefix(BareShortId(mutation.ID), "review-") {
+		return nil, meta, fmt.Errorf("review work records require internal origin from the approval workflow")
+	}
+
+	// Review authorship and revision are server attestations. Named mutation
+	// annotations alone do not cover raw insert/update calls.
+	if conceptMeta.Name == "v1:library:documentComment" && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("document feedback requires internal origin from the revision-checked review capability")
+	}
+
+	if conceptMeta.Name == "v1:campaigns:template" && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("template writes require campaignSaveTemplate and a saved revision")
+	}
+	if (conceptMeta.Name == "v1:email:connectionState" || conceptMeta.Name == "v1:email:sendOperation") && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("email connection state requires internal origin from the authorized connection capability")
+	}
+	if (conceptMeta.Name == "v1:campaigns:newsletterBinding" || conceptMeta.Name == "v1:campaigns:newsletterSignup") && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("newsletter writes require their configuration, signup or progress capability")
+	}
+	if conceptMeta.Name == "v1:campaigns:campaignSeries" && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("recurring campaigns require campaignConfigureSeries and a saved revision")
+	}
+	if conceptMeta.Name == "v1:campaigns:singleSendReceipt" && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("single-send receipts require internal origin from the sending capability")
+	}
+
 	rawPayload := strings.TrimSpace(mutation.PayloadRaw)
 	if rawPayload == "" {
 		return nil, meta, fmt.Errorf("mutation payload is required")

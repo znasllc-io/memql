@@ -93,12 +93,20 @@ var StorefrontScopes = []string{
 }
 
 // ConnectScopes is the one scope list Connect requests, Storefront scopes first,
-// then the Admin read scopes the mirror and webhooks need (generated.Scopes). A
-// missing Admin scope is shown, never refused. A copy, so a caller cannot edit it.
+// then the Admin scopes the mirror, webhooks and product-content delivery need.
+// The generated mirror only reads products; productContent also writes their
+// metafields, so its grant must be write_products (which includes read_products).
+// A missing Admin scope is shown, never refused. A copy, so a caller cannot edit it.
 func ConnectScopes() []string {
 	out := make([]string, 0, len(StorefrontScopes)+len(generated.Scopes))
 	out = append(out, StorefrontScopes...)
-	return append(out, generated.Scopes...)
+	for _, scope := range generated.Scopes {
+		if scope == "read_products" {
+			scope = "write_products"
+		}
+		out = append(out, scope)
+	}
+	return out
 }
 
 // ConnectTarget is what ResolveConnectSite learned about one storefront.

@@ -1,0 +1,16 @@
+@import "../../../brand/fonts.css";
+@import "../../../brand/tokens.css";
+:root { color-scheme: light dark; font-family: var(--memql-font-sans); }
+body { margin: 0; }
+#workbench { height: 100dvh; }
+#setup { position: fixed; z-index: 100000; inset: 0; display: grid; align-content: center; justify-content: center; gap: 16px; padding: 32px; background: var(--memql-surface); color: var(--memql-fg); }
+#setup[hidden] { display: none; }
+h1, p { margin: 0; max-width: 540px; }
+h1 { font-size: 28px; font-weight: 600; }
+#setup-detail { font-size: 14px; opacity: .75; line-height: 1.6; }
+button { font: inherit; padding: 9px 16px; border: 1px solid var(--memql-border-strong); border-radius: 6px; background: var(--memql-surface-raised); color: inherit; cursor: pointer; margin: 12px 8px 0 0; }
+button:focus-visible { outline: 2px solid var(--memql-accent); outline-offset: 3px; }
+
+#basic-banner { box-sizing: border-box; min-height: 44px; padding: 7px 16px; background: var(--memql-accent-subtle); font-size: 13px; }
+#basic-banner button { margin: 0 0 0 12px; padding: 4px 8px; font-size: 12px; }
+.basic-mode #workbench { height: calc(100dvh - 44px); }

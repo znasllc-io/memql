@@ -1,0 +1,465 @@
+# docs/public_boundary_allowlist.toml
+#
+# The links on published docs pages that break the public boundary today,
+# let through until each page is fixed (memql#5717). Read by
+# cmd/docs-gen/bundle: docs_public_boundary_test.go on every pull request,
+# and the release lane's --check before it builds.
+#
+# THIS LIST ONLY SHRINKS. An entry that no longer matches a link is itself a
+# violation, so fixing a link fails the gate until its entry is deleted here
+# too, and a new boundary-breaking link can only land by being added in a
+# change a reviewer reads. Do not add entries to make a new link pass: link
+# the public page that covers the subject, or say it in prose.
+#
+# An allowlisted link ships as its plain text -- never as a link to GitHub or
+# to a file outside docs/public -- so the site shows no dead link while the
+# page waits for its fix.
+#
+# One entry per (file, target, rule), covering every occurrence of that
+# target on that page:
+#
+#   file    the page, repository-relative
+#   target  the link target exactly as written, fragment included
+#   rule    leaves-public       resolves outside docs/public
+#           unselected-target   a docs/public page the bundle does not publish
+#                               (draft, historical, internal)
+#           unrewritable-target a docs/public path that is not a page
+#           missing-target      nothing tracked at that path
+#   reason  optional
+#
+# The format is the subset of TOML .gitleaks.toml is written in: [[allow]]
+# tables of double-quoted strings. Anything else is refused.
+#
+# Seeded from the tree on 2026-09-28: 89 entries (74 leaves-public, 14
+# unselected-target, 1 unrewritable-target). Each entry is a page to fix.
+
+[[allow]]
+file   = "docs/public/build/audio-streaming.md"
+target = "../../../integrations/CLAUDE.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/build/build-tags.md"
+target = "../../../app/build_default.go"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/build/build-tags.md"
+target = "../../internal/design/platform-consolidation.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/build/building-a-pack.md"
+target = "../../../component/memql/reference_pack_load_test.go"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/build/building-a-pack.md"
+target = "../../../examples/deploypack"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/build/building-a-pack.md"
+target = "../../../examples/referencepack"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/build/building-a-pack.md"
+target = "../../../examples/referencepack/reference_pack_test.go"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/build/building-a-pack.md"
+target = "../../superpowers/specs/2026-09-21-shopper-form-extension-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/build/consuming-the-wholesale-pack.md"
+target = "../../../dsl/commerce"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/concepts/architecture.md"
+target = "../../../component/node/CLAUDE.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/concepts/display-cards.md"
+target = "../../../sdk/ts-viewkit"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/concepts/display-cards.md"
+target = "../../../sdk/ts-viewkit/src/displayCard.ts"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/concepts/events.md"
+target = "../../superpowers/specs/2026-08-25-caching-and-live-data-architecture-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/concepts/view-elements.md"
+target = "../../../sdk/ts-viewkit"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/language/authoring-rules.md"
+target = "../../superpowers/specs/2026-08-25-caching-and-live-data-architecture-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/language/authoring-rules.md"
+target = "../../superpowers/specs/2026-09-13-dsl-v1-language-freeze-program-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/language/first-program.md"
+target = "../../../dsl/todos/mutations.memql"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/language/first-program.md"
+target = "../../../dsl/todos/queries.memql"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/language/first-program.md"
+target = "../../../examples/reading-list/reading.memql"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/language/memql.md"
+target = "../../internal/design/core-builtins-and-collections-adr.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/language/vscode-runtime-panel.md"
+target = "../../superpowers/specs/2026-08-14-vscode-constructs-view-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/language/vscode.md"
+target = "../../../editors/vscode/README.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/language/vscode.md"
+target = "../../../editors/vscode/REFERENCE.md#appearance"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/language/vscode.md"
+target = "../../../examples/reading-list/reading.memql"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/ai-routing.md"
+target = "supervised-visual-composition.md"
+rule   = "unselected-target"
+
+[[allow]]
+file   = "docs/public/operate/auth/access-model.md"
+target = "../../../internal/planning/roadmap.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/auth/node-jwt.md"
+target = "../../../internal/design/auth-threat-model.md#51-inter-node-mesh-trust-f1"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/auth/service-account-jwt.md"
+target = "../../../internal/design/auth-threat-model.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/azure-entry-install.md"
+target = "deploy-bundle-runbook.md"
+rule   = "unselected-target"
+
+[[allow]]
+file   = "docs/public/operate/azure-instance-bringup.md"
+target = "../../internal/design/capability-script-contract.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/cluster-version-record.md"
+target = "deploy-bundle-runbook.md"
+rule   = "unselected-target"
+
+[[allow]]
+file   = "docs/public/operate/database-platform.md"
+target = "../../../deploy/cnpg/README.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/database-platform.md"
+target = "../../../deploy/db-image/README.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/database-platform.md"
+target = "../../../deploy/k8s/components/cnpg-db/README.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/database-platform.md"
+target = "../../../deploy/k8s/components/cnpg-db/optional/pooler/kustomization.yaml"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/database-platform.md"
+target = "../../../deploy/k8s/monitoring/README.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/database-platform.md"
+target = "../../../deploy/k8s/monitoring/podmonitor-database.yaml"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/database-platform.md"
+target = "../../internal/ops/dr-runbook.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/database-platform.md"
+target = "../../internal/ops/timescaledb-license-compliance.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/deployables.md"
+target = "../../superpowers/specs/2026-09-02-deployables-compose-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/deployables.md"
+target = "../../superpowers/specs/2026-09-02-deployables-program-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/deployables.md"
+target = "../../superpowers/specs/2026-09-03-github-connect-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/deployment-console.md"
+target = "../../../deploy/argocd/README.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/deployment-console.md"
+target = "../../internal/design/deployment-v2.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/deployment-console.md"
+target = "../../internal/ops/dr-runbook.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/deployment-console.md"
+target = "deploy-bundle-runbook.md"
+rule   = "unselected-target"
+
+[[allow]]
+file   = "docs/public/operate/downstream-stacks.md"
+target = "../../internal/design/platform-consolidation.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/env-vars.md"
+target = "../../../component/envregistry/bootvalidate.go"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/env-vars.md"
+target = "../../../deploy/k8s/overlays/local"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/env-vars.md"
+target = "../../../scripts/k3d/seed-secrets.sh"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/env-vars.md"
+target = "../../../scripts/secrets/main.go"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/env-vars.md"
+target = "../../../scripts/secrets/manifest.yaml"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/infrastructure.md"
+target = "../../../deploy/k8s/base/README.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/instance-scale-and-upgrade.md"
+target = "deploy-bundle-runbook.md"
+rule   = "unselected-target"
+
+[[allow]]
+file   = "docs/public/operate/intervention-and-feedback.md"
+target = "../../superpowers/specs/2026-09-13-app-session-recording-and-learning-program-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/lifecycle-runbook.md"
+target = "./deploy-bundle-runbook.md"
+rule   = "unselected-target"
+
+[[allow]]
+file   = "docs/public/operate/local-models.md"
+target = "../../superpowers/specs/2026-09-08-linux-native-runtime-and-class-defaults-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/logs.md"
+target = "../../superpowers/specs/2026-09-02-deployables-program-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/logs.md"
+target = "../../superpowers/specs/2026-09-03-logs-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/memql-cloud-launch.md"
+target = "../../internal/ops/timescaledb-license-compliance.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/memql-cloud.md"
+target = "../../internal/design/capability-script-contract.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/memql-os.md"
+target = "supervised-visual-composition.md"
+rule   = "unselected-target"
+
+[[allow]]
+file   = "docs/public/operate/mesh-event-delivery.md"
+target = "../../superpowers/specs/2026-09-22-mesh-event-delivery-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/packages.md"
+target = "../../superpowers/specs/2026-09-01-packages-and-deployables-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/packages.md"
+target = "../../superpowers/specs/2026-09-02-deployables-compose-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/packages.md"
+target = "../../superpowers/specs/2026-09-02-deployables-program-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/release-cutting.md"
+target = "../../superpowers/specs/2026-08-23-release-cut-automation-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/shopify-connector.md"
+target = "../../superpowers/specs/2026-08-22-shopify-connector-complete-mirror-design.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/operate/shopify-connector.md"
+target = "shopify-connect.md"
+rule   = "unselected-target"
+
+[[allow]]
+file   = "docs/public/operate/storefront-preview.md"
+target = "shopify-connect.md"
+rule   = "unselected-target"
+
+[[allow]]
+file   = "docs/public/operate/workbench-runbook.md"
+target = "../../internal/ops/workbench-production.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/overview/index.md"
+target = "../../../CONTRIBUTING.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/overview/index.md"
+target = "../../../GLOSSARY.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/overview/index.md"
+target = "../../../sdk/go"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/overview/index.md"
+target = "../../../sdk/ts/README.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/overview/index.md"
+target = "../language/research-workflow.md"
+rule   = "unselected-target"
+
+[[allow]]
+file   = "docs/public/overview/index.md"
+target = "../operate/supervised-visual-composition.md"
+rule   = "unselected-target"
+
+[[allow]]
+file   = "docs/public/overview/proving-scorecard.md"
+target = "../../superpowers/specs/2026-09-06-proving-suite-design.md"
+rule   = "leaves-public"
+
+
+[[allow]]
+file   = "docs/public/overview/quickstart.md"
+target = "../../../CONTRIBUTING.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/overview/quickstart.md"
+target = "../../../examples/reading-list/reading.memql"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/overview/roadmap.md"
+target = "../operate/supervised-visual-composition.md"
+rule   = "unselected-target"
+
+[[allow]]
+file   = "docs/public/overview/tech-stack.md"
+target = "../../../CONTRIBUTING.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/overview/tech-stack.md"
+target = "../../../sdk/go"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/overview/tech-stack.md"
+target = "../../../sdk/ts/README.md"
+rule   = "leaves-public"
+
+[[allow]]
+file   = "docs/public/overview/what-is-memql.md"
+target = "../operate/supervised-visual-composition.md"
+rule   = "unselected-target"
+
+[[allow]]
+file   = "docs/public/overview/why-memql-harness.md"
+target = "../../superpowers/specs/2026-09-05-work-spine-design.md"
+rule   = "leaves-public"

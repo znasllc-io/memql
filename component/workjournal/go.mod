@@ -19,6 +19,7 @@ require (
 )
 
 require (
+	github.com/znasllc-io/memql/component/frontdoor v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/annotations v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/ast v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/dslclause v0.0.0 // indirect

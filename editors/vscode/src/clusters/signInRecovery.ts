@@ -29,9 +29,9 @@ import type { SignInFlow } from "../auth/signin.js";
 /** Run the same sign-in again. */
 export const SIGN_IN_RETRY = "Try again";
 /** Switch to the device grant, for a host the callback can never reach. */
-export const SIGN_IN_DEVICE_CODE = "Use a device code";
+export const SIGN_IN_DEVICE_CODE = "Use a code instead";
 /** Open the cluster's fields, because nothing named an identity service. */
-export const SIGN_IN_EDIT_CLUSTER = "Edit cluster";
+export const SIGN_IN_EDIT_CLUSTER = "Edit";
 
 export interface SignInFailureFacts {
   /**

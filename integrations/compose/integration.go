@@ -84,8 +84,9 @@ type Composer interface {
 
 // ComposeRequest is what the reasoning step is given.
 type ComposeRequest struct {
-	Statement string
-	Format    pure.Format
+	Statement  string
+	Format     pure.Format
+	OutputKind string
 	// Sources are the resolved rows, already narrowed to each concept's
 	// @composable(fields=...) projection where one was declared.
 	Sources []Resolved
@@ -108,11 +109,12 @@ type ComposeReply struct {
 
 // Integration exposes the compose capabilities.
 type Integration struct {
-	engine   Engine
-	logger   *slog.Logger
-	uploader Uploader
-	bucket   string
-	instance string
+	engine     Engine
+	logger     *slog.Logger
+	uploader   Uploader
+	downloader SourceDownloader
+	bucket     string
+	instance   string
 
 	concepts   ConceptSource
 	composer   Composer
@@ -140,6 +142,19 @@ func (i *Integration) SetUploader(u Uploader, bucket string) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.uploader, i.bucket = u, strings.TrimSpace(bucket)
+}
+
+// SetSourceDownloader wires bounded reads from the cluster's own object store.
+func (i *Integration) SetSourceDownloader(d SourceDownloader) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.downloader = d
+}
+
+func (i *Integration) sourceDownloader() SourceDownloader {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.downloader
 }
 
 // SetInstance records the cluster's domain, which is the "which MemQL

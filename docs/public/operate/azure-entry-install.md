@@ -386,8 +386,11 @@ Steps, deny reasons and the verification command:
 
 Magic links, invitations and admin notifications leave the identity
 service through `integrations/email`'s Microsoft Graph sender, and on
-this instance Graph is the ONLY path (memql#4218): no SMTP, no Azure
-Communication Services.
+the original instance Graph remains its bootstrap transport (memql#4218).
+Organization campaign sending can now use ACS through the separate
+[cluster email configuration](campaign-sending.md#configure-azure-once-for-the-cluster).
+That Settings flow is not yet part of infrastructure provisioning and must not
+be mistaken for an automatic replacement for bootstrap mail.
 
 The lesson from the first bring-up (memql#4226): AKS and the
 Pay-As-You-Go subscription sit on one Entra tenant; the sender mailbox
@@ -405,8 +408,8 @@ Everything the sender needs therefore lives on the MAILBOX tenant:
 | Tenant id | mailbox tenant | `MEMQL_EMAIL_AZURE_TENANT_ID` -- NOT the AKS directory |
 | Sender | -- | `MEMQL_EMAIL_SENDER=noreply@<domain>` |
 
-Find the tenant from the domain, not from whichever portal you are
-signed in to:
+Find the tenant from the domain, not from whichever tenant your browser
+session is signed in to:
 
 ```bash
 curl -s "https://login.microsoftonline.com/getuserrealm.srf?login=noreply@<domain>&json=1"
@@ -452,12 +455,12 @@ curl -s "https://login.microsoftonline.com/<domain>/.well-known/openid-configura
 The Entra display name for the permission is literally **"Send mail as any
 user"**, and that is what it grants. An app registration holding it can send
 as every mailbox in the tenant -- the CEO's included -- not only as the sender
-address you configured. Nothing in the Azure portal, in `az`, or in this
+address you configured. Nothing in the Azure portal, in `az`, or in this <!-- retired-vocabulary-ok: Microsoft's Azure portal, not MemQL's retired one -->
 install path narrows it for you, so an instance stood up without the step
 below has a tenant-wide send capability sitting in a Key Vault.
 
 Narrowing it is Exchange Online PowerShell. There is no `az` equivalent and no
-portal blade, which is the whole reason the step goes missing:
+portal blade, which is the whole reason the step goes missing: <!-- retired-vocabulary-ok: an Azure portal blade, not MemQL's retired portal -->
 
 ```powershell
 # Install-Module ExchangeOnlineManagement -Scope CurrentUser

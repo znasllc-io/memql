@@ -27,6 +27,10 @@ const esbuild = require("esbuild");
 const fs = require("fs");
 const path = require("path");
 
+const childProcess = require("child_process");
+const helperPath = path.join(__dirname, "dist-test", "registry-helper");
+fs.mkdirSync(path.dirname(helperPath), { recursive: true });
+childProcess.execFileSync("go", ["build", "-o", helperPath, "./cmd/memql-lsp"], { cwd: path.resolve(__dirname, "../.."), stdio: "inherit" });
 const testDir = path.join(__dirname, "test");
 const entryPoints = fs
   .readdirSync(testDir)
@@ -51,6 +55,8 @@ esbuild
         "languageClientStub.ts"
       ),
     },
+    inject: [path.join(__dirname, "test/support/registryHelper.ts")],
+    define: { __MEMQL_REGISTRY_TEST_HELPER__: JSON.stringify(helperPath) },
     sourcemap: true,
     logLevel: "info",
   })

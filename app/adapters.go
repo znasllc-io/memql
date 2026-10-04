@@ -344,6 +344,12 @@ func (a *App) campaignEmailSender() email.Sender {
 	return emailInt.SenderAccess()
 }
 
+func (a *App) emailIntegration() *email.Integration {
+	provider := a.engine.Integrations().Provider("email")
+	integration, _ := provider.(*email.Integration)
+	return integration
+}
+
 // EdgeEngineAdapter wraps MemQLEngine to satisfy edge.Engine (memql#3710).
 // Same (any, error) seam as the outbound, inbound and campaigns adapters --
 // edge.NewEngineExecutor's own tests fake this narrow shape directly, and

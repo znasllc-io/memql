@@ -369,3 +369,54 @@ describe("who is drawn which store act (Connect Shopify, D3 and D15)", () => {
     expect(within(bound).getByRole("button", { name: /Reconcile subscriptions/ })).toBeTruthy();
   });
 });
+
+// A privacy request refused on the per-store URL is a legal request Shopify
+// will not resend (memql#5707). The count and the URL are the engine's; the
+// panel's job is to put them first, in the error voice, and to say nothing
+// when there is nothing to say.
+describe("privacy deliveries refused on the store's own URL", () => {
+  const privacy = (over: Record<string, unknown>) =>
+    storeHealthRow({
+      storeId: "store-example",
+      domain: "example.myshopify.com",
+      privacyDeliveries: {
+        refused: 0,
+        lastRefusedAt: "",
+        capped: false,
+        appLevelUrl: "https://api.memql.example.com/inbound/shopify",
+        ...over,
+      },
+    });
+
+  it("names how many were refused and the URL to configure instead", async () => {
+    const { pane } = await openStore({
+      ...BOUND,
+      storeHealth: [privacy({ refused: 2, lastRefusedAt: "2026-09-02T10:00:00Z" })],
+    });
+    const alert = await within(pane).findByRole("alert");
+    expect(alert.textContent).toContain("2 privacy requests from Shopify were refused");
+    expect(alert.textContent).toContain("https://api.memql.example.com/inbound/shopify");
+    expect(alert.textContent).toContain("configuration at Shopify");
+    expect(alert.textContent).toContain("does not resend");
+  });
+
+  it("says the count is a floor when the engine capped its walk", async () => {
+    const { pane } = await openStore({ ...BOUND, storeHealth: [privacy({ refused: 500, capped: true })] });
+    const alert = await within(pane).findByRole("alert");
+    expect(alert.textContent).toContain("At least 500 privacy requests from Shopify were refused");
+  });
+
+  it.each([
+    { reading: "a measured zero", row: () => privacy({}) },
+    {
+      reading: "an engine that does not report it",
+      row: () => storeHealthRow({ storeId: "store-example", domain: "example.myshopify.com" }),
+    },
+  ])("draws nothing for $reading", async ({ row }) => {
+    const { pane } = await openStore({ ...BOUND, storeHealth: [row()] });
+    // The Scopes line is drawn from the health report, so the report has
+    // landed before absence is asserted.
+    expect(await within(pane).findByText(/scopes the mirror needs are granted/)).toBeTruthy();
+    expect(within(pane).queryByText(/privacy request/)).toBeNull();
+  });
+});

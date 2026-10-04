@@ -65,6 +65,8 @@ function fakeSubscriptions() {
 
 export interface FakeSeed {
   compositions?: Row[];
+  accounts?: Row[];
+  files?: Row[];
   runs?: Row[];
   templates?: Row[];
   recipes?: Row[];
@@ -77,6 +79,8 @@ export interface FakeSeed {
   /** What `composeMaterialize` answers with. */
   materializeReply?: Row;
   byId?: Record<string, Row>;
+  outputFile?: Row;
+  outputArtifact?: Row;
 }
 
 export function fakeConnection(seed: FakeSeed = {}) {
@@ -87,6 +91,8 @@ export function fakeConnection(seed: FakeSeed = {}) {
     });
   return {
     query: {
+      libraryArtifactsByLens: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) => rowsResult(seed.files ?? [])),
+      clientAccountsAll: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) => rowsResult(seed.accounts ?? [{id: "client-a", name: "Client A", status: "active"}] as Row[])),
       // TYPED ARGS EVEN ON THE NO-ARGUMENT READS. A `vi.fn(async () => ...)`
       // has an empty parameter list, so `.mock.calls[0][0]` is a tuple of
       // length zero and `tsc -b` -- which covers test/ -- refuses the
@@ -109,6 +115,8 @@ export function fakeConnection(seed: FakeSeed = {}) {
       composeResolveSources: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
         rowsResult(seed.resolved ? [seed.resolved] : [{ sources: [], total: 0 }]),
       ),
+      libraryArtifactBySourceConceptRef: vi.fn(async (_args: Record<string, unknown>) => rowsResult(seed.outputArtifact ? [seed.outputArtifact] : [])),
+      libraryFileById: vi.fn(async (_args: Record<string, unknown>) => rowsResult(seed.outputFile ? [seed.outputFile] : [])),
       composeMaterialize: write(seed.materializeReply),
       composeRunRecipe: write(seed.materializeReply),
       composeCancel: write(),

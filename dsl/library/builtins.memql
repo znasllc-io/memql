@@ -11,7 +11,7 @@
 @sdk
 @executor("integration.library.editDocument")
 @args(profile="object")
-@description("Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. ownerUserId is threaded from the document row, never the caller. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231).")
+@description("Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. The caller retains their own authority for reads and writes. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231).")
 builtin editDocument {
   documentId       string!
   content          string
@@ -19,6 +19,7 @@ builtin editDocument {
   note             string
   authorKind       enum("user", "assistant", "system")
   authorId         string
+  expectedRevision string
   expectedVersion  int
   producedByPlanId string
   partitionId          string
@@ -35,6 +36,7 @@ builtin assistantEditDocument {
   agentId          string
   producedByPlanId string
   partitionId          string
+  expectedRevision string
   expectedVersion  int
 }
 
@@ -145,4 +147,54 @@ builtin librarySimilarArtifacts {
 builtin libraryTrainFile {
   fileId    string!  @description("The v1:library:file row id to train. Must belong to the acting user.")
   domainId  string!  @description("Id of the knowledge domain to train the file into.")
+}
+
+/// Read revision-bound feedback after checking current access to the artifact.
+@sdk
+@executor("integration.library.documentReview")
+@args(profile="object")
+builtin libraryDocumentReview {
+  artifactId string!
+}
+
+/// Save feedback against the exact saved revision. A repeated requestId returns
+/// the original receipt; changed content under that requestId is refused.
+@sdk
+@executor("integration.library.addDocumentComment")
+@args(profile="object")
+builtin libraryAddDocumentComment {
+  artifactId string!
+  expectedVersion int!
+  expectedRevision string!
+  anchor object!
+  body string!
+  requestId string!
+}
+
+/// Capture selected current feedback and open a Nexus run waiting for approval.
+@sdk
+@executor("integration.library.requestDocumentRevision")
+@args(profile="object")
+builtin libraryRequestDocumentRevision {
+ artifactId string!
+ expectedVersion int!
+ expectedRevision string!
+ commentIds []string!
+ instruction string!
+ requestId string!
+}
+
+/// Read the exact owned proposal, approval, run and output draft.
+@sdk
+@executor("integration.library.documentRevisionStatus")
+@args(profile="object")
+builtin libraryDocumentRevisionStatus {
+ requestId string!
+}
+
+/// Only its approved, server-owned run may execute this revision.
+@executor("integration.library.executeDocumentRevision")
+@args(profile="object")
+builtin libraryExecuteDocumentRevision {
+ requestId string!
 }

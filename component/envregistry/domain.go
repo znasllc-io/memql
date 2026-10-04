@@ -113,6 +113,7 @@ func DomainDerivations(domain string) map[string]string {
 		"MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER": identity,
 		"MEMQL_IDENTITY_BOOTSTRAP_DOMAIN":         d,
 		"MEMQL_DISCOVERY_GRPC_ENDPOINT":           "api" + suffix + ":443",
+		"MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL":    api,
 		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     api + "," + app + "," + osOrigin,
 		"MEMQL_IDENTITY_REGISTERED_CLIENTS":       clients,
 		// The MCP protocol head's own front-door host (memql#3704) -- advertised

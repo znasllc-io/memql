@@ -115,10 +115,13 @@ the element vars exist for.
 A Shopify-shaped one, for a custom app's webhook secret. The source is named
 `shopify-custom`, not `shopify`: a connector's own name is its app-level
 source (for Shopify, the three compliance topics, verified with the managed
-app's secret), and the receiver refuses an env pin on a bound connector's own
-name outright -- the connector would otherwise read a body verified by the env
-secret as app-signed, and the connector for its part refuses an app-level row
-it cannot have signed for.
+app's secret), and an env pin on a connector's own name is dropped AT BOOT,
+with an ERROR naming the `MEMQL_INBOUND_SOURCE_<NAME>_*` vars, exactly like a
+source with no secret -- the connector would otherwise read a body verified by
+the env secret as app-signed, and the connector for its part refuses an
+app-level row it cannot have signed for. The receiver refuses the same pin per
+request as well, so the answer to every such delivery is 404 either way; the
+boot line is what says why.
 
 ```bash
 MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_SIGNATURE_SCHEME=hmac-sha256-base64

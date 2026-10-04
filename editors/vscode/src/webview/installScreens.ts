@@ -1,12 +1,10 @@
-// The install-run screens, shared by the add-cluster wizard and Deployments.
+// The Deployments page's run screens: the rebuild and update forms, and the
+// running and failed screens it draws for a deploy, a rebuild and an update.
 //
-// Three of `addClusterPanel.ts`'s screens are not about ADDING A CLUSTER at
-// all -- they are about running the install graph, and the Deployments surface
-// runs the same graph for a create, an upgrade and a repair. `collect`,
-// `running` and `failedStep` are lifted here so the second caller reuses them
-// instead of copying a 2200-line wizard. What stays behind is what is genuinely
-// the wizard's: the landing cards, the `connect` form for registering a remote
-// cluster, the uninstall preview, and `done`.
+// WHAT LEFT. The Add a cluster panel drew its collect, run and uninstall
+// screens from here too; it is on the page kit now (addClusterScreens.ts), and
+// the renderers only it used went with it. What stays is what
+// webview/deploymentPanel.ts still draws, until that page moves to the kit.
 //
 // A PURE LIFT. Every renderer below is the panel's method with `this` replaced
 // by arguments and nothing else changed -- same markup, same wording, same
@@ -38,101 +36,18 @@ import { renderInstallSteps } from "@znasllc-io/memql-view-kit";
 import type { PreflightItem } from "../state/preflight.js";
 import { escapeHtml, renderToHtml } from "@znasllc-io/memql-view-kit";
 
-import type { AddClusterAction } from "../clusters/presence.js";
-import type {
-  FieldError,
-  InputField,
-  Inputs,
-  StepProgress,
-} from "../state/addCluster.js";
-import { MAIN_BRANCH_CHOICE, isMainBranchChoice } from "../install/stackPin.js";
+import type { StepProgress } from "../state/addCluster.js";
 import type { UpdateStrategy } from "../state/updatePreflight.js";
-import { compareSemverDesc } from "../install/tags.js";
-import { requiredFields } from "../state/addCluster.js";
 import {
   failureGuidance,
   runIsSettled,
-  runNarration,
-  runProgress,
+  runProgressOf,
   toStepViews,
 } from "../state/installProgress.js";
+import type { RunProgress } from "../state/runProgress.js";
 import { brandMarkSvg } from "./brandTokens.js";
 import { renderRunLogPane } from "./runLogPane.js";
 import { renderScreen } from "./screenLayout.js";
-
-/** The collected fields, in the order they are asked for. */
-export const INPUT_FIELDS: readonly InputField[] = [
-  "domain",
-  "ownerFirstName",
-  "ownerLastName",
-  "ownerEmail",
-  "version",
-];
-
-/**
- * The fields rendered as a CHOICE rather than as a text box.
- *
- * EMPTY SINCE epic memql#5088, and kept rather than deleted: `version` is a
- * choice too, but a DYNAMIC one -- its options come off the remote at
- * page-open time, so it rides `CollectScreenInput.versionChoices` instead.
- * This map is the static half, and `renderField` reads it for every field.
- * The only entry it ever held was the AI vendor, which is no longer collected.
- */
-export const CHOICE_FIELDS: Partial<Record<InputField, readonly string[]>> = {};
-
-/** The label each collected field carries. */
-export const FIELD_LABELS: Record<InputField, string> = {
-  domain: "Domain",
-  ownerFirstName: "First name",
-  ownerLastName: "Last name",
-  ownerEmail: "Email address",
-  version: "Version",
-};
-
-/** What each field is for, in one line. */
-export const FIELD_HINTS: Record<InputField, string> = {
-  domain: "The cluster answers at api.<domain>. Defaults are fine if you have no preference.",
-  ownerFirstName: "The cluster owner -- you.",
-  ownerLastName: "",
-  ownerEmail: "Used to create the owner account. A local cluster sends no mail.",
-  version:
-    "Which MemQL release to install. Latest is preselected and is what a fresh install wants -- a release's manifests and its node images ship together at that tag. Choosing `main` instead clones the repository and BUILDS the node images from that checkout: it needs Docker and takes several minutes.",
-};
-
-export const COLLECT_TITLE: Partial<Record<AddClusterAction, string>> = {
-  install: "Install a local cluster",
-  installGuided: "Install a local cluster -- guided",
-  repair: "Repair the local cluster",
-};
-
-// ---------------------------------------------------------------------------
-// collect
-// ---------------------------------------------------------------------------
-
-export interface CollectScreenInput {
-  action: AddClusterAction;
-  values: Inputs;
-  errors: readonly FieldError[];
-  /**
-   * The release tags offered for `version`, newest first (memql#3882).
-   *
-   * DYNAMIC, unlike CHOICE_FIELDS, which is why it rides here rather than
-   * there: the set comes from `git ls-remote --tags` at page-open time, not
-   * from a constant this file could hold.
-   *
-   * EMPTY IS AN ORDINARY OUTCOME and renders the free-text box instead --
-   * `git ls-remote` needs a network and a git, and an operator on a plane has
-   * neither and still has a cluster to install. That is the same degradation
-   * `install/tags.ts` documents for the deployment picker, for the same reason.
-   */
-  versionChoices?: readonly string[];
-  /**
-   * The "Before it runs" checklist (memql#4195): what the run will need,
-   * stated before the Start button rather than at the moment each fact bites.
-   * Absent while the panel is still gathering it; the screen renders without.
-   */
-  preflight?: readonly PreflightItem[];
-}
 
 /**
  * The preflight checklist, above the actions so Start is an informed click.
@@ -155,120 +70,6 @@ export function renderPreflight(items: readonly PreflightItem[] | undefined): st
     .join("");
   return `<h2 class="preflight-heading">Before it runs</h2>
 <ul class="preflight">${rows}</ul>`;
-}
-
-/**
- * One field's markup.
- *
- * Extracted from `renderCollectScreen` when the AI provider fields became
- * optional (epic memql#4440) and the disclosure below the required fields
- * needed exactly the same control. That disclosure is gone with the fields
- * (epic memql#5088); this stays extracted because it is the one answer to what
- * a field LOOKS LIKE on this page, which is worth having in one place whether
- * or not two callers want it.
- */
-function renderField(input: CollectScreenInput, field: InputField): string {
-  const { values, errors } = input;
-  const error = errors.find((e) => e.field === field);
-  const hint = FIELD_HINTS[field];
-  const choices = CHOICE_FIELDS[field];
-  // NO FIELD NAMES A FILE ANY MORE (epic memql#5088), so there is no picker.
-  //
-  // memql#3547 gave `providerKeyFile` a Browse button, because typing a path
-  // is the error-prone way to name a file and that path was the one an
-  // operator could least check -- it held a secret, so nothing on the page
-  // could echo its contents back as confirmation. There is no key file now:
-  // both cloud vendors are reached by workload identity federation.
-  // `version` is the one field whose options are not a constant: they come
-  // off the remote at page-open time. Falls through to the text box when
-  // the listing is empty, which is what makes a no-network install still
-  // able to name a version.
-  //
-  // `main` is appended to that listing as a labelled choice rather than a
-  // tag (memql#3901, relabelled by memql#4430). It is NOT offered when the
-  // listing is empty: with no network the field is a free-text box, and a
-  // text box that accepts "main" would be an unlabelled branch, which
-  // clone-stack.sh refuses on purpose -- and a from-source lane with no
-  // network could not clone the repository it would build from anyway.
-  const fieldChoices: readonly VersionChoice[] | undefined =
-    field === "version"
-      ? (input.versionChoices ?? []).length === 0
-        ? undefined
-        : versionChoiceList(input.versionChoices ?? [], values.version)
-      : choices?.map((choice) => ({ value: choice, label: choice }));
-  const control =
-    fieldChoices === undefined
-      ? `<div class="control-row"><input id="f-${field}" data-field="${field}" value="${escapeHtml(
-          values[field],
-        )}"></div>`
-      : `<select id="f-${field}" data-field="${field}">${fieldChoices
-          .map(
-            (choice) =>
-              `<option value="${escapeHtml(choice.value)}"${
-                choice.value === values[field] ? " selected" : ""
-              }>${escapeHtml(choice.label)}</option>`,
-          )
-          .join("")}</select>`;
-  return `<div class="field" data-invalid="${error !== undefined}">
-  <label for="f-${field}">${escapeHtml(FIELD_LABELS[field])}</label>
-  ${control}
-  ${hint === "" ? "" : `<div class="hint">${escapeHtml(hint)}</div>`}
-  ${error === undefined ? "" : `<div class="error">${escapeHtml(error.message)}</div>`}
-</div>`;
-}
-
-/**
- * What this cluster does about AI models -- one sentence, not a field.
- *
- * IT REPLACES THE AI-PROVIDER DISCLOSURE (epic memql#4440, retired by epic
- * memql#5088). That disclosure was a collapsed `<details>` holding a vendor
- * choice and a path to a key file. Both are gone: there is no vendor API key
- * anywhere in the product, because both cloud vendors are now reached by
- * workload identity federation.
- *
- * AND FEDERATION IS NOT ON OFFER HERE EITHER, which is why this is a sentence
- * rather than a shorter form. Federation proves a cluster's identity by having
- * the vendor verify a token against the cluster's OIDC issuer; a k3d cluster's
- * issuer is not publicly reachable, so no vendor can verify anything it mints.
- * A local cluster therefore cannot hold a cloud vendor credential of any kind.
- * Offering an ids form here would collect answers that could never work.
- *
- * So the honest thing to tell an operator is where their models will actually
- * come from, and it is worth telling them: a cluster whose agents cannot think
- * yet is a working cluster, but only if you know why.
- */
-export function renderModelAccessNote(): string {
-  return `<p class="hint">${escapeHtml(
-    "No AI credential is collected, and installing makes no call to any AI vendor. " +
-      "A local cluster reaches models through a fleet machine you are signed in on, " +
-      "or through a model running locally -- not through a key.",
-  )}</p>`;
-}
-
-export function renderCollectScreen(input: CollectScreenInput): string {
-  const required = new Set(requiredFields(input.action));
-
-  const fields = INPUT_FIELDS.filter((field) => required.has(field))
-    .map((field) => renderField(input, field))
-    .join("");
-
-  return renderScreen({
-    title: COLLECT_TITLE[input.action] ?? "Install a local cluster",
-    actions: `<button class="primary" type="button" data-act="begin">Start</button>
-  <button class="secondary" type="button" data-act="back">Back</button>`,
-    // THE CHECKLIST MOVES UP WITH THE BUTTON, NOT DOWN AWAY FROM IT
-    // (memql#4453 over memql#4195). "Before it runs" was placed directly above
-    // Start so that pressing Start was an informed click; with Start hoisted to
-    // the top, leaving the checklist among the fields would have put it below
-    // everything it warns about. In the status slot it sits immediately under
-    // the actions row -- above the form rather than at the end of it -- so it is
-    // now visible WITHOUT SCROLLING, which it was not before on a form this
-    // long. What changed is that it is beside the button instead of under it.
-    status: `<p class="lede">Everything is collected before any work starts, so the long part runs unattended.</p>
-${renderPreflight(input.preflight)}`,
-    details: `${fields}
-${renderModelAccessNote()}`,
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -461,6 +262,17 @@ export interface RunningScreenInput {
   logsOpen: boolean;
   /** Whether the pane is still pinned to the tail. See `LogPaneInput.follow`. */
   logsFollow: boolean;
+  /**
+   * The run's progress, from the state machine's own `progress(now)`, which
+   * remembers its high-water mark so the bar never runs backwards.
+   *
+   * Optional so a caller holding only a step list (a gallery page, a test)
+   * still renders: the block then computes it from the steps at `now`, without
+   * that memory.
+   */
+  progress?: RunProgress;
+  /** The moment to compute progress at when `progress` is absent. Defaults to the clock. */
+  now?: number;
 }
 
 const RUN_HEADING: Readonly<Record<RunMode, string>> = {
@@ -513,57 +325,6 @@ const RUN_DONE: Readonly<Record<RunMode, string>> = {
 };
 
 /**
- * What a finished UNINSTALL says, which depends on whether anything was kept
- * (memql#5118, D8).
- *
- * "Everything the install put on this machine has been taken back" is FALSE on
- * a machine where the installer adopted a k3d cluster the operator already had
- * and then correctly declined to delete it -- the ordinary case for a
- * developer who ran `make up` before they ever opened the wizard. The refusal
- * is the system working; the sentence printed over it was not.
- */
-export function uninstallDoneSentence(kept: boolean): string {
-  if (!kept) return RUN_DONE.uninstall;
-  return (
-    "Removed, apart from what was already here. What the install created has been taken back; " +
-    "what it found is still on this machine."
-  );
-}
-
-/**
- * The uninstall confirmation's title and lede, which differ for the one verdict
- * that has no receipt behind it (memql#5118, D8).
- *
- * THE ORDINARY LEDE RESTS THE OPERATOR'S CONFIDENCE ON THE RECEIPT -- "it is
- * built from the install receipt, so nothing this machine had before the
- * install is touched" -- which is the right argument and a false sentence on
- * `present-unreceipted`, where nothing recorded this cluster and the single row
- * below comes from k3d having listed it. Reassurance that is not true is worse
- * than none, and this is the screen immediately before the one destructive act
- * in the wizard.
- *
- * HERE RATHER THAN IN THE PANEL because these are WORDS, and the wizard's words
- * live in this module where they can be read as a set and tested without a
- * webview. The panel decides which case it is in; this says what each one says.
- */
-export function uninstallConfirmCopy(unreceipted: boolean): { title: string; lede: string } {
-  if (unreceipted) {
-    return {
-      title: "Delete the cluster that is already here",
-      lede:
-        "This list is the confirmation -- there is no second prompt. Nothing recorded this " +
-        "cluster, so the one item below is what k3d reports and all this can offer to take.",
-    };
-  }
-  return {
-    title: "Uninstall the local cluster",
-    lede:
-      "This list is the confirmation -- there is no second prompt. It is built from the " +
-      "install receipt, so nothing this machine had before the install is touched.",
-  };
-}
-
-/**
  * A step's description with its full stop taken off, for embedding in a phrase.
  *
  * The descriptions are SENTENCES -- the CLI prints them as sentences and the
@@ -589,11 +350,16 @@ function phrase(description: string): string {
  * fold, where a record belongs.
  *
  * THE BAR IS DETERMINATE BECAUSE THE NUMBER IS REAL. `runStarted` seeds the
- * steps AHEAD (state/addCluster.ts says why), so `settled / total` is a fact
- * about the graph rather than an animation. Before that event lands there is no
- * total, and the bar renders INDETERMINATE rather than at 0% -- "we do not know
- * yet" and "nothing has happened yet" are different claims and only one of them
- * is true then.
+ * steps AHEAD (state/addCluster.ts says why), and each step carries the time
+ * it is expected to take, so the percent is the share of the run's expected
+ * time already behind it (state/runProgress.ts) rather than an animation.
+ * Before that event lands there is no plan, and the bar renders INDETERMINATE
+ * rather than at 0% -- "we do not know yet" and "nothing has happened yet" are
+ * different claims and only one of them is true then.
+ *
+ * THE LINE UNDER IT IS THE STEP'S SHORT LABEL, or the phase it last reported
+ * ("Starting services 5 of 9"), never its long description: the description
+ * is the checklist's, below.
  *
  * NO INLINE `style` ATTRIBUTE, and this is not a stylistic choice. Every panel
  * here runs under `style-src 'nonce-...'` with no `'unsafe-inline'`, and a
@@ -603,14 +369,13 @@ function phrase(description: string): string {
  * brandTokens.ts generates for 0..100.
  */
 export function renderRunBlock(input: RunningScreenInput): string {
-  const progress = runProgress(input.steps);
-  const narration = runNarration(progress);
-  const determinate = progress.total > 0;
+  const progress = input.progress ?? runProgressOf(input.steps, input.now ?? Date.now());
+  const determinate = input.steps.length > 0;
   const settled = runIsSettled(input.steps);
-  // THE FAILED STEP, NOT WHATEVER IS STILL RUNNING. This read
-  // `narration.message` first, which is the description of the steps currently
-  // IN FLIGHT -- so a failure in one branch of a wave was announced under the
-  // name of a healthy step in another ("Issuing the certificate ... failed").
+  // THE FAILED STEP, NOT WHATEVER IS STILL RUNNING. This once read the
+  // narration of the steps currently IN FLIGHT first -- so a failure in one
+  // branch of a wave was announced under the name of a healthy step in another
+  // ("Issuing the certificate ... failed").
   // A wave runs under Promise.all and independent branches are allowed to
   // finish, so the two are routinely different steps. The FIRST failure is the
   // one named, the same rule `AddClusterState.failedId` follows and for the
@@ -625,34 +390,32 @@ export function renderRunBlock(input: RunningScreenInput): string {
   const message = failed !== undefined
     ? `${phrase(failed.description === "" ? failed.id : failed.description)} failed -- see the log below.`
     : settled
-      ? input.mode === "uninstall"
-        ? uninstallDoneSentence(input.kept === true)
-        : RUN_DONE[input.mode]
+      ? RUN_DONE[input.mode]
       : input.steps.length === 0
         ? input.running
           ? "Starting. The first step will appear here as it begins."
           : "Nothing has been run."
         : !input.running
           ? "Stopped. Nothing further will run; what had already finished is still done."
-          : narration.message;
+          : progress.status;
 
   // `aria-valuetext` carries the human position so a screen reader hears
-  // "step 4 of 14" rather than "42 percent", which is the number the sighted
+  // "Step 4 of 14" rather than "42 percent", which is the number the sighted
   // reader is getting from the sentence rather than from the bar.
   const bar = determinate
     ? `<div class="run-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${
         progress.percent
       }"${
-        narration.position === ""
+        progress.stepText === ""
           ? ""
-          : ` aria-valuetext="${escapeHtml(narration.position)}"`
+          : ` aria-valuetext="${escapeHtml(progress.stepText)}"`
       }><div class="run-bar-fill" data-percent="${progress.percent}"></div></div>`
     : `<div class="run-bar indeterminate" role="progressbar" aria-valuetext="Starting"><div class="run-bar-fill indeterminate"></div></div>`;
 
   const position =
-    narration.position === "" || settled || failed !== undefined
+    progress.stepText === "" || settled || failed !== undefined
       ? ""
-      : ` <span class="run-position">${escapeHtml(narration.position)}</span>`;
+      : ` <span class="run-position">${escapeHtml(progress.stepText)}</span>`;
 
   return `<div class="run-block">
   <div class="run-mark">${brandMarkSvg(48)}</div>
@@ -764,23 +527,9 @@ ${renderRemedy(failure)}`;
     })
     .join("");
 
-  // GUIDED IS A WIZARD CONCEPT, AND A REBUILD HAS NO USE FOR IT (memql#4246).
-  // It re-runs one step with the operator driving the privileged part by hand
-  // in their own terminal, which is what makes `hostsBlock` and the docker
-  // group reachable at all. A rebuild is ONE unprivileged step, so the control
-  // there is a second Retry wearing a name that promises something else.
-  //
-  // Decided from `mode`, which this input already carries, rather than from a
-  // flag beside it: two fields saying which run this is could be passed
-  // disagreeing, and the heading above would then name one run while the
-  // buttons below served another.
-  const guided =
-    input.mode === "rebuild" || input.mode === "update"
-      ? ""
-      : `<button class="secondary" type="button" data-act="guided">${
-          many ? "Switch these steps to guided" : "Switch this step to guided"
-        }</button>`;
-
+  // NO "SWITCH TO GUIDED" (memql#5118 audit). It set a flag nothing that
+  // runs a step ever read and re-ran the graph exactly as Retry does; the
+  // remedy's "Open a terminal with this command" is the real manual path.
   // THE ACTIONS STAY AT THE TOP ON A FAILURE (memql#4453), and this is the
   // screen most likely to be argued into an exception. It is the same argument
   // as everywhere else, only sharper: an operator reading a failure is an
@@ -794,7 +543,6 @@ ${renderRemedy(failure)}`;
     actions: `<button class="primary" type="button" data-act="retry">${
       many ? "Retry these steps" : "Retry this step"
     }</button>
-  ${guided}
   <button class="secondary" type="button" data-act="cancel">Cancel</button>`,
     status: `${renderRunBlock(input)}
 ${blocks}`,
@@ -844,102 +592,4 @@ export function renderRemedy(failure: { id: string; remedy: string }): string {
     Open a terminal with this command
   </button>
 </div>`;
-}
-
-/**
- * The version options, with the current value guaranteed present and IN ORDER.
- *
- * A `<select>` silently drops a value that is not one of its options, so a
- * current value the remote listing does not carry -- a tag cut after this
- * extension was built, or a listing that came back partial -- would leave the
- * field showing the newest release while `values.version` still said something
- * else. The operator would then install a version the page never offered them.
- * So the value is GUARANTEED PRESENT, and that property is what this keeps.
- *
- * WHAT IT NO LONGER DOES IS HOIST IT (memql#4429). This used to return
- * `[current, ...rest]`, which put the current value at the TOP of a list whose
- * whole meaning is its order: `compareSemverDesc` sorts newest-first, and the
- * hoist then read `v0.19.1, v0.20.3, v0.19.2, ...` -- a picker that looks
- * mis-sorted because it is. Guarantee-present and queue-jumping are two
- * properties that arrived in one line; only the first was ever wanted, and the
- * sorted insert below is the first without the second.
- */
-export function withCurrentInSortedPosition(
-  choices: readonly string[],
-  current: string,
-): readonly string[] {
-  const trimmed = current.trim();
-  if (trimmed === "" || choices.includes(trimmed)) return choices;
-  return [...choices, trimmed].sort(compareSemverDesc);
-}
-
-/** One entry in the version picker: what gets submitted, and what is read. */
-export interface VersionChoice {
-  value: string;
-  label: string;
-}
-
-/**
- * The label the newest listed release carries (memql#4429).
- *
- * THE VALUE IS THE REAL TAG, never a sentinel. What the operator submits when
- * they take the recommendation is an ordinary version string, so `installPlan`,
- * `imageTagFor` and the receipt all see exactly what they would have seen had
- * the tag been picked by name -- and the receipt that install writes NAMES the
- * version rather than the word "latest", which is the difference between a
- * cluster whose version can be read back and one whose version depends on when
- * it was installed.
- */
-export function latestLabel(tag: string): string {
-  return `Latest -- ${tag} (recommended)`;
-}
-
-/**
- * What the `main` entry says it is (memql#4430).
- *
- * IT IS A LANE, NOT A VERSION, and the label says which lane. `main` builds the
- * node images FROM THE CHECKOUT it just cloned -- there is no release image
- * behind it and none is fetched -- so the operator taking it needs Docker, a
- * repository they can clone, and several minutes. The field hint states the
- * cost; this states the audience.
- *
- * IT USED TO STATE A SKEW INSTEAD (memql#3901): main's manifests and scripts
- * with the newest RELEASE's node images, because no `main` image is published.
- * That skew is gone -- the images are built here now -- so the sentence
- * describing it is gone with it rather than left standing over a decision that
- * reversed.
- */
-export const MAIN_CHOICE_LABEL = "main -- build from source (for MemQL developers)";
-
-/**
- * The version picker's entries: newest first, Latest labelled, `main` last.
- *
- * `main` IS OFFERED, AND IT IS NOT MIXED IN WITH THE RELEASE TAGS. It goes last,
- * after the releases, and its label says what it is -- because it is a different
- * KIND of answer, and an operator scanning a list of `v0.18.0`-shaped strings
- * would reasonably read a bare "main" as just another one.
- *
- * THE LATEST LABEL ATTACHES TO THE LISTING'S OWN NEWEST, not to whatever sorts
- * first. Those differ in exactly the case the sorted insert above exists for: a
- * current value the listing does not carry can sort ABOVE everything listed, and
- * calling that "Latest (recommended)" would be a recommendation the listing does
- * not support. It stays present, in order, unlabelled.
- */
-export function versionChoiceList(
-  choices: readonly string[],
-  current: string,
-): readonly VersionChoice[] {
-  const listed = choices.filter((c) => c !== MAIN_BRANCH_CHOICE);
-  const newest = listed[0] ?? "";
-  const releases = withCurrentInSortedPosition(
-    listed,
-    isMainBranchChoice(current) ? "" : current,
-  );
-  return [
-    ...releases.map((value) => ({
-      value,
-      label: value === newest && newest !== "" ? latestLabel(value) : value,
-    })),
-    { value: MAIN_BRANCH_CHOICE, label: MAIN_CHOICE_LABEL },
-  ];
 }

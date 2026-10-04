@@ -202,6 +202,7 @@ func TestConnectShopifyBeginsOnOneEngineAndFinishesOnAnother(t *testing.T) {
 	})
 	seed := func(concept, id string, payload map[string]any) {
 		t.Helper()
+		attributeOrganizationFixture(seedCtx(), concept, payload)
 		body, err := json.Marshal(payload)
 		if err != nil {
 			t.Fatal(err)

@@ -421,7 +421,17 @@ function logEvent(event: ExecEvent, log: (line: string) => void): void {
       log(`==> wave ${event.index + 1}: ${event.ids.join(", ")}`);
       return;
     case "stepStarted":
-      log(`--> ${event.step.id}: ${event.step.description}`);
+      // The graph's short label leads, as it does on the editor's run screen;
+      // the id follows in brackets because it is what `--skip` and the
+      // receipt are keyed by.
+      log(`--> ${event.step.label} [${event.step.id}]`);
+      return;
+    case "stepPhase":
+      log(
+        `    ${event.label}${
+          event.done !== undefined && event.total !== undefined ? ` (${event.done}/${event.total})` : ""
+        }`,
+      );
       return;
     case "stepLog":
       log(`    [${event.step.id}] ${event.line}`);

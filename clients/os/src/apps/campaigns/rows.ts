@@ -36,6 +36,7 @@ export const DELIVERY_CONCEPT = "v1:campaigns:delivery";
 // ---------------------------------------------------------------------------
 
 export interface CampaignRow {
+  testSourceCampaignId: string;
   id: string;
   ownerUserId: string;
   name: string;
@@ -93,6 +94,7 @@ function boolOrTrue(row: Row, key: string): boolean {
 export function campaignFromRow(row: Row): CampaignRow {
   const flat = flatten(row);
   return {
+    testSourceCampaignId: rowString(flat, "testSourceCampaignId"),
     id: rowString(flat, "id"),
     ownerUserId: rowString(flat, "ownerUserId"),
     name: rowString(flat, "name"),
@@ -1055,54 +1057,6 @@ export function skipReasonSentence(reason: string): string {
     default:
       return reason;
   }
-}
-
-// ---------------------------------------------------------------------------
-// The email integration's self-report
-// ---------------------------------------------------------------------------
-
-export interface EmailReadiness {
-  /** True only when the report SAYS it is unconfigured. Silence is not a
-   *  refusal: an integration that publishes no self-report answers "unknown",
-   *  and warning on that would put a permanent banner on a healthy cluster. */
-  needsConfiguration: boolean;
-  /** The report's own detail sentence, verbatim. "" when it gave none. */
-  detail: string;
-  /** graph | smtp | log | "". `log` is the state worth naming: mail "sends"
-   *  and lands nowhere. */
-  mode: string;
-}
-
-export const EMAIL_UNKNOWN: EmailReadiness = {
-  needsConfiguration: false,
-  detail: "",
-  mode: "",
-};
-
-/**
- * Read the email lane's line out of an `integrationStatus` payload.
- *
- * TWO ANSWERS MEAN "not ready", and they are different failures: `configured:
- * "no"` is missing settings, and `health: "degraded"` is the log-only sender
- * -- running, answering, and delivering nothing. The second is the one that
- * looks fine from every other angle, which is why it is checked here at all.
- */
-export function emailReadinessFrom(payload: Row): EmailReadiness {
-  const flat = flatten(payload);
-  const list = flat["integrations"];
-  if (!Array.isArray(list)) return EMAIL_UNKNOWN;
-  const email = list.find(
-    (entry): entry is Row =>
-      !!entry && typeof entry === "object" && (entry as Row)["name"] === "email",
-  );
-  if (!email) return EMAIL_UNKNOWN;
-  const configured = rowString(email, "configured");
-  const health = rowString(email, "health");
-  return {
-    needsConfiguration: configured === "no" || health === "degraded",
-    detail: rowString(email, "detail"),
-    mode: rowString(email, "mode"),
-  };
 }
 
 // ---------------------------------------------------------------------------

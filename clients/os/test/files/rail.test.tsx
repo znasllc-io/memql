@@ -187,7 +187,7 @@ describe("the row's right-click menu", () => {
     fireEvent.contextMenu(screen.getByRole("button", { name: /brief\.pdf/ }));
     const menu = screen.getByRole("menu", { name: "File" });
     for (const name of [
-      "Open in VS Code",
+      "Open in editor",
       "Send to desktop",
       "Download",
       "Upload new version",

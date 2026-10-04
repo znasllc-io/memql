@@ -13,6 +13,7 @@ export interface OsRuntimeConfig {
   oauthClientId: string;
   authEnabled: boolean;
   domain: string;
+  emailAppEnabled?: boolean;
 }
 
 export const UNKNOWN_RUNTIME_CONFIG: OsRuntimeConfig = {
@@ -40,6 +41,7 @@ export async function loadRuntimeConfig(
     identityApiBaseUrl: typeof raw.identityApiBaseUrl === "string" ? raw.identityApiBaseUrl : "",
     oauthClientId: typeof raw.oauthClientId === "string" ? raw.oauthClientId : "",
     authEnabled: raw.authEnabled !== false,
+    emailAppEnabled: raw.emailAppEnabled !== false,
     domain: typeof raw.domain === "string" ? raw.domain : "",
   };
 }

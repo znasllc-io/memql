@@ -21,13 +21,13 @@ func TestStorefrontTestingOpensSharedBuildWithoutCandidateOrStore(t *testing.T) 
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	siteID, host := "testing-"+suffix, "shop-"+suffix+".example.com"
 	owner := parityOwner("testing-owner-" + suffix)
-	if _, err := eng.Execute(owner, fmt.Sprintf(`mutation createSite(siteId: %s, hostname: %s, kind: "shopify_storefront", status: "draft", bundleRef: "blob://sites/shared/v1/")`, langparser.QuoteString(siteID), langparser.QuoteString(host))); err != nil {
+	if _, err := eng.Execute(owner, fmt.Sprintf(`mutation createSite(accountId: "self", siteId: %s, hostname: %s, kind: "shopify_storefront", status: "draft", bundleRef: "blob://sites/shared/v1/")`, langparser.QuoteString(siteID), langparser.QuoteString(host))); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		_, _ = db.NewDelete().TableExpr(`"MemoryNodes"`).Where("id = ? OR payload->>'siteId' = ? OR payload->>'siteId' = ?", "v1:platform:site:"+siteID, siteID, "v1:platform:site:"+siteID).Exec(context.Background())
 	})
-	if _, err := eng.Execute(owner, fmt.Sprintf(`mutation createSite(siteId: %s, hostname: %s, kind: "spa", status: "draft")`, langparser.QuoteString("reserved-"+suffix), langparser.QuoteString("test--"+host))); err == nil {
+	if _, err := eng.Execute(owner, fmt.Sprintf(`mutation createSite(accountId: "self", siteId: %s, hostname: %s, kind: "spa", status: "draft")`, langparser.QuoteString("reserved-"+suffix), langparser.QuoteString("test--"+host))); err == nil {
 		t.Fatal("a site claimed the reserved testing hostname")
 	}
 	integration := NewIntegration(parityEngine{eng}, Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))

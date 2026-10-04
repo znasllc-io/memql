@@ -346,9 +346,9 @@ surfaces prints stringified JSON into a `<pre>`, and a guard test
 (`editors/vscode/test/surfaceGuards.test.ts`) fails the build if one
 starts to.
 
-It lives in `sdk/ts-viewkit`, and the extension is its one consumer since epic
-memql#4984 retired the portal. The kit is shared with nothing else today, so
-its element-fitting layer has no caller -- see the retirement record.
+It lives in `sdk/ts-viewkit`, and the extension is its one consumer. The kit
+is shared with nothing else today, so its element-fitting layer has no caller
+(epic memql#4984).
 
 ## Beyond browsing
 

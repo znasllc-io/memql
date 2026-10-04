@@ -1,9 +1,13 @@
 package inbound
 
 import (
+	"bytes"
 	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
+
+	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
 // quietLogger keeps LoadConfig's operator-facing warnings out of test output
@@ -110,6 +114,37 @@ func TestLoadConfigAdmitsAConfiguredSource(t *testing.T) {
 	if _, ok := cfg.Sources["big-corp"]; !ok {
 		t.Errorf("a source with an explicit scheme=none must be admitted -- it is a deliberate "+
 			"configuration, and the '-' -> '_' env mapping is what this checks: %v", cfg.Sources)
+	}
+}
+
+// An env source named after a DECLARED connector is dropped at boot, with an
+// ERROR naming the env vars (memql#5707 residual). resolveSource already
+// refuses it per request, but only once a request arrives -- so a deploy
+// configured that way booted clean and answered every delivery 404 with
+// nothing at boot saying why. The other sources in the same allowlist are
+// untouched: the name is reserved, not the receiver.
+func TestLoadConfigDropsAnEnvSourceNamedAfterADeclaredConnector(t *testing.T) {
+	memqlsync.Declare("shopify")
+	t.Setenv("MEMQL_INBOUND_SOURCE_ALLOWLIST", "shopify,acme")
+	for _, suffix := range []string{"SHOPIFY", "ACME"} {
+		t.Setenv("MEMQL_INBOUND_SOURCE_"+suffix+"_SIGNATURE_SCHEME", SchemeHMACSHA256Base64)
+		t.Setenv("MEMQL_INBOUND_SOURCE_"+suffix+"_SECRET", "shh")
+		t.Setenv("MEMQL_INBOUND_SOURCE_"+suffix+"_SIGNATURE_HEADER", "X-Shopify-Hmac-Sha256")
+	}
+
+	var logs bytes.Buffer
+	cfg := LoadConfig(slog.New(slog.NewTextHandler(&logs, nil)))
+	if src, ok := cfg.Sources["shopify"]; ok {
+		t.Fatalf("an env source under a connector's own name was admitted at boot: %+v", src)
+	}
+	if _, ok := cfg.Sources["acme"]; !ok {
+		t.Fatalf("an unrelated source in the same allowlist was dropped too: %v", cfg.Sources)
+	}
+	out := logs.String()
+	for _, want := range []string{"level=ERROR", "source=shopify", "MEMQL_INBOUND_SOURCE_SHOPIFY_", "connector"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the boot log does not say %q:\n%s", want, out)
+		}
 	}
 }
 

@@ -71,7 +71,7 @@
 use accounts.concepts.{ account }
 use authoring.concepts.{ bundle }
 use identity.concepts.{ user }
-use platform.concepts.{ outboundRequest }
+use platform.concepts.{ outboundRequest, site }
 
 /// A named set of email recipients -- the WHO of a campaign. Audiences are authored in the portal
 /// and referenced by campaigns; membership lives on v1:campaigns:recipient rows pointing back here
@@ -191,6 +191,7 @@ concept senderIdentity {
 @composable(as="campaign", fields="name,status,scheduledAt,startedAt,completedAt,lastError", list="campaigns")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept campaign {
+  testSourceCampaignId string @description("Original campaign for a test run. Engine-stamped; a test has its own audience, job and delivery ledger and never advances the original campaign or its series.")
   ownerUserId     string!  @description("v1:identity:user.id that owns this campaign. Stamped from actor.userId. The per-row authz key.")
   name            string!  @description("Operator-facing campaign name. The primary display field.")
   audienceId      string!  @description("v1:campaigns:audience.id this campaign is addressed to. Resolved to recipient rows at send time, not at authoring time, so an audience that grows between scheduling and sending is mailed as it stands when the send runs.")
@@ -342,6 +343,7 @@ concept engagementEvent {
 @displayCard(primary="campaignId", secondary="status", tertiary="startedAt", status="status")
 @rowAuthz(clusterOwner)
 concept sendJob {
+  templateSnapshot object @description("Immutable ready template content and revision captured when this send was queued. Later template edits affect future jobs only.")
   campaignId           string!  @description("v1:campaigns:campaign.id this job drains. Stored canonical like every other @relationship field; the worker bare-ifies it (memql.BareShortId) before feeding it back to campaignById, because a named-query argument is the BARE-ids client contract.")
   campaignOwnerUserId  string!  @description("v1:identity:user.id the worker impersonates for every owned-tier read and write this job performs -- the campaign, its template, its audience's recipients, and the delivery ledger. SERVER-DERIVED ONLY: both writers read it off a campaign row they had already read under the caller's own actor, so it can never name a user the caller could not already act as. This is the single most security-load-bearing field in the domain.")
   campaignAccountId    string   @description("The v1:accounts:account the campaign is FOR, copied off the same campaign row campaignOwnerUserId came from (epic memql#5165, section J). Carried HERE rather than read per hit: the open/click tracking path resolves a campaign's owner from this row and cannot read the campaign row at all -- that row is owner-tier, and establishing the owner is the very thing being asked -- so without this field every tracked pixel fetch would cost a second query to learn the client tie. Written once per send, read on a path that already reads this row. Empty for a campaign with no client tie, which is the ordinary case.")
@@ -367,33 +369,16 @@ concept sendJob {
   @relationship(type="references", as="forAccount", field="campaignAccountId", target=account, direction="outgoing")
 }
 
-/// The cluster-wide do-not-mail list. ONE address per row, keyed by the SHA-256 hex digest of the
-/// normalized address (lowercased, trimmed) -- the digest IS the row id, so a lookup is a by-id read
-/// and a re-suppression is a new version of the same row rather than a duplicate.
-///
-/// SUPPRESSION IS CLUSTER-WIDE, NOT PER-ACCOUNT, and that is the decision this concept exists to
-/// record (memql#3348). An unsubscribe is a statement by a person to the operator of THIS
-/// DEPLOYMENT: every campaign leaves through the same authenticated mailbox, under the same From
-/// address, signed by the same SPF and DKIM records. A per-operator list would let operator B mail
-/// an address that unsubscribed from operator A, in a message the recipient cannot tell apart from
-/// the one they already opted out of -- and the complaint lands on the one shared domain reputation.
-/// Legally the obligation attaches to the sender, and there is one sender.
-///
-/// BEING CLUSTER-WIDE COSTS NOBODY AN ADDRESS. The row stores no mailbox: the id is a non-reversible
-/// digest and the only human-readable field is the address's DOMAIN, which is what a deliverability
-/// review actually asks for ("which domains are bouncing?") and which identifies no one. A caller
-/// can therefore ask "is this address suppressed" only about an address it already holds.
-///
-/// Reads and writes are clusterOwner because the list must not be caller-writable: a caller who
-/// could insert digests could silently suppress a competitor's audience, and one who could delete
-/// them could un-suppress a complaint. Every write goes through the engine -- the unsubscribe
-/// endpoint, the feedback builtin, or an operator's explicit suppress call -- and each of those
-/// derives the address from something it verified rather than from an argument. An operator's own
-/// view of who left is their recipient rows' subscriptionStatus, which the worker converges onto
-/// this list on the next send.
+/// Engine-owned suppression state. Rows without accountId are existing cluster-wide safety blocks.
+/// Organization opt-outs use a digest of (organization, normalized-email digest) as their row id,
+/// so leaving one client's mailing list does not unsubscribe the same person from another client.
+/// Both scopes are checked at send time; a later import cannot bypass either. No plaintext mailbox
+/// is stored. Organization scope is derived from a signed unsubscribe token or an authorized action.
 @displayCard(primary="domain", secondary="reason", tertiary="suppressedAt", status="reason")
 @rowAuthz(clusterOwner)
 concept suppression {
+  accountId         string  @description("Organization whose mail is blocked. Absent on existing cluster-wide safety suppressions.")
+  emailDigest       string  @description("SHA-256 of the normalized mailbox for organization-scoped rows. No plaintext address is stored.")
   reason            enum("unsubscribed", "hard_bounce", "complaint", "manual")!  @description("Why this address may never be mailed again. 'unsubscribed' is the recipient's own choice, via the RFC 8058 one-click header or the link in the body. 'hard_bounce' and 'complaint' are the provider's verdict and are kept apart because they mean different things to a review -- a bounce is a dead address, a complaint is a reputational event. 'manual' is an operator adding one by hand.")
   domain            string  @description("The domain part of the suppressed address, lowercased. Recorded rather than derived because the address itself is never stored: it is what makes 'which domains are bouncing' answerable without making 'who unsubscribed' answerable.")
   suppressedAt      datetime!  @description("When the address entered the list. Stamped from the engine clock at write time, not threaded by a caller -- unlike a recipient row's unsubscribedAt, which can legitimately record a state change that happened earlier.")
@@ -401,6 +386,7 @@ concept suppression {
   note              string  @description("Free-text provenance for a 'manual' row, or the provider's bounce classification for a reported one. Never the address.")
 
   @relationship(type="references", field="sourceCampaignId", target=campaign, direction="outgoing")
+  @relationship(type="references", field="accountId", target=account, direction="outgoing")
 }
 
 /// Per-(sending identity, recipient domain, day) counters -- the reputation telemetry a warming ramp
@@ -559,4 +545,110 @@ concept emailRule {
   @relationship(type="references", as="sendsAs", field="senderIdentityId", target=senderIdentity, direction="outgoing")
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
   @relationship(type="references", as="generatedInto", field="bundleId", target=bundle, direction="outgoing")
+}
+
+/// Private receipt for one caller's intended event email. A durable attempting
+/// record prevents a lost response or another replica from mailing it again.
+// @no-displayCard: internal receipt; the delivery and email rule name the send.
+@rowAuthz(owner="ownerUserId")
+concept singleSendReceipt {
+  ownerUserId string! @serverSet
+  accountId string!
+  fingerprint string!
+  status enum("attempting", "complete")!
+  result object!
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
+/// A repeating instruction, distinct from each occurrence's campaign and delivery ledger.
+/// Configuration is captured when an authorized person saves; every occurrence rechecks
+/// that person's current authority and snapshots the then-published template.
+@displayCard(primary="name", secondary="nextAt", tertiary="sourceCampaignId", status="status")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept campaignSeries {
+  ownerUserId string! @description("The creator of this series. Ownership is preserved across organization members editing it.")
+  authorizedByUserId string! @description("The person who most recently authorized the active configuration. The worker rechecks their current permissions.")
+  accountId string! @description("The client organization. A series cannot move between organizations.")
+  sourceCampaignId string! @description("The campaign used as a blueprint. Editing it does not change this captured configuration until the series is saved again.")
+  name string! @description("Name used for generated occurrences.")
+  definition object! @description("Server-captured audience, template, sender and tracking choices. Never accepted directly from a client.")
+  intervalWeeks int! @description("Repeat every 1 through 52 calendar weeks in timeZone.")
+  timeZone string! @description("IANA timezone preserving the local day and time across daylight-saving changes.")
+  anchorAt datetime! @description("The first scheduled occurrence, anchoring the calendar cadence.")
+  nextAt datetime! @description("Next unprocessed occurrence. Downtime produces at most one catch-up occurrence, then advances beyond the present.")
+  status enum("active", "paused", "blocked")! @description("Paused stops future occurrences; blocked requires review and an explicit resume. Already queued campaigns keep their own lifecycle.")
+  lastCampaignId string @description("Most recent occurrence campaign, with its own immutable delivery history.")
+  lastOccurrenceAt datetime @description("Scheduled time of the most recent committed occurrence.")
+  lastError string @description("Reason for a blocked series. No credentials or message bodies.")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="sourceCampaignId", target=campaign, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+}
+
+
+/// Explicit per-deployable newsletter configuration. Campaigns remains core;
+/// its form uses the same opt-in public-form carrier as storefront packs.
+@displayCard(primary="siteId", secondary="audienceId", status="enabled")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept newsletterBinding {
+  ownerUserId string! @description("The authenticated creator; preserved across edits.")
+  accountId string! @description("The client organization shared by all resources.")
+  siteId string! @description("The deployable whose form accepts signups. One binding per site.")
+  storeId string! @description("The live Shopify store captured from the deployable, or empty for an ordinary site. Preview bindings cannot enroll a live audience.")
+  audienceId string! @description("The organization's audience receiving subscribers.")
+  templateId string! @description("Published welcome template, captured as immutable bytes at signup.")
+  senderIdentityId string! @description("The organization's sending identity. No default mailbox fallback.")
+  consentText string! @description("The consent sentence displayed by the form and recorded for each signup.")
+  enabled bool! @description("Whether this site accepts new opt-ins and dispatches pending welcomes.")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+  @relationship(type="references", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", field="audienceId", target=audience, direction="outgoing")
+  @relationship(type="references", field="templateId", target=template, direction="outgoing")
+  @relationship(type="references", field="senderIdentityId", target=senderIdentity, direction="outgoing")
+}
+
+/// Durable intent for one welcome per audience/address. Only the signup
+/// capability may create it; the worker uses the original site owner's current authority.
+@displayCard(primary="recipientId", secondary="requestedAt", status="status")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept newsletterSignup {
+  ownerUserId string! @description("Site owner captured at signup. Never replaced when another operator retries.")
+  accountId string! @description("The client organization captured from the site binding.")
+  newsletterId string! @description("The configured source of this signup.")
+  siteId string! @description("The deployable the form was submitted on.")
+  storeId string! @description("The live store binding through which the signup arrived.")
+  audienceId string! @description("Audience captured at acceptance.")
+  recipientId string! @description("The normalized address's recipient in this audience.")
+  emailDigest string! @description("SHA-256 of the normalized mailbox, used with the audience for deduplication and checked again at send time.")
+  email string! @pii @description("The address that consented, preserved for the operator outcome list even if the recipient is later edited.")
+  displayName string @pii @description("Name supplied on the signup form, never an authenticated identity.")
+  submissionId string! @description("Server-minted form submission provenance.")
+  consentText string! @description("Exact configured consent sentence at acceptance.")
+  consentRevision datetime! @description("The saved newsletter configuration revision agreed to by the visitor.")
+  requestedAt datetime! @description("When the affirmative opt-in was first recorded.")
+  templateId string! @description("The readable template from which the welcome was captured.")
+  templateSnapshot object! @description("Immutable published template bytes and revision captured at acceptance.")
+  senderIdentityId string! @description("Client sending identity captured at acceptance.")
+  status enum("pending", "sent", "suppressed", "uncertain", "blocked")! @description("Welcome submission outcome. Uncertain attempts are never resubmitted. Blocked is rechecked only by an authorized operator.")
+  lastError string @description("Reason for a refusal or uncertain outcome, without the recipient address.")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+  @relationship(type="references", field="newsletterId", target=newsletterBinding, direction="outgoing")
+  @relationship(type="references", field="recipientId", target=recipient, direction="outgoing")
+  @relationship(type="references", field="audienceId", target=audience, direction="outgoing")
+  @relationship(type="references", field="templateId", target=template, direction="outgoing")
+  @relationship(type="references", field="senderIdentityId", target=senderIdentity, direction="outgoing")
+}
+
+/// The shared testing audience for one organization. Only the governed configuration action writes it.
+// @no-displayCard: internal organization configuration; its audience reference has the human-facing name.
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept testSettings {
+  ownerUserId string!
+  accountId string!
+  audienceId string
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+  @relationship(type="references", field="audienceId", target=audience, direction="outgoing")
 }

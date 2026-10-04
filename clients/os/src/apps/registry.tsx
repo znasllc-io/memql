@@ -26,6 +26,7 @@ import { ACCOUNTS_SECTIONS } from "./accounts/settings";
 import { BinApp } from "./bin/BinApp";
 import { BIN_APP_ID, BIN_SECTIONS } from "./bin/concepts";
 import { CampaignsApp } from "./campaigns/CampaignsApp";
+import { EmailApp } from "./email/EmailApp";
 import { ClusterApp } from "./cluster/ClusterApp";
 import { CLUSTER_SECTIONS } from "./cluster/settings";
 import { ConceptsApp } from "./concepts/ConceptsApp";
@@ -201,6 +202,7 @@ const files: OsAppManifest = {
   wants: FILES_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
+  attentionChanges: [{ id: "files:editor", revision: "browser-1", sectionId: "settings", label: "Choose browser VS Code or your installed editor" }],
   component: FilesApp,
 };
 
@@ -568,8 +570,20 @@ const campaigns: OsAppManifest = {
   wants: CAMPAIGNS_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
-  attentionChanges: [{ id: "campaigns:organization", revision: "organization-1", sectionId: "campaigns", label: "Choose the organization for every campaign" }],
+  attentionChanges: [{ id: "campaigns:testing-audience", revision: "test-queue-1", sectionId: "settings", label: "Choose a testing audience for campaign test runs" }, { id: "campaigns:package-config", revision: "package-1", sectionId: "settings", label: "Import and export campaign email configuration" }, { id: "campaigns:azure-email", revision: "azure-cluster-1", sectionId: "senders", label: "Use one cluster Azure setup for client email domains" }, { id: "campaigns:newsletter", revision: "newsletter-1", sectionId: "audiences", target: "newsletter", label: "Connect storefront newsletter signups" }, { id: "campaigns:recurring", revision: "recurring-1", sectionId: "campaigns", target: "recurring", label: "Set up repeating campaigns" }, { id: "campaigns:organization", revision: "organization-1", sectionId: "campaigns", label: "Choose the organization for every campaign" }, { id: "campaigns:template-editor", revision: "editor-1", sectionId: "templates", label: "Edit and publish email templates in Productivity Tools" }],
   component: CampaignsApp,
+};
+
+const email: OsAppManifest = {
+  id: "email",
+  name: "Email",
+  icon: Send,
+  requires: "app:email",
+  sections: [{ id: "inbox", name: "Inbox" }, { id: "logs", name: "Logs", requires: "app:email/logs" }, { id: "settings", name: "Settings" }],
+  settingsSection: "settings",
+  logsSection: "logs",
+  attentionChanges: [{ id: "email:test-inbox", revision: "capture-1", sectionId: "inbox", label: "Inspect captured test email" }],
+  component: EmailApp,
 };
 
 // The Bin, in full (memql#4784). ALWAYS DOCKED, which is the whole distinction
@@ -779,6 +793,7 @@ export const OS_REGISTRY: OsRegistry = {
     identity,
     accounts,
     campaigns,
+    email,
     cluster,
     concepts,
     files,

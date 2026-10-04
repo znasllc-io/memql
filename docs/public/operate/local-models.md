@@ -708,7 +708,7 @@ Two consequences worth knowing:
 ## What this does and does not yet prove
 
 The proving suite
-([overview/proving](../overview/proving.md)) carries a scenario in which a goal
+([the proving scorecard](../overview/proving-scorecard.md)) carries a scenario in which a goal
 whose steps are all deterministic is served end to end with **no provider call at
 all**, against a control — a goal with a step that must reason — which makes
 some. A call never made is never paid for, which is the load-bearing half of

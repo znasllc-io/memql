@@ -29,14 +29,14 @@ test("the refresh-token field is never prefilled either", () => {
 
 test("the prompt says a token is stored without saying the token", () => {
   const plan = tokenFieldPlan("eyJhbGciOi.header.payload");
-  assert.match(plan.prompt, /stored/);
+  assert.match(plan.prompt, /saved/);
   assert.match(plan.prompt, /leave empty to keep/i);
   assert.doesNotMatch(plan.prompt, /eyJhbGciOi/);
 });
 
 test("an empty prompt for an empty store does not claim anything is stored", () => {
-  assert.doesNotMatch(tokenFieldPlan("").prompt, /is stored/);
-  assert.doesNotMatch(refreshTokenFieldPlan(undefined).prompt, /pending/i);
+  assert.doesNotMatch(tokenFieldPlan("").prompt, /saved/);
+  assert.doesNotMatch(refreshTokenFieldPlan(undefined).prompt, /saved|pending/i);
 });
 
 test("an empty submission keeps the stored credential", () => {
@@ -55,4 +55,10 @@ test("an empty submission over an empty store stays empty", () => {
 
 test("a cancelled input cancels", () => {
   assert.equal(resolveCredentialInput(undefined, "stored-token"), undefined);
+});
+
+test("no prompt lectures about token classes, files or protocols", () => {
+  for (const plan of [tokenFieldPlan("x"), tokenFieldPlan(""), refreshTokenFieldPlan("x"), refreshTokenFieldPlan("")]) {
+    assert.doesNotMatch(plan.prompt, /JWT|JWKS|mesh|clusters\.yaml|oauth|mql_pat|--/i, plan.prompt);
+  }
 });

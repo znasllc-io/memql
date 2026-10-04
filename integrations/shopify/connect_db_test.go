@@ -61,6 +61,7 @@ func TestConnectResolvesAndSavesAgainstARealEngine(t *testing.T) {
 	})
 	seedWith := func(ctx context.Context, concept, id string, payload map[string]any) {
 		t.Helper()
+		attributeOrganizationFixture(ctx, concept, payload)
 		body, err := json.Marshal(payload)
 		if err != nil {
 			t.Fatal(err)
@@ -298,4 +299,19 @@ func builtinReply(t *testing.T, eng *memql.MemQLEngine, ctx context.Context, cal
 // write is one in no organization.
 func untiedSeedCtx() context.Context {
 	return auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(context.Background(), "connect-dbtest-seed"))
+}
+
+// Fixtures select an organization explicitly. Only the synthetic legacy-row
+// helper may deliberately seed a pre-attribution record.
+func attributeOrganizationFixture(ctx context.Context, concept string, payload map[string]any) {
+	ac, _ := auth.AccessFromContext(ctx)
+	if ac == nil || ac.Synthetic {
+		return
+	}
+	switch concept {
+	case "v1:platform:site", "v1:platform:package", "v1:platform:packageDeployment":
+		if _, supplied := payload["accountId"]; !supplied {
+			payload["accountId"] = "self"
+		}
+	}
 }

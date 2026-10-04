@@ -86,6 +86,45 @@ The rest of this page is technical reference for the language server and its
 packaging. The [extension guide](../../../editors/vscode/README.md) provides a
 short product tour.
 
+## Productivity tools
+
+**MemQL Productivity Tools** is a separate extension using the same icon. MemQL
+owns the cluster connection, authentication, language tooling, and lifecycle;
+Productivity Tools owns document and template interactions. Cockpit remains the
+machine worker and one-way folder backup client. Remote editor saves create
+MemQL revisions and do not overwrite a watched original on another machine.
+
+Both extensions have desktop and browser entry points for macOS and Linux.
+Windows is unsupported. The browser connection surface uses device approval;
+native cluster installation and the bundled language server run on desktop.
+Connected operations retain the cluster's existing editor sign-in role floor.
+
+Productivity Tools supports Markdown source, rendered reading, and split modes.
+Select a passage in a saved MemQL document's reading view to add feedback; the
+comment records its author and original revision. Later edits mark old anchors
+as outdated. Local Markdown remains usable offline, without claiming that local
+feedback was synchronized. PDF tools view pages, rotate them, add text, and save
+new revisions. Recovered PDF edits cannot overwrite a newer remote revision;
+Save As preserves a local copy for comparison.
+
+**Create Email from Examples** starts with an organization and reference images,
+files, or a ZIP of resources, followed by a short brief. MemQL Materializer
+captures the sources, uses its model router for visual understanding and
+composition, and records the work in Nexus. The output is an editable
+`*.email.json` containing a subject, HTML, and plain-text alternative. Source,
+preview, and split modes share the same buffer. Reference processing is explicit;
+opening a ZIP in Files still downloads it intact. Draft generation does not
+publish a template to Campaigns or send an email.
+
+The source package is in `editors/productivity`. Build the shared SDK and core
+extension, then run `npm ci`, `npm run compile`, and `npm run package` in that
+directory to create a local VSIX. Install it alongside MemQL. Packaging does
+not publish either extension to a marketplace. References are limited to eight
+images, 64 files, 16 MiB expanded data, and 256 KiB of text per composition.
+PDF and Word references are not offered by this creation flow yet. Campaign
+publication, discussion replies, and jobs that apply approved feedback remain
+under development.
+
 ## Architecture
 
 ```

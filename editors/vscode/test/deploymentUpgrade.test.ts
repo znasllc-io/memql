@@ -34,8 +34,7 @@ import {
 import { listRuns, readRun, runFilePath } from "../src/state/runLog.js";
 import { RunRecorder } from "../src/state/runRecorder.js";
 import { isSameVersion, upgradePlan, upgradeSummary } from "../src/state/upgradePlan.js";
-import { renderChooseTag } from "../src/webview/deploymentScreens.js";
-import { refusedPlatformGuidance } from "../src/state/installProgress.js";
+import { DEFAULT_STACK_REPO } from "../src/install/stackPin.js";
 
 function tmpdir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "memql-upgrade-"));
@@ -114,12 +113,13 @@ test("an offline operator can still name a tag, and a mistyped one is caught", (
   assert.equal(isReleaseTag("v0.18.0"), true);
   assert.equal(tagProblem("v0.18.0"), undefined);
   assert.equal(tagProblem("  v0.18.0  "), undefined);
-  assert.match(tagProblem("") ?? "", /Name the release tag/);
+  assert.equal(tagProblem(""), "Enter a version.");
   // The failure this catches is a checkout that cannot find the ref, which
-  // surfaces deep in the run rather than under the box that produced it.
-  assert.match(tagProblem("0.18.0") ?? "", /vMAJOR\.MINOR\.PATCH/);
-  assert.match(tagProblem("latest") ?? "", /vMAJOR\.MINOR\.PATCH/);
-  assert.match(tagProblem("v1.0.0-rc1") ?? "", /vMAJOR\.MINOR\.PATCH/);
+  // surfaces deep in the run rather than under the box that produced it. One
+  // short line, with an example, under the field.
+  for (const typed of ["0.18.0", "latest", "v1.0.0-rc1"]) {
+    assert.equal(tagProblem(typed), "Use a version like v0.24.0.", typed);
+  }
 });
 
 // -----------------------------------------------------------------------------
@@ -150,21 +150,22 @@ const GRAPH = graphOf([
   { id: "clusterUp" },
 ]);
 
-test("the forecast names the two steps a tag change is for", () => {
+test("the forecast names the two steps a tag change is for, in the operator's words", () => {
   const plan = upgradePlan({ graph: GRAPH, from: "v0.17.0", to: "v0.18.0" });
   const runs = plan.filter((s) => s.effect === "runs");
   assert.deepEqual(runs.map((s) => s.id), ["stackCheckout", "clusterUp"]);
-  assert.equal(runs[0].detail, "v0.17.0 -> v0.18.0");
-  assert.equal(runs[1].detail, "reconcile the local overlay");
+  assert.equal(runs[0].detail, "Switch the source to v0.18.0");
+  assert.equal(runs[1].detail, "Apply the new version");
+  assert.doesNotMatch(runs.map((s) => s.detail).join(" "), /overlay|reconcile|checkout/);
 });
 
 test("a read-only step is a check, not a skip -- they ask different things of the reader", () => {
   const plan = upgradePlan({ graph: GRAPH, from: "v0.17.0", to: "v0.18.0" });
   const byId = new Map(plan.map((s) => [s.id, s]));
   assert.equal(byId.get("detect")?.effect, "verifyOnly");
-  assert.equal(byId.get("detect")?.detail, "verify only");
+  assert.equal(byId.get("detect")?.detail, "Checked only");
   assert.equal(byId.get("toolK3d")?.effect, "skip");
-  assert.equal(byId.get("toolK3d")?.detail, "already satisfied - skip");
+  assert.equal(byId.get("toolK3d")?.detail, "Already in place");
 });
 
 test("the forecast is in graph order, not wave order", () => {
@@ -176,17 +177,16 @@ test("the forecast is in graph order, not wave order", () => {
   );
 });
 
-test("an unknown current version is drawn as the word, never as a blank arrow", () => {
+test("an unknown current version changes nothing about what the move says", () => {
   const plan = upgradePlan({ graph: GRAPH, from: "", to: "v0.18.0" });
-  assert.equal(plan.find((s) => s.id === "stackCheckout")?.detail, "unknown -> v0.18.0");
+  assert.equal(plan.find((s) => s.id === "stackCheckout")?.detail, "Switch the source to v0.18.0");
 });
 
-test("the summary counts the list it sits above rather than restating it", () => {
+test("the summary counts the steps left alone, from the list rather than beside it", () => {
   const plan = upgradePlan({ graph: GRAPH, from: "v0.17.0", to: "v0.18.0" });
-  assert.equal(
-    upgradeSummary(plan),
-    "2 steps change something, 2 only check the machine, and 2 should already be satisfied.",
-  );
+  assert.equal(upgradeSummary(plan), "4 other steps are checked and left as they are.");
+  assert.equal(upgradeSummary(plan.filter((s) => s.effect === "runs")), "");
+  assert.equal(upgradeSummary(plan.slice(0, 1)), "1 other step is checked and left as it is.");
 });
 
 test("deploying to the version already installed is allowed, and said", () => {
@@ -203,8 +203,8 @@ test("deploying to the version already installed is allowed, and said", () => {
 // the record
 // -----------------------------------------------------------------------------
 
-function step(id: string): { id: string; description: string } {
-  return { id, description: `${id} description` };
+function step(id: string): { id: string; label: string; description: string } {
+  return { id, label: `${id} label`, description: `${id} description` };
 }
 
 function finished(id: string, status: "ok" | "failed" | "skipped" | "preserved", reason = ""): ExecEvent {
@@ -359,30 +359,37 @@ test("a run's record joins the history the tree lists", async () => {
   assert.deepEqual(runs.map((r) => r.kind), ["upgrade", "install"]);
 });
 
-test("Create deployment on a refused platform does not offer a tag field", () => {
-  // The detail is what detect actually emits; production passes it through
-  // failureGuidance, so a fixture that omits it would test a shape the
-  // operator never sees.
-  const g = refusedPlatformGuidance(
-    "unsupported platform darwin/amd64: the local cluster installer targets linux/amd64, darwin/arm64",
-  );
-  const html = renderChooseTag({
-    instance: {
-      name: "local",
-      kind: "local",
-      presence: "absent",
-      connected: false,
+test("the version list comes from the published releases, not from wherever the extension is installed", async () => {
+  // THE BUG: the page ran `git ls-remote origin` in the extension's install
+  // root, which is not a repository in a packaged extension, so the picker was
+  // empty and printed git's own error. The shared release listing asks the
+  // project's repository by URL; this pins the call the page now reads.
+  const calls: { cwd: string; repo: string }[] = [];
+  const listing = await listReleaseTags({
+    cwd: "/Applications/Visual Studio Code.app/extensions/memql/staged",
+    repo: DEFAULT_STACK_REPO,
+    run: async (cwd, _timeout, repo) => {
+      calls.push({ cwd, repo });
+      return { stdout: "abc\trefs/tags/v0.24.0\n", error: "" };
     },
-    listing: { tags: ["v0.19.6"], error: `${g.headline} ${g.advice}`, refusedPlatform: true },
-    target: "",
-    tagError: "",
-    sameVersion: false,
-    plan: [],
-    summary: "",
   });
-  assert.match(html, /linux\/amd64/);
-  assert.match(html, /will not change that/);
-  assert.doesNotMatch(html, /data-field="tag"/);
-  assert.doesNotMatch(html, /Type the tag/);
-  assert.doesNotMatch(html, /<select/);
+  assert.deepEqual(listing.tags, ["v0.24.0"]);
+  assert.equal(calls[0]?.repo, DEFAULT_STACK_REPO);
+  assert.notEqual(calls[0]?.repo, "origin");
+});
+
+test("unawaited event callbacks cannot overwrite finished steps with pending ones", async () => {
+  const dir = await tmpdir();
+  const recorder = await RunRecorder.begin({ dir, instance: "local", kind: "install", now: () => "t0", entropy: "event-order" });
+  const steps = Array.from({ length: 12 }, (_, i) => step(`step${i}`));
+  void recorder.apply({ type: "runStarted", steps });
+  for (const s of steps) {
+    void recorder.apply({ type: "stepStarted", step: { id: s.id } as never, params: {} });
+    void recorder.apply(finished(s.id, "ok"));
+  }
+  await recorder.finish();
+  const saved = await readRun(runFilePath(dir, recorder.current.id));
+  assert.equal(saved?.status, "succeeded");
+  assert.equal(saved?.items.length, steps.length);
+  assert.ok(saved?.items.every(item => item.status === "ok"));
 });

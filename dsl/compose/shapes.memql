@@ -22,6 +22,7 @@ shape composition compositionCard {
   statement
   status
   format
+  outputKind
   templateId
   outputFileId
   folderId
@@ -47,6 +48,7 @@ shape composition compositionFull {
   statement
   status
   format
+  outputKind
   sources
   templateId
   outputFileId
@@ -94,6 +96,7 @@ shape recipe composeRecipeFull {
   sourceSelectors
   templateId
   format
+  outputKind
   folderId
   accountIds
   lastRunAt

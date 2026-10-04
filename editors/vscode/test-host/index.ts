@@ -505,21 +505,29 @@ smoke("every webview surface opens without throwing", async () => {
   const expected: string[] = [];
 
   ConceptPanel.open(context, connections, concept);
-  expected.push(`Concept: ${concept.entity}`);
+  expected.push(concept.entity);
 
+  // The page is titled with the cluster's own name (its display label once
+  // the entry is read). The registry here does not exist, so the entry is
+  // absent and the title stays the registry name: the "no longer in your
+  // list" screen, which is the one this lane can render with no cluster.
   ConnectionPanel.open(
     context,
     {
       clustersPath: path.join(os.tmpdir(), "memql-smoke-no-such-clusters.yaml"),
       connections,
-      readExpiry: async () => undefined,
+      factsFor: async () => ({ session: false, signedIn: false, ownerSetup: false, consoleUrl: "" }),
+      signInFlight: () => undefined,
+      cancelSignIn: () => undefined,
+      useCode: () => undefined,
+      showDetails: () => undefined,
     },
     "smoke-cluster",
   );
-  expected.push("Cluster: smoke-cluster");
+  expected.push("smoke-cluster");
 
   RunPanel.open(context, runHost, runTarget);
-  expected.push(`Run: ${runTarget.name}`);
+  expected.push(`Run ${runTarget.name}`);
 
   ResultPanel.show(context, runHost, {
     status: "ok",
@@ -531,7 +539,7 @@ smoke("every webview surface opens without throwing", async () => {
   });
 
   AutomationRunPanel.open(context, automationHost, automationTarget);
-  expected.push(`Run automation: ${automationTarget.name}`);
+  expected.push(`Run ${automationTarget.name}`);
 
   StepTracePanel.show(context, automationTarget, new StepTraceModel());
 
@@ -574,6 +582,12 @@ smoke("every webview surface opens without throwing", async () => {
       browseRows: () => {
         throw new Error("no console handoff in the smoke lane");
       },
+      openInOs: () => {
+        throw new Error("no MemQL OS handoff in the smoke lane");
+      },
+      run: () => {
+        throw new Error("no run in the smoke lane");
+      },
     },
     // The cluster this record was "read from" (memql#4253). The smoke lane has
     // no connection, so "" is the honest answer -- and it is the value that
@@ -581,7 +595,7 @@ smoke("every webview surface opens without throwing", async () => {
     // them unreachable here.
     ""
   );
-  expected.push("Construct: trainedResponder");
+  expected.push("trainedResponder");
 
   // The instance page (memql#3739). Opened against a machine with NO local
   // cluster, which is the state it has to render first and the one an operator
@@ -612,7 +626,9 @@ smoke("every webview surface opens without throwing", async () => {
       throw new Error("no install flow in the smoke lane");
     },
   });
-  expected.push("Deployment: local");
+  // Nothing is installed here, so the page is the local cluster that is not
+  // there yet, and says so in its tab.
+  expected.push("Local cluster");
 
   try {
     // Tabs appear asynchronously -- createWebviewPanel returns before the
@@ -688,7 +704,8 @@ smoke("the remote instance page renders all three pipeline states", async () => 
       );
       await waitFor(
         `the remote page (${label}) to title itself (saw: ${openTabLabels().join(", ")})`,
-        () => openTabLabels().includes("Deployment: staging"),
+        // The page is titled with the cluster's own name, as its row is.
+        () => openTabLabels().includes("staging"),
         15_000
       );
       info(`remote instance page rendered: ${label}`);
@@ -879,9 +896,12 @@ smoke("sign-in and sign-out are reachable from the palette and the Clusters view
       `${command}'s palette entry must carry the trust clause the runtime surface is gated on`
     );
 
+    // Cluster rows carry `memqlCluster;<state>[;flags]` (clusters/status.ts
+    // clusterContextValue), and each entry is gated on the state it is legal
+    // in -- Sign in on a signIn row, Sign out on a row with something stored.
     const inMenu = itemContext.find(
       (entry) =>
-        entry.command === command && (entry.when ?? "").includes("viewItem == memqlCluster")
+        entry.command === command && (entry.when ?? "").includes("viewItem =~ /^memqlCluster;")
     );
     assert.ok(
       inMenu !== undefined,
@@ -995,14 +1015,22 @@ async function withinDeadline<T>(what: string, work: Promise<T>, ms: number): Pr
   return raced as T;
 }
 
-/** The page's title, which the workbench also uses as its tab label. */
-const ADD_CLUSTER_TAB = "Add a MemQL cluster";
+/**
+ * The page's title, which the workbench also uses as its tab label.
+ *
+ * THE TITLE FOLLOWS THE ACT (src/webview/addClusterScreens.ts TAB_TITLES): the
+ * "+" opens "Add a cluster", and the same one panel is called "Install MemQL",
+ * "Repair MemQL" or "Uninstall MemQL" while it is doing that. The "+" case
+ * below only ever sees the first.
+ */
+const ADD_CLUSTER_TAB = "Add a cluster";
+const ADD_CLUSTER_PANEL_TABS: readonly string[] = [ADD_CLUSTER_TAB, "Install MemQL", "Repair MemQL", "Uninstall MemQL"];
 
-/** Every open tab carrying the add-a-cluster page's label, across all groups. */
+/** Every open tab carrying one of the add-a-cluster page's labels, across all groups. */
 function addClusterTabs(): vscode.Tab[] {
   return vscode.window.tabGroups.all
     .flatMap((group) => group.tabs)
-    .filter((tab) => tab.label === ADD_CLUSTER_TAB);
+    .filter((tab) => ADD_CLUSTER_PANEL_TABS.includes(tab.label));
 }
 
 // WHAT ONLY A HOST CAN SAY ABOUT THE "+".
@@ -1118,7 +1146,11 @@ smoke("the presence probe answers in the host runtime, with no Docker and no han
   // serves. Port 1 is never listenable, so this is a local, immediate refusal
   // -- nothing leaves the machine, and no container runtime is consulted.
   const started = Date.now();
-  const answered = await defaultEndpointProbe("127.0.0.1:1", 1_000);
+  // The probe answers with a reason as well as a verdict (the reason is what
+  // the Connection output names when a cluster does not answer), so the
+  // verdict is read off the answer rather than compared as a whole.
+  const result = await defaultEndpointProbe("127.0.0.1:1", 1_000);
+  const answered = typeof result === "boolean" ? result : result.answered;
   const took = Date.now() - started;
 
   assert.equal(answered, false, "something answered on port 1, which cannot be a MemQL cluster");

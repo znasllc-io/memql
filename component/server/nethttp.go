@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/httptls"
@@ -1192,7 +1193,25 @@ func corsMiddleware(allowedOrigins []string, next http.Handler, router http.Hand
 				return
 			}
 		}
+
 		origin := r.Header.Get("Origin")
+		// Editor file traffic carries an explicit bearer. Never grant these
+		// public editor hosts cookie access to the rest of the HTTP surface.
+		if auth.IsWebEditorOrigin(origin) && (r.URL.Path == "/artifacts" || strings.HasPrefix(r.URL.Path, "/artifacts/")) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Add("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			w.Header().Set("Access-Control-Max-Age", "600")
+			r = r.Clone(r.Context())
+			r.Header.Del("Cookie")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
 
 		// Determine if origin is allowed
 		var allowedOrigin string

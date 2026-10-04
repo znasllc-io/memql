@@ -13,7 +13,7 @@ MemQL Sense is the language-intelligence service for `.memql` files:
 tokenize (syntax highlighting), complete (context-aware
 autocompletion), diagnose (errors and warnings), hover (symbol info),
 signature help, and go-to-definition. It is what colors and assists the source you read
-in the memQL [VS Code extension](vscode.md).
+in the MemQL [VS Code extension](vscode.md).
 
 Sense has **one consumer** today and **two delivery paths** into it:
 
@@ -68,7 +68,7 @@ receiver-function model, while omitting live struct-form constructs
 (`logic` / `trait` / `policy` / `seed`). `dslspec` is the durable fix:
 ONE spec that Sense is generated and driven from, that a CI drift test
 pins against the parser and annotation registry, and that exports as
-portable JSON for the Cockpit and any future editor.
+portable JSON for any editor.
 
 ### Source-of-truth boundaries
 
@@ -137,7 +137,7 @@ live in `component/grpc/sense_handlers.go`.
 | **Diagnose** | Errors and warnings from the lexer, parser, and semantic validation. A retired spelling is a parser error whose code is the parser's rule id (`retired_cond_call`), which the language server's [rewrite quick fix](#the-rewrite-quick-fix) keys on. Given the document's path in the tree, the engine's load of the document as well: [load refusals](#load-refusals), each coded with its `lower_*` rule id |
 | **Hover** | Symbol info at the cursor -- function docs, concept schemas, annotation docs, tool and prompt docs, and cards for operators, catalog functions and retired spellings that say where the item runs at the cursor's position. Resolves a BARE concept short name too (#2753): `candidate` in `shape candidate candidateFull` is ambient under rule 25, so it is matched by trailing segment against the registry. A collision across namespaces (`invocation` is both `v1:worker:invocation` and `v1:observability:invocation`) is broken by the document's own domain; where that cannot decide, hover returns nothing rather than the wrong concept. The domain comes from the document path, carried by `SenseHoverMsg.file_path` on the gRPC surface (#2760) and by the document URI over LSP |
 | **SignatureHelp** | Parameter help inside call arguments, from the function catalog first, then the builtins and the registry's declared args |
-| **Definition** | Go-to-definition (F12) -- resolves the construct reference under the cursor to the file and position that declares it (#2754). Backed by `dslimports.Index.DeclarationSites`, which finds the declaring file from the declaration index and recovers the line/column by re-lexing that file's raw source (the AST carries no positions). Colliding names are narrowed by the referencing file's own domain, and where that cannot decide it returns nothing rather than jumping to the wrong file. Exposed on both surfaces: `textDocument/definition` over LSP and `SenseDefinitionMsg` / `SenseDefinitionResult` over gRPC (#2760). The result carries a WORKSPACE-RELATIVE path, never a URI -- the LSP maps it to `file://` while the Cockpit addresses pack files as `(domain, path)`, so the wire stays neutral between them |
+| **Definition** | Go-to-definition (F12) -- resolves the construct reference under the cursor to the file and position that declares it (#2754). Backed by `dslimports.Index.DeclarationSites`, which finds the declaring file from the declaration index and recovers the line/column by re-lexing that file's raw source (the AST carries no positions). Colliding names are narrowed by the referencing file's own domain, and where that cannot decide it returns nothing rather than jumping to the wrong file. Exposed on both surfaces: `textDocument/definition` over LSP and `SenseDefinitionMsg` / `SenseDefinitionResult` over gRPC (#2760). The result carries a WORKSPACE-RELATIVE path, never a URI -- the LSP maps it to `file://`, and a gRPC client resolves it against however it addresses the tree, so the wire stays neutral between the two delivery paths |
 
 ### Driven from the spec
 
@@ -516,7 +516,7 @@ What ships as a snippet:
 | `@filter(...)` | Where the construct takes `@filter` -- inserts `@filter(row => row.field == "value")`, a lambda over the triggering row. |
 | The `use <domain>.concepts.{ X }` import | Now places the cursor after the bound name (it was multi-line plain text before -- correct, just cursor-less). |
 
-Consumers without snippet support (the Cockpit gRPC path) call
+A Go consumer without snippet support calls
 `PlainInsertText()`, which collapses placeholders to their default
 text and drops tabstops. Generated snippet text escapes literal `$`,
 `}`, and `\` so it cannot be misread as a tabstop or a placeholder

@@ -1,450 +1,267 @@
-// The connection page, and where the portal is (memql#3742).
+// The cluster page (src/clusters/connectionView.ts): one cluster's state and
+// the acts legal from it, on the kit's anatomy.
 //
-// This page replaced the topology view, and not because it is nicer. Topology
-// -- a pod grid, orphan verdicts, under-replica alarms -- is cluster state,
-// which the portal owns and already draws. What no surface answered is the
-// question an operator arrives with when a cluster will not come up: WHAT IS
-// THIS EDITOR DIALLING, AS WHOM, AND WHAT HAPPENED. Every assertion here is
-// about one of those three, and every value is on this side of the boundary --
-// clusters.yaml, SecretStorage, the live connection.
-//
-// The one that matters most is the distinction between "did not answer" and
-// "nobody asked". Those are the two possibilities an operator is trying to tell
-// apart, and a page that reported an undialled cluster as unreachable would be
-// answering the question wrongly with total confidence.
+// THE FIELD FAILURE this pins. The old page said "CREDENTIAL: ... has no
+// credential", "did not answer" and "connected, but the access read produced
+// no identity" at the same moment, for a cluster nothing had dialled, and drew
+// all five buttons in every state. Now the action bar carries the one state,
+// "Signed in as" appears only while connected, and an illegal act is absent.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
-
-import { connectionView, formatExpiry } from "../src/clusters/connectionView.js";
+import { clusterPage, versionMeta, type ClusterPageInput } from "../src/clusters/connectionView.js";
+import type { ClusterFacts } from "../src/clusters/facts.js";
 import type { ClusterConfig } from "../src/clusters/model.js";
-import { composeConsoleUrl, consoleConceptUrl, consoleTarget } from "../src/clusters/consoleUrl.js";
 import type { ConnectionState } from "../src/connection/manager.js";
 
-const NOW = Date.parse("2026-08-14T12:00:00Z");
+const SESSION: ClusterFacts = { session: true, signedIn: true, ownerSetup: false, consoleUrl: "https://os.memql.localhost/" };
+const NOTHING: ClusterFacts = { session: false, signedIn: false, ownerSetup: false, consoleUrl: "https://os.memql.localhost/" };
+const CONNECTED: ConnectionState = { status: "connected", clusterName: "local", nodeId: "bff-0" };
 
 function cluster(over: Partial<ClusterConfig> = {}): ClusterConfig {
-  return { name: "staging", endpoint: "api.example.com:443", domain: "example.com", ...over };
+  return {
+    name: "local",
+    displayName: "memql.localhost",
+    endpoint: "api.memql.localhost:443",
+    domain: "memql.localhost",
+    version: "main",
+    ...over,
+  };
 }
 
-function factOf(facts: readonly { key: string; value: string; note: string }[], key: string) {
-  const found = facts.find((f) => f.key === key);
-  assert.notEqual(found, undefined, `no fact named ${key}`);
-  return found!;
+function input(over: Partial<ClusterPageInput> = {}): ClusterPageInput {
+  return {
+    clusterName: "local",
+    cluster: cluster(),
+    facts: SESSION,
+    connection: { status: "disconnected" },
+    identity: "loading",
+    consoleUrl: "https://os.memql.localhost/",
+    ...over,
+  };
 }
 
-const DISCONNECTED: ConnectionState = { status: "disconnected" };
-
-// -----------------------------------------------------------------------------
-// what this editor is dialling
-// -----------------------------------------------------------------------------
-
-test("an undialled cluster is not reported as unreachable", () => {
-  // The distinction the page exists for. "Your cluster is down" and "nobody has
-  // asked it" call for completely different next actions.
-  const view = connectionView({ cluster: cluster(), state: DISCONNECTED, nowMs: NOW });
-  assert.equal(factOf(view.connection, "endpoint").note, "not dialled from this editor");
-});
-
-test("a live session says so, and names the node that answered", () => {
-  const view = connectionView({
-    cluster: cluster(),
-    state: { status: "connected", clusterName: "staging", nodeId: "bff-7f4c" },
-    nowMs: NOW,
-  });
-  assert.match(factOf(view.connection, "endpoint").note, /reachable \(node bff-7f4c\)/);
-});
-
-test("a failure carries the engine's own message rather than a category", () => {
-  const view = connectionView({
-    cluster: cluster(),
-    state: {
-      status: "error",
-      clusterName: "staging",
-      message: "certificate has expired",
-      reason: "unreachable",
-    },
-    nowMs: NOW,
-  });
-  assert.match(factOf(view.connection, "endpoint").note, /did not answer: certificate has expired/);
-});
-
-test("a session against ANOTHER cluster says nothing about this one", () => {
-  const view = connectionView({
-    cluster: cluster(),
-    state: { status: "connected", clusterName: "prod", nodeId: "bff-1" },
-    nowMs: NOW,
-  });
-  assert.equal(factOf(view.connection, "endpoint").note, "not dialled from this editor");
-});
-
-test("the issuer is DERIVED when the entry carries none, and says so", () => {
-  // Showing the derived value is the point: it is what a refresh will actually
-  // POST to, and the operator is here because something in that chain failed.
-  const view = connectionView({ cluster: cluster(), state: DISCONNECTED, nowMs: NOW });
-  const issuer = factOf(view.connection, "issuer");
-  assert.equal(issuer.value, "https://identity.example.com");
-  assert.equal(issuer.note, "derived from the domain");
-
-  const explicit = connectionView({
-    cluster: cluster({ issuer: "https://auth.example.com/" }),
-    state: DISCONNECTED,
-    nowMs: NOW,
-  });
-  assert.equal(factOf(explicit.connection, "issuer").value, "https://auth.example.com");
-  assert.equal(factOf(explicit.connection, "issuer").note, "");
-});
-
-test("an unconfigured endpoint is named, not blank", () => {
-  const view = connectionView({
-    cluster: cluster({ endpoint: "" }),
-    state: DISCONNECTED,
-    nowMs: NOW,
-  });
-  assert.equal(factOf(view.connection, "endpoint").value, "not configured");
-});
-
-test("a local cluster is told where its uninstall lives", () => {
-  const view = connectionView({
-    cluster: cluster({ local: true }),
-    state: DISCONNECTED,
-    nowMs: NOW,
-  });
-  assert.match(factOf(view.connection, "local").note, /Deployments/);
-  // And a remote one is not: there is nothing on this machine to uninstall.
-  const remote = connectionView({ cluster: cluster(), state: DISCONNECTED, nowMs: NOW });
-  assert.equal(factOf(remote.connection, "local").note, "");
-});
-
-// -----------------------------------------------------------------------------
-// as whom
-// -----------------------------------------------------------------------------
-
-test("the identity is what the CONNECTION produced, not what the file claims", () => {
-  const view = connectionView({
-    cluster: cluster(),
-    state: { status: "connected", clusterName: "staging", nodeId: "n" },
-    identity: { email: "ada@example.com", role: "owner" },
-    nowMs: NOW,
-  });
-  assert.equal(factOf(view.identity, "signed in as").value, "ada@example.com");
-  assert.equal(factOf(view.identity, "role").value, "owner");
-});
-
-test("connected with no identity is its own answer, not 'not signed in'", () => {
-  // A session the cluster accepted whose access read produced nothing is a
-  // different fault from having no credential at all.
-  const view = connectionView({
-    cluster: cluster(),
-    state: { status: "connected", clusterName: "staging", nodeId: "n" },
-    nowMs: NOW,
-  });
-  assert.match(factOf(view.identity, "signed in as").value, /access read produced no identity/);
-});
-
-test("a token expiry is a duration, and says it renews itself", () => {
-  const view = connectionView({
-    cluster: cluster({ token: "eyJhbGciOi.body.sig" }),
-    state: DISCONNECTED,
-    expiresAtEpochSeconds: Math.floor(NOW / 1000) + 11 * 60,
-    nowMs: NOW,
-  });
-  const token = factOf(view.identity, "token");
-  assert.equal(token.value, "expires in 11m");
-  // Without this an operator reads a countdown to being logged out. Identity
-  // issues 900-second access tokens BY DESIGN.
-  assert.match(token.note, /renews automatically/);
-});
-
-test("a wrong-class credential is named rather than described", () => {
-  // A PAT here fails exactly like a forged token, and it is the one credential
-  // problem an operator cannot diagnose from the failure (memql#3383).
-  const view = connectionView({
-    cluster: cluster({ token: "mql_pat_abcdefghijklmnopqrstuvwxyz" }),
-    state: DISCONNECTED,
-    nowMs: NOW,
-  });
-  assert.match(factOf(view.identity, "token").value, /personal access token/);
-  assert.match(factOf(view.identity, "token").value, /cannot verify/);
-});
-
-test("no stored token, and a stored one with no expiry, read differently", () => {
-  const none = connectionView({ cluster: cluster(), state: DISCONNECTED, nowMs: NOW });
-  assert.equal(factOf(none.identity, "token").value, "none stored");
-
-  const noExpiry = connectionView({
-    cluster: cluster({ token: "eyJhbGciOi.body.sig" }),
-    state: DISCONNECTED,
-    nowMs: NOW,
-  });
-  assert.equal(factOf(noExpiry.identity, "token").value, "stored, with no recorded expiry");
-});
-
-test("the duration is coarse, and an expired token says so rather than counting down", () => {
-  const nowSeconds = Math.floor(NOW / 1000);
-  assert.equal(formatExpiry(nowSeconds + 30, NOW), "in under a minute");
-  assert.equal(formatExpiry(nowSeconds + 11 * 60, NOW), "in 11m");
-  assert.equal(formatExpiry(nowSeconds + 3 * 3600, NOW), "in 3h");
-  assert.equal(formatExpiry(nowSeconds + 2 * 86_400, NOW), "in 2d");
-  // An expired token and one with four seconds left ask for different things,
-  // and neither is a negative number.
-  assert.match(formatExpiry(nowSeconds - 60, NOW), /already/);
-});
-
-// -----------------------------------------------------------------------------
-// where the portal is
-// -----------------------------------------------------------------------------
-
-function siteRow(payload: Record<string, unknown>): Row {
-  return { id: `v1:platform:site:${String(payload["hostname"])}`, concept: "v1:platform:site", payload };
+/** The acts on the action bar, in order, as `act:label`. */
+function bar(html: string): string[] {
+  return [...html.matchAll(/data-act="([^"]+)"[^>]*>(?:<span[^>]*><\/span>)?([^<]+)<\/button>/g)].map(
+    (m) => `${m[1]}:${m[2]}`,
+  );
 }
 
-test("the cluster's OWN site row outranks the composed host", () => {
-  // Reading the row is what kept this correct across BOTH moves of the
-  // console's origin -- memql#3711 and epic memql#4984. It is not sufficient
-  // on its own, though: see the composition tests below, which are what a
-  // first run actually reaches, and which needed an edit each time.
-  const target = consoleTarget(cluster(), [
-    siteRow({ hostname: "shop.example.com", systemOwned: false }),
-    siteRow({ hostname: "console.example.com", systemOwned: true }),
+/** The kit escapes an apostrophe as a numeric entity; read it back as text. */
+function text(html: string): string {
+  return html.replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+}
+
+/** The state word the bar leads with. */
+function word(html: string): string {
+  return text(/<span class="mq-actbar-word">([^<]*)<\/span>/.exec(html)?.[1] ?? "");
+}
+
+/** The fact labels, in order. */
+function factLabels(html: string): string[] {
+  return [...html.matchAll(/<dt>([^<]+)<\/dt>/g)].map((m) => m[1]);
+}
+
+test("connected: Sign out, Disconnect, and Open MemQL OS as the one button", () => {
+  const page = clusterPage(input({ connection: CONNECTED, identity: { email: "ada@example.com", role: "owner" } }));
+  assert.equal(word(page.actions), "Connected");
+  assert.deepEqual(bar(page.actions), ["signOut:Sign out", "disconnect:Disconnect", "openConsole:Open MemQL OS"]);
+  assert.match(page.actions, /data-act="openConsole"[^>]*data-tone="primary"|data-tone="primary"[^>]*data-act="openConsole"/);
+  assert.deepEqual(factLabels(page.body), ["Address", "MemQL OS", "Signed in as"]);
+  assert.match(page.body, /ada@example\.com · owner/);
+});
+
+test("connected with no MemQL OS address: the act is absent, not disabled", () => {
+  const page = clusterPage(input({ connection: CONNECTED, consoleUrl: "", identity: { email: "a@b.c", role: "" } }));
+  assert.deepEqual(bar(page.actions), ["signOut:Sign out", "disconnect:Disconnect"]);
+  assert.ok(!factLabels(page.body).includes("MemQL OS"));
+});
+
+test("while the account is read, its value is a skeleton, never a sentence", () => {
+  const page = clusterPage(input({ connection: CONNECTED, identity: "loading" }));
+  assert.match(page.body, /class="mq-skel"/);
+  assert.doesNotMatch(page.body, /Loading\.\.\.|access read/);
+});
+
+test("an account that could not be read says Unknown", () => {
+  const page = clusterPage(input({ connection: CONNECTED, identity: "unavailable" }));
+  assert.match(page.body, /<dt>Signed in as<\/dt><dd data-muted="true">Unknown<\/dd>/);
+});
+
+test("a cluster needing sign-in: Sign in is the one button, with a code beside it", () => {
+  const page = clusterPage(input({ facts: NOTHING }));
+  assert.equal(word(page.actions), "Not signed in");
+  assert.deepEqual(bar(page.actions), ["signInWithCode:Sign in with a code", "signIn:Sign in"]);
+});
+
+test("THE CONTRADICTION: an error state never says who is signed in, or that the address did not answer", () => {
+  // The owner's screenshot: a credential refused before any dial, and the page
+  // claiming both "did not answer" and "connected, but ... no identity".
+  const refused: ConnectionState = {
+    status: "error",
+    clusterName: "local",
+    reason: "missingCredential",
+    message: "Cluster \"local\" has no credential.",
+  };
+  const page = clusterPage(input({ connection: refused, identity: "unavailable" }));
+  assert.equal(word(page.actions), "Not signed in");
+  assert.ok(!factLabels(page.body).includes("Signed in as"));
+  const all = page.head + page.body + page.actions;
+  assert.doesNotMatch(all, /did not answer|access read|CREDENTIAL|none stored|--/);
+});
+
+test("an ended session says so, with the same two acts", () => {
+  const expired: ConnectionState = { status: "error", clusterName: "local", reason: "reauthenticationRequired", message: "x" };
+  const page = clusterPage(input({ connection: expired }));
+  assert.equal(word(page.actions), "Your session ended");
+  assert.deepEqual(bar(page.actions), ["signInWithCode:Sign in with a code", "signIn:Sign in"]);
+});
+
+test("a first run on this machine also offers the owner passkey", () => {
+  const page = clusterPage(input({ cluster: cluster({ local: true }), facts: { ...NOTHING, ownerSetup: true } }));
+  assert.deepEqual(bar(page.actions), [
+    "takeOwnership:Create owner passkey",
+    "signInWithCode:Sign in with a code",
+    "signIn:Sign in",
   ]);
-  assert.equal(target.url, "https://console.example.com/");
-  assert.equal(target.fromSiteRow, true);
 });
 
-test("systemOwned is what identifies it, not a name", () => {
-  // Matching on a name would pick a customer's site the day somebody calls one
-  // "os". It is also what made the portal's retirement a no-op on this path:
-  // the flag moved to the row that replaced it and nothing here had to know.
-  const target = consoleTarget(cluster(), [siteRow({ hostname: "os.example.com", systemOwned: false })]);
-  assert.equal(target.fromSiteRow, false);
-  assert.equal(target.url, "https://os.example.com/");
+test("connecting: busy, and Cancel is the only act", () => {
+  const page = clusterPage(input({ connection: { status: "connecting", clusterName: "local" } }));
+  assert.equal(word(page.actions), "Connecting");
+  assert.match(page.actions, /data-tone="busy"/);
+  assert.deepEqual(bar(page.actions), ["cancel:Cancel"]);
 });
 
-test("the composed console is its OWN origin, not a path on the api front door", () => {
-  // memql#3711 moved the console to its own hostname; this composition did not
-  // follow until memql#3906. The old address does not 404 -- `/portal/` had no
-  // Ingress rule of its own, so it fell through to the `/` h2c catch-all and
-  // answered 415, an HTTP/1.1 request handed to a gRPC backend.
-  //
-  // The host then moved AGAIN: epic memql#4984 retired the portal, and this
-  // composition follows the console rather than the label it used to carry.
-  const target = consoleTarget(cluster(), []);
-  assert.equal(target.url, "https://os.example.com/");
-  assert.equal(target.fromSiteRow, false);
-  assert.doesNotMatch(target.url, /\/portal\/$/, "the sub-path form is what 415s");
-  assert.doesNotMatch(target.url, /portal\./, "the retired portal host answers nothing");
+test("a local cluster that does not answer offers Repair beside Retry", () => {
+  const down: ConnectionState = { status: "error", clusterName: "local", reason: "unreachable", message: "ECONNREFUSED" };
+  const page = clusterPage(input({ cluster: cluster({ local: true }), connection: down }));
+  assert.equal(word(page.actions), "Not running");
+  assert.deepEqual(bar(page.actions), ["showDetails:Show details", "repair:Repair", "connect:Retry"]);
+  assert.doesNotMatch(page.actions, /ECONNREFUSED/, "the raw reason is in the output, behind Show details");
 });
 
-test("an api.<domain> endpoint implies its console sibling", () => {
-  assert.equal(
-    composeConsoleUrl({ name: "x", endpoint: "api.lab.example.com:50051" }),
-    // Same derivation identityBaseUrlFor makes for identity.<domain>: the
-    // endpoint IS the api front door, so stripping that label names the domain.
-    // The port is dropped -- the console is served over 443 whatever the gRPC
-    // endpoint names.
-    "https://os.lab.example.com/",
-  );
-  // The shared endpoint parser, not a second `split(":")`: a scheme-prefixed
-  // endpoint used to compose `https://https/portal/`.
-  assert.equal(
-    composeConsoleUrl({ name: "x", endpoint: "https://api.lab.example.com:443" }),
-    "https://os.lab.example.com/",
-  );
+test("a remote cluster that does not answer offers Retry, not Repair", () => {
+  const down: ConnectionState = { status: "error", clusterName: "local", reason: "unreachable", message: "x" };
+  const page = clusterPage(input({ connection: down }));
+  assert.equal(word(page.actions), "Can't reach");
+  assert.deepEqual(bar(page.actions), ["showDetails:Show details", "connect:Retry"]);
 });
 
-test("an endpoint that names no api front door composes nothing", () => {
-  // The console is a DIFFERENT host from the gRPC endpoint, so there is no
-  // host left to reuse. Opening the endpoint's own hostname would point a
-  // browser at an address nobody nominated.
-  assert.equal(composeConsoleUrl({ name: "x", endpoint: "grpc.lab.example.com:50051" }), "");
-  assert.equal(composeConsoleUrl({ name: "x", endpoint: "[::1]:50051" }), "");
+test("a dropped connection that stopped retrying says so", () => {
+  const lost: ConnectionState = { status: "error", clusterName: "local", reason: "lost", message: "x" };
+  assert.equal(word(clusterPage(input({ connection: lost })).actions), "Connection lost");
 });
 
-test("nothing to compose from yields nothing, not https:///", () => {
-  assert.equal(composeConsoleUrl({ name: "x", endpoint: "" }), "");
-  assert.equal(consoleTarget({ name: "x", endpoint: "" }, []).url, "");
+test("no address: Edit is the one act, and the head does not offer it twice", () => {
+  const page = clusterPage(input({ cluster: cluster({ endpoint: "" }) }));
+  assert.equal(word(page.actions), "Not set up");
+  assert.deepEqual(bar(page.actions), ["edit:Edit"]);
+  assert.deepEqual(bar(page.head), ["remove:Remove from list"]);
+  assert.match(page.body, /<dt>Address<\/dt><dd data-muted="true">Not set<\/dd>/);
 });
 
-// THE CONCEPT DEEP-LINK IS GONE (epic memql#4984), and so are the three cases
-// that pinned its escaping. `portalConceptUrl` composed `<root>/concepts/<id>`
-// for the "Browse rows" button; MemQL OS has no concept browser, the button was
-// removed rather than pointed at a page that answers 404, and
-// `encodePortalSegment` had that one caller. Nothing is left to escape.
-
-// -----------------------------------------------------------------------------
-// The recorded version (memql#3995)
-// -----------------------------------------------------------------------------
-//
-// The page says the version WORD-FOR-WORD where the tree row can only hint at
-// it. In particular it says "unknown" out loud: on the row that would be noise
-// on every cluster, and here it is the answer to a question the operator asked
-// by opening the page.
-
-const RELEASES = { tags: ["v0.18.0", "v0.17.0"], fetchedAt: 1000 };
-
-test("the page always carries a version fact, even with nothing recorded", () => {
-  const view = connectionView({
-    cluster: cluster(),
-    state: DISCONNECTED,
-    nowMs: NOW,
-    listing: RELEASES,
-  });
-  const fact = factOf(view.connection, "version");
-  assert.match(fact.value, /unknown/i);
+test("signed in but not connected: Connect, and Sign out beside it", () => {
+  const page = clusterPage(input());
+  assert.equal(word(page.actions), "Not connected");
+  assert.deepEqual(bar(page.actions), ["signOut:Sign out", "connect:Connect"]);
 });
 
-test("a recorded version behind the newest release offers the upgrade", () => {
-  const view = connectionView({
-    cluster: cluster({ version: "v0.17.0" }),
-    state: DISCONNECTED,
-    nowMs: NOW,
-    listing: RELEASES,
-  });
-  const fact = factOf(view.connection, "version");
-  assert.equal(fact.value, "v0.17.0");
-  assert.match(fact.note, /v0\.18\.0/, "the note names the release that is available");
+test("the head names the cluster by its label and carries Edit and Remove from list", () => {
+  const page = clusterPage(input());
+  assert.equal(page.title, "memql.localhost");
+  assert.match(page.head, /<h1 class="mq-title">memql\.localhost<\/h1>/);
+  assert.match(page.head, /<span class="mq-head-meta">main<\/span>/);
+  assert.deepEqual(bar(page.head), ["edit:Edit", "remove:Remove from list"]);
 });
 
-test("a current cluster's note says so without offering anything", () => {
-  const view = connectionView({
-    cluster: cluster({ version: "v0.18.0" }),
-    state: DISCONNECTED,
-    nowMs: NOW,
-    listing: RELEASES,
-  });
-  const fact = factOf(view.connection, "version");
-  assert.equal(fact.value, "v0.18.0");
-  assert.match(fact.note, /newest release/i);
+test("the version meta names a newer release when there is one", () => {
+  const listing = { tags: ["v0.21.0"], fetchedAt: 1 };
+  assert.equal(versionMeta(cluster({ version: "v0.19.1" }), listing), "v0.19.1 · v0.21.0 available");
+  assert.equal(versionMeta(cluster({ version: "" }), listing), "");
 });
 
-test("a DISCONNECTED cluster reports its version -- no session required", () => {
-  // The property this whole surface exists for: the motivating incident
-  // happened on a session that had just been severed.
-  const view = connectionView({
-    cluster: cluster({ version: "v0.17.0" }),
-    state: DISCONNECTED,
-    nowMs: NOW,
-    listing: RELEASES,
-  });
-  assert.equal(factOf(view.connection, "version").value, "v0.17.0");
+test("a local cluster says it is installed on this computer; a remote one does not", () => {
+  assert.ok(factLabels(clusterPage(input({ cluster: cluster({ local: true }) })).body).includes("Installed"));
+  assert.ok(!factLabels(clusterPage(input()).body).includes("Installed"));
 });
 
-test("an unfetched listing leaves the version shown and claims nothing", () => {
-  const view = connectionView({
-    cluster: cluster({ version: "v0.17.0" }),
-    state: DISCONNECTED,
-    nowMs: NOW,
-    listing: undefined,
-  });
-  const fact = factOf(view.connection, "version");
-  assert.equal(fact.value, "v0.17.0");
-  assert.doesNotMatch(fact.note, /available/i);
-  assert.doesNotMatch(fact.note, /newest release/i);
+test("a sign-in in flight is its own state, with Cancel and, when offered, a code", () => {
+  const waiting = clusterPage(input({ facts: NOTHING, signingIn: { phase: "waiting", codeOffered: true } }));
+  assert.equal(word(waiting.actions), "Signing in");
+  assert.match(waiting.actions, /Waiting for you in the browser/);
+  assert.deepEqual(bar(waiting.actions), ["useCode:Use a code instead", "cancel:Cancel"]);
+
+  const opening = clusterPage(input({ facts: NOTHING, signingIn: { phase: "opening", codeOffered: false } }));
+  assert.deepEqual(bar(opening.actions), ["cancel:Cancel"]);
 });
 
-test("a version that is not a release is shown verbatim and not compared", () => {
-  const view = connectionView({
-    cluster: cluster({ version: "0.15.0-1737072000" }),
-    state: DISCONNECTED,
-    nowMs: NOW,
-    listing: RELEASES,
-  });
-  const fact = factOf(view.connection, "version");
-  assert.equal(fact.value, "0.15.0-1737072000");
-  assert.match(fact.note, /does not name a release/i);
+test("a page's screen is the cluster, so a state change patches rather than repaints", () => {
+  const a = clusterPage(input());
+  const b = clusterPage(input({ connection: CONNECTED, identity: { email: "a@b.c", role: "owner" } }));
+  assert.equal(a.screen, b.screen);
+  assert.equal(a.screen, "cluster:local");
 });
 
-test("the page works with no listing supplied at all", () => {
-  // Activation does no network work, so the first render of this page happens
-  // before anything has been fetched.
-  const view = connectionView({ cluster: cluster({ version: "v0.17.0" }), state: DISCONNECTED, nowMs: NOW });
-  assert.equal(factOf(view.connection, "version").value, "v0.17.0");
+test("before the facts are read, the body is the shape of the facts", () => {
+  const page = clusterPage(input({ facts: undefined }));
+  assert.match(page.body, /class="mq-skeleton" data-shape="facts"/);
+  assert.equal(page.actions, "");
 });
 
-// -----------------------------------------------------------------------------
-// the recorded checkout (memql#4246)
-// -----------------------------------------------------------------------------
-//
-// Two facts, present only for a local cluster whose receipt records a
-// checkout: where it is, and which lane -- released or checkout -- set the
-// images this cluster is actually running.
-
-test("a checkout in checkout mode names the directory and says images are built locally", () => {
-  const view = connectionView({
-    cluster: cluster(),
-    state: DISCONNECTED,
-    nowMs: NOW,
-    checkout: { path: "/home/me/.memql/src", ref: "tag:v0.17.0", imageSource: "checkout" },
-  });
-  assert.deepEqual(factOf(view.connection, "checkout"), {
-    key: "checkout",
-    value: "/home/me/.memql/src",
-    note: "tag:v0.17.0",
-  });
-  assert.deepEqual(factOf(view.connection, "image source"), {
-    key: "image source",
-    value: "checkout (built locally)",
-    note: "an install, upgrade or repair returns it to released images",
-  });
+test("a cluster no longer in the list says so, with Close", () => {
+  const page = clusterPage(input({ cluster: undefined }));
+  assert.match(page.body, /This cluster is no longer in your list\./);
+  assert.deepEqual(bar(page.body), ["close:Close"]);
 });
 
-test("a checkout in released mode names the lane and offers no reassurance", () => {
-  const view = connectionView({
-    cluster: cluster(),
-    state: DISCONNECTED,
-    nowMs: NOW,
-    checkout: { path: "/home/me/.memql/src", ref: "tag:v0.17.0", imageSource: "released" },
-  });
-  const fact = factOf(view.connection, "image source");
-  assert.equal(fact.value, "released");
-  assert.equal(fact.note, "");
+test("a cluster removed while its page is open keeps the name the page showed", () => {
+  // Not its registry key: the row, the page and the toasts all said
+  // "memql.localhost", and "local" is a name the person never saw.
+  const page = clusterPage(input({ cluster: undefined, knownLabel: "memql.localhost" }));
+  assert.equal(page.title, "memql.localhost");
+  assert.match(page.head, /memql\.localhost/);
+  assert.equal(clusterPage(input({ cluster: undefined })).title, "local", "with nothing shown before, the key is all there is");
 });
 
-test("with no recorded checkout, neither row appears", () => {
-  const view = connectionView({ cluster: cluster(), state: DISCONNECTED, nowMs: NOW });
-  assert.equal(
-    view.connection.some((f) => f.key === "checkout"),
-    false,
-  );
-  assert.equal(
-    view.connection.some((f) => f.key === "image source"),
-    false,
-  );
+test("an unreadable cluster list says so, with Open file", () => {
+  const page = clusterPage(input({ registryError: "clusters.yaml is malformed: line 3" }));
+  assert.match(text(page.body), /Can't read your cluster list\./);
+  assert.doesNotMatch(page.body, /line 3/, "the parser's words are for the file, not the page");
+  assert.deepEqual(bar(page.body), ["openFile:Open file"]);
 });
 
-// -----------------------------------------------------------------------------
-// the concept deep-link (epic memql#5009, memql#5010)
-// -----------------------------------------------------------------------------
-
-// A QUERY PARAMETER, NOT A PATH SEGMENT, and the difference is the shell's
-// shape rather than taste: MemQL OS has no router, so `/concepts/<id>` would
-// be served the shell's own index and the marker would be lost on the desk.
-test("composes the console's address for one concept's rows", () => {
-  assert.equal(
-    consoleConceptUrl("https://os.example.com/", "v1:library:artifact"),
-    "https://os.example.com/?concept=v1%3Alibrary%3Aartifact",
-  );
+test("every state's bar holds at most three acts and at most one button", () => {
+  // kit.actionBar throws otherwise; rendering every state is the check.
+  const states: ConnectionState[] = [
+    { status: "disconnected" },
+    CONNECTED,
+    { status: "connecting", clusterName: "local" },
+    { status: "error", clusterName: "local", reason: "missingCredential", message: "x" },
+    { status: "error", clusterName: "local", reason: "unreachable", message: "x" },
+    { status: "error", clusterName: "local", reason: "lost", message: "x", retrying: true },
+    { status: "error", clusterName: "local", reason: "notConfigured", message: "x" },
+  ];
+  for (const connection of states) {
+    for (const facts of [SESSION, NOTHING, { ...NOTHING, ownerSetup: true }]) {
+      const page = clusterPage(input({ cluster: cluster({ local: true }), connection, facts }));
+      assert.ok(bar(page.actions).length <= 3);
+    }
+  }
 });
 
-// The root arrives from `consoleTarget`, which may or may not end in a slash
-// depending on whether a site row or the composition supplied it. Both have
-// to produce the same address, or the same concept opens at two URLs.
-test("does not double the slash, and adds one when the root has none", () => {
-  assert.equal(
-    consoleConceptUrl("https://os.example.com", "v1:work:goal"),
-    consoleConceptUrl("https://os.example.com/", "v1:work:goal"),
-  );
-});
-
-// EMPTY IN, EMPTY OUT. `consoleTarget` answers "" when no address can be
-// worked out at all, and composing a link onto that would open `https:///?...`
-// -- a browser tab at nothing, which reads as the extension being broken
-// rather than as the cluster having no domain recorded.
-test("composes nothing when there is no console address or no concept", () => {
-  assert.equal(consoleConceptUrl("", "v1:library:artifact"), "");
-  assert.equal(consoleConceptUrl("https://os.example.com/", ""), "");
-  assert.equal(consoleConceptUrl("https://os.example.com/", "   "), "");
+test("an untrusted certificate on a local cluster leads with Repair", () => {
+  const untrusted: ConnectionState = {
+    status: "error",
+    clusterName: "local",
+    reason: "unreachable",
+    message: "self-signed certificate in certificate chain",
+  };
+  const local = clusterPage(input({ cluster: cluster({ local: true }), connection: untrusted }));
+  assert.equal(word(local.actions), "Certificate not trusted");
+  assert.deepEqual(bar(local.actions), ["showDetails:Show details", "connect:Retry", "repair:Repair"]);
+  const remote = clusterPage(input({ connection: untrusted }));
+  assert.deepEqual(bar(remote.actions), ["showDetails:Show details", "connect:Retry"]);
 });

@@ -1,7 +1,9 @@
 package library
 
 import (
+	"context"
 	"fmt"
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	"os"
 	"regexp"
 	"slices"
@@ -251,6 +253,10 @@ func loadArtifactEnumValues() (map[string][]string, error) {
 // requirement-1 fail-loud contract: an empty or hardcoded fallback is
 // never reachable from here.
 func TestMain(m *testing.M) {
+	if _, err := dbtest.EnsureSchema(context.Background()); err != nil {
+		fmt.Fprintf(os.Stderr, "dbtest.EnsureSchema: %v\n", err)
+		os.Exit(1)
+	}
 	fields, err := loadArtifactFullShapeFields()
 	if err != nil {
 		fmt.Fprintf(os.Stderr,

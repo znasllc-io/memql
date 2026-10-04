@@ -59,14 +59,10 @@ const (
 	NodeTypeEdge NodeType = "edge"
 )
 
-// ValidNodeTypes is the set of recognized node types.
-var ValidNodeTypes = map[NodeType]bool{
-	NodeTypeAgent:     true,
-	NodeTypePlanner:   true,
-	NodeTypeBFF:       true,
-	NodeTypeWorkbench: true,
-	NodeTypeMCP:       true,
-}
+// ValidNodeTypes is the set of MESH node types: the roles that join the peer
+// mesh. Derived from the role table in roles.go (the Mesh column), so the two
+// cannot disagree; identity and edge are roles outside it.
+var ValidNodeTypes = meshNodeTypes()
 
 // Identity holds the runtime identity of this node.
 type Identity struct {

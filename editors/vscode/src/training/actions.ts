@@ -87,6 +87,7 @@ import {
   type TrainingPrompt,
 } from "./report.js";
 import { SessionDefinitions } from "./session.js";
+import { NOT_CONNECTED_REFUSAL } from "../state/connectionContext.js";
 import { isTransportClose, withVersionSkewHint } from "../version/skewHint.js";
 
 /**
@@ -250,6 +251,12 @@ export class TrainingActions {
     return this.sessions;
   }
 
+  // EVERY ACT TAKES AN OPTIONAL `started`, fired once the act is really going:
+  // past the preflight and past its confirmation, before anything is sent. It
+  // is where the adapter shows progress. Earlier, a progress line would name a
+  // promote behind the modal still asking whether to promote, and a No would
+  // have shown progress for something that never happened.
+
   /**
    * Gate-1 compile and bind, in a sandbox, against a read-only clone of the
    * live registry.
@@ -259,10 +266,11 @@ export class TrainingActions {
    * writes no row, it is safe against production, and a modal in front of it
    * would train a developer to click through the modals that matter.
    */
-  async dryRun(request: TrainingRequest): Promise<TrainingOutcome> {
+  async dryRun(request: TrainingRequest, started?: () => void): Promise<TrainingOutcome> {
     const token = this.latest.begin();
     const context = this.preflight("dryRun", request);
     if ("outcome" in context) return context.outcome;
+    started?.();
 
     const bundle = await this.assemble("dryRun", request, "closure");
     if ("outcome" in bundle) return bundle.outcome;
@@ -290,7 +298,7 @@ export class TrainingActions {
    * know which of the two just happened is the failure this whole design exists
    * to prevent.
    */
-  async tryInSession(request: TrainingRequest): Promise<TrainingOutcome> {
+  async tryInSession(request: TrainingRequest, started?: () => void): Promise<TrainingOutcome> {
     const token = this.latest.begin();
     const context = this.preflight("tryInSession", request);
     if ("outcome" in context) return context.outcome;
@@ -304,6 +312,7 @@ export class TrainingActions {
     );
     if (!this.latest.isCurrent(token)) return superseded();
     if (!confirmed) return { status: "declined", action: "tryInSession", request };
+    started?.();
 
     const validated = await this.validate(
       "tryInSession",
@@ -335,7 +344,7 @@ export class TrainingActions {
         this.deps.publishDiagnostics(mapped);
         return { status: "invalid", action: "tryInSession", request, diagnostics: mapped };
       }
-      return this.refuse("tryInSession", request, defined.error, "The engine refused the bundle.");
+      return this.refuse("tryInSession", request, defined.error, "The cluster rejected this code.");
     }
 
     this.sessions.record(context.cluster.name, defined.defined);
@@ -366,7 +375,7 @@ export class TrainingActions {
    * says to train it instead, which is a better sentence than anything this
    * layer could reconstruct from a status code.
    */
-  async stage(request: TrainingRequest): Promise<TrainingOutcome> {
+  async stage(request: TrainingRequest, started?: () => void): Promise<TrainingOutcome> {
     const token = this.latest.begin();
     const context = this.preflight("stage", request);
     if ("outcome" in context) return context.outcome;
@@ -380,6 +389,7 @@ export class TrainingActions {
     );
     if (!this.latest.isCurrent(token)) return superseded();
     if (!confirmed) return { status: "declined", action: "stage", request };
+    started?.();
 
     const validated = await this.validate("stage", request, context.engine, bundle.bundle, token);
     if ("outcome" in validated) return validated.outcome;
@@ -429,7 +439,7 @@ export class TrainingActions {
    * only path that sets the flag, and it is a separate call reached through a
    * separate confirmation.
    */
-  async promote(request: TrainingRequest): Promise<TrainingOutcome> {
+  async promote(request: TrainingRequest, started?: () => void): Promise<TrainingOutcome> {
     const token = this.latest.begin();
     const context = this.preflight("promote", request);
     if ("outcome" in context) return context.outcome;
@@ -446,6 +456,7 @@ export class TrainingActions {
     );
     if (!this.latest.isCurrent(token)) return superseded();
     if (!confirmed) return { status: "declined", action: "promote", request };
+    started?.();
 
     const validated = await this.validate("promote", request, context.engine, bundle.bundle, token);
     if ("outcome" in validated) return validated.outcome;
@@ -469,6 +480,7 @@ export class TrainingActions {
     cluster: TrainingCluster,
     bundle: TrainingBundle,
     diffs: readonly ConceptSchemaDiff[],
+    started?: () => void,
   ): Promise<TrainingOutcome> {
     const token = this.latest.begin();
     const context = this.preflight("promote", request);
@@ -490,6 +502,7 @@ export class TrainingActions {
     const confirmed = await this.deps.confirmOverride(breakingOverridePrompt(diffs));
     if (!this.latest.isCurrent(token)) return superseded();
     if (!confirmed) return { status: "declined", action: "promote", request };
+    started?.();
 
     // No Gate-1 here. These exact sources were validated and then compiled by
     // the engine on the attempt that produced the diff -- the refusal was a
@@ -517,7 +530,7 @@ export class TrainingActions {
    * validating first would refuse exactly the case a demote exists to clean up:
    * a construct whose source no longer compiles.
    */
-  async demote(request: TrainingRequest): Promise<TrainingOutcome> {
+  async demote(request: TrainingRequest, started?: () => void): Promise<TrainingOutcome> {
     const token = this.latest.begin();
     const context = this.preflight("demote", request);
     if ("outcome" in context) return context.outcome;
@@ -532,6 +545,7 @@ export class TrainingActions {
     );
     if (!this.latest.isCurrent(token)) return superseded();
     if (!confirmed) return { status: "declined", action: "demote", request };
+    started?.();
 
     let demoted: DurableDemoteBundleResult;
     try {
@@ -630,7 +644,7 @@ export class TrainingActions {
     const cluster = this.deps.cluster();
     if (cluster === undefined) {
       return {
-        outcome: this.error(action, request, "No cluster selected. Pick one in the Clusters view."),
+        outcome: this.error(action, request, NOT_CONNECTED_REFUSAL),
       };
     }
     const engine = this.deps.engine();
@@ -639,7 +653,7 @@ export class TrainingActions {
         outcome: this.error(
           action,
           request,
-          `Not connected to ${cluster.label}. Select the cluster in the Clusters view to connect.`,
+          `Not connected to ${cluster.label}.`,
         ),
       };
     }
@@ -662,7 +676,7 @@ export class TrainingActions {
         outcome: this.error(
           action,
           request,
-          `This file no longer declares "${request.name}". It was renamed or removed since the lens was drawn.`,
+          `"${request.name}" isn't in this file any more. It may have been renamed.`,
         ),
       };
     }
@@ -709,7 +723,7 @@ export class TrainingActions {
           outcome: this.error(
             action,
             request,
-            "The engine rejected the bundle without a per-construct diagnostic.",
+            "The cluster rejected this code without saying where.",
           ),
         };
       }

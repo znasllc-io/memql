@@ -1,41 +1,40 @@
-// The "Before it runs" list for a rebuild (memql#4246).
+// What a rebuild from the checkout will build, and what needs attention first
+// (memql#4246).
 //
-// PURE: the panel gathers the facts, this states them. Every item is a sentence
-// the operator can check, and the one that carries the epic is "Image source".
-// A rebuild moves a cluster off released images and onto ones built from a
-// working tree, and nothing else on the machine announces that -- afterwards
-// the Deployments row simply stops naming a version and starts naming a commit.
-// So the crossing is STATED HERE, before it happens, and its mirror is stated
-// in preflight.ts before an install, upgrade or repair crosses back. Neither
-// direction is silent.
+// PURE: the panel gathers the facts, this states them. It used to be a seven
+// row "Before it runs" checklist, most of it "OK" rows that asked nothing of
+// anybody -- Docker answers, here is the path you already know, a first build
+// takes minutes. Those rows buried the two that matter, so the shape is now:
 //
-// It shares `PreflightItem` with the install checklist rather than defining a
-// second shape, so both render through one `renderPreflight` and a warning
-// cannot come to look like two different things in one extension.
+//   FACTS, which say what will be built: the folder and the commit in it.
+//   NOTICES, only for what is not fine, one sentence each. A notice that makes
+//   the rebuild pointless is BLOCKING, and the page then offers no Rebuild at
+//   all -- an act whose only outcome is a failure is absent, never disabled --
+//   but the fix instead (start Docker and check again; repair the install).
+//
+// THE LANE CROSSING IS STILL SAID BEFORE IT HAPPENS. A rebuild moves a cluster
+// off released images and onto ones built from a working tree, and nothing
+// else announces that; so the first rebuild of a released cluster says so, and
+// its mirror is said by every act that crosses back (state/imageLane.ts).
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 //
 // Refs: #4246 #4195
 
 import type { CheckoutState } from "../install/checkoutState.js";
-import { normalizeNodeList } from "../install/nodeList.js";
 import type { ImageSource } from "../install/receipt.js";
-import { checkoutSkew } from "../version/checkoutSkew.js";
-import { releasedImages } from "./imageLane.js";
-import type { PreflightItem } from "./preflight.js";
+import { checkoutSkew, shortCommit } from "../version/checkoutSkew.js";
 
 export interface RebuildPreflightInputs {
   dockerReachable: boolean;
   checkoutDir: string;
   /** Both files `k3d.dev` itself gates on: a Dockerfile and the local overlay. */
   checkoutIsMemql: boolean;
-  /** Absent when git could not read the checkout -- which is its own line. */
+  /** Absent when git could not read the checkout -- which is its own notice. */
   state?: CheckoutState;
-  /** Comma-separated node types, or "" for all app nodes. */
-  nodes: string;
   /** Which lane set the images last. "" is no evidence, never "released". */
   imageSource: ImageSource | "";
-  /** The release the cluster would return to. Empty renders as "release". */
+  /** The release the cluster would return to. Kept for the record; not said. */
   releasedTag: string;
   /**
    * The commit THIS EXTENSION was packaged from, and whether that build carried
@@ -45,151 +44,109 @@ export interface RebuildPreflightInputs {
   extensionDirty?: boolean;
 }
 
-export function rebuildPreflightItems(i: RebuildPreflightInputs): PreflightItem[] {
-  const items: PreflightItem[] = [];
+/** One fact about what will be built. */
+export interface CheckFact {
+  label: string;
+  value: string;
+  /** The editor's monospace: a path, a commit. */
+  mono?: boolean;
+}
 
-  // Docker first, because it is the one prerequisite whose absence makes every
-  // other line moot -- the build is the first thing the step does.
-  items.push(
-    i.dockerReachable
-      ? { label: "Docker", state: "ok", detail: "The Docker daemon answers." }
-      : {
-          label: "Docker",
-          state: "attention",
-          detail:
-            "Docker is not answering. Start Docker Desktop (or the daemon) before running; " +
-            "the build is the first thing this does.",
-        },
-  );
+/** The fix a notice offers, when the page can do it. */
+export type CheckFix = "checkAgain" | "repair";
 
-  items.push(
-    i.checkoutIsMemql
-      ? {
-          label: "Checkout",
-          state: "ok",
-          detail: `${i.checkoutDir} -- the checkout the install recorded.`,
-        }
-      : {
-          label: "Checkout",
-          state: "attention",
-          detail:
-            `${i.checkoutDir} is not a MemQL checkout (no Dockerfile or local overlay). ` +
-            "Repair the install to clone one.",
-        },
-  );
+/** One thing that is not fine, in one sentence. */
+export interface CheckNotice {
+  tone: "info" | "warn" | "error";
+  line: string;
+  /** What to do about it, when that is not a button. */
+  next?: string;
+  /** The rebuild (or pull) cannot work while this holds: the page withholds the act. */
+  blocking: boolean;
+  fix?: CheckFix;
+}
 
-  // WHAT WOULD BE BUILT. A line that could not be read says so rather than
-  // reporting a clean tree: "clean at 0000000" in front of a build whose
-  // provenance nothing recorded is worse than saying nothing at all.
-  if (i.state === undefined) {
-    items.push({
-      label: "Git state",
-      state: "attention",
-      detail: "git could not read the checkout; what gets built will not be recorded.",
-    });
-  } else {
-    const ref =
-      i.state.ref.kind === "detached" ? "detached HEAD" : `${i.state.ref.kind} ${i.state.ref.name}`;
-    const dirty =
-      i.state.dirtyCount === 0
-        ? "clean"
-        : `${i.state.dirtyCount} uncommitted file${i.state.dirtyCount === 1 ? "" : "s"}`;
-    // deploy/ IS THE ONE PATH WORTH NAMING. A rebuild builds and imports IMAGES;
-    // ArgoCD reconciles the manifests from the checkout's target revision, so an
-    // uncommitted manifest edit is exactly the change a developer would expect
-    // this button to apply and the one it will not.
-    const deploy = i.state.deployDirty
-      ? " deploy/ has edits -- manifests do not ride a rebuild, only images do."
-      : "";
-    items.push({
-      label: "Git state",
-      state: i.state.deployDirty ? "attention" : "ok",
-      detail: `${ref} at ${i.state.commit.slice(0, 7)}, ${dirty}.${deploy}`,
-    });
-  }
-
-  // WORDED FROM WHAT THE RUN WILL BE SENT, not from the raw typing. The two used
-  // to be different rules -- this one tidied "bff, agent" for the sentence while
-  // the plan forwarded it verbatim -- so the checklist blessed a list the script
-  // then refused with exit 2 (install/nodeList.ts).
-  const nodes = normalizeNodeList(i.nodes);
-  items.push({
-    label: "Nodes",
-    state: "ok",
-    detail:
-      nodes === ""
-        ? "all app nodes (the script's default)."
-        : nodes.split(",").join(", ") + ".",
-  });
-
-  // THE LANE CROSSING. Stated when it is a crossing and not when it is not: a
-  // line that appeared on every rebuild would be noise, and noise is what makes
-  // the one that matters unreadable.
-  items.push(
-    i.imageSource === "checkout"
-      ? {
-          label: "Image source",
-          state: "ok",
-          detail: "local already runs checkout-built images; this rebuilds them.",
-        }
-      : {
-          label: "Image source",
-          state: "attention",
-          detail:
-            "This switches local to images built from your checkout. An install, upgrade or " +
-            `repair returns it to ${releasedImages(i.releasedTag)}.`,
-        },
-  );
-
-  // THE SKEW, WHERE THE CONSEQUENCE LANDS (memql#5076). This is the second of
-  // the issue's two tiers -- the first is a quiet fact on the instance page --
-  // and it is here rather than only there because HERE is where an operator is
-  // about to act on the difference.
-  //
-  // The difference is real and it is not a bug: since memql#5056 and
-  // memql#5064 a build from the checkout runs the CHECKOUT's scripts, so the
-  // recipe matches the tree, while the graph documents, the plan functions,
-  // this checklist and the panel are whatever the extension was packaged with.
-  // Both of those issues presented as the product being broken, and both cost
-  // hours, because nothing said the two halves came from two commits.
-  //
-  // IT DOES NOT BLOCK. A checkout ahead of the extension is the normal state of
-  // a from-source install; refusing on it would refuse the ordinary case. The
-  // third tier the issue sketches -- refusing a genuinely incompatible pair --
-  // needs a compatibility contract to check against, and there is not one.
-  items.push(buildProvenanceItem(i));
-
-  items.push({
-    label: "Duration",
-    state: "ok",
-    detail: "A first build takes minutes; later builds reuse Docker's cache.",
-  });
-
-  return items;
+export interface RebuildCheck {
+  facts: CheckFact[];
+  notices: CheckNotice[];
+  /** Whether any notice is blocking. */
+  blocked: boolean;
 }
 
 /**
- * The "which code is driving this" line, shared by the rebuild and the update.
+ * The commit a checkout is on, as a fact: `main @ 3f2a9c1 · 3 uncommitted`.
  *
- * Exported so updatePreflight.ts states it identically rather than composing a
- * second wording -- the same reason version/checkoutSkew.ts owns the sentence.
+ * A tag or branch names the ref; a detached checkout has none and says only
+ * the commit. A clean tree says nothing about uncommitted files.
  */
-export function buildProvenanceItem(i: RebuildPreflightInputs): PreflightItem {
-  const skew = checkoutSkew({
-    extensionCommit: i.extensionCommit,
-    extensionDirty: i.extensionDirty,
-    // The checkout's own HEAD as git reads it NOW, which is the commit the
-    // build will actually use -- not the one the receipt recorded at install
-    // time, which is what the instance page compares and is exactly as stale
-    // as the last install.
-    checkoutCommit: i.state?.commit,
-  });
-  return {
-    label: "Extension",
-    // `unknown` is `attention` for Git state's reason one block up: "cannot
-    // tell you" is something to look at, and reporting it as fine would be the
-    // clean-tree-over-an-unreadable-repo answer that file already refuses.
-    state: skew.state === "same" ? "ok" : "attention",
-    detail: skew.sentence,
-  };
+export function checkoutCommitFact(state: CheckoutState): string {
+  const commit = shortCommit(state.commit);
+  const ref = state.ref.kind === "detached" || state.ref.name === "" ? commit : `${state.ref.name} @ ${commit}`;
+  return state.dirtyCount === 0 ? ref : `${ref} · ${state.dirtyCount} uncommitted`;
+}
+
+/** The notices every build from the checkout shares, rebuild and pull alike. */
+export function buildNotices(i: RebuildPreflightInputs): CheckNotice[] {
+  const notices: CheckNotice[] = [];
+  if (!i.dockerReachable) {
+    notices.push({
+      tone: "error",
+      line: "Docker isn't running.",
+      next: "Start Docker Desktop, then check again.",
+      blocking: true,
+      fix: "checkAgain",
+    });
+  }
+  if (!i.checkoutIsMemql) {
+    // THE SAME TWO FILES `k3d.dev` GATES ON, so this never passes a folder the
+    // run would then refuse -- the one thing a check before a run must not do.
+    notices.push({
+      tone: "error",
+      line: "This folder isn't a MemQL checkout.",
+      next: "Repair the install to download it again.",
+      blocking: true,
+      fix: "repair",
+    });
+  }
+  if (i.state === undefined) {
+    notices.push({ tone: "warn", line: "Couldn't read the folder's git status.", blocking: false });
+  } else if (i.state.deployDirty) {
+    // Manifests do not ride a rebuild, only images do: an edit under deploy/
+    // is the one change a developer expects to see and will not.
+    notices.push({ tone: "warn", line: "Changes under deploy/ aren't applied. Only code is rebuilt.", blocking: false });
+  }
+  if (i.imageSource !== "checkout") {
+    notices.push({
+      tone: "info",
+      line: "The cluster switches to your own build.",
+      next: "Changing version or repairing returns it to released images.",
+      blocking: false,
+    });
+  }
+  // A FACT ONLY WHEN IT MATTERS. The extension and the checkout on different
+  // commits is the NORMAL state for a from-source install; it is said here,
+  // where the consequence lands (the checkout's scripts run), and nowhere else.
+  if (
+    checkoutSkew({
+      extensionCommit: i.extensionCommit,
+      extensionDirty: i.extensionDirty,
+      checkoutCommit: i.state?.commit,
+    }).state === "diverged"
+  ) {
+    notices.push({
+      tone: "info",
+      line: "This extension is from a different commit than your checkout.",
+      next: "The build uses the checkout's own scripts.",
+      blocking: false,
+    });
+  }
+  return notices;
+}
+
+/** Everything the rebuild screen states. */
+export function rebuildCheck(i: RebuildPreflightInputs): RebuildCheck {
+  const facts: CheckFact[] = [{ label: "Source", value: i.checkoutDir, mono: true }];
+  if (i.state !== undefined) facts.push({ label: "Commit", value: checkoutCommitFact(i.state), mono: true });
+  const notices = buildNotices(i);
+  return { facts, notices, blocked: notices.some((n) => n.blocking) };
 }

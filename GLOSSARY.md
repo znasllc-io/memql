@@ -5,8 +5,8 @@ path, or use this detailed reference index. Layout + rules:
 [docs/DOCS_STANDARD.md](docs/DOCS_STANDARD.md).
 
 - **`docs/public/`** — user/developer-facing reference. This is the
-  single source of truth the memql.io site renders, versioned per
-  release. Areas mirror the site sidebar.
+  single source of truth the memql.io site renders: one set per release,
+  the site serving the newest. Areas mirror the site sidebar.
 - **`docs/internal/`** — design rationale (ADRs), active plans, and ops
   runbooks. In-repo only; not published.
 - Root files are repo governance + the docs standard.
@@ -57,7 +57,7 @@ path, or use this detailed reference index. Layout + rules:
 
 ### Build Against It (`build/`)
 - [Audio Streaming](docs/public/build/audio-streaming.md) · [Build Tags](docs/public/build/build-tags.md) · [Plugin SDK](docs/public/build/plugin-sdk.md) · [Building a Pack](docs/public/build/building-a-pack.md) — worked-example developer guide: the `examples/referencepack` teaching pack, and how a STOREFRONT pack under `packs/` ships in the default build and how a shopper writes to one (epic memql#5532)
-- Generated reference (DSL constructs + concept catalog) lands in `docs/public/reference/_generated/` at release time (docs-gen).
+- Generated reference: the concept catalog, rendered from the DSL by `cmd/docs-gen bundle` into each release's docs set as `reference/concepts.md` (never written into `docs/public`). The bundle, its boundary gate and its manifest are [DOCS_STANDARD.md](docs/DOCS_STANDARD.md) section 5.
 
 ### Operate (`operate/`)
 
@@ -73,7 +73,7 @@ path, or use this detailed reference index. Layout + rules:
 - [Node Lifecycle, Graceful Drain & Maintenance Runbook](docs/public/operate/lifecycle-runbook.md) — the explicit node state machine, graceful SIGTERM drain, on-demand maintenance trigger, and the coordinated/ordered rollout driver.
 - [Inbound delivery](docs/public/operate/inbound-delivery.md) — the webhook receiver: per-source allowlists and signature verification for third-party events landing in pure DSL.
 - [Outbound delivery](docs/public/operate/outbound-delivery.md) — staging rows, allowlists, and the drain worker for product-DSL-initiated outbound sends.
-- [Cutting a release](docs/public/operate/release-cutting.md) -- the owner-only control that tags `main` and publishes the GitHub Release the image-build cascade fires on: the two values to seed (`MEMQL_RELEASE_REPO`, `MEMQL_GITHUB_RELEASE_TOKEN`) and why the engine carries no repository default, the `v*` tag protection that bounds a leaked token, the first `dryRun`, what each typed refusal means -- including the half-done `tag_created_release_failed` and the two ways out of it -- and why an image check that ERRORED never becomes a claim that the images are missing.
+- [Cutting a release](docs/public/operate/release-cutting.md) -- the owner-only control that tags `main` and publishes the GitHub Release the image-build cascade fires on: the two values to seed (`MEMQL_RELEASE_REPO`, `MEMQL_GITHUB_RELEASE_TOKEN`) and why the engine carries no repository default, the `v*` tag protection that bounds a leaked token, the first `dryRun`, the prepare pull request that sets `VERSION` before a cut (refused with `version_file_stale` otherwise), what each typed refusal means -- including the half-done `tag_created_release_failed` and the two ways out of it -- and why an image check that ERRORED never becomes a claim that the images are missing.
 - [Deploy-bundle runbook](docs/public/operate/deploy-bundle-runbook.md) -- HISTORICAL: the retired imperative deploy path (deployEngineCluster from the cockpit). Kept for the bundle's phase model and the `v1:cluster:deployment` timeline evidence; the deploy is a digest bump in one overlay plus a merge
 - [The recorded cluster version](docs/public/operate/cluster-version-record.md) -- the `version` key in the shared `clusters.yaml`: why no installed cluster can state its release honestly, why the record is readable with the cluster switched off, the three-state write semantics the version learners depend on, and the rule that a write may never downgrade record quality
 - [The cluster front door](docs/public/operate/front-door.md) — the six host rules and what is behind each, the per-Service backend-protocol constraint that explains `bff` vs `bff-http` and the MCP host, the two TLS regimes -- HTTP-01 naming exact hosts only (memql#4224) and, where the overlay declares a DNS-01 issuer, a second wildcard certificate that finally covers `*.<domain>` (memql#4347) -- and why the OS shell carries an exact rule of its own either way, why a missing Ingress rule fails with a protocol error rather than a 404, why the count must not grow (a site is a row), and the media plane that is permanently separate.
@@ -122,6 +122,7 @@ path, or use this detailed reference index. Layout + rules:
 
 - **`design/`** — ADRs / point-in-time design rationale (`status: historical`), kept for the "why": engine audits, DSL syntax/operator standardization, deployment-v2, authored-automations, the auth threat model, the auto-generated architecture model.
 - **`planning/`** — active multi-phase plans (`status: draft`); deleted when shipped. Includes [roadmap.md](docs/internal/planning/roadmap.md).
+- [Organization email transport: ACS bridge and early Postfix migration](docs/internal/planning/email-transport-migration.md) — ownership, Azure eligibility evidence, guided setup, transport/receive boundaries, cost estimates and migration gates; planned capabilities are distinguished from the current implementation.
 - **`ops/`** — internal runbooks: [DR runbook](docs/internal/ops/dr-runbook.md), [merge queue](docs/internal/ops/merge-queue.md), [ruleset baseline](docs/internal/ops/ruleset-baseline.md) (what `main`'s protection rulesets should be, and what asserts it), tier-4 build graph, safety rollout, blob provisioning, workbench production, the incident records ([the 2026-09-13 hypertable SkipScan outage](docs/internal/ops/2026-09-13-skipscan-connection-exhaustion.md)), the visual-QA records ([views and layouts](docs/internal/ops/2026-08-26-views-layouts-visual-qa.md), [the Build stop's readings](docs/internal/ops/2026-09-03-deployables-build-visual-qa.md)), and [migrations/](docs/internal/ops/migrations/README.md).
 
 ---

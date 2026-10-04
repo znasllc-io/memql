@@ -104,17 +104,26 @@ test("the header and strip escape their titles", () => {
 // colour that ignores the user's editor theme outright.
 const TOKEN_MODULES = new Set(["brandTokens.ts", "palette.ts"]);
 
+/** Every .ts file under a source directory, subdirectories included (src/webview/ui is the kit). */
+function sourcesUnder(dir: string): string[] {
+  return fs
+    .readdirSync(path.join(ROOT, dir), { withFileTypes: true })
+    .flatMap((entry) =>
+      entry.isDirectory() ? sourcesUnder(`${dir}/${entry.name}`) : entry.name.endsWith(".ts") ? [`${dir}/${entry.name}`] : [],
+    );
+}
+
 test("no panel or tree hardcodes a palette hex outside the token modules", () => {
   const offenders: string[] = [];
-  for (const dir of ["src/webview", "src/views"]) {
-    for (const name of fs.readdirSync(path.join(ROOT, dir))) {
-      if (!name.endsWith(".ts") || TOKEN_MODULES.has(name)) continue;
-      const text = fs.readFileSync(path.join(ROOT, dir, name), "latin1");
-      for (const [i, line] of text.split("\n").entries()) {
-        // Hex colors only: 3/6/8-digit sequences in CSS/attribute position.
-        if (/#[0-9a-fA-F]{3}\b|#[0-9a-fA-F]{6}\b/.test(line) && !/^\s*\/\//.test(line)) {
-          offenders.push(`${dir}/${name}:${i + 1}: ${line.trim()}`);
-        }
+  const files = [...sourcesUnder("src/webview"), ...sourcesUnder("src/views")];
+  assert.ok(files.includes("src/webview/ui/kit.ts"), "the sweep reaches the kit");
+  for (const file of files) {
+    if (path.dirname(file) === "src/webview" && TOKEN_MODULES.has(path.basename(file))) continue;
+    const text = fs.readFileSync(path.join(ROOT, file), "latin1");
+    for (const [i, line] of text.split("\n").entries()) {
+      // Hex colors only: 3/6/8-digit sequences in CSS/attribute position.
+      if (/#[0-9a-fA-F]{3}\b|#[0-9a-fA-F]{6}\b/.test(line) && !/^\s*\/\//.test(line)) {
+        offenders.push(`${file}:${i + 1}: ${line.trim()}`);
       }
     }
   }

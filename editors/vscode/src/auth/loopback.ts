@@ -1,3 +1,4 @@
+import { CALLBACK_PATH, LOOPBACK_HOST } from "./loopbackAddress.js";
 // The one-shot loopback listener that catches the OAuth callback.
 //
 // -----------------------------------------------------------------------------
@@ -27,9 +28,21 @@
 // tab pointed at the port -- each is a request this server sees. Resolving on
 // "the first request" would let any of them end the flow with no code at all,
 // so only the callback path resolves; everything else gets a 404 and the
-// listener keeps waiting. The FIRST request on the callback path is served, the
-// flow resolves, and the server closes -- there is no second chance to redeem,
+// listener keeps waiting. The FIRST request on the callback path resolves the
+// flow and the server stops accepting -- there is no second chance to redeem,
 // which is what "one-shot" buys.
+//
+// -----------------------------------------------------------------------------
+// THE BROWSER IS ANSWERED AFTER THE EXCHANGE, NOT BEFORE
+// -----------------------------------------------------------------------------
+//
+// The callback's response is HELD until the flow calls `finish` with how the
+// code exchange went, and then the browser gets "You're signed in" or "Sign-in
+// didn't finish" (loopbackPage.ts). It used to be answered "Signed in" on
+// arrival, before the code had been redeemed, so a refused exchange left the
+// browser claiming a sign-in the editor did not have. A flow that never calls
+// `finish` is covered twice: `close()` answers a held response with the
+// failure page, and a bound (HOLD_LIMIT_MS) answers it if nothing else does.
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 
@@ -37,12 +50,15 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 
 import { AuthFlowError, errorText } from "./errors.js";
+import { loopbackPage, type CallbackOutcome } from "./loopbackPage.js";
+
+export type { CallbackOutcome } from "./loopbackPage.js";
 
 /** The only interface this listener is ever allowed to bind. */
-export const LOOPBACK_HOST = "127.0.0.1";
+
 
 /** The path the callback arrives on. Must match the registered redirect URI. */
-export const CALLBACK_PATH = "/callback";
+
 
 /**
  * How long the listener waits for the callback before giving up.
@@ -59,6 +75,13 @@ export const CALLBACK_PATH = "/callback";
  * longer deadline is a bounded backstop rather than a trap.
  */
 export const DEFAULT_CALLBACK_TIMEOUT_MS = 600_000;
+
+/**
+ * The longest a delivered callback's response is held for the flow's verdict.
+ * The exchange is one POST; anything past this is a flow that will not answer,
+ * and the browser is told the sign-in did not finish rather than left loading.
+ */
+export const HOLD_LIMIT_MS = 60_000;
 
 /** The raw query parameters the callback carried. Interpreting them is flow.ts's job. */
 export interface CallbackParams {
@@ -90,7 +113,17 @@ export interface LoopbackListener {
    * a caller cannot extend it by waiting to await.
    */
   waitForCallback(): Promise<CallbackParams>;
-  /** Closes the server. A still-pending wait rejects as `cancelled`. */
+  /**
+   * Answers the browser that delivered the callback, once the exchange has
+   * settled. Idempotent; a no-op before a callback has arrived.
+   *
+   * Optional so a test double need not implement it; the real listener does.
+   */
+  finish?(outcome: CallbackOutcome): void;
+  /**
+   * Closes the server. A still-pending wait rejects as `cancelled`, and a held
+   * callback response is answered with the failure page.
+   */
   close(): void;
 }
 
@@ -102,30 +135,6 @@ export interface LoopbackOptions {
   /** Aborts the wait -- rejects as `cancelled` and closes the server. */
   signal?: AbortSignal;
 }
-
-// The page the browser lands on. Deliberately tiny and self-contained: it is
-// served from a throwaway loopback port that is gone a moment later, so it can
-// reference no stylesheet, no font and no image.
-const SUCCESS_PAGE = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Signed in to MemQL</title>
-<style>
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#f5f6f8;color:#1a1a1a;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center}
-.card{background:#fff;border:1px solid #e2e4e9;border-radius:10px;padding:2rem;max-width:24rem;margin:1rem;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.06)}
-h1{font-size:1.15rem;margin:0 0 .5rem}
-p{color:#555;line-height:1.5;margin:0}
-</style>
-</head>
-<body>
-<div class="card">
-<h1>Signed in to MemQL</h1>
-<p>You can close this tab and return to your editor.</p>
-</div>
-</body>
-</html>`;
 
 /**
  * startLoopbackListener binds 127.0.0.1 on an ephemeral port and waits for one
@@ -145,6 +154,10 @@ export async function startLoopbackListener(
   let settled = false;
   let timer: NodeJS.Timeout | undefined;
   let abortListener: (() => void) | undefined;
+  // The callback's response, held until `finish` says how the exchange went.
+  let held: ServerResponse | undefined;
+  let holdTimer: NodeJS.Timeout | undefined;
+  let answered = false;
 
   let resolveCallback!: (params: CallbackParams) => void;
   let rejectCallback!: (err: unknown) => void;
@@ -160,7 +173,22 @@ export async function startLoopbackListener(
 
   const server: Server = createServer();
 
-  const teardown = (): void => {
+  // Drops every socket still open. Deferred by one tick so it can never race a
+  // response still flushing, and an optional call because closeAllConnections
+  // only exists from Node 18.2; the extension targets node20, but the cast
+  // says so rather than assuming it. It sweeps a connection that opened and
+  // never sent a complete request, which would otherwise hold the server
+  // handle (and the event loop) open.
+  const dropSockets = (): void => {
+    setImmediate(() => {
+      (server as { closeAllConnections?: () => void }).closeAllConnections?.();
+    });
+  };
+
+  // Stops listening and clears the wait's own bookkeeping. The held response,
+  // if any, is left for `answer` -- dropping its socket here would cut off the
+  // page the person is waiting to see.
+  const stopWaiting = (): void => {
     if (timer !== undefined) {
       clearTimeout(timer);
       timer = undefined;
@@ -171,31 +199,50 @@ export async function startLoopbackListener(
     }
     // Stops accepting immediately, so the port is unusable from here on.
     server.close();
-    // Every response this server writes carries `Connection: close`, so a
-    // socket that has been answered ends on its own. This sweeps the other
-    // case -- a connection opened that never sent a complete request, which
-    // would otherwise hold the server handle (and the event loop) open. It is
-    // deferred by one tick so it can never race a response still flushing, and
-    // it is an optional call because closeAllConnections only exists from Node
-    // 18.2; the extension targets node20, but the cast says so rather than
-    // assuming it.
-    setImmediate(() => {
-      (server as { closeAllConnections?: () => void }).closeAllConnections?.();
+  };
+
+  // Writes the verdict page to the held response and then releases the sockets.
+  const answer = (outcome: CallbackOutcome): void => {
+    if (answered) return;
+    answered = true;
+    if (holdTimer !== undefined) {
+      clearTimeout(holdTimer);
+      holdTimer = undefined;
+    }
+    const res = held;
+    held = undefined;
+    if (res === undefined) {
+      dropSockets();
+      return;
+    }
+    res.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      // No keep-alive: this server is about to stop existing, and a browser
+      // holding the socket open would keep the handle (and the event loop)
+      // alive well past the flow it belongs to.
+      connection: "close",
     });
+    res.end(loopbackPage(outcome), () => dropSockets());
   };
 
   const succeed = (params: CallbackParams): void => {
     if (settled) return;
     settled = true;
+    stopWaiting();
     resolveCallback(params);
-    teardown();
   };
 
   const fail = (err: AuthFlowError): void => {
-    if (settled) return;
+    if (settled) {
+      // Already delivered: the only thing left to close is a held response.
+      answer("failure");
+      return;
+    }
     settled = true;
+    stopWaiting();
     rejectCallback(err);
-    teardown();
+    answer("failure");
   };
 
   timer = setTimeout(() => {
@@ -215,9 +262,9 @@ export async function startLoopbackListener(
       respondNotFound(res);
       return;
     }
-    if (url.pathname !== path) {
+    if (url.pathname !== path || settled) {
       // A favicon fetch, a prefetch, a stray tab. Answered and IGNORED: the
-      // flow is still waiting for the real callback.
+      // flow is still waiting for the real callback (or already has it).
       respondNotFound(res);
       return;
     }
@@ -228,17 +275,11 @@ export async function startLoopbackListener(
       error: q.get("error") ?? undefined,
       errorDescription: q.get("error_description") ?? undefined,
     };
-    res.writeHead(200, {
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": "no-store",
-      // No keep-alive: this server is about to stop existing, and a browser
-      // holding the socket open would keep the handle (and the event loop)
-      // alive well past the flow it belongs to.
-      connection: "close",
-    });
-    // Settle only once the page has flushed: teardown() drops open sockets, so
-    // resolving first would race the response the person is waiting to see.
-    res.end(SUCCESS_PAGE, () => succeed(params));
+    // HELD, not answered: the page says how the exchange went, so it is
+    // written by `finish` once the flow knows (see the header).
+    held = res;
+    holdTimer = setTimeout(() => answer("failure"), HOLD_LIMIT_MS);
+    succeed(params);
   });
 
   const bound = await listen(server).catch((err: unknown) => {
@@ -260,6 +301,10 @@ export async function startLoopbackListener(
     port: bound.port,
     redirectUri: `http://${LOOPBACK_HOST}:${bound.port}${path}`,
     waitForCallback: () => callbackPromise,
+    finish: (outcome) => {
+      // Before a callback there is nobody to answer.
+      if (settled) answer(outcome);
+    },
     close: () => {
       fail(
         new AuthFlowError(
@@ -308,3 +353,5 @@ function listen(server: Server): Promise<{ host: string; port: number }> {
     });
   });
 }
+
+export { CALLBACK_PATH, LOOPBACK_HOST } from "./loopbackAddress.js";

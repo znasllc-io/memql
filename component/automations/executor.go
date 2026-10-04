@@ -359,13 +359,13 @@ func buildEventEnvelope(triggeringEvent *events.Event, triggeredBy, trigger stri
 		// the event's occurrence time on the envelope. `event.actor` is only
 		// present when the emitter stamped Metadata["actor"] -- an absent
 		// actor stays ABSENT (no empty map), so exists(event.actor) checks
-		// stay honest. `event.timestamp` (RFC3339) is distinct from the
+		// stay honest. `event.timestamp` (RFC3339, including fractional seconds) is distinct from the
 		// reserved `now` captured at eval start.
 		if actorId := triggeringEvent.Metadata["actor"]; actorId != "" {
 			envelope["actor"] = map[string]any{"id": actorId}
 		}
 		if !triggeringEvent.Timestamp.IsZero() {
-			envelope["timestamp"] = triggeringEvent.Timestamp.UTC().Format(time.RFC3339)
+			envelope["timestamp"] = triggeringEvent.Timestamp.UTC().Format(time.RFC3339Nano)
 		}
 		return envelope
 	}

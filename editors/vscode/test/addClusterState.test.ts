@@ -21,6 +21,7 @@ function step(id: string, description = id): Step {
   return {
     id,
     script: "install.binary",
+    label: "Working",
     description,
     elevation: "none",
     retained: false,
@@ -258,9 +259,9 @@ test("the plan is on screen before anything runs, every step pending", () => {
   s.apply({
     type: "runStarted",
     steps: [
-      { id: "detect", description: "look at the machine" },
-      { id: "binary", description: "place a tool" },
-      { id: "cluster", description: "create the cluster" },
+      { id: "detect", label: "Checking this computer", description: "look at the machine" },
+      { id: "binary", label: "Installing tools", description: "place a tool" },
+      { id: "cluster", label: "Creating the cluster", description: "create the cluster" },
     ],
   } as ExecEvent);
 
@@ -278,18 +279,19 @@ test("the plan is on screen before anything runs, every step pending", () => {
   assert.equal(s.steps.find((p) => p.id === "cluster")?.state, "pending", "the steps ahead stay ahead");
 });
 
-test("a re-run keeps what the previous attempt established", () => {
-  // Retry re-runs the WHOLE graph, so `runStarted` arrives a second time. If it
-  // reset the list, every step the operator had watched succeed would blink back
-  // to pending -- a display of the event rather than of the machine.
+test("a re-run starts every step again, and remembers what each came to", () => {
+  // Retry re-runs the WHOLE graph, so `runStarted` arrives a second time. Each
+  // step starts from pending, so the progress bar never runs ahead of the run
+  // and then back; the steps that passed re-report as skipped within a second.
+  // What each came to last time is kept beside it for display.
   const s = new AddClusterState();
   s.chooseAction("install");
   s.beginRun();
   const plan = {
     type: "runStarted",
     steps: [
-      { id: "binary", description: "place a tool" },
-      { id: "cluster", description: "create the cluster" },
+      { id: "binary", label: "Installing tools", description: "place a tool" },
+      { id: "cluster", label: "Creating the cluster", description: "create the cluster" },
     ],
   } as ExecEvent;
 
@@ -299,8 +301,13 @@ test("a re-run keeps what the previous attempt established", () => {
   s.retry();
   s.apply(plan);
 
-  assert.equal(s.steps.find((p) => p.id === "binary")?.state, "done");
-  assert.equal(s.steps.find((p) => p.id === "cluster")?.state, "pending");
+  const binary = s.steps.find((p) => p.id === "binary");
+  const cluster = s.steps.find((p) => p.id === "cluster");
+  assert.equal(binary?.state, "pending");
+  assert.equal(binary?.previousState, "done");
+  assert.equal(cluster?.state, "pending");
+  assert.equal(cluster?.previousState, "failed");
+  assert.equal(binary?.label, "Installing tools");
 });
 
 test("every executor status reaches the screen, including preserved", () => {
@@ -642,7 +649,7 @@ test("a typed endpoint wins over the one the domain would compose", () => {
 test("a missing name is refused", () => {
   const s = connectForm({ name: "   ", endpoint: "api.x.example.com:443" });
   assert.equal(s.connectDraft(), undefined);
-  assert.equal(messageFor(s, "name"), "A cluster name is required.");
+  assert.equal(messageFor(s, "name"), "Enter a name for this cluster.");
 });
 
 test("a name already in the registry is refused, and the message names the conflict", () => {
@@ -666,19 +673,24 @@ test("the duplicate check needs a registry, and without one the write-time wall 
 test("an endpoint that names nothing at all is refused", () => {
   const s = connectForm({ name: "staging" });
   assert.equal(s.connectDraft(), undefined);
-  assert.match(messageFor(s, "endpoint") ?? "", /An endpoint is required/);
+  assert.match(messageFor(s, "endpoint") ?? "", /Enter an endpoint/);
 });
 
 test("the endpoint is judged by the dialer, and reports what the dialer said", () => {
   // webSocketUrlFor is the function the connection layer actually calls, so
   // its refusal is the field error -- minus the "cluster \"x\": " prefix it
   // carries for callers with no field to attach a sentence to.
-  const s = connectForm({ name: "staging", endpoint: "https://api.example.com" });
+  const s = connectForm({ name: "staging", endpoint: "ftp://api.example.com" });
   assert.equal(s.connectDraft(), undefined);
   assert.equal(
     messageFor(s, "endpoint"),
-    'endpoint scheme must be ws:// or wss://, got "https://" -- store the gRPC host:port (or an explicit ws(s):// bridge URL), not a general-purpose URL',
+    "use an address like https://api.example.com or api.example.com:443, not ftp://",
   );
+});
+
+test("an https:// address is a front door the dialer accepts", () => {
+  const s = connectForm({ name: "staging", endpoint: "https://api.example.com" });
+  assert.equal(messageFor(s, "endpoint"), undefined);
 });
 
 test("a PAT in the token box is refused by name rather than left to fail at the handshake", () => {
@@ -688,7 +700,9 @@ test("a PAT in the token box is refused by name rather than left to fail at the 
     token: "mql_pat_abcdef",
   });
   assert.equal(s.connectDraft(), undefined);
-  assert.match(messageFor(s, "token") ?? "", /Personal Access Token/);
+  // In the reader's words: no JWKS, no mesh, no bearer (memql#5118 audit).
+  assert.match(messageFor(s, "token") ?? "", /personal access token can't be used here/);
+  assert.doesNotMatch(messageFor(s, "token") ?? "", /JWKS|mesh|bearer|oauth/i);
 });
 
 test("a token that picked up a line break is refused", () => {
@@ -698,13 +712,13 @@ test("a token that picked up a line break is refused", () => {
     token: "eyJhbGciOi\nJSUzI1NiJ9",
   });
   assert.equal(s.connectDraft(), undefined);
-  assert.match(messageFor(s, "token") ?? "", /whitespace/);
+  assert.match(messageFor(s, "token") ?? "", /spaces or line breaks/);
 });
 
 test("a domain given as a URL is refused, and so is one with a space in it", () => {
   const scheme = connectForm({ name: "s", domain: "https://example.com" });
   assert.equal(scheme.connectDraft(), undefined);
-  assert.match(messageFor(scheme, "domain") ?? "", /drop the scheme/);
+  assert.match(messageFor(scheme, "domain") ?? "", /without https:\/\//);
 
   const spaced = connectForm({ name: "s", domain: "staging example.com" });
   assert.equal(spaced.connectDraft(), undefined);
@@ -717,7 +731,7 @@ test("every field is checked, so all the problems arrive at once", () => {
   const s = connectForm({
     name: "staging",
     domain: "https://example.com",
-    endpoint: "https://api.example.com",
+    endpoint: "ftp://api.example.com",
     token: "mql_pat_abcdef",
   });
   s.setRegistry(registry("staging"));
@@ -873,7 +887,7 @@ test("an answer that is not a hostname is refused before anything runs", () => {
   // hostname pattern with an unescaped `.` matches more hosts than intended --
   // neither of which a substring check can get wrong.
   assert.ok(
-    message.includes("URL"),
+    message.includes("without https://"),
     `the refusal must say what is wrong with the answer: ${message}`,
   );
 });
