@@ -281,10 +281,9 @@ query channel pipelineChannelForOwnerByName {
 /// One pipeline's runs of one event, most recently queued first -- what the notify stage reads to learn
 /// whether the run before this one failed, so a notification can say the pipeline RECOVERED. @serverOnly
 /// rather than actor.userId scoping: the reader is the agent replica driving a run, which holds no
-/// person's request, and the question is about the PIPELINE -- every run of it, whoever owns it -- so
-/// an actor.userId conjunct would narrow the answer to one person's runs, and a short answer reads as a
-/// pipeline that never failed. Every status comes back, bounded at 20: the caller takes the newest
-/// COMPLETED run other than its own.
+/// person's request, and the driver's run reads in this namespace (pipelineRunById,
+/// pipelineRunsForPipelineSha) are system reads, so this one is too. Every status comes back, bounded
+/// at 20: the caller takes the newest COMPLETED run other than its own.
 @serverOnly
 @actor
 query run pipelineRunsForPipelineEvent {

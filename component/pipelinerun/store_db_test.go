@@ -391,13 +391,15 @@ func TestAStagedDeliveryIsReadOverRealRows(t *testing.T) {
 // the owner conjunct -- to the owner, under either spelling of their id, and to
 // nobody else; the read-merge keeps what an update does not name and clears
 // what it names empty -- a real secret reference included -- and a stranger's
-// update is refused; the channel writes, the secret-target staging and the
-// by-id status read are server-only, refused a client and admitted with the
-// stamp, and the two stagings land as the secret-target row or the plain row
-// the outbound worker drains; the status read sees what the worker moves and
-// the stage keeps `sent` through a re-stage; a Library file's name is read
-// under its owner and a stranger's borrowed read finds none; and the previous
-// runs of one event come back newest first.
+// update LANDS, because the owner an update names is attribution: ownership of
+// an existing channel is the caller's to prove with an owner-scoped read; the
+// channel writes, the secret-target staging and the by-id status read are
+// server-only, refused a client and admitted with the stamp, and the two
+// stagings land as the secret-target row or the plain row the outbound worker
+// drains; the status read sees what the worker moves and the stage keeps
+// `sent` through a re-stage; a Library file's name is read under its owner and
+// a stranger's borrowed read finds none; and the previous runs of one event
+// come back newest first.
 func TestTheChannelsAndTheOutboxOverRealRows(t *testing.T) {
 	eng := dbEngine(t)
 	store := NewDSLStore(eng)
@@ -522,6 +524,14 @@ func TestTheChannelsAndTheOutboxOverRealRows(t *testing.T) {
 	clientCall := fmt.Sprintf(`mutation createPipelineChannel(channelId: %s, kind: "email", name: "forged")`, langparser.QuoteString("pr6c-forged-"+suffix))
 	if _, err := eng.Execute(signedIn(owner), clientCall); err == nil || !strings.Contains(err.Error(), "server-only") {
 		t.Errorf("a client may not create a channel: %v", err)
+	}
+	// Nor change one, its owner included: the update is server-only too.
+	updateCall := fmt.Sprintf(`mutation updatePipelineChannel(channelId: %s, status: "archived")`, langparser.QuoteString(email.ID))
+	if _, err := eng.Execute(signedIn(owner), updateCall); err == nil || !strings.Contains(err.Error(), "server-only") {
+		t.Errorf("a client may not change a channel, its owner included: %v", err)
+	}
+	if still, _ := store.ChannelForOwnerByName(fresh, owner, "ops2-"+suffix); still == nil || still.Status != "active" {
+		t.Errorf("and the refused update changed nothing: %+v", still)
 	}
 	if err := store.CreateChannel(ctx, Channel{ID: "pr6c-bad-" + suffix, OwnerUserID: owner, Name: "bad-" + suffix, Kind: "sms"}); err == nil {
 		t.Errorf("a kind the concept does not declare was written")

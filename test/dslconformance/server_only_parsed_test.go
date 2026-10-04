@@ -1604,9 +1604,8 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// a client-reachable write would skip them. THE ONE READ is the notify
 		// stage's look at the runs before the one it drives: its reader is the
 		// agent replica driving a run, which holds no person's request, and the
-		// question is about the pipeline -- every run of it, whoever owns it --
-		// so an actor.userId conjunct would narrow the answer to one person's
-		// runs, and a short answer reads as a pipeline that never failed.
+		// driver's run reads in this namespace are system reads, so this one is
+		// too.
 		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineEvent"}: true,
 		{Path: "pipelines/mutations.memql", Name: "createPipelineChannel"}:      true,
 		{Path: "pipelines/mutations.memql", Name: "updatePipelineChannel"}:      true,

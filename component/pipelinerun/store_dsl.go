@@ -660,9 +660,10 @@ func (s *dslStore) UpdateChannel(ctx context.Context, owner, channelID string, p
 
 // StageNotification stages one outbound row as the system actor. A row naming
 // a secret goes through stageOutboundRequestToSecret, which stamps the medium
-// and the secret:<NAME> descriptor itself -- so n.Target is not sent, the row's
-// target being the descriptor and never a URL. Any other row is a plain
-// stageOutboundRequest. An optional field nobody set is omitted.
+// and the secret:<NAME> descriptor itself, so a row naming a secret names no
+// Target (validate refuses one beside it): its target is the descriptor and
+// never a URL. Any other row is a plain stageOutboundRequest. An optional field
+// nobody set is omitted.
 func (s *dslStore) StageNotification(ctx context.Context, n NotificationRequest) error {
 	if err := n.validate(); err != nil {
 		return err
