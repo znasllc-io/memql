@@ -634,12 +634,10 @@ func newHop(t *testing.T) (*Executor, *hopMesh, hopBackend) {
 		}
 	})
 	mesh := newHopMesh(t, cluster, "workbench-a", "workbench-b")
-	e := newTestExecutor(mesh, nil)
-	// Longer than a heartbeat takes to go stale: a stale reading while the
-	// adopting replica waits out the dead one's heartbeat is that wait, and
-	// the lost peer has already been forwarded around.
-	e.stalePatience = 400 * time.Millisecond
-	return e, mesh, cluster
+	// On the executor's fixed clock a stale reading -- the adopting replica
+	// waiting out the dead one's heartbeat -- never forwards the step again;
+	// the tests about a stale re-forward move the clock.
+	return newTestExecutor(mesh, nil), mesh, cluster
 }
 
 // TestExecuteReattachesWhenTheWorkbenchIsLost is Review Focus 2: a workbench

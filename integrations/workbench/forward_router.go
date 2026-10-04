@@ -335,14 +335,14 @@ func selectWorkbenchPeerExcluding(peers []*node.PeerEntry, existingNodeId, exclu
 		if !reachable(p) {
 			continue
 		}
-		id := p.Info.GetNodeId()
-		if exclude != "" && id == exclude {
+		nodeId := p.Info.GetNodeId()
+		if exclude != "" && nodeId == exclude {
 			if excluded == nil {
 				excluded = p
 			}
 			continue
 		}
-		if pinned != "" && id == pinned {
+		if pinned != "" && nodeId == pinned {
 			return p
 		}
 		if anyHealthy == nil {

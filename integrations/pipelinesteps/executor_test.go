@@ -76,7 +76,10 @@ func withClock(e *Executor) *exClock {
 
 // newTestExecutor is an executor on the fixed clock, with every interval
 // small enough for a test and the give-up far enough away that only a test
-// about it reaches it.
+// about it reaches it. No patience measured on the fixed clock ever runs out:
+// a stale or absent status never forwards the step again, however many
+// arrive, so a test about one moves the clock (withClock) and sets the
+// patience it measures.
 func newTestExecutor(fwd Forwarder, fleet FleetRouter) *Executor {
 	e := NewExecutor(exConfig(), fwd, fleet, quietLogger())
 	e.now = func() time.Time { return exNow }
@@ -86,9 +89,6 @@ func newTestExecutor(fwd Forwarder, fleet FleetRouter) *Executor {
 	e.noPeerWait = 5 * time.Millisecond
 	e.noPeerPatience = time.Hour
 	e.callTimeout = 2 * time.Second
-	// Longer than a status interval: a stale reading right after a
-	// re-forward is the adoption still on its way (see the test that pins it).
-	e.stalePatience = 50 * time.Millisecond
 	return e
 }
 
