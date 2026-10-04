@@ -106,9 +106,10 @@ runs. It is the single thing people get wrong, so it is worth stating flatly:
 - One file may hold trained, untrained and drifted constructs **at the same
   time**, and saving it leaves all three exactly as they were.
 
-The editor's status bar reads `3 untrained · 1 drifted` for the active
-document precisely so that this is impossible to miss. It reports only what
-needs attention: a file whose constructs are all trained shows nothing.
+The editor's status bar reads `4 not live` for the active document (its hover
+breaks that down: `3 not on cluster`, `1 differs from cluster`) precisely so
+that this is impossible to miss. It reports only what needs attention: a file
+whose constructs are all live shows nothing.
 
 ---
 
@@ -130,9 +131,9 @@ to the cluster you are connected to.
 `seeded` is distinct from `trained` and the distinction is the point: there is
 nothing to demote on a seeded construct, and no promote will change it.
 
-`staged` is distinct from `trained` for the mirror reason: it is the only state
-with a **Train** action, and collapsing it into `trained` would claim the
-cluster runs something only one person can call.
+`staged` is distinct from `trained` for the mirror reason: its **Promote** is
+what makes a copy only you can call live for everyone, and collapsing it into
+`trained` would claim the cluster runs something only one person can call.
 
 A staged construct you have edited stays `staged` rather than becoming
 `drifted`, and that is deliberate: drift is defined against a **promotion**,
@@ -161,18 +162,21 @@ the bug it is, so the parity gate is not optional.
 
 ## The five actions
 
-Each action is a distinct commitment, and they escalate. They are offered as a
-CodeLens above a construct's signature, beside the Run lens.
+Each action is a distinct commitment, and they escalate. The CodeLens above a
+construct's signature, beside the Run lens, names its state in words (Not on
+cluster, Differs from cluster, Staged · only you, Live, Built in, Edited);
+clicking it opens a quick pick of exactly the actions that state allows, each
+with a line saying what it does.
 
 | Action | What it does | What it commits you to |
 |---|---|---|
-| **Dry-run** | compiles and binds the bundle in an isolated sandbox against a read-only clone of the live registry | nothing. Zero engine mutation; safe against production |
-| **Try in session** | registers the bundle into your own stream-scoped registry, so it is callable by name | this connection only. It is dropped at disconnect, and nobody else ever sees it |
+| **Dry run** | compiles and binds the bundle in an isolated sandbox against a read-only clone of the live registry | nothing. Zero engine mutation; safe against production |
+| **Try in this session** | registers the bundle into your own stream-scoped registry, so it is callable by name | this connection only. It is dropped at disconnect, and nobody else ever sees it |
 | **Stage** | persists the construct and registers it into your own durable tier | yourself, durably. It survives restart and reconnect, and no other caller can reach it |
 | **Promote** | persists the construct, registers it into the shared registry, and broadcasts it to every node | the cluster, durably. It survives restart and is visible to every caller |
 | **Demote** | the inverse of stage or promote, whichever the construct is | withdrawing it. For a concept, see the retire rule below |
 
-Two properties of **Try in session** matter enough to state separately,
+Two properties of **Try in this session** matter enough to state separately,
 because mistaking it for a promote is the most expensive confusion available
 here:
 
@@ -181,18 +185,18 @@ here:
   simply gone, and the next call by that name resolves to the deployed
   construct instead. A tool that re-runs across a reconnect has to re-inject.
 
-**Stage is the durable alternative to Try in session**, and it is the answer to
+**Stage is the durable alternative to Try in this session**, and it is the answer to
 that silent loss: same owner-scoping, same "nobody else sees it", and it does
-not die with the connection. Reach for Try in session when you want a
+not die with the connection. Reach for Try in this session when you want a
 throwaway; reach for Stage when you would be annoyed to lose it.
 
-**Training a staged construct is Promote.** The lens over a staged construct
-labels it *Train (make it live for everyone)*, because that is the consequence,
-but there is no separate operation on the wire and no separate command: the
-engine sees the construct is staged for you and flips the same persisted row
-rather than writing a second one. One construct, one lifecycle, one row.
+**Training a staged construct is Promote.** The quick pick over a staged
+construct describes Promote as *Make it live for everyone*, because that is the
+consequence, but there is no separate operation on the wire and no separate
+command: the engine sees the construct is staged for you and flips the same
+persisted row rather than writing a second one. One construct, one lifecycle, one row.
 
-**Promote and demote are owner-only.** Dry-run, try-in-session and **stage** are
+**Promote and demote are owner-only.** Dry run, try in this session and **stage** are
 owner-or-developer. That asymmetry is deliberate, and stage sits on the lower
 side of it for the reason the tier exists: a session definition affects one
 stream, a stage affects one person, and a promotion affects the cluster.

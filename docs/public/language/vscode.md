@@ -59,11 +59,13 @@ themes take precedence. See the [appearance reference](../../../editors/vscode/R
 
 1. Open [the reading-list example](../../../examples/reading-list/reading.memql)
    in a folder. Try completion and hover; read any diagnostics before connecting.
-2. To run it, trust the workspace and choose **MemQL: Add Cluster**. Enter an
-   existing cluster's domain and sign in, or choose local installation on a
-   supported host. Docker is needed for a local cluster, not for offline editing.
-3. Select the cluster. **Constructs** shows definitions, **Data** shows authorized
-   rows, and a runnable declaration's CodeLens opens its argument form.
+2. To run it, trust the workspace and choose **MemQL: Add Cluster**. Choose
+   **Connect to a cluster** and enter an existing cluster's domain, then press
+   **Sign in**; or choose **Install MemQL on this computer** on a supported
+   host. Docker is needed for a local cluster, not for offline editing.
+3. Click the cluster in the **Clusters** view to use it. **Constructs** shows
+   definitions, **Data** shows authorized rows, and a runnable declaration's
+   CodeLens opens its argument form.
 4. Follow [Your first MemQL program](first-program.md) to add and query a row.
 
 ## What each action changes
@@ -80,7 +82,7 @@ themes take precedence. See the [appearance reference](../../../editors/vscode/R
 See [training](training.md) for seeded, trained, staged, and drifted states;
 [runtime panel](vscode-runtime-panel.md) for connection and execution details;
 and [MemQL OS](../operate/memql-os.md) for the browser workspace opened by
-**Open Console**.
+**Open MemQL OS**.
 
 The rest of this page is technical reference for the language server and its
 packaging. The [extension guide](../../../editors/vscode/README.md) provides a
@@ -183,8 +185,8 @@ under development.
   workspace cannot redirect it -- and a workspace-scoped value is refused
   *out loud*, with a warning naming the setting, rather than silently ignored.
   When no binary resolves at all, only the language features are lost: the
-  runtime surface (Clusters / Concepts / Runs) is registered independently and
-  keeps working.
+  runtime surface (the Clusters, Deployments, Constructs, Data and Runs views)
+  is registered independently and keeps working.
 
 ## Baseline grammar and language configuration (generated)
 

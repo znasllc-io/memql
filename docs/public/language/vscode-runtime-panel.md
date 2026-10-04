@@ -25,15 +25,16 @@ leaves to a human.
   completion, hover, signature help) work in an untrusted workspace; the
   runtime panel does not. It reads credentials and opens a network
   connection, which a malicious workspace must not be able to trigger.
-- A cluster in `~/.memql/clusters.yaml` with an endpoint and an
-  identity-issued JWT access token. A Personal Access Token does not work
-  here and cannot -- see [Authentication](#authentication) below. If there is
-  no cluster yet, the **+** opens the add-cluster flow, which offers local installation (see
+- A cluster in `~/.memql/clusters.yaml`, and a sign-in to it. **MemQL: Add
+  Cluster** writes the first from a name and a domain, and **Sign In** gets the
+  second through your browser; nothing needs editing by hand. A Personal Access
+  Token does not work here and cannot -- see [Authentication](#authentication)
+  below. If there is no cluster yet, the **+** opens the Add a cluster page,
+  which also installs one locally (see
   [Installing a local cluster](#installing-a-local-cluster)).
 
-For normal setup, use **Add Cluster** and **Sign In**; the editor discovers
-endpoints and obtains tokens for you. The registry/token details below are
-reference for troubleshooting and migration, not prerequisites you must hand-edit.
+The registry and token details below are reference for troubleshooting and
+migration, not prerequisites you must hand-edit.
 
 ## Clusters
 
@@ -41,22 +42,45 @@ The panel reads the same `~/.memql/clusters.yaml` the MemQL Cockpit uses,
 so a cluster added in either tool appears in both. The file is watched:
 an external edit refreshes the view.
 
-Click a cluster to make it the working cluster. The selection persists to
-`selected_cluster`, so the cockpit resumes on the same cluster.
+Click a cluster to use it: it connects, or, when it is already connected or
+needs a sign-in, opens its page. The selection persists to `selected_cluster`,
+and the cluster in use is marked on its row. Each row says its state in a word
+-- Connected, Sign in, Connecting, Not running (a local cluster), Can't reach,
+Not set up -- beside an icon:
 
 | Icon | Meaning |
 |---|---|
 | Filled green circle | Connected |
-| Spinner | Connecting |
-| Red error icon | The cluster is the problem -- unreachable, or the connection died |
+| Spinner | Connecting, or retrying a dropped connection |
+| Red error icon | The cluster is the problem -- unreachable, or the connection died and the retries stopped |
 | Yellow key | The CREDENTIAL is the problem -- expired, missing, or the wrong class |
-| Yellow warning | Not configured -- no endpoint |
+| Yellow warning | Not set up -- no address |
+| Filled circle | The cluster in use, not connected yet |
 | Hollow circle | Configured, not connected |
 
 The key and the red dot are deliberately different pictures. "Your token
 ran out" and "the cluster went away" have completely different next
 actions, and rendering both as a red dot made the first one unreadable
 (memql#3385).
+
+Each row carries one inline act, the next thing to do in its state: **Sign in**
+when it needs a sign-in, **Open MemQL OS** when it is connected. Everything else
+is in the row's context menu, by state: Show Cluster Details, Open MemQL OS,
+Sign In, Sign In With a Code, Create Owner Passkey (a first run on a local
+cluster), Disconnect, Sign Out, Edit Cluster, and, in a group of its own, Remove
+Cluster From List.
+
+**The cluster page** (**Show Cluster Details**) shows the address, MemQL OS,
+whether the cluster is installed on this computer, and who you are signed in as
+while connected. Its bar carries the state in words and the acts legal from it:
+**Sign in** (with **Sign in with a code**) when a sign-in is needed, **Open
+MemQL OS** when connected, **Retry** and **Repair** when a local cluster is not
+running. **Edit** and **Remove from list** sit at its head.
+
+**The connection comes back on its own.** The cluster in use is connected again
+when a window opens, whenever a stored session can do it, and a dropped
+connection is retried a few times over about two minutes before the row says
+it cannot reach the cluster and a notification offers **Reconnect**.
 
 The **+** in the view title opens the **Add a cluster** page. It is a page
 and not a menu: what belongs on it depends on what is already on this
@@ -73,29 +97,37 @@ shared.
 
 ### Authentication
 
-The panel dials with the `token` field, which must hold an
-**identity-issued JWT access token** -- the `access_token` from
-`POST <identity>/oauth/token`.
+**Sign In** is one click from every place that says it is needed: the row, the
+cluster page and the notification. It signs in as the editor's own built-in
+client and opens your browser; when MemQL OS is already signed in there, it
+finishes without typing. A remote window, or a host with no browser, uses a
+short code you approve on another device, and after 30 seconds without the
+browser coming back the editor offers **Use a code instead** beside it.
+[Connecting an Editor](../operate/auth/connecting-editors.md) covers both
+flows and the built-in client.
+
+The panel dials with an **identity-issued JWT access token** -- the
+`access_token` from `POST <identity>/oauth/token`.
 
 **A Personal Access Token does not work here, and cannot.** PAT
 verification is a database lookup wired only into the identity binary, so
 every mesh node (bff, agent, planner, workbench) rejects an
 `mql_pat_...` bearer *before* looking anything up. The panel detects one
-in the `token` field and refuses it by name rather than letting it fail as
-an unexplained handshake error (memql#3383).
+and refuses it by name rather than letting it fail as an unexplained
+handshake error (memql#3383).
 
 Access tokens are short-lived -- identity issues them with a 900-second
-TTL. Set `refresh_token` alongside the token and the panel renews it
-itself: proactively before each connect, and in place on a live stream via
-the SDK's re-auth hook, so a long session never has to be re-credentialed
-by hand (memql#3385).
+TTL. The panel renews them itself with the refresh token: proactively before
+each connect, and in place on a live stream via the SDK's re-auth hook, so a
+long session never has to be re-credentialed by hand (memql#3385).
 
-The refresh token is a 30-day credential, so the panel does not leave it
-in `clusters.yaml`. The `refresh_token` key is an **ingest path only**: on
-the first successful exchange the rotated token is moved into VS Code's
-`SecretStorage` and the plaintext key is deleted from the file. The access
-token stays in the file, because it is short-lived and because the MemQL
-Cockpit shares this registry and needs to see it.
+**The editor keeps its credentials in VS Code's `SecretStorage`**, never in
+`clusters.yaml`: the access token, the 30-day refresh token, the expiry, and
+the client the refresh token was issued to, which it presents on refresh. A
+`token` or `refresh_token` key in the file (pasted by hand, or left by an older
+extension) is an **ingest path only**: it is used, and moves into
+`SecretStorage` at the first refresh, leaving the file. The Cockpit keeps its own
+sign-in, and signing out of the editor leaves it alone.
 
 A cluster entry therefore looks like this:
 
@@ -103,92 +135,94 @@ A cluster entry therefore looks like this:
 clusters:
   - name: local
     domain: memql.localhost
-    endpoint: api.memql.localhost:443
+    endpoint: api.memql.localhost:443          # or https://api.memql.localhost
     issuer: https://identity.memql.localhost   # optional; derived from domain
-    client_id: cockpit                       # optional
-    token: <the access_token from /oauth/token>   # REQUIRED. A JWT, not a PAT.
-    refresh_token: <ingest only -- moved to SecretStorage on first use>
     local: true
 selected_cluster: local
 ```
 
-`issuer` is where the refresh exchange is POSTed. When it is absent the
-panel derives `https://identity.<domain>` (or the `identity.` sibling of a
-`api.<host>` endpoint); a cluster with neither is told which field to
-supply rather than having a host guessed for it.
+`endpoint` may be a bare `host:port` or an `https://` address naming the same
+front door (the Cockpit writes the local cluster that way). `issuer` is where
+the refresh exchange is POSTed. When it is absent the panel derives
+`https://identity.<domain>` (or the `identity.` sibling of a `api.<host>`
+endpoint); a cluster with neither is told which field to supply rather than
+having a host guessed for it. A `client_id` in an entry belongs to the tool
+that wrote it (the Cockpit writes `cockpit`), and the editor never signs in or
+refreshes with it.
 
 ## Cluster lifecycle
 
-Four verbs, and they live in **two views** since memql#3733. Deployments owns
+Four verbs, in two places. The Add a cluster page and the Deployments view own
 what changes this machine; Clusters owns which clusters you can reach. Two of
 the four sound alike and are deliberately kept apart.
 
 | Action | Where it lives | What it touches |
 |---|---|---|
-| **Create deployment** | Deployments, on the instance row; also the Clusters view's title menu and its zero-cluster welcome (memql#4195) | On a machine with nothing installed, the full install graph. On one that has a cluster, a move to another release tag. |
-| **Repair** | Deployments, on the local instance row; also the Clusters view's title menu | Re-runs the install. Every step verifies before it acts and skips what is already satisfied, so a repair is the install graph and not a second one -- and so is a deployment to another tag. |
-| **Remove** | Clusters, the trash can beside a row, inline | Drops the registry entry, the stored credential, and the live connection. Nothing on the machine is touched, and for a local cluster the confirmation says so and names Deployments as where to uninstall it. |
-| **Uninstall** | Deployments, on the local instance row | Reverses the install receipt: the k3d cluster, the hosts-file block, the mkcert CA, the pinned tools. |
+| **Install Local Cluster...** | The Add a cluster page (**Install MemQL on this computer**); the Clusters and Deployments title menus and welcomes when no local cluster is present | The full install graph |
+| **Repair Local Cluster** | The Add a cluster page; the Clusters and Deployments title menus; the cluster page when a local cluster is not running | Re-runs the install. Every step verifies before it acts and skips what is already satisfied, so a repair is the install graph and not a second one -- and so is **Change Version...**, which moves an installed cluster to another release tag. |
+| **Remove Cluster From List** | Clusters, the last group of a row's context menu; **Remove from list** on the cluster page | Drops the registry entry, the stored credential, and the live connection. Nothing on the machine is touched, and for a local cluster the confirmation says so. |
+| **Uninstall Local Cluster...** | The Add a cluster page; the Deployments title menu with the local cluster selected | Reverses the install receipt: the k3d cluster, the hosts-file block, the downloaded MemQL files, and whichever shared tools you switch on. |
 
-**Registering a cluster** is the remaining job of the Clusters **+**: a remote
-one through its form, and a local one that is already on the machine through
-*Connect to the local cluster*, which composes the entry from what the install
-recorded and asks for nothing.
+**Registering a cluster** is the other job of the Clusters **+**: a remote
+one through **Connect to a cluster**, and a local one that is already on the
+machine through **Connect to it**, which composes the entry from what the
+install recorded and asks for nothing.
 
 **Remove and Uninstall are different commands on purpose.** Remove is a
 routine, reversible act of editing a list: the cluster keeps running, its
-data is untouched, and adding it back is a matter of supplying its endpoint
-and a credential again. Uninstall takes a cluster off the machine, and there
-is no undo -- a k3d cluster that has been deleted is gone with everything in
-its database. Folding both into one action that then asks which you meant
-would put the irreversible one click away from the routine one, so they are
-separate commands with separate labels, separate menus and separate
-confirmations. Remove confirms with a modal whose second line says what is
-*not* happening; Uninstall confirms against an itemised dry run.
+data is untouched, and adding it back is a matter of supplying its domain and
+signing in again. Uninstall takes a cluster off the machine, and there is no
+undo -- a k3d cluster that has been deleted is gone with everything in its
+database. Folding both into one action that then asks which you meant would put
+the irreversible one click away from the routine one, so they are separate
+commands with separate labels, separate menus and separate confirmations.
+Remove confirms with a modal whose second line says what is *not* happening;
+Uninstall confirms on its own page.
 
-Uninstall is contributed only on the Deployments local-instance row, and never
-as an inline icon. It is not on any Clusters row at all, so aiming at the trash
-can beside a cluster cannot land on it -- they are in different views.
+Uninstall is never an inline icon, and it is not on any Clusters row at all, so
+aiming at a cluster's context menu cannot land on it.
 
-**The uninstall preview is the confirmation.** Before anything is removed
-the page lists every artifact the receipt names, what will happen to it, and
-what removing it will ask of you -- a step needing elevation says so before
-you consent rather than surprising you with a password prompt mid-run.
-Anything the install *found* rather than created is listed as preserved and
-is not touched: an mkcert CA that predated the install belongs to the
-machine, not to MemQL, and guessing otherwise would break every other
-locally-trusted certificate on it.
+**The uninstall page is the confirmation.** Before anything is removed it
+lists, under **Will be removed**, every artifact the receipt names and which of
+them will ask for your password, so a step needing elevation says so before you
+consent rather than surprising you with a password prompt mid-run. The shared
+tools -- k3d, kubectl, the local certificate authority and mkcert -- are
+switches under **Also remove**, all off. Anything the install *found* rather
+than created is listed as **Kept** and is not touched: an mkcert CA that
+predated the install belongs to the machine, not to MemQL, and guessing
+otherwise would break every other locally-trusted certificate on it.
+
+A cluster this editor did not create -- one brought up with `make up`, or one an
+install adopted -- is kept too, unless you turn on **Delete the cluster's
+data** and type `delete memql data`. Only then does the button read
+**Uninstall and delete data**. That is the one removal of something MemQL did
+not make, and the only one behind a phrase.
 
 ## Installing a local cluster
 
-**The Deployments view is the supported path.** Open **Deployments** and press
-**Create deployment** on the `local` row -- which is there whether or not
-anything is installed, reading `not installed` when nothing is. (Before
-memql#3733 this was filed under the Clusters **+**, as a branch of "add a
-cluster". Installing MemQL on a machine and registering a connection to one are
-different acts with different failure modes, and filing the first under the
-second made the destructive one an incidental branch of the benign one.) The page collects what an install
-needs before any work starts -- the domain, who owns the cluster, and which AI
-provider the key belongs to plus where that key is -- because a wizard that
-stops to ask a question nine minutes in is a wizard people abandon. The
-provider is a **choice** rather than a box: `anthropic` and `openai` are what
-the installer can verify a key against, and it is pre-answered, so an operator
-with no preference accepts the defaults and types four things. It then runs the install graph step by step, with
-each step's state visible and each failure carrying the exit status and the
-script's own stderr rather than a summary of it. A failed step can be retried
-in place; cancelling still leaves a valid receipt, so a cancelled install is
-still uninstallable. Where several steps in one wave fail -- which the executor
-allows deliberately, so you see every failure rather than the first one and a
-shrug -- each is explained on its own terms, because the exit codes ask for
-genuinely different things: a refusal is the script protecting something, a
-missing prerequisite is something to go and install.
+**MemQL: Install Local Cluster...**, or **Install MemQL on this computer** on
+the Add a cluster page, opens the install form. It collects what an install
+needs before any work starts -- your name and email for the owner account, and
+under **More options** the domain and the version -- because a wizard that stops
+to ask a question nine minutes in is a wizard people abandon. **Checks** below
+the form say whether the installer is ready and whether your password will be
+needed. **Install** asks for that password once, before anything runs;
+dismissing the prompt runs nothing.
 
-Whatever the operator types, what reaches the install is a **file** and never
-a command-line argument. Process arguments are world-readable in `ps`, so a
-`--provider-key` flag would publish the key to every process listing on the
-machine for as long as the install ran. That is why the CLI below takes
-`--provider-key-file` and there is deliberately no flag that carries the key
-itself.
+The run is one progress screen: the MemQL mark, a bar that only moves forward
+(weighted by how long each step usually takes), the running step in a few words
+("Creating the cluster", "Starting services 5 of 9"), `Step n of m · m:ss`, and
+**Show logs** for the live log, each step's lines under its label, with
+**Copy** and **Open in Output**. **Cancel** stops after the current step, and
+**Resume** carries on; a cancelled install still leaves a valid receipt, so it
+is still uninstallable. A failed step turns the bar red and names the step; one
+notice says what the script said and what to do, with the fix as a command you
+can **Run in terminal**, and the log opens at that step. Where several steps
+fail -- which the executor allows deliberately, so you see every failure rather
+than the first one and a shrug -- each is explained on its own terms, because
+the exit codes ask for genuinely different things: a refusal is the script
+protecting something, a missing prerequisite is something to go and install.
+**Retry** appears once every other step has finished.
 
 **The CLI is the scripted alternative, and it is not deprecated.** For CI, an
 unattended provisioning job, or any situation with no editor in it, the same
@@ -197,7 +231,8 @@ install runs from a terminal:
 ```bash
 cd editors/vscode
 npm run install-cli -- install --domain=<domain> --owner-email=<email> \
-  --provider-key-file=<path>
+  --owner-first-name=<first> --owner-last-name=<last>
+npm run install-cli -- repair
 npm run install-cli -- uninstall --receipt=<path>
 ```
 
@@ -356,7 +391,7 @@ Executing constructs from a CodeLens or from the **Constructs** catalog,
 running automations with a step trace, and driving deployments from the
 **Deployments** view have since
 landed alongside the views above. (Deployments replaced the Cluster tab in
-memql#3733: topology is cluster state and belongs to the console, while what
+memql#3733: topology is cluster state and belongs to MemQL OS, while what
 you operate and what you can reach belong here. The extension's README states
 that boundary and the table it produces.) Each has its own section in the
 [manual verification checklist](vscode-runtime-panel-verification.md),

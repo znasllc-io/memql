@@ -64,12 +64,12 @@ Everything else, without asking beyond one password prompt:
 
 | What | Where it goes | Removed on uninstall? |
 |---|---|---|
-| k3d, kubectl, mkcert | `~/.memql/bin/` | Only if you tick it -- general tools |
+| k3d, kubectl, mkcert | `~/.memql/bin/` | Only if you switch it on -- general tools |
 | The NSS tools (`certutil`) | your package manager | **No** -- see below |
-| A local certificate authority | mkcert's `CAROOT` | Only if you tick it, and only if MemQL created it |
+| A local certificate authority | mkcert's `CAROOT` | Only if you switch it on, and only if MemQL created it |
 | `api.memql.localhost` etc. in `/etc/hosts` | a marked block | Yes, always -- MemQL put it there |
 | The MemQL checkout | `~/.memql/src/` | Yes, always |
-| The k3d cluster | Docker | Only if MemQL created it, or if you tick the data box |
+| The k3d cluster | Docker | Only if MemQL created it, or if you turn on **Delete the cluster's data** |
 
 ### An uninstall is not a data reset
 
@@ -81,10 +81,12 @@ rebuild and uninstall rather than Install.
 So **uninstall followed by install does not clear a database.** The install
 adopts the cluster it finds, exactly as it did the first time.
 
-To actually remove the cluster and everything in it, tick **Also delete the
-cluster and its data** on the uninstall form and type `delete memql data` in the
-field beside it. It is the only thing in the wizard that removes an artifact
-MemQL did not create, and nothing else on the form asks for a phrase.
+To actually remove the cluster and everything in it, turn on **Delete the
+cluster's data** on the **Uninstall MemQL** page and type `delete memql data`
+in the field beneath it; the button then reads **Uninstall and delete data**.
+The same switch is how a cluster you brought up with `make up` comes off the
+machine from the editor. It is the only thing in the wizard that removes an
+artifact MemQL did not create, and nothing else on the page asks for a phrase.
 
 `make up-refresh` is the same act from the repository, for a cluster you brought
 up yourself
@@ -95,14 +97,15 @@ up yourself
 Three of those steps need root: the hosts-file block, trusting the certificate
 authority, and installing the NSS tools.
 
-**One prompt, in the editor.** The wizard asks once, in a VS Code input box,
-before anything runs, and serves the answer to each of those three steps. It has
+**One prompt, in the editor.** The wizard asks once, in a VS Code input box
+titled **MemQL needs your password**, before anything runs, and serves the
+answer to each of those three steps. It has
 to ask on their behalf because `sudo` caches an authentication per terminal --
 or, with no terminal, per parent process -- and each step is its own process, so
 nothing they do can share one prompt between them.
 
-Dismissing the box does not stop the run. The steps that need root refuse and
-hand you the exact command to run in a terminal; the rest proceed.
+Dismissing the box cancels: nothing runs, and you are back on the form with
+what you typed. A password refused three times does the same, and says so.
 
 **Running a step yourself instead** -- from a terminal, by hand -- gets your
 desktop's own password dialog, or a terminal prompt. Only the wizard's own runs
@@ -137,9 +140,10 @@ reason attached.
 ## What an uninstall does
 
 MemQL's own artifacts go without being asked about: the cluster, the checkout,
-the hosts block, the receipt. The general tools are offered **unticked** -- k3d,
-kubectl, mkcert and the local CA -- with a note on each saying what else it is
-good for. A certificate authority that predates the install is refused outright
-even if you tick it, because the receipt records that MemQL did not create it.
+the hosts block, the receipt. The general tools are offered as **switches, all
+off** -- k3d, kubectl, the local CA and mkcert -- with a note on each saying what
+else it is good for; mkcert can only be switched on once the CA is. A
+certificate authority that predates the install has no switch at all: it is
+listed as kept, because the receipt records that MemQL did not create it.
 
 Refs: memql#3566 memql#3562 memql#3560
