@@ -20,7 +20,8 @@ import {
   type LogScope,
 } from "../../logs/filters";
 import { LogDetail } from "../../logs/LogDetail";
-import { LogLine, ROW_HEIGHT } from "../../logs/LogLine";
+import { LogLine } from "../../logs/LogLine";
+import { useLogRowLayout } from "../../logs/useLogRowLayout";
 import { conceptWord } from "../../logs/rows";
 import { TEXT_DEBOUNCE_MS, useDebouncedValue } from "../../logs/useDebouncedValue";
 import { useLogSearch, useLogSources } from "../../logs/useLogSearch";
@@ -103,6 +104,7 @@ export function SearchSection({
   const sources = useLogSources(bounds, bounds === null ? "" : `search:${windowKey}`);
 
   const selected = selectedId === "" ? undefined : search.rows.find((row) => row.id === selectedId);
+  const layout = useLogRowLayout(settings.density);
   const narrowed = isNarrowed(filters);
   const chips: RefineChip[] = constraintsOf(filters).map((c) => ({
     id: c.id,
@@ -206,10 +208,10 @@ export function SearchSection({
             ) : null
           ) : (
             <>
-              <div className="os-logs-list">
+              <div className="os-logs-list" ref={layout.listRef} data-stacked={layout.stacked || undefined}>
                 <WindowedList
                   rows={search.rows}
-                  rowHeight={ROW_HEIGHT[settings.density]}
+                  rowHeight={layout.rowHeight}
                   renderRow={(row) => <LogLine row={row} now={now} onSubject={narrowTo} />}
                   rowId={(row) => row.id}
                   selectedId={selectedId}

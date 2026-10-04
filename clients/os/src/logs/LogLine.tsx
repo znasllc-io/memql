@@ -8,8 +8,15 @@ import { attrsInline, conceptWord, levelWord, type LogRow } from "./rows";
 // instant on `title`; the level WORD, coloured only for warn and error and
 // muted otherwise -- colour is never the only carrier; the component; the
 // message in the mono voice; the attributes inline as `key=value`, muted,
-// capped at forty percent of the row; and, when the line is about something,
-// a small quiet mark at the row end that narrows to it.
+// capped at forty percent of the row and the FIRST thing to give way when the
+// row is short; and, when the line is about something, a small quiet mark at
+// the row end that narrows to it.
+//
+// IN A NARROW LIST THE LINE TAKES TWO ROWS (R40, epic memql#5478): time,
+// level, component and the mark, then the whole message beneath them. One line
+// could not hold the fixed cells and a readable message there, and the message
+// is the line. The inline attributes are left to the line's detail, which
+// lists every one of them (useLogRowLayout says when).
 //
 // No badge, no per-row border, no arrival ring: a log is nothing but
 // arrivals, and a row that announced itself would be a list that never
@@ -23,6 +30,19 @@ import { attrsInline, conceptWord, levelWord, type LogRow } from "./rows";
 /** Row heights per density. The windowed list and the stylesheet both read
  *  these numbers; they must agree or the slice drifts off the scrollbar. */
 export const ROW_HEIGHT = { comfortable: 30, compact: 22 } as const;
+
+/** The same rows, stacked on two lines in a narrow list
+ *  (`.os-logs-list[data-stacked]` in the stylesheet). */
+export const STACKED_ROW_HEIGHT = { comfortable: 48, compact: 40 } as const;
+
+/** The list width below which one line cannot hold the fixed cells and a
+ *  readable message, per density. MEASURED in a browser with the brand fonts:
+ *  time, level and component (49 + 53 + 121px comfortable; 45 + 49 + 111px
+ *  compact), the subject mark at a long word ("packageDeployment", 128px), a
+ *  32ch message (230px in the mono voice at 12px; 211px at 11px), five gaps
+ *  (10px; 8px), the row's padding and rule (20px), the list's border (2px)
+ *  and a classic scrollbar (16px). */
+export const STACK_BELOW = { comfortable: 672, compact: 624 } as const;
 
 export function LogLine({
   row,

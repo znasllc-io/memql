@@ -8101,20 +8101,31 @@ a.os-button {
   white-space: nowrap;
   color: var(--os-muted);
 }
+/* The message is sized by its own length and is the only cell in the row
+ * that can shrink, so it is cut only when the row has nothing else to give:
+ * past that it keeps a readable minimum, 32 characters of its own mono voice
+ * -- a one-line row is only ever as narrow as STACK_BELOW
+ * (src/logs/LogLine.tsx) allows, which was measured to hold it beside the
+ * fixed cells. */
 .os-logs-message {
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 0 1 auto;
+  min-width: 32ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 /* Inline attributes take at most forty percent of the row: they are the
  * quiet half, and a line whose attributes crowded out its message would
- * read backwards. */
+ * read backwards. So they take only what the message leaves: their basis is
+ * nothing and they grow into the remainder, which a short row hands them
+ * empty -- they truncate, then vanish, before the message loses a
+ * character. With room to spare the auto margin seats their forty-percent
+ * block against the subject mark, where a wide row has always put it. */
 .os-logs-attrs {
-  flex: 0 1 40%;
+  flex: 1 1 0;
   min-width: 0;
   max-width: 40%;
+  margin-left: auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -8123,6 +8134,11 @@ a.os-button {
 }
 .os-logs-attrs:empty {
   display: none;
+}
+/* A line with no attributes still ends at the row's edge: the message does
+ * not grow, so the mark is pushed there. */
+.os-logs-attrs:empty + .os-logs-subject-cell {
+  margin-left: auto;
 }
 .os-logs-subject-cell {
   flex: none;
@@ -8155,6 +8171,33 @@ a.os-button {
   gap: 8px;
   font-size: var(--os-text-xs);
 }
+
+/* ---- the stacked row (R40, epic memql#5478) ----
+ *
+ * A list narrower than STACK_BELOW cannot hold the fixed cells and a readable
+ * message on one line, so the row takes two: time, level, component and the
+ * subject mark, then the whole message at full width. The list says so as
+ * `data-stacked`, from the same measurement that tells the windowed list the
+ * taller STACKED_ROW_HEIGHT (src/logs/useLogRowLayout.ts) -- a container query
+ * here would restyle rows the list still spaced as one line. The inline
+ * attributes go: the line's detail lists every one of them and opens from the
+ * row (a click, or Enter on the focused list), and a third line of quiet
+ * text would cost every row a third of its height for what the detail holds. */
+.os-logs-list[data-stacked] .os-logs-line {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "time level component subject"
+    "message message message message";
+  align-content: center;
+  row-gap: 3px;
+}
+.os-logs-list[data-stacked] .os-logs-time { grid-area: time; }
+.os-logs-list[data-stacked] .os-logs-level { grid-area: level; }
+.os-logs-list[data-stacked] .os-logs-component { grid-area: component; width: auto; }
+.os-logs-list[data-stacked] .os-logs-subject-cell { grid-area: subject; }
+.os-logs-list[data-stacked] .os-logs-message { grid-area: message; min-width: 0; }
+.os-logs-list[data-stacked] .os-logs-attrs { display: none; }
 
 /* ---- the scope line ----
  *
