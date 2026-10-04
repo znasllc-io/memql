@@ -65,12 +65,15 @@ const EMPTY_SNAPSHOT = <T,>(): LiveSnapshot<T> => ({
 });
 
 /** The concepts this app owns, for its Logs section: what serves, where it
- *  came from, each attempt to deploy it, and a client's own domain on it. */
+ *  came from, each attempt to deploy it, and a client's own domain on it --
+ *  and each pipeline run over a source, whose steps' output is about the run
+ *  and carries no app tag (epic memql#5478). */
 const DEPLOYABLES_LOG_CONCEPTS = [
   Concepts.PLATFORM_SITE,
   Concepts.PLATFORM_PACKAGE,
   Concepts.PLATFORM_PACKAGE_DEPLOYMENT,
   Concepts.PLATFORM_CUSTOM_DOMAIN,
+  Concepts.PIPELINES_RUN,
 ] as const;
 
 export function DeployablesApp(props: Parameters<typeof DeployablesAppContent>[0]) {

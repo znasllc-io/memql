@@ -22,10 +22,10 @@ import (
 //	GET  /artifacts/{id}/content    -- export a file's bytes, or a note /
 //	                                   generated output / memory's body
 //
-// BFF-ONLY, unlike resolveBlobStore' `bff || agent`. The Library is a
-// user-facing surface the portal dials; nothing on the agent uploads to it,
-// and mounting a route on a node no client addresses is how a declaration
-// stops meaning anything.
+// BFF-ONLY, unlike resolveBlobStore' `bff || agent || workbench`. The
+// Library is a user-facing surface the portal dials; nothing on the agent
+// uploads to it, and mounting a route on a node no client addresses is how a
+// declaration stops meaning anything.
 //
 // uploader/container are the Azure Blob client resolveBlobStore
 // already constructed for the SAME storage account -- reused rather than
@@ -36,7 +36,7 @@ import (
 //
 // resolveBlobStore returns server.FileUploader and a container name;
 // it holds the DOWNLOADER too, but does not return it, and widening its
-// signature would edit the shared bff+agent file for a bff-only consumer.
+// signature would edit a file three node types share for a bff-only consumer.
 // *azureblob.AzureBlobUploader satisfies both interfaces -- it is the very
 // same value transport_attachments.go passes as its own Downloader -- so the
 // assertion recovers it with no second client and no cross-build churn.

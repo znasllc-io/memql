@@ -203,6 +203,10 @@ export interface FileStory {
   machineNamed: boolean;
 }
 
+/** A pipeline step's log or artifact (epic memql#5478). One spelling for the
+ *  map and for the story, which tells it ahead of the run reading. */
+const PIPELINE_SENTENCE = "Made by a pipeline run";
+
 const SOURCE_SENTENCES: Record<string, string> = {
   uploaded: "Uploaded here",
   exported: "Exported from an artifact",
@@ -211,6 +215,7 @@ const SOURCE_SENTENCES: Record<string, string> = {
   derived: "Derived from an artifact",
   user_created: "Written here",
   live: "Live source",
+  pipeline: PIPELINE_SENTENCE,
 };
 
 export function fileStory(row: ArtifactRow, machine: MachinePresence | null): FileStory {
@@ -228,6 +233,13 @@ export function fileStory(row: ArtifactRow, machine: MachinePresence | null): Fi
   if (row.source === "computer_use") {
     // Made by computer use, machine unrecorded: honest and dot-less.
     return { sentence: "Made by computer use", tone: "unknown", machineNamed: false };
+  }
+  if (row.source === "pipeline") {
+    // A PIPELINE'S FILE IS ALWAYS A RUN'S (epic memql#5478): a step's log and
+    // its artifacts carry the work run that made them, so the run reading
+    // below would tell every one of them as "Produced by a plan". The source
+    // is the more specific fact; the run is the `Run` fact's to show.
+    return { sentence: PIPELINE_SENTENCE, tone: "reachable", machineNamed: false };
   }
   if (row.producedByRunId !== "") {
     // THE ID IS NOT IN THE SENTENCE, and that is the whole of the fix.

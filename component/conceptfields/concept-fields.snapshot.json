@@ -3021,6 +3021,7 @@
           "derived",
           "exported",
           "live",
+          "pipeline",
           "uploaded",
           "user_created",
           "vision_input",
@@ -3157,6 +3158,7 @@
           "app_session",
           "derived",
           "exported",
+          "pipeline",
           "uploaded",
           "vision_input"
         ],

@@ -5,7 +5,6 @@ package app
 import (
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/component/pipelines"
-	"github.com/znasllc-io/memql/core/logger"
 	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 )
 
@@ -46,11 +45,13 @@ func (a *App) wirePipelinesExecutor(nodeIdentity *node.Identity) {
 
 	var fleet pipelinesteps.FleetRouter
 	if integ := a.lookupWorkerIntegration(); integ != nil && integ.Dispatcher() != nil {
-		// The Library store is nil until the app's store lands with the
-		// workbench wiring (#5495); until then a fleet step's log and
-		// artifacts are notes beside it, and its output still reaches the log
-		// store.
-		fleet = pipelinesteps.NewFleet(cfg, integ.Dispatcher(), nil, a.pipelinesTokenMinterFor(), currentPipelinesLineSink, a.Logger)
+		// The SAME Library store the workbench's runner files a cluster
+		// step's log and artifacts with (#5495), over this node's own blob
+		// store, so a fleet step's land in the owner's Library exactly as a
+		// cluster step's do.
+		uploader, bucket := a.resolveBlobStore()
+		fleet = pipelinesteps.NewFleet(cfg, integ.Dispatcher(), a.pipelinesLibraryStoreFor(uploader, bucket),
+			a.pipelinesTokenMinterFor(), currentPipelinesLineSink, a.Logger)
 	} else {
 		a.Logger.Warn("pipelines executor: no worker dispatcher on this node; steps that name a need fail pipeline_runner_unavailable",
 			"component", "pipelinesteps")
@@ -62,13 +63,4 @@ func (a *App) wirePipelinesExecutor(nodeIdentity *node.Identity) {
 		"runCeiling", cfg.RunCeiling.String(),
 		"workbenchRoute", forwarder != nil,
 		"fleet", fleet != nil)
-}
-
-// currentPipelinesLineSink is the log store, as the node installed it when a
-// step's capture opens; nil before boot installs one.
-func currentPipelinesLineSink() pipelinesteps.LineSink {
-	if s := logger.CurrentSink(); s != nil {
-		return s
-	}
-	return nil
 }

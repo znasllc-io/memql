@@ -208,29 +208,6 @@ func (s *appSessionContentStore) cap() int {
 	return workerservice.MaxRecordedContentBytes
 }
 
-// sanitizeContentName bounds what reaches the Library's name field and the
-// object path. Path separators and control characters are removed for the
-// upload route's reason: the name is the last segment of the blob path, and a
-// content whose "name" carried a slash would write outside its own prefix.
-func sanitizeContentName(name string) string {
-	cleaned := strings.Map(func(r rune) rune {
-		switch {
-		case r == '/' || r == '\\':
-			return '-'
-		case r < 0x20 || r == 0x7f:
-			return -1
-		}
-		return r
-	}, strings.TrimSpace(name))
-	if cleaned == "" {
-		cleaned = "content"
-	}
-	if len([]rune(cleaned)) > 200 {
-		cleaned = string([]rune(cleaned)[:200])
-	}
-	return cleaned
-}
-
 func firstNonBlankString(vals ...string) string {
 	for _, v := range vals {
 		if s := strings.TrimSpace(v); s != "" {
