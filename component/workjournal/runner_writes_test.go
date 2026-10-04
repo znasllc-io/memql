@@ -114,11 +114,11 @@ func pipelineWork() Work {
 // sweep and the Nexus acts all decide on triggeredBy whether a run is theirs,
 // so a pipeline's run must carry pipeline:<mode> from its FIRST version -- a
 // later write could not, since updateWorkRun does not accept the field. A pass
-// that names nothing stays "system", which is what every run this journal
-// wrote before said.
+// that names nothing carries the journal's own marker, journal:<template>, so
+// the dispatcher never claims a run its driver is still recording.
 func TestBeginRecordsWhoTriggeredTheRun(t *testing.T) {
 	for _, tc := range []struct{ name, triggeredBy, want string }{
-		{"a pass that names no trigger is the system's, as before", "", "system"},
+		{"a pass that names no trigger is the journal's own", "", TriggeredBy("libraryAnalyzeFile")},
 		{"a pipeline's run carries its mode", "pipeline:affected", "pipeline:affected"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

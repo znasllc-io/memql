@@ -187,8 +187,8 @@ type Work struct {
 	QueueSteps bool
 	// RequestedVia is the surface the work arrived through.
 	RequestedVia string
-	// TriggeredBy is the run's triggeredBy. Empty is "system", which every
-	// run this journal wrote before it existed said. A pipeline's run writes
+	// TriggeredBy is the run's triggeredBy. Empty is TriggeredBy(Template),
+	// the journal's own driver-owned marker (see TriggerPrefix). A pipeline's run writes
 	// "pipeline:<mode>" (pipelines.WorkTriggerPrefix), and that value is the
 	// whole of what keeps integrations/work's dispatcher, sweep and re-run
 	// acts off it: createWorkRun is the only writer of the field, so it is
