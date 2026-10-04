@@ -492,8 +492,12 @@ func (i *SitePublishIntegration) publish(ctx context.Context, siteId, artifactId
 	// 6. Upload the new version, then flip the row -- with artifactId
 	//    riding the same write, so provenance and bundleRef can never
 	//    disagree about which artifact produced the live bytes.
+	//    ALWAYS THE SERVING VERSION. A candidate publish (memql#5601) is the
+	//    package deploy's and the CI route's: this route stamps artifactId,
+	//    the provenance of the bundle the site SERVES, and a candidate
+	//    published from here would either overwrite that or lose its own.
 	publisher := edge.NewPublisher(store.writer, &artifactSiteStore{engine: i.engine, artifactId: artifactId})
-	out, err := publisher.Publish(ctx, siteRowId, bundle)
+	out, err := publisher.Publish(ctx, siteRowId, bundle, edge.TargetServing)
 	if err != nil {
 		return publishResult{}, refuse(reasonPublishFailed, "%v", err)
 	}
@@ -532,9 +536,14 @@ type artifactSiteStore struct {
 	artifactId string
 }
 
-func (s *artifactSiteStore) UpdateBundleRef(ctx context.Context, siteID, bundleRef string) error {
-	q := fmt.Sprintf("mutation updateSiteBundle(siteId: %s, bundleRef: %s, artifactId: %s)",
-		langparser.QuoteString(siteID), langparser.QuoteString(bundleRef), langparser.QuoteString(s.artifactId))
+func (s *artifactSiteStore) PointVersion(ctx context.Context, siteID string, target edge.Target, bundleRef string) error {
+	if target != edge.TargetServing {
+		return fmt.Errorf("sitePublishFromArtifact publishes the serving version only, not the %s", target)
+	}
+	q, err := edge.PointVersionStatement(siteID, target, bundleRef, s.artifactId)
+	if err != nil {
+		return err
+	}
 	if _, err := s.engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("mutation updateSiteBundle for %s: %w", siteID, err)
 	}
@@ -759,7 +768,11 @@ func (i *SitePublishIntegration) audit(ctx context.Context, siteId, artifactId s
 	b.Write(detailJSON)
 	b.WriteString(")")
 
-	if _, err := i.engine.Execute(ctx, b.String()); err != nil {
+	// Internal origin for this one write (memql#5624): auditEvent's create
+	// admits a cluster owner or server code, and the person publishing their
+	// site need be neither. The statement is composed above field by field,
+	// so the stamp reaches this createAuditEvent and nothing else.
+	if _, err := i.engine.Execute(auth.ContextWithInternalOrigin(ctx), b.String()); err != nil {
 		i.logger.Warn("sitePublishFromArtifact: the audit event could not be written",
 			"component", "library", "site", siteId, "artifact", artifactId,
 			"outcome", outcome, "error", err)

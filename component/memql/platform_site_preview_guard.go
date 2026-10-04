@@ -16,9 +16,11 @@ import (
 //
 // # What these decide
 //
-// Four rules, and every one of them is a comparison a mutation body cannot
+// Five rules, and every one of them is a comparison a mutation body cannot
 // make -- either against the PRIOR row or against a DIFFERENT row:
 //
+//   - A storefront takes no new candidate but its serving version (memql#5601).
+//     (prior row)
 //   - Non-storefront candidates may not equal the serving version. (prior row)
 //   - A promotion must NAME the candidate it is promoting. (prior row)
 //   - A preview binding must name a DEVELOPMENT store. (another row)
@@ -92,7 +94,7 @@ func BoundStoreAsDeployment(ctx context.Context, execute func(context.Context, s
 		Readable:           true,
 		IsDevelopment:      boolFromAny(rows[0]["isDevelopment"]),
 		Domain:             stringFromAny(rows[0]["domain"]),
-		HasStorefrontToken: strings.TrimSpace(stringFromAny(rows[0]["storefrontTokenRef"])) != "",
+		HasStorefrontToken: NamesItsOwnStorefrontToken(storeId, stringFromAny(rows[0]["storefrontTokenRef"])),
 	}, nil
 }
 
@@ -176,6 +178,25 @@ func (e *MemQLEngine) validateSitePreview(
 		return nil
 	}
 
+	// Rule 0 -- a storefront takes no new candidate other than the version it
+	// serves (memql#5601).
+	//
+	// AHEAD OF THE SYSTEM-ACTOR EXEMPTION, deliberately. A candidate publish
+	// reaches this guard as setSiteCandidate from three routes, and the CI
+	// route writes as the synthetic system:edge-publish actor; behind the
+	// exemption, that route would leave a candidate nothing serves. The
+	// exemption exists for the seed materializer, which sets no candidate, so
+	// this rule cannot refuse it.
+	if candidatePresent {
+		serving := priorBundleRef
+		if bundlePresent && !promoting {
+			serving = nextBundle
+		}
+		if refusal := SiteStorefrontCandidateRefusal(storefront, priorCandidateRef, serving, candidate); !refusal.Empty() {
+			return previewRefusalError(refusal)
+		}
+	}
+
 	identity, _ := auth.UserIdentityFromContext(ctx)
 	if isSystemActor(identity, actor) {
 		return nil
@@ -187,8 +208,7 @@ func (e *MemQLEngine) validateSitePreview(
 	}
 
 	// Rule 1 -- a non-storefront candidate must differ from the serving version.
-	// Storefronts can exercise the same files against their separate sandbox.
-	// Opening a preview still validates the sandbox and the caller's grant.
+	// A storefront is rule 0's: its candidate may only BE the serving version.
 	if candidatePresent && candidate != "" && !storefront {
 		serving := priorBundleRef
 		if bundlePresent && !promoting {

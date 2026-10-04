@@ -485,12 +485,15 @@ func (c *Concept) Query(ctx context.Context, store Store, params QueryParams) ([
 		IncludeDeleted: params.IncludeDeleted,
 	}
 
-	nodes, err := store.QueryMemoryNodes(ctx, queryParams)
+	deletionSchemaId, err := c.tombstoneSchemaId()
 	if err != nil {
 		return nil, err
 	}
 
-	deletionSchemaId, _ := c.schemaVariantId(deleteSchemaKey)
+	nodes, err := store.QueryMemoryNodes(ctx, queryParams)
+	if err != nil {
+		return nil, err
+	}
 
 	result := make([]Node, 0, len(nodes))
 	seen := make(map[string]struct{}, len(nodes))
@@ -506,7 +509,7 @@ func (c *Concept) Query(ctx context.Context, store Store, params QueryParams) ([
 
 		runtimeNode := toNode(&node)
 		schemaId := extractSchemaId(runtimeNode.Schema)
-		if schemaId == deletionSchemaId {
+		if deletionSchemaId != "" && schemaId == deletionSchemaId {
 			seen[id] = struct{}{}
 			if params.IncludeDeleted {
 				result = append(result, runtimeNode)
@@ -519,6 +522,37 @@ func (c *Concept) Query(ctx context.Context, store Store, params QueryParams) ([
 	}
 
 	return result, nil
+}
+
+// tombstoneSchemaId answers the $id a deletion tombstone of this concept
+// carries, or "" when the concept registers no delete variant -- every concept
+// the DSL builds -- in which case none of its rows is a tombstone.
+//
+// Query used to ask schemaVariantId and discard its error, and for a concept
+// with no delete variant that answer was "" -- the same "" a row yields whose
+// own schema names no $id. The two compared equal and the row read as deleted
+// (memql#5661): engine reads still returned it, but the write path's prior-row
+// read did not, so an update failed with "no existing row" on a row a query
+// had just returned.
+//
+// A delete variant that IS registered but names no usable $id is the other
+// case, and the error matters there: such a variant cannot tell its tombstones
+// from live rows, so it is refused rather than guessed at either way.
+func (c *Concept) tombstoneSchemaId() (string, error) {
+	if c == nil {
+		return "", fmt.Errorf("concept runtime is not initialized")
+	}
+	if _, ok := c.Schemas[deleteSchemaKey]; !ok {
+		return "", nil
+	}
+	id, err := c.schemaVariantId(deleteSchemaKey)
+	if err != nil {
+		return "", fmt.Errorf("concept %q: its delete schema variant cannot identify a tombstone: %w", c.Name, err)
+	}
+	if id == "" {
+		return "", fmt.Errorf("concept %q: its delete schema variant has a blank $id, so a tombstone cannot be told from a row whose schema names none", c.Name)
+	}
+	return id, nil
 }
 
 func (c *Concept) schemaBytes(variant string) ([]byte, error) {

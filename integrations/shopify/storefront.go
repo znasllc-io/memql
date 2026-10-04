@@ -301,7 +301,7 @@ func storefrontCall(ctx context.Context, endpoint, token, query string, vars map
 	}
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden:
-		return fmt.Errorf("the Storefront token was refused (%d) -- check storefrontTokenRef on the store row and that the token is a Storefront API token rather than an Admin one", resp.StatusCode)
+		return storefrontRefusal{status: resp.StatusCode}
 	case resp.StatusCode == http.StatusNotFound:
 		return fmt.Errorf("the store answered 404 -- check the domain and the pinned API version on the store row")
 	case resp.StatusCode >= 400:
@@ -331,6 +331,18 @@ func storefrontCall(ctx context.Context, endpoint, token, query string, vars map
 		return fmt.Errorf("the store's reply did not have the shape this client asked for")
 	}
 	return nil
+}
+
+// storefrontRefusal is storefrontCall's failure when the store refused the
+// TOKEN (401 or 403): a statement about the credential, where every other
+// failure is about the moment -- a timeout, a 5xx, an unreachable host. Connect
+// re-mints only on this one (connect_write.go), so a flaky check never spends
+// one of the shop's hundred tokens. Its sentence is the one the preview probe
+// has always recorded.
+type storefrontRefusal struct{ status int }
+
+func (e storefrontRefusal) Error() string {
+	return fmt.Sprintf("the Storefront token was refused (%d) -- check storefrontTokenRef on the store row and that the token is a Storefront API token rather than an Admin one", e.status)
 }
 
 func sinceMs(started time.Time) int {

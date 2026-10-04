@@ -75,8 +75,9 @@ type ForwardHandler struct {
 	apps        AppCallServer
 
 	// groups resolves the verified caller's ACTIVE groups for a machine lent
-	// to a group (epic memql#5344). Nil is workerservice.InstalledGroups --
-	// THIS replica's membership source, never anything the envelope says.
+	// to a group (epic memql#5344). Nil is workerservice.CachedGroups --
+	// THIS replica's membership source behind its per-person cache
+	// (memql#5660), never anything the envelope says.
 	groups workerservice.GroupResolver
 }
 
@@ -258,7 +259,7 @@ func (h *ForwardHandler) verifyRegistration(ctx context.Context, ownerUserId, re
 		return err
 	}
 	for _, m := range machines {
-		if !sameSubject(m.RegistrationId, registrationId) {
+		if !sameRegistration(m.RegistrationId, registrationId) {
 			continue
 		}
 		if !m.RevokedAt.IsZero() {
@@ -320,9 +321,18 @@ func (h *ForwardHandler) verifySharedRegistration(ctx context.Context, actingUse
 	if err != nil {
 		return err
 	}
-	person := workerservice.NewPerson(ctx, actingUserId, h.groups)
+	// The groups come from THIS replica's membership cache unless a test set a
+	// resolver: one read per person, reused until a membership or a group
+	// changes anywhere in the mesh, and never for longer than
+	// MembershipCacheTTL (memql#5660). A fresh Person per call used to read
+	// them again for every call this receiver re-checked.
+	groups := h.groups
+	if groups == nil {
+		groups = workerservice.CachedGroups
+	}
+	person := workerservice.NewPerson(ctx, actingUserId, groups)
 	for _, m := range machines {
-		if !sameSubject(m.RegistrationId, registrationId) {
+		if !sameRegistration(m.RegistrationId, registrationId) {
 			continue
 		}
 		if !m.RevokedAt.IsZero() {
@@ -359,7 +369,7 @@ func (h *ForwardHandler) ownerOfSharedMachine(ctx context.Context, registrationI
 		return err
 	}
 	for _, m := range machines {
-		if !sameSubject(m.RegistrationId, registrationId) {
+		if !sameRegistration(m.RegistrationId, registrationId) {
 			continue
 		}
 		if sameSubject(m.OwnerUserId, registryOwner) {
@@ -440,12 +450,12 @@ func (h *ForwardHandler) send(send func(*nodev1.NodeServerMessage) error, resp *
 // (`v1:identity:user:abc`) on one side and bare (`abc`) on the other. The
 // engine bare-ifies on egress and canonicalizes on write, so both spellings
 // are in play on any given comparison -- see docs/public/concepts/identifiers.md.
+//
+// It compares PEOPLE, by component/worker.SameSubjectId's rule, never by the
+// text after the last colon: that read `system:automation:ana` as `ana`.
+// Registration ids keep that rule, through sameRegistration.
 func sameSubject(a, b string) bool {
-	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
-	if a == b {
-		return a != ""
-	}
-	return a != "" && b != "" && lastSegment(a) == lastSegment(b)
+	return workerservice.SameSubjectId(a, b)
 }
 
 func lastSegment(s string) string {

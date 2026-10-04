@@ -117,21 +117,27 @@ func TestConnectBeginWritesTheStateAgainstARealEngine(t *testing.T) {
 	beginCall := func(siteId, returnPath string) string {
 		return fmt.Sprintf(`builtin shopifyConnectBegin(siteId: %s, returnPath: %s)`, langparser.QuoteString(siteId), langparser.QuoteString(returnPath))
 	}
-	devCtx := actorCtx(dev, auth.RoleDeveloper)
+	// The per-storefront flow is a cluster owner's (memql#5638, G9): the same
+	// person, as an owner, begins it.
+	devCtx := actorCtx(dev, auth.RoleOwner)
 
 	// Below the store part the builtin gate refuses before the handler runs.
 	if _, err := eng.Execute(actorCtx(writer, auth.RoleWriter), beginCall(mine, "/")); err == nil || !strings.Contains(err.Error(), "capability_not_held") {
 		t.Fatalf("a writer's begin was not refused by the store part: %v", err)
 	}
-	// A resolution refusal and "nothing to connect" both write no state.
-	if got := builtinReply(t, eng, devCtx, beginCall(theirs, "/"))["reason"]; got != connectReasonSiteNotWritable {
-		t.Fatalf("begin on a stranger's storefront: reason %v", got)
+	// A developer holds the store part, and the owner floor refuses them before
+	// anything is read, on their own storefront and on a stranger's.
+	for _, site := range []string{mine, theirs} {
+		if _, err := eng.Execute(actorCtx(dev, auth.RoleDeveloper), beginCall(site, "/")); err == nil || !strings.Contains(err.Error(), "reserved to a cluster owner") {
+			t.Fatalf("a developer's begin on %s was not refused by the owner floor: %v", site, err)
+		}
 	}
+	// "Nothing to connect" writes no state either.
 	if got := builtinReply(t, eng, devCtx, beginCall(mine, "/"))["reason"]; got != connectReasonShopifyAppNotSaved {
 		t.Fatalf("begin with no app saved: reason %v", got)
 	}
 	if n := states(); n != 0 {
-		t.Fatalf("%d state rows after three refusals, want 0", n)
+		t.Fatalf("%d state rows after four refusals, want 0", n)
 	}
 
 	// The reachable positive: save an app, then begin.

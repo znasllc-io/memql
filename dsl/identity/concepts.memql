@@ -63,9 +63,11 @@ concept accessRequest {
 /// MECHANICS are self-readable; security DECISIONS about the whole cluster are the operator's.
 /// A non-owner admin keeps authActivityForSelf and loses the cluster-wide trail.
 ///
-/// createAuditEvent is unaffected: the write guard resolves a TARGET ROW and so covers updates and
-/// deletes, never creates (rowauthz_write_guard.go), and this concept is append-only with no
-/// update path at all.
+/// A CREATE is judged by the tier too (memql#5624, component/memql/create_rank_floor.go): a cluster
+/// owner or server code, nobody else. Every Go writer of createAuditEvent is server code recording
+/// a decision -- the identity service's EngineAuditSink and the integration audit writers -- and
+/// stamps internal origin on the one statement it composes, so an event about any caller is still
+/// recorded, while a caller writing their own trail entry directly is refused.
 @rowAuthz(clusterOwner)
 @displayCard(primary="action", secondary="category", tertiary="actorEmail", status="outcome")
 concept auditEvent {

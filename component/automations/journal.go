@@ -923,7 +923,7 @@ func (j *workJournal) parkOnRunCeiling(ctx context.Context, exec *AutomationExec
 		return
 	}
 
-	j.call(ctx, "updateWorkRun", map[string]any{
+	park := map[string]any{
 		"runId":     exec.ID,
 		"status":    "waiting",
 		"chainHead": chainHead,
@@ -938,18 +938,34 @@ func (j *workJournal) parkOnRunCeiling(ctx context.Context, exec *AutomationExec
 			"ceiling": breach.Ceiling,
 			"reason":  breach.Reason,
 		},
-		"spent": map[string]any{
-			"tokens":             ceiling.Spent.Tokens,
-			"tokensSubscription": ceiling.Spent.TokensSubscription,
-			"tokensLocal":        ceiling.Spent.TokensLocal,
-			"cost":               ceiling.Spent.Cost,
-			"modelCalls":         ceiling.Spent.ModelCalls,
-			"wallClockMs":        ceiling.Spent.WallClockMs,
-		},
 		// NOT finishedAt and not an errorCode, for parkOnInference's reason:
 		// the run has not finished and has not failed.
 		"errorMessage": exec.Error,
-	})
+	}
+	// THE SPEND IS WRITTEN OVER WHAT THE RUN HAD STORED, never instead of it
+	// (memql#5664). updateWorkRun's merge is shallow, and `spent` written with
+	// the ceiling's figures alone erased spent.retries -- the failure path's
+	// retry count -- so a run approved past its ceiling began its retry budget
+	// again at zero. A stored spend that cannot be read is left alone rather
+	// than overwritten: the breach is on the approval and the wait either way.
+	if stored, found, err := j.readOwnRun(ctx, exec); err == nil {
+		spent := map[string]any{}
+		if found {
+			if prior, ok := stored["spent"].(map[string]any); ok {
+				for k, v := range prior {
+					spent[k] = v
+				}
+			}
+		}
+		spent["tokens"] = ceiling.Spent.Tokens
+		spent["tokensSubscription"] = ceiling.Spent.TokensSubscription
+		spent["tokensLocal"] = ceiling.Spent.TokensLocal
+		spent["cost"] = ceiling.Spent.Cost
+		spent["modelCalls"] = ceiling.Spent.ModelCalls
+		spent["wallClockMs"] = ceiling.Spent.WallClockMs
+		park["spent"] = spent
+	}
+	j.call(ctx, "updateWorkRun", park)
 	if j.logger != nil {
 		j.logger.Info("work journal: the run reached a ceiling, so it parked instead of failing",
 			"component", ComponentName, "run", exec.ID, "approval", approvalId,

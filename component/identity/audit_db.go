@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -83,7 +84,16 @@ func (s *EngineAuditSink) WriteAuditEvent(ctx context.Context, ev AuditEvent) er
 	}
 	b.WriteString(`)`)
 
-	if _, err := s.Engine.Execute(ctx, b.String()); err != nil {
+	// INTERNAL ORIGIN, stamped for this one write (memql#5624). auditEvent is
+	// a cluster-owner-tier concept, so its create admits a cluster owner or
+	// server code and refuses every other caller -- which is right for a
+	// client that would forge a trail entry, and was wrong for this sink,
+	// which records decisions about every caller (an admin's console act, a
+	// signed-in person's passkey change, a refusal) under that caller's own
+	// context. The statement is this function's, composed field by field
+	// with every value quoted, so the stamp reaches one createAuditEvent and
+	// nothing else; the actor it records is still the caller, in the args.
+	if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), b.String()); err != nil {
 		return fmt.Errorf("identity.audit: execute createAuditEvent: %w", err)
 	}
 	return nil

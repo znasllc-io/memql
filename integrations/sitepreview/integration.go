@@ -265,15 +265,21 @@ func (i *Integration) handleReadiness(ctx context.Context, args map[string]any, 
 		"storeDomain":        serving.Domain,
 		"storeReadable":      seen.Readable,
 		"storeIsDevelopment": serving.Readable && serving.IsDevelopment,
-		"previewStoreId":     site.PreviewStoreID,
-		"previewStoreDomain": preview.Domain,
-		"testingUrl":         testingURL,
-		"canPreview":         previewRefusal.Empty() && strings.TrimSpace(version) != "" && !site.SystemOwned && (site.Status == "live" || site.Status == "draft") && (!storefront || testingURL != ""),
-		"canPromote":         !storefront && promote.Empty(),
-		"canGoLive":          goLive.Empty(),
-		"previewRefusal":     refusalPayload(previewRefusal),
-		"promoteRefusal":     refusalPayload(promote),
-		"goLiveRefusal":      refusalPayload(goLive),
+		// WHETHER THE EDGE WILL SERVE EACH STORE'S STOREFRONT TOKEN
+		// (memql#5626): the store names its OWN token, the one secret the edge
+		// publishes. This, rather than a non-empty reference, is "connected";
+		// the console reads it here and keeps no copy of the naming rule.
+		"storeHasStorefrontToken":        serving.Readable && serving.HasStorefrontToken,
+		"previewStoreId":                 site.PreviewStoreID,
+		"previewStoreDomain":             preview.Domain,
+		"previewStoreHasStorefrontToken": preview.Readable && preview.HasStorefrontToken,
+		"testingUrl":                     testingURL,
+		"canPreview":                     previewRefusal.Empty() && strings.TrimSpace(version) != "" && !site.SystemOwned && (site.Status == "live" || site.Status == "draft") && (!storefront || testingURL != ""),
+		"canPromote":                     !storefront && promote.Empty(),
+		"canGoLive":                      goLive.Empty(),
+		"previewRefusal":                 refusalPayload(previewRefusal),
+		"promoteRefusal":                 refusalPayload(promote),
+		"goLiveRefusal":                  refusalPayload(goLive),
 	})
 }
 
@@ -301,7 +307,7 @@ func (i *Integration) boundStore(ctx context.Context, storeID string) (memql.Pre
 		Readable:           true,
 		IsDevelopment:      store.IsDevelopment,
 		Domain:             store.Domain,
-		HasStorefrontToken: strings.TrimSpace(store.StorefrontTokenRef) != "",
+		HasStorefrontToken: memql.NamesItsOwnStorefrontToken(store.ID, store.StorefrontTokenRef),
 	}, nil
 }
 

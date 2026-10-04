@@ -10,6 +10,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/config"
 	"github.com/znasllc-io/memql/component/frontdoor"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // runtimeConfigPath is the well-known, root-relative path every hosted site
@@ -113,8 +114,11 @@ type RuntimeConfig struct {
 	// Settings is the site row's runtime settings (epic memql#4906, decision
 	// P7): plain string values under identifier keys, written whole by
 	// updateSiteSettings and read by the bundle as `config.settings.<key>`.
-	// A connected storefront inherits its store's API version when the site
-	// has no explicit storefrontApiVersion setting.
+	// For a storefront, the entry of storeSettings for the store the in-force
+	// binding names is merged over them (memql#5602), so a value that belongs
+	// to one store reaches the bundle under the same key on every destination.
+	// A connected storefront inherits its store's API version when neither
+	// sets an explicit storefrontApiVersion.
 	// This is what lets ONE bundle serve TWO deployables against different
 	// endpoints with no rebuild -- the document differs per site, the bytes
 	// do not.
@@ -191,10 +195,11 @@ type StorefrontConfig struct {
 	StoreDomain string `json:"storeDomain"`
 	// StorefrontToken is the PUBLIC Storefront API access token, resolved at
 	// serve time from the v1:platform:globalSecret the bound store's
-	// storefrontTokenRef names. Empty when the ref is unset or the secret
-	// cannot be resolved -- an honest "this store is not wired up yet" rather
-	// than a fabricated value, and the same posture OAuthClientID takes for
-	// an unregistered hostname.
+	// storefrontTokenRef names. Empty when the ref is unset, when the secret
+	// cannot be resolved, or when the ref names anything but the store's own
+	// Storefront token (StorefrontTokenSecretName, memql#5626) -- an honest
+	// "this store is not wired up" rather than a fabricated value, and the
+	// same posture OAuthClientID takes for an unregistered hostname.
 	StorefrontToken string `json:"storefrontToken"`
 }
 
@@ -281,6 +286,19 @@ func runtimeConfigForSite(ctx context.Context, site *Site, env func(string) stri
 // aliased the cached map would let one encoder's view drift from another's
 // if anything ever mutated it. Connected storefronts inherit the store's API
 // version unless the site pins one explicitly. Never nil.
+//
+// THE IN-FORCE STORE'S OWN SETTINGS ARE MERGED OVER THE SITE'S (memql#5602).
+// A value that belongs to one store -- a Customer Account API client, a
+// wholesale adapter -- is keyed by that store's id in StoreSettings, and the
+// store is the one the binding on THIS Site names. Nothing here asks whether a
+// preview is happening: under a grant previewSite has already substituted the
+// preview binding, so the testing store's values arrive the same way the
+// testing store does (design D7). A store's value overrides the site's for
+// that store alone; a key no store sets keeps the site's value; an unbound
+// destination gets the site's settings and no store's. The document keeps its
+// shape -- one flat `settings` object -- so a bundle reading
+// config.settings.customerAccountClientId needs no change. KIND IS THE GATE,
+// as it is for the storefront block.
 func settingsForSite(site *Site) map[string]string {
 	out := map[string]string{}
 	if site == nil {
@@ -288,6 +306,13 @@ func settingsForSite(site *Site) map[string]string {
 	}
 	for k, v := range site.Settings {
 		out[k] = v
+	}
+	if site.Kind == storefrontKind {
+		if storeId := memql.BareShortId(strings.TrimSpace(bindingStoreId(site.Binding))); storeId != "" {
+			for k, v := range site.StoreSettings[storeId] {
+				out[k] = v
+			}
+		}
 	}
 	if site.Kind == storefrontKind && site.Store != nil && strings.TrimSpace(out["storefrontApiVersion"]) == "" {
 		if version := strings.TrimSpace(site.Store.APIVersion); version != "" {
@@ -299,6 +324,35 @@ func settingsForSite(site *Site) map[string]string {
 
 // storefrontKind is the one site kind that carries a storefront binding.
 const storefrontKind = "shopify_storefront"
+
+// StorefrontTokenSecretName is the v1:platform:globalSecret name a store's
+// Storefront API token is sealed under: SHOPIFY_<STOREID>_STOREFRONT_TOKEN,
+// or "" for an id that is not a valid store id (lower-case letters, digits,
+// '_' and '-' -- what Connect derives from the myshopify.com domain).
+//
+// IT IS THE ONLY SECRET THE EDGE WILL PUBLISH FOR A STORE (memql#5626), and
+// the rule is the engine's (component/memql's StorefrontTokenSecretName), so
+// the store write guard that refuses any other reference and this edge that
+// refuses to resolve one cannot disagree. Connect Shopify, the pasted-token
+// path and the first-boot seed seal the token under the same name
+// (integrations/shopify's storeSecretName), held to this one by the parity
+// test in app/. The NAME is the marker because nothing else is: every Shopify
+// secret, the Admin token included, is sealed with kind "vendor_api_key", so a
+// rule admitting a secret by its kind would admit the Admin token.
+func StorefrontTokenSecretName(storeID string) string {
+	return memql.StorefrontTokenSecretName(storeID)
+}
+
+// storefrontTokenRefRefused reports whether store names a Storefront token
+// reference the edge must not resolve: anything but the store's own token.
+// An empty ref is not a refusal -- it is a store with no token yet.
+func storefrontTokenRefRefused(store *BoundStore) bool {
+	if store == nil {
+		return false
+	}
+	ref := strings.TrimSpace(store.StorefrontTokenRef)
+	return ref != "" && ref != StorefrontTokenSecretName(store.ID)
+}
 
 // storefrontForSite builds the storefront block, or nil.
 //
@@ -323,8 +377,29 @@ func storefrontForSite(ctx context.Context, site *Site, resolveSecret SecretReso
 		return out
 	}
 	out.StoreDomain = strings.TrimSpace(site.Store.Domain)
+	// A STORE SHOPIFY NO LONGER AUTHORIZES THE APP FOR (memql#5638). The row
+	// keeps its token reference after app/uninstalled -- a reinstall re-checks
+	// the token before minting another -- so the reference alone would read
+	// "connected" and hand every visitor a token Shopify refuses. Unavailable,
+	// with nothing resolved, and the same answer as an unreadable secret, so
+	// the document does not say which.
+	if site.Store.Disconnected {
+		return out
+	}
 	ref := strings.TrimSpace(site.Store.StorefrontTokenRef)
 	if ref == "" || resolveSecret == nil {
+		return out
+	}
+	// THE STORE'S OWN STOREFRONT TOKEN, OR NOTHING (memql#5626). This document
+	// is served to every visitor, so whatever the ref names is published. A
+	// ref naming the store's Admin token, another store's token or any other
+	// cluster secret is refused here, before the lookup, and the connection
+	// reads "unavailable" -- the same answer an unreadable secret gets, so the
+	// document says nothing about which secret was named. The reason goes to
+	// the log when the store is resolved (resolve.go). The store write guard
+	// refuses such a reference too (component/memql/shopify_store_guard.go);
+	// this is what keeps the edge from depending on it.
+	if storefrontTokenRefRefused(site.Store) {
 		return out
 	}
 	token, err := resolveSecret(ctx, ref)

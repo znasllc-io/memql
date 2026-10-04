@@ -62,7 +62,7 @@ func TestTheOrganizationBoundaryJudgesTheRowBeforeWriteHooksProduced(t *testing.
 	if _, err := runSiteMutation(t, systemSiteCtx(), eng, "createStore", map[string]any{
 		"storeId":            store,
 		"domain":             store + ".myshopify.com",
-		"storefrontTokenRef": "SHOPIFY_STOREFRONT_TOKEN",
+		"storefrontTokenRef": StorefrontTokenSecretName(store),
 	}); err != nil {
 		t.Fatalf("seed store: %v", err)
 	}

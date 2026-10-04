@@ -128,7 +128,13 @@ func (w *EngineMirrorWriter) StoredVersion(ctx context.Context, spec memqlsync.D
 		return "", false, nil
 	}
 
-	q := fmt.Sprintf("concept==%s && id==%s", conceptID, rowID)
+	// The row id is a literal, quoted as WriteMirror quotes it (memql#5625's
+	// sweep). It is the connector's to mint and the contract types it as a
+	// string: pasted bare, an id carrying a quote or a space failed to parse,
+	// and since this read runs before every versioned write, such a row could
+	// never be applied at all. The concept is the connector's declared domain
+	// and stays bare.
+	q := fmt.Sprintf("concept==%s && id==%s", conceptID, langparser.QuoteString(rowID))
 	res, err := w.engine.Execute(ctx, q)
 	if err != nil {
 		return "", false, fmt.Errorf("datasync: reading the stored version of %s %q: %w", conceptID, rowID, err)
@@ -140,11 +146,25 @@ func (w *EngineMirrorWriter) StoredVersion(ctx context.Context, spec memqlsync.D
 	row := rows[0]
 
 	if field := strings.TrimSpace(spec.VersionField); field != "" {
-		// The origin's own version, kept on the row. Exact.
-		return stringField(row, field), true, nil
+		// The origin's own version, kept on the row. Exact. It is a PAYLOAD
+		// field (DomainSpec.VersionField says so), and the raw read above
+		// answers bundle rows whose top level holds only the intrinsics: read
+		// there, it was empty on every row and the guard refused nothing
+		// (memql#5638). The connector stamps this field and MirrorWrite.Version
+		// from one value, so both sides of the comparison are the origin's
+		// clock -- never the row's createdAt, which is MemQL's.
+		return payloadField(row, field), true, nil
 	}
 	// The fallback (D6): the origin publishes no version, so the version
 	// is when MemQL last applied a delivery for this row.
+	//
+	// IT READS NOTHING TODAY, and that is left alone on purpose (memql#5638).
+	// The raw read carries the row's creation time as `created_at`, a
+	// protobuf timestamp, not as `createdAt`, so every row answers "no
+	// version" here. Reading it would compare a connector-stamped delivery
+	// time against MemQL's own write clock, and no connector declares a
+	// domain without a VersionField, so turning it on is a decision for the
+	// first one that does rather than a repair.
 	if t := timeField(row, "createdAt"); !t.IsZero() {
 		return t.UTC().Format(time.RFC3339Nano), true, nil
 	}

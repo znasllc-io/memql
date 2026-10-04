@@ -132,6 +132,20 @@ func scopesMissingFor(store Store, spec *generated.TypeSpec) []string {
 	return append([]string(nil), spec.Scopes...)
 }
 
+// topicScopesMissingFor is scopesMissingFor asked of the concept a webhook
+// topic routes to, so subscriptions and reconciliation refuse a domain by one
+// rule (memql#5638). A topic Shopify scopes differently from its concept is
+// judged by the concept's scopes, which are what a delivery's fetch reads
+// under. A topic that routes to no concept -- BULK_OPERATIONS_FINISH, the
+// connector's own bulk completions -- reads nothing and needs no scope.
+func topicScopesMissingFor(store Store, topic string) []string {
+	route, ok := generated.Topics[topic]
+	if !ok {
+		return nil
+	}
+	return scopesMissingFor(store, generated.Types[route.Concept])
+}
+
 // grantIncludes is the set of scopes a recorded grant reaches. A write
 // scope implies its read, as Shopify reports and its own client reads
 // them: a store granted write_products lists products.

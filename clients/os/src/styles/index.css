@@ -3437,6 +3437,27 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .fleet-share-chip .os-chip-remove:hover:not(:disabled) {
   background: var(--os-hover);
 }
+/* A STAND-IN, NOT A NAME (memql#5659): the directory could not be read, so the
+ * chip says what it is and where it sits on the list ("Person 2") in the muted
+ * ink. The edge stays solid -- it is on the list, which a dashed, stale chip
+ * is only just. */
+.fleet-share-chip[data-stand-in] .fleet-share-chip-name {
+  color: var(--os-muted);
+}
+/* While the names are read, the chips' own shape: a pill per stored entry, the
+ * height of a real one (its 20px remove control plus the padding), so nothing
+ * moves when the names land. */
+.fleet-share-chip[data-shape] .os-chip {
+  height: 26px;
+  padding: 0 12px;
+}
+.fleet-share-chip-shape {
+  width: 60px;
+  height: 9px;
+}
+.fleet-share-chip[data-shape]:nth-child(3n + 2) .fleet-share-chip-shape {
+  width: 84px;
+}
 
 /* `flex: none` because `.os-input` is `flex: 1 1 12ch`, which is right in a
  * control ROW and wrong in this COLUMN: along a column's main axis that basis
@@ -3511,24 +3532,43 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .fleet-share-option[data-active] .fleet-share-option-add {
   color: var(--os-accent);
 }
-/* The refusal takes focus (so it is scrolled to and read); its outline is the
- * notice's own edge, not a second ring around it. */
-/* Between the scrolling body and the floor: it never scrolls away, and the
- * body gives up the height it needs. flow-root keeps the notice's margins
- * inside, so the pinned band is exactly as tall as what it says. */
-.fleet-share-refusal {
+/* THE BAND between the scrolling body and the floor, for what the person must
+ * read before Save: a change made elsewhere, a refusal. It never scrolls away,
+ * and the body gives up the height it needs; as a flex column it holds its
+ * notices' margins inside, so it is exactly as tall as what it says. */
+.fleet-share-band {
   flex: none;
-  display: flow-root;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 12px 20px 14px;
   /* The body scrolls behind this band; the hairline says where it stops. */
   border-top: 1px solid var(--os-line);
 }
-.fleet-share-refusal:focus {
+/* A notice here can take focus -- the refusal, so it is read; a change made
+ * elsewhere, when the Save that held focus was disabled under it -- and its
+ * outline is the notice's own edge, not a second ring around it. */
+.fleet-share-refusal:focus,
+.fleet-share-moved:focus {
   outline: none;
 }
-.fleet-share-refusal:focus-visible > .os-notice {
+.fleet-share-refusal:focus-visible > .os-notice,
+.fleet-share-moved:focus-visible > .os-notice {
   outline: 2px solid var(--os-accent);
   outline-offset: 2px;
+}
+/* What is stored now is the half of the choice the dialog does not show, so it
+ * is set in the ink while its label stays quiet. */
+.fleet-share-moved-now {
+  color: var(--os-ink);
+}
+/* The two answers, side by side and equal: neither is the dialog's act -- that
+ * is Save, on the floor -- so neither is primary. */
+.fleet-share-moved-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
 }
 .fleet-share-terms {
   display: flex;
@@ -8547,6 +8587,103 @@ a.os-button {
   gap: 8px;
   align-items: center;
   margin-top: 4px;
+}
+
+/* ---- a storefront's values per store (memql#5602) ----
+ * One group per store, headed by the store's DOMAIN in the ink and the
+ * website it supplies in the quiet voice beside it: which store a value is
+ * for is the one thing this section must never leave in doubt. The groups
+ * reuse the settings editor's rows, header and readable measure above. */
+.os-store-values {
+  display: grid;
+  gap: 18px;
+}
+.os-store-values-store {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.os-store-values-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin: 0;
+  font-size: var(--os-text-base);
+  font-weight: 500;
+  color: var(--os-ink);
+}
+.os-store-values-name {
+  overflow-wrap: anywhere;
+}
+.os-store-values-where {
+  font-size: var(--os-text-sm);
+  font-weight: 400;
+  color: var(--os-muted);
+}
+/* A ROW IS ITS FIELDS AND ITS NOTE, so rows stand further apart than a
+ * row's own parts do -- equal spacing left a note reading as the next row's. */
+.os-store-values .os-settings-rows {
+  gap: 14px;
+}
+/* What a store's value replaces, under the row it belongs to. */
+.os-store-values-note {
+  grid-column: 1 / -1;
+  margin: -3px 0 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  overflow-wrap: anywhere;
+}
+/* Stacked on a phone, a row's parts close up and Remove keeps its own
+ * width: three full-width controls a row read as three rows. */
+@media (max-width: 640px) {
+  .os-store-values .os-settings-row {
+    gap: 6px;
+  }
+  .os-store-values .os-settings-row > .os-button {
+    justify-self: start;
+  }
+}
+.os-store-values-kept {
+  display: grid;
+  gap: 4px;
+  max-width: 720px;
+}
+/* What a store holds NOW, in the ink: the half of the choice the fields
+ * above do not show. */
+.os-store-values-now {
+  color: var(--os-ink);
+  overflow-wrap: anywhere;
+}
+/* The two answers to a change made elsewhere, equal: neither is primary. */
+.os-store-values-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* ---- the confirm gate's "Deploy as" choice (memql#5601) ----
+ * A row of the Versions section like the attempt it follows, but its body is
+ * a choice whose cards explain themselves -- so the label holds to the first
+ * card's line rather than centring on a block two cards tall, and the cards
+ * keep a readable measure instead of running the width of a wide window. */
+.deployable-version-row.deployable-deploy-target {
+  align-items: start;
+}
+.deployable-deploy-target > span {
+  padding-top: 9px;
+}
+.deployable-deploy-target-body {
+  display: grid;
+  gap: 8px;
+  max-width: 34rem;
+  min-width: 0;
+}
+@container (max-width: 480px) {
+  .deployable-deploy-target > span {
+    padding-top: 0;
+  }
 }
 
 /* Motion is emphasis, never information: the strip carries its whole meaning
@@ -14725,6 +14862,12 @@ button.os-cluster-mesh-peer:focus-visible {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+/* IN A FIELD, a copy field takes the field's width as an input does: sized
+ * to its content it cut a secret's name short, and a value cut short is one
+ * somebody copies without reading. */
+.os-form-row > .os-copyfield {
+  flex: 1 1 12ch;
 }
 .os-copyfield-line {
   position: relative;

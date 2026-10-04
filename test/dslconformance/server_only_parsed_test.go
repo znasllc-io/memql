@@ -1337,6 +1337,27 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "shopify/overlay/mutations.memql", Name: "recordComplianceJob"}: true,
 		{Path: "commerce/mutations.memql", Name: "setProductContentStatus"}:    true,
 		{Path: "commerce/mutations.memql", Name: "markQuoteAccepted"}:          true,
+		// memql#5638, a store's uninstall and its reinstall. Each row is a
+		// claim about what Shopify did, so the argument is the one above:
+		// only the code that verified it can make it, and a store row has
+		// no owner a filter could scope a caller to.
+		//
+		// markStoreUninstalled is the connector's answer to an app/uninstalled
+		// the app's secret signed. Client-callable, it would take any store's
+		// storefronts offline and drop its Admin grant.
+		//
+		// markStoreReconnected clears that, and a shop/redact purge, once
+		// Connect Shopify's callback has verified the shop approved the app
+		// again. Client-callable, it would erase the record of a purge or put
+		// a disconnected store back online with a dead grant.
+		//
+		// markExternalConnectionDisconnected runs under the selection owner's
+		// borrowed identity, so actor.userId scoping would pass; what it
+		// asserts -- that the provider ended the grant -- is the verified
+		// delivery's to say, never the person's.
+		{Path: "shopify/overlay/mutations.memql", Name: "markStoreUninstalled"}:        true,
+		{Path: "shopify/overlay/mutations.memql", Name: "markStoreReconnected"}:        true,
+		{Path: "platform/mutations.memql", Name: "markExternalConnectionDisconnected"}: true,
 		// epic memql#4434, the release-cut pair. One argument covers both, and it
 		// is not "the caller is a machine" -- the caller here is a signed-in
 		// OWNER, which is the shape this map usually refuses.

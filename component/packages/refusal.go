@@ -298,10 +298,6 @@ const (
 	// CodeStoreNotConnected: a Storefront token needs a store row to point
 	// from, and this store has none yet. Connect first.
 	CodeStoreNotConnected = "store_not_connected"
-	// CodeStoreInUse: the store's Storefront token is served under every
-	// storefront bound to it, and one of them is not the caller's to write, so
-	// changing the token is a cluster owner's act.
-	CodeStoreInUse = "store_in_use"
 	// CodeStorefrontTokenRequired: an empty token clears the store's, and a
 	// live storefront is bound to it and would stop serving its catalog.
 	CodeStorefrontTokenRequired = "storefront_token_required"

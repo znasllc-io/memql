@@ -247,12 +247,40 @@ touches rows.
 
   Two edges, stated because silence about them would be the same defect one
   layer down. **`maxRetries` and `maxEvents` are the EXECUTOR's counters and
-  reach no model call**, so this seam clears them and WARNS rather than
-  clearing them silently against a spend it never sees; and a run whose
-  ceilings **cannot be read** is REFUSED under the sentinel ceiling
+  reach no model call**, so this seam clears them rather than clearing them
+  silently against a spend it never sees: `maxRetries` is the failure path's
+  budget (below), and `maxEvents`, which nothing enforces, is WARNED about; and
+  a run whose ceilings **cannot be read** is REFUSED under the sentinel ceiling
   `unevaluated` -- a limit nobody could read must not read like a limit nobody
   set. A run with no `goalId` inherits no ceilings and costs the guard no read
   at all, which is what keeps it off every automation run in the cluster.
+- **A classified failure lands its act on the run, and each act is served
+  where it can be** (memql#5664; epic memql#5127, D12). The executor
+  classifies and records; it performs nothing:
+  - **Retry, repair and re-plan spend the RUN-WIDE retry budget** --
+    `spent.retries` against the goal's `ceilings.maxRetries`, 3 when unset --
+    counted in the same write that parks the run; past it the run asks. The
+    budget is the run's, never the failed step's `retry(n)`, which is the
+    stall signal and nothing else. An unreadable budget asks.
+  - **A due `retry` is a recovery dispatch at `waiting`** that the agent's
+    admission (`CanDispatchStoredRun`) takes only when the sweep asks and the
+    backoff has passed.
+  - **`replan` and `repair` are the planner's remedy**, handed over under ONE
+    claim per wait from the run's own `waiting` event -- which every planner
+    replica sees, whichever node holds the sweep's cron lease -- and from the
+    sweep as the backstop. A re-plan installs its draft through compile's own
+    path (Gate 1, a validated bundle bound to the run, the four template
+    fields on the run) after checking the completed steps are where resume
+    serves them; a repair is a re-run request on the failed step with the
+    violation as guidance. A remedy spends its attempt once: every outcome
+    after the model was asked moves the run off its wait.
+  - **Its questions are decidable**: `work.FailureApproval` hashes the subject
+    it stores, the decide side's rule is `work.CurrentArtifactHash` beside
+    every builder, and answering Abandon stops the run.
+  - **A failure the body continued past is no resume point.** A run executing
+    past one looked resumable to a second replica once its dispatch lease
+    lapsed; `ResumeFrom` now refuses a journal whose only failures were
+    continued past, as it always refused one with none.
 - **Both sweeps are in `maintenanceAutomations`, and that is not optional.**
   The work concepts declare the composite owner tier, so under the default
   reader actor these reads answer ZERO ROWS AND NO ERROR: a sweep that resumes

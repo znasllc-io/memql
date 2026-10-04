@@ -200,6 +200,10 @@ func (c *Connector) AuthorizeShopifyConnect(ctx context.Context, state *componen
 // guard asks of the row step 12 is about to create. Skipping it would let a
 // person granted the store part but ranked below the store's read floor seal
 // the Admin token and create the store before the attach refused them.
+//
+// The person must still be a CLUSTER OWNER (memql#5638, G9): only an owner may
+// begin this per-storefront flow, and an owner demoted between Begin and the
+// callback is refused here as every other change since Begin is.
 func (c *Connector) personMayConnect(ctx context.Context, userID string, target ConnectTarget) (string, bool) {
 	if strings.TrimSpace(userID) == "" {
 		return "", false
@@ -210,6 +214,9 @@ func (c *Connector) personMayConnect(ctx context.Context, userID string, target 
 		return "", false
 	}
 	subject := personContext(ctx, userID, user.Role)
+	if requireClusterOwner(subject, "Connect Shopify's per-storefront flow") != nil {
+		return "", false
+	}
 	if target.StoreFound {
 		res, err := c.engine.Execute(subject, renderCall("storeById", map[string]any{"storeId": target.StoreID}))
 		if err != nil || len(memql.MaterializeRows(res)) == 0 {

@@ -238,3 +238,87 @@ func TestComplianceTopicsAreNotSubscribedThroughTheApi(t *testing.T) {
 		t.Errorf("want the three mandatory topics, got %v", generated.ComplianceTopics)
 	}
 }
+
+// createdTopics is every topic a ShopifyWebhookCreate asked Shopify for.
+func createdTopics(h *testHarness) map[string]bool {
+	out := map[string]bool{}
+	for _, r := range h.admin.seen() {
+		if r.Operation == "ShopifyWebhookCreate" {
+			topic, _ := r.Variables["topic"].(string)
+			out[topic] = true
+		}
+	}
+	return out
+}
+
+// THE GRANT DECIDES WHAT IS ASKED FOR (memql#5638, G3). A store connected
+// through Connect Shopify holds the managed scopes and nothing else, and 97 of
+// the generated topics route to concepts none of those scopes reads -- the
+// customer topics under read_customers, fulfillment orders, returns, discounts.
+// Shopify refuses each such creation, the refusal lands on the store's
+// subscription health, and the daily reconcile asks again. The rule is
+// reconciliation's own (scopesMissingFor): a topic is asked for when the grant
+// holds ANY scope its concept reads under.
+func TestEnsureSubscriptionsAsksOnlyForTopicsTheGrantCovers(t *testing.T) {
+	h := newHarness(t)
+	withScopes(t, h, managedConnectScopes()...)
+	h.admin.reply("ShopifyWebhookSubscriptions", webhookList(
+		// One of ours, created under a wider grant this store no longer holds.
+		subscription("gid://shopify/WebhookSubscription/5", "CUSTOMERS_UPDATE", testCallback, generated.APIVersion, includeFields),
+	))
+	h.admin.reply("ShopifyWebhookCreate", map[string]any{"webhookSubscriptionCreate": map[string]any{"userErrors": []any{}}})
+	h.admin.reply("ShopifyWebhookDelete", map[string]any{"webhookSubscriptionDelete": map[string]any{"userErrors": []any{}}})
+
+	report, err := h.conn.EnsureSubscriptionsForStore(context.Background(), h.store(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := createdTopics(h)
+	for _, topic := range []string{"CUSTOMERS_CREATE", "CUSTOMERS_UPDATE", "RETURNS_REQUEST", "FULFILLMENT_ORDERS_MOVED"} {
+		if created[topic] {
+			t.Errorf("%s was asked for under a grant holding none of its scopes", topic)
+		}
+	}
+	// The grant's own reach is still subscribed: write_products reads
+	// products, and read_orders and read_inventory are held as they are.
+	for _, topic := range []string{"PRODUCTS_UPDATE", "ORDERS_UPDATED", "INVENTORY_ITEMS_UPDATE", generated.TopicBulkOperationsFinish} {
+		if !created[topic] {
+			t.Errorf("%s was not asked for, and the grant covers it", topic)
+		}
+	}
+	if len(report.Failed) != 0 {
+		t.Errorf("failed = %v", report.Failed)
+	}
+	if report.Desired != len(created) {
+		t.Errorf("desired = %d, created = %d: the report must count what was asked for, not the generated set", report.Desired, len(created))
+	}
+	if len(report.NotGranted) == 0 || report.Desired+len(report.NotGranted) != len(generated.SubscribedTopics) {
+		t.Errorf("notGranted = %d, desired = %d, generated = %d: every generated topic is either asked for or reported as outside the grant",
+			len(report.NotGranted), report.Desired, len(generated.SubscribedTopics))
+	}
+	// Ours, for a topic the grant no longer covers: tidied up like any other
+	// topic this store does not want.
+	if len(report.Removed) != 1 || report.Removed[0] != "CUSTOMERS_UPDATE" {
+		t.Errorf("removed = %v, want the out-of-grant subscription", report.Removed)
+	}
+}
+
+// The other side of the same rule: a fuller grant still subscribes to every
+// generated topic, so the filter narrows only what the grant cannot hold.
+func TestEnsureSubscriptionsAsksForEveryTopicUnderAFullGrant(t *testing.T) {
+	h := newHarness(t)
+	withScopes(t, h, append(append([]string(nil), StorefrontScopes...), generated.Scopes...)...)
+	h.admin.reply("ShopifyWebhookSubscriptions", webhookList())
+	h.admin.reply("ShopifyWebhookCreate", map[string]any{"webhookSubscriptionCreate": map[string]any{"userErrors": []any{}}})
+
+	report, err := h.conn.EnsureSubscriptionsForStore(context.Background(), h.store(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(createdTopics(h)); got != len(generated.SubscribedTopics) || report.Desired != got || len(report.NotGranted) != 0 {
+		t.Fatalf("created %d, desired %d, notGranted %v; want every one of %d generated topics", got, report.Desired, report.NotGranted, len(generated.SubscribedTopics))
+	}
+	if !createdTopics(h)["CUSTOMERS_UPDATE"] {
+		t.Error("a grant holding read_customers was not subscribed to CUSTOMERS_UPDATE")
+	}
+}

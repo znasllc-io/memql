@@ -356,6 +356,10 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 			"driftLast":          drift,
 			"domains":            domains,
 		}
+		// Set while the store is disconnected (memql#5638): Shopify reported the
+		// app uninstalled, so the store ingests nothing whatever its status
+		// says, and its storefronts are served as unavailable.
+		entry["uninstalledAt"] = store.UninstalledAt
 		// Privacy deliveries refused on this store's per-store URL, read off
 		// the audit trail (privacy_refusal.go). Each one is a legal request
 		// Shopify will not resend, so a failed read fails the report rather

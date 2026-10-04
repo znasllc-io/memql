@@ -317,6 +317,80 @@ func TestARerunAndAVerdictLandOnTheirRows(t *testing.T) {
 	}
 }
 
+// THE FAILURE PATH'S RELEASES LAND ON THEIR ROWS (memql#5664), against the
+// real engine and Postgres, where a fake would accept a mutation the concepts
+// refuse: a re-plan's install supersedes the failed step its new template
+// dropped and starts the run from a request of its own, and a failure
+// question's Retry releases its run under a re-run request on the step it
+// failed at, with the step's next version read off the stored versions.
+func TestTheFailurePathsReleasesLandOnTheirRows(t *testing.T) {
+	a := openActsDB(t)
+	now := time.Now().UTC()
+
+	t.Run("a re-plan's install", func(t *testing.T) {
+		runId := a.openRun(t, nil)
+		a.writeVersion(t, runId, runId, "gather", 0, 1, nil, "gathered", nil)
+		a.writeVersion(t, runId, runId, "write", 1, 1, nil, "", map[string]any{"status": "failed", "errorCode": "step_failed", "errorMessage": "the tool refused"})
+		a.write(t, "updateWorkRun", map[string]any{"runId": runId, "status": runStatusWaiting, "stepOrder": []string{"gather", "write"},
+			"waitingOn": map[string]any{"kind": waitKindReplan, "subject": "write", "since": rfc(now), "reason": "the plan cannot work"}})
+
+		if err := a.i.InstallReplan(context.Background(), a.owner, runId, ReplanTemplate{
+			AutomationName: "weeklyReportReplanned", TemplateConstructId: "v1:authoring:construct:dbtest-replanned", TemplateFingerprint: "fp-replanned",
+			StepKeys: []string{"gather", "draft", "publish"}, ResumeAt: "draft",
+		}); err != nil {
+			t.Fatalf("InstallReplan: %v", err)
+		}
+		run := a.runRow(t, runId)
+		rerun := rowMap(run, "rerun")
+		if rowString(run, "status") != runStatusRunning || rowString(run, "automationName") != "weeklyReportReplanned" {
+			t.Errorf("run status %v template %v", run["status"], run["automationName"])
+		}
+		if rowString(rerun, "reason") != rerunReasonReplan || rowString(rerun, "stepKey") != "draft" || rowString(rerun, "requestId") == "" {
+			t.Errorf("run.rerun = %v, want a replan request starting at draft", rerun)
+		}
+		if stale := rowStringSlice(run, "staleSteps"); strings.Join(stale, ",") != "draft,publish" {
+			t.Errorf("run.staleSteps = %v", stale)
+		}
+		statuses := map[string]string{}
+		codes := map[string]string{}
+		for _, row := range a.query(t, a.owner, "query "+call("workStepsForOwnerRun", map[string]any{"runId": runId})) {
+			statuses[rowString(row, "key")] = rowString(row, "status")
+			codes[rowString(row, "key")] = rowString(row, "errorCode")
+		}
+		if statuses["write"] != "skipped" || codes["write"] != "replaced_by_replan" {
+			t.Errorf("the dropped step reads %q (%q), want skipped as replaced by the re-plan", statuses["write"], codes["write"])
+		}
+		if statuses["gather"] != "done" {
+			t.Errorf("the completed step reads %q", statuses["gather"])
+		}
+	})
+
+	t.Run("a failure question's Retry", func(t *testing.T) {
+		runId := a.openRun(t, nil)
+		approvalId := newRowId(approvalConcept)
+		a.writeVersion(t, runId, runId, "fetch", 0, 1, nil, "fetched", nil)
+		a.writeVersion(t, runId, runId, "draft", 1, 1, nil, "", map[string]any{"status": "failed", "errorCode": "step_failed", "errorMessage": "prompt is too long"})
+		a.write(t, "updateWorkRun", map[string]any{"runId": runId, "status": runStatusWaiting, "stepOrder": []string{"fetch", "draft"},
+			"waitingOn": map[string]any{"kind": "approval", "subject": approvalId, "approvalKind": work.ApprovalKindFeedback}})
+
+		resumed, err := a.i.resumeParkedRun(ownerActor(context.Background(), a.owner), runId, approvalId, "answered", &failureRetry{stepKey: "draft", decidedBy: a.owner}, now)
+		if err != nil || !resumed {
+			t.Fatalf("resumeParkedRun = %v, %v", resumed, err)
+		}
+		run := a.runRow(t, runId)
+		rerun := rowMap(run, "rerun")
+		if rowString(run, "status") != runStatusRunning || rowString(rerun, "reason") != rerunReasonRerun || rowString(rerun, "stepKey") != "draft" || rowString(rerun, "requestedBy") != a.owner {
+			t.Errorf("run status %v, rerun %v", run["status"], rerun)
+		}
+		if versions := rowMap(rerun, "versions"); rowInt(versions, "draft") != 2 || rowString(rerun, "requestId") == "" {
+			t.Errorf("run.rerun versions %v, request id %q", versions, rowString(rerun, "requestId"))
+		}
+		if stale := rowStringSlice(run, "staleSteps"); strings.Join(stale, ",") != "draft" {
+			t.Errorf("run.staleSteps = %v", stale)
+		}
+	})
+}
+
 // A branch's fork run type-checks with its head, its request and the goal
 // signature it inherits, and belongs to the source's owner.
 func TestABranchOpensAForkRunItsOwnerCanRead(t *testing.T) {

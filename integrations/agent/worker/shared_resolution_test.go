@@ -405,3 +405,29 @@ func TestAGroupShareAdmitsNobodyWhenMembershipsCannotBeRead(t *testing.T) {
 		t.Fatalf("candidates = %v; nobody is admitted through a group nobody could read", got)
 	}
 }
+
+func TestASyntheticActorIsNeverTheOwnerItsNameSpells(t *testing.T) {
+	// An automation running AS ITSELF carries `system:automation:<name>` and
+	// is the cluster's own work (design G3). The own-machine arm compared ids
+	// by the text after the LAST colon, so an automation named after a
+	// person's short id recovered that person's PRIVATE machine as its own --
+	// served with no sharing consent at all, and recorded as nobody else's
+	// hardware. The share list's comparison (component/worker.SameSubjectId)
+	// was fixed for exactly this in epic memql#5344; this arm kept the old
+	// rule (memql#5662).
+	anas := privateMachine("anas-laptop", "v1:identity:user:ana")
+	store := &sharedFleet{fakeFleet: &fakeFleet{owner: "v1:identity:user:ana"}, all: []Candidate{anas}}
+	plan, err := modelRouter(t, store).PlanUserModelWithShared(context.Background(), "system:automation:ana", smallModel, ModelNeeds{})
+	if err != nil {
+		t.Fatalf("PlanUserModelWithShared: %v", err)
+	}
+	if got := ids(plan.Candidates); len(got) != 0 {
+		t.Fatalf("candidates = %v; an automation is not the person its name spells", got)
+	}
+	if OwnMachineFirst(anas, "system:automation:ana") {
+		t.Fatal("OwnMachineFirst: a synthetic actor owns no machine")
+	}
+	if got := machineOwnerAttribution(anas, "system:automation:ana"); got != "v1:identity:user:ana" {
+		t.Fatalf("attribution = %q; ana's machine serving an automation is ana's hardware, not the automation's own", got)
+	}
+}

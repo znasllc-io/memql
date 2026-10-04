@@ -85,6 +85,16 @@ novel one costs exactly one. Both figures are asserted by a proving scenario
 whose negative control is the classifier being reached at all, because a counter
 that never rises on any path reads as zero forever.
 
+**A plan miss adds one more, at the `reasoning` level, and three things bound
+it** (memql#5664). The planner re-plans the run from the failed step with
+`replanGap`: once per failure, because the remedy is served under one claim per
+wait across every planner replica and every outcome after the call moves the
+run off its wait; at most the run's retry budget times, because a re-plan
+spends a retry exactly as a retry and a repair do (`ceilings.maxRetries`, three
+when unset), and past it the run asks a person; and inside the run's own
+ceilings, because the call is made as the run and passes the model seam like
+any other.
+
 Every resolution writes one `v1:router:call` row saying which rule matched, which
 policy it named, which door served, what it cost, and every entry the walk passed
 over with the reason. Read them with `routerDecisionsRecent`. A cost control
@@ -202,7 +212,7 @@ residual gap is *cross-turn* cumulative spend, which Layers 0 and 4 close.
 |---|---|---|---|---|
 | Agent tool loop | `integrations/agent/streaming.go`, `nonstreaming.go` | 120 iters (`MEMQL_TOOL_LOOP_MAX_ITERATIONS`), 180s wallclock (`MEMQL_TURN_WALLCLOCK_TIMEOUT_SECONDS`) | none → **Layer 0 / 4** | 3 repeat-failures (`MEMQL_TOOL_LOOP_MAX_REPEAT_FAILURES`), 3 all-errored rounds, 2 produceArtifact re-delegations |
 | Engine AI tool loop | `component/memql/ai_tool_loop.go` | 120 iters (`MEMQL_TOOL_LOOP_MAX_ITERATIONS`), 8 tool-calls/iter | none → **Layer 0 / 4** | all-errored guard, identical-call breaker |
-| Work run | `integrations/work/runceilings.go`, `component/work/budget.go` | n/a -- a run is not a turn loop | the goal's `ceilings` (tokens, cost, model calls, wall clock), checked before every call; a breach parks the run. `maxRetries` and `maxEvents` are declared but not enforced: the run logs a warning that they bound nothing | n/a |
+| Work run | `integrations/work/runceilings.go`, `component/work/budget.go` | n/a -- a run is not a turn loop | the goal's `ceilings` (tokens, cost, model calls, wall clock), checked before every call; a breach parks the run. `maxRetries` bounds the failure path's retries, repairs and re-plans (three when unset; past it the run asks). `maxEvents` is declared but not enforced: the run logs a warning that it bounds nothing | n/a |
 | Authoring compile | `integrations/planner/work_compile.go`, `agent_loop_authoring_emit.go` | n/a -- a compile is a bounded pass, not a turn loop | the run's `maxModelCalls`, counted across its design, emit and repair calls (`callCapGate`) | 4 repair attempts per authoring bundle (`MEMQL_AUTHORING_MAX_REPAIRS`) |
 | Suggest | `component/grpc/` AiSuggest | single call | n/a | n/a |
 

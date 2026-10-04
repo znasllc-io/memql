@@ -1,4 +1,5 @@
 import type { ActionBarTone } from "../../../kit/ActionBar";
+import type { DeployTarget } from "../packages/calls";
 import { runCoversApp, runIsScopedToApp, type DeploymentRow, type PackageRow } from "../packages/rows";
 import type { DeployablePart, PartsHeld } from "../parts";
 import type { PreviewRefusal } from "../preview/rows";
@@ -59,6 +60,7 @@ export type ActName =
   | "Delete"
   | "Deactivate"
   | "Deploy"
+  | "Deploy as candidate"
   | "Deploy the update"
   | "Redeploy"
   | "Retry the deploy"
@@ -149,6 +151,14 @@ export interface ActsInput {
   deleting?: boolean;
   /** The domain the teardown is releasing right now, for the progress line. */
   releasing?: string;
+  /**
+   * Where the person chose to put the version a parked gate would deploy
+   * (memql#5601): the serving version, the default and what every deploy did
+   * before, or the candidate. It names the gate's act, and only where
+   * `candidateTargetOffered` holds -- anywhere else it is ignored, so a choice
+   * left over from another state can never relabel a deploy.
+   */
+  deployTarget?: DeployTarget;
 }
 
 /**
@@ -224,6 +234,12 @@ const PART_OF: Readonly<Record<ActName, DeployablePart>> = {
   Delete: "retire",
   Deactivate: "retire",
   Deploy: "deploy",
+  // DEPLOY, AND THE CHOICE IS OFFERED ONLY WITH PREVIEW TOO. The engine checks
+  // `deploy` for the run's upload and `preview` for writing candidateRef
+  // (component/packages/production.go), and one act names one part -- so
+  // `candidateTargetOffered` is where the second is asked, before the act
+  // can exist at all.
+  "Deploy as candidate": "deploy",
   "Deploy the update": "deploy",
   Redeploy: "deploy",
   "Retry the deploy": "deploy",
@@ -254,7 +270,7 @@ function heldOnly(acts: ActSpec[], can: PartsHeld): ActSpec[] {
  * deactivating, discarding -- and none of them touches the source's pointer,
  * so none of them has to wait for a deploy of a different app to finish.
  */
-const STARTS_A_RUN = new Set<ActName>(["Deploy", "Deploy the update", "Redeploy", "Retry the deploy"]);
+const STARTS_A_RUN = new Set<ActName>(["Deploy", "Deploy as candidate", "Deploy the update", "Redeploy", "Retry the deploy"]);
 
 /**
  * The line a busy source's other apps show INSTEAD of their own detail.
@@ -292,6 +308,66 @@ function hasServed(site: SiteRow): boolean {
  */
 function gateIsAboutThisApp(run: DeploymentRow, site: SiteRow): boolean {
   return runIsScopedToApp(run, site.packageDeployableName);
+}
+
+/**
+ * Whether the gate may deploy its version AS THE CANDIDATE (memql#5601) --
+ * the live site keeping what it serves while the new version is previewed.
+ *
+ * EVERY CONDITION IS ONE THE ENGINE HOLDS OR ONE THE PROMISE NEEDS:
+ *
+ *   - a gate parked FOR this deployable: a whole-source gate is the source's
+ *     business, answered from its own page;
+ *   - LIVE: "keep serving what it serves" is the whole promise, and a draft or
+ *     an offline deployable serves nobody -- deploying to its serving version
+ *     puts nothing in front of anyone;
+ *   - not a storefront: its Testing and Production serve one build, so a
+ *     storefront candidate would be served by nothing, and the engine refuses
+ *     one (`storefront_has_no_candidate`);
+ *   - not system-owned, and from a source (a parked run is a source's);
+ *   - `deploy` AND `preview`: the engine checks the first for the upload and
+ *     the second for the candidate write.
+ *
+ * ABSENT RATHER THAN DISABLED where any fails (DESIGN.md rule 12): the gate
+ * then offers today's Deploy and nothing else.
+ */
+export function candidateTargetOffered(input: Pick<ActsInput, "site" | "pkg" | "run" | "can">): boolean {
+  const { site, pkg, run, can } = input;
+  if (run === null || run.status !== "awaiting_confirm" || !gateIsAboutThisApp(run, site)) return false;
+  if (site.status !== "live" || site.kind === "shopify_storefront" || site.systemOwned) return false;
+  if (!fromSource(site, pkg)) return false;
+  return can.deploy && can.preview;
+}
+
+/**
+ * Why the gate's version cannot be deployed as the candidate, or "".
+ *
+ * A PLAN THAT CHANGES THE CLUSTER'S MEMQL CANNOT BE HELD BACK. MemQL is staged
+ * and rolled for the WHOLE cluster whatever an app's target is, so a candidate
+ * deploy of a MemQL change would reach every visitor the moment it lands --
+ * and the engine refuses one. The parked run's report says whether the plan
+ * changes the active set (`dslChanges`), and the answer is read here:
+ *
+ *   - true: unavailable, and the reason is the change;
+ *   - false: offered, though the package ships MemQL -- a product bundle
+ *     usually ships its MemQL unchanged, and hiding the choice there would
+ *     hide it in the common case;
+ *   - absent (an older run, or an analysis that did not say): the
+ *     conservative reading, unavailable whenever the package ships MemQL at
+ *     all. A reserved domain is a fatal problem that never parks, so it is
+ *     not counted.
+ *
+ * The engine's refusal, if it comes anyway, renders in place with its remedy.
+ */
+export function candidateBlockedReason(run: DeploymentRow | null): string {
+  const report = run?.report ?? null;
+  if (report?.dslChanges === false) return "";
+  if (report?.dslChanges === true) {
+    return "Not available for this version: it changes the MemQL this cluster runs, which takes effect for everyone as soon as it is deployed.";
+  }
+  const domains = (report?.dslDomains ?? []).filter((d) => d.reserved !== true).map((d) => d.domain);
+  if (domains.length === 0) return "";
+  return `Not available for this version: it includes MemQL (${domains.join(", ")}), and any change to it takes effect for the whole cluster as soon as it is deployed.`;
 }
 
 /** The gate, mentioned beside a state word that stays true. */
@@ -440,7 +516,17 @@ function reading(input: ActsInput): BarReading {
       state: "Ready to deploy",
       detail: "this deploy is waiting for you -- the report above is what it would do",
       tone: "paused",
-      acts: [spec("Cancel", "danger"), spec("Deploy", "primary")],
+      // THE ACT CARRIES THE CHOICE IN ITS NAME, so what the click does is on
+      // the button rather than only in a control somewhere above it.
+      acts: [
+        spec("Cancel", "danger"),
+        spec(
+          input.deployTarget === "candidate" && candidateTargetOffered(input) && candidateBlockedReason(run) === ""
+            ? "Deploy as candidate"
+            : "Deploy",
+          "primary",
+        ),
+      ],
     };
   }
 

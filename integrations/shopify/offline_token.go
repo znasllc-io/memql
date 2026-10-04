@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // The entire rotating pair and its deadlines are sealed as ONE secret row.
@@ -85,7 +87,23 @@ func (c *Connector) adminToken(ctx context.Context, store Store) (string, error)
 		return "", fmt.Errorf("shopify: connection storage is unavailable")
 	}
 	defer unlock()
-	sealed, err := c.stores.Secret(operatorContext(ctx), store.AdminTokenRef)
+	return c.offlineAdminTokenLocked(ctx, store)
+}
+
+// offlineAdminTokenLocked is adminToken for a sealed offline grant, for a
+// caller that already holds the store's offline lock: the uninstall handler,
+// which must judge the grant and then disconnect the store with no reinstall
+// or refresh landing in between (uninstall.go). The lock is not reentrant --
+// it is a transaction-scoped advisory lock on its own connection -- so asking
+// adminToken from under it would wait on itself.
+//
+// The sealed pair is read FRESH, never from this node's result cache: it is
+// the read half of a read-modify-write another replica may have completed
+// under this lock a moment ago -- a rotation, or a reinstall's new grant --
+// and a cached pair would refresh with a token Shopify has already retired
+// (memql#5431's rule).
+func (c *Connector) offlineAdminTokenLocked(ctx context.Context, store Store) (string, error) {
+	sealed, err := c.stores.Secret(memql.ContextWithFreshRead(operatorContext(ctx)), store.AdminTokenRef)
 	var grant offlineGrant
 	if err != nil || json.Unmarshal([]byte(sealed), &grant) != nil || grant.AccessToken == "" {
 		return "", fmt.Errorf("shopify: reconnect this store")

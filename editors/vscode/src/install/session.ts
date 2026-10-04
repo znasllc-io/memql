@@ -591,7 +591,10 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           // REPLAYED WHEN THE RECEIPT HAS ONE, DERIVED OTHERWISE (memql#4068).
           //
           // The derivation is right for an INSTALL, where the operator has just
-          // chosen a version and there is nothing recorded to replay. It is
+          // chosen a version and there is nothing recorded to replay. (An
+          // install from a COMMIT chose no version, so it derives the pin and
+          // runs that release's images under the commit's manifests;
+          // imageTagForVersion says when that pairing holds, memql#5632.) It is
           // wrong for a REPAIR, and wrong in a way that reads as success: a
           // branch install's recorded checkout is a commit and an EMPTY tag, so
           // `imageTagForVersion("")` fell through to DEFAULT_STACK_TAG and the

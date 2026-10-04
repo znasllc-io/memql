@@ -44,6 +44,24 @@ function stringMapOf(row: Row, key: string): Record<string, string> {
 }
 
 /**
+ * An object of objects whose values are meant to be plain strings -- the
+ * per-store settings (memql#5602) -- read the way the EDGE reads it
+ * (component/edge/edge.go `rowStoreSettings`): each store's object keeps only
+ * its string values, and a store entry that is not an object is dropped whole.
+ * The guard admits neither, so either is a raw write that bypassed it, and an
+ * editor showing it would show a value the served document never carries.
+ */
+function storeMapOf(row: Row, key: string): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {};
+  const stores = objectOf(row, key);
+  for (const id of Object.keys(stores)) {
+    const entry = stores[id];
+    if (entry && typeof entry === "object" && !Array.isArray(entry)) out[id] = stringMapOf(stores as Row, id);
+  }
+  return out;
+}
+
+/**
  * The values `v1:platform:site.status` declares.
  *
  * ONE LIST, and the type below is derived from it rather than restated. The
@@ -118,6 +136,15 @@ export interface SiteRow {
    */
   settings: Record<string, string>;
   /**
+   * The values that belong to ONE STORE rather than to the site (memql#5602):
+   * a BARE store id to that store's own key-values. The edge merges the entry
+   * of the store the in-force binding names over `settings` -- Production's,
+   * or on the Testing destination the preview binding's -- so a Customer
+   * Account API client reaches only the store it belongs to. Storefronts only;
+   * plain strings only, for `settings`' reason.
+   */
+  storeSettings: Record<string, Record<string, string>>;
+  /**
    * The client this deployable is FOR (epic memql#4800, D5). Optional, and a
    * plain reference with no read effect -- a site with no tie lists, resolves
    * and serves exactly as it always has.
@@ -158,6 +185,7 @@ export function siteFromRow(raw: Row): SiteRow {
     candidateRef: rowString(row, "candidateRef"),
     previewBinding: objectOf(row, "previewBinding"),
     settings: stringMapOf(row, "settings"),
+    storeSettings: storeMapOf(row, "storeSettings"),
     accountId: rowString(row, "accountId"),
     packageId: rowString(row, "packageId"),
     packageDeployableName: rowString(row, "packageDeployableName"),

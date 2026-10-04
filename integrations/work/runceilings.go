@@ -37,12 +37,16 @@ package work
 // means unbounded on purpose. The seed is retried on the next call, so a
 // transient database blip costs one refused call rather than the run.
 //
-// WHAT IT CANNOT EVALUATE, AND SAYS SO. maxRetries and maxEvents are the
-// EXECUTOR's counters -- a step's attempts and a run's published events -- and
-// neither reaches a model call. Passing a zero for them to CheckCeilings would
-// clear them silently on every call, so they are cleared from the ceilings
-// this seam checks and WARNED about once per run instead. An operator who set
-// one is told it is not enforced here rather than believing it is.
+// WHAT IT DOES NOT EVALUATE, AND WHERE THAT GOES. maxRetries and maxEvents
+// are the EXECUTOR's counters -- the run's re-attempts and its published
+// events -- and neither reaches a model call, so passing a zero for them to
+// CheckCeilings would clear them silently on every call; they are cleared from
+// the ceilings this seam checks. maxRetries IS enforced, by the failure path
+// (component/automations' classifyAndAct): every retry, repair and re-plan it
+// orders counts against spent.retries, and past the budget the run asks a
+// person (memql#5664). maxEvents is enforced nowhere, so it alone is WARNED
+// about once per run: an operator who set it is told it is not a limit rather
+// than believing it is.
 //
 // RE-ENTRY: SPEND ACCUMULATES, A NEW RUN STARTS FRESH. A resumed or
 // re-dispatched run is the same v1:work:run id, so the seed folds the calls it
@@ -318,34 +322,33 @@ func addSpent(a, b work.Spent) work.Spent {
 
 // enforceableHere drops the ceilings this seam cannot evaluate.
 //
-// maxRetries and maxEvents are the EXECUTOR's counters -- a step's attempts
-// and a run's published events -- and neither reaches a model call. Handing
-// CheckCeilings a zero for them would clear them SILENTLY on every call, which
-// is the shape of the defect this whole file exists to close. Cleared here and
-// warned about once per run instead.
+// maxRetries and maxEvents are the EXECUTOR's counters -- the run's
+// re-attempts and its published events -- and neither reaches a model call.
+// Handing CheckCeilings a zero for them would clear them SILENTLY on every
+// call, which is the shape of the defect this whole file exists to close. The
+// failure path enforces maxRetries; maxEvents is warned about once per run.
 func enforceableHere(c work.Ceilings) work.Ceilings {
 	c.MaxRetries, c.MaxEvents = 0, 0
 	return c
 }
 
-// warnAboutUnenforceable says once, per run, which declared ceilings this seam
-// does not evaluate. Silence here would let an operator believe a number they
-// set is a limit.
+// warnAboutUnenforceable says once, per run, which declared ceilings nothing
+// enforces. Silence here would let an operator believe a number they set is a
+// limit. maxRetries is not among them: the failure path counts the run's
+// re-attempts against it (memql#5664), so warning about it would tell the
+// operator the opposite of what is true.
 func (c *RunCeilings) warnAboutUnenforceable(rc common.RunContext, ceilings work.Ceilings) {
 	var unenforced []string
-	if ceilings.MaxRetries > 0 {
-		unenforced = append(unenforced, work.CeilingRetries)
-	}
 	if ceilings.MaxEvents > 0 {
 		unenforced = append(unenforced, work.CeilingEvents)
 	}
 	if len(unenforced) == 0 || c.logger == nil {
 		return
 	}
-	c.logger.Warn("work: this goal declares ceilings the model seam cannot evaluate, so they bound nothing here",
+	c.logger.Warn("work: this goal declares a ceiling nothing enforces, so it bounds nothing",
 		"component", "work.ceilings", "run", rc.RunId, "goal", rc.GoalId,
 		"unenforced", strings.Join(unenforced, ","),
-		"why", "a step's attempts and a run's published events are the executor's counters and reach no model call")
+		"why", "a run's published events are the executor's counter, reach no model call, and no executor counts them yet")
 }
 
 // budgetFor returns the run's counters, creating them on first sight.

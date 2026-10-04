@@ -68,14 +68,24 @@ name: install-cluster-e2e
 # Each of these is a real limit, not a caveat:
 #
 #   * THREE OF THE FOUR LEGS DO NOT RUN THE ENGINE UNDER TEST. Their images
-#     come from GHCR at the newest PUBLISHED release; a pull request's Go
-#     changes are not in them. What those legs exercise against a real cluster
-#     is the MANIFESTS (deploy/k8s/**), the SCRIPTS (scripts/install/**,
-#     scripts/k3d/**) and the INSTALLER (editors/vscode/src/install/**) --
-#     which is exactly the path filter below, and exactly where the bugs listed
-#     above lived. It is the same deliberate skew a release install carries
-#     (see imageTagForVersion): two thirds of the fixes arrive, the engine
-#     binary is not one of them.
+#     come from GHCR at the installer's pin, DEFAULT_STACK_TAG in
+#     editors/vscode/src/install/stackPin.ts: `--commit` names a checkout and no
+#     release, so its image tag falls back to the pin, and the upgrade leg
+#     starts from the pin by name. A pull request's Go changes are not in them.
+#     What those legs exercise against a real cluster is the MANIFESTS
+#     (deploy/k8s/**), the SCRIPTS (scripts/install/**, scripts/k3d/**) and the
+#     INSTALLER (editors/vscode/src/install/**) -- which is exactly the path
+#     filter below, and exactly where the bugs listed above lived. It is the
+#     same deliberate skew a release install carries (see imageTagForVersion):
+#     two thirds of the fixes arrive, the engine binary is not one of them.
+#
+#     THE SKEW HOLDS ONLY WHILE THE PIN IS NEW ENOUGH (memql#5632). These legs
+#     pair the revision's manifests with the pin's binaries, so a manifest that
+#     needs something the pinned engine lacks fails them on every pull request:
+#     #5631's DSL init containers ran a `dsl-fetch` the v0.19.1 pin did not
+#     have, and repair and round-trip timed out on them from then until the pin
+#     moved. The release that first carries what such a manifest needs is the
+#     release that bumps the pin.
 #
 #     `from-source` is the exception and it is NOT a general answer to this
 #     gap. It BUILDS the revision's node images, so it does run the engine
@@ -292,7 +302,8 @@ jobs:
       #
       # The default `to` is the REVISION UNDER TEST, which is what makes this
       # leg useful while only one release is published: it answers "can a
-      # v0.19.0 cluster be moved onto the code we are about to merge". When a
+      # cluster at the pinned release be moved onto the code we are about to
+      # merge". When a
       # second release exists, dispatch with both inputs (or set the repository
       # variables) for a true release-to-release upgrade; nothing else changes.
       #

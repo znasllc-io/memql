@@ -160,6 +160,11 @@ func TestConnectShopifyBeginsOnOneEngineAndFinishesOnAnother(t *testing.T) {
 	connB.admin.endpoint = func(Store) string { return admin.server.URL + "/graphql" }
 	connB.admin.sleep = func(context.Context, time.Duration) error { return nil }
 	connB.deliver = func(s Store) string { return "https://api.hop.example.test/inbound/shopify-" + s.ID }
+	// A reconnect asks the store whether the Storefront token it keeps still
+	// works (memql#5638), so B's Storefront API is a fake too: round 3 keeps
+	// the token round 2 minted, and nothing here may reach a real shop.
+	storefront := newFakeStorefront(t)
+	connB.storefrontEndpoint = func(string, string) (string, error) { return storefront.server.URL + "/api/graphql.json", nil }
 	// Step 15 inline, so a round's webhook job cannot land inside the next.
 	connB.background = func(f func()) { f() }
 	admin.reply("ShopifyConnectPlan", map[string]any{"shop": map[string]any{"plan": map[string]any{"publicDisplayName": "Basic"}}})
@@ -213,7 +218,7 @@ func TestConnectShopifyBeginsOnOneEngineAndFinishesOnAnother(t *testing.T) {
 		}
 	}
 	seed("v1:identity:user", dev, map[string]any{
-		"displayName": "Hop Dev", "primaryEmail": dev + "@hop.example.test", "role": string(auth.RoleDeveloper), "active": true,
+		"displayName": "Hop Dev", "primaryEmail": dev + "@hop.example.test", "role": string(auth.RoleOwner), "active": true,
 	})
 	// The browser the developer signed in with (D16): its session is the one
 	// every call below names (actorCtx's sid), and its refresh cookie is what
@@ -241,7 +246,8 @@ func TestConnectShopifyBeginsOnOneEngineAndFinishesOnAnother(t *testing.T) {
 		"deployables": []any{map[string]any{"name": "storefront", "siteId": "v1:platform:site:" + site}},
 	})
 
-	devCtx := actorCtx(dev, auth.RoleDeveloper)
+	// The per-storefront flow is a cluster owner's (memql#5638, G9).
+	devCtx := actorCtx(dev, auth.RoleOwner)
 	call := func(ctx context.Context, format string, args ...any) map[string]any {
 		t.Helper()
 		out := builtinReply(t, engA, ctx, fmt.Sprintf(format, args...))
@@ -457,6 +463,9 @@ func TestConnectShopifyBeginsOnOneEngineAndFinishesOnAnother(t *testing.T) {
 	settle()
 	if storeRows() != 1 || admin.countOp("ShopifyStorefrontTokenCreate") != 2 || storeRow().AppClientID != "hop-client-two" {
 		t.Fatalf("round 3: stores=%d mints=%d", storeRows(), admin.countOp("ShopifyStorefrontTokenCreate"))
+	}
+	if storefront.requests() != 1 || storefront.tokens[0] != minted2 {
+		t.Fatalf("round 3 asked the store %d times about its kept token, want once with the token round 2 minted", storefront.requests())
 	}
 	if bound, _ := boundStore(); bound != storeID {
 		t.Fatalf("the binding moved to %q", bound)

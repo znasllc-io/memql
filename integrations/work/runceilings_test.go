@@ -263,7 +263,7 @@ func TestLocalSpendIsCountedAndDoesNotBurnTheDollarCeilings(t *testing.T) {
 
 // maxRetries and maxEvents are the EXECUTOR's counters and reach no model
 // call. Handing CheckCeilings a zero for them would clear them silently on
-// every call, so they are cleared here and warned about instead.
+// every call, so they are cleared here; the failure path enforces maxRetries.
 func TestTheCeilingsThisSeamCannotEvaluateAreClearedNotSilentlyPassed(t *testing.T) {
 	c, eng := newTestCeilings(t)
 	answerRows(eng, map[string]any{"maxRetries": 1.0, "maxEvents": 1.0})

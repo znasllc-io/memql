@@ -4341,7 +4341,7 @@ QueryClient.prototype.markResponsibilityIntakePending = function (this: QueryCli
   return this.executeNamed("markResponsibilityIntakePending", buildMarkResponsibilityIntakePending(args), opts);
 };
 
-/** Stamp the shop/redact purge. The row stays: it is the audit record that a purge happened, and the domain must not be re-registered silently. */
+/** Stamp the shop/redact purge. The row stays: it is the audit record that a purge happened, and the domain must not be re-registered silently -- only a reinstall Shopify verified clears it (markStoreReconnected), and that reinstall is audited. */
 // Bound concept: v1:shopify:store (machine-readable: BoundConcepts["markStoreRedacted"] in generated_concepts.ts).
 export interface MarkStoreRedactedArgs {
   storeId: string;
@@ -7189,7 +7189,8 @@ QueryClient.prototype.setSenderIdentityStatus = function (this: QueryClient, arg
 A candidate is a bundle version this deployable is not serving. Setting one changes NOTHING about what the public is served: the edge goes on serving `bundleRef` to every request that does not carry a preview grant, for a draft site and for a live one alike.
 `candidateRef` IS STAMPED, NOT ACCEPTED, and clearSiteCandidate exists anyway. The stamp is what makes this mutation always write the value it was given; the separate clear is what makes "there is no candidate" expressible as an act a person takes deliberately, rather than as the side effect of omitting an argument. updateSiteAccount's note is the general form of the rule.
 `artifactId` is accepted for updateSiteBundle's reason exactly: it is optional provenance, and an omitted accepted arg is DROPPED from the payload so the read-merge inherits what is stored.
-A CANDIDATE MAY NOT EQUAL THE SERVING VERSION, which is a comparison against the PRIOR row and therefore Go (component/memql/platform_site_candidate_guard.go). A candidate that is already serving is not a candidate: there would be nothing to exercise, and promoting it would be a write that changes nothing while reading like a release.
+A CANDIDATE MAY NOT EQUAL THE SERVING VERSION, which is a comparison against the PRIOR row and therefore Go (component/memql/platform_site_preview_guard.go). A candidate that is already serving is not a candidate: there would be nothing to exercise, and promoting it would be a write that changes nothing while reading like a release.
+A PUBLISH CAN END HERE (memql#5601). POST /sites/{id}/bundles?target=candidate and a package deploy's `target: candidate` placement upload a new version and then call this rather than updateSiteBundle (component/edge's PointVersionStatement), so a version reaches the candidate without ever serving. A STOREFRONT TAKES NO CANDIDATE BUT THE VERSION IT SERVES, from any caller: its Testing destination serves the published build, so any other version would be served by nothing, and the same guard refuses it with storefront_has_no_candidate.
 AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite -- the row's owner, or a cluster owner through the explicit escape -- and @requiresCapability names the surface. `preview` rather than `publish` is the line this epic draws: preparing and exercising a version is one grant, making the public see it is another, and a person may hold the first without the second. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["setSiteCandidate"] in generated_concepts.ts).
 export interface SetSiteCandidateArgs {
@@ -8733,6 +8734,33 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateSiteStoreBinding = function (this: QueryClient, args: UpdateSiteStoreBindingArgs = {} as UpdateSiteStoreBindingArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateSiteStoreBinding", buildUpdateSiteStoreBinding(args), opts);
+};
+
+/** Replace a storefront's PER-STORE runtime settings (memql#5602): for each store id, the values that belong to that store rather than to the site -- a Customer Account API client id, a wholesale adapter. The edge merges the entry of the store the in-force binding names over `settings`, so Production is served its store's values and the Testing destination its testing store's, from one document shape.
+A REPLACE, NOT A MERGE, for updateSiteSettings' reason: `storeSettings` is stamped from the required arg, so an empty object clears every store's entry and dropping one store's entry is expressible. The editor sends the whole map it shows.
+The shape half is here: an object. The half that decides -- bare store ids as keys, at most 16 of them, and every store's values held to the same key form, `Ref` refusal, value type and caps `settings` is, plus the systemOwned refusal -- is the Go guard beside the settings guard (component/memql/platform_site_settings_guard.go), because a mutation body cannot see an object's keys. NOT A PLACE FOR A SECRET: every value is served to every visitor.
+AUTHORIZATION is updateSiteSettings' exactly: the concept's composite tier plus guardRowAuthzWrite -- the row's owner, or a cluster owner through the explicit escape -- and no capability part, because these are runtime settings like `settings`, not a store binding. Which store a site is bound to stays the `store` part's (updateSiteStoreBinding); an entry for a store the site is not bound to is never served. */
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteStoreSettings"] in generated_concepts.ts).
+export interface UpdateSiteStoreSettingsArgs {
+  siteId: string;
+  storeSettings: Record<string, unknown>;
+}
+
+export function buildUpdateSiteStoreSettings(args: UpdateSiteStoreSettingsArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("storeSettings: " + renderMemQLValue(args.storeSettings));
+  return "mutation updateSiteStoreSettings(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    updateSiteStoreSettings(args: UpdateSiteStoreSettingsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.updateSiteStoreSettings = function (this: QueryClient, args: UpdateSiteStoreSettingsArgs = {} as UpdateSiteStoreSettingsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("updateSiteStoreSettings", buildUpdateSiteStoreSettings(args), opts);
 };
 
 /** Change a store's configuration. Read-merge: an argument left out keeps its stored value, so rotating one secret reference does not require re-supplying the other two. */

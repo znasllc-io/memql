@@ -173,7 +173,9 @@ func TestACloudKeyOpensTheDoorWithNoFleet(t *testing.T) {
 }
 
 // The caller's own machines and the shared set MERGE: a model both offer
-// appears ONCE, or the Providers page renders two rows for one thing.
+// appears ONCE, or the Providers page renders two rows for one thing. Both
+// arrive in the person's one catalog now (memql#5660), as two entries for the
+// same model, and the read folds them.
 func TestTheCallersFleetAndTheSharedSetMergeIntoOneRowPerModel(t *testing.T) {
 	shared := capable("llama3.1:8b")
 	shared.Machines = []FleetMachine{{RegistrationId: "desktop", Name: "desktop", Online: true}}
@@ -198,8 +200,10 @@ func TestTheCallersFleetAndTheSharedSetMergeIntoOneRowPerModel(t *testing.T) {
 	}
 }
 
-// perActorFleet answers differently for a user and for system work, which is
-// what the merge has to cope with.
+// perActorFleet answers differently for a user and for system work, the way
+// FleetCatalogReader's contract says the installed reader does: a person's
+// catalog is their own machines AND the shared set (design G8), and system
+// work's is the shared set alone.
 type perActorFleet struct {
 	mine   []FleetModel
 	shared []FleetModel
@@ -209,7 +213,7 @@ func (f *perActorFleet) Catalog(_ context.Context, actingUserId string) ([]Fleet
 	if actingUserId == "" {
 		return f.shared, nil
 	}
-	return f.mine, nil
+	return append(append([]FleetModel{}, f.mine...), f.shared...), nil
 }
 
 func (f *perActorFleet) ModelPreference(context.Context, string) ([]string, error) { return nil, nil }

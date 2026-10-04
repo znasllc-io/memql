@@ -54,7 +54,7 @@ func fixtureStorefrontSite() *Site {
 		Store: &BoundStore{
 			ID:                 "fixture-store",
 			Domain:             "fixture-store.myshopify.com",
-			StorefrontTokenRef: "fixture_storefront_token",
+			StorefrontTokenRef: StorefrontTokenSecretName("fixture-store"),
 		},
 	}
 }

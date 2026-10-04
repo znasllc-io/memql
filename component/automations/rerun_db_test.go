@@ -27,7 +27,7 @@ import (
 )
 
 func TestRerun_DB_AStepRunAgainLandsAsNewVersionsAndTheHeadRoundTrips(t *testing.T) {
-	engine := openTestEngine(t)
+	engine := sharedJournalEngine(t)
 	a := statementAutomation(t, rerunSource)
 	owner, goalId, runId := id.NewShortId(), "v1:work:goal:"+id.NewShortId(), id.NewShortId()
 	ownerCtx := auth.ContextWithUserActor(context.Background(), owner)

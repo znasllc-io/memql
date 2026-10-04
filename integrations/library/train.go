@@ -351,7 +351,12 @@ func (i *Integration) auditTrain(ctx context.Context, access *auth.AccessContext
 		langparser.QuoteString(domainId),
 		characters,
 	)
-	if _, err := i.engine.Execute(ctx, q); err != nil {
+	// Internal origin for this one write (memql#5624): auditEvent's create
+	// admits a cluster owner or server code, and the person training their
+	// own file need be neither. The statement is composed above with every
+	// value quoted, so the stamp reaches this createAuditEvent and nothing
+	// else; the actor it records is still the caller.
+	if _, err := i.engine.Execute(auth.ContextWithInternalOrigin(ctx), q); err != nil {
 		i.log().Warn("library: train audit event not written",
 			"fileId", fileId, "domainId", domainId, "error", err)
 	}

@@ -85,7 +85,7 @@ func jsonShape(t *testing.T, v any) any {
 }
 
 func TestResumeV1_DB_FinishesAsAnUninterruptedRunWould(t *testing.T) {
-	engine := openTestEngine(t)
+	engine := sharedJournalEngine(t)
 	src := fmt.Sprintf(`@trigger(event="probe.fired")
 automation fourthFails%d {
   a := builtin one()
@@ -134,7 +134,7 @@ automation fourthFails%d {
 }
 
 func TestResumeV1_DB_DoesNotRerunAContinuedFailure(t *testing.T) {
-	engine := openTestEngine(t)
+	engine := sharedJournalEngine(t)
 	probe := newStmtProbe()
 	probe.answers["one"] = memql.NewResultWithOutput("A")
 	probe.fails["flaky"] = -1
@@ -157,6 +157,8 @@ automation continuesPast%d {
 	}
 }
 
+// A private engine, unlike its two neighbours: this one registers a logic
+// and installs a logic runner, which changes the engine (memql#5668).
 func TestResumeV1_DB_RerunsALogicStatementOnce(t *testing.T) {
 	engine := openTestEngine(t)
 	stamp := time.Now().UnixNano()

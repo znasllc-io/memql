@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -175,6 +177,57 @@ func TestAGoallessRerunIsRefusedAtDispatch(t *testing.T) {
 	j.GoalId, j.OwnerUserId = "", ""
 	if _, _, code, err := workRerunResumption(j, nil, rerunDispatchTemplate(t)); code != workRerunNeedsGoal || err == nil {
 		t.Fatalf("code %q, err %v, want %s", code, err, workRerunNeedsGoal)
+	}
+}
+
+// A RE-PLANNED RUN IS SERVED AS ITS INSTALL'S REQUEST (memql#5664). The
+// install records the new template and a `replan` request naming its first
+// step the run never reached; the dispatcher serves it as a re-run, from that
+// step, with the completed prefix served from the run's own rows. Refused as an
+// unknown reason, the run would be failed `rerun_reason_invalid` instead.
+func TestAReplanIsPreparedFromItsRequestAtDispatch(t *testing.T) {
+	auto := rerunDispatchTemplate(t)
+	j := finishedDispatchJournal(&automations.RerunSpec{RequestId: "req-replan", Reason: automations.RerunReasonReplan, StepKey: "b"})
+	// The old template failed at `broke`, which the new one replaced; the
+	// install superseded its row, and `b` and `publish` never ran.
+	j.Steps = map[string]*automations.MinimalStepResult{"a": {StepId: "a", Status: "success", Value: "A1"}}
+	j.StepStates = map[string]automations.StepState{"a": {Status: "done", Attempt: 1, Version: 1}, "broke": {Status: "skipped", Attempt: 1, Version: 1}}
+	j.MaxAttempt = map[string]int{"a": 1, "broke": 1}
+	j.StepOrder = []string{"a", "broke"}
+	j.StaleSteps = []string{"b", "publish"}
+	resume, opts, code, err := workRerunResumption(j, nil, auto)
+	if err != nil || code != "" {
+		t.Fatalf("a replan request was refused at dispatch: %s %v", code, err)
+	}
+	if opts.FromStep != "b" || opts.Rerun == nil || opts.Rerun.Reason != automations.RerunReasonReplan {
+		t.Fatalf("options = %+v, want the request served from the first new step", opts)
+	}
+	if resume == nil || resume.FailedStep != "" {
+		t.Fatalf("prepared journal = %+v", resume)
+	}
+}
+
+// A RESUME REFUSED ON ITS ARGS FAILS THE RUN, SAYING SO (memql#5664). It is
+// decided before any step runs and binds the same variables to the same
+// contract on every attempt; reported and left, the run sat at `running` and
+// the abandoned sweep closed it a minute later with a sentence about a node
+// going away. Any other refusal is reported as before, and a refusal that came
+// with an execution was the executor's to close.
+func TestAResumeRefusedOnItsArgsFailsTheRun(t *testing.T) {
+	refused := fmt.Errorf("%w: required field is missing", automations.ErrResumeArgsContract)
+	if code := workResumeRefusal(nil, refused); code != workResumeArgsRefused {
+		t.Fatalf("an args refusal: code %q, want %s", code, workResumeArgsRefused)
+	}
+	if code := workResumeRefusal(nil, errors.New("the database stopped answering")); code != "" {
+		t.Fatalf("a transient refusal was failed as %q", code)
+	}
+	if code := workResumeRefusal(&automations.AutomationExecution{}, refused); code != "" {
+		t.Fatalf("a refusal that came with an execution was failed as %q", code)
+	}
+	// The agent's dispatcher asks it on its ordinary resume path, compiled
+	// only under the agent tag.
+	if src := readAppFile(t, "integrations_work_dispatch.go"); !strings.Contains(src, "workResumeRefusal(exec, execErr)") {
+		t.Fatal("the agent's dispatcher does not ask workResumeRefusal on its resume path; a run refused on its args is left for the abandoned sweep")
 	}
 }
 

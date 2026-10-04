@@ -383,6 +383,20 @@ rather than omitting them, so a fast deploy is legible as a fast deploy -- and
 a person counting missing steps has no way to tell "nothing had to restart"
 from "it stopped here".
 
+**The report says which it will be, before the gate**: `report.dslChanges`
+on the run row (memql#5601) is `true` when deploying this plan would change
+the cluster's active DSL set -- some domain's tree differs from what
+`packages/active.json` names, so the run would stage and roll -- and `false`
+when every domain is already active or the package ships no DSL. It is
+**absent when the node could not tell** (no staging surface, or a pointer it
+could not read), and a reader must treat absent as unknown, never as false.
+It is computed when the run is analysed, from the same comparison the stage
+makes, without writing anything. It is what decides whether a run may publish
+any app as a [candidate](deployables.md#publishing-the-candidate-version-instead):
+a candidate run cannot carry a DSL change, and the confirm asks again rather
+than trusting the report, since another deploy can move the pointer while a
+run waits at the gate.
+
 **The confirm gate lives on the ROW**, at `status: "awaiting_confirm"`, not in
 a browser. Somebody who closed the window finds their run exactly where they
 left it, and the list marks the deployable "a deploy is waiting for you" from

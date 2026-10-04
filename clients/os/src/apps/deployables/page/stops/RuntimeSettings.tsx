@@ -51,7 +51,20 @@ import {
 const NOT_A_SECRET =
   "Read by the app when it loads, and served to everyone who visits it. Not a place for a secret -- put credentials in the cluster's secrets. A storefront names its Storefront token on its store, which is the one reference the edge resolves.";
 
-export function RuntimeSettingsPanel({ site, canEdit }: { site: SiteRow; canEdit: boolean }) {
+export function RuntimeSettingsPanel({
+  site,
+  canEdit,
+  onOpenStore,
+}: {
+  site: SiteRow;
+  canEdit: boolean;
+  /**
+   * Opens the storefront's Store page, where the values that belong to ONE
+   * store live (memql#5602). Absent for anything but a storefront somebody may
+   * open the Store page of, and then this panel says nothing about it.
+   */
+  onOpenStore?: () => void;
+}) {
   const connection = useOsConnection();
   // THE SETTINGS' OWN VALUES, not the object holding them, and the difference
   // is a bug somebody types into. `site` is re-projected whenever the live
@@ -90,6 +103,7 @@ export function RuntimeSettingsPanel({ site, canEdit }: { site: SiteRow; canEdit
       <section className="os-report-part">
         <h4 className="os-report-heading">Settings</h4>
         <Caption>{NOT_A_SECRET}</Caption>
+        <StoreValuesPointer onOpenStore={onOpenStore} />
         {stored.length === 0 ? (
           <Caption>No app values have been added.</Caption>
         ) : (
@@ -134,6 +148,7 @@ export function RuntimeSettingsPanel({ site, canEdit }: { site: SiteRow; canEdit
 
       <h4 className="os-report-heading">Settings</h4>
       <Caption>{NOT_A_SECRET}</Caption>
+      <StoreValuesPointer onOpenStore={onOpenStore} />
 
       {draft.length === 0 ? (
         <Caption>
@@ -204,6 +219,26 @@ export function RuntimeSettingsPanel({ site, canEdit }: { site: SiteRow; canEdit
         <ProblemNotice problem={{ code: "settings_refused", message: refusal, fatal: true }} tone="error" />
       )}
     </section>
+  );
+}
+
+/**
+ * Where a store's own values went (memql#5602). A value that belongs to one
+ * store left here reaches every store that does not set its own -- which is
+ * exactly how a Testing session came to hand the testing store the live
+ * store's Customer Account API client -- so the place it belongs is named
+ * where somebody would otherwise add it.
+ */
+function StoreValuesPointer({ onOpenStore }: { onOpenStore?: (() => void) | undefined }) {
+  if (onOpenStore === undefined) return null;
+  return (
+    <Caption>
+      Values that belong to one store, such as its Customer Account API client, are set on the{" "}
+      <button type="button" className="os-link" onClick={onOpenStore}>
+        Store page
+      </button>
+      .
+    </Caption>
   );
 }
 

@@ -77,6 +77,133 @@ automation resumes {
 	}
 }
 
+// A FAILURE THE BODY CONTINUED PAST IS NOT A RESUME POINT (memql#5664). A
+// run that is still executing on one replica, between two statements, has
+// this journal: a finished, a failure continued past, a finished, nothing in
+// flight. The only thing that kept a second replica from starting it again
+// once the first one's dispatch lease lapsed was the refusal of a journal
+// with no failed step -- and a continued failure IS a failed row, so the
+// second replica resumed from it, running `flaky` and the already-finished
+// `b` again beside the replica still executing the run.
+func TestAContinuedFailureIsNotAResumePoint(t *testing.T) {
+	j := &RunJournal{
+		FailedStep: "flaky",
+		Steps: map[string]*MinimalStepResult{
+			"a": {StepId: "a", Status: "success", Value: "A"},
+			"b": {StepId: "b", Status: "success", Value: "B"},
+		},
+		StepStates: states(
+			"a", StepState{Status: "done", Attempt: 1},
+			"flaky", StepState{Status: "failed", Attempt: 1},
+			"b", StepState{Status: "done", Attempt: 1},
+		),
+	}
+	probe, rec, _, err := resumeProbe(t, `@trigger(event="probe.fired")
+automation continues {
+  a := builtin one()
+  builtin flaky() on error continue
+  b := builtin two(x: a)
+  builtin three(y: b)
+}`, j, nil)
+	if got := probe.callees(); len(got) != 0 {
+		t.Fatalf("resumed and ran %v: a failure the body continued past is no resume point, and the run it belongs to may still be executing elsewhere", got)
+	}
+	if !errors.Is(err, ErrRunJournalInvalid) {
+		t.Fatalf("resume err = %v, want ErrRunJournalInvalid: there is nothing here to resume", err)
+	}
+	if got := rec.all(); len(got) != 0 {
+		t.Fatalf("the refused resume wrote %v; reopening the run would claim it for a replica that runs nothing", got)
+	}
+}
+
+const replannedSource = `@trigger(event="probe.fired")
+automation replanned {
+  a := builtin one()
+  fix := builtin mend(x: a)
+  builtin finish(y: fix)
+}`
+
+// replannedJournal is a run whose re-plan was installed: `a` finished, the
+// step it failed at (`broke`) is not in the new template, and the row it left
+// is the given state -- `failed` as the failure wrote it, `skipped` once the
+// install has superseded it.
+func replannedJournal(brokeStatus string) *RunJournal {
+	return &RunJournal{
+		RunId: "r1",
+		Steps: map[string]*MinimalStepResult{"a": {StepId: "a", Status: "success", Value: "A"}},
+		StepStates: states(
+			"a", StepState{Status: "done", Attempt: 1},
+			"broke", StepState{Status: brokeStatus, Attempt: 2},
+		),
+		MaxAttempt: map[string]int{"a": 1, "broke": 2},
+	}
+}
+
+// A RE-PLANNED TEMPLATE RESUMES FROM THE REQUEST ITS INSTALL WRITES
+// (memql#5664). replanGap re-emits the completed steps as the new template's
+// prefix and replaces the rest, so the step the run failed at may not be in
+// the template the run now carries. The install says where the run resumes --
+// a `replan` request naming the first new step, served the way a re-run is --
+// and the run does exactly that: the prefix is served, the new steps run, each
+// as its first version.
+func TestAReplannedTemplateResumesFromItsInstallRequest(t *testing.T) {
+	a := statementAutomation(t, replannedSource)
+	j := replannedJournal("skipped")
+	j.AutomationName = a.Name
+	j.Rerun = &RerunSpec{RequestId: "rq-1", Reason: RerunReasonReplan, StepKey: "fix"}
+	j.StaleSteps = []string{"fix", "finish"}
+
+	resume, opts, err := PrepareRerun(j, nil, a)
+	if err != nil {
+		t.Fatalf("PrepareRerun: %v", err)
+	}
+	probe := newStmtProbe()
+	rec := &journalRecorder{}
+	e := NewExecutor(ExecutorOptions{StepRegistry: probe})
+	e.journal = newWorkJournal(rec, nil)
+	if exec, err := e.ResumeFrom(context.Background(), resume, a, opts); err != nil {
+		t.Fatalf("resume: %v (%v)", err, exec)
+	}
+	if got, want := probe.callees(), []string{"mend", "finish"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("calls %v, want %v: the completed prefix is served, the new steps run", got, want)
+	}
+	if x := probe.argsOf(t, "mend", 0)["x"]; x != "A" {
+		t.Fatalf("mend(x: %v), want the value the completed prefix recorded", x)
+	}
+	if joined := strings.Join(rec.all(), "\n"); !strings.Contains(joined, `idempotencyKey: "r1:fix:1"`) {
+		t.Fatalf("the first new step did not run as its first version:\n%s", joined)
+	}
+}
+
+// WITHOUT ITS REQUEST, A RE-PLANNED RUN IS NOT RESUMABLE BY A SECOND REPLICA
+// (memql#5664). A resume point once fell back to the template's first unreached
+// step whenever the failed step was no longer in it -- so with replica A
+// executing the re-planned run between two steps, and A's dispatch lease
+// lapsed, replica B, claiming from one of A's receipt events past an admission
+// that fences only a step in flight, resumed it and ran `fix` and `finish`
+// beside A. A journal with no request and no failure in the template has
+// nothing to resume, superseded failed row or not.
+func TestAReplannedTemplateWithNoRequestIsNotResumed(t *testing.T) {
+	for _, broke := range []string{"failed", "skipped"} {
+		t.Run("broke "+broke, func(t *testing.T) {
+			j := replannedJournal(broke)
+			if broke == "failed" {
+				j.FailedStep = "broke"
+			}
+			probe, rec, _, err := resumeProbe(t, replannedSource, j, nil)
+			if got := probe.callees(); len(got) != 0 {
+				t.Fatalf("resumed and ran %v with no request to say where: a second replica would run these beside the first", got)
+			}
+			if !errors.Is(err, ErrRunJournalInvalid) {
+				t.Fatalf("resume err = %v, want ErrRunJournalInvalid", err)
+			}
+			if got := rec.all(); len(got) != 0 {
+				t.Fatalf("the refused resume wrote %v", got)
+			}
+		})
+	}
+}
+
 func TestStatementResumeReadsAnUnrecordedQueryAgain(t *testing.T) {
 	j := &RunJournal{
 		FailedStep: "consume",

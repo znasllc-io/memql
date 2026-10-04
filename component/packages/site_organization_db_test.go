@@ -113,7 +113,7 @@ func TestPackagePlacementRequiresTargetOrganizationActionBeforeSideEffects(t *te
 	}
 	mustExecute(t, eng, auth.ContextWithInternalOrigin(ownerCtx), fmt.Sprintf(`mutation recordSitePackageOrigin(siteId: %s, packageId: %s, packageDeployableName: "web")`, langparser.QuoteString(siteID), langparser.QuoteString(packageID)))
 	bundle := edge.Bundle{"index.html": []byte("<!doctype html><title>Organization</title>")}
-	if _, err := pub.PublishBundle(memberCtx, siteID, bundle); err == nil {
+	if _, err := pub.PublishBundle(memberCtx, siteID, bundle, edge.TargetServing); err == nil {
 		t.Fatal("A deploy grant uploaded to B")
 	}
 	if blobs.puts != 0 {
@@ -132,7 +132,7 @@ func TestPackagePlacementRequiresTargetOrganizationActionBeforeSideEffects(t *te
 	// Holding the action is insufficient when the target's data authority
 	// was revoked: refusal must precede even the first uploaded byte.
 	grant(b, auth.VerbUpdate, auth.ResourceData, auth.GrantDeny)
-	if _, err := pub.PublishBundle(memberCtx, siteID, bundle); err == nil {
+	if _, err := pub.PublishBundle(memberCtx, siteID, bundle, edge.TargetServing); err == nil {
 		t.Fatal("execute grant bypassed denied target data permission")
 	}
 	if blobs.puts != 0 {
@@ -153,7 +153,7 @@ func TestPackagePlacementRequiresTargetOrganizationActionBeforeSideEffects(t *te
 	if _, _, _, err := pub.EnsureSite(memberCtx, req); err != nil {
 		t.Fatalf("both-org authority refused explicit new B placement: %v", err)
 	}
-	if _, err := pub.PublishBundle(memberCtx, siteID, bundle); err != nil {
+	if _, err := pub.PublishBundle(memberCtx, siteID, bundle, edge.TargetServing); err != nil {
 		t.Fatalf("both-org authority refused publish: %v", err)
 	}
 	if blobs.puts != 1 {

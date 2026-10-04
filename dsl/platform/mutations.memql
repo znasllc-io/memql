@@ -579,6 +579,38 @@ mutation site updateSiteSettings {
   }
 }
 
+/// Replace a storefront's PER-STORE runtime settings (memql#5602): for each store id, the values
+/// that belong to that store rather than to the site -- a Customer Account API client id, a
+/// wholesale adapter. The edge merges the entry of the store the in-force binding names over
+/// `settings`, so Production is served its store's values and the Testing destination its testing
+/// store's, from one document shape.
+///
+/// A REPLACE, NOT A MERGE, for updateSiteSettings' reason: `storeSettings` is stamped from the
+/// required arg, so an empty object clears every store's entry and dropping one store's entry is
+/// expressible. The editor sends the whole map it shows.
+///
+/// The shape half is here: an object. The half that decides -- bare store ids as keys, at most 16
+/// of them, and every store's values held to the same key form, `Ref` refusal, value type and caps
+/// `settings` is, plus the systemOwned refusal -- is the Go guard beside the settings guard
+/// (component/memql/platform_site_settings_guard.go), because a mutation body cannot see an
+/// object's keys. NOT A PLACE FOR A SECRET: every value is served to every visitor.
+///
+/// AUTHORIZATION is updateSiteSettings' exactly: the concept's composite tier plus
+/// guardRowAuthzWrite -- the row's owner, or a cluster owner through the explicit escape -- and no
+/// capability part, because these are runtime settings like `settings`, not a store binding. Which
+/// store a site is bound to stays the `store` part's (updateSiteStoreBinding); an entry for a store
+/// the site is not bound to is never served.
+mutation site updateSiteStoreSettings {
+  args {
+    siteId         string!
+    storeSettings  object!
+  }
+  update {
+    id:            args.siteId
+    storeSettings: args.storeSettings
+  }
+}
+
 /// Turn this deployable's SHOPPER SURFACE on or off (epic memql#5532, issue memql#5551).
 ///
 /// WHAT IT SWITCHES: POST /_memql/forms/{pack}/{name} and GET /_memql/reads/{pack}/{name} on this
@@ -707,9 +739,16 @@ mutation site updateSiteStoreBinding {
 /// an omitted accepted arg is DROPPED from the payload so the read-merge inherits what is stored.
 ///
 /// A CANDIDATE MAY NOT EQUAL THE SERVING VERSION, which is a comparison against the PRIOR row and
-/// therefore Go (component/memql/platform_site_candidate_guard.go). A candidate that is already
+/// therefore Go (component/memql/platform_site_preview_guard.go). A candidate that is already
 /// serving is not a candidate: there would be nothing to exercise, and promoting it would be a
 /// write that changes nothing while reading like a release.
+///
+/// A PUBLISH CAN END HERE (memql#5601). POST /sites/{id}/bundles?target=candidate and a package
+/// deploy's `target: candidate` placement upload a new version and then call this rather than
+/// updateSiteBundle (component/edge's PointVersionStatement), so a version reaches the candidate
+/// without ever serving. A STOREFRONT TAKES NO CANDIDATE BUT THE VERSION IT SERVES, from any
+/// caller: its Testing destination serves the published build, so any other version would be
+/// served by nothing, and the same guard refuses it with storefront_has_no_candidate.
 ///
 /// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite -- the row's owner, or a
 /// cluster owner through the explicit escape -- and @requiresCapability names the surface.
@@ -2121,6 +2160,8 @@ mutation packageDeployment openPackageDeployment {
     nodeId         string
     /// The deployables this run was started for. Empty is the whole source.
     scopedTo       []string
+    /// The deployables this run publishes as their candidate version (memql#5601).
+    candidates     []string
     /// The run this one was started from, when it is a retry.
     fromDeploymentId string
     /// The package's account tie, copied by the pipeline off the package row (memql#5303).
@@ -2128,7 +2169,7 @@ mutation packageDeployment openPackageDeployment {
     startedAt      datetime!
   }
   insert {
-    accept { sourceVersion, requestedBy, nodeId, scopedTo, fromDeploymentId, accountId }
+    accept { sourceVersion, requestedBy, nodeId, scopedTo, candidates, fromDeploymentId, accountId }
     stamp {
       id:           args.deploymentId
       packageId:    args.packageId
@@ -2253,13 +2294,18 @@ mutation packageDeployment requestPackageDeploymentCancel {
 }
 
 
-/// Re-stamp which deployables a run is for. Pipeline writer.
+/// Re-stamp which deployables a run is for, and which of them it publishes as candidates. Pipeline
+/// writer.
 ///
 /// Scope is stamped at open from the placements the first call carried, and re-stamped HERE when a
 /// parked run is confirmed -- because the gate is the moment a person answers which apps they
 /// meant. A compose gate opens with no placements at all (the analyze is about the whole source)
 /// and closes with the skips somebody ticked, so a run whose scope were fixed at open would report
 /// progress on apps it had been told not to build.
+///
+/// `candidates` is the same answer about targets (memql#5601): what the gate decided, an explicit
+/// target on the confirming call winning over the one recorded at open and an omitted one keeping
+/// it. Accepted rather than stamped, so a re-stamp that names no candidates keeps the recorded ones.
 ///
 /// Its own mutation rather than an argument on advancePackageDeployment: advancing is a stage
 /// change and this is not, and a caller able to move a run's stage while rewriting what it is about
@@ -2276,10 +2322,14 @@ mutation packageDeployment recordPackageDeploymentScope {
   args {
     deploymentId  string!
     scopedTo      []string!
+    candidates    []string
   }
   update {
-    id:       args.deploymentId
-    scopedTo: args.scopedTo
+    accept { candidates }
+    stamp {
+      id:       args.deploymentId
+      scopedTo: args.scopedTo
+    }
   }
 }
 
@@ -2905,5 +2955,25 @@ mutation externalConnection disconnectExternalConnection {
   update {
     id: args.connectionId
     status: "removed"
+  }
+}
+
+/// Provider callback only: the provider reported that the resource this
+/// selection names no longer authorizes the app -- Shopify's app/uninstalled
+/// for the store. The selection stays, so a reinstall restores the same one
+/// (recordExternalConnection), and it stops reading as connected meanwhile.
+/// `disconnected` rather than `removed`, because the person removed nothing.
+///
+/// Server-only, and actor.userId scoping is not the fix: the write runs under
+/// the selection owner's borrowed identity, and what it asserts -- that the
+/// provider ended the grant -- is the verified delivery's to say, never the
+/// caller's. A client-callable version would let a person mark a working
+/// connection disconnected with no provider involved.
+@serverOnly
+mutation externalConnection markExternalConnectionDisconnected {
+  args { connectionId string! }
+  update {
+    id: args.connectionId
+    status: "disconnected"
   }
 }

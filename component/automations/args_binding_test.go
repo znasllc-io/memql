@@ -261,6 +261,49 @@ func TestBindEventArgs_NoArgsBlockIsNoOp(t *testing.T) {
 	}
 }
 
+// A TEMPLATE IS HELD TO THE VARIABLES OF THE RUN IT IS ABOUT TO BECOME
+// (memql#5664). A re-plan installs a new template on a run whose variables were
+// bound at compile; resume binds those same variables into the new template's
+// args before any step runs, so a draft declaring an argument the run never
+// had installed cleanly and failed every resume. CheckArgs is that bind, asked
+// before the install.
+func TestCheckArgsHoldsATemplateToARunsVariables(t *testing.T) {
+	auto := &Automation{Name: "a", Args: schema(req("week", "string"), opt("region", "string"))}
+	if err := CheckArgs(auto, map[string]any{"week": "2026-39", "extra": true}); err != nil {
+		t.Fatalf("variables that satisfy the contract were refused: %v", err)
+	}
+	if err := CheckArgs(auto, map[string]any{"day": "2026-09-04"}); err == nil {
+		t.Fatal("variables missing a required argument were accepted")
+	}
+	if err := CheckArgs(auto, nil); err == nil {
+		t.Fatal("a run with no variables was accepted against a required argument")
+	}
+	if err := CheckArgs(&Automation{Name: "b"}, nil); err != nil {
+		t.Fatalf("a template that declares no args refused: %v", err)
+	}
+}
+
+// A resume refused on its args says so in a way the dispatcher can act on:
+// nothing about the refusal changes on a second attempt, and a run left at
+// `running` by it is called abandoned with a sentence about a node going away.
+func TestAResumeRefusedOnItsArgsSaysSo(t *testing.T) {
+	const src = `@trigger(event="probe.fired")
+automation weekly {
+  args {
+    week string @required
+  }
+  a := builtin one(x: args.week)
+}`
+	j := &RunJournal{FailedStep: "a", StepStates: states("a", StepState{Status: "failed", Attempt: 1}), MaxAttempt: map[string]int{"a": 1}, Variables: map[string]any{"day": "2026-09-04"}}
+	probe, _, exec, err := resumeProbe(t, src, j, nil)
+	if !errors.Is(err, ErrResumeArgsContract) || exec != nil {
+		t.Fatalf("ResumeFrom = %v, %v; want ErrResumeArgsContract and no execution", exec, err)
+	}
+	if got := probe.callees(); len(got) != 0 {
+		t.Fatalf("a run refused on its args ran %v", got)
+	}
+}
+
 // --- evaluator visibility: bodies may read args.X (G1) --------------------
 
 func TestEvaluatorSeesArgs(t *testing.T) {

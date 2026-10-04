@@ -317,7 +317,7 @@ describe("refusal copy coverage", () => {
     // duplicated credential rows, which are the cluster's fault.
     for (const code of [
       "site_not_writable", "not_a_storefront", "store_not_named", "store_redacted", "app_credentials_invalid",
-      "store_not_connected", "store_in_use", "storefront_token_required", "storefront_token_invalid", "shopify_app_not_saved",
+      "store_not_connected", "storefront_token_required", "storefront_token_invalid", "shopify_app_not_saved",
     ]) {
       expect(copyFor(code), code).not.toBeNull();
       expect(toneFor(code), code).toBe("warn");

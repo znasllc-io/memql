@@ -82,13 +82,14 @@ func (i *Integration) writeAudit(ctx context.Context, c caller, action, targetTy
 		langparser.QuoteString(targetID),
 		langparser.QuoteString("success"),
 		string(encoded))
-	// The CALLER's own context, unstamped -- createAuditEvent is not
-	// @serverOnly and v1:identity:auditEvent is owned by `actorUserId`, which
-	// IS this caller, so the ordinary write path admits it. Stamping internal
-	// origin would widen a call that does not need widening, which is how an
-	// escape becomes ambient (integrations/identity records the same
-	// reasoning for the same mutation).
-	if _, err := i.store.engine.Execute(ctx, query); err != nil && i.warn != nil {
+	// Internal origin for this one write (memql#5624). This said the caller's
+	// unstamped context was enough because auditEvent "is owned by
+	// actorUserId"; it never was. The concept is cluster-owner-tier, and its
+	// create now admits a cluster owner or server code and nobody else -- so
+	// an admin managing groups wrote no trail at all. The statement is
+	// composed above with every value quoted, so the stamp reaches this one
+	// createAuditEvent; the actor it records is still the caller.
+	if _, err := i.store.engine.Execute(auth.ContextWithInternalOrigin(ctx), query); err != nil && i.warn != nil {
 		i.warn("groups: audit write failed", "action", action, "target", targetID, "error", err.Error())
 	}
 }

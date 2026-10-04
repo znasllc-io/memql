@@ -237,6 +237,10 @@ func (d *workRunDispatcher) Dispatch(ctx context.Context, req workspine.Dispatch
 		AllowSideEffects: true,
 		Overrides:        workReplayOverrides(journal, source),
 	})
+	if code := workResumeRefusal(exec, execErr); code != "" {
+		d.failRun(ctx, req, code, execErr.Error())
+		return
+	}
 	d.report(ctx, req, exec, execErr)
 }
 

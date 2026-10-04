@@ -409,6 +409,7 @@ one. Read the behaviour off these files, not off prose:
 | Anonymous refusal | same file (`refuseRowAuthzWithoutActor`) | a read carrying no caller identity **errors** rather than comparing against `""` and returning rows owned by nobody |
 | Write guard | `component/memql/rowauthz_write_guard.go` | `update` / status-flip / a raw `insert(` onto an existing id -- the engine resolves the target row and refuses when its owner is not the actor |
 | Create stamping | `component/memql/rowauthz_insert_stamp.go` | the raw-`insert(` create path that bypasses accept/stamp |
+| Cluster-owner create floor | `component/memql/create_rank_floor.go` (`refuseClusterOwnerTierCreate`) | a CREATE on a `@rowAuthz(clusterOwner)` concept, which has no stored row for the write guard to judge and no owner field to stamp: admitted for a cluster owner, internal origin, or the connector the concept names, and refused for everyone else, named mutation and raw `insert(` alike (memql#5624) |
 | Staged-data visibility | `component/memql/staged_enforce.go` (`admitStagedRow`, `filterStagedSet`, `filterStagedNodes`, `enforceStagedDataOnPlan`) | **NOT a `@rowAuthz` tier.** Rows of a concept whose DATA is staged (epic memql#3974). It asks *"is this row visible to anyone yet"* where the tier asks *"may this caller see it"*, so it rides **outside** the authz gate and no authz answer can readmit a row it withheld -- see [Staged-data visibility](#staged-data-visibility-memql3974) |
 
 Escapes from the **write** guard are enumerated in exactly one place
@@ -1451,13 +1452,17 @@ from list to executor is asserted in both directions), and end to end by
 test where the sweep's read returns the row is equally satisfied by a
 tier that is not enforced at all.
 
-The audit one carries a second assertion worth naming: that
-`createAuditEvent` still succeeds for an **ordinary** caller. The
-`clusterOwner` tier would be a severe regression if it gated creates —
-every sign-in, session and role change would stop being recorded — and
-the reason it does not is that the write guard resolves a TARGET ROW, so
-it covers updates and deletes only. That sentence is load-bearing, so it
-is evidence rather than a claim.
+The audit one carries a second assertion worth naming: that an audit
+event about an **ordinary** caller is still recorded. The `clusterOwner`
+tier now judges creates (memql#5624), admitting a cluster owner or server
+code, and that would have been a severe regression for this concept --
+every sign-in, session and role change would stop being recorded -- had
+the writers not said what they are. They do: `component/identity`'s
+`EngineAuditSink` and the integration audit writers stamp internal origin
+on the one `createAuditEvent` each composes, over the caller's own
+context. The test writes in exactly that shape, and shows the same call
+made directly by the person is refused, because a trail entry an actor
+wrote about themselves is a forgery whatever `actorUserId` it names.
 
 ### What is still undeclared, and what it is waiting for
 

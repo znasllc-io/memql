@@ -90,7 +90,19 @@ export interface Placement {
    * used to refuse the whole run for a missing binding.
    */
   skip?: boolean;
+  /**
+   * Which of the site's versions this run's build becomes (memql#5601): the
+   * SERVING version -- what every run did before targets existed, and the
+   * default -- or the CANDIDATE, which the engine publishes as `candidateRef`
+   * and leaves the live site serving what it served. A per-run choice, like
+   * skip. The engine refuses a candidate for a storefront and rechecks the
+   * `preview` part for it, so the confirm step offers it only where both hold.
+   */
+  target?: DeployTarget;
 }
+
+/** The two versions a deploy can publish to (memql#5601). */
+export type DeployTarget = "serving" | "candidate";
 
 /**
  * Every app of a source EXCEPT one, skipped -- the placements that make a run
@@ -144,6 +156,13 @@ export function placementsPayload(
     // Sent only when true, the same rule the blank halves keep: an explicit
     // `false` is a value the pipeline reads, and nobody asked for one.
     if (placement.skip === true) entry["skip"] = true;
+    // A TARGET IS SENT WHENEVER ONE WAS CHOSEN, serving included. The engine
+    // records a target when a run OPENS and, at the confirm, an explicit one
+    // wins while an omitted one reuses what was recorded -- so a confirm that
+    // means "the live version" has to say so, or a run somebody else opened as
+    // a candidate would be confirmed as one under a button reading Deploy.
+    // Absent stays absent, for `skip`'s reason: nobody chose anything.
+    if (placement.target !== undefined) entry["target"] = placement.target;
     // A SKIPPED APP MAY LEGITIMATELY HAVE NOTHING ELSE (memql#4930): one that
     // has never been deployed has no hostname to send, and dropping the entry
     // for emptiness would drop the skip with it -- which is the whole of what
@@ -413,6 +432,24 @@ export async function saveSiteSettings(
   settings: Record<string, string>,
 ): Promise<void> {
   await query.updateSiteSettings({ siteId, settings });
+}
+
+/**
+ * Replace a storefront's PER-STORE settings (memql#5602): a bare store id to
+ * that store's own values.
+ *
+ * THE WHOLE MAP, for `saveSiteSettings`' reason -- the mutation replaces -- so
+ * the caller sends every store's entry, the ones it does not show included
+ * (`store/storeValues.ts` builds it). Through the generated builder, which
+ * quotes a store id that is not a bare identifier (`acme-widgets`) as the
+ * object key the grammar names for it.
+ */
+export async function saveSiteStoreSettings(
+  query: QueryClient,
+  siteId: string,
+  storeSettings: Record<string, Record<string, string>>,
+): Promise<void> {
+  await query.updateSiteStoreSettings({ siteId, storeSettings });
 }
 
 /**

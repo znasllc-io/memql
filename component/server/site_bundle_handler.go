@@ -67,13 +67,36 @@ const (
 // is where the adapter between edge.Bundle/edge.Result and these types
 // lives.
 type BundlePublisher interface {
-	Publish(ctx context.Context, siteID string, files map[string][]byte) (SiteBundlePublishResponse, error)
+	Publish(ctx context.Context, siteID string, files map[string][]byte, target string) (SiteBundlePublishResponse, error)
 }
 
+// The two values of the `target` query parameter (memql#5601), spelled as
+// component/edge spells its Target -- this module cannot import that one, so
+// app/transport_sites.go's adapter maps between them and refuses anything it
+// does not recognise.
+const (
+	// SiteBundleTargetServing publishes the build as the site's serving
+	// version (bundleRef): what every visitor is served, and what this route
+	// published before the parameter existed. An absent parameter means it.
+	SiteBundleTargetServing = "serving"
+	// SiteBundleTargetCandidate publishes the build as the site's CANDIDATE
+	// version (candidateRef), served only under a preview grant. bundleRef,
+	// and so the public view, is left exactly where it was.
+	SiteBundleTargetCandidate = "candidate"
+)
+
 // SiteBundlePublishResponse is the JSON body a successful publish returns.
+//
+// EXACTLY ONE OF BundleRef AND CandidateRef IS SET, and which one is the
+// point: CI keeps this response as its rollback record (site-hosting.md), so
+// a candidate reported under `bundleRef` would read as the version that
+// serves. A serving publish's body is unchanged from before the parameter
+// existed, apart from `target`.
 type SiteBundlePublishResponse struct {
-	Version   string `json:"version"`
-	BundleRef string `json:"bundleRef"`
+	Version      string `json:"version"`
+	BundleRef    string `json:"bundleRef,omitempty"`
+	CandidateRef string `json:"candidateRef,omitempty"`
+	Target       string `json:"target,omitempty"`
 }
 
 // SiteBundleHandlerOptions configures a SiteBundleHandler.
@@ -90,7 +113,10 @@ type SiteBundleHandlerOptions struct {
 //
 // This IS the endpoint the endpoint-protocol exception records: multipart
 // in (a CI job's arbitrary, variable-shaped file tree), {version, bundleRef}
-// JSON out. A declared-but-unserved route is worse than no route at all --
+// JSON out -- or {version, candidateRef} when the request's optional `target`
+// query parameter asks for the candidate version (memql#5601), which is a
+// parameter on this documented exception rather than a second route.
+// A declared-but-unserved route is worse than no route at all --
 // CLAUDE.md's exception table and HandlerAuthorizedPaths() both describe
 // this handler, so this file is what makes those descriptions true rather
 // than aspirational.
@@ -178,6 +204,20 @@ func (h *SiteBundleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("site bundle publish: wrong credential class",
 			"siteId", siteID, "class", class)
 		http.Error(w, "forbidden: this endpoint requires a service-account credential", http.StatusForbidden)
+		return
+	}
+
+	// WHICH VERSION THIS BUILD BECOMES (memql#5601): the `target` query
+	// parameter, read before the body for the authorization check's reason --
+	// a bundle is up to maxBundleTotalBytes, and refusing a misspelt parameter
+	// after reading it is the waste that ordering avoids. A QUERY PARAMETER
+	// rather than a form field because every form field name in this body is
+	// a bundle path; a parameter cannot collide with a file a build happens to
+	// name `target`. An unknown value is a 400, never the serving version.
+	target, ok := siteBundleTarget(r.URL.Query().Get("target"))
+	if !ok {
+		http.Error(w, fmt.Sprintf("unknown target %q: publish the build as the %q version (the default) or the %q one",
+			r.URL.Query().Get("target"), SiteBundleTargetServing, SiteBundleTargetCandidate), http.StatusBadRequest)
 		return
 	}
 
@@ -292,7 +332,7 @@ func (h *SiteBundleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h.publisher.Publish(r.Context(), siteID, bundle)
+	res, err := h.publisher.Publish(r.Context(), siteID, bundle, target)
 	if err != nil {
 		h.logger.Error("site bundle publish: Publish failed", "error", err, "siteId", siteID)
 		http.Error(w, fmt.Sprintf("failed to publish bundle: %v", err), http.StatusInternalServerError)
@@ -302,6 +342,18 @@ func (h *SiteBundleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(res)
+}
+
+// siteBundleTarget reads the `target` query parameter: absent is the serving
+// version, and only the two exact values are anything else.
+func siteBundleTarget(raw string) (string, bool) {
+	switch strings.TrimSpace(raw) {
+	case "", SiteBundleTargetServing:
+		return SiteBundleTargetServing, true
+	case SiteBundleTargetCandidate:
+		return SiteBundleTargetCandidate, true
+	}
+	return "", false
 }
 
 // readBundlePart reads one multipart file part fully, capped one byte past

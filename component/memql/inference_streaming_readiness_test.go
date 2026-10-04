@@ -52,6 +52,9 @@ func TestInferenceStatusStreamingFleetCapability(t *testing.T) {
 	}
 }
 
+// streamingOwnerCatalog is alice's machine, optionally lent to everyone. Lent
+// to everyone, it is in EVERY catalog -- each person's and system work's --
+// which is FleetCatalogReader's contract (design G8, memql#5660).
 type streamingOwnerCatalog struct {
 	shared bool
 	err    error
@@ -61,7 +64,7 @@ func (c streamingOwnerCatalog) Catalog(_ context.Context, actor string) ([]Fleet
 	if c.err != nil {
 		return nil, c.err
 	}
-	if actor == "alice" || (actor == "" && c.shared) {
+	if actor == "alice" || c.shared {
 		return []FleetModel{capable("alice-chat")}, nil
 	}
 	return nil, nil

@@ -1,6 +1,7 @@
 package work
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -69,6 +70,113 @@ func TestResumeAllowed_UndecidedAndRejected(t *testing.T) {
 	}
 }
 
+// THE RAISE SIDE AND THE DECIDE SIDE MUST AGREE ON EVERY KIND WHOSE HASH IS
+// DERIVED (memql#5664). The failure path stored one map as its subject and
+// hashed another, and the decide side's recompute over the stored subject
+// refused every approve and every answer as "artifact changed". This asserts,
+// for every builder that derives its hash, that the subject AS STORED -- after
+// the JSON round trip the graph gives it -- recomputes to the hash it was
+// raised with, and that a genuinely edited subject does not.
+func TestEveryDerivedApprovalHashSurvivesTheDecideRecompute(t *testing.T) {
+	ev := Evidence{Tier: "t", Reason: "r", RuleId: "x.y", Source: EvidenceSourceRules}
+	breach := CheckCeilings(Ceilings{MaxModelCalls: 2}, Spent{ModelCalls: 2}, 0)
+	for _, req := range []ApprovalRequest{
+		BudgetApproval("run-1", "s", *breach, t0, time.Hour),
+		FeedbackApproval("run-1", "s", "Which one?", []map[string]any{{"label": "A", "value": "a"}}, ev, t0, time.Hour),
+		PlanReviewApproval("run-1", "s", "", []map[string]any{{"op": "relativize", "path": "/tmp/x"}}, ev, t0, time.Hour),
+		InferenceUnavailableApproval("run-1", "s", RefusalEveryDoorShut, nil, t0, time.Hour),
+		FailureApproval(ApprovalKindFeedback, "run-1", "s", SymptomHuman, "prompt is too long", "q", ev, t0, time.Hour),
+		FailureApproval(ApprovalKindPlanReview, "run-1", "s", SymptomEnvironment, "permission denied", "q", ev, t0, time.Hour),
+		FailureApproval(ApprovalKindBudget, "run-1", "s", SymptomHuman, "insufficient_quota", "q", ev, t0, time.Hour),
+	} {
+		t.Run(req.Kind+"/"+req.Question, func(t *testing.T) {
+			stored := roundTrip(t, req.Subject)
+			if got := CurrentArtifactHash(req.Kind, req.ArtifactHash, stored); got != req.ArtifactHash {
+				t.Fatalf("the stored subject recomputes to %s, the approval was raised with %s: every approve and answer would be refused as changed", short(got), short(req.ArtifactHash))
+			}
+			if ok, err := ResumeAllowed(req.ArtifactHash, CurrentArtifactHash(req.Kind, req.ArtifactHash, stored), "approved"); !ok {
+				t.Fatalf("an untouched approval did not resume: %v", err)
+			}
+			edited := roundTrip(t, req.Subject)
+			edited["editedSince"] = "the artifact changed"
+			if ok, err := ResumeAllowed(req.ArtifactHash, CurrentArtifactHash(req.Kind, req.ArtifactHash, edited), "approved"); ok || !errors.Is(err, ErrArtifactChanged) {
+				t.Fatalf("an edited subject resumed (ok=%v err=%v); that is approving one thing and running another", ok, err)
+			}
+		})
+	}
+}
+
+// A failure-path question is a decision about the FAILURE: the subject names
+// the symptom, the step and the words, and two different failures of the
+// same step are two different decisions.
+func TestFailureApprovalIsAboutTheFailure(t *testing.T) {
+	ev := Evidence{Reason: "r", Source: EvidenceSourceRules}
+	a := FailureApproval(ApprovalKindFeedback, "run-1", "fetch", SymptomHuman, "first failure", "q", ev, t0, time.Hour)
+	b := FailureApproval(ApprovalKindFeedback, "run-1", "fetch", SymptomHuman, "second failure", "q", ev, t0, time.Hour)
+	if a.ArtifactHash == b.ArtifactHash {
+		t.Fatal("two different failures hash the same, so a decision about one carries to the other")
+	}
+	if a.Subject["symptom"] != string(SymptomHuman) || a.Subject["stepKey"] != "fetch" || a.Subject["errorMessage"] != "first failure" {
+		t.Fatalf("subject = %+v", a.Subject)
+	}
+	if a.Question != "q" || len(a.Options) != 2 {
+		t.Fatalf("question/options = %q %+v", a.Question, a.Options)
+	}
+}
+
+// Answering a failure question with Abandon is a stop; answering it with
+// Retry, or answering some other question with the same word, is not.
+func TestAnswerAbandonsReadsTheOfferedOptionOnly(t *testing.T) {
+	asked := FailureApproval(ApprovalKindFeedback, "run-1", "s", SymptomHuman, "e", "q", Evidence{}, t0, time.Hour)
+	stored := roundTrip(t, map[string]any{"options": asked.Options})["options"]
+	if !AnswerAbandons(stored, map[string]any{"value": FailureAnswerAbandon, "label": "Abandon"}) {
+		t.Fatal("choosing Abandon on a failure question did not read as a stop")
+	}
+	if AnswerAbandons(stored, map[string]any{"value": FailureAnswerRetry}) {
+		t.Fatal("choosing Retry read as a stop")
+	}
+	other := []any{map[string]any{"label": "Keep it", "value": "keep"}}
+	if AnswerAbandons(other, map[string]any{"value": FailureAnswerAbandon}) {
+		t.Fatal("a question that never offered Abandon was stopped by an answer carrying the word")
+	}
+}
+
+// A failure question is told from every other approval by what it offers, as
+// built and as the graph returns it: its Retry is a request to run the failed
+// step again (memql#5664), while releasing any other approval resumes a step
+// that was waiting on a person.
+func TestIsFailureQuestionReadsBothOffers(t *testing.T) {
+	asked := FailureApproval(ApprovalKindBudget, "run-1", "s", SymptomEnvironment, "e", "q", Evidence{}, t0, time.Hour)
+	if !IsFailureQuestion(asked.Options) {
+		t.Fatal("a failure question as built did not read as one")
+	}
+	if !IsFailureQuestion(roundTrip(t, map[string]any{"options": asked.Options})["options"]) {
+		t.Fatal("a failure question as stored did not read as one")
+	}
+	feedback := FeedbackApproval("run-1", "s", "which file?", []map[string]any{{"label": "Abandon", "value": FailureAnswerAbandon}}, Evidence{}, t0, time.Hour)
+	if IsFailureQuestion(feedback.Options) {
+		t.Fatal("a question offering Abandon alone read as a failure question")
+	}
+	if IsFailureQuestion(nil) || IsFailureQuestion([]any{"retry", "abandon"}) {
+		t.Fatal("options with no offers read as a failure question")
+	}
+}
+
+// roundTrip is the subject as the graph returns it: JSON in, JSON out, so a
+// []map[string]any comes back as []any and an int as a float64.
+func roundTrip(t *testing.T, m map[string]any) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 func TestArtifactHash_StableAndSensitive(t *testing.T) {
 	a := ArtifactHash(map[string]any{"command": "ls", "cwd": "/tmp"})
 	if a != ArtifactHash(map[string]any{"cwd": "/tmp", "command": "ls"}) {
@@ -76,5 +184,24 @@ func TestArtifactHash_StableAndSensitive(t *testing.T) {
 	}
 	if a == ArtifactHash(map[string]any{"command": "ls -la", "cwd": "/tmp"}) {
 		t.Fatal("a changed command must change the hash; that is the whole guarantee")
+	}
+}
+
+// LegacyFailureHashes reproduces the hash the failure path raised its
+// questions with before memql#5664, for each run-id spelling it is given, from
+// the stored subject alone -- so an edited failure no longer reproduces it.
+func TestLegacyFailureHashesReproduceTheOldRaise(t *testing.T) {
+	raised := ArtifactHash(map[string]any{"runId": "v1:work:run:r1", "stepKey": "draft", "error": "boom", "symptom": string(SymptomHuman)})
+	subject := FailureSubject(SymptomHuman, "draft", "boom")
+	hashes := LegacyFailureHashes(subject, "r1", "v1:work:run:r1")
+	if len(hashes) != 2 || hashes[0] == raised || hashes[1] != raised {
+		t.Fatalf("legacy hashes %v, want the old raise under the canonical spelling only (%s)", hashes, raised)
+	}
+	if ArtifactHash(subject) == raised {
+		t.Fatal("the current raise hashes the same as the old one; there is no legacy shape to read")
+	}
+	edited := FailureSubject(SymptomHuman, "draft", "a different failure")
+	if LegacyFailureHashes(edited, "v1:work:run:r1")[0] == raised {
+		t.Fatal("an edited failure reproduced the old hash")
 	}
 }

@@ -249,13 +249,29 @@ func (b *blobStager) StageDomain(ctx context.Context, domain string, tree fs.FS)
 	if err != nil {
 		return "", err
 	}
-	prefix := fmt.Sprintf("packages/%s/%s/", domain, hash)
+	prefix := blobStagePrefix(domain, hash)
 	for name, data := range files {
 		if _, err := b.uploader.Upload(ctx, b.container, prefix+name, data, "text/plain"); err != nil {
 			return "", err
 		}
 	}
 	return prefix, nil
+}
+
+// PrefixFor is StageDomain's prefix with nothing written and no storage
+// resolved: the content address alone.
+func (b *blobStager) PrefixFor(domain string, tree fs.FS) (string, error) {
+	hash, _, err := hashTree(tree)
+	if err != nil {
+		return "", err
+	}
+	return blobStagePrefix(domain, hash), nil
+}
+
+// blobStagePrefix is where blobStager keeps one domain's tree: one spelling
+// for the write and for the question asked before it.
+func blobStagePrefix(domain, hash string) string {
+	return fmt.Sprintf("packages/%s/%s/", domain, hash)
 }
 
 func (b *blobStager) ReadActiveSet(ctx context.Context) (map[string]string, error) {
@@ -547,7 +563,7 @@ func (p *enginePublisher) EnsureSite(ctx context.Context, req EnsureSiteRequest)
 	return siteId, req.Hostname, true, nil
 }
 
-func (p *enginePublisher) PublishBundle(ctx context.Context, siteId string, bundle edge.Bundle) (PublishResult, error) {
+func (p *enginePublisher) PublishBundle(ctx context.Context, siteId string, bundle edge.Bundle, target edge.Target) (PublishResult, error) {
 	if err := p.requireSiteAction(ctx, siteId, "deploy"); err != nil {
 		return PublishResult{}, err
 	}
@@ -558,7 +574,7 @@ func (p *enginePublisher) PublishBundle(ctx context.Context, siteId string, bund
 		p.blobs,
 		packageSiteWriter{publisher: p},
 	)
-	res, err := publisher.Publish(ctx, siteId, bundle)
+	res, err := publisher.Publish(ctx, siteId, bundle, target)
 	if err != nil {
 		return PublishResult{}, err
 	}
@@ -604,13 +620,30 @@ func (p *enginePublisher) requireSiteAction(ctx context.Context, siteID, action 
 // The package pipeline has a real caller. Preserve that actor through the
 // final write and recheck authority after uploads, rather than using the edge
 // publisher's synthetic service-account writer.
+//
+// THE PART RECHECKED FOLLOWS THE TARGET (memql#5601). The serving version is
+// the `deploy` part, as it always was; the candidate is `preview` -- "publish a
+// candidate version" is that part's own definition, and setSiteCandidate
+// carries it. PublishBundle checks `deploy` for every run's upload first, so on
+// this route a candidate needs BOTH parts: a package deploy never publishes
+// for somebody who holds only `preview`. Holding `preview` without `deploy` is
+// the setSiteCandidate act -- naming a version that already exists -- not a
+// package deploy.
 type packageSiteWriter struct{ publisher *enginePublisher }
 
-func (s packageSiteWriter) UpdateBundleRef(ctx context.Context, siteID, bundleRef string) error {
-	if err := s.publisher.requireSiteAction(ctx, siteID, "deploy"); err != nil {
+func (s packageSiteWriter) PointVersion(ctx context.Context, siteID string, target edge.Target, ref string) error {
+	action := "deploy"
+	if target == edge.TargetCandidate {
+		action = "preview"
+	}
+	if err := s.publisher.requireSiteAction(ctx, siteID, action); err != nil {
 		return err
 	}
-	_, err := s.publisher.engine.Execute(ctx, fmt.Sprintf("mutation updateSiteBundle(siteId: %s, bundleRef: %s)", langparser.QuoteString(siteID), langparser.QuoteString(bundleRef)))
+	q, err := edge.PointVersionStatement(siteID, target, ref, "")
+	if err != nil {
+		return err
+	}
+	_, err = s.publisher.engine.Execute(ctx, q)
 	return err
 }
 

@@ -114,6 +114,30 @@ func TestSiteCandidateRefusal(t *testing.T) {
 	}
 }
 
+// A STOREFRONT HAS NO SEPARATE CANDIDATE VERSION (memql#5601): a new candidate
+// that is not the serving version is refused. The serving version itself, an
+// inherited candidate and a cleared one pass, and so does every candidate on
+// any other kind.
+func TestSiteStorefrontCandidateRefusal(t *testing.T) {
+	const serving = "blob://sites/s/v1/"
+	for _, c := range []struct {
+		name                   string
+		storefront             bool
+		prior, candidate, want string
+	}{
+		{"a storefront's new candidate", true, "", "blob://sites/s/v2/", PreviewRefusalStorefrontHasNoCandidate},
+		{"replacing a storefront's inherited candidate", true, "blob://sites/s/v0/", "blob://sites/s/v2/", PreviewRefusalStorefrontHasNoCandidate},
+		{"a storefront naming its serving version", true, "", serving, ""},
+		{"a storefront's inherited candidate", true, "blob://sites/s/v0/", "blob://sites/s/v0/", ""},
+		{"clearing a storefront's candidate", true, "blob://sites/s/v0/", "", ""},
+		{"a spa's candidate", false, "", "blob://sites/s/v2/", ""},
+	} {
+		if got := SiteStorefrontCandidateRefusal(c.storefront, c.prior, serving, c.candidate).Code; got != c.want {
+			t.Errorf("%s: code %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 func TestSitePromotionRefusal(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -184,6 +208,7 @@ func TestEveryPreviewRefusalCarriesAMessageAndARemedy(t *testing.T) {
 		SiteCandidateRefusal("blob://sites/s/v2/", "blob://sites/s/v2/"),
 		SitePromotionRefusal("", "blob://sites/s/v3/"),
 		SitePromotionRefusal("blob://sites/s/v4/", "blob://sites/s/v3/"),
+		SiteStorefrontCandidateRefusal(true, "", "blob://sites/s/v4/", "blob://sites/s/v5/"),
 	}
 
 	seen := map[string]bool{}
@@ -210,6 +235,7 @@ func TestEveryPreviewRefusalCarriesAMessageAndARemedy(t *testing.T) {
 		PreviewRefusalCandidateIsServing,
 		PreviewRefusalNoCandidate,
 		PreviewRefusalCandidateMoved,
+		PreviewRefusalStorefrontHasNoCandidate,
 	} {
 		if !seen[code] {
 			t.Errorf("no case in this file produces %s, so nothing asserts it carries a remedy", code)

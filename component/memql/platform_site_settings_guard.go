@@ -125,19 +125,29 @@ func (e *MemQLEngine) validateSiteSettings(
 	if raw == nil {
 		return nil
 	}
+	return validateSiteSettingsObject(raw, "settings")
+}
+
+// validateSiteSettingsObject holds one flat settings object to the rules every
+// value the runtime document carries obeys: an object, at most
+// MEMQL_SITE_SETTINGS_MAX_KEYS keys of the identifier form and not ending in
+// `Ref`, every value a plain string within MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH.
+// `where` names the object in a refusal -- "settings", or one store's entry in
+// storeSettings -- so the same rule reads the same way on both.
+func validateSiteSettingsObject(raw any, where string) error {
 	settings, ok := raw.(map[string]any)
 	if !ok {
 		return fmt.Errorf(
-			"v1:platform:site: settings must be an object of string values -- a key a bundle reads as config.settings.<key> and the plain string it gets; got %T",
-			raw,
+			"v1:platform:site: %s must be an object of string values -- a key a bundle reads as config.settings.<key> and the plain string it gets; got %T",
+			where, raw,
 		)
 	}
 
 	maxKeys, maxValueLength := siteSettingsCaps()
 	if len(settings) > maxKeys {
 		return fmt.Errorf(
-			"v1:platform:site: %d settings is more than this cluster keeps per deployable (%d, MEMQL_SITE_SETTINGS_MAX_KEYS). The document the edge serves grows with every key, so the cap is on the row.",
-			len(settings), maxKeys,
+			"v1:platform:site: %d keys in %s is more than this cluster keeps per deployable (%d, MEMQL_SITE_SETTINGS_MAX_KEYS). The document the edge serves grows with every key, so the cap is on the row.",
+			len(settings), where, maxKeys,
 		)
 	}
 
@@ -153,29 +163,135 @@ func (e *MemQLEngine) validateSiteSettings(
 	for _, key := range keys {
 		if !siteSettingsKeyForm.MatchString(key) {
 			return fmt.Errorf(
-				"v1:platform:site: settings key %q is not a name a bundle can read -- a key is a letter followed by letters, digits or underscores, at most 64 characters (config.settings.<key>).",
-				key,
+				"v1:platform:site: %s key %q is not a name a bundle can read -- a key is a letter followed by letters, digits or underscores, at most 64 characters (config.settings.<key>).",
+				where, key,
 			)
 		}
 		if strings.HasSuffix(key, siteSettingsRefSuffix) {
 			return fmt.Errorf(
-				"v1:platform:site: settings key %q ends in Ref, and a setting is never a reference -- the edge serves every value here to every visitor as typed, and resolves a named secret for exactly one field: the Storefront token's, on the v1:shopify:store row this site's `binding` names. A secret does not belong in settings under any name.",
-				key,
+				"v1:platform:site: %s key %q ends in Ref, and a setting is never a reference -- the edge serves every value here to every visitor as typed, and resolves a named secret for exactly one field: the Storefront token's, on the v1:shopify:store row this site's `binding` names. A secret does not belong in settings under any name.",
+				where, key,
 			)
 		}
 		value, isString := settings[key].(string)
 		if !isString {
 			return fmt.Errorf(
-				"v1:platform:site: settings key %q holds a %T, and a setting is a plain string -- the value the bundle reads as config.settings.%s is served as typed, never parsed.",
-				key, settings[key], key,
+				"v1:platform:site: %s key %q holds a %T, and a setting is a plain string -- the value the bundle reads as config.settings.%s is served as typed, never parsed.",
+				where, key, settings[key], key,
 			)
 		}
 		if n := len([]rune(value)); n > maxValueLength {
 			return fmt.Errorf(
-				"v1:platform:site: settings key %q holds %d characters, more than this cluster keeps per value (%d, MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH).",
-				key, n, maxValueLength,
+				"v1:platform:site: %s key %q holds %d characters, more than this cluster keeps per value (%d, MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH).",
+				where, key, n, maxValueLength,
 			)
 		}
+	}
+	return nil
+}
+
+// siteStoreSettingsMaxStores bounds how many stores storeSettings may name.
+// A storefront binds at most two stores at once -- Production's and
+// Testing's -- and keeps an entry for a store it was bound to before, so that
+// re-pointing a binding back restores that store's values; sixteen is far past
+// any real population, and the document never carries more than one store's
+// entry, so the bound is on the row rather than on what is served. A constant
+// rather than an env cap because nothing about a cluster makes it want more.
+const siteStoreSettingsMaxStores = 16
+
+// siteStoreIdForm is the form of a storeSettings key: a store row's BARE id,
+// as Connect writes it (acme-widgets) or as a hand-made store names it. No
+// colon, so the canonical v1:shopify:store:<id> form is refused rather than
+// kept beside the bare one -- one store is keyed one way, and the edge looks
+// it up by the bare id its binding names.
+var siteStoreIdForm = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+
+// validateSiteStoreSettings refuses a `storeSettings` value that is not an
+// object of bare store ids, each to a settings object `settings`' own rules
+// admit (memql#5602), and refuses any storeSettings at all on a systemOwned
+// row for a non-system actor -- validateSiteSettings' rules, for the values
+// the edge merges over `settings` for one store.
+//
+// The VALUES are not checked against any store: an entry for a store this
+// site is not bound to is never served, because the edge applies only the
+// entry of the store the in-force binding names, and binding a store already
+// requires reading it (platform_site_binding_guard.go).
+func (e *MemQLEngine) validateSiteStoreSettings(
+	ctx context.Context,
+	payload map[string]any,
+	priorSystemOwned bool,
+	actor string,
+) error {
+	if payload == nil {
+		return nil
+	}
+	raw, present := payload["storeSettings"]
+	if !present {
+		return nil
+	}
+
+	identity, _ := auth.UserIdentityFromContext(ctx)
+	if priorSystemOwned && !isSystemActor(identity, actor) {
+		hostname := strings.TrimSpace(stringFromAny(payload["hostname"]))
+		return fmt.Errorf(
+			"v1:platform:site: %q is systemOwned and its per-store settings cannot be written -- it is one of the cluster's own surfaces, re-seeded at every boot, and a value set here would be reverted by the next seed. See dsl/platform/concepts.memql:site.systemOwned.",
+			hostname,
+		)
+	}
+
+	if raw == nil {
+		return nil
+	}
+	stores, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf(
+			"v1:platform:site: storeSettings must be an object of store id to that store's settings, {\"<storeId>\": {key: \"value\"}}; got %T",
+			raw,
+		)
+	}
+	if len(stores) > siteStoreSettingsMaxStores {
+		return fmt.Errorf(
+			"v1:platform:site: storeSettings names %d stores, more than a deployable keeps (%d). A storefront is bound to at most two stores at once; remove the entries of stores it no longer uses.",
+			len(stores), siteStoreSettingsMaxStores,
+		)
+	}
+
+	ids := make([]string, 0, len(stores))
+	for id := range stores {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	// ONE BUDGET FOR EVERY STORE TOGETHER: the characters one full `settings`
+	// object can hold (MEMQL_SITE_SETTINGS_MAX_KEYS values of
+	// MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH). Store by store, the caps alone
+	// would let sixteen stores put two megabytes on every version of the row.
+	maxKeys, maxValueLength := siteSettingsCaps()
+	budget, total := maxKeys*maxValueLength, 0
+	for _, id := range ids {
+		if !siteStoreIdForm.MatchString(id) {
+			return fmt.Errorf(
+				"v1:platform:site: storeSettings key %q is not a store id -- name the store by its bare id, as the binding does (acme-widgets, never v1:shopify:store:acme-widgets): a letter or digit, then letters, digits, '.', '_' or '-', at most 128 characters.",
+				id,
+			)
+		}
+		if _, isObject := stores[id].(map[string]any); !isObject {
+			return fmt.Errorf(
+				"v1:platform:site: storeSettings[%q] must be an object of that store's settings; got %T",
+				id, stores[id],
+			)
+		}
+		if err := validateSiteSettingsObject(stores[id], fmt.Sprintf("storeSettings[%q]", id)); err != nil {
+			return err
+		}
+		for _, v := range stores[id].(map[string]any) {
+			total += len([]rune(stringFromAny(v)))
+		}
+	}
+	if total > budget {
+		return fmt.Errorf(
+			"v1:platform:site: storeSettings hold %d characters of values across all stores, more than one deployable keeps (%d -- MEMQL_SITE_SETTINGS_MAX_KEYS values of MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH, the most `settings` itself can hold).",
+			total, budget,
+		)
 	}
 	return nil
 }

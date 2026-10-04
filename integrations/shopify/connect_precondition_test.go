@@ -3,7 +3,10 @@ package shopify
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // THE PRECONDITION BEHIND THIS PACKAGE'S INTERNAL-ORIGIN ALLOWLIST ENTRY, for
@@ -141,17 +144,6 @@ func TestNoConnectWriteIsReachedWhenACheckRefuses(t *testing.T) {
 			on:   []handler{token}, want: connectReasonStoreNotConnected,
 		},
 		{
-			name: "a store bound to a site the caller cannot write",
-			arrange: func(h *connectHarness) {
-				h.store(map[string]any{"adminTokenRef": "A"})
-				h.engine.setRows("sitesBoundToStore", []map[string]any{
-					{"id": connectSiteID, "status": "draft", "binding": map[string]any{"storeId": connectStoreID}},
-					{"id": "v1:platform:site:someone-elses", "status": "live", "previewBinding": map[string]any{"storeId": connectStoreID}},
-				})
-			},
-			on: []handler{token}, want: connectReasonStoreInUse,
-		},
-		{
 			name: "an empty token while a live site is bound",
 			edit: func(a map[string]any) { a["token"] = "" },
 			arrange: func(h *connectHarness) {
@@ -181,7 +173,9 @@ func TestNoConnectWriteIsReachedWhenACheckRefuses(t *testing.T) {
 				if tc.arrange != nil {
 					tc.arrange(h)
 				}
-				ctx := devCtx()
+				// A cluster owner, so each refusal is the check's and not the
+				// owner floor's (TestTheLegacyConnectBuiltinsAreReservedToAClusterOwner).
+				ctx := ownerConnectCtx()
 				fn := h.integ.handleStoreAppSave
 				args := map[string]any{"siteId": "s1", "clientId": connectClientID, "clientSecret": connectSecret}
 				switch which {
@@ -258,5 +252,65 @@ func TestWriteKeepsNothingWithoutAToken(t *testing.T) {
 	}
 	if w := h.engine.writes(); len(w) != 0 {
 		t.Fatalf("a pending grant with no secret wrote %v", w)
+	}
+}
+
+// ownerConnectCtx is the connect developer as a CLUSTER OWNER: the same person
+// and browser session, so every assertion about who acted still names them,
+// at the role the per-storefront builtins now require (memql#5638, G9).
+func ownerConnectCtx() context.Context { return actorCtx(connectDev, auth.RoleOwner) }
+
+// TestTheLegacyConnectBuiltinsAreReservedToAClusterOwner (memql#5638, G9). The
+// per-storefront Connect builtins take a person's own app credentials and
+// pasted Storefront tokens, and MemQL OS no longer calls them. A developer --
+// who holds the store part the engine asks first, and can write the site --
+// is refused by each before anything is read: no statement reaches the
+// engine, and nothing reaches Shopify.
+func TestTheLegacyConnectBuiltinsAreReservedToAClusterOwner(t *testing.T) {
+	for _, which := range []string{"save", "token", "begin"} {
+		for _, role := range []auth.Role{auth.RoleDeveloper, auth.RoleAdmin} {
+			t.Run(which+"/"+string(role), func(t *testing.T) {
+				h := newConnectHarness(t)
+				t.Setenv("MEMQL_IDENTITY_BASE_URL", connectIdentityBase)
+				h.pendingApp(connectClientID)
+				h.store(map[string]any{"adminTokenRef": "A"})
+				fn := h.integ.handleStoreAppSave
+				switch which {
+				case "token":
+					fn = h.integ.handleStorefrontTokenSet
+				case "begin":
+					fn = h.integ.handleConnectBegin
+				}
+				args := map[string]any{"siteId": "s1", "clientId": connectClientID, "clientSecret": connectSecret, "token": connectToken, "returnPath": "/"}
+				_, err := fn(actorCtx(connectDev, role), args, 0)
+				if err == nil || !strings.Contains(err.Error(), "reserved to a cluster owner") {
+					t.Fatalf("role %s was answered: err=%v", role, err)
+				}
+				if n := len(h.engine.log); n != 0 {
+					t.Errorf("a refused %s call reached the engine %d times: %+v", role, n, h.engine.log)
+				}
+				if h.storefront.requests() != 0 {
+					t.Error("a refused call reached Shopify")
+				}
+			})
+		}
+		// The reachable positive over the same harness: a cluster owner.
+		t.Run(which+"/owner", func(t *testing.T) {
+			h := newConnectHarness(t)
+			t.Setenv("MEMQL_IDENTITY_BASE_URL", connectIdentityBase)
+			h.pendingApp(connectClientID)
+			h.store(map[string]any{"adminTokenRef": "A"})
+			fn := h.integ.handleStoreAppSave
+			switch which {
+			case "token":
+				fn = h.integ.handleStorefrontTokenSet
+			case "begin":
+				fn = h.integ.handleConnectBegin
+			}
+			out := invoke(t, ownerConnectCtx(), fn, map[string]any{"siteId": "s1", "clientId": connectClientID, "clientSecret": connectSecret, "token": connectToken, "returnPath": "/"})
+			if out["reason"] != connectReasonOK {
+				t.Fatalf("a cluster owner's %s: reason %v", which, out["reason"])
+			}
+		})
 	}
 }

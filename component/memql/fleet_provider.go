@@ -252,8 +252,10 @@ type FleetCallRequest struct {
 	// does not mean "any machine". The two paths are separate all the way
 	// down (memql#4678).
 	ActingUserId string
-	// RegistrationId strictly limits dispatch to one of ActingUserId's own
-	// machines. Empty retains normal fleet routing, including shared machines.
+	// RegistrationId strictly limits dispatch to ONE machine ActingUserId may
+	// use: one of their own, or one lent to them under both consents
+	// (memql#5662). It never falls through to another machine, and system work
+	// cannot set one. Empty retains normal fleet routing, own machines first.
 	RegistrationId string
 	ModelId        string
 	Kind           string
@@ -366,6 +368,14 @@ type FleetCallResult struct {
 
 // FleetCatalogReader reads graph-backed availability without dispatching calls.
 // Both public query nodes and agent nodes install the same projection.
+//
+// Catalog(ctx, person) is the person's own machines AND every machine lent to
+// them (design G8); Catalog(ctx, "") is the machines lent to everyone, which
+// system work may use. THE FIRST CONTAINS THE SECOND, for every person: a
+// machine lent to everyone is lent to them. fleetCatalogForCaller relies on
+// that and reads one catalog, not both (memql#5660), and
+// component/worker/fleetcatalog's TestAPersonsCatalogContainsTheSharedCatalog
+// holds the installed reader to it.
 type FleetCatalogReader interface {
 	Catalog(context.Context, string) ([]FleetModel, error)
 }
@@ -392,9 +402,10 @@ func (r *ProviderRegistry) FleetCatalogInstalled() bool {
 
 // FleetInference is the contract an agent-tagged build fills in.
 type FleetInference interface {
-	// Catalog returns the live model list. An empty actingUserId asks for
-	// the shared-inference set (machines whose owners opted in to cluster
-	// work), never for "everything".
+	// Catalog returns the live model list: the person's own machines and
+	// every machine lent to them. An empty actingUserId asks for the
+	// shared-inference set (machines whose owners opted in to cluster work),
+	// never for "everything". FleetCatalogReader's contract, which this is.
 	Catalog(ctx context.Context, actingUserId string) ([]FleetModel, error)
 	// Call runs one model call, streaming through req.OnDelta when set.
 	// ErrFleetUnavailable when no eligible machine could serve it.

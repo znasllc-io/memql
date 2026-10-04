@@ -58,8 +58,9 @@ func (r *writeReachRecorder) reached() []string {
 }
 
 // sandboxWithRecorder wraps a real registry in which the given step types have
-// been replaced by one shared recording executor. The engine is booted with no
-// database: the sandbox reads its function registry, never its rows.
+// been replaced by one shared recording executor. The engine has no database
+// and is the package's shared one: the sandbox reads its function registry,
+// never its rows, and changes nothing on it (memql#5668).
 func sandboxWithRecorder(t *testing.T, types ...automations.StepType) (*sandboxStepRegistry, *writeReachRecorder) {
 	t.Helper()
 	real := NewRegistry()
@@ -67,7 +68,7 @@ func sandboxWithRecorder(t *testing.T, types ...automations.StepType) (*sandboxS
 	for _, ty := range types {
 		real.Register(ty, rec)
 	}
-	return newSandboxStepRegistry(real, bootEmbeddedEngine(t), "sandbox:dryrun:2943"), rec
+	return newSandboxStepRegistry(real, sharedEmbeddedEngine(t), "sandbox:dryrun:2943"), rec
 }
 
 func newStepCtx() *automations.StepContext {
