@@ -588,6 +588,8 @@ func TestTheDriverWaitsOnAStepUntilItsRunsCeiling(t *testing.T) {
 // sentence naming that bound: the driver's deadline is the run's, so the
 // step's own timeout is not what it ran out of.
 func TestAStepThatNeverReportsFailsAtItsRunsCeiling(t *testing.T) {
+	// The default ceiling, whatever the shell running the test exports.
+	t.Setenv(pipelines.EnvRunCeiling, "")
 	dh := newDriveHarness(t, driveManifest)
 	clock := &driveClock{at: testNow}
 	dh.integ.Configure(func(d *Deps) {

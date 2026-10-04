@@ -883,7 +883,7 @@ func TestIsolationProofWaitsOutAnExceededQuota(t *testing.T) {
 }
 
 // TestIsolationProofStartsNothingForAStepNoLongerWaiting: a step whose wait
-// is over before it asks -- cancelled, or its timeout spent -- neither starts
+// is over before it asks -- cancelled, or its run's ceiling passed -- neither starts
 // a proof nor joins one: it would only start one that stops at once.
 func TestIsolationProofStartsNothingForAStepNoLongerWaiting(t *testing.T) {
 	h := newIsoHarness(t, nil) // a probe Job create would be a test failure: no script describes it

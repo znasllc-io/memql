@@ -595,8 +595,12 @@ func TestExecuteHopAStageWiderThanTheCeilingRunsEveryStep(t *testing.T) {
 	const width, ceiling = 6, 2
 	queued := 20 * time.Minute // past each step's own 15-minute timeout
 	w := newRunnerHop(t)
-	// The executor's clock is the runners': the run started ten minutes
-	// before it, and its two-hour ceiling is far away.
+	// The executor's clock starts where the runners' does: the run started
+	// ten minutes before it, and its two-hour ceiling is far away. The
+	// queue's minutes below pass on the runners' clock alone, so this proves
+	// the runner's half end to end; the executor's wait for a queued step is
+	// executor_test.go's (TestExecuteWaitsForAQueuedStepUntilItsRunsCeiling,
+	// TestExecuteGivesUpOnACreatedJobByItsCreation).
 	w.clock.set(rtT0)
 	var steppedPast atomic.Bool
 	w.h.c.with(func(c *rtCluster) {
