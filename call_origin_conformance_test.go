@@ -676,12 +676,23 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// row, never taken from an argument. Every other id is derived
 		// (sha256 of the package id or the run key) or GitHub's.
 		//
+		// ONE EXCEPTION, and it is bounded: a cluster owner may disconnect
+		// ANY pipeline, so an operator can free a repository a departed
+		// owner's pipeline holds (connect refuses every other source while it
+		// is active). When their own owner-scoped read comes back empty and
+		// their OWN verified role is the cluster owner's -- never a synthetic
+		// actor's, which is refused as no person before any read -- the
+		// pipeline is read server-side (pipelineById). That widens nothing a
+		// cluster owner does not already read through the composite tier, and
+		// the write it reaches is the status alone, under the row owner's
+		// borrowed authority, owner copied off the row.
+		//
 		// The stamp is applied in ONE place, inline as the argument to
 		// dslStore.executeInternal's single Execute, and the marked context is
 		// never returned. Asserted, with the person-facing precondition and
 		// the runner capabilities' origin refusal, in
 		// component/pipelinerun/internal_origin_test.go.
-		"component/pipelinerun":     "pipelines -- server-initiated; the trigger and the poll refuse every call without internal origin and the trigger reads its delivery from the staged row, the driver has no caller, and every person-facing act is downstream of an owner-scoped read under the person's own actor (epic memql#5477)",
+		"component/pipelinerun":     "pipelines -- server-initiated; the trigger and the poll refuse every call without internal origin and the trigger reads its delivery from the staged row, the driver has no caller, and every person-facing act is downstream of an owner-scoped read under the person's own actor, save a cluster owner's disconnect (epic memql#5477)",
 		"integrations/agent/worker": "worker store, server-initiated",
 		// THE WORK SPINE's entry points (epic memql#4966). SERVER-INITIATED,
 		// and not one of the request-derived exceptions -- stated rather than

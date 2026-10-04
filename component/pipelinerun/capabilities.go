@@ -72,9 +72,9 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "disconnect",
-			Description: "Disconnect one of the caller's pipelines: it opens no more runs, and a run no agent has started concludes pipeline_disconnected. The row and its runs stay as history. Answers {pipelineId, status}.",
+			Description: "Disconnect one of the caller's pipelines -- or, for a cluster owner, any pipeline, so an operator can free a repository a departed owner's pipeline holds: it opens no more runs, and a run no agent has started concludes pipeline_disconnected. The row and its runs stay as history. Answers {pipelineId, status}.",
 			Handler:     i.handleDisconnect,
-			ArgsSchema:  map[string]string{"pipelineId": "string (required) -- the caller's v1:pipelines:pipeline"},
+			ArgsSchema:  map[string]string{"pipelineId": "string (required) -- the caller's v1:pipelines:pipeline, or any for a cluster owner"},
 		},
 		{
 			Name:        "rerun",

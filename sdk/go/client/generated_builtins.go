@@ -3416,9 +3416,9 @@ func PipelinesConnectBuild(args PipelinesConnectArgs) string {
 	return b.String()
 }
 
-// PipelinesDisconnect -- Disconnect one of the caller's pipelines. It opens no more runs, and a run an agent has yet to start concludes with pipeline_disconnected. The pipeline row and every run stay, because they are the history the source's Runs list shows; connecting again reactivates the same pipeline.
+// PipelinesDisconnect -- Disconnect one of the caller's pipelines -- or, for a cluster owner, any pipeline, so an operator can free a repository a departed owner's pipeline holds. It opens no more runs, and a run an agent has yet to start concludes with pipeline_disconnected. The pipeline row and every run stay, because they are the history the source's Runs list shows; connecting again reactivates the same pipeline.
 type PipelinesDisconnectArgs struct {
-	// The v1:pipelines:pipeline to disconnect. Must be the caller's own.
+	// The v1:pipelines:pipeline to disconnect. Must be the caller's own, unless the caller is a cluster owner.
 	PipelineId string
 }
 

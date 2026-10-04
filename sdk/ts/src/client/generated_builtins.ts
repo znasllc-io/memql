@@ -2607,9 +2607,9 @@ QueryClient.prototype.pipelinesConnect = function (this: QueryClient, args: Pipe
   return this.executeNamed("pipelinesConnect", buildPipelinesConnect(args), opts);
 };
 
-/** Disconnect one of the caller's pipelines. It opens no more runs, and a run an agent has yet to start concludes with pipeline_disconnected. The pipeline row and every run stay, because they are the history the source's Runs list shows; connecting again reactivates the same pipeline. */
+/** Disconnect one of the caller's pipelines -- or, for a cluster owner, any pipeline, so an operator can free a repository a departed owner's pipeline holds. It opens no more runs, and a run an agent has yet to start concludes with pipeline_disconnected. The pipeline row and every run stay, because they are the history the source's Runs list shows; connecting again reactivates the same pipeline. */
 export interface PipelinesDisconnectArgs {
-  /** The v1:pipelines:pipeline to disconnect. Must be the caller's own. */
+  /** The v1:pipelines:pipeline to disconnect. Must be the caller's own, unless the caller is a cluster owner. */
   pipelineId: string;
 }
 

@@ -1,6 +1,7 @@
 package pipelinerun
 
 import (
+	"context"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -110,6 +111,48 @@ func TestNoPersonReachesAnotherOwnersRows(t *testing.T) {
 				t.Errorf("%s read under somebody other than the caller: %+v", name, c.actor)
 			}
 		}
+	}
+}
+
+// TestOnlyAClusterOwnersDisconnectReachesAnotherOwnersPipeline is the one
+// person-facing exception, and its precondition: a cluster owner's disconnect
+// of a pipeline they do not own reads it server-side, stamped, as the
+// pipelines system actor -- but only after their own owner-scoped read came
+// back empty, only on the strength of their own verified role, and the write
+// it reaches is the status alone, under the row owner's authority. A
+// synthetic owner is no person, and reaches nothing.
+func TestOnlyAClusterOwnersDisconnectReachesAnotherOwnersPipeline(t *testing.T) {
+	engine := newRecordingEngine()
+	engine.answers[qPipelineByID] = []any{map[string]any{
+		"id": "v1:pipelines:pipeline:p1", "ownerUserId": "v1:identity:user:" + ownerID, "repository": repoName, "status": "active",
+	}}
+	integ := New(Deps{Store: NewDSLStore(engine), GitHub: newFakeGitHub(t), Gate: newKeyedGate(t).run, Now: func() time.Time { return testNow }})
+
+	if _, err := integ.Disconnect(clusterOwnerCtx(otherID), "p1"); err != nil {
+		t.Fatalf("a cluster owner's disconnect: %v", err)
+	}
+	calls := engine.recorded()
+	if len(calls) != 3 {
+		t.Fatalf("calls = %d (%v); want the owner-scoped read, the server-only read, the status write", len(calls), calls)
+	}
+	if c := calls[0]; constructOf(c.query) != qPipelineForOwner || c.origin.IsInternal() || c.actor == nil || c.actor.UserId != otherID {
+		t.Errorf("first, the caller's own read, unstamped: %s %+v", c.query, c.actor)
+	}
+	if c := calls[1]; constructOf(c.query) != qPipelineByID || !c.origin.IsInternal() || c.actor == nil || c.actor.UserId != "system:pipelines" {
+		t.Errorf("then the server-only read, as the system actor: %s %+v", c.query, c.actor)
+	}
+	if c := calls[2]; c.query != `mutation updatePipeline(pipelineId: "p1", status: "disconnected")` ||
+		!c.origin.IsInternal() || c.actor == nil || c.actor.UserId != "v1:identity:user:"+ownerID {
+		t.Errorf("the status alone, under the row owner's authority: %s %+v", c.query, c.actor)
+	}
+
+	before := len(engine.recorded())
+	synthetic := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "operator-key", Role: auth.RoleOwner, Synthetic: true})
+	if _, err := integ.Disconnect(synthetic, "p1"); !errors.Is(err, ErrNoCaller) {
+		t.Errorf("a synthetic owner: %v, want ErrNoCaller", err)
+	}
+	if n := len(engine.recorded()) - before; n != 0 {
+		t.Errorf("a synthetic owner reached %d calls", n)
 	}
 }
 

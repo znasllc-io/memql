@@ -13,6 +13,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/packages"
 	"github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 // connect.go -- a source's one pipeline (decisions 8, 12, 14).
@@ -281,10 +282,22 @@ func (i *Integration) handleDisconnect(ctx context.Context, args map[string]any,
 	return resultNode(map[string]any{"pipelineId": p.ID, "status": p.Status}), nil
 }
 
-// Disconnect stops one of the caller's pipelines opening runs. The row and its
-// runs stay; connecting again reactivates the same pipeline.
+// Disconnect stops one of the caller's pipelines opening runs -- or, for a
+// cluster owner, any pipeline. The row and its runs stay; connecting again
+// reactivates the same pipeline.
+//
+// THE CLUSTER OWNER'S REACH is an operator's need, not a convenience: an
+// active pipeline holds its repository (connect refuses every other source,
+// pipeline_already_connected), and only a disconnect frees it -- so a pipeline
+// whose owner has left would hold the repository for good. A cluster owner
+// already reads every pipeline row through the composite tier; the reach is
+// decided by the caller's own verified role (a synthetic owner -- an operator
+// key, the readiness evaluator -- is no person, and refused first), the row
+// is read server-side only then, and the write is the status alone, under the
+// row owner's borrowed authority like every pipelines write.
 func (i *Integration) Disconnect(ctx context.Context, pipelineID string) (Pipeline, error) {
-	if _, err := personFrom(ctx); err != nil {
+	caller, err := personFrom(ctx)
+	if err != nil {
 		return Pipeline{}, err
 	}
 	d := i.snapshot()
@@ -295,10 +308,21 @@ func (i *Integration) Disconnect(ctx context.Context, pipelineID string) (Pipeli
 	if pipelineID == "" {
 		return Pipeline{}, fmt.Errorf("pipelines: pipelineId is required")
 	}
-	// Owner-scoped: someone else's pipeline is no pipeline.
+	// Owner-scoped first: someone else's pipeline is no pipeline...
 	p, err := d.Store.PipelineForOwner(ctx, pipelineID)
 	if err != nil {
 		return Pipeline{}, err
+	}
+	// ...unless the caller is a cluster owner.
+	if p == nil && callerIsClusterOwner(ctx) {
+		if p, err = d.Store.PipelineByID(ctx, pipelineID); err != nil {
+			return Pipeline{}, err
+		}
+		if p != nil {
+			d.Logger.Info("pipelines: a cluster owner is disconnecting another owner's pipeline",
+				"component", "pipelinerun", logger.Subject(PipelineConcept, p.ID),
+				"repository", p.Repository, "by", caller, "owner", p.OwnerUserID)
+		}
 	}
 	if p == nil {
 		return Pipeline{}, fmt.Errorf("pipelines: you have no pipeline %q", pipelineID)
@@ -395,6 +419,13 @@ func githubRepository(repoURL string) (string, error) {
 			Detail: fmt.Sprintf("%q does not name an owner and a repository (expected https://github.com/<owner>/<repo>)", raw)}
 	}
 	return normalizeRepository(parts[0] + "/" + strings.TrimSuffix(parts[1], ".git")), nil
+}
+
+// callerIsClusterOwner reports whether the person a person-facing act is for
+// is a cluster owner: their own verified role, never a synthetic actor's.
+func callerIsClusterOwner(ctx context.Context) bool {
+	ac, ok := auth.AccessFromContext(ctx)
+	return ok && ac != nil && !ac.Synthetic && ac.IsClusterOwner()
 }
 
 // personFrom is the person a person-facing act is for: a signed-in principal,

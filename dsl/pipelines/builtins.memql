@@ -19,7 +19,9 @@
 // the part: each runs under the CALLER's actor and resolves its target through
 // an owner-scoped read first (the package for connect, the pipeline for
 // disconnect, the run for re-run and cancel), so a caller who does not own it
-// resolves zero rows and is refused by name before anything is written. The
+// resolves zero rows and is refused by name before anything is written -- save
+// a cluster owner's disconnect, which reaches any pipeline so an operator can
+// free a repository a departed owner's pipeline holds. The
 // part is the door, exactly as for the Deployables actions beside them in
 // dsl/platform/builtins.memql: connecting and disconnecting a pipeline is
 // editing a source (`app:deployables/sources`), and re-running or cancelling a
@@ -53,9 +55,9 @@ builtin pipelinesConnect {
 @executor("integration.pipelines.disconnect")
 @args(profile="object")
 @requiresCapability("execute", "app:deployables/sources")
-@description("Disconnect one of the caller's pipelines. It opens no more runs, and a run an agent has yet to start concludes with pipeline_disconnected. The pipeline row and every run stay, because they are the history the source's Runs list shows; connecting again reactivates the same pipeline.")
+@description("Disconnect one of the caller's pipelines -- or, for a cluster owner, any pipeline, so an operator can free a repository a departed owner's pipeline holds. It opens no more runs, and a run an agent has yet to start concludes with pipeline_disconnected. The pipeline row and every run stay, because they are the history the source's Runs list shows; connecting again reactivates the same pipeline.")
 builtin pipelinesDisconnect {
-  pipelineId  string!  @description("The v1:pipelines:pipeline to disconnect. Must be the caller's own.")
+  pipelineId  string!  @description("The v1:pipelines:pipeline to disconnect. Must be the caller's own, unless the caller is a cluster owner.")
 }
 
 @sdk

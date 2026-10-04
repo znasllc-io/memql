@@ -92,9 +92,9 @@ Before any request leaves the cluster, connect refuses a repository another
 source's pipeline already runs, `pipeline_already_connected`: a repository has
 one pipeline, so its checks are reported once per commit. The remedy is to
 disconnect the other source's pipeline -- its owner does, with
-`pipelinesDisconnect` -- or to work from that source. The refusal says that such
-a pipeline exists and nothing about whose it is; a disconnected pipeline blocks
-nothing.
+`pipelinesDisconnect`, or a cluster owner does when that owner has left -- or to
+work from that source. The refusal says that such a pipeline exists and nothing
+about whose it is; a disconnected pipeline blocks nothing.
 
 Connect then proves the source's connection still reaches the repository by
 minting an installation token through it, reads the default branch's head and
@@ -141,7 +141,10 @@ Afterwards:
   queued run no agent has claimed is concluded cancelled at once.
 
 Each acts on your own pipeline or run only. A caller who does not own it is
-refused by name before anything is written.
+refused by name before anything is written. The one exception is disconnect: a
+cluster owner may disconnect any pipeline, so an operator can free a repository
+whose pipeline belongs to somebody who has left. It writes the pipeline's
+status and nothing else.
 
 ---
 

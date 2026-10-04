@@ -8,6 +8,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/packages"
 	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/component/pipelines"
@@ -322,6 +323,70 @@ func TestDisconnectIsTheOwnersAndKeepsTheRow(t *testing.T) {
 	}
 	if last := h.store.pipelineUpdates[len(h.store.pipelineUpdates)-1]; last.Owner != p.OwnerUserID {
 		t.Errorf("written under the owner's authority, got %q", last.Owner)
+	}
+}
+
+// An operator must be able to free a repository a departed owner's pipeline
+// holds -- connect refuses every other source while it is active, and only a
+// disconnect frees it. So a cluster owner may disconnect ANY pipeline; the
+// write is still made under the row owner's borrowed authority, and it writes
+// the status and nothing else. Every other person is held to their own.
+func TestAClusterOwnerMayDisconnectAnyPipeline(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+
+	got, err := h.integ.Disconnect(clusterOwnerCtx(otherID), p.ID)
+	if err != nil {
+		t.Fatalf("a cluster owner disconnecting a colleague's pipeline: %v", err)
+	}
+	if got.Status != PipelineDisconnected {
+		t.Errorf("status = %q", got.Status)
+	}
+	stored, _ := h.store.pipeline(p.ID)
+	if stored.Status != PipelineDisconnected || stored.OwnerUserID != p.OwnerUserID {
+		t.Errorf("the row is disconnected and still its owner's: %+v", stored)
+	}
+	if len(h.store.pipelineUpdates) != 1 {
+		t.Fatalf("pipeline writes = %d, want the one status write", len(h.store.pipelineUpdates))
+	}
+	if u := h.store.pipelineUpdates[0]; u.Owner != p.OwnerUserID || u.Patch.Status == nil || u.Patch.Heads != nil || u.Patch.SecretNames != nil {
+		t.Errorf("the status alone, under the row owner's authority: %+v", u)
+	}
+
+	// The repository is free: another source connects it.
+	h2 := connectHarness(t, connectManifest)
+	theirs := testPipeline(DeliveryWebhook)
+	theirs.ID, theirs.PackageID, theirs.OwnerUserID = PipelineIDFor("pkg-departed"), "pkg-departed", "v1:identity:user:user-gone"
+	h2.store.addPipeline(theirs)
+	if _, err := connect(h2, personCtx(ownerID), ConnectRequest{}); refusalCode(err) != pipelines.CodeAlreadyConnected {
+		t.Fatalf("while the departed owner's pipeline is active: %v", err)
+	}
+	if _, err := h2.integ.Disconnect(clusterOwnerCtx("user-operator"), theirs.ID); err != nil {
+		t.Fatalf("the operator frees it: %v", err)
+	}
+	if _, err := connect(h2, personCtx(ownerID), ConnectRequest{}); err != nil {
+		t.Errorf("then another source connects it: %v", err)
+	}
+
+	// Not a cluster owner: held to their own, and told nothing about whose.
+	h3 := newHarness(t)
+	h3.store.addPipeline(p)
+	for name, ctx := range map[string]context.Context{
+		"a developer": personCtx(otherID),
+		"an admin": auth.ContextWithAccess(context.Background(), &auth.AccessContext{
+			UserId: otherID, Role: auth.RoleAdmin,
+		}),
+		"a synthetic owner": auth.ContextWithAccess(context.Background(), &auth.AccessContext{
+			UserId: "operator-key", Role: auth.RoleOwner, Synthetic: true,
+		}),
+	} {
+		if _, err := h3.integ.Disconnect(ctx, p.ID); err == nil {
+			t.Errorf("%s disconnected somebody else's pipeline", name)
+		}
+	}
+	if stored, _ := h3.store.pipeline(p.ID); stored.Status != PipelineActive {
+		t.Errorf("a refused disconnect wrote: %+v", stored)
 	}
 }
 
