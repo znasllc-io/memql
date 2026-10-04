@@ -53,12 +53,17 @@ export const MODULE_NAMES: Record<ModuleId, string> = {
  * The engine's manifest says the same thing from its side, per lane, as
  * `configurableFrom`. This map is what the SHELL knows: which window to open.
  *
- * A target must be a section the shell can reach today
- * (test/kit/readinessStates.test.tsx holds every one to it), so a module whose
- * own section is not built yet stays null until it is, as `pipelines` does:
- * its home is a Pipelines section of Settings that epic memql#5479 builds.
- * Nothing requires or wants that module, so no Set up group draws it
- * meanwhile, and the deployment wording null implies is never shown for it.
+ * A target must be a section the shell can reach today, by the roles that
+ * configure the module (test/kit/readinessStates.test.tsx holds every one to
+ * it), so a module whose own section is not built yet stays null until it is.
+ *
+ * `pipelines` is Settings > Pipelines (epic memql#5479, D15), and it is the one
+ * target that is NOT owner-and-developer: the item asks about the cluster's own
+ * GitHub App, so its section is seeded on the owner alone. A developer shown a
+ * Set up group for it is told the place in words rather than given a button
+ * into a section they cannot open -- `moduleActFor` asks the registry, which
+ * is what makes that the answer. It is also where the optional item's mark
+ * points (chrome/OptionalReadiness).
  */
 export const MODULE_SETTINGS_SECTION: Record<
   ModuleId,
@@ -71,7 +76,7 @@ export const MODULE_SETTINGS_SECTION: Record<
   campaigns: null,
   workbench: null,
   localApps: null,
-  pipelines: null,
+  pipelines: { app: "settings", place: "Settings", section: "pipelines", name: "Pipelines" },
 };
 
 /**

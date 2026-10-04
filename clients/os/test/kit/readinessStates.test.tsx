@@ -9,6 +9,7 @@ import { UNKNOWN_RUNTIME_CONFIG } from "../../src/cluster/config";
 import {
   gateFor,
   markToneFor,
+  moduleActFor,
   SetupGroup,
   setAsideLabel,
   stateWords,
@@ -17,7 +18,7 @@ import {
 } from "../../src/kit/ReadinessStates";
 import { canConfigure } from "../../src/kit/ReadinessStates";
 import type { Readiness } from "../../src/live/readiness";
-import { MODULE_SETTINGS_SECTION } from "../../src/system/modules";
+import { MODULE_SETTINGS_SECTION, type ModuleId } from "../../src/system/modules";
 import { sectionsFor } from "../../src/system/registry";
 import { installSeededAccess } from "../seededAccess";
 import type { Verdict } from "../../src/system/readinessFold";
@@ -319,27 +320,29 @@ describe("SetupGroup", () => {
   });
 
   // THE ACT IS GATED ON REACHING THE SECTION, not just on being allowed to
-  // configure -- and after epic memql#5088 that gate is INERT, which is worth
-  // asserting rather than leaving as a silence.
+  // configure.
   //
   // This test used to read: "offers a developer the words, not a button, for
-  // an owner-only section", and its example was AI providers. That example is
-  // gone. D7 of memql#5088 moved the providers section to owner-or-developer,
-  // which is exactly the set canConfigure admits, so a developer who is shown
-  // the group can now also reach the section it points at.
+  // an owner-only section", and its example was AI providers. D7 of
+  // memql#5088 moved that section to owner-or-developer, which made the guard
+  // in ReadinessStates inert, and the test became "every role the group is
+  // shown to can reach every section it points at".
   //
-  // The guard in ReadinessStates is still right and still asked of the
-  // REGISTRY rather than restated. What changed is that no configuration
-  // currently triggers it. So the test that used to exercise it becomes the
-  // test that says WHY it cannot be exercised: every module the group can
-  // offer must be reachable by every role the group is shown to. The day that
-  // stops being true, this fails and names the pair, and the guard beside it
-  // becomes load-bearing again.
-  it("every role the group is shown to can reach every section it points at", () => {
+  // The Pipelines item (epic memql#5479, D15) makes the guard LOAD-BEARING
+  // AGAIN, deliberately: its section asks about the cluster's own GitHub App
+  // and is seeded on the owner alone, so the owner is the one role that
+  // configures it. The invariant is therefore per module -- every target is
+  // reachable by the roles that may configure THAT module -- and a role the
+  // group is shown to outside that set is held to the guard instead: it
+  // cannot reach the section, and the act it is offered is the place in words.
+  const CONFIGURED_BY: Partial<Record<ModuleId, readonly string[]>> = { pipelines: ["owner"] };
+
+  it("every role that configures a module can reach the section it points at", () => {
     const configuringRoles = ["owner", "developer"] as const;
     const targets = Object.entries(MODULE_SETTINGS_SECTION).filter(([, t]) => t !== null);
     // A REACHABLE POSITIVE: an empty map would satisfy every assertion below.
     expect(targets.length, "no module points at a settings section").toBeGreaterThan(0);
+    let guarded = 0;
 
     for (const role of configuringRoles) {
       expect(canConfigure(role), `${role} must be shown the group`).toBe(true);
@@ -352,14 +355,34 @@ describe("SetupGroup", () => {
         const app = OS_REGISTRY.apps.find((a) => a.id === target!.app);
         expect(app, `${moduleId} points at an app, ${target!.app}, that is not in the registry`).toBeTruthy();
         const reachable = new Set(sectionsFor(app!).map((sec) => sec.id));
+        if ((CONFIGURED_BY[moduleId as ModuleId] ?? configuringRoles).includes(role)) {
+          expect(
+            reachable.has(target!.section),
+            `${role} is shown "Set up" for ${moduleId} but cannot reach ${target!.place} -> ${target!.section}; ` +
+              `the button would navigate a window nowhere. Either widen that section or ` +
+              `name the roles that configure ${moduleId} in CONFIGURED_BY.`,
+          ).toBe(true);
+          continue;
+        }
+        // THE GUARD'S PAIR: not reachable (or CONFIGURED_BY is stale), and so
+        // offered the place in words rather than a button that opens nothing.
+        guarded += 1;
         expect(
           reachable.has(target!.section),
-          `${role} is shown "Set up" for ${moduleId} but cannot reach ${target!.place} -> ${target!.section}; ` +
-            `the button would navigate a window nowhere. Either widen that section or ` +
-            `confirm the guard in ReadinessStates suppresses the button for this pair.`,
-        ).toBe(true);
+          `${role} reaches ${target!.place} -> ${target!.section}, so CONFIGURED_BY.${moduleId} is out of date`,
+        ).toBe(false);
+        expect(
+          moduleActFor({
+            id: moduleId as ModuleId,
+            verdict: verdict(moduleId, "unconfigured"),
+            sectionsOf: (appId) => (appId === target!.app ? [...reachable] : []),
+            canOpenWindows: true,
+          }),
+        ).toEqual({ kind: "words", place: target!.place, name: target!.name });
       }
     }
+    // The exception is exercised, not merely declared.
+    expect(guarded, "no configuring role was held to the guard").toBeGreaterThan(0);
   });
 
   // THE GITHUB APP IS CONFIGURED FROM DEPLOYABLES, not from the deployment and

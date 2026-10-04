@@ -1,0 +1,84 @@
+/* Settings -> Pipelines (epic memql#5479, design record D15).
+ *
+ * The page is kit pieces end to end -- the Head, a Caption, the rail at page
+ * scale, Notices, the ActionBar over the action pane -- so what is here is
+ * only what those pieces leave to their surface: how a stop's body sits under
+ * its sentence outside a wizard, the measure a sentence keeps, and the one
+ * place a reused component says something the rail has already said.
+ *
+ * TOKENS ONLY, and nothing themeable: a theme pack carries colour and
+ * wallpaper values, never a rule. */
+
+/* THE RAIL IS THE PAGE'S CONTENT, so the app stack's own gap separates it
+ * from the description; the rail's default margin on top of that pushed the
+ * three sub-steps a line further from the sentence that introduces them. */
+.os-pipelines-setup .os-action-body > .os-rail {
+  margin: 0;
+}
+
+/* A SENTENCE KEEPS A READABLE MEASURE (rule 9): the page takes the window, and
+ * the description and each stop's sentence stop at about eighty characters
+ * rather than running the width of a maximised window. */
+.os-pipelines-setup .os-action-body > .os-caption,
+.os-pipelines-setup .os-rail-note,
+.os-pipelines-fleet {
+  max-width: 80ch;
+}
+
+/* ---- a stop's body ------------------------------------------------------ */
+
+/* Outside a wizard there is no `.os-wizard-body` to space a body from its
+ * line, so it is spaced here, on the rail's text edge, with the thread still
+ * running down its left side. */
+.os-pipelines-stop {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 0 4px;
+}
+
+/* THE GITHUB APP'S SETUP IS THE CONNECTIONS GROUP, REUSED WHOLE -- and that
+ * group opens with its own "GitHub" heading, directly under a stop already
+ * named "GitHub App". The heading stays for assistive technology, where it
+ * names the form; on screen the rail line is the heading (rule 7, say it
+ * once). The group's closing margin is for a settings page's next group; in a
+ * stop the next thing is the next stop, which the rail spaces itself. */
+.os-pipelines-stop > .os-field-group {
+  margin: 0;
+}
+.os-pipelines-stop > .os-field-group > .os-subhead {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* A text act, not a button: the stop's act opens another app, and the bar
+ * at the window's floor is where this page's own act lives. Sized to its
+ * words so the click target is the label, not the row. */
+.os-pipelines-act {
+  justify-self: start;
+  font: inherit;
+  font-size: var(--os-text-sm);
+}
+
+.os-pipelines-fleet {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+
+/* ---- an installation whose permissions lag the app's -------------------- */
+
+/* The notice is a column, and a link in it would otherwise stretch across the
+ * whole box -- a click target as wide as the window for two words. */
+.os-pipelines-review {
+  align-self: flex-start;
+  font-size: var(--os-text-sm);
+  text-decoration: none;
+}

@@ -60,6 +60,13 @@ export interface ConnectReturn {
  * so nothing this browser says can redirect somebody off-cluster -- which is
  * the whole reason the argument is shaped this way.
  */
+/**
+ * The sections a return may name. `pipelines` is Settings > Pipelines (epic
+ * memql#5479), where a cluster owner registers the GitHub App from the
+ * pipelines readiness item and expects to come back to.
+ */
+const RETURN_SECTIONS: readonly string[] = ["deployables", "sources", "settings", "connections", "pipelines"];
+
 export function returnPathFor(section: string, appId: "settings" | "deployables" = "deployables"): string {
   const params = new URLSearchParams();
   params.set(CONNECT_SECTION_PARAM, section);
@@ -82,7 +89,7 @@ export function readConnectReturn(search: string): ConnectReturn | null {
   return {
     reason: (params.get(CONNECT_RESULT_PARAM) ?? "").trim(),
     ...(params.get("connectApp") === "settings" ? { appId: "settings" as const } : {}),
-    section: ["deployables", "sources", "settings", "connections"].includes(section) ? section : DEFAULT_CONNECT_SECTION,
+    section: RETURN_SECTIONS.includes(section) ? section : DEFAULT_CONNECT_SECTION,
     ...(params.get("githubCredentialId") ? { credentialId: params.get("githubCredentialId")! } : {}),
     ...(params.get("githubFlowId") ? { flowId: params.get("githubFlowId")! } : {}),
   };
@@ -161,7 +168,7 @@ export function correlateConnectReturn(result: ConnectReturn, viewer: string): C
   try { attempt = JSON.parse(sessionStorage.getItem(ATTEMPT_KEY) ?? "null"); sessionStorage.removeItem(ATTEMPT_KEY); } catch { /* Refuse an unreadable correlation. */ }
   // Even a refused callback that cannot trust its state belongs where this
   // browser started. This restores navigation only, never credential authority.
-  const section = attempt?.viewer === viewer && ["deployables", "sources", "settings", "connections"].includes(attempt.section ?? "")
+  const section = attempt?.viewer === viewer && RETURN_SECTIONS.includes(attempt.section ?? "")
     ? attempt.section! : result.section;
   const destination = attempt?.viewer === viewer ? attempt.appId : result.appId;
   const app = destination === "settings" ? { appId: "settings" as const } : {};

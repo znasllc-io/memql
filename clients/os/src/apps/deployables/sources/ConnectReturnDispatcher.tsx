@@ -7,7 +7,7 @@ import { useSession } from "../../../chrome/access";
 import { bare } from "../people";
 import { useOs } from "../../../chrome/state";
 import { canOpen } from "../../../system/registry";
-import { correlateConnectReturn, takeParkedConnectReturn } from "./connectReturn";
+import { correlateConnectReturn, DEFAULT_CONNECT_SECTION, takeParkedConnectReturn } from "./connectReturn";
 
 // Hands a parked GitHub-connect return to the surface that asked for it
 // (epic memql#4915).
@@ -59,7 +59,13 @@ export function ConnectReturnDispatcher() {
     if (result === null) return;
     const correlated = correlateConnectReturn(result, viewer);
     const appId = correlated.appId ?? "deployables";
-    if (canOpen(registry, appId)) actions.openApp(appId, appId === "settings" ? "connections" : correlated.section, { connect: correlated });
+    // Settings has two places a GitHub trip starts from: Connections, and the
+    // Pipelines readiness item (epic memql#5479). "pipelines" names nothing in
+    // Deployables, so there it falls back to where every other return lands.
+    const section = appId === "settings"
+      ? (correlated.section === "pipelines" ? "pipelines" : "connections")
+      : (correlated.section === "pipelines" ? DEFAULT_CONNECT_SECTION : correlated.section);
+    if (canOpen(registry, appId)) actions.openApp(appId, section, { connect: correlated });
   }, [actions, registry, accessEpoch, viewer, connection]);
   return null;
 }
