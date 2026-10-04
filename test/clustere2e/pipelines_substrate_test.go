@@ -1,4 +1,4 @@
-//go:build clustere2e
+//go:build clustere2e && agent
 
 package clustere2e
 
@@ -15,12 +15,21 @@ package clustere2e
 // run, and for a fork's pull request it refuses -- are then held to recorded
 // GitHub fixtures.
 //
+// BUILT WITH TWO TAGS, `clustere2e` and `agent`. The executor's fleet half
+// (integrations/pipelinesteps/fleet.go) is in the agent's build only, as the
+// dispatcher it drives is, and this leg runs that half for real rather than a
+// stand-in for it. With `clustere2e` alone the file is not compiled, so the
+// test does not exist: the CI leg asks for a PASS line, not merely for no
+// failure, and ci.yml's build-clustere2e lane compiles the package under both
+// tag sets.
+//
 // WHAT IS REAL, AND WHAT STANDS IN (ruling R41). A deployed engine cannot be
 // pointed at a fake GitHub without configuration the product does not have --
 // the API base is GitHub's own, and the clone URL is composed as
 // https://github.com/<owner>/<name>.git -- and this leg adds none. So:
 //
-//   - REAL, against the cluster: the agent's Executor, and two workbench
+//   - REAL, against the cluster: the agent's Executor and its fleet half
+//     (pipelinesteps.NewFleet, with its own classification), and two workbench
 //     replicas' Runners ("workbench-a", "workbench-b"), each behind the real
 //     integrations/workbench ForwardHandler, joined by an in-process forward
 //     transport (substrateMesh, the shape of integrations/pipelinesteps'
@@ -41,19 +50,20 @@ package clustere2e
 //     writes check runs to -- the bodies it receives are what the fixtures
 //     record; the Library, as a recording LibraryStore; the clone token
 //     minter, which answers installation 0 with no token, as app/'s does; and
-//     the fleet (noMachineFleet), which answers as the agent's dispatcher and
-//     the fleet path answer an owner with no machine at all.
+//     the agent's dispatcher (noMachineDispatcher), which answers exactly as
+//     integrations/agent/worker's Dispatcher answers an owner with no machine
+//     at all, and records what the fleet half asked it for.
 //
 // WHAT IT DOES NOT COVER: the deployed agent and workbench wiring -- the app/
-// adapter, the NodeService streams, the dispatcher -- which unit and hop tests
-// cover (integrations/pipelinesteps' executor_hop_test.go and fleet_test.go,
-// integrations/agent/worker, app/). What this leg adds is what no fake can
-// stand in for: a real API server, kubelet, image pull, clone and network
-// policy under the grant the product deploys.
+// adapter, the NodeService streams, the dispatcher itself -- which unit and
+// hop tests cover (integrations/pipelinesteps' executor_hop_test.go and
+// fleet_test.go, integrations/agent/worker, app/). What this leg adds is what
+// no fake can stand in for: a real API server, kubelet, image pull, clone and
+// network policy under the grant the product deploys.
 //
 // RUN
 //
-//	MEMQL_E2E_KUBECONTEXT=k3d-memql GOWORK=off go test -tags clustere2e -count=1 \
+//	MEMQL_E2E_KUBECONTEXT=k3d-memql GOWORK=off go test -tags clustere2e,agent -count=1 \
 //	  -timeout=30m -run TestPipelinesSubstrate ./test/clustere2e/
 //
 // MEMQL_E2E_KUBECONFIG names the kubeconfig when it is not $KUBECONFIG or
@@ -105,6 +115,7 @@ import (
 	"github.com/znasllc-io/memql/component/pipelinerun"
 	pl "github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/core/id"
+	worker "github.com/znasllc-io/memql/integrations/agent/worker"
 	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 	"github.com/znasllc-io/memql/integrations/workbench"
 )
@@ -176,7 +187,7 @@ func TestPipelinesSubstrate(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	library := &recordingLibrary{}
 	tokens := &anonymousCloneTokens{}
-	fleet := &noMachineFleet{}
+	dispatcher := &noMachineDispatcher{}
 	mesh := &substrateMesh{inflight: map[string]chan *nodev1.WorkbenchForwardResponse{}, stepServedBy: map[string]string{}}
 	for _, node := range substrateWorkbenches {
 		cfg := configFor(node)
@@ -184,6 +195,7 @@ func TestPipelinesSubstrate(t *testing.T) {
 		handler.SetPipelineRunner(runnerAdapter{runner: pipelinesteps.NewRunner(cfg, pipelinesteps.NewKube(engine, cfg.Namespace), nil, library, tokens)})
 		mesh.replicas = append(mesh.replicas, &substrateReplica{node: node, handler: handler})
 	}
+	fleet := pipelinesteps.NewFleet(configFor(substrateAgent), dispatcher, library, tokens, nil, logger)
 	executor := pipelinesteps.NewExecutor(configFor(substrateAgent), mesh, fleet, logger)
 
 	run := newSubstrateRun(compiled)
@@ -290,20 +302,46 @@ func TestPipelinesSubstrate(t *testing.T) {
 
 	t.Run("fleet-refused", func(t *testing.T) {
 		// A step that needs a display, in a pipeline that consented to the
-		// fleet, is the fleet's: the executor sends it to the owner's
-		// machines, and with none it is refused before anything starts --
-		// never handed to a workbench, never a Job.
+		// fleet, is the fleet's: the executor hands it to its fleet half, which
+		// asks the agent's dispatcher for one of the owner's machines that
+		// offers a display and allows pipeline steps. With none, the
+		// dispatcher's verdict is that nothing started, and the fleet half's
+		// own classification makes that a refusal -- never handed to a
+		// workbench, never a Job.
 		s := run.mustStep(t, pl.StepKey("fleet", "display"))
 		res := s.mustResult(t)
 		if res.Status != pl.OutcomeRefused || res.ExitCode != -1 || res.Failure == nil || res.Failure.Code != pl.CodeNoMachineForNeed {
 			t.Errorf("the step ended %s, exit %d, failure %+v; want refused, exit -1, %s", res.Status, res.ExitCode, res.Failure, pl.CodeNoMachineForNeed)
 		}
+		// The sentence quotes the dispatcher's code and words: it is the fleet
+		// half's reading of the verdict, not a sentence this test supplied.
+		if res.Failure != nil && !strings.Contains(res.Failure.Message, "(no_worker_available): no machines are paired to this account") {
+			t.Errorf("the refusal reads %q; want the fleet half's sentence quoting the dispatcher's no_worker_available", res.Failure.Message)
+		}
 		if res.Where.Surface != "fleet" {
 			t.Errorf("the step reports it ran at %+v; want the fleet", res.Where)
 		}
-		calls := fleet.steps()
-		if len(calls) != 1 || calls[0] != s.step.Key {
-			t.Errorf("the fleet was handed %v; want exactly %s", calls, s.step.Key)
+		asked := dispatcher.asked()
+		if len(asked) != 1 {
+			t.Fatalf("the dispatcher was asked %d times (%v); want exactly once, for %s", len(asked), dispatchedKeys(asked), s.step.Key)
+		}
+		// What the fleet half asks for, pinned by value: a display-capable
+		// machine carries display=true, and fleet labels match exactly.
+		got := asked[0]
+		wantLabels := map[string]string{"display": "true", worker.PipelinesLabel: worker.PipelinesAllowed}
+		switch r := got.req; {
+		case r.Tool != "workerHost" || r.Action != worker.PipelineStepAction || r.Purpose != worker.PurposePipeline:
+			t.Errorf("the dispatch was %s.%s under purpose %q; want workerHost.%s under %q",
+				r.Tool, r.Action, r.Purpose, worker.PipelineStepAction, worker.PurposePipeline)
+		case r.StepId != s.step.Key || r.RunId != run.workRunID || r.CorrelationId != run.runID || r.OwnerUserId != substrateOwnerUser:
+			t.Errorf("the dispatch named step %q, work run %q, run %q, owner %q; want %s, %s, %s, %s",
+				r.StepId, r.RunId, r.CorrelationId, r.OwnerUserId, s.step.Key, run.workRunID, run.runID, substrateOwnerUser)
+		case r.AgentId != "":
+			t.Errorf("the dispatch named agent %q; a pipeline step names none", r.AgentId)
+		case !maps.Equal(r.RequireLabels, wantLabels):
+			t.Errorf("the dispatch required labels %v; want %v", r.RequireLabels, wantLabels)
+		case !got.internal:
+			t.Error("the dispatch carried no internal origin; the dispatcher admits the pipeline purpose only from the engine's own Go")
 		}
 		if forwards := mesh.stepForwards(s.step.Key); len(forwards) > 0 {
 			t.Errorf("the step was forwarded to workbench replicas %v; a fleet step never reaches one", forwards)
@@ -1367,38 +1405,54 @@ func encodeJSON(v any) []byte {
 // What stands in for the rest of the engine
 // ---------------------------------------------------------------------------
 
-// noMachineFleet is the executor's fleet half when the owner has no machine:
-// what the agent-tagged Fleet (integrations/pipelinesteps/fleet.go) answers
-// for the dispatcher's verdict with no paired machine -- Result{ErrorCode:
-// "no_worker_available", ErrorMessage: "no machines are paired to this
-// account", RefusedBeforeStart: true} (dispatch.go noCandidateMessage) --
-// which classify turns into a refusal before anything started. The dispatcher
-// and that classification are covered by integrations/agent/worker's tests and
-// fleet_test.go under the agent tag; what this leg proves is the routing: a
-// step that names a need is the fleet's, and never reaches a workbench or the
-// cluster.
-type noMachineFleet struct {
-	mu    sync.Mutex
-	calls []string
+// noMachineDispatcher is the agent's dispatcher for an owner with no machine.
+// It answers exactly what integrations/agent/worker's Dispatcher answers when
+// the router finds no candidate because none is paired: OK false, the code
+// no_worker_available, noCandidateMessage's sentence for no paired machine, and
+// the dispatcher's own verdict that nothing started on any machine
+// (dispatch.go, Dispatch's empty-candidate branch). That verdict is the
+// dispatcher's tests' to prove. What this leg proves is the other half, for
+// real: what the executor's fleet half asks for, and what its classification
+// makes of the answer.
+type noMachineDispatcher struct {
+	mu       sync.Mutex
+	requests []dispatchedStep
 }
 
-var _ pipelinesteps.FleetRouter = (*noMachineFleet)(nil)
-
-func (f *noMachineFleet) RunStep(_ context.Context, req pl.StepRequest, run pipelinesteps.StepRun) (pl.StepResult, error) {
-	f.mu.Lock()
-	f.calls = append(f.calls, run.StepKey)
-	f.mu.Unlock()
-	return pl.StepResult{Status: pl.OutcomeRefused, ExitCode: -1, Where: pl.Where{Surface: "fleet"}, Failure: &pl.Failure{
-		Code: pl.CodeNoMachineForNeed,
-		Message: fmt.Sprintf("No machine of the owner's that offers %s and allows pipeline steps could take the step (%s): %s",
-			strings.Join(req.Step.Needs, ", "), "no_worker_available", "no machines are paired to this account"),
-	}}, nil
+// dispatchedStep is one request the fleet half made, as the dispatcher saw it.
+type dispatchedStep struct {
+	req worker.Request
+	// internal: the call carried internal origin, without which the dispatcher
+	// refuses the pipeline purpose (pipeline_purpose.go).
+	internal bool
 }
 
-func (f *noMachineFleet) steps() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.Clone(f.calls)
+var _ pipelinesteps.FleetDispatcher = (*noMachineDispatcher)(nil)
+
+func (d *noMachineDispatcher) Dispatch(ctx context.Context, req worker.Request) (worker.Result, error) {
+	d.mu.Lock()
+	d.requests = append(d.requests, dispatchedStep{req: req, internal: auth.OriginFromContext(ctx).IsInternal()})
+	d.mu.Unlock()
+	return worker.Result{
+		OK:                 false,
+		ErrorCode:          "no_worker_available",
+		ErrorMessage:       "no machines are paired to this account",
+		RefusedBeforeStart: true,
+	}, nil
+}
+
+func (d *noMachineDispatcher) asked() []dispatchedStep {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return slices.Clone(d.requests)
+}
+
+func dispatchedKeys(steps []dispatchedStep) []string {
+	out := make([]string, 0, len(steps))
+	for _, s := range steps {
+		out = append(out, s.req.StepId)
+	}
+	return out
 }
 
 // storedFile is one file the Library was handed, with the id it answered.

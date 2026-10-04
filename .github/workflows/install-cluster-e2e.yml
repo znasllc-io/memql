@@ -677,11 +677,14 @@ jobs:
       # TestPipelinesSubstrate, and nothing else of that package. What it drives,
       # what stands in and why are in the test's own header.
       #
-      # GOWORK=off, as ci.yml's build-clustere2e lane compiles the package: under
-      # the workspace a module silently satisfies an import it does not require
-      # (see go.work), so a require the root go.mod lacks would build here and
-      # nowhere else. The Go cache is the shared one, restored and never saved
-      # (memql#5482): ci.yml's go-checks is its one writer.
+      # BOTH TAGS, `clustere2e,agent`: the test runs the executor's fleet half
+      # for real, and that half is in the agent's build only
+      # (integrations/pipelinesteps/fleet.go). GOWORK=off, as ci.yml's
+      # build-clustere2e lane compiles the package: under the workspace a module
+      # silently satisfies an import it does not require (see go.work), so a
+      # require the root go.mod lacks would build here and nowhere else. The Go
+      # cache is the shared one, restored and never saved (memql#5482): ci.yml's
+      # go-checks is its one writer.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: matrix.leg == 'pipelines'
         with:
@@ -698,11 +701,13 @@ jobs:
 
       # THE CLUSTER IS NAMED, NOT ASSUMED. The test skips with no context named,
       # so the name comes from what the install recorded rather than a literal
-      # that could drift from it -- and a skip here would read as a pass, so a
-      # report with no SKIP line is what this step demands. The kubeconfig is
-      # handed over the way the diagnostics below reach the cluster: the install
-      # ran as root, and so did k3d, so its kubeconfig is root's; k3d writes the
-      # cluster's into a file of the runner's own.
+      # that could drift from it. A skip would read as a pass, and so would a
+      # build that left the test out -- without the agent tag the file is not
+      # compiled, and `go test` reports "no tests to run" and exits 0 -- so this
+      # step demands the test's own PASS line, not merely no failure. The
+      # kubeconfig is handed over the way the diagnostics below reach the
+      # cluster: the install ran as root, and so did k3d, so its kubeconfig is
+      # root's; k3d writes the cluster's into a file of the runner's own.
       - name: The pipelines substrate, end to end on the installed cluster
         if: matrix.leg == 'pipelines'
         env:
@@ -719,10 +724,11 @@ jobs:
             k3d kubeconfig get "$cluster" > "$RUNNER_TEMP/kubeconfig"
           chmod 600 "$RUNNER_TEMP/kubeconfig"
           MEMQL_E2E_KUBECONFIG="$RUNNER_TEMP/kubeconfig" MEMQL_E2E_KUBECONTEXT="k3d-${cluster}" \
-            go test -tags clustere2e -count=1 -timeout=30m -v \
+            go test -tags clustere2e,agent -count=1 -timeout=30m -v \
               -run '^TestPipelinesSubstrate$' ./test/clustere2e/ 2>&1 | tee "$RUNNER_TEMP/pipelines-e2e.txt"
-          if grep -q -- '--- SKIP: TestPipelinesSubstrate' "$RUNNER_TEMP/pipelines-e2e.txt"; then
-            echo "ERROR: TestPipelinesSubstrate skipped on a cluster this leg installed and named" >&2
+          if ! grep -q -- '^--- PASS: TestPipelinesSubstrate ' "$RUNNER_TEMP/pipelines-e2e.txt"; then
+            echo "ERROR: TestPipelinesSubstrate did not pass on a cluster this leg installed and named:" >&2
+            echo "       it skipped, or the build left it out (it needs -tags clustere2e,agent)" >&2
             exit 1
           fi
 

@@ -1500,6 +1500,12 @@ jobs:
   # fails here rather than on the cluster. Gates on `go` (like
   # build-node-tags): any Go change can break it. Listed in ci-required below;
   # scripts/citags TestClusterE2ECompileLaneGatesTheMerge pins all of this.
+  #
+  # TWICE: under `clustere2e`, as the parity suite runs, and under
+  # `clustere2e,agent`. TestPipelinesSubstrate runs the executor's fleet half
+  # for real, which is in the agent's build only, so its file is
+  # `//go:build clustere2e && agent` and the first pass never compiles it
+  # (memql#5497). install-cluster-e2e.yml's pipelines leg runs it.
   build-clustere2e:
     name: build clustere2e
     timeout-minutes: 10
@@ -1526,6 +1532,10 @@ jobs:
         run: go vet -tags clustere2e ./test/clustere2e/
       - name: go test -tags clustere2e -c (compile only, never run)
         run: go test -tags clustere2e -c -o /dev/null ./test/clustere2e/
+      - name: go vet -tags clustere2e,agent
+        run: go vet -tags clustere2e,agent ./test/clustere2e/
+      - name: go test -tags clustere2e,agent -c (compile only, never run)
+        run: go test -tags clustere2e,agent -c -o /dev/null ./test/clustere2e/
 
   # TypeScript SDK lane. Gates on `sdkts` (sdk/ts/** + the generator) so a
   # pure Go change that doesn't touch the generator skips the Node lane.

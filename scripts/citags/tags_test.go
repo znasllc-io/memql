@@ -64,10 +64,12 @@ package citags
 import (
 	"fmt"
 	"go/build"
+	"go/build/constraint"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -85,7 +87,8 @@ var deliberatelyNotRunInCI = map[string]string{
 		"compiles and vets it under the tag so the package cannot rot uncompiled (memql#4212), which is not a run. One test of the " +
 		"package, TestPipelinesSubstrate, does run: install-cluster-e2e.yml's pipelines leg runs it against the cluster that leg " +
 		"installs (memql#5497) -- nightly and on that workflow's own paths, so it gates no pull request and is not a lane here, " +
-		"and the tag stays out of the node-tag passes",
+		"and the tag stays out of the node-tag passes. That test also needs the agent's build (`//go:build clustere2e && agent`: " +
+		"it runs the executor's fleet half, which is agent-only), so the compile lane builds the package under both tag sets",
 }
 
 // prCriticalWorkflows are the workflow files whose lanes actually gate a pull
@@ -412,11 +415,72 @@ func testFiles(t *testing.T, root string) [][2]string {
 func excludedReason(t *testing.T, dir, name string) (string, bool) {
 	t.Helper()
 	for tag, reason := range deliberatelyNotRunInCI {
-		if buildsUnder(t, dir, name, []string{tag}) {
+		if needsExcludedTag(t, dir, name, tag) {
 			return reason, true
 		}
 	}
 	return "", false
+}
+
+// needsExcludedTag reports whether the file compiles once tag is supplied:
+// alone, or with the other tags its own constraint names. The second half is
+// for a file that needs an excluded tag AND a node type's build
+// (`//go:build clustere2e && agent`, memql#5497). Such a file needs what the
+// exclusion is about -- a cluster -- whatever else it needs, and it compiles
+// under no single tag. MatchFile still gives the verdict; the constraint is
+// read only to learn which tags to supply.
+func needsExcludedTag(t *testing.T, dir, name, tag string) bool {
+	t.Helper()
+	if buildsUnder(t, dir, name, []string{tag}) {
+		return true
+	}
+	named := constraintTags(t, dir, name)
+	return slices.Contains(named, tag) && buildsUnder(t, dir, name, named)
+}
+
+// constraintTags is every tag the file's build constraint names outside a
+// negation: the tags a build would set to compile it. The constraint is read
+// from every line before the package clause, so one placed after a licence
+// header is found, in either spelling.
+func constraintTags(t *testing.T, dir, name string) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatalf("reading %s: %v", filepath.Join(dir, name), err)
+	}
+	var tags []string
+	var collect func(e constraint.Expr, negated bool)
+	collect = func(e constraint.Expr, negated bool) {
+		switch x := e.(type) {
+		case *constraint.TagExpr:
+			if !negated && !slices.Contains(tags, x.Tag) {
+				tags = append(tags, x.Tag)
+			}
+		case *constraint.NotExpr:
+			collect(x.X, !negated)
+		case *constraint.AndExpr:
+			collect(x.X, negated)
+			collect(x.Y, negated)
+		case *constraint.OrExpr:
+			collect(x.X, negated)
+			collect(x.Y, negated)
+		}
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "package ") {
+			break
+		}
+		if !constraint.IsGoBuild(line) && !constraint.IsPlusBuild(line) {
+			continue
+		}
+		expr, err := constraint.Parse(line)
+		if err != nil {
+			t.Fatalf("%s: the build constraint %q does not parse: %v", filepath.Join(dir, name), line, err)
+		}
+		collect(expr, false)
+	}
+	return tags
 }
 
 // TestEveryTaggedTestFileIsRunSomewhere is the gate.
@@ -496,7 +560,7 @@ func TestDeliberateExclusionsAreHonest(t *testing.T) {
 		}
 		found := false
 		for _, f := range files {
-			if !buildsUnder(t, f[0], f[1], nil) && buildsUnder(t, f[0], f[1], []string{tag}) {
+			if !buildsUnder(t, f[0], f[1], nil) && needsExcludedTag(t, f[0], f[1], tag) {
 				found = true
 				break
 			}
