@@ -141,6 +141,10 @@ type rtState struct {
 	// cancel, an ack) and not yet collected: it carries the job-name label
 	// the runner selects by, and the earlier Job's uid.
 	leftover *Pod
+	// pods are the pods of an Indexed Job -- the isolation probe's, one per
+	// completion index -- answered after pod and leftover, each owned by the
+	// Job. Nil entries are pods the controller has not created.
+	pods []*Pod
 }
 
 // rtLeftoverUID is the uid of the earlier Job a leftover pod belonged to.
@@ -276,6 +280,17 @@ type rtCluster struct {
 	// blockTails makes every tail of a container wait for its caller to
 	// give up: a kubelet that does not answer.
 	blockTails bool
+	// onSecretCreate runs, with c.mu held, on every Secret create before it
+	// is answered.
+	onSecretCreate func(c *rtCluster, s Secret)
+	// createSecretAnswers answer the first Secret creates, one each, before
+	// anything else does.
+	createSecretAnswers []kubeAnswer
+	// holdJobDeletes holds every DELETE of the named Job until its channel
+	// is closed: a delete still on its way.
+	holdJobDeletes map[string]chan struct{}
+	// podsAnswer, when set, answers every list of pods instead.
+	podsAnswer *kubeAnswer
 }
 
 func newRTCluster(t *testing.T, clock *rtClock) *rtCluster {
@@ -550,6 +565,15 @@ func (c *rtCluster) wantBackground(q map[string][]string, what string) {
 func (c *rtCluster) deleteJob(w http.ResponseWriter, name string, q map[string][]string) {
 	c.wantBackground(q, "job "+name)
 	c.mu.Lock()
+	hold := c.holdJobDeletes[name]
+	c.mu.Unlock()
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-c.closing:
+		}
+	}
+	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.jobs[name] == nil {
 		rtAnswer(w, kubeStatus(404, "NotFound", fmt.Sprintf(`jobs.batch %q not found`, name)))
@@ -566,6 +590,15 @@ func (c *rtCluster) createSecret(w http.ResponseWriter, body []byte) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.onSecretCreate != nil {
+		c.onSecretCreate(c, s)
+	}
+	if len(c.createSecretAnswers) > 0 {
+		a := c.createSecretAnswers[0]
+		c.createSecretAnswers = c.createSecretAnswers[1:]
+		rtAnswer(w, a)
+		return
+	}
 	if _, ok := c.secrets[s.Metadata.Name]; ok {
 		rtAnswer(w, kubeStatus(409, "AlreadyExists", fmt.Sprintf(`secrets %q already exists`, s.Metadata.Name)))
 		return
@@ -716,6 +749,10 @@ func (c *rtCluster) listPods(w http.ResponseWriter, selector string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.podsAnswer != nil {
+		rtAnswer(w, *c.podsAnswer)
+		return
+	}
 	items := []Pod{}
 	if j := c.jobs[name]; j != nil && j.script != nil && len(j.script.states) > 0 {
 		st := j.script.states[j.state]
@@ -727,6 +764,11 @@ func (c *rtCluster) listPods(w http.ResponseWriter, selector string) {
 			if cs := rtStepState(st.pod); cs != nil && cs.State.Terminated != nil && !j.endSeen {
 				j.endSeen = true
 				c.bumpLocked()
+			}
+		}
+		for _, p := range st.pods {
+			if p != nil {
+				items = append(items, rtOwnedBy(*p, j.job.Metadata.UID))
 			}
 		}
 		j.reads++
@@ -1175,6 +1217,12 @@ func (h *rtHarness) logs() *rtLogs {
 // newRunner builds a Runner over the fake, with the test's clock, a private
 // store bucket (the node's is process-wide) and a directory the test can
 // check is left empty.
+//
+// It is a replica that has proved memql-pipelines isolated already, a pass
+// stamped at the test's clock: a step's own mechanics are these tests', and
+// the proof (isolation.go) is isolation_test.go's, whose harness takes the
+// pass away (newIsoHarness). A pass lasts IsolationTTL, an hour, and no test
+// moves the clock that far before a step's create.
 func (h *rtHarness) newRunner(cfg Config) *Runner {
 	r := NewRunner(cfg, h.c.kube, func() LineSink { return h.sink }, h.lib, h.tokens)
 	r.now = h.clock.Now
@@ -1183,6 +1231,7 @@ func (h *rtHarness) newRunner(cfg Config) *Runner {
 	r.openCapture = func(o CaptureOptions) (*Capture, error) {
 		return newCapture(o, h.clock.Now, newCaptureBucket(1<<20, h.clock.Now()))
 	}
+	r.isoLast = IsolationVerdict{Isolated: true, Detail: "proved before the test began", At: h.clock.Now()}
 	return r
 }
 

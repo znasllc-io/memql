@@ -24,7 +24,9 @@
 # ENFORCEMENT IS THE CLUSTER'S, not this object's. k3s (the local cluster)
 # enforces NetworkPolicy out of the box. An AKS cluster enforces it only when it
 # runs a network policy engine (`az aks create --network-policy ...`); on one
-# without, this object is accepted and changes nothing -- see README.md.
+# without, this object is accepted and changes nothing -- so the workbench
+# proves it is enforced before it starts a step, and starts none while it
+# cannot (README.md).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

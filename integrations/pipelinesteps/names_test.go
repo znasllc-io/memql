@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // dnsLabel is an RFC 1123 label: what a Job name has to be, because the Job
@@ -125,5 +126,45 @@ func TestCacheSubPathIsPerOwner(t *testing.T) {
 		if again := CacheSubPath(owner); again != got {
 			t.Errorf("CacheSubPath(%q) is not deterministic: %q then %q", owner, got, again)
 		}
+	}
+}
+
+// TestIsolationProbeNamesArePerReplica: the isolation probe's Job is named
+// from the node id alone, so a replica's next proof finds whatever its last
+// one left and never another replica's; and neither it nor its Secret has the
+// shape of a step's, so Status, Ack and the orphan-Secret sweep -- which
+// address steps -- never reach them.
+func TestIsolationProbeNamesArePerReplica(t *testing.T) {
+	// "mpi-" + the first 24 hex of core/id's content address of
+	// {"isolationProbeOf":"workbench-b"}, as core/id computed it when the
+	// probe was written: a rename would leave a crashed proof's probe to its
+	// deadline and TTL rather than to the next proof's cleanup.
+	name := IsolationProbeName("workbench-b")
+	if name != "mpi-2a0defd45f4e74a41bd99849" {
+		t.Fatalf("IsolationProbeName(workbench-b) = %q, want mpi-2a0defd45f4e74a41bd99849", name)
+	}
+	if again := IsolationProbeName("workbench-b"); again != name {
+		t.Errorf("IsolationProbeName is not deterministic: %q then %q", name, again)
+	}
+	if other := IsolationProbeName("workbench-a"); other == name {
+		t.Errorf("two replicas share the probe name %q", other)
+	}
+	shape := regexp.MustCompile(`^mpi-[0-9a-f]{24}$`)
+	target := IsolationTargetName(name)
+	if !shape.MatchString(name) || target != name+"-target" {
+		t.Errorf("names = %q and %q, want mpi- and 24 hex, and that with -target", name, target)
+	}
+	for _, n := range []string{name, target} {
+		if len(n) > 63 || !dnsLabel.MatchString(n) {
+			t.Errorf("%q is not a DNS label of at most 63 characters", n)
+		}
+		if isStepJobName(n) {
+			t.Errorf("%q has the shape of a step's Job: Status and Ack would address it", n)
+		}
+	}
+	// Ownerless and a year old, it is still not a step's Secret to sweep.
+	old := ObjectMeta{Name: target, CreationTimestamp: time.Now().Add(-365 * 24 * time.Hour)}
+	if _, ok := orphanedSecret(old, time.Now()); ok {
+		t.Errorf("the orphan sweep judges %q as a step's Secret", target)
 	}
 }

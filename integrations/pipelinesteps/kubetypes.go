@@ -59,10 +59,20 @@ type Job struct {
 // JobSpec holds the three numbers that decide a step's lifecycle. Each is a
 // pointer because its zero is meaningful: backoffLimit 0 never retries,
 // ttlSecondsAfterFinished 0 deletes the Job the moment it ends.
+//
+// The isolation probe (isolation.go) is the one Indexed Job: two pods of one
+// Job, one per completion index. BackoffLimitPerIndex 0 means no index is ever
+// retried and one that fails does not end the others -- the probe's connector
+// ends failed while its listener has to keep running -- and it is a pointer
+// because absent means something else again: no per-index limit at all.
 type JobSpec struct {
 	BackoffLimit            *int32          `json:"backoffLimit,omitempty"`
 	ActiveDeadlineSeconds   *int64          `json:"activeDeadlineSeconds,omitempty"`
 	TTLSecondsAfterFinished *int32          `json:"ttlSecondsAfterFinished,omitempty"`
+	CompletionMode          string          `json:"completionMode,omitempty"`
+	Completions             *int32          `json:"completions,omitempty"`
+	Parallelism             *int32          `json:"parallelism,omitempty"`
+	BackoffLimitPerIndex    *int32          `json:"backoffLimitPerIndex,omitempty"`
 	Template                PodTemplateSpec `json:"template"`
 }
 
@@ -117,8 +127,9 @@ type SeccompProfile struct {
 }
 
 // Container is one container of the step's pod. RestartPolicy is set only on
-// a service: "Always" on an init container is what makes it a native sidecar,
-// and on any other container it means something else or nothing at all.
+// a native sidecar -- a service, and the isolation probe's listener: "Always"
+// on an init container is what makes it one, and on any other container it
+// means something else or nothing at all.
 // TerminationMessagePolicy "FallbackToLogsOnError" makes a failed container's
 // terminated.message the tail of its log; with the default (File) it is empty.
 type Container struct {
@@ -131,8 +142,18 @@ type Container struct {
 	VolumeMounts             []VolumeMount    `json:"volumeMounts,omitempty"`
 	RestartPolicy            *string          `json:"restartPolicy,omitempty"`
 	StartupProbe             *Probe           `json:"startupProbe,omitempty"`
+	ReadinessProbe           *Probe           `json:"readinessProbe,omitempty"`
+	Resources                *Resources       `json:"resources,omitempty"`
 	SecurityContext          *SecurityContext `json:"securityContext,omitempty"`
 	TerminationMessagePolicy string           `json:"terminationMessagePolicy,omitempty"`
+}
+
+// Resources are a container's requests and limits, as quantities. Only the
+// isolation probe sets them: a step's containers take the LimitRange's
+// defaults, which would ask a hundred times what a probe pod uses.
+type Resources struct {
+	Requests map[string]string `json:"requests,omitempty"`
+	Limits   map[string]string `json:"limits,omitempty"`
 }
 
 // SecurityContext is a container's security context. RunAsUser is a pointer
@@ -143,16 +164,25 @@ type SecurityContext struct {
 	AllowPrivilegeEscalation *bool  `json:"allowPrivilegeEscalation,omitempty"`
 }
 
-// Probe is a startup probe: an exec command polled until it succeeds.
+// Probe is a service's startup probe -- an exec command polled until it
+// succeeds -- or the isolation probe's readiness probe, a TCP connection the
+// kubelet makes to the listener's port.
 type Probe struct {
-	Exec             *ExecAction `json:"exec,omitempty"`
-	PeriodSeconds    int32       `json:"periodSeconds,omitempty"`
-	FailureThreshold int32       `json:"failureThreshold,omitempty"`
+	Exec             *ExecAction      `json:"exec,omitempty"`
+	TCPSocket        *TCPSocketAction `json:"tcpSocket,omitempty"`
+	PeriodSeconds    int32            `json:"periodSeconds,omitempty"`
+	FailureThreshold int32            `json:"failureThreshold,omitempty"`
 }
 
 // ExecAction is a command run inside the container.
 type ExecAction struct {
 	Command []string `json:"command,omitempty"`
+}
+
+// TCPSocketAction is a port the kubelet connects to; the probe passes when the
+// connection is accepted.
+type TCPSocketAction struct {
+	Port int32 `json:"port"`
 }
 
 // EnvVar is one environment variable: a plain Value or a ValueFrom reference.
@@ -164,9 +194,17 @@ type EnvVar struct {
 	ValueFrom *EnvVarSource `json:"valueFrom,omitempty"`
 }
 
-// EnvVarSource is where a referenced value comes from.
+// EnvVarSource is where a referenced value comes from: one key of a Secret, or
+// a field of the pod itself (the downward API).
 type EnvVarSource struct {
-	SecretKeyRef *SecretKeySelector `json:"secretKeyRef,omitempty"`
+	SecretKeyRef *SecretKeySelector   `json:"secretKeyRef,omitempty"`
+	FieldRef     *ObjectFieldSelector `json:"fieldRef,omitempty"`
+}
+
+// ObjectFieldSelector names a field of the pod as the downward API spells it,
+// e.g. metadata.labels['<key>'].
+type ObjectFieldSelector struct {
+	FieldPath string `json:"fieldPath"`
 }
 
 // SecretKeySelector is one key of one Secret. Optional is a pointer because
@@ -225,11 +263,14 @@ type PodList struct {
 
 // PodStatus is a pod's observed state. Reason and Message are set when the
 // pod as a whole failed or was stopped (Evicted, OutOfcpu, ...), which no
-// container's state says.
+// container's state says. PodIP is the address the pod's sandbox was given:
+// set once the sandbox exists, before any container has started, and what the
+// isolation probe's connector dials.
 type PodStatus struct {
 	Phase                 string            `json:"phase,omitempty"`
 	Reason                string            `json:"reason,omitempty"`
 	Message               string            `json:"message,omitempty"`
+	PodIP                 string            `json:"podIP,omitempty"`
 	Conditions            []PodCondition    `json:"conditions,omitempty"`
 	InitContainerStatuses []ContainerStatus `json:"initContainerStatuses,omitempty"`
 	ContainerStatuses     []ContainerStatus `json:"containerStatuses,omitempty"`
@@ -252,13 +293,16 @@ type PodCondition struct {
 // service: a sidecar is restarted whatever the pod's restart policy, so one
 // that crashed, or that its startup probe killed, can read running again with
 // only these two saying it stopped before. LastState is a value, and an empty
-// one ({} on the wire) is the API saying there was no previous run.
+// one ({} on the wire) is the API saying there was no previous run. Ready is
+// the container's readiness probe passing -- the isolation probe's listener
+// accepting connections; false and absent alike are not ready.
 type ContainerStatus struct {
 	Name         string         `json:"name"`
 	Image        string         `json:"image,omitempty"`
 	State        ContainerState `json:"state"`
 	LastState    ContainerState `json:"lastState,omitzero"`
 	RestartCount int32          `json:"restartCount,omitempty"`
+	Ready        bool           `json:"ready,omitempty"`
 }
 
 // ContainerState is exactly one of waiting, running or terminated.

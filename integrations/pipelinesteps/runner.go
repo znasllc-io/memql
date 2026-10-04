@@ -182,6 +182,15 @@ type Runner struct {
 	onReaped  func(deleted int)
 	// statusTrouble is what Status last logged of the API errors it met.
 	statusTrouble apiTrouble
+
+	// The isolation proof (isolation.go): the last verdict and the proof in
+	// flight, if any, guarded by isoMu; probeUpWait and probeEndWait are
+	// probeUpTimeout and probeEndTimeout.
+	isoMu        sync.Mutex
+	isoLast      IsolationVerdict
+	isoProof     *isolationProof
+	probeUpWait  time.Duration
+	probeEndWait time.Duration
 }
 
 // inflight is one Run on this replica: what CancelRun cancels by run, and
@@ -206,6 +215,9 @@ func NewRunner(cfg Config, kube *Kube, sink func() LineSink, library LibraryStor
 	if cfg.HeartbeatStale <= 0 {
 		cfg.HeartbeatStale = defaults.HeartbeatStale
 	}
+	if cfg.IsolationTTL <= 0 {
+		cfg.IsolationTTL = defaults.IsolationTTL
+	}
 	cfg.NodeID = strings.TrimSpace(cfg.NodeID)
 	return &Runner{
 		cfg: cfg, kube: kube, sink: sink, library: library, tokens: tokens,
@@ -220,6 +232,8 @@ func NewRunner(cfg Config, kube *Kube, sink func() LineSink, library LibraryStor
 		claims:         map[string]*step{},
 		reapEvery:      reapInterval,
 		statusTrouble:  apiTrouble{},
+		probeUpWait:    probeUpTimeout,
+		probeEndWait:   probeEndTimeout,
 	}
 }
 
@@ -375,13 +389,6 @@ func (r *Runner) holds(jobName string) bool {
 	}
 	return false
 }
-
-// isolationGate is where a step is refused before anything exists for it,
-// beyond what BuildJob refuses. Task 6b (#5493, ruling R12) proves here that
-// memql-pipelines is isolated -- before this replica's first step, and again
-// after any proof that did not pass -- and refuses every step while the
-// proof fails. Until it lands, every step passes.
-func (r *Runner) isolationGate(context.Context) *pl.Refusal { return nil }
 
 // stamp is this replica's claim, as of now.
 func (r *Runner) stamp() string {
@@ -577,8 +584,9 @@ func (s *step) judge(job Job) claimVerdict {
 }
 
 // create creates the step's Secret and then its Job, refusing first what
-// cannot run. The Job it answers may be one another Run created first; the
-// caller reads it like any existing one.
+// cannot run, and holding the step until this replica has proved
+// memql-pipelines isolated (isolation.go). The Job it answers may be one
+// another Run created first; the caller reads it like any existing one.
 func (s *step) create() (res pl.StepResult, job Job, done bool) {
 	spec, err := BuildJob(s.r.cfg, s.run, s.jobName)
 	if err != nil {
@@ -588,8 +596,10 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 		}
 		return s.failed(pl.CodeJobRejected, err.Error()), Job{}, true
 	}
-	if refusal := s.r.isolationGate(s.ctx); refusal != nil {
-		return s.refused(refusal.Code, refusal.Detail), Job{}, true
+	// Before anything exists for the step: a refused step leaves no token,
+	// no Secret and no Job.
+	if res, done := s.isolationGate(); done {
+		return res, Job{}, true
 	}
 
 	token, err := s.mintToken()
@@ -628,9 +638,7 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 		if left <= 0 {
 			// The token must not outlive the Job that will not come.
 			s.deleteSecret()
-			return s.failed(cmp.Or(strings.TrimSpace(s.run.DeadlineCode), pl.CodeStepTimeout), fmt.Sprintf(
-				"the step's %s timeout ran out before its Job could be created -- waiting for a free slot under the pipelines "+
-					"ceiling, or for a runner to take it -- so it was never started", time.Duration(s.run.TimeoutSeconds)*time.Second)), Job{}, true
+			return s.ranOut("waiting for a free slot under the pipelines ceiling, or for a runner to take it"), Job{}, true
 		}
 		// What is left, in whole seconds rounded up: a step that never
 		// waited keeps its timeout as declared, and the part of a second it
@@ -899,6 +907,14 @@ func (s *step) refused(code, why string) pl.StepResult {
 	res := s.failed(code, why)
 	res.Status = pl.OutcomeRefused
 	return res
+}
+
+// ranOut is the step's failure when its timeout ran out before its Job could
+// be created (ruling R31), while it was doing what: it never started.
+func (s *step) ranOut(what string) pl.StepResult {
+	return s.failed(cmp.Or(strings.TrimSpace(s.run.DeadlineCode), pl.CodeStepTimeout), fmt.Sprintf(
+		"the step's %s timeout ran out before its Job could be created -- %s -- so it was never started",
+		time.Duration(s.run.TimeoutSeconds)*time.Second, what))
 }
 
 func (s *step) where() pl.Where {

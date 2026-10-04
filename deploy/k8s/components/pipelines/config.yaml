@@ -11,8 +11,10 @@
 #                                and limits in, or every create is a 403.
 #   MEMQL_PIPELINES_CLONE_IMAGE  the image of each Job's `clone` init container,
 #                                which runs `git` and is handed the repository
-#                                token. PINNED BY DIGEST: a tag is whatever was
-#                                pushed to it last, and whoever controls the tag
+#                                token, and of the isolation probe, which runs
+#                                `bash` and `perl` (git's own dependency): this
+#                                one has all three. PINNED BY DIGEST: a tag is
+#                                whatever was pushed to it last, and whoever controls the tag
 #                                would control the token. The digest is the
 #                                multi-arch INDEX, measured with
 #                                  docker buildx imagetools inspect docker.io/library/buildpack-deps:bookworm-scm

@@ -141,14 +141,7 @@ func (k *Kube) OwnSecret(ctx context.Context, secretName string, job Job) error 
 	if job.Metadata.Name == "" || job.Metadata.UID == "" {
 		return fmt.Errorf("pipelinesteps: job %q cannot own secret %s: an owner is named by its uid, and the Job has none (use the Job the API server returned)", job.Metadata.Name, secretName)
 	}
-	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"ownerReferences": []OwnerReference{{
-		APIVersion:         "batch/v1",
-		Kind:               "Job",
-		Name:               job.Metadata.Name,
-		UID:                job.Metadata.UID,
-		Controller:         ptr(false),
-		BlockOwnerDeletion: ptr(false),
-	}}}})
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"ownerReferences": []OwnerReference{jobOwner(job)}}})
 	if err != nil {
 		return fmt.Errorf("pipelinesteps: encoding the owner of secret %s: %w", secretName, err)
 	}
@@ -324,10 +317,11 @@ func (k *Kube) ManagedSecrets(ctx context.Context, limit int, cont string) (secr
 	return secrets, list.Metadata.Continue, nil
 }
 
-// JobPod is the Job's pod, found by the job-name label the Job controller
-// puts on it: the newest when more than one answers (a leftover of a deleted
-// Job of the same name), nil before the controller has created one.
-func (k *Kube) JobPod(ctx context.Context, jobName string) (*Pod, error) {
+// JobPods is every pod of a Job, found by the job-name label the Job
+// controller puts on each: one per completion index of an Indexed Job (the
+// isolation probe), and any leftover of a deleted Job of the same name, which
+// podOfJob tells apart. None before the controller has created one.
+func (k *Kube) JobPods(ctx context.Context, jobName string) ([]Pod, error) {
 	q := url.Values{"labelSelector": {"job-name=" + jobName}}
 	out, err := k.api.Do(ctx, http.MethodGet, k.corePath("pods", "")+"?"+q.Encode(), "", nil)
 	if err != nil {
@@ -337,17 +331,38 @@ func (k *Kube) JobPod(ctx context.Context, jobName string) (*Pod, error) {
 	if err := json.Unmarshal(out, &list); err != nil {
 		return nil, fmt.Errorf("pipelinesteps: reading the pods of job %s: %w", jobName, err)
 	}
-	if len(list.Items) == 0 {
-		return nil, nil
+	return list.Items, nil
+}
+
+// JobPod is the Job's pod, found by the job-name label the Job controller
+// puts on it: the newest when more than one answers (a leftover of a deleted
+// Job of the same name), nil before the controller has created one.
+func (k *Kube) JobPod(ctx context.Context, jobName string) (*Pod, error) {
+	pods, err := k.JobPods(ctx, jobName)
+	if err != nil || len(pods) == 0 {
+		return nil, err
 	}
-	newest := list.Items[0]
-	for _, p := range list.Items[1:] {
-		at, best := p.Metadata.CreationTimestamp, newest.Metadata.CreationTimestamp
-		if at.After(best) || (at.Equal(best) && p.Metadata.Name > newest.Metadata.Name) {
-			newest = p
-		}
+	newest := &pods[0]
+	for i := range pods[1:] {
+		newest = newerPod(newest, &pods[i+1])
 	}
-	return &newest, nil
+	return newest, nil
+}
+
+// newerPod is the newer of two pods by creation, the greater name on a tie;
+// a nil one is the other.
+func newerPod(a, b *Pod) *Pod {
+	switch {
+	case a == nil:
+		return b
+	case b == nil:
+		return a
+	}
+	at, best := b.Metadata.CreationTimestamp, a.Metadata.CreationTimestamp
+	if at.After(best) || (at.Equal(best) && b.Metadata.Name > a.Metadata.Name) {
+		return b
+	}
+	return a
 }
 
 // FollowLog streams a container's log as it is written, every line prefixed

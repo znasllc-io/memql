@@ -36,6 +36,7 @@ func TestConfigFromEnvDefaultsAndClamps(t *testing.T) {
 			PollInterval:       2 * time.Second,
 			HeartbeatInterval:  10 * time.Second,
 			HeartbeatStale:     45 * time.Second,
+			IsolationTTL:       time.Hour,
 			NodeID:             "workbench-1",
 		}
 		if got != want {

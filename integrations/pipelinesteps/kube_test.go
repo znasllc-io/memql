@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -636,6 +637,61 @@ func TestJobPodIsNilBeforeThePodExists(t *testing.T) {
 		t.Errorf("JobPod = %+v, %v; want nil, nil", got, err)
 	}
 	fake.wantRequests(t, "GET "+kubePods+"?labelSelector=job-name%3D"+kubeJobName)
+}
+
+// The isolation probe's two pods (Task 6b) exactly as a k3s v1.35.5 API
+// server returned them (2026-10-04), the connector ended, with only node-local
+// ids removed: index 0 holds the listener up, ready; index 1's connector
+// exited with its verdict, 20, and its listener was stopped after it.
+const (
+	kubeProbePod0 = `{"metadata": {"name": "t6b-probe-0-m5hrk", "creationTimestamp": "2026-10-04T16:36:48Z", "labels": {"app.kubernetes.io/managed-by": "memql-workbench", "batch.kubernetes.io/controller-uid": "14ea3043-7e6e-4bce-9c35-094cc6ae391d", "batch.kubernetes.io/job-completion-index": "0", "batch.kubernetes.io/job-name": "t6b-probe", "controller-uid": "14ea3043-7e6e-4bce-9c35-094cc6ae391d", "job-name": "t6b-probe", "memql.io/probe": "isolation"}, "annotations": {"batch.kubernetes.io/job-completion-index": "0", "batch.kubernetes.io/job-index-failure-count": "0"}}, "status": {"conditions": [{"lastProbeTime": null, "lastTransitionTime": "2026-10-04T16:36:49Z", "observedGeneration": 1, "status": "True", "type": "PodReadyToStartContainers"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T16:36:49Z", "observedGeneration": 1, "status": "True", "type": "Initialized"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T16:36:52Z", "observedGeneration": 1, "status": "True", "type": "Ready"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T16:36:52Z", "observedGeneration": 1, "status": "True", "type": "ContainersReady"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T16:36:48Z", "observedGeneration": 1, "status": "True", "type": "PodScheduled"}], "containerStatuses": [{"image": "sha256:54f59601567e33099bb78a0b841147271f2779f0de10ef070870133d67a82895", "lastState": {}, "name": "connector", "ready": true, "restartCount": 0, "started": true, "state": {"running": {"startedAt": "2026-10-04T16:36:51Z"}}}], "initContainerStatuses": [{"image": "sha256:54f59601567e33099bb78a0b841147271f2779f0de10ef070870133d67a82895", "lastState": {}, "name": "listener", "ready": true, "restartCount": 0, "started": true, "state": {"running": {"startedAt": "2026-10-04T16:36:48Z"}}}], "observedGeneration": 1, "phase": "Running", "podIP": "10.42.1.10", "podIPs": [{"ip": "10.42.1.10"}], "qosClass": "Burstable", "startTime": "2026-10-04T16:36:48Z"}}`
+	kubeProbePod1 = `{"metadata": {"name": "t6b-probe-1-l94tg", "creationTimestamp": "2026-10-04T16:36:48Z", "labels": {"app.kubernetes.io/managed-by": "memql-workbench", "batch.kubernetes.io/controller-uid": "14ea3043-7e6e-4bce-9c35-094cc6ae391d", "batch.kubernetes.io/job-completion-index": "1", "batch.kubernetes.io/job-name": "t6b-probe", "controller-uid": "14ea3043-7e6e-4bce-9c35-094cc6ae391d", "job-name": "t6b-probe", "memql.io/probe": "isolation"}, "annotations": {"batch.kubernetes.io/job-completion-index": "1", "batch.kubernetes.io/job-index-failure-count": "0"}}, "status": {"conditions": [{"lastProbeTime": null, "lastTransitionTime": "2026-10-04T16:37:10Z", "observedGeneration": 1, "status": "False", "type": "PodReadyToStartContainers"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T16:36:49Z", "observedGeneration": 1, "status": "True", "type": "Initialized"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T16:37:04Z", "observedGeneration": 1, "reason": "PodFailed", "status": "False", "type": "Ready"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T16:37:04Z", "observedGeneration": 1, "reason": "PodFailed", "status": "False", "type": "ContainersReady"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T16:36:48Z", "observedGeneration": 1, "status": "True", "type": "PodScheduled"}], "containerStatuses": [{"image": "sha256:54f59601567e33099bb78a0b841147271f2779f0de10ef070870133d67a82895", "lastState": {}, "name": "connector", "ready": false, "restartCount": 0, "started": false, "state": {"terminated": {"exitCode": 20, "finishedAt": "2026-10-04T16:37:02Z", "message": "started 16:36:51.986479325\nmemql: isolation probe: dns 10.43.0.10:53 connected, connected, connected; listener 10.42.1.10:8080 refused, refused, refused\n", "reason": "Error", "startedAt": "2026-10-04T16:36:51Z"}}}], "initContainerStatuses": [{"image": "sha256:54f59601567e33099bb78a0b841147271f2779f0de10ef070870133d67a82895", "lastState": {}, "name": "listener", "ready": false, "restartCount": 0, "started": false, "state": {"terminated": {"exitCode": 137, "finishedAt": "2026-10-04T16:37:06Z", "reason": "Error", "startedAt": "2026-10-04T16:36:48Z"}}}], "observedGeneration": 1, "phase": "Failed", "podIP": "10.42.1.11", "podIPs": [{"ip": "10.42.1.11"}], "qosClass": "Burstable", "startTime": "2026-10-04T16:36:48Z"}}`
+)
+
+// TestJobPodsListsEveryPodOfTheJob: an Indexed Job has a pod per index, and
+// JobPods answers all of them, decoded to what the isolation proof reads --
+// each pod's index and address, the listener's readiness and the connector's
+// end -- in the API's own words, since a misspelt key decodes as a zero.
+func TestJobPodsListsEveryPodOfTheJob(t *testing.T) {
+	kube, fake := newKubeFake(t, map[string]kubeAnswer{
+		"GET " + kubePods: {code: 200, body: `{"kind": "PodList", "apiVersion": "v1", "items": [` + kubeProbePod0 + `, ` + kubeProbePod1 + `]}`},
+	})
+	pods, err := kube.JobPods(context.Background(), "t6b-probe")
+	if err != nil {
+		t.Fatalf("JobPods: %v", err)
+	}
+	fake.wantRequests(t, "GET "+kubePods+"?labelSelector=job-name%3Dt6b-probe")
+	if len(pods) != 2 {
+		t.Fatalf("JobPods = %d pods, want both of the Job's", len(pods))
+	}
+	for i, want := range []struct {
+		ip             string
+		listenerReady  bool
+		listenerRuns   bool
+		connectorEnded bool
+	}{
+		{ip: "10.42.1.10", listenerReady: true, listenerRuns: true},
+		{ip: "10.42.1.11", connectorEnded: true},
+	} {
+		p := pods[i]
+		if got := p.Metadata.Annotations["batch.kubernetes.io/job-completion-index"]; got != strconv.Itoa(i) || p.Status.PodIP != want.ip {
+			t.Errorf("pod %d: index %q, address %q; want %d and %s", i, got, p.Status.PodIP, i, want.ip)
+		}
+		if p.Metadata.Labels["batch.kubernetes.io/controller-uid"] != "14ea3043-7e6e-4bce-9c35-094cc6ae391d" {
+			t.Errorf("pod %d: controller-uid label %q", i, p.Metadata.Labels["batch.kubernetes.io/controller-uid"])
+		}
+		l := podContainer(&p, true, ContainerProbeListener)
+		if l == nil || l.Ready != want.listenerReady || (l.State.Running != nil) != want.listenerRuns || l.RestartCount != 0 {
+			t.Errorf("pod %d: listener = %+v, want ready %v, running %v", i, l, want.listenerReady, want.listenerRuns)
+		}
+		c := podContainer(&p, false, ContainerProbeConnector)
+		if c == nil || (c.State.Terminated != nil) != want.connectorEnded {
+			t.Fatalf("pod %d: connector = %+v, want ended %v", i, c, want.connectorEnded)
+		}
+		if want.connectorEnded && (c.State.Terminated.ExitCode != 20 || !strings.Contains(c.State.Terminated.Message, "refused, refused, refused")) {
+			t.Errorf("pod %d: the connector ended %+v, want exit 20 and its line", i, c.State.Terminated)
+		}
+	}
 }
 
 // Pods exactly as a k3s v1.32.13 API server returned them (2026-10-04), with

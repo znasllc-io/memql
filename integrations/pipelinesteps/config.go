@@ -56,6 +56,11 @@ type Config struct {
 	HeartbeatStale time.Duration
 	// NodeID is THIS node's id, as the mesh knows it.
 	NodeID string
+	// IsolationTTL is how long this replica trusts a passed isolation proof
+	// (isolation.go) before it proves again: an hour. A proof that did not
+	// pass is never trusted, so the next create proves again. Not an
+	// environment knob.
+	IsolationTTL time.Duration
 }
 
 // The environment this package reads. Named once, so the env-registry scan
@@ -108,6 +113,7 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		PollInterval:       2 * time.Second,
 		HeartbeatInterval:  10 * time.Second,
 		HeartbeatStale:     45 * time.Second,
+		IsolationTTL:       time.Hour,
 		NodeID:             nodeID(text(envNodeID)),
 	}
 }

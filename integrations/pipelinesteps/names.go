@@ -90,6 +90,30 @@ const (
 // ManagedBy is LabelManagedBy's value on everything the runner creates.
 const ManagedBy = "memql-workbench"
 
+// LabelProbe marks the isolation probe's Job, its pods and its Secret, with
+// ProbeIsolation. They carry no run label, so nothing that selects a run's
+// objects -- a cancel's deletecollection -- reaches them.
+const (
+	LabelProbe     = "memql.io/probe"
+	ProbeIsolation = "isolation"
+)
+
+// The containers of an isolation probe pod (jobspec.go): the listener, a
+// native sidecar, and the connector, which on index 0 only holds its pod up.
+const (
+	ContainerProbeListener  = "listener"
+	ContainerProbeConnector = "connector"
+)
+
+// completionIndexKey is the annotation (and, since Kubernetes 1.28, the
+// label) the Job controller puts on each pod of an Indexed Job, naming its
+// index; controllerUIDLabel is the label naming the pod's Job by uid
+// (Kubernetes 1.27 and later).
+const (
+	completionIndexKey = "batch.kubernetes.io/job-completion-index"
+	controllerUIDLabel = "batch.kubernetes.io/controller-uid"
+)
+
 // The containers of a step's pod, by name. ServicePrefix + a service's name is
 // that service's sidecar. ContainerCachePrep runs first, and only when the
 // step declares caches; its failure is a Job the runner could not set up
@@ -118,6 +142,23 @@ func RunLabelValue(runID string) string {
 	sum := namesEngine.MustFromMap(map[string]any{"runId": runID})
 	return "r-" + string(sum)[:24]
 }
+
+// IsolationProbeName is the Job of this replica's isolation probe
+// (isolation.go): "mpi-" plus 24 hex of the content address of the node id.
+// One name per replica, the same every time, so a replica's next proof finds
+// and removes whatever its last one left -- and never another replica's,
+// whose proof may be running. It is never the shape of a step's Job
+// (stepJobNameShape), so neither Status nor Ack can address it.
+func IsolationProbeName(nodeID string) string {
+	sum := namesEngine.MustFromMap(map[string]any{"isolationProbeOf": nodeID})
+	return "mpi-" + string(sum)[:24]
+}
+
+// IsolationTargetName is the probe's Secret, which hands the connector the
+// listener's address. It does not end in SecretName's suffix, so the
+// orphan-Secret sweep never judges it; its owner reference collects it with
+// the probe Job.
+func IsolationTargetName(probeName string) string { return probeName + "-target" }
 
 // CacheSubPath is the owner's directory of the cache claim, "owners/" plus 24
 // hex of the content address of the owner's id (ruling R15). The step mounts

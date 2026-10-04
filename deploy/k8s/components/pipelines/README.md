@@ -173,10 +173,25 @@ namespace isolated before it creates a step, refuses every step there
 (`pipeline_isolation_unenforced`) until an engine is enabled
 ([the isolation proof](../../../../docs/public/operate/pipelines-substrate.md#the-isolation-proof)).
 
+**So the workbench proves it before it starts a step.** Before the first step
+it creates -- and again once a pass is an hour old -- each workbench replica
+runs a probe here: one Indexed Job (`memql.io/probe=isolation`) whose pods each
+listen on a port, one of which tries to reach the other while it reaches the
+cluster's DNS, which the policy allows. Reaching DNS but not the listener is a
+pass. Reaching the listener refuses every step `pipeline_isolation_unenforced`,
+naming the fix, and so does a probe that cannot decide (DNS unreachable, the
+listener gone), until a later proof passes. The probe is one Job, so it waits
+for one slot under the ceiling as a step does, and it deletes its Job and its
+Secret before it answers. It runs under the runner's grant above and needs
+nothing more (`integrations/pipelinesteps/isolation.go`).
+
 ## The clone image
 
 `MEMQL_PIPELINES_CLONE_IMAGE` is the image of each Job's `clone` init container,
-which runs `git` and is handed the repository token. It is pinned by digest —
+which runs `git` and is handed the repository token. The isolation probe runs
+on it too, and needs `bash` (its `/dev/tcp`) and `perl` (the listener): an
+image without them leaves the probe unable to decide, and every step refused.
+It is pinned by digest —
 whoever controls a mutable tag would control the token — and the digest is the
 multi-arch index, measured, never typed:
 
@@ -194,8 +209,9 @@ docker buildx imagetools inspect docker.io/library/buildpack-deps:bookworm-scm
    carrying this component, or the sync is refused for every object here.
 2. **On AKS, the Blob CSI driver.** Re-run `azure-provision.sh` against the
    cluster; it converges an existing one with the update above.
-3. **A network policy engine**: on a cluster without one, every step is
-   refused `pipeline_isolation_unenforced` (see above).
+3. **A network policy engine.** Without one the workbench starts no step: its
+   proof finds the namespace open and refuses each one
+   `pipeline_isolation_unenforced` (see above).
 
 ## Gates
 

@@ -1,6 +1,7 @@
 package pipelinesteps
 
 import (
+	"fmt"
 	"math"
 	"net/url"
 	"regexp"
@@ -575,6 +576,297 @@ func secretVar(name, secretName, key string, optional bool) EnvVar {
 		ref.Optional = ptr(true)
 	}
 	return EnvVar{Name: name, ValueFrom: &EnvVarSource{SecretKeyRef: ref}}
+}
+
+// jobOwner makes a Job the owner of what it is put on, so collecting the Job
+// collects that too: not as its controller, and without holding the Job's
+// deletion until the dependent is gone (which would need a grant on the Job's
+// finalizers).
+func jobOwner(job Job) OwnerReference {
+	return OwnerReference{
+		APIVersion:         "batch/v1",
+		Kind:               "Job",
+		Name:               job.Metadata.Name,
+		UID:                job.Metadata.UID,
+		Controller:         ptr(false),
+		BlockOwnerDeletion: ptr(false),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The isolation probe (Task 6b, rulings R12, R42-R44)
+// ---------------------------------------------------------------------------
+//
+// The proof that memql-pipelines is isolated (isolation.go) is ONE Indexed Job
+// of two pods, so it takes one slot under the ceiling and waits for one as a
+// step does (R43):
+//
+//	init  listener   cfg.CloneImage as a native sidecar, in both pods: accepts
+//	                 and closes connections on port 8080. Its readiness probe
+//	                 is the kubelet's own TCP connection, which no
+//	                 NetworkPolicy governs (measured, k3s v1.35), so ready
+//	                 means listening. It depends on nothing, so it is up and
+//	                 ready before the probe Secret exists.
+//	main  connector  cfg.CloneImage. Its environment names two keys of the
+//	                 probe Secret, not optionally, so the kubelet starts it
+//	                 only once the Secret exists -- which the runner creates
+//	                 only once index 0's listener is ready: the connector
+//	                 cannot try before the listener listens. Index 1's is the
+//	                 connector; index 0's only holds its pod, and so the
+//	                 listener, up until the Job is deleted.
+//
+// The pods hold no credential and run as a step's do: the step identity, no
+// token, no Service links, seccomp RuntimeDefault, no privilege escalation,
+// and no run label, so no cancel of a run reaches them.
+//
+// The connector's exit code is its verdict, which the runner reads together
+// with its own re-read of the listener (ruling R42). After a settle of five
+// seconds it makes three rounds, a second apart, each of a TCP connection to
+// the cluster's DNS -- the reachable positive: the policy lets every pod reach
+// it, so an answer proves the network works and the connector can connect --
+// and one to index 0's listener, each bounded at five seconds (R44):
+//
+//	exit  the three rounds                                        verdict
+//	20    no listener attempt connected (each was refused or      isolated, if the listener
+//	      timed out), and every DNS attempt connected             is still ready, the same
+//	                                                              incarnation, when the
+//	                                                              runner re-reads it;
+//	                                                              inconclusive otherwise
+//	21    a listener attempt connected                            not isolated
+//	22    a DNS attempt failed, and none to the listener          inconclusive
+//	      connected
+//	23    a listener attempt failed some other way ("No route     inconclusive
+//	      to host"): neither refused nor timed out
+//	24    the pod's resolv.conf names no nameserver               inconclusive
+//	25    the probe Secret is not this Job's, or names nothing    inconclusive
+//	26    the pod has no part for its completion index            inconclusive
+//	any   other, 0 included: the connector ended with no verdict  inconclusive
+//
+// A refusal counts as unreachable (R42), not as a reset from the listener: a
+// policy engine may reject rather than drop -- k3s's answers a denied SYN with
+// an ICMP error the kernel reports as "Connection refused", exactly as it
+// reports a reset (measured, k3s v1.35) -- and a listener that stayed ready
+// had its socket open throughout, so a SYN that reached it would have been
+// accepted, never reset.
+//
+// The settle is there because a policy engine programs a new pod's rules a
+// moment after the pod starts: k3s's within two seconds (measured). A policy
+// that programs slower than the settle can only push the verdict toward "not
+// isolated" or "inconclusive" -- the safe directions -- never toward a false
+// pass. A rule not yet in place lets more through, never less: it can turn an
+// attempt that would have failed into one that connects -- a listener
+// attempt that connects is "not isolated" -- but it cannot make an attempt
+// fail. A pass rests on every listener attempt failing, which only rules in
+// place bring about; and a network not yet working for the new pod fails its
+// DNS attempts too, which is "inconclusive". (A DNS-blocking rule not yet in
+// place lets a DNS attempt through that it would refuse later: that takes away
+// a reason for "inconclusive", but never makes a pass, which still needs every
+// listener attempt stopped by a rule already in place.)
+
+const (
+	// probePort is the port every probe pod's listener accepts on.
+	probePort int32 = 8080
+	// The connector's exit codes: the table above.
+	probeExitIsolated      = 20
+	probeExitConnected     = 21
+	probeExitDNS           = 22
+	probeExitUnclear       = 23
+	probeExitNoNameserver  = 24
+	probeExitForeignTarget = 25
+	probeExitNoPart        = 26
+	// The probe Secret's keys, and the connector's variables: the two that
+	// read them, and its own Job's uid from its pod's label.
+	probeTargetKey  = "target"
+	probeJobUIDKey  = "job-uid"
+	probeTargetVar  = "MEMQL_PROBE_TARGET"
+	probeJobUIDVar  = "MEMQL_PROBE_JOB_UID"
+	probeSelfUIDVar = "MEMQL_PROBE_SELF_UID"
+	// probeGracePeriodSeconds: the probe's pods hold nothing worth a wait.
+	probeGracePeriodSeconds = 2
+	// probeJobTTL collects a probe Job a runner went before deleting: it
+	// holds a slot under the ceiling until it is gone, and nothing ever reads
+	// it.
+	probeJobTTL = 60 * time.Second
+	// probeJobDeadline is the probe Job's whole life, past the runner's
+	// bounds on its pods coming up and its connector ending, so a probe whose
+	// runner went ends on its own.
+	probeJobDeadline = probeUpTimeout + probeEndTimeout + 30*time.Second
+)
+
+// probeListenerScript is each probe pod's listener: perl, which git depends
+// on, so the clone image has it. It accepts and closes connections on 8080
+// until it is stopped, handling TERM itself because, as the container's first
+// process, it gets no signal it has not asked for. A listener that cannot take
+// the port ends at once, saying so, and is never ready.
+const probeListenerScript = `exec perl -MIO::Socket::IP -e '$SIG{TERM} = sub { exit 0 }; my $s = IO::Socket::IP->new(LocalPort => 8080, Listen => 64, ReuseAddr => 1) or die "memql: the isolation probe cannot listen on 8080: $@\n"; while (1) { my $c = $s->accept or next; close $c }'`
+
+// probeConnectorScript is each probe pod's main container, under bash, whose
+// /dev/tcp makes the connections. Index 0's holds its pod up; index 1's is the
+// connector, whose exit code is the table above. The five assignments at its
+// head are its tunables, each on a line of its own; the tests point them at
+// local endpoints (TestIsolationProbeConnectorReadsTheThreeRoundsTogether). An
+// attempt is classified by timeout's 124 and by bash's own sentence for a
+// refusal; whatever else ends one is neither. The line it prints last is the
+// one the runner quotes, from the container's termination message.
+const probeConnectorScript = `case "${JOB_COMPLETION_INDEX:-}" in
+1) ;;
+0)
+  trap 'exit 0' TERM
+  while :; do sleep 1; done ;;
+*)
+  echo "memql: isolation probe: no part for completion index ${JOB_COMPLETION_INDEX:-(none)}"
+  exit 26 ;;
+esac
+resolv=/etc/resolv.conf
+dns_port=53
+listener_port=8080
+settle=5
+limit=5
+if [ -z "${MEMQL_PROBE_SELF_UID:-}" ] || [ "${MEMQL_PROBE_JOB_UID:-}" != "$MEMQL_PROBE_SELF_UID" ] || [ -z "${MEMQL_PROBE_TARGET:-}" ]; then
+  echo "memql: isolation probe: the target Secret is not this probe Job's (it names Job ${MEMQL_PROBE_JOB_UID:-none}, this pod's is ${MEMQL_PROBE_SELF_UID:-unknown}, listener ${MEMQL_PROBE_TARGET:-none})"
+  exit 25
+fi
+ns=$(awk '$1 == "nameserver" { print $2; exit }' "$resolv")
+if [ -z "$ns" ]; then
+  echo "memql: isolation probe: $resolv names no nameserver"
+  exit 24
+fi
+attempt() {
+  out=$(timeout "$limit" bash -c 'exec 3<>"/dev/tcp/$1/$2"' attempt "$1" "$2" 2>&1)
+  case $? in
+  0) echo connected ;;
+  124) echo "timed out" ;;
+  *)
+    case "$out" in
+    *"Connection refused"*) echo refused ;;
+    *) echo "failed (${out##*: })" ;;
+    esac ;;
+  esac
+}
+sleep "$settle"
+dns="" listener="" connected=0 dns_failed=0 unclear=0
+for round in 1 2 3; do
+  if [ "$round" != 1 ]; then sleep 1; fi
+  d=$(attempt "$ns" "$dns_port")
+  l=$(attempt "$MEMQL_PROBE_TARGET" "$listener_port")
+  if [ "$d" != connected ]; then dns_failed=1; fi
+  case "$l" in
+  connected) connected=1 ;;
+  refused | "timed out") ;;
+  *) unclear=1 ;;
+  esac
+  dns="$dns${dns:+, }$d"
+  listener="$listener${listener:+, }$l"
+done
+echo "memql: isolation probe: dns $ns:$dns_port $dns; listener $MEMQL_PROBE_TARGET:$listener_port $listener"
+if [ "$connected" = 1 ]; then exit 21; fi
+if [ "$dns_failed" = 1 ]; then exit 22; fi
+if [ "$unclear" = 1 ]; then exit 23; fi
+exit 20`
+
+// probeResources is each probe container's: the listener and the connector
+// use a few MiB each, and the LimitRange's defaults (250m and 512Mi) would ask
+// a whole CPU and 2 GiB for the probe's four containers -- more than a step,
+// on a node a step must fit beside.
+func probeResources() *Resources {
+	return &Resources{
+		Requests: map[string]string{"cpu": "10m", "memory": "32Mi"},
+		Limits:   map[string]string{"cpu": "100m", "memory": "64Mi"},
+	}
+}
+
+// probeLabels are the labels on the probe Job, its pods and its Secret.
+func probeLabels() map[string]string {
+	return map[string]string{LabelManagedBy: ManagedBy, LabelProbe: ProbeIsolation}
+}
+
+// BuildIsolationProbe is the probe's Indexed Job (above), named by
+// IsolationProbeName: a pure function of its inputs.
+func BuildIsolationProbe(cfg Config, name string) Job {
+	target := IsolationTargetName(name)
+	return Job{
+		APIVersion: "batch/v1",
+		Kind:       "Job",
+		Metadata:   ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: probeLabels()},
+		Spec: JobSpec{
+			// Two pods, one per index, at once. A per-index limit of zero
+			// retries nothing, and the connector failing -- every verdict is
+			// a non-zero exit -- ends neither the listener nor the Job; a
+			// Job-wide backoffLimit of 0 would end both. Left unset, it
+			// defaults to unlimited when a per-index limit is set.
+			CompletionMode:          "Indexed",
+			Completions:             ptr(int32(2)),
+			Parallelism:             ptr(int32(2)),
+			BackoffLimitPerIndex:    ptr(int32(0)),
+			ActiveDeadlineSeconds:   ptr(int64(probeJobDeadline / time.Second)),
+			TTLSecondsAfterFinished: ptr(int32(probeJobTTL / time.Second)),
+			Template: PodTemplateSpec{
+				Metadata: ObjectMeta{Labels: probeLabels()},
+				Spec: PodSpec{
+					RestartPolicy:                 "Never",
+					ServiceAccountName:            cfg.StepServiceAccount,
+					AutomountServiceAccountToken:  ptr(false),
+					EnableServiceLinks:            ptr(false),
+					TerminationGracePeriodSeconds: ptr(int64(probeGracePeriodSeconds)),
+					SecurityContext:               &PodSecurityContext{SeccompProfile: &SeccompProfile{Type: "RuntimeDefault"}},
+					InitContainers: []Container{{
+						Name:                     ContainerProbeListener,
+						Image:                    cfg.CloneImage,
+						Command:                  []string{"/bin/sh", "-c", probeListenerScript},
+						RestartPolicy:            ptr("Always"),
+						ReadinessProbe:           &Probe{TCPSocket: &TCPSocketAction{Port: probePort}, PeriodSeconds: 1},
+						Resources:                probeResources(),
+						SecurityContext:          &SecurityContext{AllowPrivilegeEscalation: ptr(false)},
+						TerminationMessagePolicy: failureFromLogs,
+					}},
+					Containers: []Container{{
+						Name:    ContainerProbeConnector,
+						Image:   cfg.CloneImage,
+						Command: []string{"/bin/bash", "-c", probeConnectorScript},
+						Env: []EnvVar{
+							secretVar(probeTargetVar, target, probeTargetKey, false),
+							secretVar(probeJobUIDVar, target, probeJobUIDKey, false),
+							{Name: probeSelfUIDVar, ValueFrom: &EnvVarSource{FieldRef: &ObjectFieldSelector{
+								FieldPath: "metadata.labels['" + controllerUIDLabel + "']",
+							}}},
+						},
+						Resources:                probeResources(),
+						SecurityContext:          &SecurityContext{AllowPrivilegeEscalation: ptr(false)},
+						TerminationMessagePolicy: failureFromLogs,
+					}},
+				},
+			},
+		},
+	}
+}
+
+// BuildIsolationTarget is the probe Secret: index 0's address, which the
+// connector dials, and the probe Job's uid, which it checks against its own
+// pod's -- a Secret an earlier probe left would name another Job, and an
+// address that may be anybody's now. It is owned by the probe Job from the
+// moment it exists (R43), so it goes with the Job and the orphan-Secret sweep,
+// which judges the ownerless, never sees it. Refused without the Job's uid,
+// which only the API server's answer carries, or without the address.
+func BuildIsolationTarget(cfg Config, probe Job, listenerIP string) (Secret, error) {
+	listenerIP = strings.TrimSpace(listenerIP)
+	switch {
+	case probe.Metadata.Name == "" || probe.Metadata.UID == "":
+		return Secret{}, fmt.Errorf("pipelinesteps: probe Job %q has no uid to own its Secret by (use the Job the API server returned)", probe.Metadata.Name)
+	case listenerIP == "":
+		return Secret{}, fmt.Errorf("pipelinesteps: the probe Secret of %s names no listener address", probe.Metadata.Name)
+	}
+	return Secret{
+		APIVersion: "v1",
+		Kind:       "Secret",
+		Metadata: ObjectMeta{
+			Name:            IsolationTargetName(probe.Metadata.Name),
+			Namespace:       cfg.Namespace,
+			Labels:          probeLabels(),
+			OwnerReferences: []OwnerReference{jobOwner(probe)},
+		},
+		Type: "Opaque",
+		Data: map[string][]byte{probeTargetKey: []byte(listenerIP), probeJobUIDKey: []byte(probe.Metadata.UID)},
+	}, nil
 }
 
 func sortedKeys[V any](m map[string]V) []string {
