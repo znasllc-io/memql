@@ -30,8 +30,9 @@ func (c *Connector) managedAppSigning(ctx context.Context) (client, secret strin
 }
 
 // managedInboundSource is the app-level endpoint required for the three
-// mandatory privacy subscriptions. It works before the first store connects
-// and after uninstall; an install-listing URL is not needed to verify HMAC.
+// mandatory privacy subscriptions, and the one app/uninstalled is declared on
+// (memql#5638). It works before the first store connects and after uninstall;
+// an install-listing URL is not needed to verify HMAC.
 func (c *Connector) managedInboundSource(ctx context.Context) (memqlsync.InboundSource, bool) {
 	client, secret, ok := c.managedAppSigning(ctx)
 	if !ok || client == "" {
@@ -45,11 +46,18 @@ func (c *Connector) managedInboundSource(ctx context.Context) (memqlsync.Inbound
 	}, true
 }
 
-// managedComplianceStore uses the SIGNED shop_domain, never the unsigned
-// shop-domain header. The app-level endpoint may only touch this app's stores,
+// managedAppLevelStore binds an app-level delivery to one of this app's
+// stores: a privacy topic, or app/uninstalled (memql#5638). Any other topic
+// binds nothing.
+//
+// It uses the SIGNED shop domain, never the unsigned shop-domain header: one
+// secret signs every store's app-level deliveries, so only the body can say
+// which store one is about. The privacy payloads name it `shop_domain`;
+// app/uninstalled's payload is the Shop resource, which names it
+// `myshopify_domain`. The app-level endpoint may only touch this app's stores,
 // and only while the app can actually have signed the delivery
 // (managedAppSigning); Apply refuses the row with a reason before this runs.
-func (c *Connector) managedComplianceStore(ctx context.Context, req memqlsync.InboundRequest) (Store, bool) {
+func (c *Connector) managedAppLevelStore(ctx context.Context, req memqlsync.InboundRequest) (Store, bool) {
 	client, _, ok := c.managedAppSigning(ctx)
 	if !ok {
 		return Store{}, false
@@ -58,14 +66,15 @@ func (c *Connector) managedComplianceStore(ctx context.Context, req memqlsync.In
 	if topic == "" {
 		topic = header(req, HeaderTopic)
 	}
-	if !isComplianceTopic(topic) {
+	field := signedShopDomainField(topic)
+	if field == "" {
 		return Store{}, false
 	}
 	obj, err := decodeJSONObject(string(req.Body))
 	if err != nil {
 		return Store{}, false
 	}
-	domain, err := NormalizeShopDomain(firstString(obj, "shop_domain"))
+	domain, err := NormalizeShopDomain(firstString(obj, field))
 	if err != nil {
 		return Store{}, false
 	}
@@ -77,6 +86,18 @@ func (c *Connector) managedComplianceStore(ctx context.Context, req memqlsync.In
 		return Store{}, false
 	}
 	return store, store.AppClientID == client
+}
+
+// signedShopDomainField names the body field an app-level topic's shop is
+// signed in, or "" for a topic the app-level endpoint does not serve.
+func signedShopDomainField(topic string) string {
+	switch {
+	case isComplianceTopic(topic):
+		return "shop_domain"
+	case isUninstallTopic(topic):
+		return "myshopify_domain"
+	}
+	return ""
 }
 
 // storeSignsWithManagedSecret says whether the store's per-store webhook

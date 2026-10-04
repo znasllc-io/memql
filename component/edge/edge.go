@@ -216,7 +216,8 @@ func (e *engineExecutor) SiteForAccountFrontDoor(ctx context.Context, hostname s
 // the serving path cannot leak a reference it was never handed. Only
 // `storefrontTokenRef` comes across, because the runtime-config document
 // resolves it -- Shopify designs that one to be published to the shopper's own
-// browser.
+// browser. `uninstalledAt` and `redactedAt` are read for one bit,
+// Disconnected, and never carried (memql#5638).
 //
 // A miss (zero rows) is (nil, nil): a store that is gone is not a query
 // failure, it is a storefront with nothing to talk to, and the resolver
@@ -237,6 +238,7 @@ func (e *engineExecutor) StoreByID(ctx context.Context, storeId string) (*BoundS
 		Domain:             rowString(rows[0], "domain"),
 		StorefrontTokenRef: rowString(rows[0], "storefrontTokenRef"),
 		APIVersion:         rowString(rows[0], "apiVersion"),
+		Disconnected:       rowString(rows[0], "uninstalledAt") != "" || rowString(rows[0], "redactedAt") != "",
 	}, nil
 }
 

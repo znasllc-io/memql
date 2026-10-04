@@ -377,6 +377,15 @@ func storefrontForSite(ctx context.Context, site *Site, resolveSecret SecretReso
 		return out
 	}
 	out.StoreDomain = strings.TrimSpace(site.Store.Domain)
+	// A STORE SHOPIFY NO LONGER AUTHORIZES THE APP FOR (memql#5638). The row
+	// keeps its token reference after app/uninstalled -- a reinstall re-checks
+	// the token before minting another -- so the reference alone would read
+	// "connected" and hand every visitor a token Shopify refuses. Unavailable,
+	// with nothing resolved, and the same answer as an unreadable secret, so
+	// the document does not say which.
+	if site.Store.Disconnected {
+		return out
+	}
 	ref := strings.TrimSpace(site.Store.StorefrontTokenRef)
 	if ref == "" || resolveSecret == nil {
 		return out

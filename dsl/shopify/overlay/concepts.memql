@@ -76,8 +76,16 @@ concept store {
   /// message naming this field, rather than filing it somewhere arbitrary.
   ownerUserId         string
   /// Set when the store was purged under shop/redact. The row stays as the
-  /// audit record that a purge happened.
+  /// audit record that a purge happened; the audit trail keeps it after a
+  /// verified reinstall clears this field.
   redactedAt          datetime
+  /// Set when Shopify reported this app uninstalled from the store
+  /// (app/uninstalled, verified on the app-level endpoint). While it is set
+  /// the store is DISCONNECTED: the Admin grant Shopify ended is dropped,
+  /// ingestion stops, and the edge serves its storefronts as unavailable.
+  /// The mirror stays until shop/redact purges it. Cleared by a verified
+  /// reinstall.
+  uninstalledAt       datetime
   /// True when this store is a DEVELOPMENT store -- the one a storefront is
   /// exercised against before it serves shoppers (design D8). It is attached
   /// and mirrored like any other store: a second row, its own storeId, and

@@ -2957,3 +2957,23 @@ mutation externalConnection disconnectExternalConnection {
     status: "removed"
   }
 }
+
+/// Provider callback only: the provider reported that the resource this
+/// selection names no longer authorizes the app -- Shopify's app/uninstalled
+/// for the store. The selection stays, so a reinstall restores the same one
+/// (recordExternalConnection), and it stops reading as connected meanwhile.
+/// `disconnected` rather than `removed`, because the person removed nothing.
+///
+/// Server-only, and actor.userId scoping is not the fix: the write runs under
+/// the selection owner's borrowed identity, and what it asserts -- that the
+/// provider ended the grant -- is the verified delivery's to say, never the
+/// caller's. A client-callable version would let a person mark a working
+/// connection disconnected with no provider involved.
+@serverOnly
+mutation externalConnection markExternalConnectionDisconnected {
+  args { connectionId string! }
+  update {
+    id: args.connectionId
+    status: "disconnected"
+  }
+}

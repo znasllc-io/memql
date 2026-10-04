@@ -203,6 +203,12 @@ type BoundStore struct {
 	// APIVersion supplies the Storefront API version unless the site explicitly
 	// pins its own. It follows the connected store without rewriting the site.
 	APIVersion string
+	// Disconnected is true when Shopify no longer authorizes the app for the
+	// store: it reported the app uninstalled (uninstalledAt), or shop/redact
+	// purged the store after one (redactedAt). The storefront block then reads
+	// "unavailable" and publishes no token (memql#5638). A yes or a no, never
+	// the timestamps: the serving path needs the decision, not the history.
+	Disconnected bool
 }
 
 // SiteAccount is the account behind a reserved front door, as the served page
