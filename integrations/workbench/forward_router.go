@@ -55,6 +55,19 @@ type ForwardRouter struct {
 // opt-in does the caller degrade to local dispatch.
 var ErrNoWorkbenchPeer = errors.New("workbench: no healthy peer available")
 
+// ErrWorkbenchPeerLost ends a ForwardWatched wait whose replica stopped being
+// one this node would send to -- unhealthy, disconnected, or gone from the
+// peer table -- before it answered. NO CANCEL WAS SENT: whatever the request
+// started is left running on purpose, for the caller to find again (a
+// pipeline step's Job is adopted by the next replica it is forwarded to). The
+// node id returned beside it names the replica that was lost.
+var ErrWorkbenchPeerLost = errors.New("workbench peer lost while waiting")
+
+// defaultPeerWatchInterval is ForwardWatched's re-check cadence when the caller
+// names none: the mesh's default heartbeat interval (component/node), since
+// the peer table changes no faster than heartbeats arrive.
+const defaultPeerWatchInterval = 5 * time.Second
+
 // NewForwardRouter constructs an idle router. peerMgr must be the
 // agent node's PeerManager; logger may be nil (slog.Default used).
 func NewForwardRouter(peerMgr *node.PeerManager, logger *slog.Logger) *ForwardRouter {
@@ -103,6 +116,38 @@ func (r *ForwardRouter) SelfNodeType() string {
 // it with the pin, and that comparison is the difference between a recorded
 // re-provision and the silent split this change exists to remove.
 func (r *ForwardRouter) Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId string) (*nodev1.WorkbenchForwardResponse, string, error) {
+	return r.forward(ctx, req, pinnedNodeId, 0)
+}
+
+// ForwardWatched is Forward plus a liveness watch, for a request that runs for
+// minutes -- a pipeline step lasts as long as its Job. Every interval it
+// re-checks the replica it sent to, by the predicate the picker used to choose
+// it: still in the peer table, healthy, connected. A replica that fails it ends
+// the wait with ErrWorkbenchPeerLost, and the node id returned names it.
+//
+// Without the watch a replica that goes away mid-request -- a deploy drains
+// it, a node dies -- leaves the caller waiting out its whole deadline for a
+// reply nobody is left to send.
+//
+// THE LOSS SENDS NO CANCEL, unlike ctx ending, which sends one exactly as
+// Forward does. Losing sight of a replica is not abandoning the work: a step's
+// Job runs in the cluster rather than in the replica, and the caller
+// re-forwards so another replica adopts it. A cancel can still be delivered in
+// that moment -- a draining replica keeps serving the streams it has -- and
+// the runner deletes the Job on a cancel.
+//
+// A non-positive interval means defaultPeerWatchInterval.
+func (r *ForwardRouter) ForwardWatched(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId string, interval time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
+	if interval <= 0 {
+		interval = defaultPeerWatchInterval
+	}
+	return r.forward(ctx, req, pinnedNodeId, interval)
+}
+
+// forward is Forward and ForwardWatched: watch == 0 waits for the reply or ctx
+// alone, and a positive watch also re-checks the serving replica on that
+// cadence.
+func (r *ForwardRouter) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId string, watch time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
 	if r == nil || r.peerMgr == nil {
 		return nil, "", ErrNoWorkbenchPeer
 	}
@@ -134,24 +179,65 @@ func (r *ForwardRouter) Forward(ctx context.Context, req *nodev1.WorkbenchForwar
 		},
 	}
 	peer.Connection.Send(msg)
-	select {
-	case resp := <-respCh:
-		return resp, servedBy, nil
-	case <-ctx.Done():
-		// Best-effort cancel notification; the worker side handler
-		// is wired to stop in-flight work on receipt.
-		if peer.Connection != nil {
-			peer.Connection.Send(&nodev1.NodeClientMessage{
-				MessageId: id.NewShortId(),
-				Payload: &nodev1.NodeClientMessage_WorkbenchForwardCancel{
-					WorkbenchForwardCancel: &nodev1.WorkbenchForwardCancel{
-						RequestId: req.RequestId,
-					},
-				},
-			})
-		}
-		return nil, servedBy, ctx.Err()
+
+	var recheck <-chan time.Time
+	if watch > 0 {
+		ticker := time.NewTicker(watch)
+		defer ticker.Stop()
+		recheck = ticker.C
 	}
+	for {
+		select {
+		case resp := <-respCh:
+			return resp, servedBy, nil
+		case <-ctx.Done():
+			// Best-effort cancel notification; the worker side handler
+			// is wired to stop in-flight work on receipt.
+			if peer.Connection != nil {
+				peer.Connection.Send(&nodev1.NodeClientMessage{
+					MessageId: id.NewShortId(),
+					Payload: &nodev1.NodeClientMessage_WorkbenchForwardCancel{
+						WorkbenchForwardCancel: &nodev1.WorkbenchForwardCancel{
+							RequestId: req.RequestId,
+						},
+					},
+				})
+			}
+			return nil, servedBy, ctx.Err()
+		case <-recheck:
+			if r.stillServing(servedBy) {
+				continue
+			}
+			// A reply that landed in the same instant is still the answer.
+			select {
+			case resp := <-respCh:
+				return resp, servedBy, nil
+			default:
+			}
+			r.logger.Warn("workbench: the replica serving a watched forward is no longer one this node would send to; "+
+				"ending the wait without a cancel so its work can be adopted",
+				"request_id", req.RequestId,
+				"action", req.GetAction(),
+				"node_id", servedBy)
+			return nil, servedBy, ErrWorkbenchPeerLost
+		}
+	}
+}
+
+// stillServing reports whether nodeId is still a replica this node would send
+// to: in the peer table, healthy and connected -- healthyWorkbenchPeer, the
+// predicate pickWorkbenchPeer chose it by, so the watch and the picker cannot
+// disagree about what reachable means.
+//
+// Read from a snapshot, because this runs while heartbeats rewrite the very
+// fields it reads: the snapshot copies them under the peer table's lock.
+func (r *ForwardRouter) stillServing(nodeId string) bool {
+	for _, p := range r.peerMgr.SnapshotByType(node.NodeTypeWorkbench) {
+		if p.Info.GetNodeId() == nodeId {
+			return healthyWorkbenchPeer(p)
+		}
+	}
+	return false
 }
 
 // Dispatch implements node.WorkbenchForwardResponseSink. Called by
@@ -312,8 +398,3 @@ func truthy(env string) bool {
 		return false
 	}
 }
-
-// SilenceUnused references package-level identifiers that exist for
-// completeness but aren't read in the current call sites. Cheaper
-// than build-tagging the file and lets vet stay clean.
-var _ = time.Second
