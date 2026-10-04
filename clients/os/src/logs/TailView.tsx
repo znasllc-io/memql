@@ -4,7 +4,7 @@ import { formatFreshness } from "../kit/format";
 import { FollowControl } from "./facets";
 import { lineCount } from "./filters";
 import { LogDetail } from "./LogDetail";
-import { LogLine, ROW_HEIGHT } from "./LogLine";
+import { LogLine, type LogDensity } from "./LogLine";
 import type { LogRow } from "./rows";
 import { useLogRowLayout } from "./useLogRowLayout";
 import type { LogTail } from "./useLogTail";
@@ -21,8 +21,6 @@ import { WindowedList } from "./WindowedList";
 // drifts: the pill's sentence in one, the paused state's dot in the other.
 // So each section keeps its Head, its facets and its state, and hands the
 // rest here.
-
-export type TailDensity = keyof typeof ROW_HEIGHT;
 
 export function TailView({
   tail,
@@ -51,7 +49,7 @@ export function TailView({
   onSubject: (subject: string, subjectConcept: string) => void;
   /** One clock per section, so no two rows disagree about "now". */
   now: Date;
-  density: TailDensity;
+  density: LogDensity;
   /** Names the grid for assistive tech. */
   label: string;
   /** The grid's DOM id prefix. */

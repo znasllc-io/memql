@@ -8102,31 +8102,29 @@ a.os-button {
   white-space: nowrap;
   color: var(--os-muted);
 }
-/* The message is sized by its own length and is the only cell in the row
- * that can shrink, so it is cut only when the row has nothing else to give:
- * past that it keeps a readable minimum, 32 characters of its own mono voice
- * -- a one-line row is only ever as narrow as STACK_BELOW
- * (src/logs/LogLine.tsx) allows, which was measured to hold it beside the
- * fixed cells. */
+/* The message takes what the fixed cells and the attributes leave, and never
+ * less than a readable minimum: 32 characters of its own mono voice. A
+ * one-line row is only ever as narrow as STACK_BELOW (src/logs/LogLine.tsx)
+ * allows, which was measured to hold that minimum beside the fixed cells and
+ * the widest subject mark. */
 .os-logs-message {
-  flex: 0 1 auto;
+  flex: 1 1 0;
   min-width: 32ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Inline attributes take at most forty percent of the row: they are the
- * quiet half, and a line whose attributes crowded out its message would
- * read backwards. So they take only what the message leaves: their basis is
- * nothing and they grow into the remainder, which a short row hands them
- * empty -- they truncate, then vanish, before the message loses a
- * character. With room to spare the auto margin seats their forty-percent
- * block against the subject mark, where a wide row has always put it. */
+/* Inline attributes are a column of at most forty percent of the row: they
+ * are the quiet half, and a line whose attributes crowded out its message
+ * would read backwards. So they are the cell that gives way. The column's
+ * basis is fixed, which starts it at one x on every wide row that ends in
+ * the same mark; a row too short for the fixed cells, the message's minimum
+ * and the whole column takes the difference from the attributes alone --
+ * they truncate, then vanish -- and the message keeps its 32 characters. */
 .os-logs-attrs {
-  flex: 1 1 0;
+  flex: 0 1 40%;
   min-width: 0;
   max-width: 40%;
-  margin-left: auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -8136,19 +8134,25 @@ a.os-button {
 .os-logs-attrs:empty {
   display: none;
 }
-/* A line with no attributes still ends at the row's edge: the message does
- * not grow, so the mark is pushed there. */
-.os-logs-attrs:empty + .os-logs-subject-cell {
-  margin-left: auto;
-}
 .os-logs-subject-cell {
   flex: none;
   display: inline-flex;
 }
 /* The subject mark: a small quiet control at the row end that narrows the
  * surface to what the line is about. Chip-shaped, because it names a thing
- * rather than doing one to it. */
+ * rather than doing one to it.
+ *
+ * AT MOST EIGHTEEN CHARACTERS, then an ellipsis. The word is a concept's last
+ * segment, which nothing bounds, and STACK_BELOW can only hold the message's
+ * minimum beside a mark of known width. Eighteen keeps every subject the
+ * logs name today whole ("packageDeployment" is seventeen); the full name
+ * stays on the mark's title and in its label. The 16px is its padding and
+ * border. */
 .os-logs-subject {
+  max-width: calc(18ch + 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   border: 1px solid var(--os-line);
   border-radius: 999px;
   background: none;
