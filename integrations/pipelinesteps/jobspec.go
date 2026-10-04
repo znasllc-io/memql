@@ -605,7 +605,9 @@ func jobOwner(job Job) OwnerReference {
 //	                 and closes connections on port 8080. Its readiness probe
 //	                 is the kubelet's own TCP connection, which no
 //	                 NetworkPolicy governs (measured, k3s v1.35), so ready
-//	                 means listening. It depends on nothing, so it is up and
+//	                 means listening; it runs every second, and one miss is
+//	                 not ready, so a listener that stopped accepting reads so
+//	                 within a second. It depends on nothing, so it is up and
 //	                 ready before the probe Secret exists.
 //	main  connector  cfg.CloneImage. Its environment names two keys of the
 //	                 probe Secret, not optionally, so the kubelet starts it
@@ -627,11 +629,14 @@ func jobOwner(job Job) OwnerReference {
 // and one to index 0's listener, each bounded at five seconds (R44):
 //
 //	exit  the three rounds                                        verdict
-//	20    no listener attempt connected (each was refused or      isolated, if the listener
-//	      timed out), and every DNS attempt connected             is still ready, the same
-//	                                                              incarnation, when the
-//	                                                              runner re-reads it;
-//	                                                              inconclusive otherwise
+//	20    no listener attempt connected (each was refused or      isolated, if the runner's
+//	      timed out), and every DNS attempt connected             re-read finds the listener
+//	                                                              still ready, the same
+//	                                                              incarnation in the same
+//	                                                              pod, which the API server
+//	                                                              has not marked as going
+//	                                                              away; inconclusive
+//	                                                              otherwise
 //	21    a listener attempt connected                            not isolated
 //	22    a DNS attempt failed, and none to the listener          inconclusive
 //	      connected
@@ -814,7 +819,7 @@ func BuildIsolationProbe(cfg Config, name string) Job {
 						Image:                    cfg.CloneImage,
 						Command:                  []string{"/bin/sh", "-c", probeListenerScript},
 						RestartPolicy:            ptr("Always"),
-						ReadinessProbe:           &Probe{TCPSocket: &TCPSocketAction{Port: probePort}, PeriodSeconds: 1},
+						ReadinessProbe:           &Probe{TCPSocket: &TCPSocketAction{Port: probePort}, PeriodSeconds: 1, FailureThreshold: 1},
 						Resources:                probeResources(),
 						SecurityContext:          &SecurityContext{AllowPrivilegeEscalation: ptr(false)},
 						TerminationMessagePolicy: failureFromLogs,

@@ -23,7 +23,10 @@ import "time"
 // because the API writes a missing one as null and time.Time reads null as
 // the zero time.
 
-// ObjectMeta is the metadata every object carries.
+// ObjectMeta is the metadata every object carries. DeletionTimestamp is set
+// by the API server the moment an object starts going away -- a delete, an
+// eviction -- while a pod's containers still run out their grace period, and
+// the kubelet's report of them still reads ready.
 type ObjectMeta struct {
 	Name              string            `json:"name,omitempty"`
 	Namespace         string            `json:"namespace,omitempty"`
@@ -33,6 +36,7 @@ type ObjectMeta struct {
 	UID               string            `json:"uid,omitempty"`
 	OwnerReferences   []OwnerReference  `json:"ownerReferences,omitempty"`
 	CreationTimestamp time.Time         `json:"creationTimestamp,omitzero"`
+	DeletionTimestamp time.Time         `json:"deletionTimestamp,omitzero"`
 }
 
 // OwnerReference makes an object garbage-collected with its owner: the step's

@@ -233,9 +233,10 @@ type prober struct {
 	trouble apiTrouble
 }
 
-// probeListener is index 0's listener as the probe saw it ready: its pod's
-// address, and the incarnation that was listening.
+// probeListener is index 0's listener as the probe saw it ready: its pod --
+// by name and uid -- and its address, and the incarnation that was listening.
 type probeListener struct {
+	pod, uid  string
 	ip        string
 	restarts  int32
 	startedAt time.Time
@@ -417,10 +418,18 @@ func (p *prober) end(job Job) (ContainerStateTerminated, error) {
 
 // held reads the probe's pods again, after the connector ended (R42), and
 // says whether index 0's listener is still the incarnation first seen ready,
-// and ready. Then its socket was open from before the connector's first
-// attempt -- the connector waited for the Secret, made once the listener was
-// ready -- to after its last, so an attempt that reached it would have
-// connected. why says how it did not hold.
+// in the same pod, and ready. Then its socket was open from before the
+// connector's first attempt -- the connector waited for the Secret, made once
+// the listener was ready -- to after its last, so an attempt that reached it
+// would have connected. why says how it did not hold.
+//
+// The API server's own marks on the pod come first (fix round 1): a delete
+// or an eviction is recorded on the pod -- its deletionTimestamp, a True
+// DisruptionTarget condition -- before any kubelet acts, while the kubelet's
+// last report of the listener still reads running and ready, and a dying
+// pod's refusals are no evidence of a policy. A replacement started within
+// the second the first one did reads the same startedAt, so the pod is
+// matched by its uid.
 func (p *prober) held(job Job, was probeListener) (bool, string, error) {
 	var pods []Pod
 	err := p.retry(func() (err error) {
@@ -438,6 +447,15 @@ func (p *prober) held(job Job, was probeListener) (bool, string, error) {
 	switch {
 	case zero == nil:
 		return false, "the listener's pod was gone", nil
+	case zero.Metadata.UID != was.uid || zero.Metadata.Name != was.pod:
+		return false, fmt.Sprintf("the listener's pod %s had been replaced by %s since it was seen ready", was.pod, zero.Metadata.Name), nil
+	case !zero.Metadata.DeletionTimestamp.IsZero():
+		return false, "the listener's pod was being deleted", nil
+	case disruption(zero) != nil:
+		d := disruption(zero)
+		return false, "the listener's pod was marked for disruption (" + reasonAnd(d.Reason, d.Message) + ")", nil
+	case zero.Status.Phase == "Succeeded" || zero.Status.Phase == "Failed":
+		return false, "the listener's pod had ended (" + zero.Status.Phase + ")", nil
 	case l == nil || l.State.Running == nil:
 		return false, "the listener was no longer running", nil
 	case l.RestartCount != was.restarts || !l.State.Running.StartedAt.Equal(was.startedAt):
@@ -512,7 +530,10 @@ func listening(pod *Pod) (probeListener, bool) {
 	if pod == nil || pod.Status.PodIP == "" || l == nil || l.State.Running == nil || !l.Ready {
 		return probeListener{}, false
 	}
-	return probeListener{ip: pod.Status.PodIP, restarts: l.RestartCount, startedAt: l.State.Running.StartedAt}, true
+	return probeListener{
+		pod: pod.Metadata.Name, uid: pod.Metadata.UID, ip: pod.Status.PodIP,
+		restarts: l.RestartCount, startedAt: l.State.Running.StartedAt,
+	}, true
 }
 
 // probeContainerRuns says a container of a probe pod is running.

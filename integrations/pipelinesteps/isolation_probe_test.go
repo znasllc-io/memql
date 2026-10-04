@@ -120,9 +120,12 @@ func TestBuildIsolationProbe(t *testing.T) {
 			t.Errorf("listener command = %q, want /bin/sh -c probeListenerScript", l.Command)
 		}
 		// Ready means accepting: the kubelet's own connection, which no
-		// NetworkPolicy governs (measured on k3s v1.35).
-		if l.ReadinessProbe == nil || l.ReadinessProbe.TCPSocket == nil || l.ReadinessProbe.TCPSocket.Port != 8080 || l.ReadinessProbe.Exec != nil {
-			t.Errorf("listener readiness = %+v, want a TCP probe of port 8080", l.ReadinessProbe)
+		// NetworkPolicy governs (measured on k3s v1.35). One failed probe is
+		// enough to say otherwise, so a listener that stopped accepting reads
+		// not ready within a second, not three (fix round 1).
+		if l.ReadinessProbe == nil || l.ReadinessProbe.TCPSocket == nil || l.ReadinessProbe.TCPSocket.Port != 8080 || l.ReadinessProbe.Exec != nil ||
+			l.ReadinessProbe.PeriodSeconds != 1 || l.ReadinessProbe.FailureThreshold != 1 {
+			t.Errorf("listener readiness = %+v, want a TCP probe of port 8080 every second, failing at the first miss", l.ReadinessProbe)
 		}
 		if len(l.Env) != 0 {
 			t.Errorf("listener env = %+v, want none: it must start, and be ready, before the probe Secret exists", l.Env)

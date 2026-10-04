@@ -72,6 +72,7 @@ func isoPod(index int, ip string, listener, main ContainerStatus) *Pod {
 	return &Pod{
 		Metadata: ObjectMeta{
 			Name:              fmt.Sprintf("%s-%d-x7kk6", isoName(), index),
+			UID:               "uid-pod-" + i,
 			Labels:            map[string]string{"job-name": isoName(), "batch.kubernetes.io/job-completion-index": i},
 			Annotations:       map[string]string{"batch.kubernetes.io/job-completion-index": i},
 			CreationTimestamp: rtT0,
@@ -109,6 +110,15 @@ func isoScriptAfter(first []rtState, exit int32, said string) *rtScript {
 	s := isoScript(exit, said)
 	s.states = append(append([]rtState{}, first...), s.states[1:]...)
 	return s
+}
+
+// isoMarked is index 0's pod with its listener as the kubelet last reported
+// it -- running, ready, the incarnation first seen ready -- and mark applied:
+// what the API server says of the pod that the kubelet has not yet acted on.
+func isoMarked(mark func(p *Pod)) *Pod {
+	p := isoPod(0, isoListenerIP, isoListener(true, 0), isoHolding)
+	mark(p)
+	return p
 }
 
 // isoPutLeftoverLocked puts an earlier probe Job of this replica into the
@@ -383,6 +393,44 @@ func TestIsolationProofRefusedConnectionPassesOnlyWhileTheListenerHeld(t *testin
 				Name: ContainerProbeListener, State: ContainerState{Terminated: &ContainerStateTerminated{ExitCode: 137, Reason: "OOMKilled"}},
 			}, isoHolding), ended(probeExitIsolated)),
 			inconclusive: true, said: "no longer running",
+		},
+		{
+			// The reviewer's reproduction (fix round 1, Critical 1): the API
+			// server marks the pod for eviction before any kubelet acts, while
+			// the kubelet's last report still has the listener running and
+			// ready, the same incarnation.
+			name: "the listener's pod is marked for eviction: inconclusive",
+			script: isoScript(probeExitIsolated, isoSaid[probeExitIsolated]).then(isoMarked(func(p *Pod) {
+				p.Status.Conditions = append(p.Status.Conditions, PodCondition{
+					Type: "DisruptionTarget", Status: "True", Reason: "EvictionByEvictionAPI",
+					Message: "Eviction API: evicting", LastTransitionTime: rtT0.Add(time.Second),
+				})
+			}), ended(probeExitIsolated)),
+			inconclusive: true, said: "marked for disruption",
+		},
+		{
+			name: "the listener's pod is being deleted: inconclusive",
+			script: isoScript(probeExitIsolated, isoSaid[probeExitIsolated]).then(isoMarked(func(p *Pod) {
+				p.Metadata.DeletionTimestamp = rtT0.Add(10 * time.Second)
+			}), ended(probeExitIsolated)),
+			inconclusive: true, said: "being deleted",
+		},
+		{
+			name: "the listener's pod has ended: inconclusive",
+			script: isoScript(probeExitIsolated, isoSaid[probeExitIsolated]).then(isoMarked(func(p *Pod) {
+				p.Status.Phase = "Failed"
+			}), ended(probeExitIsolated)),
+			inconclusive: true, said: "had ended",
+		},
+		{
+			// A replacement started within the second the first one did reads
+			// the same startedAt: only the pod's own uid tells them apart.
+			name: "the listener's pod was replaced: inconclusive",
+			script: isoScript(probeExitIsolated, isoSaid[probeExitIsolated]).then(isoMarked(func(p *Pod) {
+				p.Metadata.Name, p.Metadata.UID = isoName()+"-0-repl1", "uid-pod-0-replacement"
+				p.Metadata.CreationTimestamp = rtT0.Add(time.Minute)
+			}), ended(probeExitIsolated)),
+			inconclusive: true, said: "replaced",
 		},
 		{
 			name:   "a connection is never isolation, whatever the listener did after",
@@ -764,9 +812,9 @@ func TestIsolationProofArmsOnlyOnceTheListenerIsReady(t *testing.T) {
 	up := isoListener(true, 0)
 	notReady := isoListener(false, 0)
 	older := isoPod(0, "10.42.5.5", up, isoWaiting())
-	older.Metadata.Name, older.Metadata.CreationTimestamp = isoName()+"-0-older", rtT0.Add(-time.Minute)
+	older.Metadata.Name, older.Metadata.UID, older.Metadata.CreationTimestamp = isoName()+"-0-older", "uid-pod-0-older", rtT0.Add(-time.Minute)
 	stale := isoPod(0, "10.42.7.7", up, isoWaiting())
-	stale.Metadata.Name, stale.Metadata.CreationTimestamp = isoName()+"-0-stale", rtT0.Add(time.Hour)
+	stale.Metadata.Name, stale.Metadata.UID, stale.Metadata.CreationTimestamp = isoName()+"-0-stale", "uid-pod-0-stale", rtT0.Add(time.Hour)
 	for _, c := range []struct {
 		name  string
 		first []rtState
