@@ -48,7 +48,7 @@ Prerequisites worth knowing before operating this:
 | Path | What |
 |---|---|
 | `bootstrap/` | The one-time Argo CD install (pinned upstream v2.13.3) + `argocd` namespace. NOT GitOps-managed (chicken/egg). |
-| `apps/project.yaml` | `AppProject memql` — restricts the reconciler to THIS repo + the `memql` / `argocd` namespaces. An Application whose destination namespace is missing here is **rejected at sync**. |
+| `apps/project.yaml` | `AppProject memql` — restricts the reconciler to THIS repo + the `memql` / `memql-pipelines` / `argocd` namespaces (`memql-pipelines` is where pipeline steps run as Jobs, rendered by the overlay from `deploy/k8s/components/pipelines`). An Application whose destination namespace is missing here is **rejected at sync**. |
 | `apps/root.yaml` | App-of-apps: renders the manifests its `directory.include` brace list names. **That list is the registration** — a manifest dropped into `apps/` without being added to it is silently not rendered, and the only symptom is a cluster that is not running. |
 | `apps/memql.yaml` | The cluster -> ns `memql`, source `overlays/cloud`, **manual sync**. |
 | (moved) | The PRODUCT's own bff/SPA/rollouts Applications moved to the product pack repo at the P3 cutover (#2429); this dir keeps the engine estate. |

@@ -1,0 +1,38 @@
+# The pipelines substrate's LOCAL values (epic memql#5478, task #5492), over
+# ../../components/pipelines -- one strategic-merge patch per object. The
+# component's README.md says what each number bounds.
+#
+# THE CACHE is not restated: the component's default is the local shape. No
+# storageClassName, so k3d's default local-path class provisions it, and
+# ReadWriteOnce, the only mode local-path offers (per node, and the volume pins
+# the step pods that mount it to its node).
+#
+# THE CEILING AND THE LIMITS are stated although they equal the component's
+# defaults, because they are this overlay's decision and an inherited number is
+# one nobody decided: a laptop also runs the whole mesh and the database, so it
+# is asked for at most four steps at once, each container reserving 250m /
+# 512Mi and capped at two CPUs / 4 GiB.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: memql-pipelines-ceiling
+  namespace: memql-pipelines
+spec:
+  hard:
+    count/jobs.batch: "4"
+---
+# `limits` is replaced whole, not merged, so the item is restated in full.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: memql-pipelines-limits
+  namespace: memql-pipelines
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "2"
+        memory: 4Gi
+      defaultRequest:
+        cpu: 250m
+        memory: 512Mi

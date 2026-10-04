@@ -1,0 +1,50 @@
+# The pipelines substrate (epic memql#5478, task #5492). Composed by the local,
+# cloud and cloud-entry overlays; NOT by tenants (a tenant renders base under its
+# own namespace, and memql-pipelines is one name per cluster).
+#
+# WHAT IT IS. Every compiled pipeline step runs as a Kubernetes Job in the
+# memql-pipelines namespace, created, watched and captured by the workbench
+# node. This component is that namespace and everything in it -- the runner's
+# Role, the step's empty identity, the shared cache volume, the concurrency
+# ceiling, the container limits and the network isolation -- plus ONE object
+# in the mesh namespace: the memql-pipelines ConfigMap the workbench reads its
+# pipelines env from. README.md beside this file says why each one is shaped
+# the way it is.
+#
+# A COMPONENT, NOT BASE. base sets `namespace: memql` itself and every tenant
+# overlay sets `namespace: <tenant>`, and that plain field rewrites EVERY
+# namespace it meets -- an explicit `memql-pipelines` included. In base these
+# objects would therefore land in the mesh namespace (and a second Namespace
+# object would fail the render outright: "namespace transformation produces ID
+# conflict"). A consuming overlay must set its own namespace through a
+# NamespaceTransformer with `unsetOnly: true` (namespace-transformer.yaml in
+# each instance overlay), which fills in only what is unset: the ConfigMap
+# below states no namespace, so it lands beside the workbench; everything else
+# states memql-pipelines, and keeps it.
+#
+# VALUES. An overlay patches the cache's class, access mode and size, the
+# ceiling and the limits -- `pipelines-values.yaml` in each instance overlay.
+# What ships here are the defaults a laptop can run.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - namespace.yaml
+  - step-serviceaccount.yaml
+  - rbac.yaml
+  - cache.yaml
+  - ceiling.yaml
+  - networkpolicy.yaml
+  - config.yaml
+patches:
+  # The workbench is the one binary that contains the runner, so it is the one
+  # Deployment that reads the ConfigMap. Appended rather than strategic-merged:
+  # `envFrom` has no patch merge key, so a merge would REPLACE the list and drop
+  # memql-secrets from the node. Container 0 is the engine container on every
+  # mesh Deployment.
+  - target: { kind: Deployment, name: workbench }
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          configMapRef:
+            name: memql-pipelines

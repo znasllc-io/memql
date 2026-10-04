@@ -1,0 +1,46 @@
+# How much of a cluster pipeline steps may take (epic memql#5478, task #5492).
+# Both numbers are the overlay's (pipelines-values.yaml); these are defaults a
+# laptop can run.
+#
+# THE CEILING is a quota on the NUMBER OF JOBS, because one Job is one running
+# step. The API server counts it atomically at admission, across every workbench
+# replica at once, so two replicas cannot both create the step that exceeds it:
+# the loser's create is refused with "exceeded quota", and the runner waits and
+# retries rather than failing the step (the run shows it queued, bounded by the
+# run's wall-clock ceiling). A finished Job counts until the runner deletes it
+# after the agent has the result, or until its TTL does.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: memql-pipelines-ceiling
+  namespace: memql-pipelines
+  labels:
+    app.kubernetes.io/part-of: memql
+    app.kubernetes.io/name: pipelines-ceiling
+spec:
+  hard:
+    count/jobs.batch: "4"
+---
+# THE LIMITS are a LimitRange default, so the runner sets no resources on a step
+# container and this is the one place a step's size is decided. It applies to
+# every container in the pod -- the clone init container and each service
+# sidecar as well as the step -- and fills only what a container leaves unset.
+# A default request above its default limit is refused by the API server, so
+# the two move together.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: memql-pipelines-limits
+  namespace: memql-pipelines
+  labels:
+    app.kubernetes.io/part-of: memql
+    app.kubernetes.io/name: pipelines-limits
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "2"
+        memory: 4Gi
+      defaultRequest:
+        cpu: 250m
+        memory: 512Mi

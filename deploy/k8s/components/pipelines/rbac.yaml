@@ -1,0 +1,77 @@
+# The runner's grant (epic memql#5478, task #5492).
+#
+# WHAT IT GRANTS, AND WHY EACH LINE. The workbench node turns a compiled step
+# into a Job here and sees it through, through component/deploycontrol.ClusterAPI
+# (net/http and the pod's projected token -- no client-go, no kubectl):
+#
+#   batch/jobs  create, get, list, watch, patch, delete, deletecollection
+#               one Job per step attempt; watched to completion; patched with
+#               the runner's heartbeat and the step's outcome (which is how
+#               another workbench replica adopts a Job whose runner went away);
+#               deleted once the agent acknowledged the result; a cancelled
+#               run's Jobs swept with one deletecollection by label.
+#   pods        get, list, watch
+#               the Job's pod: its phase and container states classify a
+#               failure (an image that cannot be pulled, a clone that failed).
+#   pods/log    get
+#               the step's output, followed while it runs.
+#   secrets     create, get, patch, delete, deletecollection
+#               one Secret per Job: the clone token and the step's resolved
+#               secrets, created before the Job and removed with it.
+#
+# No `*`, no resourceNames (Job and Secret names are derived per attempt, and
+# RBAC cannot pin `create` to a name), no update, and no ClusterRole. Nothing
+# here reaches outside memql-pipelines, and the namespace holds no Secret but
+# the ones the runner writes: no platform credential is reachable through it.
+#
+# THE SUBJECT IS memql-engine, the ServiceAccount every engine Deployment
+# already runs as, and NOT a workbench-only account. The workbench also makes
+# model calls (it can hold the automations cron leader), and both vendors'
+# workload identity federation trusts memql-engine by name (the projected
+# tokens in base, render_anthropic_federation_test.go); a dedicated account
+# would cut the workbench off from both. This is the precedent the
+# custom-domain Role set (../../base/custom-domain-rbac.yaml): a feature Role
+# in its own file, bound to the shared identity. What confines it is the
+# namespace -- the grant holds only in memql-pipelines, where the mesh runs
+# nothing -- and the binary: only the workbench contains the runner.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: memql-pipelines-runner
+  namespace: memql-pipelines
+  labels:
+    app.kubernetes.io/part-of: memql
+    app.kubernetes.io/name: pipelines-runner
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "patch", "delete", "deletecollection"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "patch", "delete", "deletecollection"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memql-pipelines-runner
+  namespace: memql-pipelines
+  labels:
+    app.kubernetes.io/part-of: memql
+    app.kubernetes.io/name: pipelines-runner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: memql-pipelines-runner
+subjects:
+  # The mesh namespace, stated: a RoleBinding's subject namespace is never
+  # filled in by the overlays' unsetOnly transformer (it touches only subjects
+  # named `default`), so this is the whole statement of where the engine runs.
+  - kind: ServiceAccount
+    name: memql-engine
+    namespace: memql

@@ -1,0 +1,21 @@
+# Where every pipeline step runs (epic memql#5478, task #5492).
+#
+# The name is explicit and survives because the consuming overlays set the mesh
+# namespace with an unsetOnly NamespaceTransformer, which renames nothing that
+# already has a name. It is one name per cluster: two installs sharing a cluster
+# would share this namespace, which is why tenants do not compose the component.
+#
+# POD SECURITY. Steps run images the platform did not build -- whatever a
+# repository's manifest names. `enforce: baseline` is what refuses a privileged,
+# host-path, host-network or host-PID pod here at admission, whatever spec
+# reaches the API server. `warn: restricted` reports what the stricter profile
+# would refuse without refusing it: a typical CI image runs as root, which
+# restricted forbids, so enforcing it would refuse ordinary steps.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: memql-pipelines
+  labels:
+    app.kubernetes.io/part-of: memql
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted

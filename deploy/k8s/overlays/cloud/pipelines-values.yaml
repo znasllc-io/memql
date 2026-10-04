@@ -1,0 +1,49 @@
+# The pipelines substrate's CLOUD values (epic memql#5478, task #5492), over
+# ../../components/pipelines -- one strategic-merge patch per object. The
+# component's README.md says what each number bounds.
+#
+# CACHE CLASS <-> THE BLOB CSI DRIVER -- one coupling, two files. The steps of
+# one run land on whichever node has room, so the cache two step pods mount at
+# once must be ReadWriteMany, which on AKS is the Azure Blob CSI driver's NFS
+# class. That class exists ONLY on a cluster running the driver, which
+# `scripts/deploy/azure-provision.sh` turns on (`--enable-blob-driver` at
+# create, `az aks update --enable-blob-driver` on a cluster that predates it).
+# Without it the claim sits Pending naming a class that does not exist, and
+# every step that declares a cache waits out its scheduling timeout. Gated by
+# ../substrate_overlay_coupling_test.go.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: memql-pipelines-cache
+  namespace: memql-pipelines
+spec:
+  storageClassName: azureblob-nfs-premium
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: memql-pipelines-ceiling
+  namespace: memql-pipelines
+spec:
+  hard:
+    count/jobs.batch: "12"
+---
+# `limits` is replaced whole, not merged, so the item is restated in full.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: memql-pipelines-limits
+  namespace: memql-pipelines
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "4"
+        memory: 8Gi
+      defaultRequest:
+        cpu: "1"
+        memory: 2Gi

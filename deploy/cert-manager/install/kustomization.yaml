@@ -45,14 +45,16 @@ resources:
 # upstream static manifest does not carry: the label on the pod template and
 # the client-id annotation on the ServiceAccount.
 #
-# WHY HERE AND NOT IN A CLOUD OVERLAY. Both cloud overlays set
-# `namespace: memql`, and kustomize's namespace transformer rewrites the
-# namespace of every resource it renders -- including one that names
-# `cert-manager` explicitly. A ServiceAccount patch for the cert-manager
-# namespace cannot live there. It also cannot live in a runbook: this path is
-# an ArgoCD Application, so an operator's hand-patch is reverted on the next
-# sync, and the DNS-01 issuer then fails to authenticate with nothing in the
-# manifests to explain why.
+# WHY HERE AND NOT IN A CLOUD OVERLAY. No cloud overlay renders the
+# cert-manager ServiceAccount -- this kustomization does -- so a patch for it
+# there would match nothing, and kustomize renders a targeted patch that
+# matches nothing without a word. (When this was written the cloud overlays
+# also set a plain `namespace: memql`, which rewrites even an explicit
+# `cert-manager` namespace; since memql#5492 they use an unsetOnly
+# transformer, and the first reason stands on its own.) It also cannot live
+# in a runbook: this path is an ArgoCD Application, so an operator's
+# hand-patch is reverted on the next sync, and the DNS-01 issuer then fails to
+# authenticate with nothing in the manifests to explain why.
 #
 # INERT WITHOUT AZURE, WHICH IS WHY ONE SHAPE SERVES EVERY TARGET. Both values
 # are read ONLY by the azure-workload-identity mutating webhook. On a cluster
