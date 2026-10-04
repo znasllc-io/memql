@@ -553,6 +553,9 @@ func TestAForwardableMachineOpensTheChatDoorButNotTheSessionDoor(t *testing.T) {
 // The wildcard's choice between apps is a CHAT-door choice, so it counts a
 // door this node can forward to as open.
 func TestTheWildcardTakesAnAppHeldByAnotherAgent(t *testing.T) {
+	// This test makes a guarded call, and the package's earlier tests fill the
+	// process-wide local rate ceiling; the guard is not what it asserts.
+	offTheSharedRateCeiling(t)
 	held := runnableDoor(appIdCodex)
 	held.Machines[0].LocalStream = false
 	held.Machines[0].Forwardable = true
