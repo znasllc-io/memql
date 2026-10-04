@@ -61,21 +61,40 @@ package clustere2e
 // no fake can stand in for: a real API server, kubelet, image pull, clone and
 // network policy under the grant the product deploys.
 //
-// RUN
+// RUN, against a cluster made for it. The test creates Jobs and Secrets in the
+// cluster's memql-pipelines namespace and holds slots of its ceiling while it
+// runs, so it belongs on a throwaway cluster -- or on the one
+// install-cluster-e2e.yml's `pipelines` leg installs from source -- never on a
+// development cluster somebody else is using:
 //
-//	MEMQL_E2E_KUBECONTEXT=k3d-memql GOWORK=off go test -tags clustere2e,agent -count=1 \
-//	  -timeout=30m -run TestPipelinesSubstrate ./test/clustere2e/
+//	k3d cluster create pipelines-e2e --kubeconfig-update-default=false --kubeconfig-switch-context=false
+//	k3d kubeconfig get pipelines-e2e > /tmp/pipelines-e2e.kubeconfig
+//	# apply what the test needs from `kubectl kustomize deploy/k8s/overlays/local`:
+//	# the memql and memql-pipelines namespaces, every object in memql-pipelines,
+//	# memql/memql-engine and the memql/memql-pipelines ConfigMap
+//	MEMQL_E2E_KUBECONFIG=/tmp/pipelines-e2e.kubeconfig MEMQL_E2E_KUBECONTEXT=k3d-pipelines-e2e \
+//	  GOWORK=off go test -tags clustere2e,agent -count=1 -timeout=30m -run TestPipelinesSubstrate ./test/clustere2e/
 //
 // MEMQL_E2E_KUBECONFIG names the kubeconfig when it is not $KUBECONFIG or
-// ~/.kube/config. With no context named the test SKIPS: it creates Jobs in the
-// cluster's memql-pipelines namespace, so it never runs against whichever
-// context happens to be current. Once a context is named, anything missing --
-// the ConfigMap, the engine's ServiceAccount, the grant -- FAILS it.
+// ~/.kube/config. With no context named the test SKIPS: it never runs against
+// whichever context happens to be current. Once a context is named, anything
+// missing -- the ConfigMap, the engine's ServiceAccount, the grant -- FAILS it.
+// Two subtests read no cluster and run before it is reached, so they run --
+// and can fail -- with no context named: report-mapping and normalization,
+// which hold the test's own restatements of the driver's step report and of
+// the fixtures' normalization.
 //
-// `-update` rewrites the recorded check runs (testdata/pipelines/check_run.json
-// and fork_check_run.json) from the run, normalized; the committed ones are
-// what a real run produced. install-cluster-e2e.yml's `pipelines` leg runs this
-// test against the cluster that leg installs from source.
+// THE FIXTURES. `-update` rewrites the recorded check runs
+// (testdata/pipelines/check_run.json and fork_check_run.json) from the run,
+// normalized; the committed ones are what a real run produced.
+// testdata/pipelines/fork_delivery.json is not recorded by the test: it is
+// GitHub's documented pull_request.opened payload (octokit/webhooks,
+// payload-examples/api.github.com/pull_request/opened.payload.json, the
+// Codertocat/Hello-World sample) with its head moved to a fork --
+// head.repo stranger/Hello-World with fork true, the head's user, the pull
+// request's author and the sender with it -- every numeric id but the
+// installation's (which ClassifyDelivery requires) set to 0, every node_id
+// SCRUBBED, and the user ids in the avatar URLs set to 0.
 
 import (
 	"bytes"
@@ -174,6 +193,11 @@ var substratePackages = []string{"alpha", "beta", "delta", "gamma"}
 // ---------------------------------------------------------------------------
 
 func TestPipelinesSubstrate(t *testing.T) {
+	// The test's own restatements of the seam, held first: they read no
+	// cluster, so they run -- and can fail -- before the skip below.
+	t.Run("report-mapping", testSubstrateReportMapping)
+	t.Run("normalization", testSubstrateNormalization)
+
 	cluster := connectSubstrateCluster(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), substrateRunBudget)
@@ -238,8 +262,16 @@ func TestPipelinesSubstrate(t *testing.T) {
 		// allowPrivilegeEscalation: false, and the password reaches psql
 		// through the step's environment, from the step's Secret.
 		s := run.mustStep(t, pl.StepKey("database", "psql"))
-		if svc, ok := s.step.Services["postgres"]; !ok || strings.TrimSpace(svc.Ready) == "" {
+		svc, ok := s.step.Services["postgres"]
+		if !ok || strings.TrimSpace(svc.Ready) == "" {
 			t.Errorf("the compiled step carries no postgres service with a ready check (%+v): there is no startup probe to hold the step back", s.step.Services)
+		}
+		// The native-sidecar shape as the API server held it while the Job
+		// lived -- not the compiled Ready field.
+		if job, read := seen.specs[s.step.Key]; !read {
+			t.Errorf("the step's Job was never read back while it lived (Jobs seen: %v)", seen.jobs)
+		} else {
+			assertNativeSidecar(t, job, pipelinesteps.ServicePrefix+"postgres", svc.Ready)
 		}
 		res := s.mustResult(t)
 		if res.Status != pl.OutcomeSucceeded || res.ExitCode != 0 {
@@ -504,6 +536,172 @@ func assertIsolationProof(t *testing.T, run *substrateRun) {
 				t.Errorf("%s carries the note %s: %s", s.step.Key, note.Code, note.Message)
 			}
 		}
+	}
+}
+
+// assertNativeSidecar holds a step's Job, as the API server held it, to the
+// native-sidecar shape: the service is an init container that runs for the
+// pod's life (restartPolicy Always), behind a startup probe that runs the
+// manifest's `ready` -- through the runner's $-escape (ruling R25), so the
+// container receives it as written -- started after the clone, and with no
+// privilege to gain; the step is the pod's one container. The kubelet starts
+// the step only once that probe passes, which is what the one-shot psql relies
+// on.
+func assertNativeSidecar(t *testing.T, job pipelinesteps.Job, sidecar, ready string) {
+	t.Helper()
+	pod := job.Spec.Template.Spec
+	var inits []string
+	for _, c := range pod.InitContainers {
+		inits = append(inits, c.Name)
+	}
+	at := slices.Index(inits, sidecar)
+	if at < 0 {
+		t.Errorf("the Job's init containers are %v; want the sidecar %s among them", inits, sidecar)
+		return
+	}
+	c := pod.InitContainers[at]
+	if c.RestartPolicy == nil || *c.RestartPolicy != "Always" {
+		t.Errorf("%s has restartPolicy %v; a native sidecar runs for the pod's life, restartPolicy Always", sidecar, c.RestartPolicy)
+	}
+	wantProbe := []string{"/bin/sh", "-c", strings.ReplaceAll(ready, "$", "$$")}
+	if c.StartupProbe == nil || c.StartupProbe.Exec == nil || !slices.Equal(c.StartupProbe.Exec.Command, wantProbe) {
+		t.Errorf("%s's startup probe is %+v; want exec %q", sidecar, c.StartupProbe, wantProbe)
+	}
+	if clone := slices.Index(inits, pipelinesteps.ContainerClone); clone < 0 || clone > at {
+		t.Errorf("the init containers run in the order %v; the sidecar starts after the clone", inits)
+	}
+	if sc := c.SecurityContext; sc == nil || sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
+		t.Errorf("%s may gain privileges (%+v); a service runs with allowPrivilegeEscalation false", sidecar, sc)
+	}
+	if len(pod.Containers) != 1 || pod.Containers[0].Name != pipelinesteps.ContainerStep {
+		t.Errorf("the pod's containers are %+v; want the step alone", pod.Containers)
+	}
+}
+
+// testSubstrateReportMapping holds report() to the driver's mapping case by
+// case: receiptFor's, then report()'s masking (component/pipelinerun/driver.go
+// and checkrun.go). The sentences are the driver's own -- exitMessage,
+// receiptFor's default, the executor-error receipt -- restated here because
+// none of them is exported. A refused outcome is a FAILED work step there, so
+// a refusal with no message reads the exit sentence as a failure does.
+func testSubstrateReportMapping(t *testing.T) {
+	const secret = "e2e-secret-value"
+	values := []string{secret}
+	step := pl.Step{Key: "fleet.display", Stage: "fleet", Name: "display"}
+	const waited = 1500 * time.Millisecond
+	answered := func(res pl.StepResult) substrateStep {
+		return substrateStep{step: step, sent: true, answered: true, result: res, elapsed: waited}
+	}
+	cases := []struct {
+		name string
+		s    substrateStep
+		want pl.StepReport
+	}{{
+		name: "refused with no message: the exit sentence",
+		s: answered(pl.StepResult{Status: pl.OutcomeRefused, ExitCode: -1,
+			Failure: &pl.Failure{Code: pl.CodeNoMachineForNeed}}),
+		want: pl.StepReport{Status: pipelinerun.StepRefused, Code: pl.CodeNoMachineForNeed,
+			Message: "The step's command did not run.", DurationMs: 1500},
+	}, {
+		name: "refused with no failure at all",
+		s:    answered(pl.StepResult{Status: pl.OutcomeRefused, ExitCode: -1}),
+		want: pl.StepReport{Status: pipelinerun.StepRefused, Message: "The step's command did not run.", DurationMs: 1500},
+	}, {
+		name: "failed with no sentence: its exit status",
+		s:    answered(pl.StepResult{Status: pl.OutcomeFailed, ExitCode: 3}),
+		want: pl.StepReport{Status: pipelinerun.StepFailed, Message: "The step's command exited with status 3.", DurationMs: 1500},
+	}, {
+		name: "failed with its own sentence, trimmed and masked",
+		s: answered(pl.StepResult{Status: pl.OutcomeFailed, ExitCode: 1,
+			Failure: &pl.Failure{Code: pl.CodeServiceFailed, Message: "  password " + secret + " refused \n"}}),
+		want: pl.StepReport{Status: pipelinerun.StepFailed, Code: pl.CodeServiceFailed,
+			Message: "password *** refused", DurationMs: 1500},
+	}, {
+		name: "cancelled with no message: none, a cancelled work step is not a failed one",
+		s:    answered(pl.StepResult{Status: pl.OutcomeCancelled, ExitCode: -1}),
+		want: pl.StepReport{Status: pipelinerun.StepCancelled, DurationMs: 1500},
+	}, {
+		name: "succeeded, the runner's own times and a masked log tail",
+		s: answered(pl.StepResult{Status: pl.OutcomeSucceeded, ExitCode: 0,
+			StartedAt: "2026-10-04T12:00:00Z", FinishedAt: "2026-10-04T12:00:45Z", LogTail: "the value is " + secret + "\n"}),
+		want: pl.StepReport{Status: pipelinerun.StepSucceeded, DurationMs: 45000, LogTail: "the value is ***\n"},
+	}, {
+		name: "an outcome the driver does not know",
+		s:    answered(pl.StepResult{Status: "exploded", ExitCode: 0}),
+		want: pl.StepReport{Status: pipelinerun.StepFailed, Code: pl.CodeExecutorError,
+			Message: `The runner answered an outcome this driver does not know ("exploded").`, DurationMs: 1500},
+	}, {
+		name: "no answer it could read: the executor's error, masked",
+		s:    substrateStep{step: step, sent: true, answered: true, err: errors.New("stream reset carrying " + secret)},
+		want: pl.StepReport{Status: pipelinerun.StepFailed, Code: pl.CodeExecutorError,
+			Message: "The runner could not report how the step ended: stream reset carrying ***"},
+	}}
+	for _, c := range cases {
+		c.want.Key, c.want.Stage, c.want.Name = step.Key, step.Stage, step.Name
+		if got := c.s.report(values); got != c.want {
+			t.Errorf("%s:\n got %+v\nwant %+v", c.name, got, c.want)
+		}
+	}
+}
+
+// testSubstrateNormalization holds normalizedCheckRun to what it may replace:
+// the run's id, the commit -- the whole SHA and its first seven, each under a
+// placeholder of its own -- the times, and the table's and the title's
+// durations, in every form formatDuration writes; a time nobody measured ("-")
+// and every other byte stay.
+func testSubstrateNormalization(t *testing.T) {
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	const runID = "v1:pipelines:run:e2e-normalization"
+	body := func(commit string) []byte {
+		return encodeJSON(map[string]any{
+			"name":         "MemQL / pipelines-e2e",
+			"external_id":  runID,
+			"details_url":  substrateOSOrigin + "/?pipelineRun=" + runID,
+			"head_sha":     sha,
+			"status":       "completed",
+			"conclusion":   "success",
+			"started_at":   "2026-10-04T12:00:00Z",
+			"completed_at": "2026-10-04T13:02:05Z",
+			"output": map[string]any{
+				"title": "Passed: 5 stages in 1h 02m 05s",
+				"summary": "Mode full · Push to the default branch · Commit " + commit + "\n\n" +
+					"| Stage | Status | Steps | Time |\n| --- | --- | --- | --- |\n" +
+					"| a | Passed | 1 passed | 45s |\n" +
+					"| b | Passed | 2 passed | 1m 02s |\n" +
+					"| c | Passed | 1 passed | 1h 02m 05s |\n" +
+					"| d | Passed | 1 passed | <1s |\n" +
+					"| e | Skipped | 1 skipped | - |\n",
+			},
+		})
+	}
+	const want = `{
+  "completed_at": "<timestamp>",
+  "conclusion": "success",
+  "details_url": "https://os.example.com/?pipelineRun=<run-id>",
+  "external_id": "<run-id>",
+  "head_sha": "<sha>",
+  "name": "MemQL / pipelines-e2e",
+  "output": {
+    "summary": "Mode full · Push to the default branch · Commit <sha7>\n\n| Stage | Status | Steps | Time |\n| --- | --- | --- | --- |\n| a | Passed | 1 passed | <duration> |\n| b | Passed | 2 passed | <duration> |\n| c | Passed | 1 passed | <duration> |\n| d | Passed | 1 passed | <duration> |\n| e | Skipped | 1 skipped | - |\n",
+    "title": "Passed: 5 stages in <duration>"
+  },
+  "started_at": "<timestamp>",
+  "status": "completed"
+}
+`
+	short, err := normalizedCheckRun(body(sha[:7]), runID, sha)
+	if err != nil {
+		t.Fatalf("normalizing: %v", err)
+	}
+	if string(short) != want {
+		t.Errorf("normalized:\n%s\nwant:\n%s", short, want)
+	}
+	long, err := normalizedCheckRun(body(sha), runID, sha)
+	if err != nil {
+		t.Fatalf("normalizing: %v", err)
+	}
+	if bytes.Equal(long, short) || !strings.Contains(string(long), "Commit <sha>\\n") {
+		t.Errorf("a summary naming the whole commit normalizes as %s; want `Commit <sha>`, apart from the short form's `Commit <sha7>`", long)
 	}
 }
 
@@ -987,9 +1185,13 @@ func (r *substrateRun) drive(ctx context.Context, exec pl.Executor) {
 }
 
 // report is one step as the driver reports it to the check run: receiptFor's
-// mapping of the executor's answer (restated, it is unexported), its message
-// masked with every secret value the drive resolved as the driver's report()
-// masks it, and the seam's own StepState.Report.
+// mapping of the executor's answer (component/pipelinerun/driver.go, restated
+// because it is unexported and the seam exports no path from a StepResult to
+// its report), its message masked with every secret value the drive resolved
+// as the driver's report() masks it, and the seam's own StepState.Report. It
+// follows receiptFor rule for rule, the work status included: a refused
+// outcome is a FAILED work step there, so a refusal with no message gets the
+// exit sentence as a failure does (the report-mapping subtest holds it).
 func (s *substrateStep) report(values []string) pl.StepReport {
 	st := pipelinerun.StepState{Key: s.step.Key, Stage: s.step.Stage, Name: s.step.Name}
 	mask := func(text string) string { return pl.MaskSecrets(strings.TrimSpace(text), values) }
@@ -1002,26 +1204,29 @@ func (s *substrateStep) report(values []string) pl.StepReport {
 		st.Status = pipelinerun.StepPending
 	case s.err != nil:
 		st.Status, st.Code = pipelinerun.StepFailed, pl.CodeExecutorError
-		st.Message = "The runner could not report how the step ended: " + mask(s.err.Error())
+		st.Message = "The runner could not report how the step ended: " + pl.MaskSecrets(s.err.Error(), values)
 	default:
 		res := s.result
+		// workStatus is receiptFor's rec.status, the v1:work:step status the
+		// outcome becomes; st.Status is its rec.report.
+		var workStatus string
 		switch res.Status {
 		case pl.OutcomeSucceeded:
-			st.Status = pipelinerun.StepSucceeded
+			workStatus, st.Status = pipelinerun.WorkStepDone, pipelinerun.StepSucceeded
 		case pl.OutcomeFailed:
-			st.Status = pipelinerun.StepFailed
+			workStatus, st.Status = pipelinerun.WorkStepFailed, pipelinerun.StepFailed
 		case pl.OutcomeRefused:
-			st.Status = pipelinerun.StepRefused
+			workStatus, st.Status = pipelinerun.WorkStepFailed, pipelinerun.StepRefused
 		case pl.OutcomeCancelled:
-			st.Status = pipelinerun.StepCancelled
+			workStatus, st.Status = pipelinerun.WorkStepCancelled, pipelinerun.StepCancelled
 		default:
-			st.Status, st.Code = pipelinerun.StepFailed, pl.CodeExecutorError
+			workStatus, st.Status, st.Code = pipelinerun.WorkStepFailed, pipelinerun.StepFailed, pl.CodeExecutorError
 			st.Message = fmt.Sprintf("The runner answered an outcome this driver does not know (%q).", mask(string(res.Status)))
 		}
 		if res.Failure != nil {
 			st.Code, st.Message = mask(res.Failure.Code), mask(res.Failure.Message)
 		}
-		if st.Message == "" && st.Status == pipelinerun.StepFailed {
+		if st.Message == "" && workStatus == pipelinerun.WorkStepFailed {
 			if res.ExitCode < 0 {
 				st.Message = "The step's command did not run."
 			} else {
@@ -1344,8 +1549,10 @@ func (m *substrateMesh) stepForwards(key string) []string {
 }
 
 // runnerAdapter is the workbench's PipelineRunner over the substrate's Runner:
-// JSON in, JSON out, the translation the workbench node's adapter in app/
-// makes, restated because it is that package's own.
+// JSON in, JSON out. Its production twin is app/pipelines_runner_adapter.go
+// (pipelinesRunnerAdapter, issue memql#5495), which is unexported in package
+// app, so the translation is restated here; when both are on one branch, the
+// two are reconciled -- same decode refusals, same reply shapes.
 type runnerAdapter struct {
 	runner *pipelinesteps.Runner
 }
@@ -1722,10 +1929,11 @@ var (
 
 // normalizedCheckRun is a check-run request body with what differs from one
 // run to the next written as a placeholder -- the run's id (the external id
-// and the details link), its commit, its times and the stage table's
-// durations -- and everything else as GitHub received it: the name, the
-// status, the conclusion, the title, each stage's row and every sentence.
-// Pretty-printed with sorted keys, so a diff of two reads line by line.
+// and the details link), its commit (<sha> whole, <sha7> by its first seven),
+// its times and the stage table's durations -- and everything else as GitHub
+// received it: the name, the status, the conclusion, the title, each stage's
+// row and every sentence. Pretty-printed with sorted keys, so a diff of two
+// reads line by line.
 func normalizedCheckRun(body []byte, runID, sha string) ([]byte, error) {
 	var check map[string]any
 	if err := json.Unmarshal(body, &check); err != nil {
@@ -1753,8 +1961,10 @@ func normalizedCheckRun(body []byte, runID, sha string) ([]byte, error) {
 			x = strings.ReplaceAll(x, runID, "<run-id>")
 			x = strings.ReplaceAll(x, sha, "<sha>")
 			if len(sha) >= 7 {
-				// The summary's meta line names the commit by its first seven.
-				x = strings.ReplaceAll(x, sha[:7], "<sha>")
+				// The summary's meta line names the commit by its first seven,
+				// under a placeholder of its own: a summary that switched from
+				// the short form to the long one must not normalize the same.
+				x = strings.ReplaceAll(x, sha[:7], "<sha7>")
 			}
 			return x
 		}
@@ -1818,6 +2028,11 @@ type runObjects struct {
 	jobs, secrets, pods []string
 	// stepKeys is the memql.io/step-key of every Job.
 	stepKeys []string
+	// jobOfStep is each Job's name by its step key.
+	jobOfStep map[string]string
+	// specs is each step's Job as the API server held it, read back whole
+	// once while it lived (the watch fills it; a listing does not).
+	specs map[string]pipelinesteps.Job
 }
 
 func (o runObjects) empty() bool { return len(o.jobs)+len(o.secrets)+len(o.pods) == 0 }
@@ -1861,7 +2076,12 @@ func listRunObjects(ctx context.Context, c *substrateCluster, namespace, selecto
 		for _, item := range list.Items {
 			*kind.into = append(*kind.into, item.Metadata.Name)
 			if kind.into == &out.jobs {
-				out.stepKeys = append(out.stepKeys, item.Metadata.Annotations[pipelinesteps.AnnotStepKey])
+				key := item.Metadata.Annotations[pipelinesteps.AnnotStepKey]
+				out.stepKeys = append(out.stepKeys, key)
+				if out.jobOfStep == nil {
+					out.jobOfStep = map[string]string{}
+				}
+				out.jobOfStep[key] = item.Metadata.Name
 			}
 		}
 	}
@@ -1872,15 +2092,32 @@ func listRunObjects(ctx context.Context, c *substrateCluster, namespace, selecto
 type runWatch struct {
 	mu   sync.Mutex
 	seen map[string]map[string]bool // "jobs" | "secrets" | "pods" | "stepKeys" -> names
-	done chan struct{}
-	exit chan struct{}
+	// specs is each step's Job read back whole, the first time it is listed.
+	specs map[string]pipelinesteps.Job
+	done  chan struct{}
+	exit  chan struct{}
 }
 
 // watchRunObjects lists the run's objects every two seconds until stopped:
-// the reachable positive the cleanup's empty answer is read against, and the
-// record of which steps ever had a Job.
+// the reachable positive the cleanup's empty answer is read against, the
+// record of which steps ever had a Job, and each step's Job read back whole
+// from the API server the first time it is listed -- what the cluster was
+// actually handed, not what the test compiled.
 func watchRunObjects(ctx context.Context, c *substrateCluster, namespace, selector string) *runWatch {
-	w := &runWatch{seen: map[string]map[string]bool{}, done: make(chan struct{}), exit: make(chan struct{})}
+	w := &runWatch{seen: map[string]map[string]bool{}, specs: map[string]pipelinesteps.Job{},
+		done: make(chan struct{}), exit: make(chan struct{})}
+	readBack := func(key, name string) {
+		body, status, err := c.call(ctx, http.MethodGet, "apis/batch/v1/namespaces/"+namespace+"/jobs/"+name, "", nil)
+		if err != nil || status != http.StatusOK {
+			return // gone already, or not readable now: the next listing tries again
+		}
+		var job pipelinesteps.Job
+		if json.Unmarshal(body, &job) == nil {
+			w.mu.Lock()
+			w.specs[key] = job
+			w.mu.Unlock()
+		}
+	}
 	record := func(kind string, names []string) {
 		if w.seen[kind] == nil {
 			w.seen[kind] = map[string]bool{}
@@ -1900,7 +2137,19 @@ func watchRunObjects(ctx context.Context, c *substrateCluster, namespace, select
 				record("secrets", objs.secrets)
 				record("pods", objs.pods)
 				record("stepKeys", objs.stepKeys)
+				var unread map[string]string
+				for key, name := range objs.jobOfStep {
+					if _, read := w.specs[key]; !read {
+						if unread == nil {
+							unread = map[string]string{}
+						}
+						unread[key] = name
+					}
+				}
 				w.mu.Unlock()
+				for key, name := range unread {
+					readBack(key, name)
+				}
 			}
 			select {
 			case <-w.done:
@@ -1921,7 +2170,8 @@ func (w *runWatch) stop() runObjects {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	names := func(kind string) []string { return slices.Sorted(maps.Keys(w.seen[kind])) }
-	return runObjects{jobs: names("jobs"), secrets: names("secrets"), pods: names("pods"), stepKeys: names("stepKeys")}
+	return runObjects{jobs: names("jobs"), secrets: names("secrets"), pods: names("pods"), stepKeys: names("stepKeys"),
+		specs: maps.Clone(w.specs)}
 }
 
 // awaitRunObjectsGone lists the run's objects until there are none or patience

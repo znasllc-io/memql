@@ -50,9 +50,9 @@ name: install-cluster-e2e
 #     released version, moves the cluster to the revision under test, and then
 #     uninstalls it -- so a receipt that lost track of anything across the move
 #     shows up as drift rather than as a cluster somebody has to find later.
-#   * THE FROM-SOURCE GRAPH RUNS AT ALL (memql#5067). Every other leg installs
-#     with a ref that is not `main`, so `imagesFromSource` is false and the
-#     RELEASE graph loads -- and that graph has no `buildImages` step. So
+#   * THE FROM-SOURCE GRAPH RUNS AT ALL (memql#5067). The three release legs
+#     install with a ref that is not `main`, so `imagesFromSource` is false
+#     and the RELEASE graph loads -- one with no `buildImages` step. So
 #     `install-main.json`, the lane a developer's "install from main" actually
 #     runs, was exercised by NO job, and it SHIPPED THE SAME CLASS OF BUG TWICE:
 #     memql#5056 fixed `rebuildFromCheckout` and missed `buildImages`,
@@ -78,7 +78,7 @@ name: install-cluster-e2e
 # Be honest about the gaps rather than let a green tick imply more than it is.
 # Each of these is a real limit, not a caveat:
 #
-#   * THREE OF THE FOUR LEGS DO NOT RUN THE ENGINE UNDER TEST. Their images
+#   * THREE OF THE FIVE LEGS DO NOT RUN THE ENGINE UNDER TEST. Their images
 #     come from GHCR at the newest PUBLISHED release; a pull request's Go
 #     changes are not in them. What those legs exercise against a real cluster
 #     is the MANIFESTS (deploy/k8s/**), the SCRIPTS (scripts/install/**,
@@ -88,12 +88,14 @@ name: install-cluster-e2e
 #     (see imageTagForVersion): two thirds of the fixes arrive, the engine
 #     binary is not one of them.
 #
-#     `from-source` is the exception and it is NOT a general answer to this
-#     gap. It BUILDS the revision's node images, so it does run the engine
-#     under test -- but it is one leg, it is the slowest by a wide margin, and
-#     it exists to cover `install-main.json` rather than to be the lane a Go
-#     change is proved by. Do not read a green `from-source` as "the engine
-#     works"; read it as "the from-source install path works".
+#     `from-source` and `pipelines` are the exceptions, and they are NOT a
+#     general answer to this gap. Both BUILD the revision's node images, so
+#     they do run the engine under test -- but they are the two slowest legs by
+#     a wide margin, `from-source` exists to cover `install-main.json`, and
+#     `pipelines` is that same install with one test of the pipelines substrate
+#     after it; neither is the lane a Go change is proved by. Do not read a
+#     green `from-source` as "the engine works"; read it as "the from-source
+#     install path works".
 #   * THE `pipelines` LEG DOES NOT DRIVE THE DEPLOYED ENGINE'S PIPELINES. A
 #     deployed engine cannot be pointed at a fake GitHub without configuration
 #     the product does not have, so the test runs the agent's executor and two
@@ -162,15 +164,16 @@ name: install-cluster-e2e
 # ===================== WHY A SEPARATE FILE, NOT MORE JOBS =================
 #
 # install-e2e.yml is the cheap lane: two jobs, no cluster, minutes. This one
-# pulls a cluster's worth of images three times over. Putting them in one file
-# would tie together the two things that most need to differ -- the TRIGGER
-# (this lane wants `schedule:` and a wider path set, and must NOT run on every
-# PR that touches an install script) and the CONCURRENCY GROUP (which is keyed
-# on `github.workflow`, so a docs-shaped push would cancel a cluster run
-# mid-reconcile, and the run that replaced it would start from a runner with no
-# memory of the cluster the cancelled one left behind).
+# pulls a cluster's worth of images three times over and builds one twice.
+# Putting them in one file would tie together the two things that most need
+# to differ -- the TRIGGER (this lane wants `schedule:` and a wider path set,
+# and must NOT run on every PR that touches an install script) and the
+# CONCURRENCY GROUP (which is keyed on `github.workflow`, so a docs-shaped push
+# would cancel a cluster run mid-reconcile, and the run that replaced it would
+# start from a runner with no memory of the cluster the cancelled one left
+# behind).
 #
-# The legs are a MATRIX rather than three copies of one job, and that satisfies
+# The legs are a MATRIX rather than five copies of one job, and that satisfies
 # the reasoning install-e2e.yml records for keeping `refused-key` a separate
 # job -- "sharing a baseline directory between two assertions that are exact
 # opposites is how one silently starts proving the other's claim". Each matrix
@@ -230,7 +233,7 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     name: ${{ matrix.leg }}
     runs-on: ubuntu-latest
-    # A HANG BOUND, NOT A BUDGET, and the four numbers in this file NEST.
+    # A HANG BOUND, NOT A BUDGET, and the numbers in this file NEST.
     #
     # The intended cost is ~15-20 minutes per leg (image pull, ArgoCD reconcile,
     # readiness wait, teardown). What this value has to survive is the WORST
@@ -250,16 +253,25 @@ jobs:
     #
     # `from-source` gets its own number because it is a different job wearing
     # the same YAML: it COMPILES seven engine images before the cluster can
-    # start, on top of everything the other legs do. The graph gives
+    # start, on top of everything the release legs do. The graph gives
     # `buildImages` 2700s of its own, which does not fit inside 50 minutes
     # beside a cold cluster bring-up -- and a job timeout that fires during a
     # legitimate build reports "the installer hung" about a runner that was
     # working. 90 keeps the nesting rule above intact: 1680s clusterUp +
     # 2700s buildImages = 4380s, inside 90m with room for the round trip.
     #
-    # `pipelines` is `from-source` plus one Go test, whose own `-timeout` is
-    # 30m: 4380s + 1800s = 6180s, inside 115m with the round trip's room.
-    timeout-minutes: ${{ matrix.leg == 'pipelines' && 115 || matrix.leg == 'from-source' && 90 || 50 }}
+    # `pipelines` is `from-source` and then one Go test, under two bounds of
+    # its own that nest the same way:
+    #
+    #                go test -timeout = 30m  (the test binary's run)
+    #   the test step timeout-minutes = 40m  (that run, plus compiling the
+    #                                         test binary and handing over
+    #                                         the kubeconfig)
+    #
+    # 4380s (73m) + 40m = 113m, inside 135m: the same 17m of room for the
+    # round trip `from-source` keeps, plus 5m for setting up Go, restoring its
+    # cache and building the stylesheet before the test step starts.
+    timeout-minutes: ${{ matrix.leg == 'pipelines' && 135 || matrix.leg == 'from-source' && 90 || 50 }}
     strategy:
       fail-fast: false
       matrix:
@@ -273,7 +285,7 @@ jobs:
           - upgrade
           # ...and the FROM-SOURCE graph, which no leg above can reach
           # (memql#5067). `buildImages` exists only in install-main.json, and
-          # every ref the other legs pass makes `imagesFromSource` false.
+          # every ref the legs above pass makes `imagesFromSource` false.
           #
           # IT BUILDS ALL SEVEN NODE TYPES, and that is forced rather than
           # chosen. A from-source install starts with no `memql-<node>:local`
@@ -439,12 +451,13 @@ jobs:
       # SKIPS on a cluster that supplied no federation ids -- which a local
       # cluster never can, because its OIDC issuer is private. Nothing to
       # start, nothing to write, nothing to stop.
-      # DISK, ON THE ONE LEG THAT BUILDS (memql#5067). The other three pull
-      # published images; this one compiles seven of them, plus a builder stage,
-      # onto the same runner that is also holding a k3d cluster. A runner that
-      # runs out of space fails somewhere far from the cause -- a layer write, a
-      # containerd import, a pod that will not start -- so the number is
-      # recorded before and after rather than inferred from the wreckage.
+      # DISK, ON THE LEGS THAT BUILD (memql#5067). The other three pull
+      # published images; `from-source` and `pipelines` compile seven of them,
+      # plus a builder stage, onto the same runner that is also holding a k3d
+      # cluster. A runner that runs out of space fails somewhere far from the
+      # cause -- a layer write, a containerd import, a pod that will not start
+      # -- so the number is recorded before and after rather than inferred from
+      # the wreckage.
       #
       # It REPORTS and does not free anything. No measurement here says the
       # space is short, and pre-emptively deleting half the runner image costs
@@ -474,7 +487,8 @@ jobs:
       #
       # `--commit` rather than `--tag`: the checkout, and therefore ArgoCD's
       # target revision, is the code under review. The upgrade leg starts from a
-      # release instead, which is the only difference between the legs here.
+      # release instead, and the two legs that build add `--from-source`: those
+      # are the only differences between the legs here.
       #
       # The step timeouts are generous on purpose. clusterUp pulls a whole
       # cluster's images on a cold runner; a timeout that fires during a
@@ -492,7 +506,7 @@ jobs:
           LEG: ${{ matrix.leg }}
         run: |
           set -euo pipefail
-          # AN ARRAY, because one leg passes two flags. A quoted scalar holding
+          # AN ARRAY, because two legs pass two flags. A quoted scalar holding
           # "--commit=x --from-source" reaches the CLI as ONE argument and is
           # refused as an unknown flag -- which would read as the flag being
           # broken rather than as the quoting being wrong.
@@ -502,8 +516,8 @@ jobs:
             # previous version and not this one wearing an old checkout.
             ref_flags=("--tag=${FROM_VERSION}")
           elif [ "$LEG" = "from-source" ] || [ "$LEG" = "pipelines" ]; then
-            # THE LANE AND THE VERSION ARE TWO QUESTIONS (memql#5067), and this
-            # leg needs opposite answers: the from-source GRAPH, over the
+            # THE LANE AND THE VERSION ARE TWO QUESTIONS (memql#5067), and these
+            # two legs need opposite answers: the from-source GRAPH, over the
             # revision under test. `--tag=main` would answer both and clone
             # main's tip, so the lane would green-light a tree that is not this
             # pull request. --from-source names only the lane. `pipelines` is
@@ -611,10 +625,10 @@ jobs:
               "$(field seedBootstrap result.bootstrapComplete)" "true"
           else
             expect "clusterUp.result.workloadsReady" "$(field clusterUp result.workloadsReady)" "true"
-            # THE NEGATIVE CONTROL, and the two legs prove each other: if this
-            # step ever appears on a release install, `buildImages` has stopped
-            # being the difference between the graphs and the from-source leg
-            # has stopped testing anything the others do not.
+            # THE NEGATIVE CONTROL, and the two graphs' legs prove each other:
+            # if this step ever appears on a release install, `buildImages` has
+            # stopped being the difference between the graphs and the legs that
+            # build have stopped testing anything the others do not.
             if [ "$(field buildImages result.imageSource)" != "MISSING" ]; then
               echo "[ ] ERROR: a release-graph install recorded a buildImages step; install.json is not supposed to have one" >&2
               fail=1
@@ -710,6 +724,8 @@ jobs:
       # root's; k3d writes the cluster's into a file of the runner's own.
       - name: The pipelines substrate, end to end on the installed cluster
         if: matrix.leg == 'pipelines'
+        # The job's arithmetic above: the test's own 30m plus its compile.
+        timeout-minutes: 40
         env:
           GOWORK: 'off'
         run: |
@@ -994,7 +1010,7 @@ jobs:
           # them into k3d; `k3d cluster delete` claims no images, and the
           # uninstall removes what the INSTALLER placed, which these are not.
           #
-          # Observed on this leg's first run: seven node images plus
+          # Observed on `from-source`'s first run: seven node images plus
           # `memql-db:16-dev` and `docker/dockerfile:1` (BuildKit's own
           # frontend, pulled by the build rather than by the install).
           #
