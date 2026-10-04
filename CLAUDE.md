@@ -742,9 +742,12 @@ stream, with MemQL's tools reachable over MCP.
   `ValidateExecutorBackend` refuses an unregistered name at TASK CREATION
   rather than at dispatch.
 - **The backend:** `integrations/agent/worker/cockpitapp.go`, registered from
-  `init()` under the `agent` build tag. It reuses the unexported
-  `preDispatchCheck` on purpose: an app run needs exactly the gates
-  `workerHost` needs, and a second copy drifts.
+  `init()` under the `agent` build tag. Consent is the dedicated APP GATE
+  (`app_gate.go`), not `preDispatchCheck`: the machine's per-cluster
+  `apps.allow` plus a routing policy or pin the owner made; the computer-use
+  kill switch blocks only when explicitly engaged. A call with no owner never
+  selects an app. Planner/bff calls reach an app through `AppCallForward` to
+  the agent holding the machine's stream.
 
 ### Local apps as execution surfaces (epic memql#4358)
 
