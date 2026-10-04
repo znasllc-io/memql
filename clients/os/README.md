@@ -847,10 +847,11 @@ repetitions of what the app already had.
 
 A pipeline is a fact about a source (design record
 `docs/superpowers/specs/2026-09-16-pipelines-program-design.md`, D12-D15 and
-section 10), so it lives here rather than in an app of its own: a third tab,
-**Runs**, a source's **Checks** and Pipeline fact, a run's page, the connect
-flow, and Settings -> Pipelines for the cluster owner. Everything reads from
-`apps/deployables/pipelines/`. Five things are worth knowing before changing it.
+section 10), so it lives here rather than in an app of its own: a tab of its
+own, **Runs**, a source's **Checks** and Pipeline fact, a run's page, the
+connect flow, and Settings -> Pipelines for the cluster owner. Everything reads
+from `apps/deployables/pipelines/`. Seven things are worth knowing before
+changing it.
 
 - **TWO MORE FEEDS AT THE ROOT, AND TWO ON THE RUN PAGE.** The caller's
   pipelines and runs are retained by `DeployablesApp` like every other concept
@@ -872,6 +873,19 @@ flow, and Settings -> Pipelines for the cluster owner. Everything reads from
   row's stage table moves only at stage boundaries -- and a FAILURE DOES NOT
   DIM THE STOPS AFTER IT: a stage an earlier failure kept from running reads
   "Not run" at full strength, which is a decision, not "not reached".
+- **THE CONNECT FLOW IS HELD ABOVE THE SECTION** (`connect/useConnectFlow.ts`),
+  the way `useAddMachineFlow` holds a machine's install draft: React state on
+  `DeployablesApp`, never storage, so leaving the page mid-read or mid-connect
+  keeps the answers and still lands the reply, and both tabs' pages are views
+  of the one flow. A reply that arrives after Cancel, or after the flow moved
+  to another source, is dropped. The page itself is pure readings over that
+  state (`connect/flow.ts`); whether "your fleet" exists is the one rule in
+  `pipelines/fleet.ts`, which Settings -> Pipelines reads too.
+- **THE MARKS HOLD STILL.** The deploy rail pulses its one running stage; a
+  list of runs and a stage's steps can hold several running at once, and a
+  page of pulses is the perpetual motion `SUPERVISED-VISUAL-COMPOSITION.md`
+  rules out, so `pipelines.css` stops the kit's animation for every pipelines
+  mark and the running stop keeps the reduced-motion ring.
 - **SAVED TO YOUR LIBRARY IS A FACT.** The runner keeps every step's full log
   in its owner's Library before it reports, so the run page offers "Open the
   full log" and says the log is saved, rather than offering to save it; a
@@ -2525,6 +2539,16 @@ lifetime if the app should be marked while closed. Deployables does this via
 one shared package collection, so its map, list and closed-app marker cannot
 hold different package feeds. A source retracts an item when it no longer
 applies; viewing an item does not change its underlying availability.
+
+**A change that only an EXPLICIT answer may clear names a target nothing
+wraps.** The common shell acknowledges every unseen change aimed at a visible
+section, so a section-level runtime change is cleared by a visit. The optional
+readiness item (`chrome/OptionalReadiness.tsx`, epic memql#5479) must not be:
+looking at what Settings > Pipelines asks is not answering it. Its change
+carries `target: "readiness"`, which no `AttentionDestination` wraps, so the
+dock, launcher and section navigation still draw the dot, and the section's
+"Not now" acknowledges exactly that change. The mark also retracts by itself
+when the item stops being open (set up, or no longer reported unset).
 
 Acknowledgments are `v1:os:attentionReceipt` rows, keyed by server-derived
 (user, change ID, revision), owner-scoped and broadcast between nodes. The UI

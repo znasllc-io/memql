@@ -185,16 +185,20 @@ A pipeline lives in **Deployables**, on its source -- not in an app of its own
   *pipeline* where its app count goes in the Sources list, and the Overview map
   draws a **Checks** node beside the deployables a checked source serves.
 - **Connect pipeline** is the add-a-deployable wizard's device over the source,
-  three steps: **Repository** reads the manifest at the default branch's head
-  with `pipelinesPreview`, so the stages show before anything is confirmed and
-  every refusal lands at that step with its remedy; **Compute** offers *Cluster*
-  and, only when one of your machines reports `pipelines=allowed`, *Cluster and
-  your fleet*; **Confirm** names the check, the stages and the secrets the
-  steps read, and asks how changes arrive. Nothing is written until Connect,
-  and leaving keeps the answers.
-- **Runs** is the third tab (`read app:deployables/runs`): every run of every
-  source you connected, newest first, grouped by day, Refine for the source,
-  branch and outcome. A run rings once, when it has an answer.
+  three steps. **Repository** reads `memql-package.yaml` at the default
+  branch's head with `pipelinesPreview`, so the stages show before anything is
+  confirmed. **Compute** offers *Cluster* and, only when one of your machines
+  reports `pipelines=allowed`, *Cluster and your fleet* -- the fleet alone
+  when a step names a need, which the cluster refuses -- and waits for a
+  choice, because running steps on your own machines is consent. **Confirm**
+  names the check, the stages and the secrets the steps read, and asks how
+  changes arrive. A refusal lands at the stop it is about, with its remedy: a
+  fleet code at Compute, a secret code at Confirm, everything else at
+  Repository. Nothing is written until Connect, and leaving keeps the answers.
+- **Runs** is a tab of its own, after Sources (`read app:deployables/runs`):
+  every run of every source you connected, newest first, grouped by day,
+  Refine for the source, branch and outcome. A run rings once, when it has an
+  answer.
 - **A run's page** draws the stages as stops across the top, read from the step
   rows; the open stop's steps say where each ran and for how long; a failed
   step shows its last lines -- read from its full log, which the runner keeps in
