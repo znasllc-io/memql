@@ -27,28 +27,31 @@ import (
 // a pipeline and no apps, with no special case (design record D12). Two readers
 // take the file: Deployables' source probe and every pipeline run read it
 // through component/packages' one strict decoder, and a run compiles its
-// pipeline: block with component/pipelines. These tests read it the same way --
-// compileEngineOpening is component/pipelinerun's readPlan, step for step, over
-// the committed tree -- so a manifest that would fail its own run fails here
-// first, on the pull request that broke it, rather than as the first red check
-// on main.
+// pipeline: block with component/pipelines. These tests read it the same way:
+// compileEngineOpening restates component/pipelinerun/tree.go's readPlan step
+// for step, and MUST FOLLOW IT when readPlan changes -- a restatement that
+// drifts holds the manifest to a compile no run performs. It reads the working
+// tree (the tracked files, as a run's tarball holds them), so a manifest that
+// would fail its own run fails here first, on the pull request that broke it,
+// rather than as the first red check on main.
 //
 // Beyond "it compiles", they hold three things a reader of the manifest has to
 // take on trust otherwise:
 //
-//   - Both images by digest. The Postgres is ALWAYS asserted, and it is the
-//     image ci.yml's db-tests lane runs, so the pipeline and that lane test
-//     against one image. The toolchain digest exists only once
-//     build-toolchain-image.yml has run on main, so that test skips while the
-//     manifest names the first tag, and fails on any other reference that is
-//     not a digest. Nothing here asserts an invented digest.
-//   - The copies the manifest has to carry stay copies. select.dbGated is
-//     scripts/ci/db-gated-packages.sh's set: a tree missing from it would run
-//     its database tests in go-tests, with no database, where they skip --
-//     green over tests that never ran. The gate-inputs step runs the packages
-//     ci.yml's planner adds for a change that is not Go source.
-//   - The db step reaches the service it declares, and fails rather than skips
-//     when it cannot.
+//   - Both images by digest. The Postgres is ALWAYS asserted. The toolchain
+//     digest exists only once build-toolchain-image.yml has run on main, so that
+//     test skips while the manifest names the first tag, and fails on any other
+//     reference that is not a digest. Nothing here asserts an invented digest.
+//   - Three of the copies the manifest carries stay copies: select.dbGated is
+//     scripts/ci/db-gated-packages.sh's set, the gate-inputs step runs ci.yml's
+//     GATE_PACKAGES, and the postgres service is the image and environment of
+//     ci.yml's db-tests service. A tree missing from the first would run its
+//     database tests in go-tests, with no database, where they skip -- green
+//     over tests that never ran. The manifest's other copies of ci.yml (the
+//     commands, the bucket globs, the shard counts, the fuzz targets) are held
+//     by nothing, and its header says so.
+//   - The db step hands its `go test` a DSN naming the service it declares, and
+//     MEMQL_REQUIRE_DB=1, so it fails rather than skips when it cannot connect.
 
 // The images the manifest names. Each repository is a contract: the toolchain
 // is what build-toolchain-image.yml publishes, the Postgres is the mirror
@@ -68,6 +71,7 @@ const (
 const (
 	manifestStageChecks     = "checks"
 	manifestStageTests      = "tests"
+	manifestStageGates      = "gates"
 	manifestStepGoChecks    = "go-checks"
 	manifestStepPathRouting = "path-routing"
 	manifestStepGateInputs  = "gate-inputs"
@@ -77,9 +81,13 @@ const (
 	manifestStepOSChecks    = "os-checks"
 )
 
-// manifestImageByDigest is an immutable image reference, the repository in its
-// first group.
-var manifestImageByDigest = regexp.MustCompile(`^([^@\s]+)@sha256:[0-9a-f]{64}$`)
+var (
+	// manifestImageByDigest is an immutable image reference, the repository in
+	// its first group.
+	manifestImageByDigest = regexp.MustCompile(`^([^@\s]+)@sha256:[0-9a-f]{64}$`)
+	// manifestShellAssignment is a shell variable assignment, NAME=value.
+	manifestShellAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+)
 
 // engineManifest reads memql-package.yaml through the reader Deployables' source
 // probe and a pipeline run both use: packages.ReadManifest, the strict decoder
@@ -109,13 +117,47 @@ func engineDeclaredStep(spec *pipelines.Spec, name string) (pipelines.StepSpec, 
 	return pipelines.StepSpec{}, false
 }
 
-// engineCommittedGoTree is the Go tree a run reads: the tracked go.mod, go.work
+// engineStepExports answers the value a step's command hands name to its `go
+// test`: an `export NAME=value` line, or NAME=value prefixed to the `go test`
+// command itself. Nothing else counts. A commented-out line is no line, and a
+// bare NAME=value line sets a variable the shell keeps to itself, which `go
+// test` -- and every test binary under it -- never sees.
+func engineStepExports(run, name string) (string, bool) {
+	var value string
+	found := false
+	for _, line := range strings.Split(run, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || strings.HasPrefix(fields[0], "#") {
+			continue
+		}
+		if fields[0] == "export" {
+			for _, f := range fields[1:] {
+				if v, ok := strings.CutPrefix(f, name+"="); ok {
+					value, found = strings.Trim(v, `'"`), true
+				}
+			}
+			continue
+		}
+		i, prefixed, named := 0, "", false
+		for ; i < len(fields) && manifestShellAssignment.MatchString(fields[i]); i++ {
+			if v, ok := strings.CutPrefix(fields[i], name+"="); ok {
+				prefixed, named = strings.Trim(v, `'"`), true
+			}
+		}
+		if named && i+1 < len(fields) && fields[i] == "go" && fields[i+1] == "test" {
+			value, found = prefixed, true
+		}
+	}
+	return value, found
+}
+
+// engineTrackedGoTree is the Go tree a run reads: the tracked go.mod, go.work
 // and .go files, which is what component/pipelinerun's keepForRun keeps of a
 // commit (less the manifest, which engineManifest reads). Listed by `git
 // ls-files`, so an untracked file in a working tree cannot change the graph;
 // read from the working tree, so an edit to a tracked file can. It also answers
 // the whole tracked set, which the openings check their changed paths against.
-func engineCommittedGoTree(t *testing.T) (fstest.MapFS, map[string]bool) {
+func engineTrackedGoTree(t *testing.T) (fstest.MapFS, map[string]bool) {
 	t.Helper()
 	out, err := exec.Command("git", "ls-files", "-z").Output()
 	if err != nil {
@@ -151,10 +193,10 @@ func engineCommittedGoTree(t *testing.T) (fstest.MapFS, map[string]bool) {
 // with pipelines.ScanGoTree as component/pipelinerun reads it.
 func engineImportGraph(t *testing.T) (*pipelines.Graph, map[string]bool) {
 	t.Helper()
-	tree, tracked := engineCommittedGoTree(t)
+	tree, tracked := engineTrackedGoTree(t)
 	graph, err := pipelines.ScanGoTree(tree)
 	if err != nil {
-		t.Fatalf("pipelines.ScanGoTree over the committed tree: %v", err)
+		t.Fatalf("pipelines.ScanGoTree over the tracked tree: %v", err)
 	}
 	// A file the graph cannot read makes every affected selection Full, and the
 	// pull-request openings below would then pass without compiling the
@@ -168,11 +210,11 @@ func engineImportGraph(t *testing.T) (*pipelines.Graph, map[string]bool) {
 	return graph, tracked
 }
 
-// compileEngineOpening compiles the pipeline for one run the way
-// component/pipelinerun's readPlan does: the block validated before anything is
-// computed from it, the mode the event decides, the change list a pull
-// request's compare answers, the import graph selected with Affected whenever a
-// step selects packages, and Compile.
+// compileEngineOpening compiles the pipeline for one run as
+// component/pipelinerun/tree.go's readPlan does, and must change when it does:
+// the block validated before anything is computed from it, the mode the event
+// decides, the change list a pull request's compare answers, the import graph
+// selected with Affected whenever a step selects packages, and Compile.
 //
 // Compute is cluster, the default a pipeline row carries. The engine's pipeline
 // consents to no fleet machine, so a step that named a need would refuse the
@@ -206,10 +248,10 @@ func compileEngineOpening(spec *pipelines.Spec, graph *pipelines.Graph, event pi
 	return pipelines.Compile(spec, in)
 }
 
-// Every event that opens a run compiles with no refusal, into the two stages in
-// the order written, every step in the toolchain image on the cluster, the db
-// step beside its Postgres; and each opening runs and skips what the manifest
-// says it does.
+// Every event that opens a run compiles with no refusal, into its stages in the
+// order written (the gates stage for a pull request only), every step in the
+// toolchain image on the cluster, the db step beside its Postgres; and each
+// opening runs, skips and leaves out what the manifest says it does.
 func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	graph, tracked := engineImportGraph(t)
@@ -218,34 +260,53 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		t.Fatalf("the pipeline declares no %q service, so the db-gated trees have nothing to test against", manifestPostgresService)
 	}
 
-	every := []string{manifestStepGoChecks, manifestStepPathRouting, manifestStepGateInputs,
+	fullStages := []string{manifestStageChecks, manifestStageTests}
+	pullRequestStages := []string{manifestStageChecks, manifestStageTests, manifestStageGates}
+	every := []string{manifestStepGoChecks, manifestStepPathRouting,
 		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks}
 	always := []string{manifestStepGoChecks, manifestStepPathRouting, manifestStepFuzz}
 	openings := []struct {
 		name    string
 		event   pipelines.Event
 		changed []string
-		// runs must be planned and not skipped; skips must be planned and
-		// skipped. A step in neither depends on what the import graph says.
-		runs, skips []string
+		stages  []string
+		// runs must be planned and not skipped, skips planned and skipped, absent
+		// not planned at all. A step in none of them depends on what the import
+		// graph says.
+		runs, skips, absent []string
 	}{
-		{name: "a push to the default branch", event: pipelines.EventPush, runs: every},
-		{name: "a merge group", event: pipelines.EventMergeGroup, runs: every},
+		// A full run tests every package in go-tests, the gate packages among
+		// them, so the gates stage is absent, as ci.yml runs that step only on a
+		// pull request.
+		{name: "a push to the default branch", event: pipelines.EventPush, stages: fullStages,
+			runs: every, absent: []string{manifestStepGateInputs}},
+		{name: "a merge group", event: pipelines.EventMergeGroup, stages: fullStages,
+			runs: every, absent: []string{manifestStepGateInputs}},
 		// The compiler of this very manifest: Go source only, and the db-gated
 		// driver (component/pipelinerun) imports it, so the change reaches both
 		// test steps and no bucket.
 		{
 			name: "a pull request changing Go", event: pipelines.EventPullRequest,
-			changed: []string{"component/pipelines/compile.go"},
-			runs:    append(slices.Clone(always), manifestStepGoTests, manifestStepDBTests),
-			skips:   []string{manifestStepGateInputs, manifestStepOSChecks},
+			changed: []string{"component/pipelines/compile.go"}, stages: pullRequestStages,
+			runs:  append(slices.Clone(always), manifestStepGoTests, manifestStepDBTests),
+			skips: []string{manifestStepGateInputs, manifestStepOSChecks},
 		},
 		// Not Go source, so the gate packages run; nothing the OS shell reads.
 		{
 			name: "a pull request changing only docs", event: pipelines.EventPullRequest,
-			changed: []string{"docs/public/overview/quickstart.md"},
-			runs:    append(slices.Clone(always), manifestStepGateInputs),
-			skips:   []string{manifestStepOSChecks},
+			changed: []string{"docs/public/overview/quickstart.md"}, stages: pullRequestStages,
+			runs:  append(slices.Clone(always), manifestStepGateInputs),
+			skips: []string{manifestStepOSChecks},
+		},
+		// The OS shell: os-checks must RUN. A typo in the os bucket would skip it
+		// on every pull request that changes the shell, green over a client
+		// nothing tested (the memql#2972 shape). The change reaches no db-gated
+		// package, so no Postgres starts for it.
+		{
+			name: "a pull request changing the OS shell", event: pipelines.EventPullRequest,
+			changed: []string{"clients/os/src/main.tsx"}, stages: pullRequestStages,
+			runs:  append(slices.Clone(always), manifestStepGateInputs, manifestStepOSChecks),
+			skips: []string{manifestStepDBTests},
 		},
 	}
 
@@ -265,8 +326,9 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			for _, stage := range plan.Stages {
 				stages = append(stages, stage.Name)
 			}
-			if want := []string{manifestStageChecks, manifestStageTests}; !slices.Equal(stages, want) {
-				t.Errorf("the plan's stages are %v, want %v: checks first, so a change that does not build starts no test", stages, want)
+			if !slices.Equal(stages, o.stages) {
+				t.Errorf("the plan's stages are %v, want %v: checks first, so a change that does not build starts no "+
+					"test, and the gates after the tests, so a red gate never skips one", stages, o.stages)
 			}
 
 			byName := map[string][]pipelines.Step{}
@@ -308,6 +370,12 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 					if step.Skip == nil {
 						t.Errorf("step %s runs, and this opening must skip it: nothing it reads changed", step.Key)
 					}
+				}
+			}
+			for _, name := range o.absent {
+				if steps := byName[name]; len(steps) > 0 {
+					t.Errorf("step %s is planned (%s), and this opening must leave it out: a full run tests its packages in go-tests",
+						name, steps[0].Key)
 				}
 			}
 
@@ -466,9 +534,11 @@ func TestEngineManifestGateStepRunsThePlannersGatePackages(t *testing.T) {
 	}
 }
 
-// The db step's DSN names the sidecar it declares -- the pod's own localhost,
-// the service's user, password and database -- and MEMQL_REQUIRE_DB turns a
-// database it cannot reach into a failure rather than a step of skips.
+// The db step's `go test` gets a DSN naming the sidecar it declares -- the pod's
+// own localhost, the service's user, password and database -- and
+// MEMQL_REQUIRE_DB=1, which turns a database it cannot reach into a failure
+// rather than a step of skips. Both have to reach `go test`
+// (engineStepExports): a commented-out or unexported assignment does not.
 func TestEngineManifestDBStepReachesItsService(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	step, ok := engineDeclaredStep(spec, manifestStepDBTests)
@@ -481,11 +551,12 @@ func TestEngineManifestDBStepReachesItsService(t *testing.T) {
 	}
 	postgres := spec.Services[manifestPostgresService]
 
-	assignment := regexp.MustCompile(`MEMQL_DATABASE_DSN=['"]?([^'"\s]+)`).FindStringSubmatch(step.Run)
-	if assignment == nil {
-		t.Fatalf("step %s sets no MEMQL_DATABASE_DSN, so its tests look for whatever database the default names", manifestStepDBTests)
+	raw, ok := engineStepExports(step.Run, "MEMQL_DATABASE_DSN")
+	if !ok {
+		t.Fatalf("step %s does not hand MEMQL_DATABASE_DSN to its go test (an `export` line, or a prefix on the go test "+
+			"line), so its tests look for whatever database the default names", manifestStepDBTests)
 	}
-	dsn, err := url.Parse(assignment[1])
+	dsn, err := url.Parse(raw)
 	if err != nil {
 		t.Fatalf("step %s's MEMQL_DATABASE_DSN does not parse: %v", manifestStepDBTests, err)
 	}
@@ -503,9 +574,35 @@ func TestEngineManifestDBStepReachesItsService(t *testing.T) {
 	case strings.TrimPrefix(dsn.Path, "/") != postgres.Env["POSTGRES_DB"]:
 		t.Errorf("the DSN names database %q and the %s service creates %q", strings.TrimPrefix(dsn.Path, "/"), manifestPostgresService, postgres.Env["POSTGRES_DB"])
 	}
-	if !regexp.MustCompile(`(^|\s)MEMQL_REQUIRE_DB=1(\s|$)`).MatchString(step.Run) {
-		t.Errorf("step %s does not set MEMQL_REQUIRE_DB=1, so a database it cannot reach turns every db-gated test into a skip and the step green",
-			manifestStepDBTests)
+	if v, ok := engineStepExports(step.Run, "MEMQL_REQUIRE_DB"); !ok || v != "1" {
+		t.Errorf("step %s does not hand MEMQL_REQUIRE_DB=1 to its go test (got %q), so a database it cannot reach turns "+
+			"every db-gated test into a skip and the step green", manifestStepDBTests, v)
+	}
+}
+
+// Each form engineStepExports admits, and each it refuses: the refusals are the
+// ones that would let a broken db step pass the test above.
+func TestEngineStepExportsSeesOnlyWhatGoTestReceives(t *testing.T) {
+	for _, tc := range []struct {
+		name, run string
+		want      string
+		ok        bool
+	}{
+		{"an export line", "export X=1\ngo test ./...", "1", true},
+		{"one of several exports", "export A=a X='2' B=b\ngo test ./...", "2", true},
+		{"a prefix on the go test line", "X=3 go test ./...", "3", true},
+		{"one of several prefixes", "A=a X=4 go test ./...", "4", true},
+		{"a bare assignment the shell keeps", "X=1\ngo test ./...", "", false},
+		{"a commented-out export", "# export X=1\ngo test ./...", "", false},
+		{"a prefix on another command", "X=1 psql -c 'select 1'\ngo test ./...", "", false},
+		{"another variable", "export XY=1\ngo test ./...", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := engineStepExports(tc.run, "X")
+			if got != tc.want || ok != tc.ok {
+				t.Errorf("engineStepExports(%q, X) = %q, %v; want %q, %v", tc.run, got, ok, tc.want, tc.ok)
+			}
+		})
 	}
 }
 

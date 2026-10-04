@@ -8,38 +8,55 @@
 # services as sidecars.
 #
 # WHAT IT RUNS IS WHAT CI RUNS. Each step is a lane of .github/workflows/ci.yml,
-# or a step of one, with that lane's own commands, and the comment on each step
-# names it: the Go checks and gates, the Go tests, the db-gated tests and the OS
-# shell's checks. The other lanes stay ci.yml's: those that need Docker or a
-# display (os-checks' image build, bash32-smoke, the VS Code host lanes); the
-# node-tag, cluster-e2e and per-module passes, whose tag and module lists
-# ci.yml keeps and its own gates check; and the TypeScript SDK, view-kit, VS
-# Code extension, MCP conformance and proving lanes.
+# or a step of one, with that lane's commands as they stood when copied, and the
+# comment on each step names it: the Go checks and gates, the Go tests, the
+# db-gated tests and the OS shell's checks. The other lanes stay ci.yml's:
+#
+#   - os-checks' image build, bash32-smoke and the VS Code and productivity host
+#     lanes cannot run here: they need Docker or a display.
+#   - The node-tag, cluster-e2e and per-module passes are out of this task's
+#     scope: their tag and module lists live in ci.yml, held there by its own
+#     gates, and a copy here would be held by nothing.
+#   - The TypeScript SDK lane is out of scope; it would run here (Node, npm).
+#   - The view-kit lane is out of scope; it would run here (Node, npm).
+#   - The VS Code extension lane is out of scope; it would run here (only the
+#     host lanes above need a display).
+#   - The MCP conformance lane is out of scope; it would run here beside the
+#     postgres sidecar. Until it does, test/conformance runs in go-tests with no
+#     database, so its database checks run only in ci.yml's mcp-conformance lane.
+#   - The proving lane is out of scope; it would run here beside the sidecar.
 #
 # NO STEP NAMES A NEED. A need sends a step to a fleet machine, and a pipeline
 # whose owner has not consented to the fleet refuses the whole run
 # (pipeline_fleet_not_consented): this pipeline runs on the cluster alone.
 #
-# memql_package_manifest_test.go compiles this file the way a run does, for a
-# push, a merge group and two pull requests, and holds the lists it copies to
-# their originals.
+# WHAT HOLDS IT TO CI.YML. memql_package_manifest_test.go compiles this file the
+# way a run does -- for a push, a merge group and three pull requests -- and
+# holds three of its copies to their originals: select.dbGated to
+# scripts/ci/db-gated-packages.sh, the gate-inputs packages to ci.yml's
+# GATE_PACKAGES, and the postgres service to ci.yml's db-tests service. Nothing
+# holds the rest: the step commands, the bucket globs, the shard counts, the
+# fuzz targets and the extension list are hand copies of ci.yml, and a change
+# there has to be made here too.
 formatVersion: 1
 name: memql
 pipeline:
-  # deploy/toolchain-image: Go 1.27.1, Node 22, protoc 33.4, git, make and the
-  # PostgreSQL client, as uid 1000. Named by TAG until build-toolchain-image.yml
-  # has run on main -- a dispatch-only workflow cannot run before it is on the
-  # default branch -- and then pinned by the digest its run summary prints. The
-  # test skips its digest check while this is the 1.0.0 tag and fails on any
-  # other reference that is not a digest. A step's Job pulls its images with no
-  # registry credential, so this package and the Postgres one must be public.
+  # deploy/toolchain-image: Go 1.27.1, Node 22, protoc 33.4, kubectl 1.32.13, the
+  # Docker client (no daemon), git, make, jq, python3 and the PostgreSQL client,
+  # as uid 1000. Named by TAG until build-toolchain-image.yml has run on main --
+  # a dispatch-only workflow cannot run before it is on the default branch --
+  # and then pinned by the digest its run summary prints. The test skips its
+  # digest check while this is the 1.0.0 tag and fails on any other reference
+  # that is not a digest. A step's Job pulls its images with no registry
+  # credential, so this package and the Postgres one must be public.
   image: ghcr.io/znasllc-io/memql-toolchain:1.0.0
   services:
     # TimescaleDB + pgvector: the mirror ci.yml's db-tests lane runs, at the same
-    # digest and with the same user, password and database, so the pipeline and
-    # that lane test against one image. A sidecar shares the step's pod network,
-    # so the step reaches it on localhost:5432. The password is the local
-    # development one ci.yml uses, not a secret.
+    # digest and with the same user, password and database (the test holds all
+    # four equal), so the pipeline and that lane test against one image. A
+    # sidecar shares the step's pod network, so the step reaches it on
+    # localhost:5432. The password is the local development one ci.yml uses, not
+    # a secret.
     postgres:
       image: ghcr.io/znasllc-io/ci-timescaledb@sha256:d8336a5c9cc49bdbf1e935234e8c87ab64b6d6d195fd2ecedff7b00185557631
       env:
@@ -49,8 +66,8 @@ pipeline:
       # Over TCP, the way the step connects. The image's first start runs its
       # initialization on a server listening on its socket alone and then
       # restarts it, so a socket probe can pass before the server the step will
-      # reach is up. ci.yml's lanes wait on this same check before their first
-      # query.
+      # reach is up. ci.yml's lanes wait on the same TCP check before their
+      # first query.
       ready: pg_isready -h localhost -U memql
   caches: [go, npm]
   select:
@@ -98,10 +115,10 @@ pipeline:
       # packages for exactly that change (scripts/ci/selection): their tests read
       # repository files by path, which no import graph can see.
       gates: ["**", "!**/*.go"]
-      # What the OS shell's checks read: ci.yml's osclient bucket without the
-      # root Dockerfile, which only that lane's image build reads and this step
-      # does not run, and with the Makefile and this file, which say what the
-      # step runs.
+      # What the OS shell's checks read: a hand copy of ci.yml's osclient bucket
+      # (nothing holds the two together) without the root Dockerfile, which only
+      # that lane's image build reads and this step does not run, and with the
+      # Makefile and this file, which say what the step runs.
       os:
         - clients/**
         - sdk/ts/**
@@ -144,22 +161,13 @@ pipeline:
             set -eu
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=300s ./scripts/ci/ ./scripts/dev/
-        # ci.yml go-checks' gate-inputs step, on any change that is not Go
-        # source. The packages are ci.yml's GATE_PACKAGES; the test holds them
-        # equal.
-        - name: gate-inputs
-          when: { bucket: gates }
-          run: |
-            set -eu
-            bash scripts/identity/build-css.sh
-            go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
     - name: tests
       steps:
         # ci.yml go-tests: every package outside the db-gated trees that the
-        # change reaches, over as many shards as that lane plans. Uncached, as
-        # ci.yml runs the root package: a step cannot give that package a flag
-        # of its own, and its gates read `git ls-files`, a set no test cache
-        # sees.
+        # change reaches, over four shards, the count ci.yml's class table gives
+        # that lane today (a hand copy). Uncached, as ci.yml runs the root
+        # package: a step cannot give that package a flag of its own, and its
+        # gates read `git ls-files`, a set no test cache sees.
         - name: go-tests
           packages: affected
           only: not-db-gated
@@ -169,12 +177,13 @@ pipeline:
             set -eu
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=600s $MEMQL_PACKAGES
-        # ci.yml db-tests: the db-gated packages the change reaches, over as many
-        # shards as that lane plans, each beside its own Postgres. The extensions
-        # are the ones that lane creates before it tests. A step cannot give
-        # component/memql the serial class and 600s budget ci.yml's planner
-        # does, so every package here runs under them; MEMQL_REQUIRE_DB=1 makes
-        # a database the tests cannot reach a failure, not a step of skips.
+        # ci.yml db-tests: the db-gated packages the change reaches, over five
+        # shards, the count ci.yml's class table gives that lane today (a hand
+        # copy), each beside its own Postgres. The extensions are the ones that
+        # lane creates before it tests. A step cannot give component/memql the
+        # serial class and 600s budget ci.yml's planner does, so every package
+        # here runs under them; MEMQL_REQUIRE_DB=1 makes a database the tests
+        # cannot reach a failure, not a step of skips.
         - name: db-tests
           packages: affected
           only: db-gated
@@ -205,8 +214,8 @@ pipeline:
             go test ./component/memql -run '^FuzzEvalExpr$' -fuzz '^FuzzEvalExpr$' -fuzztime=40s
             go test ./test/conformance -run '^FuzzParse$' -fuzz '^FuzzParse$' -fuzztime=40s
         # ci.yml os-checks, without its Docker build of the image's shell stage:
-        # a step's pod has no Docker. The install is retried as that lane retries
-        # it; the checks are not.
+        # a step's pod has no Docker daemon. The install is retried as that lane
+        # retries it; the checks are not.
         - name: os-checks
           when: { bucket: os }
           run: |
@@ -215,3 +224,19 @@ pipeline:
             make os-typecheck
             make os-test
             make os-build
+    # ci.yml go-checks' gate-inputs step, which ci.yml runs on a pull request
+    # only: a full run tests every package in go-tests, these among them, so
+    # this stage is planned for a pull request alone. The step runs when the
+    # change is not all Go source. The stage comes after the tests so a red gate
+    # never skips a test; a red test stage skips it in turn, as the seam skips
+    # every stage after a failed one. The packages are ci.yml's GATE_PACKAGES;
+    # the test holds them equal.
+    - name: gates
+      on: [pull_request]
+      steps:
+        - name: gate-inputs
+          when: { bucket: gates }
+          run: |
+            set -eu
+            bash scripts/identity/build-css.sh
+            go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
