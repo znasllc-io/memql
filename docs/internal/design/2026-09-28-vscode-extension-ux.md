@@ -74,8 +74,8 @@ panel drops messages).
 
 ## Long operations: one progress screen
 
-Install, repair, uninstall, deploy, rebuild and update use one screen
-(`kit.progress`):
+Install, repair, uninstall, update, rebuild and version changes use one screen
+(`kit.progress`). A remote deploy reports an outcome, not a progress screen.
 
 - The MemQL mark (inline SVG, accent colour), a title in the act's own words
   ("Installing MemQL", "Uninstalling MemQL").
