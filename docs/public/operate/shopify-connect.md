@@ -81,8 +81,12 @@ expected deliverables are tracked in
 
 The shared storefront flow requests `unauthenticated_read_product_listings`,
 `unauthenticated_read_checkouts`, `unauthenticated_write_checkouts`,
-`unauthenticated_read_customers`, `read_products`, `read_inventory`,
+`unauthenticated_read_customers`, `write_products`, `read_inventory`,
 `read_locations`, and `read_orders`. Register those scopes on the app.
+It asks for `write_products` rather than `read_products` because product-content
+delivery writes product metafields; `write_products` includes the catalog reads.
+Only a missing Storefront scope refuses a connection, so a grant without
+`write_products` still connects and product-content delivery fails later.
 The complete Shopify mirror has additional optional scope requirements; connecting
 a storefront does not request finance, staff, payment-method, or historical-order
 access for that wider mirror.
