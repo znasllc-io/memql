@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
@@ -23,6 +24,10 @@ import (
 type fakeEngine struct {
 	mu    sync.Mutex
 	calls []string
+	// internal records, per call, whether its context carried internal
+	// origin. Several of the runtime's writes are @serverOnly and the
+	// rendered text is identical with or without the stamp.
+	internal []bool
 	// rows answers a read whose rendered call STARTS WITH the key, so a
 	// test seeds `query outboxPending` without restating its arguments.
 	rows map[string][]map[string]any
@@ -34,10 +39,11 @@ func newFakeEngine() *fakeEngine {
 	return &fakeEngine{rows: map[string][]map[string]any{}, failOn: map[string]error{}}
 }
 
-func (f *fakeEngine) Execute(_ context.Context, q string) (any, error) {
+func (f *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, q)
+	f.internal = append(f.internal, auth.OriginFromContext(ctx).IsInternal())
 	for needle, err := range f.failOn {
 		if strings.Contains(q, needle) {
 			return nil, err
@@ -72,6 +78,20 @@ func (f *fakeEngine) callsContaining(needle string) []string {
 }
 
 func (f *fakeEngine) countContaining(needle string) int { return len(f.callsContaining(needle)) }
+
+// internalContaining reports, for every recorded call carrying the
+// substring, whether that call's context carried internal origin.
+func (f *fakeEngine) internalContaining(needle string) []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []bool
+	for i, c := range f.calls {
+		if strings.Contains(c, needle) {
+			out = append(out, f.internal[i])
+		}
+	}
+	return out
+}
 
 // fakeConnector is a scriptable Connector. Every method answers from a
 // field the test sets, so a suite says what the origin does rather than

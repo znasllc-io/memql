@@ -148,6 +148,41 @@ func TestLoadConfigDropsAnEnvSourceNamedAfterADeclaredConnector(t *testing.T) {
 	}
 }
 
+// A HYPHENATED source name reaches every one of its settings, FORWARD_HEADERS
+// included, through the '-' -> '_' env spelling. The case above proves the
+// mapping only for a source with scheme=none, which reads nothing but the
+// scheme, so a mapping that broke for the other keys would still pass it.
+//
+// The variables are the ones docs/public/operate/inbound-delivery.md tells an
+// operator to set for `shopify-custom`, spelled exactly as printed there. If
+// the mapping drifted, that block would configure a source that is dropped at
+// boot (no SIGNATURE_SCHEME under the name the loader reads) or, worse, one
+// that verifies and stages no metadata, so the topic never reaches a
+// connector.
+func TestLoadConfigMapsAHyphenatedSourcesForwardHeaders(t *testing.T) {
+	t.Setenv("MEMQL_INBOUND_SOURCE_ALLOWLIST", "shopify-custom")
+	t.Setenv("MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_SIGNATURE_SCHEME", "hmac-sha256-base64")
+	t.Setenv("MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_SIGNATURE_HEADER", "X-Shopify-Hmac-Sha256")
+	t.Setenv("MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_DEDUPE_HEADER", "X-Shopify-Webhook-Id")
+	t.Setenv("MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_FORWARD_HEADERS", "X-Shopify-Topic,X-Shopify-Shop-Domain,X-Shopify-Webhook-Id")
+	t.Setenv("MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_SECRET", "shh")
+
+	src, ok := LoadConfig(quietLogger()).Sources["shopify-custom"]
+	if !ok {
+		t.Fatal("the documented shopify-custom configuration was dropped: its settings did not " +
+			"resolve under MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_*")
+	}
+	if src.Scheme != SchemeHMACSHA256Base64 || src.Secret != "shh" ||
+		src.SignatureHeader != "X-Shopify-Hmac-Sha256" || src.DedupeHeader != "X-Shopify-Webhook-Id" {
+		t.Errorf("source policy did not resolve from the hyphenated name's env spelling: %+v", src)
+	}
+	want := []string{"x-shopify-topic", "x-shopify-shop-domain", "x-shopify-webhook-id"}
+	if !reflect.DeepEqual(src.ForwardHeaders, want) {
+		t.Errorf("MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_FORWARD_HEADERS resolved to %q, want %q",
+			src.ForwardHeaders, want)
+	}
+}
+
 // Enabled=false must take the whole receiver out, not merely stop new sources
 // resolving.
 func TestLoadConfigRespectsTheKillSwitch(t *testing.T) {

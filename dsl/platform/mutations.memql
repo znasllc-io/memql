@@ -361,10 +361,27 @@ mutation inboundRequest stageInboundRequest {
 // there the engine stamps and products read, here the PRODUCT stamps as
 // it works the row and the engine only ever writes the initial
 // 'received'.
+//
+// @serverOnly (memql#5707 follow-up), for stageInboundRequest's reason
+// seen from the other side. The concept declares no @rowAuthz, so without
+// the wire bar any authenticated caller could stamp any staged delivery --
+// mark a privacy request `processed` that no connector ever worked, or
+// `failed` one it did -- and the staged queue is what an operator reads to
+// learn what happened. Every legitimate writer is server-side: the
+// datasync dispatcher under its operator identity, campaigns' feedback
+// ingester stamping inline, and a product automation draining its source,
+// whose tree-loaded step context carries internal origin. A client never
+// works a delivery, so it never stamps one.
 
 /// Stamp a handling transition on a v1:platform:inboundRequest row (memql#2957). Called by the
 /// product automation draining the row (processing/processed/failed); the engine receiver only ever
 /// writes the initial 'received'.
+///
+/// @serverOnly rather than actor.userId scoping (memql#5707 follow-up): a staged delivery has no
+/// owner to scope to, and the writers -- the datasync dispatcher, campaigns' feedback ingester and a
+/// product automation's trusted step -- act for no user. What must hold is that the row's handling
+/// state is written by whatever WORKED it, never by a client choosing a status.
+@serverOnly
 mutation inboundRequest updateInboundRequestStatus {
   args {
     requestId    string!

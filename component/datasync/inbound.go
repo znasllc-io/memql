@@ -2,6 +2,7 @@ package datasync
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -208,20 +209,97 @@ type DispatchResult struct {
 
 // Dispatch works one staged inbound request.
 //
-// The request row is stamped `processed` or `failed` either way, so an
-// operator reading the staged queue sees what happened to each delivery
-// rather than a row that stayed `received` forever.
+// A row whose source no connector serves is a NO-OP: nothing is asked,
+// nothing is stamped, and Handled is false. It belongs to whatever does serve
+// that source -- a product automation -- and so does its status.
+//
+// A row a connector DOES serve is stamped `processed` or `failed` either way,
+// so an operator reading the staged queue sees what happened to each delivery
+// rather than a row that stayed `received` forever. That includes a row whose
+// staged metadata cannot be read (DispatchStaged): it is stamped `failed`
+// once the connector has claimed it, and never before, so the no-op above
+// holds for every row of an unserved source whatever its metadata says.
 func (d *Dispatcher) Dispatch(ctx context.Context, req memqlsync.InboundRequest) (DispatchResult, error) {
-	var out DispatchResult
-	source := strings.TrimSpace(req.Source)
+	connector, ok := d.connectorFor(ctx, req.Source)
+	if !ok {
+		return DispatchResult{}, nil
+	}
+	return d.dispatchTo(ctx, connector, req)
+}
+
+// StagedRequest is one staged row as the dispatch automation hands it over,
+// its delivery metadata still in the stored string form.
+type StagedRequest struct {
+	RequestId   string
+	Source      string
+	Topic       string
+	Body        []byte
+	HeadersJSON string
+	ReceivedAt  string
+}
+
+// DispatchStaged is Dispatch for a row still in its staged form. The
+// connector is resolved FIRST and the metadata parsed only after, which is
+// what keeps a row of an unserved source a no-op even when its metadata is
+// unreadable. A served row whose metadata does not parse is stamped `failed`
+// and returned as an error, as Dispatch does with an apply failure: left
+// `received`, it would say nothing to the operator and, because @createOnly
+// keeps the bad value, re-fire identically on every re-stage.
+func (d *Dispatcher) DispatchStaged(ctx context.Context, staged StagedRequest) (DispatchResult, error) {
+	connector, ok := d.connectorFor(ctx, staged.Source)
+	if !ok {
+		return DispatchResult{}, nil
+	}
+	req, reason := staged.parse(d.now)
+	if reason != "" {
+		d.stamp(OperatorContext(ctx), req.RequestId, "failed", reason)
+		return DispatchResult{Handled: true}, fmt.Errorf("datasync: %s", reason)
+	}
+	return d.dispatchTo(ctx, connector, req)
+}
+
+// parse turns the staged strings into the connector's InboundRequest, or
+// names why it cannot. An absent receipt time falls back to now.
+func (s StagedRequest) parse(now func() time.Time) (memqlsync.InboundRequest, string) {
+	req := memqlsync.InboundRequest{
+		RequestId:  strings.TrimSpace(s.RequestId),
+		Source:     strings.TrimSpace(s.Source),
+		Topic:      strings.TrimSpace(s.Topic),
+		Body:       s.Body,
+		ReceivedAt: now().UTC(),
+	}
+	if s.HeadersJSON != "" {
+		if err := json.Unmarshal([]byte(s.HeadersJSON), &req.Headers); err != nil {
+			return req, "invalid staged delivery headers"
+		}
+	}
+	if s.ReceivedAt != "" {
+		at, err := time.Parse(time.RFC3339Nano, s.ReceivedAt)
+		if err != nil {
+			return req, "invalid staged delivery timestamp"
+		}
+		req.ReceivedAt = at.UTC()
+	}
+	return req, ""
+}
+
+// connectorFor resolves the connector serving a source, or reports none.
+func (d *Dispatcher) connectorFor(ctx context.Context, source string) (memqlsync.Connector, bool) {
+	source = strings.TrimSpace(source)
 	if source == "" {
-		return out, nil
+		return nil, false
 	}
 	connector, ok := d.lookup(ctx, source)
 	if !ok || connector == nil {
-		return out, nil
+		return nil, false
 	}
-	out.Handled = true
+	return connector, true
+}
+
+// dispatchTo works a request its connector has already claimed.
+func (d *Dispatcher) dispatchTo(ctx context.Context, connector memqlsync.Connector, req memqlsync.InboundRequest) (DispatchResult, error) {
+	out := DispatchResult{Handled: true}
+	source := strings.TrimSpace(req.Source)
 
 	specs := domainSpecsByConcept(connector)
 

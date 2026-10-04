@@ -1,6 +1,9 @@
 package sync
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // inbound_source.go -- the webhook source a MULTI-TENANT connector owns
 // (memql#4391).
@@ -67,10 +70,12 @@ func SourceName(connector, tenant string) string { return connector + "-" + tena
 // SourceFor asks every BOUND connector whether it owns a source name,
 // and returns the first that says yes.
 //
-// The receiver calls this AFTER its env-configured sources, so an
-// operator who pinned a source in the environment keeps it: a connector
-// silently taking over a pinned name would move which secret verifies a
-// live sender, with nothing in the environment changed to say so.
+// The receiver calls this AFTER its env-configured sources, so a
+// connector never silently takes over a name an operator pinned: that
+// would move which secret verifies a live sender, with nothing in the
+// environment changed to say so. A pinned name ConnectorForSource
+// resolves is REFUSED by the receiver instead of verified by either
+// secret (memql#5707 follow-up).
 func SourceFor(ctx context.Context, name string) (InboundSource, bool) {
 	src, _, ok := sourceOwner(ctx, name)
 	return src, ok
@@ -78,12 +83,67 @@ func SourceFor(ctx context.Context, name string) (InboundSource, bool) {
 
 // ConnectorForSource resolves an exact connector name or a source explicitly
 // claimed by a bound connector. It never guesses ownership from a prefix.
+//
+// It is the dispatcher's routing rule AND the inbound receiver's collision
+// rule: a name this resolves is never verified by an env-pinned secret,
+// because the connector it routes to reads the row as signed by its own. One
+// predicate, so the receiver cannot admit a row the dispatcher would then
+// hand to a connector on a premise the receiver did not check.
 func ConnectorForSource(ctx context.Context, name string) (Connector, bool) {
 	if c, ok := Lookup(name); ok {
 		return c, true
 	}
 	_, c, ok := sourceOwner(ctx, name)
 	return c, ok
+}
+
+// InboundSourceClaimer is OPTIONAL beside InboundSourceProvider. It answers
+// whether a source name is the connector's WITHOUT resolving a secret, and it
+// says when it cannot tell.
+//
+// The inbound receiver's env-pin collision check needs both properties. It
+// runs before any signature check, on a path any caller can reach, so a
+// secret resolved and unsealed only to be discarded is wasted work there.
+// And "could not read my tenants" must never read as "not mine": that answer
+// admits an env pin on a tenant's name, which the dispatcher then routes to
+// the connector once the read recovers.
+type InboundSourceClaimer interface {
+	// ClaimsInboundSource reports whether name is one of the connector's
+	// sources, exactly as InboundSource would claim it, or an error when the
+	// connector cannot tell.
+	ClaimsInboundSource(ctx context.Context, name string) (bool, error)
+}
+
+// SourceClaimed is ConnectorForSource's answer for the receiver's collision
+// check: whether a bound connector claims name, and an error when one could
+// not say. A connector that implements only InboundSourceProvider is asked
+// through it, so the two answers agree wherever neither errors.
+func SourceClaimed(ctx context.Context, name string) (Connector, bool, error) {
+	if c, ok := Lookup(name); ok {
+		return c, true, nil
+	}
+	for _, connectorName := range BoundNames() {
+		c, ok := Lookup(connectorName)
+		if !ok {
+			continue
+		}
+		if claimer, ok := c.(InboundSourceClaimer); ok {
+			claimed, err := claimer.ClaimsInboundSource(ctx, name)
+			if err != nil {
+				return c, false, fmt.Errorf("sync: connector %q could not say whether it claims source %q: %w", connectorName, name, err)
+			}
+			if claimed {
+				return c, true, nil
+			}
+			continue
+		}
+		if provider, ok := c.(InboundSourceProvider); ok {
+			if _, ok := provider.InboundSource(ctx, name); ok {
+				return c, true, nil
+			}
+		}
+	}
+	return nil, false, nil
 }
 
 func sourceOwner(ctx context.Context, name string) (InboundSource, Connector, bool) {
