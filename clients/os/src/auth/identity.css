@@ -1,5 +1,6 @@
-.os-identity-gate { height: 100dvh; overflow: auto; background: var(--os-ground); color: var(--os-ink); display: grid; }
-.os-identity-gate > .os-wizard { min-height: 100dvh; }
+.os-identity-layout { height: 100vh; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; background: var(--os-ground); color: var(--os-ink); }
+.os-identity-preferences { flex: none; padding: 20px 20px 0; }
+.os-identity-layout > .os-wizard { flex: 1; min-height: 0; }
 .os-identity-page { padding: clamp(1.25rem, 4vw, 3rem); overflow: auto; }
 .os-identity-fields { min-width: 0; display: grid; gap: 1rem; }
 .os-identity-fields p { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
@@ -20,7 +21,7 @@
 /* Native sign-in uses the same mark, controls and tokens as the OS setup flow.
    Flex auto margins center short content and leave tall/zoomed content scrollable.
    vh is the fallback for browsers without dynamic viewport units. */
-.os-signin { height: 100vh; height: 100dvh; overflow: auto; display: flex; padding: clamp(16px, 4vw, 48px); background: var(--os-ground); color: var(--os-ink); }
+.os-signin { flex: 1; min-height: 0; overflow: auto; display: flex; padding: clamp(16px, 4vw, 48px); background: var(--os-ground); color: var(--os-ink); }
 .os-signin-content { width: 100%; max-width: 30rem; min-width: 0; margin: auto; padding: clamp(24px, 5vw, 40px); display: flex; flex-direction: column; gap: 24px; background: var(--os-plate); border: 1px solid var(--os-line); border-radius: var(--os-radius); }
 .os-signin-content[data-wide] { max-width: 48rem; }
 .os-identity-brand { display: flex; align-items: center; justify-content: center; gap: 12px; font-weight: 600; font-size: var(--os-text-lg); }

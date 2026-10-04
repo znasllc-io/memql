@@ -244,6 +244,16 @@ func (c *Ceremony) FinishLogin(challengeId string, body io.Reader, resolve Crede
 	// userId had been re-pointed at another person would fail here
 	// instead of logging the attacker in as them.
 	user := &User{Id: row.UserId, Credentials: []gowebauthn.Credential{stored}}
+	// Bootstrap supplies a bare id to the authenticator; graph persistence
+	// resolves user references to canonical ids. Preserve the authenticator's
+	// exact handle only when it names the SAME user in either representation.
+	// Never strip arbitrary concept prefixes or change the returned row owner.
+	const userPrefix = "v1:identity:user:"
+	handle := string(parsed.Response.UserHandle)
+	bareHandle := strings.TrimPrefix(handle, userPrefix)
+	if bareHandle != "" && !strings.Contains(bareHandle, ":") && bareHandle == strings.TrimPrefix(row.UserId, userPrefix) {
+		user.Id = handle
+	}
 	verified, err := c.rp.ValidateDiscoverableLogin(
 		func(rawID, userHandle []byte) (gowebauthn.User, error) { return user, nil },
 		*entry.Session,

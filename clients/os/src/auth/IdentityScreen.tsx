@@ -5,7 +5,7 @@ import { useAuth } from "./AuthProvider";
 import { nativeIdentity, oauthFields, value, IdentityRequestError, type IdentityPage } from "./nativeIdentity";
 import { Wizard } from "../kit/Wizard";
 import { OwnershipWizard } from "./OwnershipWizard";
-import { SetupTheme } from "./SetupTheme";
+import { IdentityLayout } from "./IdentityLayout";
 import { loginWithPasskey, registerPasskey } from "./passkeys";
 import { Field, Button, Head } from "../kit/controls";
 import { IdentityAccount } from "../apps/identity/IdentityAccount";
@@ -99,7 +99,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
     return () => { stopped = true; clearTimeout(timer); };
   }, [page, config, load]);
 
-  if (page?.page === "setup_wizard") return <div className="os-identity-gate"><OwnershipWizard data={data} busy={busy} error={error} submit={submit} /></div>;
+  if (page?.page === "setup_wizard") return <IdentityLayout><OwnershipWizard data={data} busy={busy} error={error} submit={submit} /></IdentityLayout>;
 
   if (page?.page === "setup_passkey") {
     const steps = ["Organization and owner", "Your installation", "Joining the cluster", ...(data.Local === true ? [] : ["Verify email"]), "Register passkey"];
@@ -108,14 +108,13 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
       if (!destination) throw new Error("Setup is still incomplete. Retry this step.");
       window.location.assign(destination);
     });
-    return <div className="os-identity-gate"><Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title="Finish ownership setup"
-      asideFooter={<SetupTheme />}
+    return <IdentityLayout><Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title="Finish ownership setup"
       lead={data.Local === true ? "Your passkey is required. No email verification is used on this local installation." : "Email verified. Register a passkey before you can enter MemQL OS."}
       label="Ownership setup" open="passkey" onOpen={() => {}}
       steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, state: i === steps.length - 1 ? "open" : "done", body: <><p>Create a passkey with your device or security key. Your browser will ask you to confirm.</p><p>Canceling leaves setup incomplete. You can retry this step.</p></> }))}
       notices={error ? <p role="alert">{error}</p> : undefined}
       status={{ word: busy ? "Waiting for passkey" : "Passkey required", tone: busy ? "busy" : "none" }}
-      acts={busy ? [] : [{ label: data.HasProof ? "Finish setup" : "Create passkey and finish", tone: "primary", onAct: complete }, ...(error ? [{ label: "Reload setup", text: true, onAct: () => window.location.assign("/") }] : [])]} /></div>;
+      acts={busy ? [] : [{ label: data.HasProof ? "Finish setup" : "Create passkey and finish", tone: "primary", onAct: complete }, ...(error ? [{ label: "Reload setup", text: true, onAct: () => window.location.assign("/") }] : [])]} /></IdentityLayout>;
   }
 
   if (page?.page === "login") return <SignInPage data={data} clientId={config.oauthClientId} fields={fields}

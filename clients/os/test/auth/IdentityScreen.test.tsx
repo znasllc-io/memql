@@ -20,7 +20,7 @@ const setup = {
 };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.removeItem("memql-os-theme"); document.documentElement.removeAttribute("data-theme"); });
 
 async function reachSubmission() {
   await screen.findByRole("button", { name: "Continue" });
@@ -39,12 +39,31 @@ describe("ownership setup through IdentityScreen and native transport", () => {
     render(<StrictMode><IdentityScreen initialPath="/setup" /></StrictMode>);
     fireEvent.click(await reachSubmission());
     expect(await screen.findByRole("button", { name: "Create passkey and finish" })).toBeTruthy();
+    expect(screen.getAllByRole("group", { name: "Color theme" })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Continue to passkey" })).toBeNull();
     const posts = fetcher.mock.calls.filter(([, init]) => init?.method === "POST");
     expect(posts).toHaveLength(1);
     expect(posts[0]?.[0].pathname).toBe("/setup");
     expect(posts[0]?.[1]).toMatchObject({ credentials: "include", redirect: "error", headers: { "X-CSRF-Token": "setup-csrf" } });
     expect(Object.fromEntries(posts[0]?.[1]?.body as URLSearchParams)).toMatchObject({ owner_first_name: "Ada", owner_email: "ada@example.test", brand_name: "Example" });
+  });
+
+  it("keeps theme selection through setup steps without losing the owner's draft", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(setup)));
+    render(<IdentityScreen initialPath="/setup" />);
+    await screen.findByLabelText("First name");
+    fireEvent.change(screen.getByLabelText("First name"), { target: { value: "Grace" } });
+    fireEvent.click(screen.getByRole("radio", { name: "Light" }));
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect((screen.getByLabelText("First name") as HTMLInputElement).value).toBe("Grace");
+    fireEvent.click(screen.getByRole("radio", { name: "System" }));
+    expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
+    expect(localStorage.getItem("memql-os-theme")).toBe("system");
+    expect(screen.getAllByRole("group", { name: "Color theme" })).toHaveLength(1);
   });
 
   it.each(["validation", "network"])("preserves entered fields and final step after a %s refusal, and permits retry", async kind => {
