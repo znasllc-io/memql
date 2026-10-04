@@ -3,6 +3,7 @@ package pipelinesteps
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -726,6 +727,61 @@ func TestExecuteReforwardsWhenTheReplicaIsLostOrStale(t *testing.T) {
 		close(released)
 		awaitResult(t, done, "the re-forward answered")
 	})
+}
+
+// TestExecuteKeepsAvoidingTheQuietReplicaWhenAReforwardFails: a stale
+// re-forward that fails itself -- the replica it reached went away, none was
+// reachable for a moment, the send failed -- is tried again, and the retry
+// still steers away from the replica whose runner went quiet. A retry that
+// dropped the exclusion would hand the step straight back to it.
+func TestExecuteKeepsAvoidingTheQuietReplicaWhenAReforwardFails(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		err  error
+	}{
+		{"the replica the re-forward reached went away", workbench.ErrWorkbenchPeerLost},
+		{"no replica was reachable for a moment", workbench.ErrNoWorkbenchPeer},
+		{"the send failed", errors.New("stream reset")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			wb := &scriptedWorkbench{}
+			var clock *exClock
+			wb.status = func(n int, _ *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+				if n == 1 {
+					// The patience runs out exactly once, on the first reading.
+					clock.advance(time.Minute)
+				}
+				return staleResponse("workbench-a"), "workbench-b", nil
+			}
+			wb.step = func(n int, _ *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+				switch n {
+				case 1:
+					return nil, "", nil // waits on its context, as a forward to a wedged replica does
+				case 2:
+					return nil, "workbench-b", c.err // the stale re-forward fails
+				}
+				return outcomeResponse(exOutcome("workbench-b")), "workbench-b", nil
+			}
+			e := newTestExecutor(wb, nil)
+			clock = withClock(e)
+			e.stalePatience = time.Minute
+
+			res := awaitResult(t, executeAsync(e, context.Background(), exRequest()), "the retried re-forward answered")
+			if res.Status != pl.OutcomeSucceeded || res.Where.NodeID != "workbench-b" {
+				t.Fatalf("result = %+v; want the adopting replica's outcome", res)
+			}
+			steps := wb.sent(workbench.PipelineStepAction)
+			if len(steps) != 3 {
+				t.Fatalf("step forwards = %d, want 3: the first, the stale re-forward and its retry", len(steps))
+			}
+			for i, want := range []string{"", "workbench-a", "workbench-a"} {
+				if steps[i].exclude != want {
+					t.Errorf("forward %d excluded %q, want %q: the retry of a failed stale re-forward still avoids the "+
+						"replica whose runner went quiet", i+1, steps[i].exclude, want)
+				}
+			}
+		})
+	}
 }
 
 // awaitPolls waits for n more status readings.

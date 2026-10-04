@@ -29,9 +29,9 @@ import (
 // watched forward can see -- and a Job still absent long after the forward
 // is one whose request may never have reached a runner, so it is forwarded
 // again too (the runner finds or creates the Job by its name). A stale
-// re-forward steers AWAY from the replica whose runner went quiet. The
-// outcome, however it arrives, is acked so the Job and its Secret go now
-// rather than at their TTL.
+// re-forward steers AWAY from the replica whose runner went quiet, and so
+// does every retry of it that a failed send makes. The outcome, however it
+// arrives, is acked so the Job and its Secret go now rather than at their TTL.
 //
 // Nothing waits forever. Past the step's effective deadline and lostGrace,
 // one last status decides how the step is reported, and its Job is deleted.
@@ -57,6 +57,10 @@ type clusterStep struct {
 	// to delete the Job, which is the work the replacement exists to keep.
 	pending      chan forwardEnd
 	pendingSince time.Time
+	// exclude is the replica the last forward steered away from: the one
+	// whose runner went quiet, for a stale re-forward. A forward that fails
+	// is retried with it, so the retry never hands the step back there.
+	exclude string
 	// reached says some replica answered something about this step.
 	reached bool
 	// absentForwards counts the forwards an absent Job has caused; each
@@ -112,7 +116,7 @@ func (e *Executor) runCluster(ctx context.Context, run StepRun, timeout time.Dur
 			retry = time.After(delay)
 		case <-retry:
 			retry = nil
-			s.forward(ctx, "")
+			s.forward(ctx, s.exclude)
 		case <-status.C:
 			if res, done := s.poll(ctx); done {
 				return res
@@ -128,7 +132,7 @@ func (e *Executor) runCluster(ctx context.Context, run StepRun, timeout time.Dur
 // healthy replica exists, and makes it the live forward.
 func (s *clusterStep) forward(ctx context.Context, exclude string) {
 	ch := make(chan forwardEnd, 1)
-	s.pending, s.pendingSince = ch, s.e.now()
+	s.pending, s.pendingSince, s.exclude = ch, s.e.now(), exclude
 	req, err := s.e.request(workbench.PipelineStepAction, s.run.RunID, s.run.StepKey, s.args, s.run.TimeoutSeconds)
 	if err != nil {
 		ch <- forwardEnd{err: err}
