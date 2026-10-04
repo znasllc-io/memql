@@ -61,6 +61,17 @@ name: install-cluster-e2e
 #     installs with `--commit=<revision> --from-source`, which is the pair no
 #     job could express before: the from-source GRAPH over the revision under
 #     test rather than over main's tip.
+#   * THE PIPELINES SUBSTRATE RUNS STEPS ON THE CLUSTER IT INSTALLS (epic
+#     memql#5478, issue memql#5497). The `pipelines` leg is the `from-source`
+#     install, every step of it, and then one Go test:
+#     test/clustere2e's TestPipelinesSubstrate. Its runners create, watch and
+#     delete step Jobs AS THE ENGINE, through the Role, quota, cache claim and
+#     NetworkPolicy deploy/k8s/components/pipelines put on this cluster, with
+#     the clone image the deployed ConfigMap names: a Postgres sidecar, a
+#     sharded step, a fleet step refused, a fork refused, and the check run the
+#     seam composes held to a recorded GitHub fixture. Nothing else would put
+#     those manifests in front of a real API server, kubelet and network
+#     policy.
 #
 # ========================== WHAT IT DOES NOT PROVE ========================
 #
@@ -83,6 +94,17 @@ name: install-cluster-e2e
 #     it exists to cover `install-main.json` rather than to be the lane a Go
 #     change is proved by. Do not read a green `from-source` as "the engine
 #     works"; read it as "the from-source install path works".
+#   * THE `pipelines` LEG DOES NOT DRIVE THE DEPLOYED ENGINE'S PIPELINES. A
+#     deployed engine cannot be pointed at a fake GitHub without configuration
+#     the product does not have, so the test runs the agent's executor and two
+#     workbench runners IN ITS OWN PROCESS against this cluster, and GitHub is
+#     a recorded fixture (ruling R41): the deployed agent<->workbench wiring is
+#     the unit and hop tests', and a check run GitHub actually ACCEPTS is
+#     pipelines-live.yml's, which ships disarmed. It runs on this workflow's
+#     own triggers, so a change to the substrate's Go alone does not start it
+#     on its pull request; the nightly run does. And it runs that one test:
+#     the package's others need a 2-replica parity cluster and a seeded user
+#     token, and run nowhere in CI (scripts/citags says why).
 #   * IT DOES NOT RUN FOR A FORK'S PULL REQUEST. ArgoCD reconciles the revision
 #     under test by fetching it from github.com/znasllc-io/memql.git, and a
 #     fork's branch is not there. The jobs are skipped rather than run against
@@ -95,15 +117,18 @@ name: install-cluster-e2e
 #     one of k3d's own images -- so a MemQL image left behind is still a red
 #     lane.
 #
-#     ONE FURTHER EXEMPTION, ON ONE LEG (memql#5067). `from-source` BUILDS its
-#     node images rather than pulling them, so `memql-<node>:local`,
+#     ONE FURTHER EXEMPTION, ON THE LEGS THAT BUILD (memql#5067).
+#     `from-source` BUILDS its node images rather than pulling them, and so
+#     does `pipelines`, which is the same install, so `memql-<node>:local`,
 #     `memql-db:*` and BuildKit's own `docker/dockerfile` survive a teardown
 #     that never placed them -- the assertion's own failure message names the
 #     distinction, "an image the installer PULLED". The exemption is scoped to
-#     that leg and enumerated, so the other three still fail on any surviving
+#     those legs and enumerated, so the other three still fail on any surviving
 #     image, and a PULLED engine image is caught even there because it carries
 #     its registry (`ghcr.io/znasllc-io/memql-bff:...`) and does not match the
-#     bare built name. Whether an uninstall should reap what the install BUILT
+#     bare built name. The step images TestPipelinesSubstrate pulls land in the
+#     k3d node's own containerd, never the host's daemon, and go with the
+#     cluster. Whether an uninstall should reap what the install BUILT
 #     is a product question, and this lane is not where it gets decided.
 #   * THE TRUST STORE IS STILL NOT A SURFACE. Unlike install-e2e.yml this lane
 #     RUNS localCA -- it has to, because clusterUp depends on it and a skipped
@@ -231,7 +256,10 @@ jobs:
     # legitimate build reports "the installer hung" about a runner that was
     # working. 90 keeps the nesting rule above intact: 1680s clusterUp +
     # 2700s buildImages = 4380s, inside 90m with room for the round trip.
-    timeout-minutes: ${{ matrix.leg == 'from-source' && 90 || 50 }}
+    #
+    # `pipelines` is `from-source` plus one Go test, whose own `-timeout` is
+    # 30m: 4380s + 1800s = 6180s, inside 115m with the round trip's room.
+    timeout-minutes: ${{ matrix.leg == 'pipelines' && 115 || matrix.leg == 'from-source' && 90 || 50 }}
     strategy:
       fail-fast: false
       matrix:
@@ -254,6 +282,13 @@ jobs:
           # was never going to come up. The cost is real -- see the leg's own
           # timeout below -- and it buys the only coverage this graph has.
           - from-source
+          # ...and the pipelines substrate on the cluster that install made
+          # (memql#5497): every step `from-source` runs, by the same conditions
+          # rather than a copy of them, then TestPipelinesSubstrate before the
+          # uninstall. From source, so the cluster the test drives is the
+          # revision's in every part -- its manifests and its engine images --
+          # like the substrate the test compiles from the same checkout.
+          - pipelines
     env:
       # THE REVISION ARGOCD RECONCILES. The pull-request head SHA rather than
       # `github.sha`, which for a `pull_request` event is the ephemeral merge
@@ -416,7 +451,7 @@ jobs:
       # minutes on every run to solve a problem nobody has observed. If a build
       # does run out, this is the line that says so.
       - name: Disk before the build
-        if: matrix.leg == 'from-source'
+        if: matrix.leg == 'from-source' || matrix.leg == 'pipelines'
         run: df -h / /var/lib/docker 2>/dev/null || df -h /
 
       # ====================================================================
@@ -466,12 +501,13 @@ jobs:
             # node images to that release (imageTagFor), so this really is the
             # previous version and not this one wearing an old checkout.
             ref_flags=("--tag=${FROM_VERSION}")
-          elif [ "$LEG" = "from-source" ]; then
+          elif [ "$LEG" = "from-source" ] || [ "$LEG" = "pipelines" ]; then
             # THE LANE AND THE VERSION ARE TWO QUESTIONS (memql#5067), and this
             # leg needs opposite answers: the from-source GRAPH, over the
             # revision under test. `--tag=main` would answer both and clone
             # main's tip, so the lane would green-light a tree that is not this
-            # pull request. --from-source names only the lane.
+            # pull request. --from-source names only the lane. `pipelines` is
+            # the same install, with a test after it.
             ref_flags=("--commit=${REVISION}" "--from-source")
           else
             ref_flags=("--commit=${REVISION}")
@@ -500,7 +536,7 @@ jobs:
             "$RUNNER_TEMP/install-receipt.json" "$RUNNER_TEMP/install-report.json"
 
       - name: Disk after the build
-        if: ${{ always() && matrix.leg == 'from-source' }}
+        if: ${{ always() && (matrix.leg == 'from-source' || matrix.leg == 'pipelines') }}
         run: df -h / /var/lib/docker 2>/dev/null || df -h /
 
       - name: Show what the install recorded
@@ -561,7 +597,8 @@ jobs:
           # `workloadsReady`, because on that lane the node images DO NOT EXIST
           # YET -- `buildImages` is the next step. Demanding Available workloads
           # at that moment is demanding pods pull an image nothing has built.
-          if [ "$LEG" = "from-source" ]; then
+          # `pipelines` installs through the same graph.
+          if [ "$LEG" = "from-source" ] || [ "$LEG" = "pipelines" ]; then
             expect "clusterUp.result.argocdReady" "$(field clusterUp result.argocdReady)" "true"
             # THE POSITIVE CONTROL FOR THIS LEG'S WHOLE REASON TO EXIST. Without
             # it the leg could pass having quietly loaded the release graph --
@@ -630,6 +667,64 @@ jobs:
               *) echo "[ ] ERROR: ${required} did not change -- no cluster was built" >&2; exit 1 ;;
             esac
           done
+
+      # ====================================================================
+      # LEG: pipelines
+      # ====================================================================
+      #
+      # The pipelines substrate end to end on the cluster this leg installed
+      # (epic memql#5478, issue memql#5497): test/clustere2e's
+      # TestPipelinesSubstrate, and nothing else of that package. What it drives,
+      # what stands in and why are in the test's own header.
+      #
+      # GOWORK=off, as ci.yml's build-clustere2e lane compiles the package: under
+      # the workspace a module silently satisfies an import it does not require
+      # (see go.work), so a require the root go.mod lacks would build here and
+      # nowhere else. The Go cache is the shared one, restored and never saved
+      # (memql#5482): ci.yml's go-checks is its one writer.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: matrix.leg == 'pipelines'
+        with:
+          go-version: '1.27.1'
+          cache: false # the shared cache below replaces it (memql#5482)
+
+      - uses: ./.github/actions/go-cache
+        if: matrix.leg == 'pipelines'
+
+      # component/identity/web embeds static/app.css by name, and the package
+      # compiles it in (ci.yml's build-clustere2e lane says why).
+      - uses: ./.github/actions/identity-css
+        if: matrix.leg == 'pipelines'
+
+      # THE CLUSTER IS NAMED, NOT ASSUMED. The test skips with no context named,
+      # so the name comes from what the install recorded rather than a literal
+      # that could drift from it -- and a skip here would read as a pass, so a
+      # report with no SKIP line is what this step demands. The kubeconfig is
+      # handed over the way the diagnostics below reach the cluster: the install
+      # ran as root, and so did k3d, so its kubeconfig is root's; k3d writes the
+      # cluster's into a file of the runner's own.
+      - name: The pipelines substrate, end to end on the installed cluster
+        if: matrix.leg == 'pipelines'
+        env:
+          GOWORK: 'off'
+        run: |
+          set -euo pipefail
+          cluster="$(jq -r '([.entries[] | select(.stepId == "clusterUp")] | last // {}) | .result.cluster // ""' \
+            "$RUNNER_TEMP/install-receipt.json")"
+          if [ -z "$cluster" ]; then
+            echo "ERROR: the install recorded no cluster name, so there is no context to name" >&2
+            exit 1
+          fi
+          sudo -E env "HOME=$HOME" "PATH=$HOME/.memql/bin:$PATH" \
+            k3d kubeconfig get "$cluster" > "$RUNNER_TEMP/kubeconfig"
+          chmod 600 "$RUNNER_TEMP/kubeconfig"
+          MEMQL_E2E_KUBECONFIG="$RUNNER_TEMP/kubeconfig" MEMQL_E2E_KUBECONTEXT="k3d-${cluster}" \
+            go test -tags clustere2e -count=1 -timeout=30m -v \
+              -run '^TestPipelinesSubstrate$' ./test/clustere2e/ 2>&1 | tee "$RUNNER_TEMP/pipelines-e2e.txt"
+          if grep -q -- '--- SKIP: TestPipelinesSubstrate' "$RUNNER_TEMP/pipelines-e2e.txt"; then
+            echo "ERROR: TestPipelinesSubstrate skipped on a cluster this leg installed and named" >&2
+            exit 1
+          fi
 
       # ====================================================================
       # LEG: repair
@@ -897,7 +992,10 @@ jobs:
           # `memql-db:16-dev` and `docker/dockerfile:1` (BuildKit's own
           # frontend, pulled by the build rather than by the install).
           #
-          # SCOPED TO THIS LEG AND ENUMERATED. The other three still fail on any
+          # SCOPED TO THE LEGS THAT BUILD AND ENUMERATED. `pipelines` is the
+          # same from-source install, and builds the same images; the step
+          # images its test pulls go to the k3d node's own containerd and never
+          # reach this daemon. The other legs still fail on any
           # surviving image, which is the coverage this assertion exists for --
           # and even here the names are listed rather than pattern-matched
           # loosely: a PULLED engine image is `ghcr.io/znasllc-io/memql-bff:...`
@@ -908,12 +1006,12 @@ jobs:
           # should reap images the install BUILT is a product question this lane
           # is not the place to decide. The header already records that
           # `dockerImages` is not fully reversible; this widens that statement by
-          # exactly one lane and says why.
+          # exactly the two legs that build, and says why.
           fail=0
           while IFS= read -r line; do
             if [ -z "$line" ]; then continue; fi
             repo="${line%%:*}"
-            if [ "$LEG" = "from-source" ]; then
+            if [ "$LEG" = "from-source" ] || [ "$LEG" = "pipelines" ]; then
               case "$repo" in
                 memql-*|docker/dockerfile)
                   echo "[x] built by this leg rather than pulled by the install, and k3d claims no images: ${line}"
@@ -1016,6 +1114,12 @@ jobs:
               --field-selector=status.phase!=Running -o wide
             echo "=== the memql namespace, described ==="
             sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl describe pods -n memql
+            # Where pipeline steps run: what a failed `pipelines` leg left, and
+            # why its pods did what they did. Empty on the other legs.
+            echo "=== the memql-pipelines namespace ==="
+            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get jobs,pods,secrets,pvc,resourcequota -n memql-pipelines -o wide
+            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl describe pods -n memql-pipelines
+            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get events -n memql-pipelines --sort-by=.lastTimestamp
           } > "$RUNNER_TEMP/diagnostics.txt" 2>&1
           cat "$RUNNER_TEMP/diagnostics.txt"
           exit 0
@@ -1058,5 +1162,6 @@ jobs:
             ${{ runner.temp }}/repair-report.json
             ${{ runner.temp }}/upgrade-report.json
             ${{ runner.temp }}/uninstall-report.json
+            ${{ runner.temp }}/pipelines-e2e.txt
             ${{ runner.temp }}/diagnostics.txt
           if-no-files-found: warn

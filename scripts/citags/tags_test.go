@@ -81,7 +81,11 @@ import (
 // that would survive review. A tag that is merely inconvenient belongs in a
 // lane.
 var deliberatelyNotRunInCI = map[string]string{
-	"clustere2e": "needs a provisioned 2-replica parity cluster to run (make cluster-e2e); ci.yml's build-clustere2e job compiles and vets it under the tag so the package cannot rot uncompiled (memql#4212), which is not a run",
+	"clustere2e": "needs a provisioned cluster to run (make cluster-e2e for the 2-replica parity suite); ci.yml's build-clustere2e job " +
+		"compiles and vets it under the tag so the package cannot rot uncompiled (memql#4212), which is not a run. One test of the " +
+		"package, TestPipelinesSubstrate, does run: install-cluster-e2e.yml's pipelines leg runs it against the cluster that leg " +
+		"installs (memql#5497) -- nightly and on that workflow's own paths, so it gates no pull request and is not a lane here, " +
+		"and the tag stays out of the node-tag passes",
 }
 
 // prCriticalWorkflows are the workflow files whose lanes actually gate a pull

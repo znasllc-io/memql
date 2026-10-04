@@ -1,0 +1,13 @@
+{
+  "completed_at": "<timestamp>",
+  "conclusion": "failure",
+  "details_url": "https://os.example.com/?pipelineRun=<run-id>",
+  "external_id": "<run-id>",
+  "name": "MemQL / pipelines-e2e",
+  "output": {
+    "summary": "Mode full · Push to the default branch · Commit <sha>\n\n| Stage | Status | Steps | Time |\n| --- | --- | --- | --- |\n| database | Passed | 1 passed | <duration> |\n| shards | Passed | 2 passed | <duration> |\n| fleet | Failed | 1 refused | - |\n\n### Failed steps\n\n- `fleet.display` (refused): No machine of the owner's that offers display and allows pipeline steps could take the step (no\\_worker\\_available): no machines are paired to this account (`pipeline_no_machine_for_need`)\n",
+    "title": "Failed at fleet: fleet.display"
+  },
+  "started_at": "<timestamp>",
+  "status": "completed"
+}

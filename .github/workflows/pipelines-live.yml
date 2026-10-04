@@ -1,0 +1,79 @@
+# The pipelines substrate's LIVE lane: a pipeline run against GitHub itself
+# (epic memql#5478, issue memql#5497).
+#
+# IT SHIPS DISARMED -- the proving suite's pattern (proving-live.yml):
+# `workflow_dispatch` only, no `schedule`, and its one step refuses with exit 4,
+# the capability contract's "prerequisite missing" (scripts/lib/capability.sh),
+# and a sentence naming what arming needs. It has never run, and nothing reads
+# a green run of it as evidence, because there is none to be had: the step
+# cannot succeed until somebody arms it.
+#
+# WHY IT EXISTS. install-cluster-e2e.yml's `pipelines` leg runs the substrate
+# end to end on a real cluster, but GitHub there is a RECORDED FIXTURE: a
+# deployed engine cannot be pointed at a fake GitHub without configuration the
+# product does not have (the API base is GitHub's own, and a step's clone URL
+# is composed as https://github.com/<owner>/<name>.git), so that leg asserts
+# the check run the seam COMPOSES, never one GitHub ACCEPTED, and it clones a
+# public repository with no token at all (ruling R41). Only a live run can show
+# the rest: a webhook GitHub signs and delivers, an installation token minted
+# for one repository and cloned with, and a check run GitHub stores and shows on
+# the pull request that opened it.
+#
+# ARMING IT is a set of deliberate acts, each one somebody decides:
+#
+#   1. A GitHub App installed on a TEST repository the organization owns --
+#      never this one: a check run is permanent on the commit it lands on --
+#      with contents:read and checks:write, and that repository's pipeline
+#      block naming a step this lane can tell apart.
+#   2. The app's credentials as this repository's secrets (its app id, its
+#      private key and its webhook secret), which no workflow here reads today.
+#   3. The lane's own steps in place of the refusal below: install a cluster,
+#      connect the test repository as a pipeline, push a commit to it, and read
+#      the run's check run back through GitHub's API. Then a `schedule:` block.
+#
+# Nothing in the product changes to arm it, and nothing here pretends otherwise.
+name: pipelines-live
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: 'The test repository (owner/name) the GitHub App is installed on. Never this one: a check run is permanent on its commit.'
+        required: true
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  # One live run at a time: two would race for the test repository's head and
+  # each other's check runs.
+  group: pipelines-live
+  cancel-in-progress: false
+
+jobs:
+  pipelines-live:
+    name: pipelines-live
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      # This step REFUSES today, with exit 4 and a sentence naming what is
+      # missing. That is the honest shape: the lane is designed and its one
+      # argument is declared, and running it needs an installation and
+      # credentials nobody has configured. Falling through to the recorded
+      # fixture and calling that "live" would claim exactly what this lane
+      # exists to measure, so the refusal is deliberate, and the exit code is
+      # the contract's "prerequisite missing" rather than a crash. The repository is
+      # read through `env:`, never interpolated into the script: it is a value
+      # somebody types.
+      - name: pipelines live lane (not armed)
+        env:
+          REPOSITORY: ${{ inputs.repository }}
+        run: |
+          echo "ERROR: the pipelines live lane is not armed, so nothing ran against '${REPOSITORY}'." >&2
+          echo "       Arming it needs a GitHub App installed on a test repository the organization owns" >&2
+          echo "       (contents:read, checks:write), the app's id, private key and webhook secret as" >&2
+          echo "       repository secrets, and this lane's own steps -- see the header of" >&2
+          echo "       .github/workflows/pipelines-live.yml. GitHub is a recorded fixture until then:" >&2
+          echo "       install-cluster-e2e.yml's pipelines leg asserts the check run the seam composes." >&2
+          exit 4

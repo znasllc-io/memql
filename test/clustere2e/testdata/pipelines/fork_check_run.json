@@ -1,0 +1,14 @@
+{
+  "completed_at": "<timestamp>",
+  "conclusion": "failure",
+  "details_url": "https://os.example.com/?pipelineRun=<run-id>",
+  "external_id": "<run-id>",
+  "head_sha": "<sha>",
+  "name": "MemQL / pipelines-e2e",
+  "output": {
+    "summary": "Mode affected · Pull request #2 · Commit <sha>\n\nPull request #2 comes from stranger/Hello-World, a repository other than codertocat/hello-world. A pull request from a fork runs somebody else's code, and is not run here (`pipeline_fork_refused`).\n\nChecks run only on branches in this repository. Push the branch here to run them.\n",
+    "title": "Refused: pull request from a fork"
+  },
+  "started_at": "<timestamp>",
+  "status": "completed"
+}
