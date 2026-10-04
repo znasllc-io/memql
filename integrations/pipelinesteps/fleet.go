@@ -74,6 +74,9 @@ type Fleet struct {
 	now         func() time.Time
 	tempDir     string
 	openCapture func(CaptureOptions) (*Capture, error)
+	// libraryTimeout bounds the Library writes of one step: the runner's
+	// libraryPhaseTimeout.
+	libraryTimeout time.Duration
 }
 
 var _ FleetRouter = (*Fleet)(nil)
@@ -86,14 +89,15 @@ func NewFleet(cfg Config, d FleetDispatcher, library LibraryStore, tokens TokenM
 		logger = slog.Default()
 	}
 	return &Fleet{
-		cfg:         cfg,
-		dispatch:    d,
-		library:     library,
-		tokens:      tokens,
-		sink:        sink,
-		logger:      logger,
-		now:         time.Now,
-		openCapture: NewCapture,
+		cfg:            cfg,
+		dispatch:       d,
+		library:        library,
+		tokens:         tokens,
+		sink:           sink,
+		logger:         logger,
+		now:            time.Now,
+		openCapture:    NewCapture,
+		libraryTimeout: libraryPhaseTimeout,
 	}
 }
 
@@ -168,14 +172,19 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 
 	// The step's files reach the Library as a Job's do on the cluster
 	// (settle.go): the log, then the artifacts, every note masked and bounded
-	// where it is added, and the outcome bounded the same way.
+	// where it is added, and the outcome bounded the same way -- in a window
+	// of their own (libraryWindow), so a CANCELLED step still keeps what it
+	// captured, and a Library that does not answer costs the step its files,
+	// never more than the window.
 	files := stepFiles{library: f.library, run: run, mask: mask, node: "agent node",
 		log: f.logger.With(slog.String("runId", run.RunID), slog.String("workRunId", run.WorkRunID), slog.String("stepKey", run.StepKey))}
 	notes := &noteList{mask: mask}
+	libCtx, cancelLib := libraryWindow(ctx, f.libraryTimeout)
+	defer cancelLib()
 	if _, archive, read := files.closeLog(capture, &res, notes, completeLogNote(f.cfg.LogStoreMaxLines)); read {
-		files.fileLog(ctx, archive, &res, notes)
+		files.fileLog(libCtx, archive, &res, notes)
 	}
-	f.storeArtifacts(ctx, files, out, &res, notes)
+	f.storeArtifacts(libCtx, files, out, &res, notes)
 	fitOutcome(&res, notes)
 	return res, nil
 }

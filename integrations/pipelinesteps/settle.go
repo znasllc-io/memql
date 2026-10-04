@@ -121,7 +121,15 @@ func (s *step) settle(dec pl.StepResult, pod *Pod, f *follower) pl.StepResult {
 // libraryContext is the deadline the owner's Library is written under: no
 // cancel ends it, and no other phase shares it.
 func (s *step) libraryContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(s.ctx), s.r.libraryTimeout)
+	return libraryWindow(s.ctx, s.r.libraryTimeout)
+}
+
+// libraryWindow is the window a step's files are written to its owner's
+// Library in, on either surface: detached from ctx's cancel -- a cancelled
+// step still keeps what it captured -- and bounded by d, so a Library that
+// does not answer costs the step its files and never more than d.
+func libraryWindow(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), d)
 }
 
 // persistContext is the window the outcome is recorded on the Job in, retries

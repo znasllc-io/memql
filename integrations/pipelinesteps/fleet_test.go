@@ -69,7 +69,9 @@ func (d *fakeDispatcher) only(t *testing.T) (worker.Request, context.Context) {
 	return d.reqs[0], d.ctxs[0]
 }
 
-// fakeLibrary records every file stored.
+// fakeLibrary records every file stored. Like the app's store -- whose quota
+// read and upload both run under it -- it answers its context: one already
+// ended stores nothing.
 type fakeLibrary struct {
 	mu    sync.Mutex
 	files []RunFile
@@ -77,7 +79,10 @@ type fakeLibrary struct {
 	fail  map[string]error
 }
 
-func (l *fakeLibrary) StoreRunFile(_ context.Context, f RunFile) (StoredFile, error) {
+func (l *fakeLibrary) StoreRunFile(ctx context.Context, f RunFile) (StoredFile, error) {
+	if err := ctx.Err(); err != nil {
+		return StoredFile{}, err
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if reason, ok := l.omit[f.Name]; ok {
@@ -876,6 +881,106 @@ func TestFleetStepFailuresAreTyped(t *testing.T) {
 		}}
 		f, _, _, _ := newTestFleet(t, d)
 		wantFailure(t, runFleet(t, f, fleetReq()), pl.OutcomeFailed, pl.CodeExecutorError)
+	})
+}
+
+// TestFleetStepFilesWhatACancelledStepCaptured: a run's cancel ends the
+// machine's call and the step is cancelled, but what it captured is still
+// filed -- its log, and any artifacts the machine returned -- as the cluster's
+// runner files a cancelled step's log. The Library is written in a window of
+// its own, which no cancel ends and its own bound does: a Library that does
+// not answer costs the step its files, never more than the window.
+func TestFleetStepFilesWhatACancelledStepCaptured(t *testing.T) {
+	// fleetCancelled runs a step whose run is cancelled while the machine
+	// runs it: answer streams its output, and the run's cancel lands.
+	fleetCancelled := func(t *testing.T, f *Fleet, req pl.StepRequest, ctx context.Context) pl.StepResult {
+		t.Helper()
+		res, err := f.RunStep(ctx, req, fleetRun(req))
+		if err != nil {
+			t.Fatalf("RunStep: %v", err)
+		}
+		if res.Status != pl.OutcomeCancelled || res.Failure == nil || res.Failure.Code != pl.CodeStepCancelled ||
+			res.Failure.Message != runCancelledMessage {
+			t.Fatalf("result = %+v (failure %+v), want the run's cancel", res, res.Failure)
+		}
+		return res
+	}
+
+	t.Run("cancelled mid-stream, its log is stored", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		defer cancel(nil)
+		d := &fakeDispatcher{answer: func(callCtx context.Context, req worker.Request) (worker.Result, error) {
+			req.OnStreamChunk(chunk("stdout", "compiling\nlinking\n"))
+			cancel(errRunCancelled)
+			<-callCtx.Done()
+			// As the real dispatcher answers a call whose context ended.
+			return worker.Result{OK: false, ErrorCode: "worker_disconnected", ErrorMessage: "context canceled",
+				WorkerId: "reg-1", NodeId: "agent-b"}, nil
+		}}
+		f, lib, _, _ := newTestFleet(t, d)
+		req := fleetReq()
+		req.Step.Artifacts = nil
+
+		res := fleetCancelled(t, f, req, ctx)
+
+		log, ok := lib.named(logFileName(req.StepKey))
+		if !ok || res.LogFileID == "" || !strings.Contains(string(log.Bytes), "compiling\nlinking\n") {
+			t.Fatalf("Library = %+v, outcome log file %q (notes %+v); want the cancelled step's log stored with what it printed",
+				lib.files, res.LogFileID, res.Notes)
+		}
+		if res.LogLines != 2 || len(res.Notes) != 0 {
+			t.Errorf("LogLines = %d, notes = %+v; want the two lines and nothing left unstored", res.LogLines, res.Notes)
+		}
+	})
+
+	t.Run("cancelled as the machine answered, its artifacts are stored too", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(context.Background())
+		defer cancel(nil)
+		tgz := extractTestTgz(t, []extractTestEntry{{name: "coverage.out", body: "mode: set\n"}})
+		d := &fakeDispatcher{answer: func(_ context.Context, req worker.Request) (worker.Result, error) {
+			req.OnStreamChunk(chunk("stdout", "PASS\n"))
+			cancel(errRunCancelled) // lands as the machine sends its answer
+			return worker.Result{OK: true, WorkerId: "reg-1", NodeId: "agent-b", OutputJSON: `{"exitCode":0,"durationMs":10,` +
+				`"artifactsTgzBase64":"` + base64.StdEncoding.EncodeToString(tgz) + `","artifactsMissing":[]}`}, nil
+		}}
+		f, lib, _, _ := newTestFleet(t, d)
+		req := fleetReq()
+		req.Step.Artifacts = []string{"coverage.out"}
+
+		res := fleetCancelled(t, f, req, ctx)
+
+		if _, ok := lib.named(logFileName(req.StepKey)); !ok || res.LogFileID == "" {
+			t.Errorf("Library = %+v, want the cancelled step's log", lib.files)
+		}
+		if cov, ok := lib.named("coverage.out"); !ok || string(cov.Bytes) != "mode: set\n" || len(res.ArtifactFileIDs) != 1 {
+			t.Errorf("Library = %+v, artifact ids %v; want the artifact the machine returned", lib.files, res.ArtifactFileIDs)
+		}
+	})
+
+	t.Run("a Library that does not answer costs the step its files, within the window", func(t *testing.T) {
+		d := &fakeDispatcher{answer: func(_ context.Context, req worker.Request) (worker.Result, error) {
+			req.OnStreamChunk(chunk("stdout", "ok\n"))
+			return worker.Result{OK: true, OutputJSON: `{"exitCode":0,"durationMs":10}`, WorkerId: "reg-1", NodeId: "agent-b"}, nil
+		}}
+		f, _, _, _ := newTestFleet(t, d)
+		f.library = &rtLibrary{block: true}
+		f.libraryTimeout = 50 * time.Millisecond
+		req := fleetReq()
+		req.Step.Artifacts = nil
+		done := make(chan pl.StepResult, 1)
+		go func() {
+			res, _ := f.RunStep(context.Background(), req, fleetRun(req))
+			done <- res
+		}()
+		select {
+		case res := <-done:
+			if res.Status != pl.OutcomeSucceeded || res.LogFileID != "" || len(res.Notes) != 1 ||
+				!strings.Contains(res.Notes[0].Message, "deadline") {
+				t.Fatalf("result = %+v, want a success with no log file and a note saying the Library ran out of time", res)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("RunStep did not return: a Library that does not answer held the step past its window")
+		}
 	})
 }
 
