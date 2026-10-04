@@ -22,8 +22,14 @@ var siteRefreshScript []byte
 // The public identifier contains no store credentials or internal bundle path.
 // It changes for a publish/rollback, runtime settings or binding change, and
 // engine upgrades (including baked file:// applications such as MemQL OS).
+//
+// The settings it hashes are the ones the runtime document SERVES
+// (settingsForSite), not the site's own: a per-store value for the store the
+// binding names reaches /runtime-config.json, so changing it must refresh an
+// open tab exactly as a site-level change does, and a value for a store no
+// binding names reaches nothing, so it must not (memql#5602).
 func deploymentVersion(site *Site) string {
-	settings, _ := json.Marshal(site.Settings)
+	settings, _ := json.Marshal(settingsForSite(site))
 	store := ""
 	if site.Store != nil {
 		store = site.Store.ID + "|" + site.Store.Domain + "|" + site.Store.StorefrontTokenRef + "|" + site.Store.APIVersion
