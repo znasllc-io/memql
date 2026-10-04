@@ -3642,31 +3642,51 @@ func TestNoteListAddFirstKeepsItsBounds(t *testing.T) {
 	}
 }
 
-// TestRunnerMasksStepTextInItsOwnLog (fix round 1, minor 9): an artifact's
-// name is the step's, and a Library error can quote it. The node's own log
-// line about a file that was not stored is masked like the step's output.
+// TestRunnerMasksStepTextInItsOwnLog (fix round 1 minor 9; fix round 2): an
+// artifact's name is the step's, and the Library's answer can quote it --
+// its error, or its reason for omitting the file. Neither reaches the node's
+// log line or the note beside the step (and from there the run's rows and
+// its check run) unmasked: every note is masked where it is added.
 func TestRunnerMasksStepTextInItsOwnLog(t *testing.T) {
-	h := newRunnerHarness(t)
-	logs := h.logs()
-	run := rtRun()
-	run.Artifacts = []string{"dist/*"}
 	path := "dist/" + plantedNPM + ".txt"
-	tgz := extractTestTgz(t, []extractTestEntry{{name: path, body: "x"}})
-	h.c.script(testJobName, rtFinishingScript(testJobName, 0, rtFramedLines(t, "ok", tgz)...))
 	name := artifactFileName(path)
-	h.lib.fail = map[string]error{name: fmt.Errorf("the Library refused %q: the owner's quota is spent", name)}
+	for _, c := range []struct {
+		name   string
+		answer func(l *rtLibrary)
+		logged bool
+	}{
+		{"a Library error quoting the name", func(l *rtLibrary) {
+			l.fail = map[string]error{name: fmt.Errorf("the Library refused %q: the owner's quota is spent", name)}
+		}, true},
+		{"a Library omitting the file, quoting the name", func(l *rtLibrary) {
+			l.omit = map[string]string{name: fmt.Sprintf("%q is over the Library's size limit", name)}
+		}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newRunnerHarness(t)
+			logs := h.logs()
+			run := rtRun()
+			run.Artifacts = []string{"dist/*"}
+			tgz := extractTestTgz(t, []extractTestEntry{{name: path, body: "x"}})
+			h.c.script(testJobName, rtFinishingScript(testJobName, 0, rtFramedLines(t, "ok", tgz)...))
+			c.answer(h.lib)
 
-	res := h.run(t, run)
+			res := h.run(t, run)
 
-	if res.Status != pl.OutcomeSucceeded || len(res.Notes) != 1 {
-		t.Fatalf("result = %+v (failure %+v), want a success with a note of the file not stored", res, res.Failure)
-	}
-	text := logs.String()
-	if logs.count("pipelines: a step's file could not be stored in the Library") != 1 {
-		t.Fatalf("the node logged nothing of the file it could not store:\n%s", text)
-	}
-	if strings.Contains(text, plantedNPM) {
-		t.Errorf("the node's log carries the step's secret:\n%s", text)
+			if res.Status != pl.OutcomeSucceeded || len(res.Notes) != 1 {
+				t.Fatalf("result = %+v (failure %+v), want a success with a note of the file not stored", res, res.Failure)
+			}
+			if note := res.Notes[0].Message; strings.Contains(note, plantedNPM) || !strings.Contains(note, "***") {
+				t.Errorf("note %q, want the Library's answer quoted with the secret masked", note)
+			}
+			text := logs.String()
+			if c.logged && logs.count("pipelines: a step's file could not be stored in the Library") != 1 {
+				t.Fatalf("the node logged nothing of the file it could not store:\n%s", text)
+			}
+			if strings.Contains(text, plantedNPM) {
+				t.Errorf("the node's log carries the step's secret:\n%s", text)
+			}
+		})
 	}
 }
 
