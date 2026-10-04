@@ -539,6 +539,17 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// and the poller stamp internal origin; call_origin_conformance_test.go
 		// names both.
 		{Path: "platform/mutations.memql", Name: "stageInboundRequest"}: true,
+		// Its handling-state twin, for the same reason from the other side.
+		// updateInboundRequestStatus writes `status`, `lastError` and
+		// `processedAt` on a row that has no owner either: the concept carries
+		// no @rowAuthz, so before this any authenticated caller could flip any
+		// staged delivery -- mark a privacy request `processed` that no
+		// connector ever worked, or `failed` one it did. The legitimate
+		// writers are the datasync dispatcher (under its operator identity),
+		// campaigns' feedback ingester (stamping inline via execServerOnly)
+		// and product automations draining a source, whose tree-loaded step
+		// context carries internal origin; none of them is a client.
+		{Path: "platform/mutations.memql", Name: "updateInboundRequestStatus"}: true,
 		// epic memql#4805. The custom-domain create, plus the six writes its
 		// reconciliation sweep makes on an operator's behalf.
 		//

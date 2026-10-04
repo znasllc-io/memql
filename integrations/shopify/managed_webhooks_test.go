@@ -3,6 +3,7 @@ package shopify
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -32,6 +33,56 @@ func TestManagedPrivacyEndpointExistsWithoutAnyStoreOrListing(t *testing.T) {
 	h.engine.setRows(namedRowsQuery(conceptGlobalSecret, managedClientSecret), nil)
 	if _, ok := h.conn.InboundSource(context.Background(), ConnectorName); ok {
 		t.Fatal("missing app secret admitted a managed source")
+	}
+}
+
+// The APP-LEVEL source's staging allowlist, exactly. The receiver stages
+// precisely these request headers on the inboundRequest row and nothing else,
+// so this list IS the staged metadata for every compliance delivery: narrow it
+// and the topic -- which only travels in X-Shopify-Topic -- never reaches
+// Apply, so no privacy job is queued; widen it and whatever was added lands on
+// a row any operator can read. The per-store twin is proved end to end
+// against Postgres by test/inboundhop's exact-map assertion; this is the
+// app-level half, which had only a non-empty check.
+//
+// The names are spelled as the wire carries them rather than through the
+// Header* constants, so a renamed constant cannot move the list and this test
+// with it. The per-store source must offer the same list: a delivery's
+// metadata must not depend on which of the two URLs Shopify used.
+func TestTheAppLevelSourceStagesExactlyTheShopifyDeliveryMetadata(t *testing.T) {
+	want := []string{
+		"X-Shopify-Api-Version",
+		"X-Shopify-Event-Id",
+		"X-Shopify-Shop-Domain",
+		"X-Shopify-Topic",
+		"X-Shopify-Triggered-At",
+		"X-Shopify-Webhook-Id",
+	}
+	sorted := func(in []string) []string {
+		out := slices.Clone(in)
+		slices.Sort(out)
+		return out
+	}
+
+	app, ok := managedWebhookHarness(t).conn.InboundSource(context.Background(), ConnectorName)
+	if !ok {
+		t.Fatal("the app-level source did not resolve for a fully configured managed app")
+	}
+	if got := sorted(app.ForwardHeaders); !slices.Equal(got, want) {
+		t.Errorf("the app-level source stages %q, want exactly %q", got, want)
+	}
+	for _, h := range app.ForwardHeaders {
+		if strings.EqualFold(h, app.SignatureHeader) || strings.EqualFold(h, "Authorization") || strings.EqualFold(h, "Cookie") {
+			t.Errorf("the app-level source would stage the credential header %q", h)
+		}
+	}
+
+	perStore, ok := newHarness(t).conn.InboundSource(context.Background(), ConnectorName+"-"+testStoreID)
+	if !ok || perStore.Secret == "" {
+		t.Fatal("the per-store source did not resolve for the harness store")
+	}
+	if got := sorted(perStore.ForwardHeaders); !slices.Equal(got, want) {
+		t.Errorf("the per-store source stages %q, want the app-level list %q", got, want)
 	}
 }
 
@@ -261,5 +312,45 @@ func TestAStoreNotIdentifiedAsManagedKeepsItsPerStorePrivacyURL(t *testing.T) {
 				t.Fatalf("a store not identified as managed: err=%v, jobs=%d; want its per-store privacy delivery queued", applyErr, queued)
 			}
 		})
+	}
+}
+
+// ClaimsInboundSource is the receiver's env-pin collision question
+// (memqlsync.InboundSourceClaimer). It must give InboundSource's answer for
+// every tenant name, resolve no secret doing it, and report a store list it
+// could not read as an ERROR: "no such store" there would admit an env pin on
+// a live store's name (memql#5707 follow-up).
+func TestClaimsInboundSourceAgreesFailsLoudAndResolvesNoSecret(t *testing.T) {
+	h := newHarness(t)
+	var resolved []string
+	inner := h.conn.stores.secrets
+	h.conn.stores.secrets = func(ctx context.Context, name string) (string, error) {
+		resolved = append(resolved, name)
+		return inner(ctx, name)
+	}
+	ctx := context.Background()
+	for _, name := range []string{ConnectorName + "-" + testStoreID, ConnectorName + "-nobody", "stripe", "shopifyx-" + testStoreID} {
+		claimed, err := h.conn.ClaimsInboundSource(ctx, name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		resolved = nil
+		_, want := h.conn.InboundSource(ctx, name)
+		if claimed != want {
+			t.Errorf("%s: ClaimsInboundSource = %v, InboundSource claims %v; the receiver and the dispatcher would disagree", name, claimed, want)
+		}
+	}
+	if claimed, err := h.conn.ClaimsInboundSource(ctx, ConnectorName); err != nil || !claimed {
+		t.Errorf("the connector's own name: claimed=%v err=%v; the dispatcher always routes it here", claimed, err)
+	}
+
+	resolved = nil
+	if _, err := h.conn.ClaimsInboundSource(ctx, ConnectorName+"-"+testStoreID); err != nil || len(resolved) != 0 {
+		t.Errorf("the claim resolved %v (err=%v); it needs only the store list", resolved, err)
+	}
+
+	h.engine.fail["stores"] = fmt.Errorf("context deadline exceeded")
+	if claimed, err := h.conn.ClaimsInboundSource(ctx, ConnectorName+"-"+testStoreID); err == nil || claimed {
+		t.Errorf("an unreadable store list answered claimed=%v err=%v; want an error, never \"not mine\"", claimed, err)
 	}
 }

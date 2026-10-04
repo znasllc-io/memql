@@ -424,13 +424,17 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// than to any user, so the runtime has to present internal origin to
 		// write the rows it exists to write. The stamp is applied in ONE
 		// place -- OperatorContext, alongside the operator AccessContext --
-		// on a context this package constructs per call.
+		// on a context this package constructs per call. The same stamp
+		// covers the staged inbound row's handling state
+		// (updateInboundRequestStatus, @serverOnly since the memql#5707
+		// follow-up): the dispatcher records what it did with a delivery it
+		// worked, which no client may rewrite.
 		//
 		// Mirror writes do NOT go through it. Those run under the CONNECTOR
 		// actor, a narrower credential admitted only to the concepts naming
 		// that connector; the two are stamped separately and the call sites
 		// say which is in scope.
-		"component/datasync": "the data-origins runtime -- server-initiated bookkeeping over its own clusterOwner-tier queue and health rows; mirror writes use the narrower connector actor instead (epic memql#4378)",
+		"component/datasync": "the data-origins runtime -- server-initiated bookkeeping over its own clusterOwner-tier queue and health rows, and the handling stamp on a staged inbound row it worked (updateInboundRequestStatus, @serverOnly); mirror writes use the narrower connector actor instead (epic memql#4378)",
 		// The RELEASE CUTTER (epic memql#4434). REQUEST-DERIVED, and the
 		// fourth exception -- stated rather than borrowed, because the caller
 		// here is neither a connector nor a boot path: it is a signed-in human
