@@ -3,6 +3,7 @@ package pipelines
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -220,13 +221,80 @@ func TestClassifyDeliveryLowerCasesTheSHA(t *testing.T) {
 	}
 }
 
-func TestClassifyDeliveryRefusesADeliveryWithNoRepositoryOrInstallation(t *testing.T) {
+// The installation line every fixture carries, and the repository object,
+// whose keys differ between a push and the rest.
+const fixtureInstallationLine = `"installation": { "id": 51234567 },`
+
+var fixtureRepositoryLine = regexp.MustCompile(`"repository": \{[^}]*\},`)
+
+// Pipelines run on the GitHub App's deliveries. A repository webhook -- the
+// one Packages documents for Deployables' update feed -- posts to the same
+// inbound seam with no installation, on every push to every branch and every
+// release. Each such delivery asks pipelines for nothing, so it is ignored,
+// never an error: an error fails the trigger automation, and would fail it on
+// every push.
+func TestClassifyDeliveryIgnoresADeliveryNotFromAnAppInstallation(t *testing.T) {
+	const want = "not delivered through a GitHub App installation"
+	for _, fixture := range []string{
+		"push_default.json", "push_other_branch.json", "push_tag.json", "release_published.json",
+		"pull_request_opened.json", "pull_request_closed.json", "merge_group_checks_requested.json",
+		"check_run_rerequested.json", "check_suite_rerequested.json",
+	} {
+		original := string(readDelivery(t, fixture))
+		for name, body := range map[string]string{
+			"no installation":   strings.Replace(original, fixtureInstallationLine, ``, 1),
+			"null installation": strings.Replace(original, fixtureInstallationLine, `"installation": null,`, 1),
+		} {
+			if body == original {
+				t.Fatalf("%s, %s: the replacement matched nothing, so this case would test the unmodified fixture", fixture, name)
+			}
+			got, ignored, err := ClassifyDelivery("", []byte(body))
+			if err != nil {
+				t.Errorf("%s, %s: error %v, want ignored %q", fixture, name, err, want)
+				continue
+			}
+			if ignored == nil || ignored.Reason != want {
+				t.Errorf("%s, %s: got (%+v, %+v), want ignored %q", fixture, name, got, ignored, want)
+			}
+		}
+	}
+}
+
+// A delivery naming no repository is about nothing a pipeline is connected
+// to, and asks for nothing either.
+func TestClassifyDeliveryIgnoresADeliveryNamingNoRepository(t *testing.T) {
+	const want = "the delivery names no repository"
+	for _, fixture := range []string{"push_default.json", "release_published.json", "pull_request_opened.json", "check_run_rerequested.json"} {
+		original := string(readDelivery(t, fixture))
+		for name, body := range map[string]string{
+			"no repository":   fixtureRepositoryLine.ReplaceAllLiteralString(original, ``),
+			"null repository": fixtureRepositoryLine.ReplaceAllLiteralString(original, `"repository": null,`),
+		} {
+			if body == original {
+				t.Fatalf("%s, %s: the replacement matched nothing, so this case would test the unmodified fixture", fixture, name)
+			}
+			got, ignored, err := ClassifyDelivery("", []byte(body))
+			if err != nil {
+				t.Errorf("%s, %s: error %v, want ignored %q", fixture, name, err, want)
+				continue
+			}
+			if ignored == nil || ignored.Reason != want {
+				t.Errorf("%s, %s: got (%+v, %+v), want ignored %q", fixture, name, got, ignored, want)
+			}
+		}
+	}
+}
+
+// What pipelines WOULD act on and cannot read is an error, which fails the
+// trigger automation where an operator sees it: an App delivery whose
+// installation or repository is malformed, or a body that is no JSON object.
+func TestClassifyDeliveryRefusesADeliveryItCannotRead(t *testing.T) {
 	opened := string(readDelivery(t, "pull_request_opened.json"))
 	cases := map[string]string{
-		"no repository":   strings.Replace(opened, `"repository": { "full_name": "Acme-Corp/Storefront", "default_branch": "main", "private": false },`, ``, 1),
-		"no installation": strings.Replace(opened, `"installation": { "id": 51234567 },`, ``, 1),
-		"not an object":   `["pull_request"]`,
-		"not json":        `{"pull_request": `,
+		"an installation with no id":          strings.Replace(opened, fixtureInstallationLine, `"installation": {},`, 1),
+		"a repository that is not owner/name": strings.Replace(opened, `"full_name": "Acme-Corp/Storefront", "default_branch"`, `"full_name": "storefront", "default_branch"`, 1),
+		"not an object":                       `["pull_request"]`,
+		"not json":                            `{"pull_request": `,
 	}
 	for name, body := range cases {
 		if body == opened {

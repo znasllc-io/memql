@@ -56,8 +56,16 @@ const (
 //
 // An Ignored delivery is never an error: it asks pipelines for nothing, and a
 // delivery pipelines would not act on cannot be wrong in a way that matters
-// here. An error is a delivery pipelines WOULD act on that cannot be read: no
-// repository, no installation, a head that is not a SHA.
+// here. An error is a delivery pipelines WOULD act on that cannot be read: an
+// installation with no id, a repository that is not owner/name, a head that
+// is not a SHA.
+//
+// A delivery with no installation is Ignored, whatever else it carries:
+// pipelines run on the GitHub App's deliveries only, and a repository
+// webhook -- which Deployables' update feed documents, on the same inbound
+// seam -- delivers without one, on every push to every branch. Failing on
+// those would fail the trigger automation on every push. A delivery naming no
+// repository is about nothing a pipeline is connected to, and is Ignored too.
 func ClassifyDelivery(headerEvent string, body []byte) (Trigger, *Ignored, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil {
@@ -72,6 +80,12 @@ func ClassifyDelivery(headerEvent string, body []byte) (Trigger, *Ignored, error
 	}
 	if h := strings.ToLower(strings.TrimSpace(headerEvent)); h != "" && h != kind {
 		return Trigger{}, ignore("header says %s, body is %s", h, kind), nil
+	}
+	if !present(top, "installation") {
+		return Trigger{}, ignore("not delivered through a GitHub App installation"), nil
+	}
+	if !present(top, "repository") {
+		return Trigger{}, ignore("the delivery names no repository"), nil
 	}
 	var action string
 	if err := decodeField(top, "action", &action); err != nil {
@@ -370,11 +384,9 @@ func classifyPush(top map[string]json.RawMessage) (Trigger, *Ignored, error) {
 }
 
 // envelope reads what every delivery pipelines act on carries: the repository
-// and the installation it was delivered to.
+// and the installation it was delivered to. ClassifyDelivery has already
+// ignored a delivery missing either, so here a malformed one is an error.
 func envelope(top map[string]json.RawMessage) (Trigger, error) {
-	if !present(top, "repository") {
-		return Trigger{}, errors.New("the delivery names no repository")
-	}
 	var repo ghRepository
 	if err := decodeField(top, "repository", &repo); err != nil {
 		return Trigger{}, err
@@ -383,11 +395,6 @@ func envelope(top map[string]json.RawMessage) (Trigger, error) {
 	owner, name, ok := strings.Cut(full, "/")
 	if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
 		return Trigger{}, fmt.Errorf("repository.full_name %q is not owner/name", clip(full))
-	}
-	// An installation is what an App delivery carries and a repository
-	// webhook does not: pipelines run on the App's deliveries only.
-	if !present(top, "installation") {
-		return Trigger{}, errors.New("the delivery names no installation; pipelines run on deliveries to the GitHub App")
 	}
 	var inst ghInstallation
 	if err := decodeField(top, "installation", &inst); err != nil {
