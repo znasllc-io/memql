@@ -314,6 +314,44 @@ func (c *Capture) Note(text string) {
 	c.archiveLine(c.clean(strings.TrimRight(text, "\r\n")))
 }
 
+// Notice appends a runner line a person watching the step live must see --
+// the wait for a free slot under the ceiling, a re-attach after a replica
+// was lost -- to the store as well as the archive. Like Note it is cleaned
+// and masked, stays out of the tail and is not counted in Lines. Unlike
+// output it is neither paced by the node's bucket nor counted against
+// StoreMaxLines: the runner writes one or two per step, and each must land.
+// Once the store copy is capped nothing more reaches the store, a notice
+// included: the cap line says the live log stops there.
+func (c *Capture) Notice(text string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
+	line := c.clean(strings.TrimRight(text, "\r\n"))
+	c.archiveLine(line)
+	if c.sink == nil || c.storeCapped {
+		return
+	}
+	at := c.now()
+	for _, l := range strings.Split(line, "\n") {
+		for _, piece := range captureSplit(l, captureStoreLineBytes) {
+			c.sink.Write(c.storeLine(at, slog.LevelInfo, piece, ""))
+		}
+	}
+}
+
+// Mask is s with the repair and the masking every captured line gets: NUL
+// bytes dropped, invalid UTF-8 replaced, every secret value masked. It is for
+// text the step controls that reaches its result outside the log -- the name
+// of a tar entry it refused, quoted in a note -- and works before and after
+// Close.
+func (c *Capture) Mask(s string) string {
+	// c.mask is set once by newCapture and never written again, so it is
+	// read without the lock.
+	return c.clean(s)
+}
+
 // Close finishes the capture: the archive's truncation line when it was
 // capped, the file flushed and closed, the artifact frame judged. The error
 // is the archive's (a write that failed); the result is filled either way. A

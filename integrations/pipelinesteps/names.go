@@ -70,6 +70,15 @@ const (
 	// AnnotOutcome is the pl.StepResult as JSON, written before the reply is
 	// sent, so a lost reply can be answered again without re-running.
 	AnnotOutcome = "memql.io/outcome"
+	// AnnotObservation is how the step ended, as the runner FIRST saw it --
+	// a pl.StepResult holding only the status, the exit code, the failure and
+	// the times -- recorded the moment it is seen, before the slow half of
+	// settling the step (its log and artifacts into the Library). An adopter
+	// settles the step by it rather than looking again: "finished inside its
+	// deadline" lasts only as long as the pod does, and once the Job
+	// controller has deleted a pod at the deadline the same Job reads
+	// DeadlineExceeded.
+	AnnotObservation = "memql.io/observation"
 )
 
 // ManagedBy is LabelManagedBy's value on everything the runner creates.

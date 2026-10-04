@@ -670,6 +670,76 @@ func TestCaptureNotesGoToTheArchiveOnly(t *testing.T) {
 	}
 }
 
+// TestCaptureNoticesReachTheStoreAndTheArchive: a runner notice -- the wait
+// for a free slot under the ceiling, a re-attach -- is for a person watching
+// the step live, so unlike a Note it reaches the store as well as the archive.
+// It is cleaned and masked like output, but it is not output: it stays out of
+// the tail and the line count, and neither the node's pacing nor the step's
+// store cap holds it back -- except after the cap line, which says the live
+// log stops there.
+func TestCaptureNoticesReachTheStoreAndTheArchive(t *testing.T) {
+	spent := newCaptureBucket(1, captureTestClock)
+	spent.take(captureTestClock) // the node's budget is gone: output is paced out
+	sink := &captureTestSink{}
+	c, err := newCapture(CaptureOptions{
+		RunID: "r0a1b2c3", WorkRunID: "w4d5e6f7", StepKey: "test/unit", Secrets: []string{"opensesame"},
+		StoreMaxLines: 1, ArchiveMax: 1 << 20, ArchivePath: filepath.Join(t.TempDir(), "step.log"), Sink: sink,
+	}, func() time.Time { return captureTestClock }, spent)
+	if err != nil {
+		t.Fatalf("newCapture: %v", err)
+	}
+	c.Notice("memql: waiting for a free slot (opensesame)\x00")
+	c.Feed(captureKubeLine(captureTestClock, "step output"))
+	res := closeCaptureForTest(t, c)
+
+	lines := sink.all()
+	if len(lines) != 1 {
+		t.Fatalf("store = %q, want the notice alone: the output was paced out", sink.messages())
+	}
+	want := logger.Line{
+		At: captureTestClock, Level: slog.LevelInfo, Component: "pipelines.step",
+		Message: "memql: waiting for a free slot (***)", Subject: "r0a1b2c3", SubjectConcept: "v1:pipelines:run",
+		Attributes: map[string]any{"stepKey": "test/unit", "workRunId": "w4d5e6f7"},
+	}
+	if !reflect.DeepEqual(lines[0], want) {
+		t.Errorf("notice store line:\n  got  %+v\n  want %+v", lines[0], want)
+	}
+	if archive := readArchiveForTest(t, res); archive != "memql: waiting for a free slot (***)\nstep output\n" {
+		t.Errorf("archive = %q, want the notice, masked, then the output", archive)
+	}
+	if res.Tail != "step output" || res.Lines != 1 {
+		t.Errorf("tail %q, lines %d; want the step's own output only", res.Tail, res.Lines)
+	}
+
+	t.Run("after the cap line the live log has stopped, notices included", func(t *testing.T) {
+		c, sink := newCaptureForTest(t, CaptureOptions{StoreMaxLines: 1})
+		c.Feed(captureKubeLine(captureTestClock, "one"))
+		c.Feed(captureKubeLine(captureTestClock, "two")) // the cap line
+		c.Notice("memql: re-attached on workbench-b")
+		res := closeCaptureForTest(t, c)
+		msgs := sink.messages()
+		if len(msgs) != 2 || strings.Contains(msgs[1], "re-attached") {
+			t.Errorf("store = %q, want one line and the cap line, nothing after it", msgs)
+		}
+		if !strings.Contains(readArchiveForTest(t, res), "memql: re-attached on workbench-b\n") {
+			t.Error("the notice is not in the archive")
+		}
+	})
+}
+
+// TestCaptureMaskCleansLikeOutput: text the step controls reaches a step's
+// result outside the log too -- the name of a tar entry it refused, in a
+// note -- and gets the same repair and masking a line does, after the
+// capture is closed as well as before.
+func TestCaptureMaskCleansLikeOutput(t *testing.T) {
+	c, _ := newCaptureForTest(t, CaptureOptions{Secrets: []string{"opensesame", "abc"}})
+	closeCaptureForTest(t, c)
+	got := c.Mask("entry dist/open\x00sesame.txt holds \xff and abc")
+	if want := "entry dist/***.txt holds � and abc"; got != want {
+		t.Errorf("Mask = %q, want %q", got, want)
+	}
+}
+
 func TestNewCaptureRefusesAnIncompleteContract(t *testing.T) {
 	valid := func(t *testing.T) CaptureOptions {
 		return CaptureOptions{
