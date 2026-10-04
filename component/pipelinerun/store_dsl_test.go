@@ -289,6 +289,37 @@ func TestEachCallRunsUnderItsAuthority(t *testing.T) {
 	}
 }
 
+// A connect restates the source's organization AS IT IS NOW, empty included:
+// createPipeline is a read-merge insert, so an accountId left out keeps the
+// previous connection's -- and through the account tier, that organization's
+// members keep reading and writing a pipeline whose source no longer belongs
+// to them.
+func TestAConnectWritesTheSourcesAccountEvenWhenItIsEmpty(t *testing.T) {
+	engine := newRecordingEngine()
+	store := NewDSLStore(engine)
+	p := Pipeline{
+		ID: "p1", OwnerUserID: "v1:identity:user:u1", PackageID: "k1", Name: "shop", Repository: repoName,
+		InstallationID: 7, CredentialID: "c1", Delivery: DeliveryWebhook,
+	}
+	if err := store.CreatePipeline(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	p.AccountID = "v1:accounts:account:a1"
+	if err := store.CreatePipeline(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	calls := engine.recorded()
+	if len(calls) != 2 {
+		t.Fatalf("calls = %d", len(calls))
+	}
+	if !strings.Contains(calls[0].query, `accountId: ""`) {
+		t.Errorf("an untied source writes its pipeline's accountId empty: %s", calls[0].query)
+	}
+	if !strings.Contains(calls[1].query, `accountId: "a1"`) {
+		t.Errorf("a tied source writes its organization, bare: %s", calls[1].query)
+	}
+}
+
 func TestTheRenderedCallsSayWhatTheRowsAre(t *testing.T) {
 	engine := newRecordingEngine()
 	store := NewDSLStore(engine)

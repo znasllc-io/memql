@@ -280,9 +280,12 @@ func (s *dslStore) WorkSteps(ctx context.Context, workRunID string) ([]WorkStep,
 // CreatePipeline connects a pipeline, or reconnects it: createPipeline is a
 // read-merge insert at the derived id, so a second call restates the
 // configuration, marks the row active and moves connectedAt, while the
-// poll's heads and the timing table survive. The allowlist is ALWAYS sent,
-// empty included: it is the owner's answer at connect, and omitting an empty
-// one would keep the previous connection's.
+// poll's heads and the timing table survive. Two arguments are ALWAYS sent,
+// empty included, because omitting an empty one would keep the previous
+// connection's: the allowlist, the owner's answer at connect; and the
+// organization, the source's as it is NOW -- a source untied from one must
+// untie its pipeline, or that organization's members keep reading and, through
+// the account tier, writing it.
 func (s *dslStore) CreatePipeline(ctx context.Context, p Pipeline) error {
 	compute := p.Compute
 	if compute == "" {
@@ -291,6 +294,7 @@ func (s *dslStore) CreatePipeline(ctx context.Context, p Pipeline) error {
 	args := map[string]any{
 		"pipelineId":     bareID(p.ID),
 		"packageId":      bareID(p.PackageID),
+		"accountId":      bareID(p.AccountID),
 		"name":           p.Name,
 		"repository":     normalizeRepository(p.Repository),
 		"installationId": formatID(p.InstallationID),
@@ -299,7 +303,6 @@ func (s *dslStore) CreatePipeline(ctx context.Context, p Pipeline) error {
 		"compute":        string(compute),
 		"secretNames":    stringList(p.SecretNames),
 	}
-	setIfSet(args, "accountId", bareID(p.AccountID))
 	setIfSet(args, "defaultBranch", p.DefaultBranch)
 	if len(p.ChannelIDs) > 0 {
 		args["channelIds"] = stringList(p.ChannelIDs)

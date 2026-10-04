@@ -323,6 +323,18 @@ func TestTheDSLStoreOverRealRows(t *testing.T) {
 	if open, err := store.RunsUnfinished(ctx); err != nil || hasRun(open, run.ID) {
 		t.Errorf("a completed run is not unfinished: %v", err)
 	}
+
+	// ---- a reconnect of a source no longer tied to an organization unties
+	// its pipeline: createPipeline is a read-merge insert, and the account is
+	// written as it is now, empty included ----
+	untied := reconnect
+	untied.AccountID = ""
+	if err := store.CreatePipeline(ctx, untied); err != nil {
+		t.Fatalf("reconnect, untied: %v", err)
+	}
+	if got := mustPipeline(t, store, p.ID); got.AccountID != "" || got.Status != PipelineActive {
+		t.Errorf("the pipeline keeps no organization its source left: account %q status %q", got.AccountID, got.Status)
+	}
 }
 
 // The trigger's one read of a delivery, over a row the receiver's own
