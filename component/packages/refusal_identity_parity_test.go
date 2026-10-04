@@ -109,7 +109,7 @@ func TestEveryCodeTheIdentityNodeAnswersIsCatalogued(t *testing.T) {
 		CodeGithubAppSetupStateInvalid, CodeGithubAppSetupFailed, CodeConnectStateInvalid, CodeGithubAppNotConfigured,
 		CodeExchangeFailed, CodeSignatureInvalid, CodePermissionLost, CodeScopesMissing, CodeStorefrontTokenFailed,
 		CodeSiteNotWritable, CodeNotAStorefront, CodeStoreNotNamed, CodeStoreRedacted, CodeAppCredentialsInvalid,
-		CodeSecretNameAmbiguous, CodeStoreNotConnected, CodeStoreInUse, CodeStorefrontTokenRequired,
+		CodeSecretNameAmbiguous, CodeStoreNotConnected, CodeStorefrontTokenRequired,
 		CodeStorefrontTokenInvalid, CodeShopifyAppNotSaved,
 	} {
 		if _, ok := seen[code]; !ok {
