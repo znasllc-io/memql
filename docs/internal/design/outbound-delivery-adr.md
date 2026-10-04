@@ -271,19 +271,31 @@ value is the URL, in `targetSecret`, and `target` holds only the descriptor
 secret and never the URL. `outboundRequestById` (`@serverOnly`) is how the
 notify stage learns that its delivery was sent.
 
-**Who may write one.** Whoever writes a secret row chooses what is posted to
-a channel a cluster owner configured, so only server-side Go may: the notify
-stage, through `stageOutboundRequestToSecret` under internal origin.
-`@serverOnly` on that mutation bars only the named call. A raw `insert()`
-never consults it, and the concept declares no row tier, so the engine holds
-the line itself. `validateOutboundSecretTargetWrite`
+**Who may write one.** A secret row is server-written end to end. Whoever
+writes its content chooses what is posted to a channel a cluster owner
+configured. Whoever writes its delivery state decides what the pipelines
+notify stage reports, because the stage says "delivered" when the row it
+staged reads `sent`. So only server-side Go writes either:
+
+- the notify stage stages the row, through `stageOutboundRequestToSecret`;
+- the outbound worker stamps each status transition.
+
+Both run under internal origin, and the worker stamps it inline on each
+status stamp alone. Its drain scan and its secret lookup run without it.
+`@serverOnly` on the stage bars only the named call. A raw `insert()` never
+consults it, and the concept declares no row tier, so the engine holds the
+line itself. `validateOutboundSecretTargetWrite`
 (`component/memql/outbound_secret_target_write_guard.go`) sits at the
 post-read-merge seam every write path shares. Without internal origin it
-refuses any write that sets, changes or clears `targetSecret`, or that changes
-what a row naming a secret sends (`medium`, `target`, `subject`, `body`,
-`dedupeKey`, `requestedBy`). The delivery status fields stay open: the worker
-stamps them under its own system actor, and nothing in them chooses where a
-POST goes or what it says.
+refuses:
+
+- any write that sets, changes or clears `targetSecret`;
+- every write to a row whose stored or final version names a secret: its
+  content, its delivery state, even an unchanged rewrite.
+
+An operator's requeue of a failed secret row through
+`updateOutboundRequestStatus` is refused with the rest. The remedy is to
+re-run the pipeline's notify step, which stages a fresh delivery.
 
 The client-reachable `stageOutboundRequest` also stamps `targetSecret` empty
 on every write. The guard already refuses a client's re-stage onto a secret
@@ -340,12 +352,11 @@ credential.
 
 **What it does not close.** `v1:platform:outboundRequest` declares no row
 tier (memql#5804). Any signed-in caller can still read every row through
-`outboundRequestsByStatus`. For a secret row that shows the body and the
-secret's name, never its URL. The status fields the guard leaves open for
-the worker are also open to any signed-in caller, through
-`updateOutboundRequestStatus`. Requeueing a sent secret row replays its own
-body to its own channel. Marking a row sent or failed misleads whoever is
-waiting on it.
+`outboundRequestsByStatus`, which for a secret row shows the body and the
+secret's name but never its URL. A PLAIN row, one naming no secret, is not
+the guard's at all. Any signed-in caller can still stage, re-stage, stamp
+and requeue a plain row as before, and anyone waiting on one reads a status
+a stranger could have written. Both close when the concept declares a tier.
 
 ## 8. References
 

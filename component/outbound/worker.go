@@ -486,8 +486,17 @@ func (w *Worker) stampFailed(ctx context.Context, req Request, policyErr error) 
 	w.logger.Warn("outbound worker: row refused by policy", "id", req.ID, "medium", req.Medium, "error", policyErr)
 }
 
+// stamp writes one delivery-state transition, and is the only place the worker
+// stamps internal origin (memql#5480). A row naming a secret target is
+// server-written end to end -- the engine refuses any write to it without
+// internal origin, because the pipelines notify stage reports a delivery when
+// its row reads `sent` -- so the worker's own transitions must carry it. The
+// stamp is INLINE on this one Execute, where the trust dies: the drain scan
+// and the secret's lookup keep the plain system actor, and the statement is
+// always updateOutboundRequestStatus, composed by this file with every string
+// argument passed through QuoteString.
 func (w *Worker) stamp(ctx context.Context, mutation string) {
-	if _, err := w.engine.Execute(ctx, mutation); err != nil {
+	if _, err := w.engine.Execute(auth.ContextWithInternalOrigin(ctx), mutation); err != nil {
 		w.logger.Warn("outbound worker: status stamp failed", "error", err)
 	}
 }
@@ -661,7 +670,9 @@ func parseTimeOrZero(s string) time.Time {
 
 // SystemActorContext stamps engine roundtrips from the worker with a
 // system identity (planner precedent): every drain scan, every status stamp
-// and every secret target's lookup runs under it, with no internal origin.
+// and every secret target's lookup runs under it. It carries no internal
+// origin; stamp adds that inline to each status stamp, and nothing else gets
+// it.
 //
 // Exported for app's database test (memql#5480), which reads a sealed
 // globalSecret through the engine's real resolver under exactly this

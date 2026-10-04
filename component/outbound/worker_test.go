@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -35,12 +36,14 @@ type fakeEngine struct {
 	pending  []map[string]any
 	retrying []map[string]any
 	calls    []string
+	origins  []auth.CallOrigin // the call origin each of calls arrived with
 }
 
-func (e *fakeEngine) Execute(_ context.Context, q string) (any, error) {
+func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.calls = append(e.calls, q)
+	e.origins = append(e.origins, auth.OriginFromContext(ctx))
 	switch {
 	case strings.Contains(q, `outboundRequestsByStatus(status: "pending")`):
 		return rowsEnvelope(e.pending), nil
@@ -677,16 +680,18 @@ func secretRow(id string) map[string]any {
 // fakeSecrets stands in for the globalSecret resolver: it answers one value or
 // one error and records every name it was asked for.
 type fakeSecrets struct {
-	mu    sync.Mutex
-	value string
-	err   error
-	asked []string
+	mu      sync.Mutex
+	value   string
+	err     error
+	asked   []string
+	origins []auth.CallOrigin // the call origin each lookup arrived with
 }
 
-func (s *fakeSecrets) Resolve(_ context.Context, name string) (string, error) {
+func (s *fakeSecrets) Resolve(ctx context.Context, name string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.asked = append(s.asked, name)
+	s.origins = append(s.origins, auth.OriginFromContext(ctx))
 	return s.value, s.err
 }
 
@@ -1111,6 +1116,64 @@ func TestSecretTargetNameOutsideThePatternIsRefused(t *testing.T) {
 			}
 			if strings.Contains(logs.String(), name) {
 				t.Fatalf("the log repeats the refused name:\n%s", logs.String())
+			}
+		})
+	}
+}
+
+// TestOnlyTheWorkersStatusStampsCarryInternalOrigin: a secret row's delivery
+// state is server-written end to end (memql#5480) -- the engine refuses any
+// write to such a row without internal origin, because the notify stage
+// reports a delivery when its row reads `sent`. So the worker stamps every
+// status transition with internal origin, INLINE on that one Execute, where
+// the trust dies. The drain scan and the secret's lookup keep the plain system
+// actor: neither opens a @serverOnly gate, and a context carrying internal
+// origin onward would widen what everything downstream of it may do
+// (memql#2879). Walked through every way a row leaves the worker: delivered,
+// retried after a send, retried after a lookup, and refused by policy.
+func TestOnlyTheWorkersStatusStampsCarryInternalOrigin(t *testing.T) {
+	resolved := discordWebhookPrefix + "123/" + discordToken
+	for _, tc := range []struct {
+		name      string
+		secrets   *fakeSecrets
+		transport *fakeTransport
+		want      string // the last status stamped
+	}{
+		{"delivered", &fakeSecrets{value: resolved}, &fakeTransport{}, "sent"},
+		{"retried after a send", &fakeSecrets{value: resolved}, &fakeTransport{err: errors.New("connect timeout")}, "retrying"},
+		{"retried after a lookup", &fakeSecrets{err: errors.New("i/o timeout")}, &fakeTransport{}, "retrying"},
+		{"refused by policy", &fakeSecrets{err: memql.ErrVariableNotFound}, &fakeTransport{}, "failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := &fakeEngine{pending: []map[string]any{secretRow("v1:platform:outboundRequest:s1")}}
+			w, _ := newSecretTargetWorker(eng, tc.transport, tc.secrets)
+
+			w.drainOnce(context.Background())
+
+			eng.mu.Lock()
+			defer eng.mu.Unlock()
+			lastStamp := ""
+			for i, call := range eng.calls {
+				internal := eng.origins[i].IsInternal()
+				switch {
+				case strings.HasPrefix(call, "mutation updateOutboundRequestStatus("):
+					lastStamp = call
+					if !internal {
+						t.Errorf("a status stamp went out without internal origin, so the engine refuses it on a secret row: %s", call)
+					}
+				case internal:
+					t.Errorf("internal origin reached a call that is not a status stamp: %s", call)
+				}
+			}
+			if !strings.Contains(lastStamp, `status: "`+tc.want+`"`) {
+				t.Fatalf("expected the walk to end stamped %s, got %v", tc.want, eng.calls)
+			}
+			tc.secrets.mu.Lock()
+			defer tc.secrets.mu.Unlock()
+			for _, o := range tc.secrets.origins {
+				if o.IsInternal() {
+					t.Error("the secret's lookup ran with internal origin; it needs none")
+				}
 			}
 		})
 	}

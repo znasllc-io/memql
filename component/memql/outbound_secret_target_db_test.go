@@ -22,11 +22,12 @@ import (
 // "secret:" + args.targetSecret writes the descriptor, that outboundRequestFull
 // carries targetSecret to the worker, that a client is refused both
 // server-only constructs, and -- the half that matters most -- that no write
-// without internal origin can name a secret or change what a secret row sends.
-// @serverOnly bars a NAMED call; a raw insert() never consults it, so the last
-// is the write guard's (outbound_secret_target_write_guard.go). component/outbound
-// is not in the db-tests lane, so all of it is pinned here, on the shared engine
-// this package's DSL-over-real-rows tests already boot.
+// without internal origin reaches a secret row at all: not its target, not
+// what it sends, not its delivery state. @serverOnly bars a NAMED call; a raw
+// insert() never consults it, so the last is the write guard's
+// (outbound_secret_target_write_guard.go). component/outbound is not in the
+// db-tests lane, so all of it is pinned here, on the shared engine this
+// package's DSL-over-real-rows tests already boot.
 
 const outboundRequestConcept = "v1:platform:outboundRequest"
 
@@ -172,18 +173,25 @@ func TestAClientCannotReVersionASecretRow(t *testing.T) {
 	}
 }
 
+// outboundWorkerActor is the outbound worker's identity as
+// component/outbound.SystemActorContext builds it: a system token, no person.
+// The worker adds internal origin on each status stamp, inline.
+func outboundWorkerActor() context.Context {
+	return auth.ContextWithToken(context.Background(), &auth.TokenInfo{
+		Subject: "system:outbound",
+		Claims:  map[string]any{"sub": "system:outbound", "role": "system"},
+	})
+}
+
 // TestTheWorkersStatusStampsOnASecretRowLand: the outbound worker stamps
-// delivery state under its own system actor, with no internal origin, so the
-// guard must leave the lifecycle fields open on a secret row. This is the walk
-// a delivery that is retried once and then sent takes.
+// delivery state under its system actor with internal origin on each stamp,
+// so the guard admits it. This is the walk a delivery that is retried once
+// and then sent takes.
 func TestTheWorkersStatusStampsOnASecretRowLand(t *testing.T) {
 	eng, db, ctx := sharedReadMergeEngine(t)
 	reqId := "out5480-" + uniqueSuffix("secret-stamps")
 	canonicalId := stageSecretRow(t, eng, ctx, reqId)
-	worker := auth.ContextWithClientOrigin(auth.ContextWithToken(context.Background(), &auth.TokenInfo{
-		Subject: "system:outbound",
-		Claims:  map[string]any{"sub": "system:outbound", "role": "system"},
-	}))
+	worker := auth.ContextWithInternalOrigin(outboundWorkerActor())
 
 	for _, call := range []string{
 		`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "sending")`,
@@ -199,6 +207,69 @@ func TestTheWorkersStatusStampsOnASecretRowLand(t *testing.T) {
 	require.EqualValues(t, 1, stored["attempts"])
 	require.Equal(t, "2026-10-04T12:00:31Z", stored["sentAt"])
 	require.Equal(t, "DISCORD_RELEASES", stored["targetSecret"])
+}
+
+// TestAClientCannotStampASecretRowsStatus: the notify stage reports a delivery
+// when the row it staged reads `sent`, so a secret row's delivery state is as
+// much server-side Go's as its target. A client marking one sent would fake a
+// delivery, and requeueing one would post the stored body again. Both are
+// refused, as is the worker's own actor arriving without internal origin, and
+// the row keeps the state the worker gave it.
+func TestAClientCannotStampASecretRowsStatus(t *testing.T) {
+	eng, db, ctx := sharedReadMergeEngine(t)
+	internal := auth.ContextWithInternalOrigin(ctx)
+	reqId := "out5480-" + uniqueSuffix("secret-client-stamp")
+	canonicalId := stageSecretRow(t, eng, ctx, reqId)
+	_, err := eng.Execute(auth.ContextWithInternalOrigin(outboundWorkerActor()),
+		`mutation updateOutboundRequestStatus(requestId: "`+reqId+`", status: "failed", attempts: 5, lastError: "webhook: status 404")`)
+	require.NoError(t, err, "precondition: the worker failed the row")
+
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		call string
+	}{
+		{"a client marking it sent", outboundClient(ctx, "writer-5480"),
+			`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "sent", lastError: "", sentAt: "2026-10-04T12:00:31Z")`},
+		{"a client requeueing it", outboundClient(ctx, "writer-5480"),
+			`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "pending")`},
+		{"the worker's actor without internal origin", auth.ContextWithClientOrigin(outboundWorkerActor()),
+			`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "pending")`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := eng.Execute(tc.ctx, tc.call)
+			require.Error(t, err, "a status stamp without internal origin landed on a secret row")
+			require.Contains(t, err.Error(), "`status`")
+			stored := latestPayload(t, internal, db, outboundRequestConcept, canonicalId)
+			require.Equal(t, "failed", stored["status"], "the refused stamp changed the row's state")
+			require.EqualValues(t, 5, stored["attempts"])
+		})
+	}
+}
+
+// TestAClientStatusStampOnAPlainRowLands: the rule is about rows naming a
+// secret. A plain row's delivery state stays as open as it always was --
+// stamped and requeued by any signed-in caller -- until the concept declares
+// a tier (memql#5804).
+func TestAClientStatusStampOnAPlainRowLands(t *testing.T) {
+	eng, db, ctx := sharedReadMergeEngine(t)
+	client := outboundClient(ctx, "writer-5480")
+	reqId := "out5480-" + uniqueSuffix("plain-client-stamp")
+	canonicalId := runMutation(t, client, eng, "stageOutboundRequest", map[string]any{
+		"requestId": reqId,
+		"medium":    "webhook",
+		"target":    "https://hooks.example/plain",
+		"body":      "plain",
+	})
+
+	for _, call := range []string{
+		`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "sent", lastError: "", sentAt: "2026-10-04T12:00:31Z")`,
+		`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "pending")`,
+	} {
+		_, err := eng.Execute(client, call)
+		require.NoError(t, err, "a client status stamp on a plain row was refused: %s", call)
+	}
+	require.Equal(t, "pending", latestPayload(t, auth.ContextWithInternalOrigin(ctx), db, outboundRequestConcept, canonicalId)["status"])
 }
 
 // TestAnInternalReStageThroughThePlainMutationLeavesAPlainRow: what the guard
