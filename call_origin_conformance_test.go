@@ -635,7 +635,36 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// own actor, which is what keeps row admission the composite tier's
 		// decision. Both asserted in
 		// component/packages/internal_origin_test.go.
-		"component/packages":        "package deploy pipeline -- server-initiated; stage advances happen after cross-node handoffs with no caller in scope, and every id is engine-minted (memql#4794)",
+		"component/packages": "package deploy pipeline -- server-initiated; stage advances happen after cross-node handoffs with no caller in scope, and every id is engine-minted (memql#4794)",
+		// PIPELINES (epic memql#5477). SERVER-INITIATED, and the argument is
+		// component/packages' one step on, because a pipeline hangs off a
+		// package and borrows its owner.
+		//
+		// Most of its work has no caller at all: a GitHub delivery staged on
+		// the inbound seam, the every-minute poll, and the agent driver that
+		// claims and concludes runs on another replica (Task 10b). There the
+		// stamp opens the @serverOnly constructs the work is made of -- the
+		// cross-owner reads (a delivery must find every owner's pipeline of a
+		// repository; recovery must find a run whose driver died) under the
+		// package's OWN synthetic system actor, and the four writes under the
+		// row owner's borrowed authority, which the mutations stamp
+		// ownerUserId from. Without it every run would be refused with one
+		// WARN and the check run would sit queued forever.
+		//
+		// What a PERSON reaches -- connect, disconnect, re-run, cancel -- is
+		// downstream of an owner-scoped read under their own actor
+		// (packageById under the composite tier plus an explicit owner match;
+		// pipelineForOwner; pipelineRunForOwner), so no caller-supplied
+		// identifier reaches a stamped call until the caller has been shown
+		// to own the row it names, and the owner borrowed is COPIED off that
+		// row, never taken from an argument. Every other id is derived
+		// (sha256 of the package id or the run key) or GitHub's.
+		//
+		// The stamp is applied in ONE place, inline as the argument to
+		// dslStore.executeInternal's single Execute, and the marked context is
+		// never returned. Asserted, with the person-facing precondition, in
+		// component/pipelinerun/internal_origin_test.go.
+		"component/pipelinerun":     "pipelines -- server-initiated; deliveries, the poll and the driver have no caller, and every person-facing act is downstream of an owner-scoped read under the person's own actor (epic memql#5477)",
 		"integrations/agent/worker": "worker store, server-initiated",
 		// THE WORK SPINE's entry points (epic memql#4966). SERVER-INITIATED,
 		// and not one of the request-derived exceptions -- stated rather than
