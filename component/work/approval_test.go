@@ -186,3 +186,22 @@ func TestArtifactHash_StableAndSensitive(t *testing.T) {
 		t.Fatal("a changed command must change the hash; that is the whole guarantee")
 	}
 }
+
+// LegacyFailureHashes reproduces the hash the failure path raised its
+// questions with before memql#5664, for each run-id spelling it is given, from
+// the stored subject alone -- so an edited failure no longer reproduces it.
+func TestLegacyFailureHashesReproduceTheOldRaise(t *testing.T) {
+	raised := ArtifactHash(map[string]any{"runId": "v1:work:run:r1", "stepKey": "draft", "error": "boom", "symptom": string(SymptomHuman)})
+	subject := FailureSubject(SymptomHuman, "draft", "boom")
+	hashes := LegacyFailureHashes(subject, "r1", "v1:work:run:r1")
+	if len(hashes) != 2 || hashes[0] == raised || hashes[1] != raised {
+		t.Fatalf("legacy hashes %v, want the old raise under the canonical spelling only (%s)", hashes, raised)
+	}
+	if ArtifactHash(subject) == raised {
+		t.Fatal("the current raise hashes the same as the old one; there is no legacy shape to read")
+	}
+	edited := FailureSubject(SymptomHuman, "draft", "a different failure")
+	if LegacyFailureHashes(edited, "v1:work:run:r1")[0] == raised {
+		t.Fatal("an edited failure reproduced the old hash")
+	}
+}

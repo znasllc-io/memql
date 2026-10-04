@@ -127,6 +127,12 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 			return nil, err
 		}
 		current := currentArtifactHash(kind, storedHash, rowMap(approval, "subject"))
+		if current != storedHash && work.IsFailureQuestion(approval["options"]) && legacyFailureHash(storedHash, rowMap(approval, "subject"), runId) {
+			// A failure question raised before memql#5664, whose hash was
+			// over another map (work.LegacyFailureHashes): the same failure,
+			// still unedited, so the decision may land.
+			current = storedHash
+		}
 		if kind == work.ApprovalKindProcedurePromotion {
 			// The one kind whose artifact is a ROW that keeps changing after
 			// the approval is raised: a re-lift rewrites the construct's
@@ -269,6 +275,20 @@ func withTrainingOutcome(payload map[string]any, goalId, runId string, escalated
 // decision fail as "changed" and the safety gate's inbox undecidable.
 func currentArtifactHash(kind, storedHash string, subject map[string]any) string {
 	return work.CurrentArtifactHash(kind, storedHash, subject)
+}
+
+// legacyFailureHash reports whether stored is the hash a failure question was
+// raised with before memql#5664 (work.LegacyFailureHashes), for any spelling
+// of the run's id: the executor hashed the id it ran under, and the row reads
+// it back in whatever form the engine returns.
+func legacyFailureHash(stored string, subject map[string]any, runId string) bool {
+	bare := memql.BareShortId(runId)
+	for _, h := range work.LegacyFailureHashes(subject, runId, bare, runConcept+":"+bare) {
+		if h == stored {
+			return true
+		}
+	}
+	return false
 }
 
 // resumeParkedRun takes the run off its wait, or stops it.

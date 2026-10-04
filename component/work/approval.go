@@ -278,6 +278,31 @@ func CurrentArtifactHash(kind, storedHash string, subject map[string]any) string
 	return ArtifactHash(subject)
 }
 
+// LegacyFailureHashes are the hashes a failure-path question was raised with
+// before memql#5664 made its subject and its hash one map: the subject stored
+// {symptom, stepKey, errorMessage} -- FailureSubject's shape -- and the hash
+// covered {runId, stepKey, error, symptom}, the same failure under other keys
+// plus the run's id as the executor spelled it. A question raised then may
+// still be pending, so the decide side reads this shape too, for the run-id
+// spellings it is given; the hash is still over the stored subject's own
+// fields, so a failure edited since is still refused. There is no migration:
+// the rows are rare, short-lived (workApprovalTTL), and decidable as they are.
+func LegacyFailureHashes(subject map[string]any, runIds ...string) []string {
+	symptom, _ := subject["symptom"].(string)
+	stepKey, _ := subject["stepKey"].(string)
+	errorMessage, _ := subject["errorMessage"].(string)
+	out := make([]string, 0, len(runIds))
+	for _, runId := range runIds {
+		out = append(out, ArtifactHash(map[string]any{
+			"runId":   runId,
+			"stepKey": stepKey,
+			"error":   errorMessage,
+			"symptom": symptom,
+		}))
+	}
+	return out
+}
+
 // ResumeAllowed is the gate resume runs before it acts on an approval.
 func ResumeAllowed(approvedHash, currentHash, decision string) (bool, error) {
 	switch decision {

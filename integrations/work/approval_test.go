@@ -313,6 +313,66 @@ func TestDecideApprovalLandsOnAFailurePathQuestion(t *testing.T) {
 	}
 }
 
+// A FAILURE QUESTION RAISED BEFORE THE FIX IS STILL DECIDABLE (memql#5664).
+// The failure path stored {symptom, stepKey, errorMessage} as the subject and
+// hashed {runId, stepKey, error, symptom}: the same failure under other keys,
+// plus the run's id as the executor spelled it. Such a row may still be pending
+// in a running cluster, and no migration rewrites it, so the decide side also
+// reads that shape for a question offering Retry and Abandon -- and still
+// refuses one whose failure was edited since.
+func TestDecideApprovalLandsOnALegacyFailureQuestion(t *testing.T) {
+	legacy := func(t *testing.T, errorMessage string) map[string]any {
+		t.Helper()
+		req := work.FailureApproval(work.ApprovalKindFeedback, "v1:work:run:r1", "draft", work.SymptomHuman, "prompt is too long", "q", work.Evidence{}, testNow, time.Hour)
+		raw, err := json.Marshal(map[string]any{
+			// The pending list reads the run id back bare.
+			"id": "v1:work:approval:a1", "runId": "r1", "ownerUserId": "u-alice", "stepKey": "draft", "kind": req.Kind,
+			"subject": map[string]any{"symptom": string(work.SymptomHuman), "stepKey": "draft", "errorMessage": errorMessage},
+			"artifactHash": work.ArtifactHash(map[string]any{
+				"runId": "v1:work:run:r1", "stepKey": "draft", "error": "prompt is too long", "symptom": string(work.SymptomHuman),
+			}),
+			"question": req.Question, "options": req.Options,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var row map[string]any
+		if err := json.Unmarshal(raw, &row); err != nil {
+			t.Fatal(err)
+		}
+		return row
+	}
+	for _, tc := range []struct {
+		name, errorMessage string
+		wantChanged        bool
+	}{
+		{"as raised", "prompt is too long", false},
+		{"its failure edited since", "a different failure", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			i, eng := newTestIntegration(t)
+			eng.reply("workApprovalsForOwner", legacy(t, tc.errorMessage))
+			eng.reply("workRunForOwner", map[string]any{
+				"id": "v1:work:run:r1", "ownerUserId": "u-alice", "status": runStatusWaiting,
+				"waitingOn": map[string]any{"kind": "approval", "subject": "v1:work:approval:a1", "approvalKind": work.ApprovalKindFeedback},
+			})
+			_, err := i.handleDecideApproval(callerContext("u-alice"), map[string]any{"approvalId": "v1:work:approval:a1", "decision": "approved"}, 0)
+			if tc.wantChanged {
+				if err == nil || !strings.Contains(err.Error(), work.ErrArtifactChanged.Error()) {
+					t.Fatalf("err = %v, want %q", err, work.ErrArtifactChanged)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("a failure question raised before the fix was refused: %v", err)
+			}
+			if update := argsOf(t, eng, "updateWorkRun"); update["status"] != runStatusRunning {
+				t.Fatalf("run update = %v, want it resumed", update)
+			}
+		})
+	}
+}
+
 // A PERSON'S RETRY RESUMES THE RUN UNDER A REQUEST OF ITS OWN (memql#5664).
 // Approving a failure question within four minutes of the run's dispatch put
 // the run back to `running` with nothing but its id to claim it by -- and the
