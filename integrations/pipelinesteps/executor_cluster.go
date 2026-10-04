@@ -270,9 +270,13 @@ func (s *clusterStep) giveUp(ctx context.Context) pl.StepResult {
 	limit := time.Duration(s.run.TimeoutSeconds) * time.Second
 	switch {
 	case ok && reply.State == StateRunning:
+		// Time spent waiting for a slot counts against the Job's deadline
+		// (ruling R31), so a runner still holding the step now is one whose
+		// settling -- its log, its files, its outcome -- overran the grace.
 		return s.where(failedResult(s.run.DeadlineCode, fmt.Sprintf(
-			"The step was still running %s after it was handed to the cluster, past its %s deadline: it waited for "+
-				"a free slot under the pipelines ceiling before it started. It was stopped.", s.timeout+s.e.lostGrace, limit)))
+			"The step's runner still held it %s after it was handed to the cluster, with no outcome recorded: past "+
+				"its %s deadline and the %s allowed for settling it (its log, its files and its outcome), settling "+
+				"overran. It was stopped.", s.timeout+s.e.lostGrace, limit, s.e.lostGrace)))
 	case ok && reply.State == StateAbsent:
 		return s.where(failedResult(s.run.DeadlineCode, fmt.Sprintf(
 			"The step did not start within its %s deadline: the cluster had no free slot for it under the pipelines "+

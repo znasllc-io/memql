@@ -909,22 +909,25 @@ func TestExecuteGivesUpPastTheDeadline(t *testing.T) {
 		status func() (*nodev1.WorkbenchForwardResponse, string, error)
 		want   pl.Outcome
 		code   string
+		says   string // what the failure says
 	}{
 		{"no replica answers for the step", func() (*nodev1.WorkbenchForwardResponse, string, error) {
 			return nil, "", workbench.ErrNoWorkbenchPeer
-		}, pl.OutcomeFailed, pl.CodeNodeLost},
+		}, pl.OutcomeFailed, pl.CodeNodeLost, "went away"},
 		{"the Job's runner went quiet", func() (*nodev1.WorkbenchForwardResponse, string, error) {
 			return stateResponse(StateStale), "workbench-b", nil
-		}, pl.OutcomeFailed, pl.CodeNodeLost},
-		{"the Job is still running: it started late", func() (*nodev1.WorkbenchForwardResponse, string, error) {
+		}, pl.OutcomeFailed, pl.CodeNodeLost, "went away"},
+		// The wait for a slot counts against the Job's deadline (R31): a
+		// runner still holding the step now has overrun settling it.
+		{"the Job's runner still holds it: settling overran", func() (*nodev1.WorkbenchForwardResponse, string, error) {
 			return stateResponse(StateRunning), "workbench-b", nil
-		}, pl.OutcomeFailed, pl.CodeStepTimeout},
+		}, pl.OutcomeFailed, pl.CodeStepTimeout, "settling overran"},
 		{"the Job never started: it waited for a slot", func() (*nodev1.WorkbenchForwardResponse, string, error) {
 			return stateResponse(StateAbsent), "workbench-b", nil
-		}, pl.OutcomeFailed, pl.CodeStepTimeout},
+		}, pl.OutcomeFailed, pl.CodeStepTimeout, "did not start"},
 		{"the last look found the outcome", func() (*nodev1.WorkbenchForwardResponse, string, error) {
 			return finishedResponse(exOutcome("workbench-a")), "workbench-b", nil
-		}, pl.OutcomeSucceeded, ""},
+		}, pl.OutcomeSucceeded, "", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -944,6 +947,12 @@ func TestExecuteGivesUpPastTheDeadline(t *testing.T) {
 				return
 			}
 			wantFailure(t, res, c.want, c.code)
+			if !strings.Contains(res.Failure.Message, c.says) {
+				t.Errorf("failure %q, want it to say %q", res.Failure.Message, c.says)
+			}
+			if c.says == "settling overran" && strings.Contains(res.Failure.Message, "free slot") {
+				t.Errorf("failure %q blames a wait for a slot, which counts against the Job's deadline now", res.Failure.Message)
+			}
 			awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineAckAction)) == 1 },
 				"the step was given up on and its Job left to run: the give-up must delete it")
 		})
