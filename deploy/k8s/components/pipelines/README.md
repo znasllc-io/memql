@@ -179,11 +179,13 @@ runs a probe here: one Indexed Job (`memql.io/probe=isolation`) whose pods each
 listen on a port, one of which tries to reach the other while it reaches the
 cluster's DNS, which the policy allows. Reaching DNS but not the listener is a
 pass. Reaching the listener refuses every step `pipeline_isolation_unenforced`,
-naming the fix, and so does a probe that cannot decide (DNS unreachable, the
-listener gone), until a later proof passes. The probe is one Job, so it waits
-for one slot under the ceiling as a step does, and it deletes its Job and its
-Secret before it answers. It runs under the runner's grant above and needs
-nothing more (`integrations/pipelinesteps/isolation.go`).
+naming the fix: a network policy engine. A probe that cannot decide (DNS
+unreachable, the listener gone) refuses every step too, until a later proof
+passes; its refusal says what it saw and, should it persist, where to look:
+whether the policy engine runs and whether cluster DNS answers. The probe is
+one Job, so it waits for one slot under the ceiling as a step does, and it
+deletes its Job and its Secret before it answers. It runs under the runner's
+grant above and needs nothing more (`integrations/pipelinesteps/isolation.go`).
 
 ## The clone image
 

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -285,6 +286,9 @@ func isoRefusing(t *testing.T) int {
 // every SYN after it, so an attempt times out (measured, Linux).
 func isoSilent(t *testing.T) int {
 	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skip("a full accept queue drops a SYN -- the silence this fixture stands for -- on Linux; another kernel may answer it")
+	}
 	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
 	if err != nil {
 		t.Fatalf("socket: %v", err)
@@ -386,6 +390,8 @@ func TestIsolationProbeConnectorReadsTheThreeRoundsTogether(t *testing.T) {
 		env      map[string]string
 		code     int
 		said     []string
+		// linuxOnly, when set, is why the case holds on Linux alone.
+		linuxOnly string
 	}{
 		{
 			name: "every listener attempt refused while DNS answered every one: isolated",
@@ -429,6 +435,8 @@ func TestIsolationProbeConnectorReadsTheThreeRoundsTogether(t *testing.T) {
 			dns:  func(t *testing.T) int { return isoAccepting(t).port() }, listener: isoRefusing,
 			env:  map[string]string{probeTargetVar: "255.255.255.255"},
 			code: probeExitUnclear, said: []string{"Network is unreachable"},
+			linuxOnly: "Linux refuses TCP to a broadcast address in connect() itself, as \"Network is unreachable\"; " +
+				"another kernel refuses it otherwise",
 		},
 		{
 			name: "the target Secret names another Job: inconclusive",
@@ -462,6 +470,9 @@ func TestIsolationProbeConnectorReadsTheThreeRoundsTogether(t *testing.T) {
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			if c.linuxOnly != "" && runtime.GOOS != "linux" {
+				t.Skip(c.linuxOnly)
+			}
 			// Each case has its own endpoints, and most wait out three
 			// rounds a second apart.
 			t.Parallel()

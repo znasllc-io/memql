@@ -639,6 +639,30 @@ func TestJobPodIsNilBeforeThePodExists(t *testing.T) {
 	fake.wantRequests(t, "GET "+kubePods+"?labelSelector=job-name%3D"+kubeJobName)
 }
 
+// TestProbeTargetReadsTheProbeSecretsTwoKeys: the isolation probe's Secret
+// is read for its address and its Job's uid alone -- whatever else a Secret
+// of that name held is never decoded -- and an absent one is the API
+// server's 404.
+func TestProbeTargetReadsTheProbeSecretsTwoKeys(t *testing.T) {
+	enc := func(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+	kube, fake := newKubeFake(t, map[string]kubeAnswer{
+		"GET " + kubeSecrets + "/mpi-x-target": kubeOK(200, map[string]any{"kind": "Secret", "metadata": map[string]any{"name": "mpi-x-target"},
+			"data": map[string]string{"target": enc("10.42.1.3"), "job-uid": enc("uid-probe-7"), "other": "not base64 at all"}}),
+		"GET " + kubeSecrets + "/mpi-y-target": kubeStatus(404, "NotFound", `secrets "mpi-y-target" not found`),
+	})
+	target, uid, err := kube.ProbeTarget(context.Background(), "mpi-x-target")
+	if err != nil || target != "10.42.1.3" || uid != "uid-probe-7" {
+		t.Errorf("ProbeTarget = %q, %q, %v; want the address and the uid, the other key left unread", target, uid, err)
+	}
+	if _, _, err := kube.ProbeTarget(context.Background(), "mpi-y-target"); !deploycontrol.IsNotFound(err) {
+		t.Errorf("an absent probe Secret = %v, want the API server's 404", err)
+	}
+	if _, _, err := kube.ProbeTarget(context.Background(), ""); err == nil {
+		t.Error("an unnamed Secret was read: the path would be the collection's")
+	}
+	fake.wantRequests(t, "GET "+kubeSecrets+"/mpi-x-target", "GET "+kubeSecrets+"/mpi-y-target")
+}
+
 // The isolation probe's two pods (Task 6b) exactly as a k3s v1.35.5 API
 // server returned them (2026-10-04), the connector ended, with only node-local
 // ids removed: index 0 holds the listener up, ready; index 1's connector

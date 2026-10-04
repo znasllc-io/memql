@@ -291,6 +291,9 @@ type rtCluster struct {
 	holdJobDeletes map[string]chan struct{}
 	// podsAnswer, when set, answers every list of pods instead.
 	podsAnswer *kubeAnswer
+	// loseSecretCreates makes that many Secret creates, and answers each
+	// 503, as a reply lost on its way back.
+	loseSecretCreates int
 }
 
 func newRTCluster(t *testing.T, clock *rtClock) *rtCluster {
@@ -607,6 +610,11 @@ func (c *rtCluster) createSecret(w http.ResponseWriter, body []byte) {
 	s.Metadata.ResourceVersion = strconv.Itoa(c.rv)
 	s.Metadata.CreationTimestamp = c.clock.Now()
 	c.secrets[s.Metadata.Name] = s
+	if c.loseSecretCreates > 0 {
+		c.loseSecretCreates--
+		rtAnswer(w, rtUnavailable)
+		return
+	}
 	rtJSON(w, 201, s)
 }
 

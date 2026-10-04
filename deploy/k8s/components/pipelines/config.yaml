@@ -14,9 +14,9 @@
 #                                token, and of the isolation probe, which runs
 #                                `bash` and `perl` (git's own dependency): this
 #                                one has all three. PINNED BY DIGEST: a tag is
-#                                whatever was pushed to it last, and whoever controls the tag
-#                                would control the token. The digest is the
-#                                multi-arch INDEX, measured with
+#                                whatever was pushed to it last, and whoever
+#                                controls the tag would control the token. The
+#                                digest is the multi-arch INDEX, measured with
 #                                  docker buildx imagetools inspect docker.io/library/buildpack-deps:bookworm-scm
 #                                on 2026-10-03; move it by measuring again, never
 #                                by editing the tag alone.

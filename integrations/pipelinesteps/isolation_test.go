@@ -466,8 +466,8 @@ func TestIsolationProofRefusedConnectionPassesOnlyWhileTheListenerHeld(t *testin
 // the cluster's DNS, which the policy allows, so its failure to reach the
 // listener proves nothing about the policy -- the network itself may be
 // broken. Never a pass: the step is refused, saying the proof did not
-// conclude rather than prescribing the policy engine, and the next create
-// proves again.
+// conclude and where to look if that persists -- not the remedy for a
+// namespace found open -- and the next create proves again.
 func TestIsolationProofWithoutDNSIsInconclusive(t *testing.T) {
 	h := newIsoHarness(t, isoScript(probeExitDNS, isoSaid[probeExitDNS]))
 
@@ -478,8 +478,11 @@ func TestIsolationProofWithoutDNSIsInconclusive(t *testing.T) {
 	if v.Isolated || !v.Inconclusive || !strings.Contains(v.Detail, "DNS") {
 		t.Errorf("verdict = %+v, want inconclusive, naming DNS", v)
 	}
-	if !strings.Contains(res.Failure.Message, "could not prove") || strings.Contains(res.Failure.Message, "az aks update") {
-		t.Errorf("the refusal %q, want it to say the proof did not conclude, not to prescribe a policy engine", res.Failure.Message)
+	msg := res.Failure.Message
+	if !strings.Contains(msg, "could not prove") ||
+		!strings.Contains(msg, "if this persists, check that the cluster's network policy engine is running and that cluster DNS (kube-system) answers") ||
+		strings.Contains(msg, "az aks update") || strings.Contains(msg, "Enable a network policy engine") {
+		t.Errorf("the refusal %q, want it to say the proof did not conclude and where to look if that persists, not the fix for an open namespace", msg)
 	}
 	isoLeftNothing(t, h)
 
@@ -517,12 +520,23 @@ func TestIsolationProofInconclusiveIsNotAPass(t *testing.T) {
 					c.createJobAnswers = []kubeAnswer{kubeStatus(403, "Forbidden", `jobs.batch is forbidden: User "system:serviceaccount:memql:memql-engine" cannot create resource "jobs"`)}
 				})
 			}, said: "cannot create resource"},
-		{name: "a probe Secret was there before the proof made it", script: isoScript(probeExitIsolated, isoSaid[probeExitIsolated]),
+		{name: "another probe's Secret was there before the proof made its own", script: isoScript(probeExitIsolated, isoSaid[probeExitIsolated]),
+			setup: func(h *rtHarness) {
+				// Made after the proof cleared the way: when its Job is.
+				foreign, err := BuildIsolationTarget(h.cfg, Job{Metadata: ObjectMeta{Name: isoName(), UID: "uid-another-probe"}}, "10.42.7.7")
+				if err != nil {
+					t.Fatal(err)
+				}
+				h.c.with(func(c *rtCluster) {
+					c.onJobCreate = func(c *rtCluster, _ int) { c.secrets[isoTarget()] = foreign }
+				})
+			}, said: "already there"},
+		{name: "a probe Secret answered there and then could not be read", script: isoScript(probeExitIsolated, isoSaid[probeExitIsolated]),
 			setup: func(h *rtHarness) {
 				h.c.with(func(c *rtCluster) {
 					c.createSecretAnswers = []kubeAnswer{kubeStatus(409, "AlreadyExists", fmt.Sprintf("secrets %q already exists", isoTarget()))}
 				})
-			}, said: "already there"},
+			}, said: "could not be read"},
 		{name: "the probe Secret could not be created", script: isoScript(probeExitIsolated, isoSaid[probeExitIsolated]),
 			setup: func(h *rtHarness) {
 				h.r.probeEndWait = 300 * time.Millisecond
@@ -799,6 +813,26 @@ func TestIsolationProofTriesAgainWhatMayPass(t *testing.T) {
 	}
 	if n := createsOf(h.c, kubeJobs, isoName()); n != 3 {
 		t.Errorf("the probe Job was asked for %d times, want three: two unanswered, then made", n)
+	}
+	isoLeftNothing(t, h)
+}
+
+// TestIsolationProofKeepsItsOwnSecretWhoseAnswerWasLost (fix round 1, minor
+// 2): the probe Secret's create was made, but its answer lost on the way
+// back, and the retry met it (409). It names this probe Job and this listener
+// -- one Runner proves at a time -- so it is this proof's own, and kept.
+func TestIsolationProofKeepsItsOwnSecretWhoseAnswerWasLost(t *testing.T) {
+	h := newIsoHarness(t, isoScript(probeExitIsolated, isoSaid[probeExitIsolated]))
+	h.c.with(func(c *rtCluster) { c.loseSecretCreates = 1 })
+
+	if res := h.run(t, isoStep(h, rtRun().StepKey)); res.Status != pl.OutcomeSucceeded {
+		t.Fatalf("result = %+v (failure %+v), want the step run on the Secret the proof made", res, res.Failure)
+	}
+	if n := createsOf(h.c, kubeSecrets, isoTarget()); n != 2 {
+		t.Errorf("the probe Secret was asked for %d times, want twice: made with its answer lost, then met", n)
+	}
+	if v := h.r.Isolation(); !v.Isolated {
+		t.Errorf("verdict = %+v, want isolated", v)
 	}
 	isoLeftNothing(t, h)
 }

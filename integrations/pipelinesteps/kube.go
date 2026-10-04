@@ -33,10 +33,12 @@ import (
 //     leave the step running with its Job gone.
 //   - Gone is done. Deleting what is already absent succeeds: a retry, a
 //     second replica and the Job's TTL all delete the same objects.
-//   - A Secret's values never leave this file, but for one: the clone token
-//     SecretCloneToken reads, for the runner to mask. The API answers a
-//     create, a patch and a delete of Secrets with the Secrets themselves,
-//     values included, and those answers are dropped unread.
+//   - A Secret's values never leave this file, but for two: the clone token
+//     SecretCloneToken reads, for the runner to mask, and the isolation
+//     probe Secret's address and Job uid ProbeTarget reads, neither of them
+//     a secret. The API answers a create, a patch and a delete of Secrets
+//     with the Secrets themselves, values included, and those answers are
+//     dropped unread.
 type Kube struct {
 	api *deploycontrol.ClusterAPI
 	ns  string
@@ -127,6 +129,44 @@ func (k *Kube) SecretCloneToken(ctx context.Context, secretName string) (string,
 		return "", fmt.Errorf("pipelinesteps: reading the clone token of secret %s: %w", secretName, err)
 	}
 	return string(token), nil
+}
+
+// ProbeTarget is what the isolation probe's Secret names
+// (BuildIsolationTarget): the listener's address and the probe Job's uid,
+// "" for a key it lacks. Neither is a secret; nothing else in it is decoded.
+// An absent Secret is the API server's 404.
+func (k *Kube) ProbeTarget(ctx context.Context, secretName string) (target, jobUID string, err error) {
+	if err := named("secret", secretName); err != nil {
+		return "", "", err
+	}
+	out, err := k.api.Do(ctx, http.MethodGet, k.corePath("secrets", secretName), "", nil)
+	if err != nil {
+		return "", "", err
+	}
+	var secret struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(out, &secret); err != nil {
+		return "", "", fmt.Errorf("pipelinesteps: reading secret %s: %w", secretName, err)
+	}
+	value := func(key string) (string, error) {
+		raw, ok := secret.Data[key]
+		if !ok {
+			return "", nil
+		}
+		var v []byte
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return "", fmt.Errorf("pipelinesteps: reading key %s of secret %s: %w", key, secretName, err)
+		}
+		return string(v), nil
+	}
+	if target, err = value(probeTargetKey); err != nil {
+		return "", "", err
+	}
+	if jobUID, err = value(probeJobUIDKey); err != nil {
+		return "", "", err
+	}
+	return target, jobUID, nil
 }
 
 // OwnSecret makes the Job its Secret's owner, so that collecting the Job --

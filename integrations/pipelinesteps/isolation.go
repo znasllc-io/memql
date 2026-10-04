@@ -139,11 +139,12 @@ func (s *step) isolationGate() (res pl.StepResult, done bool) {
 
 // isolationRefusal is the sentence a step the proof did not let through is
 // refused with: for a namespace found open, the fix; for a proof that could
-// not decide, that it is tried again.
+// not decide, that it is tried again, and where to look if that persists.
 func isolationRefusal(v IsolationVerdict) string {
 	if v.Inconclusive {
 		return "this workbench node could not prove memql-pipelines is network-isolated, and starts no pipeline step until it can: " +
-			v.Detail + ". It tries again before the next step."
+			v.Detail + ". It tries again before the next step; if this persists, check that the cluster's network policy engine " +
+			"is running and that cluster DNS (kube-system) answers."
 	}
 	return "memql-pipelines is not network-isolated, so this workbench node starts no pipeline step: " + v.Detail +
 		". Enable a network policy engine on the cluster so the namespace's NetworkPolicy is enforced (on AKS: " +
@@ -298,6 +299,13 @@ func (p *prober) create() (Job, error) {
 		case err == nil && created:
 			return job, nil
 		case p.ctx.Err() != nil:
+			// Stopped with the create in flight: the API server may have made
+			// the Job though its answer never came back, and remove's delete
+			// can overtake the create. A Job left so ends at its own deadline
+			// and is collected by its TTL -- probeJobDeadline and probeJobTTL,
+			// some four minutes -- unless this replica's next proof deletes it
+			// first. Until then it holds a slot under the ceiling: on
+			// cloud-entry, the only one.
 			return Job{}, errProbeStopped
 		case created:
 			return Job{}, probeFailure("the probe Job was created, but the API server's answer could not be read: " + err.Error())
@@ -380,10 +388,27 @@ func (p *prober) arm(job Job, listenerIP string) error {
 		return errProbeStopped
 	case err != nil:
 		return probeFailure("the probe Secret could not be created: " + apiMessage(err))
-	case existed:
-		// Deleted above, so another proof made it since: the connectors may
-		// already have read it.
-		return probeFailure(fmt.Sprintf("a probe Secret, %s, was already there when this proof made its own", p.target))
+	case !existed:
+		return nil
+	}
+	// The way was cleared before the probe Job was made, so a Secret already
+	// there is this proof's own -- a create made, its answer lost, and the
+	// retry met it -- or somebody else's since. Its own names this probe Job
+	// and this listener, and is kept: a Runner proves one at a time. Any
+	// other, the connectors may have read already.
+	var target, uid string
+	err = p.retry(func() (err error) {
+		target, uid, err = p.r.kube.ProbeTarget(p.ctx, p.target)
+		return err
+	})
+	switch {
+	case p.ctx.Err() != nil:
+		return errProbeStopped
+	case err != nil:
+		return probeFailure(fmt.Sprintf("a probe Secret, %s, was already there when this proof made its own, and could not be read: %s",
+			p.target, apiMessage(err)))
+	case uid != job.Metadata.UID || target != listenerIP:
+		return probeFailure(fmt.Sprintf("a probe Secret, %s, was already there when this proof made its own, naming another probe Job or listener", p.target))
 	}
 	return nil
 }
