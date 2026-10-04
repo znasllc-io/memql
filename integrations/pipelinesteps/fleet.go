@@ -57,10 +57,12 @@ const (
 	// the machine's clone and packing (fleetCloneSlack), then filing what it
 	// captured in the Library window (libraryPhaseTimeout, a window no
 	// cancel and no deadline of the step's ends). The pipeline driver stops
-	// waiting stepGrace past the step's own timeout
-	// (component/pipelinerun/driver.go), which the effective one never
-	// exceeds, so fleetGrace must stay inside it, or a step still filing its
-	// files reads as one that never reported. A test holds the two apart.
+	// waiting stepGrace past the step's RUN's ceiling
+	// (component/pipelinerun/driver.go, ruling R31b), and a fleet step's
+	// effective timeout -- counted from its hand-over, since the machine
+	// starts it at once -- never runs past that ceiling, so fleetGrace must
+	// stay inside stepGrace, or a step still filing its files reads as one
+	// that never reported. A test holds the two apart.
 	fleetGrace = fleetCloneSlack + libraryPhaseTimeout
 	// fleetMaxPartialLine bounds a line still waiting for its newline. The
 	// cockpit cuts a line longer than 64 KiB where no secret straddles the

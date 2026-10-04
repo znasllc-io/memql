@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
@@ -489,7 +490,7 @@ func TestANotifyStageIsSkippedUntilChannelsArrive(t *testing.T) {
 }
 
 // The deadline is HARD: a runner that never answers -- not even to its
-// context -- cannot hold the drive past the step's timeout and the grace.
+// context -- cannot hold the drive past the deadline it was given.
 func TestAStepThatNeverAnswersHitsAHardDeadline(t *testing.T) {
 	never := make(chan struct{})
 	defer close(never)
@@ -504,17 +505,144 @@ func TestAStepThatNeverAnswersHitsAHardDeadline(t *testing.T) {
 	began := time.Now()
 	end := dr.execStep(exec, pipelines.StepRequest{StepKey: "tests.unit"}, 20*time.Millisecond)
 	if end.kind != endTimeout {
-		t.Errorf("a step past its deadline ends pipeline_step_timeout: %v", end.kind)
+		t.Errorf("a step past its deadline ends as a timeout: %v", end.kind)
 	}
 	if waited := time.Since(began); waited > 5*time.Second {
 		t.Errorf("the drive waited %v for a deaf runner", waited)
 	}
-	if got := stepDeadline(pipelines.Step{TimeoutSeconds: 90}); got != 90*time.Second+stepGrace {
-		t.Errorf("the deadline is the step's own timeout plus the grace: %v", got)
+}
+
+// ceilingManifest is one stage of one step whose own timeout is two minutes.
+const ceilingManifest = `formatVersion: 1
+name: shop
+pipeline:
+  image: ghcr.io/acme/toolchain@sha256:abc
+  stages:
+    - name: tests
+      steps:
+        - name: unit
+          run: go test ./...
+          timeout: 2m
+`
+
+// TestTheDriverWaitsOnAStepUntilItsRunsCeiling (ruling R31b, design record
+// D11): the driver waits on a step it hands the runner until its RUN's
+// ceiling and the grace past it -- not the step's own timeout and the grace.
+// A step may wait in the cluster's queue for a free slot, bounded by its
+// run's ceiling alone, and its own timeout runs from its Job's creation: a
+// driver that stopped waiting at the step's own timeout would fail the tail
+// of a stage wider than the ceiling, steps that never started.
+func TestTheDriverWaitsOnAStepUntilItsRunsCeiling(t *testing.T) {
+	t.Setenv("MEMQL_PIPELINES_RUN_MAX_MINUTES", "30")
+
+	t.Run("the step's context ends at its run's ceiling and the grace", func(t *testing.T) {
+		dh := newDriveHarness(t, ceilingManifest)
+		type seen struct {
+			left     time.Duration
+			deadline bool
+			own      int
+		}
+		got := make(chan seen, 1)
+		dh.exec.answer = func(ctx context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+			deadline, ok := ctx.Deadline()
+			got <- seen{left: time.Until(deadline), deadline: ok, own: req.Step.TimeoutSeconds}
+			return passed(req), nil
+		}
+		deliver(t, dh.integ, dh.openRun(t, prOpening()))
+
+		s := <-got
+		if !s.deadline {
+			t.Fatal("the step was handed a context with no deadline: a runner that never answers would hold the drive")
+		}
+		if s.own != 120 {
+			t.Fatalf("the step's own timeout is %ds, want 120 (the manifest's 2m): the case is a step its run outlasts", s.own)
+		}
+		// The run started on the driver's clock as it was driven, so all of
+		// its 30-minute ceiling is left: 40 minutes with the grace, not the 12
+		// of the step's own timeout and the grace.
+		want := 30*time.Minute + stepGrace
+		if s.left > want || s.left < want-time.Minute {
+			t.Errorf("the step's context ends %v after it was handed over, want %v: its run's 30m ceiling and the %v grace",
+				s.left, want, stepGrace)
+		}
+	})
+
+	t.Run("what is left of the run, measured from its start", func(t *testing.T) {
+		dr := &runDriver{
+			d:     Deps{Now: func() time.Time { return testNow }},
+			facts: requestFacts{startedAt: testNow.Add(-25 * time.Minute).Format(time.RFC3339)},
+		}
+		if got, want := dr.stepDeadline(30*time.Minute), 5*time.Minute+stepGrace; got != want {
+			t.Errorf("a run 25 minutes into its 30-minute ceiling: the driver waits %v, want %v", got, want)
+		}
+		dr.facts.startedAt = testNow.Add(-time.Hour).Format(time.RFC3339)
+		if got := dr.stepDeadline(30 * time.Minute); got > 0 {
+			t.Errorf("a run past its ceiling and the grace: the driver waits %v, want nothing at all", got)
+		}
+	})
+}
+
+// TestAStepThatNeverReportsFailsAtItsRunsCeiling (ruling R31b): a step the
+// runner never answers -- deaf even to its context -- is failed once its
+// run's ceiling and the grace past it have passed, with the run's code and a
+// sentence naming that bound: the driver's deadline is the run's, so the
+// step's own timeout is not what it ran out of.
+func TestAStepThatNeverReportsFailsAtItsRunsCeiling(t *testing.T) {
+	dh := newDriveHarness(t, driveManifest)
+	clock := &driveClock{at: testNow}
+	dh.integ.Configure(func(d *Deps) {
+		d.Now = clock.now
+		inner := d.Secrets
+		d.Secrets = func(ctx context.Context, name string) (string, error) {
+			// tests.unit's secret resolves after its run started and before
+			// the step is handed over: its run's ceiling and the grace pass
+			// here.
+			clock.set(testNow.Add(pipelines.DefaultRunCeiling + stepGrace + time.Minute))
+			return inner(ctx, name)
+		}
+	})
+	deaf := make(chan struct{})
+	t.Cleanup(func() { close(deaf) })
+	dh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+		if req.StepKey == "tests.unit" {
+			<-deaf // never answers, its context's end included
+		}
+		return passed(req), nil
 	}
-	if got := stepDeadline(pipelines.Step{}); got != pipelines.DefaultStepTimeout+stepGrace {
-		t.Errorf("a step with no timeout gets the default: %v", got)
+	run := dh.openRun(t, prOpening())
+	deliver(t, dh.integ, run)
+
+	unit := dh.work.receiptsOf("tests.unit")
+	if len(unit) != 1 || argString(unit[0].Args, "status") != WorkStepFailed {
+		t.Fatalf("the deaf step's receipts = %+v, want one failure", unit)
 	}
+	if code := argString(unit[0].Args, "errorCode"); code != pipelines.CodeRunCeiling {
+		t.Errorf("the deaf step failed %q, want %s: the driver waited until its run's ceiling", code, pipelines.CodeRunCeiling)
+	}
+	if msg := argString(unit[0].Args, "errorMessage"); !strings.Contains(msg, "run's 2h0m0s ceiling") || !strings.Contains(msg, stepGrace.String()) {
+		t.Errorf("the failure says %q, want it to name the run's 2h0m0s ceiling and the %v grace", msg, stepGrace)
+	}
+	if got, _ := dh.store.run(run.ID); got.Conclusion != ConclusionFailure {
+		t.Errorf("run = %s, want failure", got.Conclusion)
+	}
+}
+
+// driveClock is a driver clock a test moves by hand.
+type driveClock struct {
+	mu sync.Mutex
+	at time.Time
+}
+
+func (c *driveClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.at
+}
+
+func (c *driveClock) set(at time.Time) {
+	c.mu.Lock()
+	c.at = at
+	c.mu.Unlock()
 }
 
 // ---------------------------------------------------------------------------

@@ -902,16 +902,18 @@ func TestFleetStepFailuresAreTyped(t *testing.T) {
 }
 
 // driverStepGrace is component/pipelinerun/driver.go's stepGrace: how long
-// past a step's own timeout the pipeline driver waits for Execute before it
-// stops waiting. The driver does not export it, so it is pinned here --
-// change the two together -- and TestAFleetStepsGraceStaysInsideTheDrivers
-// reads driver.go to check the pin still says what the driver does.
+// past a step's run's ceiling the pipeline driver waits for Execute before it
+// stops waiting (ruling R31b). The driver does not export it, so it is pinned
+// here -- change the two together -- and
+// TestAFleetStepsGraceStaysInsideTheDrivers reads driver.go to check the pin
+// still says what the driver does.
 const driverStepGrace = 10 * time.Minute
 
 // TestAFleetStepsGraceStaysInsideTheDrivers: a fleet step can take its
 // effective timeout and fleetGrace past it -- the machine's clone and packing,
 // then the Library window, which no deadline of the step's ends -- while the
-// driver stops waiting driverStepGrace past the step's own timeout. A step
+// driver stops waiting driverStepGrace past the step's run's ceiling, which
+// the effective timeout, counted from the hand-over, never passes. A step
 // still filing its files must never read as one that never reported.
 func TestAFleetStepsGraceStaysInsideTheDrivers(t *testing.T) {
 	if fleetGrace >= driverStepGrace {

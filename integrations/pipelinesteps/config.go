@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	pl "github.com/znasllc-io/memql/component/pipelines"
 )
 
 // Config is everything the runner and the executor read from the node's
@@ -28,7 +30,9 @@ type Config struct {
 	// RoleBinding, whose token is never mounted.
 	StepServiceAccount string
 	// RunCeiling bounds a whole run's wall-clock time
-	// (MEMQL_PIPELINES_RUN_MAX_MINUTES, default 120, clamped to 5..1440).
+	// (MEMQL_PIPELINES_RUN_MAX_MINUTES, default 120, clamped to 5..1440), as
+	// the seam parses it (pl.ParseRunCeiling): the driver waits on a run's
+	// steps by the same reading.
 	RunCeiling time.Duration
 	// LogStoreMaxLines is how many lines of one step reach the log store
 	// (MEMQL_PIPELINES_LOG_STORE_MAX_LINES, default 2000, clamped to
@@ -68,7 +72,6 @@ type Config struct {
 const (
 	envNamespace        = "MEMQL_PIPELINES_NAMESPACE"
 	envCloneImage       = "MEMQL_PIPELINES_CLONE_IMAGE"
-	envRunMaxMinutes    = "MEMQL_PIPELINES_RUN_MAX_MINUTES"
 	envLogStoreMaxLines = "MEMQL_PIPELINES_LOG_STORE_MAX_LINES"
 	envArtifactMaxBytes = "MEMQL_PIPELINES_ARTIFACT_MAX_BYTES"
 	envNodeID           = "MEMQL_NODE_ID"
@@ -103,7 +106,7 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		CloneImage:         text(envCloneImage),
 		CacheClaim:         cacheClaim,
 		StepServiceAccount: stepServiceAccount,
-		RunCeiling:         time.Duration(whole(envRunMaxMinutes, 120, 5, 1440)) * time.Minute,
+		RunCeiling:         pl.ParseRunCeiling(text(pl.EnvRunCeiling)),
 		LogStoreMaxLines:   whole(envLogStoreMaxLines, 2000, 100, 100000),
 		ArtifactMaxBytes:   int64(whole(envArtifactMaxBytes, 64*mebibyte, mebibyte, 256*mebibyte)),
 		ArchiveMaxBytes:    64 * mebibyte,

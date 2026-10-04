@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/node"
+	pl "github.com/znasllc-io/memql/component/pipelines"
 )
 
 // envOf is a getenv over a fixed map: the configuration is read through the
@@ -125,6 +126,18 @@ func TestConfigFromEnvDefaultsAndClamps(t *testing.T) {
 			}
 		})
 	}
+
+	// The run's ceiling is read once, at the seam's leaf, and the driver that
+	// waits on a run's steps reads it there too (ruling R31b): one default,
+	// one parse, so the two can never disagree about how long a run may take.
+	t.Run("the ceiling is the seam's own reading of the variable", func(t *testing.T) {
+		for _, raw := range []string{"", "90", "1", "1441", "0", "ninety"} {
+			env := envOf(map[string]string{"MEMQL_PIPELINES_RUN_MAX_MINUTES": raw})
+			if got, want := ConfigFromEnv(env).RunCeiling, pl.ParseRunCeiling(raw); got != want {
+				t.Errorf("MEMQL_PIPELINES_RUN_MAX_MINUTES=%q: Config reads %v, the seam %v", raw, got, want)
+			}
+		}
+	})
 
 	t.Run("a blank namespace is the default namespace", func(t *testing.T) {
 		got := ConfigFromEnv(envOf(map[string]string{"MEMQL_PIPELINES_NAMESPACE": "   "}))

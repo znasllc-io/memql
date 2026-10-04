@@ -141,7 +141,7 @@ func NewExecutor(cfg Config, fwd Forwarder, fleet FleetRouter, logger *slog.Logg
 	}
 	if cfg.RunCeiling <= 0 {
 		// Never unbounded: a zero ceiling is a Config nobody filled in.
-		cfg.RunCeiling = 120 * time.Minute
+		cfg.RunCeiling = pl.DefaultRunCeiling
 	}
 	if cfg.DefaultStepTimeout <= 0 {
 		cfg.DefaultStepTimeout = pl.DefaultStepTimeout
