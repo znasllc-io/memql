@@ -40,6 +40,15 @@ export interface StoreRow {
   isDevelopment: boolean;
   /** The live store this one stands in for, or "" when it stands in for none. */
   developmentOfStoreId: string;
+  /**
+   * When Shopify reported the app uninstalled from this store (memql#5638), or
+   * "". While set the store is disconnected: its Admin grant is dropped and
+   * the edge serves its storefronts as unavailable. A verified reinstall
+   * clears it.
+   */
+  uninstalledAt: string;
+  /** When Shopify purged this store's data (shop/redact), or "". Cleared by a verified reinstall. */
+  redactedAt: string;
 }
 
 export function storeFromRow(row: Row): StoreRow {
@@ -57,6 +66,8 @@ export function storeFromRow(row: Row): StoreRow {
     status: rowString(row, "status"),
     isDevelopment: row["isDevelopment"] === true,
     developmentOfStoreId: rowString(row, "developmentOfStoreId"),
+    uninstalledAt: rowString(row, "uninstalledAt"),
+    redactedAt: rowString(row, "redactedAt"),
   };
 }
 
@@ -98,45 +109,52 @@ export function storeNote(store: StoreRow, all: readonly StoreRow[]): string {
 }
 
 // ===========================================================================
-// THE STOREFRONT TOKEN IS PUBLISHED UNDER ONE NAME ONLY (memql#5626)
+// WHETHER A STORE IS CONNECTED IS THE ENGINE'S ANSWER (memql#5626, #5638)
 // ===========================================================================
-// The edge serves a store's Storefront token to a storefront's browser only
-// when the store's `storefrontTokenRef` is exactly that store's own name --
-// every Shopify secret, the Admin token included, is sealed with one kind, so
-// the NAME is the only marker that says a secret is the public one. Connect
-// Shopify, the pasted-token path and the first-boot seed all seal it there.
-//
-// A MIRROR, AND IT SAYS SO, until the engine carries the verdict on the row:
-// the register form answers with the name at keystroke rate and the readiness
-// below stops calling a store connected whose token the edge will not serve.
-// `storeToken.test.tsx` reads component/edge/runtimeconfig.go's
-// `StorefrontTokenSecretName` and fails if the two spellings part.
+// The edge publishes a store's Storefront token only from the secret named for
+// that store, so a non-empty reference is not "connected": the engine says
+// whether it would serve the token (sitePreviewReadiness'
+// storeHasStorefrontToken and previewStoreHasStorefrontToken) and the shell
+// keeps no copy of the naming rule. Shopify can also cut a store off: an
+// uninstalled app (uninstalledAt) or a purge of the store's data (redactedAt).
 
-/** `SHOPIFY_<STOREID>_STOREFRONT_TOKEN`: the id upper-cased, its hyphens kept. "" for no id. */
-export function storefrontTokenSecretName(storeId: string): string {
-  const id = storeId.trim();
-  return id === "" ? "" : `SHOPIFY_${id.toUpperCase()}_STOREFRONT_TOKEN`;
-}
+/** A bound store's connection, in the states a person acts on differently. */
+export type StoreConnection = "connected" | "uninstalled" | "redacted" | "token-misnamed" | "setup-needed" | "unknown";
 
 /**
- * Whether the store names a Storefront token the edge will NOT publish: one
- * registered under any name but the store's own. An empty reference is not
- * this -- it is a store with no token yet, which is setup still to do rather
- * than a token in the wrong place.
+ * What a store's connection is, from its row and the engine's answer about
+ * its Storefront token (`null` until that answer has landed).
+ *
+ * SHOPIFY'S OWN WORD COMES FIRST. A purged store is a stronger statement than
+ * an uninstalled one (a purge follows an uninstall), and either outranks every
+ * token question: the remedy is to reconnect the store, whatever its tokens
+ * say. Then the Admin token, without which the mirror reads nothing. Then the
+ * engine's answer: a store naming a token the edge will not serve has it under
+ * a different name -- the only way the reference and the answer can disagree
+ * -- and one naming none has setup still to do. NEVER CONNECTED BY DEFAULT:
+ * until the engine has answered, the state is unknown.
  */
-export function storefrontTokenMisnamed(store: StoreRow): boolean {
-  const ref = store.storefrontTokenRef.trim();
-  return ref !== "" && ref !== storefrontTokenSecretName(store.id);
+export function storeConnection(store: StoreRow, servesStorefrontToken: boolean | null): StoreConnection {
+  if (store.redactedAt.trim() !== "") return "redacted";
+  if (store.uninstalledAt.trim() !== "") return "uninstalled";
+  if (store.adminTokenRef.trim() === "") return "setup-needed";
+  if (servesStorefrontToken === null) return "unknown";
+  if (servesStorefrontToken) return "connected";
+  return store.storefrontTokenRef.trim() === "" ? "setup-needed" : "token-misnamed";
 }
 
-/**
- * Whether a store is CONNECTED as a storefront needs it: an Admin token
- * reference for the mirror, and a Storefront token reference under the store's
- * own name, which is the only one the edge serves. Both references being
- * present was the whole test before memql#5626, and it called a store
- * connected whose storefront could read no token at all.
- */
-export function storeConnected(store: StoreRow | null): boolean {
-  if (store === null) return false;
-  return store.adminTokenRef.trim() !== "" && store.storefrontTokenRef.trim() !== "" && !storefrontTokenMisnamed(store);
+/** A connection state in one word, for a row or a slot. "" while unknown. */
+export function connectionWord(state: StoreConnection): string {
+  switch (state) {
+    case "connected":
+      return "Connected";
+    case "uninstalled":
+      return "Uninstalled";
+    case "redacted":
+      return "Data removed";
+    case "unknown":
+      return "";
+    default:
+      return "Needs attention";
+  }
 }

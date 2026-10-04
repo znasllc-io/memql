@@ -1283,8 +1283,12 @@ export function previewReadinessRow(over: Partial<Row> & { siteId: string }): Ro
     storeDomain: "",
     storeReadable: false,
     storeIsDevelopment: false,
+    // Whether the edge serves each store's Storefront token (memql#5626):
+    // false with no store attached, which is what this default describes.
+    storeHasStorefrontToken: false,
     previewStoreId: "",
     previewStoreDomain: "",
+    previewStoreHasStorefrontToken: false,
     testingUrl: "https://test--shop.memql.example.com/",
     canPreview: false,
     canPromote: false,

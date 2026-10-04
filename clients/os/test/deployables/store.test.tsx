@@ -108,18 +108,38 @@ const BOUND: FakeSeed = {
 };
 
 describe("the store is a connection on the deployable, not a build setting", () => {
+  // THE ENGINE ANSWERS WHETHER A STORE'S TOKEN IS SERVED (memql#5626), and
+  // each case says what it answered: `served` is sitePreviewReadiness'
+  // storeHasStorefrontToken (or previewStoreHasStorefrontToken for a store
+  // bound to Testing alone).
   it.each([
-    { store: STORE, testingOnly: false, needsSetup: false },
-    { store: DEV_STORE, testingOnly: false, needsSetup: false },
-    { store: DEV_STORE, testingOnly: true, needsSetup: false },
-    { store: { ...DEV_STORE, adminTokenRef: "" }, testingOnly: false, needsSetup: true },
-    { store: { ...DEV_STORE, storefrontTokenRef: "" }, testingOnly: true, needsSetup: true },
-    // A TOKEN UNDER ANOTHER NAME IS NOT CONNECTED (memql#5626): the edge
-    // publishes a store's Storefront token only from the secret named for that
-    // store, so a storefront bound to this one reads no token at all.
-    { store: { ...STORE, storefrontTokenRef: "EXAMPLE_STOREFRONT_TOKEN" }, testingOnly: false, needsSetup: true },
-  ])("shows the bound store's connection readiness ($testingOnly, $needsSetup)", async ({ store, testingOnly, needsSetup }) => {
-    const connection = fakeConnection({ ...BOUND, stores: [store], sites: [{ ...SHOP, binding: testingOnly ? {} : { storeId: store.id }, previewBinding: testingOnly ? { storeId: store.id } : {} }] });
+    { store: STORE, testingOnly: false, served: true, word: "Connected" },
+    { store: DEV_STORE, testingOnly: false, served: true, word: "Connected" },
+    { store: DEV_STORE, testingOnly: true, served: true, word: "Connected" },
+    { store: { ...DEV_STORE, adminTokenRef: "" }, testingOnly: false, served: true, word: "Setup needed" },
+    { store: { ...DEV_STORE, storefrontTokenRef: "" }, testingOnly: true, served: false, word: "Setup needed" },
+    // A TOKEN THE EDGE WILL NOT SERVE IS NOT CONNECTED: it names a secret
+    // other than the store's own, and the engine says so.
+    { store: { ...STORE, storefrontTokenRef: "EXAMPLE_STOREFRONT_TOKEN" }, testingOnly: false, served: false, word: "Setup needed" },
+    // THE ENGINE'S ANSWER DECIDES, NOT THE REFERENCE: a store naming its own
+    // token that the engine says is not served is not connected.
+    { store: STORE, testingOnly: false, served: false, word: "Setup needed" },
+    // SHOPIFY CUT IT OFF (memql#5638): an uninstalled app, a purged store.
+    { store: { ...STORE, adminTokenRef: "", uninstalledAt: "2026-10-03T08:00:00Z" }, testingOnly: false, served: true, word: "Uninstalled" },
+    { store: { ...STORE, adminTokenRef: "", uninstalledAt: "2026-10-03T08:00:00Z", redactedAt: "2026-10-04T08:00:00Z" }, testingOnly: false, served: false, word: "Data removed" },
+  ])("shows the bound store's connection readiness ($testingOnly, $word)", async ({ store, testingOnly, served, word }) => {
+    const connection = fakeConnection({
+      ...BOUND,
+      stores: [store],
+      sites: [{ ...SHOP, binding: testingOnly ? {} : { storeId: store.id }, previewBinding: testingOnly ? { storeId: store.id } : {} }],
+      previewReadiness: {
+        "site-shop": previewReadinessRow({
+          siteId: "site-shop",
+          storeHasStorefrontToken: !testingOnly && served,
+          previewStoreHasStorefrontToken: testingOnly && served,
+        } as never),
+      },
+    });
     mount(connection);
     const page = await openDeployable("shop.memql.example.com");
     const slot = storeSlot(page);
@@ -127,8 +147,8 @@ describe("the store is a connection on the deployable, not a build setting", () 
     // It reads the store, so the slot names the DOMAIN rather than an opaque
     // row id: the domain is what somebody came to check.
     await waitFor(() => expect(slot?.textContent).toContain(store.domain));
-    expect(slot?.textContent).toContain(needsSetup ? "Setup needed" : "Connected");
-    expect(slot?.hasAttribute("data-os-setup")).toBe(needsSetup);
+    await waitFor(() => expect(slot?.textContent).toContain(word));
+    expect(slot?.hasAttribute("data-os-setup")).toBe(word !== "Connected");
     if (store.isDevelopment) expect(slot?.textContent).toContain("Sandbox");
     if (testingOnly) expect(slot?.textContent).toContain("Testing");
   });

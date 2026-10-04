@@ -472,6 +472,7 @@ export function DeployablePage({
             timelineError={deployments?.snapshot.error ?? ""} onRetryRead={reseed}
             onInspect={setDetail} onOpenSource={() => pkg && onOpenSource(pkg.id)}
             lifecycle={lifecycle}
+            readiness={previewReadiness}
             deployChoice={offerCandidate ? {
               target: gateTarget,
               onChoose: (next) => {

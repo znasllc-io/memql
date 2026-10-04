@@ -16,7 +16,8 @@ import { boundStoreId, previewStoreId, bundleForm, type SiteRow } from "../rows"
 import { kindLabel } from "../targets";
 import { useCustomDomains } from "../useCustomDomains";
 import { railFor, type RailInput } from "./rail";
-import { storeConnected, storeLabel } from "../store/rows";
+import { storeConnection, storeLabel } from "../store/rows";
+import type { PreviewReadiness } from "../preview/rows";
 import { PreviewSection } from "../preview/PreviewSection";
 import { NO_PARTS, type PartsHeld } from "../parts";
 import { AttentionMarker } from "../../../attention/Attention";
@@ -25,8 +26,10 @@ import { DeployTargetChoice, type DeployChoice } from "./DeployTargetChoice";
 
 export type WorkspaceDetail = "source" | "whatItIs" | "whereItLives" | "build" | "runtime" | "traffic" | "store";
 
-export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDomains, canStore, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, lifecycle, canSources = false, onUpdate, deployChoice }: {
+export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDomains, canStore, timelineState, timelineError, onRetryRead, onInspect, onOpenSource, lifecycle, canSources = false, onUpdate, deployChoice, readiness = null }: {
   canSources?: boolean; onUpdate?: () => void;
+  /** The engine's readiness answer, read once by the page; the Store slot's connection comes from it. */
+  readiness?: PreviewReadiness | null;
   /** Where a parked gate's version goes (memql#5601), when the gate may choose. */
   deployChoice?: DeployChoice;
   site: SiteRow; pkg: PackageRow | null; run: DeploymentRow | null; accounts: AccountRow[];
@@ -81,7 +84,7 @@ export function DeployableWorkspace({ site, pkg, run, runs, can, accounts, canDo
             above, so somebody without `execute app:deployables/store` would
             be shown a slot the engine then serves nothing into -- a refusal
             rendered as an empty panel. */}
-        {storefront && canStore ? <StorePiece storeId={storeId} testingId={previewStoreId(site)} onClick={() => onInspect("store")} siteId={site.id} /> : null}
+        {storefront && canStore ? <StorePiece storeId={storeId} testingId={previewStoreId(site)} onClick={() => onInspect("store")} siteId={site.id} readiness={readiness} /> : null}
         <ActivityTarget target={`deployables:${site.id}:address`}><Piece icon={<Globe size={18} aria-hidden />} label="Cluster address" detail={site.hostname || "No address recorded"} onClick={() => onInspect("whereItLives")} /></ActivityTarget>
         {canDomains ? <DomainPiece site={site} onClick={() => onInspect("whereItLives")} /> : null}
         <ActivityTarget target={`deployables:${site.id}:client`}><Piece icon={<Building2 size={18} aria-hidden />} label="Client" detail={accountNameFrom(accounts, site.accountId) || (site.accountId ? "Client name unavailable" : "The cluster")} onClick={() => onInspect("whereItLives")} /></ActivityTarget>
@@ -131,25 +134,29 @@ function DomainPiece({ site, onClick }: { site: SiteRow; onClick: () => void }) 
  * state. A store that does not read back is NOT drawn as unbound -- that
  * would hide a real misconfiguration behind a state that looks deliberate.
  */
-function StorePiece({ storeId, testingId, siteId, onClick }: { storeId: string; testingId: string; siteId: string; onClick: () => void }) {
+function StorePiece({ storeId, testingId, siteId, onClick, readiness }: { storeId: string; testingId: string; siteId: string; onClick: () => void; readiness: PreviewReadiness | null }) {
   const bound = useStore(storeId);
   const testing = useStore(testingId);
   const connection = storeId ? bound : testing;
-  // One reading of "connected", the Store page's: both references, and the
-  // Storefront token under the store's own name -- the only one the edge
-  // serves (memql#5626).
-  const connected = storeConnected(connection.store);
+  // ONE READING OF "CONNECTED", THE STORE PAGE'S (memql#5626, #5638): the
+  // engine says whether the edge serves this store's Storefront token, and the
+  // row says whether Shopify uninstalled the app or purged the store. Unknown
+  // until the engine has answered, and never Connected by default.
+  const served = readiness === null ? null : storeId ? readiness.storeHasStorefrontToken : readiness.previewStoreHasStorefrontToken;
+  const state = connection.store === null ? null : storeConnection(connection.store, served);
+  const word = state === "connected" ? "Connected" : state === "uninstalled" ? "Uninstalled" : state === "redacted" ? "Data removed" : state === "unknown" || state === null ? "" : "Setup needed";
   const detail =
     !storeId && !testingId
       ? "Not connected"
       : connection.state === "failed"
         ? "The store could not be read"
         : connection.store !== null
-          ? [storeLabel(connection.store), storeId ? "" : "Testing", connection.store.isDevelopment ? "Sandbox" : "", connected ? "Connected" : "Setup needed"].filter((part) => part !== "").join(" \u00b7 ")
+          ? <>{[storeLabel(connection.store), storeId ? "" : "Testing", connection.store.isDevelopment ? "Sandbox" : "", word].filter((part) => part !== "").join(" \u00b7 ")}{state === "unknown" ? <> <InlineSkeleton label="Loading store status" /></> : null}</>
           : connection.state === "read"
             ? "Names a store that is not on this cluster"
             : <InlineSkeleton label="Loading store" />;
-  return <ActivityTarget target={`deployables:${siteId}:store`}><button type="button" className="deployable-slot" onClick={onClick} data-os-setup={(!storeId && !testingId) || connection.state === "failed" || (connection.state === "read" && !connected) ? "" : undefined}><ShoppingBag size={18} aria-hidden /><span><strong>Store</strong><small>{detail}</small></span><AttentionMarker appId="deployables" sectionId="deployables" target="shopify-store" /><ChevronRight size={13} aria-hidden /></button></ActivityTarget>;
+  const needsSetup = (!storeId && !testingId) || connection.state === "failed" || (connection.state === "read" && state !== null && state !== "connected" && state !== "unknown");
+  return <ActivityTarget target={`deployables:${siteId}:store`}><button type="button" className="deployable-slot" onClick={onClick} data-os-setup={needsSetup ? "" : undefined}><ShoppingBag size={18} aria-hidden /><span><strong>Store</strong><small>{detail}</small></span><AttentionMarker appId="deployables" sectionId="deployables" target="shopify-store" /><ChevronRight size={13} aria-hidden /></button></ActivityTarget>;
 }
 
 export function attemptWord(status: string): string {

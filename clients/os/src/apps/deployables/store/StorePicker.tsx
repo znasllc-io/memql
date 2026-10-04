@@ -5,7 +5,6 @@ import {
   Caption,
   Check,
   ChoiceStack,
-  CopyField,
   Field,
   Input,
   Notice,
@@ -15,7 +14,7 @@ import {
   type ChoiceOption,
 } from "../../../kit";
 import { siteName, type SiteRow } from "../rows";
-import { storeLongLabel, storeNote, storefrontTokenSecretName } from "./rows";
+import { storeLongLabel, storeNote } from "./rows";
 import { BLANK_STORE, useStoreList, type NewStore, type StoreWrites } from "./useStore";
 
 // CHOOSING THE STORE A STOREFRONT FRONTS (epic memql#5530, issue memql#5539).
@@ -52,12 +51,13 @@ import { BLANK_STORE, useStoreList, type NewStore, type StoreWrites } from "./us
 // and would show it on a screen. The placeholders and the caption say so
 // where somebody is about to type, not in a refusal afterwards.
 //
-// THE STOREFRONT TOKEN'S NAME IS NOT A CHOICE (memql#5626). The edge serves a
-// store's Storefront token only from the secret named for that store,
-// `SHOPIFY_<STOREID>_STOREFRONT_TOKEN`, and the engine refuses any other. The
-// field used to take free text -- with a placeholder suggesting a name the
-// edge would never serve -- so it shows the one name now, read-only and
-// copyable, because the person still has to create the secret under it.
+// THE STOREFRONT TOKEN IS NOT ASKED FOR HERE (memql#5626). The edge serves a
+// store's Storefront token only from the secret named for that store, and the
+// engine refuses any other name. The field used to take the name as free text
+// -- with a placeholder suggesting one the edge would never serve -- so it is
+// gone: the store registers without one, and connecting it in Settings seals
+// the token under the store's own name. If the engine refuses the write all
+// the same, its sentence renders above the form, which keeps what was typed.
 
 const NAMES_NOT_TOKENS =
   "The two credential fields each take the NAME of a cluster secret, never the token itself. Create the secret first, then name it here.";
@@ -97,9 +97,6 @@ export function StorePicker({
   );
 
   const domain = draft.domain.trim();
-  // The id the store will be registered under, and so the one name its
-  // Storefront token can have.
-  const storefrontRef = domain === "" ? "" : storefrontTokenSecretName(slugOf(domain));
   const canRegister = domain !== "";
   const canAttach = chosen !== "" && chosen !== currentStoreId;
 
@@ -108,7 +105,7 @@ export function StorePicker({
     // never changes. A random id would make the same store attachable twice
     // under two rows, and every mirrored row is scoped by store id.
     const storeId = slugOf(domain);
-    const ok = await writes.createStore({ ...draft, storeId, domain, storefrontTokenRef: storefrontTokenSecretName(storeId) });
+    const ok = await writes.createStore({ ...draft, storeId, domain, storefrontTokenRef: "" });
     if (!ok) return;
     const bound = await writes.bindSite(site.id, storeId);
     if (bound) onDone();
@@ -155,19 +152,8 @@ export function StorePicker({
                 placeholder="Acme Widgets"
               />
             </Field>
-            <Field label="Storefront token">
-              {storefrontRef === "" ? (
-                <Caption>Named after the store once its domain is entered.</Caption>
-              ) : (
-                <CopyField
-                  id="os-store-storefront-ref"
-                  value={storefrontRef}
-                  label="the name of the secret the Storefront API token is read from"
-                />
-              )}
-            </Field>
-            {storefrontRef === "" ? null : (
-              <Caption>The storefront is served the token sealed under exactly this name, so create the secret under it.</Caption>
+            {domain === "" ? null : (
+              <Caption>Its Storefront token is added when the store is connected in Settings.</Caption>
             )}
             <Field label="Admin token">
               <Input
