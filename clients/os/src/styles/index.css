@@ -8128,20 +8128,22 @@ a.os-button {
   display: none;
 }
 /* THE MESSAGE AND THE ATTRIBUTES: three layouts, one per list (R40, R40b,
- * epic memql#5478). useLogRowLayout names one on `.os-logs-list` as
+ * R40c, epic memql#5478). useLogRowLayout names one on `.os-logs-list` as
  * `data-layout`, from the list's width and the reader's font size. These two
  * rules are WIDE's, and an unmeasured list is WIDE; MEDIUM and NARROW are
  * below.
  *
- * WIDE: the attributes are an aligned column of forty percent of the row,
- * whose fixed basis -- before the mark's fixed column, below -- starts it at
- * one x on every line with a mark, and the message takes the rest. A list is
- * WIDE only from WIDE_FROM (src/logs/LogLine.tsx), measured to hold the fixed
- * cells, the widest mark and the whole column beside a comfortable message of
- * forty characters, so the column never takes the message below that. The
- * 32-character minimum is MEDIUM's floor; WIDE never reaches it. */
+ * WIDE: the row's flexible width -- what the fixed cells and the mark's fixed
+ * column (below) leave -- goes seventy percent to the message and thirty to
+ * the attributes. Both grow from nothing in that ratio, so the attribute
+ * column starts at one x on every line with a mark, and the message has the
+ * larger share: a column wider than its attributes is room the message did
+ * not get. A list is WIDE only from WIDE_FROM (src/logs/LogLine.tsx),
+ * measured so that the message's share is a comfortable forty characters
+ * beside the widest mark. The 32-character minimum is MEDIUM's floor; WIDE
+ * never reaches it. */
 .os-logs-message {
-  flex: 1 1 0;
+  flex: 7 1 0;
   min-width: 32ch;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -8151,7 +8153,7 @@ a.os-button {
  * out its message would read backwards: at most forty percent of the row,
  * and in every layout the first cell to give way. */
 .os-logs-attrs {
-  flex: 0 1 40%;
+  flex: 3 1 0;
   min-width: 0;
   max-width: 40%;
   overflow: hidden;
@@ -8221,13 +8223,13 @@ a.os-button {
   font-size: var(--os-text-xs);
 }
 /* A line with no mark has no mark's cell (an empty one is not laid out), and
- * its attributes run on through that column to the row end: they start where
- * every other line's do, and the room the absent mark leaves is theirs
+ * its attributes run on through that column to the row end: starting from
+ * the column's width, they grow by the same thirty percent, so they start
+ * where every other line's do, and the room the absent mark leaves is theirs
  * rather than blank. Their characters are the mark's (the same mono voice at
  * the same size), so the column is the cell's exactly. */
 .os-logs-list[data-layout="wide"] .os-logs-attrs:has(+ .os-logs-subject-cell:empty) {
-  flex-basis: calc(40% + var(--os-logs-gap) + 18ch + 16px);
-  max-width: calc(40% + var(--os-logs-gap) + 18ch + 16px);
+  flex-basis: calc(var(--os-logs-gap) + 18ch + 16px);
 }
 
 /* ---- MEDIUM: the message first (R40b) ----

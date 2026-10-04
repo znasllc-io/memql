@@ -74,20 +74,20 @@ export const STACK_BELOW = {
   compact: { scaled: 534.7, fixed: 86 },
 } as const;
 
-/** The list width from which a row holds the fixed cells, the widest mark, a
+/** The list width from which the message's share of a WIDE row is a
  *  COMFORTABLE message -- forty characters, a quarter more than the readable
- *  minimum -- and the whole forty-percent attribute column, per density, in
- *  STACK_BELOW's two parts. Derived from the same measurements: the cells,
- *  the mark and the message are sixty percent of the line at most, because
- *  the column takes the other forty, so they and the row's own spaces and mark
- *  padding (56px; 48px) are divided by 0.6 -- time, level and component, the
- *  mark's eighteen characters and forty of the message's (288px; 264px) come
- *  to 630.1px comfortable and 587.5px compact before that -- and the list's
- *  border, the row's padding and rule and a classic scrollbar (38px) are
- *  added after it. */
+ *  minimum -- beside the widest mark, per density, in STACK_BELOW's two parts.
+ *  Derived from the same measurements. In WIDE the flexible width (what the
+ *  fixed cells and the mark's fixed column leave) goes seventy percent to the
+ *  message and thirty to the attributes, so the message's forty characters
+ *  (288px; 264px) are divided by 0.7 (411.4px; 377.1px) and added to the
+ *  fixed cells and the mark's eighteen characters (342.1px; 323.5px). The
+ *  pixel part is STACK_BELOW's own -- the cells' spaces, the mark's padding
+ *  and border, the row's padding and rule, the list's border and a classic
+ *  scrollbar -- because the same things stand beside the message here. */
 export const WIDE_FROM = {
-  comfortable: { scaled: 1050.2, fixed: 131.3 },
-  compact: { scaled: 979.1, fixed: 118 },
+  comfortable: { scaled: 753.5, fixed: 94 },
+  compact: { scaled: 700.6, fixed: 86 },
 } as const;
 
 /** One of the two measures in CSS pixels at a root font size. Only the part

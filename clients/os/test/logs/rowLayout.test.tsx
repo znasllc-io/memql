@@ -94,10 +94,10 @@ describe("the layouts' boundaries", () => {
   it("are the measured widths, at 16px and 20px roots", () => {
     // The widths the captures were taken at. A change to either measure is
     // a change to these, and the captures have to be taken again.
-    expect([STACK_16, WIDE_16]).toEqual([667, 1182]);
-    expect([STACK_20, WIDE_20]).toEqual([810, 1445]);
-    expect([stackBelow("compact", 16), wideFrom("compact", 16)]).toEqual([621, 1098]);
-    expect([stackBelow("compact", 20), wideFrom("compact", 20)]).toEqual([755, 1342]);
+    expect([STACK_16, WIDE_16]).toEqual([667, 848]);
+    expect([STACK_20, WIDE_20]).toEqual([810, 1036]);
+    expect([stackBelow("compact", 16), wideFrom("compact", 16)]).toEqual([621, 787]);
+    expect([stackBelow("compact", 20), wideFrom("compact", 20)]).toEqual([755, 962]);
   });
 
   it.each([16, 20])("divide the widths into the three layouts at a %ipx root", (rootPx) => {
@@ -212,7 +212,7 @@ describe("the hook", () => {
     // Across a measure: one render, and none for the next resize inside it.
     resizeTo(WIDE_16 - 1);
     expect(renders).toBe(settled + 1);
-    resizeTo(900);
+    resizeTo(STACK_16 + 1);
     expect(renders).toBe(settled + 1);
 
     resizeTo(600);
@@ -286,12 +286,12 @@ describe("the stylesheet", () => {
     expect(block(".os-logs-subject")).toContain("text-overflow: ellipsis;");
   });
 
-  it("gives WIDE an aligned attribute column", () => {
-    // The base rules are WIDE's: the message grows into the row from nothing
-    // and the attributes' basis is their whole column, which starts it at one
-    // x on every line ending in the same mark.
-    expect(block(".os-logs-message")).toContain("flex: 1 1 0;");
-    expect(block(".os-logs-attrs")).toContain("flex: 0 1 40%;");
+  it("gives WIDE an aligned attribute column, seventy-thirty in the message's favour", () => {
+    // The base rules are WIDE's: both grow from nothing, seven to three, so the
+    // row's flexible width is shared in that ratio and the attribute column
+    // starts at one x on every line with a mark.
+    expect(block(".os-logs-message")).toContain("flex: 7 1 0;");
+    expect(block(".os-logs-attrs")).toContain("flex: 3 1 0;");
     expect(block(".os-logs-attrs")).toContain("min-width: 0;");
     expect(block(".os-logs-attrs")).not.toContain("margin-left: auto");
   });
@@ -324,8 +324,7 @@ describe("the stylesheet", () => {
     // A line with no mark keeps the column's start: its attributes run on
     // through the absent mark's column rather than leaving it blank.
     const unmarked = block('.os-logs-list[data-layout="wide"] .os-logs-attrs:has(+ .os-logs-subject-cell:empty)');
-    expect(unmarked).toContain("flex-basis: calc(40% + var(--os-logs-gap) + 18ch + 16px);");
-    expect(unmarked).toContain("max-width: calc(40% + var(--os-logs-gap) + 18ch + 16px);");
+    expect(unmarked).toContain("flex-basis: calc(var(--os-logs-gap) + 18ch + 16px);");
   });
 
   it("puts the message first in MEDIUM", () => {
