@@ -363,3 +363,84 @@ func TestTheDispatcherNeverAdmitsAProcedureReplayRun(t *testing.T) {
 		t.Fatalf("the control: an ordinary recovery was not claimed and dispatched (claims %v, dispatched %+v)", c.keys, d.seen())
 	}
 }
+
+// waitForClaims waits for a HandleRunEvent goroutine to settle: until the
+// claimer has seen want claims or two seconds pass, then a further 50 ms for
+// any claim that should NOT have come. It answers the claims it saw.
+func waitForClaims(c *stubClaimer, want int) int {
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		c.mu.Lock()
+		n := len(c.keys)
+		c.mu.Unlock()
+		if n >= want {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.keys)
+}
+
+// A PIPELINE'S RUN IS ITS RUNNER'S (epic memql#5477, decision 11 of the
+// pipelines plan). The pipelines driver on an agent node executes it step by
+// step against the registered executor, under a lease of its own; the template
+// executor has no template to load for it, and taking it would run every step
+// a second time. So the dispatcher's admission refuses it on BOTH paths a run
+// reaches it by -- the run event every agent replica sees, and the recovery
+// the sweep's backstop offers -- before the claim, so no lease is spent on it,
+// and again behind the privileged read.
+//
+// The run here carries everything an admitted run carries -- `running`, a
+// template and a goal -- so nothing but its trigger stands between it and a
+// dispatch. The trigger is spelled as the driver writes it,
+// pipelines.WorkTriggerPrefix plus the mode, and the ordinary runs beside it
+// are the controls: without them a dispatcher that refused everything would
+// pass.
+func TestTheDispatcherNeverAdmitsAPipelineRun(t *testing.T) {
+	now := time.Now()
+	for _, trigger := range []string{"pipeline:affected", "pipeline:full"} {
+		t.Run(trigger, func(t *testing.T) {
+			ev := runEvent("pipeline-run-1", runStatusRunning, "pipeline", "u1")
+			ev.Payload["payload"].(map[string]any)["triggeredBy"] = trigger
+			i, d, c := newDispatchProbe(t, true)
+			i.HandleRunEvent(ev)
+			if n := waitForClaims(c, 0); n != 0 || len(d.seen()) != 0 {
+				t.Errorf("the run event: claimed %d and dispatched %+v; a pipeline's run is its driver's", n, d.seen())
+			}
+			event := DispatchRequest{RunId: "pipeline-run-1", GoalId: "goal-1", Status: runStatusRunning, TriggeredBy: trigger}
+			if event.CanDispatchStoredRun("goal-1", runStatusRunning, nil, now) {
+				t.Error("the run event was admitted behind the privileged read")
+			}
+
+			recovery := DispatchRequest{RunId: "pipeline-run-1", Status: runStatusRunning, Recovery: true, TriggeredBy: trigger}
+			if recovery.CanDispatchStoredRun("", runStatusRunning, nil, now) {
+				t.Error("a goal-less pipeline run was admitted on recovery")
+			}
+			if recovery.CanDispatchStoredRun("goal-1", runStatusRunning, nil, now) {
+				t.Error("a pipeline run naming its goal was admitted on recovery")
+			}
+			i, d, c = newDispatchProbe(t, true)
+			if i.dispatchRun(context.Background(), recovery) {
+				t.Error("dispatchRun reported a pipeline run taken on recovery")
+			}
+			if len(c.keys) != 0 || len(d.seen()) != 0 {
+				t.Errorf("recovery: claimed %v and dispatched %+v; a pipeline run's claim is never taken", c.keys, d.seen())
+			}
+		})
+	}
+
+	ordinary := runEvent("ordinary-1", runStatusRunning, "weeklyReport", "u1")
+	ordinary.Payload["payload"].(map[string]any)["triggeredBy"] = "direct"
+	i, d, c := newDispatchProbe(t, true)
+	i.HandleRunEvent(ordinary)
+	if n := waitForClaims(c, 1); n != 1 || len(d.seen()) != 1 {
+		t.Fatalf("the control: an ordinary goal run's event was not claimed and dispatched (claims %d, dispatched %+v)", n, d.seen())
+	}
+	recovered := DispatchRequest{RunId: "ordinary-2", Status: runStatusRunning, Recovery: true, TriggeredBy: "schedule"}
+	if !recovered.CanDispatchStoredRun("", runStatusRunning, nil, now) {
+		t.Fatal("the control: an ordinary goal-less run is no longer admitted on recovery")
+	}
+}

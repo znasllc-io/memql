@@ -106,6 +106,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
+	github.com/znasllc-io/memql/component/pipelines v0.0.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect

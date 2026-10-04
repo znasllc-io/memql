@@ -161,15 +161,31 @@ func (i *Integration) SweepWaiting(ctx context.Context, olderThan time.Duration)
 		// owner; the value comes off the row just read.
 		writeCtx := ownerActor(ctx, owner)
 		status := rowString(run, "status")
-		if isProcedureReplay(rowString(run, "triggeredBy")) && status != runStatusRunning {
+		triggeredBy := rowString(run, "triggeredBy")
+		if runnerOwnsRecovery(triggeredBy) {
+			// A PIPELINE'S RUN IS ITS RUNNER'S, ITS LIVENESS INCLUDED
+			// (pipelines.WorkTriggerPrefix, epic memql#5477). The pipelines
+			// driver holds a lease of its own on the pipelines run and its own
+			// recovery claims a silent run back and resumes it from the
+			// journal, so every judgment below would be a second one that
+			// contradicts the first: abandoning closes a run another driver is
+			// about to resume, a due timer releases it to a dispatch that
+			// carries no trigger, a remedy replans it on the planner, and the
+			// backstop offers it to a template executor with nothing to load.
+			// Read past in every shape, and nothing is written.
+			continue
+		}
+		if runnerOwned(triggeredBy) && status != runStatusRunning {
 			// A PROCEDURE'S REPLAY RUN IS ITS RUNNER'S
-			// (ProcedureReplayTriggerPrefix). It is never compiled and never
-			// parks, so nothing below that compiles, resumes, remedies or
-			// retries a run applies to it -- and every one of those hands the
-			// run to the template executor. A replay run in any shape but
-			// `running` is left for its runner rather than guessed at. At
-			// `running` it falls through to the heartbeat, the one judgment
-			// made of every run, and the backstop does not offer it back.
+			// (ProcedureReplayTriggerPrefix) -- the one runner-owned run still
+			// here, since a pipeline's was read past above. It is never
+			// compiled and never parks, so nothing below that compiles,
+			// resumes, remedies or retries a run applies to it -- and every
+			// one of those hands the run to the template executor. A replay
+			// run in any shape but `running` is left for its runner rather
+			// than guessed at. At `running` it falls through to the heartbeat,
+			// the one judgment made of every run, and the backstop does not
+			// offer it back.
 			continue
 		}
 		if status == runStatusCompiling {
@@ -404,7 +420,8 @@ func (i *Integration) redispatchStale(ctx context.Context, run map[string]any, r
 	// refuse a PROCEDURE'S REPLAY RUN before claiming it: such a run names an
 	// automation and has no goal, which is otherwise exactly what this hands
 	// back (ProcedureReplayTriggerPrefix). Refused, a silent one is closed by
-	// its heartbeat like any other.
+	// its heartbeat like any other. A pipeline's run, refused there too, never
+	// gets this far: the sweep reads past it (runnerOwnsRecovery).
 	if !i.dispatchRun(ctx, DispatchRequest{
 		RunId: runId, OwnerUserId: owner, GoalId: rowString(run, "goalId"), Status: rowString(run, "status"),
 		TriggeredBy: rowString(run, "triggeredBy"), Recovery: true,

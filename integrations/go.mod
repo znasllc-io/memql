@@ -34,6 +34,7 @@ require (
 	github.com/znasllc-io/memql/component/memql v0.0.0
 	github.com/znasllc-io/memql/component/node v0.0.0
 	github.com/znasllc-io/memql/component/node/gen v0.0.0
+	github.com/znasllc-io/memql/component/pipelines v0.0.0
 	github.com/znasllc-io/memql/component/planner v0.0.0
 	github.com/znasllc-io/memql/component/procedure v0.0.0
 	github.com/znasllc-io/memql/component/router v0.0.0
