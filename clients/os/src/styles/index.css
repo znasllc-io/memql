@@ -15029,6 +15029,11 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-info-detail { display: inline-flex; vertical-align: middle; }
 .os-info-detail .os-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; background: transparent; color: var(--os-muted); border-radius: 50%; cursor: pointer; }
 .os-info-detail .os-icon-button:hover:not(:disabled), .os-info-detail .os-icon-button:focus-visible:not(:disabled) { background: var(--os-hover); color: var(--os-ink); }
+/* Beside a fact's value (Fleet's "Pipeline steps", epic memql#5478) the info
+ * control overflows the line rather than growing it -- the Reuse heading's
+ * rule, one container down. Grown, its 28px button pushed the value 6px below
+ * its own label and made the one row taller than every row around it. */
+.os-facts dd .os-info-detail { margin: -6px 0 -6px 6px; }
 .os-info-dialog { padding: 0; color: var(--os-ink); background: var(--os-raised); border: 1px solid var(--os-line-strong); border-radius: 12px; width: min(430px,calc(100vw - 40px)); max-height: calc(100vh - 60px); box-shadow: var(--os-shadow-float); }
 .os-info-dialog::backdrop { background: #0006; }
 .os-info-dialog-body { padding: 20px 24px; font-size: var(--os-text-sm); line-height: 1.65; }
