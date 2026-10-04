@@ -439,6 +439,13 @@ func (e *Executor) ResumeFrom(
 	if opts.FromStep != "" {
 		resumeStepId = opts.FromStep
 	}
+	if resumeStepId == "" {
+		// Every failure the journal holds was continued past (statementResumePoint):
+		// nothing stopped this run, so either it finished or it is still
+		// executing -- on another replica, as like as not -- and resuming it
+		// would run its steps a second time.
+		return nil, fmt.Errorf("%w: run %s has no failed or unfinished step to resume from -- every failure in its journal was continued past", ErrRunJournalInvalid, journal.RunId)
+	}
 
 	// Find the step index to resume from
 	resumeIndex := -1
