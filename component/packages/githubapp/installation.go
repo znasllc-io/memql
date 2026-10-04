@@ -115,3 +115,75 @@ func (c *Client) InstallationToken(ctx context.Context, installationId int64) (s
 	c.mu.Unlock()
 	return token, nil
 }
+
+// ScopedInstallationToken mints an UNCACHED installation token narrowed to
+// the named repositories and permissions (POST access_tokens with a body).
+// The substrate mints the clone token a Job carries this way: contents read
+// on one repository, never the installation-wide token the cache holds.
+//
+// Repositories are NAMES within the installation's account ("widget", not
+// "acme/widget"), which is how GitHub's access_tokens body takes them.
+//
+// A REQUEST THAT WOULD NOT NARROW IS REFUSED before anything is signed. No
+// repositories, or no permissions, is GitHub's spelling of "all of them": a
+// call meant to mint the narrow token would hand back the wide one, so an empty
+// list is an error here rather than a default.
+//
+// Never cached, in either direction. The cache is keyed on the installation
+// and holds the wide token; a narrowed one stored there would be served to a
+// caller expecting the installation's reach, and the wide one served here
+// would be exactly the token this exists to keep off a Job.
+func (c *Client) ScopedInstallationToken(ctx context.Context, installationID int64, repositories []string, permissions map[string]string) (token string, expiresAt time.Time, err error) {
+	cfg := c.config()
+	if !cfg.Configured() {
+		return "", time.Time{}, ErrNotConfigured
+	}
+	if installationID == 0 {
+		return "", time.Time{}, ErrNotInstalled
+	}
+	if len(repositories) == 0 || len(permissions) == 0 {
+		return "", time.Time{}, errors.New("a scoped installation token names the repositories and the permissions it is narrowed to")
+	}
+	for _, name := range repositories {
+		if strings.TrimSpace(name) == "" || strings.Contains(name, "/") {
+			return "", time.Time{}, errors.New("a scoped installation token names repositories by name within the installation's account")
+		}
+	}
+	for scope, level := range permissions {
+		if strings.TrimSpace(scope) == "" || strings.TrimSpace(level) == "" {
+			return "", time.Time{}, errors.New("a scoped installation token names each permission and its level")
+		}
+	}
+
+	now := c.now()
+	assertion, err := c.appJWT(cfg, now)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	body := struct {
+		Repositories []string          `json:"repositories"`
+		Permissions  map[string]string `json:"permissions"`
+	}{Repositories: repositories, Permissions: permissions}
+	var payload struct {
+		Token     string `json:"token"`
+		ExpiresAt string `json:"expires_at"`
+	}
+	endpoint := "/app/installations/" + strconv.FormatInt(installationID, 10) + "/access_tokens"
+	if _, cerr := c.callJSON(ctx, http.MethodPost, endpoint, assertion, body, &payload); cerr != nil {
+		if StatusOf(cerr) == http.StatusNotFound {
+			return "", time.Time{}, ErrNotInstalled
+		}
+		return "", time.Time{}, cerr
+	}
+	token = strings.TrimSpace(payload.Token)
+	if token == "" {
+		return "", time.Time{}, errors.New("GitHub minted an empty installation token")
+	}
+	// The same reading of an unparseable expiry InstallationToken makes: a
+	// minute from now, never forever.
+	expiresAt = now.Add(time.Minute)
+	if parsed, perr := time.Parse(time.RFC3339, strings.TrimSpace(payload.ExpiresAt)); perr == nil {
+		expiresAt = parsed.UTC()
+	}
+	return token, expiresAt, nil
+}

@@ -3,6 +3,7 @@ package packages
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -58,6 +59,12 @@ func (i *Integration) handleNoteUpstreamFromWebhook(ctx context.Context, args ma
 		// A body this cluster cannot read is not a failure of the delivery --
 		// GitHub sends event types nobody here models. Skipped, and named, so
 		// an operator reading the trail can tell "ignored" from "broken".
+		//
+		// errNotAPush lands here too, and it is the commonest: the pull
+		// request, merge queue and check deliveries pipelines subscribe to
+		// arrive on this same source (epic memql#5477), and every one of them
+		// is somebody else's, not a fault. Nothing is looked up, nothing is
+		// noted, and no auto-deploy starts.
 		return resultNode(map[string]any{"skipped": perr.Error()}), nil
 	}
 
@@ -72,6 +79,29 @@ func (i *Integration) handleNoteUpstreamFromWebhook(ctx context.Context, args ma
 	}), nil
 }
 
+// errNotAPush is a delivery that is neither a push nor a release, and is
+// nothing to note.
+//
+// Once the GitHub App subscribes to pipelines' events (epic memql#5477), much
+// of what arrives on this source is one: a pull request, a merge queue, a
+// check run or suite. Each names the repository a push names, and each carries
+// a SHA somewhere -- a pull request's synchronize puts `before` and `after` at
+// the top of its body, exactly where a push does. None of them moves what a
+// SOURCE deploys, so none may move the update cue or start an auto-deploy:
+// noting a pull request's head would offer a branch nobody merged as the
+// source's next version.
+var errNotAPush = errors.New("the delivery is not a push")
+
+// notAPushKeys are the top-level keys that mark another event's body. Read
+// from the SIGNED BODY's shape, deliberately: X-GitHub-Event names the event
+// too, but it is a header, and the signature the inbound seam verified does
+// not cover it.
+//
+// `release` is NOT among them. A release is an upstream event this feed has
+// always read -- it is how a source tracking a tag learns of a new one -- and
+// the pipelines reading the same delivery do not change what it means here.
+var notAPushKeys = []string{"pull_request", "merge_group", "check_run", "check_suite"}
+
 // upstreamEvent is what either feed learned about a repository.
 type upstreamEvent struct {
 	RepoUrl       string
@@ -80,13 +110,23 @@ type upstreamEvent struct {
 	DefaultBranch string
 }
 
-// parseGitHubPush reads the two facts a push or release carries.
+// parseGitHubPush reads the facts a push or release carries, and answers
+// errNotAPush for any other delivery.
 //
 // Version is the commit SHA for a push and the tag for a release, MIRRORING
 // what sourceVersion and deployedVersion record -- otherwise the comparison
 // that lights the cue would be between two different kinds of string, and
 // updateAvailable would be permanently true.
 func parseGitHubPush(body string) (upstreamEvent, error) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &top); err != nil {
+		return upstreamEvent{}, fmt.Errorf("the delivery body is not JSON this cluster reads")
+	}
+	for _, key := range notAPushKeys {
+		if _, ok := top[key]; ok {
+			return upstreamEvent{}, fmt.Errorf("%w: it carries %s", errNotAPush, key)
+		}
+	}
 	var payload struct {
 		Ref        string `json:"ref"`
 		Deleted    bool   `json:"deleted"`
@@ -103,6 +143,18 @@ func parseGitHubPush(body string) (upstreamEvent, error) {
 	if err := json.Unmarshal([]byte(body), &payload); err != nil {
 		return upstreamEvent{}, fmt.Errorf("the delivery body is not JSON this cluster reads")
 	}
+	tag := strings.TrimSpace(payload.Release.TagName)
+	ref := strings.TrimSpace(payload.Ref)
+	if ref == "" && tag != "" {
+		ref = "refs/tags/" + tag
+	}
+	// A push names its ref and a release names its tag. A body with neither
+	// is another event, and an EMPTY ref used to skip the branch filter in
+	// noteUpstreamEvent: such a body was noted on every package tracking the
+	// repository, whatever branch each tracks.
+	if ref == "" {
+		return upstreamEvent{}, fmt.Errorf("%w: it names no ref and no release tag", errNotAPush)
+	}
 	repo := strings.TrimSpace(payload.Repository.HTMLURL)
 	if repo == "" {
 		repo = strings.TrimSuffix(strings.TrimSpace(payload.Repository.CloneURL), ".git")
@@ -110,16 +162,12 @@ func parseGitHubPush(body string) (upstreamEvent, error) {
 	if repo == "" {
 		return upstreamEvent{}, fmt.Errorf("the delivery names no repository")
 	}
-	version := strings.TrimSpace(payload.Release.TagName)
+	version := tag
 	if version == "" {
 		version = strings.TrimSpace(payload.After)
 	}
 	if version == "" || payload.Deleted || strings.Trim(version, "0") == "" {
 		return upstreamEvent{}, fmt.Errorf("the delivery names no version")
-	}
-	ref := payload.Ref
-	if ref == "" && payload.Release.TagName != "" {
-		ref = "refs/tags/" + payload.Release.TagName
 	}
 	return upstreamEvent{RepoUrl: repo, Version: version, Ref: ref, DefaultBranch: payload.Repository.DefaultBranch}, nil
 }

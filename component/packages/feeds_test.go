@@ -2,6 +2,7 @@ package packages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -198,6 +199,145 @@ func TestAReleaseIsIdentifiedByItsTag(t *testing.T) {
 	}
 	if ev.Version != "v1.4.0" {
 		t.Fatalf("a release is its tag, got %q", ev.Version)
+	}
+	if ev.Ref != "refs/tags/v1.4.0" {
+		t.Fatalf("a release names its tag's ref, got %q", ev.Ref)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Only a push or a release is an upstream event (epic memql#5477, Review
+// Focus 2)
+// ---------------------------------------------------------------------------
+
+const widgetRepository = `"repository":{"html_url":"https://github.com/acme/widget","default_branch":"main","full_name":"acme/widget"}`
+
+// releaseBody is a release published on the same source, as GitHub sends it.
+const releaseBody = `{"action":"published","release":{"tag_name":"v1.4.0","target_commitish":"main"},` +
+	widgetRepository + `,"installation":{"id":42}}`
+
+// notAPushBodies are deliveries the GitHub App sends on the same source once it
+// subscribes to pipelines' events. Every one names the repository a push names
+// and a SHA somewhere -- the pull request's synchronize carries `before` and
+// `after` at the top, exactly where a push does -- which is why the feed must
+// read the body's shape rather than hunt for a version.
+var notAPushBodies = map[string]string{
+	"pull_request synchronize": `{"action":"synchronize","number":7,"before":"basesha00000000","after":"prheadsha0000000",` +
+		`"pull_request":{"number":7,"head":{"sha":"prheadsha0000000","ref":"feature","repo":{"full_name":"acme/widget"}},"base":{"sha":"basesha00000000","ref":"main"}},` +
+		widgetRepository + `,"installation":{"id":42}}`,
+	"check_suite requested": `{"action":"requested","check_suite":{"id":5,"head_branch":"main","head_sha":"suitesha0000000","before":"basesha00000000","after":"suitesha0000000"},` +
+		widgetRepository + `,"installation":{"id":42}}`,
+	"check_run rerequested": `{"action":"rerequested","check_run":{"id":9,"head_sha":"runsha000000000","external_id":"v1:pipelines:run:abc"},` +
+		widgetRepository + `,"installation":{"id":42}}`,
+	"merge_group checks_requested": `{"action":"checks_requested","merge_group":{"head_sha":"queuesha0000000","head_ref":"refs/heads/gh-readonly-queue/main/pr-7-basesha","base_sha":"basesha00000000","base_ref":"refs/heads/main"},` +
+		widgetRepository + `,"installation":{"id":42}}`,
+	// A push-shaped body with no ref and no release tag: today that skipped
+	// the branch filter and noted its SHA on every package tracking the
+	// repository.
+	"a body naming no ref and no release": `{"after":"newsha0000000000",` + widgetRepository + `}`,
+}
+
+func TestOnlyAPushOrAReleaseIsReadAsAnUpstreamEvent(t *testing.T) {
+	for name, body := range notAPushBodies {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseGitHubPush(body); !errors.Is(err, errNotAPush) {
+				t.Fatalf("want errNotAPush, got %v", err)
+			}
+		})
+	}
+
+	// THE REACHABLE POSITIVE: a push to a branch, a push of a tag and a
+	// release are upstream events. A push carries the commit SHA and a release
+	// its tag, each mirroring what sourceVersion records for that ref -- a
+	// version of another kind would make the comparison that lights the cue
+	// permanently true.
+	for name, tc := range map[string]struct{ body, ref, version string }{
+		"a push to a branch": {pushBody, "refs/heads/main", "newsha0000000000"},
+		"a push of a tag": {`{"ref":"refs/tags/v1.4.0","before":"0000000000000000","after":"tagsha0000000000",` + widgetRepository + `}`,
+			"refs/tags/v1.4.0", "tagsha0000000000"},
+		"a release": {releaseBody, "refs/tags/v1.4.0", "v1.4.0"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ev, err := parseGitHubPush(tc.body)
+			if err != nil {
+				t.Fatalf("an upstream event must parse: %v", err)
+			}
+			if ev.Ref != tc.ref || ev.Version != tc.version || ev.RepoUrl != "https://github.com/acme/widget" {
+				t.Fatalf("got %+v", ev)
+			}
+		})
+	}
+}
+
+// TestAReleaseDeliveryStillNotesItsTag: the app now delivers releases for
+// pipelines too, and that changes nothing here. A source tracking the tag
+// learns of it, exactly as before pipelines existed.
+func TestAReleaseDeliveryStillNotesItsTag(t *testing.T) {
+	pkg := trackedPackage("v1.3.0", "", false)
+	pkg["repoRef"] = "v1.4.0"
+	i, engine := feedHarness(t, pkg)
+	if _, err := i.handleNoteUpstreamFromWebhook(context.Background(), map[string]any{
+		"inboundRequestId": "v1:platform:inboundRequest:1", "source": "github", "body": releaseBody,
+	}, 0); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if !engine.sawStatement(`mutation recordPackageUpstreamVersion(packageId: "v1:platform:package:abc", latestKnownVersion: "v1.4.0", updateAvailable: true)`) {
+		t.Fatalf("a release must note its tag; statements: %v", engine.statements())
+	}
+}
+
+// TestADeliveryThatIsNotAPushMovesNothingAndStartsNothing is Review Focus 2:
+// a pull request's synchronize and a check suite -- and the merge queue and
+// check run deliveries the app now receives beside them -- must not move the
+// update cue (latestKnownVersion) and must not start an auto-deploy, against a
+// package armed to start one. Each is skipped without an error: it is
+// somebody else's delivery, not a fault.
+func TestADeliveryThatIsNotAPushMovesNothingAndStartsNothing(t *testing.T) {
+	armed := func(t *testing.T) (*Integration, *harness) {
+		t.Helper()
+		pkg := autoPackage()
+		h := newHarness(t, spaOnlyPackage(), pkg)
+		h.engine.rows["query packagesByRepoUrl"] = []map[string]any{pkg}
+		i := NewIntegration(h.engine, discardLogger())
+		i.depsOnce.Do(func() { i.deps = h.deps })
+		return i, h
+	}
+
+	for name, body := range notAPushBodies {
+		t.Run(name, func(t *testing.T) {
+			i, h := armed(t)
+			res, err := i.handleNoteUpstreamFromWebhook(context.Background(), map[string]any{
+				"inboundRequestId": "v1:platform:inboundRequest:1", "source": "github", "body": body,
+			}, 0)
+			if err != nil {
+				t.Fatalf("another event's delivery is skipped, never failed: %v", err)
+			}
+			if len(res) == 0 {
+				t.Fatal("want a result envelope saying the delivery was skipped")
+			}
+			if h.engine.sawStatement("query packagesByRepoUrl") {
+				t.Fatalf("a delivery that is not a push must not even look for packages; statements: %v", h.engine.statements())
+			}
+			if h.engine.sawStatement("mutation ") {
+				t.Fatalf("a delivery that is not a push wrote something; statements: %v", h.engine.statements())
+			}
+		})
+	}
+
+	// THE REACHABLE POSITIVE: the same armed package, a real push. The cue
+	// moves and the auto-run opens, so the silence above is about the
+	// delivery and not about a harness that could never write.
+	i, h := armed(t)
+	if _, err := i.handleNoteUpstreamFromWebhook(context.Background(), map[string]any{
+		"inboundRequestId": "v1:platform:inboundRequest:1", "source": "github", "body": pushBody,
+	}, 0); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	if !h.engine.sawStatement(`mutation recordPackageUpstreamVersion(packageId: "v1:platform:package:abc", latestKnownVersion: "newsha0000000000"`) {
+		t.Fatalf("a push must move the cue; statements: %v", h.engine.statements())
+	}
+	if !h.engine.sawStatement("mutation openPackageDeployment") {
+		t.Fatalf("a push to an armed source must start its auto-run; statements: %v", h.engine.statements())
 	}
 }
 

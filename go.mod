@@ -19,6 +19,7 @@ require (
 	github.com/znasllc-io/memql/component/healing v0.0.0
 	github.com/znasllc-io/memql/component/node/gen v0.0.0
 	github.com/znasllc-io/memql/component/observe v0.0.0-00010101000000-000000000000
+	github.com/znasllc-io/memql/component/pipelines v0.0.0
 	github.com/znasllc-io/memql/component/procedure v0.0.0
 	golang.org/x/sync v0.23.0
 	google.golang.org/grpc v1.83.2
