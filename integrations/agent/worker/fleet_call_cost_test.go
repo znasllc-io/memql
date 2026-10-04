@@ -43,6 +43,7 @@ const (
 	costCaller          = "v1:identity:user:ursula"
 	costDesignGroup     = "v1:identity:group:design"
 	costLentMachineName = "studio"
+	costOwnMachineName  = "laptop"
 )
 
 // countingFleetEngine is the database both replicas read, as the fleet store
@@ -185,28 +186,24 @@ type costHop struct {
 	memberships *countingMemberships
 }
 
-func newCostHop(t *testing.T) *costHop {
-	t.Helper()
-	memberships := installMemberships(t)
-
-	studio := map[string]any{
-		"id":              costLentMachineName,
-		"name":            costLentMachineName,
-		"ownerUserId":     costLender,
+// costMachine is one registration row in the counting engine and, held by
+// replica B, its stream.
+func costMachine(id, owner string, sharing map[string]any) (map[string]any, *workerservice.Worker) {
+	row := map[string]any{
+		"id":              id,
+		"name":            id,
+		"ownerUserId":     owner,
 		"capabilities":    []any{workerservice.CapabilityHeadless, workerservice.ModelCapability},
 		"labels":          map[string]any{workerservice.ModelLabel(costModel): "ctx=8192"},
 		"connectedNodeId": nodeB,
 		"lastSeenAt":      fleetNow().Format(time.RFC3339Nano),
-		"sharing":         map[string]any{"mode": workerservice.SharingModePeople, "groupIds": []any{"design"}},
+		"sharing":         sharing,
 		"capabilityDescriptor": map[string]any{
 			"inferenceServe": workerservice.InferenceServeCluster,
 		},
 	}
-	engine := &countingFleetEngine{rows: []map[string]any{studio}, counts: map[string]int{}}
-
-	regB := workerservice.NewRegistry(testLogger(), fleetNow)
 	w := &workerservice.Worker{
-		RegistrationId: costLentMachineName, OwnerUserId: costLender, Name: costLentMachineName,
+		RegistrationId: id, OwnerUserId: owner, Name: id,
 		Capabilities: []string{workerservice.CapabilityHeadless, workerservice.ModelCapability},
 		Labels:       map[string]string{workerservice.ModelLabel(costModel): "ctx=8192"},
 		Concurrency:  map[string]uint32{workerservice.ModelCapability: 4},
@@ -216,7 +213,27 @@ func newCostHop(t *testing.T) *costHop {
 		go finish(workerservice.ModelCallOutcome{FinishReason: workerservice.ModelFinishStop, Content: "served"})
 		return h, nil
 	})
-	regB.Add(w)
+	return row, w
+}
+
+// newCostHop is the cluster the measurements run in: a machine lent to the
+// caller's group, plus -- with ownMachine -- one of the caller's own, both
+// held by replica B.
+func newCostHop(t *testing.T, ownMachine bool) *costHop {
+	t.Helper()
+	memberships := installMemberships(t)
+	regB := workerservice.NewRegistry(testLogger(), fleetNow)
+
+	studio, studioWorker := costMachine(costLentMachineName, costLender,
+		map[string]any{"mode": workerservice.SharingModePeople, "groupIds": []any{"design"}})
+	rows := []map[string]any{studio}
+	regB.Add(studioWorker)
+	if ownMachine {
+		laptop, laptopWorker := costMachine(costOwnMachineName, costCaller, map[string]any{"mode": workerservice.SharingModeOwner})
+		rows = append(rows, laptop)
+		regB.Add(laptopWorker)
+	}
+	engine := &countingFleetEngine{rows: rows, counts: map[string]int{}}
 
 	link := &meshLink{t: t, reachable: true}
 	link.handler = NewForwardHandler(regB, newCostStore(engine), testLogger())
@@ -228,19 +245,21 @@ func newCostHop(t *testing.T) *costHop {
 }
 
 // call is one model call on the person path: the availability read the
-// router makes before choosing the provider, then the call itself.
-func (h *costHop) call(t *testing.T, n int) callCost {
+// router makes before choosing the provider, then the call itself, pinned to
+// one machine when pin names one. It reports what the call read and which
+// machine served it.
+func (h *costHop) call(t *testing.T, n int, pin string) (callCost, string) {
 	t.Helper()
 	ctx := authorityCtx(t, costCaller)
 	models, err := h.f.Catalog(ctx, costCaller)
 	if err != nil || len(models) != 1 || !models[0].Online() {
-		t.Fatalf("call %d: the router's availability read must offer the lent model: %+v, %v", n, models, err)
+		t.Fatalf("call %d: the router's availability read must offer the model: %+v, %v", n, models, err)
 	}
 	res, err := h.f.Call(ctx, memqlengine.FleetCallRequest{
-		ActingUserId: costCaller, ModelId: costModel, Kind: memqlengine.FleetKindChat,
+		ActingUserId: costCaller, RegistrationId: pin, ModelId: costModel, Kind: memqlengine.FleetKindChat,
 	})
 	if err != nil || res.Content != "served" {
-		t.Fatalf("call %d: the lent machine must serve the call: %+v, %v", n, res, err)
+		t.Fatalf("call %d: the call must be served: %+v, %v", n, res, err)
 	}
 	counts := h.engine.take()
 	for q := range counts {
@@ -253,7 +272,7 @@ func (h *costHop) call(t *testing.T, n int) callCost {
 		allReads:        counts[queryAllWorkers],
 		policyReads:     counts[queryRoutingPolicy],
 		membershipReads: h.memberships.take(),
-	}
+	}, res.ExecutionSurface
 }
 
 // Measured on this harness for memql#5660, before the receiver reused
@@ -264,12 +283,12 @@ func (h *costHop) call(t *testing.T, n int) callCost {
 // person's groups once and reuses them until a membership or a group changes,
 // so the second call and every one after it costs one membership read fewer.
 func TestWhatOnePersonModelCallReads(t *testing.T) {
-	h := newCostHop(t)
+	h := newCostHop(t, false)
 	subscribeInstalledMembershipCache(t)
 	ceiling := callCost{ownReads: 3, allReads: 4, policyReads: 1}
 	var costs []string
 	for n := 1; n <= 3; n++ {
-		c := h.call(t, n)
+		c, _ := h.call(t, n, "")
 		costs = append(costs, fmt.Sprintf("call %d: %s", n, c))
 		wantMemberships := 2 // the catalog's and the plan's: the sender reads fresh
 		if n == 1 {
@@ -284,4 +303,35 @@ func TestWhatOnePersonModelCallReads(t *testing.T) {
 	}
 	t.Log("person-path model call to a machine lent to the caller's group, across the hop:\n  " +
 		strings.Join(costs, "\n  "))
+}
+
+// A PIN TO YOUR OWN MACHINE pays for your own machines only (memql#5660,
+// review of memql#5662). The pin plans over everything the caller may use,
+// own and lent, but a pin that names one of their own machines is decided by
+// the owner-scoped plan alone; reading every registration in the cluster and
+// the caller's groups to rule on a machine already in hand was the per-call
+// cost this issue set out to cut. The availability read before the call is
+// the router's and reads what it always did.
+//
+// Measured before the fix: own=3 all=2 policy=1 membership=2 -- the plan's
+// cross-owner read, and its membership read for the machine lent to a group.
+func TestWhatAPinToYourOwnMachineReads(t *testing.T) {
+	h := newCostHop(t, true)
+	subscribeInstalledMembershipCache(t)
+	want := callCost{
+		ownReads:        3, // the catalog, the plan, the receiver's ownership re-check
+		allReads:        1, // the catalog's, for what is lent to the caller
+		policyReads:     1, // the plan's
+		membershipReads: 1, // the catalog's, for the machine lent to a group
+	}
+	for n := 1; n <= 2; n++ {
+		c, surface := h.call(t, n, "v1:worker:registration:"+costOwnMachineName)
+		t.Logf("call %d, pinned to the caller's own machine: %s", n, c)
+		if surface != FleetSurfacePrefix+costOwnMachineName {
+			t.Fatalf("call %d: the pin was served by %q", n, surface)
+		}
+		if c != want {
+			t.Errorf("call %d: %s, want %s", n, c, want)
+		}
+	}
 }

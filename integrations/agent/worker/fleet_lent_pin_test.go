@@ -363,3 +363,19 @@ func TestAPinnedCallIsNoNarrowerThanTheGateThatAdmittedIt(t *testing.T) {
 			answer, h.studioCalls.Load(), h.ownCalls.Load())
 	}
 }
+
+func TestAPinToYourOwnMachineTheOwnerReadMissedIsStillServed(t *testing.T) {
+	// A pin the own plan has not judged goes on to the lent half, and that is
+	// also where the caller's own machine is RECOVERED when the owner-scoped
+	// read missed it (its row spells the owner differently). Deciding a pin
+	// from the own plan alone (memql#5660) must not lose that machine.
+	mine := privateMachine("mine", "v1:identity:user:alice")
+	store := &sharedFleet{fakeFleet: &fakeFleet{owner: "alice"}, all: []Candidate{mine}}
+	plan, err := modelRouter(t, store).PlanPinnedModel(authorityCtx(t, "alice"), "alice", "v1:worker:registration:mine", smallModel, ModelNeeds{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(plan.Candidates); len(got) != 1 || got[0] != "mine" {
+		t.Fatalf("candidates = %v; a pin to the caller's own machine must reach it even when the owner read missed it", got)
+	}
+}

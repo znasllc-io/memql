@@ -77,13 +77,27 @@ func (r *Router) PlanUserModelWithShared(
 	if err != nil {
 		return own, err
 	}
+	return r.withLentMachines(ctx, actingUserId, modelId, needs, own), nil
+}
 
+// withLentMachines is PlanUserModelWithShared's second half: given the
+// caller's own plan, it reads across owners and appends what is lent to them,
+// and the caller's own machines the owner-scoped read missed. It is separate
+// so a pin that the own plan already decides (PlanPinnedModel) does not pay
+// for the cross-owner read and the membership read it would not use.
+func (r *Router) withLentMachines(
+	ctx context.Context,
+	actingUserId string,
+	modelId string,
+	needs ModelNeeds,
+	own RoutePlan,
+) RoutePlan {
 	shared, ok := r.store.(SharedFleetStore)
 	if !ok {
 		// A node whose store cannot read across owners serves the caller's own
 		// machines and says nothing about anybody else's. That is a NARROWER
 		// answer, not a wrong one, and narrowing is the safe direction here.
-		return own, nil
+		return own
 	}
 	all, err := shared.SharedInferenceWorkers(ctx)
 	if err != nil {
@@ -95,7 +109,7 @@ func (r *Router) PlanUserModelWithShared(
 			r.logger.Warn("worker router: could not read the shared fleet; serving the caller's own machines only",
 				"acting_user_id", actingUserId, "error", err)
 		}
-		return own, nil
+		return own
 	}
 
 	// ownSeen is every registration the owner-scoped plan already judged --
@@ -220,7 +234,7 @@ func (r *Router) PlanUserModelWithShared(
 	}
 	out.Rejected = rejected
 	out.Total = own.Total + len(all)
-	return out, nil
+	return out
 }
 
 // OwnMachineFirst reports whether a candidate belongs to the acting user.

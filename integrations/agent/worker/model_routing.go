@@ -106,6 +106,13 @@ func (r *Router) PlanModel(
 // IT NEVER FALLS THROUGH. The plan holds the pinned machine or nothing, so a
 // refusal before start cannot move the call onto another candidate.
 //
+// A PIN TO YOUR OWN MACHINE IS DECIDED BY YOUR OWN PLAN (memql#5660). When the
+// owner-scoped plan has already judged the pinned machine -- kept it, or ruled
+// it out -- the lent half cannot change the answer: it skips every machine the
+// own plan judged. So the cross-owner read, and the membership read a machine
+// lent to a group would cost, happen only for a pin the own plan has not seen:
+// a machine lent to the caller, or one of theirs the owner read missed.
+//
 // SYSTEM WORK CANNOT PIN. A pin is a person's choice of machine, so a call
 // that acts for no person makes none: a blank acting user, and every identity
 // the cluster synthesizes -- an automation running as itself, a connector,
@@ -132,9 +139,12 @@ func (r *Router) PlanPinnedModel(
 	if strings.TrimSpace(registrationId) == "" {
 		return RoutePlan{Policy: DefaultPolicy()}, fmt.Errorf("worker router: a pinned model call needs the machine it is pinned to")
 	}
-	plan, err := r.PlanUserModelWithShared(ctx, actingUserId, modelId, needs)
+	plan, err := r.PlanModel(ctx, actingUserId, modelId, needs)
 	if err != nil {
 		return plan, err
+	}
+	if !planJudged(plan, registrationId) {
+		plan = r.withLentMachines(ctx, actingUserId, modelId, needs, plan)
 	}
 	selected := make([]Candidate, 0, 1)
 	for _, c := range plan.Candidates {
@@ -150,6 +160,22 @@ func (r *Router) PlanPinnedModel(
 	plan.Rejected = nil
 	plan.Total = 1
 	return plan, nil
+}
+
+// planJudged reports whether a plan has already ruled on this machine: kept
+// it as a candidate, or rejected it with a reason.
+func planJudged(plan RoutePlan, registrationId string) bool {
+	for _, c := range plan.Candidates {
+		if sameSubject(c.RegistrationId, registrationId) {
+			return true
+		}
+	}
+	for id := range plan.Rejected {
+		if sameSubject(id, registrationId) {
+			return true
+		}
+	}
+	return false
 }
 
 // PlanSharedModel orders the machines eligible for CLUSTER work -- the calls
