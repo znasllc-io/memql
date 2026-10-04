@@ -14,17 +14,15 @@
 #
 #   - os-checks' image build, bash32-smoke and the VS Code and productivity host
 #     lanes cannot run here: they need Docker or a display.
-#   - The node-tag, cluster-e2e and per-module passes are out of this task's
-#     scope: their tag and module lists live in ci.yml, held there by its own
-#     gates, and a copy here would be held by nothing.
-#   - The TypeScript SDK lane is out of scope; it would run here (Node, npm).
-#   - The view-kit lane is out of scope; it would run here (Node, npm).
-#   - The VS Code extension lane is out of scope; it would run here (only the
-#     host lanes above need a display).
-#   - The MCP conformance lane is out of scope; it would run here beside the
-#     postgres sidecar. Until it does, test/conformance runs in go-tests with no
-#     database, so its database checks run only in ci.yml's mcp-conformance lane.
-#   - The proving lane is out of scope; it would run here beside the sidecar.
+#   - The node-tag, cluster-e2e and per-module passes stay ci.yml's: their tag
+#     and module lists live there, held by its own gates, and a copy here would
+#     be held by nothing.
+#   - Not carried here yet, though each could run here: the TypeScript SDK and
+#     view-kit lanes (Node, npm), the VS Code extension lane (only the host
+#     lanes above need a display), and the MCP conformance and proving lanes
+#     (beside the postgres sidecar). Until MCP conformance is carried,
+#     test/conformance runs in go-tests with no database, so its database
+#     checks run only in ci.yml's mcp-conformance lane.
 #
 # NO STEP NAMES A NEED. A need sends a step to a fleet machine, and a pipeline
 # whose owner has not consented to the fleet refuses the whole run
