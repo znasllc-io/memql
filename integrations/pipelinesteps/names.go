@@ -162,7 +162,8 @@ func IsolationProbeName(nodeID string) string {
 func IsolationTargetName(probeName string) string { return probeName + "-target" }
 
 // CacheTrust is the half of a repository's cache a run reads and writes
-// (ruling R15b): CacheTrusted for what the repository has accepted,
+// (ruling R15b): CacheTrusted for what the repository's shipping paths build
+// -- its default branch, its merge queue, its published releases --
 // CacheUntrusted for what a collaborator proposes.
 type CacheTrust string
 
@@ -205,8 +206,12 @@ const eventVar = "MEMQL_EVENT"
 
 // cacheTrustOf is the trust of a step's cache, by the event its run was opened
 // for (ruling R15b): a push to the default branch, the merge queue and a
-// published release build what the repository has accepted; a pull request
-// builds what a collaborator proposes. A re-run is opened with its original's
+// published release build what the repository ships; a pull request builds
+// what a collaborator proposes. A release's tag can name a commit the default
+// branch does not hold, and a merge-queue candidate can still fail to merge:
+// both stay trusted (ruling R15c), because whoever can publish a release or
+// queue a merge can ship that commit anyway, and an untrusted release would
+// read what pull requests write. A re-run is opened with its original's
 // event, so it keeps its original's trust. An event this version does not
 // know, or none, is untrusted: a run the runner cannot place never writes the
 // cache the default branch reads.

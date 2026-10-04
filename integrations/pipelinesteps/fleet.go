@@ -320,7 +320,10 @@ func fleetCloneURL(repo pl.Repository) string {
 }
 
 // parseFleetOutput reads a machine's answer: a result whose output is the
-// contract, or a refusal (no output, nothing to read).
+// contract, or a refusal (no output, nothing to read). The output is the
+// machine's raw answer and is not masked: it is parsed here and never stored
+// or logged whole. Its fields are numbers, flags, the paths the step declared
+// and the step's own artifact archive.
 func parseFleetOutput(r worker.Result) (*fleetOutput, error) {
 	if !r.OK {
 		return nil, nil
