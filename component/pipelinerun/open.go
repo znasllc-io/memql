@@ -196,12 +196,25 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 // poll and a webhook for one head, are one run; for a re-run, only an attempt
 // this same delivery already opened -- a re-request delivered twice. A re-run
 // that no attempt answers opens the next one.
+//
+// A FORK'S REFUSAL ANSWERS ONLY A FORK. One head SHA can be a fork's pull
+// request and a same-repository one -- the fork's branch pushed here and
+// opened again -- and so one run key. When every run of the key is a fork's
+// refusal, a same-repository opening opens the next attempt rather than
+// being answered by a refusal that ran nothing: otherwise the commit's
+// required check would fail for good with nothing ever run. Once any other
+// run answers the key, it answers a fork's opening too: the fork's head is
+// a commit this repository already runs, and a refused run beside it would
+// put a failing check run on the commit next to the real one.
 func answeredBy(runs []Run, o Opening) (Run, bool) {
 	newest, attempts := newestAttempt(runs)
 	if attempts == 0 {
 		return Run{}, false
 	}
 	if o.Trigger != TriggerRerun {
+		if !o.Fork && onlyForkRefusals(runs) {
+			return Run{}, false
+		}
 		return newest, true
 	}
 	if id := strings.TrimSpace(o.DeliveryID); id != "" {
@@ -212,6 +225,17 @@ func answeredBy(runs []Run, o Opening) (Run, bool) {
 		}
 	}
 	return Run{}, false
+}
+
+// onlyForkRefusals reports whether every run of a key is a fork's refusal --
+// none of them ran anything.
+func onlyForkRefusals(runs []Run) bool {
+	for _, r := range runs {
+		if r.RefusalCode != pipelines.CodeForkRefused {
+			return false
+		}
+	}
+	return len(runs) > 0
 }
 
 // runsOf is the runs that are pipelineID's -- compared by bare short id,

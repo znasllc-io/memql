@@ -336,6 +336,70 @@ func TestAForkPullRequestIsRefusedWithAFailingCheckRun(t *testing.T) {
 	}
 }
 
+// The reviewer's probe. A fork's pull request and a same-repository pull
+// request can carry ONE head SHA -- the fork's branch pushed to this
+// repository and opened again -- and so one run key. The fork's refused run
+// must not answer for the same-repository one: that would leave the commit's
+// required check failing with nothing ever run. The same-repository opening
+// opens the next attempt, queued, with a check run of its own; and from then
+// on the key is answered, by that attempt, for a fork's delivery too.
+func TestAForksRefusedRunDoesNotBlockASameRepositoryPullRequestAtTheSameSHA(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+	key := pipelines.RunKey(repoName, shaA, pipelines.ModeAffected, pipelines.EventPullRequest)
+
+	fork := trigger(t, h, "pull_request", "d-fork", prDelivery(t, "opened", 7, shaA, "mallory/shop", testInstallation))
+	if len(fork.Opened) != 1 || fork.Opened[0].RefusalCode != pipelines.CodeForkRefused {
+		t.Fatalf("the fork's run is refused: %+v", fork)
+	}
+
+	same := trigger(t, h, "pull_request", "d-same", prDelivery(t, "opened", 8, shaA, repoName, testInstallation))
+	if len(same.Opened) != 1 {
+		t.Fatalf("the same-repository pull request opened %d runs (existing %d); want its own queued attempt", len(same.Opened), len(same.Existing))
+	}
+	run := same.Opened[0]
+	if run.Status != StatusQueued || run.Attempt != 2 || run.RunKey != key || run.ID != RunIDFor(p.ID, key, 2) {
+		t.Errorf("want attempt 2 of %s, queued: attempt %d status %s id %s", key, run.Attempt, run.Status, run.ID)
+	}
+	if run.Trigger != TriggerWebhook || run.RerunOf != "" || run.PullRequest != 8 || run.RefusalCode != "" {
+		t.Errorf("it is the delivery's own run, not a re-run of the fork's: %+v", run)
+	}
+	if created := h.github.createdRuns(); len(created) != 2 || created[1].Run.Status != "queued" {
+		t.Errorf("the attempt gets a queued check run of its own, superseding the fork's failure: %+v", created)
+	}
+
+	// From here the key is answered: a redelivery of either opens nothing.
+	again := trigger(t, h, "pull_request", "d-same", prDelivery(t, "synchronize", 8, shaA, repoName, testInstallation))
+	forkAgain := trigger(t, h, "pull_request", "d-fork-2", prDelivery(t, "synchronize", 7, shaA, "mallory/shop", testInstallation))
+	for name, res := range map[string]TriggerResult{"the same repository's": again, "the fork's": forkAgain} {
+		if len(res.Opened) != 0 || len(res.Existing) != 1 || res.Existing[0].ID != run.ID {
+			t.Errorf("%s redelivery: opened %d, existing %+v; want the queued attempt", name, len(res.Opened), res.Existing)
+		}
+	}
+	if n := len(h.store.allRuns()); n != 2 {
+		t.Errorf("runs = %d, want the fork's refusal and the queued attempt", n)
+	}
+}
+
+// The other order: the same-repository run first. A fork at that SHA is the
+// same commit this repository already runs, so the key is answered by the run
+// that exists -- and no refused run, whose failing check run would sit on the
+// commit beside the real one, is opened.
+func TestAForkAtAnSHAThisRepositoryAlreadyRunsIsAnsweredByThatRun(t *testing.T) {
+	h := newHarness(t)
+	h.store.addPipeline(testPipeline(DeliveryWebhook))
+
+	same := trigger(t, h, "pull_request", "d-same", prDelivery(t, "opened", 8, shaA, repoName, testInstallation))
+	fork := trigger(t, h, "pull_request", "d-fork", prDelivery(t, "opened", 7, shaA, "mallory/shop", testInstallation))
+	if len(fork.Opened) != 0 || len(fork.Existing) != 1 || fork.Existing[0].ID != same.Opened[0].ID {
+		t.Fatalf("the fork is answered by the same-repository run: %+v", fork)
+	}
+	if n := len(h.github.createdRuns()); n != 1 {
+		t.Errorf("check runs = %d, want only the same-repository run's", n)
+	}
+}
+
 // Decision 3: a re-requested check run is the NEXT ATTEMPT of the run it
 // reports, in that run's mode and event.
 func TestACheckRunRerequestOpensTheNextAttemptOfTheOriginal(t *testing.T) {

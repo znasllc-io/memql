@@ -472,7 +472,11 @@ contributor.
 
 To run such a change, run it from a branch of the repository: a maintainer
 pushes the contributor's commits to a branch here and opens a pull request from
-it, and that pull request's run executes.
+it, and that pull request's run executes. The commits keep their SHA, so it is
+the same run key as the refused run: a fork's refusal answers only a fork, and
+the new pull request opens the key's next attempt, whose check run replaces the
+failing one. Once a run of this repository's answers the key, a fork's pull
+request at that commit is answered by it rather than refused beside it.
 
 ### A manifest that cannot compile
 
