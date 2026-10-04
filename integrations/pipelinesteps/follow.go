@@ -272,12 +272,14 @@ func (f *follower) feed(fate lineFate, stamp time.Time, piece string, first bool
 			f.noteStream(piece)
 		}
 	case fateArchive:
-		f.s.replayedHead = true
+		if !f.s.replayedHead {
+			f.s.replayedHead, f.s.firstReplayed = true, stamp
+		}
 		f.capture.FeedArchived(raw)
 	case fateStore:
 		if first && !f.adopted.IsZero() {
 			// The seam: the first line after the cursor.
-			f.s.noteReattach(!f.s.replayedHead)
+			f.s.noteReattach()
 		}
 		f.capture.Feed(raw)
 	}
@@ -302,6 +304,7 @@ func (f *follower) fedLine(fate lineFate, at time.Time, print linePrint) {
 	}
 	if fate == fateStore {
 		f.s.publishCursor(at)
+		f.s.noteFirstStored(at)
 	}
 }
 

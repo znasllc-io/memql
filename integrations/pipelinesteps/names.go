@@ -67,6 +67,12 @@ const (
 	// AnnotLogCursor is the RFC3339Nano timestamp of the last line captured,
 	// where an adopting replica resumes the log.
 	AnnotLogCursor = "memql.io/log-cursor"
+	// AnnotLogFirst is the RFC3339Nano timestamp of the step's first line, as
+	// the runner that followed it from its start captured it; written once,
+	// and never by an adopter. An adopter compares it with the first line the
+	// node's log still serves to tell whether its archive has the step's head
+	// (the kubelet serves only the container's current log file).
+	AnnotLogFirst = "memql.io/log-first"
 	// AnnotOutcome is the pl.StepResult as JSON, written before the reply is
 	// sent, so a lost reply can be answered again without re-running.
 	AnnotOutcome = "memql.io/outcome"

@@ -411,25 +411,34 @@ type step struct {
 	// that claim was sent over another Run's, and claimCursor is the log
 	// cursor read before sending it: a claim whose answer was lost is still
 	// an adoption, from that cursor (fix round 2, Important B).
-	claimSent   string
-	claimAdopts bool
-	claimCursor time.Time
+	claimSent     string
+	claimAdopts   bool
+	claimCursor   time.Time
+	claimLogFirst time.Time
 	// secrets is what the capture masks: every piece the follower cuts a
 	// line into is cut outside them. Guarded by mu: the follower reads it.
 	secrets []string
 	// adopted: this Run took over a Job another Run had claimed; adoptedAt
-	// is the cursor it was left at -- the store has every line up to it.
+	// is the cursor it was left at -- the store has every line up to it --
+	// and logFirst the step's first line, as the Job records it (zero when
+	// it does not).
 	adopted   bool
 	adoptedAt time.Time
-	// reattachNoted: the notice that this Run re-attached is written;
-	// headLost: when it was, the node's log no longer reached back to the
-	// cursor, so the archive starts where the node's log does.
+	logFirst  time.Time
+	// reattachNoted: the notice that this Run re-attached is written; head
+	// is what the archive holds of the step's start, judged when it was.
 	reattachNoted bool
-	headLost      bool
+	head          archiveHead
 	// replayedHead: a line at or before the adoption cursor was replayed into
-	// the archive -- the node's log still reached back that far. Written by
-	// the follower, read once it has stopped.
-	replayedHead bool
+	// the archive -- the node's log still reached back that far -- and
+	// firstReplayed is the first such line's stamp. Written by the follower,
+	// read once it has stopped (or by the follower itself, at the seam).
+	replayedHead  bool
+	firstReplayed time.Time
+	// firstStored is the first line this Run stored: the step's first, for
+	// a Run that followed it from its start. Guarded by mu: the heartbeat
+	// publishes it (AnnotLogFirst).
+	firstStored time.Time
 	// trouble is what this Run's own loops last logged of the API errors
 	// they met; the heartbeat and the follower keep their own.
 	trouble apiTrouble
@@ -680,7 +689,7 @@ func (s *step) own(job Job, mine bool) (pl.StepResult, bool) {
 	if !mine {
 		var err error
 		_, _, s.claimAdopts = holder(job)
-		s.claimCursor = logCursor(job)
+		s.claimCursor, s.claimLogFirst = logCursor(job), logFirst(job)
 		s.claimSent = s.r.stamp()
 		claimed, err = s.r.kube.AnnotateJob(s.ctx, s.jobName, map[string]string{AnnotRunner: s.claimSent}, job.Metadata.ResourceVersion)
 		switch {
@@ -716,10 +725,10 @@ func (s *step) own(job Job, mine bool) (pl.StepResult, bool) {
 	if s.claimAdopts {
 		cursor := s.claimCursor
 		s.publishCursor(cursor)
-		s.adopted, s.adoptedAt = true, cursor
+		s.adopted, s.adoptedAt, s.logFirst = true, cursor, s.claimLogFirst
 		if cursor.IsZero() {
 			// Nothing was captured before: there is no seam to wait for.
-			s.noteReattach(false)
+			s.noteReattach()
 		}
 		s.log.Info("pipelines: adopted the step's Job", "cursor", cursor)
 	}
@@ -1257,6 +1266,11 @@ func (s *step) beat(ctx context.Context, trouble apiTrouble) bool {
 		if c := s.getCursor(); !c.IsZero() {
 			annots[AnnotLogCursor] = c.UTC().Format(time.RFC3339Nano)
 		}
+		// The step's first line, once, by a Run that followed it from its
+		// start: an adopter's first line is the cursor's successor.
+		if first := s.getFirstStored(); !s.claimAdopts && !first.IsZero() && job.Metadata.Annotations[AnnotLogFirst] == "" {
+			annots[AnnotLogFirst] = first.UTC().Format(time.RFC3339Nano)
+		}
 		_, err = s.r.kube.AnnotateJob(ctx, s.jobName, annots, job.Metadata.ResourceVersion)
 		if !deploycontrol.IsConflict(err) {
 			if err != nil && ctx.Err() == nil {
@@ -1326,8 +1340,13 @@ func recordedObservation(job Job) (pl.StepResult, bool) {
 }
 
 // logCursor is the Job's log cursor, or zero.
-func logCursor(job Job) time.Time {
-	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(job.Metadata.Annotations[AnnotLogCursor]))
+func logCursor(job Job) time.Time { return annotTime(job, AnnotLogCursor) }
+
+// logFirst is the step's first line as the Job records it, or zero.
+func logFirst(job Job) time.Time { return annotTime(job, AnnotLogFirst) }
+
+func annotTime(job Job, key string) time.Time {
+	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(job.Metadata.Annotations[key]))
 	if err != nil {
 		return time.Time{}
 	}
@@ -1357,27 +1376,91 @@ func podOfJob(pod *Pod, job Job) bool {
 	return false
 }
 
+// archiveHead is what an adopted step's archive holds of the step's start
+// (ruling R36, fix round 2). The kubelet serves only the container's current
+// log file, so once the node has rotated it, what an adopter replays begins
+// wherever that file does -- and the notices say only what is so.
+type archiveHead int
+
+const (
+	// headWhole: the archive begins at the step's first line -- a step this
+	// Run followed from its start, or one whose first replayed line is the
+	// first line the Job records (AnnotLogFirst).
+	headWhole archiveHead = iota
+	// headHeld: replayed as far back as the node's log still held the
+	// output; the Job records no first line to tell whether that is the start.
+	headHeld
+	// headMissing: the first line replayed is not the step's first, which
+	// the Job records: the head may be missing.
+	headMissing
+	// headLost: nothing at or before the cursor was replayed: the archive
+	// starts where the node's log does, after the cursor.
+	headLost
+	// headUncaptured: no line had been captured before this Run, so all of
+	// the output is followed -- as far back as the node's log held it.
+	headUncaptured
+)
+
+// judgeHead is what the archive holds of the step's start, once the lines at
+// or before the adoption cursor have been replayed (or none was).
+func (s *step) judgeHead() archiveHead {
+	switch {
+	case !s.adopted:
+		return headWhole
+	case s.adoptedAt.IsZero():
+		return headUncaptured
+	case !s.replayedHead:
+		return headLost
+	case s.logFirst.IsZero():
+		return headHeld
+	case s.firstReplayed.Equal(s.logFirst):
+		return headWhole
+	}
+	return headMissing
+}
+
 // noteReattach writes, once, the notice that this Run re-attached to a step
 // another Run had held: to the store, where the lines after the cursor follow
 // it, and to the archive, at the seam between the lines replayed from the
-// node's log and the ones after the cursor (ruling R36). headLost says the
-// node's log no longer reached back to the cursor.
-func (s *step) noteReattach(headLost bool) {
+// node's log and the ones after the cursor (ruling R36). It says what the
+// archive holds of the step's start, which is judged here.
+func (s *step) noteReattach() {
 	if !s.adopted || s.reattachNoted || s.capture == nil {
 		return
 	}
-	s.reattachNoted, s.headLost = true, headLost && !s.adoptedAt.IsZero()
-	s.capture.Notice(reattachNotice(s.r.cfg.NodeID, s.adoptedAt, s.headLost))
+	s.reattachNoted, s.head = true, s.judgeHead()
+	s.capture.Notice(s.reattachNotice())
 }
 
-func reattachNotice(node string, cursor time.Time, headLost bool) string {
-	switch {
-	case cursor.IsZero():
-		return "memql: re-attached on " + node + "; no line of the step's output had been captured, so it is followed from its start"
+func (s *step) reattachNotice() string {
+	at := func(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
+	lead := "memql: re-attached on " + s.r.cfg.NodeID
+	stored := "lines before " + at(s.adoptedAt) + " are in the store already"
+	switch s.head {
+	case headUncaptured:
+		return lead + "; no line of the step's output had been captured, so this archive holds what the node's log still held of it"
 	case headLost:
-		return "memql: re-attached on " + node + "; lines before " + cursor.UTC().Format(time.RFC3339Nano) +
-			" are in the store already, but the node's log no longer holds them, so this archive starts where the node's log does"
+		return lead + "; " + stored + ", but the node's log no longer holds them, so this archive starts where the node's log does"
+	case headWhole:
+		return lead + ": earlier lines replayed from the node's log, from the step's first line; " + stored
+	case headMissing:
+		return lead + ": earlier lines replayed from the node's log, as far back as it still held the step's output -- from " +
+			at(s.firstReplayed) + ", after the step's first line at " + at(s.logFirst) + ", so the head may be missing; " + stored
 	}
-	return "memql: re-attached on " + node + ": earlier lines replayed from the node's log; lines before " +
-		cursor.UTC().Format(time.RFC3339Nano) + " are in the store already"
+	return lead + ": earlier lines replayed from the node's log, as far back as it still held the step's output; " + stored
+}
+
+// noteFirstStored records the first line this Run stored.
+func (s *step) noteFirstStored(at time.Time) {
+	s.mu.Lock()
+	if s.firstStored.IsZero() {
+		s.firstStored = at
+	}
+	s.mu.Unlock()
+}
+
+func (s *step) getFirstStored() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.firstStored
 }

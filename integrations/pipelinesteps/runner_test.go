@@ -1658,6 +1658,7 @@ func TestRunnerAdoptsAJobWhoseRunnerWentStale(t *testing.T) {
 	h.c.putJob(h.existingJob(t, run, map[string]string{
 		AnnotRunner:    rtStamp(rtOther, rtT0.Add(-time.Minute)),
 		AnnotLogCursor: cursor.Format(time.RFC3339Nano),
+		AnnotLogFirst:  rtAt(1100).Format(time.RFC3339Nano),
 	}), rtFinishingScript(testJobName, 0, l0, l1, l2, l3, l4))
 	h.c.putSecret(BuildSecret(h.cfg, run, testJobName, rtCloneToken))
 
@@ -1695,7 +1696,7 @@ func TestRunnerAdoptsAJobWhoseRunnerWentStale(t *testing.T) {
 		t.Fatalf("store = %q, want the re-attach notice and the two lines after the cursor", store)
 	}
 	notice := store[0]
-	for _, w := range []string{"re-attached on " + rtNode, cursor.Format(time.RFC3339Nano), "in the store already", "replayed from the node's log"} {
+	for _, w := range []string{"re-attached on " + rtNode, cursor.Format(time.RFC3339Nano), "in the store already", "replayed from the node's log, from the step's first line"} {
 		if !strings.Contains(notice, w) {
 			t.Errorf("notice %q does not say %q", notice, w)
 		}
@@ -1710,6 +1711,11 @@ func TestRunnerAdoptsAJobWhoseRunnerWentStale(t *testing.T) {
 	}
 	if res.LogTail != strings.Join(rtTexts(l0, l1, l2, l3, l4), "\n") {
 		t.Errorf("tail = %q, want the step's lines, not the runner's notice", res.LogTail)
+	}
+	for _, p := range h.c.appliedPatches() {
+		if v, ok := p.get(AnnotLogFirst); ok {
+			t.Errorf("the adopter wrote the step's first line (%q): only a Run that followed the step from its start may", v)
+		}
 	}
 }
 
@@ -1746,6 +1752,167 @@ func TestRunnerAdoptionArchiveStartsWhereTheNodesLogDoes(t *testing.T) {
 			t.Errorf("note %q claims the Library holds the complete log; its archive starts where the node's log did", n.Message)
 		}
 	}
+}
+
+// TestRunnerSaysWhatAnAdoptersArchiveHolds (ruling R36, fix round 2): the
+// kubelet serves only a container's current log file, so after a rotation an
+// adopter replays the step's output only as far back as that file reaches.
+// The Job records the step's first line (AnnotLogFirst); the seam notice and
+// a capped live log's note say the archive is complete only when the replay
+// began there, say the head may be missing when it began later, and claim
+// nothing about the start when the Job records no first line.
+func TestRunnerSaysWhatAnAdoptersArchiveHolds(t *testing.T) {
+	cursor := rtAt(2500)
+	l0 := captureKubeLine(rtAt(1100), "line 0")
+	l1 := captureKubeLine(rtAt(2100), "line 1")
+	l2 := captureKubeLine(cursor, "line 2, the cursor")
+	after := []string{captureKubeLine(rtAt(3100), "a"), captureKubeLine(rtAt(3200), "b"), captureKubeLine(rtAt(3300), "c")}
+	for _, c := range []struct {
+		name       string
+		first      string   // AnnotLogFirst on the Job; "" for none
+		log        []string // what the node's log still serves
+		notice     []string // what the seam notice says
+		notNotice  string   // and must not say
+		capped     string   // what the capped log's note says
+		notCapped  string
+		archiveTop string // the archive's first line
+	}{
+		{
+			name: "the whole head replayed", first: rtAt(1100).Format(time.RFC3339Nano),
+			log:        append([]string{l0, l1, l2}, after...),
+			notice:     []string{"from the step's first line"},
+			notNotice:  "may be missing",
+			capped:     "the complete log is archived",
+			archiveTop: "line 0",
+		},
+		{
+			// The re-review's probe: line 0 was rotated away on the node.
+			name: "the head rotated away", first: rtAt(1100).Format(time.RFC3339Nano),
+			log:        append([]string{l1, l2}, after...),
+			notice:     []string{"as far back as it still held the step's output", "from " + rtAt(2100).Format(time.RFC3339Nano), "after the step's first line at " + rtAt(1100).Format(time.RFC3339Nano), "the head may be missing"},
+			notNotice:  "from the step's first line",
+			capped:     "holds what the node's log still held of the step's output when this replica re-attached to the step; its head may be missing",
+			notCapped:  "complete log",
+			archiveTop: "line 1",
+		},
+		{
+			name: "no first line on the Job", first: "",
+			log:        append([]string{l1, l2}, after...),
+			notice:     []string{"as far back as it still held the step's output"},
+			notNotice:  "first line",
+			capped:     "holds what the node's log still held of the step's output when this replica re-attached to the step",
+			notCapped:  "complete log",
+			archiveTop: "line 1",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newRunnerHarness(t, func(c *Config) { c.LogStoreMaxLines = 2 })
+			run := rtRun()
+			annots := map[string]string{AnnotRunner: rtStamp(rtOther, rtT0.Add(-time.Minute)), AnnotLogCursor: cursor.Format(time.RFC3339Nano)}
+			if c.first != "" {
+				annots[AnnotLogFirst] = c.first
+			}
+			h.c.putJob(h.existingJob(t, run, annots), rtFinishingScript(testJobName, 0, c.log...))
+
+			res := h.run(t, run)
+
+			if res.Status != pl.OutcomeSucceeded || !res.LogCapped {
+				t.Fatalf("result = %+v, want success with the live log capped", res)
+			}
+			store := h.sink.messages()
+			if len(store) == 0 || !strings.Contains(store[0], "re-attached on "+rtNode) {
+				t.Fatalf("store = %q, want the seam notice first", store)
+			}
+			for _, w := range c.notice {
+				if !strings.Contains(store[0], w) {
+					t.Errorf("notice %q does not say %q", store[0], w)
+				}
+			}
+			if strings.Contains(store[0], c.notNotice) {
+				t.Errorf("notice %q says %q, which is not so", store[0], c.notNotice)
+			}
+			var capped string
+			for _, n := range res.Notes {
+				if n.Code == pl.CodeLogCapped {
+					capped = n.Message
+				}
+			}
+			if !strings.Contains(capped, c.capped) || (c.notCapped != "" && strings.Contains(capped, c.notCapped)) {
+				t.Errorf("capped note %q, want it to say %q and not %q", capped, c.capped, c.notCapped)
+			}
+			if top, _, _ := strings.Cut(string(h.file(t, "tests-go-tests-2.log").Bytes), "\n"); top != c.archiveTop {
+				t.Errorf("the archive begins %q, want %q", top, c.archiveTop)
+			}
+		})
+	}
+}
+
+// TestTheHeartbeatRecordsTheStepsFirstLineOnce (ruling R36, fix round 2): a
+// Run that follows a step from its start records the step's first line on
+// the Job with its heartbeat -- once, and never over one already recorded --
+// so an adopter can tell whether its replay reached the step's head.
+func TestTheHeartbeatRecordsTheStepsFirstLineOnce(t *testing.T) {
+	l1, l2 := captureKubeLine(rtAt(1100), "first"), captureKubeLine(rtAt(1200), "second")
+	firstWritten := func(h *rtHarness) []string {
+		var written []string
+		for _, p := range h.c.appliedPatches() {
+			if v, ok := p.get(AnnotLogFirst); ok {
+				written = append(written, v)
+			}
+		}
+		return written
+	}
+	// heldUntilCursor runs the step until a heartbeat has carried the cursor
+	// to its last line, so beats have run with both lines stored.
+	heldUntilCursor := func(t *testing.T, h *rtHarness, run StepRun) {
+		t.Helper()
+		released := false
+		running := rtPod(testJobName, rtStepRunning(rtAt(1000)), clsCloneDone)
+		script := &rtScript{
+			states: []rtState{
+				{pod: running, visible: 2, until: func(c *rtCluster) bool { return released }},
+				{pod: rtPod(testJobName, rtStepEnded(0, rtAt(1000), rtAt(4000)), clsCloneDone), visible: 2},
+			},
+			log:   []string{l1, l2},
+			tails: map[string]string{ContainerClone: rtCloneTail},
+		}
+		if h.c.hasJob(testJobName) {
+			h.c.with(func(c *rtCluster) { c.jobs[testJobName].script = script })
+		} else {
+			h.c.script(testJobName, script)
+		}
+		done := h.start(context.Background(), run)
+		rtWaitUntil(t, "the cursor at the last line", func() bool {
+			var ok bool
+			h.c.with(func(c *rtCluster) { ok = c.cursorPatchedLocked(testJobName, rtAt(1200)) })
+			return ok
+		})
+		h.c.with(func(*rtCluster) { released = true })
+		if res := h.await(t, done); res.Status != pl.OutcomeSucceeded {
+			t.Fatalf("result = %+v, want success", res)
+		}
+	}
+
+	t.Run("by the Run that followed the step from its start, once", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		heldUntilCursor(t, h, rtRun())
+		if written := firstWritten(h); len(written) != 1 || written[0] != rtAt(1100).Format(time.RFC3339Nano) {
+			t.Errorf("the first line was written %q, want once, the first line's stamp", written)
+		}
+	})
+
+	t.Run("never by an adopter", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		run := rtRun()
+		h.c.putJob(h.existingJob(t, run, map[string]string{
+			AnnotRunner:    rtStamp(rtOther, rtT0.Add(-time.Minute)),
+			AnnotLogCursor: rtAt(1000).Format(time.RFC3339Nano),
+		}), &rtScript{states: []rtState{{}}})
+		heldUntilCursor(t, h, run)
+		if written := firstWritten(h); len(written) != 0 {
+			t.Errorf("the adopter wrote the step's first line %q: the first line it stored is not the step's", written)
+		}
+	})
 }
 
 // TestRunnerKeepsLinesWrittenOutOfStampOrder: stdout and stderr are stamped by
@@ -1972,6 +2139,9 @@ func TestTwoRunsOfOneReplicaNeverBothOwnAStep(t *testing.T) {
 // claiming -- else every line from the step's start would reach the store
 // again, with no word of the seam.
 func TestRunnerTakesItsOwnClaimWhoseAnswerWasLost(t *testing.T) {
+	// No heartbeat: a beat before any line is captured patches the claim
+	// alone, as a claim does, and would be counted as one.
+	quietHeartbeat := func(c *Config) { c.HeartbeatInterval = time.Hour }
 	claimsApplied := func(h *rtHarness) int {
 		n := 0
 		for _, p := range h.c.appliedPatches() {
@@ -1985,7 +2155,7 @@ func TestRunnerTakesItsOwnClaimWhoseAnswerWasLost(t *testing.T) {
 	}
 
 	t.Run("a creator's claim", func(t *testing.T) {
-		h := newRunnerHarness(t)
+		h := newRunnerHarness(t, quietHeartbeat)
 		h.c.with(func(c *rtCluster) { c.loseClaims = 1 })
 		h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "ok")))
 
@@ -2005,7 +2175,7 @@ func TestRunnerTakesItsOwnClaimWhoseAnswerWasLost(t *testing.T) {
 	for _, lose := range []int{0, 1} {
 		name := map[int]string{0: "an adopter's claim, its answer received (control)", 1: "an adopter's claim"}[lose]
 		t.Run(name, func(t *testing.T) {
-			h := newRunnerHarness(t)
+			h := newRunnerHarness(t, quietHeartbeat)
 			run := rtRun()
 			cursor := rtAt(2500)
 			l0 := captureKubeLine(rtAt(1100), "line 0")

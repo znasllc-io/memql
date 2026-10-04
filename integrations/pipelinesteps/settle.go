@@ -96,7 +96,7 @@ func (s *step) settle(dec pl.StepResult, pod *Pod, f *follower) pl.StepResult {
 	}
 	// An adopted step that printed nothing after the cursor has had no seam:
 	// the notice goes after what was replayed.
-	s.noteReattach(!s.replayedHead)
+	s.noteReattach()
 	if pod != nil {
 		s.tails(pod.Metadata.Name, dec.Status == pl.OutcomeFailed)
 	}
@@ -257,12 +257,8 @@ func (s *step) storeLog(ctx context.Context, res *pl.StepResult, notes *noteList
 		notes.add(pl.CodeArtifactMissing, "the step's log archive could not be written whole, so its Library copy may stop early: "+err.Error())
 	}
 	res.LogTail, res.LogLines, res.LogCapped = cr.Tail, cr.Lines, cr.StoreCapped
-	switch {
-	case cr.StoreCapped && s.headLost:
-		notes.add(pl.CodeLogCapped, fmt.Sprintf("the live log of this step stops at %d lines; the log archived to the Library "+
-			"starts where the node's log did when this replica re-attached to the step", s.r.cfg.LogStoreMaxLines))
-	case cr.StoreCapped:
-		notes.add(pl.CodeLogCapped, fmt.Sprintf("the live log of this step stops at %d lines; the complete log is archived to the Library", s.r.cfg.LogStoreMaxLines))
+	if cr.StoreCapped {
+		notes.add(pl.CodeLogCapped, s.cappedNote())
 	}
 	body, err := os.ReadFile(cr.ArchivePath)
 	s.removeArchive()
@@ -275,6 +271,23 @@ func (s *step) storeLog(ctx context.Context, res *pl.StepResult, notes *noteList
 	}
 	res.LogFileID = s.store(ctx, logFileName(s.run.StepKey), archiveMIME, body, "the step's log", notes)
 	return cr
+}
+
+// cappedNote says the live log stopped at its cap, and what the Library's
+// copy holds instead: the complete log, unless the step was adopted and its
+// archive could not be shown to begin at the step's first line (ruling R36).
+func (s *step) cappedNote() string {
+	stops := fmt.Sprintf("the live log of this step stops at %d lines; ", s.r.cfg.LogStoreMaxLines)
+	held := "the log archived to the Library holds what the node's log still held of the step's output when this replica re-attached to the step"
+	switch s.head {
+	case headWhole:
+		return stops + "the complete log is archived to the Library"
+	case headLost:
+		return stops + "the log archived to the Library starts where the node's log did when this replica re-attached to the step"
+	case headMissing:
+		return stops + held + "; its head may be missing"
+	}
+	return stops + held
 }
 
 // goTimings reads each passing Go package's wall time out of the step's
@@ -442,7 +455,7 @@ func (s *step) cancelled(pod *Pod, why string) pl.StepResult {
 	res.StartedAt, _ = stepTimes(pod)
 	res.FinishedAt = s.r.nowText()
 	if s.capture != nil {
-		s.noteReattach(!s.replayedHead)
+		s.noteReattach()
 		s.capture.Note("memql: " + why)
 		notes := s.newNotes()
 		ctx, cancel := s.libraryContext()
