@@ -435,7 +435,7 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 						"component", "edge", "siteId", site.ID, "storeId", storeId, "err", serr)
 				} else {
 					site.Store = store
-					r.warnUnservedToken(site, store, "production")
+					r.warnUnservedToken(site, store, "binding")
 				}
 			}
 			// THE PREVIEW BINDING'S STORE, resolved beside the serving one and
@@ -456,7 +456,7 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 						"component", "edge", "siteId", site.ID, "storeId", storeId, "err", serr)
 				} else {
 					site.PreviewStore = store
-					r.warnUnservedToken(site, store, "testing")
+					r.warnUnservedToken(site, store, "previewBinding")
 				}
 			}
 		}
@@ -496,7 +496,11 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 // naming the secret there would tell every visitor which secrets exist. A
 // store row written before the write guard refused such references is the
 // case this is for; there is no migration, because the repair is one act.
-func (r *resolver) warnUnservedToken(site *Site, store *BoundStore, destination string) {
+//
+// `via` is the site field that named the store -- binding or previewBinding --
+// spelled as the row spells it, which is also what keeps an environment word
+// out of engine code (TestNoEnvironmentBranchingInEngineCode).
+func (r *resolver) warnUnservedToken(site *Site, store *BoundStore, via string) {
 	if site == nil || store == nil || !storefrontTokenRefRefused(store) {
 		return
 	}
@@ -510,7 +514,7 @@ func (r *resolver) warnUnservedToken(site *Site, store *BoundStore, destination 
 		remedy = "the store id is not one Connect Shopify derives (lower-case letters, digits, '_' and '-'), so it can name no token; attach the store through Connect Shopify, which registers it under its own id"
 	}
 	r.logger.Warn("edge: this storefront serves no Storefront token: its store names a secret that is not the store's own token",
-		"component", "edge", "siteId", site.ID, "destination", destination, "storeId", store.ID,
+		"component", "edge", "siteId", site.ID, "via", via, "storeId", store.ID,
 		"storefrontTokenRef", ref, "expected", want, "remedy", remedy)
 }
 
