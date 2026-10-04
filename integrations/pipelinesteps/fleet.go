@@ -220,7 +220,7 @@ func (f *Fleet) cloneToken(ctx context.Context, run StepRun) (string, pl.StepRes
 	token, err := f.tokens.CloneToken(ctx, run.InstallationID, run.Repository.Owner, run.Repository.Name)
 	if err != nil {
 		if ctx.Err() != nil {
-			return "", stoppedResult(ctx, run.DeadlineCode), false
+			return "", stoppedResult(ctx), false
 		}
 		return "", failedResult(pl.CodeCloneFailed, cutBytes(fmt.Sprintf(
 			"A token to clone %s could not be minted, so the step did not run: %v", run.Repository.FullName(), err), failureMaxBytes)), false
@@ -356,7 +356,7 @@ func (f *Fleet) classify(ctx context.Context, req pl.StepRequest, run StepRun, r
 		return withWhere(refusedResult(code, cutBytes(mask(message), failureMaxBytes)), where)
 	}
 	if ctx.Err() != nil {
-		return withWhere(stoppedResult(ctx, run.DeadlineCode), where)
+		return withWhere(stoppedResult(ctx), where)
 	}
 	if r.OK {
 		if outErr != nil {

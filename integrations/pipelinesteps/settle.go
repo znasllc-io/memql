@@ -2,7 +2,6 @@ package pipelinesteps
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -39,7 +38,7 @@ func (s *step) decision(obs Observation, pod *Pod, job Job) pl.StepResult {
 	}
 	if obs.Failure != nil {
 		message := obs.Failure.Message
-		if obs.Failure.Code == cmp.Or(strings.TrimSpace(s.run.DeadlineCode), pl.CodeStepTimeout) {
+		if obs.Failure.Code == s.deadlineCode(job) {
 			message += s.shortened(job)
 		}
 		dec.Failure = &pl.Failure{Code: obs.Failure.Code, Message: cutBytes(s.mask(message), failureMaxBytes)}
@@ -52,15 +51,16 @@ func (s *step) decision(obs Observation, pod *Pod, job Job) pl.StepResult {
 }
 
 // shortened is what a deadline failure adds when the step's Job was given
-// less than its timeout, the rest spent before the Job was created (ruling
-// R31): the deadline the Job reports is not the one the step declared.
+// less than its timeout: less of its run was left than that when the Job was
+// created (ruling R31b), so the deadline the Job reports is the run's
+// ceiling's, not the one the step declared.
 func (s *step) shortened(job Job) string {
 	ads, full := job.Spec.ActiveDeadlineSeconds, int64(s.run.TimeoutSeconds)
 	if ads == nil || *ads >= full {
 		return ""
 	}
-	return fmt.Sprintf(", what was left of its %s timeout once it had waited %s to start (a wait for a free slot under the pipelines ceiling counts)",
-		time.Duration(full)*time.Second, time.Duration(full-*ads)*time.Second)
+	return fmt.Sprintf(", what was left of its run's ceiling when its Job was created, less than its own %s timeout",
+		time.Duration(full)*time.Second)
 }
 
 // record writes the decision on the Job, so a runner that adopts the step

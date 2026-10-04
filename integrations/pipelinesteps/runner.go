@@ -251,7 +251,7 @@ func (r *Runner) Run(ctx context.Context, run StepRun) pl.StepResult {
 	r.maybeReap()
 
 	s := &step{
-		r: r, run: run, jobName: jobName, ctx: ctx, trouble: apiTrouble{}, began: r.now(),
+		r: r, run: run, jobName: jobName, ctx: ctx, trouble: apiTrouble{},
 		// The ids, never the StepRun: its secrets would print.
 		log: r.log.With("runId", run.RunID, "workRunId", run.WorkRunID, "stepKey", run.StepKey,
 			"attempt", run.Attempt, "jobName", jobName, "node", r.cfg.NodeID),
@@ -265,7 +265,10 @@ func (r *Runner) Run(ctx context.Context, run StepRun) pl.StepResult {
 // running under a fresh claim, or stale. A step this replica is running
 // before its Job exists -- waiting for a slot under the ceiling -- is running.
 // Running and stale name the node whose claim is on the Job, when one is: the
-// agent forwards a stale step again away from it.
+// agent forwards a stale step again away from it. Whenever the Job exists the
+// reply says when it was created, which is where the step's own timeout runs
+// from (ruling R31b); a running step with no creation time is one waiting for
+// its Job, which the agent waits on until the run's ceiling.
 func (r *Runner) Status(ctx context.Context, req StatusRequest) StatusReply {
 	if !isStepJobName(req.JobName) {
 		return StatusReply{State: StateAbsent}
@@ -292,14 +295,18 @@ func (r *Runner) Status(ctx context.Context, req StatusRequest) StatusReply {
 		}
 		return StatusReply{State: StateStale}
 	}
+	var created string
+	if at := job.Metadata.CreationTimestamp; !at.IsZero() {
+		created = at.UTC().Format(time.RFC3339)
+	}
 	if out, ok := persisted(job); ok {
-		return StatusReply{State: StateFinished, Result: &out}
+		return StatusReply{State: StateFinished, Result: &out, JobCreatedAt: created}
 	}
 	node, at, claimed := holder(job)
 	if claimed && r.fresh(at) {
-		return StatusReply{State: StateRunning, Runner: node}
+		return StatusReply{State: StateRunning, Runner: node, JobCreatedAt: created}
 	}
-	return StatusReply{State: StateStale, Runner: node}
+	return StatusReply{State: StateStale, Runner: node, JobCreatedAt: created}
 }
 
 // Ack deletes a step's Job and Secret once the agent holds the outcome; what
@@ -418,9 +425,6 @@ type step struct {
 	jobName string
 	ctx     context.Context
 	log     *slog.Logger
-	// began is when this Run began: the step's timeout counts from it when
-	// the agent said nothing of when it handed the step over.
-	began time.Time
 
 	// capture is open while this Run captures the step's output; nil while
 	// it only waits on another runner.
@@ -590,6 +594,10 @@ func (s *step) judge(job Job) claimVerdict {
 // cannot run, and holding the step until this replica has proved
 // memql-pipelines isolated (isolation.go). The Job it answers may be one
 // another Run created first; the caller reads it like any existing one.
+//
+// Everything before the Job exists -- the proof, the wait for a free slot
+// under the ceiling -- is bounded by the step's run's ceiling alone, never by
+// its own timeout, which runs from the Job's creation (ruling R31b).
 func (s *step) create() (res pl.StepResult, job Job, done bool) {
 	spec, err := BuildJob(s.r.cfg, s.run, s.jobName)
 	if err != nil {
@@ -599,9 +607,16 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 		}
 		return s.failed(pl.CodeJobRejected, err.Error()), Job{}, true
 	}
+	runDeadline, ok := s.runDeadline()
+	if !ok {
+		return s.failed(pl.CodeExecutorError, fmt.Sprintf(
+			"the step names no run deadline this runner can read (%q), so its wait for a free slot under the pipelines "+
+				"ceiling would have no bound, and a step with no bound is not started; nothing was created",
+			s.run.RunDeadline)), Job{}, true
+	}
 	// Before anything exists for the step: a refused step leaves no token,
 	// no Secret and no Job.
-	if res, done := s.isolationGate(); done {
+	if res, done := s.isolationGate(runDeadline); done {
 		return res, Job{}, true
 	}
 
@@ -635,18 +650,21 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 	// any age: freshenToken writes this Run's over it.
 	s.tokenWritten = !existed
 
+	own := time.Duration(s.run.TimeoutSeconds) * time.Second
 	waiting, attempts := false, 0
 	for {
-		left := s.budgetLeft()
-		if left <= 0 {
-			// The token must not outlive the Job that will not come.
+		left := runDeadline.Sub(s.r.now())
+		if left < time.Second {
+			// No Job deadline can say less than a second. The token must not
+			// outlive the Job that will not come.
 			s.deleteSecret()
-			return s.ranOut("waiting for a free slot under the pipelines ceiling, or for a runner to take it"), Job{}, true
+			return s.ceilingPassed(runDeadline, "waiting for a free slot under the pipelines ceiling, or for a runner to take it"), Job{}, true
 		}
-		// What is left, in whole seconds rounded up: a step that never
-		// waited keeps its timeout as declared, and the part of a second it
-		// may gain is well inside the agent's grace.
-		spec.Spec.ActiveDeadlineSeconds = ptr(int64((left + time.Second - 1) / time.Second))
+		// The step's own timeout runs from its Job's creation, however long
+		// it waited for this slot, and never past its run's ceiling: the Job
+		// is given all of it, or what is left of the run, in whole seconds,
+		// when that is less (deadlineCode names which).
+		spec.Spec.ActiveDeadlineSeconds = ptr(int64(min(own, left) / time.Second))
 		s.freshenToken()
 		j, made, err := s.r.kube.CreateJob(s.ctx, spec)
 		switch {
@@ -660,8 +678,9 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 			return s.abandon(nil), Job{}, true
 		case deploycontrol.IsForbiddenQuota(err):
 			// The ceiling is full (Review Focus 4): wait for a slot, as long
-			// as the step is wanted, and say so once. The API server
-			// answered, so the failures that may pass start counting again.
+			// as the step is wanted and its run's ceiling allows, and say so
+			// once. The API server answered, so the failures that may pass
+			// start counting again.
 			attempts = 0
 			if !waiting {
 				waiting = true
@@ -841,7 +860,7 @@ func (s *step) watch(hb *heartbeat) (pl.StepResult, bool) {
 		if pod != nil {
 			last = pod
 		}
-		obs := Classify(job, pod, created, s.r.now(), s.r.cfg, s.run.DeadlineCode)
+		obs := Classify(job, pod, created, s.r.now(), s.r.cfg, s.deadlineCode(job))
 		switch obs.Phase {
 		case PhaseRunning:
 			if f == nil {
@@ -912,12 +931,25 @@ func (s *step) refused(code, why string) pl.StepResult {
 	return res
 }
 
-// ranOut is the step's failure when its timeout ran out before its Job could
-// be created (ruling R31), while it was doing what: it never started.
-func (s *step) ranOut(what string) pl.StepResult {
-	return s.failed(cmp.Or(strings.TrimSpace(s.run.DeadlineCode), pl.CodeStepTimeout), fmt.Sprintf(
-		"the step's %s timeout ran out before its Job could be created -- %s -- so it was never started",
-		time.Duration(s.run.TimeoutSeconds)*time.Second, what))
+// ceilingPassed is the step's failure when its run reached its ceiling
+// before its Job could be created (ruling R31b), while it was doing what: it
+// never started.
+func (s *step) ceilingPassed(runDeadline time.Time, what string) pl.StepResult {
+	return s.failed(pl.CodeRunCeiling, fmt.Sprintf(
+		"the run reached its ceiling at %s before the step's Job could be created -- %s -- so the step was never started",
+		runDeadline.UTC().Format(time.RFC3339), what))
+}
+
+// deadlineCode names the bound the step's Job's deadline is (ruling R31b):
+// the step's own timeout -- or its run's ceiling, when the StepRun says the
+// ceiling bound the timeout at the hand-over, or when the Job was given less
+// than the timeout because less of the run was left at its creation. Read off
+// the Job, so every replica that adopts it names the same bound.
+func (s *step) deadlineCode(job Job) string {
+	if ads := job.Spec.ActiveDeadlineSeconds; ads != nil && *ads < int64(s.run.TimeoutSeconds) {
+		return pl.CodeRunCeiling
+	}
+	return cmp.Or(strings.TrimSpace(s.run.DeadlineCode), pl.CodeStepTimeout)
 }
 
 func (s *step) where() pl.Where {
@@ -1022,22 +1054,13 @@ func (s *step) mintToken() (string, error) {
 	return s.r.tokens.CloneToken(s.ctx, s.run.InstallationID, s.run.Repository.Owner, s.run.Repository.Name)
 }
 
-// handedAt is when the agent handed the step over (StepRun.HandedAt), which
-// the step's timeout counts from on both sides; a Run told nothing counts
-// from its own start.
-func (s *step) handedAt() time.Time {
-	if at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(s.run.HandedAt)); err == nil {
-		return at
-	}
-	return s.began
-}
-
-// budgetLeft is what is left of the step's timeout now (ruling R31): time
-// spent before its Job exists -- waiting for a slot under the ceiling, or for
-// a forward to reach a runner -- is the step's. A hand-over stamped ahead of
-// this node's clock spent nothing.
-func (s *step) budgetLeft() time.Duration {
-	return time.Duration(s.run.TimeoutSeconds)*time.Second - max(s.r.now().Sub(s.handedAt()), 0)
+// runDeadline is when the step's run reaches its ceiling
+// (StepRun.RunDeadline, ruling R31b): what bounds every wait before the
+// step's Job exists. ok is false when the StepRun names none this runner can
+// read.
+func (s *step) runDeadline() (time.Time, bool) {
+	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(s.run.RunDeadline))
+	return at, err == nil
 }
 
 // setSecrets makes the step's secret list the run's secrets and every token

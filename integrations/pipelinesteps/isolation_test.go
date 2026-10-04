@@ -815,7 +815,7 @@ func TestIsolationProofIsSharedByConcurrentCreates(t *testing.T) {
 // TestIsolationProofWaitsOutAnExceededQuota: the probe is one Job, so it waits
 // for one slot under the ceiling exactly as a step does (R43) -- under a
 // ceiling of one, it runs once the slot is free -- and the step it holds
-// waits for it only as long as its own timeout lasts (R31).
+// waits for it only until its run's ceiling (R31b).
 func TestIsolationProofWaitsOutAnExceededQuota(t *testing.T) {
 	t.Run("it waits for a slot, and says so once", func(t *testing.T) {
 		h := newIsoHarness(t, isoScript(probeExitIsolated, isoSaid[probeExitIsolated]))
@@ -839,7 +839,7 @@ func TestIsolationProofWaitsOutAnExceededQuota(t *testing.T) {
 		isoLeftNothing(t, h)
 	})
 
-	t.Run("a step waits for the proof only as long as its own timeout", func(t *testing.T) {
+	t.Run("a step waits for the proof only until its run's ceiling", func(t *testing.T) {
 		h := newIsoHarness(t, isoScript(probeExitIsolated, isoSaid[probeExitIsolated]))
 		// The last verdict, a pass too old to trust: the proof that stops
 		// unfinished must not stand in for it.
@@ -847,13 +847,13 @@ func TestIsolationProofWaitsOutAnExceededQuota(t *testing.T) {
 		h.r.isoLast = last
 		h.c.with(func(c *rtCluster) { c.quotaJobs = map[string]bool{isoName(): true} })
 		run := rtRun()
-		run.TimeoutSeconds = 1
+		run.RunDeadline = rtRunDeadline(time.Second)
 
 		res := h.run(t, run)
 
-		rtWantCode(t, res, pl.OutcomeFailed, pl.CodeStepTimeout)
+		rtWantCode(t, res, pl.OutcomeFailed, pl.CodeRunCeiling)
 		if !strings.Contains(res.Failure.Message, "isolated") || !strings.Contains(res.Failure.Message, "never started") {
-			t.Errorf("failure %q, want it to say the timeout ran out while the node proved isolation", res.Failure.Message)
+			t.Errorf("failure %q, want it to say the run's ceiling passed while the node proved isolation", res.Failure.Message)
 		}
 		if n := createsOf(h.c, kubeSecrets, testSecretName); n != 0 || len(h.tokens.called()) != 0 {
 			t.Errorf("the step made its Secret (%d) or minted a token (%q) without a proof", n, h.tokens.called())
@@ -865,16 +865,16 @@ func TestIsolationProofWaitsOutAnExceededQuota(t *testing.T) {
 		}
 	})
 
-	t.Run("a step whose timeout was spent before it arrived is not proved for", func(t *testing.T) {
+	t.Run("a step whose run's ceiling passed before it arrived is not proved for", func(t *testing.T) {
 		h := newIsoHarness(t, nil) // a probe Job create would be a test failure: no script describes it
 		run := rtRun()
-		run.HandedAt = rtT0.Add(-20 * time.Minute).Format(time.RFC3339Nano) // of its 15 minutes
+		run.RunDeadline = rtRunDeadline(-5 * time.Minute)
 
 		res := h.run(t, run)
 
-		rtWantCode(t, res, pl.OutcomeFailed, pl.CodeStepTimeout)
+		rtWantCode(t, res, pl.OutcomeFailed, pl.CodeRunCeiling)
 		if !strings.Contains(res.Failure.Message, "or for a runner to take it") || strings.Contains(res.Failure.Message, "isolated") {
-			t.Errorf("failure %q, want the timeout spent before the step reached this runner, not a proof", res.Failure.Message)
+			t.Errorf("failure %q, want the run's ceiling passed before the step reached this runner, not a proof", res.Failure.Message)
 		}
 		if n := createsOf(h.c, kubeJobs, isoName()); n != 0 || len(h.tokens.called()) != 0 || h.c.hasSecret(testSecretName) {
 			t.Errorf("probe creates %d, tokens %q, step Secret %v; want nothing at all", n, h.tokens.called(), h.c.hasSecret(testSecretName))
@@ -1038,18 +1038,18 @@ func TestIsolationProofDeletesALeftoverInItsWay(t *testing.T) {
 func TestIsolationProofAbandonedAsAStepJoinsIsProvedAgain(t *testing.T) {
 	h := newIsoHarness(t, isoScript(probeExitIsolated, isoSaid[probeExitIsolated]))
 	probeJob := kubeJobs + "/" + isoName()
-	// The first proof never gets a slot, and its step's timeout is a second.
+	// The first proof never gets a slot, and its step's run has a second left.
 	h.c.with(func(c *rtCluster) { c.quotaJobs = map[string]bool{isoName(): true} })
 	gaveUp := rtRun()
-	gaveUp.TimeoutSeconds = 1
+	gaveUp.RunDeadline = rtRunDeadline(time.Second)
 	first := h.start(context.Background(), gaveUp)
 	// Once it has cleared the way and asked for a slot, its next delete --
 	// the cleanup of a proof nobody waits on -- is held on its way.
 	rtWaitUntil(t, "the first proof asking for a slot", func() bool { return createsOf(h.c, kubeJobs, isoName()) > 0 })
 	hold := make(chan struct{})
 	h.c.with(func(c *rtCluster) { c.holdJobDeletes = map[string]chan struct{}{isoName(): hold} })
-	if res := h.await(t, first); res.Failure == nil || res.Failure.Code != pl.CodeStepTimeout {
-		t.Fatalf("the first step = %+v, want its timeout spent waiting for the proof", res)
+	if res := h.await(t, first); res.Failure == nil || res.Failure.Code != pl.CodeRunCeiling {
+		t.Fatalf("the first step = %+v, want its run's ceiling passed waiting for the proof", res)
 	}
 	rtWaitUntil(t, "the stopped proof's cleanup on its way", func() bool { return len(h.c.requestsFor(http.MethodDelete, probeJob)) == 2 })
 	h.r.isoMu.Lock()

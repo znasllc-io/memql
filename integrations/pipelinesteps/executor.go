@@ -29,7 +29,11 @@ import (
 // need runs on one of its owner's machines through the agent's dispatcher
 // (fleet.go). Either way the executor decides first what the step may be
 // given: it refuses what it must not route, and it bounds the step by the
-// lesser of its own timeout and what is left of its run's wall-clock ceiling.
+// lesser of its own timeout and what is left of its run's wall-clock ceiling,
+// and names the moment that ceiling is reached (StepRun.RunDeadline). A
+// machine starts a step at once; a cluster step may first wait for a free
+// slot under the ceiling, bounded by its run's ceiling alone, and its own
+// timeout runs from its Job's creation (ruling R31b).
 
 // Forwarder is the agent's road to a workbench replica: integrations/
 // workbench's ForwardRouter on an agent node, a fake mesh in a test. A step is
@@ -59,12 +63,15 @@ const (
 	// peerWatchInterval is how often the watched forward re-checks the
 	// replica it is waiting on: the mesh's heartbeat interval.
 	peerWatchInterval = 5 * time.Second
-	// nodeLostGrace is how long past a step's effective deadline the
-	// executor waits for anything before it gives the step up. The Job's own
-	// deadline ends it at the effective deadline; the grace covers settling
-	// it, every phase at its deadline (settleBudget, the runner's), and
-	// settleMargin past that -- derived, so the two cannot drift apart and
-	// the agent never acks away a Job whose outcome is still being recorded.
+	// nodeLostGrace is how long past the bound it waits for -- the deadline
+	// of a step's Job (its timeout from its creation, never past its run's
+	// ceiling), or for a step whose Job does not exist yet, its run's ceiling
+	// (ruling R31b) -- the executor waits for anything before it gives the
+	// step up. The Job's own deadline ends it at its bound; the grace covers
+	// settling it, every phase at its deadline (settleBudget, the runner's),
+	// and settleMargin past that -- derived, so the two cannot drift apart
+	// and the agent never acks away a Job whose outcome is still being
+	// recorded.
 	nodeLostGrace = settleBudget + settleMargin
 	// settleMargin is the grace past settleBudget: the poll that sees the
 	// step decided, the Job controller marking its deadline, and the reply's
@@ -172,11 +179,12 @@ func (e *Executor) Execute(ctx context.Context, req pl.StepRequest) (pl.StepResu
 	if res, refused := refuseStep(req); refused {
 		return res, nil
 	}
-	timeout, deadlineCode, ceiling := e.deadlineFor(req, e.now())
+	timeout, deadlineCode, runDeadline, ceiling := e.deadlineFor(req, e.now())
 	if ceiling != nil {
 		return *ceiling, nil
 	}
 	run := stepRunFor(req, int(timeout/time.Second), deadlineCode)
+	run.RunDeadline = runDeadline.UTC().Format(time.RFC3339Nano)
 
 	stepCtx, release := e.track(ctx, req.RunID)
 	defer release()
@@ -189,7 +197,7 @@ func (e *Executor) Execute(ctx context.Context, req pl.StepRequest) (pl.StepResu
 		}
 		return e.fleet.RunStep(stepCtx, req, run)
 	}
-	return e.runCluster(stepCtx, run, timeout), nil
+	return e.runCluster(stepCtx, run, timeout, runDeadline), nil
 }
 
 // refuseStep is what the executor will not route, decided before anything
@@ -219,33 +227,34 @@ func refuseStep(req pl.StepRequest) (pl.StepResult, bool) {
 }
 
 // deadlineFor is the step's effective timeout -- the lesser of its own
-// timeout and what is left of its run's ceiling, in whole seconds -- and the
-// code naming whichever bound it is. A run past its ceiling, or with less than
-// a second of it left, answers the failure instead: no Job deadline can say
-// less than a second.
-func (e *Executor) deadlineFor(req pl.StepRequest, now time.Time) (time.Duration, string, *pl.StepResult) {
+// timeout and what is left of its run's ceiling, in whole seconds -- the code
+// naming whichever bound it is, and the moment the run reaches its ceiling. A
+// run past its ceiling, or with less than a second of it left, answers the
+// failure instead: no Job deadline can say less than a second.
+func (e *Executor) deadlineFor(req pl.StepRequest, now time.Time) (time.Duration, string, time.Time, *pl.StepResult) {
 	started, err := time.Parse(time.RFC3339, strings.TrimSpace(req.RunStartedAt))
 	if err != nil {
 		res := failedResult(pl.CodeExecutorError, fmt.Sprintf(
 			"The run's start time (%q) could not be read, so the step's share of the run's %s ceiling could not be "+
 				"computed, and a step with no bound is not started. Nothing ran.", req.RunStartedAt, e.cfg.RunCeiling))
-		return 0, "", &res
+		return 0, "", time.Time{}, &res
 	}
-	remaining := started.Add(e.cfg.RunCeiling).Sub(now)
+	runDeadline := started.Add(e.cfg.RunCeiling)
+	remaining := runDeadline.Sub(now)
 	if remaining < time.Second {
 		res := failedResult(pl.CodeRunCeiling, fmt.Sprintf(
 			"The run has used its %s ceiling (MEMQL_PIPELINES_RUN_MAX_MINUTES), so this step was not started.",
 			e.cfg.RunCeiling))
-		return 0, "", &res
+		return 0, "", time.Time{}, &res
 	}
 	own := e.cfg.DefaultStepTimeout
 	if req.Step.TimeoutSeconds > 0 {
 		own = time.Duration(req.Step.TimeoutSeconds) * time.Second
 	}
 	if own <= remaining {
-		return own.Truncate(time.Second), pl.CodeStepTimeout, nil
+		return own.Truncate(time.Second), pl.CodeStepTimeout, runDeadline, nil
 	}
-	return remaining.Truncate(time.Second), pl.CodeRunCeiling, nil
+	return remaining.Truncate(time.Second), pl.CodeRunCeiling, runDeadline, nil
 }
 
 // Cancel stops every step of a run: this node's Execute calls in flight end
@@ -403,18 +412,21 @@ func cancelledResult(message string) pl.StepResult {
 // The sentences a step stopped by its context reports, one per cause.
 const (
 	runCancelledMessage   = "The run was cancelled while the step ran; the step was stopped."
-	driverDeadlineMessage = "The driver stopped waiting for the step past its deadline; the step was stopped."
+	driverDeadlineMessage = "The driver stopped waiting for the step past its run's ceiling and the grace after it; the step was stopped."
 	driveEndedMessage     = "The step was stopped before it reported: the drive running it ended. It was cancelled."
 )
 
 // stoppedResult is how a step whose context ended reports: the run's cancel,
-// the driver's own deadline, or the drive ending around it.
-func stoppedResult(ctx context.Context, deadlineCode string) pl.StepResult {
+// the driver's own deadline, or the drive ending around it. The driver's
+// deadline is its run's ceiling and the grace past it (ruling R31b), so a
+// step it ends fails pipeline_run_ceiling, whichever bound its own timeout
+// had.
+func stoppedResult(ctx context.Context) pl.StepResult {
 	switch {
 	case errors.Is(context.Cause(ctx), errRunCancelled):
 		return cancelledResult(runCancelledMessage)
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return failedResult(cmp.Or(deadlineCode, pl.CodeStepTimeout), driverDeadlineMessage)
+		return failedResult(pl.CodeRunCeiling, driverDeadlineMessage)
 	}
 	return cancelledResult(driveEndedMessage)
 }

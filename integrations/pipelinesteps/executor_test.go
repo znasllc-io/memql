@@ -66,6 +66,12 @@ func (c *exClock) advance(d time.Duration) {
 	c.mu.Unlock()
 }
 
+func (c *exClock) set(at time.Time) {
+	c.mu.Lock()
+	c.at = at
+	c.mu.Unlock()
+}
+
 // withClock gives e an advanceable clock starting at exNow. Call it before
 // the executor runs anything.
 func withClock(e *Executor) *exClock {
@@ -800,11 +806,13 @@ func staleResponse(runner string) *nodev1.WorkbenchForwardResponse {
 	return &nodev1.WorkbenchForwardResponse{PayloadJson: mustMarshal(StatusReply{State: StateStale, Runner: runner})}
 }
 
-// TestExecuteStampsWhenItHandedTheStepOver (ruling R31): the step's timeout
-// counts from the moment the agent handed it to the cluster, on both sides,
-// so every forward of the step -- the first and each re-forward -- carries
-// that one moment for the runner to count from.
-func TestExecuteStampsWhenItHandedTheStepOver(t *testing.T) {
+// TestExecuteNamesTheRunsDeadline (ruling R31b): every forward of a step --
+// the first and each re-forward -- carries when its run reaches its ceiling,
+// computed once on the agent from the run's start and the ceiling the driver
+// reads too, so the runner bounds the step's wait for a slot by the moment
+// the agent waits on it until. The step's own timeout travels whole: it runs
+// from the step's Job's creation, so nothing of it is spent before.
+func TestExecuteNamesTheRunsDeadline(t *testing.T) {
 	wb := &scriptedWorkbench{}
 	var clock *exClock
 	wb.step = func(n int, _ *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
@@ -816,7 +824,8 @@ func TestExecuteStampsWhenItHandedTheStepOver(t *testing.T) {
 	}
 	e := newTestExecutor(wb, nil)
 	clock = withClock(e)
-	handed := exNow.UTC().Format(time.RFC3339Nano)
+	// The run started ten minutes before exNow, under a two-hour ceiling.
+	want := exNow.Add(110 * time.Minute).UTC().Format(time.RFC3339Nano)
 
 	if res, err := e.Execute(context.Background(), exRequest()); err != nil || res.Status != pl.OutcomeSucceeded {
 		t.Fatalf("Execute = %+v, %v; want the adopting replica's outcome", res, err)
@@ -826,8 +835,15 @@ func TestExecuteStampsWhenItHandedTheStepOver(t *testing.T) {
 		t.Fatalf("step forwards = %d, want 2", len(steps))
 	}
 	for i, f := range steps {
-		if got := stepRunOf(t, f).HandedAt; got != handed {
-			t.Errorf("forward %d says the step was handed over at %q, want %q: the moment it first was", i+1, got, handed)
+		run := stepRunOf(t, f)
+		if run.RunDeadline != want {
+			t.Errorf("forward %d names the run's deadline %q, want %q: its start plus its ceiling", i+1, run.RunDeadline, want)
+		}
+		if run.TimeoutSeconds != 900 {
+			t.Errorf("forward %d gives the step %ds, want its whole 900", i+1, run.TimeoutSeconds)
+		}
+		if strings.Contains(string(f.req.GetArgsJson()), "handedAt") {
+			t.Errorf("forward %d still names a hand-over moment: nothing counts the step's timeout from it", i+1)
 		}
 	}
 }
@@ -956,46 +972,176 @@ func TestExecuteReadsAWorkbenchRefusal(t *testing.T) {
 	})
 }
 
-// TestExecuteGivesUpPastTheDeadline: nothing waits forever. Past the step's
-// effective deadline and the grace beyond it, one last status decides what
-// the step is reported as -- and the Job, if it is still there, is deleted.
-func TestExecuteGivesUpPastTheDeadline(t *testing.T) {
+// stillWaiting waits for two status readings that began after it was called
+// -- whatever was read before is drained first -- which is one whole turn of
+// the executor's loop, its give-up check and then its reading, on the clock
+// as the caller left it. It fails the test if the step ended instead: it was
+// given up too early.
+func stillWaiting(t *testing.T, polls chan struct{}, done <-chan pl.StepResult, why string) {
+	t.Helper()
+	for drained := false; !drained; {
+		select {
+		case <-polls:
+		default:
+			drained = true
+		}
+	}
+	for seen := 0; seen < 2; {
+		select {
+		case <-polls:
+			seen++
+		case res := <-done:
+			t.Fatalf("%s, but it was given up: %+v (failure %+v)", why, res, res.Failure)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d of 2 status readings arrived", seen)
+		}
+	}
+}
+
+// runningReply is a status of a step whose runner holds it: with its Job's
+// creation time, or none -- the runner is waiting for a free slot under the
+// ceiling, and no Job exists yet.
+func runningReply(created string) *nodev1.WorkbenchForwardResponse {
+	return &nodev1.WorkbenchForwardResponse{PayloadJson: mustMarshal(StatusReply{State: StateRunning, Runner: "workbench-a", JobCreatedAt: created})}
+}
+
+// TestExecuteWaitsForAQueuedStepUntilItsRunsCeiling (ruling R31b, Review
+// Focus 4): a step whose Job does not exist yet -- its runner holds it,
+// waiting for a free slot under the ceiling: running, with no creation time
+// -- is waited on past its own timeout and the grace, until its run's ceiling
+// and the grace past it. Then one last look, and the step fails
+// pipeline_run_ceiling, never started; its Secret is deleted with the ack.
+func TestExecuteWaitsForAQueuedStepUntilItsRunsCeiling(t *testing.T) {
+	polls := make(chan struct{}, 1024)
+	wb := &scriptedWorkbench{}
+	wb.status = func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+		polls <- struct{}{}
+		return runningReply(""), "workbench-a", nil
+	}
+	e := newTestExecutor(wb, nil)
+	clock := withClock(e)
+	e.lostGrace = time.Minute
+	e.statusEvery = 2 * time.Millisecond
+	// Its own timeout is fifteen minutes; its run's ceiling is 110 away.
+	done := executeAsync(e, context.Background(), exRequest())
+	awaitPolls(t, polls, 1) // handed over, on the clock as it stands
+
+	clock.set(exNow.Add(15*time.Minute + time.Minute + time.Second))
+	stillWaiting(t, polls, done, "past its own timeout and the grace, where R31 gave it up, a step waiting for a slot is still waited on")
+	clock.set(exNow.Add(110*time.Minute + time.Minute - time.Second))
+	stillWaiting(t, polls, done, "a second short of its run's ceiling and the grace, a step waiting for a slot is still waited on")
+
+	clock.advance(2 * time.Second)
+	res := awaitResult(t, done, "its run's ceiling and the grace passed")
+	wantFailure(t, res, pl.OutcomeFailed, pl.CodeRunCeiling)
+	if !strings.Contains(res.Failure.Message, "never started") || !strings.Contains(res.Failure.Message, "2h0m0s ceiling") {
+		t.Errorf("failure %q, want it to say the step never started before its run's 2h0m0s ceiling", res.Failure.Message)
+	}
+	awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineAckAction)) == 1 },
+		"the step was given up on and its Secret left: the give-up must ack")
+}
+
+// TestExecuteGivesUpOnACreatedJobByItsCreation (ruling R31b): once its Job
+// exists, a step is given up its own timeout and the grace after the Job's
+// CREATION -- which the runner reports with the step's status -- however long
+// it queued before, and never past its run's ceiling and the grace. The
+// give-up moves with the creation time.
+func TestExecuteGivesUpOnACreatedJobByItsCreation(t *testing.T) {
 	for _, c := range []struct {
-		name   string
-		status func() (*nodev1.WorkbenchForwardResponse, string, error)
-		want   pl.Outcome
-		code   string
-		says   string // what the failure says
+		name     string
+		created  time.Duration // after exNow, when the step was handed over
+		giveUpAt time.Duration // after exNow
+		code     string
 	}{
-		{"no replica answers for the step", func() (*nodev1.WorkbenchForwardResponse, string, error) {
+		{"a Job created at once: its timeout and the grace from then", 0, 15*time.Minute + time.Minute, pl.CodeStepTimeout},
+		{"a Job created after half an hour in the queue: the same, from then", 30 * time.Minute, 46 * time.Minute, pl.CodeStepTimeout},
+		{"a Job created near its run's ceiling: never past it and the grace", 100 * time.Minute, 111 * time.Minute, pl.CodeRunCeiling},
+		// A creation time ahead of the hand-over on this clock is a clock
+		// that cannot vouch for it: the hand-over bounds it.
+		{"a Job reported created before the step was handed over: from the hand-over", -time.Hour, 16 * time.Minute, pl.CodeStepTimeout},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			polls := make(chan struct{}, 1024)
+			created := exNow.Add(c.created).UTC().Format(time.RFC3339)
+			wb := &scriptedWorkbench{}
+			wb.status = func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+				polls <- struct{}{}
+				return runningReply(created), "workbench-a", nil
+			}
+			e := newTestExecutor(wb, nil)
+			clock := withClock(e)
+			e.lostGrace = time.Minute
+			e.statusEvery = 2 * time.Millisecond
+			done := executeAsync(e, context.Background(), exRequest())
+			awaitPolls(t, polls, 1) // handed over at exNow
+
+			clock.set(exNow.Add(c.giveUpAt - time.Second))
+			stillWaiting(t, polls, done, "a second short of its give-up, the step is still waited on")
+			clock.advance(2 * time.Second)
+			res := awaitResult(t, done, "the Job's deadline and the grace passed")
+			wantFailure(t, res, pl.OutcomeFailed, c.code)
+			if !strings.Contains(res.Failure.Message, "settling overran") {
+				t.Errorf("failure %q, want it to say the runner still held the step: settling overran", res.Failure.Message)
+			}
+		})
+	}
+}
+
+// TestExecuteGivesUpPastTheDeadline: nothing waits forever. Past the bound it
+// waits for -- its run's ceiling while no Job exists, its Job's deadline once
+// one does -- and the grace beyond it, one last status decides what the step
+// is reported as, and the Job and its Secret, if they are still there, are
+// deleted.
+func TestExecuteGivesUpPastTheDeadline(t *testing.T) {
+	created := exNow.UTC().Format(time.RFC3339)
+	for _, c := range []struct {
+		name string
+		// look answers the n-th status: the first is the executor's own
+		// reading, the second the give-up's last look.
+		look func(n int) (*nodev1.WorkbenchForwardResponse, string, error)
+		want pl.Outcome
+		code string
+		says string // what the failure says
+	}{
+		{"no replica answers for the step", func(int) (*nodev1.WorkbenchForwardResponse, string, error) {
 			return nil, "", workbench.ErrNoWorkbenchPeer
 		}, pl.OutcomeFailed, pl.CodeNodeLost, "went away"},
-		{"the Job's runner went quiet", func() (*nodev1.WorkbenchForwardResponse, string, error) {
-			return stateResponse(StateStale), "workbench-b", nil
+		{"the Job's runner went quiet", func(int) (*nodev1.WorkbenchForwardResponse, string, error) {
+			return &nodev1.WorkbenchForwardResponse{PayloadJson: mustMarshal(StatusReply{State: StateStale, Runner: "workbench-a", JobCreatedAt: created})}, "workbench-b", nil
 		}, pl.OutcomeFailed, pl.CodeNodeLost, "went away"},
-		// The wait for a slot counts against the Job's deadline (R31): a
-		// runner still holding the step now has overrun settling it.
-		{"the Job's runner still holds it: settling overran", func() (*nodev1.WorkbenchForwardResponse, string, error) {
-			return stateResponse(StateRunning), "workbench-b", nil
+		{"the Job's runner still holds it: settling overran", func(int) (*nodev1.WorkbenchForwardResponse, string, error) {
+			return runningReply(created), "workbench-b", nil
 		}, pl.OutcomeFailed, pl.CodeStepTimeout, "settling overran"},
-		{"the Job never started: it waited for a slot", func() (*nodev1.WorkbenchForwardResponse, string, error) {
+		{"the step never left the queue", func(int) (*nodev1.WorkbenchForwardResponse, string, error) {
+			return runningReply(""), "workbench-b", nil
+		}, pl.OutcomeFailed, pl.CodeRunCeiling, "never started"},
+		{"no Job was ever made for it", func(int) (*nodev1.WorkbenchForwardResponse, string, error) {
 			return stateResponse(StateAbsent), "workbench-b", nil
-		}, pl.OutcomeFailed, pl.CodeStepTimeout, "did not start"},
-		{"the last look found the outcome", func() (*nodev1.WorkbenchForwardResponse, string, error) {
+		}, pl.OutcomeFailed, pl.CodeRunCeiling, "never started"},
+		{"the last look found the outcome", func(n int) (*nodev1.WorkbenchForwardResponse, string, error) {
+			if n == 1 {
+				return runningReply(created), "workbench-b", nil
+			}
 			return finishedResponse(exOutcome("workbench-a")), "workbench-b", nil
 		}, pl.OutcomeSucceeded, "", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			wb := &scriptedWorkbench{}
-			wb.status = func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) { return c.status() }
 			e := newTestExecutor(wb, nil)
-			e.statusEvery = time.Hour // the give-up's own look is the only one
-			e.lostGrace = 0
-			req := exRequest()
-			req.Step.TimeoutSeconds = 1
+			clock := withClock(e)
+			e.lostGrace = time.Minute
+			e.stalePatience = 24 * time.Hour // a stale or absent reading forwards nothing again here
+			wb.status = func(n int, _ *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+				if n == 1 {
+					// The executor's first reading: past every bound it
+					// waits for, and the grace, from here on.
+					clock.set(exNow.Add(110*time.Minute + time.Minute + time.Second))
+				}
+				return c.look(n)
+			}
 
-			res := awaitResult(t, executeAsync(e, context.Background(), req), "the step's deadline passed")
+			res := awaitResult(t, executeAsync(e, context.Background(), exRequest()), "every bound and the grace passed")
 			if c.code == "" {
 				if res.Status != c.want {
 					t.Fatalf("result = %+v, want %s", res, c.want)
@@ -1007,7 +1153,7 @@ func TestExecuteGivesUpPastTheDeadline(t *testing.T) {
 				t.Errorf("failure %q, want it to say %q", res.Failure.Message, c.says)
 			}
 			if c.says == "settling overran" && strings.Contains(res.Failure.Message, "free slot") {
-				t.Errorf("failure %q blames a wait for a slot, which counts against the Job's deadline now", res.Failure.Message)
+				t.Errorf("failure %q blames a wait for a slot, which its Job's deadline never counts", res.Failure.Message)
 			}
 			awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineAckAction)) == 1 },
 				"the step was given up on and its Job left to run: the give-up must delete it")
@@ -1033,6 +1179,25 @@ func TestExecuteGivesUpPastTheDeadline(t *testing.T) {
 			t.Errorf("step forwards = %d: a replica missing for a moment (a rolling deploy) must be tried again", n)
 		}
 	})
+}
+
+// TestExecuteReadsTheDriversDeadlineAsTheRunsCeiling (ruling R31b): the
+// driver hands a step a context that ends at its run's ceiling and the grace
+// past it, so a step whose context ended so failed pipeline_run_ceiling,
+// whichever bound its own timeout was.
+func TestExecuteReadsTheDriversDeadlineAsTheRunsCeiling(t *testing.T) {
+	wb := &scriptedWorkbench{}
+	e := newTestExecutor(wb, nil)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	req := exRequest() // its own timeout binds: the StepRun names pipeline_step_timeout
+
+	res := awaitResult(t, executeAsync(e, ctx, req), "the driver's deadline had passed")
+
+	wantFailure(t, res, pl.OutcomeFailed, pl.CodeRunCeiling)
+	if res.Failure.Message != driverDeadlineMessage {
+		t.Errorf("failure %q, want the driver's own sentence %q", res.Failure.Message, driverDeadlineMessage)
+	}
 }
 
 // ---------------------------------------------------------------------------

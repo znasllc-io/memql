@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -578,4 +579,97 @@ func TestExecuteHopRealRunnersTakeALostReplyFromTheJob(t *testing.T) {
 		t.Errorf("Library = %+v, want exactly the step's log", files)
 	}
 	w.ackedAway(t, job)
+}
+
+// TestExecuteHopAStageWiderThanTheCeilingRunsEveryStep is Review Focus 4 and
+// design record D11 under ruling R31b, with the real runners: a stage of six
+// steps meets a cluster whose ceiling admits two Jobs at once. The four that
+// do not fit wait for a free slot -- longer than their own fifteen-minute
+// timeout, by the runners' clock -- and each runs to its end once a slot
+// frees, its Job given its whole timeout from its creation: a step's own
+// timeout runs from its Job's creation, and only its run's ceiling bounds the
+// wait. (Under R31 the four timed out in the queue, never started.) At no
+// moment do more Jobs exist than the ceiling admits, and each outcome's ack
+// is what frees the next slot.
+func TestExecuteHopAStageWiderThanTheCeilingRunsEveryStep(t *testing.T) {
+	const width, ceiling = 6, 2
+	queued := 20 * time.Minute // past each step's own 15-minute timeout
+	w := newRunnerHop(t)
+	// The executor's clock is the runners': the run started ten minutes
+	// before it, and its two-hour ceiling is far away.
+	w.clock.set(rtT0)
+	var steppedPast atomic.Bool
+	w.h.c.with(func(c *rtCluster) {
+		c.jobCeiling = ceiling
+		c.onJobCreate = func(c *rtCluster, _ int) {
+			// The first try that finds the ceiling full: from here on, the
+			// steps still queued have waited longer than they may run.
+			if len(c.jobs) >= ceiling && steppedPast.CompareAndSwap(false, true) {
+				w.h.clock.Advance(queued)
+			}
+		}
+	})
+
+	var (
+		done []<-chan pl.StepResult
+		jobs = map[string]string{} // Job -> step key
+	)
+	for i := 1; i <= width; i++ {
+		req := hopRequest()
+		req.RunStartedAt = rtT0.Add(-10 * time.Minute).Format(time.RFC3339)
+		req.StepKey = "tests.go-tests#" + strconv.Itoa(i)
+		req.Step.Key = req.StepKey
+		job := JobName(req.RunID, req.StepKey, req.Attempt)
+		w.h.c.script(job, rtFinishingScript(job, 0, captureKubeLine(rtAt(1100), "ok  \tgithub.com/acme/widget/a\t1.500s")))
+		jobs[job] = req.StepKey
+		done = append(done, w.execute(req))
+	}
+	for i, d := range done {
+		res := awaitHop(t, d, "step "+strconv.Itoa(i+1)+" of the stage")
+		if res.Status != pl.OutcomeSucceeded || res.ExitCode != 0 || res.Failure != nil {
+			t.Errorf("step %d = %+v (failure %+v), want it run to success: a step that waits for a free slot is "+
+				"bounded by its run's ceiling, and its own timeout runs from its Job's creation", i+1, res, res.Failure)
+		}
+	}
+
+	var (
+		made     []Job
+		most     int
+		refusals int
+	)
+	w.h.c.with(func(c *rtCluster) { made, most = append([]Job(nil), c.made...), c.mostJobs })
+	refusals = len(w.h.c.requestsFor(http.MethodPost, kubeJobs)) - len(made)
+	if !steppedPast.Load() || refusals == 0 {
+		t.Fatalf("the ceiling was never full (%d refused creates): the case is a stage wider than it", refusals)
+	}
+	if most > ceiling {
+		t.Errorf("%d Jobs existed at once, past the ceiling of %d", most, ceiling)
+	}
+	if len(made) != width {
+		t.Fatalf("%d Jobs created, want one per step, %d", len(made), width)
+	}
+	late := 0
+	for _, job := range made {
+		if _, ok := jobs[job.Metadata.Name]; !ok {
+			t.Errorf("a Job no step names was created: %s", job.Metadata.Name)
+		}
+		if ads := job.Spec.ActiveDeadlineSeconds; ads == nil || *ads != 900 {
+			t.Errorf("Job %s was created with deadline %v, want the step's whole 900s from its creation", job.Metadata.Name, ads)
+		}
+		if !job.Metadata.CreationTimestamp.Before(rtT0.Add(queued)) {
+			late++
+		}
+	}
+	if late < width-ceiling {
+		t.Errorf("%d Jobs were created after the queue outlasted the steps' own timeout, want at least %d", late, width-ceiling)
+	}
+	if files := w.h.lib.stored(); len(files) != width {
+		t.Errorf("the Library holds %d files, want each step's log, %d", len(files), width)
+	}
+	for job := range jobs {
+		rtWaitUntil(t, "Job "+job+" and its Secret to be acked away", func() bool {
+			return !w.h.c.hasJob(job) && !w.h.c.hasSecret(SecretName(job))
+		})
+	}
+	w.h.leftNoArchive(t)
 }

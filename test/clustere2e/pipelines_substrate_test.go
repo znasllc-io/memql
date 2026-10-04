@@ -227,7 +227,7 @@ func TestPipelinesSubstrate(t *testing.T) {
 	t.Cleanup(func() { sweepRunObjects(t, cluster, namespace, selector) })
 
 	watch := watchRunObjects(ctx, cluster, namespace, selector)
-	run.drive(ctx, executor)
+	run.drive(ctx, executor, configFor(substrateAgent).RunCeiling)
 	seen := watch.stop()
 	if err := ctx.Err(); err != nil {
 		t.Fatalf("the run did not end within %s (%v); its steps as they stood:\n%s", substrateRunBudget, err, run.summary())
@@ -1144,8 +1144,10 @@ func (r *substrateRun) request(step pl.Step) pl.StepRequest {
 
 // drive runs the stages strictly in the order written, a stage's steps at
 // once, and blocks every later stage once one fails (driver.go execute): each
-// step bounded by its timeout and the grace the driver gives a runner past it.
-func (r *substrateRun) drive(ctx context.Context, exec pl.Executor) {
+// step bounded by its run's ceiling and the grace the driver gives a runner
+// past it (driver.go stepDeadline, ruling R31b) -- not by its own timeout,
+// which runs from its Job's creation.
+func (r *substrateRun) drive(ctx context.Context, exec pl.Executor, ceiling time.Duration) {
 	r.started = time.Now()
 	blockedBy := ""
 	for _, stage := range r.stages {
@@ -1166,7 +1168,7 @@ func (r *substrateRun) drive(ctx context.Context, exec pl.Executor) {
 			wg.Add(1)
 			go func(s *substrateStep, req pl.StepRequest) {
 				defer wg.Done()
-				stepCtx, cancel := context.WithTimeout(ctx, time.Duration(s.step.TimeoutSeconds)*time.Second+10*time.Minute)
+				stepCtx, cancel := context.WithDeadline(ctx, r.started.Add(ceiling+10*time.Minute))
 				defer cancel()
 				began := time.Now()
 				res, err := exec.Execute(stepCtx, req)

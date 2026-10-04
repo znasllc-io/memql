@@ -17,10 +17,10 @@ import (
 // its Run went between creating the Secret and creating the Job, or before it
 // could give the Job ownership, and a cancel missed it. The reaper deletes
 // such a Secret once nothing can want it any more: older than the run's
-// ceiling, by when every step of its run has ended (a step queued that long
-// has spent its whole timeout and is never started, ruling R31), and the Job
-// TTL past it, within which an outcome may still be read. A Secret whose Job
-// exists is never deleted, owned or not.
+// ceiling, by when every step of its run has ended (a step still queued for a
+// slot when its run reaches its ceiling is never started, ruling R31b), and
+// the Job TTL past it, within which an outcome may still be read. A Secret
+// whose Job exists is never deleted, owned or not.
 //
 // Each replica sweeps at most once every reapInterval, piggybacked on Run --
 // any replica's sweep reaps every replica's orphans -- and a sweep is bounded:

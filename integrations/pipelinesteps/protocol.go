@@ -57,19 +57,24 @@ type StepRun struct {
 	// Artifacts are relative paths or globs in the working copy.
 	Artifacts []string `json:"artifacts,omitempty"`
 	// TimeoutSeconds is the EFFECTIVE timeout: the lesser of the step's own
-	// timeout and what is left of the run's ceiling.
+	// timeout and what was left of the run's ceiling when the agent handed the
+	// step over. It runs from the step's Job's CREATION (ruling R31b): a step
+	// that waits for a free slot under the ceiling spends none of it there.
 	TimeoutSeconds int `json:"timeoutSeconds"`
 	// DeadlineCode names whichever bound TimeoutSeconds is:
-	// pl.CodeStepTimeout or pl.CodeRunCeiling.
+	// pl.CodeStepTimeout or pl.CodeRunCeiling. A Job its run's ceiling cut
+	// shorter still, at its creation, is the ceiling's (step.deadlineCode).
 	DeadlineCode string `json:"deadlineCode"`
-	// HandedAt is when the agent handed the step to the cluster, RFC 3339
-	// with nanoseconds: the moment TimeoutSeconds counts from on both sides
-	// (ruling R31). The agent gives the step up TimeoutSeconds and its grace
-	// after it; the runner gives the step's Job only what is left of
-	// TimeoutSeconds when it is created, so a step that waited for a slot
-	// under the ceiling has spent the rest. Every forward of one step carries
-	// the same moment. Empty: the runner counts from its Run's start.
-	HandedAt string `json:"handedAt,omitempty"`
+	// RunDeadline is when the step's run reaches its wall-clock ceiling, RFC
+	// 3339 (ruling R31b): the run's start plus the agent's Config.RunCeiling,
+	// computed once, on the agent, and the same on every forward of the step.
+	// It alone bounds the time the step waits before its Job exists -- for a
+	// free slot under the ceiling, for the isolation proof -- and the Job is
+	// given no more than what is left of it. The agent waits for a step whose
+	// Job does not exist yet until it, and the driver until it and its grace.
+	// A step that names none this runner can read is not started: its wait
+	// would have no bound.
+	RunDeadline string `json:"runDeadline"`
 	// GoTimings asks the runner to read Go test timings out of the output.
 	GoTimings bool `json:"goTimings,omitempty"`
 }
@@ -121,6 +126,7 @@ func (r StepRun) LogValue() slog.Value {
 		slog.Any("secretNames", sortedKeys(r.Secrets)),
 		slog.Int("timeoutSeconds", r.TimeoutSeconds),
 		slog.String("deadlineCode", r.DeadlineCode),
+		slog.String("runDeadline", r.RunDeadline),
 	)
 }
 
@@ -152,6 +158,13 @@ type StatusReply struct {
 	// replica whose runner went quiet, which the agent forwards the step
 	// AWAY from when it forwards it again.
 	Runner string `json:"runner,omitempty"`
+	// JobCreatedAt is when the step's Job was created, RFC 3339, as the API
+	// server stamped it, whenever the Job exists: where the step's own
+	// timeout runs from (ruling R31b). A running state WITHOUT it is a step
+	// whose runner holds it before its Job exists -- waiting for a free slot
+	// under the ceiling -- which the agent waits on until the run's ceiling
+	// rather than the step's own timeout.
+	JobCreatedAt string `json:"jobCreatedAt,omitempty"`
 }
 
 // AckRequest tells the runner the agent holds the outcome, so the Job and its

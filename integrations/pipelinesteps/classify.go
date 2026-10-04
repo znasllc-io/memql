@@ -51,8 +51,9 @@ var pullReasons = map[string]bool{"ErrImagePull": true, "ImagePullBackOff": true
 // says where the step stands. created is when the runner created or adopted
 // the Job; with now and cfg.ScheduleTimeout it bounds how long the pod may
 // wait on the cluster -- to be scheduled, or for its cache volume. deadlineCode
-// is the StepRun's: pl.CodeStepTimeout or pl.CodeRunCeiling, whichever bound
-// the Job's deadline is; empty reads as pl.CodeStepTimeout.
+// names whichever bound the Job's deadline is, pl.CodeStepTimeout or
+// pl.CodeRunCeiling (the runner reads it off the Job: step.deadlineCode);
+// empty reads as pl.CodeStepTimeout.
 //
 // It is pure -- no I/O, no clock -- and the runner calls it on every read. The
 // order below is the classification, each rule taken only when none before it

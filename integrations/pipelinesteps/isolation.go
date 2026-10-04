@@ -31,9 +31,11 @@ import (
 //   - A pass is trusted for cfg.IsolationTTL (an hour), then proved again. A
 //     proof that did not pass is never trusted: the next create proves again.
 //   - The steps created on this replica while a proof runs all wait on that
-//     one proof -- one probe, one slot under the ceiling -- each for as long
-//     as its own timeout lasts (ruling R31). A proof every waiting step gave
-//     up on is stopped, and decides nothing.
+//     one proof -- one probe, one slot under the ceiling -- each until its
+//     run's ceiling (ruling R31b: like the wait for a slot, the proof's is
+//     bounded by the run, and the step's own timeout runs from its Job's
+//     creation). A proof every waiting step gave up on is stopped, and
+//     decides nothing.
 //   - Only the create path waits on it. Adopting a Job another Run created
 //     starts nothing new in the namespace, and a replica that cannot prove
 //     isolation must still settle the steps another replica started.
@@ -120,13 +122,14 @@ func (r *Runner) Isolation() IsolationVerdict {
 
 // isolationGate holds a step at its create until this replica has proved
 // memql-pipelines isolated, and ends it -- done -- when the proof does not
-// let it through, when its timeout runs out first (R31), or when it is
-// cancelled.
-func (s *step) isolationGate() (res pl.StepResult, done bool) {
-	left := s.budgetLeft()
-	if left <= 0 {
-		// Spent before it reached this runner: nothing to prove for.
-		return s.ranOut("waiting for a free slot under the pipelines ceiling, or for a runner to take it"), true
+// let it through, when its run reaches its ceiling first (R31b), or when it
+// is cancelled.
+func (s *step) isolationGate(runDeadline time.Time) (res pl.StepResult, done bool) {
+	left := runDeadline.Sub(s.r.now())
+	if left < time.Second {
+		// The run's ceiling passed before the step reached this runner:
+		// nothing to prove for.
+		return s.ceilingPassed(runDeadline, "waiting for a free slot under the pipelines ceiling, or for a runner to take it"), true
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, left)
 	defer cancel()
@@ -137,7 +140,7 @@ func (s *step) isolationGate() (res pl.StepResult, done bool) {
 	case s.ctx.Err() != nil:
 		return s.abandon(nil), true
 	case err != nil:
-		return s.ranOut("while this workbench node proved memql-pipelines isolated"), true
+		return s.ceilingPassed(runDeadline, "while this workbench node proved memql-pipelines isolated"), true
 	}
 	return s.refused(pl.CodeIsolationUnenforced, isolationRefusal(v)), true
 }
@@ -158,8 +161,8 @@ func isolationRefusal(v IsolationVerdict) string {
 
 // proveIsolation is this replica's verdict: a pass still fresh, or else the
 // one proof in flight -- started here if none is -- once it decides. ctx is
-// the waiting step's, bounded by its timeout: when it ends first the step
-// stops waiting (its error), and a proof no step waits on any more is
+// the waiting step's, bounded by its run's ceiling: when it ends first the
+// step stops waiting (its error), and a proof no step waits on any more is
 // stopped.
 func (r *Runner) proveIsolation(ctx context.Context) (IsolationVerdict, error) {
 	for {

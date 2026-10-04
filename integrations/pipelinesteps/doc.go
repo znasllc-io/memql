@@ -8,7 +8,8 @@
 //
 // The AGENT node holds the executor the seam's driver calls. It turns a
 // pl.StepRequest into a StepRun (the effective timeout, the deadline code,
-// the environment without the secrets), routes a step that names a need to
+// the moment its run reaches its ceiling, the environment without the
+// secrets), routes a step that names a need to
 // the fleet through the agent's dispatcher, and forwards every other step to
 // a workbench replica over NodeService. It never talks to the Kubernetes API,
 // and it is what notices a workbench replica going quiet and forwards again.

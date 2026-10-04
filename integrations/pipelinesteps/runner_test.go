@@ -70,13 +70,19 @@ func rtConfig() Config {
 	return cfg
 }
 
-// rtRun is testRun without services, caches or artifacts: a test that needs
-// one adds it.
+// rtRun is testRun without services, caches or artifacts, of a run whose
+// ceiling is a day away (rtRunDeadline): a test that needs one of them, or a
+// nearer ceiling, sets it.
 func rtRun() StepRun {
 	run := testRun()
 	run.Services, run.Caches, run.Artifacts = nil, nil, nil
+	run.RunDeadline = rtRunDeadline(24 * time.Hour)
 	return run
 }
+
+// rtRunDeadline is a run's deadline as the agent stamps one (StepRun.
+// RunDeadline): its ceiling, d after the runner's clock begins.
+func rtRunDeadline(d time.Duration) string { return rtT0.Add(d).Format(time.RFC3339Nano) }
 
 // ---------------------------------------------------------------------------
 // Pods and scripts
@@ -248,6 +254,14 @@ type rtCluster struct {
 	quotaRefusals int
 	// quotaJobs are Jobs the ceiling refuses for as long as they are named.
 	quotaJobs map[string]bool
+	// jobCeiling, when set, is the namespace's count/jobs.batch quota (Review
+	// Focus 4): a create is refused exceeded-quota while that many Jobs exist,
+	// finished ones included, as the ResourceQuota counts them. mostJobs is
+	// the most that ever existed at once, and made is every Job admitted, as
+	// it was created.
+	jobCeiling int
+	mostJobs   int
+	made       []Job
 	// createJobAnswer, when set, answers every Job create instead.
 	createJobAnswer *kubeAnswer
 	// createJobAnswers answer the first Job creates, one each, before
@@ -453,6 +467,11 @@ func (c *rtCluster) createJob(w http.ResponseWriter, body []byte) {
 		}
 		rtAnswer(w, rtQuotaRefusal(name))
 		return
+	case c.jobCeiling > 0 && len(c.jobs) >= c.jobCeiling:
+		// Admission, before storage: a full ceiling refuses the create
+		// whether or not a Job of that name exists.
+		rtAnswer(w, rtQuotaRefusal(name))
+		return
 	case c.jobs[name] != nil:
 		rtAnswer(w, kubeStatus(409, "AlreadyExists", fmt.Sprintf(`jobs.batch %q already exists`, name)))
 		return
@@ -469,6 +488,8 @@ func (c *rtCluster) createJob(w http.ResponseWriter, body []byte) {
 	job.Metadata.CreationTimestamp = c.clock.Now()
 	j := &rtJob{job: job, script: s, createdRV: job.Metadata.ResourceVersion}
 	c.jobs[name] = j
+	c.mostJobs = max(c.mostJobs, len(c.jobs))
+	c.made = append(c.made, c.viewLocked(j))
 	c.bumpLocked()
 	rtJSON(w, 201, c.viewLocked(j))
 	// The Job controller writes the new Job's status at once (measured on
@@ -3222,12 +3243,14 @@ func TestRunnerWaitsOutAnExceededQuota(t *testing.T) {
 	})
 }
 
-// TestRunnerCountsTheWaitAgainstTheTimeout (ruling R31): the step's timeout
-// counts from when the agent handed it over (StepRun.HandedAt), as the agent's
-// own give-up does. The Job is given what is left when it is finally created;
-// a step with nothing left is failed with its deadline code, and nothing is
-// created for it.
-func TestRunnerCountsTheWaitAgainstTheTimeout(t *testing.T) {
+// TestRunnerBoundsTheWaitByTheRunsCeiling (ruling R31b, which supersedes
+// R31; Review Focus 4, design record D11): a step's own timeout runs from its
+// Job's creation, and the time it waits for a free slot under the pipelines
+// ceiling is bounded by its RUN's ceiling alone (StepRun.RunDeadline). So the
+// Job is given the step's whole timeout however long it queued -- or what is
+// left of its run, when that is less -- and a step still waiting when its run
+// reaches its ceiling fails pipeline_run_ceiling, having created nothing.
+func TestRunnerBoundsTheWaitByTheRunsCeiling(t *testing.T) {
 	deadlineOf := func(t *testing.T, h *rtHarness) int64 {
 		t.Helper()
 		ads := h.c.jobNow(t, testJobName).Spec.ActiveDeadlineSeconds
@@ -3250,23 +3273,22 @@ func TestRunnerCountsTheWaitAgainstTheTimeout(t *testing.T) {
 
 	for _, c := range []struct {
 		name     string
-		handedAt string
+		runLeft  time.Duration // from the runner's clock as the step arrives
 		queued   time.Duration
 		want     int64
+		wantCode string
 	}{
-		{"a step that never waited keeps its whole timeout", rtT0.Format(time.RFC3339Nano), 0, 900},
-		{"part of a second spent before the Job is not taken from it", rtT0.Add(-300 * time.Millisecond).Format(time.RFC3339Nano), 0, 900},
-		{"the wait for a slot is the step's", rtT0.Format(time.RFC3339Nano), 10 * time.Minute, 300},
-		{"so is the time before a forward reached a runner", rtT0.Add(-10 * time.Minute).Format(time.RFC3339Nano), 0, 300},
-		{"a Run told nothing counts from its own start", "", 10 * time.Minute, 300},
-		{"a hand-over stamped ahead of this node's clock spent nothing", rtT0.Add(time.Minute).Format(time.RFC3339Nano), 0, 900},
+		{"a step that never waited is given its whole timeout", 2 * time.Hour, 0, 900, pl.CodeStepTimeout},
+		{"so is one that waited longer than its own timeout for a slot", 2 * time.Hour, 20 * time.Minute, 900, pl.CodeStepTimeout},
+		{"a run with less left than the step's timeout gives its Job what is left", 25 * time.Minute, 20 * time.Minute, 300, pl.CodeRunCeiling},
+		{"what is left of the run counts in whole seconds, never past it", 15*time.Minute + 1500*time.Millisecond, 0, 900, pl.CodeStepTimeout},
+		{"part of a second less than the step's timeout is the run's bound", 15*time.Minute - 500*time.Millisecond, 0, 899, pl.CodeRunCeiling},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newRunnerHarness(t)
 			h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "done")))
 			run := rtRun()
-			run.HandedAt = c.handedAt
-
+			run.RunDeadline = rtRunDeadline(c.runLeft)
 			if c.queued > 0 {
 				waitFor(h, c.queued)
 			}
@@ -3274,26 +3296,42 @@ func TestRunnerCountsTheWaitAgainstTheTimeout(t *testing.T) {
 			res := h.run(t, run)
 
 			if res.Status != pl.OutcomeSucceeded {
-				t.Fatalf("result = %+v (failure %+v), want success", res, res.Failure)
+				t.Fatalf("result = %+v (failure %+v), want success: a step's wait for a slot is bounded by its run's "+
+					"ceiling, not by its own timeout", res, res.Failure)
 			}
+			job := h.c.jobNow(t, testJobName)
 			if got := deadlineOf(t, h); got != c.want {
-				t.Errorf("the Job's deadline is %ds, want %ds of the step's 900", got, c.want)
+				t.Errorf("the Job's deadline is %ds, want %ds: the step's own 900 from the Job's creation, or what is "+
+					"left of its run when that is less", got, c.want)
+			}
+			if got := (&step{run: run}).deadlineCode(job); got != c.wantCode {
+				t.Errorf("the Job's deadline is named %q, want %q", got, c.wantCode)
 			}
 		})
 	}
 
-	t.Run("a step with nothing left fails with its deadline code, and nothing is created", func(t *testing.T) {
+	t.Run("a step still waiting when its run reaches its ceiling fails pipeline_run_ceiling, and nothing is left", func(t *testing.T) {
 		h := newRunnerHarness(t)
 		h.c.script(testJobName, rtRunningScript(testJobName))
-		waitFor(h, 15*time.Minute)
+		// The ceiling stays full, and every refused try costs six minutes:
+		// the run's ceiling, five minutes away, passes on the first.
+		h.c.with(func(c *rtCluster) {
+			c.quotaJobs = map[string]bool{testJobName: true}
+			c.onJobCreate = func(*rtCluster, int) { h.clock.Advance(6 * time.Minute) }
+		})
 		run := rtRun()
-		run.HandedAt, run.DeadlineCode = rtT0.Format(time.RFC3339Nano), pl.CodeRunCeiling
+		run.RunDeadline = rtRunDeadline(5 * time.Minute)
 
 		res := h.run(t, run)
 
 		rtWantCode(t, res, pl.OutcomeFailed, pl.CodeRunCeiling)
-		if !strings.Contains(res.Failure.Message, "15m0s timeout ran out before its Job could be created") {
-			t.Errorf("failure %q does not say the timeout ran out before the step started", res.Failure.Message)
+		if !strings.Contains(res.Failure.Message, "ceiling") || !strings.Contains(res.Failure.Message, "never started") ||
+			!strings.Contains(res.Failure.Message, "free slot") {
+			t.Errorf("failure %q, want it to say the run's ceiling passed while the step waited for a free slot, so it never started",
+				res.Failure.Message)
+		}
+		if n := len(h.c.requestsFor(http.MethodPost, kubeJobs)); n != 1 {
+			t.Errorf("%d Job creates, want one: refused, after which the run had no time left", n)
 		}
 		if h.c.hasJob(testJobName) || h.c.hasSecret(testSecretName) {
 			t.Error("a step that never started left a Job, or the Secret holding its token")
@@ -3301,7 +3339,27 @@ func TestRunnerCountsTheWaitAgainstTheTimeout(t *testing.T) {
 		h.leftNoArchive(t)
 	})
 
-	t.Run("a deadline the wait shortened says so", func(t *testing.T) {
+	t.Run("a step that names no run deadline is not started", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		for _, deadline := range []string{"", "tomorrow"} {
+			run := rtRun()
+			run.RunDeadline = deadline
+
+			res := h.run(t, run)
+
+			rtWantCode(t, res, pl.OutcomeFailed, pl.CodeExecutorError)
+			if !strings.Contains(res.Failure.Message, "run deadline") {
+				t.Errorf("RunDeadline %q: failure %q, want it to say the step names no run deadline", deadline, res.Failure.Message)
+			}
+		}
+		if len(h.tokens.called()) != 0 || len(h.c.requestsFor(http.MethodPost, kubeJobs)) != 0 ||
+			len(h.c.requestsFor(http.MethodPost, kubeSecrets)) != 0 {
+			t.Errorf("tokens minted %q, %d Job and %d Secret creates; want none: a wait with no bound is never begun",
+				h.tokens.called(), len(h.c.requestsFor(http.MethodPost, kubeJobs)), len(h.c.requestsFor(http.MethodPost, kubeSecrets)))
+		}
+	})
+
+	t.Run("a deadline the run's ceiling shortened says so", func(t *testing.T) {
 		h := newRunnerHarness(t)
 		job := h.existingJob(t, rtRun(), nil)
 		job.Spec.ActiveDeadlineSeconds = ptrTo(int64(300))
@@ -3312,9 +3370,24 @@ func TestRunnerCountsTheWaitAgainstTheTimeout(t *testing.T) {
 
 		res := h.run(t, rtRun())
 
-		rtWantCode(t, res, pl.OutcomeFailed, pl.CodeStepTimeout)
-		if want := "within its deadline of 5m0s, what was left of its 15m0s timeout once it had waited 10m0s to start"; !strings.Contains(res.Failure.Message, want) {
+		rtWantCode(t, res, pl.OutcomeFailed, pl.CodeRunCeiling)
+		if want := "within its deadline of 5m0s, what was left of its run's ceiling when its Job was created, less than its own 15m0s timeout"; !strings.Contains(res.Failure.Message, want) {
 			t.Errorf("failure %q, want it to say %q", res.Failure.Message, want)
+		}
+	})
+
+	t.Run("a deadline that is the step's own timeout is the step's", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		h.c.putJob(h.existingJob(t, rtRun(), nil), &rtScript{states: []rtState{{job: JobStatus{
+			StartTime:  rtT0.Add(-15 * time.Minute),
+			Conditions: []JobCondition{{Type: "FailureTarget", Status: "True", Reason: "DeadlineExceeded"}},
+		}}}})
+
+		res := h.run(t, rtRun())
+
+		rtWantCode(t, res, pl.OutcomeFailed, pl.CodeStepTimeout)
+		if strings.Contains(res.Failure.Message, "ceiling") {
+			t.Errorf("failure %q blames the run's ceiling for the step's own timeout", res.Failure.Message)
 		}
 	})
 }
@@ -3638,10 +3711,8 @@ func TestRunnerFreshensACloneTokenThatAgedInTheQueue(t *testing.T) {
 	script := rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "done"))
 	script.tails = map[string]string{ContainerClone: "fetching with " + second + "\n" + rtCloneTail}
 	h.c.script(testJobName, script)
-	run := rtRun()
-	run.TimeoutSeconds = 3600 // time queued counts against it (ruling R31)
 
-	res := h.run(t, run)
+	res := h.run(t, rtRun())
 
 	if res.Status != pl.OutcomeSucceeded {
 		t.Fatalf("result = %+v (failure %+v), want success", res, res.Failure)
@@ -4555,19 +4626,23 @@ func TestAckDeletesJobAndSecret(t *testing.T) {
 	})
 }
 
-// TestStatusStates: the agent asks a replica where a step's Job stands.
+// TestStatusStates: the agent asks a replica where a step's Job stands -- and,
+// whenever the Job exists, when it was created, which is where the step's own
+// timeout runs from (ruling R31b).
 func TestStatusStates(t *testing.T) {
 	outcome := pl.StepResult{Status: pl.OutcomeFailed, ExitCode: 1, Where: pl.Where{Surface: "cluster", NodeID: rtOther, JobName: testJobName}}
+	// putJob's Jobs were created a minute before the runner's clock.
+	created := rtT0.Add(-time.Minute).Format(time.RFC3339)
 	for _, c := range []struct {
 		name   string
 		annots map[string]string // nil: no Job at all
 		want   StatusReply
 	}{
 		{"no Job is absent", nil, StatusReply{State: StateAbsent}},
-		{"a persisted outcome is finished, with it", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0), AnnotOutcome: mustJSON(t, outcome)}, StatusReply{State: StateFinished, Result: &outcome}},
-		{"a fresh claim is running, on its node", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0.Add(-10*time.Second))}, StatusReply{State: StateRunning, Runner: rtOther}},
-		{"a claim older than HeartbeatStale is stale, naming the node that went quiet", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0.Add(-46*time.Second))}, StatusReply{State: StateStale, Runner: rtOther}},
-		{"an unclaimed Job is stale", map[string]string{}, StatusReply{State: StateStale}},
+		{"a persisted outcome is finished, with it", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0), AnnotOutcome: mustJSON(t, outcome)}, StatusReply{State: StateFinished, Result: &outcome, JobCreatedAt: created}},
+		{"a fresh claim is running, on its node", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0.Add(-10*time.Second))}, StatusReply{State: StateRunning, Runner: rtOther, JobCreatedAt: created}},
+		{"a claim older than HeartbeatStale is stale, naming the node that went quiet", map[string]string{AnnotRunner: rtStamp(rtOther, rtT0.Add(-46*time.Second))}, StatusReply{State: StateStale, Runner: rtOther, JobCreatedAt: created}},
+		{"an unclaimed Job is stale", map[string]string{}, StatusReply{State: StateStale, JobCreatedAt: created}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newRunnerHarness(t)
@@ -4595,6 +4670,10 @@ func TestStatusStates(t *testing.T) {
 
 		if got.State != StateRunning {
 			t.Errorf("Status = %+v, want running: this replica holds the step, waiting for a slot", got)
+		}
+		if got.JobCreatedAt != "" {
+			t.Errorf("Status = %+v, want no creation time: a step waiting for a slot has no Job, and the agent "+
+				"waits on it until its run's ceiling rather than its own timeout", got)
 		}
 		if after := h.r.Status(context.Background(), StatusRequest{JobName: testJobName}); after.State != StateAbsent {
 			t.Errorf("Status after the step ended = %+v, want absent", after)
