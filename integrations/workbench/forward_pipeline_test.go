@@ -51,6 +51,12 @@ type fakePipelineRunner struct {
 	ackCode     string
 	cancelReply []byte
 	cancelCode  string
+
+	// statusHold, when set, holds every Status until it is closed or the
+	// call's context ends: a runner whose API server does not answer.
+	// statusEntered is told each Status that began.
+	statusHold    chan struct{}
+	statusEntered chan struct{}
 }
 
 // fakeStep is one RunStep in progress: the context the handler ran it under,
@@ -115,8 +121,20 @@ func (f *fakePipelineRunner) RunStep(ctx context.Context, argsJSON []byte) []byt
 	}
 }
 
-func (f *fakePipelineRunner) Status(_ context.Context, argsJSON []byte) ([]byte, string) {
+func (f *fakePipelineRunner) Status(ctx context.Context, argsJSON []byte) ([]byte, string) {
 	f.record(PipelineStatusAction, argsJSON)
+	f.mu.Lock()
+	hold, entered := f.statusHold, f.statusEntered
+	f.mu.Unlock()
+	if entered != nil {
+		entered <- struct{}{}
+	}
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-ctx.Done():
+		}
+	}
 	return f.statusReply, f.statusCode
 }
 
@@ -703,4 +721,78 @@ func TestForwardWatchedReturnsPeerLostWithoutCancel(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAHungStatusDoesNotHoldTheReceiveLoop (final review, M2): Status, Ack
+// and Cancel each read or write the API server, which the runner bounds at
+// ten seconds, and an API server that hangs holds each one that long. On the
+// peer stream's receive loop -- with every step the agent waits on asked
+// after every thirty seconds -- they would keep it blocked: heartbeats, event
+// forwards, a running step's cancel and every other forward waiting behind
+// them. So each is answered on a goroutine of its own, its reply serialized
+// onto the stream with the rest, and the loop reads on.
+//
+// Over a real stream, because the receive loop is the property: a status the
+// runner hangs in, then an ack that must be answered while the status still
+// hangs -- and the status, answered once its runner lets go.
+func TestAHungStatusDoesNotHoldTheReceiveLoop(t *testing.T) {
+	hop := newPipelineHop(t)
+	hold, entered := make(chan struct{}), make(chan struct{}, 4)
+	var release sync.Once
+	// Registered last, so it runs first: a status still held would hold the
+	// node server's stop open.
+	t.Cleanup(func() { release.Do(func() { close(hold) }) })
+	hop.runner.mu.Lock()
+	hop.runner.statusHold, hop.runner.statusEntered = hold, entered
+	hop.runner.mu.Unlock()
+
+	type answer struct {
+		resp *nodev1.WorkbenchForwardResponse
+		err  error
+	}
+	status := make(chan answer, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		resp, _, err := hop.router.Forward(ctx,
+			pipelineForward("status-hung", PipelineStatusAction, `{"jobName":"mp-1"}`, systemAuthority(t)), "")
+		status <- answer{resp, err}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the status never reached the runner")
+	}
+
+	ackCtx, cancelAck := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelAck()
+	ack, _, err := hop.router.Forward(ackCtx,
+		pipelineForward("ack-1", PipelineAckAction, `{"jobName":"mp-1"}`, systemAuthority(t)), "")
+	if err != nil {
+		t.Fatalf("the ack was not answered while a status hung (%v): the workbench's receive loop is blocked inside "+
+			"Status, so nothing else that replica's peer sends is read", err)
+	}
+	if ack.GetErrorCode() != "" || ack.GetRequestId() != "ack-1" {
+		t.Fatalf("the ack's answer = %+v, want the runner's ack, answered", ack)
+	}
+	select {
+	case got := <-status:
+		t.Fatalf("the status was answered (%+v, %v) while its runner still held it", got.resp, got.err)
+	default:
+	}
+	if n := trackedRequests(hop.handler); n != 1 {
+		t.Errorf("%d requests tracked while the status hangs, want it alone: a cancel must still reach it", n)
+	}
+
+	release.Do(func() { close(hold) })
+	select {
+	case got := <-status:
+		if got.err != nil || string(got.resp.GetPayloadJson()) != `{"state":"running"}` {
+			t.Fatalf("the released status = %+v, %v; want the runner's reply", got.resp, got.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the status was never answered once its runner let go")
+	}
+	awaitCondition(t, func() bool { return trackedRequests(hop.handler) == 0 },
+		"a status or an ack is still tracked after it was answered")
 }

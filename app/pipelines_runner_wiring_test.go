@@ -154,14 +154,16 @@ func TestTheWorkbenchRunsPipelineStepsOnlyWhenConfigured(t *testing.T) {
 }
 
 // pipelinesForward sends one pipeline action through the handler, as the
-// agent's executor does: under the engine's own SYSTEM assertion.
+// agent's executor does: under the engine's own SYSTEM assertion. The handler
+// answers a pipeline action on a goroutine of its own, off the stream's
+// receive loop, so its one reply is waited for.
 func pipelinesForward(t *testing.T, h *workbench.ForwardHandler, action, args string) *nodev1.WorkbenchForwardResponse {
 	t.Helper()
 	assertion, err := auth.ForwardedAuthorityForSystem("pipelines:agent-a", time.Now())
 	if err != nil {
 		t.Fatalf("ForwardedAuthorityForSystem: %v", err)
 	}
-	var replies []*nodev1.NodeServerMessage
+	replies := make(chan *nodev1.NodeServerMessage, 4)
 	h.HandleForwardedRequest(context.Background(), &nodev1.WorkbenchForwardRequest{
 		RequestId: "req-" + action,
 		RunId:     "run-1",
@@ -169,13 +171,19 @@ func pipelinesForward(t *testing.T, h *workbench.ForwardHandler, action, args st
 		ArgsJson:  []byte(args),
 		Authority: node.ForwardedAuthorityToProto(assertion, "agent-a", "agent"),
 	}, func(m *nodev1.NodeServerMessage) error {
-		replies = append(replies, m)
+		replies <- m
 		return nil
 	})
-	if len(replies) != 1 || replies[0].GetWorkbenchForwardResponse() == nil {
-		t.Fatalf("%s: the handler answered %v, want one WorkbenchForwardResponse", action, replies)
+	var reply *nodev1.NodeServerMessage
+	select {
+	case reply = <-replies:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s: the handler never answered", action)
 	}
-	return replies[0].GetWorkbenchForwardResponse()
+	if reply.GetWorkbenchForwardResponse() == nil {
+		t.Fatalf("%s: the handler answered %v, want a WorkbenchForwardResponse", action, reply)
+	}
+	return reply.GetWorkbenchForwardResponse()
 }
 
 // TestTheWorkbenchForwardHandlerAnswersThroughItsRunner. The handler a

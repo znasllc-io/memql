@@ -284,9 +284,9 @@ func (e *Executor) Cancel(ctx context.Context, runID string) error {
 }
 
 // deleteRunJobs forwards pipelineCancel until a replica confirms it. It is
-// retried because the cancel is answered synchronously on the replica's
-// receive loop, so a stream that drops mid-answer loses it; deleting by label
-// is idempotent, so a retry that repeats a delete costs nothing.
+// retried because a stream that drops mid-answer loses the replica's answer;
+// deleting by label is idempotent, so a retry that repeats a delete costs
+// nothing.
 func (e *Executor) deleteRunJobs(ctx context.Context, runID string) error {
 	args, err := json.Marshal(CancelRequest{RunID: runID})
 	if err != nil {

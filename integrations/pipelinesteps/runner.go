@@ -64,9 +64,10 @@ import (
 // would be lost, and with it the answer to a reply lost with this replica.
 
 const (
-	// quickCallTimeout bounds Status, Ack and CancelRun, which run on the
-	// workbench's receive loop (integrations/workbench): it reads nothing
-	// else while they do.
+	// quickCallTimeout bounds Status, Ack and CancelRun. The workbench
+	// answers each on a goroutine of its own, off its receive loop
+	// (integrations/workbench), so an API server that hangs costs one
+	// goroutine per call for at most this long, and the agent its answer.
 	quickCallTimeout = 10 * time.Second
 	// libraryPhaseTimeout bounds the owner's Library writes of one settled
 	// step -- its log and its artifacts -- under a context a late cancel

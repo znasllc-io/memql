@@ -58,12 +58,13 @@ const (
 	// on its own goroutine and never on the stream's receive loop.
 	PipelineStepAction = "pipelineStep"
 	// PipelineStatusAction asks after a step's Job: running, finished (with
-	// the outcome), absent or stale. Immediate.
+	// the outcome), absent or stale. Quick -- the runner bounds it at ten
+	// seconds -- and still answered off the receive loop, as are the next two.
 	PipelineStatusAction = "pipelineStatus"
 	// PipelineAckAction tells the runner its outcome was received, so the Job
-	// and its Secret can be deleted. Immediate.
+	// and its Secret can be deleted. Quick.
 	PipelineAckAction = "pipelineAck"
-	// PipelineCancelAction deletes every Job of a run. Immediate.
+	// PipelineCancelAction deletes every Job of a run. Quick.
 	PipelineCancelAction = "pipelineCancel"
 )
 
@@ -124,8 +125,8 @@ func NewForwardHandler(integ *Integration, logger *slog.Logger) *ForwardHandler 
 // provided callback.
 //
 // It is called on the peer stream's RECEIVE loop and returns before long work:
-// a pipeline step is started on its own goroutine, which sends the step's one
-// response when the step ends.
+// every pipeline action is answered on a goroutine of its own, which sends its
+// one response when it ends.
 func (h *ForwardHandler) HandleForwardedRequest(ctx context.Context, req *nodev1.WorkbenchForwardRequest, send func(*nodev1.NodeServerMessage) error) {
 	requestId := req.GetRequestId()
 
@@ -145,10 +146,11 @@ func (h *ForwardHandler) HandleForwardedRequest(ctx context.Context, req *nodev1
 	}
 
 	// THE PIPELINE ENTRIES (epic memql#5478) fork here, beside the build entry
-	// and for its reason, and BEFORE the request is tracked below: a step
-	// outlives this call, so it owns its tracking and its release, and a
-	// deferred release here would forget it the moment the receive loop moved
-	// on -- leaving a running step no cancel could reach.
+	// and for its reason, and BEFORE the request is tracked below: each one
+	// outlives this call, answered on a goroutine of its own, so it owns its
+	// tracking and its release, and a deferred release here would forget it
+	// the moment the receive loop moved on -- leaving a running step no cancel
+	// could reach.
 	if isPipelineAction(req.GetAction()) {
 		h.handleForwardedPipeline(actx, req, send)
 		return
@@ -303,8 +305,9 @@ func isPipelineAction(action string) bool {
 // secrets, and an ack or a cancel deletes Jobs. Checked before the runner, so
 // what a refused caller learns is the refusal, not this node's configuration.
 //
-// pipelineStep starts on its own goroutine and returns; the other three are
-// immediate and answered here.
+// Each starts on a goroutine of its own and this returns: pipelineStep for
+// as long as its Job lasts, the other three for at most the runner's bound on
+// them.
 func (h *ForwardHandler) handleForwardedPipeline(ctx context.Context, req *nodev1.WorkbenchForwardRequest, send func(*nodev1.NodeServerMessage) error) {
 	requestId := req.GetRequestId()
 	action := req.GetAction()
@@ -330,20 +333,43 @@ func (h *ForwardHandler) handleForwardedPipeline(ctx context.Context, req *nodev
 		h.startPipelineStep(ctx, runner, req, send)
 		return
 	}
+	h.startPipelineQuick(ctx, runner, req, send)
+}
 
+// startPipelineQuick answers a status, an ack or a cancel on a goroutine of
+// its own and returns at once (final review, M2).
+//
+// OFF THE RECEIVE LOOP for the step's reason, at a smaller scale: each reads or
+// writes the API server, which the runner bounds at ten seconds
+// (quickCallTimeout), and an API server that hangs holds every one of them
+// that long. The agent asks after every step it waits on every thirty seconds,
+// so answered inline they would keep this loop blocked -- heartbeats, event
+// forwards, a running step's cancel and every other forward waiting behind
+// them. The reply goes out through the same send, which the node server
+// serializes with every other send on the stream (serializeStream).
+//
+// TRACKED BEFORE IT STARTS, here on the receive loop, as a step is, so a cancel
+// read next finds it. It keeps the stream's cancellation, unlike a step: a
+// stream that ends leaves nobody to answer, and all three are reads or
+// idempotent deletes the agent asks for again.
+func (h *ForwardHandler) startPipelineQuick(ctx context.Context, runner PipelineRunner, req *nodev1.WorkbenchForwardRequest, send func(*nodev1.NodeServerMessage) error) {
+	requestId, action, args := req.GetRequestId(), req.GetAction(), req.GetArgsJson()
 	cctx, release := h.track(ctx, requestId)
-	defer release()
-	var reply []byte
-	var code string
-	switch action {
-	case PipelineStatusAction:
-		reply, code = runner.Status(cctx, req.GetArgsJson())
-	case PipelineAckAction:
-		code = runner.Ack(cctx, req.GetArgsJson())
-	case PipelineCancelAction:
-		reply, code = runner.CancelRun(cctx, req.GetArgsJson())
-	}
-	h.sendPipelineReply(send, requestId, action, reply, code)
+	go func() {
+		var reply []byte
+		var code string
+		switch action {
+		case PipelineStatusAction:
+			reply, code = runner.Status(cctx, args)
+		case PipelineAckAction:
+			code = runner.Ack(cctx, args)
+		case PipelineCancelAction:
+			reply, code = runner.CancelRun(cctx, args)
+		}
+		// Released before the reply goes out, as a step's is.
+		release()
+		h.sendPipelineReply(send, requestId, action, reply, code)
+	}()
 }
 
 // startPipelineStep starts a step on its own goroutine and returns at once.
