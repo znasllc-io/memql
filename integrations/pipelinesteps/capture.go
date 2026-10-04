@@ -739,13 +739,12 @@ func captureSplit(s string, limit int) []string {
 	return append(pieces, strings.Clone(s))
 }
 
-// captureMasker builds the replacer every line goes through, or nil when no
-// value is long enough to mask. Values are repaired the way lines are, so the
-// two can meet; a multi-line value contributes each of its lines too; and the
-// longest values come first, because strings.Replacer tries its pairs in
-// argument order at each position -- so where "pass" and "pass-and-more" both
-// match, the longer is masked whole rather than leaving "-and-more" behind.
-func captureMasker(secrets []string) *strings.Replacer {
+// captureMaskForms is every form of the secrets a line is masked for, longest
+// first: each value repaired the way lines are, so the two can meet, and a
+// multi-line value's lines too, since the capture sees one line at a time.
+// Values shorter than captureMaskMinBytes are not masked. The follower keeps
+// its cuts out of the same forms, so no piece it feeds holds part of one.
+func captureMaskForms(secrets []string) []string {
 	seen := map[string]bool{}
 	var values []string
 	add := func(v string) {
@@ -763,15 +762,25 @@ func captureMasker(secrets []string) *strings.Replacer {
 			}
 		}
 	}
-	if len(values) == 0 {
-		return nil
-	}
 	sort.Slice(values, func(i, j int) bool {
 		if len(values[i]) != len(values[j]) {
 			return len(values[i]) > len(values[j])
 		}
 		return values[i] < values[j]
 	})
+	return values
+}
+
+// captureMasker builds the replacer every line goes through, or nil when no
+// value is long enough to mask. The longest values come first, because
+// strings.Replacer tries its pairs in argument order at each position -- so
+// where "pass" and "pass-and-more" both match, the longer is masked whole
+// rather than leaving "-and-more" behind.
+func captureMasker(secrets []string) *strings.Replacer {
+	values := captureMaskForms(secrets)
+	if len(values) == 0 {
+		return nil
+	}
 	pairs := make([]string, 0, 2*len(values))
 	for _, v := range values {
 		pairs = append(pairs, v, captureMask)

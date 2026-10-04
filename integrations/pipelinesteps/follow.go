@@ -6,6 +6,7 @@ import (
 	"errors"
 	"hash/crc64"
 	"io"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -189,7 +190,7 @@ const (
 // follower). final says the step had ended when the stream was opened, so a
 // last line with no newline is all there is.
 func (f *follower) consume(r io.Reader, final bool) error {
-	lines := newLogLines(r, followLineMax)
+	lines := newLogLines(r, followLineMax, captureMaskForms(f.s.secrets))
 	opened := f.fed
 	var (
 		fate  lineFate
@@ -303,16 +304,21 @@ func (f *follower) fedLine(fate lineFate, at time.Time, print linePrint) {
 
 // logLines reads a stream as lines without holding more than max bytes of any
 // one: a longer line comes in pieces of at most max bytes, each cut where a
-// rune starts.
+// rune starts -- and never inside a secret (review finding 4). Each piece is
+// masked on its own, so a secret a cut fell inside would be masked in neither:
+// a piece that ends with the beginning of one of secrets is cut before it,
+// and the secret goes whole into the next piece (the cockpit's chunker holds
+// back the same way).
 type logLines struct {
-	br    *bufio.Reader
-	max   int
-	carry []byte
-	mid   bool // the last piece ended inside its line
+	br      *bufio.Reader
+	max     int
+	secrets []string // the capture's mask forms
+	carry   []byte
+	mid     bool // the last piece ended inside its line
 }
 
-func newLogLines(r io.Reader, max int) *logLines {
-	return &logLines{br: bufio.NewReaderSize(r, max), max: max}
+func newLogLines(r io.Reader, max int, secrets []string) *logLines {
+	return &logLines{br: bufio.NewReaderSize(r, max), max: max, secrets: secrets}
 }
 
 // next is the next piece of the stream, without its newline. first says it
@@ -333,7 +339,7 @@ func (l *logLines) next() (piece string, first, end bool, err error) {
 		}
 		return string(buf), first, true, nil
 	case errors.Is(err, bufio.ErrBufferFull):
-		cut := runeCut(buf, l.max)
+		cut := holdBack(buf, runeCut(buf, l.max), l.secrets)
 		l.carry = append([]byte(nil), buf[cut:]...)
 		l.mid = true
 		return string(buf[:cut]), first, false, nil
@@ -341,6 +347,27 @@ func (l *logLines) next() (piece string, first, end bool, err error) {
 		l.mid = false
 		return string(buf), first, false, err
 	}
+}
+
+// holdBack moves a cut in b back to before the earliest place where what
+// precedes the cut is the beginning -- a proper prefix -- of a secret, so no
+// secret straddles it. A secret starts where a rune does, so the cut stays on
+// a rune boundary. It never moves the cut to the start: a piece holds
+// something.
+func holdBack(b []byte, cut int, secrets []string) int {
+	longest := 0
+	for _, s := range secrets {
+		longest = max(longest, len(s))
+	}
+	for k := max(1, cut-longest+1); k < cut; k++ {
+		tail := b[k:cut]
+		for _, s := range secrets {
+			if len(tail) < len(s) && strings.HasPrefix(s, string(tail)) {
+				return k
+			}
+		}
+	}
+	return cut
 }
 
 // runeCut is where a piece of b of at most max bytes ends on a rune boundary:

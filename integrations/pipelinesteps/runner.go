@@ -369,6 +369,9 @@ type step struct {
 	// claimSent is the claim this Run last sent: the Job carrying exactly it
 	// is this Run's own claim, whatever answer was lost.
 	claimSent string
+	// secrets is what the capture masks: every piece the follower cuts a
+	// line into is cut outside them.
+	secrets []string
 	// adopted: this Run took over a Job another Run had claimed; adoptedAt
 	// is the cursor it was left at -- the store has every line up to it.
 	adopted   bool
@@ -817,16 +820,12 @@ func (s *step) ensureCapture() error {
 	if s.r.sink != nil {
 		sink = s.r.sink()
 	}
-	secrets := make([]string, 0, len(s.run.Secrets)+1)
-	for _, v := range s.run.Secrets {
-		secrets = append(secrets, v)
-	}
-	if s.token != "" {
-		secrets = append(secrets, s.token)
-	}
+	// The one list the capture masks and the follower keeps its cuts out
+	// of (secretValues, the fleet path's too).
+	s.secrets = secretValues(s.run, s.token)
 	o := CaptureOptions{
 		RunID: s.run.RunID, WorkRunID: s.run.WorkRunID, StepKey: s.run.StepKey,
-		Secrets:       secrets,
+		Secrets:       s.secrets,
 		StoreMaxLines: s.r.cfg.LogStoreMaxLines,
 		ArchiveMax:    s.r.cfg.ArchiveMaxBytes,
 		ArtifactMax:   s.r.cfg.ArtifactMaxBytes,

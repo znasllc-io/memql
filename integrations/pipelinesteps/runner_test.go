@@ -2121,6 +2121,62 @@ func TestRunnerKeepsTheKubeletsWordsOutOfTheStepsOutput(t *testing.T) {
 	}
 }
 
+// TestRunnerNeverCutsInsideASecret (review finding 4, Review Focus 1): an
+// endless line is fed in pieces, and each piece is masked on its own, so a
+// secret the cut fell inside would be masked in neither. The cut moves back
+// to before any part of a secret at a piece's end; the secret goes whole into
+// the next piece, and is masked there.
+func TestRunnerNeverCutsInsideASecret(t *testing.T) {
+	h := newRunnerHarness(t, func(c *Config) { c.ArchiveMaxBytes = 4 << 20 })
+	stamp := rtAt(1200).Format(time.RFC3339Nano) + " "
+	// The secret begins six bytes before the first cut, at a mebibyte.
+	line := stamp + strings.Repeat("a", followLineMax-len(stamp)-6) + plantedNPM + strings.Repeat("b", 1000)
+	h.c.script(testJobName, rtFinishingScript(testJobName, 0, line))
+
+	res := h.run(t, rtRun())
+
+	if res.Status != pl.OutcomeSucceeded {
+		t.Fatalf("result = %+v, want success", res)
+	}
+	archive := string(h.file(t, "tests-go-tests-2.log").Bytes)
+	store := strings.Join(h.sink.messages(), "\n")
+	for name, text := range map[string]string{"archive": archive, "store": store, "tail": res.LogTail} {
+		if strings.Contains(text, plantedNPM[:6]) || strings.Contains(text, plantedNPM[6:]) {
+			t.Errorf("the %s holds part of the secret: the cut split it, and neither piece was masked", name)
+		}
+	}
+	if !strings.Contains(archive, "***") {
+		t.Error("the archive has no mask at all: the secret was not masked anywhere")
+	}
+}
+
+// TestHoldBackNeverLeavesPartOfASecretAtACut: where holdBack moves a cut.
+func TestHoldBackNeverLeavesPartOfASecretAtACut(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		b       string
+		cut     int
+		secrets []string
+		want    int
+	}{
+		{"nothing to protect", "aaaaSECR", 8, nil, 8},
+		{"no secret near the cut", "aaaaxxxx", 8, []string{"SECRET"}, 8},
+		{"a whole secret ending at the cut stays", "aaSECRET", 8, []string{"SECRET"}, 8},
+		{"the beginning of a secret goes to the next piece", "aaaaSECR", 8, []string{"SECRET"}, 4},
+		{"one byte of it", "aaaaaaaS", 8, []string{"SECRET"}, 7},
+		{"the earliest of two prefixes", "aaabcabc", 8, []string{"abcabcX", "cX"}, 2},
+		// The whole piece begins the secret: no later cut helps, and a piece
+		// must hold something, so the cut stays.
+		{"never to the start", "ABCDEFGH", 8, []string{"ABCDEFGHIJ"}, 8},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := holdBack([]byte(c.b), c.cut, c.secrets); got != c.want {
+				t.Errorf("holdBack(%q, %d) = %d, want %d", c.b, c.cut, got, c.want)
+			}
+		})
+	}
+}
+
 // TestRunnerCutsAnEndlessLine (Review Focus 5): a step that prints one
 // enormous line reaches the archive in pieces of at most a mebibyte, nothing
 // of it lost, and the lines after it keep their own timestamps.
