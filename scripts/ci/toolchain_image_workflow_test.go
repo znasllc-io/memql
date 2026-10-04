@@ -18,12 +18,20 @@
 //
 //   - An automatic trigger publishes digests nothing pins, and invites
 //     swapping the digest pin for a floating tag.
-//   - GITHUB_TOKEN's `packages: write` works from ANY branch, so without the
-//     main-only refusal an unreviewed Dockerfile on a feature branch could
-//     publish under the package name memql-package.yaml pins.
+//   - Without the main-only refusal, a dispatch against another ref publishes
+//     that ref's Dockerfile, and nothing says so. The refusal guards against
+//     that accident; it is not the security boundary, because a dispatch runs
+//     the workflow file of the ref it names and a branch can drop the step.
+//     What makes a published digest trustworthy is its pin in
+//     memql-package.yaml, which lands through a reviewed pull request, and who
+//     holds write access to the package.
+//   - Without the immutability guard, every re-dispatch of a published version
+//     overwrites the tag; without the concurrency group, two dispatches of one
+//     version can both pass the guard before either pushes.
 //   - `packages: write` at workflow scope is inherited by every job added later.
 //   - A mutable action tag runs whatever the tag points at today, holding a
-//     registry-write token.
+//     registry-write token -- and so does a `${{ }}` expression interpolated
+//     into a `run:` script, the shape of a workflow injection.
 //   - Moving the smoke test after the push reads as tidying, and the workflow
 //     stays green on every run where the image happens to be fine.
 //   - Go and protoc are written down where the repository pins them and again
@@ -68,21 +76,27 @@ var toolchainAllowedActions = map[string]bool{
 
 var (
 	toolchainSHA40       = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	toolchainSHA256      = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	toolchainDigest      = regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
 	toolchainEnvRef      = regexp.MustCompile(`\$\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}`)
 	toolchainFromLine    = regexp.MustCompile(`(?mi)^FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?\s*$`)
 	toolchainLeadVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+(?:\.[0-9]+)?`)
+	// toolchainInspectsTheTag is the guard's question to the registry, in any
+	// of the ways a shell can spell the two variables.
+	toolchainInspectsTheTag = regexp.MustCompile(`imagetools\s+inspect\s+"?\$\{?IMAGE\}?:\$\{?VERSION\}?"?`)
 )
 
 type toolchainWorkflow struct {
 	On          any                     `yaml:"on"`
 	Permissions map[string]string       `yaml:"permissions"`
 	Env         map[string]any          `yaml:"env"`
+	Concurrency any                     `yaml:"concurrency"`
 	Jobs        map[string]toolchainJob `yaml:"jobs"`
 }
 
 type toolchainJob struct {
 	Permissions map[string]string `yaml:"permissions"`
+	Concurrency any               `yaml:"concurrency"`
 	Steps       []toolchainStep   `yaml:"steps"`
 }
 
@@ -242,9 +256,11 @@ func toolchainMainOnlyProblems(wf toolchainWorkflow) []string {
 		!strings.Contains(first.Run, "refs/heads/main") ||
 		!strings.Contains(first.Run, "exit 1") {
 		return []string{fmt.Sprintf("the pushing job's first step (%q) does not refuse a ref other than "+
-			"refs/heads/main. A dispatch can run from any branch, and GITHUB_TOKEN's `packages: write` "+
-			"works from all of them, so this refusal is the only thing that keeps an unreviewed "+
-			"Dockerfile from publishing under the pinned package name", first.Name)}
+			"refs/heads/main. A dispatch can name any branch, and GITHUB_TOKEN's `packages: write` works "+
+			"from all of them, so without the refusal a routine dispatch against the wrong ref publishes "+
+			"that ref's Dockerfile under the package name memql-package.yaml pins. (It guards against "+
+			"that accident; the pin, landing through a reviewed pull request, is what keeps an "+
+			"unreviewed image out of a pipeline.)", first.Name)}
 	}
 	return nil
 }
@@ -457,6 +473,105 @@ func toolchainSummaryProblems(wf toolchainWorkflow) []string {
 		"pin it in memql-package.yaml into $GITHUB_STEP_SUMMARY; the digest is this workflow's product"}
 }
 
+// toolchainImmutabilityProblems: a published tag is never silently replaced.
+// Before the push a step asks the registry whether ${IMAGE}:${VERSION} exists
+// and exits non-zero when it does, skipped only through the dispatch's
+// allow_overwrite input; and dispatches of one version are serialized, so two
+// cannot both pass that question before either pushes.
+func toolchainImmutabilityProblems(wf toolchainWorkflow) []string {
+	job, ok := toolchainPushJob(wf)
+	if !ok {
+		return []string{"no job holds `packages: write`, so there is no push to guard"}
+	}
+	pushAt, problem := toolchainPushIndex(job)
+	if problem != "" {
+		return []string{problem}
+	}
+	var out []string
+	guardAt := -1
+	for i, s := range job.Steps {
+		if toolchainInspectsTheTag.MatchString(s.Run) {
+			guardAt = i
+			break
+		}
+	}
+	switch {
+	case guardAt < 0:
+		out = append(out, "no step asks the registry whether ${IMAGE}:${VERSION} already exists "+
+			"(`docker buildx imagetools inspect`), so the immutability guard is gone: every re-dispatch "+
+			"of a published version would silently overwrite a tag a pin may already name")
+	case guardAt > pushAt:
+		out = append(out, fmt.Sprintf("the immutability guard (%q) runs AFTER the push; by then the tag it "+
+			"exists to protect has already been overwritten", job.Steps[guardAt].Name))
+	default:
+		guard := job.Steps[guardAt]
+		if !strings.Contains(guard.If, "allow_overwrite") {
+			out = append(out, fmt.Sprintf("the immutability guard's `if:` (%q) does not name the "+
+				"allow_overwrite input. That input is the one declared way past the guard: a guard with no "+
+				"condition makes it a lie, and any other condition skips the guard for a reason nobody "+
+				"declared", guard.If))
+		}
+		if !strings.Contains(guard.Run, "exit 1") {
+			out = append(out, "the immutability guard never exits non-zero, so finding the tag stops nothing")
+		}
+	}
+
+	// Concurrency may sit on the workflow or on the pushing job; both serialize
+	// the push. A string is a bare group name, which never cancels.
+	conc := wf.Concurrency
+	if conc == nil {
+		conc = job.Concurrency
+	}
+	group, cancel := "", any(nil)
+	switch c := conc.(type) {
+	case string:
+		group = c
+	case map[string]any:
+		group, _ = c["group"].(string)
+		cancel = c["cancel-in-progress"]
+	}
+	switch {
+	case conc == nil:
+		out = append(out, "the workflow declares no `concurrency:` group, so two dispatches of one "+
+			"version can both pass the immutability guard before either pushes")
+	case !strings.Contains(group, "inputs.version"):
+		out = append(out, fmt.Sprintf("the `concurrency:` group %q is not keyed on the version input; it "+
+			"must serialize dispatches of the SAME version, the ones that race for one tag", group))
+	}
+	if cancel != nil && cancel != false {
+		out = append(out, fmt.Sprintf("`cancel-in-progress` is %v; it must be false. A second dispatch "+
+			"should wait for the first and then meet the tag it pushed, not cancel a build mid-push", cancel))
+	}
+	return out
+}
+
+// toolchainRunScriptProblems: no `run:` script, in any job, interpolates a
+// `${{ }}` expression. Values reach a script through `env:`; an expression
+// pasted into the script text is the shape of a workflow injection, and this
+// workflow's job holds a registry-write token.
+func toolchainRunScriptProblems(wf toolchainWorkflow) []string {
+	var out []string
+	checked := 0
+	for _, name := range SortedKeys(wf.Jobs) {
+		for _, s := range wf.Jobs[name].Steps {
+			if s.Run == "" {
+				continue
+			}
+			checked++
+			if strings.Contains(s.Run, "${{") {
+				out = append(out, fmt.Sprintf("job %q step %q interpolates a `${{ }}` expression into its "+
+					"`run:` script. Pass the value through the step's `env:` and read it as a shell variable: "+
+					"an interpolated expression is spliced into the script text before the shell parses it",
+					name, s.Name))
+			}
+		}
+	}
+	if checked == 0 {
+		out = append(out, "the workflow has no `run:` step at all; this guard would pass vacuously")
+	}
+	return out
+}
+
 // toolchainDockerfileProblems: every base is pinned by digest, the versions
 // are the repository's, the protoc download is verified, and the image runs as
 // a numeric non-root user.
@@ -531,6 +646,21 @@ func toolchainDockerfileProblems(dockerfile, goWork, protoGen string) []string {
 		out = append(out, "the protoc download is not checked against a pinned SHA-256 (`sha256sum -c`); "+
 			"a fetched binary with no checksum is whatever the URL served that day")
 	}
+	// `sha256sum -c` is only as good as what it is fed. Each architecture's zip
+	// has its own digest, so both are pinned, each a SHA-256, and never equal.
+	sums := map[string]string{}
+	for _, arch := range []string{"AMD64", "ARM64"} {
+		name := "PROTOC_SHA256_" + arch
+		sums[arch] = first(`(?m)^ARG `+name+`=(\S*)\s*$`, dockerfile)
+		if !toolchainSHA256.MatchString(sums[arch]) {
+			out = append(out, fmt.Sprintf("ARG %s is %q; it must be the 64-hex SHA-256 of that architecture's "+
+				"protoc zip, or the download it checks is checked against nothing", name, sums[arch]))
+		}
+	}
+	if sums["AMD64"] != "" && sums["AMD64"] == sums["ARM64"] {
+		out = append(out, "ARG PROTOC_SHA256_AMD64 and ARG PROTOC_SHA256_ARM64 are the same value; each "+
+			"architecture's zip has its own digest, so one of them is a copy that verifies the wrong file")
+	}
 
 	users := regexp.MustCompile(`(?m)^USER\s+(\S+)\s*$`).FindAllStringSubmatch(dockerfile, -1)
 	if len(users) == 0 {
@@ -575,6 +705,14 @@ func TestToolchainImageSmokeTestGatesThePush(t *testing.T) {
 
 func TestToolchainImageSummaryNamesTheDigestToPin(t *testing.T) {
 	toolchainReport(t, toolchainSummaryProblems(toolchainLoad(t)))
+}
+
+func TestToolchainImageWorkflowNeverOverwritesATag(t *testing.T) {
+	toolchainReport(t, toolchainImmutabilityProblems(toolchainLoad(t)))
+}
+
+func TestToolchainImageWorkflowInterpolatesNothingIntoAScript(t *testing.T) {
+	toolchainReport(t, toolchainRunScriptProblems(toolchainLoad(t)))
 }
 
 func TestToolchainImageVersionsMatchTheRepositoryPins(t *testing.T) {
@@ -629,6 +767,19 @@ func toolchainDockerfileMutations(t *testing.T) {
 		{"an unverified download", "`sha256sum -c`", func(s string) string {
 			return strings.ReplaceAll(s, "sha256sum -c", "true")
 		}},
+		{"a protoc checksum missing", `ARG PROTOC_SHA256_ARM64 is ""`, func(s string) string {
+			return regexp.MustCompile(`(?m)^ARG PROTOC_SHA256_ARM64=\S+\n`).ReplaceAllString(s, "")
+		}},
+		{"a protoc checksum that is not a SHA-256", "ARG PROTOC_SHA256_AMD64 is", func(s string) string {
+			return regexp.MustCompile(`(?m)^(ARG PROTOC_SHA256_AMD64=[0-9a-f]{8})[0-9a-f]+`).ReplaceAllString(s, "$1")
+		}},
+		{"the two protoc checksums equal", "are the same value", func(s string) string {
+			amd := regexp.MustCompile(`(?m)^ARG PROTOC_SHA256_AMD64=(\S+)`).FindStringSubmatch(s)
+			if amd == nil {
+				return s // anchor gone: the harness reports a mutation that changed nothing
+			}
+			return regexp.MustCompile(`(?m)^ARG PROTOC_SHA256_ARM64=\S+`).ReplaceAllString(s, "ARG PROTOC_SHA256_ARM64="+amd[1])
+		}},
 		{"a root user", "NUMERIC uid 1000", func(s string) string {
 			return regexp.MustCompile(`(?m)^USER\s+\S+\s*$`).ReplaceAllString(s, "USER root")
 		}},
@@ -659,8 +810,27 @@ func toolchainWorkflowMutations(t *testing.T) {
 		t.Fatal("the mutation's anchor step is gone from the workflow; retarget the mutation")
 		return -1
 	}
+	// moveToEnd moves the step a predicate finds to the end of the job, past the push.
+	moveToEnd := func(t *testing.T, job *toolchainJob, pred func(toolchainStep) bool) {
+		t.Helper()
+		at := stepAt(t, *job, pred)
+		moved := job.Steps[at]
+		job.Steps = append(job.Steps[:at:at], job.Steps[at+1:]...)
+		job.Steps = append(job.Steps, moved)
+	}
+	// editRun rewrites part of one step's script, and fails when that changed nothing.
+	editRun := func(t *testing.T, job *toolchainJob, pred func(toolchainStep) bool, old, replacement string) {
+		t.Helper()
+		at := stepAt(t, *job, pred)
+		edited := strings.ReplaceAll(job.Steps[at].Run, old, replacement)
+		if edited == job.Steps[at].Run {
+			t.Fatalf("the mutation's anchor %q is gone from step %q; retarget the mutation", old, job.Steps[at].Name)
+		}
+		job.Steps[at].Run = edited
+	}
 	isSmoke := func(s toolchainStep) bool { return strings.Contains(s.Run, toolchainSmokeScript) }
 	isPush := func(s toolchainStep) bool { return s.publishes() }
+	isGuard := func(s toolchainStep) bool { return toolchainInspectsTheTag.MatchString(s.Run) }
 	isTestedBuild := func(s toolchainStep) bool {
 		return s.action() == "docker/build-push-action" && s.with("push") == "false"
 	}
@@ -714,13 +884,75 @@ func toolchainWorkflowMutations(t *testing.T) {
 		},
 		{
 			name:  "the smoke test moved after the push",
-			want:  "AFTER the push",
+			want:  "the smoke test runs AFTER the push",
 			check: toolchainPushOrderProblems,
 			mutate: func(t *testing.T, job *toolchainJob) {
-				smoke := stepAt(t, *job, isSmoke)
-				moved := job.Steps[smoke]
-				job.Steps = append(job.Steps[:smoke:smoke], job.Steps[smoke+1:]...)
-				job.Steps = append(job.Steps, moved)
+				moveToEnd(t, job, isSmoke)
+			},
+		},
+		{
+			name:  "no immutability guard",
+			want:  "the immutability guard is gone",
+			check: toolchainImmutabilityProblems,
+			mutate: func(t *testing.T, job *toolchainJob) {
+				at := stepAt(t, *job, isGuard)
+				job.Steps = append(job.Steps[:at:at], job.Steps[at+1:]...)
+			},
+		},
+		{
+			name:  "the immutability guard moved after the push",
+			want:  "runs AFTER the push; by then the tag",
+			check: toolchainImmutabilityProblems,
+			mutate: func(t *testing.T, job *toolchainJob) {
+				moveToEnd(t, job, isGuard)
+			},
+		},
+		{
+			name:  "the immutability guard's if dropped",
+			want:  "does not name the allow_overwrite input",
+			check: toolchainImmutabilityProblems,
+			mutate: func(t *testing.T, job *toolchainJob) {
+				job.Steps[stepAt(t, *job, isGuard)].If = ""
+			},
+		},
+		{
+			name:  "the immutability guard never fails",
+			want:  "never exits non-zero",
+			check: toolchainImmutabilityProblems,
+			mutate: func(t *testing.T, job *toolchainJob) {
+				editRun(t, job, isGuard, "exit 1", "true")
+			},
+		},
+		{
+			name:  "no concurrency group",
+			want:  "declares no `concurrency:` group",
+			check: toolchainImmutabilityProblems,
+			text: func(s string) string {
+				return regexp.MustCompile(`(?m)^concurrency:\n(?:  .*\n)+`).ReplaceAllString(s, "")
+			},
+		},
+		{
+			name:  "a concurrency group not keyed on the version",
+			want:  "is not keyed on the version input",
+			check: toolchainImmutabilityProblems,
+			text: func(s string) string {
+				return strings.Replace(s, "group: build-toolchain-image-${{ inputs.version }}", "group: build-toolchain-image", 1)
+			},
+		},
+		{
+			name:  "a concurrency group that cancels",
+			want:  "`cancel-in-progress` is true",
+			check: toolchainImmutabilityProblems,
+			text: func(s string) string {
+				return strings.Replace(s, "cancel-in-progress: false", "cancel-in-progress: true", 1)
+			},
+		},
+		{
+			name:  "an expression pasted into a run",
+			want:  "interpolates a `${{ }}` expression",
+			check: toolchainRunScriptProblems,
+			mutate: func(t *testing.T, job *toolchainJob) {
+				editRun(t, job, isGuard, `"${IMAGE}:${VERSION}"`, `"${IMAGE}:${{ inputs.version }}"`)
 			},
 		},
 		{

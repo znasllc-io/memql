@@ -18,10 +18,19 @@ name: build-toolchain-image
 #     here needs Azure, and the Job that pulls the image names no pull secret.
 #   - The package must be PUBLIC before anyone pins it (see the summary).
 #
-# MAIN ONLY. A workflow_dispatch can run from any branch, and GITHUB_TOKEN's
-# `packages: write` works from every one of them, so the first step refuses
-# any ref but main. Every published digest is then built from source that
-# reached main through a pull request.
+# MAIN ONLY. The first step refuses a dispatch against any ref but main, so a
+# routine dispatch cannot publish a feature branch's Dockerfile by mistake.
+# That is a guard against accident, not the security boundary: a dispatch runs
+# the workflow file of the ref it names, so a branch can drop the step. What
+# makes a published digest trustworthy is that nothing runs it until
+# memql-package.yaml pins it, through a reviewed pull request, and who holds
+# write access to the package.
+#
+# ONE TAG, ONE IMAGE. A published version is never silently replaced. Before
+# the push, the immutability guard asks the registry whether the tag exists and
+# refuses if it does, unless the dispatch sets allow_overwrite; and the
+# `concurrency:` group below runs two dispatches of one version one after the
+# other, so the second's guard sees the first's push instead of racing it.
 #
 # THE SMOKE TEST GATES THE PUSH. The image is built and LOADED, exercised by
 # deploy/toolchain-image/smoke-test.sh, and only then pushed. A broken
@@ -34,7 +43,8 @@ name: build-toolchain-image
 #
 # scripts/ci/toolchain_image_workflow_test.go holds the trigger, the main-only
 # refusal, the job-scoped write, the pinned actions, the push target, the
-# smoke-before-push order and the digest summary.
+# immutability guard and its concurrency group, the smoke-before-push order,
+# the digest summary, and that no `run:` interpolates a `${{ }}` expression.
 
 on:
   workflow_dispatch:
@@ -58,6 +68,13 @@ env:
   IMAGE: ghcr.io/znasllc-io/memql-toolchain
   CANDIDATE: memql-toolchain:candidate
 
+# Keyed on the version, and never cancelling: a second dispatch of one version
+# waits for the first to finish, then its immutability guard finds the tag the
+# first pushed. Without this both could pass the guard before either pushed.
+concurrency:
+  group: build-toolchain-image-${{ inputs.version }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: build memql-toolchain
@@ -71,7 +88,8 @@ jobs:
       packages: write # push to GHCR
     steps:
       # Dispatch inputs reach the shell through `env:`, never through a `${{ }}`
-      # interpolated into a script body -- the shape of a workflow injection.
+      # interpolated into a script body -- the shape of a workflow injection,
+      # in a job that holds a registry-write token.
       - name: Check the dispatch
         env:
           REF: ${{ github.ref }}
@@ -96,18 +114,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # inspect succeeding means the tag exists: refuse. It failing is the
+      # expected answer for a new tag, but an auth or network error fails it
+      # too and would let a re-push through, so what it said is shown on the
+      # one line of a notice (a line break could start a workflow command).
       - name: Immutability guard
         if: ${{ !inputs.allow_overwrite }}
         env:
           VERSION: ${{ inputs.version }}
         run: |
-          if docker buildx imagetools inspect "${IMAGE}:${VERSION}" >/dev/null 2>&1; then
+          if out="$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" 2>&1)"; then
             echo "::error::${IMAGE}:${VERSION} already exists -- tags are immutable. Bump version or re-run with allow_overwrite=true." >&2
             exit 1
           fi
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+          echo "::notice::${IMAGE}:${VERSION} is not published yet; imagetools inspect said: $(printf '%s' "$out" | tr '\r\n' '  ')"
 
       # Built and LOADED, not pushed. The push happens below, only after the
       # smoke test passes.
@@ -125,8 +148,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=memql-toolchain
 
       # Reads the Go and protoc versions to expect from go.work and
-      # scripts/dev/proto-gen.sh in this checkout, so it asserts the image
-      # carries the repository's pins rather than a copy of them.
+      # scripts/dev/proto-gen.sh in this checkout, and Node's major from the
+      # image's own Dockerfile, so it asserts the image carries the declared
+      # versions rather than a copy of them.
       - name: Smoke test
         run: ./deploy/toolchain-image/smoke-test.sh "$CANDIDATE"
 

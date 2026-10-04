@@ -18,6 +18,11 @@
 #      pins them (go.work's toolchain line, scripts/dev/proto-gen.sh's
 #      PROTOC_VERSION) rather than from a third copy here. A pinned image
 #      carrying another Go would test the repository on a Go nothing else runs.
+#      Node's MAJOR is the one this image's Dockerfile declares
+#      (`FROM node:<major>-...`): no file pins Node repository-wide (the
+#      packages accept >=20, ci.yml uses 20 and 22), so the declaration is the
+#      source, and the check proves the image runs what it says, not Debian's
+#      Node 18 or a copy that went wrong.
 #   3. Go compiles and protoc resolves the well-known types this repository's
 #      protos import. A version string proves the binary starts; these prove
 #      the toolchain is whole (GOROOT, protoc's include directory).
@@ -69,6 +74,13 @@ function pinned_protoc() {
 	printf '%s' "$v"
 }
 
+function declared_node_major() {
+	local v
+	v="$(awk '/^FROM node:[0-9]/ { sub(/^FROM node:/, ""); sub(/[^0-9].*$/, ""); print; exit }' "${REPO_ROOT}/deploy/toolchain-image/Dockerfile")"
+	[[ -n "$v" ]] || fail "could not read a FROM node:<major> line from ${REPO_ROOT}/deploy/toolchain-image/Dockerfile"
+	printf '%s' "$v"
+}
+
 function assert_tools_run() {
 	info "(1) every tool a step reaches for runs..."
 	in_image <<'SCRIPT' || fail "a tool a pipeline step needs is missing or broken (see above)"
@@ -86,11 +98,12 @@ SCRIPT
 }
 
 function assert_pinned_versions() {
-	local want_go want_protoc
+	local want_go want_protoc want_node
 	want_go="$(pinned_go)"
 	want_protoc="$(pinned_protoc)"
-	info "(2) Go is ${want_go} (go.work) and protoc is ${want_protoc} (scripts/dev/proto-gen.sh)..."
-	in_image -e "WANT_GO=${want_go}" -e "WANT_PROTOC=${want_protoc}" <<'SCRIPT' || fail "the image does not carry the toolchain this repository pins"
+	want_node="$(declared_node_major)"
+	info "(2) Go is ${want_go} (go.work), protoc ${want_protoc} (scripts/dev/proto-gen.sh), Node ${want_node}.x (its Dockerfile)..."
+	in_image -e "WANT_GO=${want_go}" -e "WANT_PROTOC=${want_protoc}" -e "WANT_NODE_MAJOR=${want_node}" <<'SCRIPT' || fail "the image does not carry the toolchain this repository pins"
 set -euo pipefail
 # GOTOOLCHAIN=local: report the Go INSTALLED here, never one fetched on demand.
 got_go="$(GOTOOLCHAIN=local go env GOVERSION)"
@@ -103,7 +116,14 @@ if [[ "$got_protoc" != "libprotoc ${WANT_PROTOC}" ]]; then
 	echo "ERROR: the image's protoc says '${got_protoc}'; scripts/dev/proto-gen.sh pins ${WANT_PROTOC}" >&2
 	exit 1
 fi
-echo "  go ${got_go#go}, protoc ${got_protoc#libprotoc }"
+got_node="$(node --version)"
+got_node_major="${got_node#v}"
+got_node_major="${got_node_major%%.*}"
+if [[ "$got_node_major" != "$WANT_NODE_MAJOR" ]]; then
+	echo "ERROR: the image's Node is ${got_node}; its Dockerfile declares node ${WANT_NODE_MAJOR}" >&2
+	exit 1
+fi
+echo "  go ${got_go#go}, protoc ${got_protoc#libprotoc }, node ${got_node#v}"
 SCRIPT
 }
 
