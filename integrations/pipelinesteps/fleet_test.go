@@ -957,6 +957,46 @@ func TestFleetStepFilesWhatACancelledStepCaptured(t *testing.T) {
 		}
 	})
 
+	// The run's cancel is a cancelled step's answer (Executor.Cancel's
+	// contract), so artifacts too large to keep are a note beside it, never a
+	// failure that turns it into a failed step.
+	for _, c := range []struct{ name, out string }{
+		{"cancelled as the machine answered its artifacts too large, it stays cancelled",
+			`{"exitCode":0,"durationMs":10,"artifactsTooLarge":true}`},
+		{"cancelled as the machine answered an archive past the cap, it stays cancelled",
+			`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"` + strings.Repeat("A", 90000) + `"}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancelCause(context.Background())
+			defer cancel(nil)
+			d := &fakeDispatcher{answer: func(_ context.Context, req worker.Request) (worker.Result, error) {
+				req.OnStreamChunk(chunk("stdout", "PASS\n"))
+				cancel(errRunCancelled) // lands as the machine sends its answer
+				return worker.Result{OK: true, WorkerId: "reg-1", NodeId: "agent-b", OutputJSON: c.out}, nil
+			}}
+			f, lib, _, _ := newTestFleet(t, d)
+			f.cfg.ArtifactMaxBytes = 4
+			req := fleetReq()
+			req.Step.Artifacts = []string{"coverage.out"}
+
+			res := fleetCancelled(t, f, req, ctx)
+
+			var said []string
+			for _, n := range res.Notes {
+				if n.Code == pl.CodeArtifactTooLarge {
+					said = append(said, n.Message)
+				}
+			}
+			if len(said) != 1 || res.ExitCode != -1 {
+				t.Errorf("exit %d, notes %+v; want the cancel's -1 and one %s note saying the artifacts were not kept",
+					res.ExitCode, res.Notes, pl.CodeArtifactTooLarge)
+			}
+			if _, ok := lib.named(logFileName(req.StepKey)); !ok || res.LogFileID == "" {
+				t.Errorf("Library = %+v, want the cancelled step's log", lib.files)
+			}
+		})
+	}
+
 	t.Run("a Library that does not answer costs the step its files, within the window", func(t *testing.T) {
 		d := &fakeDispatcher{answer: func(_ context.Context, req worker.Request) (worker.Result, error) {
 			req.OnStreamChunk(chunk("stdout", "ok\n"))

@@ -417,9 +417,12 @@ func (f stepFiles) noteMissing(notes *noteList, paths []string) {
 // artifactFact records what became of the artifacts by the class of its
 // code: a note changes nothing; a failure-class code fails the step even when
 // its command succeeded -- the command's exit code stays as it was, and an
-// earlier typed failure keeps its place.
+// earlier typed failure keeps its place. A CANCELLED step stays cancelled
+// whatever the fact: the run's cancel is its answer (Executor.Cancel's
+// contract), so the fact is a note beside it. Only the fleet path files a
+// cancelled step's artifacts; the runner's cancelled path files its log alone.
 func (f stepFiles) artifactFact(res *pl.StepResult, notes *noteList, fact pl.Failure) {
-	if class, _ := pl.ClassOf(fact.Code); class != pl.ClassFailure {
+	if class, _ := pl.ClassOf(fact.Code); class != pl.ClassFailure || res.Status == pl.OutcomeCancelled {
 		notes.add(fact.Code, fact.Message)
 		return
 	}
