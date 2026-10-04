@@ -97,3 +97,16 @@ func RunLabelValue(runID string) string {
 	sum := namesEngine.MustFromMap(map[string]any{"runId": runID})
 	return "r-" + string(sum)[:24]
 }
+
+// CacheSubPath is the owner's directory of the cache claim, "owners/" plus 24
+// hex of the content address of the owner's id (ruling R15). The step mounts
+// this directory as /cache, never the claim's root, so every step of one owner
+// shares a cache and two owners never do: a step can rewrite any entry of the
+// cache it is given, so a cache shared across owners would let one owner's
+// step poison another's builds. Hashed, so no owner id can name a path of its
+// own choosing; derived, so every replica and every version mounts the same
+// directory.
+func CacheSubPath(ownerUserID string) string {
+	sum := namesEngine.MustFromMap(map[string]any{"ownerUserId": ownerUserID})
+	return "owners/" + string(sum)[:24]
+}

@@ -318,6 +318,86 @@ func TestCloneScriptChecksOutTheSHAAndNothingAfterIt(t *testing.T) {
 	}
 }
 
+// TestCloneScriptPreparesTheOwnersCacheDirectory (ruling R15): the step mounts
+// only its owner's directory of the cache claim, and kubelet creates a missing
+// subPath root-owned with the claim ROOT's mode -- so on a claim whose root is
+// not world-writable, a non-root step would get a cache it cannot write. The
+// clone runs first and mounts the claim's root, so it creates the owner's
+// directory itself, world-writable, and opens up one created narrower before.
+func TestCloneScriptPreparesTheOwnersCacheDirectory(t *testing.T) {
+	requireTools(t, "git")
+	src := t.TempDir()
+	git(t, src, "init", "-q", ".")
+	git(t, src, "commit", "-q", "--allow-empty", "-m", "one")
+	sha := git(t, src, "rev-parse", "HEAD")
+	clone := func(t *testing.T, ownerCache string) shellRun {
+		env := append(gitEnv(t), "CLONE_URL=file://"+src, "SHA="+sha)
+		if ownerCache != "" {
+			env = append(env, "OWNER_CACHE="+ownerCache)
+		}
+		return runScript(t, cloneScript, t.TempDir(), env)
+	}
+	modeOf := func(t *testing.T, path string) os.FileMode {
+		t.Helper()
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		return info.Mode().Perm()
+	}
+
+	t.Run("a missing owner directory is created world-writable", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "owners", "0dde18ce172fff450b32bf41")
+		if res := clone(t, dir); res.code != 0 {
+			t.Fatalf("clone exited %d\nstderr %s", res.code, res.stderr)
+		}
+		if got := modeOf(t, dir); got != 0o777 {
+			t.Errorf("the owner's cache directory has mode %o, want 777: a non-root step could not write it", got)
+		}
+	})
+
+	t.Run("an owner directory made narrower before is opened up", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "owners", "0dde18ce172fff450b32bf41")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if res := clone(t, dir); res.code != 0 {
+			t.Fatalf("clone exited %d\nstderr %s", res.code, res.stderr)
+		}
+		if got := modeOf(t, dir); got != 0o777 {
+			t.Errorf("the existing owner directory kept mode %o, want 777", got)
+		}
+	})
+
+	t.Run("a step with no cache prepares nothing and still clones", func(t *testing.T) {
+		if res := clone(t, ""); res.code != 0 {
+			t.Fatalf("clone without a cache exited %d: the preparation must be skipped, not attempted\nstderr %s", res.code, res.stderr)
+		}
+	})
+
+	t.Run("a directory that cannot be prepared fails the clone, naming it", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("running as root, which writes through any mode: nothing here can refuse it")
+		}
+		root := t.TempDir()
+		if err := os.Chmod(root, 0o555); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+		dir := filepath.Join(root, "owners", "0dde18ce172fff450b32bf41")
+		res := clone(t, dir)
+		if res.code == 0 {
+			t.Fatal("the clone succeeded with a cache directory it could not create; the step would meet an unwritable cache instead")
+		}
+		if !strings.Contains(res.stderr, dir) {
+			t.Errorf("stderr = %q, want a line naming %s", res.stderr, dir)
+		}
+	})
+}
+
 // TestCloneScriptSendsTheTokenAsBasicAuthAndNeverPrintsIt: GitHub accepts an
 // installation token as the password of user x-access-token. The header is
 // what a private clone stands on, and the token must not reach the log the

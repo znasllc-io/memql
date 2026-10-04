@@ -42,6 +42,13 @@ exit $rc`
 // cloneScript is the clone init container's entrypoint: a shallow fetch of
 // exactly one commit, by its id, into /workspace, world-writable (see above).
 //
+// When the step declares caches, OWNER_CACHE names the owner's directory of
+// the cache claim, mounted here by its root (ruling R15). The script creates it
+// world-writable, or opens up one created narrower before, so the step --
+// which mounts only that directory, as whatever uid its image runs as -- can
+// write it. A directory that cannot be prepared fails the clone, naming it,
+// rather than handing the step a cache it cannot write.
+//
 // The token, when there is one, goes to GitHub as the password of user
 // x-access-token in an http.extraheader for this one command, so it is never
 // written to the repository's config, never part of a URL a git error would
@@ -50,6 +57,9 @@ exit $rc`
 // and a clone URL that is not plain https.
 const cloneScript = `umask 0000
 set -eu
+if [ -n "${OWNER_CACHE:-}" ]; then
+  mkdir -p "$OWNER_CACHE" && chmod 0777 "$OWNER_CACHE" || { echo "memql: cannot prepare the cache directory $OWNER_CACHE" >&2; exit 1; }
+fi
 cd /workspace
 git init -q .
 if [ -n "${GIT_TOKEN:-}" ]; then

@@ -37,6 +37,17 @@ const (
 	cacheVolume     = "cache"
 	cachePath       = "/cache"
 
+	// cacheRootPath is where the clone container mounts the cache claim's
+	// ROOT, and ownerCacheVar names the owner's directory under it that the
+	// clone prepares (ruling R15). Kubelet creates a missing subPath
+	// root-owned with the claim root's mode, so on a claim whose root is not
+	// world-writable a non-root step would get a cache it cannot write; the
+	// clone runs first, as root in the clone image, and creates the directory
+	// world-writable itself. Only the clone sees the root -- platform code,
+	// never a step's.
+	cacheRootPath = "/cache-root"
+	ownerCacheVar = "OWNER_CACHE"
+
 	// gitTokenKey is the clone token's key in the step's Secret, and the
 	// variable only the clone container receives it as.
 	gitTokenKey = "GIT_TOKEN"
@@ -140,7 +151,7 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 	secretName := SecretName(jobName)
 	caches := declaredCaches(run.Caches)
 
-	initContainers := []Container{cloneContainer(cfg, run, secretName)}
+	initContainers := []Container{cloneContainer(cfg, run, secretName, caches)}
 	initContainers = append(initContainers, serviceContainers(run.Services)...)
 
 	volumes := []Volume{{Name: workspaceVolume, EmptyDir: &EmptyDirVolumeSource{}}}
@@ -198,6 +209,9 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 	ttl := int64(cfg.JobTTL / time.Second)
 	if ttl <= 0 || ttl > math.MaxInt32 {
 		return refuse("the Job TTL %v is not a positive number of seconds that fits the API: a zero TTL deletes the Job before its outcome is read", cfg.JobTTL)
+	}
+	if strings.TrimSpace(run.OwnerUserID) == "" {
+		return refuse("the step has no owner: its cache, its Library files and its secrets are all an owner's")
 	}
 	if strings.TrimSpace(run.RunID) == "" {
 		return refuse("the step has no run id, so nothing could select its Job for a cancel")
@@ -331,8 +345,10 @@ func artifactProblem(path string) string {
 	return ""
 }
 
-func cloneContainer(cfg Config, run StepRun, secretName string) Container {
-	return Container{
+// cloneContainer fetches the commit and, when the step declares caches,
+// prepares the owner's directory of the cache claim (see cacheRootPath).
+func cloneContainer(cfg Config, run StepRun, secretName string, caches []string) Container {
+	c := Container{
 		Name:    ContainerClone,
 		Image:   cfg.CloneImage,
 		Command: []string{"/bin/sh", "-c", cloneScript},
@@ -346,6 +362,11 @@ func cloneContainer(cfg Config, run StepRun, secretName string) Container {
 		VolumeMounts:    []VolumeMount{{Name: workspaceVolume, MountPath: workspacePath}},
 		SecurityContext: &SecurityContext{AllowPrivilegeEscalation: ptr(false)},
 	}
+	if len(caches) > 0 {
+		c.Env = append(c.Env, plainVar(ownerCacheVar, cacheRootPath+"/"+CacheSubPath(run.OwnerUserID)))
+		c.VolumeMounts = append(c.VolumeMounts, VolumeMount{Name: cacheVolume, MountPath: cacheRootPath})
+	}
+	return c
 }
 
 // serviceContainers are the native sidecars, in name order: init containers
@@ -399,7 +420,8 @@ func stepContainer(run StepRun, jobName, secretName string, caches []string) Con
 
 	mounts := []VolumeMount{{Name: workspaceVolume, MountPath: workspacePath}}
 	if len(caches) > 0 {
-		mounts = append(mounts, VolumeMount{Name: cacheVolume, MountPath: cachePath})
+		// The owner's directory only, never the claim's root (ruling R15).
+		mounts = append(mounts, VolumeMount{Name: cacheVolume, MountPath: cachePath, SubPath: CacheSubPath(run.OwnerUserID)})
 	}
 	return Container{
 		Name:            ContainerStep,

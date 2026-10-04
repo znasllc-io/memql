@@ -268,12 +268,16 @@ func TestBuildJob(t *testing.T) {
 			{Name: "GIT_TOKEN", ValueFrom: &EnvVarSource{SecretKeyRef: &SecretKeySelector{
 				Name: testSecretName, Key: "GIT_TOKEN", Optional: ptrTo(true),
 			}}},
+			// Ruling R15: the clone prepares the owner's cache directory, which
+			// kubelet would otherwise create with the claim root's mode.
+			{Name: "OWNER_CACHE", Value: "/cache-root/owners/0dde18ce172fff450b32bf41"},
 		}
 		if !reflect.DeepEqual(clone.Env, wantEnv) {
 			t.Errorf("clone env =\n  %s\nwant\n  %s", mustJSON(t, clone.Env), mustJSON(t, wantEnv))
 		}
-		if !reflect.DeepEqual(clone.VolumeMounts, []VolumeMount{{Name: "workspace", MountPath: "/workspace"}}) {
-			t.Errorf("clone mounts = %+v, want only the workspace at /workspace", clone.VolumeMounts)
+		wantCloneMounts := []VolumeMount{{Name: "workspace", MountPath: "/workspace"}, {Name: "cache", MountPath: "/cache-root"}}
+		if !reflect.DeepEqual(clone.VolumeMounts, wantCloneMounts) {
+			t.Errorf("clone mounts = %+v, want the workspace at /workspace and the cache claim's root at /cache-root", clone.VolumeMounts)
 		}
 		if clone.SecurityContext == nil || clone.SecurityContext.AllowPrivilegeEscalation == nil ||
 			*clone.SecurityContext.AllowPrivilegeEscalation {
@@ -391,9 +395,12 @@ func TestBuildJob(t *testing.T) {
 		if !reflect.DeepEqual(step.Env, wantEnv) {
 			t.Errorf("step env =\n  %s\nwant\n  %s", mustJSON(t, step.Env), mustJSON(t, wantEnv))
 		}
-		wantMounts := []VolumeMount{{Name: "workspace", MountPath: "/workspace"}, {Name: "cache", MountPath: "/cache"}}
+		wantMounts := []VolumeMount{
+			{Name: "workspace", MountPath: "/workspace"},
+			{Name: "cache", MountPath: "/cache", SubPath: "owners/0dde18ce172fff450b32bf41"},
+		}
 		if !reflect.DeepEqual(step.VolumeMounts, wantMounts) {
-			t.Errorf("step mounts = %+v, want %+v", step.VolumeMounts, wantMounts)
+			t.Errorf("step mounts = %+v, want %+v (the cache is the OWNER's directory of the claim, never its root)", step.VolumeMounts, wantMounts)
 		}
 		if step.SecurityContext == nil || step.SecurityContext.AllowPrivilegeEscalation == nil ||
 			*step.SecurityContext.AllowPrivilegeEscalation {
@@ -406,6 +413,41 @@ func TestBuildJob(t *testing.T) {
 		doc := wire(t, job)
 		wantField(t, doc, false, "spec", "template", "spec", "containers", 0, "securityContext", "allowPrivilegeEscalation")
 		wantField(t, doc, "/workspace", "spec", "template", "spec", "containers", 0, "workingDir")
+		wantField(t, doc, "owners/0dde18ce172fff450b32bf41", "spec", "template", "spec", "containers", 0, "volumeMounts", 1, "subPath")
+	})
+
+	t.Run("every step of one owner shares a cache and two owners never do", func(t *testing.T) {
+		cacheOf := func(run StepRun) (subPath, prepared string) {
+			job := mustBuild(t, testConfig(), run)
+			for _, m := range stepOf(t, job).VolumeMounts {
+				if m.Name == "cache" {
+					subPath = m.SubPath
+				}
+			}
+			if e, ok := envNamed(cloneOf(t, job), "OWNER_CACHE"); ok {
+				prepared = e.Value
+			}
+			return subPath, prepared
+		}
+		first := testRun()
+		later := testRun()
+		later.RunID, later.StepKey, later.Attempt = "run-91d0", "checks/vet", 1
+		other := testRun()
+		other.OwnerUserID = "user-77aa"
+
+		mine, minePrepared := cacheOf(first)
+		again, _ := cacheOf(later)
+		theirs, theirsPrepared := cacheOf(other)
+		if mine == "" || mine != again {
+			t.Errorf("two steps of one owner mount %q and %q, want one shared cache", mine, again)
+		}
+		if theirs != "owners/97d5292f36414d4a6638d794" || theirs == mine {
+			t.Errorf("owners user-5d1e and user-77aa mount %q and %q, want two different caches", mine, theirs)
+		}
+		// The directory the clone prepares is exactly the one the step mounts.
+		if minePrepared != "/cache-root/"+mine || theirsPrepared != "/cache-root/"+theirs {
+			t.Errorf("the clone prepares %q and %q, but the steps mount %q and %q", minePrepared, theirsPrepared, mine, theirs)
+		}
 	})
 
 	// Ruling R13: the clone container's uid never matches every step image's,
@@ -475,6 +517,15 @@ func TestBuildJob(t *testing.T) {
 			if m.Name == "cache" || m.MountPath == "/cache" {
 				t.Errorf("no caches declared, the step still mounts %+v", m)
 			}
+		}
+		clone := cloneOf(t, job)
+		for _, m := range clone.VolumeMounts {
+			if m.Name == "cache" {
+				t.Errorf("no caches declared, the clone still mounts the claim: %+v", m)
+			}
+		}
+		if e, ok := envNamed(clone, "OWNER_CACHE"); ok {
+			t.Errorf("no caches declared, the clone still prepares %q", e.Value)
 		}
 
 		run.Caches = []string{"go", "maven"}
@@ -582,6 +633,9 @@ func TestBuildJob(t *testing.T) {
 			}, pl.CodeJobRejected},
 			{"an unknown cache", func(_ *Config, r *StepRun) { r.Caches = []string{"maven"} }, pl.CodeJobRejected},
 			{"no run id", func(_ *Config, r *StepRun) { r.RunID = "" }, pl.CodeJobRejected},
+			{"no owner", func(_ *Config, r *StepRun) { r.OwnerUserID = "" }, pl.CodeJobRejected},
+			{"a blank owner", func(_ *Config, r *StepRun) { r.OwnerUserID = "  " }, pl.CodeJobRejected},
+			{"no owner, even with no cache to key", func(_ *Config, r *StepRun) { r.OwnerUserID, r.Caches = "", nil }, pl.CodeJobRejected},
 			{"an attempt below one", func(_ *Config, r *StepRun) { r.Attempt = -1 }, pl.CodeJobRejected},
 			{"a SHA that is a branch name", func(_ *Config, r *StepRun) { r.SHA = "main" }, pl.CodeJobRejected},
 			{"an abbreviated SHA", func(_ *Config, r *StepRun) { r.SHA = "ab12ab1" }, pl.CodeJobRejected},

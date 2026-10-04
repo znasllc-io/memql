@@ -169,10 +169,12 @@ type SecretKeySelector struct {
 	Optional *bool  `json:"optional,omitempty"`
 }
 
-// VolumeMount mounts a pod volume into a container.
+// VolumeMount mounts a pod volume into a container; SubPath mounts one
+// directory of it instead of its root.
 type VolumeMount struct {
 	Name      string `json:"name"`
 	MountPath string `json:"mountPath"`
+	SubPath   string `json:"subPath,omitempty"`
 }
 
 // Volume is one pod volume: scratch (EmptyDir) or a claim.

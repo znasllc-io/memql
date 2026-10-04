@@ -100,3 +100,30 @@ func TestRunLabelValueIsAlwaysALabelValue(t *testing.T) {
 		}
 	}
 }
+
+// TestCacheSubPathIsPerOwner: every step of one owner shares a cache and two
+// owners never do (ruling R15). A step can rewrite any entry of the cache it
+// is given, so one cache across owners would let one owner's step poison
+// another owner's builds. The directory is derived, so every replica and every
+// version mounts the same one, and hashed, so no owner id can climb out of
+// owners/ or name a sibling.
+func TestCacheSubPathIsPerOwner(t *testing.T) {
+	// "owners/" + the first 24 hex of core/id's content address of
+	// {"ownerUserId":"user-5d1e"}, derived like names_test.go's other literals.
+	if got := CacheSubPath("user-5d1e"); got != "owners/0dde18ce172fff450b32bf41" {
+		t.Errorf("CacheSubPath(user-5d1e) = %q, want owners/0dde18ce172fff450b32bf41", got)
+	}
+	if got := CacheSubPath("user-77aa"); got != "owners/97d5292f36414d4a6638d794" {
+		t.Errorf("CacheSubPath(user-77aa) = %q, want owners/97d5292f36414d4a6638d794: two owners share a cache", got)
+	}
+	shape := regexp.MustCompile(`^owners/[0-9a-f]{24}$`)
+	for _, owner := range []string{"user-5d1e", "../../etc", "a/b", ".", strings.Repeat("x", 300)} {
+		got := CacheSubPath(owner)
+		if !shape.MatchString(got) {
+			t.Errorf("CacheSubPath(%q) = %q, want owners/ and 24 hex: anything else is a path an owner id chose", owner, got)
+		}
+		if again := CacheSubPath(owner); again != got {
+			t.Errorf("CacheSubPath(%q) is not deterministic: %q then %q", owner, got, again)
+		}
+	}
+}
