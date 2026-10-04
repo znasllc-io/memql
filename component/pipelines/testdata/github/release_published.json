@@ -1,0 +1,14 @@
+{
+  "action": "published",
+  "release": {
+    "id": 181234567,
+    "tag_name": "v1.4.0",
+    "target_commitish": "main",
+    "name": "Storefront 1.4",
+    "draft": false,
+    "prerelease": false
+  },
+  "repository": { "full_name": "Acme-Corp/Storefront", "default_branch": "main", "private": false },
+  "installation": { "id": 51234567 },
+  "sender": { "login": "octocat" }
+}

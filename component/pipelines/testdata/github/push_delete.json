@@ -1,0 +1,13 @@
+{
+  "ref": "refs/heads/cart-badge",
+  "before": "c907455d2f334be04a32e43df29f61c07329f815",
+  "after": "0000000000000000000000000000000000000000",
+  "created": false,
+  "deleted": true,
+  "forced": false,
+  "base_ref": null,
+  "head_commit": null,
+  "repository": { "full_name": "Acme-Corp/Storefront", "default_branch": "main", "master_branch": "main", "private": false },
+  "installation": { "id": 51234567 },
+  "sender": { "login": "octocat" }
+}
