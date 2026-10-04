@@ -119,8 +119,9 @@ jobs:
 
       # inspect succeeding means the tag exists: refuse. It failing is the
       # expected answer for a new tag, but an auth or network error fails it
-      # too and would let a re-push through, so what it said is shown on the
-      # one line of a notice (a line break could start a workflow command).
+      # too and would let a re-push through, so the notice says only that it
+      # failed and shows what it said on one line (a line break could start a
+      # workflow command). Never `continue-on-error`: the exit is the guard.
       - name: Immutability guard
         if: ${{ !inputs.allow_overwrite }}
         env:
@@ -130,7 +131,7 @@ jobs:
             echo "::error::${IMAGE}:${VERSION} already exists -- tags are immutable. Bump version or re-run with allow_overwrite=true." >&2
             exit 1
           fi
-          echo "::notice::${IMAGE}:${VERSION} is not published yet; imagetools inspect said: $(printf '%s' "$out" | tr '\r\n' '  ')"
+          echo "::notice::imagetools inspect found no ${IMAGE}:${VERSION}, which is what a new tag answers -- and what an auth or network failure answers too. It said: $(printf '%s' "$out" | tr '\r\n' '  ')"
 
       # Built and LOADED, not pushed. The push happens below, only after the
       # smoke test passes.

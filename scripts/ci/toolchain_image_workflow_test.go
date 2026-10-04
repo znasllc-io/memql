@@ -114,6 +114,8 @@ type toolchainStep struct {
 	Run  string         `yaml:"run"`
 	With map[string]any `yaml:"with"`
 	Env  map[string]any `yaml:"env"`
+	// ContinueOnError is any: a YAML boolean, or an expression string.
+	ContinueOnError any `yaml:"continue-on-error"`
 }
 
 // with reads a `with:` input as text; `push: false` is a YAML boolean.
@@ -511,14 +513,18 @@ func toolchainImmutabilityProblems(wf toolchainWorkflow) []string {
 			"exists to protect has already been overwritten", job.Steps[guardAt].Name))
 	default:
 		guard := job.Steps[guardAt]
-		if !strings.Contains(guard.If, "allow_overwrite") {
-			out = append(out, fmt.Sprintf("the immutability guard's `if:` (%q) does not name the "+
-				"allow_overwrite input. That input is the one declared way past the guard: a guard with no "+
-				"condition makes it a lie, and any other condition skips the guard for a reason nobody "+
-				"declared", guard.If))
+		if !toolchainGuardCondition(guard.If) {
+			out = append(out, fmt.Sprintf("the immutability guard's `if:` (%q) is not "+
+				"`${{ !inputs.allow_overwrite }}`. That input is the one declared way past the guard: a guard "+
+				"with no condition makes it a lie, an inverted one runs it only when an overwrite was ASKED "+
+				"for, and any other condition skips it for a reason nobody declared", guard.If))
 		}
 		if !strings.Contains(guard.Run, "exit 1") {
 			out = append(out, "the immutability guard never exits non-zero, so finding the tag stops nothing")
+		}
+		if guard.ContinueOnError != nil && guard.ContinueOnError != false {
+			out = append(out, fmt.Sprintf("the immutability guard carries `continue-on-error: %v`, so the "+
+				"job goes on to push when the guard finds the tag and fails: its exit stops nothing", guard.ContinueOnError))
 		}
 	}
 
@@ -549,6 +555,17 @@ func toolchainImmutabilityProblems(wf toolchainWorkflow) []string {
 			"should wait for the first and then meet the tag it pushed, not cancel a build mid-push", cancel))
 	}
 	return out
+}
+
+// toolchainGuardCondition reports whether an `if:` is exactly "the dispatch
+// did not ask for an overwrite", written with or without the `${{ }}` wrapper
+// GitHub accepts on `if:`, and whatever the spacing.
+func toolchainGuardCondition(cond string) bool {
+	c := strings.Join(strings.Fields(cond), "")
+	if strings.HasPrefix(c, "${{") && strings.HasSuffix(c, "}}") {
+		c = strings.TrimSuffix(strings.TrimPrefix(c, "${{"), "}}")
+	}
+	return c == "!inputs.allow_overwrite"
 }
 
 // toolchainRunScriptProblems: no `run:` script, in any job, interpolates a
@@ -949,10 +966,26 @@ func toolchainWorkflowMutations(t *testing.T) {
 		},
 		{
 			name:  "the immutability guard's if dropped",
-			want:  "does not name the allow_overwrite input",
+			want:  "is not `${{ !inputs.allow_overwrite }}`",
 			check: toolchainImmutabilityProblems,
 			mutate: func(t *testing.T, job *toolchainJob) {
 				job.Steps[stepAt(t, *job, isGuard)].If = ""
+			},
+		},
+		{
+			name:  "the immutability guard's if inverted",
+			want:  "is not `${{ !inputs.allow_overwrite }}`",
+			check: toolchainImmutabilityProblems,
+			text: func(s string) string {
+				return strings.Replace(s, "if: ${{ !inputs.allow_overwrite }}", "if: ${{ inputs.allow_overwrite }}", 1)
+			},
+		},
+		{
+			name:  "the immutability guard's failure ignored",
+			want:  "carries `continue-on-error: true`",
+			check: toolchainImmutabilityProblems,
+			text: func(s string) string {
+				return strings.Replace(s, "        if: ${{ !inputs.allow_overwrite }}\n", "        if: ${{ !inputs.allow_overwrite }}\n        continue-on-error: true\n", 1)
 			},
 		},
 		{
