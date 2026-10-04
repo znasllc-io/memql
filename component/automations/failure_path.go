@@ -455,31 +455,19 @@ func (b runRetryBudget) spending() map[string]any {
 // and an unscoped read answers zero rows and no error -- which would read as
 // "no ceilings", the default budget, when the person declared a smaller one.
 func (j *workJournal) retryBudget(ctx context.Context, exec *AutomationExecution) (runRetryBudget, bool) {
-	if j == nil || exec == nil || exec.ID == "" {
+	run, found, err := j.readOwnRun(ctx, exec)
+	if err != nil || !found {
 		return runRetryBudget{}, false
 	}
 	fresh := memql.ContextWithFreshRead(ctx)
-	runCall, err := journalArgs("workRunById", map[string]any{"runId": exec.ID})
-	if err != nil {
-		return runRetryBudget{}, false
-	}
-	res, err := j.exec.Execute(journalContext(fresh), "query "+runCall)
-	if err != nil {
-		j.warn("workRunById", err)
-		return runRetryBudget{}, false
-	}
-	runs := memql.MaterializeRows(res)
-	if len(runs) == 0 {
-		return runRetryBudget{}, false
-	}
-	stored, _ := runs[0]["spent"].(map[string]any)
+	stored, _ := run["spent"].(map[string]any)
 	budget := runRetryBudget{spent: intField(stored, "retries"), max: work.DefaultMaxRetries, stored: stored}
-	goalId := stringField(runs[0], "goalId")
+	goalId := stringField(run, "goalId")
 	if goalId == "" {
 		return budget, true
 	}
 	budget.goalId = goalId
-	owner := stringField(runs[0], "ownerUserId")
+	owner := stringField(run, "ownerUserId")
 	if owner == "" {
 		// A goal is a person's; one with no owner on its run is an anomaly,
 		// and its ceilings cannot be read as anybody.
@@ -489,7 +477,7 @@ func (j *workJournal) retryBudget(ctx context.Context, exec *AutomationExecution
 	if err != nil {
 		return runRetryBudget{}, false
 	}
-	res, err = j.exec.Execute(auth.ContextWithUserActor(fresh, owner), "query "+goalCall)
+	res, err := j.exec.Execute(auth.ContextWithUserActor(fresh, owner), "query "+goalCall)
 	if err != nil {
 		j.warn("workGoalForOwner", err)
 		return runRetryBudget{}, false
@@ -501,6 +489,32 @@ func (j *workJournal) retryBudget(ctx context.Context, exec *AutomationExecution
 	ceilings, _ := goals[0]["ceilings"].(map[string]any)
 	budget.max = work.RetryBudget(work.Ceilings{MaxRetries: intField(ceilings, "maxRetries")})
 	return budget, true
+}
+
+// readOwnRun reads exec's run row as the journal reads it, under its own
+// cluster actor, skipping this node's result cache: every caller reads a count
+// off it, raises it and writes it back, and the previous write may have been
+// made on another replica. found is false for a run with no row; err is set
+// only when the read itself failed, which a caller must not read as "nothing
+// stored".
+func (j *workJournal) readOwnRun(ctx context.Context, exec *AutomationExecution) (run map[string]any, found bool, err error) {
+	if j == nil || exec == nil || exec.ID == "" {
+		return nil, false, nil
+	}
+	runCall, err := journalArgs("workRunById", map[string]any{"runId": exec.ID})
+	if err != nil {
+		return nil, false, err
+	}
+	res, err := j.exec.Execute(journalContext(memql.ContextWithFreshRead(ctx)), "query "+runCall)
+	if err != nil {
+		j.warn("workRunById", err)
+		return nil, false, err
+	}
+	runs := memql.MaterializeRows(res)
+	if len(runs) == 0 {
+		return nil, false, nil
+	}
+	return runs[0], true, nil
 }
 
 // signalFor builds the rules table's input from what the executor actually
