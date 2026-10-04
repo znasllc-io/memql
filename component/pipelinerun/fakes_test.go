@@ -55,6 +55,10 @@ type memStore struct {
 	failCreateRun error
 	failUpdateRun error
 
+	// afterCreatePipeline runs after each CreatePipeline lands, outside the
+	// store's lock: what another writer does right after a connect.
+	afterCreatePipeline func()
+
 	// work is the work spine the journal writes through, whose step rows
 	// WorkSteps reads back (nil: no work rows at all).
 	work *fakeWork
@@ -352,6 +356,12 @@ func (s *memStore) CreatePipeline(_ context.Context, p Pipeline) error {
 		return errors.New("memStore: a pipeline is written only under its owner")
 	}
 	s.mu.Lock()
+	hook := s.afterCreatePipeline
+	defer func() {
+		if hook != nil {
+			hook()
+		}
+	}()
 	defer s.mu.Unlock()
 	s.pipelineCreates = append(s.pipelineCreates, p)
 	id := bareID(p.ID)
@@ -507,8 +517,12 @@ func (s *memStore) UpdateRun(_ context.Context, owner, runID string, patch RunPa
 // fakeGitHub answers every GitHub call from maps and records the writes.
 // Repositories are keyed "owner/name"; heads "owner/name@branch"; commits
 // "owner/name@ref"; trees "owner/name@sha".
+//
+// It keeps the GATE DISCIPLINE (watchGitHubCall): every call fails the test
+// when it is made under a held gate, except open()'s check-run create.
 type fakeGitHub struct {
 	mu sync.Mutex
+	t  testing.TB
 
 	unconfigured bool
 	// installationID is what a token mint answers; 0 means 7.
@@ -536,6 +550,10 @@ type fakeGitHub struct {
 	// keep admitted, across calls.
 	treeErr  error
 	treeKept []string
+
+	// onBranchHead runs inside each BranchHead call: what another writer
+	// does while GitHub is being asked.
+	onBranchHead func()
 }
 
 type tokenMint struct{ CredentialID, Owner, Repository string }
@@ -554,8 +572,9 @@ type compareAnswer struct {
 	Complete bool
 }
 
-func newFakeGitHub() *fakeGitHub {
+func newFakeGitHub(t testing.TB) *fakeGitHub {
 	return &fakeGitHub{
+		t:       t,
 		nextID:  1000,
 		repos:   map[string]githubapp.RepositoryInfo{},
 		heads:   map[string]headAnswer{},
@@ -568,7 +587,8 @@ func newFakeGitHub() *fakeGitHub {
 
 func (g *fakeGitHub) Configured() bool { return !g.unconfigured }
 
-func (g *fakeGitHub) InstallationToken(_ context.Context, credentialID, ownerUserID, repository string) (string, int64, error) {
+func (g *fakeGitHub) InstallationToken(ctx context.Context, credentialID, ownerUserID, repository string) (string, int64, error) {
+	watchGitHubCall(g.t, ctx, "InstallationToken")
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.tokenMints = append(g.tokenMints, tokenMint{CredentialID: credentialID, Owner: ownerUserID, Repository: repository})
@@ -585,7 +605,8 @@ func (g *fakeGitHub) InstallationToken(_ context.Context, credentialID, ownerUse
 	return "ghs_" + credentialID, inst, nil
 }
 
-func (g *fakeGitHub) CreateCheckRun(_ context.Context, token, repository string, run githubapp.CheckRun) (int64, error) {
+func (g *fakeGitHub) CreateCheckRun(ctx context.Context, token, repository string, run githubapp.CheckRun) (int64, error) {
+	watchGitHubCall(g.t, ctx, "CreateCheckRun")
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.createErr != nil {
@@ -596,7 +617,8 @@ func (g *fakeGitHub) CreateCheckRun(_ context.Context, token, repository string,
 	return g.nextID, nil
 }
 
-func (g *fakeGitHub) UpdateCheckRun(_ context.Context, token, repository string, id int64, run githubapp.CheckRun) error {
+func (g *fakeGitHub) UpdateCheckRun(ctx context.Context, token, repository string, id int64, run githubapp.CheckRun) error {
+	watchGitHubCall(g.t, ctx, "UpdateCheckRun")
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if g.updateErr != nil {
@@ -606,7 +628,8 @@ func (g *fakeGitHub) UpdateCheckRun(_ context.Context, token, repository string,
 	return nil
 }
 
-func (g *fakeGitHub) Repository(_ context.Context, _, repository string) (githubapp.RepositoryInfo, error) {
+func (g *fakeGitHub) Repository(ctx context.Context, _, repository string) (githubapp.RepositoryInfo, error) {
+	watchGitHubCall(g.t, ctx, "Repository")
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	info, ok := g.repos[repository]
@@ -616,23 +639,30 @@ func (g *fakeGitHub) Repository(_ context.Context, _, repository string) (github
 	return info, nil
 }
 
-func (g *fakeGitHub) BranchHead(_ context.Context, _, repository, branch string) (string, string, error) {
+func (g *fakeGitHub) BranchHead(ctx context.Context, _, repository, branch string) (string, string, error) {
+	watchGitHubCall(g.t, ctx, "BranchHead")
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	h, ok := g.heads[repository+"@"+branch]
+	hook := g.onBranchHead
+	g.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	if !ok {
 		return "", "", &githubapp.StatusError{Status: 404, Endpoint: "/repos/" + repository + "/branches/" + branch}
 	}
 	return h.SHA, h.Message, nil
 }
 
-func (g *fakeGitHub) OpenPullRequests(_ context.Context, _, repository string) ([]githubapp.PullRequestHead, error) {
+func (g *fakeGitHub) OpenPullRequests(ctx context.Context, _, repository string) ([]githubapp.PullRequestHead, error) {
+	watchGitHubCall(g.t, ctx, "OpenPullRequests")
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return slices.Clone(g.pulls[repository]), nil
 }
 
-func (g *fakeGitHub) Compare(_ context.Context, _, repository, base, head string) ([]string, bool, error) {
+func (g *fakeGitHub) Compare(ctx context.Context, _, repository, base, head string) ([]string, bool, error) {
+	watchGitHubCall(g.t, ctx, "Compare")
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	c, ok := g.compare[repository+"@"+base+"..."+head]
@@ -642,7 +672,8 @@ func (g *fakeGitHub) Compare(_ context.Context, _, repository, base, head string
 	return slices.Clone(c.Files), c.Complete, nil
 }
 
-func (g *fakeGitHub) CommitForRef(_ context.Context, _, repository, ref string) (string, string, error) {
+func (g *fakeGitHub) CommitForRef(ctx context.Context, _, repository, ref string) (string, string, error) {
+	watchGitHubCall(g.t, ctx, "CommitForRef")
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	c, ok := g.commits[repository+"@"+ref]
@@ -652,7 +683,8 @@ func (g *fakeGitHub) CommitForRef(_ context.Context, _, repository, ref string) 
 	return c.SHA, c.Message, nil
 }
 
-func (g *fakeGitHub) Tree(_ context.Context, _, repository, sha string, keep func(string) bool, maxBytes int64) (fs.FS, error) {
+func (g *fakeGitHub) Tree(ctx context.Context, _, repository, sha string, keep func(string) bool, maxBytes int64) (fs.FS, error) {
+	watchGitHubCall(g.t, ctx, "Tree")
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.treeCalls = append(g.treeCalls, repository+"@"+sha)
@@ -696,8 +728,10 @@ func (g *fakeGitHub) updatedRuns() []checkWrite {
 // ---------------------------------------------------------------------------
 
 // keyedGate is a Gate that really serializes per key, as the advisory lock
-// does across replicas, and records every key it was asked for.
+// does across replicas, records every key it was asked for, and keeps the
+// GATE DISCIPLINE (watchedGate).
 type keyedGate struct {
+	t     testing.TB
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
 	keys  []string
@@ -706,9 +740,13 @@ type keyedGate struct {
 	refuse error
 }
 
-func newKeyedGate() *keyedGate { return &keyedGate{locks: map[string]*sync.Mutex{}} }
+func newKeyedGate(t testing.TB) *keyedGate { return &keyedGate{t: t, locks: map[string]*sync.Mutex{}} }
 
 func (g *keyedGate) run(ctx context.Context, key string, fn func(context.Context) error) error {
+	return watchedGate(g.t, g.acquire)(ctx, key, fn)
+}
+
+func (g *keyedGate) acquire(ctx context.Context, key string, fn func(context.Context) error) error {
 	g.mu.Lock()
 	if g.refuse != nil {
 		g.mu.Unlock()
@@ -730,6 +768,66 @@ func (g *keyedGate) seen() []string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return slices.Clone(g.keys)
+}
+
+// ---------------------------------------------------------------------------
+// The gate discipline
+// ---------------------------------------------------------------------------
+//
+// The production gate holds a connection of the DIRECT database pool for its
+// whole section -- a pool of four, of which an agent's cron leaders already
+// hold one or two, whose waiters give up after five seconds
+// (githubconnect.WithGate). Two rules follow, and every test in this package
+// is held to them through the two shared fakes:
+//
+//   - NO NESTING. A gate taken while another is held holds two of the four
+//     connections, and two replicas taking two keys in opposite orders wait
+//     on each other until both time out.
+//   - NO NETWORK UNDER A GATE. A call to GitHub takes as long as GitHub
+//     takes; under a gate it holds the connection, and every other opener
+//     of the key, for that long. The ONE exception is open()'s check-run
+//     CREATE, under the run key's gate: a duplicate check run on GitHub is
+//     visible and permanent, so the dedup read and the create are one
+//     critical section (open.go says why), and the token it is created with
+//     is minted before the gate.
+//
+// The fake gate marks the context it hands its section with the key it
+// holds; a gate asked for on a marked context, and a GitHub call made on one,
+// fail the test.
+
+// gateHeldKey marks a context with the gate key its holder holds.
+type gateHeldKey struct{}
+
+func gateHeldOn(ctx context.Context) (string, bool) {
+	key, ok := ctx.Value(gateHeldKey{}).(string)
+	return key, ok
+}
+
+// watchedGate is inner under the discipline: it fails t when key is asked
+// for while a gate is held, and marks the context fn runs on.
+func watchedGate(t testing.TB, inner Gate) Gate {
+	return func(ctx context.Context, key string, fn func(context.Context) error) error {
+		if held, ok := gateHeldOn(ctx); ok {
+			t.Errorf("GATE DISCIPLINE: the gate %q was asked for while %q is held -- a nested gate holds two of the direct pool's four connections, and two replicas nesting two keys in opposite orders deadlock", key, held)
+		}
+		return inner(ctx, key, func(gctx context.Context) error {
+			return fn(context.WithValue(gctx, gateHeldKey{}, key))
+		})
+	}
+}
+
+// watchGitHubCall fails t when a GitHub call is made under a held gate --
+// unless it is the check-run create under a run key's open gate, the one
+// network call open() makes there.
+func watchGitHubCall(t testing.TB, ctx context.Context, call string) {
+	held, ok := gateHeldOn(ctx)
+	if !ok || t == nil {
+		return
+	}
+	if call == "CreateCheckRun" && strings.HasPrefix(held, OpenGateKey("")) {
+		return
+	}
+	t.Errorf("GATE DISCIPLINE: GitHub's %s was called while the gate %q is held -- a call to GitHub holds the gate's connection, and every other opener of the key, for as long as GitHub takes", call, held)
 }
 
 // ---------------------------------------------------------------------------
@@ -796,7 +894,7 @@ func automationCtx() context.Context { return auth.ContextWithInternalOrigin(con
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	h := &harness{store: newMemStore(), github: newFakeGitHub(), gate: newKeyedGate()}
+	h := &harness{store: newMemStore(), github: newFakeGitHub(t), gate: newKeyedGate(t)}
 	h.integ = New(Deps{
 		Store:    h.store,
 		GitHub:   h.github,

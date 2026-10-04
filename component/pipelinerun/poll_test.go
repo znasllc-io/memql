@@ -214,16 +214,51 @@ func TestOnlyPolledPipelinesArePolled(t *testing.T) {
 	}
 }
 
-func TestThePollHoldsThePipelinesGate(t *testing.T) {
+// The poll writes its heads under the repository's gate -- the key every
+// writer of the pipeline row takes -- and takes it only to write: a baseline
+// is one gated section, after every GitHub read (the fakes fail any GitHub
+// call made under a gate).
+func TestThePollWritesItsHeadsUnderTheRepositorysGate(t *testing.T) {
 	h := newHarness(t)
 	p := testPipeline(DeliveryPoll)
 	h.store.addPipeline(p)
 	h.github.heads[repoName+"@main"] = headAnswer{SHA: shaA}
 
 	poll(t, h)
-	seen := h.gate.seen()
-	if len(seen) == 0 || seen[0] != PipelineGateKey(p.ID) {
-		t.Errorf("gate keys = %v, want %q first", seen, PipelineGateKey(p.ID))
+	if seen := h.gate.seen(); len(seen) != 1 || seen[0] != RepositoryGateKey(repoName) {
+		t.Errorf("gate keys = %v, want exactly %q", seen, RepositoryGateKey(repoName))
+	}
+}
+
+// The heads write is a compare-and-swap against the row the poll read: a
+// writer that moved the row while the poll talked to GitHub -- here a
+// reconnect to another repository, which clears the heads -- wins, and the
+// poll's stale heads are not written over it.
+func TestAPollDoesNotWriteHeadsOverARowThatMovedMeanwhile(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryPoll)
+	p.Heads = map[string]string{"branch:main": shaA}
+	h.store.addPipeline(p)
+	h.github.heads[repoName+"@main"] = headAnswer{SHA: shaB}
+	// The reconnect lands between the poll's reads of GitHub and its write.
+	h.github.onBranchHead = func() {
+		moved := p
+		moved.Repository, moved.Heads = "acme/elsewhere", map[string]string{}
+		h.store.addPipeline(moved)
+	}
+
+	res := poll(t, h)
+	if len(res.Opened) != 1 {
+		t.Fatalf("the push the poll saw still opens: %+v", res)
+	}
+	got, _ := h.store.pipeline(p.ID)
+	if got.Repository != "acme/elsewhere" || len(got.Heads) != 0 {
+		t.Errorf("the moved row keeps what its writer wrote: %s %v", got.Repository, got.Heads)
+	}
+	for _, u := range h.store.pipelineUpdates {
+		if u.Patch.Heads != nil {
+			t.Errorf("the poll wrote heads over a row that moved: %v", *u.Patch.Heads)
+		}
 	}
 }
 

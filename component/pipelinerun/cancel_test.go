@@ -141,3 +141,31 @@ func TestCancelWithA403StillConcludesAndRecordsTheNote(t *testing.T) {
 		t.Errorf("notes = %+v", got.Notes)
 	}
 }
+
+// The check run of a run a cancel concluded is written AFTER the run's gate
+// is released (the fakes fail a GitHub call under it). When that final write
+// does not land, the row must not keep saying `written` over a check run that
+// still shows the run queued: it records `unavailable`, which recovery
+// republishes.
+func TestACancelsFinalCheckRunThatDidNotLandIsRecordedUnavailable(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+	run := queuedRun(p, shaA)
+	h.store.addRun(run)
+	h.github.updateErr = errStatus(502)
+
+	if err := h.integ.RequestCancel(context.Background(), run.ID, ownerID); err != nil {
+		t.Fatalf("a check run that did not move does not fail the cancel: %v", err)
+	}
+	got, _ := h.store.run(run.ID)
+	if got.Status != StatusCompleted || got.Conclusion != ConclusionCancelled {
+		t.Errorf("the run is concluded whatever GitHub answered: %s/%s", got.Status, got.Conclusion)
+	}
+	if got.CheckRunState != CheckRunUnavailable || got.CheckRunID != 501 {
+		t.Errorf("checkRunState %q id %d; want unavailable, the check run kept", got.CheckRunState, got.CheckRunID)
+	}
+	if keys := h.gate.seen(); len(keys) != 2 || keys[0] != RunGateKey(run.ID) || keys[1] != RunGateKey(run.ID) {
+		t.Errorf("gate keys = %v; want the run's gate for the conclusion, then again, after GitHub, to record the answer", keys)
+	}
+}

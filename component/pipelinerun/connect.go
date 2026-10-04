@@ -206,34 +206,61 @@ func (i *Integration) Connect(ctx context.Context, req ConnectRequest) (ConnectR
 		Compute:        compute,
 		SecretNames:    secretNames,
 	}
-	reconnected := false
-	// The repository's gate, then the pipeline's (ids.go's order): two
-	// sources connecting one repository at once serialize here, and the
-	// second finds the first.
-	err = d.gate(ctx, RepositoryGateKey(repository), func(rctx context.Context) error {
-		refusal, err := alreadyConnected(memql.ContextWithFreshRead(rctx), d, repository, pkg.ID)
+	var (
+		reconnected bool
+		movedFrom   string
+	)
+	// ONE gate, the repository's (ids.go), and every GitHub read above
+	// already done: two sources connecting one repository at once serialize
+	// here and the second finds the first, and the pipeline row's other
+	// writers -- a disconnect, the poll's heads, the timings merge -- take the
+	// same key, so nothing here nests.
+	err = d.gate(ctx, RepositoryGateKey(repository), func(gctx context.Context) error {
+		fresh := memql.ContextWithFreshRead(gctx)
+		refusal, err := alreadyConnected(fresh, d, repository, pkg.ID)
 		if err != nil || refusal != nil {
 			return firstErr(err, refusal)
 		}
-		return d.gate(rctx, PipelineGateKey(p.ID), func(gctx context.Context) error {
-			existing, err := d.Store.PipelineByID(memql.ContextWithFreshRead(gctx), p.ID)
-			if err != nil {
-				return err
+		existing, err := d.Store.PipelineByID(fresh, p.ID)
+		if err != nil {
+			return err
+		}
+		reconnected = existing != nil
+		if existing != nil && existing.Repository != p.Repository {
+			// The source now points at another repository: what the poll
+			// saw there is not a baseline here. Cleared BEFORE the row
+			// names the new repository, so no poll ever reads the new
+			// repository beside the old one's heads and diffs one against
+			// the other.
+			movedFrom = existing.Repository
+			if len(existing.Heads) > 0 {
+				if err := d.Store.UpdatePipeline(gctx, existing.OwnerUserID, p.ID, PipelinePatch{Heads: ptr(map[string]string{})}); err != nil {
+					return err
+				}
 			}
-			reconnected = existing != nil
-			if err := d.Store.CreatePipeline(gctx, p); err != nil {
-				return err
-			}
-			if existing != nil && existing.Repository != p.Repository && len(existing.Heads) > 0 {
-				// The source now points at another repository: what the
-				// poll saw there is not a baseline here.
-				return d.Store.UpdatePipeline(gctx, p.OwnerUserID, p.ID, PipelinePatch{Heads: ptr(map[string]string{})})
-			}
-			return nil
-		})
+		}
+		return d.Store.CreatePipeline(gctx, p)
 	})
 	if err != nil {
 		return ConnectResult{}, err
+	}
+	if movedFrom != "" {
+		// The fence for the repository the pipeline left. A poll that read
+		// the row before the move writes its heads back under the OLD
+		// repository's key, which the section above did not hold; this one
+		// does, after it, so such a write lands before it and is cleared
+		// here, or after it and finds the row on another repository and
+		// writes nothing (writeHeads' compare-and-swap).
+		err = d.gate(ctx, RepositoryGateKey(movedFrom), func(gctx context.Context) error {
+			current, err := d.Store.PipelineByID(memql.ContextWithFreshRead(gctx), p.ID)
+			if err != nil || current == nil || current.Repository != p.Repository || len(current.Heads) == 0 {
+				return err
+			}
+			return d.Store.UpdatePipeline(gctx, current.OwnerUserID, current.ID, PipelinePatch{Heads: ptr(map[string]string{})})
+		})
+		if err != nil {
+			return ConnectResult{}, err
+		}
 	}
 
 	stages := make([]string, 0, len(manifest.Pipeline.Stages))
@@ -276,7 +303,8 @@ func (i *Integration) Disconnect(ctx context.Context, pipelineID string) (Pipeli
 	if p == nil {
 		return Pipeline{}, fmt.Errorf("pipelines: you have no pipeline %q", pipelineID)
 	}
-	err = d.gate(ctx, PipelineGateKey(p.ID), func(gctx context.Context) error {
+	// The repository's gate, the one every writer of the pipeline row takes.
+	err = d.gate(ctx, RepositoryGateKey(p.Repository), func(gctx context.Context) error {
 		return d.Store.UpdatePipeline(gctx, p.OwnerUserID, p.ID, PipelinePatch{Status: ptr(PipelineDisconnected)})
 	})
 	if err != nil {

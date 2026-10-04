@@ -1361,7 +1361,10 @@ func (dr *runDriver) conclude(ctx context.Context, v verdict) bool {
 
 	err := dr.underLease(ctx, func(gctx context.Context, current Run) error {
 		if written != nil {
-			if cr, changed := written.Patch(current); changed {
+			// A final report that did not land, after its retries, is
+			// recorded `unavailable` -- a check run left showing the run
+			// unfinished is not "written" -- and recovery republishes it.
+			if cr, changed := finalCheckRunPatch(*written, current); changed {
 				patch.CheckRunID, patch.CheckRunState, patch.Notes = cr.CheckRunID, cr.CheckRunState, cr.Notes
 			}
 			if id := dr.run.CheckRunID; id > 0 && id != current.CheckRunID && patch.CheckRunID == nil {
@@ -1369,12 +1372,6 @@ func (dr *runDriver) conclude(ctx context.Context, v verdict) bool {
 				// row: the row learns it now, or the next re-run's reader
 				// finds no check run to name.
 				patch.CheckRunID = ptr(id)
-			}
-			if written.State == CheckRunUnavailable && written.Err != nil {
-				// The final report did not land, after its retries: a check
-				// run left showing the run unfinished is not "written", and
-				// the row must not say it is.
-				patch.CheckRunState = ptr(CheckRunUnavailable)
 			}
 		}
 		return dr.d.Store.UpdateRun(gctx, current.OwnerUserID, current.ID, patch)
@@ -1386,7 +1383,7 @@ func (dr *runDriver) conclude(ctx context.Context, v verdict) bool {
 	applyRunPatch(&dr.run, patch)
 	dr.log.Info("pipelines: the run concluded", "conclusion", v.conclusion, "code", v.workCode)
 	if v.conclusion == ConclusionSuccess && dr.run.Mode == pipelines.ModeFull && dr.havePipeline {
-		if err := dr.i.mergeTimings(ctx, dr.d, dr.p.ID, dr.runID, dr.observedTimings()); err != nil {
+		if err := dr.i.mergeTimings(ctx, dr.d, dr.p, dr.runID, dr.observedTimings()); err != nil {
 			dr.log.Warn("pipelines: the run's package timings were not merged into the pipeline's table", "error", err)
 		}
 	}

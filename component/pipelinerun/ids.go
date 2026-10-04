@@ -36,26 +36,28 @@ func deriveID(kind, key string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-// The gate keys, and the ONE order they are taken in, so no two replicas can
-// each hold a key the other is waiting for:
+// The gate keys: THREE, and NO KEY IS EVER TAKEN WHILE ANOTHER IS HELD.
 //
-//	repository  ->  pipeline  ->  open
-//	run (alone)
-//
-// A connect holds a repository's key and then its pipeline's; the poll holds
-// a pipeline's and opens runs under their open keys; an open takes no other
-// key; a run's key is taken with no other held.
+// The production gate holds a connection of the DIRECT database pool for its
+// whole section -- a pool of four, one or two of which an agent's cron
+// leaders already hold, whose waiters give up after five seconds
+// (githubconnect.WithGate). A nested gate holds two of those connections,
+// and two replicas nesting two keys in opposite orders wait on each other
+// until both time out. So every section is flat, short and local: a fresh
+// read and its writes, with GitHub asked before the gate is taken -- the one
+// call a section makes to GitHub is open()'s check-run create, which open.go
+// says why. fakes_test.go holds every test in this package to both rules.
 
-// RepositoryGateKey serializes connecting a repository, so two sources
-// connecting one repository at once cannot both find it free (one pipeline
-// per repository).
+// RepositoryGateKey serializes everything that writes a repository's
+// pipeline row: a connect (whose "one pipeline per repository" check and the
+// write it guards are one section), a disconnect, the poll's heads, and the
+// driver's timings merge. ONE key for the row and for the repository,
+// derived from the repository, because a repository has exactly one active
+// pipeline: two keys -- one per row, one per repository -- were what a
+// connect had to nest.
 func RepositoryGateKey(repository string) string {
 	return "pipelines.repository:" + normalizeRepository(repository)
 }
-
-// PipelineGateKey serializes the read-modify-writes of a pipeline row: the
-// poll's heads, a connect, a disconnect, and the timings merge (Task 10b).
-func PipelineGateKey(pipelineID string) string { return "pipelines.pipeline:" + bareID(pipelineID) }
 
 // OpenGateKey serializes the opening of a run key: the dedup read and the
 // create are one critical section, so a redelivered webhook and a poll for
@@ -63,7 +65,8 @@ func PipelineGateKey(pipelineID string) string { return "pipelines.pipeline:" + 
 func OpenGateKey(runKey string) string { return "pipelines.open:" + runKey }
 
 // RunGateKey serializes every read-modify-write of an opened run: the
-// driver's claim, heartbeat and conclusion (Task 10b) and a cancel request.
-// One key for all of them, so a cancel and a claim cannot both decide from
-// the same stale row.
+// driver's claim, heartbeat and conclusion (Task 10b), a cancel request, and
+// the recording of a check-run write made outside a drive. One key for all
+// of them, so a cancel and a claim cannot both decide from the same stale
+// row.
 func RunGateKey(runID string) string { return "pipelines.drive:" + bareID(runID) }

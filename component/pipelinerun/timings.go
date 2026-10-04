@@ -17,23 +17,26 @@ import (
 // reached, a sample skewed toward whatever was edited; and only a successful
 // one, because a failing run's times are a failing tree's.
 //
-// The merge is a read-modify-write of the whole table, under the pipeline's
-// gate with a fresh read, so two runs finishing at once never write each
-// other's table over: each merges into the table as the other left it.
+// The merge is a read-modify-write of the whole table, under the
+// repository's gate -- the one every writer of the pipeline row takes -- with
+// a fresh read, so two runs finishing at once never write each other's table
+// over: each merges into the table as the other left it.
 
-// mergeTimings merges observed into the pipeline's table and records which
-// run taught it last.
-func (i *Integration) mergeTimings(ctx context.Context, d Deps, pipelineID, runID string, observed map[string]float64) error {
+// mergeTimings merges observed into p's table and records which run taught it
+// last. A table is the repository's: when the row names another repository by
+// now -- its source was reconnected elsewhere -- the measurements of this one
+// teach it nothing, and are dropped.
+func (i *Integration) mergeTimings(ctx context.Context, d Deps, p Pipeline, runID string, observed map[string]float64) error {
 	if len(observed) == 0 {
 		return nil
 	}
-	return i.driverGate(ctx, d, PipelineGateKey(pipelineID), func(gctx context.Context) error {
-		p, err := d.Store.PipelineByID(memql.ContextWithFreshRead(gctx), pipelineID)
-		if err != nil || p == nil {
+	return i.driverGate(ctx, d, RepositoryGateKey(p.Repository), func(gctx context.Context) error {
+		current, err := d.Store.PipelineByID(memql.ContextWithFreshRead(gctx), p.ID)
+		if err != nil || current == nil || current.Repository != p.Repository {
 			return err
 		}
-		merged := pipelines.MergeTimings(p.Timings, observed)
-		return d.Store.UpdatePipeline(gctx, p.OwnerUserID, p.ID, PipelinePatch{
+		merged := pipelines.MergeTimings(current.Timings, observed)
+		return d.Store.UpdatePipeline(gctx, current.OwnerUserID, current.ID, PipelinePatch{
 			Timings: ptr(merged), TimingsRunID: ptr(bareID(runID)), TimingsUpdatedAt: ptr(d.now()),
 		})
 	})

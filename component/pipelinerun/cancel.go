@@ -84,7 +84,11 @@ func (i *Integration) requestCancel(ctx context.Context, d Deps, runID, by strin
 	var (
 		result    Run
 		signalled bool
+		concluded bool
 	)
+	// The decision and its write are one short section under the run's gate:
+	// a fresh read and one write, nothing of GitHub's. The check run of a run
+	// concluded here is moved AFTER the gate is released (below).
 	err := d.gate(ctx, RunGateKey(runID), func(gctx context.Context) error {
 		r, err := d.Store.RunByID(memql.ContextWithFreshRead(gctx), runID)
 		if err != nil {
@@ -102,29 +106,15 @@ func (i *Integration) requestCancel(ctx context.Context, d Deps, runID, by strin
 			// Nobody drives it: nothing is in flight, and nobody would
 			// conclude it. The cancel IS the conclusion.
 			now := d.now()
-			r.Status, r.Conclusion = StatusCompleted, ConclusionCancelled
-			r.CancelRequested, r.CancelledBy = true, by
-			r.FinishedAt = now
 			patch := RunPatch{
 				Status: ptr(StatusCompleted), Conclusion: ptr(ConclusionCancelled),
 				CancelRequested: ptr(true), CancelledBy: ptr(by), FinishedAt: ptr(now),
 			}
-			if p, err := d.Store.PipelineByID(gctx, r.PipelineID); err != nil {
-				return err
-			} else if p != nil {
-				w := publishCheckRun(gctx, d, *p, *r, ReportFor(*p, *r, nil))
-				if w.Err != nil {
-					d.Logger.Warn("pipelines: the cancelled run's check run was not moved",
-						"component", "pipelinerun", logger.Subject(RunConcept, r.ID), "checkRunState", w.State, "error", w.Err)
-				}
-				if cr, changed := w.Patch(*r); changed {
-					patch.CheckRunID, patch.CheckRunState, patch.Notes = cr.CheckRunID, cr.CheckRunState, cr.Notes
-				}
-			}
 			if err := d.Store.UpdateRun(gctx, r.OwnerUserID, r.ID, patch); err != nil {
 				return err
 			}
-			result = *r
+			applyRunPatch(r, patch)
+			result, concluded = *r, true
 			return nil
 		}
 
@@ -143,10 +133,48 @@ func (i *Integration) requestCancel(ctx context.Context, d Deps, runID, by strin
 	if err != nil {
 		return result, err
 	}
+	if concluded {
+		// The run is concluded on its row; its check run follows, with no
+		// gate held -- a mint and a write to GitHub are as slow as GitHub is.
+		// A completed run is never claimed and never reopened, so nothing
+		// moves between the section above and this write.
+		reportConclusion(ctx, d, d.gate, result)
+	}
 	// Outside the gate: the driver's own conclusion takes the same key, and
 	// a hook that concluded synchronously would otherwise wait on it.
 	if signalled && d.SignalCancel != nil {
 		d.SignalCancel(ctx, result.ID)
 	}
 	return result, nil
+}
+
+// reportConclusion writes the final check run of a run concluded OUTSIDE a
+// drive -- a queued run cancelled before any agent claimed it -- and records
+// the answer on the row. GitHub is asked with no gate held; the answer is
+// recorded under the run's gate as a fresh read and one write, and only when
+// it says something new. A final report that did not land is recorded
+// `unavailable`, never left reading `written` over a check run that still
+// shows the run unfinished: recovery republishes it (recover.go). It never
+// fails the conclusion it reports.
+func reportConclusion(ctx context.Context, d Deps, gate Gate, r Run) {
+	p, err := d.Store.PipelineByID(ctx, r.PipelineID)
+	if err != nil || p == nil {
+		if err != nil {
+			d.Logger.Warn("pipelines: the concluded run's pipeline could not be read, so its check run was not moved",
+				"component", "pipelinerun", logger.Subject(RunConcept, r.ID), "error", err)
+		}
+		return
+	}
+	w := publishCheckRun(ctx, d, *p, r, ReportFor(*p, r, nil))
+	if w.Err != nil {
+		d.Logger.Warn("pipelines: the concluded run's check run was not moved",
+			"component", "pipelinerun", logger.Subject(RunConcept, r.ID), "checkRunState", w.State, "error", w.Err)
+	}
+	if _, changed := finalCheckRunPatch(w, r); !changed {
+		return // the row already says all of it: no gate for nothing
+	}
+	if err := recordFinalCheckRun(ctx, d, gate, r.ID, w); err != nil {
+		d.Logger.Warn("pipelines: the concluded run's check-run state was not recorded",
+			"component", "pipelinerun", logger.Subject(RunConcept, r.ID), "error", err)
+	}
 }

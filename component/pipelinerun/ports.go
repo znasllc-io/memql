@@ -26,7 +26,9 @@ type Engine interface {
 //
 // A read inside fn that decides the write must be fresh
 // (memql.ContextWithFreshRead): this node's result cache can hold a row
-// another replica has since rewritten.
+// another replica has since rewritten. And fn is SHORT -- that read and its
+// writes: it never takes another gate and never calls GitHub, save open()'s
+// check-run create (ids.go; every test holds every path to it).
 type Gate func(ctx context.Context, key string, fn func(context.Context) error) error
 
 // Secrets resolves a v1:platform:globalSecret value by name. Production is

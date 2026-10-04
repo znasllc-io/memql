@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/packages"
 	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/component/pipelines"
@@ -22,9 +23,12 @@ import (
 // checkRunState "refused" and the pipeline_check_permission_missing note on
 // the run, and NEVER stops the run.
 //
-// A CHECK RUN IS WRITTEN OUTSIDE EVERY GATE by the driver: a call to GitHub
-// never holds a gate's connection (lease.go, driverGate). The row write that
-// records its answer is the gated part, as a fresh read and one write.
+// A CHECK RUN IS WRITTEN OUTSIDE EVERY GATE -- by the driver, by a cancel, by
+// recovery: a call to GitHub never holds a gate's connection (ids.go,
+// lease.go's driverGate). The row write that records its answer is the gated
+// part, as a fresh read and one write. The one exception is the CREATE an
+// opening makes under its run key's gate, with a token minted before it
+// (open.go says why).
 
 // checkPermissionMessage is the note a run carries when GitHub refused its
 // check run. It names the repair: the app's permissions, accepted per
@@ -128,17 +132,37 @@ type CheckRunWrite struct {
 //
 // The token is minted through the pipeline owner's grant on every call --
 // verifying the grant still reaches the repository -- and dies with the call.
+// Both are calls to GitHub, so it is never called under a gate.
 func publishCheckRun(ctx context.Context, d Deps, p Pipeline, r Run, report pipelines.RunReport) CheckRunWrite {
+	token, err := checkRunToken(ctx, d, p)
+	return writeCheckRun(ctx, d, p, r, report, token, err)
+}
+
+// checkRunToken mints the installation token p's check runs are written
+// under, through the owner's grant. A mint is several calls to GitHub (the
+// grant's installations, the repository, the token), so a caller that writes
+// a check run under a gate mints BEFORE taking it.
+func checkRunToken(ctx context.Context, d Deps, p Pipeline) (string, error) {
+	if d.GitHub == nil {
+		return "", errNoGitHub
+	}
+	token, _, err := d.GitHub.InstallationToken(ctx, p.CredentialID, p.OwnerUserID, p.Repository)
+	return token, err
+}
+
+// writeCheckRun is publishCheckRun's write half, under a token its caller
+// minted: a failed mint (tokenErr) is the write's answer, unavailable, with no
+// call made.
+func writeCheckRun(ctx context.Context, d Deps, p Pipeline, r Run, report pipelines.RunReport, token string, tokenErr error) CheckRunWrite {
 	if d.GitHub == nil {
 		return CheckRunWrite{State: CheckRunUnavailable, Err: errNoGitHub}
 	}
-	token, _, err := d.GitHub.InstallationToken(ctx, p.CredentialID, p.OwnerUserID, p.Repository)
-	if err != nil {
-		return CheckRunWrite{State: CheckRunUnavailable, Err: err}
+	if tokenErr != nil {
+		return CheckRunWrite{State: CheckRunUnavailable, Err: tokenErr}
 	}
 	run := ComposeCheckRun(d.OSOrigin(), p, r, report)
 	if r.CheckRunID > 0 {
-		err = d.GitHub.UpdateCheckRun(ctx, token, p.Repository, r.CheckRunID, run)
+		err := d.GitHub.UpdateCheckRun(ctx, token, p.Repository, r.CheckRunID, run)
 		if err == nil {
 			return CheckRunWrite{State: CheckRunWritten}
 		}
@@ -149,6 +173,40 @@ func publishCheckRun(ctx context.Context, d Deps, p Pipeline, r Run, report pipe
 		return CheckRunWrite{ID: id, State: CheckRunWritten}
 	}
 	return classifyCheckRunError(err)
+}
+
+// recordFinalCheckRun records what a concluded run's final check-run write,
+// made OUTSIDE a drive -- a cancel's conclusion, recovery's republish --
+// answered, on the run row: under the run's gate, as a fresh read and one
+// write, and only when the answer says something the row does not. The write
+// to GitHub came first, with no gate held; this is the short section after
+// it.
+func recordFinalCheckRun(ctx context.Context, d Deps, gate Gate, runID string, w CheckRunWrite) error {
+	return gate(ctx, RunGateKey(runID), func(gctx context.Context) error {
+		current, err := d.Store.RunByID(memql.ContextWithFreshRead(gctx), runID)
+		if err != nil || current == nil {
+			return err
+		}
+		patch, changed := finalCheckRunPatch(w, *current)
+		if !changed {
+			return nil
+		}
+		return d.Store.UpdateRun(gctx, current.OwnerUserID, current.ID, patch)
+	})
+}
+
+// finalCheckRunPatch is the run-row write that records w when w was a
+// concluded run's FINAL report: w.Patch's, except that a final report that
+// did not land is `unavailable` whatever the row said before. A check run
+// left showing a concluded run unfinished is not `written` -- a required
+// check showing it holds a merge -- and `unavailable` on a completed run is
+// what recovery republishes (recover.go).
+func finalCheckRunPatch(w CheckRunWrite, current Run) (RunPatch, bool) {
+	patch, changed := w.Patch(current)
+	if w.State == CheckRunUnavailable && w.Err != nil && current.CheckRunState != CheckRunUnavailable {
+		patch.CheckRunState, changed = ptr(CheckRunUnavailable), true
+	}
+	return patch, changed
 }
 
 // classifyCheckRunError reads a failed write. A 403 that is not GitHub's

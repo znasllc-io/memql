@@ -56,14 +56,31 @@ type OpenResult struct {
 	Opened bool
 }
 
-// open opens o on p, or finds the run that already answers it.
-//
-// The check run is written BEFORE the row, inside the gate, so the row is
-// created already naming its check run: a driver that claims the run the
-// moment its created event arrives finds a complete row, rather than racing
-// the opener to a check run of its own. When GitHub refuses the write (403)
-// or no token can be had, the run opens anyway with checkRunState saying so.
+// open opens o on p, or finds the run that already answers it, minting the
+// check run's token itself.
 func (i *Integration) open(ctx context.Context, d Deps, p Pipeline, o Opening) (OpenResult, error) {
+	return i.openWithToken(ctx, d, p, o, "")
+}
+
+// openWithToken is open under an installation token its caller already
+// minted for p's repository -- the poll's, a release's -- so an opening costs
+// no second mint; "" mints one here.
+//
+// THE ONE CALL TO GITHUB UNDER A GATE IS HERE, and it is the check-run
+// CREATE. The dedup read, the check run's create and the run row's create are
+// one critical section under the run key's gate, because a check run on
+// GitHub cannot be taken back: two openers that each read "no run" and each
+// created one would leave two check runs of one name on the commit, visible
+// and permanent, where two run rows would merely be a duplicate the derived
+// id collapses. And the row is created already naming its check run, so a
+// driver claiming the run the moment its created event arrives finds a
+// complete row rather than racing the opener to a check run of its own.
+// Everything else GitHub is asked -- the token above all, several calls
+// through the owner's grant -- is asked BEFORE the gate, which then holds its
+// connection for one create, not for a mint. When GitHub refuses the create
+// (403) or no token could be had, the run opens anyway with checkRunState
+// saying so.
+func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o Opening, token string) (OpenResult, error) {
 	if d.Store == nil {
 		return OpenResult{}, errNoStore
 	}
@@ -85,33 +102,39 @@ func (i *Integration) open(ctx context.Context, d Deps, p Pipeline, o Opening) (
 	}
 	key := pipelines.RunKey(p.Repository, sha, mode, o.Event)
 
+	// Asked first, fresh and with no gate held: a redelivery, a retried
+	// trigger or a poll that sees a head a webhook already opened is
+	// answered by the run that exists, at the cost of a read rather than a
+	// mint. The answer can only become MORE true -- runs are never deleted --
+	// so a stale "no" costs only the gated read below, which decides.
+	keyed, err := d.Store.RunsForKey(memql.ContextWithFreshRead(ctx), key)
+	if err != nil {
+		return OpenResult{}, err
+	}
+	if run, ok := answeredBy(runsOf(keyed, p.ID), o); ok {
+		return OpenResult{Run: run}, nil
+	}
+
+	var tokenErr error
+	if token == "" {
+		token, tokenErr = checkRunToken(ctx, d, p)
+	}
+
 	var result OpenResult
-	err := d.gate(ctx, OpenGateKey(key), func(gctx context.Context) error {
+	err = d.gate(ctx, OpenGateKey(key), func(gctx context.Context) error {
 		keyed, err := d.Store.RunsForKey(memql.ContextWithFreshRead(gctx), key)
 		if err != nil {
 			return err
 		}
 		runs := runsOf(keyed, p.ID)
+		if run, ok := answeredBy(runs, o); ok {
+			result = OpenResult{Run: run}
+			return nil
+		}
 		newest, attempts := newestAttempt(runs)
-		if o.Trigger != TriggerRerun {
-			if attempts > 0 {
-				result = OpenResult{Run: newest}
-				return nil
-			}
-		} else if attempts > 0 {
-			if id := strings.TrimSpace(o.DeliveryID); id != "" {
-				for _, r := range runs {
-					if r.DeliveryID == id {
-						// The same re-request delivered twice.
-						result = OpenResult{Run: r}
-						return nil
-					}
-				}
-			}
-			if !newest.Finished() {
-				result = OpenResult{Run: newest}
-				return ErrRunInProgress
-			}
+		if o.Trigger == TriggerRerun && attempts > 0 && !newest.Finished() {
+			result = OpenResult{Run: newest}
+			return ErrRunInProgress
 		}
 
 		now := d.now()
@@ -148,7 +171,8 @@ func (i *Integration) open(ctx context.Context, d Deps, p Pipeline, o Opening) (
 			run.FinishedAt = now
 		}
 
-		w := publishCheckRun(gctx, d, p, run, ReportFor(p, run, nil))
+		// The create, and nothing else of GitHub's: see above.
+		w := writeCheckRun(gctx, d, p, run, ReportFor(p, run, nil), token, tokenErr)
 		run.CheckRunID, run.CheckRunState = w.ID, w.State
 		if w.Note != nil {
 			run.Notes = withNote(run.Notes, *w.Note)
@@ -165,6 +189,29 @@ func (i *Integration) open(ctx context.Context, d Deps, p Pipeline, o Opening) (
 		return nil
 	})
 	return result, err
+}
+
+// answeredBy is the existing run of o's key that answers o, when one does:
+// for a delivery or the poll, the key's newest attempt -- a redelivery, or a
+// poll and a webhook for one head, are one run; for a re-run, only an attempt
+// this same delivery already opened -- a re-request delivered twice. A re-run
+// that no attempt answers opens the next one.
+func answeredBy(runs []Run, o Opening) (Run, bool) {
+	newest, attempts := newestAttempt(runs)
+	if attempts == 0 {
+		return Run{}, false
+	}
+	if o.Trigger != TriggerRerun {
+		return newest, true
+	}
+	if id := strings.TrimSpace(o.DeliveryID); id != "" {
+		for _, r := range runs {
+			if r.DeliveryID == id {
+				return r, true
+			}
+		}
+	}
+	return Run{}, false
 }
 
 // runsOf is the runs that are pipelineID's -- compared by bare short id,

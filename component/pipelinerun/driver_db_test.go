@@ -76,12 +76,14 @@ func TestARunIsDrivenOverRealRows(t *testing.T) {
 	store := NewDSLStore(eng)
 	ctx := context.Background()
 
-	// The production gate, over its own pool to the test database.
+	// The production gate, over its own pool to the test database, held to
+	// the gate discipline the fake gate keeps (fakes_test.go): no gate under
+	// a gate, no GitHub call under one but open()'s check-run create.
 	gateDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN())))
 	t.Cleanup(func() { _ = gateDB.Close() })
-	gate := func(ctx context.Context, key string, fn func(context.Context) error) error {
+	gate := watchedGate(t, func(ctx context.Context, key string, fn func(context.Context) error) error {
 		return githubconnect.WithGate(ctx, gateDB, key, fn)
-	}
+	})
 
 	suffix := strings.ReplaceAll(id.NewShortId(), "-", "")[:12]
 	owner := "pr10b-owner-" + suffix
@@ -114,7 +116,7 @@ func TestARunIsDrivenOverRealRows(t *testing.T) {
 	p := mustPipeline(t, store, PipelineIDFor(pkg.ID))
 
 	// ---- GitHub and the runner, the two fakes ----
-	gh := newFakeGitHub()
+	gh := newFakeGitHub(t)
 	for _, sha := range []string{shaA, shaB} {
 		gh.trees[repo+"@"+sha] = fstest.MapFS{
 			pipelines.ManifestPath: {Data: []byte(dbDriveManifest)},

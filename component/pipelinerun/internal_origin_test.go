@@ -76,8 +76,8 @@ func TestNoPersonReachesAnotherOwnersRows(t *testing.T) {
 	engine := newRecordingEngine()
 	integ := New(Deps{
 		Store:  NewDSLStore(engine),
-		GitHub: newFakeGitHub(),
-		Gate:   newKeyedGate().run,
+		GitHub: newFakeGitHub(t),
+		Gate:   newKeyedGate(t).run,
 		Now:    func() time.Time { return testNow },
 	})
 	stranger := personCtx(otherID)
@@ -125,7 +125,7 @@ func TestNoPersonReachesAnotherOwnersRows(t *testing.T) {
 // is a Go API no client reaches, and reads the same way.
 func TestTheRunnersEntryPointsRefuseAClientAndReadAsTheSystemActor(t *testing.T) {
 	engine := newRecordingEngine()
-	integ := New(Deps{Store: NewDSLStore(engine), GitHub: newFakeGitHub(), Gate: newKeyedGate().run})
+	integ := New(Deps{Store: NewDSLStore(engine), GitHub: newFakeGitHub(t), Gate: newKeyedGate(t).run})
 	caller := personCtx(otherID)
 
 	if _, err := integ.Trigger(caller, "inbound-1"); !errors.Is(err, ErrClientOrigin) {

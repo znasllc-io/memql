@@ -112,135 +112,189 @@ type pollOutcome struct {
 	baseline bool
 }
 
-// pollOne polls one pipeline under its gate: a fresh read of the row, the
-// heads GitHub reports, the runs a moved head asks for, and the heads written
-// back. A head whose run could not be opened keeps its PREVIOUS value, so the
-// next poll asks again rather than the change being lost.
+// pollOne polls one pipeline, and HOLDS NO GATE WHILE IT TALKS TO GITHUB:
+// a fresh read of the row, then the token, the default branch's head and the
+// open pull requests asked with no gate held; then the runs a moved head asks
+// for, each opened under its own run key's gate and no other; then the heads
+// written back under the repository's gate as one short compare-and-swap
+// (writeHeads). A head whose run could not be opened keeps its PREVIOUS
+// value, so the next poll asks again rather than the change being lost.
 func (i *Integration) pollOne(ctx context.Context, d Deps, listed Pipeline) (pollOutcome, error) {
 	var out pollOutcome
-	err := d.gate(ctx, PipelineGateKey(listed.ID), func(gctx context.Context) error {
-		p, err := d.Store.PipelineByID(memql.ContextWithFreshRead(gctx), listed.ID)
-		if err != nil {
-			return err
-		}
-		if p == nil || !p.Active() || p.Delivery != DeliveryPoll {
-			return nil // disconnected or switched to webhooks since the list was read
-		}
-		if d.GitHub == nil {
-			return errNoGitHub
-		}
-		token, _, err := d.GitHub.InstallationToken(gctx, p.CredentialID, p.OwnerUserID, p.Repository)
-		if err != nil {
-			return err
-		}
-		branch := strings.TrimSpace(p.DefaultBranch)
-		if branch == "" {
-			info, err := d.GitHub.Repository(gctx, token, p.Repository)
-			if err != nil {
-				return err
-			}
-			branch = strings.TrimSpace(info.DefaultBranch)
-		}
-		if branch == "" {
-			return fmt.Errorf("GitHub names no default branch for %s", p.Repository)
-		}
-		// branchPatch records a default branch that moved on GitHub since the
-		// row was written, so the next poll asks for the right one.
-		var branchPatch *string
-		headSHA, headMessage, err := d.GitHub.BranchHead(gctx, token, p.Repository, branch)
-		if githubapp.StatusOf(err) == http.StatusNotFound {
-			// The stored branch is gone: renamed since connect. Ask GitHub
-			// which branch is the default now, rather than failing every
-			// minute until somebody reconnects. Its key is new to the heads,
-			// so it is a baseline -- a rename is not a push.
-			if info, rerr := d.GitHub.Repository(gctx, token, p.Repository); rerr == nil {
-				if renamed := strings.TrimSpace(info.DefaultBranch); renamed != "" && renamed != branch {
-					branch, branchPatch = renamed, ptr(renamed)
-					headSHA, headMessage, err = d.GitHub.BranchHead(gctx, token, p.Repository, branch)
-				}
-			}
-		}
-		if err != nil {
-			return fmt.Errorf("reading %s's head: %w", branch, err)
-		}
-		pulls, err := d.GitHub.OpenPullRequests(gctx, token, p.Repository)
-		if err != nil {
-			return fmt.Errorf("reading open pull requests: %w", err)
-		}
+	p, err := d.Store.PipelineByID(memql.ContextWithFreshRead(ctx), listed.ID)
+	if err != nil {
+		return out, err
+	}
+	if p == nil || !p.Active() || p.Delivery != DeliveryPoll {
+		return out, nil // disconnected or switched to webhooks since the list was read
+	}
+	if d.GitHub == nil {
+		return out, errNoGitHub
+	}
+	token, _, err := d.GitHub.InstallationToken(ctx, p.CredentialID, p.OwnerUserID, p.Repository)
+	if err != nil {
+		return out, err
+	}
+	head, err := readDefaultHead(ctx, d, *p, token)
+	if err != nil {
+		return out, err
+	}
+	pulls, err := d.GitHub.OpenPullRequests(ctx, token, p.Repository)
+	if err != nil {
+		return out, fmt.Errorf("reading open pull requests: %w", err)
+	}
 
-		branchKey := headKeyBranch(branch)
-		seen := map[string]string{branchKey: strings.ToLower(strings.TrimSpace(headSHA))}
-		for _, pr := range pulls {
-			if pr.Number <= 0 || strings.TrimSpace(pr.HeadSHA) == "" {
-				continue
-			}
-			seen[headKeyPR(pr.Number)] = strings.ToLower(strings.TrimSpace(pr.HeadSHA))
+	branchKey := headKeyBranch(head.branch)
+	seen := map[string]string{branchKey: head.sha}
+	for _, pr := range pulls {
+		if pr.Number <= 0 || strings.TrimSpace(pr.HeadSHA) == "" {
+			continue
 		}
+		seen[headKeyPR(pr.Number)] = strings.ToLower(strings.TrimSpace(pr.HeadSHA))
+	}
+	// branchPatch records a default branch that moved on GitHub since the
+	// row was written, so the next poll asks for the right one.
+	var branchPatch *string
+	if head.renamed {
+		branchPatch = ptr(head.branch)
+	}
 
-		if len(p.Heads) == 0 {
-			// The baseline: record, open nothing.
-			out.baseline = true
-			return d.Store.UpdatePipeline(gctx, p.OwnerUserID, p.ID, PipelinePatch{Heads: ptr(seen), DefaultBranch: branchPatch})
-		}
+	if len(p.Heads) == 0 {
+		// The baseline: record, open nothing.
+		written, err := i.writeHeads(ctx, d, *p, seen, branchPatch)
+		out.baseline = written
+		return out, err
+	}
 
-		next := maps.Clone(seen) // closed pull requests' keys drop out here
-		var failures []error
-		openOrKeep := func(key string, o Opening) {
-			res, err := i.open(gctx, d, *p, o)
-			if err != nil {
-				failures = append(failures, err)
-				if prev, ok := p.Heads[key]; ok {
-					next[key] = prev
-				} else {
-					delete(next, key)
-				}
-				return
-			}
-			if res.Opened {
-				out.opened = append(out.opened, res.Run)
+	next := maps.Clone(seen) // closed pull requests' keys drop out here
+	var failures []error
+	openOrKeep := func(key string, o Opening) {
+		res, err := i.openWithToken(ctx, d, *p, o, token)
+		if err != nil {
+			failures = append(failures, err)
+			if prev, ok := p.Heads[key]; ok {
+				next[key] = prev
 			} else {
-				out.existing = append(out.existing, res.Run)
+				delete(next, key)
 			}
+			return
 		}
+		if res.Opened {
+			out.opened = append(out.opened, res.Run)
+		} else {
+			out.existing = append(out.existing, res.Run)
+		}
+	}
 
-		// The default branch: a head that MOVED is a push. A branch key the
-		// heads do not hold yet -- the default branch was renamed since the
-		// last poll -- is a baseline for that branch, which is what a webhook
-		// does too: a rename is not a push.
-		if prev, ok := p.Heads[branchKey]; ok && prev != seen[branchKey] {
-			openOrKeep(branchKey, Opening{
-				Event: pipelines.EventPush, SHA: seen[branchKey], BaseSHA: prev, Branch: branch,
-				Title: firstLine(headMessage), Trigger: TriggerPoll,
-			})
+	// The default branch: a head that MOVED is a push. A branch key the
+	// heads do not hold yet -- the default branch was renamed since the
+	// last poll -- is a baseline for that branch, which is what a webhook
+	// does too: a rename is not a push.
+	if prev, ok := p.Heads[branchKey]; ok && prev != seen[branchKey] {
+		openOrKeep(branchKey, Opening{
+			Event: pipelines.EventPush, SHA: seen[branchKey], BaseSHA: prev, Branch: head.branch,
+			Title: firstLine(head.message), Trigger: TriggerPoll,
+		})
+	}
+	// Pull requests: a NEW one, or one whose head moved, is what a
+	// webhook's opened or synchronize would have carried.
+	for _, pr := range pulls {
+		key := headKeyPR(pr.Number)
+		sha, ok := seen[key]
+		if !ok || p.Heads[key] == sha {
+			continue
 		}
-		// Pull requests: a NEW one, or one whose head moved, is what a
-		// webhook's opened or synchronize would have carried.
-		for _, pr := range pulls {
-			key := headKeyPR(pr.Number)
-			sha, ok := seen[key]
-			if !ok || p.Heads[key] == sha {
-				continue
-			}
-			head := strings.TrimSpace(pr.HeadRepository)
-			openOrKeep(key, Opening{
-				Event: pipelines.EventPullRequest, SHA: sha, BaseSHA: pr.BaseSHA, Branch: pr.HeadRef,
-				Title: firstLine(pr.Title), PullRequest: pr.Number,
-				// D6, exactly as the delivery reads it: a head in another
-				// repository, or one GitHub reports deleted, is a fork.
-				Fork:           head == "" || !strings.EqualFold(head, p.Repository),
-				HeadRepository: head,
-				Trigger:        TriggerPoll,
-			})
-		}
+		headRepo := strings.TrimSpace(pr.HeadRepository)
+		openOrKeep(key, Opening{
+			Event: pipelines.EventPullRequest, SHA: sha, BaseSHA: pr.BaseSHA, Branch: pr.HeadRef,
+			Title: firstLine(pr.Title), PullRequest: pr.Number,
+			// D6, exactly as the delivery reads it: a head in another
+			// repository, or one GitHub reports deleted, is a fork.
+			Fork:           headRepo == "" || !strings.EqualFold(headRepo, p.Repository),
+			HeadRepository: headRepo,
+			Trigger:        TriggerPoll,
+		})
+	}
 
-		if !maps.Equal(next, p.Heads) || branchPatch != nil {
-			if err := d.Store.UpdatePipeline(gctx, p.OwnerUserID, p.ID, PipelinePatch{Heads: ptr(next), DefaultBranch: branchPatch}); err != nil {
-				failures = append(failures, err)
+	if !maps.Equal(next, p.Heads) || branchPatch != nil {
+		if _, err := i.writeHeads(ctx, d, *p, next, branchPatch); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return out, errors.Join(failures...)
+}
+
+// polledHead is a pipeline's default branch as GitHub reports it now.
+type polledHead struct {
+	branch, sha, message string
+	// renamed: the branch is not the one the row names -- it was renamed on
+	// GitHub since connect -- so the row's defaultBranch moves with it.
+	renamed bool
+}
+
+// readDefaultHead asks GitHub for the default branch's head, following a
+// rename: when the stored branch is gone (404), it asks which branch is the
+// default now rather than failing every minute until somebody reconnects. A
+// network call throughout, made with no gate held.
+func readDefaultHead(ctx context.Context, d Deps, p Pipeline, token string) (polledHead, error) {
+	branch := strings.TrimSpace(p.DefaultBranch)
+	renamed := false
+	if branch == "" {
+		info, err := d.GitHub.Repository(ctx, token, p.Repository)
+		if err != nil {
+			return polledHead{}, err
+		}
+		branch = strings.TrimSpace(info.DefaultBranch)
+	}
+	if branch == "" {
+		return polledHead{}, fmt.Errorf("GitHub names no default branch for %s", p.Repository)
+	}
+	sha, message, err := d.GitHub.BranchHead(ctx, token, p.Repository, branch)
+	if githubapp.StatusOf(err) == http.StatusNotFound {
+		// The stored branch is gone: renamed since connect. Its key is new to
+		// the heads, so it is a baseline -- a rename is not a push.
+		if info, rerr := d.GitHub.Repository(ctx, token, p.Repository); rerr == nil {
+			if now := strings.TrimSpace(info.DefaultBranch); now != "" && now != branch {
+				branch, renamed = now, true
+				sha, message, err = d.GitHub.BranchHead(ctx, token, p.Repository, branch)
 			}
 		}
-		return errors.Join(failures...)
+	}
+	if err != nil {
+		return polledHead{}, fmt.Errorf("reading %s's head: %w", branch, err)
+	}
+	return polledHead{branch: branch, sha: strings.ToLower(strings.TrimSpace(sha)), message: message, renamed: renamed}, nil
+}
+
+// writeHeads records what a poll saw, under the repository's gate -- the
+// one every writer of the pipeline row takes -- as a COMPARE-AND-SWAP against
+// the row the poll read: a fresh read must still show it active, polled, on
+// the same repository, holding the very heads the poll diffed against.
+// Anything else is another writer since -- a reconnect elsewhere, a
+// disconnect, a switch to webhooks -- and the write is skipped, reported as
+// not written: the next poll starts from the row as it is, and a run this one
+// opened is the run key the next one computes, so nothing opens twice. One
+// fresh read and one write; GitHub was asked before.
+func (i *Integration) writeHeads(ctx context.Context, d Deps, read Pipeline, heads map[string]string, branch *string) (bool, error) {
+	written := false
+	err := d.gate(ctx, RepositoryGateKey(read.Repository), func(gctx context.Context) error {
+		current, err := d.Store.PipelineByID(memql.ContextWithFreshRead(gctx), read.ID)
+		if err != nil {
+			return err
+		}
+		if current == nil || !current.Active() || current.Delivery != DeliveryPoll ||
+			current.Repository != read.Repository || !maps.Equal(current.Heads, read.Heads) {
+			d.Logger.Info("pipelines: the pipeline changed while it was polled; the next poll starts from it as it is",
+				"component", "pipelinerun", logger.Subject(PipelineConcept, read.ID), "repository", read.Repository)
+			return nil
+		}
+		if err := d.Store.UpdatePipeline(gctx, current.OwnerUserID, current.ID, PipelinePatch{Heads: ptr(heads), DefaultBranch: branch}); err != nil {
+			return err
+		}
+		written = true
+		return nil
 	})
-	return out, err
+	return written, err
 }
 
 func headKeyBranch(branch string) string { return "branch:" + branch }

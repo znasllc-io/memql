@@ -266,6 +266,41 @@ func TestReconnectToAnotherRepositoryForgetsTheOldHeads(t *testing.T) {
 	}
 }
 
+// A poll of the OLD repository that read the row before the move writes its
+// heads under the old repository's key, which the connect's own section does
+// not hold -- landing here right after the row names the new repository. The
+// fence connect takes on the old key afterwards clears them, so the new
+// repository never starts from the old one's heads.
+func TestAReconnectElsewhereClearsHeadsALatePollWrote(t *testing.T) {
+	h := connectHarness(t, connectManifest)
+	existing := testPipeline(DeliveryPoll)
+	existing.Repository = "acme/old-shop"
+	existing.Heads = map[string]string{"branch:main": shaC}
+	h.store.addPipeline(existing)
+	late := true
+	h.store.afterCreatePipeline = func() {
+		if late {
+			late = false
+			if err := h.store.UpdatePipeline(context.Background(), existing.OwnerUserID, existing.ID,
+				PipelinePatch{Heads: ptr(map[string]string{"branch:main": shaB, "pr:4": shaC})}); err != nil {
+				t.Errorf("the late poll's write: %v", err)
+			}
+		}
+	}
+
+	if _, err := connect(h, personCtx(ownerID), ConnectRequest{Delivery: DeliveryPoll}); err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+	p, _ := h.store.pipeline(existing.ID)
+	if p.Repository != repoName || len(p.Heads) != 0 {
+		t.Errorf("the old repository's heads are no baseline for the new one: %s %v", p.Repository, p.Heads)
+	}
+	keys := h.gate.seen()
+	if len(keys) != 2 || keys[0] != RepositoryGateKey(repoName) || keys[1] != RepositoryGateKey("acme/old-shop") {
+		t.Errorf("gate keys = %v; want the new repository's, then -- after it, never inside it -- the old one's", keys)
+	}
+}
+
 func TestDisconnectIsTheOwnersAndKeepsTheRow(t *testing.T) {
 	h := newHarness(t)
 	p := testPipeline(DeliveryWebhook)
