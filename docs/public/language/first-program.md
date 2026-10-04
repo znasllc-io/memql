@@ -113,8 +113,8 @@ The extension also reports diagnostics as you edit.
 1. [Install the extension](vscode.md#get-the-extension), open the example's
    folder, and trust the workspace when you intend to connect.
 2. Use **MemQL: Add Cluster**, choose **Connect to a cluster**, supply a name and
-   your cluster domain, and press **Sign in**. Use a development cluster and an
-   account allowed to train constructs.
+   your cluster domain, press **Connect**, then **Sign in**. Use a development
+   cluster and an account allowed to train constructs.
 3. Click the training lens above `readingItem` (**Not on cluster**) and choose
    **Dry run**, then **Promote**.
    Concepts cannot be staged privately; promoting this one registers a shared

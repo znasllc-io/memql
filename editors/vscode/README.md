@@ -101,9 +101,9 @@ The MemQL panel in the activity bar has five views.
 Runnable queries, mutations, logic, tools and automations get a **Run** lens
 in the editor. A run can change real data. Each construct also gets a lens
 saying where it stands on the cluster: Not on cluster, Differs from cluster,
-Live, Built in or Staged. Click it for the actions that state allows (Dry run,
-Try in this session, Stage, Promote, Demote). Saving a file never changes the
-cluster. The [training guide](https://github.com/znasllc-io/memql/blob/main/docs/public/language/training.md)
+Staged, Live, Built in or Edited. Click it for the actions that state allows,
+such as Dry run, Try in this session, Stage, Promote or Demote. Saving a file
+never changes the cluster. The [training guide](https://github.com/znasllc-io/memql/blob/main/docs/public/language/training.md)
 explains each action.
 
 **Open MemQL OS**, on a connected cluster's row, opens that cluster's MemQL OS

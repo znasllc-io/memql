@@ -60,9 +60,10 @@ themes take precedence. See the [appearance reference](../../../editors/vscode/R
 1. Open [the reading-list example](../../../examples/reading-list/reading.memql)
    in a folder. Try completion and hover; read any diagnostics before connecting.
 2. To run it, trust the workspace and choose **MemQL: Add Cluster**. Choose
-   **Connect to a cluster** and enter an existing cluster's domain, then press
-   **Sign in**; or choose **Install MemQL on this computer** on a supported
-   host. Docker is needed for a local cluster, not for offline editing.
+   **Connect to a cluster**, enter a name and an existing cluster's domain,
+   press **Connect**, then **Sign in**; or choose **Install MemQL on this
+   computer** on a supported host. Docker is needed for a local cluster, not
+   for offline editing.
 3. Click the cluster in the **Clusters** view to use it. **Constructs** shows
    definitions, **Data** shows authorized rows, and a runnable declaration's
    CodeLens opens its argument form.

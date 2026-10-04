@@ -740,9 +740,9 @@ shown only when it is legal.
 ### 5b. Changing a local cluster's version
 
 - [ ] **Change Version...** on an installed cluster opens **Change version**:
-      the current version, and a list of release tags from the checkout's
-      origin, newest first, the newest marked **Latest** and the running one
-      **Current**, with **nothing pre-selected**. **Other...** takes a typed tag
+      the current version, and a list of the published MemQL releases, newest
+      first, the newest marked **Latest** and the running one **Current**,
+      with **nothing pre-selected**. **Other...** takes a typed tag
 - [ ] With no network, the list is absent and a **Version** box, with
       *Couldn't load the list of versions.* under it, still accepts a tag
 - [ ] A mistyped tag (`0.18.0`, `latest`) is refused under the box, before
@@ -755,8 +755,9 @@ shown only when it is legal.
       <version>**
 - [ ] A newer release than the running one is also offered on the cluster's page
       as **Update to <version>...**
-- [ ] The run uses the progress screen (*Updating MemQL*), and the ones already
-      satisfied are skipped
+- [ ] The run uses the progress screen (*Changing version*, or *Updating
+      MemQL* for **Update to <version>...**), and the steps already satisfied
+      are skipped
 - [ ] Docker not running fails at the first step, **in the page with its
       guidance** -- not as a notification toast
 - [ ] A failed step offers **Retry** (when retrying could help) and no guided

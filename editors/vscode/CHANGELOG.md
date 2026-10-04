@@ -4,16 +4,17 @@
 
 A new interface for everything around your `.memql` files: clusters, signing
 in, installing and uninstalling a local cluster, deployments and the authoring
-pages. Nothing it could do before is gone. The language is the same as 0.6.1.
+pages. Apart from Guided install, every action it had before is still there.
+The language is the same as 0.6.1.
 
 - **Every page is rebuilt to say less.** The cluster page, the Add a cluster
-  page, the deployments pages and the construct, concept, run and language
-  reference pages share one layout: a title, the facts, and a bar at the bottom
-  with the state in words and only the actions that work from it. Commands,
-  menus and notifications are in plain words, with titles such as **MemQL:
-  Install Local Cluster...**, **MemQL: Open MemQL OS** and **MemQL: Show
-  Cluster Details**, and every notification is one short sentence with its fix
-  as a button.
+  page, the deployments pages and the construct, concept, automation, run and
+  language reference pages share one layout: a title, the facts, and a bar at
+  the bottom with the state in words and only the actions that work from it.
+  Commands, menus and notifications are in plain words, with titles such as
+  **MemQL: Install Local Cluster...**, **MemQL: Open MemQL OS** and **MemQL:
+  Show Cluster Details**, and every notification is one short sentence with its
+  fix as a button.
 - **Reconnecting to a cluster works again.** Two things stopped it. The editor
   signed in with the client another MemQL tool had saved for the same cluster,
   which the cluster refused for the editor's sign-in: the browser showed "Bad
@@ -32,11 +33,11 @@ pages. Nothing it could do before is gone. The language is the same as 0.6.1.
   a window opens and after the connection drops. If it is still away after
   about two minutes, a notification says so, with **Reconnect**.
 - **Long operations share one progress screen.** Install, repair, uninstall,
-  update, rebuild and deploy show a bar that only moves forward, the step
-  running now, the step count and the time so far, with the live log one click
-  away. A failed step says what went wrong and gives its fix as a command to
-  **Run in terminal**. **Cancel** stops after the current step, and **Resume**
-  carries on.
+  update, changing version and rebuilding show a bar that only moves forward,
+  the step running now, the step count and the time so far, with the live log
+  one click away. A failed step says what went wrong and gives its fix as a
+  command to **Run in terminal**. **Cancel** stops after the current step, and
+  a stopped install, repair or uninstall offers **Resume**.
 - **Choices are switches.** Every on/off choice on a page is a switch, in place
   of a checkbox. On the uninstall page the shared tools start off, and deleting
   a cluster's data takes its own red switch and a typed phrase before the
@@ -46,21 +47,24 @@ pages. Nothing it could do before is gone. The language is the same as 0.6.1.
   that cluster as kept, and removes it only when you turn on **Delete the
   cluster's data** and type `delete memql data`. Dismissing the password prompt
   now cancels an install or uninstall instead of starting it.
-- **Deployments and authoring have pages of their own.** The Deployments page
-  shows the cluster's version, its history and the next step: Update, Change
-  version, Rebuild from checkout and Pull and rebuild for a local cluster;
-  Deploy, Promote, Abort and Roll back for a remote one. A construct's lens
-  names its state in words (Not on cluster, Live, Staged) and opens the actions
-  that state allows.
+- **The Deployments page leads with what you can do next.** It shows the
+  cluster's version and its history, and offers only the steps that work from
+  where the cluster is: Update, Change version, Rebuild from checkout and Pull
+  and rebuild for a local cluster; Deploy, Promote, Abort and Roll back for a
+  remote one. Opening a failed run offers Retry for the act it came from.
+- **One lens per construct.** The lens above a construct names its state in
+  words (Not on cluster, Differs from cluster, Staged, Live, Built in, Edited),
+  and clicking it opens the actions that state allows, each with a line saying
+  what it does. It replaces the row of action lenses.
 - **Guided install is gone.** It showed each step's command for you to run, and
   in practice ran the same steps again as Retry does. A step that needs your
   hand now gives its command with **Run in terminal**.
 - **MemQL opens in VS Code for the Web.** In a browser it connects to clusters
-  you already have, with the sign-in approved by a code; installing a cluster
-  and the language server stay on the desktop. On every host the editor keeps
-  its sign-in in VS Code's secret storage rather than in the cluster list it
-  shares with MemQL Cockpit, and MemQL Productivity Tools uses this connection
-  instead of a sign-in of its own.
+  that are already running, with the sign-in approved by a code; installing a
+  cluster and the language server stay on the desktop. On every host the editor
+  keeps its sign-in in VS Code's secret storage rather than in the cluster list
+  it shares with MemQL Cockpit, and MemQL Productivity Tools uses this
+  connection instead of a sign-in of its own.
 
 ## 0.6.1
 

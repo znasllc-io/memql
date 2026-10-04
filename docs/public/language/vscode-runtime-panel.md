@@ -280,10 +280,10 @@ question that already has one.
 
 The catalog reports a path relative to the **cluster's** tree, which is
 not obliged to be the checkout you have open -- for a remote cluster it
-usually is not. When the path does not resolve here the page names it and
-offers **View source from cluster**: the cluster that loaded the construct
-also serves the file, over its pack browser, so the source opens as a
-read-only `memql-cluster://` document at the signature. Highlighting and
+usually is not. When the path does not resolve here, the page's
+**Open source** still works: the cluster that loaded the construct also serves
+the file, over its pack browser, so the source opens as a read-only
+`memql-cluster://` document at the signature. Highlighting and
 nothing else -- a file that is not on this machine gets no diagnostics,
 because the imports it names resolve against the cluster's tree rather
 than yours.
@@ -305,9 +305,9 @@ none -- but a trigger: which payload modes to offer, and which concept's
 rows the picker browses. The catalog carries that trigger, so the detail
 page opens the same automation form a `.memql` file's CodeLens does.
 
-The button says **Run automation...**, and the ellipsis is the point: for
-the other four kinds a click invokes, while here it opens a form that
-ends in firing a real event on a real cluster. An automation the cluster
+The button says **Run...** rather than **Run**, and the ellipsis is the
+point: for the other four kinds a click invokes, while here it opens a form
+that ends in firing a real event on a real cluster. An automation the cluster
 reports no trigger for is manual-run, which is a real form rather than a
 missing one, so it is offered as such.
 
@@ -392,8 +392,8 @@ running automations with a step trace, and driving deployments from the
 **Deployments** view have since
 landed alongside the views above. (Deployments replaced the Cluster tab in
 memql#3733: topology is cluster state and belongs to MemQL OS, while what
-you operate and what you can reach belong here. The extension's README states
-that boundary and the table it produces.) Each has its own section in the
+you operate and what you can reach belong here. The extension's detailed
+reference states that boundary and the table it produces.) Each has its own section in the
 [manual verification checklist](vscode-runtime-panel-verification.md),
 which is where the behaviour is written down in the detail a reader
 checking one of them needs.

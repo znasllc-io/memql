@@ -24,9 +24,9 @@ and validate it with the command-line linter.
 ## Connect to an existing cluster
 
 1. Open a trusted workspace in VS Code or Cursor.
-2. Run **MemQL: Add Cluster**, choose **Connect to a cluster**, and enter a name
-   and the domain supplied by your operator. The extension works out the
-   endpoints from the domain.
+2. Run **MemQL: Add Cluster**, choose **Connect to a cluster**, enter a name
+   and the domain supplied by your operator, and press **Connect**. The
+   extension works out the endpoints from the domain.
 3. Press **Sign in**. Your browser opens the cluster's sign-in; after that the
    extension reconnects on its own.
 4. Browse **Constructs** for definitions and **Data** for rows your account may
