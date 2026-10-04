@@ -353,8 +353,10 @@ func exitPhrase(t *ContainerStateTerminated) string {
 	return s
 }
 
-// messageOf is a platform container's own last words, when it left any: its
-// termination message, on one line. Never used for the step container.
+// messageOf is a container's own last words, when it left any: its
+// termination message, on one line. It is read for the clone, cache-prep and
+// the services -- platform code, and images given no secrets -- and never for
+// the step container (stepEnded says why).
 func messageOf(t *ContainerStateTerminated) string {
 	if m := oneLine(t.Message); m != "" {
 		return ": " + m
