@@ -235,13 +235,16 @@ type PodStatus struct {
 	ContainerStatuses     []ContainerStatus `json:"containerStatuses,omitempty"`
 }
 
-// PodCondition is one of a pod's conditions (PodScheduled is the one that
-// says a step is waiting for room).
+// PodCondition is one of a pod's conditions: PodScheduled says a step is
+// waiting for room, and DisruptionTarget that the cluster is stopping the pod
+// (a node drain, a preemption, an eviction). LastTransitionTime is when the
+// condition took its status -- for DisruptionTarget, when the stopping began.
 type PodCondition struct {
-	Type    string `json:"type"`
-	Status  string `json:"status"`
-	Reason  string `json:"reason,omitempty"`
-	Message string `json:"message,omitempty"`
+	Type               string    `json:"type"`
+	Status             string    `json:"status"`
+	Reason             string    `json:"reason,omitempty"`
+	Message            string    `json:"message,omitempty"`
+	LastTransitionTime time.Time `json:"lastTransitionTime,omitzero"`
 }
 
 // ContainerStatus is one container's observed state. Image is the image the

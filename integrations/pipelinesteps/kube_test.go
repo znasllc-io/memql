@@ -522,7 +522,37 @@ const (
 	// A pod the kubelet refused at admission: failed, no container statuses,
 	// no conditions, the reason on the pod alone.
 	kubePodRejected = `{"metadata": {"name": "r-rejected-cznfj"}, "status": {"message": "Pod was rejected: Node didn't have enough resource: cpu, requested: 500000, used: 100, capacity: 24000", "phase": "Failed", "qosClass": "Burstable", "reason": "OutOfcpu", "startTime": "2026-10-04T07:59:31Z"}}`
+	// A running step evicted (the API a node drain uses) at 08:31:58 and
+	// killed by the kubelet when its grace ran out, 08:32:08.
+	kubePodDrainedAfterKill = `{"metadata": {"name": "mp-a7a72726d5075767e0b6d115-8s7jz", "creationTimestamp": "2026-10-04T08:31:40Z", "deletionTimestamp": "2026-10-04T08:32:08Z", "labels": {"job-name": "mp-a7a72726d5075767e0b6d115"}}, "status": {"conditions": [{"lastProbeTime": null, "lastTransitionTime": "2026-10-04T08:31:58Z", "message": "Eviction API: evicting", "reason": "EvictionByEvictionAPI", "status": "True", "type": "DisruptionTarget"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T08:32:10Z", "status": "False", "type": "PodReadyToStartContainers"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T08:31:41Z", "status": "True", "type": "Initialized"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T08:32:10Z", "reason": "PodFailed", "status": "False", "type": "Ready"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T08:32:10Z", "reason": "PodFailed", "status": "False", "type": "ContainersReady"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T08:31:40Z", "status": "True", "type": "PodScheduled"}], "containerStatuses": [{"image": "docker.io/library/alpine:3.20", "lastState": {}, "name": "step", "ready": false, "restartCount": 0, "started": false, "state": {"terminated": {"exitCode": 137, "finishedAt": "2026-10-04T08:32:08Z", "reason": "Error", "startedAt": "2026-10-04T08:31:41Z"}}}], "initContainerStatuses": [{"image": "docker.io/library/alpine:3.20", "lastState": {}, "name": "clone", "ready": true, "restartCount": 0, "started": false, "state": {"terminated": {"exitCode": 0, "finishedAt": "2026-10-04T08:31:40Z", "reason": "Completed", "startedAt": "2026-10-04T08:31:40Z"}}}, {"image": "docker.io/library/alpine:3.20", "lastState": {}, "name": "svc-db", "ready": false, "restartCount": 0, "started": false, "state": {"terminated": {"exitCode": 137, "finishedAt": "2026-10-04T08:32:10Z", "reason": "Error", "startedAt": "2026-10-04T08:31:40Z"}}}], "phase": "Failed", "startTime": "2026-10-04T08:31:40Z"}}`
+	// A step that exited 0 at 08:31:41, its pod evicted at 08:31:54 while
+	// its service still ran.
+	kubePodDisruptedAfterExit = `{"metadata": {"name": "mp-a7a72726d5075767e0b6d115-njpwn", "creationTimestamp": "2026-10-04T08:31:40Z", "deletionTimestamp": "2026-10-04T08:32:24Z", "labels": {"job-name": "mp-a7a72726d5075767e0b6d115"}}, "status": {"conditions": [{"lastProbeTime": null, "lastTransitionTime": "2026-10-04T08:31:40Z", "status": "True", "type": "PodReadyToStartContainers"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T08:31:41Z", "status": "True", "type": "Initialized"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T08:31:40Z", "message": "containers with unready status: [step]", "reason": "ContainersNotReady", "status": "False", "type": "Ready"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T08:31:40Z", "message": "containers with unready status: [step]", "reason": "ContainersNotReady", "status": "False", "type": "ContainersReady"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T08:31:40Z", "status": "True", "type": "PodScheduled"}, {"lastProbeTime": null, "lastTransitionTime": "2026-10-04T08:31:54Z", "message": "Eviction API: evicting", "reason": "EvictionByEvictionAPI", "status": "True", "type": "DisruptionTarget"}], "containerStatuses": [{"image": "docker.io/library/alpine:3.20", "lastState": {}, "name": "step", "ready": false, "restartCount": 0, "started": false, "state": {"terminated": {"exitCode": 0, "finishedAt": "2026-10-04T08:31:41Z", "reason": "Completed", "startedAt": "2026-10-04T08:31:41Z"}}}], "initContainerStatuses": [{"image": "docker.io/library/alpine:3.20", "lastState": {}, "name": "clone", "ready": true, "restartCount": 0, "started": false, "state": {"terminated": {"exitCode": 0, "finishedAt": "2026-10-04T08:31:40Z", "reason": "Completed", "startedAt": "2026-10-04T08:31:40Z"}}}, {"image": "docker.io/library/alpine:3.20", "lastState": {}, "name": "svc-db", "ready": true, "restartCount": 0, "started": true, "state": {"running": {"startedAt": "2026-10-04T08:31:40Z"}}}], "phase": "Running", "startTime": "2026-10-04T08:31:40Z"}}`
 )
+
+// kubeDisruptedJob is the evicted pods' Job, as it read (measured): started
+// 08:31:40 with a 600 s deadline, and marked failing the moment its pod was
+// evicted.
+func kubeDisruptedJob() Job {
+	return Job{
+		Metadata: ObjectMeta{Name: kubeJobName},
+		Spec:     JobSpec{ActiveDeadlineSeconds: ptrTo(int64(600))},
+		Status: JobStatus{
+			StartTime:  time.Date(2026, 10, 4, 8, 31, 40, 0, time.UTC),
+			Conditions: []JobCondition{clsCond("FailureTarget", "BackoffLimitExceeded", "Job has reached the specified backoff limit")},
+		},
+	}
+}
+
+// kubeDisruption is the pod's DisruptionTarget condition, or nil.
+func kubeDisruption(p *Pod) *PodCondition {
+	for i, c := range p.Status.Conditions {
+		if c.Type == "DisruptionTarget" {
+			return &p.Status.Conditions[i]
+		}
+	}
+	return nil
+}
 
 // TestJobPodDecodesTheStatusTheClassifierReads: each pod above, read through
 // JobPod as the runner reads it, decodes to the fields the classifier needs
@@ -536,8 +566,10 @@ func TestJobPodDecodesTheStatusTheClassifierReads(t *testing.T) {
 		pod      string
 		job      Job
 		check    func(t *testing.T, p *Pod)
-		code     string
-		mentions []string
+		phase    Phase
+		exitCode int
+		code     string   // "" means no Failure
+		mentions []string // in the Failure's message, or in Detail when there is none
 	}{
 		{
 			name: "a service restarted after its startup probe failed",
@@ -550,8 +582,33 @@ func TestJobPodDecodesTheStatusTheClassifierReads(t *testing.T) {
 					t.Errorf("svc-db decoded as %+v, want image, restartCount 1, running, last state terminated 137", svc)
 				}
 			},
-			code:     "pipeline_service_failed",
+			phase: PhaseFailed, exitCode: -1, code: "pipeline_service_failed",
 			mentions: []string{"exited 137", "restarted once"},
+		},
+		{
+			name: "a running step a drain evicted, after its kill",
+			pod:  kubePodDrainedAfterKill,
+			job:  kubeDisruptedJob(),
+			check: func(t *testing.T, p *Pod) {
+				d := kubeDisruption(p)
+				if d == nil || d.Status != "True" || d.Reason != "EvictionByEvictionAPI" || !d.LastTransitionTime.Equal(time.Date(2026, 10, 4, 8, 31, 58, 0, time.UTC)) {
+					t.Errorf("DisruptionTarget decoded as %+v, want True, EvictionByEvictionAPI, at 08:31:58", d)
+				}
+			},
+			phase: PhaseFailed, exitCode: -1, code: "pipeline_node_lost",
+			mentions: []string{"EvictionByEvictionAPI", "Eviction API: evicting"},
+		},
+		{
+			name: "a step that exited 0 before its pod was evicted",
+			pod:  kubePodDisruptedAfterExit,
+			job:  kubeDisruptedJob(),
+			check: func(t *testing.T, p *Pod) {
+				d := kubeDisruption(p)
+				if d == nil || !d.LastTransitionTime.Equal(time.Date(2026, 10, 4, 8, 31, 54, 0, time.UTC)) {
+					t.Errorf("DisruptionTarget decoded as %+v, want it at 08:31:54", d)
+				}
+			},
+			phase: PhaseSucceeded, exitCode: 0,
 		},
 		{
 			name: "a service in its restart back-off",
@@ -567,7 +624,7 @@ func TestJobPodDecodesTheStatusTheClassifierReads(t *testing.T) {
 					t.Errorf("step decoded as %+v, want waiting PodInitializing", step)
 				}
 			},
-			code:     "pipeline_service_failed",
+			phase: PhaseFailed, exitCode: -1, code: "pipeline_service_failed",
 			mentions: []string{"exited 137", "restarted 11 times"},
 		},
 		{
@@ -579,7 +636,7 @@ func TestJobPodDecodesTheStatusTheClassifierReads(t *testing.T) {
 					t.Errorf("pod status decoded as %+v, want Failed, OutOfcpu and the kubelet's message", p.Status)
 				}
 			},
-			code:     "pipeline_node_lost",
+			phase: PhaseFailed, exitCode: -1, code: "pipeline_node_lost",
 			mentions: []string{"OutOfcpu", "Node didn't have enough resource: cpu"},
 		},
 	} {
@@ -594,12 +651,16 @@ func TestJobPodDecodesTheStatusTheClassifierReads(t *testing.T) {
 			c.check(t, pod)
 
 			got := Classify(c.job, pod, clsCreated, clsNow, clsConfig(), "pipeline_step_timeout")
-			if got.Phase != PhaseFailed || got.Failure == nil || got.Failure.Code != c.code {
-				t.Fatalf("classified %s failure %+v, want failed %s", clsPhaseNames[got.Phase], got.Failure, c.code)
+			gotCode, text := "", got.Detail
+			if got.Failure != nil {
+				gotCode, text = got.Failure.Code, got.Failure.Message
+			}
+			if got.Phase != c.phase || got.ExitCode != c.exitCode || gotCode != c.code {
+				t.Fatalf("classified %s exit %d failure %+v, want %s exit %d code %q", clsPhaseNames[got.Phase], got.ExitCode, got.Failure, clsPhaseNames[c.phase], c.exitCode, c.code)
 			}
 			for _, m := range c.mentions {
-				if !strings.Contains(got.Failure.Message, m) {
-					t.Errorf("%q does not mention %q", got.Failure.Message, m)
+				if !strings.Contains(text, m) {
+					t.Errorf("%q does not mention %q", text, m)
 				}
 			}
 		})

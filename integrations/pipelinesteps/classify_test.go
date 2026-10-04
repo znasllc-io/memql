@@ -75,6 +75,27 @@ func clsTerminated(name string, exit int32, reason, message string, finished tim
 	}}
 }
 
+// clsDisrupted marks a pod as the cluster stopping it, at a time: what an
+// eviction (the API a node drain uses), a preemption or the kubelet's own
+// eviction writes before it kills anything.
+func clsDisrupted(p *Pod, reason, message string, at time.Time) *Pod {
+	p.Status.Conditions = append(p.Status.Conditions, PodCondition{
+		Type: "DisruptionTarget", Status: "True", Reason: reason, Message: message, LastTransitionTime: at,
+	})
+	return p
+}
+
+// clsPostgresNoPassword is what postgres:16 started without a password left as
+// its termination message under FallbackToLogsOnError (measured): its own
+// error, several lines of it.
+const clsPostgresNoPassword = "Error: Database is uninitialized and superuser password is not specified.\n" +
+	"       You must specify POSTGRES_PASSWORD to a non-empty value for the\n" +
+	"       superuser. For example, \"-e POSTGRES_PASSWORD=password\" on \"docker run\".\n\n" +
+	"       You may also use \"POSTGRES_HOST_AUTH_METHOD=trust\" to allow all\n" +
+	"       connections without a password. This is *not* recommended.\n\n" +
+	"       See PostgreSQL documentation about \"trust\":\n" +
+	"       https://www.postgresql.org/docs/current/auth-trust.html\n"
+
 // Container states that recur: a clone that finished, and a container waiting
 // for the init containers before it.
 var (
@@ -163,7 +184,96 @@ func TestClassify(t *testing.T) {
 		}}},
 	}
 
+	backoffExceeded := clsCond("FailureTarget", "BackoffLimitExceeded", "Job has reached the specified backoff limit")
+
 	cases := []clsCase{
+		// -- the cluster stopping the pod (ruling R24) --
+		{
+			// Measured: an eviction marks the pod DisruptionTarget at once; the
+			// step reads running through its 10 s grace, and the Job already
+			// reads FailureTarget BackoffLimitExceeded.
+			name: "a drained running step",
+			job:  clsJob(1200, backoffExceeded),
+			pod: clsDisrupted(clsPod("Running", []ContainerStatus{clsCloneDone, clsRunning("svc-db")}, clsRunning("step")),
+				"EvictionByEvictionAPI", "Eviction API: evicting", clsStart.Add(18*time.Second)),
+			want: wantFailed(pl.CodeNodeLost, "EvictionByEvictionAPI"),
+		},
+		{
+			// Measured: ten seconds after the eviction (08:31:58) the kubelet
+			// killed the step (137, 08:32:08) and the pod read Failed. Read as
+			// the step's own exit, a node drain would be a failing command.
+			name: "a drained running step after the drain's kill",
+			job:  clsJob(1200, backoffExceeded),
+			pod: clsDisrupted(clsPod("Failed",
+				[]ContainerStatus{clsCloneDone, clsTerminated("svc-db", 137, "Error", "", clsStart.Add(30*time.Second))},
+				clsTerminated("step", 137, "Error", "", clsStart.Add(28*time.Second))),
+				"EvictionByEvictionAPI", "Eviction API: evicting", clsStart.Add(18*time.Second)),
+			want: wantFailed(pl.CodeNodeLost, "EvictionByEvictionAPI"),
+		},
+		{
+			// Measured: evicted while its service's ready check had not passed.
+			// The service (redis) exits 0 on the eviction's TERM, which the
+			// service rule alone reads as the service having failed.
+			name: "a drained pending step",
+			job:  clsJob(1200, backoffExceeded),
+			pod: clsDisrupted(clsPod("Pending",
+				[]ContainerStatus{clsCloneDone, clsTerminated("svc-db", 0, "Completed", "", clsStart.Add(26*time.Second))},
+				clsStepInit),
+				"EvictionByEvictionAPI", "Eviction API: evicting", clsStart.Add(25*time.Second)),
+			want: wantFailed(pl.CodeNodeLost, "EvictionByEvictionAPI"),
+		},
+		{
+			// Constructed from the API's documented reason: the kubelet evicting
+			// under node pressure fails the pod and marks it the same way.
+			name: "a step the kubelet evicted under node pressure",
+			job:  clsJob(1200),
+			pod: func() *Pod {
+				p := clsDisrupted(clsPod("Failed", []ContainerStatus{clsCloneDone}, clsTerminated("step", 137, "Error", "", clsStart.Add(40*time.Second))),
+					"TerminationByKubelet", "The node was low on resource: memory. Threshold quantity: 100Mi, available: 92Mi.", clsStart.Add(39*time.Second))
+				p.Status.Reason, p.Status.Message = "Evicted", "The node was low on resource: memory. Threshold quantity: 100Mi, available: 92Mi."
+				return p
+			}(),
+			want: wantFailed(pl.CodeNodeLost, "TerminationByKubelet"),
+		},
+		{
+			// Measured: the step exited 0 at 08:31:41; the eviction came at
+			// 08:31:54 while a service stopped. The pod read Succeeded and the
+			// Job still failed BackoffLimitExceeded. The command ended before the
+			// cluster touched the pod, so its own answer stands (R23's rule).
+			name: "a step that finished before its pod was disrupted keeps its own answer",
+			job:  clsJob(1200, backoffExceeded),
+			pod: clsDisrupted(clsPod("Running", []ContainerStatus{clsCloneDone, clsRunning("svc-db")}, clsTerminated("step", 0, "Completed", "", clsStart.Add(time.Second))),
+				"EvictionByEvictionAPI", "Eviction API: evicting", clsStart.Add(14*time.Second)),
+			want: clsWant{phase: PhaseSucceeded, exitCode: 0},
+		},
+		{
+			// A container killed with no disruption on its pod was killed for
+			// what the step did: here its memory limit.
+			name: "a plain 137 with no DisruptionTarget is the command's own (OOMKilled)",
+			job:  clsJob(1200, backoffExceeded),
+			pod:  clsPod("Failed", []ContainerStatus{clsCloneDone}, clsTerminated("step", 137, "OOMKilled", "", clsStart.Add(40*time.Second))),
+			want: clsWant{phase: PhaseFailed, exitCode: 137, mentions: []string{"OOMKilled"}},
+		},
+		{
+			name: "a plain 137 with no DisruptionTarget is the command's own",
+			job:  clsJob(1200, backoffExceeded),
+			pod:  clsPod("Failed", []ContainerStatus{clsCloneDone}, clsTerminated("step", 137, "Error", "", clsStart.Add(40*time.Second))),
+			want: clsWant{phase: PhaseFailed, exitCode: 137},
+		},
+		{
+			// Only status True is a disruption; False and Unknown say the
+			// opposite or nothing.
+			name: "a DisruptionTarget that is not True is no disruption",
+			job:  clsJob(1200),
+			pod: func() *Pod {
+				p := clsDisrupted(clsPod("Running", []ContainerStatus{clsCloneDone, clsRunning("svc-db")}, clsRunning("step")),
+					"EvictionByEvictionAPI", "Eviction API: evicting", clsStart.Add(18*time.Second))
+				p.Status.Conditions[len(p.Status.Conditions)-1].Status = "False"
+				return p
+			}(),
+			want: clsWant{phase: PhaseRunning, exitCode: -1},
+		},
+
 		// -- the deadline --
 		{
 			// Measured: past the deadline the Job controller deletes the pod,
@@ -295,15 +405,20 @@ func TestClassify(t *testing.T) {
 
 		// -- the owner's cache directory --
 		{
+			// Measured (the clone image running cache-prep's script on a claim it
+			// cannot write, FallbackToLogsOnError): mkdir's error and the
+			// script's own line are its termination message.
 			name: "cache-prep terminated with non-zero exit",
 			job:  clsJob(1200),
 			pod: clsPod("Failed",
 				[]ContainerStatus{
-					clsTerminated("cache-prep", 1, "Error", "memql: cannot prepare the cache directory /cache-root/owners/0dde18ce172fff450b32bf41\n", clsStart.Add(time.Second)),
+					clsTerminated("cache-prep", 1, "Error",
+						"mkdir: cannot create directory '/cache-root/owners': Read-only file system\nmemql: cannot prepare the cache directory /cache-root/owners/0dde18ce172fff450b32bf41\n",
+						clsStart.Add(time.Second)),
 					clsWaiting("clone", "alpine:3.20", "PodInitializing", ""),
 				},
 				clsStepInit),
-			want: wantFailed(pl.CodeJobRejected, "/cache-root/owners/0dde18ce172fff450b32bf41"),
+			want: wantFailed(pl.CodeJobRejected, "exited 1", "Read-only file system", "cannot prepare the cache directory /cache-root/owners/0dde18ce172fff450b32bf41"),
 		},
 		{
 			name: "cache-prep waiting on a reason it cannot start past",
@@ -347,14 +462,16 @@ func TestClassify(t *testing.T) {
 
 		// -- the clone --
 		{
-			// With terminationMessagePolicy FallbackToLogsOnError the clone's
-			// last lines are its termination message (measured).
+			// Measured (BuildJob's clone, FallbackToLogsOnError, a SHA the
+			// repository does not have): git's own error is the termination
+			// message.
 			name: "clone init container terminated with non-zero exit",
 			job:  clsJob(1200, clsCond("Failed", "BackoffLimitExceeded", "Job has reached the specified backoff limit")),
 			pod: clsPod("Failed",
-				[]ContainerStatus{clsTerminated("clone", 128, "Error", "fatal: couldn't find remote ref 4c1f0a7e\n", clsStart.Add(time.Second)), clsSvcInit},
+				[]ContainerStatus{clsTerminated("clone", 128, "Error",
+					"fatal: remote error: upload-pack: not our ref 0123456789abcdef0123456789abcdef01234567\n", clsStart.Add(time.Second)), clsSvcInit},
 				clsStepInit),
-			want: wantFailed(pl.CodeCloneFailed, "128", "couldn't find remote ref 4c1f0a7e"),
+			want: wantFailed(pl.CodeCloneFailed, "exited 128", "fatal: remote error: upload-pack: not our ref 0123456789abcdef0123456789abcdef01234567"),
 		},
 		{
 			// Measured: under the default termination-message policy a failed
@@ -377,6 +494,34 @@ func TestClassify(t *testing.T) {
 				[]ContainerStatus{clsCloneDone, clsTerminated("svc-db", 1, "Error", "", clsStart.Add(2*time.Second))},
 				clsStepInit),
 			want: wantFailed(pl.CodeServiceFailed, "db"),
+		},
+		{
+			// Measured (BuildJob's sidecar, FallbackToLogsOnError): postgres
+			// given no password says why and exits 1; its last lines are the
+			// termination message, collapsed onto one line.
+			name: "a svc-* sidecar's own last words are its failure",
+			job:  clsJob(1200),
+			pod: clsPod("Pending",
+				[]ContainerStatus{clsCloneDone, clsTerminated("svc-db", 1, "Error", clsPostgresNoPassword, clsStart.Add(36*time.Second))},
+				clsStepInit),
+			want: wantFailed(pl.CodeServiceFailed, "service db", "exited 1",
+				"superuser password is not specified. You must specify POSTGRES_PASSWORD to a non-empty value for the superuser."),
+		},
+		{
+			// Measured: after its startup probe killed it, the restarted sidecar
+			// reads running; its last words are in its last state.
+			name: "a restarted svc-* sidecar's last words come from its last state",
+			job:  clsJob(1200),
+			pod: clsPod("Pending",
+				[]ContainerStatus{clsCloneDone, {
+					Name: "svc-db", Image: "docker.io/library/alpine:3.20", RestartCount: 1,
+					State: ContainerState{Running: &ContainerStateRunning{StartedAt: clsStart.Add(11 * time.Second)}},
+					LastState: ContainerState{Terminated: &ContainerStateTerminated{
+						ExitCode: 137, Reason: "Error", Message: "db: starting\ndb: waiting for the volume\n", FinishedAt: clsStart.Add(10 * time.Second),
+					}},
+				}},
+				clsStepInit),
+			want: wantFailed(pl.CodeServiceFailed, "exited 137", "db: starting db: waiting for the volume", "restarted once"),
 		},
 		{
 			// Measured: a sidecar whose startup probe fails is killed (137) and

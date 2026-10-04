@@ -30,8 +30,9 @@ const (
 type Observation struct {
 	Phase Phase
 	// ExitCode is the command's exit status when it ended on its own, else -1.
-	// A step that never started has none, and neither does one its deadline
-	// stopped: whatever status the kill left is not the command's answer.
+	// A step that never started has none, and neither does one its deadline or
+	// the cluster stopped: whatever status the kill left is not the command's
+	// answer.
 	ExitCode int
 	// Failure is the typed reason a step failed for something other than its
 	// command: a code from the seam's catalogue and the sentence the check run
@@ -41,13 +42,6 @@ type Observation struct {
 	// waiting on, or how it ended.
 	Detail string
 }
-
-// containerCachePrep is the init container that prepares the owner's cache
-// directory, first, when the step declares caches. It must equal the name
-// BuildJob gives that container: names.go's ContainerCachePrep, which arrives
-// with the cache-prep container itself; this literal gives way to that
-// constant once both are on the branch.
-const containerCachePrep = "cache-prep"
 
 // pullReasons are the waiting reasons of a container whose image cannot be
 // pulled.
@@ -64,22 +58,26 @@ var pullReasons = map[string]bool{"ErrImagePull": true, "ImagePullBackOff": true
 // order below is the classification, each rule taken only when none before it
 // applied:
 //
-//  1. The Job is past its deadline: deadlineCode -- unless the command ended
+//  1. The cluster is stopping the pod -- DisruptionTarget=True: a node drain,
+//     a preemption, an eviction -- the cluster lost the step (pl.CodeNodeLost,
+//     ruling R24), unless the command ended before the disruption began, when
+//     its own answer stands.
+//  2. The Job is past its deadline: deadlineCode -- unless the command ended
 //     before the deadline, when its own answer stands.
-//  2. The step container ended: exit 0 succeeded; any other exit failed, with
+//  3. The step container ended: exit 0 succeeded; any other exit failed, with
 //     no code, because the exit code is the answer.
-//  3. The Job completed: succeeded.
-//  4. Something in the pod means the step can never run: an image that
+//  4. The Job completed: succeeded.
+//  5. Something in the pod means the step can never run: an image that
 //     cannot be pulled (pl.CodeImagePullFailed), a container that cannot be
 //     created or the owner's cache directory (pl.CodeJobRejected), the clone
 //     (pl.CodeCloneFailed), a service that stopped before the step started
 //     (pl.CodeServiceFailed), a pod nobody can schedule
 //     (pl.CodeJobUnschedulable).
-//  5. The step container runs: running.
-//  6. The Job or its pod failed and nothing above says why -- evicted,
-//     rejected by the kubelet, deleted: the cluster lost the step
+//  6. The step container runs: running.
+//  7. The Job or its pod failed and nothing above says why -- rejected by the
+//     kubelet, deleted, gone with its node: the cluster lost the step
 //     (pl.CodeNodeLost).
-//  7. Otherwise pending.
+//  8. Otherwise pending.
 //
 // Most of these rules exist because of what an API server was measured to
 // report (k3s v1.32, kept in classify_test.go's fixtures): a sidecar is
@@ -87,8 +85,11 @@ var pullReasons = map[string]bool{"ErrImagePull": true, "ImagePullBackOff": true
 // fails the pod and has to be read from its restart history; the kubelet
 // stops every service once the step ends, so a stopped service is only a
 // failure before the step starts; a step can end inside its deadline and its
-// Job still fail DeadlineExceeded while the services stop; and the node's own
-// pull throttle reports ErrImagePull for an image that pulls on the next try.
+// Job still fail DeadlineExceeded while the services stop; the node's own
+// pull throttle reports ErrImagePull for an image that pulls on the next try;
+// and an evicted step is killed (137) and its services stopped after the pod
+// is marked, which read alone would be the command failing or a service
+// failing.
 func Classify(job Job, pod *Pod, created, now time.Time, cfg Config, deadlineCode string) Observation {
 	step := podContainer(pod, false, ContainerStep)
 	var stepEnd *ContainerStateTerminated
@@ -96,6 +97,10 @@ func Classify(job Job, pod *Pod, created, now time.Time, cfg Config, deadlineCod
 		stepEnd = step.State.Terminated
 	}
 
+	if d := disruption(pod); d != nil && !endedBefore(stepEnd, d.LastTransitionTime) {
+		return failed(pl.CodeNodeLost, "the cluster stopped the step's pod ("+reasonAnd(d.Reason, d.Message)+
+			"): a node drain, a preemption or an eviction, not the step's command")
+	}
 	if jobCondition(job, "DeadlineExceeded", "Failed", "FailureTarget") != nil && !endedBefore(stepEnd, jobDeadline(job)) {
 		code := deadlineCode
 		if strings.TrimSpace(code) == "" {
@@ -149,12 +154,30 @@ func jobDeadline(job Job) time.Time {
 	return job.Status.StartTime.Add(time.Duration(*job.Spec.ActiveDeadlineSeconds) * time.Second)
 }
 
-// endedBefore says the step container ended strictly before the deadline: on
-// its own, not because the deadline stopped it. A step the deadline stops ends
-// at or after it, even one that traps the signal and exits 0. Unknown times
-// are not before.
-func endedBefore(t *ContainerStateTerminated, deadline time.Time) bool {
-	return t != nil && !deadline.IsZero() && !t.FinishedAt.IsZero() && t.FinishedAt.Before(deadline)
+// endedBefore says the step container ended strictly before an instant -- the
+// deadline, or the moment the cluster began stopping the pod: on its own, not
+// because it was stopped. A step that is stopped ends at or after the instant,
+// even one that traps the signal and exits 0 (measured for both: the Job
+// controller and the eviction mark the Job or the pod before anything is
+// killed). Unknown times are not before.
+func endedBefore(t *ContainerStateTerminated, instant time.Time) bool {
+	return t != nil && !instant.IsZero() && !t.FinishedAt.IsZero() && t.FinishedAt.Before(instant)
+}
+
+// disruption is the pod's DisruptionTarget condition when it is True: the
+// cluster is stopping the pod for its own reasons (EvictionByEvictionAPI for a
+// drain, PreemptionByScheduler, TerminationByKubelet under node pressure,
+// DeletionByTaintManager, DeletionByPodGC) and has said so before killing
+// anything. The Job controller's deadline is not one of them: a pod it deletes
+// carries no such condition (measured).
+func disruption(pod *Pod) *PodCondition {
+	if pod == nil {
+		return nil
+	}
+	if c := podCondition(pod, "DisruptionTarget"); c != nil && c.Status == "True" {
+		return c
+	}
+	return nil
 }
 
 func deadlineSentence(job Job) string {
@@ -180,7 +203,7 @@ func podFailure(pod *Pod, step *ContainerStatus, created, now time.Time, cfg Con
 			return &pl.Failure{Code: pl.CodeJobRejected, Message: role(cs.Name) + " cannot be created: " + reasonAnd(w.Reason, w.Message)}
 		}
 	}
-	if f := cachePrepFailure(podContainer(pod, true, containerCachePrep), created, now, cfg); f != nil {
+	if f := cachePrepFailure(podContainer(pod, true, ContainerCachePrep), created, now, cfg); f != nil {
 		return f
 	}
 	if clone := podContainer(pod, true, ContainerClone); clone != nil {
@@ -255,9 +278,10 @@ func serviceFailure(cs ContainerStatus) *pl.Failure {
 }
 
 // unexplainedFailure: the Job or its pod failed and no rule before this one
-// says why -- the pod was evicted, deleted, rejected by the kubelet, or lost
-// with its node. Read as pending, the runner would wait for an answer that
-// cannot come.
+// says why -- the pod was rejected by the kubelet, deleted, or lost with its
+// node, or it was evicted and is already gone, taking its DisruptionTarget
+// with it. Read as pending, the runner would wait for an answer that cannot
+// come.
 func unexplainedFailure(job Job, pod *Pod) *pl.Failure {
 	if pod != nil && pod.Status.Phase == "Failed" {
 		msg := "the step's pod failed without any of its containers saying why"
@@ -326,7 +350,7 @@ func role(name string) string {
 		return "the step"
 	case name == ContainerClone:
 		return "the clone"
-	case name == containerCachePrep:
+	case name == ContainerCachePrep:
 		return "cache-prep"
 	case strings.HasPrefix(name, ServicePrefix):
 		return "service " + strings.TrimPrefix(name, ServicePrefix)
