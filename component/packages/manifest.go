@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/core/emailconfig"
 	"gopkg.in/yaml.v3"
 )
@@ -70,6 +71,22 @@ type Manifest struct {
 	Name          string                 `yaml:"name"          json:"name"`
 	Deployables   []ManifestDeployable   `yaml:"deployables"   json:"deployables"`
 	Campaigns     *emailconfig.Campaigns `yaml:"campaigns,omitempty" json:"campaigns,omitempty"`
+	// Pipeline is the repository's pipeline (epic memql#5477, design record
+	// D3): the same file, so a repository has one manifest and one place the
+	// platform looks.
+	//
+	// DECODED HERE, NEVER VALIDATED HERE. The strict decoder below holds the
+	// block's SHAPE to the rule every key is held to -- an unknown key inside
+	// it is package_manifest_invalid -- and stops there. What the block MEANS
+	// (a need nobody offers, a timeout that is no duration, a bucket nobody
+	// declared) is pipelines.Validate's question, asked when a run compiles,
+	// and its answer fails that RUN with a typed refusal (D9). A typo in a
+	// pipeline must never refuse a deploy of the source it sits in.
+	//
+	// Not part of PlanFingerprint either: the block decides what a pipeline
+	// run executes and nothing about what deploying the source does, so
+	// editing it never parks an automatic deploy.
+	Pipeline *pipelines.Spec `yaml:"pipeline,omitempty" json:"pipeline,omitempty"`
 }
 
 // ManifestDeployable is one declared web surface inside the package.

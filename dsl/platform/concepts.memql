@@ -877,17 +877,24 @@ concept packageDeployment {
 /// an enum value bricks stored rows (root CLAUDE.md). A lane's optional `scope: "cluster"` marks one
 /// computed from cluster rows alone; the fold sets aside a row whose cluster-scoped lanes lag the
 /// freshest row's (memql#5259).
+///
+/// `core`, `optional` and `dismissable` are the module's DECLARATION in the manifest, copied onto
+/// every row whatever its state, so the fold reads them off a notApplicable row as readily as off a
+/// vote (pipelines program design record, D15). A row written before the two later flags existed
+/// carries neither, which reads as false: the module it describes declared neither.
 @rowAuthz(public, requiresIdentity)
 @displayCard(primary="module", secondary="nodeId", tertiary="nodeType", status="state")
 concept moduleReadiness {
-  module      string!  @description("The readiness module id from the env manifest's modules block: ai, storage, email, githubApp, campaigns, workbench, localApps.")
-  nodeId      string!  @description("The reporting node's MEMQL_NODE_ID.")
-  nodeType    string!  @description("The reporting node's type.")
-  state       enum("configured", "partial", "unconfigured", "notApplicable", "unknown")!  @description("This node's verdict; notApplicable means the node does not host the module; unknown means the node could not evaluate it (see reason) and casts no vote.")
-  reason      string   @description("Why the state is unknown, from a closed vocabulary: fleetReadFailed, integrationProbeFailed. Empty for every other state.")
-  core        bool     @description("Whether the module is one the first-run wizard walks.")
-  lanes       []object @description("One entry per lane: { name, configurableFrom, scope, complete, slots: [{ name, present, source, optional }] }. Presence and source only; scope is the word cluster for a lane computed from cluster rows alone, and absent for a node-scoped one.")
-  reportedAt  datetime!  @description("When this node evaluated, RFC3339.")
+  module       string!  @description("The readiness module id from the env manifest's modules block: ai, storage, email, githubApp, campaigns, workbench, localApps, pipelines.")
+  nodeId       string!  @description("The reporting node's MEMQL_NODE_ID.")
+  nodeType     string!  @description("The reporting node's type.")
+  state        enum("configured", "partial", "unconfigured", "notApplicable", "unknown")!  @description("This node's verdict; notApplicable means the node does not host the module; unknown means the node could not evaluate it (see reason) and casts no vote.")
+  reason       string   @description("Why the state is unknown, from a closed vocabulary: fleetReadFailed, integrationProbeFailed. Empty for every other state.")
+  core         bool     @description("Whether the module is one the first-run wizard walks.")
+  optional     bool     @description("Whether the module is one nothing needs: a feature an owner may choose to set up. Never true together with core.")
+  dismissable  bool     @description("Whether a person may answer Not now to the module's setup prompt. Only an optional module is.")
+  lanes        []object @description("One entry per lane: { name, configurableFrom, scope, complete, slots: [{ name, present, source, optional }] }. Presence and source only; scope is the word cluster for a lane computed from cluster rows alone, and absent for a node-scoped one.")
+  reportedAt   datetime!  @description("When this node evaluated, RFC3339.")
 }
 
 /// Virtual, never persisted: the cluster-wide fold of moduleReadiness rows, one row per module with
@@ -896,12 +903,17 @@ concept moduleReadiness {
 ///
 /// @displayCard's tertiary names "core" rather than the brief's original "disagreement": the loader
 /// rejects an array-typed slot ("disagreement" is []string; only string/enum/bool/datetime/int/float
-/// display), and core is the one other scalar this concept carries.
+/// display), and core was the one other scalar this concept carried when the card was chosen.
+///
+/// `core`, `optional` and `dismissable` are read off every report of the module, voting or not, so
+/// an optional module nobody has set up still says it is optional while its state is unreported.
 @displayCard(primary="module", secondary="state", tertiary="core")
 concept moduleVerdict {
   module        string!  @description("The module id.")
   state         enum("configured", "partial", "unconfigured", "unreported")!  @description("Worst state across the live reporting nodes that vote; partial with disagreement when they differ; unreported when no live node voted.")
   core          bool     @description("Whether the module is core.")
+  optional      bool     @description("Whether the module is one nothing needs; never true together with core.")
+  dismissable   bool     @description("Whether a person may answer Not now to the module's setup prompt; only an optional module is.")
   disagreement  []string @description("nodeId=state for every voting reporter when they disagree, worst first; empty otherwise.")
   nodes         []object @description("Per voting reporter: { nodeId, nodeType, state, reportedAt }. A stale or unknown row is not a vote and is not listed here.")
   unknown       []string @description("Live nodes whose row says they could not evaluate the module, sorted. Set aside, never counted.")

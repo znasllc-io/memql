@@ -82,8 +82,19 @@ var pluginKinds = map[string]moduleKind{
 	"embedding":     kindComponent, // see the note below
 	"deployversion": kindComponent,
 	"packages":      kindComponent, // see the note below
-	"sitePublish":   kindComponent, // see the note below
-	"siteHealth":    kindComponent, // Mandatory deployable observation storage and readiness reporting.
+	// Pipelines (epic memql#5477), component/pipelinerun. A COMPONENT by this
+	// table's own test, and for packages' reasons one step on: its six
+	// builtins are declared in dsl/pipelines, which EVERY binary loads, so a
+	// node without the executor fails boot resolution -- turning it off breaks
+	// the engine rather than removing a feature, `customDomain`'s reasoning
+	// exactly. And the GitHub it talks to is not a vendor lane of its own: it
+	// borrows the node's one GitHub App client and the source owner's
+	// verified grant from component/packages, and reads and reports on the
+	// operator's OWN repository -- the relationship packages has to GitHub's
+	// tarball API, which this table already classifies a component.
+	"pipelines":   kindComponent,
+	"sitePublish": kindComponent, // see the note below
+	"siteHealth":  kindComponent, // Mandatory deployable observation storage and readiness reporting.
 	// The edge's request log and the traffic figure folded from it (epic
 	// memql#4906). A COMPONENT by this table's own test: turning it off does
 	// not remove a feature, it breaks the engine. `siteTrafficInWindow` is

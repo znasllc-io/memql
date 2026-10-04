@@ -1,0 +1,134 @@
+// concepts.memql
+//
+// The pipelines namespace (epic memql#5477; design record
+// docs/superpowers/specs/2026-09-16-pipelines-program-design.md). A pipeline
+// is the `pipeline:` block of a repository's memql-package.yaml, connected to
+// this cluster; a run is one attempt at one (repository, SHA, mode, event),
+// compiled into a v1:work:goal with one v1:work:step per step and reported to
+// GitHub as a check run; a channel is where a notify stage delivers (D16).
+//
+// ONE PIPELINE PER SOURCE (plan decision 12). A pipeline hangs off a
+// v1:platform:package; its id is derived from the package id and its owner is
+// the package's owner, whose sourceCredential grant mints every installation
+// token the pipeline is driven under.
+//
+// TIER. All three declare the composite owner tier with the account argument,
+// exactly as v1:platform:package does: a person reads their own, a cluster
+// owner reads every one, and a member of the account the row names reads it.
+// A run copies its pipeline's accountId and a pipeline its package's, so a
+// run is readable by exactly the people its source is. ownerUserId is
+// @serverSet: the server-only writers in mutations.memql stamp it from
+// actor.userId, and component/pipelinerun calls them under the package
+// owner's borrowed authority.
+//
+// THESE ROWS CARRY NAMES, NEVER VALUES. No token, no secret value and no log
+// line lands on any of them: secretNames is an allowlist of globalSecret
+// NAMES, credentialId names a grant, and a run's notes and stages are
+// sentences a person reads.
+
+use accounts.concepts.{ account }
+use identity.concepts.{ user }
+use platform.concepts.{ package, sourceCredential }
+use work.concepts.{ goal }
+
+/// A repository's checks, connected to this cluster: the `pipeline:` block of one source's
+/// memql-package.yaml, plus what the cluster needs to run it -- how deliveries arrive, where steps may
+/// execute, which secrets they may resolve, and what the poll has already seen. The manifest itself
+/// is NOT copied here: every run reads it from the repository at the run's own SHA, so a row can never
+/// describe a pipeline the tree no longer declares.
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@displayCard(primary="name", secondary="repository", tertiary="delivery", status="status")
+concept pipeline {
+  ownerUserId       string  @serverSet  @description("v1:identity:user.id of the person this pipeline belongs to: the owner of its package, stamped from the actor by createPipeline and never accepted from an argument. It is the row-authz key the composite tier compares against actor.userId, and the person whose GitHub grant mints every token a run of this pipeline uses.")
+  accountId         string  @description("The v1:accounts:account organization this pipeline is for, copied from its package when it is connected, so a member of that organization reads it exactly as they read the source. Empty for a package tied to no account.")
+  packageId         string!  @description("The v1:platform:package this pipeline belongs to -- the source. One pipeline per source; the pipeline's own id is derived from this one.")
+  name              string!  @description("What the check run is called on GitHub, after `MemQL / `. The package's manifest name when it was connected.")
+  repository        string!  @description("The GitHub repository as lower-cased owner/name -- the trigger's match key. A delivery names its repository and the trigger finds the active pipelines of it, so the value is stored normalized rather than as typed.")
+  defaultBranch     string  @description("The repository's default branch as GitHub reported it at connect. A push to it opens a full run; the poll watches its head.")
+  installationId    string!  @description("The GitHub App installation that reaches this repository, a number GitHub assigns, stored as text. A delivery carries its own installation and must match this one before it can open a run, so a second installation of the same repository cannot drive this pipeline.")
+  credentialId      string!  @description("The v1:platform:sourceCredential grant every installation token for this pipeline is minted under -- a NAME, never a value. It is resolved under the pipeline owner's actor, so a pipeline naming somebody else's grant resolves nothing.")
+  delivery          enum("webhook", "poll")!  @description("How changes reach this pipeline: `webhook` is a GitHub delivery to the inbound seam, `poll` is the every-minute poll reading the default branch's head and the open pull requests' heads, for a cluster GitHub cannot reach.")
+  compute           enum("cluster", "cluster_and_fleet")  @description("Where steps may run. `cluster` keeps every step on the cluster and refuses a step naming a need the cluster cannot meet; `cluster_and_fleet` lets such a step route to a machine in the owner's fleet. Absent reads as cluster.")
+  status            enum("active", "disconnected")!  @description("`active` opens runs; `disconnected` opens none, and a run an agent has yet to start concludes with pipeline_disconnected. The row stays: it is the history every run of it points at.")
+  secretNames       []string  @description("The globalSecret NAMES a step of this pipeline may resolve -- the owner's allowlist. A step naming a secret not listed here is refused before any executor sees it, and a name beginning MEMQL_ never resolves whatever this list says.")
+  channelIds        []string  @description("The channels a notify stage of this pipeline may deliver to (D16). Empty until channels have writers (epic memql#5480).")
+  heads             object  @description("What the poll has seen, keyed by ref: {\"branch:<name>\": sha, \"pr:<number>\": sha}. The first poll records it and opens nothing; a later poll opens a run for a head that moved and drops the keys of closed pull requests. Written whole, so a writer always sends the complete map.")
+  timings           object  @description("Seconds per Go import path, merged from every successful FULL run's step timings -- what the shard split balances on. Written whole.")
+  timingsRunId      string  @description("The v1:pipelines:run whose timings were merged into this table last.")
+  timingsUpdatedAt  datetime  @description("When the timings table was last merged.")
+  connectedAt       datetime  @description("When the pipeline was last connected: stamped by createPipeline, so a reconnect moves it.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+  @relationship(type="references", as="forSource", field="packageId", target=package, direction="outgoing")
+  @relationship(type="references", as="mintsUnder", field="credentialId", target=sourceCredential, direction="outgoing")
+  @relationship(type="references", as="timedBy", field="timingsRunId", target=run, direction="outgoing")
+}
+
+/// One attempt at one (repository, SHA, mode, event): the row a delivery or the poll opens, an agent
+/// node claims under a lease and drives over the work spine, and the GitHub check run reports. A
+/// re-run is a NEW row with the attempt incremented; a finished row is never reopened, so the rows of
+/// one run key are the literal history of what was attempted.
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@displayCard(primary="sha", secondary="title", tertiary="conclusion", status="status")
+concept run {
+  ownerUserId        string  @serverSet  @description("v1:identity:user.id of the pipeline's owner, stamped from the actor by createPipelineRun -- the run is written under the owner's borrowed authority, so this is always the person whose grant drives it.")
+  accountId          string  @description("Copied from the pipeline at open, so the run is readable by exactly the people its pipeline is.")
+  pipelineId         string!  @description("The v1:pipelines:pipeline this run belongs to.")
+  repository         string!  @description("The repository as lower-cased owner/name, copied from the pipeline at open.")
+  sha                string!  @description("The head commit this run checks.")
+  mode               enum("affected", "full")!  @description("How much of the suite runs: `affected` on a pull request, `full` in the merge queue, on a push to the default branch and on a release (D1, D5).")
+  event              enum("pull_request", "merge_group", "push", "release")!  @description("The GitHub event the run was opened for. A re-requested check is not an event of its own: it re-runs the original's event and mode.")
+  runKey             string!  @description("The dedup key over (repository, SHA, mode, event). A redelivered webhook and a poll for the same head compute the same key, which is what keeps them one run; the event keeps the merge queue's full run and the default branch's push run of one SHA apart.")
+  attempt            int!  @description("1 for the first run of a key; a re-run is attempt + 1.")
+  trigger            enum("webhook", "poll", "rerun")!  @description("What opened this row: a GitHub delivery, the poll, or a person's or GitHub's re-run request.")
+  rerunOf            string  @description("The pipelines run this attempt re-runs, when trigger is rerun. Empty otherwise.")
+  deliveryId         string  @description("GitHub's delivery GUID (the X-GitHub-Delivery header) of the webhook that opened this run. Correlation only; empty for a poll or a re-run.")
+  pullRequest        int  @description("The pull request number for a pull_request run. Absent for every other event.")
+  headBranch         string  @description("The branch the head SHA was pushed to, when GitHub named one.")
+  baseSha            string  @description("The commit the change is compared against in affected mode: the pull request's base, or the push's before. Empty when there is none, which selects everything.")
+  title              string  @description("The commit message's first line or the pull request's title, for a person reading the list.")
+  version            string  @description("MEMQL_VERSION for the run's steps: the release tag for a release, the head SHA otherwise.")
+  status             enum("queued", "in_progress", "completed")!  @description("Where the run is. `queued` until an agent claims it, `in_progress` while one drives it, `completed` once it has a conclusion.")
+  conclusion         enum("", "success", "failure", "cancelled", "refused")  @description("How it ended. Empty until completed. `refused` is a run that was never queued: a pull request from a fork (D6), with the code in refusalCode. A manifest that does not compile, or a step naming a secret the owner did not allow, is a `failure` carrying its typed refusal (D9), never a skip.")
+  refusalCode        string  @description("The pipeline_* code of the refusal or failure that ended the run, when one did.")
+  refusalMessage     string  @description("That refusal in words.")
+  refusalScope       string  @description("What the refusal is about: \"stage/step\", a stage name, or empty for the whole pipeline.")
+  checkRunId         string  @description("The id GitHub assigned the check run reporting this run, a number stored as text. Empty when no check run could be written -- checkRunState then says why.")
+  checkRunState      enum("", "written", "refused", "unavailable")  @description("Whether the check run exists. `written` once GitHub accepted it; `refused` when GitHub answered 403, an installation predating the checks permission, which never stops the run; `unavailable` when no app or token could be had.")
+  notes              []object  @description("[{code, message}] -- informational notes that change no outcome, such as pipeline_check_permission_missing.")
+  workRunId          string  @description("The v1:work:run this run compiled into, once the driver opened it. Empty for a run refused before any work began. A plain string FK, not a @relationship, and not by choice: this domain declares its own `run`, and a relationship target resolves the owning domain's concept before any import, so the edge would canonicalize this value under v1:pipelines:run -- the wrong concept. Stored as the driver writes it.")
+  workGoalId         string  @description("The v1:work:goal behind that work run.")
+  driverNodeId       string  @description("MEMQL_NODE_ID of the agent replica holding this run's lease. Empty while queued. Compared byte for byte with a replica's own id, so it is stored exactly as the replica wrote it.")
+  driverHeartbeatAt  datetime  @description("When the driving replica last renewed its lease. Renewed every 30 seconds; a lease older than 120 seconds may be claimed by another agent replica.")
+  cancelRequested    bool  @description("Somebody asked this run to stop. The driving replica reads it at its next heartbeat and cancels what is executing.")
+  cancelledBy        string  @description("v1:identity:user.id of the person who asked for the stop, or a system sentinel.")
+  stages             []object  @description("[{name, status, durationMs, steps, failed}] in the order the manifest declares them, written as the run advances -- the table the check run's summary renders.")
+  queuedAt           datetime!  @description("When the run was opened.")
+  startedAt          datetime  @description("When an agent began driving it.")
+  finishedAt         datetime  @description("When it reached completed.")
+  durationMs         int  @description("Wall-clock duration from startedAt to finishedAt, in milliseconds.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+  @relationship(type="parent", field="pipelineId", target=pipeline, direction="outgoing")
+  @relationship(type="references", as="compiledInto", field="workGoalId", target=goal, direction="outgoing")
+}
+
+/// Where a notify stage delivers (D16): a Discord webhook or an email list, named by a manifest
+/// stage. The secret a channel needs is a REFERENCE to a globalSecret, never its value. This epic
+/// declares the concept, its tier and its routing; its writers arrive with epic memql#5480.
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+@displayCard(primary="name", secondary="kind", status="status")
+concept channel {
+  ownerUserId  string  @serverSet  @description("v1:identity:user.id of the person this channel belongs to, stamped from the actor by its writer.")
+  accountId    string  @description("The v1:accounts:account organization this channel is for, so its members read it with the pipelines that deliver to it.")
+  name         string!  @description("The name a manifest's notify stage uses for this channel.")
+  kind         enum("discord", "email")!  @description("How it delivers: a Discord webhook, or email through the cluster's sender.")
+  secretRef    string  @description("The globalSecret NAME holding what the channel needs to deliver -- a webhook URL for Discord. A name, never the value.")
+  recipients   []string  @description("The addresses an email channel delivers to. Empty for Discord.")
+  status       enum("active", "archived")!  @description("`active` delivers; `archived` is kept for the runs that name it and delivers nothing.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+}

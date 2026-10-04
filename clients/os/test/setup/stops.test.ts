@@ -18,7 +18,7 @@ import type { Verdict } from "../../src/system/readinessFold";
 // all -- is this function over four facts.
 
 function verdict(module: string, state: Verdict["state"], core = true): Verdict {
-  return { module, state, core, disagreement: [], nodes: [], lanes: [], unknown: [], stale: [], aside: [] };
+  return { module, state, core, optional: false, dismissable: false, disagreement: [], nodes: [], lanes: [], unknown: [], stale: [], aside: [] };
 }
 
 function readiness(loaded: boolean, verdicts: Verdict[]): Readiness {

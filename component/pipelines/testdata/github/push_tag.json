@@ -1,0 +1,17 @@
+{
+  "ref": "refs/tags/v1.4.0",
+  "before": "0000000000000000000000000000000000000000",
+  "after": "06a04156349f7dd56861f5146740d859b9f924ee",
+  "created": true,
+  "deleted": false,
+  "forced": false,
+  "base_ref": "refs/heads/main",
+  "head_commit": {
+    "id": "a944ae33e9bcd7b2f5d1e5d74dcd8acc6a0ae9df",
+    "message": "Show the cart count on the badge (#42)",
+    "timestamp": "2026-10-03T09:21:44Z"
+  },
+  "repository": { "full_name": "Acme-Corp/Storefront", "default_branch": "main", "master_branch": "main", "private": false },
+  "installation": { "id": 51234567 },
+  "sender": { "login": "octocat" }
+}

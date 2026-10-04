@@ -216,6 +216,34 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # refuses; the root module may depend on all three, so it sits under test/
 # beside clustere2e, and a db-gated test outside this lane only ever runs on
 # the machine of whoever happened to have Postgres up.
+#
+# epic memql#5477 added `component/pipelinerun`. Its store writes four
+# @serverOnly mutations under a borrowed owner and reads eight server-only
+# queries as its own system actor, and every claim worth testing about that is
+# the ENGINE's over real rows: that the stamped calls are admitted and an
+# unstamped one refused, that ownerUserId is stamped from the borrowed actor,
+# that the owner conjunct hides a run from a stranger, that a reconnect's
+# read-merge insert keeps the poll's heads, and that createPipelineRun's
+# @createOnly keeps a claimed run claimed. The package's other suites drive a
+# recording engine that parses every call and gates none, which passes the
+# right store and a wrong one alike. What the complement now means, having
+# looked: the package moves from go-checks to db-tests whole, and its unit
+# suites run beside a database they ignore.
+#
+# epic memql#5477 (issue #5491) added `test/pipelinehop`, the seam's
+# cross-node evidence: a GitHub delivery staged on one engine through the real
+# inbound receiver and the shipped trigger automation opens a run that a
+# SECOND engine claims and drives, the two sharing only Postgres, the advisory
+# gate on it and the events the routing rules let across. Every claim in it is
+# about real rows and a real lock -- one run per run key under the gate, the
+# lease the run row records, the work spine the driver writes -- and a
+# single-node fake would pass a driver that never left the node it was opened
+# on. It crosses component/inbound, component/automations and
+# component/pipelinerun, so it sits under test/ in the root module beside
+# test/inboundhop, and a db-gated test outside this lane only ever runs on the
+# machine of whoever happened to have Postgres up. What the complement now
+# means, having looked: the package holds nothing but this test and its
+# routing assertion, so it moves from go-checks to db-tests whole.
 readonly DB_GATED_TREES=(
 	"app"
 	"component/memql"
@@ -230,6 +258,7 @@ readonly DB_GATED_TREES=(
 	"component/logstore"
 	"component/node"
 	"component/packages"
+	"component/pipelinerun"
 	"component/server"
 	"component/sitehealth"
 	"component/sitetraffic"
@@ -247,6 +276,7 @@ readonly DB_GATED_TREES=(
 	"examples/referencepack"
 	"packs"
 	"test/inboundhop"
+	"test/pipelinehop"
 )
 
 # KNOWN_GO_MOD_DIRS is every directory this script knows carries a `go.mod`,
@@ -382,6 +412,24 @@ readonly DB_GATED_TREES=(
 #
 # `integrations/compose` is NOT here, for `integrations/work`'s reason: it is
 # a package inside the existing `integrations` module.
+#
+# epic memql#5477 added `component/pipelines`, Pipelines' PURE half -- the
+# manifest's pipeline: block, the compiled plan, the event-to-mode table, the
+# affected set and the executor contract the substrate's runner implements.
+# It is a module for procedure's reason and no other: the substrate's runner
+# lives in the `integrations` module, which cannot import a root-module
+# package with GOWORK=off. What the complement now means, MEASURED:
+#
+#	go list github.com/znasllc-io/memql/... | grep -cE 'component/pipelines$'
+#	  1
+#	scripts/ci/db-gated-packages.sh --complement | grep -cE 'component/pipelines$'
+#	  1
+#
+# It is enumerated in workspace mode and sits in the complement, so its tests
+# run in THIS lane. It is NOT db-gated and must not join DB_GATED_TREES: its
+# purity_test.go makes "reaches no database" a build-graph fact.
+# `component/pipelinerun`, the engine side, is a root-module package and is
+# covered by the root pattern like any other.
 readonly KNOWN_GO_MOD_DIRS=(
 	"."
 	"component/actions"
@@ -417,6 +465,7 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"component/node/gen"
 	"component/observe"
 	"component/outbound"
+	"component/pipelines"
 	"component/planner"
 	"component/procedure"
 	"component/provenance"

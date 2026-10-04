@@ -1,6 +1,7 @@
 package githubapp
 
 import (
+	"bytes"
 	"context"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -36,6 +37,13 @@ const (
 // few hundred kilobytes; a megabyte is generous and a body without a bound is
 // a memory ceiling set by somebody else.
 const maxBody = 4 << 20
+
+// largeBody bounds the three replies whose size somebody else's change
+// decides: a compare and a single commit each list up to 300 files WITH their
+// patches, and a page of open pull requests carries every description in full.
+// Ordinary changes put those past maxBody, and a reply cut short is a failed
+// read -- a compare that fails selects everything, which is safe and slow.
+const largeBody = 32 << 20
 
 // ErrNotConfigured is the answer for every call on a cluster with no GitHub
 // App. It is a sentinel rather than a status because nothing was asked: the
@@ -259,23 +267,67 @@ func (c *Client) InstallURL() string {
 // The one request path
 // ---------------------------------------------------------------------------
 
-// call issues one API request and decodes its JSON body into out.
+// call issues one API request with no body and decodes its JSON reply into
+// out.
 //
-// EVERY API call in this package goes through here, which is what makes the
-// headers, the body bound and the status classification single facts rather
-// than five copies that drift. `bearer` is the whole Authorization value's
-// credential half and is written straight onto the header: it is never
-// inspected, never compared and never returned.
+// Every API call in this package goes through do, which is what makes the
+// headers, the reply bound and the status classification single facts rather
+// than copies that drift; call and callJSON are its two common shapes. Three
+// calls cannot: the two OAuth calls in user.go (a form body, Basic auth) build
+// their own requests, and the archive (repos.go) follows its redirect by hand
+// through newRequest. `bearer` is the whole Authorization value's credential
+// half and is written straight onto the header: it is never inspected, never
+// compared and never returned.
 func (c *Client) call(ctx context.Context, method, endpoint, bearer string, out any) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.apiBase+endpoint, nil)
+	return c.do(ctx, method, endpoint, bearer, nil, out, maxBody)
+}
+
+// callJSON issues one API request whose body is in, encoded as JSON -- the
+// shape every GitHub write takes (a check run, a scoped token mint).
+func (c *Client) callJSON(ctx context.Context, method, endpoint, bearer string, in, out any) (*http.Response, error) {
+	body, err := json.Marshal(in)
+	if err != nil {
+		return nil, err
+	}
+	return c.do(ctx, method, endpoint, bearer, body, out, maxBody)
+}
+
+// newRequest builds one request carrying the headers every call carries.
+// A non-nil body is JSON and says so.
+func (c *Client) newRequest(ctx context.Context, method, target, bearer string, body []byte) (*http.Request, error) {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, target, reader)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", acceptJSON)
 	req.Header.Set("X-GitHub-Api-Version", apiVersion)
 	req.Header.Set("User-Agent", userAgent)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if strings.TrimSpace(bearer) != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	return req, nil
+}
+
+// do is the one request path: build, send, classify the status, decode at
+// most limit bytes of the reply into out.
+//
+// A NIL CLIENT answers ErrNotConfigured, as Configured and Missing already
+// treat one: a node with no client wired is a node with no app, and a bearer
+// call on it must say so rather than dereference nothing.
+func (c *Client) do(ctx context.Context, method, endpoint, bearer string, body []byte, out any, limit int64) (*http.Response, error) {
+	if c == nil {
+		return nil, ErrNotConfigured
+	}
+	req, err := c.newRequest(ctx, method, c.apiBase+endpoint, bearer, body)
+	if err != nil {
+		return nil, err
 	}
 	resp, derr := c.http.Do(req)
 	if derr != nil {
@@ -294,11 +346,11 @@ func (c *Client) call(ctx context.Context, method, endpoint, bearer string, out 
 		}
 	}
 	if out != nil {
-		if derr := json.NewDecoder(io.LimitReader(resp.Body, maxBody)).Decode(out); derr != nil {
+		if derr := json.NewDecoder(io.LimitReader(resp.Body, limit)).Decode(out); derr != nil {
 			return resp, fmt.Errorf("GitHub answered %s with a body this cluster could not read: %v", pathOnly(endpoint), derr)
 		}
 	} else {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxBody))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, limit))
 	}
 	return resp, nil
 }

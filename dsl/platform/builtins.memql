@@ -301,24 +301,32 @@ builtin packageRollback {
 // ---- update detection, the D11 feeds (epic memql#4794) ----
 //
 // TWO FEEDS, ONE EFFECT: set latestKnownVersion + updateAvailable on the
-// package row, which broadcasts and lights the OS cue. NEITHER FEED EVER
-// DEPLOYS. Deploying the update is a person's click starting a new deployment
-// run at the new version, through analyze and confirm again -- so a feed that
-// could write anything else would be deciding to deploy on somebody's behalf.
+// package row, which broadcasts and lights the OS cue. A feed deploys nothing
+// by itself: a source with auto-deploy switched OFF waits for a person's click,
+// and one switched ON (packageSetAutoDeploy) starts the run the feed noticed
+// through the same analyse-and-confirm gate as a person's deploy.
 //
 // The webhook feed rides the EXISTING inbound seam (memql#2957: deny-by-default
 // source allowlist plus per-source HMAC) rather than a new HTTP route, and it
 // reads a row that seam already staged -- which is the "product DSL reacts with
 // an ordinary automation on node.created" shape v1:platform:inboundRequest's
 // own doc describes.
+//
+// IT CARRIES NO @sdk AND THAT KEEPS NOTHING OUT. @sdk has no engine effect, a
+// builtin takes no @serverOnly, and any signed-in client's query can name a
+// builtin, so the gate is in the HANDLER (component/packages/feeds.go): a call
+// without internal origin -- which the automation executor stamps on a
+// tree-loaded automation's step context, and on nothing a client sends -- is
+// refused before anything is read, and the feed is handed the staged row's id
+// and nothing else. A forged push would otherwise move every tracking
+// package's cue and start an armed source's automatic deploy of whatever
+// commit it named.
 
 @executor("integration.packages.noteUpstreamFromWebhook")
 @args(profile="object")
-@description("Match a staged inbound webhook delivery to the packages tracking that repository and record the version it announced (epic memql#4794, D11). Reads a v1:platform:inboundRequest row the inbound receiver already verified; a delivery whose repository matches no package is a NO-OP rather than an error, because most of a cluster's webhooks are not about packages. Writes only latestKnownVersion and updateAvailable, and never starts a deployment.")
+@description("Match a staged inbound webhook delivery to the packages tracking that repository and record the version it announced (epic memql#4794, D11). Only the shipped automation reaches it: a call without internal origin is refused before anything is read. Reads the v1:platform:inboundRequest row by its id -- a row on the packages webhook source (MEMQL_PACKAGES_WEBHOOK_SOURCE, default github) that the inbound receiver signature-verified, or nothing is noted -- and reads the push or release from the row's body, never from an argument. A pull request, merge queue or check delivery on the same source is skipped, and a delivery whose repository matches no package is a NO-OP rather than an error, because most of a cluster's webhooks are not about packages. Writes only latestKnownVersion and updateAvailable; a source whose auto-deploy is armed then starts its automatic run at the noted version.")
 builtin packageNoteUpstreamFromWebhook {
-  inboundRequestId  string!  @description("The v1:platform:inboundRequest row staged by the inbound receiver.")
-  source            string   @description("The allowlisted source segment the delivery arrived on.")
-  body              string   @description("The verified raw body, exactly as signed.")
+  inboundRequestId  string!  @description("The v1:platform:inboundRequest row the inbound receiver staged. Its source, body and signature verdict are read from the row; no argument can supply them.")
 }
 
 @executor("integration.packages.pollUpstream")

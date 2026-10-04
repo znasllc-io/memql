@@ -117,7 +117,17 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// replica's log. That is the shape of bug that survives a release, which
 		// is why these two packages stamp rather than being exempted from the
 		// annotation.
-		"component/campaigns": "campaign drain worker, tracking endpoints and consent writers -- server-initiated; every write it stamps for is @serverOnly (memql#4820)",
+		//
+		// One more caller, and the one a person could reach: the provider
+		// feedback ingester, which stamps the staged inbound row it worked
+		// (updateInboundRequestStatus). campaignIngestFeedback is a builtin,
+		// which any signed-in client's query can name (@sdk has no engine
+		// effect), and it was gated by configuration alone. It now refuses
+		// every call that did not arrive with internal origin before it reads
+		// the row, and it takes the source, the body and the signature verdict
+		// from the staged row, never from an argument
+		// (component/campaigns/feedback_parse_test.go).
+		"component/campaigns": "campaign drain worker, tracking endpoints, consent writers and the feedback ingester -- server-initiated; every write it stamps for is @serverOnly, and the ingester refuses every call without internal origin (memql#4820, epic memql#5477)",
 		// The proving suite's row writer (epic memql#4993, design section G).
 		// SERVER-INITIATED with no request anywhere near it: its only caller is
 		// cmd/memql-bench, a CI-lane binary run from a workflow step, and the
@@ -413,10 +423,22 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		//   - the backfill and reconciliation runners are operator- or
 		//     schedule-driven;
 		//   - the inbound dispatcher works a v1:platform:inboundRequest ROW
-		//     that the HTTP edge staged and an automation handed over. It
-		//     never sees the request -- by the time it runs, the signature
+		//     that the HTTP edge staged and an automation handed over BY ID.
+		//     It never sees the request -- by the time it runs, the signature
 		//     has been checked, the body has been persisted, and the socket
 		//     is long closed.
+		//
+		// "Handed over" is ENFORCED, not assumed (epic memql#5477).
+		// datasyncDispatchInbound is a builtin, which any signed-in client's
+		// query can name (@sdk has no engine effect), and it used to take the
+		// source, the body, the headers and the verifying tier as arguments,
+		// so whatever reached it chose the delivery a connector applied. It
+		// refuses every call that did not arrive with internal origin before
+		// it reads anything, and takes no delivery from its caller at all: it
+		// is handed the staged row's id and reads the row itself, under the
+		// operator identity below, refusing a claimed row another tier or no
+		// secret verified (component/datasync/inbound_test.go, and end to end
+		// through Execute in test/inboundhop).
 		//
 		// What it stamps for: its own bookkeeping. The outbox queue and the
 		// health timeline are clusterOwner-tier concepts whose mutations are
@@ -434,7 +456,7 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// actor, a narrower credential admitted only to the concepts naming
 		// that connector; the two are stamped separately and the call sites
 		// say which is in scope.
-		"component/datasync": "the data-origins runtime -- server-initiated bookkeeping over its own clusterOwner-tier queue and health rows, and the handling stamp on a staged inbound row it worked (updateInboundRequestStatus, @serverOnly); mirror writes use the narrower connector actor instead (epic memql#4378)",
+		"component/datasync": "the data-origins runtime -- server-initiated bookkeeping over its own clusterOwner-tier queue and health rows, and the handling stamp on a staged inbound row it worked (updateInboundRequestStatus, @serverOnly), the dispatch builtin refusing every call without internal origin and reading its delivery from the staged row; mirror writes use the narrower connector actor instead (epic memql#4378, epic memql#5477)",
 		// The RELEASE CUTTER (epic memql#4434). REQUEST-DERIVED, and the
 		// fourth exception -- stated rather than borrowed, because the caller
 		// here is neither a connector nor a boot path: it is a signed-in human
@@ -628,6 +650,21 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// name a user that caller could not act as), and the report is the
 		// output of the offline analysis rather than anything a caller sent.
 		//
+		// The update feeds write through the same stamp, and the webhook feed
+		// was the one entry point that held a caller's text:
+		// packageNoteUpstreamFromWebhook is a builtin, which any signed-in
+		// client's query can name (@sdk has no engine effect), and it noted
+		// whatever source and body it was handed -- a forged push that moved
+		// every tracking package's cue and started an armed source's automatic
+		// deploy. It now refuses every call that did not arrive with internal
+		// origin before its first read, and takes no delivery from its caller
+		// at all: it is handed the staged inboundRequest's id and reads the
+		// source, the body and the receiver's signatureVerified from the row,
+		// noting nothing from an unverified one
+		// (component/packages/feeds_test.go). The one caller-supplied value
+		// left is that row id, and all it can name is a delivery the inbound
+		// receiver verified.
+		//
 		// The stamp is scoped to ONE Execute call and cannot escape: it is
 		// applied inline inside store.writeInternal and the marked context is
 		// never returned, so no later frame inherits it -- the memql#2879
@@ -635,7 +672,64 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// own actor, which is what keeps row admission the composite tier's
 		// decision. Both asserted in
 		// component/packages/internal_origin_test.go.
-		"component/packages":        "package deploy pipeline -- server-initiated; stage advances happen after cross-node handoffs with no caller in scope, and every id is engine-minted (memql#4794)",
+		"component/packages": "package deploy pipeline -- server-initiated; stage advances happen after cross-node handoffs with no caller in scope, every id is engine-minted, and the webhook feed refuses every call without internal origin and reads its delivery from the staged row (memql#4794, epic memql#5477)",
+		// PIPELINES (epic memql#5477). SERVER-INITIATED, and the argument is
+		// component/packages' one step on, because a pipeline hangs off a
+		// package and borrows its owner.
+		//
+		// Most of its work is the runner's: a GitHub delivery staged on the
+		// inbound seam, the every-minute poll, and the agent driver that
+		// claims and concludes runs on another replica (Task 10b). There the
+		// stamp opens the @serverOnly constructs the work is made of -- the
+		// cross-owner reads (a delivery must find every owner's pipeline of a
+		// repository; recovery must find a run whose driver died) under the
+		// package's OWN synthetic system actor, and the four writes under the
+		// row owner's borrowed authority, which the mutations stamp
+		// ownerUserId from. Without it every run would be refused with one
+		// WARN and the check run would sit queued forever.
+		//
+		// "The runner's" is ENFORCED, not assumed. The driver is subscribed to
+		// run events on agent nodes and no request reaches it. The delivery
+		// and the poll ARE reachable: pipelinesTrigger and pipelinesPoll are
+		// builtins, which any signed-in client's query can name (@sdk has no
+		// engine effect; an earlier version of this argument said they had
+		// "no caller", and a review proved otherwise). So both refuse every
+		// call that did not arrive with internal origin, before their first
+		// read -- the automation executor stamps it on a tree-loaded
+		// automation's step context and on nothing a client sends -- and the
+		// trigger takes no delivery from its caller at all: it is handed the
+		// staged row's id and reads the body, the headers and the
+		// receiver's signature verdict from the row, refusing anything but a
+		// verified github row. The one caller-supplied value that reaches a
+		// stamped call there is that row id, and all it can name is a delivery
+		// GitHub signed.
+		//
+		// What a PERSON reaches -- connect, disconnect, re-run, cancel -- is
+		// downstream of an owner-scoped read under their own actor
+		// (packageById under the composite tier plus an explicit owner match;
+		// pipelineForOwner; pipelineRunForOwner), so no caller-supplied
+		// identifier reaches a stamped call until the caller has been shown
+		// to own the row it names, and the owner borrowed is COPIED off that
+		// row, never taken from an argument. Every other id is derived
+		// (sha256 of the package id or the run key) or GitHub's.
+		//
+		// ONE EXCEPTION, and it is bounded: a cluster owner may disconnect
+		// ANY pipeline, so an operator can free a repository a departed
+		// owner's pipeline holds (connect refuses every other source while it
+		// is active). When their own owner-scoped read comes back empty and
+		// their OWN verified role is the cluster owner's -- never a synthetic
+		// actor's, which is refused as no person before any read -- the
+		// pipeline is read server-side (pipelineById). That widens nothing a
+		// cluster owner does not already read through the composite tier, and
+		// the write it reaches is the status alone, under the row owner's
+		// borrowed authority, owner copied off the row.
+		//
+		// The stamp is applied in ONE place, inline as the argument to
+		// dslStore.executeInternal's single Execute, and the marked context is
+		// never returned. Asserted, with the person-facing precondition and
+		// the runner capabilities' origin refusal, in
+		// component/pipelinerun/internal_origin_test.go.
+		"component/pipelinerun":     "pipelines -- server-initiated; the trigger and the poll refuse every call without internal origin and the trigger reads its delivery from the staged row, the driver has no caller, and every person-facing act is downstream of an owner-scoped read under the person's own actor, save a cluster owner's disconnect (epic memql#5477)",
 		"integrations/agent/worker": "worker store, server-initiated",
 		// THE WORK SPINE's entry points (epic memql#4966). SERVER-INITIATED,
 		// and not one of the request-derived exceptions -- stated rather than

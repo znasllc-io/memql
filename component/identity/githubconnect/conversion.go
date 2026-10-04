@@ -166,9 +166,10 @@ func (c *Client) ConvertManifest(ctx context.Context, code string, mintSecret fu
 // `asked` asked for, at no higher level.
 //
 // The owner can edit only the app's NAME on GitHub's confirmation page, so an
-// app coming back with more than contents and metadata read is not the app
-// this cluster's manifest described -- whatever produced it, its credentials
-// are not ones to keep. "Within" rather than "equal": GitHub may report a
+// app coming back with more than RequestedPermissions asked (a permission it
+// does not name, or a read come back as a write) is not the app this
+// cluster's manifest described -- whatever produced it, its credentials are
+// not ones to keep. "Within" rather than "equal": GitHub may report a
 // permission it implies (metadata read comes with everything), and refusing a
 // correct app over a field it added would break setup for no safety.
 func PermissionsAreWithin(got, asked map[string]string) bool {

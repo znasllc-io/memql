@@ -37,6 +37,11 @@ func (a *App) integrationsAgent() {
 	// app first, a second session (app/integrations_work_validator.go).
 	a.wireAnswerChecks()
 
+	// The agent node DRIVES pipeline runs (epic memql#5477): after
+	// integrationsCore(), whose wirePipelines() gave the plug-in its gate,
+	// GitHub port, node id and journal -- every port a driver needs.
+	a.wirePipelinesDriver()
+
 	a.Logger.Info("agent integration providers registered")
 }
 

@@ -1,0 +1,201 @@
+// mutations.memql
+//
+// Writes over the pipelines namespace. Same-domain constructs are ambient, so
+// there is no `use pipelines.*` line here (#2617).
+//
+// WHY EVERY WRITE HERE IS @serverOnly. A pipeline row says which repository,
+// installation and grant a cluster drives checks under, and a run row is the
+// cluster's testimony about what it checked and how that ended -- the same
+// testimony GitHub shows as a required status. A client-reachable write is a
+// forged result: a person could mark their own failing run `success`, point
+// their pipeline at an installation their grant does not reach, or open a run
+// GitHub never asked for. Scoping to actor.userId does not address any of
+// that; it would make the forgery correctly attributed and no less a forgery.
+// The only writer is component/pipelinerun, after it has proved the grant
+// (packages.InstallationToken, verifyGrantRepository) and read the manifest,
+// and it writes under the package OWNER'S borrowed authority with internal
+// origin. The client-reachable acts are the builtins in builtins.memql, each
+// of which checks that the caller owns what it touches.
+//
+// THE OWNER IS STAMPED, NEVER ACCEPTED. Both creates stamp ownerUserId from
+// actor.userId, which under that borrowed authority is the package owner;
+// ownerUserId is @serverSet on every concept here, so no argument can name it.
+//
+// THE UPDATES CARRY NO DEFAULTS, on purpose. Each is a read-merge, and a run
+// row has several writers -- the trigger, the driver on whichever agent
+// replica holds the lease, a person's cancel, the conclusion -- so a `??`
+// default on any argument would write that default over another writer's
+// value the moment a write that did not name it landed. Every argument is
+// written only when named, and a writer clearing a field names it with its
+// empty value ("" for a string, false for cancelRequested, {} or [] for the
+// collections). The merge is SHALLOW: heads, timings, notes and stages are
+// always sent whole.
+
+/// Connect a pipeline: the one row of a source, at an id derived from the package id. Reconnecting
+/// re-runs this insert on the same id, which is a read-merge -- it restates the configuration, marks
+/// the pipeline active again and moves connectedAt, while the poll's heads and the timing table
+/// survive. compute defaults to `cluster` here, on the create, because nothing about a laptop is a
+/// default (plan decision 8).
+///
+/// @serverOnly rather than actor.userId scoping: the row is only true after component/pipelinerun
+/// has minted a token through the caller's grant and read a `pipeline:` block at the repository's
+/// head, and a client-written row could name an installation or a grant nothing verified. The
+/// owner is stamped from actor.userId, which under the borrowed authority is the package owner.
+@serverOnly
+@actor
+mutation pipeline createPipeline {
+  args {
+    pipelineId      string!
+    packageId       string!
+    accountId       string
+    name            string!
+    repository      string!
+    defaultBranch   string
+    installationId  string!
+    credentialId    string!
+    delivery        string!
+    compute         string
+    secretNames     []string
+    channelIds      []string
+  }
+  insert {
+    accept { packageId, accountId, name, repository, defaultBranch, installationId, credentialId, delivery, secretNames, channelIds }
+    stamp {
+      id: args.pipelineId
+      ownerUserId: actor.userId
+      compute: args.compute ?? "cluster"
+      status: "active"
+      connectedAt: now
+    }
+  }
+}
+
+/// Advance a pipeline: its configuration, its status, the poll's heads, the timing table. Read-merge
+/// with no defaults, so every field not named keeps its value -- see the header for why.
+///
+/// @serverOnly: heads decides which SHAs the poll treats as already seen and timings decides how a
+/// full run's shards are split, so a client-written value is a way to suppress runs or skew them,
+/// and actor.userId scoping would only mean the caller skews their own -- which is still the
+/// defect. Disconnecting is the pipelinesDisconnect capability, which checks the caller owns the
+/// pipeline before it writes status here.
+@serverOnly
+mutation pipeline updatePipeline {
+  args {
+    pipelineId        string!
+    name              string
+    defaultBranch     string
+    delivery          string
+    compute           string
+    status            string
+    secretNames       []string
+    channelIds        []string
+    heads             object
+    timings           object
+    timingsRunId      string
+    timingsUpdatedAt  string
+  }
+  update {
+    accept { name, defaultBranch, delivery, compute, status, secretNames, channelIds, heads, timings, timingsRunId, timingsUpdatedAt }
+    stamp {
+      id: args.pipelineId
+    }
+  }
+}
+
+/// Open a run: every open-time field, at a fresh id per attempt. A fork is opened already completed
+/// and refused, and a check run GitHub would not take is opened carrying checkRunState and its note,
+/// which is why those arrive here as arguments. conclusion and checkRunState are stamped empty when
+/// not named, because empty is their pending value.
+///
+/// @createOnly on the lifecycle fields the DRIVER owns after this write: should a second open ever
+/// land on an existing run's id, it must not put a completed or claimed run back to queued.
+///
+/// @serverOnly: a run row is the cluster's claim that GitHub asked for a check at this SHA, and a
+/// client-opened run would put a check run on a commit nobody pushed; actor.userId scoping would
+/// attribute that claim correctly and refuse nothing. The owner is stamped from actor.userId, the
+/// pipeline owner's borrowed authority.
+@createOnly("status", "conclusion", "checkRunState", "cancelRequested")
+@serverOnly
+@actor
+mutation run createPipelineRun {
+  args {
+    runId           string!
+    pipelineId      string!
+    accountId       string
+    repository      string!
+    sha             string!
+    mode            string!
+    event           string!
+    runKey          string!
+    attempt         int!
+    trigger         string!
+    rerunOf         string
+    deliveryId      string
+    pullRequest     int
+    headBranch      string
+    baseSha         string
+    title           string
+    version         string
+    status          string!
+    conclusion      string
+    refusalCode     string
+    refusalMessage  string
+    refusalScope    string
+    checkRunId      string
+    checkRunState   string
+    notes           []object
+    queuedAt        string!
+    finishedAt      string
+    durationMs      int
+  }
+  insert {
+    accept { pipelineId, accountId, repository, sha, mode, event, runKey, attempt, trigger, rerunOf, deliveryId, pullRequest, headBranch, baseSha, title, version, status, refusalCode, refusalMessage, refusalScope, checkRunId, notes, queuedAt, finishedAt, durationMs }
+    stamp {
+      id: args.runId
+      ownerUserId: actor.userId
+      conclusion: args.conclusion ?? ""
+      checkRunState: args.checkRunState ?? ""
+      cancelRequested: false
+    }
+  }
+}
+
+/// Advance a run: the claim and its heartbeat, the work run it compiled into, the stages as they
+/// finish, the check run's state, a cancel request, the conclusion. Read-merge with no defaults --
+/// four writers share this row, and a default on any argument would erase another's value (see the
+/// header).
+///
+/// @serverOnly: only the driver knows what a run actually did, and the conclusion is what GitHub
+/// shows as the required check, so actor.userId scoping would let a caller close their own failing
+/// run as a success, which is the whole failure mode. Cancelling is the pipelinesCancel capability,
+/// which checks the caller owns the run before it writes cancelRequested here.
+@serverOnly
+mutation run updatePipelineRun {
+  args {
+    runId              string!
+    status             string
+    conclusion         string
+    refusalCode        string
+    refusalMessage     string
+    refusalScope       string
+    checkRunId         string
+    checkRunState      string
+    notes              []object
+    workRunId          string
+    workGoalId         string
+    driverNodeId       string
+    driverHeartbeatAt  string
+    cancelRequested    bool
+    cancelledBy        string
+    stages             []object
+    startedAt          string
+    finishedAt         string
+    durationMs         int
+  }
+  update {
+    accept { status, conclusion, refusalCode, refusalMessage, refusalScope, checkRunId, checkRunState, notes, workRunId, workGoalId, driverNodeId, driverHeartbeatAt, cancelRequested, cancelledBy, stages, startedAt, finishedAt, durationMs }
+    stamp {
+      id: args.runId
+    }
+  }
+}

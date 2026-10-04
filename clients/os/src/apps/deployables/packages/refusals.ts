@@ -541,6 +541,201 @@ const COPY: Record<string, RefusalCopy> = {
     title: "This needs a part of Deployables you have not been granted",
     next: "An owner or admin can grant it to you in Settings, under Access. Nothing was changed.",
   },
+
+  // -- pipelines (epic memql#5477; where a step executes, epic memql#5478).
+  //    Each lands on a PIPELINE RUN, one of its steps and its check run on
+  //    GitHub -- never on a deploy, so none parks a stop on the deploy rail,
+  //    and a source whose pipeline cannot compile still deploys (D9). The
+  //    server's sentence names the stage, the step and the value; these say
+  //    what kind of thing happened and where it is fixed. The sentences for
+  //    where a step executes are the runner's own (epic memql#5478), adapted
+  //    to this table's two halves. --
+
+  // The manifest's pipeline: block, and the plan compiled from it. A run whose
+  // block does not compile fails before any step runs.
+  pipeline_not_declared: {
+    title: "This repository declares no pipeline",
+    next: "Add a pipeline: block to its memql-package.yaml.",
+  },
+  pipeline_stage_invalid: {
+    // "Declares no stages" is one of this code's sentences, so the headline is
+    // about the stages as a whole rather than one of them.
+    title: "The pipeline's stages are not valid",
+    next: "The message says which stage and why. Fix it in memql-package.yaml and push the change.",
+  },
+  pipeline_step_invalid: {
+    title: "A step of this pipeline is not valid",
+    next: "The message says which step and why. Fix it in memql-package.yaml and push the change.",
+  },
+  pipeline_select_invalid: {
+    title: "The pipeline's select: block is not valid",
+    next: "The message says which entry and why. Fix it in memql-package.yaml and push the change.",
+  },
+  pipeline_select_missing: {
+    // Two sentences share this code: the manifest names no import graph, or
+    // none was read for this run. The first is the one a person meets.
+    title: "A step's Go packages could not be chosen",
+    next: "The message says why. Most often the pipeline needs select: { go: import-graph } in memql-package.yaml.",
+  },
+  pipeline_event_unknown: {
+    title: "A stage runs on an event this cluster does not know",
+    next: "Use one of the events or modes the message lists.",
+  },
+  pipeline_bucket_unknown: {
+    title: "A step names a bucket the pipeline does not declare",
+    next: "Declare it under select.buckets, or correct the name in the step's when.bucket.",
+  },
+  pipeline_service_unknown: {
+    title: "A step names a service the pipeline does not declare",
+    next: "Declare it under services, or correct the name in the step.",
+  },
+  pipeline_need_unknown: {
+    // The closed set is in the server's sentence and not restated here: a
+    // list copied into this table is the copy that drifts.
+    title: "A step names a need this cluster does not know",
+    next: "Use one of the needs the message lists, or remove it from the step.",
+  },
+  pipeline_secret_invalid: {
+    title: "A step's secret name is not one this cluster accepts",
+    next: "Rename it as the message describes.",
+  },
+  pipeline_secret_not_allowed: {
+    // A CONSENT, NOT A FAULT. The owner decides which secrets a pipeline may
+    // read, and the step asked for one outside that list, so it did not run.
+    title: "A step uses a secret the pipeline's owner has not allowed",
+    next: "The owner can add it to the pipeline's allowed secrets, or remove it from the step.",
+  },
+  pipeline_fleet_not_consented: {
+    // The same shape: a need sends a step to somebody's own machine, and the
+    // owner has not let this pipeline use the fleet.
+    title: "A step needs a fleet machine, and this pipeline runs on the cluster only",
+    next: "The pipeline's owner can let it use the fleet, or remove the need from the step.",
+  },
+
+  // The trigger (D6): a fork's head is refused, never queued.
+  pipeline_fork_refused: {
+    title: "This cluster does not run pull requests from forks",
+    next: "Push the branch to the repository itself to run it.",
+  },
+
+  // The run.
+  pipeline_runner_unavailable: {
+    // The cluster's condition, not the repository's, and the next line says so
+    // before anybody goes looking for a mistake in a manifest that is fine.
+    title: "This cluster has no pipeline runner yet",
+    next: "Nothing ran, and the repository is not the cause. Ask an operator to set up a runner.",
+  },
+  pipeline_executor_error: {
+    title: "The runner could not run this step",
+    next: "Re-run the step. If it fails the same way, ask an operator to look at the runner.",
+  },
+  pipeline_secret_missing: {
+    title: "A secret this step uses has no value on this cluster",
+    next: "The pipeline's owner can store a value under that name, then re-run the step.",
+  },
+  pipeline_disconnected: {
+    // Somebody disconnected the pipeline while a run waited. A decision, not a
+    // fault, and the headline does not say when because a resumed run meets it
+    // part-way through.
+    title: "This pipeline is disconnected",
+    next: "The run did not go ahead. Connect the pipeline again, and the next push runs it.",
+  },
+  pipeline_already_connected: {
+    // One pipeline per repository. A second would write a second check run
+    // with the same name on every commit, so connect refuses it and names the
+    // way forward rather than the rule.
+    title: "This repository already has a pipeline",
+    next: "Another source runs its checks. Disconnect that pipeline first, or work from that source.",
+  },
+  pipeline_check_permission_missing: {
+    // A NOTE: the run executes and concludes as usual. An app registered
+    // before pipelines cannot write checks until its permissions are widened
+    // on GitHub, so this run is missing only from GitHub's checks.
+    title: "GitHub refused this run's check",
+    next: "The run itself went ahead. Give the GitHub App permission to write checks on GitHub and accept it, so later runs report there.",
+  },
+
+  // Skips: a step the plan or the run chose not to execute. None is a fault.
+  pipeline_stage_blocked: {
+    title: "Skipped because an earlier stage failed",
+    next: "It runs once the stages before it pass.",
+  },
+  pipeline_not_affected: {
+    // The server's sentence says which: no change under the step's bucket, or
+    // no affected Go packages.
+    title: "Skipped because the change touched nothing this step covers",
+    next: "Nothing to do. It runs when a change touches what it covers.",
+  },
+  pipeline_notify_unavailable: {
+    title: "Skipped because this cluster cannot send notifications yet",
+    next: "Nothing failed, and the rest of the run is unaffected.",
+  },
+
+  // Where a step executes (epic memql#5478).
+  pipeline_step_timeout: {
+    title: "The step ran past its time limit and was stopped",
+    next: "Raise the step's timeout in memql-package.yaml, or split the work.",
+  },
+  pipeline_run_ceiling: {
+    title: "The run passed its wall-clock ceiling",
+    next: "Its unfinished steps were stopped. Shorten the run, or ask an operator to raise MEMQL_PIPELINES_RUN_MAX_MINUTES.",
+  },
+  pipeline_no_machine_for_need: {
+    title: "No online machine of yours offers what this step needs",
+    next: "Turn on a machine that has it and allow pipelines in its policy, or drop the need.",
+  },
+  pipeline_fleet_disabled: {
+    title: "Computer use is switched off for your machines",
+    next: "Steps that need a machine cannot run. Switch it back on in Fleet.",
+  },
+  pipeline_isolation_unenforced: {
+    // The runner checks the cluster before it starts anything, so a run that
+    // meets this has no step started, and the repair is the cluster's.
+    title: "This cluster does not enforce the network isolation pipeline steps need",
+    next: "No step was started. Enable a network policy engine on the cluster (on AKS: az aks update --network-policy), then re-run.",
+  },
+  pipeline_job_rejected: {
+    title: "The cluster refused to start the step",
+    next: "The message says why; usually the namespace quota or an invalid image reference.",
+  },
+  pipeline_job_unschedulable: {
+    title: "No cluster node had room to run the step",
+    next: "Lower the step's demands or wait for capacity.",
+  },
+  pipeline_image_pull_failed: {
+    title: "The step's image could not be pulled",
+    next: "Check the image reference and that the registry allows anonymous pulls.",
+  },
+  pipeline_clone_failed: {
+    title: "The repository could not be fetched at this commit",
+    next: "Check that the GitHub App still has access and the commit exists.",
+  },
+  pipeline_service_failed: {
+    title: "A service the step depends on did not start",
+    next: "Open the full log; the service's own lines are at the end.",
+  },
+  pipeline_step_cancelled: {
+    title: "The step was cancelled",
+    next: "Re-run when ready.",
+  },
+  pipeline_node_lost: {
+    title: "The node running the step went away before it finished",
+    next: "Re-run the step.",
+  },
+  pipeline_artifact_too_large: {
+    title: "An artifact was over the size limit and was not saved",
+    next: "Narrow the artifact paths.",
+  },
+  pipeline_artifact_missing: {
+    // A NOTE: the step's outcome stands; one declared path saved nothing.
+    title: "A declared artifact path matched no file",
+    next: "Check the path in memql-package.yaml.",
+  },
+  pipeline_log_capped: {
+    // A NOTE: nothing was lost, only the live view stopped.
+    title: "The live log stopped at its line limit",
+    next: "Open the full log, which is in the Library.",
+  },
 };
 
 /**
@@ -629,6 +824,28 @@ const NOT_A_FAULT: ReadonlySet<string> = new Set([
   "storefront_token_required",
   "storefront_token_invalid",
   "shopify_app_not_saved",
+  // Pipelines'. Every SKIP and every NOTE, by class (component/pipelines/
+  // refusal.go): a step not run because nothing it covers changed, because an
+  // earlier stage failed or because nothing can notify yet; a check GitHub
+  // refused, an artifact path that matched nothing, a live log at its limit.
+  "pipeline_not_affected",
+  "pipeline_stage_blocked",
+  "pipeline_notify_unavailable",
+  "pipeline_check_permission_missing",
+  "pipeline_artifact_missing",
+  "pipeline_log_capped",
+  // And the ones whose cause is somebody's DECISION rather than a fault: a
+  // fork's policy, a secret or the fleet the owner has not allowed, computer
+  // use switched off, a pipeline disconnected, a step cancelled. A manifest
+  // that does not compile, and anything that broke where a step executes,
+  // stay faults: each has a repair, and the repair is the point.
+  "pipeline_fork_refused",
+  "pipeline_secret_not_allowed",
+  "pipeline_fleet_not_consented",
+  "pipeline_fleet_disabled",
+  "pipeline_disconnected",
+  "pipeline_already_connected",
+  "pipeline_step_cancelled",
 ]);
 
 /**

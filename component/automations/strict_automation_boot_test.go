@@ -191,12 +191,18 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // added, none removed; measured by the strict loader on this tree.
 // reviseLibraryDocument adds the human-approved document revision template.
 //
-// 75 -> 76 with workerAppSessionStaleSweep, the fourth worker sweep and the
+// 75 -> 77 in epic memql#5477 (pipelines, the seam): the new `pipelines`
+// domain's two triggers. triggerPipelinesOnGitHubDelivery opens runs from a
+// staged GitHub delivery, and pollPipelines is the every-minute poll and
+// recovery, placed on agent replicas behind its own `pipelines-poll` lease
+// (app/automation_schedule_placement.go). Two added, none removed; measured by
+// the strict loader on this tree.
+// 77 -> 78 with workerAppSessionStaleSweep, the fourth worker sweep and the
 // one v1:worker:appSession's status description promised before it existed:
 // a session is held by one replica and only that replica ends its row, so a
 // pod restart left it at `running` for good. One added, none removed;
 // measured by the strict loader on this tree.
-const shippedAutomationCount = 76
+const shippedAutomationCount = 78
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

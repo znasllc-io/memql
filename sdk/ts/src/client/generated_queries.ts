@@ -6295,6 +6295,135 @@ QueryClient.prototype.pendingUserInvitations = function (this: QueryClient, args
   return this.executeNamed("pendingUserInvitations", buildPendingUserInvitations(args), opts);
 };
 
+/** The caller's notification channels, by name. */
+// Bound concept: v1:pipelines:channel (machine-readable: BoundConcepts["pipelineChannelsForOwner"] in generated_concepts.ts).
+export interface PipelineChannelsForOwnerArgs {
+}
+
+export function buildPipelineChannelsForOwner(args: PipelineChannelsForOwnerArgs): string {
+  void args;
+  return "query pipelineChannelsForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelineChannelsForOwner(args?: PipelineChannelsForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelineChannelsForOwner = function (this: QueryClient, args: PipelineChannelsForOwnerArgs = {} as PipelineChannelsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelineChannelsForOwner", buildPipelineChannelsForOwner(args), opts);
+};
+
+/** One of the caller's pipelines by id. */
+// Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelineForOwner"] in generated_concepts.ts).
+export interface PipelineForOwnerArgs {
+  pipelineId: string;
+}
+
+export function buildPipelineForOwner(args: PipelineForOwnerArgs): string {
+  const parts: string[] = [];
+  parts.push("pipelineId: " + renderMemQLValue(args.pipelineId));
+  return "query pipelineForOwner(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelineForOwner(args: PipelineForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelineForOwner = function (this: QueryClient, args: PipelineForOwnerArgs = {} as PipelineForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelineForOwner", buildPipelineForOwner(args), opts);
+};
+
+/** The caller's pipeline for one source -- what the source page reads to show its Pipeline facts. One pipeline per source, so this answers at most one row; the sort and page of one say so. */
+// Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelineForPackage"] in generated_concepts.ts).
+export interface PipelineForPackageArgs {
+  packageId: string;
+}
+
+export function buildPipelineForPackage(args: PipelineForPackageArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  return "query pipelineForPackage(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelineForPackage(args: PipelineForPackageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelineForPackage = function (this: QueryClient, args: PipelineForPackageArgs = {} as PipelineForPackageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelineForPackage", buildPipelineForPackage(args), opts);
+};
+
+/** One of the caller's runs by id -- the run page. */
+// Bound concept: v1:pipelines:run (machine-readable: BoundConcepts["pipelineRunForOwner"] in generated_concepts.ts).
+export interface PipelineRunForOwnerArgs {
+  runId: string;
+}
+
+export function buildPipelineRunForOwner(args: PipelineRunForOwnerArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query pipelineRunForOwner(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelineRunForOwner(args: PipelineRunForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelineRunForOwner = function (this: QueryClient, args: PipelineRunForOwnerArgs = {} as PipelineRunForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelineRunForOwner", buildPipelineRunForOwner(args), opts);
+};
+
+/** The caller's runs, most recently queued first, optionally narrowed to one pipeline -- the Runs list across every source, or one source's runs. */
+// Bound concept: v1:pipelines:run (machine-readable: BoundConcepts["pipelineRunsForOwner"] in generated_concepts.ts).
+export interface PipelineRunsForOwnerArgs {
+  /** The pipeline to narrow to. Absent lists every pipeline's runs. */
+  pipelineId?: string;
+}
+
+export function buildPipelineRunsForOwner(args: PipelineRunsForOwnerArgs): string {
+  const parts: string[] = [];
+  if (args.pipelineId !== undefined) parts.push("pipelineId: " + renderMemQLValue(args.pipelineId));
+  return "query pipelineRunsForOwner(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelineRunsForOwner(args: PipelineRunsForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelineRunsForOwner = function (this: QueryClient, args: PipelineRunsForOwnerArgs = {} as PipelineRunsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelineRunsForOwner", buildPipelineRunsForOwner(args), opts);
+};
+
+/** The caller's pipelines, most recently connected first. */
+// Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelinesForOwner"] in generated_concepts.ts).
+export interface PipelinesForOwnerArgs {
+}
+
+export function buildPipelinesForOwner(args: PipelinesForOwnerArgs): string {
+  void args;
+  return "query pipelinesForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesForOwner(args?: PipelinesForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesForOwner = function (this: QueryClient, args: PipelinesForOwnerArgs = {} as PipelinesForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesForOwner", buildPipelinesForOwner(args), opts);
+};
+
 /** Returns the validation policy for a record type. Space-specific policies take precedence over global. */
 // Bound concept: v1:data:policy (machine-readable: BoundConcepts["policy"] in generated_concepts.ts).
 export interface PolicyArgs {

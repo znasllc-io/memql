@@ -47,4 +47,29 @@ describe("reportFromRow", () => {
   it("drops a row with no module", () => {
     expect(reportFromRow({ ...base, module: "" } as unknown as Row)).toBeNull();
   });
+
+  // THE DECLARATION RIDES THROUGH. A feed that dropped the two flags would
+  // read the pipelines item as one somebody NEEDS, and nothing would say so --
+  // false is a value, not an error.
+  it("carries the module's optional and dismissable flags", () => {
+    const r = reportFromRow({
+      ...base,
+      module: "pipelines",
+      state: "notApplicable",
+      core: false,
+      optional: true,
+      dismissable: true,
+    } as unknown as Row);
+    expect(r?.optional).toBe(true);
+    expect(r?.dismissable).toBe(true);
+    expect(r?.core).toBe(false);
+  });
+
+  // And a row written before the flags existed carries neither key, which
+  // reads as the module having declared neither -- never as undefined.
+  it("reads a row without the flags as declaring neither", () => {
+    const r = reportFromRow({ ...base, state: "configured" } as unknown as Row);
+    expect(r?.optional).toBe(false);
+    expect(r?.dismissable).toBe(false);
+  });
 });

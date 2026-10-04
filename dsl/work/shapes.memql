@@ -144,6 +144,11 @@ shape step workStepFull {
   basis
   override
   authoredBy
+  // epic memql#5477: the Library files a runner's receipt names -- a pipeline
+  // step's full log and its artifacts. The run page reads them through this
+  // shape, so a field missing here is a link the page cannot draw.
+  logFileId
+  artifactFileIds
 }
 
 /// Every modelCall field.

@@ -2,6 +2,7 @@ package packages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 func feedHarness(t *testing.T, pkgs ...map[string]any) (*Integration, *recordingEngine) {
@@ -30,6 +34,38 @@ func feedHarness(t *testing.T, pkgs ...map[string]any) (*Integration, *recording
 
 const pushBody = `{"ref":"refs/heads/main","after":"newsha0000000000","repository":{"html_url":"https://github.com/acme/widget","default_branch":"main"}}`
 
+// stagedDeliveryID is the v1:platform:inboundRequest row every webhook-feed
+// test stages its delivery as.
+const stagedDeliveryID = "v1:platform:inboundRequest:1"
+
+// stageDelivery puts a delivery where the webhook feed reads it: the staged
+// inbound row, answered for inboundRequestById. The row is the ONLY place the
+// feed takes a delivery from -- its source, its body and the receiver's
+// signature verdict -- so this is how every feed test hands one over.
+func stageDelivery(engine *recordingEngine, source, body string, verified bool) {
+	engine.rows["query inboundRequestById"] = []map[string]any{{
+		"id":                stagedDeliveryID,
+		"source":            source,
+		"medium":            "webhook",
+		"body":              body,
+		"signatureVerified": verified,
+		"status":            "received",
+	}}
+}
+
+// automationCtx is the context the shipped automation's step runs under:
+// internal origin, which the executor stamps on a tree-loaded automation and on
+// nothing a client sends.
+func automationCtx() context.Context {
+	return auth.ContextWithInternalOrigin(context.Background())
+}
+
+// deliver runs the webhook feed the way notePackageUpstreamFromWebhook does: on
+// the automation's context, handed the staged row's id and nothing else.
+func deliver(i *Integration) ([]memorynodes.MemoryNode, error) {
+	return i.handleNoteUpstreamFromWebhook(automationCtx(), map[string]any{"inboundRequestId": stagedDeliveryID}, 0)
+}
+
 func trackedPackage(deployed, known string, available bool) map[string]any {
 	return map[string]any{
 		"id":                 "v1:platform:package:abc",
@@ -44,12 +80,9 @@ func trackedPackage(deployed, known string, available bool) map[string]any {
 
 func TestAWebhookFlipsTheTwoFeedOwnedFields(t *testing.T) {
 	i, engine := feedHarness(t, trackedPackage("oldsha0000000000", "", false))
+	stageDelivery(engine, "github", pushBody, true)
 
-	if _, err := i.handleNoteUpstreamFromWebhook(context.Background(), map[string]any{
-		"inboundRequestId": "v1:platform:inboundRequest:1",
-		"source":           "github",
-		"body":             pushBody,
-	}, 0); err != nil {
+	if _, err := deliver(i); err != nil {
 		t.Fatalf("webhook: %v", err)
 	}
 
@@ -65,9 +98,8 @@ func TestAWebhookFlipsTheTwoFeedOwnedFields(t *testing.T) {
 // touch two fields and start nothing.
 func TestNeitherFeedWritesAnythingElseAndNeitherDeploys(t *testing.T) {
 	i, engine := feedHarness(t, trackedPackage("oldsha0000000000", "", false))
-	if _, err := i.handleNoteUpstreamFromWebhook(context.Background(), map[string]any{
-		"source": "github", "body": pushBody,
-	}, 0); err != nil {
+	stageDelivery(engine, "github", pushBody, true)
+	if _, err := deliver(i); err != nil {
 		t.Fatalf("webhook: %v", err)
 	}
 
@@ -89,9 +121,8 @@ func TestAnUnchangedUpstreamWritesNothing(t *testing.T) {
 	// change and re-fire the OS arrival cue on what is effectively a
 	// heartbeat -- "a heartbeat is not news".
 	i, engine := feedHarness(t, trackedPackage("oldsha0000000000", "newsha0000000000", true))
-	if _, err := i.handleNoteUpstreamFromWebhook(context.Background(), map[string]any{
-		"source": "github", "body": pushBody,
-	}, 0); err != nil {
+	stageDelivery(engine, "github", pushBody, true)
+	if _, err := deliver(i); err != nil {
 		t.Fatalf("webhook: %v", err)
 	}
 	if engine.sawStatement("mutation recordPackageUpstreamVersion") {
@@ -115,9 +146,8 @@ func TestAnArchivedPackageIsNotWrittenByTheFeed(t *testing.T) {
 	archived := trackedPackage("oldsha0000000000", "", false)
 	archived["status"] = "archived"
 	i, engine := feedHarness(t, archived)
-	if _, err := i.handleNoteUpstreamFromWebhook(context.Background(), map[string]any{
-		"source": "github", "body": pushBody,
-	}, 0); err != nil {
+	stageDelivery(engine, "github", pushBody, true)
+	if _, err := deliver(i); err != nil {
 		t.Fatalf("webhook: %v", err)
 	}
 	if engine.sawStatement("mutation ") {
@@ -147,9 +177,8 @@ func TestPackagesByRepoUrlExcludesArchivedPackages(t *testing.T) {
 
 func TestADeliveryMatchingNoPackageIsANoOpNotAnError(t *testing.T) {
 	i, engine := feedHarness(t) // no packages tracked
-	res, err := i.handleNoteUpstreamFromWebhook(context.Background(), map[string]any{
-		"source": "github", "body": pushBody,
-	}, 0)
+	stageDelivery(engine, "github", pushBody, true)
+	res, err := deliver(i)
 	if err != nil {
 		t.Fatalf("a webhook about a repository nobody tracks is ordinary, not an error: %v", err)
 	}
@@ -162,27 +191,30 @@ func TestADeliveryMatchingNoPackageIsANoOpNotAnError(t *testing.T) {
 }
 
 func TestADeliveryFromAnotherSourceIsSkipped(t *testing.T) {
-	i, engine := feedHarness(t, trackedPackage("oldsha0000000000", "", false))
-	if _, err := i.handleNoteUpstreamFromWebhook(context.Background(), map[string]any{
-		"source": "stripe", "body": pushBody,
-	}, 0); err != nil {
-		t.Fatalf("skipping is not an error: %v", err)
-	}
-	if engine.sawStatement("mutation ") {
-		t.Fatal("a delivery from another source must not be read as a package update")
+	// Verified or not: a row staged on another source is somebody else's
+	// delivery, so it is skipped rather than refused, and no package is even
+	// looked up.
+	for _, verified := range []bool{true, false} {
+		i, engine := feedHarness(t, trackedPackage("oldsha0000000000", "", false))
+		stageDelivery(engine, "stripe", pushBody, verified)
+		if _, err := deliver(i); err != nil {
+			t.Fatalf("skipping is not an error (signatureVerified=%v): %v", verified, err)
+		}
+		if engine.sawStatement("query packagesByRepoUrl") || engine.sawStatement("mutation ") {
+			t.Fatalf("a delivery from another source must not be read as a package update; statements: %v", engine.statements())
+		}
 	}
 }
 
 func TestABodyThisClusterCannotReadIsSkippedRatherThanFailed(t *testing.T) {
-	i, _ := feedHarness(t, trackedPackage("oldsha0000000000", "", false))
+	i, engine := feedHarness(t, trackedPackage("oldsha0000000000", "", false))
 	for _, body := range []string{
 		`not json`,
 		`{"repository":{"html_url":"https://github.com/acme/widget","default_branch":"main"}}`, // no version
 		`{"after":"abc"}`, // no repository
 	} {
-		if _, err := i.handleNoteUpstreamFromWebhook(context.Background(), map[string]any{
-			"source": "github", "body": body,
-		}, 0); err != nil {
+		stageDelivery(engine, "github", body, true)
+		if _, err := deliver(i); err != nil {
 			t.Errorf("GitHub sends event types nobody models; %q must be skipped, not failed: %v", body, err)
 		}
 	}
@@ -198,6 +230,291 @@ func TestAReleaseIsIdentifiedByItsTag(t *testing.T) {
 	}
 	if ev.Version != "v1.4.0" {
 		t.Fatalf("a release is its tag, got %q", ev.Version)
+	}
+	if ev.Ref != "refs/tags/v1.4.0" {
+		t.Fatalf("a release names its tag's ref, got %q", ev.Ref)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Only a push or a release is an upstream event (epic memql#5477, Review
+// Focus 2)
+// ---------------------------------------------------------------------------
+
+const widgetRepository = `"repository":{"html_url":"https://github.com/acme/widget","default_branch":"main","full_name":"acme/widget"}`
+
+// releaseBody is a release published on the same source, as GitHub sends it.
+const releaseBody = `{"action":"published","release":{"tag_name":"v1.4.0","target_commitish":"main"},` +
+	widgetRepository + `,"installation":{"id":42}}`
+
+// notAPushBodies are deliveries the GitHub App sends on the same source once it
+// subscribes to pipelines' events. Every one names the repository a push names
+// and a SHA somewhere -- the pull request's synchronize carries `before` and
+// `after` at the top, exactly where a push does -- which is why the feed must
+// read the body's shape rather than hunt for a version.
+var notAPushBodies = map[string]string{
+	"pull_request synchronize": `{"action":"synchronize","number":7,"before":"basesha00000000","after":"prheadsha0000000",` +
+		`"pull_request":{"number":7,"head":{"sha":"prheadsha0000000","ref":"feature","repo":{"full_name":"acme/widget"}},"base":{"sha":"basesha00000000","ref":"main"}},` +
+		widgetRepository + `,"installation":{"id":42}}`,
+	"check_suite requested": `{"action":"requested","check_suite":{"id":5,"head_branch":"main","head_sha":"suitesha0000000","before":"basesha00000000","after":"suitesha0000000"},` +
+		widgetRepository + `,"installation":{"id":42}}`,
+	"check_run rerequested": `{"action":"rerequested","check_run":{"id":9,"head_sha":"runsha000000000","external_id":"v1:pipelines:run:abc"},` +
+		widgetRepository + `,"installation":{"id":42}}`,
+	"merge_group checks_requested": `{"action":"checks_requested","merge_group":{"head_sha":"queuesha0000000","head_ref":"refs/heads/gh-readonly-queue/main/pr-7-basesha","base_sha":"basesha00000000","base_ref":"refs/heads/main"},` +
+		widgetRepository + `,"installation":{"id":42}}`,
+	// A push-shaped body with no ref and no release tag: today that skipped
+	// the branch filter and noted its SHA on every package tracking the
+	// repository.
+	"a body naming no ref and no release": `{"after":"newsha0000000000",` + widgetRepository + `}`,
+}
+
+func TestOnlyAPushOrAReleaseIsReadAsAnUpstreamEvent(t *testing.T) {
+	for name, body := range notAPushBodies {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseGitHubPush(body); !errors.Is(err, errNotAPush) {
+				t.Fatalf("want errNotAPush, got %v", err)
+			}
+		})
+	}
+
+	// THE REACHABLE POSITIVE: a push to a branch, a push of a tag and a
+	// release are upstream events. A push carries the commit SHA and a release
+	// its tag, each mirroring what sourceVersion records for that ref -- a
+	// version of another kind would make the comparison that lights the cue
+	// permanently true.
+	for name, tc := range map[string]struct{ body, ref, version string }{
+		"a push to a branch": {pushBody, "refs/heads/main", "newsha0000000000"},
+		"a push of a tag": {`{"ref":"refs/tags/v1.4.0","before":"0000000000000000","after":"tagsha0000000000",` + widgetRepository + `}`,
+			"refs/tags/v1.4.0", "tagsha0000000000"},
+		"a release": {releaseBody, "refs/tags/v1.4.0", "v1.4.0"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ev, err := parseGitHubPush(tc.body)
+			if err != nil {
+				t.Fatalf("an upstream event must parse: %v", err)
+			}
+			if ev.Ref != tc.ref || ev.Version != tc.version || ev.RepoUrl != "https://github.com/acme/widget" {
+				t.Fatalf("got %+v", ev)
+			}
+		})
+	}
+}
+
+// TestAReleaseDeliveryStillNotesItsTag: the app now delivers releases for
+// pipelines too, and that changes nothing here. A source tracking the tag
+// learns of it, exactly as before pipelines existed.
+func TestAReleaseDeliveryStillNotesItsTag(t *testing.T) {
+	pkg := trackedPackage("v1.3.0", "", false)
+	pkg["repoRef"] = "v1.4.0"
+	i, engine := feedHarness(t, pkg)
+	stageDelivery(engine, "github", releaseBody, true)
+	if _, err := deliver(i); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if !engine.sawStatement(`mutation recordPackageUpstreamVersion(packageId: "v1:platform:package:abc", latestKnownVersion: "v1.4.0", updateAvailable: true)`) {
+		t.Fatalf("a release must note its tag; statements: %v", engine.statements())
+	}
+}
+
+// TestADeliveryThatIsNotAPushMovesNothingAndStartsNothing is Review Focus 2:
+// a pull request's synchronize and a check suite -- and the merge queue and
+// check run deliveries the app now receives beside them -- must not move the
+// update cue (latestKnownVersion) and must not start an auto-deploy, against a
+// package armed to start one. Each is skipped without an error: it is
+// somebody else's delivery, not a fault.
+func TestADeliveryThatIsNotAPushMovesNothingAndStartsNothing(t *testing.T) {
+	for name, body := range notAPushBodies {
+		t.Run(name, func(t *testing.T) {
+			i, h := armedFeed(t)
+			stageDelivery(h.engine, "github", body, true)
+			res, err := deliver(i)
+			if err != nil {
+				t.Fatalf("another event's delivery is skipped, never failed: %v", err)
+			}
+			if len(res) == 0 {
+				t.Fatal("want a result envelope saying the delivery was skipped")
+			}
+			if h.engine.sawStatement("query packagesByRepoUrl") {
+				t.Fatalf("a delivery that is not a push must not even look for packages; statements: %v", h.engine.statements())
+			}
+			if h.engine.sawStatement("mutation ") {
+				t.Fatalf("a delivery that is not a push wrote something; statements: %v", h.engine.statements())
+			}
+		})
+	}
+
+	// THE REACHABLE POSITIVE: the same armed package, a real push. The cue
+	// moves and the auto-run opens, so the silence above is about the
+	// delivery and not about a harness that could never write.
+	i, h := armedFeed(t)
+	stageDelivery(h.engine, "github", pushBody, true)
+	if _, err := deliver(i); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	if !h.engine.sawStatement(`mutation recordPackageUpstreamVersion(packageId: "v1:platform:package:abc", latestKnownVersion: "newsha0000000000"`) {
+		t.Fatalf("a push must move the cue; statements: %v", h.engine.statements())
+	}
+	if !h.engine.sawStatement("mutation openPackageDeployment") {
+		t.Fatalf("a push to an armed source must start its auto-run; statements: %v", h.engine.statements())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Only the shipped automation, and only the staged row (epic memql#5477)
+// ---------------------------------------------------------------------------
+
+// armedFeed is the webhook feed over one package whose auto-deploy is armed:
+// the source a forged push would hurt most, because a noted version starts an
+// automatic run of whatever commit the body names.
+func armedFeed(t *testing.T) (*Integration, *harness) {
+	t.Helper()
+	pkg := autoPackage()
+	h := newHarness(t, spaOnlyPackage(), pkg)
+	h.engine.rows["query packagesByRepoUrl"] = []map[string]any{pkg}
+	i := NewIntegration(h.engine, discardLogger())
+	i.depsOnce.Do(func() { i.deps = h.deps })
+	return i, h
+}
+
+// movedAnything reports whether the feed looked up a package or wrote at all.
+func movedAnything(e *recordingEngine) bool {
+	return e.sawStatement("query packagesByRepoUrl") || e.sawStatement("mutation ")
+}
+
+// THE CRITICAL ONE. packageNoteUpstreamFromWebhook is a builtin, and any
+// signed-in client's query can name a builtin -- @sdk has no engine effect --
+// so the feed refuses every call that did not arrive with internal origin, and
+// refuses it before it reads anything: no staged row, no package, no write and
+// no auto-run.
+func TestTheWebhookFeedRefusesAClientBeforeReadingAnything(t *testing.T) {
+	for name, ctx := range map[string]context.Context{
+		"a signed-in person": callerCtx("v1:identity:user:someone"),
+		"a cluster owner":    clusterOwnerCtx("v1:identity:user:owner"),
+		"nobody":             context.Background(),
+		// Client origin stamped over an internal one: the mark a trusted
+		// frame carried does not survive the client's stamp.
+		"a client descended from a trusted frame": auth.ContextWithClientOrigin(automationCtx()),
+	} {
+		t.Run(name, func(t *testing.T) {
+			i, h := armedFeed(t)
+			stageDelivery(h.engine, "github", pushBody, true)
+			_, err := i.handleNoteUpstreamFromWebhook(ctx, map[string]any{
+				"inboundRequestId": stagedDeliveryID, "source": "github", "body": pushBody,
+			}, 0)
+			if !errors.Is(err, errWebhookFeedClientOrigin) {
+				t.Fatalf("err = %v, want errWebhookFeedClientOrigin", err)
+			}
+			if got := h.engine.statements(); len(got) != 0 {
+				t.Fatalf("a refused call reached the engine %d times; the refusal must come before the first read: %v", len(got), got)
+			}
+		})
+	}
+
+	// THE CONTROL: the same staged delivery on the automation's context moves
+	// the cue and opens the armed source's auto-run, so the refusals above are
+	// about the origin and nothing else.
+	i, h := armedFeed(t)
+	stageDelivery(h.engine, "github", pushBody, true)
+	if _, err := deliver(i); err != nil {
+		t.Fatalf("the automation's call: %v", err)
+	}
+	if !h.engine.sawStatement("mutation recordPackageUpstreamVersion") || !h.engine.sawStatement("mutation openPackageDeployment") {
+		t.Fatalf("the automation's call must move the cue and start the auto-run; statements: %v", h.engine.statements())
+	}
+}
+
+// The feed acts on the STAGED ROW and on nothing its caller hands it. A
+// source, a body or a verdict passed as arguments -- which the automation no
+// longer passes, and a caller could forge -- change nothing about what is
+// noted, even on the automation's own context.
+func TestAForgedDeliveryInTheArgumentsHasNoEffect(t *testing.T) {
+	const forgedPush = `{"ref":"refs/heads/main","after":"forgedsha0000000","repository":{"html_url":"https://github.com/acme/widget","default_branch":"main"}}`
+	forged := map[string]any{
+		"inboundRequestId":  stagedDeliveryID,
+		"source":            "github",
+		"body":              forgedPush,
+		"signatureVerified": true,
+	}
+
+	t.Run("the staged push is noted, not the argument's", func(t *testing.T) {
+		i, h := armedFeed(t)
+		stageDelivery(h.engine, "github", pushBody, true)
+		if _, err := i.handleNoteUpstreamFromWebhook(automationCtx(), forged, 0); err != nil {
+			t.Fatalf("webhook: %v", err)
+		}
+		if !h.engine.sawStatement(`latestKnownVersion: "newsha0000000000"`) {
+			t.Fatalf("the staged row's push must be the one noted; statements: %v", h.engine.statements())
+		}
+		if h.engine.sawStatement("forgedsha") {
+			t.Fatalf("the argument's body reached the engine; statements: %v", h.engine.statements())
+		}
+	})
+	t.Run("a staged pull request stays a pull request", func(t *testing.T) {
+		i, h := armedFeed(t)
+		stageDelivery(h.engine, "github", notAPushBodies["pull_request synchronize"], true)
+		if _, err := i.handleNoteUpstreamFromWebhook(automationCtx(), forged, 0); err != nil {
+			t.Fatalf("another event's delivery is skipped, never failed: %v", err)
+		}
+		if movedAnything(h.engine) {
+			t.Fatalf("a forged push over a staged pull request moved something; statements: %v", h.engine.statements())
+		}
+	})
+	t.Run("the staged source decides, not the argument's", func(t *testing.T) {
+		i, h := armedFeed(t)
+		stageDelivery(h.engine, "stripe", pushBody, true)
+		if _, err := i.handleNoteUpstreamFromWebhook(automationCtx(), forged, 0); err != nil {
+			t.Fatalf("another source's delivery is skipped, never failed: %v", err)
+		}
+		if movedAnything(h.engine) {
+			t.Fatalf("an argument moved another source's delivery onto the packages source; statements: %v", h.engine.statements())
+		}
+	})
+	t.Run("an unsigned staged row is not signed by an argument", func(t *testing.T) {
+		i, h := armedFeed(t)
+		stageDelivery(h.engine, "github", pushBody, false)
+		if _, err := i.handleNoteUpstreamFromWebhook(automationCtx(), forged, 0); !errors.Is(err, errWebhookDeliveryUnverified) {
+			t.Fatalf("err = %v, want errWebhookDeliveryUnverified", err)
+		}
+		if movedAnything(h.engine) {
+			t.Fatalf("an argument's verdict let an unsigned delivery through; statements: %v", h.engine.statements())
+		}
+	})
+	t.Run("no staged row is no delivery", func(t *testing.T) {
+		i, h := armedFeed(t) // nothing staged under the id
+		for _, args := range []map[string]any{forged, {"inboundRequestId": "  ", "source": "github", "body": forgedPush}} {
+			if _, err := i.handleNoteUpstreamFromWebhook(automationCtx(), args, 0); err == nil {
+				t.Fatalf("a delivery no staged row answers for must be an error, not a silent no-op: %v", args)
+			}
+		}
+		if movedAnything(h.engine) {
+			t.Fatalf("arguments with no staged row moved something; statements: %v", h.engine.statements())
+		}
+	})
+}
+
+// A delivery the receiver did not verify -- the packages source configured
+// with scheme none -- is anybody's body. It moves no cue and starts no
+// auto-run, and it is an error rather than a skip: it is the packages source
+// itself running unverified, which only an operator can fix.
+func TestAnUnverifiedDeliveryMovesNothingAndStartsNothing(t *testing.T) {
+	i, h := armedFeed(t)
+	stageDelivery(h.engine, "github", pushBody, false)
+	if _, err := deliver(i); !errors.Is(err, errWebhookDeliveryUnverified) {
+		t.Fatalf("err = %v, want errWebhookDeliveryUnverified", err)
+	}
+	if movedAnything(h.engine) {
+		t.Fatalf("an unverified delivery reached the packages; statements: %v", h.engine.statements())
+	}
+
+	// THE REACHABLE POSITIVE: the same push, verified, moves the cue and starts
+	// the armed source's run -- so the silence above is the verdict's.
+	i, h = armedFeed(t)
+	stageDelivery(h.engine, "github", pushBody, true)
+	if _, err := deliver(i); err != nil {
+		t.Fatalf("a verified push: %v", err)
+	}
+	if !h.engine.sawStatement("mutation recordPackageUpstreamVersion") || !h.engine.sawStatement("mutation openPackageDeployment") {
+		t.Fatalf("a verified push must move the cue and start the auto-run; statements: %v", h.engine.statements())
 	}
 }
 

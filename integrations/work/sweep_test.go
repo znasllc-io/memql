@@ -690,3 +690,141 @@ func TestMissingApprovalReadFailurePreservesSystemWait(t *testing.T) {
 		}
 	}
 }
+
+// recordingRemedy is a Remedy that takes every run it is offered and says
+// which, so a test can see the replan and repair branches reach it.
+type recordingRemedy struct {
+	mu      sync.Mutex
+	offered []string
+}
+
+func (r *recordingRemedy) Replan(_ context.Context, runId, _, _, _ string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.offered = append(r.offered, runId)
+	return true
+}
+
+func (r *recordingRemedy) Repair(_ context.Context, runId, _, _, _ string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.offered = append(r.offered, runId)
+	return true
+}
+
+func (r *recordingRemedy) seen() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.offered...)
+}
+
+// pipelineRunRow is a pipeline's work run as the pipelines driver opens it
+// through the work journal: naming its template and the goal it serves, and
+// triggered by `pipeline:<mode>`. It carries every field the sweep's recovery
+// paths act on -- a template, a goal, a node, a start and a beat -- so nothing
+// but the trigger keeps a path from taking it. The trigger is the literal the
+// driver writes, spelled out rather than built from the constant, which would
+// agree with any value the two sides drifted to.
+func pipelineRunRow(id, status, heartbeatAt string) map[string]any {
+	return map[string]any{
+		"id": id, "ownerUserId": "u-alice", "status": status,
+		"automationName": "pipeline", "goalId": "v1:work:goal:pipeline-goal",
+		"triggeredBy": "pipeline:full", "nodeId": "agent-2",
+		"startedAt": heartbeatAt, "heartbeatAt": heartbeatAt,
+	}
+}
+
+// TestSweepLeavesAPipelineRunToItsRunnerEntirely (epic memql#5477, decision
+// 11 of the pipelines plan). A procedure's replay run leaves its LIVENESS to
+// this sweep; a pipeline's run does not. The pipelines driver holds a lease of
+// its own on the pipelines run (driverNodeId, driverHeartbeatAt), and its own
+// recovery claims a silent run and RESUMES it from the journal -- so every
+// judgment here would be a second one that contradicts the first: abandoning
+// the work run closes a run another driver is about to resume, a due timer
+// releases it to a dispatch that carries no trigger, a replan hands it to the
+// planner, and a redispatch hands it to a template executor with nothing to
+// load. So the sweep reads past it in every shape, writing nothing.
+//
+// Two contrasts make it the RIGHT skip rather than a sweep that does nothing:
+// the ordinary run beside it, just as silent, is handed back when a replica
+// can take it and abandoned when none can; and a procedure's replay run, just
+// as silent, is still closed by its heartbeat.
+func TestSweepLeavesAPipelineRunToItsRunnerEntirely(t *testing.T) {
+	now := testNow
+	stale := now.Add(-10 * time.Minute).Format(time.RFC3339)
+	fresh := now.Add(-5 * time.Second).Format(time.RFC3339)
+	due := now.Add(-time.Minute).Format(time.RFC3339)
+
+	timerDue := pipelineRunRow("v1:work:run:pipeline-timer", runStatusWaiting, stale)
+	timerDue["waitingOn"] = map[string]any{"kind": "timer", "resumeAt": due}
+	replanDue := pipelineRunRow("v1:work:run:pipeline-replan", runStatusWaiting, stale)
+	replanDue["waitingOn"] = map[string]any{"kind": waitKindReplan, "subject": "tests/go-tests#1", "reason": "a contract violation", "resumeAt": due}
+	pipelineRows := func() []map[string]any {
+		return []map[string]any{
+			pipelineRunRow("v1:work:run:pipeline-silent", runStatusRunning, stale),
+			pipelineRunRow("v1:work:run:pipeline-live", runStatusRunning, fresh),
+			timerDue,
+			replanDue,
+		}
+	}
+	ordinary := func(id string) map[string]any {
+		return map[string]any{
+			"id": id, "ownerUserId": "u-bob", "status": runStatusRunning,
+			"automationName": "invokeAgent", "goalId": "v1:work:goal:g-bob", "triggeredBy": "direct", "heartbeatAt": stale,
+		}
+	}
+	untouched := func(t *testing.T, eng *recordingEngine) {
+		t.Helper()
+		for _, call := range eng.callsTo("updateWorkRun") {
+			if id, _ := call.Args(t)["runId"].(string); strings.Contains(id, "pipeline-") {
+				t.Errorf("the sweep wrote the pipeline run %s: %v", id, call.Args(t))
+			}
+		}
+	}
+
+	t.Run("a replica could take it: nothing is handed over, resumed or remedied", func(t *testing.T) {
+		i, eng := newTestIntegration(t)
+		d, c, remedy := &capturingDispatcher{}, &stubClaimer{grant: true}, &recordingRemedy{}
+		i.SetDispatcher(d)
+		i.SetRunClaimer(c)
+		i.SetRemedy(remedy)
+
+		res := sweepRows(context.Background(), i, append(pipelineRows(), ordinary("v1:work:run:ordinary")), now, time.Minute)
+
+		if got := d.seen(); len(got) != 1 || got[0].RunId != "v1:work:run:ordinary" {
+			t.Fatalf("dispatched %+v, want only the ordinary run", got)
+		}
+		if len(c.keys) != 1 || c.keys[0] != "v1:work:run:ordinary" {
+			t.Errorf("claimed %v, want only the ordinary run's claim", c.keys)
+		}
+		if got := remedy.seen(); len(got) != 0 {
+			t.Errorf("offered %v to the remedy; a pipeline run is never replanned by the planner", got)
+		}
+		if res.Redispatched != 1 || res.Resumed != 0 || res.Abandoned != 0 {
+			t.Errorf("sweep = %+v, want only the ordinary run redispatched", res)
+		}
+		untouched(t, eng)
+	})
+
+	t.Run("nobody could take it: the ordinary run and the replay are closed, the pipeline run is not", func(t *testing.T) {
+		i, eng := newTestIntegration(t)
+		rows := append(pipelineRows(), ordinary("v1:work:run:ordinary"), replayRunRow("v1:work:run:replay-silent", stale))
+
+		res := sweepRows(context.Background(), i, rows, now, time.Minute)
+
+		closed := map[string]bool{}
+		for _, call := range eng.callsTo("updateWorkRun") {
+			args := call.Args(t)
+			if args["status"] == runStatusAbandoned {
+				closed[args["runId"].(string)] = true
+			}
+		}
+		if !closed["v1:work:run:ordinary"] || !closed["v1:work:run:replay-silent"] {
+			t.Fatalf("closed %v, want the silent ordinary run and the silent replay run -- the controls", closed)
+		}
+		if res.Abandoned != 2 {
+			t.Errorf("sweep = %+v, want exactly the two controls abandoned", res)
+		}
+		untouched(t, eng)
+	})
+}

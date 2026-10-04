@@ -1,0 +1,24 @@
+{
+  "action": "opened",
+  "number": 42,
+  "pull_request": {
+    "number": 42,
+    "state": "open",
+    "title": "Show the cart count on the badge",
+    "head": {
+      "label": "Acme-Corp:cart-badge",
+      "ref": "cart-badge",
+      "sha": "c5fa05f142af4f7c6bd9b18c24924ebed165a4ab",
+      "repo": { "full_name": "Acme-Corp/Storefront" }
+    },
+    "base": {
+      "label": "Acme-Corp:main",
+      "ref": "main",
+      "sha": "772c6a1d531d6f34ca4bc594a70987215f3ce1c8",
+      "repo": { "full_name": "Acme-Corp/Storefront" }
+    }
+  },
+  "repository": { "full_name": "Acme-Corp/Storefront", "default_branch": "main", "private": false },
+  "installation": { "id": 51234567 },
+  "sender": { "login": "octocat" }
+}

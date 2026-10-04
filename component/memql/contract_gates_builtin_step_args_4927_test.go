@@ -54,7 +54,7 @@ func scan4927Real(t *testing.T, builtin string) []string {
 // THE RULE. A builtin whose profile refuses an empty call, called with one.
 func TestBuiltinStepGateRefusesAnEmptyCallTheProfileRejects(t *testing.T) {
 	// `packageNoteUpstreamFromWebhook` is declared @args(profile="object")
-	// with three fields, so an empty call is exactly the memql#4927 shape.
+	// with a required field, so an empty call is exactly the memql#4927 shape.
 	hits := scan4927Real(t, "packageNoteUpstreamFromWebhook")
 	if len(hits) != 1 {
 		t.Fatalf("want 1 violation, got %d: %v", len(hits), hits)

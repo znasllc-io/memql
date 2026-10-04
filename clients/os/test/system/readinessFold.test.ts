@@ -21,7 +21,20 @@ interface Fixture {
   now: string;
   reports: NodeReport[];
   nodes: NodeLiveness[];
-  expect: { module: string; state: string; disagreement: string[]; unknown?: string[]; stale?: string[] }[];
+  /**
+   * `optional` and `dismissable` are optional in a fixture, as `unknown` and
+   * `stale` are: an absent flag means false, and it is compared, not skipped
+   * (fold_test.go reads them the same way). `core` is never stated.
+   */
+  expect: {
+    module: string;
+    state: string;
+    disagreement: string[];
+    unknown?: string[];
+    stale?: string[];
+    optional?: boolean;
+    dismissable?: boolean;
+  }[];
 }
 
 describe("the fold mirrors component/memql/readiness", () => {
@@ -31,7 +44,7 @@ describe("the fold mirrors component/memql/readiness", () => {
 
   // Without this, a mistyped path reads as a suite with no cases and passes.
   it("finds the shared fixtures", () => {
-    expect(files.length).toBeGreaterThanOrEqual(15);
+    expect(files.length).toBeGreaterThanOrEqual(17);
   });
 
   for (const file of files) {
@@ -45,10 +58,52 @@ describe("the fold mirrors component/memql/readiness", () => {
           disagreement: v.disagreement,
           unknown: v.unknown,
           stale: v.stale,
+          optional: v.optional,
+          dismissable: v.dismissable,
         })),
-      ).toEqual(fx.expect.map((e) => ({ ...e, unknown: e.unknown ?? [], stale: e.stale ?? [] })));
+      ).toEqual(
+        fx.expect.map((e) => ({
+          ...e,
+          unknown: e.unknown ?? [],
+          stale: e.stale ?? [],
+          optional: e.optional ?? false,
+          dismissable: e.dismissable ?? false,
+        })),
+      );
     });
   }
+
+  // THE DECLARED FLAGS ARE ANY REPORT'S WORD, core included -- the shell's
+  // half of fold_test.go's TestTheDeclaredFlagsAreAnyReportsWord. The shared
+  // fixtures never state core (every older case carries it), so the rule is
+  // held here by name for all three.
+  it("reads core, optional and dismissable off every report, voting or not", () => {
+    const now = new Date("2026-10-03T12:00:00Z");
+    const seen = "2026-10-03T11:59:50Z";
+    const at = "2026-10-03T12:00:00Z";
+    const got = foldReadiness(
+      [
+        { module: "pipelines", nodeId: "agent-a", nodeType: "agent", state: "notApplicable", optional: true, dismissable: true, reportedAt: at },
+        { module: "storage", nodeId: "bff-a", nodeType: "bff", state: "configured", core: true, reportedAt: at },
+        { module: "storage", nodeId: "bff-b", nodeType: "bff", state: "configured", reportedAt: at },
+        { module: "workbench", nodeId: "gone", nodeType: "agent", state: "unconfigured", optional: true, reportedAt: at },
+        { module: "workbench", nodeId: "agent-a", nodeType: "agent", state: "configured", reportedAt: at },
+      ],
+      [
+        { nodeId: "agent-a", health: "healthy", lastSeen: seen },
+        { nodeId: "bff-a", health: "healthy", lastSeen: seen },
+        { nodeId: "bff-b", health: "healthy", lastSeen: seen },
+      ],
+      now,
+    );
+    expect(
+      got.map((v) => ({ module: v.module, state: v.state, core: v.core, optional: v.optional, dismissable: v.dismissable })),
+    ).toEqual([
+      { module: "pipelines", state: "unreported", core: false, optional: true, dismissable: true },
+      { module: "storage", state: "configured", core: true, optional: false, dismissable: false },
+      { module: "workbench", state: "configured", core: false, optional: true, dismissable: false },
+    ]);
+  });
 
   // THE LANES ARE THE SHELL'S HALF ALONE, so this half of the parity is
   // asserted here and nowhere else. The Go Verdict deliberately carries no

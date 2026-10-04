@@ -82,6 +82,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/component/workjournal"
 )
 
@@ -132,8 +133,8 @@ type DispatchRequest struct {
 	// TriggeredBy is the run's triggeredBy, as the event or the sweep's row
 	// read carried it. Unlike Status it is not a hint: createWorkRun writes it
 	// once and updateWorkRun does not accept it, so every copy of it is the
-	// stored value. It is what marks a procedure's replay run
-	// (ProcedureReplayTriggerPrefix).
+	// stored value. It is what marks a run another runner owns (runnerOwned):
+	// a procedure's replay run or a pipeline's run.
 	TriggeredBy string
 }
 
@@ -164,8 +165,9 @@ func isProcedureReplay(triggeredBy string) bool {
 
 // IsDriverOwnedRun reports a run whose DRIVER writes and runs it, so this
 // dispatcher never may: a procedure's replay run (ProcedureReplayTriggerPrefix),
-// and a Go-written journal (workjournal.TriggerPrefix) -- the Library's
-// analysis pass, the D7 delegate's child run, and an app session's recording.
+// a pipeline's run (pipelines.WorkTriggerPrefix, epic memql#5477), and a
+// Go-written journal (workjournal.TriggerPrefix) -- the Library's analysis
+// pass, the D7 delegate's child run, and an app session's recording.
 //
 // A journal has exactly the shape this dispatcher takes for compiled goal work
 // -- `running`, a goal, and an automationName that is a template WORD naming no
@@ -178,7 +180,26 @@ func isProcedureReplay(triggeredBy string) bool {
 // event carries no triggeredBy at all.
 func IsDriverOwnedRun(triggeredBy string) bool {
 	by := strings.TrimSpace(triggeredBy)
-	return isProcedureReplay(by) || strings.HasPrefix(by, workjournal.TriggerPrefix)
+	return isProcedureReplay(by) || isPipelineRun(by) || strings.HasPrefix(by, workjournal.TriggerPrefix)
+}
+
+// isPipelineRun reports a triggeredBy the pipelines driver wrote:
+// `pipeline:<mode>` (pipelines.WorkTriggerPrefix, the one spelling of the
+// prefix; epic memql#5477). The driver opens the run through the work journal
+// on an agent node and executes its steps against the registered executor,
+// under a lease of its own on the pipelines run.
+func isPipelineRun(triggeredBy string) bool {
+	return strings.HasPrefix(strings.TrimSpace(triggeredBy), pipelines.WorkTriggerPrefix)
+}
+
+// runnerOwnsRecovery reports a run whose runner judges its LIVENESS as well,
+// so the sweep must not judge it at all: a pipeline's run. The pipelines
+// driver claims a silent run back under its own lease and resumes it from the
+// journal, so the sweep abandoning or re-dispatching the work run would
+// contradict a judgment already made elsewhere. A procedure's replay run is
+// runner-owned but not this: its heartbeat is still the sweep's to judge.
+func runnerOwnsRecovery(triggeredBy string) bool {
+	return isPipelineRun(triggeredBy)
 }
 
 // CanDispatchStoredRun rechecks an event or explicit recovery request against
@@ -358,11 +379,13 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 	}
 	if IsDriverOwnedRun(req.TriggeredBy) {
 		// Refused BEFORE the claim: the run is its driver's -- a replay
-		// runner's or a journal's (IsDriverOwnedRun) -- and a lease taken for
-		// it would be one this node never uses. Silent, because the refusal is
-		// the design rather than an incident: the caller -- the sweep's
-		// backstop -- goes on to judge the run by its heartbeat and says what
-		// it did.
+		// runner's, the pipelines driver's or a journal's (IsDriverOwnedRun)
+		// -- and a lease taken for it would be one this node never uses.
+		// Silent, because the refusal is the design rather than an incident:
+		// on an event there is nothing to say, and on recovery the caller --
+		// the sweep's backstop -- goes on to judge the run by its heartbeat and
+		// says what it did. A pipeline's run never reaches the backstop at all
+		// (runnerOwnsRecovery).
 		return false
 	}
 	claimer := i.runClaimerRef()

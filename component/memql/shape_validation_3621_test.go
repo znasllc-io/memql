@@ -417,3 +417,52 @@ func TestAmbiguousShapeBindingResolvesByDomain(t *testing.T) {
 		t.Fatalf("detail = %q, want it to name the ambiguity", violations[0].Detail)
 	}
 }
+
+// TestAmbiguousShapeBindingInAPinnedNestedDomainResolvesThroughThePin pins the
+// third arm of the domain hint: a shape in a NESTED domain that a
+// namespace.pin names. dsl/shopify/generated pins "shopify", so its concepts
+// are v1:shopify:*, but its directory answers NamespaceFromFilePath with
+// "shopify/generated" -- no concept's namespace. Hinting with the directory
+// alone left channelMirror unresolvable the moment epic memql#5477 declared
+// v1:pipelines:channel, while shopifyChannelByGid beside it resolved through
+// the pin the signature path reads. The shape now reads the same pin.
+func TestAmbiguousShapeBindingInAPinnedNestedDomainResolvesThroughThePin(t *testing.T) {
+	_, concepts := loadCorpusShapes(t)
+
+	// Precondition: `channel` really is ambiguous by bare name
+	// (v1:shopify:channel and v1:pipelines:channel).
+	if _, err := resolveConceptByTrailingSegment(concepts, "channel"); err == nil {
+		t.Skip("`channel` is no longer an ambiguous trailing segment; the hole this pins is gone")
+	}
+
+	shapes := newShapeRegistry()
+	if err := shapes.Upsert(&ShapeDefinition{
+		Name:              "channelMirrorDefaulted",
+		Origin:            "unified:shopify/generated/channel.memql",
+		KindRow:           true,
+		UseConcepts:       []string{"channel"},
+		Template:          map[string]any{},
+		DefaultProjection: true,
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	if violations := validateShapeConceptBindings(shapes, concepts); len(violations) != 0 {
+		t.Fatalf("a shape in a pinned nested domain must resolve through the pin, got %+v", violations)
+	}
+	if expanded := expandDefaultShapeProjections(quietLogger(), shapes, concepts); expanded != 1 {
+		t.Fatalf("expanded = %d, want 1", expanded)
+	}
+	got, _ := shapes.Get("channelMirrorDefaulted")
+	if got == nil {
+		t.Fatal("shape vanished from the registry")
+	}
+	// gid is v1:shopify:channel's; kind is v1:pipelines:channel's. Binding the
+	// wrong one of the two would project the other's fields.
+	if _, ok := got.Template["gid"]; !ok {
+		t.Fatalf("expanded template %v does not look like v1:shopify:channel (no `gid`)", sortedTemplateKeys(got.Template))
+	}
+	if _, ok := got.Template["kind"]; ok {
+		t.Fatalf("expanded template %v carries `kind` -- it bound v1:pipelines:channel", sortedTemplateKeys(got.Template))
+	}
+}

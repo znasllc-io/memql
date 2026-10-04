@@ -134,6 +134,77 @@ func TestReadinessRowsCarryNoValues(t *testing.T) {
 	}
 }
 
+// THE DECLARATION MAKES THE WHOLE ROUND TRIP, BY BOTH READS. A flag the
+// mutation does not accept refuses the write; a flag the concept does not
+// declare refuses it too; and a flag the query's SHAPE does not project
+// reaches the Go read (which takes the bundle) and never reaches the shell
+// (which takes the shaped rows) -- the one of the three that fails silently.
+// So the pipelines row is read back both ways: optional and dismissable, and
+// storage's row neither.
+func TestTheDeclaredFlagsSurviveTheRoundTrip(t *testing.T) {
+	e := bootReadinessTestEngine(t)
+	nodeId := fmt.Sprintf("readiness-flags-node-%d", time.Now().UnixNano())
+	// The pipelines row is notApplicable here, as it is on every node until
+	// the pipelines integration reports -- which is the case that matters:
+	// the declaration has to ride on a row that casts no vote.
+	e.SetReadinessIdentity(nodeId, "bff")
+	if _, err := e.WriteModuleReadiness(context.Background()); err != nil && !IsReadinessUnknown(err) {
+		t.Fatal(err)
+	}
+
+	byModule := map[string]readiness.NodeReport{}
+	for _, r := range readinessRowsForTest(t, e) {
+		if r.NodeId == nodeId {
+			byModule[r.Module] = r
+		}
+	}
+	pipelines, ok := byModule["pipelines"]
+	if !ok {
+		t.Fatalf("no pipelines row came back for %s; rows: %+v", nodeId, byModule)
+	}
+	if !pipelines.Optional || !pipelines.Dismissable || pipelines.Core {
+		t.Fatalf("the pipelines row lost its declaration on the way through the database: %+v", pipelines)
+	}
+	if storage, ok := byModule["storage"]; !ok || storage.Optional || storage.Dismissable || !storage.Core {
+		t.Fatalf("the storage row must be core and neither optional nor dismissable: %+v (found %v)", storage, ok)
+	}
+
+	// The shell's read: the query's shaped rows, not the bundle.
+	result, err := e.Execute(readerContext(), "query moduleReadinessAll()")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, ok := result.FlatOutput()
+	if !ok {
+		t.Fatal("moduleReadinessAll answered no shaped output; the shell reads nothing but that")
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatalf("the shaped output is not a list of rows: %v\n%s", err, raw)
+	}
+	found := false
+	for _, row := range rows {
+		fields := row
+		if p, ok := row["payload"].(map[string]any); ok {
+			fields = p
+		}
+		if fields["module"] != "pipelines" || fields["nodeId"] != nodeId {
+			continue
+		}
+		found = true
+		if fields["optional"] != true || fields["dismissable"] != true {
+			t.Fatalf("the shaped row the shell folds lost a flag: %v", fields)
+		}
+	}
+	if !found {
+		t.Fatalf("this node's pipelines row is not among the shaped rows:\n%s", raw)
+	}
+}
+
 // A report from a node with no v1:cluster:node row must not count. The honest
 // answer is then unreported, never unconfigured: not knowing and not being
 // configured are different answers, and only one of them sends a person to a

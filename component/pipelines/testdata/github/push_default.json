@@ -1,0 +1,17 @@
+{
+  "ref": "refs/heads/main",
+  "before": "772c6a1d531d6f34ca4bc594a70987215f3ce1c8",
+  "after": "a944ae33e9bcd7b2f5d1e5d74dcd8acc6a0ae9df",
+  "created": false,
+  "deleted": false,
+  "forced": false,
+  "base_ref": null,
+  "head_commit": {
+    "id": "a944ae33e9bcd7b2f5d1e5d74dcd8acc6a0ae9df",
+    "message": "Show the cart count on the badge (#42)\n\nThe badge now reads the cart's line count.",
+    "timestamp": "2026-10-03T09:21:44Z"
+  },
+  "repository": { "full_name": "Acme-Corp/Storefront", "default_branch": "main", "master_branch": "main", "private": false },
+  "installation": { "id": 51234567 },
+  "sender": { "login": "octocat" }
+}

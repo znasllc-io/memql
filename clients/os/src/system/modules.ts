@@ -5,7 +5,7 @@
 // reads the tuple below and fails the build the moment it disagrees with the
 // manifest. Keep the tuple on ONE line with double-quoted ids: the gate parses
 // it by regexp, not by executing TypeScript.
-export const READINESS_MODULES = ["ai", "storage", "email", "githubApp", "campaigns", "workbench", "localApps"] as const;
+export const READINESS_MODULES = ["ai", "storage", "email", "githubApp", "campaigns", "workbench", "localApps", "pipelines"] as const;
 
 export type ModuleId = (typeof READINESS_MODULES)[number];
 
@@ -35,6 +35,7 @@ export const MODULE_NAMES: Record<ModuleId, string> = {
   campaigns: "Campaign sending",
   workbench: "Workbenches",
   localApps: "Local apps",
+  pipelines: "Pipelines",
 };
 
 /**
@@ -51,6 +52,13 @@ export const MODULE_NAMES: Record<ModuleId, string> = {
  *
  * The engine's manifest says the same thing from its side, per lane, as
  * `configurableFrom`. This map is what the SHELL knows: which window to open.
+ *
+ * A target must be a section the shell can reach today
+ * (test/kit/readinessStates.test.tsx holds every one to it), so a module whose
+ * own section is not built yet stays null until it is, as `pipelines` does:
+ * its home is a Pipelines section of Settings that epic memql#5479 builds.
+ * Nothing requires or wants that module, so no Set up group draws it
+ * meanwhile, and the deployment wording null implies is never shown for it.
  */
 export const MODULE_SETTINGS_SECTION: Record<
   ModuleId,
@@ -63,6 +71,7 @@ export const MODULE_SETTINGS_SECTION: Record<
   campaigns: null,
   workbench: null,
   localApps: null,
+  pipelines: null,
 };
 
 /**
@@ -82,4 +91,5 @@ export const MODULE_DESCRIPTIONS: Record<ModuleId, string> = {
   campaigns: "Installation prepares campaign unsubscribe links. If setup is incomplete, ask the cluster owner to repair the installation.",
   workbench: "Workbenches need a workbench node this agent can reach.",
   localApps: "Running a task in Claude Code or Codex on your machine needs the agent to mint a session credential.",
+  pipelines: "Pipelines run a repository's checks from its memql-package.yaml and report them on GitHub.",
 };
