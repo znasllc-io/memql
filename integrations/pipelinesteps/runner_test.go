@@ -1962,34 +1962,81 @@ func TestTwoRunsOfOneReplicaNeverBothOwnAStep(t *testing.T) {
 	}
 }
 
-// TestRunnerTakesItsOwnClaimWhoseAnswerWasLost (review finding 3): the claim
-// was applied and its answer lost on the way back. Read again, the Job carries
-// this replica's claim, and the replica's registry says it is this Run's: the
-// Run goes on as its holder -- it waits on no heartbeat, its own, to go stale,
-// and says nothing about re-attaching.
+// TestRunnerTakesItsOwnClaimWhoseAnswerWasLost (review finding 3, fix round 2
+// Important B): the claim was applied and its answer lost on the way back.
+// Read again, the Job carries this replica's claim, and the replica's
+// registry says it is this Run's: the Run goes on as its holder -- it waits
+// on no heartbeat, its own, to go stale. What the claim was is remembered
+// from when it was sent: a creator's claim says nothing about re-attaching,
+// and an ADOPTER's claim stays an adoption, from the cursor it read before
+// claiming -- else every line from the step's start would reach the store
+// again, with no word of the seam.
 func TestRunnerTakesItsOwnClaimWhoseAnswerWasLost(t *testing.T) {
-	h := newRunnerHarness(t)
-	h.c.with(func(c *rtCluster) { c.loseClaims = 1 })
-	h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "ok")))
-
-	res := h.await(t, h.start(context.Background(), rtRun()))
-
-	if res.Status != pl.OutcomeSucceeded {
-		t.Fatalf("result = %+v, want success", res)
-	}
-	if got := h.sink.messages(); !reflect.DeepEqual(got, []string{"ok"}) {
-		t.Errorf("store = %q, want the step's line and no word of a re-attach", got)
-	}
-	claims := 0
-	for _, p := range h.c.appliedPatches() {
-		if _, beat := p.get(AnnotLogCursor); !beat && len(p.annots) == 1 && p.rv != "" {
-			if _, ok := p.get(AnnotRunner); ok {
-				claims++
+	claimsApplied := func(h *rtHarness) int {
+		n := 0
+		for _, p := range h.c.appliedPatches() {
+			if _, beat := p.get(AnnotLogCursor); !beat && len(p.annots) == 1 && p.rv != "" {
+				if _, ok := p.get(AnnotRunner); ok {
+					n++
+				}
 			}
 		}
+		return n
 	}
-	if claims != 1 {
-		t.Errorf("%d claims applied, want the one whose answer was lost", claims)
+
+	t.Run("a creator's claim", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		h.c.with(func(c *rtCluster) { c.loseClaims = 1 })
+		h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "ok")))
+
+		res := h.await(t, h.start(context.Background(), rtRun()))
+
+		if res.Status != pl.OutcomeSucceeded {
+			t.Fatalf("result = %+v, want success", res)
+		}
+		if got := h.sink.messages(); !reflect.DeepEqual(got, []string{"ok"}) {
+			t.Errorf("store = %q, want the step's line and no word of a re-attach", got)
+		}
+		if n := claimsApplied(h); n != 1 {
+			t.Errorf("%d claims applied, want the one whose answer was lost", n)
+		}
+	})
+
+	for _, lose := range []int{0, 1} {
+		name := map[int]string{0: "an adopter's claim, its answer received (control)", 1: "an adopter's claim"}[lose]
+		t.Run(name, func(t *testing.T) {
+			h := newRunnerHarness(t)
+			run := rtRun()
+			cursor := rtAt(2500)
+			l0 := captureKubeLine(rtAt(1100), "line 0")
+			l1 := captureKubeLine(rtAt(2100), "line 1, captured by workbench-a")
+			l2 := captureKubeLine(cursor, "line 2, the cursor")
+			l3 := captureKubeLine(rtAt(2700), "line 3")
+			l4 := captureKubeLine(rtAt(3100), "line 4")
+			h.c.putJob(h.existingJob(t, run, map[string]string{
+				AnnotRunner:    rtStamp(rtOther, rtT0.Add(-time.Minute)),
+				AnnotLogCursor: cursor.Format(time.RFC3339Nano),
+			}), rtFinishingScript(testJobName, 0, l0, l1, l2, l3, l4))
+			h.c.putSecret(BuildSecret(h.cfg, run, testJobName, rtCloneToken))
+			h.c.with(func(c *rtCluster) { c.loseClaims = lose })
+
+			res := h.run(t, run)
+
+			if res.Status != pl.OutcomeSucceeded {
+				t.Fatalf("result = %+v, want success", res)
+			}
+			store := h.sink.messages()
+			if len(store) != 3 || !strings.Contains(store[0], "re-attached") || store[1] != "line 3" || store[2] != "line 4" {
+				t.Errorf("store = %q, want the re-attach notice and lines 3 and 4 only: lines 0-2 are in the store already", store)
+			}
+			archive := string(h.file(t, "tests-go-tests-2.log").Bytes)
+			if !strings.HasPrefix(archive, strings.Join(rtTexts(l0, l1, l2), "\n")+"\n"+store[0]+"\nline 3\nline 4\n") {
+				t.Errorf("archive = %q, want lines 0-2 replayed, the notice at the seam, then lines 3 and 4", archive)
+			}
+			if n := claimsApplied(h); n != 1 {
+				t.Errorf("%d claims applied, want one", n)
+			}
+		})
 	}
 }
 

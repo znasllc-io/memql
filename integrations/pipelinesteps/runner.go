@@ -407,8 +407,13 @@ type step struct {
 	// ownedSecret: this Run made the Job its Secret's owner.
 	ownedSecret bool
 	// claimSent is the claim this Run last sent: the Job carrying exactly it
-	// is this Run's own claim, whatever answer was lost.
-	claimSent string
+	// is this Run's own claim, whatever answer was lost. claimAdopts says
+	// that claim was sent over another Run's, and claimCursor is the log
+	// cursor read before sending it: a claim whose answer was lost is still
+	// an adoption, from that cursor (fix round 2, Important B).
+	claimSent   string
+	claimAdopts bool
+	claimCursor time.Time
 	// secrets is what the capture masks: every piece the follower cuts a
 	// line into is cut outside them. Guarded by mu: the follower reads it.
 	secrets []string
@@ -671,11 +676,11 @@ func (s *step) own(job Job, mine bool) (pl.StepResult, bool) {
 	if err := s.ensureCapture(); err != nil {
 		return s.failed(pl.CodeRunnerUnavailable, "this workbench node cannot open the step's log archive: "+err.Error()), true
 	}
-	_, _, adopted := holder(job)
-	adopted = adopted && !mine
 	claimed := job
 	if !mine {
 		var err error
+		_, _, s.claimAdopts = holder(job)
+		s.claimCursor = logCursor(job)
 		s.claimSent = s.r.stamp()
 		claimed, err = s.r.kube.AnnotateJob(s.ctx, s.jobName, map[string]string{AnnotRunner: s.claimSent}, job.Metadata.ResourceVersion)
 		switch {
@@ -708,8 +713,8 @@ func (s *step) own(job Job, mine bool) (pl.StepResult, bool) {
 	defer hb.stop()
 	s.ownSecret(claimed)
 	s.readToken()
-	if adopted {
-		cursor := logCursor(claimed)
+	if s.claimAdopts {
+		cursor := s.claimCursor
 		s.publishCursor(cursor)
 		s.adopted, s.adoptedAt = true, cursor
 		if cursor.IsZero() {
