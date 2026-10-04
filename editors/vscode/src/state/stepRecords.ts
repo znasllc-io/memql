@@ -31,7 +31,6 @@ export function freshStep(id: string, label: string, description: string): StepP
     reason: "",
     exitCode: null,
     log: "",
-    guided: false,
     remedy: "",
   };
 }
@@ -50,8 +49,6 @@ export function freshStep(id: string, label: string, description: string): StepP
  * EXACTLY THE PLAN. A panel that runs a second graph through the same machine
  * (the deployment page rebuilds, then updates) must not carry the first graph's
  * steps into the second's total, where they would sit pending forever.
- *
- * `guided` survives: it is the operator's choice about a step, not a result.
  */
 export function recordsForAttempt(previous: readonly StepProgress[], plan: readonly PlannedStep[]): StepProgress[] {
   return plan.map((planned) => {
@@ -60,7 +57,6 @@ export function recordsForAttempt(previous: readonly StepProgress[], plan: reado
     if (before === undefined) return fresh;
     if (fresh.label === "") fresh.label = before.label;
     if (fresh.description === "") fresh.description = before.description;
-    fresh.guided = before.guided;
     const last = before.state !== "pending" && before.state !== "running" ? before.state : before.previousState;
     if (last !== undefined) fresh.previousState = last;
     return fresh;

@@ -41,7 +41,7 @@ Related: [identity](auth/identity-service.md), [access](auth/access-model.md),
 deliberate.**
 
 The VS Code panel reads `~/.memql/clusters.yaml` and authenticates with an
-identity-issued JWT access token. Refresh credentials use editor SecretStorage.
+identity-issued JWT access token. Its credentials stay in editor SecretStorage.
 A PAT does not authenticate this engine connection. A browser can do neither: it has no
 filesystem, and a long-lived PAT where page JavaScript can read it would be
 strictly worse than the OAuth flow the identity service already runs.

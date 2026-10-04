@@ -608,14 +608,13 @@ export class AddClusterPanel {
     const action = this.requested;
     this.requested = undefined;
     if (action === undefined || this.detected === undefined || this.runBusy()) return;
-    const act: LandingAct = action === "installGuided" ? "install" : action;
-    if (!LANDING_ACTS.includes(act) || !this.offers(act)) {
+    if (!LANDING_ACTS.includes(action) || !this.offers(action)) {
       // Not something this computer has: the landing, which says what it does.
       this.state.back();
       this.setFlow("add");
       return;
     }
-    this.choose(act);
+    this.choose(action);
   }
 
   /** Whether the landing, as detection found this computer, offers `act`. */
@@ -923,7 +922,7 @@ export class AddClusterPanel {
   private async startRun(): Promise<void> {
     if (this.runInFlight) return;
     const action = this.state.action;
-    if (action !== "install" && action !== "installGuided" && action !== "repair") return;
+    if (action !== "install" && action !== "repair") return;
     // Taken in the same tick the entry point checked it, so nothing can start
     // in between; given back when this run settles, below.
     this.holdSlot(action === "repair" ? "repairing" : "installing");
@@ -2333,7 +2332,6 @@ const COPY_LINK = "Copy link";
 function flowOf(action: AddClusterAction): PanelFlow {
   switch (action) {
     case "install":
-    case "installGuided":
       return "install";
     case "repair":
       return "repair";

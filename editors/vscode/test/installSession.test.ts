@@ -29,7 +29,7 @@ import {
   type Graph,
   type Step,
 } from "../src/install/graph.js";
-import { refuseUnsupportedPlatform } from "../src/install/platform.js";
+import { PLATFORM_DETECT_STEP, refuseUnsupportedPlatform } from "../src/install/platform.js";
 import { capabilityScriptPath, type RunScript } from "../src/install/runner.js";
 import { failureGuidance } from "../src/state/installProgress.js";
 import {
@@ -1646,4 +1646,28 @@ test("refuseUnsupportedPlatform is the same gate install and uninstall share", a
   assert.ok(report);
   assert.equal(report?.ok, false);
   assert.equal(report?.outcomes[0]?.exitCode, 3);
+});
+
+test("the detect step's second copy still says what the install document says", async () => {
+  // `PLATFORM_DETECT_STEP` is a hand-written copy of one step, used when the
+  // wizard refuses before a run starts -- so a content rewrite of the document
+  // leaves it reading in the old voice, on precisely the path an operator hits
+  // when something is wrong.
+  const doc = JSON.parse(
+    await fs.readFile(path.join(REPO_ROOT, "scripts", "install", "graph", "install.json"), "utf8"),
+  ) as { steps: { id: string; label: string; description: string }[] };
+  const detect = doc.steps.find((s) => s.id === "detect");
+  assert.notEqual(detect, undefined, "install.json still has a detect step");
+  assert.equal(
+    PLATFORM_DETECT_STEP.description,
+    detect?.description,
+    "src/install/platform.ts holds a second copy of the detect step's sentence; " +
+      "it must say what scripts/install/graph/install.json says",
+  );
+  assert.equal(
+    PLATFORM_DETECT_STEP.label,
+    detect?.label,
+    "src/install/platform.ts holds a second copy of the detect step's label; " +
+      "it must say what scripts/install/graph/install.json says",
+  );
 });

@@ -89,7 +89,6 @@ export const DEPLOYMENT_STYLES = `
   .dp-row-label { flex: none; }
   .dp-row-desc { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
                  color: var(--memql-muted); font-variant-numeric: tabular-nums; }
-  .dp-row-reason { flex-basis: 100%; margin: -2px 0 4px 18px; color: var(--memql-muted); }
   .dp-row-acts { flex: none; display: flex; gap: 8px; margin-left: auto; }
   .dp-row-acts > .mq-textbtn:last-child { margin-right: -6px; }
   .dp-note { margin: 6px 0 0; color: var(--memql-muted); }

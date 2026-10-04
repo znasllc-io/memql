@@ -132,6 +132,15 @@ does a connector. So `shopify-custom` works only while no connected store has
 the id `custom`; connect one and the pin starts answering `404` until it is
 renamed or removed.
 
+The receiver also records on each staged row which tier's secret verified it,
+in `verifiedBy`: `env`, `registered` or `connector`. The dispatcher applies a
+row whose source a connector claims only when it says `connector`, and stamps
+any other `failed` with a reason naming the tier. That covers the case the
+receiver cannot see: a delivery an env pin admitted while no store had that id,
+dispatched after the store was connected. A row with no `verifiedBy` -- one the
+mailbox reader staged, or one staged before the field existed -- is dispatched
+as before.
+
 ```bash
 MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_SIGNATURE_SCHEME=hmac-sha256-base64
 MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_SIGNATURE_HEADER=X-Shopify-Hmac-Sha256
@@ -224,8 +233,8 @@ Both can coexist: the dispatcher only ever offers a row to the connector
 its `source` names, so an automation on a different source never sees a
 connector and vice versa.
 
-The row also carries `contentType`, `dedupeKey`, `signatureVerified` and
-`receivedAt`. Query staged rows with `inboundRequestsByStatus(status:
+The row also carries `contentType`, `dedupeKey`, `signatureVerified`,
+`verifiedBy` and `receivedAt`. Query staged rows with `inboundRequestsByStatus(status:
 "received")`, or look one up with `inboundRequestByDedupeKey`.
 
 ## Redelivery

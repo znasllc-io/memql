@@ -14,9 +14,7 @@ import {
   catalogAutomationTarget,
   catalogRunTarget,
   catalogUri,
-  isAutomationRun,
   isCatalogUri,
-  offersRun,
 } from "../src/constructs/catalogTarget.js";
 import type { CatalogConstruct } from "../src/state/constructCatalog.js";
 
@@ -68,8 +66,6 @@ test("an automation gets an automation target and not an arg-form one", () => {
   // The trigger is what the form is built from: the concept decides which
   // rows the picker browses, the event decides the modes offered.
   assert.deepEqual(target?.trigger, { event: "node.created", concept: "v1:cognition:participant" });
-  assert.equal(offersRun(c), true, "the page must now draw a Run control for an automation");
-  assert.equal(isAutomationRun(c), true);
 });
 
 // A trigger the cluster did not report is manual-run, which IS a describable
@@ -81,7 +77,6 @@ test("an automation with no reported trigger still gets a target, carrying none"
   const target = catalogAutomationTarget(c);
   assert.notEqual(target, undefined);
   assert.equal(target?.trigger, undefined);
-  assert.equal(offersRun(c), true);
 });
 
 // The target's trigger is a COPY. The catalog entry outlives the panel, and a
@@ -104,8 +99,6 @@ test("a view-only construct gets neither kind of target", () => {
   const c = construct({ kind: "concept", runnable: false, runnableKind: undefined });
   assert.equal(catalogRunTarget(c), undefined);
   assert.equal(catalogAutomationTarget(c), undefined);
-  assert.equal(offersRun(c), false);
-  assert.equal(isAutomationRun(c), false);
 });
 
 // -----------------------------------------------------------------------------

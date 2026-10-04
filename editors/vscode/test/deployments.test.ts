@@ -12,7 +12,6 @@ import assert from "node:assert/strict";
 
 import {
   LOCAL_INSTANCE_NAME,
-  displayVersion,
   localInstance,
   newLocalRun,
   nodeSpecDetail,
@@ -247,7 +246,7 @@ test("a remote instance's version is the CURRENT deployment's", () => {
   assert.equal(instance.presence, "installed-healthy");
 });
 
-test("a remote version that cannot resolve renders as unknown, never blank", () => {
+test("a remote version that cannot resolve is unset, never blank", () => {
   const unreachable = remoteInstance({
     name: "staging",
     reachable: false,
@@ -256,7 +255,6 @@ test("a remote version that cannot resolve renders as unknown, never blank", () 
     currentDeploymentId: "",
   });
   assert.equal(unreachable.version, undefined);
-  assert.equal(displayVersion(unreachable.version), "unknown");
   assert.equal(unreachable.presence, "installed-unreachable");
 
   // A current id that names a record the page never loaded is the same case.
@@ -267,14 +265,7 @@ test("a remote version that cannot resolve renders as unknown, never blank", () 
     deployments: [deployment({ deploymentId: "other" })],
     currentDeploymentId: "d-not-loaded",
   });
-  assert.equal(displayVersion(missingRecord.version), "unknown");
-});
-
-test("displayVersion says the word for every empty spelling", () => {
-  assert.equal(displayVersion(undefined), "unknown");
-  assert.equal(displayVersion(""), "unknown");
-  assert.equal(displayVersion("   "), "unknown");
-  assert.equal(displayVersion("v1.2.3"), "v1.2.3");
+  assert.equal(missingRecord.version, undefined);
 });
 
 test("local sorts above remote, then remote by name", () => {

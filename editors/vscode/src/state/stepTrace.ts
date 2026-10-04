@@ -160,18 +160,6 @@ export class StepTraceModel {
   noteError(message: string): void {
     this.errorValue = message;
   }
-
-  /** counts tallies the steps by status, for the timeline's summary line. */
-  get counts(): { success: number; failed: number; skipped: number; other: number } {
-    const out = { success: 0, failed: 0, skipped: 0, other: 0 };
-    for (const step of this.bySequence.values()) {
-      if (step.status === "success") out.success++;
-      else if (step.status === "failed") out.failed++;
-      else if (step.status === "skipped") out.skipped++;
-      else out.other++;
-    }
-    return out;
-  }
 }
 
 /**
