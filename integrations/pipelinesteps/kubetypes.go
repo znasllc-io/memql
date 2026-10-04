@@ -119,17 +119,20 @@ type SeccompProfile struct {
 // Container is one container of the step's pod. RestartPolicy is set only on
 // a service: "Always" on an init container is what makes it a native sidecar,
 // and on any other container it means something else or nothing at all.
+// TerminationMessagePolicy "FallbackToLogsOnError" makes a failed container's
+// terminated.message the tail of its log; with the default (File) it is empty.
 type Container struct {
-	Name            string           `json:"name"`
-	Image           string           `json:"image,omitempty"`
-	Command         []string         `json:"command,omitempty"`
-	Args            []string         `json:"args,omitempty"`
-	WorkingDir      string           `json:"workingDir,omitempty"`
-	Env             []EnvVar         `json:"env,omitempty"`
-	VolumeMounts    []VolumeMount    `json:"volumeMounts,omitempty"`
-	RestartPolicy   *string          `json:"restartPolicy,omitempty"`
-	StartupProbe    *Probe           `json:"startupProbe,omitempty"`
-	SecurityContext *SecurityContext `json:"securityContext,omitempty"`
+	Name                     string           `json:"name"`
+	Image                    string           `json:"image,omitempty"`
+	Command                  []string         `json:"command,omitempty"`
+	Args                     []string         `json:"args,omitempty"`
+	WorkingDir               string           `json:"workingDir,omitempty"`
+	Env                      []EnvVar         `json:"env,omitempty"`
+	VolumeMounts             []VolumeMount    `json:"volumeMounts,omitempty"`
+	RestartPolicy            *string          `json:"restartPolicy,omitempty"`
+	StartupProbe             *Probe           `json:"startupProbe,omitempty"`
+	SecurityContext          *SecurityContext `json:"securityContext,omitempty"`
+	TerminationMessagePolicy string           `json:"terminationMessagePolicy,omitempty"`
 }
 
 // SecurityContext is a container's security context. RunAsUser is a pointer

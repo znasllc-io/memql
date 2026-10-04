@@ -305,8 +305,7 @@ func TestBuildJob(t *testing.T) {
 		if !reflect.DeepEqual(clone.VolumeMounts, []VolumeMount{{Name: "workspace", MountPath: "/workspace"}}) {
 			t.Errorf("clone mounts = %+v, want only the workspace at /workspace", clone.VolumeMounts)
 		}
-		// Ruling R17: root, because the emptyDir is root-owned and a git image
-		// that runs as non-root could not write it.
+		// Ruling R17: the clone runs as uid 0, whatever user its image declares.
 		wantSecurity := &SecurityContext{RunAsUser: ptrTo(int64(0)), AllowPrivilegeEscalation: ptrTo(false)}
 		if !reflect.DeepEqual(clone.SecurityContext, wantSecurity) {
 			t.Errorf("clone securityContext = %s, want %s", mustJSON(t, clone.SecurityContext), mustJSON(t, wantSecurity))
@@ -314,8 +313,14 @@ func TestBuildJob(t *testing.T) {
 		if clone.RestartPolicy != nil {
 			t.Errorf("clone restartPolicy = %q: an init container with one is a sidecar, which never finishes, so the step would never start", *clone.RestartPolicy)
 		}
+		// Round 2: with the default policy (File) a failed init container's
+		// terminated.message is empty, so the classifier could not quote why.
+		if clone.TerminationMessagePolicy != "FallbackToLogsOnError" {
+			t.Errorf("clone terminationMessagePolicy = %q, want FallbackToLogsOnError", clone.TerminationMessagePolicy)
+		}
 
 		doc := wire(t, job)
+		wantField(t, doc, "FallbackToLogsOnError", "spec", "template", "spec", "initContainers", index, "terminationMessagePolicy")
 		wantField(t, doc, "GIT_TOKEN", "spec", "template", "spec", "initContainers", index, "env", 2, "valueFrom", "secretKeyRef", "key")
 		wantField(t, doc, true, "spec", "template", "spec", "initContainers", index, "env", 2, "valueFrom", "secretKeyRef", "optional")
 		wantField(t, doc, float64(0), "spec", "template", "spec", "initContainers", index, "securityContext", "runAsUser")
@@ -354,7 +359,12 @@ func TestBuildJob(t *testing.T) {
 		if prep.RestartPolicy != nil {
 			t.Errorf("cache-prep restartPolicy = %q, want none: it runs to completion", *prep.RestartPolicy)
 		}
-		wantField(t, wire(t, job), float64(0), "spec", "template", "spec", "initContainers", 0, "securityContext", "runAsUser")
+		if prep.TerminationMessagePolicy != "FallbackToLogsOnError" {
+			t.Errorf("cache-prep terminationMessagePolicy = %q, want FallbackToLogsOnError: its failure line must reach terminated.message", prep.TerminationMessagePolicy)
+		}
+		doc := wire(t, job)
+		wantField(t, doc, float64(0), "spec", "template", "spec", "initContainers", 0, "securityContext", "runAsUser")
+		wantField(t, doc, "FallbackToLogsOnError", "spec", "template", "spec", "initContainers", 0, "terminationMessagePolicy")
 
 		run := testRun()
 		run.Caches = nil
@@ -391,6 +401,9 @@ func TestBuildJob(t *testing.T) {
 				*svc.SecurityContext.AllowPrivilegeEscalation {
 				t.Errorf("%s securityContext = %+v, want allowPrivilegeEscalation false", svc.Name, svc.SecurityContext)
 			}
+			if svc.TerminationMessagePolicy != "FallbackToLogsOnError" {
+				t.Errorf("%s terminationMessagePolicy = %q, want FallbackToLogsOnError: a dead service must say why", svc.Name, svc.TerminationMessagePolicy)
+			}
 		}
 		wantPGEnv := []EnvVar{{Name: "POSTGRES_PASSWORD", Value: "memql"}, {Name: "POSTGRES_USER", Value: "memql"}}
 		if !reflect.DeepEqual(pg.Env, wantPGEnv) {
@@ -415,6 +428,8 @@ func TestBuildJob(t *testing.T) {
 		wantField(t, doc, float64(2), "spec", "template", "spec", "initContainers", 2, "startupProbe", "periodSeconds")
 		wantField(t, doc, float64(90), "spec", "template", "spec", "initContainers", 2, "startupProbe", "failureThreshold")
 		wantField(t, doc, false, "spec", "template", "spec", "initContainers", 2, "securityContext", "allowPrivilegeEscalation")
+		wantField(t, doc, "FallbackToLogsOnError", "spec", "template", "spec", "initContainers", 2, "terminationMessagePolicy")
+		wantField(t, doc, "FallbackToLogsOnError", "spec", "template", "spec", "initContainers", 3, "terminationMessagePolicy")
 		wantField(t, doc, "Always", "spec", "template", "spec", "initContainers", 3, "restartPolicy")
 		if _, ok := field(doc, "spec", "template", "spec", "initContainers", 3, "startupProbe"); ok {
 			t.Error("svc-redis carries a startupProbe on the wire")
@@ -475,8 +490,16 @@ func TestBuildJob(t *testing.T) {
 		if step.RestartPolicy != nil {
 			t.Errorf("step restartPolicy = %q, want none on a main container", *step.RestartPolicy)
 		}
+		// The step's own output is captured from its log stream, so it keeps
+		// the default termination message policy.
+		if step.TerminationMessagePolicy != "" {
+			t.Errorf("step terminationMessagePolicy = %q, want the default", step.TerminationMessagePolicy)
+		}
 
 		doc := wire(t, job)
+		if _, ok := field(doc, "spec", "template", "spec", "containers", 0, "terminationMessagePolicy"); ok {
+			t.Error("the step carries a terminationMessagePolicy on the wire")
+		}
 		wantField(t, doc, false, "spec", "template", "spec", "containers", 0, "securityContext", "allowPrivilegeEscalation")
 		wantField(t, doc, "/workspace", "spec", "template", "spec", "containers", 0, "workingDir")
 		wantField(t, doc, testOwnerCache, "spec", "template", "spec", "containers", 0, "volumeMounts", 1, "subPath")

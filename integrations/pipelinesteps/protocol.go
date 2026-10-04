@@ -70,6 +70,12 @@ type StepRun struct {
 // printing one must not print them (ruling R17). Format and LogValue show each
 // secret's NAME, so a reader can tell it was there, and never its value. JSON
 // keeps the values: it is the forward's wire, the one place they travel.
+//
+// Two paths still reach the values, and neither can be closed from here: fmt
+// prints an UNEXPORTED field that holds a StepRun by reflection, without
+// calling Format; and slog's JSON handler encodes a struct that contains a
+// StepRun with encoding/json -- the wire's own encoding. So callers log a
+// StepRun itself, or its ids, never a struct embedding one.
 
 // redactedStepRun has StepRun's fields and none of its methods, so formatting
 // one cannot come back into Format.

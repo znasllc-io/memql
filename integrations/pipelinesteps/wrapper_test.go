@@ -297,6 +297,22 @@ func TestStepWrapperGivesEachUIDItsOwnCacheTree(t *testing.T) {
 			t.Errorf("caches %q: the command saw %q, want %q", tc.caches, got, tc.want)
 		}
 	}
+
+	// Round 2: a step whose uid cannot be determined -- an image with no id --
+	// runs uncached. Guessing root's tree would put a non-root step among a
+	// root step's files, where it fails with EACCES instead of missing a cache.
+	res := runScript(t, stepWrapper, t.TempDir(), []string{
+		"PATH=" + t.TempDir(), // a PATH with no id on it
+		"MEMQL_CACHES=go npm",
+		"MEMQL_STEP_COMMAND=" + show,
+		"MEMQL_ARTIFACT_MARKER=" + testMarker,
+	})
+	if res.code != 0 {
+		t.Fatalf("no id: exit status = %d (stderr %q)", res.code, res.stderr)
+	}
+	if got := strings.TrimSpace(res.stdout); got != "unset|unset|unset" {
+		t.Errorf("with no id the command saw %q, want it uncached (unset|unset|unset)", got)
+	}
 }
 
 func untar(t *testing.T, tgz []byte) map[string]string {
@@ -406,19 +422,31 @@ func TestCloneScriptChecksOutTheSHAAndNothingAfterIt(t *testing.T) {
 // create a missing one root-owned with the claim ROOT's mode -- unwritable for
 // a non-root step on a claim whose root is not world-writable. The cache-prep
 // init container runs first and alone with the claim's root, and creates the
-// directory world-writable, or opens up one created narrower before.
+// directory world-writable and STICKY (round 2), or opens up one created
+// narrower before: any uid of the owner's steps can create its own tree there,
+// and none can rename or replace another uid's.
 func TestCachePrepScriptPreparesTheOwnersCacheDirectory(t *testing.T) {
 	prep := func(t *testing.T, ownerCache string) shellRun {
 		return runShell(t, cachePrepScript, []string{"PATH=" + os.Getenv("PATH"), "OWNER_CACHE=" + ownerCache})
 	}
+	// stickyModeOf is a directory's permission bits and its sticky bit.
+	stickyModeOf := func(t *testing.T, path string) os.FileMode {
+		t.Helper()
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		return info.Mode() & (os.ModePerm | os.ModeSticky)
+	}
+	const want = os.ModeSticky | 0o777 // 01777
 
-	t.Run("a missing owner directory is created world-writable", func(t *testing.T) {
+	t.Run("a missing owner directory is created world-writable and sticky", func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "owners", "0dde18ce172fff450b32bf41")
 		if res := prep(t, dir); res.code != 0 {
 			t.Fatalf("cache-prep exited %d\nstderr %s", res.code, res.stderr)
 		}
-		if got := modeOf(t, dir); got != 0o777 {
-			t.Errorf("the owner's cache directory has mode %o, want 777: a non-root step could not write it", got)
+		if got := stickyModeOf(t, dir); got != want {
+			t.Errorf("the owner's cache directory has mode %v, want %v (01777)", got, want)
 		}
 	})
 
@@ -433,8 +461,8 @@ func TestCachePrepScriptPreparesTheOwnersCacheDirectory(t *testing.T) {
 		if res := prep(t, dir); res.code != 0 {
 			t.Fatalf("cache-prep exited %d\nstderr %s", res.code, res.stderr)
 		}
-		if got := modeOf(t, dir); got != 0o777 {
-			t.Errorf("the existing owner directory kept mode %o, want 777", got)
+		if got := stickyModeOf(t, dir); got != want {
+			t.Errorf("the existing owner directory has mode %v, want %v (01777)", got, want)
 		}
 	})
 

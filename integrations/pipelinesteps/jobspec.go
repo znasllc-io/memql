@@ -43,14 +43,22 @@ const (
 	cachePath       = "/cache"
 
 	// cacheRootPath is where cache-prep mounts the cache claim's ROOT, and
-	// ownerCacheVar names the owner's directory under it that cache-prep opens
-	// (rulings R15, R15b). Kubelet creates a missing subPath root-owned with
-	// the claim root's mode, so on a claim whose root is not world-writable a
-	// non-root step would get a cache it cannot enter. Only cache-prep -- a
-	// fixed script, no git, no token -- ever sees the claim's root, where every
-	// owner's cache lives.
+	// ownerCacheVar names the owner's directory under it that cache-prep opens,
+	// world-writable and sticky (rulings R15, R15b). Kubelet creates a missing
+	// subPath root-owned with the claim root's mode, so on a claim whose root is
+	// not world-writable a non-root step would get a cache it cannot enter; the
+	// sticky bit keeps one uid of the owner's steps from renaming or replacing
+	// another uid's tree. Only cache-prep -- a fixed script, no git, no token --
+	// ever sees the claim's root, where every owner's cache lives.
 	cacheRootPath = "/cache-root"
 	ownerCacheVar = "OWNER_CACHE"
+
+	// failureFromLogs is the termination message policy of cache-prep, the
+	// clone and every sidecar: with the default (File) a failed container's
+	// terminated.message is empty, and the runner's classifier quotes it to say
+	// why the step never ran. The step keeps the default; its own output is
+	// captured from its log stream.
+	failureFromLogs = "FallbackToLogsOnError"
 
 	// gitTokenKey is the clone token's key in the step's Secret, and the
 	// variable only the clone container receives it as.
@@ -105,9 +113,12 @@ var (
 	// reads as $NAME, and a legal key in a Secret. The step's own variables --
 	// the contract and its secrets -- are held to it.
 	envNameShape = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
-	// serviceEnvNameShape is the name the API server accepts for a variable.
-	// A service's environment is read by its image's own process rather than a
-	// shell, so dotted names its image documents (discovery.type) are legal.
+	// serviceEnvNameShape is the API's relaxed rule for a variable name, its
+	// regular expression only: the API's IsEnvVarName additionally refuses ".",
+	// ".." and names starting "..", which reach the API and come back as a
+	// rejected Job. A service's environment is read by its image's own process
+	// rather than a shell, so dotted names its image documents
+	// (discovery.type) are legal.
 	serviceEnvNameShape = regexp.MustCompile(`^[-._a-zA-Z][-._a-zA-Z0-9]*$`)
 	// shaShape is a full object id, SHA-1 or SHA-256. Never an abbreviation
 	// (ambiguous) and never a ref name (it moves).
@@ -388,15 +399,15 @@ func artifactProblem(path string) string {
 		case segment == "." || segment == "..":
 			return "names " + segment + " as a path segment, which could leave the working copy"
 		case (strings.HasPrefix(segment, ".") || strings.HasPrefix(segment, "[")) && strings.ContainsAny(segment, "*?["):
-			return "has the glob segment " + strconv.Quote(segment) + ", which the shell can expand to . or .."
+			return "has the glob segment " + strconv.Quote(segment) + ": a glob segment may not begin with a dot or a bracket"
 		}
 	}
 	return ""
 }
 
-// rootContext is the security context of the two init containers that must
-// be root (ruling R17): the emptyDir and the claim's root are root-owned, so
-// an image whose user is not root could write neither.
+// rootContext pins cache-prep and the clone to uid 0 (ruling R17): the cache
+// claim's root is root-owned and may be 0755, so only root can open the
+// owner's directory under it.
 func rootContext() *SecurityContext {
 	return &SecurityContext{RunAsUser: ptr(int64(0)), AllowPrivilegeEscalation: ptr(false)}
 }
@@ -407,12 +418,13 @@ func rootContext() *SecurityContext {
 // is the one that runs no repository content.
 func cachePrepContainer(cfg Config, run StepRun) Container {
 	return Container{
-		Name:            ContainerCachePrep,
-		Image:           cfg.CloneImage,
-		Command:         []string{"/bin/sh", "-c", cachePrepScript},
-		Env:             []EnvVar{plainVar(ownerCacheVar, cacheRootPath+"/"+CacheSubPath(run.OwnerUserID))},
-		VolumeMounts:    []VolumeMount{{Name: cacheVolume, MountPath: cacheRootPath}},
-		SecurityContext: rootContext(),
+		Name:                     ContainerCachePrep,
+		Image:                    cfg.CloneImage,
+		Command:                  []string{"/bin/sh", "-c", cachePrepScript},
+		Env:                      []EnvVar{plainVar(ownerCacheVar, cacheRootPath+"/"+CacheSubPath(run.OwnerUserID))},
+		VolumeMounts:             []VolumeMount{{Name: cacheVolume, MountPath: cacheRootPath}},
+		SecurityContext:          rootContext(),
+		TerminationMessagePolicy: failureFromLogs,
 	}
 }
 
@@ -430,8 +442,9 @@ func cloneContainer(cfg Config, run StepRun, secretName string) Container {
 			// and a required key that is absent would stop the pod.
 			secretVar(gitTokenKey, secretName, gitTokenKey, true),
 		},
-		VolumeMounts:    []VolumeMount{{Name: workspaceVolume, MountPath: workspacePath}},
-		SecurityContext: rootContext(),
+		VolumeMounts:             []VolumeMount{{Name: workspaceVolume, MountPath: workspacePath}},
+		SecurityContext:          rootContext(),
+		TerminationMessagePolicy: failureFromLogs,
 	}
 }
 
@@ -445,10 +458,11 @@ func serviceContainers(services map[string]pl.Service) []Container {
 	for _, name := range sortedKeys(services) {
 		svc := services[name]
 		c := Container{
-			Name:            ServicePrefix + name,
-			Image:           svc.Image,
-			RestartPolicy:   ptr("Always"),
-			SecurityContext: &SecurityContext{AllowPrivilegeEscalation: ptr(false)},
+			Name:                     ServicePrefix + name,
+			Image:                    svc.Image,
+			RestartPolicy:            ptr("Always"),
+			SecurityContext:          &SecurityContext{AllowPrivilegeEscalation: ptr(false)},
+			TerminationMessagePolicy: failureFromLogs,
 		}
 		for _, key := range sortedKeys(svc.Env) {
 			c.Env = append(c.Env, plainVar(key, svc.Env[key]))
