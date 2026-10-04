@@ -30,7 +30,7 @@ package worker
 //     which its cockpit advertises as the routing label pipelines=allowed (and
 //     enforces again when the step arrives).
 //
-// And the owner's off switch, computerUseEnabled, still holds. It is the one
+// And the owner's off switch, KillSwitchEngaged, still holds. It is the one
 // control that means "nothing runs on my machines", and a pipeline step is
 // something.
 //

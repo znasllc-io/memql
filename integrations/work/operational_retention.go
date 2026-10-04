@@ -34,7 +34,7 @@ const DefaultPipelinesRunRetentionDays = 30
 
 // pipelinesRunConcept is spelled here, as integrations/pipelinesteps spells it
 // for itself: component/pipelinerun owns the name and this module does not
-// depend on it. TestRetentionPredicatesNameStatusesTheirConceptsDeclare reads
+// depend on it. TestRetentionPredicatesSelectOnlyWhatTheirConceptsDeclare reads
 // the concept out of the DSL, so a rename fails there instead of retiring
 // nothing.
 const pipelinesRunConcept = "v1:pipelines:run"
@@ -268,7 +268,8 @@ func (i *Integration) operationalRetentionWindows(ctx context.Context) (map[stri
 		stored["MEMQL_WORKER_INVOCATION_RETENTION_DAYS"] = stored["WORKER_INVOCATION_RETENTION_DAYS"]
 	}
 	// Keyed by the env name, which is what a window IS: two policies share
-	// v1:work:run, and the two pipelines policies share one variable.
+	// v1:work:run, and the three pipelines policies (the work run, the
+	// v1:pipelines:run row and the pipeline goal) share one variable.
 	// Policies sharing a variable share its default too
 	// (TestOperationalPoliciesSharingAWindowShareItsDefault), so the answer
 	// does not depend on which of them was read last.
