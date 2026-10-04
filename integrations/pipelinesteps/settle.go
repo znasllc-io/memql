@@ -1,6 +1,7 @@
 package pipelinesteps
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -90,8 +91,6 @@ func (s *step) settle(dec pl.StepResult, pod *Pod, f *follower) pl.StepResult {
 	cr := s.storeLog(libCtx, &res, notes)
 	s.storeArtifacts(libCtx, cr, &res, notes)
 	res.Notes = notes.list()
-	// Timings stay empty until the seam exports ParseGoTestOutput (ledger
-	// ruling R6).
 	persistCtx, cancelPersist := s.persistContext()
 	defer cancelPersist()
 	s.persist(persistCtx, res)
@@ -186,8 +185,25 @@ func (s *step) storeLog(ctx context.Context, res *pl.StepResult, notes *noteList
 		notes.add(pl.CodeArtifactMissing, "the step's log was not stored in the Library: its archive could not be read: "+err.Error())
 		return cr
 	}
+	if s.run.GoTimings {
+		s.goTimings(res, body, notes)
+	}
 	res.LogFileID = s.store(ctx, logFileName(s.run.StepKey), archiveMIME, body, "the step's log", notes)
 	return cr
+}
+
+// goTimings reads each passing Go package's wall time out of the step's
+// archived log (pl.ParseGoTestOutput, the seam's one reader), for a step that
+// runs Go tests. A log it cannot read is a note: the timings only steer how
+// later runs are sharded, so they never fail a step.
+func (s *step) goTimings(res *pl.StepResult, archive []byte, notes *noteList) {
+	timings, err := pl.ParseGoTestOutput(bytes.NewReader(archive))
+	switch {
+	case err != nil:
+		notes.add(pl.CodeArtifactMissing, "the step's Go test timings could not be read from its log: "+err.Error())
+	case len(timings) > 0:
+		res.Timings = timings
+	}
 }
 
 // storeArtifacts stores the step's artifacts, one Library file each, named by

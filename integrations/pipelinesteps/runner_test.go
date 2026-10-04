@@ -3016,6 +3016,57 @@ func rtFramedLines(t *testing.T, line string, tgz []byte) []string {
 	return append(out, captureKubeLine(rtAt(1999), marker+" end"))
 }
 
+// TestRunnerReadsGoTimings (fix round 1): a Go test step's passing packages'
+// times come out of its archived log -- anchored result lines, never a cached
+// result or a failed package -- and ride its outcome; a log they cannot be
+// read from is a note beside the step, never its failure.
+func TestRunnerReadsGoTimings(t *testing.T) {
+	lines := []string{
+		captureKubeLine(rtAt(1100), "ok  \tgithub.com/acme/widget/a\t1.500s"),
+		captureKubeLine(rtAt(1200), "ok  \tgithub.com/acme/widget/b\t(cached)"),
+		captureKubeLine(rtAt(1300), "FAIL\tgithub.com/acme/widget/c\t2.000s"),
+	}
+	for _, c := range []struct {
+		name      string
+		goTimings bool
+		extra     string
+		want      map[string]float64
+		note      bool
+	}{
+		{"a Go test step's passing packages", true, "", map[string]float64{"github.com/acme/widget/a": 1.5}, false},
+		{"a step that runs no Go tests reads none", false, "", nil, false},
+		{"a result line that cannot be read is a note", true, "ok  \tgithub.com/acme/widget/d\t" + strings.Repeat("9", 400) + "s", nil, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newRunnerHarness(t)
+			run := rtRun()
+			run.GoTimings = c.goTimings
+			script := append([]string(nil), lines...)
+			if c.extra != "" {
+				script = append(script, captureKubeLine(rtAt(1400), c.extra))
+			}
+			h.c.script(testJobName, rtFinishingScript(testJobName, 0, script...))
+
+			res := h.run(t, run)
+
+			if res.Status != pl.OutcomeSucceeded || res.Failure != nil {
+				t.Fatalf("result = %+v (failure %+v), want success: timings never fail a step", res, res.Failure)
+			}
+			if !reflect.DeepEqual(res.Timings, c.want) {
+				t.Errorf("Timings = %v, want %v", res.Timings, c.want)
+			}
+			noted := len(res.Notes) == 1 && res.Notes[0].Code == pl.CodeArtifactMissing && strings.Contains(res.Notes[0].Message, "Go test timings")
+			if noted != c.note || (!c.note && len(res.Notes) != 0) {
+				t.Errorf("notes = %+v, want a note of the unreadable timings: %v", res.Notes, c.note)
+			}
+			var recorded pl.StepResult
+			if err := json.Unmarshal([]byte(h.c.jobNow(t, testJobName).Metadata.Annotations[AnnotOutcome]), &recorded); err != nil || !reflect.DeepEqual(recorded.Timings, c.want) {
+				t.Errorf("the outcome recorded on the Job has Timings %v (%v), want %v", recorded.Timings, err, c.want)
+			}
+		})
+	}
+}
+
 // TestRunnerMasksStepTextInItsOwnLog (fix round 1, minor 9): an artifact's
 // name is the step's, and a Library error can quote it. The node's own log
 // line about a file that was not stored is masked like the step's output.
