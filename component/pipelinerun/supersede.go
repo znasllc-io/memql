@@ -64,6 +64,21 @@ import (
 // under a gate and a nested gate, which the gate discipline forbids (ids.go).
 // A read or an ask that fails is logged and fails nothing: the new head's run
 // is open, and an earlier run left going costs a runner, never a wrong answer.
+//
+// A SUPERSEDED RUN DOES NOT ANSWER ITS OWN HEAD COMING BACK (ruling R37).
+// Push X, push Y (which supersedes X's run), force-push back to X: X's key
+// already has a run, the superseded one, and a second sighting of a head is
+// answered by its run -- which would leave the head the pull request shows
+// with a cancelled check and no run coming, while Y's run, a commit no longer
+// in the pull request, keeps its runner. So when the key's newest attempt was
+// stopped as superseded (stoppedBySupersede), the dedup asks GitHub whether
+// the opening's commit is the pull request's head again: if it is, the key
+// opens its NEXT attempt, the way a fork's refusal is opened past, and that
+// run supersedes Y in the ordinary way above. The question is asked BEFORE the
+// open gate and only in that case; the gated dedup read reuses the answer, so
+// nothing of GitHub's is asked under the gate for it. Anything short of a yes
+// -- another head (a late redelivery of a superseded head), no token, a
+// refused read -- leaves the superseded run answering, as it always has.
 
 // supersedes reports whether opening o, in mode, stops its pull request's
 // earlier runs: a new head of a pull request, in affected mode, delivered by
@@ -106,53 +121,149 @@ func (i *Integration) supersede(ctx context.Context, d Deps, opened Run, earlier
 	if len(stale) == 0 || !isPullRequestHead(ctx, d, opened, token) {
 		return
 	}
-	by := "superseded by " + opened.ID
+	by := supersededPrefix + opened.ID
 	for _, r := range stale {
+		attrs := []any{"component", "pipelinerun", logger.Subject(RunConcept, r.ID), "supersededBy", opened.ID,
+			"pullRequest", opened.PullRequest}
 		if _, err := i.requestCancel(ctx, d, r.ID, by); err != nil {
 			if errors.Is(err, ErrRunFinished) {
+				d.Logger.Info("pipelines: a run a newer push superseded had finished before it could be asked to stop; its answer stands", attrs...)
 				continue
 			}
 			d.Logger.Warn("pipelines: a run a newer push to its pull request superseded could not be cancelled",
-				"component", "pipelinerun", logger.Subject(RunConcept, r.ID), "supersededBy", opened.ID,
-				"pullRequest", opened.PullRequest, "error", err)
+				append(attrs, "error", err)...)
 			continue
 		}
-		d.Logger.Info("pipelines: a newer push to the pull request superseded this run",
-			"component", "pipelinerun", logger.Subject(RunConcept, r.ID), "supersededBy", opened.ID,
-			"pullRequest", opened.PullRequest)
+		d.Logger.Info("pipelines: a newer push to the pull request superseded this run", attrs...)
 	}
+}
+
+// supersededPrefix begins the cancelledBy of every run a newer push stopped:
+// "superseded by <run id>".
+const supersededPrefix = "superseded by "
+
+// headVerdict is what GitHub says of one commit and a pull request's head.
+type headVerdict int
+
+const (
+	// headUnknown: no token to ask with, a read GitHub refused, or an answer
+	// naming no head -- the error says which.
+	headUnknown headVerdict = iota
+	// headElsewhere: GitHub names another commit.
+	headElsewhere
+	// headHere: GitHub names this commit.
+	headHere
+)
+
+var (
+	errNoHeadToken = errors.New("there is no installation token to ask GitHub with")
+	errNoHeadNamed = errors.New("GitHub named no head for the pull request")
+)
+
+// pullRequestHead asks GitHub for pull request number's head in repository and
+// says whether it is sha, and what it is. The ONE place either decision -- a
+// supersede (R34) or a superseded head coming back (R37) -- reads the head, so
+// both compare SHAs as this package compares them everywhere: trimmed and
+// lower-cased, then equal.
+func pullRequestHead(ctx context.Context, d Deps, repository string, number int, sha, token string) (headVerdict, string, error) {
+	if d.GitHub == nil || strings.TrimSpace(token) == "" {
+		return headUnknown, "", errNoHeadToken
+	}
+	pr, err := d.GitHub.PullRequestHead(ctx, token, repository, number)
+	if err != nil {
+		return headUnknown, "", err
+	}
+	head := strings.ToLower(strings.TrimSpace(pr.HeadSHA))
+	if head == "" {
+		return headUnknown, "", errNoHeadNamed
+	}
+	if head != strings.ToLower(strings.TrimSpace(sha)) {
+		return headElsewhere, head, nil
+	}
+	return headHere, head, nil
 }
 
 // isPullRequestHead reports whether opened's commit is its pull request's head
 // as GitHub reports it now. Anything short of a yes is a no, and the log says
 // which: a head that has moved on at Info -- the newer head's own opening
-// supersedes -- and anything that kept the head from being known at Warn. SHAs
-// are compared as this package compares them everywhere: trimmed and
-// lower-cased, then equal.
+// supersedes -- and anything that kept the head from being known at Warn.
 func isPullRequestHead(ctx context.Context, d Deps, opened Run, token string) bool {
 	attrs := []any{"component", "pipelinerun", logger.Subject(RunConcept, opened.ID),
 		"repository", opened.Repository, "pullRequest", opened.PullRequest}
-	if d.GitHub == nil || strings.TrimSpace(token) == "" {
-		d.Logger.Warn("pipelines: there is no installation token to ask GitHub for the pull request's head, so this push stops none of its earlier runs", attrs...)
-		return false
-	}
-	pr, err := d.GitHub.PullRequestHead(ctx, token, opened.Repository, opened.PullRequest)
-	if err != nil {
-		d.Logger.Warn("pipelines: the pull request's head could not be read from GitHub, so this push stops none of its earlier runs",
-			append(attrs, "error", err)...)
-		return false
-	}
-	head := strings.ToLower(strings.TrimSpace(pr.HeadSHA))
-	if head == "" {
-		d.Logger.Warn("pipelines: GitHub named no head for the pull request, so this push stops none of its earlier runs", attrs...)
-		return false
-	}
-	if head != strings.ToLower(strings.TrimSpace(opened.SHA)) {
+	verdict, head, err := pullRequestHead(ctx, d, opened.Repository, opened.PullRequest, opened.SHA, token)
+	switch {
+	case verdict == headHere:
+		return true
+	case verdict == headElsewhere:
 		d.Logger.Info("pipelines: the pull request's head has moved on since this push, so it stops none of its earlier runs; the newer head's own opening supersedes",
 			append(attrs, "sha", opened.SHA, "head", head)...)
-		return false
+	case errors.Is(err, errNoHeadToken):
+		d.Logger.Warn("pipelines: there is no installation token to ask GitHub for the pull request's head, so this push stops none of its earlier runs", attrs...)
+	case errors.Is(err, errNoHeadNamed):
+		d.Logger.Warn("pipelines: GitHub named no head for the pull request, so this push stops none of its earlier runs", attrs...)
+	default:
+		d.Logger.Warn("pipelines: the pull request's head could not be read from GitHub, so this push stops none of its earlier runs",
+			append(attrs, "error", err)...)
 	}
-	return true
+	return false
+}
+
+// stoppedBySupersede reports whether r was stopped -- or is being stopped --
+// because a newer push superseded it: asked by a supersede (its cancelledBy
+// says so, and only a supersede writes that), and either concluded cancelled
+// or not concluded yet. A run a PERSON cancelled is not one: that cancel was a
+// decision. Nor is a superseded run that finished with an answer of its own
+// before its driver read the ask: that answer stands.
+func stoppedBySupersede(r Run) bool {
+	return r.CancelRequested && strings.HasPrefix(r.CancelledBy, supersededPrefix) &&
+		(!r.Finished() || r.Conclusion == ConclusionCancelled)
+}
+
+// supersededNewest is the key's newest attempt when it was stopped as
+// superseded and o is an opening its head coming back could rerun: a push --
+// not a re-run, which answers through its own rule -- of a pull request,
+// from this repository (a fork's head runs nothing either way). It is the one
+// case in which the dedup asks GitHub anything (R37).
+func supersededNewest(runs []Run, o Opening) (Run, bool) {
+	if o.Trigger == TriggerRerun || o.Fork || o.PullRequest <= 0 {
+		return Run{}, false
+	}
+	newest, attempts := newestAttempt(runs)
+	if attempts == 0 || !stoppedBySupersede(newest) {
+		return Run{}, false
+	}
+	return newest, true
+}
+
+// headCameBack reports whether GitHub names o's commit as its pull request's
+// head NOW -- a force-push back to a commit whose run a newer push superseded
+// -- in which case that superseded run does not answer the delivery and the
+// key opens its next attempt (R37). It is asked before the open gate, under
+// the token the opening minted (tokenErr: the mint that failed). Anything
+// short of a yes leaves the superseded run answering, and the log says why.
+func headCameBack(ctx context.Context, d Deps, p Pipeline, o Opening, sha, token string, tokenErr error, superseded Run) bool {
+	attrs := []any{"component", "pipelinerun", logger.Subject(RunConcept, superseded.ID), "repository", p.Repository,
+		"pullRequest", o.PullRequest, "sha", sha, "cancelledBy", superseded.CancelledBy}
+	if tokenErr != nil {
+		token = ""
+	}
+	verdict, head, err := pullRequestHead(ctx, d, p.Repository, o.PullRequest, sha, token)
+	switch {
+	case verdict == headHere:
+		d.Logger.Info("pipelines: the pull request's head comes back to a commit whose run a newer push superseded, so it runs again", attrs...)
+		return true
+	case verdict == headElsewhere:
+		d.Logger.Info("pipelines: a delivery for a head a newer push superseded is answered by its superseded run; the pull request's head is elsewhere",
+			append(attrs, "head", head)...)
+	case errors.Is(err, errNoHeadToken):
+		d.Logger.Warn("pipelines: there is no installation token to ask GitHub whether the pull request's head came back to this commit, so its superseded run answers the delivery", attrs...)
+	case errors.Is(err, errNoHeadNamed):
+		d.Logger.Warn("pipelines: GitHub named no head for the pull request, so the superseded run answers the delivery", attrs...)
+	default:
+		d.Logger.Warn("pipelines: the pull request's head could not be read from GitHub, so the superseded run answers the delivery",
+			append(attrs, "error", err)...)
+	}
+	return false
 }
 
 // supersededBy reports whether opened stops r: ANOTHER run of the same

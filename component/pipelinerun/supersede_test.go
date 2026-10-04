@@ -25,6 +25,10 @@ import (
 // shaD is a fourth head: a pull request pushed more than twice.
 const shaD = "4444444444444444444444444444444444444444"
 
+// shaHex is a head spelled with hex LETTERS, which every other test SHA lacks:
+// the only one whose case can differ between two spellings.
+const shaHex = "abcdef0123456789abcdef0123456789abcdef01"
+
 // prRun is pull request pr's run of head sha on p, as an earlier push left
 // it: affected, attempt 1, queued ten minutes ago by a webhook, reporting
 // check run checkRunID, and claimed by no agent yet.
@@ -72,13 +76,13 @@ func wantAsked(t *testing.T, h *harness, id, supersededBy string) Run {
 	return got
 }
 
-// wantUntouched holds a run to exactly what it was: never asked to stop, its
+// wantUntouched holds a run to exactly what it was: no new ask to stop, its
 // status and conclusion unmoved, and its gate never taken -- so not even asked
 // and refused.
 func wantUntouched(t *testing.T, h *harness, before Run) {
 	t.Helper()
 	got, _ := h.store.run(before.ID)
-	if got.CancelRequested || got.CancelledBy != before.CancelledBy || got.Status != before.Status || got.Conclusion != before.Conclusion {
+	if got.CancelRequested != before.CancelRequested || got.CancelledBy != before.CancelledBy || got.Status != before.Status || got.Conclusion != before.Conclusion {
 		t.Errorf("run %s (%s #%d %s) was touched: %s/%s cancelRequested %v by %q",
 			before.ID, before.Mode, before.PullRequest, before.SHA[:7], got.Status, got.Conclusion, got.CancelRequested, got.CancelledBy)
 	}
@@ -88,6 +92,39 @@ func wantUntouched(t *testing.T, h *harness, before Run) {
 			return
 		}
 	}
+}
+
+// logLine is the first line of out that says phrase, or "" -- so a test holds
+// a phrase and its LEVEL to one line, not to two lines that each say one.
+func logLine(out, phrase string) string {
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, phrase) {
+			return line
+		}
+	}
+	return ""
+}
+
+// wantLogged holds out to a line saying phrase at level ("INFO", "WARN").
+func wantLogged(t *testing.T, out, phrase, level string) {
+	t.Helper()
+	if line := logLine(out, phrase); line == "" || !strings.Contains(line, "level="+level) {
+		t.Errorf("want one %s line saying %q, got line %q in:\n%s", level, phrase, line, out)
+	}
+}
+
+// supersededAt is pull request pr's run of head sha after the run byID
+// superseded it: concluded cancelled, or -- stopping -- still in progress on
+// agent-b with the ask on its row.
+func supersededAt(p Pipeline, pr int, sha string, checkRunID int64, byID string, stopping bool) Run {
+	r := prRun(p, pr, sha, checkRunID)
+	if stopping {
+		r = drivenBy(r, "agent-b")
+	} else {
+		r.Status, r.Conclusion, r.FinishedAt = StatusCompleted, ConclusionCancelled, testNow.Add(-time.Minute)
+	}
+	r.CancelRequested, r.CancelledBy = true, "superseded by "+byID
+	return r
 }
 
 // checkRunWrites is every write GitHub saw to check run id.
@@ -244,6 +281,11 @@ func TestADedupHitCancelsNothing(t *testing.T) {
 	}
 	wantUntouched(t, h, earlier)
 	wantUntouched(t, h, seen)
+	// An ordinary second sighting asks GitHub nothing: only a key whose newest
+	// attempt a newer push superseded asks whether its head came back (R37).
+	if reads := h.github.headReads(); len(reads) != 0 {
+		t.Errorf("a dedup hit on a run nobody superseded read the head: %v", reads)
+	}
 
 	// The control: the next head's push does stop both.
 	opened := push42(t, h, "d-next", shaD)
@@ -310,9 +352,7 @@ func TestALateOpeningForAnOlderHeadStopsNothing(t *testing.T) {
 	if reads := h.github.headReads(); !slices.Equal(reads, []string{repoName + "#42"}) {
 		t.Errorf("GitHub is asked for #42's head once: %v", reads)
 	}
-	if out := logs.String(); !strings.Contains(out, "level=INFO") || !strings.Contains(out, "has moved on") {
-		t.Errorf("why nothing was stopped is said, at info:\n%s", out)
-	}
+	wantLogged(t, logs.String(), "has moved on", "INFO")
 
 	// The control: the next push is the head GitHub names, and stops both.
 	opened := push42(t, h, "d-next", shaC)
@@ -352,26 +392,31 @@ func TestTheHeadReadFailingStopsNothing(t *testing.T) {
 			if reads := h.github.headReads(); (len(reads) == 0) != c.noReads {
 				t.Errorf("head reads %v", reads)
 			}
-			if out := logs.String(); !strings.Contains(out, c.says) || !strings.Contains(out, "level=WARN") {
-				t.Errorf("the reason is logged as a warning saying %q:\n%s", c.says, out)
-			}
+			// The phrase and its level on ONE line: the opening's own
+			// warning about its check run is another line, at WARN too.
+			wantLogged(t, logs.String(), c.says, "WARN")
 		})
 	}
 }
 
 // GitHub's head is compared as this package compares every SHA -- trimmed and
 // lower-cased -- so the same commit spelled in upper case by one side is the
-// same head, and the push it belongs to supersedes.
+// same head, and the push it belongs to supersedes. The SHA carries hex
+// letters: an all-digit SHA reads the same in either case and would test
+// nothing.
 func TestTheHeadIsComparedAsThePackageComparesSHAs(t *testing.T) {
+	if strings.ToUpper(shaHex) == shaHex {
+		t.Fatalf("%s has no letters to change case -- the test checks nothing", shaHex)
+	}
 	h := newHarness(t)
 	p := testPipeline(DeliveryWebhook)
 	h.store.addPipeline(p)
 	earlier := drivenBy(prRun(p, 42, shaA, 501), "agent-b")
 	h.store.addRun(earlier)
 
-	h.github.setPullHead(repoName, 42, " "+strings.ToUpper(shaC)+" ")
-	res := trigger(t, h, "pull_request", "d-push", prDelivery(t, "synchronize", 42, shaC, repoName, testInstallation))
-	if len(res.Opened) != 1 {
+	h.github.setPullHead(repoName, 42, " "+strings.ToUpper(shaHex)+" ")
+	res := trigger(t, h, "pull_request", "d-push", prDelivery(t, "synchronize", 42, shaHex, repoName, testInstallation))
+	if len(res.Opened) != 1 || res.Opened[0].SHA != shaHex {
 		t.Fatalf("opened %+v", res)
 	}
 	wantAsked(t, h, earlier.ID, res.Opened[0].ID)
@@ -464,7 +509,7 @@ func TestASupersedeThatFailsDoesNotFailTheOpen(t *testing.T) {
 		fail func(s *memStore)
 		says string
 	}{
-		"the pull request's runs cannot be read": {func(s *memStore) { s.failRunsForPullRequest = errors.New("database unavailable") }, "could not be read"},
+		"the pull request's runs cannot be read": {func(s *memStore) { s.failRunsForPullRequest = errors.New("database unavailable") }, "earlier runs could not be read"},
 		"the earlier run cannot be asked":        {func(s *memStore) { s.failUpdateRun = errors.New("database unavailable") }, "could not be cancelled"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -485,9 +530,7 @@ func TestASupersedeThatFailsDoesNotFailTheOpen(t *testing.T) {
 			if got, _ := h.store.run(earlier.ID); got.CancelRequested {
 				t.Errorf("the earlier run reads as asked: %+v", got)
 			}
-			if out := logs.String(); !strings.Contains(out, c.says) || !strings.Contains(out, "level=WARN") {
-				t.Errorf("the failure is logged as a warning saying %q:\n%s", c.says, out)
-			}
+			wantLogged(t, logs.String(), c.says, "WARN")
 		})
 	}
 }
@@ -637,4 +680,299 @@ func TestASupersededRunThisNodeDrivesStopsAtOnce(t *testing.T) {
 	if now, _ := dh.store.run(pushed.ID); now.Status != StatusQueued || now.CancelRequested {
 		t.Errorf("the new head's run is left queued for a driver: %+v", now)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// R37: a superseded run does not answer its own head coming back
+// ---------------------------------------------------------------------------
+
+// A force-push BACK to a head a newer push superseded: the head's run was
+// cancelled -- or is still stopping -- as superseded, and would answer the
+// delivery as a second sighting, leaving the head the pull request shows with
+// a cancelled check and no run coming while the dropped commit's run goes on.
+// When GitHub names the commit as the pull request's head again, the key
+// opens its NEXT attempt instead, and that run supersedes the dropped one.
+func TestAForcePushBackToASupersededHeadRunsItAgain(t *testing.T) {
+	for name, stopping := range map[string]bool{"its run concluded cancelled": false, "its run still stopping": true} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			logs := &lockedBuffer{}
+			h.integ.Configure(func(d *Deps) { d.Logger = slog.New(slog.NewTextHandler(logs, nil)) })
+			p := testPipeline(DeliveryWebhook)
+			h.store.addPipeline(p)
+			dropped := drivenBy(prRun(p, 42, shaB, 502), "agent-b")
+			back := supersededAt(p, 42, shaA, 501, dropped.ID, stopping)
+			h.store.addRun(back)
+			h.store.addRun(dropped)
+
+			// The developer force-pushes #42 back to shaA.
+			again := push42(t, h, "d-back", shaA)
+
+			if again.RunKey != back.RunKey || again.Attempt != 2 || again.ID != RunIDFor(p.ID, back.RunKey, 2) {
+				t.Errorf("the key's NEXT attempt opens: key %q attempt %d id %s", again.RunKey, again.Attempt, again.ID)
+			}
+			if again.Trigger != TriggerWebhook || again.RerunOf != "" || again.Status != StatusQueued || again.PullRequest != 42 {
+				t.Errorf("it is the push's own run, queued, not a re-run: %+v", again)
+			}
+			wantAsked(t, h, dropped.ID, again.ID)
+			if got, _ := h.store.run(back.ID); got.CancelledBy != back.CancelledBy || got.Attempt != 1 {
+				t.Errorf("the superseded run stays as it was stopped: %+v", got)
+			}
+			// One read decides the dedup, before the gate; one decides the
+			// supersede, after it.
+			if reads := h.github.headReads(); len(reads) != 2 {
+				t.Errorf("head reads %v; want the dedup's and the supersede's", reads)
+			}
+			wantLogged(t, logs.String(), "runs again", "INFO")
+		})
+	}
+}
+
+// The same delivery while GitHub's head is ELSEWHERE -- a late redelivery of a
+// head a newer push superseded -- is answered by the superseded run, as a
+// second sighting always is: nothing opens, nothing is stopped.
+func TestALateRedeliveryOfASupersededHeadOpensNothing(t *testing.T) {
+	h := newHarness(t)
+	logs := &lockedBuffer{}
+	h.integ.Configure(func(d *Deps) { d.Logger = slog.New(slog.NewTextHandler(logs, nil)) })
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+	current := drivenBy(prRun(p, 42, shaB, 502), "agent-b")
+	superseded := supersededAt(p, 42, shaA, 501, current.ID, false)
+	h.store.addRun(superseded)
+	h.store.addRun(current)
+	h.github.setPullHead(repoName, 42, shaB)
+
+	res := trigger(t, h, "pull_request", "d-late", prDelivery(t, "synchronize", 42, shaA, repoName, testInstallation))
+	if len(res.Opened) != 0 || len(res.Existing) != 1 || res.Existing[0].ID != superseded.ID {
+		t.Fatalf("the superseded run answers a head GitHub no longer names: %+v", res)
+	}
+	wantUntouched(t, h, current)
+	wantUntouched(t, h, superseded)
+	if reads := h.github.headReads(); len(reads) != 1 {
+		t.Errorf("one head read decides the dedup: %v", reads)
+	}
+	wantLogged(t, logs.String(), "answered by its superseded run", "INFO")
+
+	// The control: GitHub naming shaA again makes the same delivery run it.
+	h.github.setPullHead(repoName, 42, shaA)
+	again := trigger(t, h, "pull_request", "d-late", prDelivery(t, "synchronize", 42, shaA, repoName, testInstallation))
+	if len(again.Opened) != 1 || again.Opened[0].Attempt != 2 {
+		t.Fatalf("with its head back, the commit runs again: %+v", again)
+	}
+	wantAsked(t, h, current.ID, again.Opened[0].ID)
+}
+
+// Whatever keeps the head from being KNOWN leaves the superseded run
+// answering, as today: nothing re-runs, nothing is stopped, and a warning
+// says why on its own line.
+func TestTheHeadUnknownLeavesTheSupersededRunAnswering(t *testing.T) {
+	for name, c := range map[string]struct {
+		break_ func(g *fakeGitHub)
+		says   string
+	}{
+		"GitHub refuses the read": {func(g *fakeGitHub) { g.pullHeadErr = errStatus(502) }, "head could not be read from GitHub, so the superseded run answers"},
+		"no installation token":   {func(g *fakeGitHub) { g.tokenErr = errors.New("reconnect_required") }, "no installation token to ask GitHub whether"},
+		"GitHub names no head":    {func(g *fakeGitHub) { g.setPullHead(repoName, 42, "") }, "named no head for the pull request, so the superseded run answers"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			logs := &lockedBuffer{}
+			h.integ.Configure(func(d *Deps) { d.Logger = slog.New(slog.NewTextHandler(logs, nil)) })
+			p := testPipeline(DeliveryWebhook)
+			h.store.addPipeline(p)
+			current := drivenBy(prRun(p, 42, shaB, 502), "agent-b")
+			superseded := supersededAt(p, 42, shaA, 501, current.ID, false)
+			h.store.addRun(superseded)
+			h.store.addRun(current)
+			h.github.setPullHead(repoName, 42, shaA)
+			c.break_(h.github)
+
+			res := trigger(t, h, "pull_request", "d-back", prDelivery(t, "synchronize", 42, shaA, repoName, testInstallation))
+			if len(res.Opened) != 0 || len(res.Existing) != 1 || res.Existing[0].ID != superseded.ID {
+				t.Fatalf("an unknown head leaves the superseded run answering: %+v", res)
+			}
+			wantUntouched(t, h, current)
+			wantLogged(t, logs.String(), c.says, "WARN")
+		})
+	}
+}
+
+// A run a PERSON cancelled answers its head as it always has -- the cancel
+// was somebody's decision, not a push's -- and costs no head read.
+func TestAPersonsCancelStillAnswersItsHead(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+	cancelled := prRun(p, 42, shaA, 501)
+	cancelled.Status, cancelled.Conclusion, cancelled.FinishedAt = StatusCompleted, ConclusionCancelled, testNow.Add(-time.Minute)
+	cancelled.CancelRequested, cancelled.CancelledBy = true, "v1:identity:user:"+ownerID
+	h.store.addRun(cancelled)
+	h.github.setPullHead(repoName, 42, shaA)
+
+	res := trigger(t, h, "pull_request", "d-again", prDelivery(t, "synchronize", 42, shaA, repoName, testInstallation))
+	if len(res.Opened) != 0 || len(res.Existing) != 1 || res.Existing[0].ID != cancelled.ID {
+		t.Fatalf("a person's cancel answers its head: %+v", res)
+	}
+	if reads := h.github.headReads(); len(reads) != 0 {
+		t.Errorf("a run nobody superseded asked GitHub for the head: %v", reads)
+	}
+}
+
+// The poll sees a force-push back too -- it opens the head GitHub's list
+// names -- and the superseded run does not answer it there either.
+func TestThePollSeesAForcePushBackToo(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryPoll)
+	p.Heads = map[string]string{"branch:main": shaBase, "pr:42": shaB}
+	h.store.addPipeline(p)
+	h.github.heads[repoName+"@main"] = headAnswer{SHA: shaBase}
+	h.github.setPullHead(repoName, 42, shaA)
+	dropped := drivenBy(prRun(p, 42, shaB, 502), "agent-b")
+	back := supersededAt(p, 42, shaA, 501, dropped.ID, false)
+	h.store.addRun(back)
+	h.store.addRun(dropped)
+
+	res := poll(t, h)
+	if len(res.Opened) != 1 || res.Opened[0].RunKey != back.RunKey || res.Opened[0].Attempt != 2 || res.Opened[0].Trigger != TriggerPoll {
+		t.Fatalf("the poll opens the head's next attempt: %+v", res)
+	}
+	wantAsked(t, h, dropped.ID, res.Opened[0].ID)
+}
+
+// THE GATE DISCIPLINE for R37's read: GitHub is asked whether the head came
+// back BEFORE the open gate is taken, and the gated dedup read reuses the
+// answer -- nothing GitHub is asked under the gate. The supersede's own head
+// read follows the gate's release, and only then is the dropped run asked.
+func TestTheHeadComingBackIsReadBeforeTheGate(t *testing.T) {
+	h := newHarness(t)
+	rec := &disciplineRecorder{TB: t}
+	h.gate.t, h.github.t = rec, rec
+	var (
+		mu   sync.Mutex
+		asks []gateEvent
+	)
+	inner := h.gate.run
+	h.integ.Configure(func(d *Deps) {
+		d.Gate = func(ctx context.Context, key string, fn func(context.Context) error) error {
+			held, _ := gateHeldOn(ctx)
+			mu.Lock()
+			asks = append(asks, gateEvent{key: key, enter: true, held: held})
+			mu.Unlock()
+			defer func() {
+				mu.Lock()
+				asks = append(asks, gateEvent{key: key})
+				mu.Unlock()
+			}()
+			return inner(ctx, key, fn)
+		}
+		d.GitHub = hookedGitHub{fakeGitHub: h.github, afterHeadRead: func(ctx context.Context) {
+			held, _ := gateHeldOn(ctx)
+			mu.Lock()
+			defer mu.Unlock()
+			asks = append(asks, gateEvent{key: headRead, enter: true, held: held})
+		}}
+	})
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+	dropped := prRun(p, 42, shaB, 502)
+	back := supersededAt(p, 42, shaA, 501, dropped.ID, false)
+	h.store.addRun(back)
+	h.store.addRun(dropped)
+
+	again := push42(t, h, "d-back", shaA)
+
+	if got := rec.took(); len(got) != 0 {
+		t.Errorf("the gate discipline was broken:\n  %s", strings.Join(got, "\n  "))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	openKey := OpenGateKey(again.RunKey)
+	entered := slices.IndexFunc(asks, func(e gateEvent) bool { return e.enter && e.key == openKey })
+	released := slices.IndexFunc(asks, func(e gateEvent) bool { return !e.enter && e.key == openKey })
+	var reads []int
+	for i, e := range asks {
+		if e.key == headRead {
+			reads = append(reads, i)
+			if e.held != "" {
+				t.Errorf("the head was read while %q was held", e.held)
+			}
+		}
+	}
+	if entered < 0 || released < 0 || len(reads) != 2 {
+		t.Fatalf("want the open gate taken and released and two head reads: %+v", asks)
+	}
+	if reads[0] > entered {
+		t.Errorf("the dedup's head read came after the open gate was taken: %+v", asks)
+	}
+	if reads[1] < released {
+		t.Errorf("the supersede's head read came before the open gate was released: %+v", asks)
+	}
+	stopped := slices.IndexFunc(asks, func(e gateEvent) bool { return e.enter && e.key == RunGateKey(dropped.ID) })
+	if stopped < reads[1] {
+		t.Errorf("the dropped run was asked to stop before the supersede read the head: %+v", asks)
+	}
+}
+
+// R37 is answered once, before the gate: when ANOTHER replica opens the key's
+// run between this opening's two dedup reads, the gated read finds it and
+// answers -- this opening opened nothing, so it supersedes nothing and asks
+// GitHub nothing (the other replica's opening did both).
+func TestARunAnotherReplicaOpenedBetweenTheReadsAnswersAndSupersedesNothing(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+	earlier := drivenBy(prRun(p, 42, shaA, 501), "agent-b")
+	h.store.addRun(earlier)
+	theirs := prRun(p, 42, shaC, 503)
+	theirs.QueuedAt = testNow
+	inner := h.gate.run
+	var once sync.Once
+	h.integ.Configure(func(d *Deps) {
+		d.Gate = func(ctx context.Context, key string, fn func(context.Context) error) error {
+			if key == OpenGateKey(theirs.RunKey) {
+				once.Do(func() { h.store.addRun(theirs) })
+			}
+			return inner(ctx, key, fn)
+		}
+	})
+	h.github.setPullHead(repoName, 42, shaC)
+
+	res := trigger(t, h, "pull_request", "d-push", prDelivery(t, "synchronize", 42, shaC, repoName, testInstallation))
+	if len(res.Opened) != 0 || len(res.Existing) != 1 || res.Existing[0].ID != theirs.ID {
+		t.Fatalf("the gated read answers with the other replica's run: %+v", res)
+	}
+	wantUntouched(t, h, earlier)
+	if reads := h.github.headReads(); len(reads) != 0 {
+		t.Errorf("an opening that opened nothing asked GitHub for the head: %v", reads)
+	}
+}
+
+// A run that finished on its own before it could be asked -- it passed as the
+// push read the head -- keeps its answer, and the skip is said like every
+// other: at info, on its own line.
+func TestARunThatFinishedBeforeItsAskIsPassedOverAndSaid(t *testing.T) {
+	h := newHarness(t)
+	logs := &lockedBuffer{}
+	h.integ.Configure(func(d *Deps) { d.Logger = slog.New(slog.NewTextHandler(logs, nil)) })
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+	earlier := drivenBy(prRun(p, 42, shaA, 501), "agent-b")
+	h.store.addRun(earlier)
+	h.integ.Configure(func(d *Deps) {
+		d.GitHub = hookedGitHub{fakeGitHub: h.github, afterHeadRead: func(context.Context) {
+			h.store.mu.Lock()
+			defer h.store.mu.Unlock()
+			r := h.store.runs[earlier.ID]
+			r.Status, r.Conclusion = StatusCompleted, ConclusionSuccess
+			h.store.runs[earlier.ID] = r
+		}}
+	})
+
+	push42(t, h, "d-push", shaC)
+
+	if got, _ := h.store.run(earlier.ID); got.Conclusion != ConclusionSuccess || got.CancelRequested {
+		t.Errorf("a run that finished keeps its own answer: %s cancelRequested %v", got.Conclusion, got.CancelRequested)
+	}
+	wantLogged(t, logs.String(), "had finished before it could be asked", "INFO")
 }
