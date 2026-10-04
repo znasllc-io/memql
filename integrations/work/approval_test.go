@@ -313,6 +313,111 @@ func TestDecideApprovalLandsOnAFailurePathQuestion(t *testing.T) {
 	}
 }
 
+// A PERSON'S RETRY RESUMES THE RUN UNDER A REQUEST OF ITS OWN (memql#5664).
+// Approving a failure question within four minutes of the run's dispatch put
+// the run back to `running` with nothing but its id to claim it by -- and the
+// execution that failed still held that claim -- so every agent lost it, no
+// second event came, and the sweep closed the run as abandoned. The release is
+// now a re-run request on the step the question was about, decided by the
+// person who answered, and the agents claim it under that request.
+func TestApprovingAFailureQuestionResumesUnderARequestOfItsOwn(t *testing.T) {
+	i, eng, store := newActsIntegration(t)
+	addVersion(store, actRunId, "fetch", 0, 1, "done", nil, nil)
+	addVersion(store, actRunId, "draft", 1, 1, "failed", nil, nil)
+	req := work.FailureApproval(work.ApprovalKindFeedback, actRunId, "draft", work.SymptomHuman, "prompt is too long", "q", work.Evidence{}, testNow, time.Hour)
+	raw, err := json.Marshal(map[string]any{
+		"id": "v1:work:approval:a1", "runId": actRunId, "ownerUserId": actOwner, "stepKey": "draft",
+		"kind": req.Kind, "subject": req.Subject, "artifactHash": req.ArtifactHash, "options": req.Options,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approval map[string]any
+	if err := json.Unmarshal(raw, &approval); err != nil {
+		t.Fatal(err)
+	}
+	eng.reply("workApprovalsForOwner", approval)
+	run := actRunRow(runStatusWaiting, "fetch", "draft")
+	run["waitingOn"] = map[string]any{"kind": "approval", "subject": "v1:work:approval:a1", "approvalKind": req.Kind}
+	eng.reply("workRunForOwner", run)
+
+	if _, err := i.handleDecideApproval(callerContext(actOwner), map[string]any{"approvalId": "v1:work:approval:a1", "decision": "approved"}, 0); err != nil {
+		t.Fatalf("decideApproval: %v", err)
+	}
+	update := argsOf(t, eng, "updateWorkRun")
+	rerun, _ := update["rerun"].(map[string]any)
+	if update["status"] != runStatusRunning || rerun["reason"] != rerunReasonRerun || rerun["stepKey"] != "draft" || rerun["requestId"] == nil || rerun["requestId"] == "" {
+		t.Fatalf("update = %v, want the run released under a re-run request on the step the question was about", update)
+	}
+	if rerun["requestedBy"] != actOwner {
+		t.Errorf("requestedBy = %v, want the person who decided", rerun["requestedBy"])
+	}
+	if versions, _ := rerun["versions"].(map[string]any); versions["draft"] != float64(2) {
+		t.Errorf("versions = %v, want the step's next version", rerun["versions"])
+	}
+	if _, written := update["cancelRequested"]; written {
+		t.Errorf("the release wrote cancelRequested = %v", update["cancelRequested"])
+	}
+
+	released := map[string]any{}
+	for k, v := range run {
+		released[k] = v
+	}
+	for k, v := range update {
+		if k != "runId" {
+			released[k] = v
+		}
+	}
+	claims := &pkClaims{}
+	if !claims.ClaimWithTTL(context.Background(), runClaimName, actRunId, runClaimTTL) {
+		t.Fatal("could not stand in for the failing execution's claim")
+	}
+	agent, _ := newTestIntegration(t)
+	d := &signallingDispatcher{}
+	agent.SetDispatcher(d)
+	agent.SetRunClaimer(claims)
+	agent.HandleRunEvent(remedyEvent(released))
+	if got := d.settled(t, 1); len(got) != 1 || got[0].RerunRequestId == "" {
+		t.Fatalf("the released run was dispatched %+v, want once under its request: on the bare run id it loses to the execution that failed", got)
+	}
+}
+
+// Only a failure question's Retry is a re-run. A budget approval the model
+// seam raised parks a step mid-flight on a person's word, and approving it
+// resumes that step; writing a request would run it again as a new version.
+func TestReleasingAnApprovalThatIsNotAFailureQuestionWritesNoRequest(t *testing.T) {
+	i, eng, store := newActsIntegration(t)
+	addVersion(store, actRunId, "fetch", 0, 1, "done", nil, nil)
+	addVersion(store, actRunId, "draft", 1, 1, "running", nil, nil)
+	req := work.BudgetApproval(actRunId, "draft", work.CeilingBreach{Ceiling: "maxTokens", Limit: "10", Actual: "12", Reason: "over"}, testNow, time.Hour)
+	raw, err := json.Marshal(map[string]any{
+		"id": "v1:work:approval:a1", "runId": actRunId, "ownerUserId": actOwner, "stepKey": "draft",
+		"kind": req.Kind, "subject": req.Subject, "artifactHash": req.ArtifactHash,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approval map[string]any
+	if err := json.Unmarshal(raw, &approval); err != nil {
+		t.Fatal(err)
+	}
+	eng.reply("workApprovalsForOwner", approval)
+	run := actRunRow(runStatusWaiting, "fetch", "draft")
+	run["waitingOn"] = map[string]any{"kind": "approval", "subject": "v1:work:approval:a1", "approvalKind": req.Kind}
+	eng.reply("workRunForOwner", run)
+
+	if _, err := i.handleDecideApproval(callerContext(actOwner), map[string]any{"approvalId": "v1:work:approval:a1", "decision": "approved"}, 0); err != nil {
+		t.Fatalf("decideApproval: %v", err)
+	}
+	update := argsOf(t, eng, "updateWorkRun")
+	if update["status"] != runStatusRunning {
+		t.Fatalf("status = %v, want running", update["status"])
+	}
+	if rerun, written := update["rerun"]; written {
+		t.Fatalf("a budget approval's release wrote a re-run request %v", rerun)
+	}
+}
+
 // TestDecideApprovalRefusesAnApprovalTheCallerCannotSee. The caller's own
 // pending list IS the ownership check.
 func TestDecideApprovalRefusesAnApprovalTheCallerCannotSee(t *testing.T) {

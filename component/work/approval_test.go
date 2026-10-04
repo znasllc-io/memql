@@ -141,6 +141,27 @@ func TestAnswerAbandonsReadsTheOfferedOptionOnly(t *testing.T) {
 	}
 }
 
+// A failure question is told from every other approval by what it offers, as
+// built and as the graph returns it: its Retry is a request to run the failed
+// step again (memql#5664), while releasing any other approval resumes a step
+// that was waiting on a person.
+func TestIsFailureQuestionReadsBothOffers(t *testing.T) {
+	asked := FailureApproval(ApprovalKindBudget, "run-1", "s", SymptomEnvironment, "e", "q", Evidence{}, t0, time.Hour)
+	if !IsFailureQuestion(asked.Options) {
+		t.Fatal("a failure question as built did not read as one")
+	}
+	if !IsFailureQuestion(roundTrip(t, map[string]any{"options": asked.Options})["options"]) {
+		t.Fatal("a failure question as stored did not read as one")
+	}
+	feedback := FeedbackApproval("run-1", "s", "which file?", []map[string]any{{"label": "Abandon", "value": FailureAnswerAbandon}}, Evidence{}, t0, time.Hour)
+	if IsFailureQuestion(feedback.Options) {
+		t.Fatal("a question offering Abandon alone read as a failure question")
+	}
+	if IsFailureQuestion(nil) || IsFailureQuestion([]any{"retry", "abandon"}) {
+		t.Fatal("options with no offers read as a failure question")
+	}
+}
+
 // roundTrip is the subject as the graph returns it: JSON in, JSON out, so a
 // []map[string]any comes back as []any and an int as a float64.
 func roundTrip(t *testing.T, m map[string]any) map[string]any {

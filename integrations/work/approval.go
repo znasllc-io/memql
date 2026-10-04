@@ -208,7 +208,11 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	if decision == "answered" && work.AnswerAbandons(approval["options"], answer) {
 		runDecision = decisionAbandoned
 	}
-	resumed, err := i.resumeParkedRun(writeCtx, runId, approvalId, runDecision, now)
+	var retry *failureRetry
+	if work.IsFailureQuestion(approval["options"]) {
+		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: strings.TrimSpace(ac.UserId)}
+	}
+	resumed, err := i.resumeParkedRun(writeCtx, runId, approvalId, runDecision, retry, now)
 	if err != nil {
 		// The DECISION landed. Failing the whole call now would tell the
 		// caller their answer was not recorded when it was, and a retry
@@ -287,7 +291,17 @@ func currentArtifactHash(kind, storedHash string, subject map[string]any) string
 // `human` symptom and the loop decides what the run does about it; the run's
 // terminal status here is the honest executor-free reading of "deny fails the
 // step as human" (design section E).
-func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, decision string, now time.Time) (bool, error) {
+//
+// A FAILURE-PATH QUESTION'S RETRY IS A REQUEST OF ITS OWN (memql#5664). retry
+// is set only for a question the failure path raised (work.IsFailureQuestion),
+// and then the run is released under a re-run request on the step it failed
+// at (failureRetryRequest), decided by the person who answered. Released bare,
+// the run met the claim the failing execution still held -- a lease of four
+// minutes from its dispatch, and a person answers within that as a rule --
+// every agent lost it, no second event came, and the sweep closed the run as
+// abandoned. Every other approval is released bare, as before: what it parked
+// is a step waiting on a person, not a failure to run again.
+func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, decision string, retry *failureRetry, now time.Time) (bool, error) {
 	if runId == "" {
 		return false, nil
 	}
@@ -329,11 +343,67 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 	default:
 		fields["status"] = runStatusRunning
 		fields["heartbeatAt"] = rfc(now)
+		if retry != nil {
+			if request, stale, ok := i.failureRetryRequest(ctx, run, runId, *retry, now); ok {
+				fields["rerun"] = request
+				fields["staleSteps"] = stale
+			}
+		}
 	}
 	if err := st.updateRun(ctx, runId, fields); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// failureRetry is what releasing a run off a failure-path question says beyond
+// `running`: the step the run failed at, and who decided to try it again.
+type failureRetry struct {
+	stepKey   string
+	decidedBy string
+}
+
+// failureRetryRequest is the re-run request a failure question's Retry
+// releases its run under: the step the run failed at -- the top-level step a
+// nested key belongs to -- and every step after it, each as its next version,
+// the completed prefix served and never run again. It is the request a
+// person's rerunStep writes (rerun.go), so the agents serve it on that path,
+// under a once-claim of its own.
+//
+// ok is false for a run no request can be written for, and the run is then
+// released bare, as it was before: a run that is not the executor's to run
+// again (actRun.requireExecutable -- a goalless scheduler journal among them,
+// which the event path never dispatches), a question naming no step, or one
+// naming a step the run never recorded. A version read that fails is the same
+// answer, said in the log: the decision has landed, and a run left on a
+// decided question would wait for an answer nobody can give again.
+func (i *Integration) failureRetryRequest(ctx context.Context, row map[string]any, runId string, retry failureRetry, now time.Time) (map[string]any, []string, bool) {
+	run := actRun{row: row, id: runId, owner: rowString(row, "ownerUserId"), order: topLevelOrder(rowStringSlice(row, "stepOrder"))}
+	key := topLevelStepKey(retry.stepKey)
+	if key == "" || run.requireExecutable() != nil || run.requireTopLevel(key) != nil {
+		return nil, nil, false
+	}
+	versions, err := i.readVersions(ctx, runId, run.order)
+	if err != nil {
+		i.log().Warn("work: the run's versions could not be read; releasing it without a request of its own",
+			"component", "work.approval", "run", runId, "step", key, "err", err)
+		return nil, nil, false
+	}
+	plan, err := work.PlanRerun(run.order, versions.byKey, key)
+	if err != nil {
+		return nil, nil, false
+	}
+	return rerunRequest(rerunReasonRerun, key, work.Override{}, plan.Versions, nil, "", retry.decidedBy, now), plan.Stale, true
+}
+
+// topLevelStepKey is the run's own step a key belongs to: the key itself, or
+// the first segment of a nested one (`for_x/0/touch` belongs to `for_x`).
+func topLevelStepKey(key string) string {
+	key = strings.TrimSpace(key)
+	if before, _, nested := strings.Cut(key, "/"); nested {
+		return before
+	}
+	return key
 }
 
 // decisionAbandoned is not a decision anybody records -- the approval row

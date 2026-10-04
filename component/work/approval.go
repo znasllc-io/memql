@@ -211,6 +211,21 @@ func AnswerAbandons(options any, answer map[string]any) bool {
 	if value, _ := answer["value"].(string); value != FailureAnswerAbandon {
 		return false
 	}
+	return offers(options, FailureAnswerAbandon)
+}
+
+// IsFailureQuestion reports an approval the failure path raised
+// (FailureApproval): one offering both Retry and Abandon. Its approve, and an
+// answer other than Abandon, means "run the step that failed again", which is
+// how the decide side tells a retry from the release of a step that is waiting
+// on a person.
+func IsFailureQuestion(options any) bool {
+	return offers(options, FailureAnswerRetry) && offers(options, FailureAnswerAbandon)
+}
+
+// offers reports whether an approval's options -- as built, or as decoded
+// from a row -- include value.
+func offers(options any, value string) bool {
 	var offered []map[string]any
 	switch list := options.(type) {
 	case []map[string]any:
@@ -223,7 +238,7 @@ func AnswerAbandons(options any, answer map[string]any) bool {
 		}
 	}
 	for _, o := range offered {
-		if v, _ := o["value"].(string); v == FailureAnswerAbandon {
+		if v, _ := o["value"].(string); v == value {
 			return true
 		}
 	}
