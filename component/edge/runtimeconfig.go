@@ -12,6 +12,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/config"
 	"github.com/znasllc-io/memql/component/frontdoor"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // runtimeConfigPath is the well-known, root-relative path every hosted site
@@ -115,8 +116,11 @@ type RuntimeConfig struct {
 	// Settings is the site row's runtime settings (epic memql#4906, decision
 	// P7): plain string values under identifier keys, written whole by
 	// updateSiteSettings and read by the bundle as `config.settings.<key>`.
-	// A connected storefront inherits its store's API version when the site
-	// has no explicit storefrontApiVersion setting.
+	// For a storefront, the entry of storeSettings for the store the in-force
+	// binding names is merged over them (memql#5602), so a value that belongs
+	// to one store reaches the bundle under the same key on every destination.
+	// A connected storefront inherits its store's API version when neither
+	// sets an explicit storefrontApiVersion.
 	// This is what lets ONE bundle serve TWO deployables against different
 	// endpoints with no rebuild -- the document differs per site, the bytes
 	// do not.
@@ -343,6 +347,19 @@ func runtimeConfigForSite(ctx context.Context, site *Site, env func(string) stri
 // aliased the cached map would let one encoder's view drift from another's
 // if anything ever mutated it. Connected storefronts inherit the store's API
 // version unless the site pins one explicitly. Never nil.
+//
+// THE IN-FORCE STORE'S OWN SETTINGS ARE MERGED OVER THE SITE'S (memql#5602).
+// A value that belongs to one store -- a Customer Account API client, a
+// wholesale adapter -- is keyed by that store's id in StoreSettings, and the
+// store is the one the binding on THIS Site names. Nothing here asks whether a
+// preview is happening: under a grant previewSite has already substituted the
+// preview binding, so the testing store's values arrive the same way the
+// testing store does (design D7). A store's value overrides the site's for
+// that store alone; a key no store sets keeps the site's value; an unbound
+// destination gets the site's settings and no store's. The document keeps its
+// shape -- one flat `settings` object -- so a bundle reading
+// config.settings.customerAccountClientId needs no change. KIND IS THE GATE,
+// as it is for the storefront block.
 func settingsForSite(site *Site) map[string]string {
 	out := map[string]string{}
 	if site == nil {
@@ -350,6 +367,13 @@ func settingsForSite(site *Site) map[string]string {
 	}
 	for k, v := range site.Settings {
 		out[k] = v
+	}
+	if site.Kind == storefrontKind {
+		if storeId := memql.BareShortId(strings.TrimSpace(bindingStoreId(site.Binding))); storeId != "" {
+			for k, v := range site.StoreSettings[storeId] {
+				out[k] = v
+			}
+		}
 	}
 	if site.Kind == storefrontKind && site.Store != nil && strings.TrimSpace(out["storefrontApiVersion"]) == "" {
 		if version := strings.TrimSpace(site.Store.APIVersion); version != "" {

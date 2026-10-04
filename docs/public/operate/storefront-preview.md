@@ -104,9 +104,15 @@ are each refused for a storefront with `storefront_has_no_candidate`
 (memql#5601). A version is tried on Testing by publishing it, which reaches both
 destinations, and rolled back if it should not serve.
 
-Site runtime settings are shared between destinations. Store-specific Customer
-Account API settings still require separate work; independent catalog bindings
-do not imply independent account-client settings.
+Site runtime settings are shared between destinations. Values that belong to
+ONE STORE -- the Customer Account API client of that store's Headless channel,
+the wholesale adapter configured for it -- go in the deployable's
+`storeSettings`, keyed by store id, and travel with the store each destination
+selects (memql#5602): the edge merges the entry of the in-force binding's store
+over `settings`, so Testing hands the testing store its own client and
+Production hands the live store its own. The document keeps its shape: a bundle
+reads `config.settings.customerAccountClientId` either way. See
+[Deployables](deployables.md#settings-that-belong-to-one-store).
 
 ## Store connection state
 

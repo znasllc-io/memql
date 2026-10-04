@@ -296,7 +296,28 @@ func siteFromRow(r map[string]any) *Site {
 		CandidateRef:         rowString(r, "candidateRef"),
 		PreviewBinding:       rowObject(r, "previewBinding"),
 		Settings:             rowStringMap(r, "settings"),
+		StoreSettings:        rowStoreSettings(r, "storeSettings"),
 	}
+}
+
+// rowStoreSettings projects v1:platform:site.storeSettings (memql#5602): an
+// object of store id to an object of plain string values. Each store's map is
+// projected as rowStringMap projects `settings`, keeping only the entries that
+// ARE strings, and a store entry that is not an object is dropped whole -- the
+// write guard admits neither, so either is a raw write that bypassed it.
+// Absent, null or a non-object yields an empty map, never nil.
+func rowStoreSettings(m map[string]any, key string) map[string]map[string]string {
+	out := map[string]map[string]string{}
+	stores, ok := m[key].(map[string]any)
+	if !ok {
+		return out
+	}
+	for storeId := range stores {
+		if _, isObject := stores[storeId].(map[string]any); isObject {
+			out[storeId] = rowStringMap(stores, storeId)
+		}
+	}
+	return out
 }
 
 // rowStringMap projects an object field whose values are meant to be plain

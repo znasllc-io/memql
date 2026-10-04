@@ -784,6 +784,46 @@ Enforced beside the engine's write path
 (`component/memql/platform_site_settings_guard.go`), not in the mutation
 body: a mutation sees a value and never an object's KEYS.
 
+### Settings that belong to one store
+
+A `shopify_storefront` deployable also carries **`storeSettings`**
+(memql#5602): for each store, by its bare id, the values that belong to THAT
+store rather than to the site -- the Customer Account API client id of one
+store's Headless channel, the wholesale adapter configured for one store.
+
+```
+mutation updateSiteStoreSettings(siteId: "v1:platform:site:abc", storeSettings: {
+  "acme":     {customerAccountClientId: "shp_live_client", wholesaleAdapter: "shopifyB2B"},
+  "acme-dev": {customerAccountClientId: "shp_dev_client",  wholesaleAdapter: "customerTag"}
+})
+```
+
+The edge merges the entry of the store the in-force binding names over
+`settings`, into the same flat `settings` object of the runtime document, so a
+bundle reads `config.settings.customerAccountClientId` as it always did.
+Production is served its own store's values; the Testing destination, which
+swaps in the Testing store, is served the Testing store's
+([storefront-preview.md](storefront-preview.md)). Nothing branches on which
+destination it is: the store the edge chose decides, so both destinations
+bound to one store get that store's values.
+
+- **A store's value overrides the site's for that store alone.** A key no
+  store sets keeps the site's value, and an unbound destination gets the
+  site's settings and no store's. A value that belongs to one store belongs in
+  `storeSettings` only: left in `settings`, it reaches every store that does
+  not set its own.
+- **Keyed by store, not by destination.** Re-pointing a binding picks up the
+  new store's entry; pointing it back restores the old one.
+- **The same rules as `settings`, store by store** -- key form, the `Ref`
+  refusal, plain strings, the per-deployable caps -- plus bare store ids
+  (`acme-widgets`, never `v1:shopify:store:acme-widgets`) and at most 16
+  stores. Public by construction, like every setting.
+- **The write REPLACES**, for `updateSiteSettings`' reason, and has its
+  authorization: the deployable's owner, or a cluster owner. It needs no
+  store part -- which store a deployable is bound to stays
+  `updateSiteStoreBinding`'s -- and an entry for a store the deployable is not
+  bound to is inert.
+
 ---
 
 ## Traffic and health

@@ -238,6 +238,12 @@ right.
       on the site row, which the same document carries. Public by
       construction: the document is served unauthenticated to every visitor,
       so a value there is a value anybody can read.
+- [ ] A value that belongs to ONE STORE -- the Customer Account API client id,
+      the wholesale adapter -- is a `storeSettings` entry under that store's
+      id, not a `settings` key (memql#5602). The edge merges the in-force
+      store's entry into `settings`, so the bundle reads the same key whether
+      it is served against the live store or the testing one, and the testing
+      store is never handed the live store's client.
 - [ ] Promotion is checked by pointing the SAME bundle at both stores and
       confirming each serves its own catalog. A bundle that passes against
       one store proves nothing about promotion.

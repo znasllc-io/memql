@@ -89,6 +89,8 @@ func TestEngineExecutorSiteByHostnameProjectsTheRow(t *testing.T) {
 		// %+v, so a failure here reads as "want X, got X" -- which is what
 		// this line exists to stop somebody hunting for.
 		Settings: map[string]string{},
+		// Empty and never nil for the same reason (memql#5602).
+		StoreSettings: map[string]map[string]string{},
 	}
 	// reflect.DeepEqual rather than *got != *want: Site carries the row's
 	// `binding` object as a map now (memql#4345), and a struct holding a map

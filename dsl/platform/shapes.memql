@@ -101,6 +101,7 @@ shape site siteFull {
   candidateRef
   previewBinding
   settings
+  storeSettings
   packageId
   packageDeployableName
   accountId

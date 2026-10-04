@@ -162,6 +162,17 @@ type Site struct {
 	// slipped one past it must not put a number where a bundle reads a
 	// string.
 	Settings map[string]string
+
+	// StoreSettings is the site row's per-store runtime settings (memql#5602):
+	// for each store id, BARE, the plain string values that belong to that
+	// store rather than to the site -- the Customer Account API client of one
+	// store's Headless channel, the wholesale adapter configured for one
+	// store. settingsForSite merges the map of the store the in-force binding
+	// names over Settings, so the values travel with whichever store the edge
+	// chose: Production's binding, or under a grant the Testing binding
+	// previewSite substituted. Never nil; only string values survive the
+	// projection, for Settings' reason.
+	StoreSettings map[string]map[string]string
 }
 
 // BoundStore is the v1:shopify:store row as the SERVING PATH sees it: the

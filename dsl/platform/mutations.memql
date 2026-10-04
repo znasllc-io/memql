@@ -579,6 +579,38 @@ mutation site updateSiteSettings {
   }
 }
 
+/// Replace a storefront's PER-STORE runtime settings (memql#5602): for each store id, the values
+/// that belong to that store rather than to the site -- a Customer Account API client id, a
+/// wholesale adapter. The edge merges the entry of the store the in-force binding names over
+/// `settings`, so Production is served its store's values and the Testing destination its testing
+/// store's, from one document shape.
+///
+/// A REPLACE, NOT A MERGE, for updateSiteSettings' reason: `storeSettings` is stamped from the
+/// required arg, so an empty object clears every store's entry and dropping one store's entry is
+/// expressible. The editor sends the whole map it shows.
+///
+/// The shape half is here: an object. The half that decides -- bare store ids as keys, at most 16
+/// of them, and every store's values held to the same key form, `Ref` refusal, value type and caps
+/// `settings` is, plus the systemOwned refusal -- is the Go guard beside the settings guard
+/// (component/memql/platform_site_settings_guard.go), because a mutation body cannot see an
+/// object's keys. NOT A PLACE FOR A SECRET: every value is served to every visitor.
+///
+/// AUTHORIZATION is updateSiteSettings' exactly: the concept's composite tier plus
+/// guardRowAuthzWrite -- the row's owner, or a cluster owner through the explicit escape -- and no
+/// capability part, because these are runtime settings like `settings`, not a store binding. Which
+/// store a site is bound to stays the `store` part's (updateSiteStoreBinding); an entry for a store
+/// the site is not bound to is inert.
+mutation site updateSiteStoreSettings {
+  args {
+    siteId         string!
+    storeSettings  object!
+  }
+  update {
+    id:            args.siteId
+    storeSettings: args.storeSettings
+  }
+}
+
 /// Turn this deployable's SHOPPER SURFACE on or off (epic memql#5532, issue memql#5551).
 ///
 /// WHAT IT SWITCHES: POST /_memql/forms/{pack}/{name} and GET /_memql/reads/{pack}/{name} on this

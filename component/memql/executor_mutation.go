@@ -1459,6 +1459,12 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := e.validateSiteSettings(ctx, payload, meta.priorSystemOwned, actor); err != nil {
 			return nil, meta, err
 		}
+		// Per-store settings (memql#5602): the same rules for the values the
+		// edge merges over `settings` for one store, plus the bare store ids
+		// they are keyed by. See platform_site_settings_guard.go.
+		if err := e.validateSiteStoreSettings(ctx, payload, meta.priorSystemOwned, actor); err != nil {
+			return nil, meta, err
+		}
 		// The storefront binding (epic memql#5530, issue memql#5538), beside the
 		// four above and for their reason: whether the caller may read the store
 		// row the binding NAMES is a cross-row question, and no mutation body can
