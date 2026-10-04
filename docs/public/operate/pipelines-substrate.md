@@ -856,19 +856,17 @@ never replaced unless the dispatch says so, `linux/amd64` only. It carries:
   ca-certificates and the PostgreSQL client (`psql`, `pg_isready`);
 - uid 1000 (`memql`), never root, with git trusting `/workspace`.
 
-`memql-package.yaml` names the image by its first tag, `1.0.0`, until the
-workflow has run on main -- a dispatch-only workflow cannot run before it is on
-the default branch -- and then by the digest that run's summary prints, pinned
-in a one-line follow-up. The manifest's test skips its digest check while the
-reference is that tag, and fails on any other reference that is not a digest.
+`memql-package.yaml` names the image by the digest its run's summary printed
+(version `1.0.0`). A rebuild takes a new version and a new pin: the manifest's
+test fails on any reference that is not a digest of this repository.
 
 ---
 
 ## Owner actions
 
-- [ ] **Make two GHCR packages public**: `memql-toolchain`, once
-  `build-toolchain-image.yml` has published it, and `ci-timescaledb`, the
-  engine pipeline's Postgres sidecar. A step's pod pulls every image with no
+- [ ] **Make the `ci-timescaledb` GHCR package public**: the engine
+  pipeline's Postgres sidecar (`memql-toolchain` is public already). A step's
+  pod pulls every image with no
   registry credential -- its ServiceAccount carries no pull secret -- so a
   private package fails every step that uses it `pipeline_image_pull_failed`.
   On GitHub: the organization's packages, the package, Package settings, Change
@@ -884,10 +882,6 @@ reference is that tag, and fails on any other reference that is not a digest.
   runs, and each log and artifact is a `pipeline_artifact_missing` note ("this
   node has no object storage configured") instead of a Library file. A local
   cluster has both, for its in-cluster Azurite.
-- [ ] **Pin the toolchain by digest after its first build**: dispatch
-  `build-toolchain-image.yml` on main with version `1.0.0`, make the package
-  public, and replace `ghcr.io/znasllc-io/memql-toolchain:1.0.0` in
-  `memql-package.yaml` with the digest the run's summary prints.
 - [ ] **Bring a cluster that predates the substrate onto it**: an install whose
   Argo CD runs its own AppProject adds `memql-pipelines` as a destination before
   it syncs a revision carrying the pipelines component (the repository's `memql`

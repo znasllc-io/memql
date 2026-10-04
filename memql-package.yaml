@@ -41,13 +41,12 @@ name: memql
 pipeline:
   # deploy/toolchain-image: Go 1.27.1, Node 22, protoc 33.4, kubectl 1.32.13, the
   # Docker client (no daemon), git, make, jq, python3 and the PostgreSQL client,
-  # as uid 1000. Named by TAG until build-toolchain-image.yml has run on main --
-  # a dispatch-only workflow cannot run before it is on the default branch --
-  # and then pinned by the digest its run summary prints. The test skips its
-  # digest check while this is the 1.0.0 tag and fails on any other reference
-  # that is not a digest. A step's Job pulls its images with no registry
+  # as uid 1000. Pinned by the digest build-toolchain-image.yml's run on main
+  # printed for version 1.0.0 (run 37243543561); a rebuild takes a new version
+  # and a new pin, and the manifest's test fails on any reference that is not a
+  # digest of this repository. A step's Job pulls its images with no registry
   # credential, so this package and the Postgres one must be public.
-  image: ghcr.io/znasllc-io/memql-toolchain:1.0.0
+  image: ghcr.io/znasllc-io/memql-toolchain@sha256:90d080d8c2402c3b539b9ed129872069cd89bdf6aacd92117b62cc3836873fc2
   services:
     # TimescaleDB + pgvector: the mirror ci.yml's db-tests lane runs, at the same
     # digest and with the same user, password and database (the test holds all
