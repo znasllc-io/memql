@@ -47,7 +47,7 @@ const messageFor = (s: AddClusterState, field: ConnectField): string | undefined
 // D6 -- the localhost family, refused by name
 // ---------------------------------------------------------------------------
 
-test("every spelling of the local machine is refused, and the message points at Install", () => {
+test("every spelling of the local machine is refused, and the message points at the local cluster", () => {
   const family = [
     "localhost",
     "memql.localhost",
@@ -72,8 +72,8 @@ test("every spelling of the local machine is refused, and the message points at 
     assert.notEqual(problem, undefined, `${domain} must be refused here`);
     assert.match(
       problem!,
-      /Install a local cluster/,
-      `${domain}'s refusal must name the other flow -- an operator who is told "no" and not "there" tries again`,
+      /choose the local cluster instead/,
+      `${domain}'s refusal must name the other way in -- an operator who is told "no" and not "there" tries again`,
     );
   }
 });
@@ -120,10 +120,10 @@ test("the two flows diverge on memql.localhost, and each is right", () => {
 // D4/D5 -- two primary answers, everything else derived
 // ---------------------------------------------------------------------------
 
-test("the domain is required, and its message says what is derived from it", () => {
+test("the domain is required, and its message says what to enter", () => {
   const s = connectForm({ name: "staging" });
   assert.equal(s.connectDraft(), undefined);
-  assert.match(messageFor(s, "domain")!, /required/);
+  assert.equal(messageFor(s, "domain"), "Enter the cluster's domain.");
 });
 
 test("two answers are enough: the endpoint is derived", () => {
@@ -186,8 +186,8 @@ test("the derivation hint is composed by the real function, not re-implemented",
   // instead of the endpoint box, so the whole sentence is the contract.
   // (CodeQL js/regex/missing-regexp-anchor flagged the loose form, and it was
   // right about the assertion even though this is a test.)
-  assert.equal(derivationLine("example.com"), `Will connect to ${composeEndpointFromDomain("example.com")}.`);
-  assert.doesNotMatch(derivationLine(""), /api\.:443/, "an empty domain must not compose a hole");
+  assert.equal(derivationLine("example.com"), `Connects to ${composeEndpointFromDomain("example.com")}`);
+  assert.equal(derivationLine(""), "", "an empty domain says nothing rather than compose a hole");
 });
 
 // ---------------------------------------------------------------------------
@@ -326,14 +326,11 @@ test("an Advanced endpoint is what gets probed, not the one it replaced", () => 
 test("pasting the API host into the domain box is named, not composed", () => {
   const problem = connectDomainProblem("api.example.com");
   assert.ok(problem !== undefined, "api.example.com was accepted as a domain");
-  assert.match(problem, /api host/i);
+  assert.match(problem, /without "api\."/);
   // The PHRASE, not the bare host: it is the instruction that has to be there,
   // and asserting the surrounding words is what proves the message tells the
   // operator what to type rather than merely mentioning a domain somewhere.
-  assert.ok(
-    problem.includes("enter `example.com` here"),
-    `the message does not say what to type instead: ${problem}`,
-  );
+  assert.ok(problem.includes("for example example.com"), `the message does not say what to type instead: ${problem}`);
 });
 
 // The whole front-door role set, not just `api.` -- they are all hosts MemQL
@@ -422,12 +419,14 @@ test("a probe that discovers nothing omits issuer rather than writing empty", as
 test("a local install is refused from a remote window, with the reason", () => {
   const problem = localInstallRemoteProblem("ssh-remote");
   assert.ok(problem !== undefined, "a remote window was allowed to install a local cluster");
-  assert.match(problem, /ssh-remote/, "the refusal does not say what is different about this window");
+  assert.match(problem, /Remote SSH/, "the refusal does not say what is different about this window");
+  assert.doesNotMatch(problem, /ssh-remote|a ssh/, "the remoteName id, not the name a person reads");
   assert.match(
     problem,
-    /Connect to an existing cluster/,
+    /Open a local VS Code window/,
     "an operator told only \"no\" tries again; the refusal must name the way through",
   );
+  assert.doesNotMatch(problem, /--/, "one sentence, not a paragraph of reasons");
 });
 
 test("every remote kind is refused, and a local window is not", () => {

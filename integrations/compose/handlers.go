@@ -52,6 +52,9 @@ func (i *Integration) handleRunRecipe(ctx context.Context, args map[string]any, 
 	if err != nil {
 		return nil, err
 	}
+	if len(refs) == 0 && strings.TrimSpace(stringOf(row["description"])) == "" {
+		return nil, fmt.Errorf("compose: this recipe needs a brief or reference sources")
+	}
 
 	name := strings.TrimSpace(stringOf(args["name"]))
 	if name == "" {
@@ -62,6 +65,7 @@ func (i *Integration) handleRunRecipe(ctx context.Context, args map[string]any, 
 		Name:       name,
 		Statement:  stringOf(row["description"]),
 		Format:     format,
+		OutputKind: stringOf(row["outputKind"]),
 		Sources:    refs,
 		TemplateId: strings.TrimSpace(stringOf(row["templateId"])),
 		FolderId:   strings.TrimSpace(stringOf(row["folderId"])),
@@ -103,7 +107,9 @@ func selectorsToSources(raw any) ([]SourceRef, error) {
 				items = append(items, m)
 			}
 		} else if raw == nil {
-			return nil, fmt.Errorf("compose: that recipe names no sources, so running it would compose from nothing")
+			// A brief-only composition is a valid recipe. The caller checks
+			// that it still has a brief before opening any work.
+			return nil, nil
 		} else {
 			return nil, fmt.Errorf("compose: the recipe's sourceSelectors are not a list")
 		}
@@ -117,14 +123,30 @@ func selectorsToSources(raw any) ([]SourceRef, error) {
 		kind := strings.TrimSpace(stringOf(m["kind"]))
 		selector := strings.TrimSpace(stringOf(m["selector"]))
 		label := strings.TrimSpace(stringOf(m["label"]))
+		content := false
+		if raw, exists := m["content"]; exists {
+			var valid bool
+			content, valid = raw.(bool)
+			if !valid || (content && kind != "library_file") {
+				return nil, fmt.Errorf("compose: reference contents require a library_file selector and a boolean content flag")
+			}
+		}
 		if selector == "" {
 			return nil, fmt.Errorf("compose: sourceSelectors[%d] (%s) names nothing", idx, kind)
+		}
+		includeImages := false
+		if raw, exists := m["includeImages"]; exists {
+			var valid bool
+			includeImages, valid = raw.(bool)
+			if !valid || (includeImages && (!content || kind != "library_file")) {
+				return nil, fmt.Errorf("compose: image assets require an explicit library_file reference")
+			}
 		}
 		switch kind {
 		case "concept_query", "query":
 			out = append(out, SourceRef{Kind: KindQuery, Ref: selector, Label: label})
 		case "library_file":
-			out = append(out, SourceRef{Kind: KindLibraryFile, Ref: selector, Label: label})
+			out = append(out, SourceRef{Kind: KindLibraryFile, Ref: selector, Label: label, Content: content, IncludeImages: includeImages})
 		case "library_folder":
 			return nil, fmt.Errorf("compose: sourceSelectors[%d] names a folder, and there is no Library read that answers %q -- a file's folderId is its initial filing only, so a folder selector would silently omit every file since moved. Name a concept_query over the artifact index instead", idx, selector)
 		default:

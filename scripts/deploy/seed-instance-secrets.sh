@@ -105,10 +105,10 @@ DRY_RUN="$(cap_bool_str dryRun false)"
 readonly MERGE_SHELL_SECRET="memql-secrets"
 readonly CNPG_BOOTSTRAP_SECRET="memql-db-app-creds"
 
-# The seven vault entries the mesh reads. Listed rather than discovered: the
+# The vault entries the mesh reads. Listed rather than discovered: the
 # failure worth catching is a new required credential arriving in the engine
 # and nobody extending this list, and discovery would wave that through.
-readonly VAULT_ENTRIES="memql-master-key memql-operator-key memql-node-bootstrap-token memql-identity-signing-key-b64 memql-identity-signing-key-created-at memory-nodes-database-dsn memory-nodes-database-direct-dsn"
+readonly VAULT_ENTRIES="memql-master-key memql-operator-key memql-node-bootstrap-token memql-identity-signing-key-b64 memql-identity-signing-key-created-at memory-nodes-database-dsn memory-nodes-database-direct-dsn memql-campaigns-unsubscribe-secret"
 
 WORK=""
 CREATED=0
@@ -363,6 +363,7 @@ function main() {
     # DECRYPTS, the other AUTHENTICATES a cluster-owner bearer over the network.
     ensure_generated "memql-operator-key"                    gen_hex32
     ensure_generated "memql-node-bootstrap-token"            gen_hex32
+    ensure_generated "memql-campaigns-unsubscribe-secret"     gen_hex32
     # Every identity replica must derive the SAME Ed25519 key, kid and JWKS
     # from this one seed; divergent keysets fail roughly half of all auth.
     ensure_generated "memql-identity-signing-key-b64"        gen_key_b64

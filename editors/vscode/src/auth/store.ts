@@ -1,35 +1,10 @@
 // Where a signed-in cluster's tokens live, and how they are taken away again.
 //
-// -----------------------------------------------------------------------------
-// THE SPLIT, AND WHY IT IS NOT THE ONE memql#3404 ASKED FOR
-// -----------------------------------------------------------------------------
+// Credentials belong to this editor profile's SecretStorage. Cockpit has its
+// own OAuth client and credential store; it never consumes our access token.
+// The shared registry carries connection metadata. Old token/refresh_token
+// fields are an ingest path that successful sign-in/refresh clears.
 //
-// The issue's acceptance criteria say the ACCESS token goes into SecretStorage
-// too, and that no token material is ever written to clusters.yaml. memql#3385
-// landed first and decided otherwise for that one half, deliberately:
-// clusters.yaml is OWNED and SHARED with the MemQL Cockpit, so a cluster entry
-// the extension has signed in to but which carries no credential at all reads,
-// to the Cockpit, as a cluster nobody has signed in to. A registry two tools
-// disagree about is worse than one they share. So the split follows the blast
-// radius of each secret rather than the credential's name:
-//
-//   ACCESS TOKEN   -- clusters.yaml `token:`. Fifteen minutes
-//                     (component/identity/config.go,
-//                     DefaultAccessTokenTTLSeconds), and it is what the
-//                     Cockpit reads.
-//   REFRESH TOKEN  -- SecretStorage, keyed per cluster. THIRTY DAYS, and it
-//                     mints access tokens on demand. This is the credential
-//                     the issue is actually about, and it never touches the
-//                     shared file except as an ingest path
-//                     (src/connection/credentials.ts takes custody on the
-//                     first successful exchange and deletes the plaintext).
-//   EXPIRY         -- SecretStorage, beside the refresh token. Redundant for
-//                     the JWT the identity service issues today, since `exp`
-//                     is inside it; it exists so an OPAQUE access token can
-//                     still be renewed proactively rather than only after it
-//                     has already failed a dial.
-//
-// -----------------------------------------------------------------------------
 // WHY THERE IS AN INDEX
 // -----------------------------------------------------------------------------
 //
@@ -71,6 +46,10 @@ export interface SecretStore {
   delete(key: string): PromiseLike<void>;
 }
 
+export function accessTokenSecretKey(clusterName: string): string {
+  return `memql.cluster.accessToken:${clusterName}`;
+}
+
 /** refreshTokenSecretKey is the per-cluster SecretStorage key. */
 export function refreshTokenSecretKey(clusterName: string): string {
   return `memql.cluster.refreshToken:${clusterName}`;
@@ -79,6 +58,11 @@ export function refreshTokenSecretKey(clusterName: string): string {
 /** accessTokenExpirySecretKey holds the access token's absolute expiry, in epoch seconds. */
 export function accessTokenExpirySecretKey(clusterName: string): string {
   return `memql.cluster.tokenExpiry:${clusterName}`;
+}
+
+/** issuedClientSecretKey holds the client_id the stored refresh token was issued to. */
+export function issuedClientSecretKey(clusterName: string): string {
+  return `memql.cluster.clientId:${clusterName}`;
 }
 
 /** credentialIndexKey holds the JSON array of cluster names this store has written for. */
@@ -106,6 +90,7 @@ export interface SignInTokens {
   refreshToken: string;
   /** Absolute expiry in epoch seconds. 0 when the server reported no lifetime. */
   expiresAtEpochSeconds: number;
+  /** The client the tokens were issued to; kept beside the refresh token. */
   clientId: string;
 }
 
@@ -126,6 +111,17 @@ export class ClusterCredentialStore {
   /** available reports whether there is anywhere to put a secret at all. */
   get available(): boolean {
     return this.secrets !== undefined;
+  }
+
+  async readAccessToken(clusterName: string): Promise<string | undefined> {
+    return (await this.read(accessTokenSecretKey(clusterName))) || undefined;
+  }
+
+  async writeAccessToken(clusterName: string, token: string): Promise<boolean> {
+    if (!token.trim()) return false;
+    const stored = await this.write(accessTokenSecretKey(clusterName), token.trim());
+    if (stored) await this.index(clusterName);
+    return stored;
   }
 
   async readRefreshToken(clusterName: string): Promise<string | undefined> {
@@ -184,11 +180,26 @@ export class ClusterCredentialStore {
     if (stored) await this.index(clusterName);
   }
 
+  /** readClientId returns the client the stored refresh token was issued to, when recorded. */
+  async readClientId(clusterName: string): Promise<string | undefined> {
+    const value = await this.read(issuedClientSecretKey(clusterName));
+    return value === "" ? undefined : value;
+  }
+
+  /** writeClientId records the client a refresh token was issued to. An empty id writes nothing. */
+  async writeClientId(clusterName: string, clientId: string): Promise<void> {
+    if (this.secrets === undefined || clientId.trim() === "") return;
+    const stored = await this.write(issuedClientSecretKey(clusterName), clientId.trim());
+    if (stored) await this.index(clusterName);
+  }
+
   /** clear removes every secret held for one cluster, and de-indexes it. */
   async clear(clusterName: string): Promise<void> {
     if (this.secrets === undefined) return;
+    await this.remove(accessTokenSecretKey(clusterName));
     await this.remove(refreshTokenSecretKey(clusterName));
     await this.remove(accessTokenExpirySecretKey(clusterName));
+    await this.remove(issuedClientSecretKey(clusterName));
     await this.deindex(clusterName);
   }
 
@@ -203,10 +214,14 @@ export class ClusterCredentialStore {
   async rename(previousName: string, newName: string): Promise<void> {
     if (this.secrets === undefined) return;
     if (previousName === newName) return;
+    const accessToken = await this.readAccessToken(previousName);
+    if (accessToken !== undefined && !await this.writeAccessToken(newName, accessToken)) throw new Error("Could not move the stored sign-in. Unlock VS Code secret storage and try again.");
     const refreshToken = await this.readRefreshToken(previousName);
     const expiry = await this.readExpiry(previousName);
+    const clientId = await this.readClientId(previousName);
     if (refreshToken !== undefined) await this.writeRefreshToken(newName, refreshToken);
     if (expiry !== undefined) await this.writeExpiry(newName, expiry);
+    if (clientId !== undefined) await this.writeClientId(newName, clientId);
     await this.clear(previousName);
   }
 
@@ -224,8 +239,10 @@ export class ClusterCredentialStore {
     const indexed = await this.readIndex();
     const orphans = indexed.filter((name) => !live.has(name));
     for (const name of orphans) {
+      await this.remove(accessTokenSecretKey(name));
       await this.remove(refreshTokenSecretKey(name));
       await this.remove(accessTokenExpirySecretKey(name));
+      await this.remove(issuedClientSecretKey(name));
     }
     if (orphans.length > 0) {
       await this.writeIndex(indexed.filter((name) => live.has(name)));
@@ -303,19 +320,16 @@ export class ClusterCredentialStore {
 /**
  * persistSignIn stores everything a completed sign-in produced.
  *
- * The refresh token goes to SecretStorage and the plaintext key in
- * clusters.yaml is cleared in the same write. When there is no SecretStorage --
- * a locked or absent keyring -- the refresh token is written to the file
- * instead: it is the ingest path src/connection/credentials.ts already reads,
- * and a sign-in that silently discarded the thirty-day credential would leave
- * the operator re-authorizing through a browser every fifteen minutes.
+ * Both access and refresh tokens go to this editor's SecretStorage. Legacy
+ * editor token fields in clusters.yaml are cleared only after storage succeeds.
+ * A locked or absent secret store refuses sign-in with an actionable error;
+ * the shared registry is never a fallback credential store.
  *
- * `client_id` is written unconditionally rather than only when the flow
- * registered a fresh one. It is not a secret (it is a public OAuth client
- * identifier), the write is already happening for the access token, and
- * re-writing the same value is a no-op -- whereas skipping it leaves a cluster
- * whose registration this extension performed but never recorded, which
- * re-registers on every sign-in.
+ * THE CLIENT ID IS KEPT BESIDE THE REFRESH TOKEN, NEVER IN THE FILE. It is the
+ * client the token was issued to, which is what a refresh must present. The
+ * file's `client_id` belongs to whichever tool wrote the entry -- the Cockpit
+ * writes its own -- and writing the editor's there would either clobber the
+ * Cockpit's or be clobbered by it (wellKnownClient.ts).
  */
 export async function persistSignIn(
   deps: CredentialStoreDeps,
@@ -325,16 +339,22 @@ export async function persistSignIn(
   const store = new ClusterCredentialStore(deps.secrets);
   const refreshToken = tokens.refreshToken.trim();
   const custodyTaken = await store.writeRefreshToken(clusterName, refreshToken);
+  if (refreshToken !== "" && !custodyTaken) {
+    throw new Error("VS Code could not store your sign-in securely. Unlock secret storage and sign in again.");
+  }
+  if (!await store.writeAccessToken(clusterName, tokens.accessToken)) {
+    throw new Error("VS Code could not store your sign-in securely. Unlock secret storage and sign in again.");
+  }
   await store.writeExpiry(clusterName, tokens.expiresAtEpochSeconds);
+  if (custodyTaken) await store.writeClientId(clusterName, tokens.clientId);
 
   await deps.writeCluster({
     name: clusterName,
-    token: tokens.accessToken.trim(),
+    token: "",
     // "" DELETES the key. Written only when SecretStorage holds the token, or
     // when there is no refresh token at all -- otherwise the file is the only
     // copy and clearing it would destroy it.
-    refreshToken: custodyTaken || refreshToken === "" ? "" : refreshToken,
-    ...(tokens.clientId.trim() === "" ? {} : { clientId: tokens.clientId.trim() }),
+    refreshToken: "",
   });
 }
 
@@ -343,8 +363,7 @@ export async function persistSignIn(
  * the cluster when it can (memql#4625).
  *
  * Both halves of the split, in one call: the SecretStorage entries are deleted
- * and de-indexed, and the file's `token` / `refresh_token` keys are removed so
- * the Cockpit sees the same signed-out cluster this extension does. The cluster
+ * and de-indexed, and the file's `token` / `refresh_token` keys are removed without changing Cockpit's separate login. The cluster
  * entry itself survives -- signing out is not deleting a cluster.
  *
  * THE REVOKE RUNS FIRST AND IS NOT ALLOWED TO STOP THE FORGETTING. It has to
@@ -388,8 +407,7 @@ export async function signOut(
  * renameClusterCredentials moves a cluster's secrets when it is renamed.
  *
  * Call it from the edit flow ALONGSIDE the file write, not instead of it: the
- * file write moves the access token (it lives on the renamed node), this moves
- * the refresh token and the expiry.
+ * file write renames metadata; this moves the editor's secret credentials.
  */
 export async function renameClusterCredentials(
   deps: Pick<CredentialStoreDeps, "secrets">,

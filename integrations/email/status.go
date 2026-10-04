@@ -269,6 +269,25 @@ func (d *describer) resolve(ctx context.Context) resolvedConfig {
 // badge from -- which needs the two combined, since a configured integration
 // whose probe failed is neither of the two words on its own.
 func (i *Integration) emailReport(ctx context.Context, probe bool) IntegrationReport {
+	if _, ok := captureSender(i.sender); ok {
+		return IntegrationReport{Name: "email", Registered: true, Capabilities: capabilityNames(i.Capabilities()), Mode: "capture", Configured: AnswerYes, Health: HealthHealthy, State: "configured", Detail: "Messages are captured for testing in the Email app. They are not delivered externally.", Settings: []Setting{}, Credentials: []Credential{}, Reasons: []ConfigReason{}}
+	}
+	if i.azure != nil {
+		var connection azureConnection
+		found, _, err := i.azure.store.read(ctx, "organization:self", &connection)
+		if (found && !connection.retainsOperatorTransport()) || err != nil {
+			report := IntegrationReport{Name: "email", Registered: true, Capabilities: capabilityNames(i.Capabilities()), Mode: "acs", Configured: AnswerNo, Health: HealthUnknown, State: StateNeedsConfiguration, Detail: "The operator organization's Azure email connection needs setup. Client campaigns use their own organization connections.", Settings: []Setting{}, Credentials: []Credential{}, Reasons: []ConfigReason{}}
+			if err == nil {
+				if sender, resolveErr := i.azure.sender(ctx, "self"); resolveErr == nil && sender != nil {
+					report.Configured = AnswerYes
+					report.State = StateConfigured
+					report.Detail = "The operator organization's Azure email connection is configured. No message was sent to check delivery. Client campaigns use their own organization connections."
+				}
+			}
+			return report
+		}
+	}
+
 	d := newDescriber(i.sender)
 	cfg := d.resolve(ctx)
 

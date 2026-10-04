@@ -24,7 +24,6 @@
 // Refs: #3739 #3733
 
 import type { Graph } from "../install/graph.js";
-import { displayVersion } from "./deployments.js";
 
 export type PlannedEffect =
   /** Changes something: this is what the deployment is for. */
@@ -38,7 +37,12 @@ export interface PlannedStepView {
   id: string;
   description: string;
   effect: PlannedEffect;
-  /** The one line the row carries beside the step's name. */
+  /**
+   * What the step does in THIS move, in the operator's words: "Switch the
+   * source to v0.24.0", "Apply the new version", "Checked only", "Already in
+   * place". The page lists the steps that change something by this, and never
+   * by their ids.
+   */
   detail: string;
 }
 
@@ -51,14 +55,14 @@ export interface PlannedStepView {
  * receipts, not which flags a step reads. A list a reviewer can check against
  * `installSessionOptions` beats an inference that looks principled and is not.
  */
-const TAG_SENSITIVE_STEPS: Readonly<Record<string, string>> = {
-  stackCheckout: "move the checkout",
-  clusterUp: "reconcile the local overlay",
+const TAG_SENSITIVE_STEPS: Readonly<Record<string, (to: string) => string>> = {
+  stackCheckout: (to) => `Switch the source to ${to}`,
+  clusterUp: () => "Apply the new version",
 };
 
 export interface UpgradePlanInput {
   graph: Graph;
-  /** The tag the receipt records. Empty when unknown. */
+  /** The tag the receipt records. Empty when unknown. Kept for the caller's record. */
   from: string;
   /** The tag the operator picked. */
   to: string;
@@ -79,10 +83,7 @@ export function upgradePlan(input: UpgradePlanInput): PlannedStepView[] {
         id: step.id,
         description: step.description ?? "",
         effect: "runs" as const,
-        detail:
-          step.id === "stackCheckout"
-            ? `${displayVersion(input.from)} -> ${displayVersion(input.to)}`
-            : tagged,
+        detail: tagged(input.to.trim()),
       };
     }
     if (step.readOnly === true) {
@@ -90,34 +91,32 @@ export function upgradePlan(input: UpgradePlanInput): PlannedStepView[] {
         id: step.id,
         description: step.description ?? "",
         effect: "verifyOnly" as const,
-        detail: "verify only",
+        detail: "Checked only",
       };
     }
     return {
       id: step.id,
       description: step.description ?? "",
       effect: "skip" as const,
-      detail: "already satisfied - skip",
+      detail: "Already in place",
     };
   });
 }
 
 /**
- * The one-line summary above the list.
+ * The one line under the steps that change something: how many others there
+ * are, which the run will check and leave alone.
  *
  * Counted from the projection rather than written as prose, so the sentence and
- * the list beneath it cannot disagree -- which they would the first time a step
- * is added to the graph.
+ * the list above it cannot disagree -- which they would the first time a step
+ * is added to the graph. "" when every step changes something.
  */
 export function upgradeSummary(plan: readonly PlannedStepView[]): string {
-  const runs = plan.filter((s) => s.effect === "runs").length;
-  const checks = plan.filter((s) => s.effect === "verifyOnly").length;
-  const skips = plan.filter((s) => s.effect === "skip").length;
-  return (
-    `${runs} ${runs === 1 ? "step changes" : "steps change"} something, ` +
-    `${checks} only ${checks === 1 ? "checks" : "check"} the machine, ` +
-    `and ${skips} should already be satisfied.`
-  );
+  const others = plan.filter((s) => s.effect !== "runs").length;
+  if (others === 0) return "";
+  return others === 1
+    ? "1 other step is checked and left as it is."
+    : `${others} other steps are checked and left as they are.`;
 }
 
 /**

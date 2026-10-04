@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // grantedOriginTTL is how long the middleware may reuse the granted-origin set
@@ -219,7 +221,25 @@ func (s *Server) readGrantedCORSOrigins(ctx context.Context) ([]string, error) {
 // customer's website cost an env change and a restart.
 func (s *Server) cors(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+
 		origin := r.Header.Get("Origin")
+		if auth.IsWebEditorOrigin(origin) && auth.IsEditorIdentityPath(r.URL.Path) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Add("Vary", "Origin")
+			w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.Header().Set("Access-Control-Max-Age", "600")
+			// Device redemption and logout require the token in the request body.
+			// Browser editor origins never borrow an identity cookie session.
+			r = r.Clone(r.Context())
+			r.Header.Del("Cookie")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next(w, r)
+			return
+		}
 		if origin != "" && s.originAllowedForRequest(r.Context(), origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")

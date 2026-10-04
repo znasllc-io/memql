@@ -11,6 +11,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // capabilities.go -- the DSL-callable surface.
@@ -46,9 +47,17 @@ func (w *Worker) IntegrationName() string { return "campaigns" }
 // Capabilities returns the DSL-callable operations.
 func (w *Worker) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "configureTestAudience", Description: "Configure the organization testing audience.", Handler: w.handleConfigureTestAudience},
+		{Name: "testAudienceSend", Description: "Queue a test through the normal campaign worker.", Handler: w.handleTestAudienceSend},
+		{Name: "sendingReadiness", Description: "Check the selected organization's sender and unsubscribe setup without sending mail.", Handler: w.handleSendingReadiness},
+		{Name: "configureNewsletter", Description: "Bind a deployable to its organization's audience and reviewed welcome template.", Handler: w.handleConfigureNewsletter},
+		{Name: "subscribe", Description: "Record an explicit storefront opt-in and queue one welcome.", Handler: w.handleSubscribe},
+		{Name: "retryNewsletterWelcome", Description: "Recheck a blocked welcome without repeating an uncertain delivery attempt.", Handler: w.handleRetryNewsletterWelcome},
+		{Name: "configureSeries", Description: "Save, pause or resume a recurring campaign under current organization authority.", Handler: w.handleConfigureSeries},
+		{Name: "saveTemplate", Description: "Save or publish the reviewed revision of an organization email template.", Handler: w.handleSaveTemplate},
 		{
 			Name:        "startSend",
-			Description: "Preflight and start a campaign send. Refuses rather than partially sending when the sender, one-click unsubscribe, template, audience or product_purchasable catalog is not ready.",
+			Description: "Preflight and start a campaign send. Refuses rather than partially sending when the sender, one-click unsubscribe, template or audience is not ready.",
 			Handler:     w.handleStartSend,
 			ArgsSchema: map[string]string{
 				"campaignId": "string (required) - the campaign to send",
@@ -142,7 +151,8 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"templateId":       "string (required) - v1:campaigns:template.id supplying the subject and bodies",
 				"recipientId":      "string (required) - v1:campaigns:recipient.id to send to",
-				"senderIdentityId": "string (optional) - the identity to send as; empty is the configured default",
+				"senderIdentityId": "string (optional) - an identity in the recipient's organization; omission resolves that organization's configured sender",
+				"requestId":        "string (optional) - stable identifier for one intended message; retries return its durable receipt",
 				"emailRuleId":      "string (optional) - the rule this send came from; also names the audience to resolve the recipient in",
 			},
 		},
@@ -171,7 +181,7 @@ func (w *Worker) handleStartSend(ctx context.Context, args map[string]any, _ int
 	if err := sendableStatus("startSend", campaign.Status); err != nil {
 		return nil, err
 	}
-	recipients, err := w.preflight(ctx, "startSend", campaign)
+	recipients, snapshot, err := w.preflight(ctx, "startSend", campaign)
 	if err != nil {
 		return nil, err
 	}
@@ -190,6 +200,7 @@ func (w *Worker) handleStartSend(ctx context.Context, args map[string]any, _ int
 		CampaignAccountID: campaign.AccountID,
 		AudienceID:        campaign.AudienceID,
 		TemplateID:        campaign.TemplateID,
+		TemplateSnapshot:  &snapshot,
 	}); err != nil {
 		return nil, fmt.Errorf("campaigns.startSend: %w", err)
 	}
@@ -265,7 +276,7 @@ func (w *Worker) handleScheduleSend(ctx context.Context, args map[string]any, _ 
 			when.Format(time.RFC3339), now.Format(time.RFC3339))
 	}
 
-	recipients, err := w.preflight(ctx, "scheduleSend", campaign)
+	recipients, snapshot, err := w.preflight(ctx, "scheduleSend", campaign)
 	if err != nil {
 		return nil, err
 	}
@@ -281,6 +292,7 @@ func (w *Worker) handleScheduleSend(ctx context.Context, args map[string]any, _ 
 		CampaignAccountID:   campaign.AccountID,
 		AudienceID:          campaign.AudienceID,
 		TemplateID:          campaign.TemplateID,
+		TemplateSnapshot:    &snapshot,
 		Status:              "scheduled",
 		ScheduledAt:         when,
 	}); err != nil {
@@ -343,18 +355,19 @@ func sendableStatus(op, status string) error {
 // template and roster it consults are the ones the caller can actually see.
 //
 // Returns the recipient count the send will work through.
-func (w *Worker) preflight(ctx context.Context, op string, campaign Campaign) (int, error) {
+func (w *Worker) preflight(ctx context.Context, op string, campaign Campaign) (int, Template, error) {
+	return w.preflightAudience(ctx, op, campaign, false)
+}
+
+func (w *Worker) preflightAudience(ctx context.Context, op string, campaign Campaign, allowEmpty bool) (int, Template, error) {
 	if err := w.requireSendAuthority(ctx, campaign.AccountID); err != nil {
-		return 0, err
+		return 0, Template{}, err
 	}
 	if reason := w.cfg.RequireUnsubscribe(); reason != "" {
-		return 0, fmt.Errorf("campaigns.%s: %s", op, reason)
+		return 0, Template{}, fmt.Errorf("campaigns.%s: %s", op, reason)
 	}
 	if w.resolveSender() == nil {
-		return 0, fmt.Errorf("campaigns.%s: no email sender is registered on this node, so nothing could deliver the campaign", op)
-	}
-	if reason := w.catalogRefusal(ctx); reason != "" {
-		return 0, fmt.Errorf("campaigns.%s: %s", op, reason)
+		return 0, Template{}, fmt.Errorf("campaigns.%s: no email sender is registered on this node, so nothing could deliver the campaign", op)
 	}
 
 	// THE IDENTITY, before anything else about the content (memql#4821).
@@ -365,26 +378,30 @@ func (w *Worker) preflight(ctx context.Context, op string, campaign Campaign) (i
 	// where an unreadable identity waits -- because a caller pressing the
 	// button is owed an answer now rather than a queued job that may or may
 	// not resolve later.
-	if _, refusal := w.resolveSendIdentity(ctx, campaign); refusal.refused() {
-		return 0, fmt.Errorf("campaigns.%s: %s", op, refusal.Reason)
+	identity, refusal := w.resolveSendIdentity(ctx, campaign)
+	if refusal.refused() {
+		return 0, Template{}, fmt.Errorf("campaigns.%s: %s", op, refusal.Reason)
+	}
+	if err := email.CheckSender(ctx, w.resolveSender(), identity.SendAs); err != nil {
+		return 0, Template{}, fmt.Errorf("campaigns.%s: %w", op, err)
 	}
 
 	tmpl, found, err := w.store.TemplateByID(ctx, campaign.TemplateID)
 	if err != nil {
-		return 0, fmt.Errorf("campaigns.%s: %w", op, err)
+		return 0, Template{}, fmt.Errorf("campaigns.%s: %w", op, err)
 	}
 	if !found {
-		return 0, fmt.Errorf("campaigns.%s: template %q is not readable", op, campaign.TemplateID)
+		return 0, Template{}, fmt.Errorf("campaigns.%s: template %q is not readable", op, campaign.TemplateID)
 	}
 	if err := w.validateCampaignOrganization(ctx, campaign, tmpl); err != nil {
-		return 0, fmt.Errorf("campaigns.%s: %w", op, err)
+		return 0, Template{}, fmt.Errorf("campaigns.%s: %w", op, err)
 	}
 	// `ready` is an operator asserting the copy is finished. Refusing a
 	// draft is the cheapest guard there is against the single most
 	// expensive mistake in this domain -- half-written copy delivered to
 	// an entire audience, which is unrecallable.
 	if tmpl.Status != "ready" {
-		return 0, fmt.Errorf("campaigns.%s: template %q is %q, not \"ready\". Mark it ready once the copy is final", op, tmpl.ID, tmpl.Status)
+		return 0, Template{}, fmt.Errorf("campaigns.%s: template %q is %q, not \"ready\". Mark it ready once the copy is final", op, tmpl.ID, tmpl.Status)
 	}
 
 	// A server-side COUNT, not the length of a read (memql#3460). The
@@ -393,19 +410,19 @@ func (w *Worker) preflight(ctx context.Context, op string, campaign Campaign) (i
 	// to be bounded by.
 	size, err := w.store.RosterSize(ctx, campaign.AudienceID)
 	if err != nil {
-		return 0, fmt.Errorf("campaigns.%s: %w", op, err)
+		return 0, Template{}, fmt.Errorf("campaigns.%s: %w", op, err)
 	}
-	if size == 0 {
-		return 0, fmt.Errorf("campaigns.%s: audience %q has no recipients", op, campaign.AudienceID)
+	if size == 0 && !allowEmpty {
+		return 0, Template{}, fmt.Errorf("campaigns.%s: audience %q has no recipients", op, campaign.AudienceID)
 	}
 	if size > w.cfg.MaxAudience {
-		return 0, fmt.Errorf(
+		return 0, Template{}, fmt.Errorf(
 			"campaigns.%s: audience %q has %d recipients, over the %d ceiling (MEMQL_CAMPAIGNS_MAX_AUDIENCE). "+
 				"The ceiling is a deliberate refusal, not a technical bound -- the send pages through the roster, so no size is unsafe. "+
 				"A send this large is more often a mis-scoped audience than an intent, and it cannot be recalled. Raise the ceiling if you mean it",
 			op, campaign.AudienceID, size, w.cfg.MaxAudience)
 	}
-	return size, nil
+	return size, tmpl, nil
 }
 
 func (w *Worker) handlePauseSend(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

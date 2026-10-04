@@ -24,8 +24,11 @@ import type { ConnectionState } from "../src/connection/manager.js";
 import {
   CLUSTER_SELECTED_KEY,
   CONNECTED_KEY,
+  CONNECTION_STATE_KEY,
   NOT_CONNECTED_REFUSAL,
   connectionContextKeys,
+  connectionStateWord,
+  type ConnectionStateWord,
 } from "../src/state/connectionContext.js";
 
 const CASES: ReadonlyArray<{
@@ -33,24 +36,28 @@ const CASES: ReadonlyArray<{
   state: ConnectionState;
   clusterSelected: boolean;
   connected: boolean;
+  word: ConnectionStateWord;
 }> = [
   {
     what: "nothing has been selected",
     state: { status: "disconnected" },
     clusterSelected: false,
     connected: false,
+    word: "none",
   },
   {
     what: "a cluster is being dialled",
     state: { status: "connecting", clusterName: "local" },
     clusterSelected: true,
     connected: false,
+    word: "connecting",
   },
   {
     what: "a cluster is held",
     state: { status: "connected", clusterName: "local", nodeId: "node-1" },
     clusterSelected: true,
     connected: true,
+    word: "connected",
   },
   {
     what: "the dial was refused",
@@ -62,6 +69,7 @@ const CASES: ReadonlyArray<{
     },
     clusterSelected: true,
     connected: false,
+    word: "unreachable",
   },
   {
     what: "the connection was lost",
@@ -73,6 +81,7 @@ const CASES: ReadonlyArray<{
     },
     clusterSelected: true,
     connected: false,
+    word: "unreachable",
   },
   {
     what: "the credential expired",
@@ -84,6 +93,7 @@ const CASES: ReadonlyArray<{
     },
     clusterSelected: true,
     connected: false,
+    word: "signIn",
   },
 ];
 
@@ -92,6 +102,7 @@ for (const row of CASES) {
     assert.deepEqual(connectionContextKeys(row.state), {
       clusterSelected: row.clusterSelected,
       connected: row.connected,
+      connectionState: row.word,
     });
   });
 }
@@ -128,6 +139,24 @@ test("the refusal is one sentence, shared by the welcomes and by runs.execute", 
   // Design D2's Runs exception refuses with it at execution time; the three
   // welcomes open with the same words. Two spellings would be two refusals an
   // operator has to learn are the same one.
-  assert.equal(NOT_CONNECTED_REFUSAL, "Not connected. Select a cluster first.");
-  assert.ok(NOT_CONNECTED_REFUSAL.startsWith("Not connected."));
+  assert.equal(NOT_CONNECTED_REFUSAL, "Not connected to a cluster.");
+  assert.ok(NOT_CONNECTED_REFUSAL.startsWith("Not connected"));
+});
+
+test("memql.connectionState tells a sign-in problem from an outage", () => {
+  assert.equal(CONNECTION_STATE_KEY, "memql.connectionState");
+  const error = (reason: "missingCredential" | "reauthenticationRequired" | "wrongTokenClass" | "notConfigured" | "lost", retrying?: boolean): ConnectionState => ({
+    status: "error",
+    clusterName: "local",
+    message: "x",
+    reason,
+    ...(retrying ? { retrying } : {}),
+  });
+  assert.equal(connectionStateWord(error("missingCredential")), "signIn");
+  assert.equal(connectionStateWord(error("reauthenticationRequired")), "signIn");
+  assert.equal(connectionStateWord(error("wrongTokenClass")), "signIn");
+  assert.equal(connectionStateWord(error("notConfigured")), "notConfigured");
+  // A drop being retried is not yet an outage.
+  assert.equal(connectionStateWord(error("lost", true)), "connecting");
+  assert.equal(connectionStateWord(error("lost")), "unreachable");
 });

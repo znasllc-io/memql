@@ -58,6 +58,7 @@ mutation run createWorkRun {
     status                 string!
     nodeId                 string
     initialChainHead       string
+    waitingOn              object
     startedAt              string!
     parentRunId            string
     head                   object
@@ -65,7 +66,7 @@ mutation run createWorkRun {
     routing                object
   }
   insert {
-    accept { executionAuthority, goalId, goalSignature, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt, parentRunId, head, rerun, routing }
+    accept { executionAuthority, goalId, goalSignature, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, waitingOn, startedAt, parentRunId, head, rerun, routing }
     stamp {
       id: args.runId
       ownerUserId: actor.userId
@@ -289,9 +290,10 @@ mutation goal createWorkGoal {
     ceilings          object
     requestedVia      string
     routing           object
+    requestFingerprint string
   }
   insert {
-    accept { statement, origin, responsibilityId, accountIds, input, ceilings, routing }
+    accept { statement, origin, responsibilityId, accountIds, input, ceilings, routing, requestFingerprint }
     stamp {
       id: args.goalId
       ownerUserId: actor.userId
@@ -438,12 +440,14 @@ mutation approval decideWorkApproval {
     decision    string!
     decidedBy   string!
     decidedAt   string!
+    versionTime datetime
     answer      object
   }
   update {
     accept { decision, decidedBy, decidedAt, answer }
     stamp {
       id: args.approvalId
+      createdAt: args.versionTime ?? now
     }
   }
 }

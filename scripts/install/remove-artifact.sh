@@ -211,14 +211,15 @@ function remove_binary() {
 function prune_empty_parents() {
     [[ -n "$(cap_flag prune-empty-parents)" ]] || return 0
 
-    local dir level=0
+    local dir resolved_home level=0
+    resolved_home="$(cd "$HOME" 2>/dev/null && pwd -P)" || return 0
     dir="$(dirname "$1")"
     while [[ "$level" -lt 2 ]]; do
         [[ -d "$dir" ]] || break
         local resolved
         resolved="$(cd "$dir" 2>/dev/null && pwd -P)" || break
         case "$resolved" in
-            /|"${HOME%/}"|/home|/Users|/root|/usr|/usr/local|/usr/local/bin|/bin|/etc|/opt|/var|/tmp)
+            /|"$resolved_home"|/home|/Users|/root|/usr|/usr/local|/usr/local/bin|/bin|/etc|/opt|/var|/tmp)
                 break ;;
         esac
         # Shallower than two components is a system location, not ours.
@@ -258,10 +259,11 @@ function remove_checkout() {
 
     # Resolve before comparing: a receipt carrying "~/.memql/src/.." must not
     # get past a string comparison against $HOME.
-    local resolved
+    local resolved resolved_home
     resolved="$(cd "$path" 2>/dev/null && pwd -P)" || cap_fail 5 "could not resolve ${path}"
+    resolved_home="$(cd "$HOME" 2>/dev/null && pwd -P)" || cap_fail 3 "could not resolve the home directory; refusing checkout removal"
     case "$resolved" in
-        /|"${HOME%/}"|/home|/Users|/root)
+        /|"$resolved_home"|/home|/Users|/root)
             cap_fail 3 "refusing to remove ${resolved}: that is a home or filesystem root, not a checkout"
             ;;
     esac

@@ -5,6 +5,8 @@ bin/
 .vscode-test/
 dist-test/
 dist-host/
+# The gallery's rendered pages and captures (npm run gallery / gallery:shoot).
+dist-gallery/
 # The bundled install CLI (npm run build:install-cli) -- build output, not source.
 dist-install/
 

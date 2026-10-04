@@ -1,3 +1,12 @@
+@sdk
+@executor("integration.campaigns.sendingReadiness")
+@description("Check current organization sending permission, the selected sender and unsubscribe setup without sending mail. A campaignId reads that campaign's saved organization and sender. Otherwise select accountId and senderIdentityId explicitly. Readiness is not evidence of delivery and is rechecked when sending.")
+builtin campaignSendingReadiness {
+  campaignId string
+  accountId string
+  senderIdentityId string
+}
+
 // campaigns domain -- the Go-backed sending surface (memql#3348).
 //
 // WHY THESE ARE BUILTINS AND NOT MUTATIONS. Everything else an operator
@@ -156,9 +165,10 @@ builtin campaignStats {
 @description("Send ONE message to ONE recipient through the campaign machinery -- the marketing lane's primitive for event-triggered email (memql#4829, program P5). Suppression is checked at the point of send, the RFC 8058 unsubscribe pair is attached, the resolved sending identity is applied, and the outcome is ledgered exactly as a campaign send is. It exists because the two event-email lanes are the only sanctioned shapes for automated mail: operational recipients ride the transactional outbox (allowlist enforced, no unsubscribe, no suppression) and marketing recipients ride this. There is deliberately NO free-form sendEmail builtin, and this is not one: it takes a template and an audience recipient, not a subject and a body.")
 @executor("integration.campaigns.sendToRecipient")
 builtin campaignSendToRecipient {
+  requestId         string   @description("Stable identifier for one intended event email. Replays never submit it twice; an uncertain provider outcome remains uncertain and is not automatically resent.")
   templateId        string!  @description("v1:campaigns:template.id supplying the subject and bodies.")
   recipientId       string!  @description("v1:campaigns:recipient.id to send to. Its subscription state and the cluster suppression list are both consulted before anything leaves.")
-  senderIdentityId  string   @description("Optional v1:campaigns:senderIdentity.id to send as. Empty resolves to the env-configured default, exactly as a campaign's does.")
+  senderIdentityId  string   @description("v1:campaigns:senderIdentity.id belonging to the recipient's organization. Omit to resolve that organization's configured sender; client sends never fall back to the operator identity.")
   emailRuleId       string   @description("Optional v1:campaigns:emailRule.id this send came from, stamped on the ledger row so 'which rule mailed this person' is answerable.")
 }
 
@@ -182,4 +192,80 @@ builtin emailRuleFire {
   emailRuleId  string!  @description("v1:campaigns:emailRule.id whose form decides what happens. Baked into the generated construct as a literal, so a rule can only ever fire itself.")
   nodeId       string   @description("The triggering row's id, bound from the event payload by the automation's args block.")
   event        object   @description("The whole triggering event envelope, forwarded by the generated statement. Carries the row payload, which is where a row_address rule reads its recipient from -- reading the field off the EVENT rather than re-reading the row is what keeps the rule working on a concept whose rows the author's own envelope could not read back.")
+}
+
+@description("Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail.")
+@sdk
+@executor("integration.campaigns.saveTemplate")
+builtin campaignSaveTemplate {
+  templateId string! @description("Stable caller-generated template ID; reuse on an uncertain creation response.")
+  accountId string! @description("Owning organization; immutable after creation.")
+  name string! @description("Template name.")
+  content object! @description("The reviewed email file: subject, textBody, htmlBody.")
+  expectedRevision string! @description("Exact createdAt from templateById; empty only when creating.")
+  action string @description("save (default), publish, or archive. Publishing is an explicit human action.")
+}
+
+@description("Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series.")
+@sdk
+@executor("integration.campaigns.configureSeries")
+builtin campaignConfigureSeries {
+  campaignId string!
+  action enum("save", "pause", "resume")!
+  intervalWeeks int
+  firstSendAt datetime
+  timeZone string
+  expectedRevision string
+}
+
+
+@sdk
+@description("Configure this deployable's organization newsletter. Enabling also enables its existing shopper-form carrier; disabling affects only this newsletter.")
+@executor("integration.campaigns.configureNewsletter")
+builtin campaignConfigureNewsletter {
+  siteId string!
+  audienceId string!
+  templateId string!
+  senderIdentityId string!
+  consentText string!
+  enabled bool!
+  expectedRevision string
+}
+
+@description("Accept an affirmative opt-in through the declared storefront form. Site, store, owner and submission provenance come from the existing public-form carrier; audience and sender come only from the saved site binding.")
+@executor("integration.campaigns.subscribe")
+builtin campaignSubscribe {
+  siteId string!
+  storeId string!
+  submissionId string!
+  email string!
+  displayName string
+  consent string!
+  consentRevision string!
+}
+
+@sdk
+@description("Recheck a blocked welcome under its original owner's current authority. A saved delivery attempt prevents resubmission even when its outcome is uncertain.")
+@executor("integration.campaigns.retryNewsletterWelcome")
+builtin campaignRetryNewsletterWelcome {
+  signupId string!
+  expectedRevision string!
+}
+
+@description("Save the organization's shared testing audience. Must name an active audience in that organization; an empty audienceId disconnects it. Changes require the current revision.")
+@sdk
+@executor("integration.campaigns.configureTestAudience")
+builtin campaignConfigureTestAudience {
+  accountId string!
+  audienceId string!
+  expectedRevision string
+}
+
+@description("Queue a separate test run through the ordinary campaign worker, using this organization's configured testing audience. Works in every source lifecycle, including an active series, whose saved instruction is used without advancing its schedule. Requires the same published template and sending readiness as a live run. Replaying requestId returns the original run without resending.")
+@sdk
+@executor("integration.campaigns.testAudienceSend")
+builtin campaignTestAudienceSend {
+  campaignId string!
+  requestId string!
+  audienceId string! @description("The testing audience reviewed by the caller. Must still match the organization's saved setting; never replaces the saved setting.")
 }

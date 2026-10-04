@@ -118,7 +118,7 @@ export function coerceArgs(
 
     if (text === "") {
       if (arg.required) {
-        errors[arg.name] = "required";
+        errors[arg.name] = "Required";
       }
       continue;
     }
@@ -127,7 +127,7 @@ export function coerceArgs(
       // The enum is the DSL's own closed set, so a value outside it is
       // guaranteed to be refused by the engine. Saying so here names the
       // field; the engine's refusal would not.
-      errors[arg.name] = `must be one of: ${arg.enum.join(", ")}`;
+      errors[arg.name] = `Choose one of: ${arg.enum.join(", ")}`;
       continue;
     }
 
@@ -149,27 +149,27 @@ function coerceOne(
       return { value: text };
     case "number": {
       const n = Number(text);
-      if (!Number.isFinite(n)) return { error: `"${text}" is not a number` };
+      if (!Number.isFinite(n)) return { error: "Enter a number" };
       return { value: n };
     }
     case "boolean": {
       const lowered = text.toLowerCase();
       if (lowered === "true") return { value: true };
       if (lowered === "false") return { value: false };
-      return { error: `"${text}" is not true or false` };
+      return { error: "Enter true or false" };
     }
     case "object": {
       const parsed = parseJson(text);
-      if ("error" in parsed) return { error: `not valid JSON: ${parsed.error}` };
+      if ("error" in parsed) return { error: jsonErrorText(text, parsed.error) };
       if (parsed.value === null || typeof parsed.value !== "object" || Array.isArray(parsed.value)) {
-        return { error: "must be a JSON object" };
+        return { error: "Enter a JSON object" };
       }
       return { value: parsed.value };
     }
     case "array": {
       const parsed = parseJson(text);
-      if ("error" in parsed) return { error: `not valid JSON: ${parsed.error}` };
-      if (!Array.isArray(parsed.value)) return { error: "must be a JSON array" };
+      if ("error" in parsed) return { error: jsonErrorText(text, parsed.error) };
+      if (!Array.isArray(parsed.value)) return { error: "Enter a JSON array" };
       return { value: parsed.value };
     }
     case "any": {
@@ -183,6 +183,21 @@ function coerceOne(
     default:
       return { value: text };
   }
+}
+
+/**
+ * "Invalid JSON (line 3)": where the parser stopped, in the words a person
+ * counts in, rather than the parser's own sentence. Node reports a character
+ * POSITION; the line is worked out from it. A message with no position is
+ * just "Invalid JSON".
+ */
+export function jsonErrorText(text: string, parserMessage: string): string {
+  const lineCol = /line (\d+)/.exec(parserMessage);
+  if (lineCol !== null) return `Invalid JSON (line ${lineCol[1]})`;
+  const position = /position (\d+)/.exec(parserMessage);
+  if (position === null) return "Invalid JSON";
+  const line = text.slice(0, Number(position[1])).split("\n").length;
+  return `Invalid JSON (line ${line})`;
 }
 
 function parseJson(text: string): { value: unknown } | { error: string } {
@@ -203,5 +218,4 @@ function parseJson(text: string): { value: unknown } | { error: string } {
  * disclaim the whole form. The server reports it per field now (memql#3333),
  * so the form marks the one or two fields it is actually true of.
  */
-export const AUTO_INJECTED_FIELD_NOTE =
-  "Supplied by the engine -- any value entered here is discarded.";
+export const AUTO_INJECTED_FIELD_NOTE = "Set by the cluster; anything entered here is ignored.";

@@ -15,6 +15,7 @@ import { useOs } from "../../chrome/state";
 import { canOpen } from "../../system/registry";
 import { openInVsCode, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
 import { downloadArtifact } from "./actions/download";
+import { editorFilename, isZipArtifact } from "../../items/editorPreference";
 import { useOsConnection } from "../../live/connection";
 import { entriesOf, hasDirectory, walkEntries } from "../../items/folderDrop";
 import { planArchive, runArchiveWalk, subtreeHoldsArtifact } from "./actions/archive";
@@ -515,7 +516,7 @@ export function BrowseSection({
       ];
     }
     return [
-      { id: "open", label: "Open in VS Code", onSelect: () => openVsCodeFor(row) },
+      ...(!isZipArtifact(row) ? [{ id: "open", label: "Open in editor", onSelect: () => openVsCodeFor(row) }] : []),
       { id: "desk", label: "Send to desktop", onSelect: () => sendRowToDesk(row) },
       download,
       ...(row.kind === "file"
@@ -553,8 +554,12 @@ export function BrowseSection({
   };
 
   const openVsCodeFor = (row: ArtifactRow) => {
+    if (isZipArtifact(row)) {
+      void downloadRow(row);
+      return;
+    }
     setVsNoAnswer(false);
-    openInVsCode(config.domain, row.id, () => setVsNoAnswer(true));
+    openInVsCode(config.domain, row.id, () => setVsNoAnswer(true), undefined, editorFilename(row));
   };
 
   const selected = content.find((r) => r.id === selectedId) ?? null;

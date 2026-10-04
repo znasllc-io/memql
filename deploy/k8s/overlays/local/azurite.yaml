@@ -15,6 +15,21 @@
 # IMAGE: mcr.microsoft.com/azure-storage/azurite:3.34.0 (Microsoft, MIT).
 # Pinned by tag (mutable); digest-pin gate skipped for the `local` overlay.
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: azurite-data
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: azurite
+    app.kubernetes.io/part-of: memql
+    memql/role: local-infra
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -39,6 +54,10 @@ spec:
         app.kubernetes.io/part-of: memql
         memql/role: local-infra
     spec:
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: azurite-data
       containers:
         - name: azurite
           image: mcr.microsoft.com/azure-storage/azurite:3.34.0
@@ -57,7 +76,12 @@ spec:
           # `exit status 2` in the WAL sidecar -- pointing at barman, not at
           # the emulator. The flag is Azurite's own documented remedy, and it
           # is a LOCAL-only concern: real Azure Blob accepts the version.
-          command: ["azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000", "--skipApiVersionCheck"]
+          # Both the blob extents and Azurite's metadata must survive a pod
+          # replacement, just like the file rows in the local database.
+          command: ["azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000", "--skipApiVersionCheck", "--location", "/data"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
           ports:
             - { name: blob, containerPort: 10000 }
           resources:

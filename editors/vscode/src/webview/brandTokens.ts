@@ -43,6 +43,7 @@
 import { escapeHtml } from "@znasllc-io/memql-view-kit";
 
 import { DARK, LIGHT, PALETTE_KEYS, type PaletteKey } from "./palette.js";
+import { kitStyles } from "./ui/kitStyles.js";
 
 /**
  * What each token becomes under either high-contrast theme.
@@ -63,9 +64,15 @@ const HIGH_CONTRAST: Readonly<Record<PaletteKey, string>> = {
   subtle: "var(--vscode-descriptionForeground)",
   accent: "var(--vscode-focusBorder)",
   "accent-deep": "var(--vscode-focusBorder)",
+  "accent-subtle": "var(--vscode-editor-background)",
   "on-accent": "var(--vscode-editor-background)",
   "on-accent-hover": "var(--vscode-editor-background)",
+  focus: "var(--vscode-focusBorder)",
+  ok: "var(--vscode-charts-green, var(--vscode-foreground))",
+  warn: "var(--vscode-editorWarning-foreground, var(--vscode-foreground))",
+  "warn-subtle": "var(--vscode-editor-background)",
   danger: "var(--vscode-errorForeground)",
+  "danger-subtle": "var(--vscode-editor-background)",
   "data-number": "var(--vscode-foreground)",
   "data-string": "var(--vscode-foreground)",
 };
@@ -117,6 +124,10 @@ function percentRules(): string {
  * Light being the DEFAULT rather than a stamped case is deliberate: a panel
  * rendered before a theme could be resolved, or by a code path that forgot to
  * stamp, gets a readable light page rather than an unstyled one.
+ *
+ * The page kit's stylesheet (ui/kitStyles.ts) rides at the end, so every
+ * document that carries the brand can use every `mq-*` component with no
+ * wiring of its own.
  */
 export function brandStyleBlock(): string {
   return `
@@ -133,6 +144,35 @@ ${declarations(DARK)}
   body.vscode-high-contrast, body.vscode-high-contrast-light {
 ${declarations(HIGH_CONTRAST)}
   }
+
+  /* Metrics, not colours: no theme may move a box or change how fast anything
+     moves. 26px is VS Code's own control line, so a MemQL button sits level
+     with the editor's. Reduced motion zeroes the one duration, which is the
+     whole opt-out for every transition that reads it. */
+  body {
+    --memql-control-h: 26px;
+    --memql-radius: 4px;
+    --memql-radius-lg: 6px;
+    --memql-motion-dur: 160ms;
+    --memql-motion-ease: cubic-bezier(0.2, 0, 0, 1);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    body { --memql-motion-dur: 0ms; }
+  }
+
+  /* Native controls, selection popups and scrollbars follow the palette in
+     force, not the editor's. The page's own scrollbar belongs to <html>,
+     which the body-scoped tokens do not reach, so it is named from the
+     palette directly. High contrast keeps VS Code's. */
+  body { color-scheme: light; }
+  body[data-memql-theme="light"] { color-scheme: light; }
+  body[data-memql-theme="dark"] { color-scheme: dark; }
+  body.vscode-high-contrast { color-scheme: dark; }
+  body.vscode-high-contrast-light { color-scheme: light; }
+  html:has(> body[data-memql-theme="light"]) { color-scheme: light;
+    scrollbar-color: ${LIGHT["border-strong"]} ${LIGHT.bg}; }
+  html:has(> body[data-memql-theme="dark"]) { color-scheme: dark;
+    scrollbar-color: ${DARK["border-strong"]} ${DARK.bg}; }
 
   /* view-kit rides the same tokens, so its lists and tables wear the brand. */
   body {
@@ -172,7 +212,7 @@ ${declarations(HIGH_CONTRAST)}
 
   .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
   button.primary, button.secondary {
-    font: inherit; padding: 4px 12px; cursor: pointer; border-radius: 3px;
+    font: inherit; padding: 4px 12px; cursor: pointer; border-radius: var(--memql-radius);
     border: 1px solid transparent; }
   button.primary { background: var(--memql-accent); color: var(--memql-on-accent); }
   button.primary:hover { background: var(--memql-accent-deep); color: var(--memql-on-accent-hover); }
@@ -180,7 +220,7 @@ ${declarations(HIGH_CONTRAST)}
                      border-color: var(--memql-border-strong); }
   button.secondary:hover { border-color: var(--memql-accent); }
   button.destructive { color: var(--memql-danger); }
-  button:focus-visible { outline: 2px solid var(--memql-accent); outline-offset: 1px; }
+  button:focus-visible { outline: 2px solid var(--memql-focus); outline-offset: 1px; }
 
   .badge { display: inline-block; border: 1px solid var(--memql-border-strong);
            border-radius: 999px; padding: 1px 8px; font-size: 0.85em;
@@ -197,7 +237,7 @@ ${declarations(HIGH_CONTRAST)}
   .preflight-item:last-child { border-bottom: none; }
   .preflight-mark { flex: 0 0 3.2em; font-size: 0.78em; font-weight: 700;
                     letter-spacing: 0.06em; color: var(--memql-accent); }
-  .preflight-item.attention .preflight-mark { color: var(--memql-data-string); }
+  .preflight-item.attention .preflight-mark { color: var(--memql-warn); }
   .preflight-label { flex: 0 0 10em; font-weight: 600; }
   .preflight-detail { color: var(--memql-muted); }
 
@@ -239,7 +279,7 @@ ${percentRules()}
   .disclosure-toggle:hover { text-decoration: underline; }
   .disclosure-toggle[disabled] { color: var(--memql-muted); cursor: default;
                                  text-decoration: none; }
-  .disclosure-toggle:focus-visible { outline: 2px solid var(--memql-accent);
+  .disclosure-toggle:focus-visible { outline: 2px solid var(--memql-focus);
                                      outline-offset: 2px; }
   .disclosure-pane { margin-top: 8px; }
   /* SCROLLABLE AND BOUNDED. An install writes hundreds of lines; a pane that
@@ -263,7 +303,9 @@ ${percentRules()}
     .run-bar-fill { transition: none; }
     .run-bar-fill.indeterminate { animation: none; }
   }
-`;
+
+  /* ---- the page kit (src/webview/ui/kit.ts): every mq-* component ---- */
+${kitStyles()}`;
 }
 
 /**

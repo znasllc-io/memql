@@ -173,6 +173,25 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// Capture belongs to the installation's restricted test inbox, not
+		// actor.userId: identity mail can precede a recipient account. Only
+		// the capture service writes encrypted bodies; the public read capability
+		// checks a signed-in owner/developer before borrowing that service actor.
+		{Path: "email/mutations.memql", Name: "recordCapturedEmail"}: true,
+		{Path: "email/queries.memql", Name: "capturedEmails"}:        true,
+		// Azure sessions and transport credentials are sealed after explicit
+		// operator/organization authorization. Per-user row scoping cannot
+		// model one organization's connection consumed by multiple workers.
+		{Path: "email/mutations.memql", Name: "storeEmailConnectionState"}: true,
+		{Path: "email/queries.memql", Name: "emailConnectionStateById"}:    true,
+		// Provider receipts belong to the organization's shared transport, not
+		// the user whose replica submitted a message. The internal poller spans
+		// organizations; the public projection first checks real organization
+		// management authority and omits encrypted contents and private routing.
+		{Path: "email/mutations.memql", Name: "storeEmailSendOperation"}:  true,
+		{Path: "email/queries.memql", Name: "emailSendOperationById"}:     true,
+		{Path: "email/queries.memql", Name: "emailPendingSendOperations"}: true,
+		{Path: "email/queries.memql", Name: "emailRecentSendOperations"}:  true,
 		// Shopify's outbox delivers rows under its connector actor, which has
 		// no actor.userId. These row-id reads keep the concept's mirroredTo
 		// admission: Shopify may read its source, another connector may not,
@@ -370,6 +389,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// owner-stamped and a caller can only reach their own rows); what is
 		// missing is that a caller may not perform these transitions AT ALL,
 		// which is what @serverOnly says and a tier cannot.
+		// Template content and readiness share a cross-replica revision gate.
+		// Caller scoping admits authorized writers but cannot enforce that gate;
+		// direct writes could overwrite a concurrent edit or publish stale copy.
+		// campaignSaveTemplate retains the actor and checks organization rights.
+		{Path: "campaigns/mutations.memql", Name: "createTemplate"}:         true,
+		{Path: "campaigns/mutations.memql", Name: "updateTemplate"}:         true,
 		{Path: "campaigns/mutations.memql", Name: "startCampaign"}:          true,
 		{Path: "campaigns/mutations.memql", Name: "pauseCampaign"}:          true,
 		{Path: "campaigns/mutations.memql", Name: "resumeCampaign"}:         true,
@@ -383,6 +408,30 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// it derives a single argument. @serverOnly is the second wall: even
 		// holding a valid token, nothing client-reachable can write this row.
 		{Path: "campaigns/mutations.memql", Name: "recordEngagementEvent"}: true,
+		// The public opt-out has a verified HMAC, not an actor.userId session.
+		// Only its handler derives organization/digest and writes engine state;
+		// actor scoping would either exclude mail clients or admit forged claims.
+		{Path: "campaigns/mutations.memql", Name: "recordOrganizationSuppression"}: true,
+		// An actor may request a send, but only the provider adapter can attest
+		// that an attempt began. The receipt and its replay read are private.
+		// Ownership cannot attest locked scheduling or a committed occurrence.
+		// Newsletter configuration requires multi-resource preflight; signup receipts
+		// attest consent, enrollment and a reviewed snapshot; progress attests delivery.
+		// The queue scan spans owners and rechecks each captured actor before sending.
+		{Path: "campaigns/mutations.memql", Name: "configureNewsletter"}:     true,
+		{Path: "campaigns/mutations.memql", Name: "recordNewsletterSignup"}:  true,
+		{Path: "campaigns/mutations.memql", Name: "updateNewsletterWelcome"}: true,
+		{Path: "campaigns/queries.memql", Name: "pendingNewsletterWelcomes"}: true,
+
+		{Path: "campaigns/mutations.memql", Name: "configureCampaignSeries"}: true,
+		// A caller-scoped write cannot establish the testing audience choice,
+		// cross-organization agreement, or the serialized idempotent run.
+		{Path: "campaigns/mutations.memql", Name: "saveCampaignTestSettings"}: true,
+		{Path: "campaigns/mutations.memql", Name: "createCampaignTestRun"}:    true,
+		{Path: "campaigns/mutations.memql", Name: "advanceCampaignSeries"}:    true,
+		{Path: "campaigns/queries.memql", Name: "dueCampaignSeries"}:          true,
+		{Path: "campaigns/mutations.memql", Name: "recordCampaignSingleSend"}: true,
+		{Path: "campaigns/queries.memql", Name: "campaignSingleSendById"}:     true,
 		// memql#4829. The engine's own account of what it made of an event-email
 		// rule -- which bundle and construct it generated, whether activation
 		// succeeded, and how many times the rule has fired. The value of these
@@ -1058,6 +1107,19 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// version would put that back in a caller's hands.
 		{Path: "library/mutations.memql", Name: "createLibraryFileVersion"}: true,
 		{Path: "library/mutations.memql", Name: "supersedeLibraryFileHead"}: true,
+
+		// Document history is authored only after a shared write lock, a fresh
+		// owned-row read and a revision comparison. Even the document's owner
+		// must not bypass those checks to forge version numbers or timestamps.
+		{Path: "library/mutations.memql", Name: "appendDocumentVersion"}:        true,
+		{Path: "library/mutations.memql", Name: "updateGeneratedOutputContent"}: true,
+
+		// Feedback attests the source revision and actor after current artifact
+		// authorization; direct writes could forge that attestation. These
+		// reads borrow the backing owner only after the same current read gate.
+		{Path: "library/mutations.memql", Name: "appendDocumentComment"}:     true,
+		{Path: "library/queries.memql", Name: "documentCommentsForArtifact"}: true,
+		{Path: "library/queries.memql", Name: "documentCommentById"}:         true,
 
 		// The provenance stamps (epic memql#5391, design D9). Caller-scoping is
 		// not the fix here and the reason is unusual enough to be worth the

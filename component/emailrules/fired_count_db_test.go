@@ -116,19 +116,13 @@ func seedFiringRule(t *testing.T, eng *memql.MemQLEngine) (context.Context, stri
 	q := langparser.QuoteString
 	execute(owner, fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Fired count organization")`, q(account)))
 	execute(owner, fmt.Sprintf(`mutation createAudience(audienceId: %s, name: "Fired count audience", accountId: %s)`, q(audience), q(account)))
-	execute(owner, fmt.Sprintf(`mutation createTemplate(templateId: %s, name: "Fired count template", subject: "Hello", textBody: "Hello", accountId: %s)`, q(template), q(account)))
+	execute(auth.ContextWithInternalOrigin(owner), fmt.Sprintf(`mutation createTemplate(versionTime: "2026-10-01T00:00:00Z", templateId: %s, name: "Fired count template", subject: "Hello", textBody: "Hello", accountId: %s)`, q(template), q(account)))
 	execute(owner, fmt.Sprintf(`mutation createEmailRule(emailRuleId: %s, name: "Fired count rule", triggerConcept: "v1:todos:todo", eventKind: "updated", templateId: %s, recipientMode: "audience", audienceId: %s, accountId: %s)`,
 		q(rule), q(template), q(audience), q(account)))
 	execute(auth.ContextWithInternalOrigin(owner), fmt.Sprintf(`mutation recordEmailRuleGeneration(emailRuleId: %s, status: "active")`, q(rule)))
-	// The author is a MEMBER of the rule's organization, by row. A run is
-	// fired under a writer-role envelope (automations.AuthorContext), which
-	// carries none of the standing reach a staff role has, and the
-	// organization boundary (memql#5598) admits the rule -- even to its own
-	// author -- only to a member. Without these two rows every firing reads no
-	// rule and fails "rule is gone".
-	group := "acct-" + account
-	execute(system, fmt.Sprintf(`mutation writeGroup(groupId: %s, name: "Fired count organization", kind: "account", accountId: %s, status: "active")`, q(group), q(account)))
-	execute(system, fmt.Sprintf(`mutation writeGroupMembership(membershipId: %s, groupId: %s, userId: %s, origin: "added", status: "active", accountId: %s)`, q("m-"+suffix), q(group), q(user), q(account)))
+	// No membership workaround: staff authors manage clients through their
+	// current operator authority. Both receiving replicas must re-resolve it
+	// from shared principal state (#5679).
 
 	// Fired under the envelope the authored scheduler builds for every run.
 	return automations.AuthorContext(ctx, user), rule
@@ -213,6 +207,27 @@ func TestFiredCountCountsEveryFiringAcrossReplicas(t *testing.T) {
 	}
 	if got.lastFiredAt == "" {
 		t.Error("lastFiredAt is empty after firings")
+	}
+}
+
+// A remote firing resolves CURRENT authority, not the role held when armed
+// or a privileged envelope cached by the originating scheduler.
+func TestFiredCountAuthorRevocationAcrossReplicas(t *testing.T) {
+	a, b := openReplica(t), openReplica(t)
+	ctx, rule := seedFiringRule(t, a.eng)
+	first, err := b.firer.Fire(ctx, rule, "v1:todos:todo:before", map[string]any{})
+	if err != nil || len(first.Refusals) != 0 {
+		t.Fatalf("initial authorized firing: %+v %v", first, err)
+	}
+	ac, _ := auth.AccessFromContext(ctx)
+	system := auth.ContextWithToken(auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), auth.SystemActor("revocation-test"))), &auth.TokenInfo{Subject: "revocation-test"})
+	_, err = a.eng.Execute(system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"displayName":"Former operator","primaryEmail":"former@example.test","role":"reader","active":true})`, langparser.QuoteString(ac.UserId)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := b.firer.Fire(ctx, rule, "v1:todos:todo:after", map[string]any{})
+	if err == nil && len(second.Refusals) == 0 {
+		t.Fatal("remote firing retained revoked operator authority")
 	}
 }
 

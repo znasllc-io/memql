@@ -179,10 +179,20 @@ export type ExecEvent =
    * concurrency resolved would be a display of the executor rather than of the
    * install.
    */
-  | { type: "runStarted"; steps: { id: string; description: string }[] }
+  | { type: "runStarted"; steps: { id: string; label: string; description: string }[] }
   | { type: "waveStarted"; index: number; ids: string[] }
   | { type: "stepStarted"; step: Step; params: Record<string, string> }
   | { type: "stepLog"; step: Step; line: string }
+  /**
+   * Where a running step has got to, from its own `cap_progress` line.
+   *
+   * INSTEAD OF a stepLog, never as well: the runner takes the line out of the
+   * step's output entirely. `label` is the phase in the step's own words
+   * ("Starting services"); `done` / `total` are present together or not at
+   * all, and when present they are the phase's own count ("5 of 9"), not a
+   * fraction of the whole step.
+   */
+  | { type: "stepPhase"; step: Step; label: string; done?: number; total?: number }
   | { type: "stepFinished"; step: Step; outcome: StepOutcome };
 
 export interface ExecuteOptions {
@@ -245,7 +255,7 @@ export async function executeGraph(options: ExecuteOptions): Promise<ExecutionRe
   // graph: a plan that cannot be scheduled is not a plan to show anyone.
   await emit(options, {
     type: "runStarted",
-    steps: graph.steps.map((s) => ({ id: s.id, description: s.description })),
+    steps: graph.steps.map((s) => ({ id: s.id, label: s.label, description: s.description })),
   });
 
   let cancelled = false;
@@ -325,6 +335,15 @@ async function runStep(
     // step's hang detection with it.
     timeoutMs: step.timeoutSeconds !== undefined ? step.timeoutSeconds * 1000 : options.timeoutMs,
     onLog: (line) => void emit(options, { type: "stepLog", step, line }),
+    onProgress: (progress) =>
+      void emit(options, {
+        type: "stepPhase",
+        step,
+        label: progress.label,
+        ...(progress.done !== undefined && progress.total !== undefined
+          ? { done: progress.done, total: progress.total }
+          : {}),
+      }),
   });
 
   const envelope = outcome.envelope;

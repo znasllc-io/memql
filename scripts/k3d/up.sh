@@ -329,6 +329,7 @@ function warn_occupied_ports() {
 
 function create_cluster() {
     section "Creating k3d cluster '${CLUSTER_NAME}'"
+    cap_progress "Creating the cluster"
 
     if k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}[[:space:]]"; then
         info "Cluster '${CLUSTER_NAME}' already exists -- skipping creation."
@@ -390,6 +391,7 @@ function create_cluster() {
 
 function install_argocd() {
     section "Installing ArgoCD ${ARGOCD_VERSION}"
+    cap_progress "Installing ArgoCD"
 
     if kubectl get namespace "${ARGOCD_NAMESPACE}" &>/dev/null; then
         if kubectl get deployment argocd-server -n "${ARGOCD_NAMESPACE}" &>/dev/null; then
@@ -568,6 +570,29 @@ for p in pods:
 ' 2>/dev/null || kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null | awk '$2 !~ /^([0-9]+)\/\1$/ {print "  not ready: "$1"  ("$3")"}'
 }
 
+# available_count <names> -- how many of the named Deployments (`deployment.apps/x`,
+# one per line) report Available right now.
+#
+# THE WAIT BELOW DID NOT KNOW THIS. Its `kubectl wait` over every name is all or
+# nothing, so all it could say while it waited was how many seconds had passed.
+# That is enough for a log line and too little for a progress bar: "Starting
+# services 5 of 9" tells the operator the wait is moving, where "300 of 900"
+# tells them only that time is. One read of the Deployments per poll buys the
+# real count. A failed read counts nothing rather than failing the wait -- this
+# number is narration, and the verdict is still `kubectl wait`'s.
+function available_count() {
+    local names="$1" name status count=0
+    while read -r name status; do
+        [[ -n "$name" && "$status" == "True" ]] || continue
+        if grep -qxF "deployment.apps/${name}" <<<"$names"; then
+            count=$((count + 1))
+        fi
+    done < <(kubectl get deployments -n "$NAMESPACE" \
+        -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.conditions[?(@.type=="Available")].status}{"\n"}{end}' \
+        2>/dev/null || true)
+    printf '%s' "$count"
+}
+
 function wait_for_workloads() {
     # Param > env > default, resolved HERE as well as in main: tests (and any
     # future caller) source this file and call the function directly, where
@@ -624,6 +649,15 @@ function wait_for_workloads() {
     # operator were themselves pulled and admitted. Every 30s of not-ready
     # this prints WHO is not ready and WHY, so a slow pull reads as a slow
     # pull while it happens, and a timeout's last report is its diagnosis.
+    # The phase the progress bar follows through the longest wait of an
+    # install: how many of the Deployments meant to be running are Available.
+    # Reported again only when the count moves.
+    local total ready reported=-1
+    total="$(grep -c . <<<"$names" || true)"
+    ready="$(available_count "$names")"
+    cap_progress "Starting services" "$ready" "$total"
+    reported=$ready
+
     started=$SECONDS
     while :; do
         waited=$((SECONDS - started))
@@ -637,9 +671,15 @@ function wait_for_workloads() {
         if kubectl wait --for=condition=Available --timeout="${poll}s" \
             -n "$NAMESPACE" $names >/dev/null 2>&1; then
             waited=$((SECONDS - started))
+            cap_progress "Starting services" "$total" "$total"
             info "every MemQL workload is Available (after ${waited}s)."
             WORKLOADS_READY=true
             return 0
+        fi
+        ready="$(available_count "$names")"
+        if [[ "$ready" != "$reported" ]]; then
+            cap_progress "Starting services" "$ready" "$total"
+            reported=$ready
         fi
         # The deadline includes time spent inside kubectl, not only sleeps.
         waited=$((SECONDS - started))
@@ -979,6 +1019,10 @@ function _wait_for_operator() {
 # directories; this function is bootstrap, not a second install path.
 function install_operator_stack() {
     section "Registering the cluster operator stack (cert-manager + CloudNativePG)"
+    # One phase for this and apply_argocd_app, which follows it: both register
+    # what the cluster is to run, and a status line that changed between them
+    # would be naming the installer's steps rather than the operator's wait.
+    cap_progress "Registering services"
 
     info "cert-manager -> deploy/cert-manager/install"
     _register_operator_app cert-manager
@@ -1158,6 +1202,7 @@ function wait_for_app_comparison() {
 
 function seed_secrets() {
     section "Seeding local k8s Secrets"
+    cap_progress "Seeding secrets"
 
     # Ensure the memql namespace exists before seeding.
     if ! kubectl get namespace "${NAMESPACE}" &>/dev/null; then

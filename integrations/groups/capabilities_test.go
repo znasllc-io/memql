@@ -226,9 +226,9 @@ func TestGroupCreateRefusesAnAbsentOrArchivedAccount(t *testing.T) {
 	} else if RefusalCode(err) != CodeAccountNotActive {
 		t.Fatalf("code %q, want %q", RefusalCode(err), CodeAccountNotActive)
 	}
-	// A group with NO account is legal and grants nothing (D8).
-	if _, err := i.handleGroupCreate(adminCtx(), map[string]any{"name": "Just organising"}, 0); err != nil {
-		t.Fatalf("a group with no account: want admit, got %v", err)
+	// Newly created groups always have an explicitly selected organization.
+	if _, err := i.handleGroupCreate(adminCtx(), map[string]any{"name": "Just organising"}, 0); err == nil {
+		t.Fatal("a group with no organization was accepted")
 	}
 }
 

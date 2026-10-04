@@ -187,28 +187,26 @@ export function formatDuration(ms: number): string {
 }
 
 /**
- * describeRefusal turns a refusal code into text that says WHAT TO DO.
+ * describeRefusal turns a refusal code into one sentence that says WHAT TO DO.
  *
- * The spec's error-handling table asks for exactly this on two of these rows:
- * an insufficient role "names the role it requires, never a silent no-op", and
- * a cluster-side refusal gets an actionable message. The rest follow the same
- * rule -- each code has one likely cause and one next action, and the engine's
- * own message is appended rather than replaced, because it carries the
- * specifics (which automation, which filter).
+ * Each code has one likely cause and one next action, and this is that
+ * sentence -- nothing else. The engine's own message carries the specifics
+ * (which automation, which filter) and the page shows it BESIDE this, not
+ * spliced into the middle of it; the code itself belongs in the trace's
+ * details, since a person acts on the sentence and quotes the code.
  */
 export function describeRefusal(refusal: TraceRefusal): string {
-  const suffix = refusal.message.trim() === "" ? "" : ` -- ${refusal.message}`;
   switch (refusal.code) {
     case 3: // INVALID_ARGUMENT
-      return `The request could not be turned into a trigger event${suffix}. The automation's trigger pattern may be a glob the engine cannot make concrete: name the concept the payload row belongs to.`;
+      return "The request couldn't be turned into a trigger event. Name the concept the payload row belongs to.";
     case 4: // DEADLINE_EXCEEDED
-      return `The run outlived its timeout${suffix}. Work already dispatched is NOT cancelled -- it may still be running on the cluster.`;
+      return "The run took longer than its timeout. Work already started may still be running on the cluster.";
     case 5: // NOT_FOUND
-      return `No automation of that name is registered on the answering node${suffix}. Check the name, and whether the definition is deployed to the node type this run targeted.`;
+      return "No automation of that name is deployed on the node that answered. Check the name and the node type.";
     case 7: // PERMISSION_DENIED
-      return `Running an automation requires the CLUSTER OWNER or an ADMIN role${suffix}. Your identity on this cluster does not hold either.`;
+      return "Only a cluster owner or an admin can run automations.";
     case 8: // RESOURCE_EXHAUSTED
-      return `Too many operator-initiated runs are already in flight on that node${suffix}. Wait for one to finish and try again.`;
+      return "Too many runs are already in flight on that node. Try again when one finishes.";
     case 9: // FAILED_PRECONDITION
       // The engine gives @disabled and a @filter miss the same code, so this
       // branch is the only place the two can be told apart -- and only when
@@ -216,12 +214,12 @@ export function describeRefusal(refusal: TraceRefusal): string {
       // cause matters because the two have opposite next actions: re-enable
       // the construct, versus fix the payload.
       if (refusal.disabled === true) {
-        return `The automation is @disabled${suffix}, so the loader skipped it and no run of it can be attempted. Its @filter was never consulted. Remove the annotation and redeploy to run it.`;
+        return "The automation is @disabled, so its @filter was never consulted. Remove @disabled and deploy it to run it.";
       }
-      return `The automation refused this event${suffix}. It is either @disabled, or its @filter rejects the payload -- which is the same question a real trigger would have asked.`;
+      return "The automation refused this event: either it is @disabled, or its @filter rejects this payload.";
     case 14: // UNAVAILABLE
-      return `No node of the requested type picked the run up${suffix}. That node type is not running, or the run topics are not being forwarded across the mesh.`;
+      return "No node of the requested type picked the run up. That node type may not be running.";
     default:
-      return `The engine refused the run (${refusal.codeName})${suffix}.`;
+      return "The cluster refused the run.";
   }
 }

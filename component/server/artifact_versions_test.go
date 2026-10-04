@@ -534,3 +534,99 @@ func TestChunkedVersionSessionStagesAtAFreshPathUnderTheSameFile(t *testing.T) {
 		t.Errorf("staging path %q is the FIRST version's path -- a version must never stage over stored bytes", row.BlobPath)
 	}
 }
+
+func TestEditorVersionConflictDoesNotUploadBytes(t *testing.T) {
+	store := newFakeLibraryStore()
+	blob := newFakeBlob()
+	seedVersionedFile(store, blob, "user-a", "artifact-1", "file-1", []byte("existing"), "text/plain", "draft.txt", 2)
+	h := NewArtifactHandler(ArtifactHandlerOptions{Logger: quietLogger(), Bucket: "lib", Uploader: blob, Downloader: blob, Store: store})
+	for _, expected := range []string{"1", "invalid", "0"} {
+		rec := postUpload(t, h, "user-a", "draft.txt", "text/plain", []byte("stale"), map[string]string{libraryFormTargetKey: "artifact-1", "expectedVersion": expected})
+		want := http.StatusConflict
+		if expected != "1" {
+			want = http.StatusBadRequest
+		}
+		if rec.Code != want {
+			t.Fatalf("expected %s: %d %s", expected, rec.Code, rec.Body.String())
+		}
+	}
+	if len(store.snapshotSupersedes()) != 0 || len(store.snapshotCreated()) != 0 {
+		t.Fatal("conflict changed stored files")
+	}
+}
+
+// A Cockpit upload can start on one replica and complete on another, after
+// Productivity saved new bytes. The original version travels with the session.
+func TestChunkedBackupCannotOverwriteAnEditorSaveAcrossHandlers(t *testing.T) {
+	store, blob := newFakeLibraryStore(), newFakeBlob()
+	seedVersionedFile(store, blob, "user-a", "artifact-1", "file-1", []byte("v1"), "text/plain", "a.txt", 1)
+	sessions, blocks := newFakeSessionStore(), newFakeBlocks()
+	first := sessionsHandler(store, sessions, blocks, 4, nil)
+	second := sessionsHandler(store, sessions, blocks, 4, nil)
+	for _, expected := range []any{0, -1, 2} {
+		rec := doJSON(t, first, http.MethodPost, "/artifacts/uploads", "user-a", map[string]any{
+			"name": "a.txt", "size": 4, "targetArtifactId": "artifact-1", "expectedVersion": expected,
+		})
+		want := http.StatusBadRequest
+		if expected == 2 {
+			want = http.StatusConflict
+		}
+		if rec.Code != want {
+			t.Fatalf("init expected %v: %d %s", expected, rec.Code, rec.Body.String())
+		}
+	}
+	if len(sessions.sessions) != 0 {
+		t.Fatal("refused init persisted a session")
+	}
+	out := openSession(t, first, "user-a", map[string]any{
+		"name": "a.txt", "size": 4, "targetArtifactId": "artifact-1", "expectedVersion": 1,
+	})
+	putChunk(t, second, "user-a", out.UploadId, 1, []byte("back"))
+	editor := NewArtifactHandler(ArtifactHandlerOptions{Logger: quietLogger(), Bucket: "lib", Store: store, Uploader: blob, Downloader: blob})
+	saved := postUpload(t, editor, "user-a", "a.txt", "text/plain", []byte("editor"), map[string]string{libraryFormTargetKey: "artifact-1", "expectedVersion": "1"})
+	if saved.Code != http.StatusCreated {
+		t.Fatalf("editor save: %d %s", saved.Code, saved.Body.String())
+	}
+	rec := doJSON(t, second, http.MethodPost, "/artifacts/uploads/"+out.UploadId+"/complete", "user-a", nil)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("backup completion: %d %s", rec.Code, rec.Body.String())
+	}
+	if blocks.commitCount() != 0 || len(store.snapshotSupersedes()) != 1 {
+		t.Fatal("stale backup changed stored bytes or history")
+	}
+}
+
+func TestChunkedUploadReceiptDoesNotAdvanceWithLaterEdits(t *testing.T) {
+	for _, interrupted := range []bool{false, true} {
+		t.Run(fmt.Sprint("interrupted=", interrupted), func(t *testing.T) {
+			store, blob := newFakeLibraryStore(), newFakeBlob()
+			seedVersionedFile(store, blob, "user-a", "artifact-1", "file-1", []byte("v1"), "text/plain", "a.txt", 1)
+			sessions, blocks := newFakeSessionStore(), newFakeBlocks()
+			first, second := sessionsHandler(store, sessions, blocks, 4, nil), sessionsHandler(store, sessions, blocks, 4, nil)
+			out := openSession(t, first, "user-a", map[string]any{"name": "a.txt", "size": 4, "targetArtifactId": "artifact-1"})
+			putChunk(t, first, "user-a", out.UploadId, 1, []byte("back"))
+			rec := doJSON(t, second, http.MethodPost, "/artifacts/uploads/"+out.UploadId+"/complete", "user-a", nil)
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("complete: %d %s", rec.Code, rec.Body.String())
+			}
+			if interrupted {
+				sessions.sessions[out.UploadId].Status = "open"
+			} // crash after head write, before session completion
+			editor := NewArtifactHandler(ArtifactHandlerOptions{Logger: quietLogger(), Bucket: "lib", Store: store, Uploader: blob, Downloader: blob})
+			saved := postUpload(t, editor, "user-a", "a.txt", "text/plain", []byte("editor"), map[string]string{libraryFormTargetKey: "artifact-1", "expectedVersion": "2"})
+			if saved.Code != http.StatusCreated {
+				t.Fatalf("editor save: %d %s", saved.Code, saved.Body.String())
+			}
+			again := doJSON(t, first, http.MethodPost, "/artifacts/uploads/"+out.UploadId+"/complete", "user-a", nil)
+			if again.Code != http.StatusOK {
+				t.Fatalf("retry: %d %s", again.Code, again.Body.String())
+			}
+			if got := decodeUpload(t, again); got.VersionNumber != 2 {
+				t.Fatalf("receipt changed: %+v", got)
+			}
+			if blocks.commitCount() != 1 || len(store.snapshotSupersedes()) != 2 {
+				t.Fatal("retry wrote a second version")
+			}
+		})
+	}
+}

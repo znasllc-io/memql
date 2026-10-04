@@ -28,8 +28,6 @@
 //
 // Refs: #3763 #3745
 
-import type { LspRange } from "../constructs/runnable.js";
-import type { TrainingConstruct } from "../state/training.js";
 
 /** One construct a session-define registered. */
 export interface DefinedConstruct {
@@ -92,43 +90,12 @@ export class SessionDefinitions {
   }
 }
 
-/** A lens saying a construct is live for this session only. */
-export interface SessionLensPlan {
-  name: string;
-  signatureRange: LspRange;
-  title: string;
-  tooltip: string;
-}
-
-/**
- * sessionLensPlans is the lens that keeps "temporary" on screen.
- *
- * It is a SEPARATE lens from the state lens rather than a fifth state, because
- * it is not a state: the construct is still `untrained` on that cluster and
- * still wants a Promote offered beside it. What changed is that a copy of it is
- * answering calls right now, on this connection, and will stop without notice.
- *
- * NO COMMAND. Clicking it would have to do something, and there is nothing to
- * do: undefining is not a thing the engine offers, and the way to make it
- * permanent is the Promote lens already sitting on the same line.
- */
-export function sessionLensPlans(
-  constructs: readonly TrainingConstruct[],
-  defined: SessionLookup,
-): SessionLensPlan[] {
-  const out: SessionLensPlan[] = [];
-  for (const construct of constructs) {
-    if (!defined(construct.name)) continue;
-    out.push({
-      name: construct.name,
-      signatureRange: construct.signatureRange,
-      title: "defined for this session only",
-      tooltip:
-        "This version is answering calls on the current connection and nowhere else. It is not persisted, no other caller can see it, and it is dropped when the connection drops or you switch cluster. Promote is what makes it outlive the session.",
-    });
-  }
-  return out;
-}
+// THE LENS THAT KEEPS "TEMPORARY" ON SCREEN is no longer a lens of its own: a
+// construct defined for this session only says so in its one training lens
+// ("Not on cluster · this session"; state/training.ts's trainingLensPlans,
+// handed a SessionLookup). What changed is still a fact about the CONNECTION,
+// not a state -- the construct is still `untrained` and still offers Promote --
+// so the lookup below is read per paint and forgets everything on a reconnect.
 
 /** Whether a construct name is currently session-defined. */
 export type SessionLookup = (name: string) => boolean;

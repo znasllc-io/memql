@@ -122,6 +122,36 @@ function cap_warn()  { printf 'WARN:  %s\n' "$*" >&2; }
 function cap_error() { printf 'ERROR: %s\n' "$*" >&2; }
 function cap_step()  { printf '==> %s\n'    "$*" >&2; }
 
+# cap_progress <label> [<done> <total>]
+# Reports where a long step has got to, as exactly one STDERR line:
+#
+#   ::memql-progress:: <done>/<total> <label>     (with a count)
+#   ::memql-progress:: - <label>                  (without one)
+#
+# A caller that runs this script (the editor's install runner) reads the line
+# as the step's current phase -- "Starting services 5 of 9" under a progress
+# bar -- and keeps it OUT of the step's log; a human at a terminal just sees
+# the line. <label> is short, sentence case, in the operator's words. <done>
+# and <total> are whole numbers counting THIS phase's own units (services,
+# images), not the whole step; pass both or neither.
+#
+# Reporting progress must never be able to fail a capability, so a malformed
+# count is dropped (the label is still reported) rather than refused. A count
+# with leading zeros is read as decimal (10#): bash would otherwise take "08"
+# for a bad octal number and print its own error into the step's log.
+function cap_progress() {
+    local label="${1:-}" count_done="${2:-}" count_total="${3:-}"
+    label="${label//$'\n'/ }"
+    label="${label//$'\r'/ }"
+    [[ -n "$label" ]] || return 0
+    if [[ "$count_done" =~ ^[0-9]{1,9}$ && "$count_total" =~ ^[0-9]{1,9}$ ]] \
+        && (( 10#$count_total > 0 )); then
+        printf '::memql-progress:: %d/%d %s\n' "$((10#$count_done))" "$((10#$count_total))" "$label" >&2
+    else
+        printf '::memql-progress:: - %s\n' "$label" >&2
+    fi
+}
+
 #=============================================================================
 # JSON HELPERS (pure bash -- no jq dependency for emission)
 #=============================================================================

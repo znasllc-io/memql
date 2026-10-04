@@ -56,6 +56,7 @@ func (a *App) transportAgent() {
 	// Materializer automation steps execute here, with this node's own
 	// registered integration, AI router and shared Library blob container.
 	a.wireComposeIntegration(uploader, blobContainer)
+	a.wireLibraryIntegration(uploader)
 
 	// memql#733/#801: hand the workbench integration the Azure Blob uploader so a
 	// successful LOCAL fs_write uploads its bytes to v1:common:attachment

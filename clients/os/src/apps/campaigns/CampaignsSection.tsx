@@ -1,13 +1,12 @@
-import { ContentSkeleton } from "../../kit/ContentSkeleton";
+import { ContentSkeleton, InlineSkeleton } from "../../kit/ContentSkeleton";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { RecordList, listCount } from "../../kit/RecordRow";
-import { NeedsConfiguration } from "./NeedsConfiguration";
+import { useSendingReadiness } from "./useCampaigns";
 import { useSession } from "../../chrome/access";
-import { campaignSendingConfigured } from "./readiness";
+import { editorTemplateURL } from "../../items/editorPreference";
+import { openHandoff, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
 import type { UploadProvider } from "../../items/upload";
 import { CampaignJourney } from "./CampaignJourney";
-import type { EmailReadiness } from "./rows";
-import type { Reading } from "./useCampaigns";
 import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -37,8 +36,10 @@ import {
   formatMoment,
 } from "../../kit";
 import { useLiveView } from "../../live/liveView";
-import type { CampaignWrites, TestSendState } from "./actions";
+import { TestSendPanel } from "./TestAudiencePanel";
+import type { CampaignWrites } from "./actions";
 import { SendBar } from "./SendBar";
+import { RecurrencePanel } from "./RecurrencePanel";
 import {
   audienceFromRow,
   campaignFingerprint,
@@ -61,9 +62,8 @@ import { useCampaignDeliveries, useCampaignStats, type CampaignFeeds } from "./u
 // The campaigns list and one campaign in full.
 //
 // The list is LIVE (`v1:campaigns:campaign` broadcasts both verbs). The
-// detail's two heavy readings -- the delivery ledger and the server-computed
-// stats -- are NOT, deliberately, and they say when they were read. See
-// useCampaigns.ts for the volume argument.
+// detail refreshes delivery records and server-computed statistics
+// automatically without broadcasting recipient-volume events.
 
 export function CampaignsSection({
   feeds,
@@ -71,10 +71,8 @@ export function CampaignsSection({
   showFiled,
   trackByDefault,
   uploads,
-  email,
 }: {
   uploads: UploadProvider;
-  email: Reading<EmailReadiness>;
   feeds: CampaignFeeds;
   writes: CampaignWrites;
   showFiled: boolean;
@@ -110,7 +108,6 @@ export function CampaignsSection({
         feeds={feeds}
         writes={writes}
         uploads={uploads}
-        email={email}
         trackByDefault={trackByDefault}
         onDone={(id) => {
           setAdding(false);
@@ -135,12 +132,12 @@ export function CampaignsSection({
           title={campaignName(open)}
           back={{ label: "Campaigns", onSelect: () => setOpenId("") }}
         />
-        <NeedsConfiguration email={email} />
         <CampaignDetail
           key={open.id}
           campaign={open}
           audiences={audiences}
           templates={templates}
+          templateFeed={feeds.templates}
           senders={senders}
           writes={writes}
         />
@@ -152,7 +149,6 @@ export function CampaignsSection({
       <Head title="Campaigns" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => setAdding((v) => !v)} label="New campaign" />
       </Head>
-      <NeedsConfiguration email={email} />
 
       {feeds.campaigns.snapshot.error ? (
         <Notice
@@ -295,12 +291,14 @@ function CampaignDetail({
   campaign,
   audiences,
   templates,
+  templateFeed,
   senders,
   writes,
 }: {
   campaign: CampaignRow;
   audiences: AudienceRow[];
   templates: TemplateRow[];
+  templateFeed: CampaignFeeds["templates"];
   senders: SenderIdentityRow[];
   writes: CampaignWrites;
 }) {
@@ -312,7 +310,7 @@ function CampaignDetail({
     <div className="os-campaign-detail">
       <Panel label={`${campaignName(campaign)} progress`}>
         <div className="os-campaign-detail-head">
-          <Subhead>{campaignName(campaign)}</Subhead>
+          <Subhead>Campaign results</Subhead>
           <AccountChip name={accountNameFrom(accounts, campaign.accountId)} />
         </div>
 
@@ -320,6 +318,7 @@ function CampaignDetail({
             counters, which arrive live, so it fills under somebody watching a
             send without this panel re-reading anything. */}
         <SendBar campaign={campaign} stats={stats.value} />
+        <Caption>Results for this campaign’s audience. Test sends have their own results below.</Caption>
 
         {/* A SEND'S REFUSAL IS THE SERVER'S SENTENCE, verbatim and in place.
             "no email sender is registered on this node" names the thing to go
@@ -362,11 +361,14 @@ function CampaignDetail({
         </Facts>
       </Panel>
 
-      <SendControls campaign={campaign} writes={writes} />
+      <TestSendPanel key={campaign.id} campaign={campaign} audiences={audiences} />
 
-      <TestSendPanel campaignId={campaign.id} testSend={writes.testSend} />
+      <SendControls campaign={campaign} writes={writes}
+        template={templates.find(template => template.id === campaign.templateId)}
+        templateFeed={templateFeed} />
+      <RecurrencePanel campaignId={campaign.id} />
 
-      <StatsPanel campaign={campaign} stats={stats} />
+      <StatsPanel stats={stats} />
 
       <DeliveriesPanel campaignId={campaign.id} />
 
@@ -414,11 +416,29 @@ function CampaignDetail({
  * when they hesitate. "Send to 4,182 people?" is a different question from
  * "Send?" and it is the one being asked.
  */
-function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: CampaignWrites }) {
-  const readyToSend = campaignSendingConfigured(useSession().readiness);
+function SendControls({ campaign, writes, template, templateFeed }: {
+  campaign: CampaignRow; writes: CampaignWrites; template?: TemplateRow;
+  templateFeed: CampaignFeeds["templates"];
+}) {
+  const { config } = useSession();
+  const [editorNotice, setEditorNotice] = useState("");
+  const templatesCurrent = templateFeed.snapshot.state === "live" && !templateFeed.snapshot.error;
+  const ownTemplate = template?.accountId === campaign.accountId;
+  const templateReady = templatesCurrent && ownTemplate && template?.status === "ready";
+  const sending = useSendingReadiness(campaign.accountId, campaign.senderIdentityId, campaign.id);
+  const readyToSend = sending.ready;
+  const readyToStart = readyToSend && templateReady;
   const controls = writes.sendControls;
   const [asking, setAsking] = useState<"" | "start" | "cancel">("");
   const [when, setWhen] = useState("");
+
+  useEffect(() => {
+    // A publication or a later edit must not reuse an earlier send confirmation.
+    setAsking(held => held === "start" ? "" : held);
+    controls.reset();
+    // reset belongs to this campaign's write state; its wrapper changes each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaign.templateId, template?.createdAt, template?.status, templatesCurrent]);
 
   const draft = campaign.status === "draft";
   const scheduled = campaign.status === "scheduled";
@@ -441,23 +461,45 @@ function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: Cam
   return (
     <Panel label="Send controls">
       <Subhead>Sending</Subhead>
+      {sending.capture ? <Caption>Messages will appear in the Email app. External delivery is disabled.</Caption> : null}
       {!readyToSend ? (
         <Notice
           tone="warn"
           sentence="Sending setup is incomplete or unconfirmed."
-          next="Review Campaigns settings. You can still edit this draft or stop an existing send."
-        />
+          next="Review this organization’s email connection in Senders. You can still edit the draft or stop an existing send."
+          detail={sending.reason}
+        ><Button onClick={sending.reload} busy={sending.state === "loading"}>Check again</Button></Notice>
       ) : null}
 
-      {asking === "start" && readyToSend ? (
+      {(draft || scheduled) && readyToSend && !templateReady ? (
+        !templatesCurrent ? templateFeed.snapshot.state === "seeding" ? (
+          <InlineSkeleton label="Checking template publication" />
+        ) : (
+          <Notice tone="warn" sentence="Template status could not be confirmed." detail={templateFeed.snapshot.error}>
+            <Button onClick={templateFeed.reseed}>Try again</Button>
+          </Notice>
+        ) : template && ownTemplate && template.status === "draft" ? (
+          <Notice tone="info" sentence={`Publish “${template.name || "Untitled template"}” before sending.`}
+            next="Review it in the editor, then choose Use in Campaigns → Publish template for campaigns.">
+            <Button onClick={() => openHandoff(editorTemplateURL(config.domain, template.id, template.name), () => setEditorNotice(VSCODE_NO_ANSWER_MESSAGE))}>Review template</Button>
+          </Notice>
+        ) : (
+          <Notice tone="warn" sentence="Choose a published template from this organization before sending."
+            next={scheduled ? "Restore and publish the template in Templates, or cancel this schedule to change it." : "Select another template under Details → Edit."} />
+        )
+      ) : null}
+      {editorNotice ? <Notice sentence={editorNotice} /> : null}
+
+      {asking === "start" && readyToStart ? (
         <div className="os-campaign-confirm">
           <p className="os-campaign-confirm-line">
             Send {campaignName(campaign)} now
             {campaign.recipientCount > 0 ? ` to ${campaign.recipientCount} people` : ""}?
           </p>
           <Caption>
-            Mail starts leaving immediately. Anyone on the do-not-mail list is skipped and recorded
-            as skipped; everybody else gets it. There is no unsend.
+            {sending.capture
+              ? "Messages are captured for review in the Email app. Anyone on the do-not-mail list is skipped."
+              : "Mail starts leaving immediately. Anyone on the do-not-mail list is skipped and recorded as skipped; everybody else gets it. There is no unsend."}
           </Caption>
           <div className="os-campaign-actions">
             <Button
@@ -512,7 +554,7 @@ function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: Cam
         </div>
       ) : (
         <div className="os-campaign-actions">
-          {(draft || scheduled) && readyToSend ? (
+          {(draft || scheduled) && readyToStart ? (
             <Button tone="primary" onClick={() => setAsking("start")}>
               Send now
             </Button>
@@ -546,7 +588,7 @@ function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: Cam
         </div>
       )}
 
-      {(draft || scheduled) && readyToSend ? (
+      {(draft || scheduled) && readyToStart ? (
         <div className="os-campaign-schedule">
           <Field label="Or send it at">
             <Input
@@ -596,140 +638,17 @@ function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: Cam
 // Test send
 // ---------------------------------------------------------------------------
 
-/**
- * One test copy, and the merge tags it could not resolve.
- *
- * IT LIVES WITH THE CAMPAIGN because the builtin does: a test renders the
- * campaign's template through the campaign's resolved sending identity, so
- * there is no such thing as testing a template on its own. The template editor
- * mounts this same panel against a campaign that uses the template, which is
- * how the check lands where somebody is actually writing copy.
- *
- * THE UNRESOLVED LIST IS THE FEATURE. A typo'd `{{fields.compnay}}` renders as
- * its own literal text into somebody's inbox and looks like nothing from this
- * side; this is the only thing that catches it before the whole audience does.
- * A clean test says so out loud rather than showing nothing, because "no
- * warnings" and "the check did not run" look identical when both are silent.
- */
-export function TestSendPanel({
-  campaignId,
-  testSend,
-  label = "Send a test",
-}: {
-  campaignId: string;
-  testSend: TestSendState;
-  label?: string;
-}) {
-  const [to, setTo] = useState("");
-  const readyToSend = campaignSendingConfigured(useSession().readiness);
-
-  // The result belongs to the campaign it was run against. Switching campaigns
-  // with a stale "Test sent" on screen would credit one campaign with another's
-  // check.
-  useEffect(() => {
-    testSend.reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignId]);
-
-  return (
-    <Panel label={label}>
-      <Subhead>{label}</Subhead>
-      {!readyToSend ? (
-        <Notice
-          tone="warn"
-          sentence="Finish sending setup before sending a test."
-          next="Review Campaigns settings, then check again."
-        />
-      ) : null}
-      <Field label="Send one copy to">
-        <Input
-          id={`os-campaign-test-${campaignId}`}
-          label="Test recipient address"
-          value={to}
-          onChange={setTo}
-          placeholder="you@example.com"
-          onEnter={() => {
-            if (readyToSend) void testSend.send(campaignId, to);
-          }}
-        />
-        <Button
-          disabled={!readyToSend}
-          busy={testSend.busy}
-          busyLabel="Sending"
-          onClick={() => testSend.send(campaignId, to)}
-        >
-          Send test
-        </Button>
-      </Field>
-      <Caption>
-        Renders the real template against a stand-in recipient, using the merge data of the first
-        real person in the audience so {"{{fields.*}}"} show the shape they will actually have. It
-        writes no delivery record and moves no counter.
-      </Caption>
-
-      {testSend.error === "" ? null : (
-        <Notice
-          tone="error"
-          sentence="The test did not go out."
-          next="Nothing was sent and no counter moved."
-          detail={testSend.error}
-        />
-      )}
-
-      {!testSend.sent ? null : testSend.unresolved.length === 0 ? (
-        <Notice tone="info" sentence="Test sent. Every merge tag in this template resolved." />
-      ) : (
-        <Notice
-          tone="warn"
-          sentence="Test sent -- but these merge tags did not resolve."
-          next="They will appear as their own text in the message. Check the spelling, or the column name on the audience."
-        >
-          <div
-            className="os-campaign-tags"
-            role="list"
-            aria-label="Merge tags that did not resolve"
-          >
-            {testSend.unresolved.map((tag) => (
-              <span key={tag} className="os-campaign-tag" role="listitem" data-unresolved>
-                <span className="os-mono">{tag}</span>
-              </span>
-            ))}
-          </div>
-        </Notice>
-      )}
-    </Panel>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // The full breakdown
 // ---------------------------------------------------------------------------
 
-/**
- * Everything the server counted, under the bar that summarises it.
- *
- * ON DEMAND AND IT SAYS SO. `campaignStats` reads the delivery ledger and the
- * consent stream, neither of which broadcasts, so this panel prints when it
- * looked and offers to look again. During a live send the BAR above moves and
- * this does not, which is exactly the honest split: the counters are on the
- * campaign row and arrive live, and the breakdown is a computation over rows
- * nothing announces.
- */
-function StatsPanel({
-  campaign,
-  stats,
-}: {
-  campaign: CampaignRow;
-  stats: ReturnType<typeof useCampaignStats>;
-}) {
+/** Server-computed totals refresh automatically, including late engagement. */
+function StatsPanel({ stats }: { stats: ReturnType<typeof useCampaignStats> }) {
   const value = stats.value;
   return (
     <Panel label="Full breakdown">
       <div className="os-campaign-detail-head">
         <Subhead>Breakdown</Subhead>
-        <Button busy={stats.state === "loading"} onClick={stats.reload}>
-          {campaignIsRunning(campaign) ? "Read again" : "Re-read"}
-        </Button>
       </div>
 
       {stats.state === "error" ? (
@@ -767,12 +686,7 @@ function StatsPanel({
         </>
       )}
 
-      {stats.readAt === "" ? null : (
-        <Caption>
-          Read at {new Date(stats.readAt).toLocaleTimeString()}. This is not live -- read again to
-          see what has happened since.
-        </Caption>
-      )}
+      <Caption>Updates automatically</Caption>
     </Panel>
   );
 }
@@ -794,9 +708,6 @@ function DeliveriesPanel({ campaignId }: { campaignId: string }) {
     <Panel label="Who got it">
       <div className="os-campaign-detail-head">
         <Subhead meta={ledger.state === "ready" && !ledger.error ? `${rows.length} read` : undefined}>Who got it</Subhead>
-        <Button busy={ledger.state === "loading"} onClick={ledger.reload}>
-          Read again
-        </Button>
       </div>
 
       {ledger.state === "error" ? (
@@ -822,13 +733,7 @@ function DeliveriesPanel({ campaignId }: { campaignId: string }) {
         </RecordList>
       )}
 
-      {ledger.readAt === "" ? null : (
-        <Caption>
-          Read at {new Date(ledger.readAt).toLocaleTimeString()}. Delivery records are not broadcast
-          -- there is one per recipient per send, so they are read when you ask rather than
-          streamed.
-        </Caption>
-      )}
+      <Caption>Latest 100 · Updates automatically</Caption>
     </Panel>
   );
 }

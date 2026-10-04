@@ -104,24 +104,25 @@ test("a read-only file carries a badge, a hover and the greyed colour -- all thr
   return markerIn(OTHER_CLONE, { name: "staging", local: false }, CATALOG).then((marker) => {
     const core = decorationFor(marker, OTHER_CLONE, "dsl/cognition/queries.memql");
     assert.ok(core !== undefined, "a core file on a remote cluster must be decorated");
-    assert.equal(core?.badge, "C");
-    assert.match(String(core?.tooltip), /Core engine DSL -- read-only/);
+    assert.equal(core?.badge, "RO");
+    assert.match(String(core?.tooltip), /Read-only: built-in MemQL source/);
     assert.equal(colorId(core), "disabledForeground");
 
     const bundle = decorationFor(marker, OTHER_CLONE, "dsl/shop/queries.memql");
-    assert.equal(bundle?.badge, "R");
-    assert.match(String(bundle?.tooltip), /product bundle/);
-    // Two reasons, two marks: a single badge for both would make the hover the
-    // only way to tell a sealed file from one that another cluster would unlock.
-    assert.notEqual(core?.badge, bundle?.badge);
+    assert.equal(bundle?.badge, "RO");
+    assert.match(String(bundle?.tooltip), /loads this bundle from its own image/);
+    // ONE mark for one fact; the two reasons differ in their hover.
+    assert.notEqual(String(core?.tooltip), String(bundle?.tooltip));
   });
 });
 
 test("a local cluster locks nothing, and says so on the file rather than in the settings", async () => {
   const marker = await markerIn(OTHER_CLONE, { name: "local", local: true, checkout: CHECKOUT }, CATALOG);
   const core = decorationFor(marker, OTHER_CLONE, "dsl/cognition/queries.memql");
-  assert.equal(core?.badge, "L");
-  assert.match(String(core?.tooltip), /not the checkout local rebuilds from \(\/home\/me\/\.memql\/src\)/);
+  // A hint, not a lock: no badge (the one badge means read-only), a quieted
+  // label and the hover.
+  assert.equal(core?.badge, undefined);
+  assert.match(String(core?.tooltip), /local is built from \/home\/me\/\.memql\/src, not this folder/);
   assert.equal(core?.propagate, false);
   // NOT ONE WRITE. The hint is a hover, and `files.readonlyInclude` is for files
   // this editor is actually marking read-only -- so on a local cluster, which

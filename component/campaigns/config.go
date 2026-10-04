@@ -406,11 +406,8 @@ func LoadConfig() Config {
 // the deployment label rather than becoming a key of its own: a counter
 // bucket named after a malformed value is evidence nobody can find again.
 //
-// Suppression is deliberately NOT keyed this way and stays cluster-wide (P8).
-// One deployment sends from one tenant and shares one reputation with the
-// mailbox providers; a per-identity suppression list would let an address that
-// hard-bounced on one identity be mailed from the next, which is precisely
-// what a shared reputation punishes.
+// Suppression is not keyed by sending mailbox: an organization's opt-outs
+// cover every one of its identities, and cluster-wide safety blocks cover all.
 func (c Config) SendingIdentityFor(address string) string {
 	if normalized := NormalizeEmail(address); normalized != "" {
 		return normalized

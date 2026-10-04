@@ -377,3 +377,12 @@ query feedbackPolicy feedbackPolicyCurrent {
   filter  row => row.id == "v1:work:feedbackPolicy:primary"
   shape   feedbackPolicyFull
 }
+
+/// Exact caller-owned approval receipt, including decided approvals for recovery.
+@actor
+query approval workApprovalForOwner {
+  args { approvalId string! }
+  filter row => row.id == args.approvalId && row.ownerUserId == actor.userId
+  paginate 1
+  shape workApprovalFull
+}

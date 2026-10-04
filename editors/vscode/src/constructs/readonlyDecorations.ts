@@ -116,7 +116,7 @@ export class ReadonlyMarker implements vscode.FileDecorationProvider {
         // safeDecode, not decodeURIComponent: a cluster named with a literal
         // `%` makes the bare call throw URIError, and a throw inside a
         // FileDecorationProvider takes the badge with it silently.
-        tooltip: `Served from ${safeDecode(uri.authority)} -- read-only. The file is not on this machine; this is the source the cluster loaded.`,
+        tooltip: `Read-only: the source ${safeDecode(uri.authority)} loaded, served by the cluster.`,
         propagate: false,
       };
     }
@@ -166,9 +166,13 @@ export class ReadonlyMarker implements vscode.FileDecorationProvider {
       workspaceIsClusterCheckout: this.workspaceIsClusterCheckout,
     });
     if (!shows) return undefined;
-    // ONE LETTER, for the reason `reasonBadge` states at length: a longer badge
-    // is refused by the editor and takes the hover down with it.
-    const decoration = new vscode.FileDecoration("L", checkoutHint(this.clusterName, this.checkout));
+    // NO BADGE: this is a hint, not a lock, and the one badge this marker
+    // draws means read-only. The label is quieted and the hover says why.
+    const decoration = new vscode.FileDecoration(
+      undefined,
+      checkoutHint(this.clusterName, this.checkout),
+      new vscode.ThemeColor("descriptionForeground"),
+    );
     // A hint about ONE file. Propagating it up the tree would put the mark on
     // every ancestor folder of a checkout that is, itself, perfectly fine.
     decoration.propagate = false;

@@ -79,6 +79,13 @@ resources:
 # Remove cloud-only resources
 # ---------------------------------------------------------------------------
 patches:
+  - target: { kind: Deployment, name: "^(identity|bff|agent|planner|workbench|mcp|edge)$" }
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: MEMQL_EMAIL_TRANSPORT
+          value: capture
   - path: patches/livekit-local.yaml
   # Share the BFF image key so both make dev and the release installer's
   # image override select a real image for the dsl-fetch subcommand.

@@ -100,7 +100,7 @@ test('a workspace-level serverPath is refused, and the refusal is visible', () =
   assert.equal(recorded.warnings.length, 1, `unexpected warnings: ${recorded.warnings.join(' | ')}`);
   const message = recorded.warnings[0] ?? '';
   assert.match(message, /memql\.lsp\.serverPath/);
-  assert.match(message, /IGNORED/);
+  assert.match(message, /ignored/i);
   assert.match(message, /user settings/i);
 });
 

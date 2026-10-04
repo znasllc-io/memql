@@ -46,6 +46,8 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 	// -- specifically to remove the unguarded coupling a duplicated hash
 	// expression created, so the entry is gone rather than kept.)
 	allow := map[string]string{
+		"email/acs.go":      "Azure Communication Services requires SHA-256 content digests and HMAC-SHA256 request authentication; these are wire signatures, not row IDs",
+		"email/acs_test.go": "Independently verifies ACS's required SHA-256 content hash and HMAC wire signature against the outgoing request",
 		// Retention archives are recoverable outside MemQL. Their filenames are
 		// standard SHA-256 checksums of the gzip bytes, verified with sha256sum
 		// before restoring evidence; core/id's chained fingerprint differs.

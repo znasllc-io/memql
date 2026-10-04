@@ -768,6 +768,14 @@ func defaultRoutingRules() []RoutingRule {
 		// v1:campaigns:delivery, engagementEvent and recipient are
 		// deliberately NOT here; each is a recorded exclusion with its
 		// reason in RoutingExclusions().
+		// Series move once per occurrence or human action; their next date
+		// and blocked/paused state must reach another replica's client.
+		{Pattern: "graph.node.created.v1:campaigns:newsletterBinding", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:campaigns:newsletterBinding", TargetType: ""},
+		{Pattern: "graph.node.created.v1:campaigns:testSettings", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:campaigns:testSettings", TargetType: ""},
+		{Pattern: "graph.node.created.v1:campaigns:campaignSeries", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:campaigns:campaignSeries", TargetType: ""},
 		{Pattern: "graph.node.created.v1:campaigns:campaign", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:campaigns:campaign", TargetType: ""},
 		{Pattern: "graph.node.created.v1:campaigns:audience", TargetType: ""},

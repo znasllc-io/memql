@@ -50,6 +50,8 @@ interface FakeIdentity {
    */
   oauthUrls(): string[];
   discoveryUrls(): string[];
+  /** The sign-in pre-validation: the GET of the authorization URL made before a browser opens. */
+  preValidations(): Array<{ url: string; headers: Record<string, string>; redirect?: string }>;
 }
 
 interface FakeIdentityOptions {
@@ -63,23 +65,46 @@ interface FakeIdentityOptions {
   metadata?: Record<string, unknown> | null;
   /** The issuer the served metadata names. Defaults to the fetched host. */
   issuer?: string;
+  /**
+   * How the pre-validation GET of /authorize is answered. Defaults to a 200
+   * login page; a 400 is identity refusing the client or its redirect URI.
+   */
+  authorize?: { status: number; body: unknown } | "throw";
 }
+
+/** The pre-validation is the one GET that carries an authorization request. */
+const isPreValidation = (u: string): boolean => new URL(u).searchParams.has("response_type");
 
 function identity(options: FakeIdentityOptions = {}): FakeIdentity {
   const calls: FakeIdentity["calls"] = [];
+  const preValidations: ReturnType<FakeIdentity["preValidations"]> = [];
   return {
     calls,
+    preValidations: () => preValidations,
     urls: () => calls.map((c) => c.url),
     oauthUrls: () =>
       calls
         .map((c) => c.url)
-        .filter((u) => !u.endsWith("/.well-known/oauth-authorization-server")),
+        .filter((u) => !u.endsWith("/.well-known/oauth-authorization-server") && !isPreValidation(u)),
     discoveryUrls: () =>
       calls
         .map((c) => c.url)
         .filter((u) => u.endsWith("/.well-known/oauth-authorization-server")),
     fetch: async (url, init) => {
       calls.push({ url, body: JSON.parse(init.body ?? "{}") as Record<string, unknown> });
+
+      // THE PRE-VALIDATION: the authorization URL itself, asked as MemQL OS
+      // would before a browser is opened.
+      if (isPreValidation(url)) {
+        preValidations.push({ url, headers: init.headers, redirect: init.redirect });
+        const answer = options.authorize ?? { status: 200, body: { page: "login" } };
+        if (answer === "throw") throw new TypeError("fetch failed");
+        return {
+          ok: answer.status >= 200 && answer.status < 300,
+          status: answer.status,
+          text: async () => JSON.stringify(answer.body),
+        };
+      }
 
       // THE PRE-FLIGHT (memql#4624). Sign-in now asks the cluster where its
       // endpoints are before it opens a browser, so the fake has to be able to
@@ -135,6 +160,14 @@ interface FakeBrowser {
   resolved: string[];
   /** Every URL actually opened -- i.e. the asExternalUri OUTPUT. */
   opened: string[];
+  /**
+   * The page the loopback listener finally answered the tab with. The listener
+   * HOLDS that response until the exchange settles, so a real browser tab keeps
+   * loading meanwhile -- and so does this one: it is NOT awaited by
+   * openExternal (which, like env.openExternal, returns once the browser is
+   * launched), or the flow would wait on its own callback.
+   */
+  page?(): Promise<string>;
 }
 
 type CallbackShape = (params: URLSearchParams) => Record<string, string>;
@@ -145,9 +178,11 @@ const goodCallback: CallbackShape = (q) => ({ code: "AUTHCODE", state: q.get("st
 function browser(shape: CallbackShape = goodCallback, externalPrefix = ""): FakeBrowser {
   const resolved: string[] = [];
   const opened: string[] = [];
+  let landed: Promise<string> = Promise.resolve("");
   return {
     resolved,
     opened,
+    page: () => landed,
     // Models what asExternalUri does on a remote host: hands back a possibly
     // DIFFERENT URL. The prefix makes it observable that the flow opened the
     // resolved value rather than the original.
@@ -166,8 +201,10 @@ function browser(shape: CallbackShape = goodCallback, externalPrefix = ""): Fake
       for (const [key, value] of Object.entries(shape(query))) {
         callback.searchParams.set(key, value);
       }
-      const res = await fetch(callback.toString());
-      await res.text();
+      landed = fetch(callback.toString()).then(
+        (res) => res.text(),
+        () => "",
+      );
     },
   };
 }
@@ -265,21 +302,20 @@ test("the code_verifier redeemed matches the code_challenge that was authorized"
   assert.equal(codeChallengeS256(verifier as string), authorize.searchParams.get("code_challenge"));
 });
 
-test("a cluster clientId OVERRIDES the well-known id", async () => {
-  // The override is what keeps two cases working: an operator's own static
-  // client, and an entry still carrying an id the deleted registration path
-  // minted. Neither is migrated or rewritten -- the value is simply read.
+test("a registry clientId is another tool's and is NOT used", async () => {
+  // The Cockpit writes `client_id: cockpit` into the shared clusters.yaml, and
+  // identity registers that client for `/cockpit/callback` only. Honouring it
+  // is what sent the editor's loopback sign-in to a refused /authorize and a
+  // ten-minute wait (wellKnownClient.ts).
   const net = identity();
   const ui = browser();
 
-  const tokens = await runAuthorizationFlow(
-    cluster({ clientId: "mcp_stored" }),
-    deps(net, ui),
-  );
+  const tokens = await runAuthorizationFlow(cluster({ clientId: "cockpit" }), deps(net, ui));
 
-  assert.equal(tokens.clientId, "mcp_stored");
-  assert.deepEqual(net.oauthUrls(), [`${ISSUER}/oauth/token`]);
-  assert.equal(new URL(ui.resolved[0] ?? "").searchParams.get("client_id"), "mcp_stored");
+  assert.equal(tokens.clientId, WELL_KNOWN_CLIENT_ID);
+  assert.equal(new URL(ui.resolved[0] ?? "").searchParams.get("client_id"), WELL_KNOWN_CLIENT_ID);
+  const exchange = net.calls.find((c) => c.url.endsWith("/oauth/token"));
+  assert.equal(exchange?.body.client_id, WELL_KNOWN_CLIENT_ID);
 });
 
 test("a state mismatch is refused and the code is NEVER exchanged", async () => {
@@ -551,6 +587,7 @@ test("a transport failure names the cause, not just \"fetch failed\"", async () 
     urls: () => [],
     oauthUrls: () => [],
     discoveryUrls: () => [],
+    preValidations: () => [],
     fetch: async (url: string) => {
       if (url.endsWith("/.well-known/oauth-authorization-server")) {
         const base = url.slice(0, -"/.well-known/oauth-authorization-server".length);
@@ -701,6 +738,7 @@ test("an unreachable issuer fails immediately with the real reason", async () =>
     urls: () => [],
     oauthUrls: () => [],
     discoveryUrls: () => [],
+    preValidations: () => [],
     fetch: async () => {
       const wrapper = new TypeError("fetch failed");
       (wrapper as { cause?: unknown }).cause = new Error("getaddrinfo ENOTFOUND identity.memql.localhost");
@@ -829,4 +867,97 @@ test("an empty remoteName is local", async () => {
   const ui = browser();
   const tokens = await runAuthorizationFlow(cluster(), { ...deps(net, ui), remoteName: "  " });
   assert.equal(tokens.accessToken, "ACCESS");
+});
+
+// -----------------------------------------------------------------------------
+// Fail fast: the authorization request is pre-validated before a browser opens
+// -----------------------------------------------------------------------------
+//
+// THE FIELD FAILURE. identity refuses an unregistered client or redirect URI
+// with a 400 that the browser (MemQL OS) renders as a dead page. The callback
+// never comes, and the editor waited out its ten-minute deadline. The flow now
+// asks first -- as MemQL OS would -- and stops in seconds on a definite
+// refusal, while every other answer carries on as before.
+
+test("a refused authorization request fails as clientRefused before any browser opens", async () => {
+  const net = identity({
+    authorize: {
+      status: 400,
+      body: { error: "Invalid redirect URI. The redirect URI in this authorization request is not registered." },
+    },
+  });
+  const ui = browser();
+
+  await assert.rejects(
+    () => runAuthorizationFlow(cluster(), deps(net, ui)),
+    (err: unknown) => {
+      assert.ok(isAuthFlowError(err));
+      assert.equal(err.kind, "clientRefused");
+      assert.match(err.serverMessage ?? "", /^Invalid redirect URI/);
+      return true;
+    },
+  );
+  assert.deepEqual(ui.opened, [], "no browser may be opened for a request the cluster refuses");
+  assert.deepEqual(net.oauthUrls(), [], "nothing was redeemed");
+});
+
+test("the pre-validation asks as MemQL OS does, and does not follow redirects", async () => {
+  const net = identity();
+  await runAuthorizationFlow(cluster(), deps(net, browser()));
+
+  const [probe] = net.preValidations();
+  assert.ok(probe !== undefined, "no pre-validation was made");
+  assert.equal(probe.headers.accept, "application/vnd.memql.identity+json");
+  assert.equal(probe.headers.origin, "https://os.memql.localhost");
+  assert.equal(probe.redirect, "manual");
+  // The very URL the browser is then given.
+  assert.equal(new URL(probe.url).searchParams.get("client_id"), WELL_KNOWN_CLIENT_ID);
+});
+
+for (const answer of [
+  { status: 403, body: { error: "Identity UI origin refused" } },
+  { status: 404, body: "not found" },
+  { status: 503, body: { error: "Service Unavailable" } },
+  "throw" as const,
+]) {
+  const label = answer === "throw" ? "an unreachable probe" : `a ${answer.status}`;
+  test(`${label} is not a refusal: the flow carries on to the browser`, async () => {
+    const net = identity({ authorize: answer });
+    const ui = browser();
+    const tokens = await runAuthorizationFlow(cluster(), deps(net, ui));
+    assert.equal(tokens.accessToken, "ACCESS");
+    assert.equal(ui.opened.length, 1);
+  });
+}
+
+test("a cluster with no MemQL OS address is not pre-validated at all", async () => {
+  const net = identity();
+  await runAuthorizationFlow(
+    cluster({ domain: undefined, endpoint: "10.0.0.4:443", issuer: ISSUER }),
+    deps(net, browser()),
+  );
+  assert.deepEqual(net.preValidations(), []);
+});
+
+test("the phases are reported in order: opening, waiting, finishing", async () => {
+  const phases: string[] = [];
+  await runAuthorizationFlow(cluster(), deps(identity(), browser(), { onPhase: (p) => phases.push(p) }));
+  assert.deepEqual(phases, ["opening", "waiting", "finishing"]);
+});
+
+test("the browser is told it is signed in only after the exchange succeeded", async () => {
+  const ui = browser();
+  await runAuthorizationFlow(cluster(), deps(identity(), ui));
+  const page = await (ui.page?.() ?? Promise.resolve(""));
+  assert.match(page, /You're signed in/);
+});
+
+test("a refused exchange tells the browser the sign-in did not finish", async () => {
+  const ui = browser();
+  await assert.rejects(() =>
+    runAuthorizationFlow(cluster(), deps(identity({ tokenStatus: 400, tokenBody: { error: "invalid_grant" } }), ui)),
+  );
+  const page = await (ui.page?.() ?? Promise.resolve(""));
+  assert.match(page, /Sign-in didn't finish/);
+  assert.doesNotMatch(page, /signed in/i);
 });

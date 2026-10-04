@@ -129,6 +129,96 @@ QueryClient.prototype.campaignActivateEmailRule = function (this: QueryClient, a
   return this.executeNamed("campaignActivateEmailRule", buildCampaignActivateEmailRule(args), opts);
 };
 
+/** Configure this deployable's organization newsletter. Enabling also enables its existing shopper-form carrier; disabling affects only this newsletter. */
+export interface CampaignConfigureNewsletterArgs {
+  siteId: string;
+  audienceId: string;
+  templateId: string;
+  senderIdentityId: string;
+  consentText: string;
+  enabled: boolean;
+  expectedRevision?: string;
+}
+
+export function buildCampaignConfigureNewsletter(args: CampaignConfigureNewsletterArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
+  parts.push("consentText: " + renderMemQLValue(args.consentText));
+  parts.push("enabled: " + renderMemQLValue(args.enabled));
+  if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin campaignConfigureNewsletter(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignConfigureNewsletter(args: CampaignConfigureNewsletterArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignConfigureNewsletter = function (this: QueryClient, args: CampaignConfigureNewsletterArgs = {} as CampaignConfigureNewsletterArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignConfigureNewsletter", buildCampaignConfigureNewsletter(args), opts);
+};
+
+/** Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series. */
+export interface CampaignConfigureSeriesArgs {
+  campaignId: string;
+  // Enum: save | pause | resume
+  action: string;
+  intervalWeeks?: number;
+  firstSendAt?: string;
+  timeZone?: string;
+  expectedRevision?: string;
+}
+
+export function buildCampaignConfigureSeries(args: CampaignConfigureSeriesArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  parts.push("action: " + renderMemQLValue(args.action));
+  if (args.intervalWeeks !== undefined) parts.push("intervalWeeks: " + renderMemQLValue(args.intervalWeeks));
+  if (args.firstSendAt !== undefined) parts.push("firstSendAt: " + renderMemQLValue(args.firstSendAt));
+  if (args.timeZone !== undefined) parts.push("timeZone: " + renderMemQLValue(args.timeZone));
+  if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin campaignConfigureSeries(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignConfigureSeries(args: CampaignConfigureSeriesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignConfigureSeries = function (this: QueryClient, args: CampaignConfigureSeriesArgs = {} as CampaignConfigureSeriesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignConfigureSeries", buildCampaignConfigureSeries(args), opts);
+};
+
+/** Save the organization's shared testing audience. Must name an active audience in that organization; an empty audienceId disconnects it. Changes require the current revision. */
+export interface CampaignConfigureTestAudienceArgs {
+  accountId: string;
+  audienceId: string;
+  expectedRevision?: string;
+}
+
+export function buildCampaignConfigureTestAudience(args: CampaignConfigureTestAudienceArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin campaignConfigureTestAudience(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignConfigureTestAudience(args: CampaignConfigureTestAudienceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignConfigureTestAudience = function (this: QueryClient, args: CampaignConfigureTestAudienceArgs = {} as CampaignConfigureTestAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignConfigureTestAudience", buildCampaignConfigureTestAudience(args), opts);
+};
+
 /** Import recipients into an audience from a CSV file already uploaded to the Library (memql#4822). The file is read SERVER-SIDE under the caller's own actor, so a file the caller cannot read is a file this cannot import -- the artifact id is not a capability. The header row must carry an `email` column (case-insensitive; `displayName` and `name` are also recognized) and EVERY OTHER COLUMN lands verbatim in the recipient's `fields` map, reachable from a template as {{fields.<key>}}. Per row: the address is normalized and shape-validated, deduplicated against the audience's existing recipients AND against earlier rows of the same file (first occurrence wins). The import refuses WHOLE when the resulting roster would exceed MEMQL_CAMPAIGNS_MAX_AUDIENCE -- it never silently truncates, because a partially-imported list is one nobody knows is partial. Returns {added, duplicates, invalid, total} plus up to 20 sample invalid lines with their line numbers, so the operator's next action is fixing the file rather than guessing at it. Each added recipient also gets a consent grant event with source 'import'. */
 export interface CampaignImportRecipientsArgs {
   /** The audience to import into. The caller must be able to read it. */
@@ -223,6 +313,66 @@ QueryClient.prototype.campaignRetireEmailRule = function (this: QueryClient, arg
   return this.executeNamed("campaignRetireEmailRule", buildCampaignRetireEmailRule(args), opts);
 };
 
+/** Recheck a blocked welcome under its original owner's current authority. A saved delivery attempt prevents resubmission even when its outcome is uncertain. */
+export interface CampaignRetryNewsletterWelcomeArgs {
+  signupId: string;
+  expectedRevision: string;
+}
+
+export function buildCampaignRetryNewsletterWelcome(args: CampaignRetryNewsletterWelcomeArgs): string {
+  const parts: string[] = [];
+  parts.push("signupId: " + renderMemQLValue(args.signupId));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin campaignRetryNewsletterWelcome(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignRetryNewsletterWelcome(args: CampaignRetryNewsletterWelcomeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignRetryNewsletterWelcome = function (this: QueryClient, args: CampaignRetryNewsletterWelcomeArgs = {} as CampaignRetryNewsletterWelcomeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignRetryNewsletterWelcome", buildCampaignRetryNewsletterWelcome(args), opts);
+};
+
+/** Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail. */
+export interface CampaignSaveTemplateArgs {
+  /** Stable caller-generated template ID; reuse on an uncertain creation response. */
+  templateId: string;
+  /** Owning organization; immutable after creation. */
+  accountId: string;
+  /** Template name. */
+  name: string;
+  /** The reviewed email file: subject, textBody, htmlBody. */
+  content: Record<string, unknown>;
+  /** Exact createdAt from templateById; empty only when creating. */
+  expectedRevision: string;
+  /** save (default), publish, or archive. Publishing is an explicit human action. */
+  action?: string;
+}
+
+export function buildCampaignSaveTemplate(args: CampaignSaveTemplateArgs): string {
+  const parts: string[] = [];
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("content: " + renderMemQLValue(args.content));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  if (args.action !== undefined) parts.push("action: " + renderMemQLValue(args.action));
+  return "builtin campaignSaveTemplate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSaveTemplate(args: CampaignSaveTemplateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSaveTemplate = function (this: QueryClient, args: CampaignSaveTemplateArgs = {} as CampaignSaveTemplateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSaveTemplate", buildCampaignSaveTemplate(args), opts);
+};
+
 /** Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Requires the same organization update permission as starting one by hand. */
 export interface CampaignScheduleSendArgs {
   /** The campaign to schedule. The caller needs update permission in its organization. */
@@ -246,6 +396,31 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignScheduleSend = function (this: QueryClient, args: CampaignScheduleSendArgs = {} as CampaignScheduleSendArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignScheduleSend", buildCampaignScheduleSend(args), opts);
+};
+
+/** Check current organization sending permission, the selected sender and unsubscribe setup without sending mail. A campaignId reads that campaign's saved organization and sender. Otherwise select accountId and senderIdentityId explicitly. Readiness is not evidence of delivery and is rechecked when sending. */
+export interface CampaignSendingReadinessArgs {
+  campaignId?: string;
+  accountId?: string;
+  senderIdentityId?: string;
+}
+
+export function buildCampaignSendingReadiness(args: CampaignSendingReadinessArgs): string {
+  const parts: string[] = [];
+  if (args.campaignId !== undefined) parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.senderIdentityId !== undefined) parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
+  return "builtin campaignSendingReadiness(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSendingReadiness(args: CampaignSendingReadinessArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSendingReadiness = function (this: QueryClient, args: CampaignSendingReadinessArgs = {} as CampaignSendingReadinessArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSendingReadiness", buildCampaignSendingReadiness(args), opts);
 };
 
 /** Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Requires a readable campaign and update permission on data in its organization. Returns the recipient count the send will work through. */
@@ -290,6 +465,32 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignStats = function (this: QueryClient, args: CampaignStatsArgs = {} as CampaignStatsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignStats", buildCampaignStats(args), opts);
+};
+
+/** Queue a separate test run through the ordinary campaign worker, using this organization's configured testing audience. Works in every source lifecycle, including an active series, whose saved instruction is used without advancing its schedule. Requires the same published template and sending readiness as a live run. Replaying requestId returns the original run without resending. */
+export interface CampaignTestAudienceSendArgs {
+  campaignId: string;
+  requestId: string;
+  /** The testing audience reviewed by the caller. Must still match the organization's saved setting; never replaces the saved setting. */
+  audienceId: string;
+}
+
+export function buildCampaignTestAudienceSend(args: CampaignTestAudienceSendArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "builtin campaignTestAudienceSend(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignTestAudienceSend(args: CampaignTestAudienceSendArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignTestAudienceSend = function (this: QueryClient, args: CampaignTestAudienceSendArgs = {} as CampaignTestAudienceSendArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignTestAudienceSend", buildCampaignTestAudienceSend(args), opts);
 };
 
 /** Send one test copy of a campaign to a named address (memql#4822). Renders the campaign's template against a synthetic recipient -- display name 'Test Recipient', the address you name, and the `fields` of the audience's first real recipient when one exists, so {{fields.*}} show the shape they will actually have. The subject is prefixed '[Test] ', the message goes through the campaign's resolved sending identity, and the unsubscribe footer carries an obviously-inert token. It writes NO delivery row and touches NO counter, so a test send can never make a campaign look partly sent; it does consume the ordinary send-rate token bucket, because a test is a real message to a real mailbox. Returns the list of merge tags it could not resolve -- the check that catches a typo'd {{fields.compnay}} before the whole audience gets it. `to` is REQUIRED and never defaults to the caller's own address: a builtin that mails somewhere you did not name is one you have to remember the default of. */
@@ -502,7 +703,9 @@ export interface ComposeMaterializeArgs {
   statement?: string;
   /** markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of. */
   format: string;
-  /** What to compose from: a list of {kind, ref, label} where kind is concept_row | library_file | query. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each. */
+  /** email_template produces a validated .email.json with subject, editable HTML, and plain-text alternative; requires format json. Empty creates an ordinary document. The result is a draft, never published or sent automatically. */
+  outputKind?: string;
+  /** What to compose from: a list of {kind, ref, label, content?} where kind is concept_row | library_file | query. Set content=true only for a library_file to capture its bytes as reference input, including bounded inspection of supported ZIP members. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each. */
   sources?: Record<string, unknown>[];
   /** A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly. */
   draft?: string;
@@ -525,6 +728,7 @@ export function buildComposeMaterialize(args: ComposeMaterializeArgs): string {
   parts.push("name: " + renderMemQLValue(args.name));
   if (args.statement !== undefined) parts.push("statement: " + renderMemQLValue(args.statement));
   parts.push("format: " + renderMemQLValue(args.format));
+  if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
   if (args.sources !== undefined) parts.push("sources: " + renderMemQLValue(args.sources));
   if (args.draft !== undefined) parts.push("draft: " + renderMemQLValue(args.draft));
   if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
@@ -835,7 +1039,7 @@ QueryClient.prototype.decideApproval = function (this: QueryClient, args: Decide
   return this.executeNamed("decideApproval", buildDecideApproval(args), opts);
 };
 
-/** Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. ownerUserId is threaded from the document row, never the caller. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231). */
+/** Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. The caller retains their own authority for reads and writes. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231). */
 export interface EditDocumentArgs {
   documentId: string;
   content?: string;
@@ -844,6 +1048,7 @@ export interface EditDocumentArgs {
   // Enum: user | assistant | system
   authorKind?: string;
   authorId?: string;
+  expectedRevision?: string;
   expectedVersion?: number;
   producedByPlanId?: string;
   partitionId?: string;
@@ -857,6 +1062,7 @@ export function buildEditDocument(args: EditDocumentArgs): string {
   if (args.note !== undefined) parts.push("note: " + renderMemQLValue(args.note));
   if (args.authorKind !== undefined) parts.push("authorKind: " + renderMemQLValue(args.authorKind));
   if (args.authorId !== undefined) parts.push("authorId: " + renderMemQLValue(args.authorId));
+  if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
   if (args.expectedVersion !== undefined) parts.push("expectedVersion: " + renderMemQLValue(args.expectedVersion));
   if (args.producedByPlanId !== undefined) parts.push("producedByPlanId: " + renderMemQLValue(args.producedByPlanId));
   if (args.partitionId !== undefined) parts.push("partitionId: " + renderMemQLValue(args.partitionId));
@@ -890,6 +1096,52 @@ declare module "./query.js" {
 
 QueryClient.prototype.effectiveCapabilitiesForActor = function (this: QueryClient, args: EffectiveCapabilitiesForActorArgs = {} as EffectiveCapabilitiesForActorArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("effectiveCapabilitiesForActor", buildEffectiveCapabilitiesForActor(args), opts);
+};
+
+/** Configure one Microsoft Azure connection for the cluster with accountId self, then manage each organization's domain and sender using that saved connection. Owner or developer only. Credentials stay encrypted on the cluster. */
+export interface EmailAzureSetupArgs {
+  accountId: string;
+  action: string;
+  sessionId?: string;
+  options?: Record<string, unknown>;
+}
+
+export function buildEmailAzureSetup(args: EmailAzureSetupArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("action: " + renderMemQLValue(args.action));
+  if (args.sessionId !== undefined) parts.push("sessionId: " + renderMemQLValue(args.sessionId));
+  if (args.options !== undefined) parts.push("options: " + renderMemQLValue(args.options));
+  return "builtin emailAzureSetup(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailAzureSetup(args: EmailAzureSetupArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailAzureSetup = function (this: QueryClient, args: EmailAzureSetupArgs = {} as EmailAzureSetupArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailAzureSetup", buildEmailAzureSetup(args), opts);
+};
+
+/** Read the last 100 captured test messages from the last seven days. Owner or developer only; capture must be explicitly configured. This is a sensitive test inbox, not evidence of Internet delivery. */
+export interface EmailInboxArgs {
+}
+
+export function buildEmailInbox(args: EmailInboxArgs): string {
+  void args;
+  return "builtin emailInbox()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailInbox(args?: EmailInboxArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailInbox = function (this: QueryClient, args: EmailInboxArgs = {} as EmailInboxArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailInbox", buildEmailInbox(args), opts);
 };
 
 /** Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions. */
@@ -1544,6 +1796,79 @@ QueryClient.prototype.libraryAddArtifactLabel = function (this: QueryClient, arg
   return this.executeNamed("libraryAddArtifactLabel", buildLibraryAddArtifactLabel(args), opts);
 };
 
+/** Save feedback against the exact saved revision. A repeated requestId returns the original receipt; changed content under that requestId is refused. */
+export interface LibraryAddDocumentCommentArgs {
+  artifactId: string;
+  expectedVersion: number;
+  expectedRevision: string;
+  anchor: Record<string, unknown>;
+  body: string;
+  requestId: string;
+}
+
+export function buildLibraryAddDocumentComment(args: LibraryAddDocumentCommentArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  parts.push("expectedVersion: " + renderMemQLValue(args.expectedVersion));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  parts.push("anchor: " + renderMemQLValue(args.anchor));
+  parts.push("body: " + renderMemQLValue(args.body));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  return "builtin libraryAddDocumentComment(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryAddDocumentComment(args: LibraryAddDocumentCommentArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryAddDocumentComment = function (this: QueryClient, args: LibraryAddDocumentCommentArgs = {} as LibraryAddDocumentCommentArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryAddDocumentComment", buildLibraryAddDocumentComment(args), opts);
+};
+
+/** Read revision-bound feedback after checking current access to the artifact. */
+export interface LibraryDocumentReviewArgs {
+  artifactId: string;
+}
+
+export function buildLibraryDocumentReview(args: LibraryDocumentReviewArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  return "builtin libraryDocumentReview(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryDocumentReview(args: LibraryDocumentReviewArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryDocumentReview = function (this: QueryClient, args: LibraryDocumentReviewArgs = {} as LibraryDocumentReviewArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryDocumentReview", buildLibraryDocumentReview(args), opts);
+};
+
+/** Read the exact owned proposal, approval, run and output draft. */
+export interface LibraryDocumentRevisionStatusArgs {
+  requestId: string;
+}
+
+export function buildLibraryDocumentRevisionStatus(args: LibraryDocumentRevisionStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  return "builtin libraryDocumentRevisionStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryDocumentRevisionStatus(args: LibraryDocumentRevisionStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryDocumentRevisionStatus = function (this: QueryClient, args: LibraryDocumentRevisionStatusArgs = {} as LibraryDocumentRevisionStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryDocumentRevisionStatus", buildLibraryDocumentRevisionStatus(args), opts);
+};
+
 /** Remove a label from a Library artifact index row. Idempotent -- a label already absent is left alone and nothing is written. Same owner-threaded load/write shape as libraryAddArtifactLabel. */
 export interface LibraryRemoveArtifactLabelArgs {
   artifactId: string;
@@ -1565,6 +1890,37 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryRemoveArtifactLabel = function (this: QueryClient, args: LibraryRemoveArtifactLabelArgs = {} as LibraryRemoveArtifactLabelArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryRemoveArtifactLabel", buildLibraryRemoveArtifactLabel(args), opts);
+};
+
+/** Capture selected current feedback and open a Nexus run waiting for approval. */
+export interface LibraryRequestDocumentRevisionArgs {
+  artifactId: string;
+  expectedVersion: number;
+  expectedRevision: string;
+  commentIds: string[];
+  instruction: string;
+  requestId: string;
+}
+
+export function buildLibraryRequestDocumentRevision(args: LibraryRequestDocumentRevisionArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  parts.push("expectedVersion: " + renderMemQLValue(args.expectedVersion));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  parts.push("commentIds: " + renderMemQLValue(args.commentIds));
+  parts.push("instruction: " + renderMemQLValue(args.instruction));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  return "builtin libraryRequestDocumentRevision(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryRequestDocumentRevision(args: LibraryRequestDocumentRevisionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryRequestDocumentRevision = function (this: QueryClient, args: LibraryRequestDocumentRevisionArgs = {} as LibraryRequestDocumentRevisionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryRequestDocumentRevision", buildLibraryRequestDocumentRevision(args), opts);
 };
 
 /** Search the caller's Library by meaning and get whole artifacts back, best match first. */
@@ -1972,6 +2328,35 @@ declare module "./query.js" {
 
 QueryClient.prototype.packageArchive = function (this: QueryClient, args: PackageArchiveArgs = {} as PackageArchiveArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("packageArchive", buildPackageArchive(args), opts);
+};
+
+/** Public configuration only. Import records a draft after explicit organization selection; Microsoft consent, provisioning and live DNS verification remain in email setup. Export merges into the supplied manifest, preserving apps. */
+export interface PackageCampaignsArgs {
+  action: string;
+  manifest?: string;
+  accountId?: string;
+  organization?: string;
+  confirmed?: boolean;
+}
+
+export function buildPackageCampaigns(args: PackageCampaignsArgs): string {
+  const parts: string[] = [];
+  parts.push("action: " + renderMemQLValue(args.action));
+  if (args.manifest !== undefined) parts.push("manifest: " + renderMemQLValue(args.manifest));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.organization !== undefined) parts.push("organization: " + renderMemQLValue(args.organization));
+  if (args.confirmed !== undefined) parts.push("confirmed: " + renderMemQLValue(args.confirmed));
+  return "builtin packageCampaigns(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packageCampaigns(args: PackageCampaignsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packageCampaigns = function (this: QueryClient, args: PackageCampaignsArgs = {} as PackageCampaignsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packageCampaigns", buildPackageCampaigns(args), opts);
 };
 
 /** Ask a running deployment to stop (epic memql#4937). It flags the row and ends nothing: the node running the attempt reads the flag at its next stage boundary and closes the run `cancelled`, which is what keeps the timeline from claiming a run stopped while its build is still running somewhere. Refuses a run that is already terminal, and refuses one at or past `staging_dsl` -- from the roll on there is no cancel, because a roll restarts the cluster onto staged MemQL and stopping half way through is the one outcome worse than either finishing or not starting. `cancelled` is its own terminal status and NOT a flavour of `failed`: nothing broke and nothing was published. Returns {deploymentId, status, cancelRequested}. */

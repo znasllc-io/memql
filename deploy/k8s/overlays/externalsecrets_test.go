@@ -59,6 +59,7 @@ var deployRoot = filepath.Join("..", "..")
 var knownExternalSecrets = []string{
 	"memql-secrets",
 	"memql-secrets-identity",
+	"memql-secrets-campaigns",
 }
 
 // externalSecret is the slice of a manifest these gates reason about.
@@ -294,12 +295,13 @@ var moduleExternalSecrets = map[string]string{}
 // overlay holds them off and an overlay that did would be broken rather than
 // minimal.
 var engineCoreExternalSecrets = map[string]string{
-	// BOTH live in deploy/external-secrets/, not deploy/k8s/base/ -- they are
+	// These live in deploy/external-secrets/, not deploy/k8s/base/ -- they are
 	// wired onto an instance by scripts/deploy/wire-external-secrets.sh rather
 	// than composed by an overlay, which is why no overlay has a patch for
 	// either and why neither could ever be held off by one.
-	"memql-secrets":          filepath.Join(deployRoot, "external-secrets", "externalsecret-memql.yaml"),
-	"memql-secrets-identity": filepath.Join(deployRoot, "external-secrets", "externalsecret-memql.yaml"),
+	"memql-secrets":           filepath.Join(deployRoot, "external-secrets", "externalsecret-memql.yaml"),
+	"memql-secrets-identity":  filepath.Join(deployRoot, "external-secrets", "externalsecret-memql.yaml"),
+	"memql-secrets-campaigns": filepath.Join(deployRoot, "external-secrets", "externalsecret-memql.yaml"),
 }
 
 // TestEveryExternalSecretIsClassified is the memql#4488 ratchet: the thing that

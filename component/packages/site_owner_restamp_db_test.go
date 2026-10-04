@@ -165,16 +165,16 @@ func TestSiteOwnerRestampRepairsTheErasedDeveloperSite(t *testing.T) {
 
 	// ---- the deploy, as the pipeline writes it ----
 	mustExecute(t, eng, devCtx, fmt.Sprintf(
-		`mutation createPackage(packageId: %s, name: "restamp", sourceKind: "artifact")`,
+		`mutation createPackage(accountId: "self", packageId: %s, name: "restamp", sourceKind: "artifact")`,
 		langparser.QuoteString(packageId)))
 	mustExecute(t, eng, devCtx, fmt.Sprintf(
-		`mutation createSite(siteId: %s, hostname: %s, kind: "static", bundleRef: "", status: "draft")`,
+		`mutation createSite(accountId: "self", siteId: %s, hostname: %s, kind: "static", bundleRef: "", status: "draft")`,
 		langparser.QuoteString(siteId), langparser.QuoteString(hostname)))
 	mustExecute(t, eng, pipelineCtx, fmt.Sprintf(
 		`mutation recordSitePackageOrigin(siteId: %s, packageId: %s, packageDeployableName: "web")`,
 		langparser.QuoteString(siteId), langparser.QuoteString(packageId)))
 	mustExecute(t, eng, pipelineCtx, fmt.Sprintf(
-		`mutation openPackageDeployment(deploymentId: %s, packageId: %s, sourceVersion: "abc123", requestedBy: %s, automatic: false, nodeId: "test", scopedTo: [], fromDeploymentId: "", startedAt: %s)`,
+		`mutation openPackageDeployment(accountId: "self", deploymentId: %s, packageId: %s, sourceVersion: "abc123", requestedBy: %s, automatic: false, nodeId: "test", scopedTo: [], fromDeploymentId: "", startedAt: %s)`,
 		langparser.QuoteString(deploymentId), langparser.QuoteString(packageId), langparser.QuoteString(developer), langparser.QuoteString(now)))
 	mustExecute(t, eng, pipelineCtx, fmt.Sprintf(
 		`mutation closePackageDeployment(deploymentId: %s, status: "succeeded", deployables: [{"name": "web", "siteId": %s, "hostname": %s, "bundleRef": "blob://sites/x/1/", "version": "abc123"}], dslVersion: "", buildLogTail: "", builtOn: {"surface": "prebuilt", "nodeId": ""}, finishedAt: %s)`,
@@ -275,16 +275,16 @@ func TestSiteOwnerRestampFallsBackToThePackageOwnerAndLeavesTheRestAlone(t *test
 	// its deployables[] names a DIFFERENT site, so the deployment answer is
 	// empty and the package row's owner is the one to take.
 	mustExecute(t, eng, ownerCtx, fmt.Sprintf(
-		`mutation createPackage(packageId: %s, name: "restamp-fb", sourceKind: "artifact")`,
+		`mutation createPackage(accountId: "self", packageId: %s, name: "restamp-fb", sourceKind: "artifact")`,
 		langparser.QuoteString(packageId)))
 	mustExecute(t, eng, ownerCtx, fmt.Sprintf(
-		`mutation createSite(siteId: %s, hostname: %s, kind: "static", bundleRef: "", status: "draft")`,
+		`mutation createSite(accountId: "self", siteId: %s, hostname: %s, kind: "static", bundleRef: "", status: "draft")`,
 		langparser.QuoteString(siteByPackage), langparser.QuoteString("restamp-pkg-"+suffix+"."+domain)))
 	mustExecute(t, eng, pipelineCtx, fmt.Sprintf(
 		`mutation recordSitePackageOrigin(siteId: %s, packageId: %s, packageDeployableName: "web")`,
 		langparser.QuoteString(siteByPackage), langparser.QuoteString(packageId)))
 	mustExecute(t, eng, pipelineCtx, fmt.Sprintf(
-		`mutation openPackageDeployment(deploymentId: %s, packageId: %s, sourceVersion: "abc123", requestedBy: %s, automatic: false, nodeId: "test", scopedTo: [], fromDeploymentId: "", startedAt: %s)`,
+		`mutation openPackageDeployment(accountId: "self", deploymentId: %s, packageId: %s, sourceVersion: "abc123", requestedBy: %s, automatic: false, nodeId: "test", scopedTo: [], fromDeploymentId: "", startedAt: %s)`,
 		langparser.QuoteString(deploymentId), langparser.QuoteString(packageId), langparser.QuoteString("v1:identity:user:restamp-stranger-"+suffix), langparser.QuoteString(now)))
 	mustExecute(t, eng, pipelineCtx, fmt.Sprintf(
 		`mutation closePackageDeployment(deploymentId: %s, status: "succeeded", deployables: [{"name": "other", "siteId": %s}], dslVersion: "", buildLogTail: "", builtOn: {"surface": "prebuilt", "nodeId": ""}, finishedAt: %s)`,

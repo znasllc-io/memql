@@ -1,3 +1,10 @@
+import { CampaignsSettingsSection } from "../src/apps/campaigns/CampaignsSettingsSection";
+import { AzureEmailConnections } from "../src/modules/connections/AzureEmailConnections";
+import { DEFAULT_CAMPAIGNS_SETTINGS } from "../src/apps/campaigns/settings";
+import { fakeConnection as campaignConnection, rowsResult, withSession as campaignSession } from "../test/campaigns/harness";
+import { NewsletterPanel } from "../src/apps/campaigns/NewsletterPanel";
+import { useCampaignFeeds } from "../src/apps/campaigns/useCampaigns";
+import { RecurrencePanel } from "../src/apps/campaigns/RecurrencePanel";
 import { AccountsApp } from "../src/apps/accounts/AccountsApp";
 import { LocalAccountsSettingsStore } from "../src/apps/accounts/settings";
 import { fakeConnection as accountConnection, accountRow, withSession as accountSession } from "../test/accounts/harness";
@@ -341,10 +348,10 @@ function settingsStore() {
  * the wrong height, and a wizard judged outside a bounded body has no floor --
  * its action bar is only at the bottom of something that has a bottom.
  */
-function WindowBody({ fallback, children }: { fallback: string; children: ReactNode }) {
+function WindowBody({ fallback, children, width }: { fallback: string; children: ReactNode; width?: number }) {
   const content = useRef<HTMLDivElement>(null);
   return (
-    <div className="os-window" style={{ position: "fixed", inset: 0, display: "flex", flexDirection: "column" }}>
+    <div className="os-window" style={{ position: "fixed", inset: 0, maxWidth: width, display: "flex", flexDirection: "column" }}>
       <div className="os-window-body">
         <PageNavigationProvider root={content} trail={[]}>
           <TrailRow fallback={fallback} />
@@ -538,6 +545,27 @@ function PreviewPage({ site }: { site: ReturnType<typeof siteFromRow> }) {
 // `syncStatesAll`. Two fixture harnesses rather than one widened one, for the
 // reason the README gives about the fake in general: each is the SUITE's, so a
 // screenshot cannot disagree with what those tests assert.
+const recurrenceQaRow = { id: "qa-series", sourceCampaignId: "qa-campaign", intervalWeeks: 3, timeZone: "America/Phoenix", status: "active", anchorAt: "2026-10-09T16:00:00Z", nextAt: "2026-10-30T16:00:00Z", createdAt: "2026-10-01T12:00:00Z" };
+function RecurrenceQa() {
+  const narrow = new URLSearchParams(window.location.search).get("width") === "narrow";
+  return <div className="os-window-content" style={{ maxWidth: narrow ? 390 : 880, margin: "0 auto" }}><RecurrencePanel campaignId="qa-campaign" /></div>;
+}
+
+const newsletterQaSite = { id: "qa-shop", accountId: "qa-client", title: "Client storefront", status: "live" };
+const newsletterQaBinding = { id: "qa-newsletter", siteId: "qa-shop", accountId: "qa-client", audienceId: "qa-audience", templateId: "qa-welcome", senderIdentityId: "qa-sender", enabled: true, consentText: "Send me product news and offers by email.", createdAt: "2026-10-01T12:00:00Z" };
+function newsletterQaConnection(populated: boolean) {
+  return campaignConnection({ sites: [newsletterQaSite], newsletters: populated ? [newsletterQaBinding] : [],
+    templates: [{ id: "qa-welcome", accountId: "qa-client", name: "Thanks for subscribing", status: "ready" }],
+    senderIdentities: [{ id: "qa-sender", accountId: "qa-client", address: "hello@client.example", status: "active" }],
+    welcomes: populated ? [{ id: "qa-sent", email: "alex@example.test", displayName: "Alex", requestedAt: "2026-10-01T13:00:00Z", status: "sent" }, { id: "qa-blocked", email: "jordan@example.test", displayName: "Jordan", requestedAt: "2026-10-01T13:02:00Z", status: "blocked", lastError: "This sender is disabled. Review the sending identity before continuing." }] : [],
+  });
+}
+function NewsletterQa() {
+  const resources = useCampaignFeeds();
+  const narrow = new URLSearchParams(window.location.search).get("width") === "narrow";
+  return <div className="os-window-content" style={{ maxWidth: narrow ? 390 : 880, margin: "0 auto" }}><NewsletterPanel audienceId="qa-audience" accountId="qa-client" resources={resources} /></div>;
+}
+
 const VIEWS: Record<
   string,
   {
@@ -549,6 +577,28 @@ const VIEWS: Record<
     render: () => JSX.Element;
   }
 > = {
+  "azure-email-dns": azureEmailView("dns"),
+  "azure-email-provisioning": azureEmailView("provisioning"),
+  "azure-email-empty": azureEmailView("unconfigured"),
+  "campaigns-settings": campaignSettingsView(false),
+  "campaigns-settings-connected": campaignSettingsView(true),
+  "campaign-newsletter-empty": { connect: () => newsletterQaConnection(false), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
+  "campaign-newsletter-active": { connect: () => newsletterQaConnection(true), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
+  "campaign-repeat-empty": {
+    connect: () => campaignConnection(),
+    wrap: el => campaignSession(el),
+    render: () => <RecurrenceQa />,
+  },
+  "campaign-repeat-active": {
+    connect: () => campaignConnection({ campaignSeries: [recurrenceQaRow] }),
+    wrap: el => campaignSession(el),
+    render: () => <RecurrenceQa />,
+  },
+  "campaign-repeat-blocked": {
+    connect: () => campaignConnection({ campaignSeries: [{ ...recurrenceQaRow, status: "blocked", lastError: "Publish the template before resuming this schedule." }] }),
+    wrap: el => campaignSession(el),
+    render: () => <RecurrenceQa />,
+  },
   // NEXUS (epic memql#5414): what an automation is for. The procedure's page
   // in the three readings its Reuse panel has -- the evidence deciding, a
   // person's own label over evidence that disagrees, and nothing counted yet
@@ -930,6 +980,49 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
       <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="details" />
     </div>
   );
+}
+
+function azureEmailView(status: string) {
+  return {
+    connect: () => {
+      const conn = campaignConnection({ accounts: [accountRow({ id: "studio", name: "Our Studio" })] });
+      const plan = { domain: "studio.example", subscriptionId: "subscription", resourceGroup: "mail", dataLocation: "United States", emailService: "studio-email", communicationService: "studio-delivery" };
+      const records = [
+        { purpose: "Domain", type: "TXT", name: "studio.example", value: "ms-domain-verification=00000000-1111-2222-3333-444444444444", status: "Verified" },
+        { purpose: "SPF", type: "TXT", name: "studio.example", value: "v=spf1 include:spf.protection.outlook.com -all", status: "VerificationInProgress" },
+        { purpose: "DKIM", type: "CNAME", name: "selector1-azurecomm-prod-net._domainkey", value: "selector1-azurecomm-prod-net._domainkey.azurecomm.net", status: "NotStarted" },
+        { purpose: "DKIM2", type: "CNAME", name: "selector2-azurecomm-prod-net._domainkey", value: "selector2-azurecomm-prod-net._domainkey.azurecomm.net", status: "NotStarted" },
+      ];
+      Object.assign(conn.query, { emailAzureSetup: async ({ action }: { action: string }) => rowsResult([
+        action === "clusterStatus" ? { status: "connected", capture: true, resourceGroup: "mail" } :
+        action === "prepare" ? { status: "planned", plan, planId: "qa" } :
+        status === "unconfigured" ? { status } :
+        { status, plan, planId: "qa", ...(status === "dns" ? { records } : {}) },
+      ]) });
+      return conn;
+    },
+    wrap: (el: JSX.Element, role: string) => campaignSession(el, { role }),
+    render: () => <WindowBody fallback="Campaigns" width={new URLSearchParams(window.location.search).get("width") === "narrow" ? 390 : undefined}><AzureEmailConnections manageCluster={false}/></WindowBody>,
+  };
+}
+
+function campaignSettingsView(connected: boolean) {
+  return {
+    connect: () => {
+      const conn = campaignConnection({ accounts: [accountRow({ id: "studio", name: "Our Studio" })] });
+      Object.assign(conn.query, { emailAzureSetup: async ({ action }: { action: string }) => rowsResult([
+        action === "begin" ? { status: "waiting", sessionId: "qa", userCode: "WXYZ-1234", verificationUri: "https://microsoft.com/devicelogin" } :
+        connected ? { status: "ready", sender: "news@studio.example", replyTo: "hello@studio.example", plan: { domain: "studio.example" } } : { status: "unconfigured" },
+      ]) });
+      return conn;
+    },
+    wrap: (el: JSX.Element, role: string) => campaignSession(el, { role }),
+    render: () => <CampaignSettingsPane />,
+  };
+}
+function CampaignSettingsPane() {
+  const [settings, setSettings] = useState(DEFAULT_CAMPAIGNS_SETTINGS);
+  return <WindowBody fallback="Campaigns"><CampaignsSettingsSection settings={settings} update={patch => setSettings(old => ({ ...old, ...patch }))}/></WindowBody>;
 }
 
 function AccountsPane() {

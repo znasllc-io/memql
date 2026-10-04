@@ -1,0 +1,65 @@
+use common.traits.{ statusIsRunning }
+
+/// Restricted transport storage read. The public capability checks test-inbox access first.
+/// actor.userId scoping cannot represent an operator test inbox: identity services
+/// send to recipients who may not have an account. The owner/developer gate runs
+/// before this query is called under the internal capture service actor.
+@actor
+@serverOnly
+@cache(0)
+query capturedMessage capturedEmails {
+  args { since datetime! }
+  filter row => row.createdAt >= args.since && actor.isClusterOwner == true
+  sort "row.createdAt", "desc"
+  paginate 100
+  shape capturedEmailStored
+}
+
+/// Internal encrypted state lookup after operator or delivery authorization.
+/// actor.userId scoping cannot represent a transport shared by an organization's
+/// workers; the integration validates the requesting actor before unsealing.
+@actor
+@serverOnly
+@cache(0)
+query connectionState emailConnectionStateById {
+  args { stateId string! }
+  filter row => row.id == args.stateId && actor.isClusterOwner == true
+  shape emailConnectionStateStored
+}
+
+/// Internal provider journal; the capability gates the organization before reading.
+/// actor.userId cannot represent a shared transport receipt; only the service actor reads it.
+@actor
+@serverOnly
+@cache(0)
+query sendOperation emailSendOperationById {
+  args { operationId string! }
+  filter row => row.id == args.operationId && actor.isClusterOwner == true
+  shape emailSendOperationStored
+}
+
+/// Internal reconciliation across all organizations. The service alone polls;
+/// actor.userId cannot represent the shared transport maintenance task.
+@actor
+@serverOnly
+@cache(0)
+query sendOperation emailPendingSendOperations {
+  args { dueBefore datetime! }
+  filter row => actor.isClusterOwner == true && row.nextPollAt <= args.dueBefore && (row.status == "submitting" || row.status == "unknown" || row.status == "accepted" || statusIsRunning(row))
+  sort "nextPollAt", "asc"
+  paginate 50
+  shape emailSendOperationStored
+}
+
+/// The caller's organization permission is checked before this service read.
+/// actor.userId cannot represent shared organization send receipts.
+@actor
+@serverOnly
+@cache(0)
+query sendOperation emailRecentSendOperations {
+  args { accountId string! }
+  filter row => actor.isClusterOwner == true && row.accountId == args.accountId
+  sort "row.createdAt", "desc"
+  paginate 25
+  shape emailSendOperationStored
+}

@@ -85,6 +85,9 @@ func serverOnlyWrites() []struct {
 		construct string
 		issue     func(*Store, context.Context) error
 	}{
+		{"recordOrganizationSuppression", func(s *Store, ctx context.Context) error {
+			return s.RecordOrganizationSuppression(ctx, "org", strings.Repeat("a", 64), "unsubscribed", "example.test", "", "")
+		}},
 		{"recordCampaignDelivery", func(s *Store, ctx context.Context) error {
 			return s.RecordDelivery(ctx, Delivery{
 				CampaignID: "c1", RecipientID: "r1", Email: "a@example.test",

@@ -48,6 +48,59 @@ const wrap = (node: React.ReactNode, userId = "alice") => withSession(<Attention
 afterEach(cleanup);
 
 describe("shared attention", () => {
+  it("acknowledges the Email app only when its inbox is visible", async () => {
+    const fake = setup();
+    const email = OS_REGISTRY.apps.find(app => app.id === "email")!;
+    function Destination({ section = "settings", visible = true }: { section?: string; visible?: boolean }) {
+      return <AttentionProvider apps={[email]}><AttentionMarker appId="email" /><AttentionDestination appId="email" sectionId={section} visible={visible}><span>Inbox destination</span></AttentionDestination></AttentionProvider>;
+    }
+    const view = render(withSession(<Destination />));
+    await screen.findByRole("img", { name: "Unseen change" });
+    expect(fake.executeNamed.mock.calls.some(([name]) => name === "acknowledgeAttention")).toBe(false);
+    view.rerender(withSession(<Destination section="inbox" visible={false} />));
+    expect(screen.getByRole("img", { name: "Unseen change" })).toBeTruthy();
+    view.rerender(withSession(<Destination section="inbox" />));
+    await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
+    expect(fake.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")?.[1]).toContain('changeId: "email:test-inbox"');
+  });
+  it("acknowledges editor choice only at visible Files settings", async () => {
+    const fake = setup();
+    const files = OS_REGISTRY.apps.find(app => app.id === "files")!;
+    const feature = files.attentionChanges!.find(change => change.id === "files:editor")!;
+    const apps = [{ ...files, attentionChanges: [feature] }];
+    function Destination({ section = "map", visible = true }: { section?: string; visible?: boolean }) {
+      return <AttentionProvider apps={apps}><AttentionMarker appId="files" />
+        <AttentionDestination appId="files" sectionId={section} visible={visible}><span>Destination</span></AttentionDestination>
+      </AttentionProvider>;
+    }
+    const view = render(withSession(<Destination />));
+    await screen.findByRole("img", { name: "Unseen change" });
+    expect(fake.executeNamed.mock.calls.filter(([name]) => name === "acknowledgeAttention")).toHaveLength(0);
+    view.rerender(withSession(<Destination section="settings" visible={false} />));
+    expect(screen.getByRole("img", { name: "Unseen change" })).toBeTruthy();
+    view.rerender(withSession(<Destination section="settings" />));
+    await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
+    expect(fake.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")?.[1]).toContain('changeId: "files:editor"');
+  });
+  it.each([["campaigns:testing-audience", "settings"], ["campaigns:template-editor", "templates"], ["campaigns:azure-email", "senders"]])("acknowledges %s only at its visible destination", async (changeId, sectionId) => {
+    const fake = setup();
+    const campaigns = OS_REGISTRY.apps.find(app => app.id === "campaigns")!;
+    const feature = campaigns.attentionChanges!.find(change => change.id === changeId)!;
+    const apps = [{ ...campaigns, attentionChanges: [feature] }];
+    function Destination({ section = "map", visible = true }: { section?: string; visible?: boolean }) {
+      return <AttentionProvider apps={apps}><AttentionMarker appId="campaigns" />
+        <AttentionDestination appId="campaigns" sectionId={section} visible={visible}><span>Destination</span></AttentionDestination>
+      </AttentionProvider>;
+    }
+    const view = render(withSession(<Destination />));
+    await screen.findByRole("img", { name: "Unseen change" });
+    expect(fake.executeNamed.mock.calls.filter(([name]) => name === "acknowledgeAttention")).toHaveLength(0);
+    view.rerender(withSession(<Destination section={sectionId} visible={false} />));
+    expect(screen.getByRole("img", { name: "Unseen change" })).toBeTruthy();
+    view.rerender(withSession(<Destination section={sectionId} />));
+    await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
+    expect(fake.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")?.[1]).toContain(`changeId: "${changeId}"`);
+  });
   it("acknowledges GitHub account management only at visible Deployables settings", async () => {
     const fake = setup();
     const deployables = OS_REGISTRY.apps.find(app => app.id === "deployables")!;

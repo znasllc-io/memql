@@ -1,0 +1,48 @@
+/// Record one encrypted test message. The transport supplies an opaque unique id.
+/// actor.userId scoping cannot express this write: identity services send before
+/// a recipient has an account. The internal capture service actor alone writes
+/// the body, after validation and encryption, rather than accepting browser data.
+@serverOnly
+mutation capturedMessage recordCapturedEmail {
+  args {
+    id string!
+    encryptedValue string!
+  }
+  insert {
+    accept { id, encryptedValue }
+  }
+}
+
+/// Store a sealed Azure session or transport configuration under a shared lock.
+/// actor.userId scoping cannot coordinate a connection used by multiple delivery
+/// workers; the capability checks the real operator, organization, and revision.
+@serverOnly
+mutation connectionState storeEmailConnectionState {
+  args {
+    id string!
+    encryptedValue string!
+    versionTime datetime!
+  }
+  insert {
+    accept { id, encryptedValue }
+    stamp { createdAt: args.versionTime }
+  }
+}
+
+/// The transport records its attempt under a shared database lock.
+/// actor.userId cannot attest shared provider state; only internal origin writes.
+@serverOnly
+mutation sendOperation storeEmailSendOperation {
+  args {
+    id string!
+    accountId string!
+    status string!
+    nextPollAt datetime!
+    encryptedValue string!
+    versionTime datetime!
+  }
+  insert {
+    accept { id, accountId, status, nextPollAt, encryptedValue }
+    stamp { createdAt: args.versionTime }
+  }
+}

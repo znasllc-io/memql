@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/znasllc-io/memql/component/fileprocessor"
 	"github.com/znasllc-io/memql/component/memql"
@@ -19,7 +20,16 @@ import (
 // runs at process start.
 func init() {
 	memql.RegisterPlugin("library", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
-		i := NewIntegration(pctx.Engine)
+		i := NewIntegration(pctx.Engine, func() *sql.DB {
+			if pctx.BunDB == nil {
+				return nil
+			}
+			db := pctx.BunDB()
+			if db == nil {
+				return nil
+			}
+			return db.DB
+		})
 		i.SetLogger(pctx.Logger)
 		// The analysis pass's text extractor (memql#4342). Built from the
 		// SAME processor the attachment route uses, so "which types can

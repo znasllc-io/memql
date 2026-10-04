@@ -232,6 +232,7 @@ type ModelRequest struct {
 	Model    string
 	Settings map[string]any
 	Messages []ChatMessage
+	Images   []VisionContent
 	Tools    []ToolDefinition
 	Schema   StructuredSchema
 }
@@ -288,6 +289,10 @@ func (r ModelRequest) Hash() string {
 
 	// Tools are sorted by name: the set a model is offered is a set, and the
 	// order a caller happens to build it in is not part of the request.
+	for n, image := range r.Images {
+		write(fmt.Sprintf("image:%d:mime", n), image.MimeType)
+		write(fmt.Sprintf("image:%d:bytes", n), string(image.Data))
+	}
 	tools := make([]ToolDefinition, len(r.Tools))
 	copy(tools, r.Tools)
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })

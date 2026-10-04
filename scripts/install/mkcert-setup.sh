@@ -293,7 +293,8 @@ function self_command() {
 # transient, retry"), and getting it wrong is how an operator ends up retrying
 # a thing that will never succeed unattended.
 function looks_like_an_elevation_failure() {
-    local lower="${1,,}"
+    local lower
+    lower="$(printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
     [[ "$lower" == *"a terminal is required"* ]] && return 0
     [[ "$lower" == *"a password is required"* ]] && return 0
     [[ "$lower" == *"askpass"* ]] && return 0

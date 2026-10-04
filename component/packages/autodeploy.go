@@ -3,6 +3,7 @@ package packages
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -57,7 +58,11 @@ func PlanFingerprint(rep *Report) string {
 	// than by the report's own lengths -- summing two caller-supplied lengths
 	// to pre-size an allocation is the shape that overflows, and it was
 	// sizing for the wrong thing anyway.
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 4)
+	if rep.Manifest != nil && rep.Manifest.Campaigns != nil {
+		public, _ := json.Marshal(rep.Manifest.Campaigns)
+		parts = append(parts, fmt.Sprintf("campaigns=%x", sha256.Sum256(public)))
+	}
 	apps := make([]string, 0, len(rep.Deployables))
 	for _, d := range rep.Deployables {
 		problem := ""

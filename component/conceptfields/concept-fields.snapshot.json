@@ -742,6 +742,7 @@
         "startedAt",
         "status",
         "templateId",
+        "testSourceCampaignId",
         "trackClicks",
         "trackOpens"
       ],
@@ -760,6 +761,46 @@
           "scheduled",
           "sending",
           "sent"
+        ]
+      }
+    },
+    {
+      "concept": "v1:campaigns:campaignSeries",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "anchorAt",
+        "authorizedByUserId",
+        "definition",
+        "intervalWeeks",
+        "lastCampaignId",
+        "lastError",
+        "lastOccurrenceAt",
+        "name",
+        "nextAt",
+        "ownerUserId",
+        "sourceCampaignId",
+        "status",
+        "timeZone"
+      ],
+      "required": [
+        "accountId",
+        "anchorAt",
+        "authorizedByUserId",
+        "definition",
+        "intervalWeeks",
+        "name",
+        "nextAt",
+        "ownerUserId",
+        "sourceCampaignId",
+        "status",
+        "timeZone"
+      ],
+      "enums": {
+        "status": [
+          "active",
+          "blocked",
+          "paused"
         ]
       }
     },
@@ -912,6 +953,85 @@
       }
     },
     {
+      "concept": "v1:campaigns:newsletterBinding",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "audienceId",
+        "consentText",
+        "enabled",
+        "ownerUserId",
+        "senderIdentityId",
+        "siteId",
+        "storeId",
+        "templateId"
+      ],
+      "required": [
+        "accountId",
+        "audienceId",
+        "consentText",
+        "enabled",
+        "ownerUserId",
+        "senderIdentityId",
+        "siteId",
+        "storeId",
+        "templateId"
+      ]
+    },
+    {
+      "concept": "v1:campaigns:newsletterSignup",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "audienceId",
+        "consentRevision",
+        "consentText",
+        "displayName",
+        "email",
+        "emailDigest",
+        "lastError",
+        "newsletterId",
+        "ownerUserId",
+        "recipientId",
+        "requestedAt",
+        "senderIdentityId",
+        "siteId",
+        "status",
+        "storeId",
+        "submissionId",
+        "templateId",
+        "templateSnapshot"
+      ],
+      "required": [
+        "accountId",
+        "audienceId",
+        "consentRevision",
+        "consentText",
+        "email",
+        "emailDigest",
+        "newsletterId",
+        "ownerUserId",
+        "recipientId",
+        "requestedAt",
+        "senderIdentityId",
+        "siteId",
+        "status",
+        "storeId",
+        "submissionId",
+        "templateId",
+        "templateSnapshot"
+      ],
+      "enums": {
+        "status": [
+          "blocked",
+          "pending",
+          "sent",
+          "suppressed",
+          "uncertain"
+        ]
+      }
+    },
+    {
       "concept": "v1:campaigns:recipient",
       "file": "campaigns/concepts.memql",
       "fields": [
@@ -984,6 +1104,7 @@
         "startedAt",
         "status",
         "templateId",
+        "templateSnapshot",
         "throttledUntil"
       ],
       "required": [
@@ -1030,10 +1151,36 @@
       }
     },
     {
+      "concept": "v1:campaigns:singleSendReceipt",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "fingerprint",
+        "ownerUserId",
+        "result",
+        "status"
+      ],
+      "required": [
+        "accountId",
+        "fingerprint",
+        "ownerUserId",
+        "result",
+        "status"
+      ],
+      "enums": {
+        "status": [
+          "attempting",
+          "complete"
+        ]
+      }
+    },
+    {
       "concept": "v1:campaigns:suppression",
       "file": "campaigns/concepts.memql",
       "fields": [
+        "accountId",
         "domain",
+        "emailDigest",
         "note",
         "reason",
         "sourceCampaignId",
@@ -1077,6 +1224,19 @@
           "ready"
         ]
       }
+    },
+    {
+      "concept": "v1:campaigns:testSettings",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "audienceId",
+        "ownerUserId"
+      ],
+      "required": [
+        "accountId",
+        "ownerUserId"
+      ]
     },
     {
       "concept": "v1:campaigns:warmupState",
@@ -1608,6 +1768,7 @@
         "modelsUsed",
         "name",
         "outputFileId",
+        "outputKind",
         "ownerUserId",
         "provenanceEmbedded",
         "provenanceNote",
@@ -1676,6 +1837,7 @@
         "format",
         "lastRunAt",
         "name",
+        "outputKind",
         "ownerUserId",
         "runCount",
         "sourceSelectors",
@@ -1810,6 +1972,42 @@
           "draft"
         ]
       }
+    },
+    {
+      "concept": "v1:email:capturedMessage",
+      "file": "email/concepts.memql",
+      "fields": [
+        "encryptedValue"
+      ],
+      "required": [
+        "encryptedValue"
+      ]
+    },
+    {
+      "concept": "v1:email:connectionState",
+      "file": "email/concepts.memql",
+      "fields": [
+        "encryptedValue"
+      ],
+      "required": [
+        "encryptedValue"
+      ]
+    },
+    {
+      "concept": "v1:email:sendOperation",
+      "file": "email/concepts.memql",
+      "fields": [
+        "accountId",
+        "encryptedValue",
+        "nextPollAt",
+        "status"
+      ],
+      "required": [
+        "accountId",
+        "encryptedValue",
+        "nextPollAt",
+        "status"
+      ]
     },
     {
       "concept": "v1:forge:project",
@@ -2840,6 +3038,30 @@
       }
     },
     {
+      "concept": "v1:library:documentComment",
+      "file": "library/concepts.memql",
+      "fields": [
+        "anchor",
+        "artifactId",
+        "authorUserId",
+        "body",
+        "ownerUserId",
+        "requestId",
+        "revision",
+        "versionNumber"
+      ],
+      "required": [
+        "anchor",
+        "artifactId",
+        "authorUserId",
+        "body",
+        "ownerUserId",
+        "requestId",
+        "revision",
+        "versionNumber"
+      ]
+    },
+    {
       "concept": "v1:library:documentVersion",
       "file": "library/concepts.memql",
       "fields": [
@@ -2874,6 +3096,8 @@
       "file": "library/concepts.memql",
       "fields": [
         "archived",
+        "backupPath",
+        "backupWorkerId",
         "blobUrl",
         "embeddingStatus",
         "failureReason",
@@ -3100,6 +3324,7 @@
       "fields": [
         "blobPath",
         "chunkSize",
+        "expectedVersion",
         "fileId",
         "folderId",
         "labels",
@@ -4330,6 +4555,7 @@
         "bundleRef",
         "candidateRef",
         "deleted",
+        "extensionRuntimePath",
         "hostname",
         "kind",
         "notes",
@@ -7954,6 +8180,7 @@
         "input",
         "origin",
         "ownerUserId",
+        "requestFingerprint",
         "requestedVia",
         "responsibilityId",
         "routing",

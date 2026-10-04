@@ -5,6 +5,21 @@ Write `.memql` where you write code. Inspect and run it where it lives.
 The MemQL extension combines offline language support with an optional connection
 to your MemQL clusters. It is part of the alpha MemQL platform.
 
+## Desktop and browser
+
+Supported operating systems are **macOS and Linux**. Windows is not supported.
+Both this extension and **MemQL Productivity Tools** have desktop and browser
+entry points. In VS Code for the Web, MemQL connects to existing clusters using
+a browser sign-in approval. Browser credentials stay in VS Code SecretStorage.
+Native cluster installation and the bundled offline language server run on the
+desktop host; they cannot execute inside a browser worker. Syntax highlighting
+and the MemQL theme are available offline on both hosts.
+
+MemQL owns cluster connections, authentication, lifecycle, and development tools.
+Productivity Tools adds document and template work, PDFs, and review workflows
+through MemQL's versioned connection API. It does not keep another cluster
+registry or another set of credentials. See [the editor boundary](../README.md).
+
 ## Install / update the extension locally
 
 From a checkout of this repository:
@@ -28,7 +43,7 @@ listing is not assumed by these instructions.
 
 ## Features
 
-### Author offline
+### Author offline on desktop
 
 - Syntax highlighting and semantic tokens.
 - Live diagnostics and cross-reference checks.
@@ -73,7 +88,7 @@ explains the states, permissions, and effects of each action.
 
 ### MemQL OS and the editor
 
-Use **Open Console** for the selected cluster's MemQL OS: the browser workspace
+Use **Open MemQL OS** for the selected cluster: the browser workspace
 for Fleet, Files, Deployables, Nexus, and other apps. The editor owns source
 files and cluster connections; OS apps organize work inside one cluster.
 

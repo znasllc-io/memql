@@ -42,6 +42,8 @@ func run(args []string) int {
 	// Subcommands are dispatched before the server flag set.
 	if len(args) > 0 {
 		switch args[0] {
+		case "registry-update":
+			return runRegistryUpdate(args[1:])
 		case "gen-grammar":
 			return runGenGrammar(args[1:])
 		case "gen-language-config":

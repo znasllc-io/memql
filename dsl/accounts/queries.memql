@@ -222,6 +222,7 @@ query campaign campaignsForAccount {
     accountId  string!
   }
   filter  row => row.accountId == args.accountId
+              && (row.testSourceCampaignId == nil || row.testSourceCampaignId == "")
   shape   campaignFull
   sort    "row.createdAt", "desc"
 }

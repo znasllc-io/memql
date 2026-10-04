@@ -42,6 +42,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/num"
 	procedure "github.com/znasllc-io/memql/integrations/procedure"
 	workspine "github.com/znasllc-io/memql/integrations/work"
@@ -124,7 +125,7 @@ func (h *engineLifecycle) Open(ctx context.Context, owner string, overlay work.L
 
 	log := newWarningLog(h.logger)
 	h.workLog.set(log)
-	spine := &engineSpine{e: h.e, wi: workspine.New(h.e, log.logger()), acts: acts, log: log.logger()}
+	spine := &engineSpine{e: h.e, wi: workspine.New(h.e, log.logger(), func() *bun.DB { return h.db }), acts: acts, log: log.logger()}
 	return &LifecyclePlatform{
 		Recorder: workspine.NewSessionWriter(h.e, log.logger()),
 		Spine:    spine,
@@ -272,7 +273,12 @@ func (s *engineSpine) DecideApproval(ctx context.Context, owner, approvalId, dec
 		if c.Name != "decideApproval" {
 			continue
 		}
-		_, err := c.Handler(auth.ContextWithUserActor(ctx, owner), map[string]any{"approvalId": approvalId, "decision": decision}, 0)
+		// This fixture represents the person's click, not the borrowed actor
+		// used by a job. Production refuses synthetic/unranked/job decisions.
+		person := common.ContextWithRun(ctx, common.RunContext{})
+		person = auth.ContextWithToken(person, &auth.TokenInfo{Subject: owner})
+		person = auth.ContextWithAccess(person, &auth.AccessContext{UserId: owner, Role: auth.RoleOwner})
+		_, err := c.Handler(person, map[string]any{"approvalId": approvalId, "decision": decision}, 0)
 		return err
 	}
 	return fmt.Errorf("proving: integrations/work offers no decideApproval capability")

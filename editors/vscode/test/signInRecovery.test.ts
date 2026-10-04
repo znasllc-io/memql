@@ -36,6 +36,7 @@ const ALL_KINDS: AuthFlowErrorKind[] = [
   "stateMismatch",
   "invalidCallback",
   "exchangeRejected",
+  "clientRefused",
 ];
 
 /** What the editor actually has in hand at the toast: a report and a rejection. */
@@ -77,6 +78,12 @@ test("browserUnavailable offers nothing, because the fallback has already run", 
   // this kind reaches a toast, signInWithDeviceCodeFallback has already tried
   // the device grant. Offering it again would be offering what just happened.
   assert.deepEqual(actionsFor("browserUnavailable"), []);
+});
+
+test("a refused client offers nothing: the device grant presents the same client", () => {
+  // The cluster answered the pre-validation with a refusal of this editor's
+  // client. Retrying, or switching to a code, asks it the same question.
+  assert.deepEqual(actionsFor("clientRefused"), []);
 });
 
 test("every other retryable kind offers exactly the retry", () => {

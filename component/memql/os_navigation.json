@@ -95,6 +95,27 @@
     "records": []
   },
   {
+    "id": "email",
+    "name": "Email",
+    "requires": "app:email",
+    "sections": [
+      {
+        "id": "inbox",
+        "name": "Inbox"
+      },
+      {
+        "id": "logs",
+        "name": "Logs",
+        "requires": "app:email/logs"
+      },
+      {
+        "id": "settings",
+        "name": "Settings"
+      }
+    ],
+    "records": []
+  },
+  {
     "id": "cluster",
     "name": "Cluster",
     "requires": "app:cluster",

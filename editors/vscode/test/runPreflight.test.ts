@@ -85,5 +85,7 @@ test("writeConfirmationMessage -- names both the cluster and the construct", () 
   });
   assert.match(message, /createSpace/);
   assert.match(message, /MemQL Staging/);
-  assert.match(message, /not marked local/);
+  assert.match(message, /isn't a local cluster/);
+  // The consequence, not the file that records it.
+  assert.doesNotMatch(message, /clusters\.yaml/);
 });

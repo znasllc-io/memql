@@ -79,7 +79,7 @@ export const MODULE_DESCRIPTIONS: Record<ModuleId, string> = {
   storage: "Files, materialized outputs, deploy bundles and log archives live in blob storage.",
   email: "Sending mail needs a mailbox this cluster can send from.",
   githubApp: "Connecting a source through the GitHub App needs the app registered on the identity node.",
-  campaigns: "Sending a campaign needs a one-click unsubscribe secret and a reachable unsubscribe address.",
+  campaigns: "Installation prepares campaign unsubscribe links. If setup is incomplete, ask the cluster owner to repair the installation.",
   workbench: "Workbenches need a workbench node this agent can reach.",
   localApps: "Running a task in Claude Code or Codex on your machine needs the agent to mint a session credential.",
 };

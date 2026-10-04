@@ -64,6 +64,7 @@ const INSTALL_GRAPH: Graph = graph({
   steps: [
     {
       id: "binary",
+      label: "Working",
       description: "place a tool",
       script: "install.binary",
       elevation: "none",
@@ -77,6 +78,7 @@ const INSTALL_GRAPH: Graph = graph({
     },
     {
       id: "cluster",
+      label: "Working",
       description: "create the cluster",
       script: "k3d.up",
       dependsOn: ["binary"],
@@ -98,6 +100,7 @@ const DETECT_GRAPH: Graph = graph({
   steps: [
     {
       id: "detect",
+      label: "Working",
       description: "inventory the machine",
       script: "install.detect",
       elevation: "none",
@@ -109,6 +112,7 @@ const DETECT_GRAPH: Graph = graph({
     },
     {
       id: "cluster",
+      label: "Working",
       description: "create the cluster",
       script: "k3d.up",
       dependsOn: ["detect"],
@@ -130,6 +134,7 @@ const UNINSTALL_GRAPH: Graph = graph({
   steps: [
     {
       id: "removeCluster",
+      label: "Working",
       description: "remove the cluster",
       script: "install.removeArtifact",
       reverses: "cluster",
@@ -142,6 +147,7 @@ const UNINSTALL_GRAPH: Graph = graph({
     },
     {
       id: "removeBinary",
+      label: "Working",
       description: "remove the tool",
       script: "install.removeArtifact",
       reverses: "binary",
@@ -332,6 +338,7 @@ test("runUninstall removes what the receipt recorded", async () => {
 const REBUILD_STEP: Step = {
   id: "rebuildFromCheckout",
   script: "k3d.dev",
+  label: "Working",
   description: "",
   elevation: "none",
   retained: false,
@@ -622,6 +629,7 @@ test("the STEP's own --repo-root decides, not a guess made when the session was 
       kind: "install",
       steps: [{
         id: "rebuildFromCheckout",
+        label: "Working",
         description: "build from the checkout",
         script: "k3d.dev",
         elevation: "none",
@@ -926,6 +934,7 @@ test("clusterUp is told where the checkout is, rather than deriving it", async (
   const decision = plan({
     id: "clusterUp",
     script: "k3d.up",
+    label: "Working",
     description: "",
     elevation: "none",
     retained: false,
@@ -950,6 +959,7 @@ test("both steps are given the SAME directory", async () => {
   const checkout = plan({
     id: "stackCheckout",
     script: "install.cloneStack",
+    label: "Working",
     description: "",
     elevation: "none",
     retained: false,
@@ -961,6 +971,7 @@ test("both steps are given the SAME directory", async () => {
   const cluster = plan({
     id: "clusterUp",
     script: "k3d.up",
+    label: "Working",
     description: "",
     elevation: "none",
     retained: false,
@@ -991,6 +1002,7 @@ test("stackCheckout is given a tag even when the caller names none", async () =>
   const decision = plan({
     id: "stackCheckout",
     script: "install.cloneStack",
+    label: "Working",
     description: "",
     elevation: "none",
     retained: false,
@@ -1012,6 +1024,7 @@ test("an explicit tag still wins over the pin", async () => {
   const decision = plan({
     id: "stackCheckout",
     script: "install.cloneStack",
+    label: "Working",
     description: "",
     elevation: "none",
     retained: false,
@@ -1159,6 +1172,7 @@ test("the root a packaged run passes is NOT the script's own parent", async () =
   const cluster = plan({
     id: "clusterUp",
     script: "k3d.up",
+    label: "Working",
     description: "",
     elevation: "none",
     retained: false,
@@ -1191,6 +1205,7 @@ test("clusterUp gets a fresh-pull budget, not the dev default (memql#4073)", asy
   const decision = plan({
     id: "clusterUp",
     script: "k3d.up",
+    label: "Working",
     description: "",
     elevation: "none",
     retained: false,
@@ -1223,6 +1238,7 @@ test("the from-source lane gets a SHORT workload wait, because that one is dead 
   const decision = plan({
     id: "clusterUp",
     script: "k3d.up",
+    label: "Working",
     description: "",
     elevation: "none",
     retained: false,
@@ -1260,6 +1276,7 @@ test("a REPAIR of a from-source cluster keeps the full budget, because its image
   const decision = plan({
     id: "clusterUp",
     script: "k3d.up",
+    label: "Working",
     description: "",
     elevation: "none",
     retained: false,
@@ -1290,6 +1307,7 @@ test("clusterUp is told to pull published images, not locally built ones", async
   const decision = plan({
     id: "clusterUp",
     script: "k3d.up",
+    label: "Working",
     description: "",
     elevation: "none",
     retained: false,
@@ -1317,6 +1335,7 @@ test("an explicit tag moves the images with it", async () => {
   const decision = plan({
     id: "clusterUp",
     script: "k3d.up",
+    label: "Working",
     description: "",
     elevation: "none",
     retained: false,
@@ -1395,6 +1414,7 @@ function stepFor(id: string, script: string): Step {
   return {
     id,
     script,
+    label: "Working",
     description: "",
     elevation: "none",
     retained: false,
@@ -1579,7 +1599,7 @@ test("runInstall on an unsupported platform fails at detect and does not create 
   );
   const copy = failureGuidance(3, "", report.outcomes[0]?.reason ?? "");
   assert.match(copy.advice, /linux\/amd64/);
-  assert.match(copy.advice, /will not change that/);
+  assert.match(copy.advice, /Retrying won.t change that/);
   assert.equal(copy.retryable, false);
 });
 

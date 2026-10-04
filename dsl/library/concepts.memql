@@ -333,11 +333,15 @@ concept file {
 
   uploadedFromPath  string  @description("Absolute path the file occupied on the uploading machine, as the cockpit reported it (e.g. '/Users/a/Reports/q3.pdf'). Stamped only where honestly known -- a browser upload carries none. Stays on THIS row and is deliberately not promoted to the index: the Files app's inspector reads the file row, and the future watched-folder sync epic keys re-pushes on (uploadedFromWorkerId, uploadedFromPath) read from here (design E).")
 
+  backupWorkerId string @description("Stable machine half of the watched-file identity. Separate from this version's upload provenance: a remote editor save keeps this link without claiming the machine uploaded those bytes. Established from verified provenance; older rows fall back to uploadedFromWorkerId until their next save.")
+
+  backupPath string @description("Stable original path for the watched-file identity. A remote save does not retarget or write back to this path. Older rows fall back to uploadedFromPath until their next save.")
+
   versionNumber  int  @description("Which version of this file the CURRENT row holds -- 1 at upload, incremented by supersedeLibraryFileHead each time somebody uploads a new version at this artifact (epic memql#4806, design D1). The head is always the newest version; every superseded one is its own immutable v1:library:fileVersion row. ABSENT MEANS 1, and it has to: every file uploaded before this field existed has no member at all, and a reader that treated absence as 0 would render 'v0' on every file in the Library. The counter lives here rather than being computed from the version rows because a count is not a version number -- a history read the caller could not complete would silently renumber the head.")
 
   versionUploadedAt  datetime  @description("RFC3339 moment the CURRENT version's bytes arrived. Stamped at upload and re-stamped on every supersede. NOT the same fact as the row intrinsic createdAt, which is why it is declared: MemQL is append-only, so an update materialises a NEW row and createdAt is the moment of the LAST WRITE -- an analysis status transition moves it. The history panel says 'uploaded 3 weeks ago' from this field; reading createdAt would have it say 'uploaded a minute ago' because the summariser finished a minute ago.")
 
-  linkState  enum("synced", "stale", "origin_gone")  @description("How this copy stands against the machine it was pushed from -- the watched-folder backup's per-file state (epic memql#4783). synced = the copy matched the origin when it was last checked; stale = the origin changed and the new bytes have not arrived; origin_gone = the file is no longer at that path, or the machine is no longer reachable. THE INVARIANT IS THAT THIS FIELD ONLY EVER FLAGS: a deletion or a disconnection at the origin sets origin_gone and NEVER archives, moves or deletes the MemQL copy, because the whole point of a backup is that it outlives the thing it copied (design E, D12). ABSENT means this file has no origin link at all -- a browser upload has none to have, and every file stored before this field existed has no member. Absent is deliberately not a fourth state: 'we do not track this file' and 'we track it and it is fine' are different answers and must not share a spelling. The upload route stamps synced on any push that names a (machine, path), because at the instant those exact bytes arrived the copy DID equal the origin; every later transition is reported by the cockpit's verify lane through setLibraryFileLinkState.")
+  linkState  enum("synced", "stale", "origin_gone")  @description("How this copy stands against the machine it was pushed from -- the watched-folder backup's per-file state (epic memql#4783). synced = the copy matched the origin when it was last checked; stale = local and remote copies may differ, including after a remote editor save; origin_gone = the file is no longer at that path, or the machine is no longer reachable. THE INVARIANT IS THAT THIS FIELD ONLY EVER FLAGS: a deletion or a disconnection at the origin sets origin_gone and NEVER archives, moves or deletes the MemQL copy, because the whole point of a backup is that it outlives the thing it copied (design E, D12). ABSENT means this file has no origin link at all -- a browser upload has none to have, and every file stored before this field existed has no member. Absent is deliberately not a fourth state: 'we do not track this file' and 'we track it and it is fine' are different answers and must not share a spelling. The upload route stamps synced on any push that names a (machine, path), because at the instant those exact bytes arrived the copy DID equal the origin; every later transition is reported by the cockpit's verify lane through setLibraryFileLinkState.")
 
   producedBy   object  @description("Which intelligence produced this item, when an app session did (epic memql#5391, design D9): {app, model, effort, sessionId}. `app` is one of the engine's closed runnable ids; `model` and `effort` are what the app REPORTED -- empty when it said nothing, never the value that was requested, because a report copied from a request records as measured something nobody measured; `sessionId` is the v1:worker:appSession row the run is readable at. ABSENT MEANS NO SESSION PRODUCED THIS, which is every file a person uploaded, and the absence is the answer rather than a stamp naming no app: 'nobody delegated this' and 'an app produced it and reported nothing' are different facts and must not share a spelling. A lifted construct's source reads this stamp, which is what lets its provenance say 'recorded from claude-code, model X, effort Y, session Z'.")
   linkCheckedAt  datetime  @description("RFC3339 moment linkState was last established. Displayed CONTINUOUSLY beside the state rather than fingerprinted into the arrival cue: a verify lane touches this on a schedule for every watched file forever, so naming it as news would strobe the Files list on the sweep's own cycle (the heartbeat rule, clients/os/README.md). It is what makes a stale `synced` honest -- 'synced, checked 3 weeks ago' is a different claim from 'synced', and only one of them is one this row can make.")
@@ -345,6 +349,7 @@ concept file {
   @relationship(type="references", field="producedByRunId", target=run, direction="outgoing")
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="uploadedFromWorkerId", target=registration, direction="outgoing")
+  @relationship(type="references", field="backupWorkerId", target=registration, direction="outgoing")
   @relationship(type="references", field="folderId", target=folder, direction="outgoing")
 }
 
@@ -575,6 +580,8 @@ concept uploadSession {
 
   targetArtifactId  string  @description("The v1:library:artifact this session uploads a NEW VERSION of, when it is a supersede rather than a fresh upload (epic memql#4806, design D7). Empty is the ordinary case and means complete creates a file row; set means complete supersedes the artifact's existing one, and fileId above is then that EXISTING file's id rather than a fresh mint. Recorded at init because the three target gates -- the artifact resolves under the caller's actor, its kind is file, its backing row resolves -- run there, before anybody streams gigabytes; complete must not re-ask the client anything, least of all which artifact it is allowed to write to.")
 
+  expectedVersion int @description("Original head version recorded by the server at session init. A version upload must still match it at completion; otherwise return a conflict. Missing on old version sessions means they must be restarted. Completed version uploads always return this version plus one, even after later edits.")
+
   chunkSize    int!  @description("Chunk size in bytes -- 16 MiB, a constant of the design (D8), not a knob. Recorded on the row so complete and resume compute ceil(size / chunkSize) from what THIS session was opened with, even if the constant ever changes between releases.")
 
   status       enum("open", "completed", "abandoned")!  @description("Lifecycle. open = accepting chunks; completed = the block list committed and the file row exists (terminal); abandoned = declared but unwritten in v1 -- a stopped session needs no write to be abandoned, its staging garbage-collects server-side on Azure's ~7-day clock, and the row itself is inert either way. Stamped 'open' at init and never accepted from args: a caller who could re-open a completed session could drive complete twice.")
@@ -663,4 +670,22 @@ concept watchedFolder {
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="workerId", target=registration, direction="outgoing")
   @relationship(type="references", field="folderId", target=folder, direction="outgoing")
+}
+
+/// Revision-bound document feedback. Shared reads go through libraryDocumentReview,
+/// which first rechecks access to the current artifact and its backing document.
+@displayCard(primary="body")
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept documentComment {
+  ownerUserId  string! @serverSet @description("The backing document's owner; assigned only by the review store after caller authorization.")
+  artifactId   string!
+  authorUserId string!
+  revision     string!
+  versionNumber int!
+  anchor       object!
+  body         string!
+  requestId    string!
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="artifactId", target=artifact, direction="outgoing")
+  @relationship(type="references", field="authorUserId", target=user, direction="outgoing")
 }

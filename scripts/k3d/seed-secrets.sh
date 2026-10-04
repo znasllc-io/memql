@@ -221,6 +221,7 @@ CLUSTER_MASTER_KEY=""
 CLUSTER_SIGNING_KEY_B64=""
 CLUSTER_SIGNING_KEY_CREATED_AT=""
 CLUSTER_NODE_BOOTSTRAP_TOKEN=""
+CLUSTER_CAMPAIGNS_UNSUBSCRIBE_SECRET=""
 
 function load_cluster_secret_snapshot() {
     local state
@@ -237,6 +238,16 @@ function load_cluster_secret_snapshot() {
     CLUSTER_SECRET_STATE="present"
 
     local raw
+    raw="$(kubectl get secret memql-secrets --namespace="$NAMESPACE" \
+              -o 'jsonpath={.data.MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET}' 2>/dev/null)" \
+        || cap_fail 5 "cannot read the existing campaign unsubscribe signing key; refusing to replace it."
+    if [ -n "$raw" ]; then
+        CLUSTER_CAMPAIGNS_UNSUBSCRIBE_SECRET="$(printf '%s' "$raw" | b64_decode 2>/dev/null)" \
+            || cap_fail 5 "the campaign unsubscribe signing key could not be decoded; refusing to replace it."
+        [ -n "$CLUSTER_CAMPAIGNS_UNSUBSCRIBE_SECRET" ] \
+            || cap_fail 5 "the stored campaign unsubscribe signing key is empty; repair the secret before seeding."
+    fi
+
     raw="$(kubectl get secret memql-secrets --namespace="$NAMESPACE" \
               -o 'jsonpath={.data.MEMQL_MASTER_KEY}' 2>/dev/null)" \
         || cap_fail 5 "memql-secrets exists but its MEMQL_MASTER_KEY could not be read; refusing to overwrite it blind."
@@ -1102,6 +1113,7 @@ function seed_memql_secrets() {
         --from-literal="MEMQL_IDENTITY_SIGNING_KEY_B64=$signing_key" \
         --from-literal="MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT=$signing_key_created_at" \
         --from-literal="MEMQL_NODE_BOOTSTRAP_TOKEN=$node_bootstrap_token" \
+        --from-literal="MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET=$RESOLVED_CAMPAIGNS_UNSUBSCRIBE_SECRET" \
         --from-literal="MEMQL_IDENTITY_OAUTH_DCR_ENABLED=true" \
         --from-literal="MEMQL_DATABASE_DSN=$db_dsn" \
         --from-literal="MEMORY_NODES_DATABASE_DIRECT_DSN=$db_direct_dsn" \
@@ -1116,6 +1128,17 @@ function seed_memql_secrets() {
         | kubectl apply -f - >&2
     SEEDED_COUNT=$((SEEDED_COUNT + 1))
     info "memql-secrets seeded."
+}
+
+# One random key per cluster, shared by all replicas. A routine seed must not
+# rotate it: unsubscribe links already in inboxes have no expiry.
+function resolve_campaign_unsubscribe_secret() {
+    RESOLVED_CAMPAIGNS_UNSUBSCRIBE_SECRET="$CLUSTER_CAMPAIGNS_UNSUBSCRIBE_SECRET"
+    if [ -z "$RESOLVED_CAMPAIGNS_UNSUBSCRIBE_SECRET" ]; then
+        RESOLVED_CAMPAIGNS_UNSUBSCRIBE_SECRET="$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')"
+        [ "${#RESOLVED_CAMPAIGNS_UNSUBSCRIBE_SECRET}" -eq 64 ] \
+            || cap_fail 5 "could not generate the campaign unsubscribe signing key."
+    fi
 }
 
 #=============================================================================
@@ -1206,6 +1229,7 @@ function main() {
     resolve_signing_key
     resolve_signing_key_created_at
     resolve_node_bootstrap_token
+    resolve_campaign_unsubscribe_secret
     resolve_github_app
     resolve_voice_credentials
 

@@ -1,0 +1,60 @@
+export type EditorPreference = "browser" | "vscode" | "cursor";
+
+const EDITOR_PREFERENCE_KEY = "memql-os-editor-v1";
+
+export function readEditorPreference(): EditorPreference {
+  try {
+    const value = globalThis.localStorage?.getItem(EDITOR_PREFERENCE_KEY);
+    return value === "vscode" || value === "cursor" ? value : "browser";
+  } catch {
+    return "browser";
+  }
+}
+
+export function saveEditorPreference(preference: EditorPreference): void {
+  try {
+    globalThis.localStorage?.setItem(EDITOR_PREFERENCE_KEY, preference);
+  } catch {
+    // A blocked preference store must not prevent opening the file.
+  }
+}
+
+/** ZIP content is always downloaded intact, including a renamed ZIP. */
+export function isZipArtifact(file: { title?: string; name?: string; mimeType?: string }): boolean {
+  const mime = (file.mimeType ?? "").split(";", 1)[0]!.trim().toLowerCase();
+  return mime === "application/zip" || mime === "application/x-zip-compressed" ||
+    /\.zip\s*$/i.test(file.name ?? file.title ?? "");
+}
+
+/** Generated document titles need an extension so VS Code selects the right viewer. */
+export function editorFilename(file: { title?: string; name?: string; kind?: string; format?: string; mimeType?: string }): string {
+  const name = file.name || file.title || "document";
+  if (file.kind === "file" || /\.[a-z0-9]{1,12}$/i.test(name)) return name;
+  const format = file.format || ({ "text/markdown": "markdown", "application/pdf": "pdf", "text/plain": "text" } as Record<string, string>)[file.mimeType ?? ""];
+  const extension = ({ markdown: "md", pdf: "pdf", text: "txt" } as Record<string, string>)[format ?? ""];
+  return extension ? `${name}.${extension}` : name;
+}
+
+export function editorArtifactURI(domain: string, artifactId: string, name = "document"): string {
+  const filename = name.replace(/[\\/\u0000-\u001f\u007f]/g, "_").slice(0, 180) || "document";
+  return `memql-file://${encodeURIComponent(domain)}/artifacts/${encodeURIComponent(artifactId)}/${encodeURIComponent(filename)}`;
+}
+
+export function editorArtifactURL(domain: string, artifactId: string, name = "document", preference = readEditorPreference()): string {
+  return editorResourceURL(editorArtifactURI(domain, artifactId, name), preference);
+}
+
+export function editorTemplateURL(domain: string, templateId: string, name: string, preference = readEditorPreference()): string {
+  const filename = name.replace(/[\\/\u0000-\u001f\u007f]/g, "_").slice(0, 160) + ".email.json";
+  return editorResourceURL(`memql-file://${encodeURIComponent(domain)}/templates/${encodeURIComponent(templateId)}/${encodeURIComponent(filename)}`, preference);
+}
+
+function editorResourceURL(resource: string, preference: EditorPreference): string {
+  if (preference === "browser") {
+    // The cluster-hosted editor includes both MemQL extensions.
+    // Only a resource reference travels here. Its file provider authenticates
+    // through the MemQL extension; no file bytes or credential enter the URL.
+    return `https://vscode.${new URL(resource).hostname}/editor/?resource=${encodeURIComponent(resource)}`;
+  }
+  return `${preference}://znasllc.memql-productivity-tools/open?resource=${encodeURIComponent(resource)}`;
+}

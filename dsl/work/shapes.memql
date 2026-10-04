@@ -18,6 +18,7 @@ shape goal workGoalFull {
   ceilings
   status
   requestedVia
+  requestFingerprint
   closedAt
   closeReason
   // The owner's routing choice (the Ask route picker's).

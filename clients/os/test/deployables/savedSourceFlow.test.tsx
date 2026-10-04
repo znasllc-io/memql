@@ -72,6 +72,10 @@ async function addRepository(region: HTMLElement, name = "new-project") {
   expect(within(region).queryByText(/^chosen$/i)).toBeNull();
   const repositories = await within(region).findByRole("list", { name: "acme repositories" });
   await click(await within(repositories).findByRole("button", { name: new RegExp(name) }));
+  // An operator managing multiple organizations must name the owner of a new
+  // deployable. The repository's GitHub organization is a separate selection.
+  await click(await screen.findByLabelText("Accounts"));
+  await click(await screen.findByRole("option", { name: "Operator organization" }));
 }
 
 function stage(region: HTMLElement, name: string): HTMLElement {

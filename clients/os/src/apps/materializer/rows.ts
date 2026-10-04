@@ -36,6 +36,7 @@ export interface CompositionRow {
   name: string;
   statement: string;
   status: CompositionStatus;
+  outputKind: string;
   format: string;
   templateId: string;
   outputFileId: string;
@@ -95,6 +96,8 @@ export interface RecipeRow {
 }
 
 export interface SelectorRow {
+  content?: boolean;
+  includeImages?: boolean;
   kind: string;
   selector: string;
   label: string;
@@ -102,6 +105,8 @@ export interface SelectorRow {
 
 /** One entry of a composition's `sources`, as the record stored it. */
 export interface SourceRow {
+  content?: boolean;
+  includeImages?: boolean;
   kind: string;
   ref: string;
   label: string;
@@ -124,6 +129,7 @@ export function compositionFromRow(row: Row): CompositionRow {
     name: rowString(row, "name"),
     statement: rowString(row, "statement"),
     status: (rowString(row, "status") || "") as CompositionStatus,
+    outputKind: rowString(row, "outputKind"),
     format: rowString(row, "format"),
     templateId: rowString(row, "templateId"),
     outputFileId: rowString(row, "outputFileId"),
@@ -232,6 +238,7 @@ export function sourcesOf(row: Row): SourceRow[] {
     ref: str(s["ref"]),
     label: str(s["label"]),
     capturedAt: str(s["capturedAt"]),
+    ...referenceFlags(s),
   }));
 }
 
@@ -256,6 +263,7 @@ function selectorsOf(row: Row): SelectorRow[] {
   return objectArray(row, "sourceSelectors").map((s) => ({
     kind: str(s["kind"]),
     selector: str(s["selector"]),
+    ...referenceFlags(s),
     label: str(s["label"]),
   }));
 }
@@ -278,4 +286,11 @@ function str(v: unknown): string {
 
 function num(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+function referenceFlags(value: Record<string, unknown>) {
+  return {
+    ...(typeof value.content === "boolean" ? { content: value.content } : {}),
+    ...(typeof value.includeImages === "boolean" ? { includeImages: value.includeImages } : {}),
+  };
 }

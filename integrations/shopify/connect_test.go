@@ -204,7 +204,7 @@ func newConnectHarness(t *testing.T) *connectHarness {
 // site makes siteById answer one row the developer owns.
 func (h *connectHarness) site(id, kind string) {
 	h.engine.setRows("siteById", []map[string]any{{
-		"id": id, "kind": kind, "status": "draft", "ownerUserId": connectDev,
+		"id": id, "accountId": "self", "kind": kind, "status": "draft", "ownerUserId": connectDev,
 		"packageId": "v1:platform:package:p1", "packageDeployableName": "storefront",
 	}})
 }
@@ -606,8 +606,14 @@ func TestTheConnectScopeListIsPinned(t *testing.T) {
 		t.Fatalf("StorefrontScopes = %v, want %v -- the runbook prints this list and Connect refuses without it", StorefrontScopes, want)
 	}
 	all := ConnectScopes()
-	if !reflect.DeepEqual(all[:len(want)], want) || !reflect.DeepEqual(all[len(want):], generated.Scopes) {
-		t.Fatalf("ConnectScopes = %v, want the Storefront scopes then generated.Scopes", all)
+	admin := append([]string(nil), generated.Scopes...)
+	for idx, scope := range admin {
+		if scope == "read_products" {
+			admin[idx] = "write_products"
+		}
+	}
+	if !reflect.DeepEqual(all[:len(want)], want) || !reflect.DeepEqual(all[len(want):], admin) {
+		t.Fatalf("ConnectScopes = %v, want the Storefront scopes then mirror scopes with product write access", all)
 	}
 	// A copy: a caller appending to it must not change the list.
 	all[0] = "mutated"

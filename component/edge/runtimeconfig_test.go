@@ -84,6 +84,7 @@ func TestRuntimeConfigForSite_FullDerivation(t *testing.T) {
 	got := runtimeConfigForSite(context.Background(), site, env, true, nil)
 
 	want := RuntimeConfig{
+		EmailAppEnabled:    true,
 		IdentityURL:        "https://identity.example.com",
 		IdentityAPIBaseURL: "",
 		OAuthClientID:      "shop",
@@ -724,5 +725,15 @@ func TestRuntimeConfigUnboundStorefrontKeepsKindWithoutResolvingSecrets(t *testi
 	}
 	if doc.Storefront == nil || *doc.Storefront != (StorefrontConfig{Kind: storefrontKind, ConnectionState: "unbound"}) {
 		t.Fatalf("unbound storefront config = %+v, want kind without commerce credentials", doc.Storefront)
+	}
+}
+
+func TestRuntimeConfigEmailAppAvailability(t *testing.T) {
+	for _, value := range []string{"", "true", "false", " FALSE "} {
+		config := runtimeConfigForSite(context.Background(), nil, fakeEnv(map[string]string{"MEMQL_EMAIL_APP_ENABLED": value}), true, nil)
+		want := strings.ToLower(strings.TrimSpace(value)) != "false"
+		if config.EmailAppEnabled != want {
+			t.Fatalf("%q: enabled=%v", value, config.EmailAppEnabled)
+		}
 	}
 }

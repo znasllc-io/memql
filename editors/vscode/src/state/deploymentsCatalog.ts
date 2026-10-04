@@ -39,20 +39,26 @@
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
+import type { ConnectionState } from "../connection/manager.js";
+
 import { readClustersFileSafe } from "../clusters/file.js";
 import type { PresenceResult, PresenceVerdict } from "../clusters/presence.js";
 import { defaultReceiptPath, readReceipt, type Receipt } from "../install/receipt.js";
+import { failureGuidance } from "./installProgress.js";
+import { compareVersions } from "../version/compare.js";
 import { describeVersion } from "../version/describe.js";
 import type { ReleaseListing } from "../version/releaseCache.js";
 import {
   LOCAL_INSTANCE_NAME,
-  displayVersion,
+  instanceLabel,
   localInstance,
   remoteInstance,
   runsFromDeployments,
   sortInstances,
   type Instance,
   type Run,
+  type RunItem,
+  type RunItemStatus,
 } from "./deployments.js";
 import {
   currentDeploymentId,
@@ -67,6 +73,12 @@ import { defaultRunsDir, listRuns, sortRunsNewestFirst } from "./runLog.js";
 export interface ConnectionFacts {
   clusterName: string;
   connected: boolean;
+  /**
+   * Where the connection to `clusterName` stands, in the vocabulary every
+   * surface shares (`memql.connectionState`). Absent from a caller that only
+   * knows connected-or-not, which then reads as `connected` or `unreachable`.
+   */
+  word?: ConnectionWord;
 }
 
 export interface CatalogInputs {
@@ -139,7 +151,14 @@ export async function buildCatalog(inputs: CatalogInputs): Promise<Catalog> {
       presence,
       receipt,
       ...(registered !== undefined
-        ? { registered: { name: registered.name, domain: registered.domain } }
+        ? {
+            registered: {
+              name: registered.name,
+              ...(registered.displayName !== undefined ? { displayName: registered.displayName } : {}),
+              domain: registered.domain,
+              ...(registered.version !== undefined ? { version: registered.version } : {}),
+            },
+          }
         : {}),
       connected:
         connection?.connected === true &&
@@ -162,12 +181,14 @@ export async function buildCatalog(inputs: CatalogInputs): Promise<Catalog> {
     const isConnected = connection?.connected === true && connection.clusterName === cluster.name;
     const instance = remoteInstance({
       name: cluster.name,
+      ...(cluster.displayName !== undefined ? { displayName: cluster.displayName } : {}),
       ...(cluster.domain !== undefined ? { domain: cluster.domain } : {}),
       // Reachability is only ever KNOWN for the cluster we hold a connection
       // to. For the rest the honest verdict is the one that says it does not
       // answer, because as far as this editor can tell, it does not.
       reachable: isConnected,
       connected: isConnected,
+      ...(cluster.version !== undefined ? { registryVersion: cluster.version } : {}),
       ...(isConnected && remote !== undefined
         ? {
             deployments: remote.records,
@@ -254,177 +275,328 @@ async function resolveRemote(
   }
 }
 
+
 // ---------------------------------------------------------------------------
-// what a row says
+// where this editor stands with a cluster
 // ---------------------------------------------------------------------------
 
 /**
- * The icon vocabulary, named rather than spelled as ThemeIcons.
+ * The connection, in the one vocabulary every surface shares.
  *
- * Same split as clusters/status.ts: the WORDING and the CHOICE are testable
- * here, and views/deploymentsTree.ts is left as a mapping onto VS Code's icon
- * names.
+ * The same six values as the `memql.connectionState` context key: `none` (no
+ * cluster in hand, or a different one), `connecting`, `connected`, `signIn`
+ * (the credential is missing, expired or was refused -- the fix is a sign-in,
+ * whatever the cause), `unreachable`, and `notConfigured` (the cluster list
+ * names no address to dial).
  */
+export type ConnectionWord = "none" | "connecting" | "connected" | "signIn" | "unreachable" | "notConfigured";
+
+/** The failure reasons whose fix is a sign-in rather than a look at the cluster. */
+const SIGN_IN_REASONS = new Set([
+  "missingCredential",
+  "credentialExpired",
+  "wrongTokenClass",
+  "reauthenticationRequired",
+]);
+
 /**
- * A checkout-mode instance's version text, or "" for every other instance.
+ * Where the connection to `clusterName` stands.
  *
- * A CHECKOUT-MODE INSTANCE NAMES THE CHECKOUT, NOT THE RECORDED RELEASE
- * (memql#4246). `instance.version` is still whichever tag the ORIGINAL install
- * checked out -- a repair or upgrade would replay it -- but that is not what is
- * running right now. Printing it would tell an operator their v0.17.0 cluster
- * is healthy while it is actually serving whatever was in the checkout at the
- * last rebuild, uncommitted edits included.
- *
- * Its own function since memql#4426, because two surfaces now say it: the tree
- * row, and the Deployments view description above the timeline. A second copy
- * of this rule is how one of them would go on printing a release tag for a
- * cluster running a developer's own build.
- *
- * A count the envelope did not carry is LEFT OUT, never invented: printing
- * "0 uncommitted files" from an unreported field is a claim that the tree was
- * clean.
+ * `none` for a state about a DIFFERENT cluster: the Deployments page for
+ * `staging` is not "connected" because this editor holds `local`.
  */
-export function checkoutVersionText(instance: Instance): string {
-  if (instance.imageSource !== "checkout" || instance.rebuild === undefined) return "";
-  const { rebuild } = instance;
-  const shortCommit = rebuild.commit.slice(0, 7);
-  const dirty = rebuild.dirtyCount;
-  return `checkout ${shortCommit}${dirty !== undefined && dirty > 0 ? ` (${dirty} uncommitted)` : ""}`;
+export function connectionWordFor(state: ConnectionState, clusterName: string): ConnectionWord {
+  if (state.status === "disconnected" || state.clusterName !== clusterName) return "none";
+  switch (state.status) {
+    case "connecting":
+      return "connecting";
+    case "connected":
+      return "connected";
+    case "error":
+      if (SIGN_IN_REASONS.has(state.reason)) return "signIn";
+      if (state.reason === "notConfigured") return "notConfigured";
+      return "unreachable";
+  }
 }
 
-export type InstanceRowIcon = "healthy" | "unreachable" | "absent";
-
-export interface InstanceRowStatus {
-  icon: InstanceRowIcon;
-  /** The right-hand text on the row. */
-  description: string;
-  tooltip: string;
+/** The connection word for an instance, from the facts a catalog was built with. */
+export function instanceConnectionWord(instance: Instance, connection: ConnectionFacts | undefined): ConnectionWord {
+  if (connection === undefined || connection.clusterName !== instance.name) return "none";
+  if (connection.word !== undefined) return connection.word;
+  return connection.connected ? "connected" : "unreachable";
 }
 
+/** The dot beside a state word (kit `BarTone`). */
+export type StateTone = "idle" | "live" | "busy" | "warn" | "error";
+
+export type ClusterStateKey =
+  | "notInstalled"
+  | "unreceipted"
+  | "notListed"
+  | "connected"
+  | "connecting"
+  | "signIn"
+  | "notSetUp"
+  | "notRunning"
+  | "cantReach"
+  | "notConnected";
+
+export interface ClusterState {
+  key: ClusterStateKey;
+  /** The page's words ("Not signed in"). */
+  word: string;
+  /** The heading's words, where the act is not beside it ("Sign in"). */
+  heading: string;
+  tone: StateTone;
+}
+
+const STATES: Readonly<Record<ClusterStateKey, Omit<ClusterState, "key">>> = {
+  notInstalled: { word: "Not installed", heading: "Not installed", tone: "idle" },
+  unreceipted: { word: "Not connected", heading: "Not connected", tone: "idle" },
+  notListed: { word: "Not in your list", heading: "Not in your list", tone: "idle" },
+  connected: { word: "Connected", heading: "Connected", tone: "live" },
+  connecting: { word: "Connecting", heading: "Connecting", tone: "busy" },
+  signIn: { word: "Not signed in", heading: "Sign in", tone: "warn" },
+  notSetUp: { word: "Not set up", heading: "Not set up", tone: "warn" },
+  notRunning: { word: "Not running", heading: "Not running", tone: "error" },
+  cantReach: { word: "Can't reach", heading: "Can't reach", tone: "error" },
+  notConnected: { word: "Not connected", heading: "Not connected", tone: "idle" },
+};
+
 /**
- * @param listing the release listing, or undefined when nothing has been
- * fetched. REQUIRED rather than optional: a caller with no listing is making a
- * decision ("render without availability"), and an optional parameter would let
- * a new call site make it by omission -- which presents as the availability
- * clause silently never appearing on one surface.
+ * One cluster's state, in words: the connection first, what is on the machine
+ * second.
+ *
+ * THE CONNECTION WINS because it is what the person can act on from here. A
+ * local cluster that answers its front door but refuses this editor's
+ * credential is "Not signed in", never "healthy" -- the old heading said
+ * "not answering" for exactly that case, from a probe that could not tell the
+ * difference, and offered nothing.
+ *
+ * The machine decides only what the connection cannot: nothing installed, a
+ * cluster this editor did not install, a cluster missing from the list, and a
+ * dropped connection to a local cluster whose front door is also silent
+ * (`Not running`, which a Repair fixes) as against one that answers
+ * (`Can't reach`).
  */
-export function instanceRowStatus(
-  instance: Instance,
+export function clusterState(instance: Instance, connection: ConnectionWord): ClusterState {
+  const key = clusterStateKey(instance, connection);
+  return { key, ...STATES[key] };
+}
+
+function clusterStateKey(instance: Instance, connection: ConnectionWord): ClusterStateKey {
+  if (instance.kind === "local") {
+    if (instance.presence === "absent") return "notInstalled";
+    if (instance.presence === "present-unreceipted") return "unreceipted";
+    if (instance.registered === false) return "notListed";
+  }
+  switch (connection) {
+    case "connected":
+      return "connected";
+    case "connecting":
+      return "connecting";
+    case "signIn":
+      return "signIn";
+    case "notConfigured":
+      return "notSetUp";
+    case "unreachable":
+      return instance.kind === "local" && instance.presence === "installed-unreachable" ? "notRunning" : "cantReach";
+    case "none":
+      return instance.kind === "local" && instance.presence === "installed-unreachable" ? "notRunning" : "notConnected";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// the heading above the timeline
+// ---------------------------------------------------------------------------
+
+/**
+ * The line beside the view's name: which cluster, how it stands, what it runs.
+ *
+ *   local · Connected · v0.23.5
+ *   local · Connected · v0.23.5 · v0.24.0 available
+ *   local · Sign in · main @ 3f2a9c1
+ *   staging · Can't reach · v0.9.2
+ *   local · Not installed
+ *
+ * The state word is the connection's (`clusterState`), shared with the page,
+ * so the heading and the page cannot disagree about the same cluster. The
+ * version is `versionLabel`, left out when nothing names one rather than
+ * printed as "unknown".
+ *
+ * AN UPDATE IS SAID ONLY FOR A RELEASED CLUSTER. A cluster running the
+ * checkout's build is not on the release its receipt names, so an update "to"
+ * a newer release is a claim about a version it is not on.
+ *
+ * "" FOR NO SELECTION: the welcome is already saying what is going on.
+ */
+export function selectedViewDescription(
+  instance: Instance | undefined,
   listing: ReleaseListing | undefined,
-): InstanceRowStatus {
-  if (instance.presence === "absent") {
-    return {
-      icon: "absent",
-      description: "not installed",
-      tooltip:
-        instance.kind === "local"
-          ? "No local cluster on this machine. Create a deployment to install one."
-          : "Not installed.",
-    };
+  connection: ConnectionWord = "none",
+): string {
+  if (instance === undefined) return "";
+  const state = clusterState(instance, connection);
+  const parts = [instanceLabel(instance), state.heading];
+  if (state.key === "notInstalled") return parts.join(" · ");
+  const label = (instance.versionLabel ?? "").trim();
+  if (label !== "") parts.push(label);
+  if (instance.imageSource !== "checkout") {
+    const described = describeVersion({ recorded: instance.version, listing });
+    if (described.upgradeAvailable && described.latest !== undefined) {
+      parts.push(`${described.latest} available`);
+    }
   }
-  // The version is ALWAYS printed, and printed as the word "unknown" when it
-  // could not be resolved. A blank reads as a fact about the instance ("it has
-  // no version") when it is a fact about the read.
-  //
-  // WHICH IS WHY `short` IS NOT USED ON ITS OWN (memql#3996). describeVersion
-  // returns "" for an unrecorded version, because a Clusters-tree row that
-  // appended "unknown" to every cluster on a fresh install would be noise.
-  // These rows made the opposite call first and it still holds here: this row
-  // already prints a version for every instance, so falling silent for one
-  // instance would read as a fact about that instance.
-  const version = displayVersion(instance.version);
-  const described = describeVersion({ recorded: instance.version, listing });
-  // `short` carries the availability clause in the one state that has one --
-  // `v0.18.0 - v0.19.0 available` -- and is otherwise just the version. Taking
-  // the wording from there rather than re-composing it is what keeps this row
-  // and the Clusters tree from saying "available" two different ways.
-  let versionText = described.short === "" ? version : described.short;
-  // A CHECKOUT-MODE INSTANCE NAMES THE CHECKOUT, NOT THE RECORDED RELEASE
-  // (memql#4246). `instance.version` is still whichever tag the ORIGINAL
-  // install checked out -- a repair or upgrade would replay it -- but that is
-  // not what is running right now. Printing it here would tell an operator
-  // their v0.17.0 cluster is healthy while it is actually serving whatever
-  // was in the checkout at the last rebuild, uncommitted edits included.
-  let checkoutTooltip = "";
-  const checkoutText = checkoutVersionText(instance);
-  if (checkoutText !== "" && instance.rebuild !== undefined) {
-    const { rebuild } = instance;
-    const shortCommit = rebuild.commit.slice(0, 7);
-    const dirty = rebuild.dirtyCount;
-    versionText = checkoutText;
-    checkoutTooltip =
-      `\nRunning images built from the checkout at ${shortCommit}` +
-      (dirty === undefined ? ". " : ` (${dirty} uncommitted files when it was built). `) +
-      "An install, upgrade or repair returns it to released images.";
-  }
-  // The presence verdict stays FIRST in the tooltip. It is what an operator
-  // opened the row for; the version is context beneath it, and a tooltip that
-  // led with the version would bury the reason the row is amber.
-  if (instance.presence === "installed-unreachable") {
-    return {
-      icon: "unreachable",
-      description: `not answering - ${versionText}`,
-      tooltip:
-        (instance.kind === "local"
-          ? `A local cluster is installed but is not answering. Version ${version}.`
-          : `${instance.name} is not answering. Version ${version}.`) +
-        `\n${described.sentence}` +
-        checkoutTooltip,
-    };
-  }
-  return {
-    icon: "healthy",
-    description: `healthy - ${versionText}`,
-    tooltip: `${instance.name} is healthy. Version ${version}.\n${described.sentence}` + checkoutTooltip,
-  };
+  return parts.join(" · ");
 }
 
-export type RunRowIcon =
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "cancelled"
-  | "interrupted"
-  | "replaced";
+// ---------------------------------------------------------------------------
+// what a run row says
+// ---------------------------------------------------------------------------
+
+/** How a run reads, in its three tenses. */
+export interface RunVerbs {
+  /** It went through: "Updated". */
+  done: string;
+  /** It is going: "Updating". */
+  doing: string;
+  /** A thing that can fail or be stopped: "Update". */
+  noun: string;
+}
+
+/**
+ * The words for what a run did.
+ *
+ * A VERSION MOVE IS "UPDATED" ONLY WHEN IT MOVED FORWARD. The run log records
+ * every move to a tag as `upgrade`, and a move back to an older release during
+ * an incident is exactly the one that must not read as an upgrade; so the
+ * direction is read off the two versions, and anything that is not provably
+ * forward is a version change.
+ */
+export function runVerbs(run: Run): RunVerbs {
+  switch (run.kind) {
+    case "install":
+      return { done: "Installed", doing: "Installing", noun: "Install" };
+    case "repair":
+      return { done: "Repaired", doing: "Repairing", noun: "Repair" };
+    case "uninstall":
+      return { done: "Uninstalled", doing: "Uninstalling", noun: "Uninstall" };
+    case "rebuild":
+      return { done: "Rebuilt", doing: "Rebuilding", noun: "Rebuild" };
+    case "update":
+      return { done: "Pulled and rebuilt", doing: "Pulling and rebuilding", noun: "Pull and rebuild" };
+    case "upgrade":
+      return compareVersions(run.fromVersion, run.toVersion) === "behind"
+        ? { done: "Updated", doing: "Updating", noun: "Update" }
+        : { done: "Changed version", doing: "Changing version", noun: "Version change" };
+    case "rollout":
+      return { done: "Deployed", doing: "Deploying", noun: "Deploy" };
+  }
+}
+
+export type RunRowIcon = "running" | "succeeded" | "failed" | "cancelled" | "interrupted" | "replaced";
 
 export interface RunRowStatus {
   icon: RunRowIcon;
-  /** The row's label: the verb, which is what the operator chose. */
+  /** The dot a page draws for it. */
+  tone: StateTone;
+  /** What happened, as a verb: "Updated", "Install failed". */
   label: string;
-  /** version transition, status, and when. */
+  /** From where to where, and when: "v0.18.0 → v0.19.0 · 2d ago". */
   description: string;
+  /** When it started, how long it took, and why it failed. */
   tooltip: string;
+  /** The status in a word, for the run's own page ("Failed"). */
+  statusWord: string;
 }
 
-export function runRowStatus(run: Run, nowMs: number): RunRowStatus {
+/**
+ * A run as a row.
+ *
+ * THE LABEL CARRIES THE OUTCOME ONLY WHEN IT IS NOT A SUCCESS. A tick and
+ * "Updated" say it once; "Update failed" needs its word because a red dot on
+ * its own could be any of four things. The description never repeats it.
+ */
+export function runRowStatus(run: Run, nowMs: number, opts: { prepared?: boolean } = {}): RunRowStatus {
+  const verbs = runVerbs(run);
+  // A REMOTE RECORD THAT IS PREPARED AND NOT SHIPPED is not "Deploying": the
+  // deployment concept's `pending` reads as running (deployments.ts), and the
+  // row would claim a deploy is under way that nobody has started.
+  const prepared = opts.prepared === true && run.status === "running";
+  const label = prepared ? "Prepared" : runLabel(run, verbs);
   const parts: string[] = [];
   const transition = versionTransition(run);
   if (transition !== "") parts.push(transition);
-  parts.push(run.status);
+  if (run.status === "superseded") parts.push("replaced");
   const when = relativeTime(run.finishedAt ?? run.startedAt, nowMs);
   if (when !== "") parts.push(when);
+
+  const lines: string[] = [];
+  const started = formatWhen(run.startedAt, nowMs);
+  const took = runDuration(run.startedAt, run.finishedAt);
+  if (started !== "") lines.push(`Started ${started}${took === "" ? "" : ` · took ${took}`}`);
+  const reason = runFailureReason(run);
+  if (reason !== "") lines.push(reason);
+  if (run.status === "interrupted") lines.push("It stopped when the editor closed.");
+
   return {
-    icon: runRowIcon(run.status),
-    label: run.kind,
-    description: parts.join("  "),
-    tooltip: `${run.kind} ${transition} ${run.status} - started ${run.startedAt}`.replace(
-      /\s+/g,
-      " ",
-    ),
+    icon: prepared ? "cancelled" : runRowIcon(run.status),
+    tone: prepared ? "idle" : runTone(run.status),
+    label,
+    description: parts.join(" · "),
+    tooltip: lines.join("\n"),
+    statusWord: prepared ? "Prepared" : STATUS_WORDS[run.status],
   };
 }
 
 /**
- * `v0.16.1 -> v0.17.0`, or just the target when there is nothing to come from.
+ * What a run WAS, as a noun for its own page's title ("Update", "Rebuild",
+ * "Rollback"); the outcome is the page's state word, said once, on its bar.
+ */
+export function runNoun(run: Run): string {
+  return run.status === "rolled_back" ? "Rollback" : runVerbs(run).noun;
+}
+
+const STATUS_WORDS: Readonly<Record<Run["status"], string>> = {
+  running: "Running",
+  succeeded: "Succeeded",
+  failed: "Failed",
+  cancelled: "Cancelled",
+  interrupted: "Interrupted",
+  superseded: "Replaced",
+  rolled_back: "Rolled back",
+};
+
+function runLabel(run: Run, verbs: RunVerbs): string {
+  switch (run.status) {
+    case "running":
+      return verbs.doing;
+    case "succeeded":
+    case "superseded":
+      return verbs.done;
+    case "rolled_back":
+      // A remote record that lands in `rolled_back` IS the rollback: the
+      // deploy-control service writes a new record for it (deploymentHistory.ts).
+      return "Rolled back";
+    case "failed":
+      return `${verbs.noun} failed`;
+    case "cancelled":
+      return `${verbs.noun} cancelled`;
+    case "interrupted":
+      return `${verbs.noun} interrupted`;
+  }
+}
+
+/**
+ * `v0.16.1 → v0.17.0`, or just the target when there is nothing to come from.
  *
  * An install has no `fromVersion` -- there was nothing there -- and rendering
- * `unknown -> v0.17.0` for it would invent a predecessor. A run with neither
- * renders no transition at all rather than an arrow between two blanks.
+ * a predecessor for it would invent one. A run with neither renders nothing.
  */
 export function versionTransition(run: Run): string {
   const to = (run.toVersion ?? "").trim();
   const from = (run.fromVersion ?? "").trim();
-  if (from !== "" && to !== "") return `${from} -> ${to}`;
+  if (from !== "" && to !== "") return `${from} → ${to}`;
   return to !== "" ? to : "";
 }
 
@@ -439,37 +611,160 @@ function runRowIcon(status: Run["status"]): RunRowIcon {
     case "cancelled":
       return "cancelled";
     case "interrupted":
-      // ITS OWN ICON, not the cancelled one it is nearest to. Both ended
-      // without finishing, but an operator scanning this list is asking a
-      // different question of each: `cancelled` is a decision they made and
-      // need not revisit, while `interrupted` is work that stopped for a
-      // reason unrelated to the work -- so it is the row worth re-running,
-      // and it has to be findable as such (memql#3886).
+      // ITS OWN ICON: `cancelled` is a decision somebody made, `interrupted`
+      // is work that stopped because the editor went away -- the row worth
+      // re-running (memql#3886).
       return "interrupted";
     case "superseded":
     case "rolled_back":
-      // Both LANDED and were later replaced. Drawing them as failures would
-      // blame the run for a subsequent decision; drawing them as plain
-      // successes would hide that the cluster is no longer running them.
+      // Both LANDED and were later replaced: neither a failure nor the
+      // version running now.
       return "replaced";
   }
 }
+
+function runTone(status: Run["status"]): StateTone {
+  switch (status) {
+    case "running":
+      return "busy";
+    case "succeeded":
+      return "live";
+    case "failed":
+      return "error";
+    case "interrupted":
+      return "warn";
+    default:
+      return "idle";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// one step of a recorded run
+// ---------------------------------------------------------------------------
+
+/**
+ * What the run log's `detail` says, taken apart.
+ *
+ * runRecorder.ts writes `reason · exit N · <already-holds> · key=value ... ·
+ * log=<file>`, each part only when it has something to say. A surface shows the
+ * reason and offers the log; the rest belongs under Details.
+ */
+export interface ItemDetail {
+  /** The step's own sentence about what went wrong, or "". */
+  reason: string;
+  exitCode?: number;
+  /** The step found its work already done. */
+  alreadyInPlace: boolean;
+  /** The result's key=value pairs, verbatim. */
+  fields: string;
+  /** The saved output of a failed step, a file name in the runs directory. */
+  logFile: string;
+}
+
+const ALREADY_HOLDS = "the condition dependents needed already holds";
+
+export function parseItemDetail(detail: string | undefined): ItemDetail {
+  const out: ItemDetail = { reason: "", alreadyInPlace: false, fields: "", logFile: "" };
+  const reasons: string[] = [];
+  for (const raw of (detail ?? "").split(" · ")) {
+    const part = raw.trim();
+    if (part === "") continue;
+    const exit = /^exit (\d+)$/.exec(part);
+    if (exit !== null) {
+      out.exitCode = Number(exit[1]);
+      continue;
+    }
+    if (part === ALREADY_HOLDS) {
+      out.alreadyInPlace = true;
+      continue;
+    }
+    const log = /^log=(\S+)$/.exec(part);
+    if (log !== null) {
+      out.logFile = log[1]!;
+      continue;
+    }
+    if (/^[A-Za-z][\w.-]*=\S*(\s+[A-Za-z][\w.-]*=\S*)*$/.test(part)) {
+      out.fields = out.fields === "" ? part : `${out.fields} ${part}`;
+      continue;
+    }
+    reasons.push(part);
+  }
+  out.reason = reasons.join(" ");
+  return out;
+}
+
+/**
+ * Why a run failed, in one sentence, or "".
+ *
+ * READ OFF THE ITEMS, never stored beside them: the reason is whatever the
+ * first failed step recorded, so it cannot disagree with the step list. A step
+ * that failed without a sentence says what its exit code means instead of
+ * printing the number.
+ */
+export function runFailureReason(run: Run): string {
+  if (run.status !== "failed") return "";
+  const failed = run.items.find((item) => item.status === "failed");
+  if (failed === undefined) return "";
+  return itemReason(failed);
+}
+
+/** A failed step's sentence: its own, or what its exit code means. */
+export function itemReason(item: RunItem): string {
+  const parsed = parseItemDetail(item.detail);
+  if (parsed.reason !== "") return parsed.reason;
+  if (parsed.exitCode !== undefined) return failureGuidance(parsed.exitCode).headline;
+  return "";
+}
+
+/** One line of a run's step list: consecutive steps under one label are one line. */
+export interface StepGroup {
+  label: string;
+  status: RunItemStatus;
+  items: RunItem[];
+}
+
+/** Which status a group of steps shows: the worst of them. */
+const GROUP_RANK: readonly RunItemStatus[] = ["failed", "running", "pending", "preserved", "ok", "skipped"];
+
+/**
+ * A run's items as the page lists them: in order, named in words, and the
+ * three "Installing tools" steps as one line.
+ *
+ * `labels` maps a step id to its short label from the graph documents; an id
+ * it does not name is shown as itself rather than dropped.
+ */
+export function stepGroups(items: readonly RunItem[], labels: ReadonlyMap<string, string>): StepGroup[] {
+  const groups: StepGroup[] = [];
+  for (const item of items) {
+    const label = labels.get(item.label) ?? item.label;
+    const last = groups[groups.length - 1];
+    if (last !== undefined && last.label === label) {
+      last.items.push(item);
+      last.status = worse(last.status, item.status);
+      continue;
+    }
+    groups.push({ label, status: item.status, items: [item] });
+  }
+  return groups;
+}
+
+function worse(a: RunItemStatus, b: RunItemStatus): RunItemStatus {
+  return GROUP_RANK.indexOf(a) <= GROUP_RANK.indexOf(b) ? a : b;
+}
+
+// ---------------------------------------------------------------------------
+// time
+// ---------------------------------------------------------------------------
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
 /**
- * How long ago, coarsely.
+ * How long ago, coarsely: `2d ago` is read at a glance where a timestamp is not.
  *
- * Coarse on purpose: the question a history answers is "when, roughly", and a
- * row that says `2d ago` is read at a glance where a timestamp is not. The
- * exact instant is in the tooltip.
- *
- * An unparseable or empty stamp renders as nothing rather than as `NaN ago`,
- * and a stamp in the FUTURE renders as `just now` rather than as a negative
- * age -- clock skew between a cluster and this machine is ordinary, and a run
- * dated slightly ahead is not a run that happened in the future.
+ * An unparseable stamp renders as nothing, and one in the FUTURE as
+ * `just now` -- clock skew between a cluster and this machine is ordinary.
  */
 export function relativeTime(iso: string | undefined, nowMs: number): string {
   const at = Date.parse(iso ?? "");
@@ -481,24 +776,28 @@ export function relativeTime(iso: string | undefined, nowMs: number): string {
   return `${Math.floor(elapsed / DAY)}d ago`;
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 /**
- * How long a run TOOK, as the detail page prints it (memql#4427).
+ * A moment in this machine's own time: `27 Sep, 10:00`, with the year only
+ * when it is not this one. Never an RFC3339 stamp; those are for Details.
+ */
+export function formatWhen(iso: string | undefined, nowMs: number): string {
+  const at = Date.parse(iso ?? "");
+  if (!Number.isFinite(at)) return "";
+  const d = new Date(at);
+  const year = d.getFullYear() === new Date(nowMs).getFullYear() ? "" : ` ${d.getFullYear()}`;
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}${year}, ${hh}:${mm}`;
+}
+
+/**
+ * How long a run TOOK: `4m 12s`, `1h 3m`, `40s`.
  *
- * A different question from `relativeTime`, which answers "how long ago", and
- * kept beside it so the two read as one vocabulary rather than as two authors.
- * Coarse in the same way and for the same reason -- `4m 12s` is read at a
- * glance -- but it keeps seconds, because a run's duration is often under a
- * minute and "0m" would be a worse answer than none.
- *
- * "" WHEN IT CANNOT BE COMPUTED, and the caller omits the fact rather than
- * printing a placeholder. A run still in flight has no finish, an interrupted
- * one never got a finish written, and an unparseable stamp is a fact about the
- * record. None of the three is a duration of zero, and printing one would be
- * the same class of lie `displayVersion` exists to prevent.
- *
- * A NEGATIVE ELAPSED READS AS `0s`, not as a negative duration: clock skew
- * between a cluster and this machine is ordinary, and a run that finished a
- * moment "before" it started did not run backwards.
+ * "" when it cannot be computed -- still running, interrupted, unparseable --
+ * and the caller then omits the fact rather than printing a zero. A negative
+ * elapsed (clock skew) reads as `0s`.
  */
 export function runDuration(
   startedAt: string | undefined,
@@ -518,47 +817,59 @@ export function runDuration(
 }
 
 /**
- * The context key the Deployments view title menu is scoped by (memql#4426).
+ * How often a VISIBLE Deployments surface re-reads on its own.
  *
- * A KEY RATHER THAN A ROW'S `contextValue`, because there is no longer a row.
- * The instance actions moved to the view TITLE menu when the wrapper row went,
- * and `view/title` clauses are evaluated with no `viewItem` in scope -- so the
- * only way to keep "Uninstall is offered for an installed local cluster and for
- * nothing else" is to publish the same vocabulary as a key.
- *
- * IT IS NOT A THIRD CONNECTION KEY. `memql.clusterSelected` and
- * `memql.connected` describe the CONNECTION and only the ConnectionManager
- * publishes them (design D1). This describes what the selected cluster IS --
- * local or remote, installed or not -- which is a fact only the catalog
- * computes, so the Deployments view is its one publisher for the same reason
- * the manager is theirs.
+ * A run still going is polled briskly, because its row is the thing somebody
+ * is watching; otherwise slowly, enough to notice a cluster that stopped or a
+ * deploy somebody else started. Nothing polls while the surface is hidden.
  */
-export const DEPLOYMENTS_INSTANCE_KEY = "memql.deploymentsInstance";
+export const POLL_ACTIVE_MS = 10_000;
+export const POLL_IDLE_MS = 60_000;
 
-/**
- * The context value an instance carries, which is what scopes its menu entries.
- *
- * The vocabulary is unchanged from when it labelled a row: the three values
- * exist because the three kinds of instance offer different actions, and an
- * absent local cluster can only be created where an installed one can also be
- * repaired, rebuilt and uninstalled.
- */
-export function instanceContextValue(instance: Instance): string {
-  if (instance.kind === "remote") return "memqlRemoteInstance";
-  return instance.presence === "absent" ? "memqlLocalInstanceAbsent" : "memqlLocalInstance";
+export function pollIntervalMs(runs: readonly Run[]): number {
+  return runs.some((run) => run.status === "running") ? POLL_ACTIVE_MS : POLL_IDLE_MS;
 }
 
+// ---------------------------------------------------------------------------
+// the title menu's context keys
+// ---------------------------------------------------------------------------
+
 /**
- * The same value for the SELECTION, including when there is not one.
+ * What the Deployments title menu is scoped by (memql#4426): what the selected
+ * cluster IS -- local or remote, installed or not.
  *
- * "" when nothing is selected, which is what every `==` clause in the manifest
- * fails against -- so a title menu over an unselected view offers none of the
- * instance actions, and the welcome is the only thing on screen. Distinguished
- * from `instanceContextValue` so no caller has to invent a value for the
- * absent case; inventing one is how "no cluster" would come to mean "local".
+ * NOT A CONNECTION KEY. `memql.connectionState`, `memql.clusterSelected` and
+ * `memql.connected` describe the connection and the ConnectionManager publishes
+ * them; this is a fact only the catalog computes, so the view publishes it.
  */
-export function selectedInstanceContext(instance: Instance | undefined): string {
-  return instance === undefined ? "" : instanceContextValue(instance);
+export const DEPLOYMENTS_INSTANCE_KEY = "memql.deploymentsInstance";
+/** A checkout is recorded: Rebuild From Checkout and Open Local Checkout have something to act on. */
+export const DEPLOYMENTS_HAS_CHECKOUT_KEY = "memql.deploymentsHasCheckout";
+/** The checkout is on a branch: Update And Rebuild has something to pull. */
+export const DEPLOYMENTS_HAS_BRANCH_KEY = "memql.deploymentsHasBranch";
+
+/** The context value an instance carries. */
+export function instanceContextValue(instance: Instance): string {
+  if (instance.kind === "remote") return "memqlRemoteInstance";
+  if (instance.presence === "absent") return "memqlLocalInstanceAbsent";
+  if (instance.presence === "present-unreceipted") return "memqlLocalInstanceUnreceipted";
+  return "memqlLocalInstance";
+}
+
+/** Every key the title menu reads, for the selection -- "" and false when there is none. */
+export interface DeploymentsContextKeys {
+  [DEPLOYMENTS_INSTANCE_KEY]: string;
+  [DEPLOYMENTS_HAS_CHECKOUT_KEY]: boolean;
+  [DEPLOYMENTS_HAS_BRANCH_KEY]: boolean;
+}
+
+export function deploymentsContextKeys(instance: Instance | undefined): DeploymentsContextKeys {
+  const local = instance !== undefined && instance.kind === "local" && instance.presence !== "absent" && instance.presence !== "present-unreceipted";
+  return {
+    [DEPLOYMENTS_INSTANCE_KEY]: instance === undefined ? "" : instanceContextValue(instance),
+    [DEPLOYMENTS_HAS_CHECKOUT_KEY]: local && (instance?.checkout ?? "") !== "",
+    [DEPLOYMENTS_HAS_BRANCH_KEY]: local && (instance?.checkout ?? "") !== "" && (instance?.checkoutBranch ?? "") !== "",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -568,34 +879,14 @@ export function selectedInstanceContext(instance: Instance | undefined): string 
 /**
  * The instance the Deployments view is about, and its runs.
  *
- * WHAT CHANGED, AND WHY THE SHAPING IS HERE. The view used to render every
- * registered instance as a top-level row with its runs nested underneath, which
- * put a wrapper row -- `local`, most often -- between an operator and the only
- * list they came for. It now renders ONE cluster's runs, flat: the one this
- * editor has in hand. The instance itself does not vanish; it moves to the view
- * description, where it is a heading rather than a row to expand.
- *
- * Pure, and in this file rather than inline in the provider, for the reason the
- * header states about every other decision here: the failure mode of the
- * Deployments view is a BLANK PANEL, and no unit test of a TreeDataProvider
- * would see one. Driven here, "a selection that names no instance yields no
- * rows" is an assertion.
- *
- * NOTHING SELECTED IS NOT AN ERROR, and it is not an empty cluster either. It
- * yields no instance and no runs, so the provider returns `[]` and the
- * manifest's welcome renders over it -- which is the whole mechanism, since VS
- * Code draws welcome content ONLY over a genuinely empty tree.
- *
- * A SELECTION THAT NAMES NO INSTANCE yields the same nothing rather than a
- * complaint. It is an ordinary race: `clusters.yaml` is shared with the MemQL
- * Cockpit, so a cluster can be removed there between this editor selecting it
- * and this catalog being read, and a synthetic error row would suppress the
- * welcome that correctly describes what is left.
+ * NOTHING SELECTED yields no instance and no runs, so the provider returns
+ * `[]` and the manifest's welcome renders over it -- VS Code draws welcome
+ * content ONLY over a genuinely empty tree. A selection that names no instance
+ * (removed from clusters.yaml by the Cockpit a moment ago) yields the same.
  */
 export interface SelectedRuns {
-  /** The selected cluster's instance, or undefined when there is no selection. */
   instance: Instance | undefined;
-  /** Its runs, newest first. Empty when there is no selection. */
+  /** Newest first. */
   runs: Run[];
 }
 
@@ -606,65 +897,7 @@ export function runsForSelected(
   if (selection === undefined) return { instance: undefined, runs: [] };
   const instance = catalog.instances.find((i) => i.name === selection.clusterName);
   if (instance === undefined) return { instance: undefined, runs: [] };
-  // RE-DERIVED, not inherited. `listRuns` and `runsFromDeployments` each sort
-  // their own output already, so this is a second application of an order that
-  // is usually right -- and that is the point: a list filtered or re-ordered
-  // upstream cannot silently produce a history running backwards, and the
-  // comparator is the shared one rather than a third spelling of it.
   return { instance, runs: sortRunsNewestFirst(catalog.runs.get(instance.name) ?? []) };
-}
-
-/**
- * The line above the timeline: which cluster this is, how it is, what it runs.
- *
- *   local · healthy · v0.19.1
- *   local · healthy · v0.19.1 · update v0.20.0 available
- *   staging · not answering · v0.9.2
- *   local · not installed
- *
- * THE INSTANCE FACTS, PROMOTED OUT OF A ROW. `TreeView.description` is the API
- * made for exactly this -- a subtitle beside the view's own name -- and it is
- * what lets the runs be the only rows. An operator reading it learns the three
- * things the wrapper row told them, in the place a heading belongs.
- *
- * IT SAYS "update vX available", NOT the row's "vX available". The row appends
- * the clause to a version and reads `v0.18.0 - v0.19.0 available`, which is one
- * field. Here the version is its own segment, and a bare `v0.19.0 available`
- * beside `v0.18.0` would read as two versions with no statement about either.
- *
- * A CHECKOUT-MODE CLUSTER GETS NO AVAILABILITY CLAUSE, which is the same call
- * `instanceRowStatus` makes: the recorded release is not what the cluster is
- * running, so "an update to it is available" is a claim about a version it is
- * not on.
- *
- * "" FOR NO SELECTION, and the caller clears the description rather than
- * printing something. The welcome is already saying what is going on.
- */
-export function selectedViewDescription(
-  instance: Instance | undefined,
-  listing: ReleaseListing | undefined,
-): string {
-  if (instance === undefined) return "";
-  if (instance.presence === "absent") {
-    // No version segment, exactly as the row makes no version claim about a
-    // machine with nothing installed.
-    return `${instance.name} · not installed`;
-  }
-  const parts = [
-    instance.name,
-    instance.presence === "installed-unreachable" ? "not answering" : "healthy",
-  ];
-  const checkout = checkoutVersionText(instance);
-  if (checkout !== "") {
-    parts.push(checkout);
-    return parts.join(" · ");
-  }
-  parts.push(displayVersion(instance.version));
-  const described = describeVersion({ recorded: instance.version, listing });
-  if (described.upgradeAvailable && described.latest !== undefined) {
-    parts.push(`update ${described.latest} available`);
-  }
-  return parts.join(" · ");
 }
 
 export { LOCAL_INSTANCE_NAME };

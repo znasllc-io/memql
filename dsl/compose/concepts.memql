@@ -58,6 +58,8 @@ concept composition {
 
   format       enum("markdown", "html", "txt", "csv", "json", "docx", "pdf")!  @description("What kind of file this produces. The set is exactly what component/compose can WRITE (design D3). Audio and video are named in the brief and deliberately have NO value here: audio wants a compose-then-speak pipeline with a cost ceiling of its own and video wants a generation provider this cluster has none of, and a value that nothing can produce is a form somebody can fill in and nothing can store -- the same reasoning v1:platform:site.kind gives for having no ios/android value. The Target column names both absences and says why, because an absent option with no account of itself reads as something nobody got round to building.")
 
+  outputKind   string  @description("email_template for an editable Campaigns email JSON draft; absent means an ordinary document. Publication is a separate reviewed action.")
+
   sources      []object  @description("What went in: a list of {kind, ref, label, capturedAt} where kind is concept_row | library_file | query. THREE KINDS RATHER THAN A LIST OF IDS, and the distinction is load-bearing (design C): 'made from the 4 invoices matching status=open' and 'made from these 4 invoice ids' are different claims about repeatability, and flattening them to ids keeps only the second. `ref` is a BARE id for the row and file kinds and a rendered call string for the query kind; `capturedAt` is when it was resolved, which is what makes a re-run's difference explainable.")
 
   templateId   string  @description("v1:compose:template this was rendered through. Empty for a composition with no template -- the format's own default rendering is used, which is the common case for markdown and the impossible case for docx branding.")
@@ -200,6 +202,8 @@ concept recipe {
   folderId     string  @description("v1:library:folder to file each run's output into. Empty means the Library root.")
 
   accountIds   []string  @description("Optional v1:accounts:account tags. A record, never a visibility scope.")
+
+  outputKind   string  @description("email_template for an editable Campaigns email JSON draft; absent means an ordinary document. Publication is a separate reviewed action.")
 
   lastRunAt    datetime  @description("When this recipe last produced something. Rendered continuously beside the row and deliberately ABSENT from the arrival-cue fingerprint: a recipe on a schedule would touch it forever, and naming it as news would strobe the list on that schedule's own cycle (the heartbeat rule, clients/os/README.md).")
 

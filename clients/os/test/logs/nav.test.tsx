@@ -72,6 +72,6 @@ describe("the Logs app in the launcher", () => {
     const launcher = screen.getByRole("dialog", { name: "Launcher" });
     expect(within(launcher).queryByRole("button", { name: "Logs" })).toBeNull();
     // The reachable positive: the launcher did draw apps for this reader.
-    expect(within(launcher).getByRole("button", { name: "Files" })).toBeTruthy();
+    expect(within(launcher).getByRole("button", { name: /^(Unseen change )?Files$/ })).toBeTruthy();
   });
 });

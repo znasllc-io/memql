@@ -241,3 +241,13 @@ automation archiveFileOnArtifactArchive {
 
   archiveBackingFile := mutation archiveLibraryFile(fileId: args.sourceConceptRef)
 }
+
+/// A captured Markdown revision executes only after its Nexus approval.
+@template
+automation reviseLibraryDocument {
+ args {
+  requestId string!
+  proposal object!
+ }
+ revise := builtin libraryExecuteDocumentRevision(requestId: args.requestId)
+}

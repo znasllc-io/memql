@@ -1,11 +1,7 @@
-// Package email is a minimal outbound-mail helper used by MemQL for
-// transactional messages (currently just guest invites).
-//
-// The package intentionally avoids the full integrations.Integration
-// lifecycle: email is fire-and-forget, doesn't need a ticker, and the
-// SMTP connection is opened per-send. If volume ever grows we can swap
-// in a pooled vendor SDK behind the same Sender interface without
-// touching callers.
+// Package email provides organization-aware outbound transports and explicit
+// test capture. SMTP opens a connection per send; ACS persists send attempts
+// before submission and the cluster reconciles processing with signed GETs.
+// MemQL owns campaign, audience, consent, and approval behavior.
 package email
 
 import (
@@ -17,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/core/env"
+
+	"github.com/znasllc-io/memql/component/compose"
 )
 
 // ComponentName identifies the package in logs + env lookups.
@@ -52,6 +50,9 @@ type Sender interface {
 // somebody else's tenant, and the honest check is the provider's 403 landing
 // on the campaign's lastError (design D7).
 type SendAs struct {
+	// AccountID carries the organization authorized by the caller's stored
+	// campaign/identity. It is routing authority, never a user-supplied header.
+	AccountID string
 	// Address is the mailbox UPN to send as -- the value that becomes both
 	// the Graph `/users/{address}/sendMail` path segment and the address
 	// half of the From header.
@@ -121,8 +122,11 @@ func resolveIdentity(as SendAs, defaultAddr, defaultName string) (string, string
 
 // Message is a rendered email ready to go on the wire.
 type Message struct {
-	To      string
-	Subject string
+	// IntentID is a stable internal delivery identity, never an email header.
+	// A transport can reconcile a lost response without submitting it again.
+	IntentID string
+	To       string
+	Subject  string
 	// TextBody is the plain-text alternative. Required.
 	TextBody string
 	// HTMLBody is optional; when set the message goes out as
@@ -162,6 +166,9 @@ func headerUnsafe(v string) bool {
 
 // Validate reports missing or obviously malformed fields.
 func (m Message) Validate() error {
+	if _, _, err := compose.ExtractEmailImages(m.HTMLBody); err != nil {
+		return err
+	}
 	if strings.TrimSpace(m.To) == "" {
 		return errors.New("email: To is required")
 	}
@@ -420,6 +427,11 @@ func DefaultEnvKeys() EnvKeys {
 // Prefix is optional (e.g. "MEMQL_"). Pass "" for no prefix.
 func NewSenderFromEnv(prefix string, logger *slog.Logger) (Sender, error) {
 	reader := env.NewEnvReader(strings.TrimRight(prefix, "_"))
+	if mode, _ := reader.String(TransportEnv); mode == "capture" {
+		return &CaptureSender{}, nil
+	} else if mode != "" && mode != "auto" {
+		return nil, fmt.Errorf("email: unsupported transport %q", mode)
+	}
 
 	// ONE walk over the declared manifest (memql#4825). Which lanes exist,
 	// which slots each needs, which are secret and which legacy names are

@@ -60,8 +60,12 @@ import * as path from "node:path";
 // rename that kept both sides in step, and -- worse -- would keep passing if
 // the code stopped publishing the key at all, which is the failure that makes
 // a menu entry silently unreachable.
-import { CLUSTER_SELECTED_KEY } from "../src/state/connectionContext.js";
-import { DEPLOYMENTS_INSTANCE_KEY } from "../src/state/deploymentsCatalog.js";
+import { CLUSTER_SELECTED_KEY, LOCAL_CLUSTER_PRESENT_KEY } from "../src/state/connectionContext.js";
+import {
+  DEPLOYMENTS_HAS_BRANCH_KEY,
+  DEPLOYMENTS_HAS_CHECKOUT_KEY,
+  DEPLOYMENTS_INSTANCE_KEY,
+} from "../src/state/deploymentsCatalog.js";
 
 // dist-test/test/<name>.js is where esbuild.test.js puts this file, so the
 // manifest is two levels up. Read at runtime rather than imported: it is the
@@ -98,8 +102,31 @@ const titleMenu = manifest.contributes.menus["view/title"] ?? [];
  */
 type WhenContext = Record<string, string | boolean>;
 
-const REMOTE_ROW: WhenContext = { view: "memqlClusters", viewItem: "memqlCluster" };
-const LOCAL_ROW: WhenContext = { view: "memqlClusters", viewItem: "memqlLocalCluster" };
+// Cluster rows, as clusters/status.ts `clusterContextValue` spells them:
+// `memqlCluster;<state>[;local][;signedIn][;ownerSetup][;os][;inUse]`.
+function row(contextValue: string): WhenContext {
+  return { view: "memqlClusters", viewItem: contextValue };
+}
+const REMOTE_ROW = row("memqlCluster;idle;signedIn;os");
+const LOCAL_ROW = row("memqlCluster;idle;local;signedIn;os;inUse");
+const SIGN_IN_ROW = row("memqlCluster;signIn;local;os");
+const FIRST_RUN_ROW = row("memqlCluster;signIn;local;ownerSetup;os");
+const CONNECTED_ROW = row("memqlCluster;connected;signedIn;os;inUse");
+const CONNECTED_NO_OS_ROW = row("memqlCluster;connected;signedIn;inUse");
+const CONNECTING_ROW = row("memqlCluster;connecting;signedIn;os;inUse");
+const UNREACHABLE_ROW = row("memqlCluster;unreachable;local;signedIn;os");
+const NOT_CONFIGURED_ROW = row("memqlCluster;notConfigured");
+const EVERY_ROW = [
+  REMOTE_ROW,
+  LOCAL_ROW,
+  SIGN_IN_ROW,
+  FIRST_RUN_ROW,
+  CONNECTED_ROW,
+  CONNECTED_NO_OS_ROW,
+  CONNECTING_ROW,
+  UNREACHABLE_ROW,
+  NOT_CONFIGURED_ROW,
+];
 // Where uninstall lives NOW (memql#3742, then memql#4426). Taking a cluster off
 // the machine is a Deployments action -- the Clusters view is connections, and
 // its rows offer nothing that changes the machine -- and within Deployments it
@@ -111,6 +138,13 @@ const LOCAL_ROW: WhenContext = { view: "memqlClusters", viewItem: "memqlLocalClu
 const LOCAL_INSTANCE_SELECTED: WhenContext = {
   view: "memqlDeployments",
   [DEPLOYMENTS_INSTANCE_KEY]: "memqlLocalInstance",
+};
+// The same, with a checkout recorded on a branch: what Rebuild, Open checkout
+// and Pull and rebuild need to have something to act on.
+const LOCAL_WITH_CHECKOUT: WhenContext = {
+  ...LOCAL_INSTANCE_SELECTED,
+  [DEPLOYMENTS_HAS_CHECKOUT_KEY]: true,
+  [DEPLOYMENTS_HAS_BRANCH_KEY]: true,
 };
 const ABSENT_INSTANCE_SELECTED: WhenContext = {
   view: "memqlDeployments",
@@ -135,16 +169,18 @@ const ABSENT_INSTANCE_ROW: WhenContext = {
 };
 
 // A recursive-descent evaluator over the fragment of the when-clause grammar
-// this manifest uses: `&&`, `||`, `!`, parentheses, and `==` / `!=` against a
-// bare word. It is deliberately small and deliberately strict -- an unparseable
-// clause throws rather than evaluating to false, because a silent false here
-// would be this file reproducing the exact defect it exists to catch.
+// this manifest uses: `&&`, `||`, `!`, parentheses, `==` / `!=` against a bare
+// word, and `=~` against a /regex/ literal (the Clusters rows' contextValue
+// carries flags, matched by pattern). It is deliberately small and
+// deliberately strict -- an unparseable clause throws rather than evaluating
+// to false, because a silent false here would be this file reproducing the
+// exact defect it exists to catch.
 class WhenParser {
   private readonly tokens: string[];
   private at = 0;
 
   constructor(clause: string) {
-    this.tokens = clause.match(/\(|\)|&&|\|\||==|!=|!|[A-Za-z0-9_.:-]+/g) ?? [];
+    this.tokens = clause.match(/\/(?:\\.|[^/])*\/[a-z]*|\(|\)|&&|\|\||==|!=|=~|!|[A-Za-z0-9_.:-]+/g) ?? [];
     if (this.tokens.length === 0) {
       throw new Error(`when clause tokenized to nothing: ${JSON.stringify(clause)}`);
     }
@@ -197,6 +233,14 @@ class WhenParser {
 
     const left = this.word();
     const operator = this.tokens[this.at];
+    if (operator === "=~") {
+      this.at += 1;
+      const literal = this.tokens[this.at] ?? "";
+      const parsed = /^\/((?:\\.|[^/])*)\/([a-z]*)$/.exec(literal);
+      if (parsed === null) throw new Error(`expected a /regex/ after =~, found ${literal}`);
+      this.at += 1;
+      return new RegExp(parsed[1], parsed[2]).test(this.lookup(left, context) ?? "");
+    }
     if (operator === "==" || operator === "!=") {
       this.at += 1;
       const right = this.word();
@@ -238,6 +282,20 @@ function entriesFor(command: string): MenuEntry[] {
   return itemMenu.filter((entry) => entry.command === command);
 }
 
+/** The inline acts a row shows. */
+function inlineCommands(r: WhenContext): string[] {
+  return itemMenu
+    .filter((entry) => (entry.group ?? "").startsWith("inline") && matches(entry, r))
+    .map((entry) => entry.command);
+}
+
+/** The context-menu acts a row shows (everything that is not inline). */
+function contextCommands(r: WhenContext): string[] {
+  return itemMenu
+    .filter((entry) => !(entry.group ?? "").startsWith("inline") && matches(entry, r))
+    .map((entry) => entry.command);
+}
+
 function titleEntriesFor(command: string): MenuEntry[] {
   return titleMenu.filter((entry) => entry.command === command);
 }
@@ -246,23 +304,21 @@ function titleEntriesFor(command: string): MenuEntry[] {
 // broken parser that answered false to everything would make every "does not
 // offer" assertion below pass for the wrong reason.
 test("the when-clause evaluator answers the shapes this manifest uses", () => {
-  const clause = "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)";
-  assert.equal(new WhenParser(clause).evaluate(REMOTE_ROW), true);
-  assert.equal(new WhenParser(clause).evaluate(LOCAL_ROW), true);
+  const legacy = row("memqlLegacy");
+  const clause = "view == memqlClusters && (viewItem == memqlLegacy || viewItem == memqlOther)";
+  assert.equal(new WhenParser(clause).evaluate(legacy), true);
   assert.equal(
-    new WhenParser(clause).evaluate({ view: "memqlRuns", viewItem: "memqlRun" }),
+    new WhenParser(clause).evaluate({ view: "memqlRuns", viewItem: "memqlLegacy" }),
     false,
     "a clause bound to memqlClusters matched a row in another view"
   );
-  assert.equal(
-    new WhenParser("view == memqlClusters && viewItem == memqlLocalCluster").evaluate(REMOTE_ROW),
-    false
-  );
-  // The typo case this file exists for: a contextValue nothing sets.
-  assert.equal(
-    new WhenParser("view == memqlClusters && viewItem == memqlLocalClusters").evaluate(LOCAL_ROW),
-    false
-  );
+  // The regex form the Clusters rows use, both ways.
+  const signIn = "view == memqlClusters && viewItem =~ /^memqlCluster;signIn(;|$)/";
+  assert.equal(new WhenParser(signIn).evaluate(SIGN_IN_ROW), true);
+  assert.equal(new WhenParser(signIn).evaluate(CONNECTED_ROW), false);
+  // The typo case this file exists for: a pattern nothing sets.
+  assert.equal(new WhenParser("view == memqlClusters && viewItem =~ /^memqlClusters;/").evaluate(LOCAL_ROW), false);
+  assert.throws(() => new WhenParser("viewItem =~ notaregex").evaluate(LOCAL_ROW));
 });
 
 test("uninstall is offered from the Deployments title menu when a local cluster is selected", () => {
@@ -322,13 +378,23 @@ test("every action the instance row offered is reachable from the title menu", (
   const installed = [
     "memql.clusters.uninstall",
     "memql.clusters.repair",
-    "memql.deployments.rebuildFromCheckout",
-    "memql.deployments.openCheckout",
+    "memql.deployments.changeVersion",
   ];
   for (const command of installed) {
     assert.ok(
       titleEntriesFor(command).some((entry) => matches(entry, LOCAL_INSTANCE_SELECTED)),
       `${command} is unreachable: it left the instance row and did not arrive in the title menu`
+    );
+  }
+  // The three that act on the checkout, where there is one.
+  for (const command of [
+    "memql.deployments.rebuildFromCheckout",
+    "memql.deployments.openCheckout",
+    "memql.deployments.updateAndRebuild",
+  ]) {
+    assert.ok(
+      titleEntriesFor(command).some((entry) => matches(entry, LOCAL_WITH_CHECKOUT)),
+      `${command} is unreachable with a checkout recorded`
     );
   }
   assert.ok(
@@ -339,12 +405,49 @@ test("every action the instance row offered is reachable from the title menu", (
   );
 });
 
-test("opening the instance page is offered whenever a cluster is selected", () => {
+test("acts on the checkout are withheld where no checkout is recorded", () => {
+  // The old menu offered Rebuild and Open checkout for every installed local
+  // cluster, and without a checkout the click landed silently on the overview
+  // or a dead-end toast.
+  for (const command of [
+    "memql.deployments.rebuildFromCheckout",
+    "memql.deployments.openCheckout",
+    "memql.deployments.updateAndRebuild",
+  ]) {
+    assert.deepEqual(
+      titleEntriesFor(command).filter((entry) => matches(entry, LOCAL_INSTANCE_SELECTED)),
+      [],
+      `${command} is offered with no checkout recorded`
+    );
+  }
+  // A checkout pinned to a tag has nothing to pull.
+  assert.deepEqual(
+    titleEntriesFor("memql.deployments.updateAndRebuild").filter((entry) =>
+      matches(entry, { ...LOCAL_WITH_CHECKOUT, [DEPLOYMENTS_HAS_BRANCH_KEY]: false })
+    ),
+    [],
+  );
+});
+
+test("the Deployments title bar has no Refresh: the view keeps itself current", () => {
+  assert.deepEqual(titleEntriesFor("memql.deployments.refresh"), []);
+});
+
+test("Sign in sits on the Deployments title bar exactly when the selected cluster needs it", () => {
+  const entries = titleEntriesFor("memql.deployments.signIn");
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].group?.startsWith("navigation"), true, "sign-in is an inline act");
+  assert.ok(matches(entries[0], { view: "memqlDeployments", "memql.connectionState": "signIn" }));
+  assert.equal(matches(entries[0], { view: "memqlDeployments", "memql.connectionState": "connected" }), false);
+});
+
+test("opening the cluster page is offered whenever a cluster is selected", () => {
   // The route the instance ROW used to be: its `command` opened the page. With
   // the row gone the only way back to it is this entry, so it is gated on the
-  // connection key alone -- every selected cluster has an instance page, local
-  // or remote.
-  const entries = titleEntriesFor("memql.deployments.open");
+  // connection key alone -- every selected cluster has a page, local or
+  // remote. It opens the SELECTED cluster; "Open Local Deployment" stays in the
+  // palette and now always opens the local one, as its title says.
+  const entries = titleEntriesFor("memql.deployments.openCluster");
   assert.equal(entries.length, 1, "expected exactly one open-instance entry in view/title");
   for (const context of [
     LOCAL_INSTANCE_SELECTED,
@@ -368,11 +471,11 @@ test("uninstall is NOT offered on any Clusters row", () => {
   // connections: removing a row there takes the connection and leaves the
   // cluster running, and an uninstall beside it is the one action whose
   // presence makes that distinction unreadable.
-  for (const row of [LOCAL_ROW, REMOTE_ROW]) {
+  for (const r of EVERY_ROW) {
     assert.deepEqual(
-      entriesFor("memql.clusters.uninstall").filter((entry) => matches(entry, row)),
+      entriesFor("memql.clusters.uninstall").filter((entry) => matches(entry, r)),
       [],
-      `uninstall reached ${String(row["viewItem"])}`
+      `uninstall reached ${String(r["viewItem"])}`
     );
   }
 });
@@ -397,9 +500,16 @@ test("repair moved with it, and to the same place", () => {
     entries.some((entry) => matches(entry, LOCAL_INSTANCE_SELECTED)),
     "repair does not reach a selected local instance"
   );
+  // Only where there is a local cluster to repair: a title act on a machine
+  // with none would be offered and then refused.
   assert.ok(
-    entries.some((entry) => matches(entry, { view: "memqlClusters" })),
+    entries.some((entry) => matches(entry, { view: "memqlClusters", [LOCAL_CLUSTER_PRESENT_KEY]: true })),
     "repair left the Clusters title menu"
+  );
+  assert.equal(
+    entries.some((entry) => matches(entry, { view: "memqlClusters" })),
+    false,
+    "repair is offered in the Clusters title with no local cluster on this machine"
   );
   const deployments = entries.filter((entry) => (entry.when ?? "").includes("memqlDeployments"));
   assert.equal(deployments.length, 1, "expected exactly one Deployments repair entry");
@@ -444,65 +554,80 @@ test("the Clusters context menu changes nothing on the machine", () => {
     "memql.clusters.repair",
     "memql.deployments.createDeployment",
   ];
-  for (const row of [LOCAL_ROW, REMOTE_ROW]) {
+  for (const r of EVERY_ROW) {
     const offered = itemMenu
       .filter((entry) => machineActions.includes(entry.command))
-      .filter((entry) => matches(entry, row))
+      .filter((entry) => matches(entry, r))
       .map((entry) => entry.command);
-    assert.deepEqual(offered, [], `${String(row["viewItem"])} offers ${offered.join(", ")}`);
+    assert.deepEqual(offered, [], `${String(r["viewItem"])} offers ${offered.join(", ")}`);
   }
 });
 
-test("taking ownership reaches a LOCAL cluster row (memql#3906)", () => {
-  // The gap this closes. `memql.clusters.takeOwnership` was contributed to the
-  // palette only, so an operator who closed the install wizard -- or whose run
-  // predated it -- had no route to the one action that gives a bootstrapped
-  // owner its first credential. The cluster sits in front of them in the tree
-  // and right-clicking it offered sign-in, which cannot work.
+test("creating the owner passkey is offered exactly on a first-run row", () => {
+  // The flag is set only for a local cluster whose install receipt names its
+  // owner and that nobody has signed in to here (clusters/ownershipRoute.ts).
+  // The owner's own `make up` cluster -- no receipt, passkey long enrolled --
+  // used to be offered it, and the walk dead-ended in "Re-run the installer".
   const entries = entriesFor("memql.clusters.takeOwnership");
-  assert.ok(entries.length > 0, "no take-ownership entry in view/item/context");
-  assert.ok(
-    entries.some((entry) => matches(entry, LOCAL_ROW)),
-    "take ownership does not reach a memqlLocalCluster row"
-  );
+  assert.ok(entries.some((entry) => matches(entry, FIRST_RUN_ROW)), "not offered on a first run");
+  for (const r of EVERY_ROW.filter((x) => x !== FIRST_RUN_ROW)) {
+    assert.equal(entries.some((entry) => matches(entry, r)), false, `offered on ${String(r["viewItem"])}`);
+  }
 });
 
-test("taking ownership is NOT offered on a remote cluster", () => {
-  // Minting needs `kubectl exec` into the identity pod, so it can only be done
-  // from the machine hosting the cluster. `mintOwnershipLink` refuses a remote
-  // one by name (`notLocal`); offering the action anyway would put a button in
-  // front of an operator whose only outcome is that refusal.
-  assert.deepEqual(
-    entriesFor("memql.clusters.takeOwnership").filter((entry) => matches(entry, REMOTE_ROW)),
-    [],
-    "take ownership reached a remote cluster, where there is no pod to mint in"
-  );
+test("a row needing sign-in carries ONE inline act, Sign in", () => {
+  assert.deepEqual(inlineCommands(SIGN_IN_ROW), ["memql.clusters.signIn"]);
+  assert.deepEqual(inlineCommands(FIRST_RUN_ROW), ["memql.clusters.signIn"]);
 });
 
-test("remove is offered on both row kinds", () => {
-  const entries = entriesFor("memql.clusters.remove");
-  assert.ok(entries.length > 0, "no remove entry in view/item/context");
-  assert.ok(
-    entries.some((entry) => matches(entry, LOCAL_ROW)),
-    "remove does not reach a memqlLocalCluster row"
-  );
-  assert.ok(
-    entries.some((entry) => matches(entry, REMOTE_ROW)),
-    "remove does not reach a memqlCluster row"
-  );
+test("a connected row carries ONE inline act, Open MemQL OS, when it has an address", () => {
+  assert.deepEqual(inlineCommands(CONNECTED_ROW), ["memql.clusters.openConsole"]);
+  assert.deepEqual(inlineCommands(CONNECTED_NO_OS_ROW), []);
 });
 
-test("remove is the inline action and uninstall is not", () => {
+test("every other row carries no inline act", () => {
+  for (const r of [REMOTE_ROW, LOCAL_ROW, CONNECTING_ROW, UNREACHABLE_ROW, NOT_CONFIGURED_ROW]) {
+    assert.deepEqual(inlineCommands(r), [], String(r["viewItem"]));
+  }
+});
+
+test("the context menu offers only what is legal in the row's state", () => {
+  const menu = (r: WhenContext): string[] => contextCommands(r);
+  // Sign out only when something is stored to end; Disconnect only when
+  // something is connected; sign-in only when it is needed.
+  assert.ok(menu(CONNECTED_ROW).includes("memql.clusters.signOut"));
+  assert.ok(menu(CONNECTED_ROW).includes("memql.clusters.disconnect"));
+  assert.ok(!menu(CONNECTED_ROW).includes("memql.clusters.signIn"));
+  assert.ok(menu(CONNECTING_ROW).includes("memql.clusters.disconnect"));
+  assert.ok(!menu(SIGN_IN_ROW).includes("memql.clusters.signOut"), "sign out with nothing stored");
+  assert.ok(!menu(SIGN_IN_ROW).includes("memql.clusters.disconnect"), "disconnect with nothing connected");
+  assert.ok(menu(SIGN_IN_ROW).includes("memql.clusters.signIn"));
+  assert.ok(menu(SIGN_IN_ROW).includes("memql.clusters.signInWithCode"));
+  assert.ok(!menu(UNREACHABLE_ROW).includes("memql.clusters.disconnect"));
+  assert.ok(!menu(NOT_CONFIGURED_ROW).includes("memql.clusters.openConsole"), "no MemQL OS without an address");
+  for (const r of EVERY_ROW) {
+    for (const always of ["memql.clusters.connection", "memql.clusters.edit", "memql.clusters.remove"]) {
+      assert.ok(menu(r).includes(always), `${always} is missing on ${String(r["viewItem"])}`);
+    }
+  }
+});
+
+test("remove from list is in the context menu's last group, never inline; uninstall is not inline", () => {
   const remove = entriesFor("memql.clusters.remove");
-  assert.ok(
-    remove.every((entry) => (entry.group ?? "").startsWith("inline")),
-    "remove left the inline group -- the trash can beside a row is the routine action"
-  );
+  assert.ok(remove.length > 0, "no remove entry in view/item/context");
+  for (const entry of remove) {
+    assert.ok(!(entry.group ?? "").startsWith("inline"), "remove is inline again");
+  }
+  const clusterGroups = itemMenu
+    .filter((entry) => (entry.when ?? "").includes("memqlClusters") && !(entry.group ?? "").startsWith("inline"))
+    .map((entry) => entry.group ?? "");
+  const last = [...clusterGroups].sort().at(-1);
+  assert.ok(remove.every((entry) => entry.group === last), `remove is not in the last group (${String(last)})`);
 
   const uninstall = entriesFor("memql.clusters.uninstall");
   assert.ok(
     uninstall.every((entry) => !(entry.group ?? "").startsWith("inline")),
-    "uninstall is contributed inline -- an irreversible action must not sit under the cursor aimed at Remove"
+    "uninstall is contributed inline -- an irreversible action must not sit under the cursor"
   );
 });
 

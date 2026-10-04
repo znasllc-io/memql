@@ -394,10 +394,11 @@ func (s *Store) StageOutbound(ctx context.Context, requestID, target, subject, b
 // `@handler(type="query", query="builtin help(name: args.name)")`, and a query
 // handler renders exactly such a call from its arguments' values and hands it
 // to Execute (component/memql/tool_handler_v1.go).
-func (s *Store) SendToRecipient(ctx context.Context, templateID, recipientID, senderIdentityID, ruleID string) error {
+func (s *Store) SendToRecipient(ctx context.Context, templateID, recipientID, senderIdentityID, ruleID, requestID string) (map[string]any, error) {
 	args := []arg{
 		{"templateId", memql.BareShortId(templateID)},
 		{"recipientId", memql.BareShortId(recipientID)},
+		{"requestId", requestID},
 	}
 	if strings.TrimSpace(senderIdentityID) != "" {
 		args = append(args, arg{"senderIdentityId", memql.BareShortId(senderIdentityID)})
@@ -405,7 +406,14 @@ func (s *Store) SendToRecipient(ctx context.Context, templateID, recipientID, se
 	if strings.TrimSpace(ruleID) != "" {
 		args = append(args, arg{"emailRuleId", memql.BareShortId(ruleID)})
 	}
-	return s.exec(ctx, call("builtin", "campaignSendToRecipient", args...))
+	rows, err := s.rows(ctx, call("builtin", "campaignSendToRecipient", args...))
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) != 1 {
+		return nil, fmt.Errorf("emailrules: campaign send returned no readable receipt")
+	}
+	return rows[0], nil
 }
 
 // AddRecipient enrols a row-derived address into the rule's audience, so it

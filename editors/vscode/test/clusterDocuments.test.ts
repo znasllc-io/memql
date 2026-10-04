@@ -40,12 +40,16 @@ test("the header lens carries the cluster the document came from, not just the c
   const document = { uri: fakeUri() } as unknown as TextDocument;
   const lenses = new ClusterDocumentLens().provideCodeLenses(document);
 
-  assert.equal(lenses.length, 1);
-  assert.equal(lenses[0]?.command?.command, "memql.constructs.showDetails");
-  assert.deepEqual(lenses[0]?.command?.arguments, [
+  // A fact and an act: where the bytes came from, then Details.
+  assert.equal(lenses.length, 2);
+  assert.match(String(lenses[0]?.command?.title), /staging/);
+  assert.match(String(lenses[0]?.command?.title), /read-only/);
+  assert.equal(lenses[0]?.command?.command, "", "the fact lens is not a button");
+  assert.equal(lenses[1]?.command?.title, "Details");
+  assert.equal(lenses[1]?.command?.command, "memql.constructs.showDetails");
+  assert.deepEqual(lenses[1]?.command?.arguments, [
     { cluster: "staging", kind: "query", name: "spaceParticipants" },
   ]);
-  assert.match(String(lenses[0]?.command?.title), /staging/);
 });
 
 test("a lens is offered for nothing but a cluster document", () => {
@@ -79,7 +83,7 @@ test("a failed fetch renders a notice, reports the failure once, and is not cach
   const provider = new ClusterDocumentProvider(deps);
   try {
     const text = await provider.provideTextDocumentContent(fakeUri());
-    assert.match(text, /could not be read/);
+    assert.match(text, /Couldn't load/);
     assert.match(text, /staging/);
     assert.equal(/stream closed/.test(text), false, "the raw error text reached the document");
 
@@ -110,7 +114,7 @@ test("a provider with no onError still answers the notice rather than throwing",
     } as unknown as ClusterDocumentDeps["connections"],
   });
   try {
-    assert.match(await provider.provideTextDocumentContent(fakeUri()), /could not be read/);
+    assert.match(await provider.provideTextDocumentContent(fakeUri()), /Couldn't load/);
   } finally {
     provider.dispose();
   }

@@ -14,6 +14,7 @@ func TestDomainDerivations(t *testing.T) {
 		"MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER": "https://identity.memql.localhost",
 		"MEMQL_IDENTITY_BOOTSTRAP_DOMAIN":         "memql.localhost",
 		"MEMQL_DISCOVERY_GRPC_ENDPOINT":           "api.memql.localhost:443",
+		"MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL":    "https://api.memql.localhost",
 		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     "https://api.memql.localhost,https://app.memql.localhost,https://os.memql.localhost",
 		"MEMQL_MCP_PUBLIC_URL":                    "https://mcp.memql.localhost",
 	}
@@ -76,6 +77,7 @@ func TestApplyDomainDerivationsExplicitWins(t *testing.T) {
 	t.Setenv("MEMQL_DOMAIN", "memql.localhost")
 	t.Setenv("MEMQL_IDENTITY_BASE_URL", "https://auth.example.com")
 	t.Setenv("MEMQL_IDENTITY_BOOTSTRAP_DOMAIN", "")
+	t.Setenv("MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL", "https://mail.example.com/preferences")
 
 	ApplyDomainDerivations(nil)
 
@@ -84,6 +86,9 @@ func TestApplyDomainDerivationsExplicitWins(t *testing.T) {
 	}
 	if got := os.Getenv("MEMQL_IDENTITY_BOOTSTRAP_DOMAIN"); got != "memql.localhost" {
 		t.Errorf("BOOTSTRAP_DOMAIN = %q, want it derived", got)
+	}
+	if got := os.Getenv("MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL"); got != "https://mail.example.com/preferences" {
+		t.Errorf("explicit unsubscribe URL was changed: %q", got)
 	}
 }
 
@@ -129,5 +134,13 @@ func TestApplyDomainDerivationsIdempotent(t *testing.T) {
 
 	if got := os.Getenv("MEMQL_IDENTITY_BASE_URL"); got != first {
 		t.Errorf("second call changed BASE_URL: %q -> %q", first, got)
+	}
+}
+
+func TestCampaignUnsubscribeUsesClusterDomain(t *testing.T) {
+	for _, domain := range []string{"memql.localhost", "cluster.example.com"} {
+		if got := DomainDerivations(domain)["MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL"]; got != "https://api."+domain {
+			t.Errorf("unsubscribe URL for %s = %s", domain, got)
+		}
 	}
 }

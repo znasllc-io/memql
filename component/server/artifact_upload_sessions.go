@@ -33,6 +33,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,6 +43,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server/fileversion"
 	"github.com/znasllc-io/memql/component/server/uploadsession"
 	"github.com/znasllc-io/memql/core/id"
@@ -334,6 +336,7 @@ type uploadInitRequest struct {
 	// three target gates run HERE, at init -- fail-fast, before anybody
 	// streams gigabytes at a target they may not write to.
 	TargetArtifactId string `json:"targetArtifactId"`
+	ExpectedVersion  *int   `json:"expectedVersion"`
 }
 
 type uploadInitResponse struct {
@@ -371,7 +374,7 @@ func (h *ArtifactHandler) handleUploadInit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	ctx := r.Context()
+	ctx := memql.ContextWithFreshRead(r.Context())
 
 	// The same gates the one-shot route runs, in the same order and for the
 	// same reason -- everything that can refuse this upload refuses it before
@@ -412,6 +415,16 @@ func (h *ArtifactHandler) handleUploadInit(w http.ResponseWriter, r *http.Reques
 			targetArtifact, head = keyedArtifact, keyedHead
 		}
 	}
+	if req.ExpectedVersion != nil {
+		if *req.ExpectedVersion < 1 {
+			http.Error(w, "expectedVersion must be positive", http.StatusBadRequest)
+			return
+		}
+		if head == nil || head.VersionNumber != *req.ExpectedVersion {
+			http.Error(w, "This file changed. Reload its latest version before saving.", http.StatusConflict)
+			return
+		}
+	}
 	if status, msg := h.checkQuota(ctx, req.Size); status != 0 {
 		http.Error(w, msg, status)
 		return
@@ -425,6 +438,7 @@ func (h *ArtifactHandler) handleUploadInit(w http.ResponseWriter, r *http.Reques
 	// @serverOnly: a caller-authored path could escape this prefix.
 	blobPath := fmt.Sprintf("library/%s/%s/%s", userId, fileId, name)
 	targetArtifactId := ""
+	expectedVersion := 0
 	if head != nil {
 		// A version keeps the file's identity, so the session carries the
 		// EXISTING file id and stages into a path no version has used. Both
@@ -433,6 +447,7 @@ func (h *ArtifactHandler) handleUploadInit(w http.ResponseWriter, r *http.Reques
 		fileId = head.ID
 		blobPath = libraryVersionObjectName(userId, fileId, name)
 		targetArtifactId = targetArtifact.ID
+		expectedVersion = head.VersionNumber
 	}
 
 	if err := h.sessions.Create(ctx, uploadsession.CreateParams{
@@ -443,7 +458,7 @@ func (h *ArtifactHandler) handleUploadInit(w http.ResponseWriter, r *http.Reques
 		UploadedFromWorkerName: workerName,
 		UploadedFromPath:       strings.TrimSpace(req.UploadedFromPath),
 		BlobPath:               blobPath, FileId: fileId, ChunkSize: h.chunkSizeBytes,
-		TargetArtifactId: targetArtifactId,
+		TargetArtifactId: targetArtifactId, ExpectedVersion: expectedVersion,
 	}); err != nil {
 		h.logger.Error("create upload session", "error", err)
 		http.Error(w, fmt.Sprintf("failed to open upload session: %v", err), http.StatusInternalServerError)
@@ -579,7 +594,7 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 	if session == nil {
 		return
 	}
-	ctx := r.Context()
+	ctx := memql.ContextWithFreshRead(r.Context())
 
 	// A COMPLETED session answers its ids instead of re-running the commit:
 	// the client that died between commit and response re-completes and
@@ -602,9 +617,43 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 		_ = json.NewEncoder(w).Encode(ArtifactUploadResponse{
 			ArtifactId:    artifactId,
 			FileId:        session.FileId,
-			VersionNumber: h.completedSessionVersion(ctx, session),
+			VersionNumber: completedSessionVersion(session),
 		})
 		return
+	}
+
+	if session.TargetArtifactId != "" {
+		_, head, status, msg := h.resolveVersionTarget(ctx, session.TargetArtifactId)
+		if status != 0 {
+			http.Error(w, msg, status)
+			return
+		}
+		if head.ID != session.FileId || session.ExpectedVersion < 1 {
+			http.Error(w, "This upload has no valid original version. Start a new upload.", http.StatusConflict)
+			return
+		}
+		landed := head.BlobUrl == session.BlobPath && head.VersionNumber == session.ExpectedVersion+1
+		if !landed && head.VersionNumber > session.ExpectedVersion+1 {
+			prior, err := h.store.FileVersion(ctx, session.FileId, session.ExpectedVersion+1)
+			if err != nil {
+				http.Error(w, "version lookup failed", http.StatusInternalServerError)
+				return
+			}
+			landed = prior != nil && prior.BlobUrl == session.BlobPath
+		}
+		if landed {
+			if err := h.sessions.Complete(ctx, session.ID); err != nil {
+				http.Error(w, "Could not record upload completion. Retry this request.", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(ArtifactUploadResponse{ArtifactId: session.TargetArtifactId, FileId: session.FileId, VersionNumber: completedSessionVersion(session)})
+			return
+		}
+		if head.VersionNumber != session.ExpectedVersion {
+			http.Error(w, "This file changed since the upload began. Reload its latest version before saving.", http.StatusConflict)
+			return
+		}
 	}
 
 	// The declared size is a CLAIM (design D8/D9), and this is where it is
@@ -698,7 +747,7 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 	// they finished arriving. Best effort -- the upload is done, and a file
 	// that is stored and unlabelled beats a 500 that says it is not.
 	stampLink := func() {
-		if session.UploadedFromWorkerId == "" || session.UploadedFromPath == "" {
+		if session.TargetArtifactId != "" || session.UploadedFromWorkerId == "" || session.UploadedFromPath == "" {
 			return
 		}
 		if err := h.store.SetFileLinkState(ctx, session.FileId, libraryLinkStateSynced); err != nil {
@@ -783,7 +832,7 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 // to, or against a file that has been archived and re-owned. The read costs
 // one query on a path that just moved gigabytes.
 func (h *ArtifactHandler) completeVersionSession(w http.ResponseWriter, r *http.Request, session *uploadsession.Row) (string, int, bool) {
-	ctx := r.Context()
+	ctx := memql.ContextWithFreshRead(r.Context())
 	targetArtifact, head, status, msg := h.resolveVersionTarget(ctx, session.TargetArtifactId)
 	if status != 0 {
 		http.Error(w, msg, status)
@@ -797,6 +846,10 @@ func (h *ArtifactHandler) completeVersionSession(w http.ResponseWriter, r *http.
 			"uploadId", session.ID, "sessionFileId", session.FileId, "headFileId", head.ID)
 		http.Error(w, "this upload session's target has changed since it was opened, so nothing was written",
 			http.StatusConflict)
+		return "", 0, false
+	}
+	if session.ExpectedVersion < 1 || head.VersionNumber != session.ExpectedVersion {
+		http.Error(w, "This file changed since the upload began. Reload its latest version before saving.", http.StatusConflict)
 		return "", 0, false
 	}
 	version := head.VersionNumber + 1
@@ -833,6 +886,10 @@ func (h *ArtifactHandler) completeVersionSession(w http.ResponseWriter, r *http.
 			UploadedFromWorkerName: session.UploadedFromWorkerName,
 			UploadedFromPath:       session.UploadedFromPath,
 		}); err != nil {
+		if errors.Is(err, ErrFileVersionConflict) {
+			http.Error(w, "This file changed. Reload its latest version before saving.", http.StatusConflict)
+			return "", 0, false
+		}
 		h.logger.Error("supersede library file for session", "error", err,
 			"uploadId", session.ID, "fileId", head.ID, "version", version)
 		http.Error(w, fmt.Sprintf("failed to record the new version: %v", err), http.StatusInternalServerError)
@@ -841,19 +898,16 @@ func (h *ArtifactHandler) completeVersionSession(w http.ResponseWriter, r *http.
 	return targetArtifact.ID, version, true
 }
 
-// completedSessionVersion answers the version a finished session landed as,
-// read off the head now rather than remembered.
-//
-// Best-effort by design: this only ever runs on the idempotent re-complete
-// path, where the ids are the answer the caller came for and the version is
-// a courtesy. Zero when the head cannot be read, which a client reads as
-// "not stated" rather than as version zero.
-func (h *ArtifactHandler) completedSessionVersion(ctx context.Context, session *uploadsession.Row) int {
-	row, err := h.store.File(ctx, LibraryFileConceptRef(session.FileId))
-	if err != nil || row == nil {
-		return 0
+// completedSessionVersion is this upload's receipt, not today's head. A later
+// editor save must not change the version Cockpit records in its backup ledger.
+func completedSessionVersion(session *uploadsession.Row) int {
+	if session.TargetArtifactId == "" {
+		return 1
 	}
-	return headVersionNumber(row.VersionNumber)
+	if session.ExpectedVersion > 0 {
+		return session.ExpectedVersion + 1
+	}
+	return 0 // Legacy completed sessions did not record their base.
 }
 
 // ---------------------------------------------------------------------------

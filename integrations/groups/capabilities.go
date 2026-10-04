@@ -142,6 +142,9 @@ func (i *Integration) handleGroupCreate(ctx context.Context, args map[string]any
 	if err := i.requireOrganizationCapability(ctx, c, accountID, auth.VerbCreate); err != nil {
 		return nil, err
 	}
+	if accountID == "" {
+		return nil, refusal(CodeAccountNotFound, "select the organization this group belongs to")
+	}
 	if accountID != "" {
 		if err := i.requireActiveAccount(ctx, accountID); err != nil {
 			return nil, err

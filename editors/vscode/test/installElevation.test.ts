@@ -50,6 +50,7 @@ import {
   setNextInputBoxResult,
   type StubWebviewPanel,
 } from "./support/vscodeStub.js";
+import { LocalRuns } from "../src/deploy/localRun.js";
 
 // dist-test/test/<bundle>.js -> the repository root. The same four levels
 // addClusterPanel.test.ts walks, and for the same reason: the graph under test is
@@ -205,6 +206,9 @@ function openPanel(options: {
     // that does not -- from a single test run.
     sudoIsFree: async () => options.sudoIsFree,
     sudoAccepts: async () => options.passwordAccepted ?? true,
+    // A slot of its own per case: a run an earlier case left going must not
+    // refuse this one (test/runSlot.test.ts holds the sharing).
+    runs: new LocalRuns(),
   };
   AddClusterPanel.show({ subscriptions: [] } as unknown as ExtensionContext, presence(), deps, "install");
   return recorded.webviews[recorded.webviews.length - 1]!;
@@ -212,10 +216,10 @@ function openPanel(options: {
 
 function beginInstall(panel: StubWebviewPanel): void {
   panel.send({ type: "choose", value: "install" });
-  panel.send({ type: "input", value: { field: "domain", text: "memql.localhost" } });
-  panel.send({ type: "input", value: { field: "ownerFirstName", text: "Ada" } });
-  panel.send({ type: "input", value: { field: "ownerLastName", text: "Lovelace" } });
-  panel.send({ type: "input", value: { field: "ownerEmail", text: "ada@example.com" } });
+  panel.send({ type: "input", field: "domain", value: "memql.localhost" });
+  panel.send({ type: "input", field: "ownerFirstName", value: "Ada" });
+  panel.send({ type: "input", field: "ownerLastName", value: "Lovelace" });
+  panel.send({ type: "input", field: "ownerEmail", value: "ada@example.com" });
   panel.send({ type: "begin" });
 }
 
@@ -277,25 +281,25 @@ test("every step of an install is told the wizard owns the asking", async () => 
   }
 });
 
-// THE RUN THAT SHIPPED THREE DIALOGS. No password reaches the extension -- the
-// box was dismissed -- and the scripts must STILL not prompt. The password
-// having been declined is an answer; asking again in a different shape is not
-// what the wizard does with it.
-test("a run that collected no password still does not let the scripts prompt", async () => {
+// A DISMISSED PASSWORD IS AN ANSWER, AND THE ANSWER IS "NOT NOW" (memql#5118
+// audit). This case used to assert the opposite -- that the run started
+// anyway, with no agent, and relied on each privileged step refusing with a
+// command. That is how an uninstall deleted a cluster (a step that needs no
+// root) and only then failed on the hosts file. Dismissing now starts
+// nothing: no step runs, and the scripts are never in a position to prompt.
+test("a dismissed password prompt starts no step at all", async () => {
   const runner = await fakeRunner();
   const panel = openPanel({ runner, sudoIsFree: false });
   try {
     setNextInputBoxResult(undefined); // dismissed
     beginInstall(panel);
-    await until(() => runner.calls.length > 3, "the run to reach its privileged steps");
-
-    for (const call of runner.calls) {
-      assert.equal(call.env?.[ELEVATE_DIALOG_ENV], "never", `${call.capability} may draw its own dialog`);
-      assert.ok(
-        call.env?.SUDO_ASKPASS === undefined,
-        `${call.capability} was given a SUDO_ASKPASS for an agent that does not exist`,
-      );
-    }
+    await until(() => recorded.inputBoxes.length === 1, "the password prompt");
+    await until(() => /data-act="begin"/.test(panel.html), "the form, back again");
+    assert.deepEqual(
+      runner.calls.map((c) => c.capability).filter((c) => c !== "install.detect"),
+      [],
+      "a step ran after the password was declined",
+    );
   } finally {
     panel.close();
   }
