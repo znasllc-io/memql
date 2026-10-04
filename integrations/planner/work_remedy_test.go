@@ -221,6 +221,56 @@ func TestReplanRefusesADraftThatWouldRunACompletedStepAgain(t *testing.T) {
 	}
 }
 
+// replanSourceWithArgs is replanSource declaring one argument, read by its
+// new step.
+func replanSourceWithArgs(arg string) string {
+	return strings.Replace(strings.Replace(replanSource,
+		"automation summariseTicketsReplanned {\n",
+		"automation summariseTicketsReplanned {\n  args {\n    "+arg+" string @required\n  }\n", 1),
+		`prompt: "write the summary as a plain list"`, "prompt: args."+arg, 1)
+}
+
+// A RE-PLANNED DRAFT IS HELD TO THE RUN'S VARIABLES (memql#5664). Resume binds
+// the variables the run was compiled with into the new template's args before
+// any step runs, so a draft declaring an argument the run never had installed
+// cleanly and refused every resume -- a run back at `running` that nothing
+// could execute. The model is shown the run's input keys, and a draft that
+// still asks for another argument is refused before anything is persisted:
+// a person is asked, as for every draft the run cannot use.
+func TestReplanHoldsTheDraftToTheRunsVariables(t *testing.T) {
+	withVariables := func() workintegration.ReplanContext {
+		rc := replanFixture()
+		rc.Variables = map[string]any{"team": "support", "day": "2026-09-04"}
+		return rc
+	}
+
+	t.Run("a draft reading an argument the run has", func(t *testing.T) {
+		eng := &replanEngine{answer: replanAnswer(t, replanSourceWithArgs("day"), false)}
+		rec := &remedyRecorder{context: withVariables()}
+		if !newRemedy(eng, rec).Replan(context.Background(), "v1:work:run:r1", "u1", "draft", "") || len(rec.installed) != 1 {
+			t.Fatalf("a draft binding the run's own variable was not installed (asked: %v)", rec.asked)
+		}
+		keys, _ := eng.aiData[0]["inputKeys"].([]string)
+		if strings.Join(keys, ",") != "day,team" {
+			t.Fatalf("replanGap was shown input keys %v, want the run's variables, sorted", eng.aiData[0]["inputKeys"])
+		}
+	})
+
+	t.Run("a draft asking for an argument the run never had", func(t *testing.T) {
+		eng := &replanEngine{answer: replanAnswer(t, replanSourceWithArgs("week"), false)}
+		rec := &remedyRecorder{context: withVariables()}
+		if !newRemedy(eng, rec).Replan(context.Background(), "v1:work:run:r1", "u1", "draft", "") {
+			t.Fatal("the refused draft left the run on its remedy wait, to be re-planned again next pass")
+		}
+		if len(rec.installed) != 0 || len(eng.wrote("createAuthoringBundle")) != 0 {
+			t.Fatalf("a draft the run cannot bind was persisted (%v) or installed (%v)", eng.wrote("createAuthoringBundle"), rec.installed)
+		}
+		if len(rec.asked) != 1 || !strings.Contains(rec.asked[0], "week") {
+			t.Fatalf("asked %v, want one question naming the argument the run does not have", rec.asked)
+		}
+	})
+}
+
 // Every outcome after the model was asked moves the run off its wait; a
 // failure that spent nothing leaves it parked to be served again.
 func TestReplanSpendsItsAttemptOnce(t *testing.T) {

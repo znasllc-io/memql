@@ -782,6 +782,12 @@ type ReplanContext struct {
 	// resume point, so a completed step the new template puts after the first
 	// step the run never reached would run a second time.
 	Recorded map[string]string
+	// Variables are what the run's resume binds into its template's args
+	// before any step runs: the run's stored variables, or its triggering
+	// event's payload when it has none -- component/automations' ResumeFrom
+	// rule. A re-planned template is held to them before it is installed
+	// (memql#5664).
+	Variables map[string]any
 }
 
 // LoadReplanContext reads the context for one run's replan under the OWNER's
@@ -800,7 +806,10 @@ func (i *Integration) LoadReplanContext(ctx context.Context, ownerUserId, runId,
 	if err != nil {
 		return ReplanContext{}, err
 	}
-	out := ReplanContext{}
+	out := ReplanContext{Variables: rowMap(run, "variables")}
+	if out.Variables == nil {
+		out.Variables = rowMap(rowMap(run, "triggerEvent"), "payload")
+	}
 	if goalId := rowString(run, "goalId"); goalId != "" {
 		if goal, gerr := st.goalForOwner(actorCtx, goalId); gerr == nil && goal != nil {
 			out.Statement = rowString(goal, "statement")

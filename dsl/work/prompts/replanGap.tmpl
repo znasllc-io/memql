@@ -16,6 +16,7 @@ localized repair, and it throws away work that already succeeded.
 
 Goal:           {{ .statement }}
 Remaining goal: {{ .remainingGoal }}
+Input keys:     {{ .inputKeys }}
 Now:            {{ .now }}
 
 Completed steps (FIXED -- their results are available to you):
@@ -43,6 +44,10 @@ Reusable catalog (constructs already available to compose -- prefer these):
    compile did.
 
 4. Every value that would differ next time is an argument, not a literal.
+   The run already has its arguments: declare exactly the input keys as
+   the automation's args. Resume binds the run's stored values into them
+   before any step runs, so an argument the run was never given refuses
+   the run.
 
 5. Depend on the completed steps by key where you need their values. A
    later statement reads a completed step's value by the name that step's

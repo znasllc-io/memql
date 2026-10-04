@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -202,6 +204,30 @@ func TestAReplanIsPreparedFromItsRequestAtDispatch(t *testing.T) {
 	}
 	if resume == nil || resume.FailedStep != "" {
 		t.Fatalf("prepared journal = %+v", resume)
+	}
+}
+
+// A RESUME REFUSED ON ITS ARGS FAILS THE RUN, SAYING SO (memql#5664). It is
+// decided before any step runs and binds the same variables to the same
+// contract on every attempt; reported and left, the run sat at `running` and
+// the abandoned sweep closed it a minute later with a sentence about a node
+// going away. Any other refusal is reported as before, and a refusal that came
+// with an execution was the executor's to close.
+func TestAResumeRefusedOnItsArgsFailsTheRun(t *testing.T) {
+	refused := fmt.Errorf("%w: required field is missing", automations.ErrResumeArgsContract)
+	if code := workResumeRefusal(nil, refused); code != workResumeArgsRefused {
+		t.Fatalf("an args refusal: code %q, want %s", code, workResumeArgsRefused)
+	}
+	if code := workResumeRefusal(nil, errors.New("the database stopped answering")); code != "" {
+		t.Fatalf("a transient refusal was failed as %q", code)
+	}
+	if code := workResumeRefusal(&automations.AutomationExecution{}, refused); code != "" {
+		t.Fatalf("a refusal that came with an execution was failed as %q", code)
+	}
+	// The agent's dispatcher asks it on its ordinary resume path, compiled
+	// only under the agent tag.
+	if src := readAppFile(t, "integrations_work_dispatch.go"); !strings.Contains(src, "workResumeRefusal(exec, execErr)") {
+		t.Fatal("the agent's dispatcher does not ask workResumeRefusal on its resume path; a run refused on its args is left for the abandoned sweep")
 	}
 }
 

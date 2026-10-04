@@ -3,6 +3,7 @@ package work
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 
@@ -275,6 +276,44 @@ func TestARemedyWriteRefusesARunThatMovedOn(t *testing.T) {
 			}
 			if writes := mutationsIn(eng); len(writes) != 0 {
 				t.Fatalf("a refused remedy wrote %s", eng.summary())
+			}
+		})
+	}
+}
+
+// A re-plan's context carries what the run's resume will bind into the new
+// template's args (memql#5664): the run's stored variables, or, for a run with
+// none, its triggering event's payload -- ResumeFrom's rule, so the draft is
+// held to exactly what its resume will hold it to.
+func TestLoadReplanContextCarriesWhatResumeBinds(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(map[string]any)
+		want string
+	}{
+		{"the run's variables", func(r map[string]any) {}, "region=emea,week=2026-39"},
+		{"the trigger's payload, for a run with no variables", func(r map[string]any) {
+			delete(r, "variables")
+			r["triggerEvent"] = map[string]any{"topic": "report.requested", "payload": map[string]any{"week": "2026-40"}}
+		}, "week=2026-40"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			i, eng := newTestIntegration(t)
+			run := remedyWaitRow(waitKindReplan)
+			run["variables"] = map[string]any{"week": "2026-39", "region": "emea"}
+			tc.edit(run)
+			eng.reply("workRunForOwner", run)
+			rc, err := i.LoadReplanContext(context.Background(), "u-alice", remedyRunId, "draft")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for k, v := range rc.Variables {
+				got = append(got, k+"="+v.(string))
+			}
+			sort.Strings(got)
+			if strings.Join(got, ",") != tc.want {
+				t.Fatalf("variables = %v, want %s", rc.Variables, tc.want)
 			}
 		})
 	}

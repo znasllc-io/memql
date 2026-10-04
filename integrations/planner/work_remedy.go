@@ -129,7 +129,10 @@ func (r *WorkRemedy) Replan(ctx context.Context, runId, ownerUserId, stepKey, re
 		"statement":      rc.Statement,
 		"completedSteps": rc.CompletedSteps,
 		"failedStep":     rc.FailedStep,
-		"now":            r.clock().UTC().Format(time.RFC3339),
+		// The run's arguments, by name: the new version declares exactly
+		// these, because resume binds the run's stored values into them.
+		"inputKeys": inputKeys(rc.Variables),
+		"now":       r.clock().UTC().Format(time.RFC3339),
 	}
 	if trimmed := strings.TrimSpace(reason); trimmed != "" {
 		data["remainingGoal"] = trimmed
@@ -172,6 +175,14 @@ func (r *WorkRemedy) Replan(ctx context.Context, runId, ownerUserId, stepKey, re
 	if err != nil {
 		return r.ask(ctx, ownerUserId, runId, failedKey, workintegration.RemedyReplan,
 			"The re-planned draft does not keep the completed steps where they would be served: "+err.Error())
+	}
+	// HELD TO THE RUN'S VARIABLES BEFORE IT IS PERSISTED (memql#5664). Resume
+	// binds them into the new template's args before any step runs, so a
+	// draft declaring an argument the run never had would be installed and
+	// refuse every resume of the run it was installed on.
+	if err := automations.CheckArgs(auto, rc.Variables); err != nil {
+		return r.ask(ctx, ownerUserId, runId, failedKey, workintegration.RemedyReplan,
+			"The re-planned draft asks for arguments this run was not given: "+err.Error())
 	}
 	persisted, err := r.loop.persistWorkDraft(ctx,
 		CompileRequest{RunId: runId, OwnerUserId: ownerUserId, Statement: rc.Statement},
