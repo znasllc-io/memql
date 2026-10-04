@@ -574,7 +574,7 @@ export const DEFAULT_FALLBACK: RoutingFallback = "nextMatching";
 // Rendered beside the control, because "leastLoaded" does not say what it is
 // least-loaded against.
 export const STRATEGY_BLURB: Record<RoutingStrategy, string> = {
-  firstFit: "Registration order. What the router did before policies existed.",
+  firstFit: "Registration order: the first eligible machine takes the call.",
   roundRobin:
     "Longest since last chosen first, so two replicas rotate the same way with no shared counter.",
   leastLoaded: "Fewest calls in flight first, against each capability's own cap.",

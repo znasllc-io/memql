@@ -54,8 +54,8 @@ query call routerDecisionsRecent {
     since    string
     /// Only decisions resolved at this level.
     level    enum("fast", "strong", "reasoning", "embeddings")
-    /// Only decisions served through this door.
-    door     enum("local", "app", "federation")
+    /// Only decisions served through this door. `session` is an app handed a whole step.
+    door     enum("local", "app", "federation", "session")
     /// Only decisions the named rule made.
     rule     string
     /// Only decisions with this outcome. A park is recorded as its refusal code.

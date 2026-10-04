@@ -197,7 +197,12 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // recovery, placed on agent replicas behind its own `pipelines-poll` lease
 // (app/automation_schedule_placement.go). Two added, none removed; measured by
 // the strict loader on this tree.
-const shippedAutomationCount = 77
+// 77 -> 78 with workerAppSessionStaleSweep, the fourth worker sweep and the
+// one v1:worker:appSession's status description promised before it existed:
+// a session is held by one replica and only that replica ends its row, so a
+// pod restart left it at `running` for good. One added, none removed;
+// measured by the strict loader on this tree.
+const shippedAutomationCount = 78
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

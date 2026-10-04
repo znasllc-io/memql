@@ -548,6 +548,29 @@ QueryClient.prototype.usersDueDeletionReminder = function (this: QueryClient, ar
   return this.executeNamed("usersDueDeletionReminder", buildUsersDueDeletionReminder(args), opts);
 };
 
+/** Every app session nobody is holding, judged by TWO cutoffs.
+The STALL grace is against heartbeatAt, which the holder re-writes every two seconds (component/worker's recordingPublishInterval) from the session's start until its recording closes; the default of 90s is some forty missed flushes, so a replica that is merely slow is never taken for a dead one. The MAX AGE is against startedAt, and it defaults to the four-hour session ceiling (integrations/agent/worker's defaultAppSessionMaxDuration) plus half an hour: nothing legitimately runs that long, and it is the only judgment available for a row written before heartbeatAt existed. Both defaults are hand copies of Go values, so each is pinned against its value by a Go test beside it.
+Both are read from globalVariables so an operator can widen them on a slow cluster without a release, and both default generously: failing a session that is merely slow is worse than leaving a dead one on screen for another minute. */
+export interface WorkerAppSessionStaleSweepArgs {
+  event: Record<string, unknown>;
+}
+
+export function buildWorkerAppSessionStaleSweep(args: WorkerAppSessionStaleSweepArgs): string {
+  const parts: string[] = [];
+  parts.push("event: " + renderMemQLValue(args.event));
+  return "logic workerAppSessionStaleSweep(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workerAppSessionStaleSweep(args: WorkerAppSessionStaleSweepArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workerAppSessionStaleSweep = function (this: QueryClient, args: WorkerAppSessionStaleSweepArgs = {} as WorkerAppSessionStaleSweepArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workerAppSessionStaleSweep", buildWorkerAppSessionStaleSweep(args), opts);
+};
+
 /** Pure decide for the worker-invocation retention sweep (#2369, cluster pruneStaleClusterNodes pattern): reads WORKER_INVOCATION_RETENTION_DAYS (default 90), computes cutoff = now - window via addDuration with a negative ISO duration, reads `query expiredWorkerInvocations(createdBefore: cutoff)` and returns its nodes() -- rows past retention, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's `for` loop soft-deletes each unconditionally. */
 export interface WorkerInvocationRetentionSweepArgs {
   event: Record<string, unknown>;

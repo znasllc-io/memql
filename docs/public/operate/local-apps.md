@@ -29,7 +29,7 @@ The engine drives exactly two apps today — **Claude Code** (`claude-code`) and
    executorBackend=cockpit-app:claude-code
         │
         ▼
-   cockpit-app backend  ──── consent gates ────►  refused, with a reason
+   cockpit-app backend  ────── app gate ───────►  refused, with a reason
    (agent node)                                    naming which gate
         │
         │  AppSessionStart {credential, mcpEndpoint, workspace, prompt}
@@ -100,12 +100,63 @@ stream. Nothing in this feature picks between machines itself — a second
 selector would disagree with the first, and the plan would commit to a machine
 that then refused.
 
-**A session runs only on the replica holding that machine's stream.** The
-tool-dispatch path can forward across nodes (`WorkerForward`, memql#4352); the
-app-session envelope cannot yet. A machine attached to a different agent
-replica is therefore skipped during selection rather than failing the run —
-which makes it a routing outcome instead of an error, and is why the refusal
-says "on a stream this replica holds".
+**A session runs only on the replica holding that machine's stream, and a
+call can be forwarded there.** A machine's WorkerService stream terminates on
+exactly one agent replica. The planner holds no streams at all, and with two
+agent replicas the one serving a turn is the one holding the laptop about half
+the time. So an app-door call made anywhere else is **forwarded** to the agent
+holding the machine (`AppCallForward` on `NodeService.Stream`, the
+ModelForward shape):
+
+- **Planner prompts can now use app Sources.** When a Route (the one a Rule
+  picks) or an Ask pin puts `app:claude-code` or `app:codex` ahead of a local
+  model, the planner's triage, compile and compose calls are answered by that
+  app on the owner's machine. The planner resolves the Source once, picks the machine from
+  the persisted registration (`connectedNodeId`) and forwards the RESOLVED call
+  -- never the prompt for a second resolution, so there is one router and one
+  decision record per call.
+- **The holding agent decides whether it runs.** It verifies the forwarded
+  authority, that the machine is the verified subject's own and not revoked
+  (app sessions are never lent -- sharing lends a machine's models, not its
+  signed-in apps), the app gate (the owner's own pin or a Rule's Route, and
+  the kill switch when it is engaged), and that it still holds the stream with the
+  app allowed and signed in. It never forwards again.
+- **A refusal moves the Route on.** A holder that is not reachable, that no
+  longer holds the stream, or whose gate refuses answers with a named reason and
+  "nothing started", so the Route tries its next Source. The app gate's
+  refusal comes back under its own code (`kill_switch_engaged`,
+  `app_not_named_by_owner`) exactly as on the agent itself.
+- **Cancellation and loss cross the hop.** A caller that has already given
+  up -- typically because a slower first Source used up the triage's deadline
+  -- sends nothing at all. A caller that gives up mid-call sends a cancel and
+  the session on the machine is stopped. The holder registers every forwarded
+  call before it runs it, so a cancel that arrives right behind its request,
+  or even ahead of it, still stops it: the call is refused before anything
+  opens (`caller_cancelled`). The call also carries the caller's remaining
+  deadline, so a cancel that never arrives still ends the session when the
+  caller stopped waiting, not at the ten-minute ceiling. A holder that goes
+  away mid-call is noticed when its stream ends, not waited out; the session
+  may have run there, so the call is not re-run on a second machine -- the
+  Route moves on to its next Source instead. An answer that arrived just
+  before the stream ended is still the answer.
+- **The same app, whichever node asks.** `app:*` follows the owner's
+  delegation policy `appOrder` on the planner exactly as on the agent, so one
+  Route never picks Claude Code in triage and Codex in the reply.
+- **A vision call keeps its refusal.** When the holder cannot land a vision
+  call's images, the refusal comes back as `app_vision_staging_failed`, not as
+  "no machine can run this app", and no other machine is tried: the images
+  land in the holder's storage, which the next machine would share.
+
+**Only the chat door forwards.** A chat, structured or vision turn is one call
+and crosses; a tool-needing STEP (the session door, below) does not -- it runs
+as a session subrun on the replica whose delegate opens it. On a node that does
+not hold the stream, a tool turn therefore passes an app Source over with
+"a step handover opens its session on the agent holding the machine's stream"
+and takes the next Source in the Route. System work with no acting user never
+gets an app door on any node: a session's credential names a person. The
+inference-status row (`appEligible`, `runnableApps`) asks the chat door's
+question, so a replica that can forward to the laptop reports the app door
+open -- which is what its chat and structured calls find.
 
 > A cockpit that reports no apps at all is normal — that is what a build older
 > than the app protocol does, and what a machine with neither binary on PATH
@@ -157,7 +208,10 @@ Three kinds:
 > stayed dark. The app does not serve the turn; it takes the whole STEP, drives its
 > own loop, reaches MemQL's tools back over MCP, and answers once. The step records
 > a `childRunId` naming the subrun, and a call carrying no step is REFUSED at
-> resolution rather than falling through to the vendor behind it.
+> resolution rather than falling through to the vendor behind it. A call made
+> inside a run takes its run and step KEY from the run context when it did not
+> name them, so every work turn -- an Ask's `reason` step included, pinned or
+> not -- carries one; only a call outside any run is refused this way.
 >
 > **`run` is still the only kind anything initiates today.** The protocol carries all
 > three and the runner accepts all three; `open` and `attach` have no
@@ -206,6 +260,32 @@ session that did nothing.
 plan that was cancelled leaves a headless agent working on somebody's laptop.
 A worker disconnect ends every live session with a named error rather than
 leaving callers parked until their own deadlines expire.
+
+**Only the replica holding a session ends its row, so a sweep ends the rest.**
+While a replica holds a session it re-writes the row's `heartbeatAt` every
+two seconds -- including after the app's output stops, while the transcript
+is stored -- and keeps the recording run's heartbeat fresh too (unless the run
+belongs to a delegated step, whose own journal beats it). A heartbeat names no
+status: the row is promoted to `running` once, on the first chunk, so a row
+the sweep has failed stays failed until the holder's own terminal write.
+`workerAppSessionStaleSweep` runs every two minutes on the cron leader and
+fails a `starting` or `running` row whose heartbeat is older than 90 seconds
+(the holder is gone), or whose session started more than 4.5 hours ago (longer
+than any session may run). It writes only the status, exit code, error and end
+time: no `result`, so an answer the app submitted over MCP survives the close,
+and no usage or billing, so a holder that ended the row first keeps its
+account. The machine being online is not the
+test: after a pod restart it re-registers on another replica within seconds,
+while the session the dead pod held is orphaned. Both graces are
+`globalVariable`s an operator can widen without a release:
+`MEMQL_APP_SESSION_STALL_GRACE_SECONDS` and `MEMQL_APP_SESSION_MAX_AGE_SECONDS`.
+
+**A recording run is its driver's, not the dispatcher's.** The recording (and
+every other Go-written journal) carries `triggeredBy: journal:<template>`, and
+the work dispatcher never adopts a run with that prefix. Before it did, every
+agent replica claimed each recording a millisecond after it opened, could not
+load a template called `appSession`, and failed it `automation_not_runnable`
+over the session's own outcome.
 
 ---
 
@@ -292,20 +372,52 @@ as it does today.
 
 ## Consent
 
-An app run edits files and runs commands on somebody's own computer. It gets
-**exactly** the gates `workerHost` gets — the backend calls the same
-`preDispatchCheck` function, in the same package, rather than a copy:
+An app session has its **own** gate, not the computer-use gates `workerHost`
+takes. Those answer "may this *agent* run this command on this user's
+computer"; an app session is the owner's own app, on their own machine, doing
+work that was routed to it. Every app session asks the same gate
+(`integrations/agent/worker/app_gate.go`) — a step handed over through the
+session door and a turn through the chat or structured app door alike, and a
+delegated Task through the same executor:
 
-1. **Per-task approval** — the Task must carry a `PlanId` from an approved
-   scope-elevation Plan.
-2. **The kill switch** — `v1:identity:user.preferences.computerUseEnabled`.
-3. **Standing scope** — the agent's `agentAuthorization.computerUseScope` must
-   be `full`; an app run does shell exec and file writes.
-4. **The safety classifier**, fail-closed on this surface.
-5. **Plus `apps.allow`** on the machine itself, which the cockpit enforces and
-   the routing label reflects.
+1. **`apps.allow` on the machine** — the app is allowed in that machine's
+   `policy.yaml` and somebody signed into it. The cockpit enforces it, the
+   registration reports it, and the `app:<id>` routing label reflects it.
+2. **The machine is the owner's** — an app session runs only on the machines
+   of the person it runs for. There is no sharing opt-in for app sessions: the
+   session's back-channel credential names a person.
+3. **A decision named the app** — and the router reaches an app door two ways:
+   - **A routing rule's chain.** The chain names `app:<id>` because the
+     cluster's AI routing configuration wrote it there. That configuration is
+     **one document for the whole cluster**, not a per-owner policy; what makes
+     the session the owner's is items 1 and 2 — the door resolves only against
+     their own machines, where their own `apps.allow` consented to it.
+   - **An explicit pin** — a provider named on the request itself, which skips
+     every rule. A pin opens a session only when **the person the session runs
+     for made it**: their own request naming the app, their own step
+     override. A pin anybody else made — another user's agent whose record
+     stores `app:<id>`, a prompt author's `@defaultProvider`, a deploy-time env
+     var — is refused as `app_not_named_by_owner`. The router carries which of
+     the two a door was, and who made a pin, to the gate.
 
-A refusal names which gate refused it.
+   A delegated Task reaches an app because the owner's delegation policy
+   routed its kind there, and carries no pin.
+4. **The kill switch**, when it is **explicitly** engaged —
+   `v1:identity:user.preferences.computerUseEnabled == false` closes every app
+   session. Unset is not engaged. A preference read that **fails** is neither,
+   and refuses as `kill_switch_unreadable`: it neither opens a machine the
+   owner may have switched off nor tells them they switched it off.
+
+No `agentAuthorization` row and no `computerUseScope` is read, and there is no
+per-task approval or classifier pass: a cluster where no agent was ever granted
+a shell still opens the sessions routed to its owners' apps.
+
+A refusal names which gate refused it (`app_not_named_by_owner`,
+`kill_switch_engaged`, `kill_switch_unreadable`, "is not allowed and signed
+in", "is not <owner>'s machine"). The pin and the kill switch are asked before
+a machine is chosen — and on the session door before the step's child run is
+opened — so a refused call never opens anything, on the machine or in the
+Work feed.
 
 ---
 
@@ -323,8 +435,15 @@ apps reported by a machine.
 | `eligibleKinds` | task kinds that may be delegated. An **empty list allows nothing** — opting in does not opt every kind in with it |
 | `appOrder` | which apps to try, in order. An app not listed is never selected even on a machine that has it |
 | `maxConcurrentSessions` | live sessions across every machine. `0` reads as the default of 1, never as "none" |
-| `workspaceRoot` | where per-run directories are created. The cockpit still gets to veto a path outside its own roots |
+| `workspaceRoot` | where the engine names a directory for a handed-over step or Task: one per run. An inference turn (chat or structured) never gets one — it is one session, and the machine chooses. **Unset lets the machine choose** for every session — `AppSessionStart.workspace` is sent empty and the machine runs it in a scratch directory under its own roots. The cockpit still gets to veto a path outside its own roots |
 | `credentialLifetimeSeconds` | default 4h, clamped to 8h at the mint |
+
+> **Pending the cockpit release.** The machine-chooses half of this contract
+> lives in memql-cockpit. Cockpit releases up to v0.16.0 still refuse an
+> **empty** `AppSessionStart.workspace` ("no workspace in AppSessionStart"), so
+> until the release that creates a scratch directory ships, an app session
+> opens only for a step or Task whose owner set a `workspaceRoot` — and an
+> inference turn through the app door fails on the machine.
 
 **If no machine with an allowed, signed-in app is online, the task runs
 in-process.** A plan never waits for a laptop to wake up: a delegation design
@@ -424,7 +543,11 @@ kubectl logs -n memql deploy/agent | grep 'cockpit-app container executor instal
 | `cockpit-app: no credential minter configured` | `MEMQL_IDENTITY_VERIFIER_BASE_URL` or `MEMQL_NODE_BOOTSTRAP_TOKEN` is unset on the agent. The run is REFUSED rather than started with a blank bearer — an app with no credential reaches nothing over MCP and reports that as "MemQL's tools are broken" |
 | `no machine online with claude-code allowed and signed in` | check Fleet -> Machines page; the badge says which half is missing |
 | `executorBackend "..." is not registered` at task creation | the name was validated against `RegisteredExecutors()`. With an empty registry the message says so |
-| A session stuck in `starting` | the node holding it died. The row is the record; a live session cannot survive its node |
+| `app_holder_unreachable` / "the agent holding its stream (...) is not reachable from this node" | the registration names an agent replica this node cannot reach (restarted, or the row is stale). Nothing started; the route moved on. The machine re-registers on a live replica within a heartbeat |
+| `app_holder_gone` | the agent holding the machine went away while the session ran. The session may have run on the machine; the call is not re-run elsewhere and the route moved on |
+| `caller_cancelled` | the caller gave up -- a cancel, or its deadline passed -- before the session opened on the machine. Nothing ran. Common when a slower first Source in the Route used up the call's deadline |
+| "a step handover opens its session on the agent holding the machine's stream" | a TOOL turn resolved on a node that does not hold the machine's stream. Chat and structured calls forward; a step does not. Expected on the planner and on the replica without the laptop |
+| "No agent replica is holding this session any more" | the node holding the session died, or the session outlived the longest any session may run. `workerAppSessionStaleSweep` closed the row a few minutes after its last heartbeat. Whatever the app already did on the machine stays there; ask again to start a new session |
 
 ### Environment
 
@@ -444,7 +567,7 @@ per platform.
 
 ## Related
 
-- [Workers runbook](workers-runbook.md) — the tool surface this shares its consent gates with
+- [Workers runbook](workers-runbook.md) — the tool surface, whose computer-use gates app sessions do not take
 - [MCP connect](mcp-connect.md) — the endpoint the back-channel dials
 - [LLM cost control](../ai/llm-cost-control.md) — the layered spend guardrails
 - [Service-account JWTs](auth/service-account-jwt.md) — the credential class

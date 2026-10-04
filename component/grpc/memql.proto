@@ -945,6 +945,21 @@ message ToolResultContent {
 message AiChatMsg {
   string request_id = 1;
   repeated AiChatMessage messages = 2;
+  // Outside Ask: an explicit provider pin for this one chat call.
+  //
+  // For an Ask turn (conversation_id set) it is the conversation's SOURCE
+  // CHOICE, a routing selector applied to every model call of the turn's
+  // goal on every node (the planner's triage and compile, the agent's reply):
+  //   ""                    Auto -- the routing rules decide
+  //   "app:claude-code", "app:codex", "app:*"
+  //   "fleet:strongest", "fleet:fastest", "fleet:<modelId>"
+  //   "federation:cheapest", "federation:strongest"
+  //   "policy:<name>"       a route: its chain is walked instead of the rule's
+  // A pinned source is the owner's own pin and is never substituted: when it
+  // cannot serve, the call refuses naming it. A route fails over along its
+  // chain. Anything else refuses the turn before any goal is created, with a
+  // QueryError whose metadata carries code "route_source_invalid" or
+  // "route_policy_unknown" and field "source".
   string provider = 3;
   bool stream = 4;
   // Optional strict pin to one of the caller's own fleet machines. Clients
@@ -954,6 +969,12 @@ message AiChatMsg {
   // Ask uses a server-owned transcript. Only one user message is accepted.
   string conversation_id = 6;
   string page_context = 7;
+  // Ask only: the conversation's LEVEL choice -- "" (Auto: each call keeps its
+  // own), "fast", "strong" or "reasoning". It binds the calls the turn's steps
+  // make (the reply, a compose); compile-time calls such as triage keep their
+  // own level and still honour the source. Anything else refuses the turn with
+  // metadata code "route_level_invalid", field "level".
+  string level = 8;
 }
 
 message AiChatMessage {

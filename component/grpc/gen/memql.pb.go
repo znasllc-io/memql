@@ -4442,8 +4442,25 @@ type AiChatMsg struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	Messages  []*AiChatMessage       `protobuf:"bytes,2,rep,name=messages,proto3" json:"messages,omitempty"`
-	Provider  string                 `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
-	Stream    bool                   `protobuf:"varint,4,opt,name=stream,proto3" json:"stream,omitempty"`
+	// Outside Ask: an explicit provider pin for this one chat call.
+	//
+	// For an Ask turn (conversation_id set) it is the conversation's SOURCE
+	// CHOICE, a routing selector applied to every model call of the turn's
+	// goal on every node (the planner's triage and compile, the agent's reply):
+	//
+	//	""                    Auto -- the routing rules decide
+	//	"app:claude-code", "app:codex", "app:*"
+	//	"fleet:strongest", "fleet:fastest", "fleet:<modelId>"
+	//	"federation:cheapest", "federation:strongest"
+	//	"policy:<name>"       a route: its chain is walked instead of the rule's
+	//
+	// A pinned source is the owner's own pin and is never substituted: when it
+	// cannot serve, the call refuses naming it. A route fails over along its
+	// chain. Anything else refuses the turn before any goal is created, with a
+	// QueryError whose metadata carries code "route_source_invalid" or
+	// "route_policy_unknown" and field "source".
+	Provider string `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
+	Stream   bool   `protobuf:"varint,4,opt,name=stream,proto3" json:"stream,omitempty"`
 	// Optional strict pin to one of the caller's own fleet machines. Clients
 	// send the bare registration id and an explicit fleet:<modelId> provider.
 	// An unavailable or unauthorized target refuses; no other machine serves it.
@@ -4451,8 +4468,14 @@ type AiChatMsg struct {
 	// Ask uses a server-owned transcript. Only one user message is accepted.
 	ConversationId string `protobuf:"bytes,6,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
 	PageContext    string `protobuf:"bytes,7,opt,name=page_context,json=pageContext,proto3" json:"page_context,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Ask only: the conversation's LEVEL choice -- "" (Auto: each call keeps its
+	// own), "fast", "strong" or "reasoning". It binds the calls the turn's steps
+	// make (the reply, a compose); compile-time calls such as triage keep their
+	// own level and still honour the source. Anything else refuses the turn with
+	// metadata code "route_level_invalid", field "level".
+	Level         string `protobuf:"bytes,8,opt,name=level,proto3" json:"level,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AiChatMsg) Reset() {
@@ -4530,6 +4553,13 @@ func (x *AiChatMsg) GetConversationId() string {
 func (x *AiChatMsg) GetPageContext() string {
 	if x != nil {
 		return x.PageContext
+	}
+	return ""
+}
+
+func (x *AiChatMsg) GetLevel() string {
+	if x != nil {
+		return x.Level
 	}
 	return ""
 }
@@ -17966,7 +17996,7 @@ const file_memql_proto_rawDesc = "" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12\x1b\n" +
 	"\tmime_type\x18\x03 \x01(\tR\bmimeType\x12\x12\n" +
 	"\x04data\x18\x04 \x01(\tR\x04data\x12\x10\n" +
-	"\x03uri\x18\x05 \x01(\tR\x03uri\"\x9b\x02\n" +
+	"\x03uri\x18\x05 \x01(\tR\x03uri\"\xb1\x02\n" +
 	"\tAiChatMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12;\n" +
@@ -17975,7 +18005,8 @@ const file_memql_proto_rawDesc = "" +
 	"\x06stream\x18\x04 \x01(\bR\x06stream\x122\n" +
 	"\x15fleet_registration_id\x18\x05 \x01(\tR\x13fleetRegistrationId\x12'\n" +
 	"\x0fconversation_id\x18\x06 \x01(\tR\x0econversationId\x12!\n" +
-	"\fpage_context\x18\a \x01(\tR\vpageContext\"Q\n" +
+	"\fpage_context\x18\a \x01(\tR\vpageContext\x12\x14\n" +
+	"\x05level\x18\b \x01(\tR\x05level\"Q\n" +
 	"\rAiChatMessage\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12\x12\n" +

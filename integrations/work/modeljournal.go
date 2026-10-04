@@ -31,6 +31,7 @@ import (
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/num"
 )
@@ -206,7 +207,39 @@ func (j *ModelJournal) Record(ctx context.Context, ownerUserId string, c memqlen
 		"served":        c.Served,
 		"response":      optMap(c.Response),
 		"error":         c.Error,
+		"routerCallId":  c.RouterCallId,
+		"decision":      decisionArg(c.Decision),
 	}))
+}
+
+// decisionArg renders the routing decision behind a call as the modelCall
+// row's `decision` object, or nil -- which call() drops -- when there is none:
+// a journal-served row asked no source, and an optional object given null
+// fails the concept's type check and loses the whole row.
+//
+// `considered` is kept WHOLE and in walk order. It is the part a reader of a
+// run acts on -- the app source this node could not open, the machine that was
+// asleep -- and it ends with the source that served.
+func decisionArg(d *airoute.Decision) map[string]any {
+	if d == nil {
+		return nil
+	}
+	considered := make([]map[string]any, 0, len(d.Considered))
+	for _, c := range d.Considered {
+		considered = append(considered, map[string]any{"entry": c.Entry, "door": c.Door, "reason": c.Reason})
+	}
+	return map[string]any{
+		"level":            string(d.Level),
+		"requestedLevel":   string(d.RequestedLevel),
+		"servedLevel":      string(d.ServedLevel),
+		"degraded":         d.Degraded,
+		"rule":             d.Rule,
+		"policy":           d.Policy,
+		"door":             d.Door,
+		"outcome":          d.Outcome,
+		"minContextTokens": d.MinContextTokens,
+		"considered":       considered,
+	}
 }
 
 // rowInt reads a numeric field.

@@ -33,6 +33,7 @@ import (
 	"log/slog"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -262,9 +263,18 @@ func writeDrivers() []driver {
 			return s.CreateAppSession(ctx, sess)
 		}},
 		{"RecordAppSessionProgress", func(ctx context.Context, s *EngineStore) error {
-			return s.RecordAppSessionProgress(ctx, sess.ID, 7, 1, AppSessionStatusRunning)
+			return s.RecordAppSessionProgress(ctx, sess.ID, 7, 1, AppSessionStatusRunning, at)
 		}},
 		{"EndAppSession", func(ctx context.Context, s *EngineStore) error {
+			// WITH a structured answer, so the statement this renders carries
+			// the `result` argument at all: the fixture has none, and a driver
+			// built on it alone would parse a call missing exactly the argument
+			// whose absence is the other driver's point.
+			answered := sess
+			answered.Result = []byte(`{"answer": ` + strconv.Quote(awkwardText) + `}`)
+			return s.EndAppSession(ctx, answered)
+		}},
+		{"EndAppSessionWithoutResult", func(ctx context.Context, s *EngineStore) error {
 			return s.EndAppSession(ctx, sess)
 		}},
 		// The seq allocator renders BOTH a read and a write -- appSessionById
@@ -361,6 +371,48 @@ func TestNoStatementUsesTheRetiredObjectLiteralForm(t *testing.T) {
 					"since memql#2335. Render it with parser.RenderCall:\n  %s", method, stmt)
 			}
 		}
+	}
+}
+
+// TestEndAppSessionOmitsAnAbsentResult pins the one argument whose ABSENCE is
+// the mechanism.
+//
+// endAppSession writes `args.result` with no default, so a session end carrying
+// no structured answer must not name the argument at all: the read-merge then
+// keeps whatever a mid-run `submit` recorded (design D7). Naming it as `null`
+// -- which is what an always-present map key renders -- writes null into an
+// `object` field, the concept refuses the WHOLE terminal write, and the session
+// row stays `running` forever. That is how every free-text run, every refused
+// start and every disconnect was left live on the cluster.
+//
+// Parsed rather than string-matched, so the assertion is about the argument
+// list the engine receives and not about the spelling of the text.
+func TestEndAppSessionOmitsAnAbsentResult(t *testing.T) {
+	stmts := renderedStatements(t)
+	endArgs := func(method string) map[string]any {
+		t.Helper()
+		if len(stmts[method]) != 1 {
+			t.Fatalf("%s rendered %d statements, want exactly one", method, len(stmts[method]))
+		}
+		parsed, err := langparser.ParseExpression(stmts[method][0])
+		if err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+		call, ok := parsed.(*langparser.FunctionCallExpr)
+		if !ok {
+			t.Fatalf("%s parsed as %T, want a call", method, parsed)
+		}
+		return call.Args
+	}
+
+	if v, named := endArgs("EndAppSessionWithoutResult")["result"]; named {
+		t.Fatalf("a session end with no structured answer named result = %#v; the concept refuses null "+
+			"in an object field, so the terminal write fails and the row is stuck at running", v)
+	}
+	// The control: an end that DID carry an answer still writes it. Without
+	// this, a store that dropped the result every time would pass.
+	if _, named := endArgs("EndAppSession")["result"]; !named {
+		t.Fatal("a session end WITH a structured answer did not write it")
 	}
 }
 

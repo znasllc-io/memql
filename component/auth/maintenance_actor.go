@@ -160,6 +160,15 @@ var maintenanceAutomations = map[string]string{
 		"error, and the sweep reports nothing to clear on a cluster where every stamp is dead -- and " +
 		"unlike a stuck pull, what this leaves behind is not a spinner but a WRONG ANSWER: every " +
 		"reader, the router included, believes a machine is up",
+	"workerAppSessionStaleSweep": "the two-minute sweep that fails the app sessions no agent replica " +
+		"is holding. A session is held by ONE replica -- the one holding the machine's stream -- and " +
+		"the only thing that ends its row is that replica, so a pod restart, a crash or a refused " +
+		"terminal write leaves the row at `running` for good: live on the Fleet pages and counted " +
+		"against the owner's maxConcurrentSessions cap, which is what planner delegation checks. Its " +
+		"read spans owners BY NATURE, for the reason the three sweeps above do: a sweep for orphaned " +
+		"sessions cannot know whose session was orphaned before it looks. Without this principal " +
+		"openAppSessions returns zero rows and no error, and every stranded session stays live while " +
+		"the sweep reports nothing to do",
 	"routingEvidenceFold": "the nightly fold of decision records into v1:platform:modelEvidence " +
 		"(epic memql#5146, D5). It reads EVERY owner's calls by nature -- the question is how a MODEL " +
 		"behaved across the fleet, not how it behaved for one person -- and v1:router:call carries no " +

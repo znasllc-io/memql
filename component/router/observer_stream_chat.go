@@ -31,7 +31,7 @@ func (o *observedStreamChat) CallChatStream(
 
 	innerCh, err := o.inner.CallChatStream(ctx, messages)
 	if err != nil {
-		o.router.recordObserved(ctx, buildRecord(o.req, o.resolved, o.inner, inputTokens, 0, 0, start, time.Time{}, time.Now(), true, err, ctx.Err()))
+		o.router.recordAttempt(ctx, buildRecord(o.req, o.resolved, o.inner, inputTokens, 0, 0, start, time.Time{}, time.Now(), true, err, ctx.Err()))
 		return nil, err
 	}
 
@@ -56,7 +56,7 @@ func (o *observedStreamChat) CallChatStream(
 			if duration := end.Sub(start).Seconds(); duration > 0.1 {
 				rec.TokensPerSec = float64(outputTokens) / duration
 			}
-			o.router.recordObserved(ctx, rec)
+			o.router.recordAttempt(ctx, rec)
 		}
 		defer record()
 		for {

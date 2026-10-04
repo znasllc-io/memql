@@ -39,6 +39,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -88,6 +89,10 @@ type AppSessionHandover struct {
 	// Inputs are Library artifact ids the cockpit pulls into the session
 	// workspace before the run starts.
 	Inputs []string
+	// Pin is how the router reached this door: a rule's chain, or an explicit
+	// pin and the person who made it. The delegate's app gate refuses a pin
+	// the session's owner did not make, before anything is opened.
+	Pin AppDoorPin
 }
 
 // AppSessionOutcome is what the session produced.
@@ -170,6 +175,8 @@ type SessionRequest struct {
 	Effort       string
 	RunId        string
 	StepId       string
+	// Pin is how the router reached the door. See AppDoorPin.
+	Pin AppDoorPin
 }
 
 // SessionProvider builds the client behind a `session` winner.
@@ -229,6 +236,12 @@ func (p *sessionProvider) run(
 	if actingUser == "" {
 		actingUser = actingUserFromContext(ctx)
 	}
+	// A STEP HANDED OVER FOR NOBODY IS REFUSED BEFORE THE DELEGATE, with the
+	// app door's own reason: the session would run on a person's machine
+	// under a credential naming that person, and there is no person here.
+	if auth.ActsForNoPerson(ctx, actingUser) {
+		return AppSessionOutcome{}, &AppUnavailable{AppId: p.appId, NoOwner: true}
+	}
 
 	out, err := d.RunStep(ctx, AppSessionHandover{
 		ActingUserId:   actingUser,
@@ -242,6 +255,7 @@ func (p *sessionProvider) run(
 		Prompt:         flattenForSession(messages),
 		Tools:          tools,
 		ResponseSchema: schema,
+		Pin:            p.req.Pin,
 	})
 	if err != nil {
 		return out, err

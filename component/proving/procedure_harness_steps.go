@@ -377,7 +377,7 @@ func (s *engineSpine) executionContext(ctx context.Context, j *automations.RunJo
 		// from nowhere.
 		return nil, fmt.Errorf("run %s is a branch of %s, which the proving harness does not execute", j.RunId, j.ForkedFromRunId)
 	}
-	run := common.RunContext{RunId: j.RunId, GoalId: j.GoalId, OwnerUserId: j.OwnerUserId, Mode: j.Mode, ReplayPolicy: j.ReplayPolicy, ForkAtStepKey: j.ForkAtStepKey}
+	run := common.RunContext{RunId: j.RunId, GoalId: j.GoalId, OwnerUserId: j.OwnerUserId, Mode: j.Mode, ReplayPolicy: j.ReplayPolicy, ForkAtStepKey: j.ForkAtStepKey, Routing: j.Routing}
 	if run.Mode == "" {
 		run.Mode = common.RunModeLive
 	}

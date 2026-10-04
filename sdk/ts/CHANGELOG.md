@@ -4,6 +4,15 @@ Notable changes to the client-agnostic runtime core. Entries are newest first.
 
 ## Unreleased
 
+### Added
+
+**`AiChatOptions.level`** -- how much intelligence a chat call needs: `""`
+(Auto: the cluster's rules decide), `"fast"`, `"strong"` or `"reasoning"`. It
+rides `AiChatMsg.level` beside `provider` on both `aiChat` and `aiChatStream`,
+and like `provider` it is omitted from the wire when empty. MemQL OS's Ask
+route picker sends a conversation's chosen source as `provider` and its Effort
+as `level`.
+
 ### Changed -- BREAKING for anyone importing the rotation helpers directly
 
 **Bearer auto-rotation is scheduled from the token's own lifetime, with a

@@ -76,6 +76,8 @@ func requestForPrompt(ctx context.Context, prompt *PromptTemplate, invocation *A
 	// model", and @defaultProvider is an author saying the same about one
 	// prompt. Neither consults a rule, and both land on the decision record as
 	// an explicit provider so a reader can tell a pinned call from a routed one.
+	// NEITHER IS A PERSON'S, so PinnedBy stays empty: an app door reached
+	// through either opens no session on anybody's machine (AppDoorPin).
 	if invocation != nil && invocation.ProviderOverride != nil {
 		if pinned := strings.TrimSpace(*invocation.ProviderOverride); pinned != "" {
 			req.ExplicitProvider = pinned

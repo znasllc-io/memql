@@ -20,19 +20,33 @@ type IdentityAuditor struct {
 // Emit translates a worker.AuditEvent to identity.AuditEvent and
 // dispatches it. No-op when AuditLogger is nil (lets the agent node
 // run audit-free in dev mode).
+//
+// ActorIdentityId goes to the identity field as-is and ActorLabel to
+// detail.actor, on a COPY of the caller's detail: emitters build that map
+// for this one call today, but a bridge that writes into a map it was
+// handed is one shared map away from stamping a label on somebody else's
+// event.
 func (a *IdentityAuditor) Emit(ctx context.Context, ev AuditEvent) {
 	if a == nil || a.AuditLogger == nil {
 		return
+	}
+	detail := ev.Detail
+	if ev.ActorLabel != "" {
+		detail = make(map[string]any, len(ev.Detail)+1)
+		for k, v := range ev.Detail {
+			detail[k] = v
+		}
+		detail["actor"] = ev.ActorLabel
 	}
 	out := identity.AuditEvent{
 		OccurredAt:    ev.Timestamp,
 		Category:      identity.AuditCategoryAuthorization,
 		Action:        ev.Action,
 		ActorUserId:   "",
-		ActorIdentity: ev.Actor,
+		ActorIdentity: ev.ActorIdentityId,
 		TargetType:    ev.TargetType,
 		TargetId:      ev.Target,
-		Detail:        ev.Detail,
+		Detail:        detail,
 		CorrelationId: ev.CorrelationId,
 		Outcome:       identity.AuditOutcomeSuccess,
 	}

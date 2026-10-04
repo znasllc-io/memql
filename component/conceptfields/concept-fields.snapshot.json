@@ -2303,6 +2303,7 @@
         "targetType": [
           "",
           "accessRequest",
+          "agent",
           "appSession",
           "authCode",
           "badgeIdentity",
@@ -8356,6 +8357,7 @@
         "requestFingerprint",
         "requestedVia",
         "responsibilityId",
+        "routing",
         "statement",
         "status"
       ],
@@ -8393,6 +8395,7 @@
       "file": "work/concepts.memql",
       "fields": [
         "cost",
+        "decision",
         "error",
         "inputTokens",
         "latencyMs",
@@ -8404,6 +8407,7 @@
         "provider",
         "requestHash",
         "response",
+        "routerCallId",
         "runId",
         "served",
         "settings",
@@ -8482,6 +8486,7 @@
         "parentRunId",
         "replayPolicy",
         "rerun",
+        "routing",
         "spent",
         "staleSteps",
         "startedAt",
@@ -8652,6 +8657,7 @@
         "endedAt",
         "errorMessage",
         "exitCode",
+        "heartbeatAt",
         "inputArtifactIds",
         "kind",
         "mcpEndpoint",

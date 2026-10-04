@@ -126,7 +126,11 @@ func ApplyStepOverride(ctx context.Context, req airoute.ResolveRequest) (airoute
 		req.Level = level
 	}
 	if model := strings.TrimSpace(ov.Model); model != "" {
+		// The pin is now the PERSON'S, whoever pinned before them: an app
+		// door reached through it opens a session only for a pin the
+		// session's owner made (AppDoorPin).
 		req.ExplicitProvider = model
+		req.PinnedBy = strings.TrimSpace(ov.RequestedBy)
 	}
 	if effort := strings.TrimSpace(ov.Effort); effort != "" {
 		req.Effort = effort

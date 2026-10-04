@@ -81,6 +81,11 @@ func TestRemoteFleetInferenceFromPlannerCrossesActualModelHop(t *testing.T) {
 		if req.Model != model || len(req.ResponseFormatSchema) == 0 || req.Params.ContextTokens < 8192 {
 			return nil, fmt.Errorf("model request lost its schema or context floor: %+v", req)
 		}
+		// The planner's triage is a `fast` call, and the level is what the
+		// cockpit reads to run it with the model's hidden thinking off.
+		if req.Level != "fast" {
+			return nil, fmt.Errorf("model request lost its level between the planner and the agent: got %q", req.Level)
+		}
 		handle, emit, finish := workerservice.NewModelCallLoopback(req, func(string) {})
 		go func() {
 			emit(workerservice.ModelCallDelta{Seq: 1, Content: `{"draft":"local result"}`})
@@ -105,7 +110,7 @@ func TestRemoteFleetInferenceFromPlannerCrossesActualModelHop(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(auth.BindForwardedContext(context.Background(), authority.Principal().Claims, access, authority), 5*time.Second)
 	defer cancel()
-	result, err := fleet.Call(ctx, memqlengine.FleetCallRequest{ActingUserId: "alice", ModelId: model, Kind: memqlengine.FleetKindChat, ContextTokens: 8192,
+	result, err := fleet.Call(ctx, memqlengine.FleetCallRequest{ActingUserId: "alice", ModelId: model, Kind: memqlengine.FleetKindChat, ContextTokens: 8192, Level: "fast",
 		Messages: []common.ChatMessage{{Role: "user", Content: "Write a draft"}}, Schema: &common.StructuredSchema{Name: "draft", Schema: json.RawMessage(`{"type":"object"}`), Strict: true}})
 	if err != nil {
 		t.Fatal(err)

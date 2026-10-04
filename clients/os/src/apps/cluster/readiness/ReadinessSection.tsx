@@ -232,7 +232,7 @@ function notReadyNext(facts: {
   }
   if (!facts.federationConfigured) {
     routes.push(
-      "set up Anthropic or OpenAI workload-identity federation (Settings -> Doors)",
+      "set up Anthropic or OpenAI workload-identity federation (Settings -> Vendors)",
     );
   }
   // THE KEY ROUTE IS GONE, and `cloudConfigured` no longer earns one of its

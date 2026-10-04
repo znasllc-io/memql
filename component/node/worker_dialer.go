@@ -948,6 +948,14 @@ func (wd *WorkerDialer) handleServerMessage(entry *dialEntry, msg *nodev1.NodeSe
 			sink.DispatchModelProbeProgress(payload.ModelProbeForwardProgress)
 		}
 
+	case *nodev1.NodeServerMessage_AppCallForwardResponse:
+		wd.sinkMu.RLock()
+		sink := wd.workerForwardSink
+		wd.sinkMu.RUnlock()
+		if sink != nil {
+			sink.DispatchAppCall(payload.AppCallForwardResponse)
+		}
+
 	case *nodev1.NodeServerMessage_DeployControlForwardResponse:
 		wd.sinkMu.RLock()
 		sink := wd.deployControlSink

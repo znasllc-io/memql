@@ -467,6 +467,11 @@ func (r *fakeRecorder) CloseRecording(_ context.Context, c workerservice.Recordi
 	return nil
 }
 
+// HeartbeatRecording is a no-op: a recording in memory cannot be abandoned.
+func (r *fakeRecorder) HeartbeatRecording(context.Context, workerservice.RecordingHeartbeat) error {
+	return nil
+}
+
 func (r *fakeRecorder) recording(id string) (*fakeRecording, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

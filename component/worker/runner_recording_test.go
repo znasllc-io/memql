@@ -25,6 +25,7 @@ type fakeRecorder struct {
 	actions  []RecordedAction
 	gaps     []RecordedGap
 	closed   []RecordingClose
+	beats    []RecordingHeartbeat
 	runId    string
 	openErr  error
 }
@@ -63,6 +64,19 @@ func (f *fakeRecorder) CloseRecording(_ context.Context, r RecordingClose) error
 	defer f.mu.Unlock()
 	f.closed = append(f.closed, r)
 	return nil
+}
+
+func (f *fakeRecorder) HeartbeatRecording(_ context.Context, r RecordingHeartbeat) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.beats = append(f.beats, r)
+	return nil
+}
+
+func (f *fakeRecorder) runBeats() []RecordingHeartbeat {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]RecordingHeartbeat(nil), f.beats...)
 }
 
 func (f *fakeRecorder) recorded() ([]RecordedAction, []RecordedGap, []RecordingClose) {
@@ -631,5 +645,30 @@ func TestTheRecordingCloseCarriesTheReportedModelAndEffort(t *testing.T) {
 					closes[0].Model, closes[0].Effort, tc.model, tc.effort)
 			}
 		})
+	}
+}
+
+// TestAModelCallSessionTellsTheRecorderSo: the recorder decides whether the
+// recording claims the calling step (a handed-over step does; one model call
+// the step made does not), and it can only decide from what the runner tells
+// it.
+func TestAModelCallSessionTellsTheRecorderSo(t *testing.T) {
+	for _, modelCall := range []bool{false, true} {
+		runner, session, _, rec, _ := recordingFixture(t)
+		spec := runSpec()
+		spec.ModelCall = modelCall
+		go func() {
+			waitForSession(t, session, "sess-run")
+			session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run"})
+		}()
+		if _, err := runner.Run(context.Background(), session.worker, spec, nil); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		rec.mu.Lock()
+		opened := rec.openedAs
+		rec.mu.Unlock()
+		if opened.ModelCall != modelCall || opened.ParentRunId != spec.RunId || opened.ParentStepId != spec.StepId {
+			t.Errorf("ModelCall=%v: the recorder was opened with %+v", modelCall, opened)
+		}
 	}
 }

@@ -241,8 +241,8 @@ describe("SetupGroup", () => {
     expect(rowStates).toContain("Set up");
     // No OsProvider in this test, so the act is the words, not a button --
     // a button with no window to open into would go nowhere.
-    expect(screen.getByText("Settings, under Doors")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Open Doors" })).toBeNull();
+    expect(screen.getByText("Settings, under Vendors")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Open Vendors" })).toBeNull();
     // And the CONFIGURED module carries no act at all: "Set in the
     // deployment" beside a row that says "Set up" is an instruction with
     // nothing behind it.
@@ -431,10 +431,10 @@ describe("SetupGroup", () => {
       ),
     );
     expect(
-      screen.queryByRole("button", { name: "Open Doors" }),
+      screen.queryByRole("button", { name: "Open Vendors" }),
       "a developer may configure providers since memql#5088 D7, so the act is offered",
     ).not.toBeNull();
-    expect(screen.queryByText("Settings, under Doors")).toBeNull();
+    expect(screen.queryByText("Settings, under Vendors")).toBeNull();
   });
 
   it("renders nothing for a viewer", () => {

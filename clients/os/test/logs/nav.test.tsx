@@ -30,7 +30,7 @@ describe("the Logs section in a window's nav", () => {
     // still the section immediately before Settings, which is what this
     // pins.
     expect(navNames("Fleet")).toEqual([
-      "Overview", "Machines", "Policies", "Model library", "Machine routing", "Activity", "Workspaces",
+      "Overview", "Machines", "Routing", "Model library", "Activity", "Workspaces",
     ]);
   });
 
@@ -41,7 +41,7 @@ describe("the Logs section in a window's nav", () => {
     // Apps is NOT admin-floored -- both concepts behind it declare the
     // composite owner tier -- so a reader keeps it and loses only Logs.
     expect(navNames("Fleet")).toEqual([
-      "Overview", "Machines", "Policies", "Model library", "Machine routing", "Activity", "Workspaces",
+      "Overview", "Machines", "Routing", "Model library", "Activity", "Workspaces",
     ]);
   });
 

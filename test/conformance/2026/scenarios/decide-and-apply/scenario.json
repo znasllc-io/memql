@@ -21,6 +21,37 @@
       "resume": { "fire": 0, "failAt": 2 }
     },
     {
+      "name": "app-session-stale-sweep",
+      "description": "A session whose holding replica has not reported for longer than the stall grace is failed, and so is one older than any session may run however recently it reported; a session reported just now is left to its replica -- one that STARTED long ago included, since the heartbeat and not the start is what says it is held -- a finished one is not touched, and an answer the app submitted before its replica went away survives the close.",
+      "seed": [
+        { "mutation": "createAppSession", "args": { "sessionId": { "$id": "silent" }, "workerId": "worker-scenario", "app": "claude-code", "kind": "run", "startedAt": { "$ago": "PT10M" } } },
+        { "mutation": "createAppSession", "args": { "sessionId": { "$id": "live" }, "workerId": "worker-scenario", "app": "claude-code", "kind": "run", "startedAt": { "$ago": "PT0S" } } },
+        { "mutation": "createAppSession", "args": { "sessionId": { "$id": "held" }, "workerId": "worker-scenario", "app": "claude-code", "kind": "run", "startedAt": { "$ago": "PT10M" } } },
+        { "mutation": "recordAppSessionProgress", "args": { "sessionId": { "$id": "held" }, "status": "running", "heartbeatAt": { "$ago": "PT0S" } } },
+        { "mutation": "createAppSession", "args": { "sessionId": { "$id": "overdue" }, "workerId": "worker-scenario", "app": "claude-code", "kind": "run", "startedAt": { "$ago": "PT6H" } } },
+        { "mutation": "recordAppSessionProgress", "args": { "sessionId": { "$id": "overdue" }, "status": "running", "heartbeatAt": { "$ago": "PT0S" } } },
+        { "mutation": "createAppSession", "args": { "sessionId": { "$id": "answered" }, "workerId": "worker-scenario", "app": "claude-code", "kind": "run", "startedAt": { "$ago": "PT10M" } } },
+        { "mutation": "submitAppSessionResult", "args": { "sessionId": { "$id": "answered" }, "result": { "answer": "forty-two" }, "submittedAt": { "$ago": "PT1M" } } },
+        { "mutation": "createAppSession", "args": { "sessionId": { "$id": "finished" }, "workerId": "worker-scenario", "app": "claude-code", "kind": "run", "startedAt": { "$ago": "PT10M" } } },
+        { "mutation": "endAppSession", "args": { "sessionId": { "$id": "finished" }, "status": "ended", "endedAt": { "$ago": "PT9M" } } }
+      ],
+      "fire": [
+        { "automation": "workerAppSessionStaleSweep", "schedule": true }
+      ],
+      "expect": {
+        "rows": [
+          { "concept": "v1:worker:appSession", "id": { "$id": "silent" }, "payload": { "status": "failed" } },
+          { "concept": "v1:worker:appSession", "id": { "$id": "live" }, "payload": { "status": "starting" } },
+          { "concept": "v1:worker:appSession", "id": { "$id": "held" }, "payload": { "status": "running" } },
+          { "concept": "v1:worker:appSession", "id": { "$id": "overdue" }, "payload": { "status": "failed" } },
+          { "concept": "v1:worker:appSession", "id": { "$id": "answered" }, "payload": { "status": "failed", "result": { "answer": "forty-two" } } },
+          { "concept": "v1:worker:appSession", "id": { "$id": "finished" }, "payload": { "status": "ended" } }
+        ]
+      },
+      "dryRun": { "fire": 0, "writes": 3 },
+      "resume": { "fire": 0, "failAt": 2 }
+    },
+    {
       "name": "stale-cluster-node-prune",
       "description": "A node whose last sighting is older than the prune window is marked stopped; one seen just now stays healthy.",
       "seed": [

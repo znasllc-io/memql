@@ -1,0 +1,150 @@
+/* Fleet > Routing (routing redesign, 2026-09-28).
+ *
+ * THEME TOKENS ONLY, AND ONE ACCENT USE. The circuit line up to the serving
+ * slot and its "Serves now" marker are the only things drawn in the accent;
+ * everything else is the shell's neutral ink, lines and washes. No new
+ * palette, no gradients, no drop-shadow cards, no capitals.
+ *
+ * The section is a pane with its own scroller so a page's action bar sits on
+ * the window's floor (DESIGN.md rule 12), the same way the add-machine wizard
+ * takes the page. */
+
+.fleet-page:has(> .fleet-routing) { padding: 0; overflow: hidden; scrollbar-gutter: auto; }
+.fleet-routing { height: 100%; min-height: 0; container: fleet-routing / inline-size; }
+.fleet-routing-tab { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.fleet-routing-tab[hidden] { display: none; }
+.fleet-routing-tab > .os-deploy-scroll,
+.fleet-routing-tab > .os-deploy-pane > .os-deploy-scroll { padding: 0 20px 28px; gap: 14px; }
+.fleet-routing-tab > .os-deploy-pane { height: 100%; }
+.fleet-routing-tab .os-wizard { height: 100%; }
+
+/* The Head and the local tabs stay put while the list scrolls under them. */
+.fleet-routing-header,
+.fleet-route-page .os-deploy-scroll > .os-activity-target > .os-head,
+.fleet-rule-page .os-deploy-scroll > .os-head,
+.fleet-rule-page .os-deploy-scroll > .os-activity-target > .os-head { position: sticky; top: 0; z-index: 3; background: var(--os-glass-solid); padding-top: 18px; }
+.fleet-routing-header > .os-head { padding-bottom: 8px; }
+.fleet-routing-header > .os-local-tabs { margin: 0; padding-block: 2px 8px; }
+.fleet-route-page .os-deploy-scroll > .os-activity-target > .os-head,
+.fleet-rule-page .os-deploy-scroll .os-head { padding-bottom: 12px; }
+.fleet-route-page .os-activity-target,
+.fleet-rule-page .os-activity-target { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+/* ---- the routes list ---- */
+.fleet-routes .os-record-status { white-space: normal; text-align: right; }
+.fleet-glyph-strip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.fleet-glyph { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: var(--os-radius-xs); color: var(--os-muted); background: var(--os-wash); opacity: .55; }
+.fleet-glyph[data-ready] { opacity: 1; }
+.fleet-glyph[data-serving] { color: var(--os-ink); box-shadow: inset 0 -2px 0 var(--os-accent); }
+
+/* ---- a route's page ---- */
+.fleet-route-description { align-self: flex-start; max-width: 80ch; border: 0; background: none; padding: 0; margin: -6px 0 0; font: inherit; font-size: var(--os-text-sm); color: var(--os-muted); text-align: left; cursor: text; }
+.fleet-route-description[data-empty] { font-style: italic; }
+button.fleet-route-description:hover { color: var(--os-ink); }
+button.fleet-route-description:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 3px; border-radius: 3px; }
+.fleet-route-description-input { max-width: 60ch; }
+/* How many rules take the route: one quiet line, a link when there are any. */
+.fleet-route-taken { align-self: flex-start; margin: -8px 0 0; font-size: var(--os-text-sm); color: var(--os-muted); }
+
+/* ---- the composer: the circuit ---- */
+.fleet-composer { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.fleet-circuit { display: flex; align-items: flex-start; gap: 0; min-width: 0; padding: 6px 0 4px; }
+.fleet-circuit-origin { display: inline-flex; align-items: center; gap: 8px; flex: none; height: 64px; font-size: var(--os-text-sm); color: var(--os-muted); padding-right: 2px; }
+.fleet-circuit-node { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--os-line-strong, var(--os-muted)); background: var(--os-plate); transition: background var(--os-duration-fast) var(--os-ease), border-color var(--os-duration-fast) var(--os-ease); }
+.fleet-circuit-node[data-lit] { background: var(--os-accent); border-color: var(--os-accent); }
+.fleet-circuit-slots { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 18px 0; list-style: none; margin: 0; padding: 0; min-width: 0; }
+.fleet-circuit-step { position: relative; display: grid; grid-template-columns: 26px auto; grid-template-rows: 64px auto; align-items: center; }
+.fleet-circuit-link { grid-column: 1; grid-row: 1; height: 2px; width: 100%; background: var(--os-line); transform-origin: left center; transition: background 200ms var(--os-ease); }
+.fleet-circuit-link[data-lit] { background: var(--os-accent); }
+.fleet-circuit-step > .fleet-slot,
+.fleet-circuit-step > button.fleet-slot { grid-column: 2; grid-row: 1; }
+.fleet-serves-now,
+.fleet-slot-refusal { grid-column: 2; grid-row: 2; padding-top: 6px; font-size: var(--os-text-xs); }
+.fleet-serves-now { color: var(--os-accent); animation: fleet-serves-in 200ms var(--os-ease); }
+.fleet-slot-refusal { color: var(--os-warn); max-width: 22ch; }
+@keyframes fleet-serves-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+
+/* A slot is a fixed tile: the sequence is the order, so every tile is the same size. */
+.fleet-slot { position: relative; display: flex; width: 212px; height: 64px; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-plate); }
+.fleet-slot[data-ready] { border-color: color-mix(in srgb, var(--os-ink) 22%, transparent); }
+.fleet-slot[data-serving] { border-color: var(--os-accent); }
+.fleet-slot[data-chosen] { box-shadow: 0 0 0 2px var(--os-hover); border-style: dashed; }
+.fleet-slot[data-refused] { border-color: var(--os-warn); }
+.fleet-slot-body { display: grid; grid-template-columns: 22px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 8px; row-gap: 3px; align-content: center; width: 100%; padding: 8px 26px 8px 10px; border: 0; border-radius: inherit; background: none; color: var(--os-ink); font: inherit; text-align: left; cursor: grab; }
+.fleet-slot-body[aria-pressed] { cursor: pointer; }
+.fleet-slot-body:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+.fleet-slot:not([data-ready]) .fleet-slot-body { color: var(--os-muted); }
+.fleet-slot-glyph { grid-row: 1 / 3; display: flex; align-items: center; color: var(--os-muted); }
+.fleet-slot[data-ready] .fleet-slot-glyph { color: var(--os-ink); }
+.fleet-slot-name { font-size: var(--os-text-base); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-slot-fact { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--os-text-xs); color: var(--os-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-slot-remove { position: absolute; top: 5px; right: 5px; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 0; border-radius: 50%; background: transparent; color: var(--os-muted); cursor: pointer; opacity: 0; transition: opacity var(--os-duration-fast) var(--os-ease); }
+.fleet-slot:hover .fleet-slot-remove,
+.fleet-slot:focus-within .fleet-slot-remove { opacity: 1; }
+.fleet-slot-remove:hover { background: var(--os-hover); color: var(--os-ink); }
+.fleet-slot-empty { align-items: center; justify-content: center; border-style: dashed; background: transparent; color: var(--os-muted); cursor: pointer; font: inherit; }
+.fleet-slot-empty:hover { color: var(--os-ink); background: var(--os-hover); }
+.fleet-slot-empty:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+
+.fleet-source-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; border: 1px solid var(--os-muted); }
+.fleet-source-dot[data-ready] { border-color: currentColor; background: currentColor; }
+.fleet-slot[data-ready] .fleet-source-dot { color: var(--os-ink); }
+
+/* ---- the composer: the tray ---- */
+.fleet-tray { display: grid; gap: 12px; padding-top: 14px; border-top: 1px solid var(--os-line); }
+.fleet-tray-group { display: grid; grid-template-columns: 9.5rem minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.fleet-tray-title { font-size: var(--os-text-sm); color: var(--os-muted); }
+.fleet-tray-sources { display: flex; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+.fleet-tray-source { display: inline-flex; align-items: center; gap: 7px; height: var(--os-control-h); padding: 0 10px; border: 1px solid var(--os-line); border-radius: var(--os-radius-xs); background: transparent; color: var(--os-muted); font: inherit; font-size: var(--os-text-base); cursor: grab; }
+.fleet-tray-source[data-ready] { color: var(--os-ink); }
+.fleet-tray-source:hover { background: var(--os-hover); }
+.fleet-tray-source:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+.fleet-tray-name { white-space: nowrap; }
+/* The exact-name field: a source the tray does not list, typed. */
+.fleet-tray-exact { align-items: center; }
+.fleet-tray-exact .os-input { width: min(22rem, 100%); }
+
+/* ---- the new-route review ---- */
+.fleet-route-review { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.fleet-route-review > span:last-child { color: var(--os-muted); font-size: var(--os-text-sm); }
+
+/* ---- rules ---- */
+.fleet-rule-line { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 10px 4px; border: 0; background: none; color: var(--os-ink); font: inherit; text-align: left; }
+button.fleet-rule-line { cursor: pointer; }
+button.fleet-rule-line:hover { background: var(--os-hover); }
+button.fleet-rule-line:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+button.fleet-rule-line[draggable="true"] { cursor: grab; }
+.fleet-rule-lock, .fleet-rule-grip { flex: none; width: 14px; color: var(--os-muted); }
+.fleet-rule-sentence { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.fleet-rule-when, .fleet-rule-route { display: inline-flex; align-items: center; padding: 2px 10px; border: 1px solid var(--os-line); border-radius: 999px; font-size: var(--os-text-base); white-space: nowrap; }
+.fleet-rule-route { background: var(--os-wash); }
+.fleet-rule-line[data-locked] .fleet-rule-when,
+.fleet-rule-line[data-locked] .fleet-rule-route { color: var(--os-muted); }
+.fleet-rule-arrow { flex: none; color: var(--os-muted); }
+.fleet-rule-extra { font-size: var(--os-text-sm); color: var(--os-muted); }
+.fleet-rule-said { padding: 6px 0 2px; }
+.fleet-rule-described { margin: -6px 0 0; max-width: 80ch; font-size: var(--os-text-sm); color: var(--os-muted); }
+.fleet-rule-when-step { display: grid; gap: 12px; max-width: 34rem; }
+.fleet-rule-review { display: grid; gap: 14px; max-width: 34rem; }
+.fleet-rule-page .os-rule-textarea { max-width: 80ch; }
+.fleet-rule-page .os-form { max-width: 34rem; }
+
+/* ---- the Settings side's one quiet link ---- */
+.os-routing-link { align-self: flex-start; }
+
+/* NARROW: the slot row becomes a vertical chain, the circuit running down its left. */
+@container fleet-routing (max-width: 560px) {
+  .fleet-circuit { flex-direction: column; }
+  .fleet-circuit-origin { height: auto; padding: 0 0 6px; }
+  .fleet-circuit-slots { flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 0; width: 100%; }
+  .fleet-circuit-step { grid-template-columns: 22px minmax(0, 1fr); grid-template-rows: auto auto; padding-bottom: 12px; }
+  .fleet-circuit-link { grid-row: 1 / 3; width: 2px; height: 100%; min-height: 76px; justify-self: center; align-self: stretch; }
+  .fleet-slot { width: 100%; }
+  .fleet-slot-empty { height: 44px; }
+  .fleet-tray-group { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fleet-circuit-link, .fleet-circuit-node, .fleet-slot-remove { transition: none; }
+  .fleet-serves-now { animation: none; }
+}

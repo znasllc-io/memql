@@ -97,6 +97,11 @@ type RunContext struct {
 	// step (design D19). Set only on the targeted step, and only when it is
 	// a session step.
 	Snapshot *WorkspaceSnapshot
+	// Routing is the person's routing choice for EVERY model call of this
+	// run (route_choice.go): read off the run row by whichever node builds
+	// this context, never carried in memory from the node that took the
+	// request. The zero value routes by the rules.
+	Routing RouteChoice
 }
 
 // StepOverride is a person's change to one version of one step (epic

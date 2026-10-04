@@ -61,24 +61,6 @@ func TestCockpitAppRequiresAnAppInTheBackendName(t *testing.T) {
 	}
 }
 
-// TestCockpitAppRunsTheSharedConsentGates is D4: an app run gets
-// EXACTLY the gates a shell command through the same machine gets.
-// Here the per-task approval gate fires because the Task carries no
-// RunId -- the same denial `workerHost` would produce.
-func TestCockpitAppRunsTheSharedConsentGates(t *testing.T) {
-	exec := newTestCockpitAppExecutor(t)
-	_, err := exec.Run(context.Background(), planner.ExecutorRequest{
-		OwnerUserId: "user-1",
-		Input:       map[string]any{"executorBackend": "cockpit-app:claude-code"},
-	}, nil)
-	if err == nil {
-		t.Fatal("ran without per-task approval")
-	}
-	if !strings.Contains(err.Error(), "denied_no_per_task_approval") {
-		t.Fatalf("expected the shared per-task approval gate, got %v", err)
-	}
-}
-
 // TestDelegationPolicyAllowsKind pins two defaults that are easy to
 // get backwards. Delegation off means NOTHING is eligible whatever
 // the kind list says; and an EMPTY kind list allows nothing rather

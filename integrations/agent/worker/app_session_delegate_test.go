@@ -25,7 +25,13 @@ type recordingExecutor struct {
 	err  error
 }
 
-func (r *recordingExecutor) Run(_ context.Context, req planner.ExecutorRequest, _ planner.ProgressCallback) (planner.ExecutorResult, error) {
+// admitSession admits: these tests are about what the delegate hands over, and
+// the gate's own tests (app_gate_test.go) drive the real one.
+func (r *recordingExecutor) admitSession(context.Context, string, memqlengine.AppDoorPin) *appGateRefusal {
+	return nil
+}
+
+func (r *recordingExecutor) runAdmitted(_ context.Context, req planner.ExecutorRequest, _ planner.ProgressCallback) (planner.ExecutorResult, error) {
 	r.runs++
 	r.got = req
 	return r.out, r.err
@@ -50,6 +56,7 @@ func TestDelegateCarriesTheStepAndTheCallsOwnKnobs(t *testing.T) {
 		Output: map[string]any{
 			"sessionId":  "v1:worker:appSession:s1",
 			"workerId":   "reg-laptop",
+			"answer":     "worked",
 			"transcript": "worked",
 			"model":      "claude-sonnet-4-6",
 			"effort":     "high",
@@ -104,12 +111,17 @@ func TestDelegateCarriesTheStepAndTheCallsOwnKnobs(t *testing.T) {
 	}
 }
 
-// A structured answer comes back as RAW JSON beside the transcript, not
+// A structured answer comes back as RAW JSON beside the text answer, not
 // instead of it: a harness can answer the schema and still exit non-zero, and
-// a session that answered no schema still produced a transcript.
+// a session that answered no schema still said something. The text answer is
+// the app's own output, never the transcript, whose stderr carries the
+// cockpit's diagnostics.
 func TestDelegateKeepsBothTheAnswerAndTheTranscript(t *testing.T) {
 	ex := &recordingExecutor{out: planner.ExecutorResult{Output: map[string]any{
-		"sessionId": "s", "transcript": "chatter", "result": map[string]any{"ok": true},
+		"sessionId":  "s",
+		"answer":     "chatter",
+		"transcript": "[memql] level strong runs claude-code with --model sonnet --effort high (the cockpit's built-in table)\nchatter",
+		"result":     map[string]any{"ok": true},
 	}}}
 	d := newAppSessionDelegateFor(ex, nil, nil, nil)
 
@@ -130,7 +142,7 @@ func TestDelegateKeepsBothTheAnswerAndTheTranscript(t *testing.T) {
 		t.Fatalf("Result = %q", out.Result)
 	}
 	if out.Content != "chatter" {
-		t.Fatalf("the transcript is still the text answer, got %q", out.Content)
+		t.Fatalf("the text answer is the app's own output, got %q", out.Content)
 	}
 }
 
@@ -217,7 +229,7 @@ func TestDelegateRefusesWithNoExecutor(t *testing.T) {
 func TestDelegateReportsAFailedSession(t *testing.T) {
 	ex := &recordingExecutor{
 		out: planner.ExecutorResult{Output: map[string]any{
-			"sessionId": "v1:worker:appSession:s9", "transcript": "got halfway",
+			"sessionId": "v1:worker:appSession:s9", "answer": "got halfway", "transcript": "got halfway",
 		}, ArtifactIds: []string{"v1:library:artifact:a9"}},
 		err: errors.New("cockpit-app: claude-code run failed: exit 1"),
 	}

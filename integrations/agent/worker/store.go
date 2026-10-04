@@ -25,35 +25,36 @@ type EngineStore struct {
 	Engine *memqlengine.MemQLEngine
 }
 
-// UserPreferences resolves the user's computerUseEnabled flag.
-// Any error or missing row defaults to enabled=true so the kill
-// switch defaults to "permitted" (Q13: opt-in to disable).
+// UserPreferences resolves the user's computer-use kill switch. Any error or
+// missing row leaves it NOT engaged (Q13: opt in to disable) -- see
+// killSwitchEngaged for the one value that engages it.
 func (s *EngineStore) UserPreferences(ctx context.Context, userId string) (Preferences, error) {
 	if s == nil || s.Engine == nil {
-		return Preferences{ComputerUseEnabled: true}, nil
+		return Preferences{}, nil
 	}
 	if strings.TrimSpace(userId) == "" {
-		return Preferences{ComputerUseEnabled: true}, nil
+		return Preferences{}, nil
 	}
 	// #2800: reads the owning user's preferences server-side (worker
 	// kill-switch), not the caller's.
 	query := fmt.Sprintf(`query userByIdSystem(userId:%s)`, langparser.QuoteString(userId))
 	res, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), query)
 	if err != nil {
-		return Preferences{ComputerUseEnabled: true}, fmt.Errorf("user lookup: %w", err)
+		return Preferences{}, fmt.Errorf("user lookup: %w", err)
 	}
 	if res == nil || res.Bundle == nil || len(res.Bundle.Nodes) == 0 {
-		return Preferences{ComputerUseEnabled: true}, nil
+		return Preferences{}, nil
 	}
-	prefs := nestedObject(res.Bundle.Nodes[0], "preferences")
-	if prefs == nil {
-		return Preferences{ComputerUseEnabled: true}, nil
-	}
-	enabled := true
-	if v, ok := prefs["computerUseEnabled"].(bool); ok {
-		enabled = v
-	}
-	return Preferences{ComputerUseEnabled: enabled}, nil
+	return Preferences{KillSwitchEngaged: killSwitchEngaged(nestedObject(res.Bundle.Nodes[0], "preferences"))}, nil
+}
+
+// killSwitchEngaged reads the switch off a user's preferences object. It is
+// engaged ONLY by an explicit boolean false: a missing object, a missing key
+// and a value of any other type all read as not engaged, because the switch
+// is something a person throws and none of those is a person throwing it.
+func killSwitchEngaged(prefs map[string]any) bool {
+	enabled, ok := prefs["computerUseEnabled"].(bool)
+	return ok && !enabled
 }
 
 // AgentAuthorization resolves the standing agentAuthorization for

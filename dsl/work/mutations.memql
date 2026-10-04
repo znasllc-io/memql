@@ -30,7 +30,9 @@
 /// synthetic cluster actor with no actor.userId to scope to. goalSignature and parentRunId (epic
 /// memql#5408) are accepted so a run can be opened already carrying the goal it serves and the run
 /// that delegated it -- a delegated app session's recording run and a procedure's replay run both
-/// are -- and both are bound with no default, so a writer that has neither writes neither.
+/// are -- and both are bound with no default, so a writer that has neither writes neither. routing
+/// is the owner's routing choice the run is opened with (v1:work:run.routing), bound with no default
+/// for the same reason: a run nobody chose for writes none.
 @serverOnly
 @actor
 mutation run createWorkRun {
@@ -61,9 +63,10 @@ mutation run createWorkRun {
     parentRunId            string
     head                   object
     rerun                  object
+    routing                object
   }
   insert {
-    accept { executionAuthority, goalId, goalSignature, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, waitingOn, startedAt, parentRunId, head, rerun }
+    accept { executionAuthority, goalId, goalSignature, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, waitingOn, startedAt, parentRunId, head, rerun, routing }
     stamp {
       id: args.runId
       ownerUserId: actor.userId
@@ -293,10 +296,11 @@ mutation goal createWorkGoal {
     input             object
     ceilings          object
     requestedVia      string
+    routing           object
     requestFingerprint string
   }
   insert {
-    accept { statement, origin, responsibilityId, accountIds, input, ceilings, requestFingerprint }
+    accept { statement, origin, responsibilityId, accountIds, input, ceilings, routing, requestFingerprint }
     stamp {
       id: args.goalId
       ownerUserId: actor.userId
@@ -364,9 +368,11 @@ mutation modelCall createWorkModelCall {
     served         string!
     response       object
     error          string
+    routerCallId   string
+    decision       object
   }
   insert {
-    accept { runId, stepKey, requestHash, provider, model, settings, promptRef, promptVersion, inputTokens, outputTokens, cost, latencyMs, served, response, error }
+    accept { runId, stepKey, requestHash, provider, model, settings, promptRef, promptVersion, inputTokens, outputTokens, cost, latencyMs, served, response, error, routerCallId, decision }
     stamp {
       id: args.modelCallId
       ownerUserId: actor.userId

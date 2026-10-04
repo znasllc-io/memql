@@ -87,14 +87,15 @@ func TestAWorkTurnRunsAtItsOverridesLevelModelAndEffort(t *testing.T) {
 	engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{"composeFile": true}}, prompts: registry}
 	r := newTestReplier(engine)
 	owner := "v1:identity:user:work-override-owner"
-	turn := func(ov *common.StepOverride) (*preparedTurn, error) {
+	turn := func(ov *common.StepOverride) (context.Context, *preparedTurn, error) {
 		ctx := auth.ContextWithUserActor(context.Background(), owner)
 		ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "run", GoalId: "goal", StepKey: "draft", OwnerUserId: owner, Override: ov})
 		msg := &memqlv1.AgentGenerateTurnMsg{AgentId: "assistant", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "assistant", Name: "Ada", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "Draft the report"}}}
-		return r.prepareTurn(ctx, msg, time.Now())
+		prepared, err := r.prepareTurn(ctx, msg, time.Now())
+		return ctx, prepared, err
 	}
 
-	prepared, err := turn(&common.StepOverride{Level: "reasoning", Model: "app:claude-code:opus", Effort: "high"})
+	pinnedCtx, prepared, err := turn(&common.StepOverride{Level: "reasoning", Model: "app:claude-code:opus", Effort: "high"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,26 +103,29 @@ func TestAWorkTurnRunsAtItsOverridesLevelModelAndEffort(t *testing.T) {
 		t.Fatalf("the re-run turn resolves with level=%q pin=%q effort=%q", got.Level, got.ExplicitProvider, got.Effort)
 	}
 	// A pinned app is a session door, and the session door hands over a STEP:
-	// without the run and step on the request it refuses at resolution.
-	if got := prepared.routerReq; got.RunId != "run" || got.StepId != "draft" {
-		t.Fatalf("a pinned model's turn must name its step for the session door; run=%q step=%q", got.RunId, got.StepId)
+	// resolved from its run context, the turn names the one it is running.
+	if h := sessionHandoverOf(t, pinnedCtx, prepared.routerReq); h.RunId != "run" || h.StepId != "draft" || h.Model != "opus" {
+		t.Fatalf("a pinned model's turn must hand its step to the session door; run=%q step=%q model=%q", h.RunId, h.StepId, h.Model)
 	}
 
 	// The control: the same turn nobody re-ran is the ordinary strong turn.
-	plain, err := turn(nil)
+	plainCtx, plain, err := turn(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := plain.routerReq; got.Level != airoute.LevelStrong || got.ExplicitProvider != "" || got.Effort != "" {
 		t.Fatalf("a turn nobody re-ran resolves with level=%q pin=%q effort=%q", got.Level, got.ExplicitProvider, got.Effort)
 	}
-	if got := plain.routerReq; got.RunId != "" || got.StepId != "" {
-		t.Fatalf("default routing of a turn nobody pinned is unchanged; run=%q step=%q", got.RunId, got.StepId)
+	// AND IT NAMES ITS STEP TOO. Naming the step only for a pinned model left
+	// every ordinary work turn that policy routed to an app refused at the
+	// session door, with nothing behind it tried.
+	if h := sessionHandoverOf(t, plainCtx, plain.routerReq); h.RunId != "run" || h.StepId != "draft" {
+		t.Fatalf("a turn nobody pinned must hand its step to the session door too; run=%q step=%q", h.RunId, h.StepId)
 	}
 
 	// A level no step is re-run at refuses the turn rather than running it at
 	// strong and recording that it asked for something else.
-	if _, err := turn(&common.StepOverride{Level: "embeddings"}); err == nil {
+	if _, _, err := turn(&common.StepOverride{Level: "embeddings"}); err == nil {
 		t.Fatal("an embeddings override prepared a turn")
 	}
 }

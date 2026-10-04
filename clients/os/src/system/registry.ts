@@ -77,8 +77,17 @@ export interface OsAppProps {
   navigation?: { origin: "peer" | "content" | "back"; revision: number };
   /** Navigate the window to another of the app's sections. */
   navigate: (sectionId: string, options?: { fromContent?: boolean }) => void;
-  /** Augment the window's Ask context ("app:<id>" is always present). */
+  /**
+   * Note what the person is looking at, for the window's Ask ("app:<id>" is
+   * always present). It NEVER opens Ask: selecting a run or a file is not
+   * asking about it, and opening Ask over the app is in the person's way.
+   */
   askContext: (tag: string) => void;
+  /**
+   * Open Ask about one thing, for an explicit "Ask about this" the person
+   * chose. Absent where the host has no Ask; an app then offers no such entry.
+   */
+  askAbout?: (tag: string) => void;
   /**
    * A standing open instruction (epic memql#4842, #4845): opaque payload the
    * opener handed to `openApp`, delivered whether this window is fresh or

@@ -50,6 +50,11 @@ future work, not capabilities implied by an animated prototype.
 
 ## Policies and rules
 
+On screen these are **routes** and **rules**, built from **sources**, and calls
+name a **level** (routing design brief, 2026-09-28): the engine keeps the word
+policy in its ids and DSL, and no routing surface renders it. Fleet > Routing
+is their one home.
+
 A policy chooses a preferred compatible source/model and ordered fallbacks. A rule
 matches work to a policy. Show their scopes honestly: a cluster-wide policy is not
 an assignment to the selected machine, and an eligible app is not every installed

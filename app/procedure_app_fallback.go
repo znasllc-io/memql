@@ -36,9 +36,12 @@ import (
 // still checked: anything but a session door is refused here, before the call.
 //
 // THE CONSENT IS THE APP SESSION'S OWN: the delegate runs it through the same
-// executor, and the same per-run and standing-scope gates, as a delegated
-// task -- under the owner's reasoning agent, which is why the request carries
-// it. A session runs only on the replica holding the machine's stream; a
+// executor and the same app gate (integrations/agent/worker/app_gate.go) as a
+// step any other door hands over -- the app allowed and signed in on the
+// owner's own machine, the kill switch not engaged, and a pin the owner made,
+// which this one is. The request carries the owner's reasoning agent so the
+// session is attributed to it. A session runs only on the replica holding the
+// machine's stream; a
 // replay on the other replica is refused by the router, Handover returns that
 // refusal as its error, and the runner fails the goal with
 // procedure_fallback_failed rather than serving it somewhere else.
@@ -100,7 +103,7 @@ func (f *procedureAppFallback) Handover(ctx context.Context, req procedure.Fallb
 	if agentId == "" {
 		agent, err := f.agents(ctx, owner)
 		if err != nil {
-			return procedure.FallbackOutcome{}, fmt.Errorf("procedure fallback: an app session runs under the owner's reasoning agent, whose standing scope is its consent, and none resolves: %w", err)
+			return procedure.FallbackOutcome{}, fmt.Errorf("procedure fallback: an app session is attributed to the owner's reasoning agent, and none resolves: %w", err)
 		}
 		agentId = agent.Id
 	}
@@ -127,6 +130,12 @@ func (f *procedureAppFallback) Handover(ctx context.Context, req procedure.Fallb
 		AgentId:          agentId,
 		RunId:            runId,
 		StepId:           stepId,
+		// THE PIN IS THE OWNER'S. It is their own goal going back to the app
+		// their own recording came from, on their own machine -- not somebody
+		// else choosing an app for them -- and the app gate opens a pinned door
+		// only for a pin the session's owner made. A person's re-run override
+		// below replaces it with their own.
+		PinnedBy: owner,
 	}
 	// A PERSON'S KNOBS BIND HERE (epic memql#5414, D20). When the step being
 	// handed over is one a person re-ran or branched, its level, the app they

@@ -54,22 +54,29 @@ func (e *MemQLEngine) CallAIStructured(ctx context.Context, req airoute.ResolveR
 		return out, fmt.Errorf("the router resolved %q for a structured call and it does not serve one", resolved.Resolution.ProviderName)
 	}
 	out.Resolution = resolved.Resolution
-	out.Served = "live"
-	local := resolved.Resolution.Decision.Door == airoute.DoorLocal || strings.HasPrefix(resolved.Resolution.ProviderName, FleetReferencePrefix)
-	if local {
-		out.Served = "local"
-	}
+	out.Served = servedLabel(servedLocally(resolved.Resolution.Decision.Door, resolved.Resolution.ProviderName))
 	journalReq := common.ModelRequest{Provider: resolved.Resolution.ProviderName, Model: resolved.Resolution.Model, Messages: messages, Schema: schema}
 	if resolved.Entry != nil {
 		journalReq.Settings = answerAffectingParams(resolved.Entry.Config.Params)
 	}
 	out.Text, err = e.modelSeam.serveText(ctx, journalReq, req.PromptName, func(ctx context.Context) (modelCallOutcome, error) {
 		text, usage, callErr := callStructuredWithUsage(ctx, provider, messages, schema)
+		outcome := modelCallOutcome{Value: text, Usage: usage, Local: out.Served == "local"}
+		// THE SOURCE THAT SERVED, when the routed client says which: the
+		// router walks the rest of the route when the pick fails, and the
+		// result a caller hands on -- and the journal row -- must not name,
+		// as having answered, a source that did not.
+		if served, ok := servedBy(provider); ok {
+			outcome.Served = &served
+			outcome.Local = servedLocally(served.Decision.Door, served.ProviderName)
+			out.Resolution = resolutionServed(served)
+			out.Served = servedLabel(outcome.Local)
+		}
 		out.Usage = usage
 		if usage.Model != "" {
 			out.Resolution.Model = usage.Model
 		}
-		return modelCallOutcome{Value: text, Usage: usage, Local: local}, callErr
+		return outcome, callErr
 	}, func(call JournaledCall) {
 		out.Served = call.Served
 		if call.Served == "journal" {
@@ -78,4 +85,13 @@ func (e *MemQLEngine) CallAIStructured(ctx context.Context, req airoute.ResolveR
 		}
 	})
 	return out, err
+}
+
+// servedLabel is the `served` word for a live answer: "local" for one of the
+// user's own models, "live" for anything else.
+func servedLabel(local bool) string {
+	if local {
+		return "local"
+	}
+	return "live"
 }

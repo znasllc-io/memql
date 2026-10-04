@@ -276,3 +276,19 @@ func TestAReplayRunsWithTheOverridesItsSourceRecorded(t *testing.T) {
 		}
 	}
 }
+
+// The agent builds the reply step's context from the run row alone, and the
+// owner's routing choice is part of that row: every model call the run's steps
+// make reads it from here.
+func TestExecutionHopRestoresTheOwnersRouteChoice(t *testing.T) {
+	choice := common.RouteChoice{Source: "policy:localFirst", Level: "reasoning", By: "u"}
+	j := &automations.RunJournal{RunId: "r", GoalId: "g", OwnerUserId: "u", Mode: "live", Routing: choice}
+	ctx, err := workExecutionContext(context.Background(), j, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, ok := common.RunFromContext(ctx)
+	if !ok || run.Routing != choice {
+		t.Fatalf("run context routing = %+v, want %+v", run.Routing, choice)
+	}
+}

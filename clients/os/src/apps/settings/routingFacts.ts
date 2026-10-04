@@ -262,7 +262,7 @@ function fleetDoor(status: InferenceReading): DoorReading {
     return {
       ...base,
       state: "shut",
-      said: "No machine you own is offering a model. This is the door that costs nothing.",
+      said: "No machine you own is offering a model. This is the source that costs nothing.",
       detail: "",
     };
   }
@@ -320,7 +320,7 @@ function appDoor(status: InferenceReading): DoorReading {
     ...base,
     state: "shut",
     said:
-      "This cluster is not set up to run work inside a signed-in app, so signing in on a machine would not open this door. That is a deployment setting rather than anything to fix here.",
+      "This cluster is not set up to run work inside a signed-in app, so signing in on a machine would not make one a source. That is a deployment setting rather than anything to fix here.",
     detail: "",
   };
 }
@@ -368,7 +368,7 @@ export function doorReadings(
       // install failed.
       said:
         state === "open"
-          ? "Federated. Reached only after the two doors above are shut."
+          ? "Used when a route reaches a vendor."
           : state === "half"
             ? "Some ids are set and some are missing, and a node that reads a partial set refuses to boot."
             : state === "unknown"
@@ -474,7 +474,7 @@ export function levelReadings(
       measured,
       unread,
       sentence: unread
-        ? "The cluster has not said which doors are open, so this level's answer is not known."
+        ? "The cluster has not said which sources are ready, so this level's answer is not known."
         : levelSentence(id, door, model, where),
       // NO ADVICE ON AN UNREAD CLUSTER. There is nothing to advise: the thing
       // to fix might be the read itself, and telling somebody to pull a model
@@ -487,8 +487,8 @@ export function levelReadings(
 function levelSentence(id: LevelId, door: DoorReading | null, model: string, where: string): string {
   if (door === null) {
     return id === "embeddings"
-      ? "No door is open, so nothing can be embedded and the work waits rather than being written wrong."
-      : "No door is open, so a call at this level parks until one is.";
+      ? "No source is ready, so nothing can be embedded and the work waits rather than being written wrong."
+      : "No source is ready, so a call at this level waits until one is.";
   }
   const named = model === "" ? "" : where === "" ? ` ${model}` : ` ${model} on ${where}`;
   if (door.kind === "local") {

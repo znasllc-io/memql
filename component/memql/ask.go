@@ -30,6 +30,19 @@ type AskTurn struct {
 	Error            string      `json:"error,omitempty"`
 	GoalID           string      `json:"goalId,omitempty"`
 	RunID            string      `json:"runId,omitempty"`
+	// Route is the source choice the turn's goal was opened with; absent for
+	// Auto. The run row carries the choice every node honours -- this is the
+	// conversation's own record of it.
+	Route *AskRoute `json:"route,omitempty"`
+}
+
+// AskRoute is the conversation's source choice for one turn, as the wire
+// carries it (AiChatMsg.provider and AiChatMsg.level): a Source -- empty for
+// Auto, a pinned source, or a route `policy:<name>` -- and a Level, empty for
+// Auto. ParseRouteChoice is its grammar.
+type AskRoute struct {
+	Source string `json:"source,omitempty"`
+	Level  string `json:"level,omitempty"`
 }
 
 type askTranscript struct {
@@ -39,7 +52,13 @@ type askTranscript struct {
 // RunAsk is shared by text and live voice. Only the server can append an
 // assistant message. The lock spans replicas and rejects overlapping turns;
 // a lost request is never automatically re-executed with its side effects.
-func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt, pageContext string, onText func(string), onEvent func(WorkEvent)) (answer string, err error) {
+//
+// route is the turn's source choice. It is checked FIRST -- a word outside the
+// picker's vocabulary, or a route this cluster does not have, refuses the turn
+// with a *RouteChoiceError before anything is written -- and it reaches the
+// goal beside the request (ContextWithGoalRouteChoice), where createGoal
+// writes it onto the goal and run rows that every executing node reads.
+func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt, pageContext string, route AskRoute, onText func(string), onEvent func(WorkEvent)) (answer string, err error) {
 	if subject, ok := auth.SubjectFromContext(ctx); !ok || !auth.CapableFor(ctx, subject, "read", "app:ask") {
 		return "", fmt.Errorf("Ask requires a signed-in person")
 	}
@@ -51,6 +70,18 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 	}
 	if turnID == "" || len(turnID) > 160 {
 		return "", fmt.Errorf("invalid turn id")
+	}
+	choice, err := ParseRouteChoice(route.Source, route.Level)
+	if err != nil {
+		return "", err
+	}
+	if err = e.CheckRouteChoice(ctx, choice); err != nil {
+		return "", err
+	}
+	// Who chose is the server's to say: the authenticated caller, the same
+	// identity createGoal makes the goal's owner.
+	if subject, ok := auth.SubjectFromContext(ctx); ok {
+		choice.By = subject.UserId
 	}
 	// Verify ownership before reserving capacity, then re-read under the lock.
 	if _, err = e.askRead(ctx, conversationID); err != nil {
@@ -100,7 +131,11 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 	e.reconcileAskRuns(ctx, &transcript)
 	history := askConversationMessages(transcript.Turns)
 	if resumeIndex < 0 {
-		transcript.Turns = append(transcript.Turns, AskTurn{ID: turnID, Prompt: prompt, Context: pageContext, State: "streaming", StartedAt: time.Now().UTC(), Activity: []WorkEvent{}})
+		turn := AskTurn{ID: turnID, Prompt: prompt, Context: pageContext, State: "streaming", StartedAt: time.Now().UTC(), Activity: []WorkEvent{}}
+		if !choice.IsZero() {
+			turn.Route = &AskRoute{Source: choice.Source, Level: choice.Level}
+		}
+		transcript.Turns = append(transcript.Turns, turn)
 		resumeIndex = len(transcript.Turns) - 1
 	}
 	turn := &transcript.Turns[resumeIndex]
@@ -165,7 +200,9 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 		if callErr != nil {
 			return "", callErr
 		}
-		result, callErr := e.Execute(ctx, "builtin "+call)
+		// The choice rides BESIDE the request, not in its input: the input
+		// is what the model reads.
+		result, callErr := e.Execute(ContextWithGoalRouteChoice(ctx, choice), "builtin "+call)
 		if callErr != nil {
 			return "", callErr
 		}
