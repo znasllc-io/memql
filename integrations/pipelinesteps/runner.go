@@ -138,6 +138,11 @@ type Runner struct {
 
 	mu       sync.Mutex
 	inflight map[*inflight]struct{}
+	// claims is which Run of this replica holds -- or is taking -- each
+	// Job's claim. A claim names the node, and every Run here shares the
+	// node's id, so the id alone cannot say whose a claim stamped by this
+	// replica is (review finding 3); this can.
+	claims map[string]*step
 }
 
 // inflight is one Run on this replica: what CancelRun cancels by run, and
@@ -172,6 +177,7 @@ func NewRunner(cfg Config, kube *Kube, sink func() LineSink, library LibraryStor
 		drainTimeout:   followDrainTimeout,
 		libraryTimeout: libraryPhaseTimeout,
 		inflight:       map[*inflight]struct{}{},
+		claims:         map[string]*step{},
 	}
 }
 
@@ -191,6 +197,7 @@ func (r *Runner) Run(ctx context.Context, run StepRun) pl.StepResult {
 			"attempt", run.Attempt, "jobName", jobName, "node", r.cfg.NodeID),
 	}
 	defer s.discardCapture()
+	defer r.dropClaim(jobName, s)
 	return s.execute()
 }
 
@@ -276,6 +283,35 @@ func (r *Runner) track(runID, jobName string, cancel context.CancelFunc) func() 
 	}
 }
 
+// claimHolder is the Run of this replica that holds, or is taking, the Job's
+// claim; nil when none does.
+func (r *Runner) claimHolder(jobName string) *step {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.claims[jobName]
+}
+
+// takeClaim registers s as the Run taking the Job's claim, unless another
+// Run of this replica holds it.
+func (r *Runner) takeClaim(jobName string, s *step) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if h := r.claims[jobName]; h != nil && h != s {
+		return false
+	}
+	r.claims[jobName] = s
+	return true
+}
+
+// dropClaim forgets s as the Job's holder; another Run's registration stays.
+func (r *Runner) dropClaim(jobName string, s *step) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.claims[jobName] == s {
+		delete(r.claims, jobName)
+	}
+}
+
 // holds says a Run of this replica is running the Job's step.
 func (r *Runner) holds(jobName string) bool {
 	r.mu.Lock()
@@ -330,6 +366,9 @@ type step struct {
 	claimFailures int
 	// ownedSecret: this Run made the Job its Secret's owner.
 	ownedSecret bool
+	// claimSent is the claim this Run last sent: the Job carrying exactly it
+	// is this Run's own claim, whatever answer was lost.
+	claimSent string
 	// adopted: this Run took over a Job another Run had claimed; adoptedAt
 	// is the cursor it was left at -- the store has every line up to it.
 	adopted   bool
@@ -392,19 +431,57 @@ func (s *step) execute() pl.StepResult {
 			s.discardCapture()
 			return out
 		}
-		// A fresh claim is waited on whoever holds it -- this replica too: a
-		// re-forward can arrive while its own first Run still holds the Job.
-		if _, at, ok := holder(job); ok && s.r.fresh(at) {
+		verdict := s.judge(job)
+		if verdict == claimWait {
 			if res, done := s.wait(); done {
 				return res
 			}
 			continue
 		}
-		res, done := s.own(job)
+		res, done := s.own(job, verdict == claimMine)
 		if done {
 			return res
 		}
 	}
+}
+
+// claimVerdict is what a Run does about a Job's claim.
+type claimVerdict int
+
+const (
+	// claimTake: unclaimed, a claim gone stale, or one this replica's
+	// previous incarnation left -- claim it.
+	claimTake claimVerdict = iota
+	// claimMine: the claim this Run itself sent, whose answer was lost.
+	claimMine
+	// claimWait: another Run holds it, on this replica or another -- wait
+	// for its outcome.
+	claimWait
+)
+
+// judge reads a Job's claim (review finding 3). A claim stamped by another
+// node is that node's while fresh. One stamped by THIS node means what this
+// replica's registry says: this Run's own (an answer lost on the way back),
+// another live Run's here -- waited on however old its stamp, since that Run
+// still lives and only its heartbeats are failing -- or, with no Run here
+// holding it, a previous incarnation's, which is adopted at once.
+func (s *step) judge(job Job) claimVerdict {
+	h := s.r.claimHolder(s.jobName)
+	if h != nil && h != s {
+		return claimWait
+	}
+	node, at, claimed := holder(job)
+	switch {
+	case !claimed:
+		return claimTake
+	case node == s.r.cfg.NodeID && h == s && job.Metadata.Annotations[AnnotRunner] == s.claimSent:
+		return claimMine
+	case node == s.r.cfg.NodeID:
+		return claimTake
+	case s.r.fresh(at):
+		return claimWait
+	}
+	return claimTake
 }
 
 // create creates the step's Secret and then its Job, refusing first what
@@ -504,35 +581,49 @@ func (s *step) ownSecret(job Job) {
 // is adopted: its step is followed from the cursor its holder left, and the
 // log says so. Who created the Job does not matter: the creator's own first
 // claim is often refused, because the Job controller has written the Job's
-// status since the create answered. done is false when the claim went to
-// another runner -- one that claimed the Job first, or adopted it from under
-// this one -- and the Run should read the Job again.
-func (s *step) own(job Job) (pl.StepResult, bool) {
+// status since the create answered. mine says the claim on the Job is the one
+// this Run sent, whose answer was lost: it is held already. done is false
+// when the claim went to another runner -- one that claimed the Job first, or
+// adopted it from under this one -- and the Run should read the Job again.
+func (s *step) own(job Job, mine bool) (pl.StepResult, bool) {
+	if !s.r.takeClaim(s.jobName, s) {
+		// Another Run of this replica took it first: wait for its outcome.
+		return s.wait()
+	}
 	if err := s.ensureCapture(); err != nil {
 		return s.failed(pl.CodeRunnerUnavailable, "this workbench node cannot open the step's log archive: "+err.Error()), true
 	}
 	_, _, adopted := holder(job)
-	claimed, err := s.r.kube.AnnotateJob(s.ctx, s.jobName, map[string]string{AnnotRunner: s.r.stamp()}, job.Metadata.ResourceVersion)
-	switch {
-	case err == nil:
-	case s.ctx.Err() != nil:
-		return s.abandon(nil), true
-	case deploycontrol.IsConflict(err):
-		// The Job changed since it was read: another runner's claim, or
-		// only its status. Read it again and decide again.
-		s.log.Info("pipelines: the step's Job changed before it could be claimed; reading it again")
-		return pl.StepResult{}, false
-	case deploycontrol.IsNotFound(err):
-		return s.vanished(nil), true
-	default:
-		s.claimFailures++
-		if s.claimFailures >= apiAttempts || !transient(err) {
-			return s.failed(pl.CodeRunnerUnavailable, "the step's Job could not be claimed: "+apiMessage(err)), true
-		}
-		if !s.sleep(s.r.cfg.PollInterval) {
+	adopted = adopted && !mine
+	claimed := job
+	if !mine {
+		var err error
+		s.claimSent = s.r.stamp()
+		claimed, err = s.r.kube.AnnotateJob(s.ctx, s.jobName, map[string]string{AnnotRunner: s.claimSent}, job.Metadata.ResourceVersion)
+		switch {
+		case err == nil:
+		case s.ctx.Err() != nil:
 			return s.abandon(nil), true
+		case deploycontrol.IsConflict(err):
+			// The Job changed since it was read: another runner's claim, or
+			// only its status. Read it again and decide again.
+			s.r.dropClaim(s.jobName, s)
+			s.log.Info("pipelines: the step's Job changed before it could be claimed; reading it again")
+			return pl.StepResult{}, false
+		case deploycontrol.IsNotFound(err):
+			return s.vanished(nil), true
+		default:
+			// The claim may have been applied with its answer lost: this Run
+			// stays registered, so reading the Job again tells (judge).
+			s.claimFailures++
+			if s.claimFailures >= apiAttempts || !transient(err) {
+				return s.failed(pl.CodeRunnerUnavailable, "the step's Job could not be claimed: "+apiMessage(err)), true
+			}
+			if !s.sleep(s.r.cfg.PollInterval) {
+				return s.abandon(nil), true
+			}
+			return pl.StepResult{}, false
 		}
-		return pl.StepResult{}, false
 	}
 
 	hb := s.startHeartbeat()
@@ -642,13 +733,15 @@ func (s *step) watch(hb *heartbeat) (pl.StepResult, bool) {
 // yield gives the step up to the runner that holds it now.
 func (s *step) yield() {
 	s.log.Info("pipelines: another runner holds the step's Job now; waiting for its outcome")
+	s.r.dropClaim(s.jobName, s)
 	s.discardCapture()
 }
 
 // wait waits on a Job another Run holds, here or on another replica, for its
-// outcome. done is false when the claim went stale: the Run reads the Job
-// again, and adopts it.
+// outcome. done is false once the Job is no longer another Run's to wait on
+// (judge): the Run reads the Job again, and adopts it.
 func (s *step) wait() (pl.StepResult, bool) {
+	s.r.dropClaim(s.jobName, s)
 	s.discardCapture()
 	s.log.Info("pipelines: another runner holds the step's Job; waiting for its outcome")
 	for {
@@ -671,7 +764,7 @@ func (s *step) wait() (pl.StepResult, bool) {
 		if out, ok := persisted(job); ok {
 			return out, true
 		}
-		if _, at, ok := holder(job); !ok || !s.r.fresh(at) {
+		if s.judge(job) != claimWait {
 			return pl.StepResult{}, false
 		}
 	}

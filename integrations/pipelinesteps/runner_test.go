@@ -255,6 +255,13 @@ type rtCluster struct {
 	// onJobPatch runs, with c.mu held, on every patch of a Job before it is
 	// applied.
 	onJobPatch func(c *rtCluster, p rtPatch)
+	// refuseBeats answers 503 to every patch that carries a log cursor -- a
+	// heartbeat of a runner that has captured a line -- applying nothing.
+	refuseBeats bool
+	// loseClaims applies that many claims -- patches of the runner
+	// annotation alone, on a version -- and answers each 503, as a reply
+	// lost on its way back.
+	loseClaims int
 }
 
 func newRTCluster(t *testing.T, clock *rtClock) *rtCluster {
@@ -451,12 +458,18 @@ func (c *rtCluster) patchJob(w http.ResponseWriter, name string, body []byte) {
 		c.onJobPatch(c, p)
 	}
 	j := c.jobs[name]
+	_, beat := p.get(AnnotLogCursor)
+	_, runner := p.get(AnnotRunner)
+	lose := c.loseClaims > 0 && runner && !beat && len(p.annots) == 1 && p.rv != ""
 	switch {
 	case j == nil:
 		rtAnswer(w, kubeStatus(404, "NotFound", fmt.Sprintf(`jobs.batch %q not found`, name)))
 		return
 	case p.rv != "" && p.rv != j.job.Metadata.ResourceVersion:
 		rtAnswer(w, kubeStatus(409, "Conflict", fmt.Sprintf(`Operation cannot be fulfilled on jobs.batch %q: the object has been modified; please apply your changes to the latest version and try again`, name)))
+		return
+	case c.refuseBeats && beat:
+		rtAnswer(w, kubeStatus(503, "ServiceUnavailable", "the server is currently unable to handle the request"))
 		return
 	}
 	merged := map[string]string{}
@@ -485,6 +498,11 @@ func (c *rtCluster) patchJob(w http.ResponseWriter, name string, body []byte) {
 	j.job.Metadata.ResourceVersion = strconv.Itoa(c.rv)
 	c.patches = append(c.patches, p)
 	c.bumpLocked()
+	if lose {
+		c.loseClaims--
+		rtAnswer(w, kubeStatus(503, "ServiceUnavailable", "the server is currently unable to handle the request"))
+		return
+	}
 	rtJSON(w, 200, c.viewLocked(j))
 }
 
@@ -1393,33 +1411,45 @@ func TestRunnerWaitsWhileAnotherReplicaHoldsAFreshHeartbeat(t *testing.T) {
 			}
 		}
 	}
-	for _, holder := range []struct{ name, node string }{
-		{"another replica's fresh claim", rtOther},
-		// A transient DEGRADED ends the agent's wait, so a re-forward can
-		// reach this replica while its own first Run still holds the Job:
-		// it waits as well, and never runs its own Job a second time.
-		{"this replica's own fresh claim", rtNode},
-	} {
-		t.Run(holder.name+": it waits for the outcome", func(t *testing.T) {
-			h := newRunnerHarness(t)
-			h.c.putJob(h.existingJob(t, rtRun(), map[string]string{AnnotRunner: rtStamp(holder.node, rtT0.Add(-10*time.Second))}), rtRunningScript(testJobName))
-			h.c.onJobGet = func(c *rtCluster, n int) {
-				if n == 4 {
-					c.annotateLocked(testJobName, AnnotOutcome, mustJSON(t, outcome))
-				}
+	// A fresh claim this replica's own LIVE Run holds is waited on too: that
+	// is TestTwoRunsOfOneReplicaNeverBothOwnAStep.
+	t.Run("another replica's fresh claim: it waits for the outcome", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		h.c.putJob(h.existingJob(t, rtRun(), map[string]string{AnnotRunner: rtStamp(rtOther, rtT0.Add(-10*time.Second))}), rtRunningScript(testJobName))
+		h.c.onJobGet = func(c *rtCluster, n int) {
+			if n == 4 {
+				c.annotateLocked(testJobName, AnnotOutcome, mustJSON(t, outcome))
 			}
+		}
 
-			res := h.run(t, rtRun())
+		res := h.run(t, rtRun())
 
-			if !reflect.DeepEqual(res, outcome) {
-				t.Errorf("result = %+v, want the holder's outcome %+v", res, outcome)
-			}
-			onlyReads(t, h.c)
-			if len(h.lib.stored()) != 0 || len(h.tokens.called()) != 0 {
-				t.Error("a waiting runner stored a file or minted a token")
-			}
-		})
-	}
+		if !reflect.DeepEqual(res, outcome) {
+			t.Errorf("result = %+v, want the holder's outcome %+v", res, outcome)
+		}
+		onlyReads(t, h.c)
+		if len(h.lib.stored()) != 0 || len(h.tokens.called()) != 0 {
+			t.Error("a waiting runner stored a file or minted a token")
+		}
+	})
+
+	t.Run("a fresh claim of this replica with no Run of it alive: a previous incarnation's, adopted at once", func(t *testing.T) {
+		// The workbench container restarted in its pod: same node id, and
+		// nothing in this process holds the step. Waiting would only wait
+		// out a heartbeat nobody will stamp again.
+		h := newRunnerHarness(t)
+		h.c.putJob(h.existingJob(t, rtRun(), map[string]string{AnnotRunner: rtStamp(rtNode, rtT0.Add(-10*time.Second))}),
+			rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "ok")))
+
+		res := h.run(t, rtRun())
+
+		if res.Status != pl.OutcomeSucceeded || res.Where.NodeID != rtNode || res.LogLines != 1 {
+			t.Fatalf("result = %+v, want the step adopted and run to success here", res)
+		}
+		if store := h.sink.messages(); len(store) != 2 || !strings.Contains(store[0], "re-attached on "+rtNode) {
+			t.Errorf("store = %q, want the re-attach notice and the step's line", store)
+		}
+	})
 
 	t.Run("the Job vanishes while it waits: the step's node is lost", func(t *testing.T) {
 		h := newRunnerHarness(t)
@@ -1732,6 +1762,91 @@ func TestRunnerLosesTheOwnershipRaceAndWaits(t *testing.T) {
 		t.Error("the runner that lost the claim stored a file")
 	}
 	h.leftNoArchive(t)
+}
+
+// TestTwoRunsOfOneReplicaNeverBothOwnAStep (review finding 3): a re-forward
+// can reach the replica whose own first Run still holds the step. That Run's
+// claim carries this replica's node id, so the id cannot say whose it is:
+// the replica's registry of its Runs does. While the first Run lives, the
+// second waits for its outcome -- even once the claim looks stale, its
+// heartbeats failing -- and the step is captured and settled once.
+func TestTwoRunsOfOneReplicaNeverBothOwnAStep(t *testing.T) {
+	h := newRunnerHarness(t)
+	released := false
+	l1, l2 := captureKubeLine(rtAt(1100), "one"), captureKubeLine(rtAt(1200), "two")
+	running := rtPod(testJobName, rtStepRunning(rtAt(1000)), clsCloneDone)
+	h.c.script(testJobName, &rtScript{
+		states: []rtState{
+			{pod: running, visible: 1, until: func(*rtCluster) bool { return released }},
+			{pod: running, visible: 2, reads: 2},
+			{pod: rtPod(testJobName, rtStepEnded(0, rtAt(1000), rtAt(4000)), clsCloneDone), visible: 2},
+		},
+		log:   []string{l1, l2},
+		tails: map[string]string{ContainerClone: rtCloneTail},
+	})
+	first := h.start(context.Background(), rtRun())
+	rtWaitUntil(t, "the first Run to follow the step", func() bool { return len(h.sink.messages()) == 1 })
+
+	// The first Run's heartbeats fail and its claim ages past HeartbeatStale.
+	var base int
+	h.c.with(func(c *rtCluster) { c.refuseBeats, base = true, c.jobGets })
+	h.clock.Advance(time.Minute)
+	second := h.start(context.Background(), rtRun())
+	rtWaitUntil(t, "the second Run to read the Job a while", func() bool {
+		var n int
+		h.c.with(func(c *rtCluster) { n = c.jobGets })
+		return n > base+20
+	})
+	h.c.with(func(c *rtCluster) { c.refuseBeats, released = false, true })
+
+	a, b := h.await(t, first), h.await(t, second)
+
+	if !reflect.DeepEqual(a, b) || a.Status != pl.OutcomeSucceeded {
+		t.Errorf("results:\n  first  %+v\n  second %+v\nwant one success, the second Run answering the first's outcome", a, b)
+	}
+	if got := h.sink.messages(); !reflect.DeepEqual(got, rtTexts(l1, l2)) {
+		t.Errorf("store = %q, want each line once: one Run captured the step", got)
+	}
+	outcomes := 0
+	for _, p := range h.c.appliedPatches() {
+		if _, ok := p.get(AnnotOutcome); ok {
+			outcomes++
+		}
+	}
+	if outcomes != 1 || len(h.lib.stored()) != 1 {
+		t.Errorf("%d outcomes persisted and %d Library files, want one of each: one Run settled the step", outcomes, len(h.lib.stored()))
+	}
+}
+
+// TestRunnerTakesItsOwnClaimWhoseAnswerWasLost (review finding 3): the claim
+// was applied and its answer lost on the way back. Read again, the Job carries
+// this replica's claim, and the replica's registry says it is this Run's: the
+// Run goes on as its holder -- it waits on no heartbeat, its own, to go stale,
+// and says nothing about re-attaching.
+func TestRunnerTakesItsOwnClaimWhoseAnswerWasLost(t *testing.T) {
+	h := newRunnerHarness(t)
+	h.c.with(func(c *rtCluster) { c.loseClaims = 1 })
+	h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "ok")))
+
+	res := h.await(t, h.start(context.Background(), rtRun()))
+
+	if res.Status != pl.OutcomeSucceeded {
+		t.Fatalf("result = %+v, want success", res)
+	}
+	if got := h.sink.messages(); !reflect.DeepEqual(got, []string{"ok"}) {
+		t.Errorf("store = %q, want the step's line and no word of a re-attach", got)
+	}
+	claims := 0
+	for _, p := range h.c.appliedPatches() {
+		if _, beat := p.get(AnnotLogCursor); !beat && len(p.annots) == 1 && p.rv != "" {
+			if _, ok := p.get(AnnotRunner); ok {
+				claims++
+			}
+		}
+	}
+	if claims != 1 {
+		t.Errorf("%d claims applied, want the one whose answer was lost", claims)
+	}
 }
 
 // TestRunnerYieldsWhenAnotherReplicaTakesTheJob: a runner whose claim went
