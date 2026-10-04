@@ -65,6 +65,12 @@ type Config struct {
 	// pass is never trusted, so the next create proves again. Not an
 	// environment knob.
 	IsolationTTL time.Duration
+	// WorkspaceLimit is the sizeLimit of every step's workspace, a quantity
+	// (MEMQL_PIPELINES_WORKSPACE_LIMIT, default 20Gi): the pipelines
+	// LimitRange's default ephemeral-storage limit, which the component's
+	// ConfigMap states beside it, so the bound the kubelet enforces on the
+	// pod is the one the Job shows on its workspace.
+	WorkspaceLimit string
 }
 
 // The environment this package reads. Named once, so the env-registry scan
@@ -75,6 +81,7 @@ const (
 	envLogStoreMaxLines = "MEMQL_PIPELINES_LOG_STORE_MAX_LINES"
 	envArtifactMaxBytes = "MEMQL_PIPELINES_ARTIFACT_MAX_BYTES"
 	envNodeID           = "MEMQL_NODE_ID"
+	envWorkspaceLimit   = "MEMQL_PIPELINES_WORKSPACE_LIMIT"
 )
 
 const (
@@ -82,6 +89,9 @@ const (
 	cacheClaim         = "memql-pipelines-cache"
 	stepServiceAccount = "memql-pipelines-step"
 	mebibyte           = 1 << 20
+	// workspaceLimit is the component's default ephemeral-storage limit,
+	// which every overlay restates beside its LimitRange.
+	workspaceLimit = "20Gi"
 )
 
 // ConfigFromEnv reads the configuration through getenv (os.Getenv when nil).
@@ -118,7 +128,31 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		HeartbeatStale:     45 * time.Second,
 		IsolationTTL:       time.Hour,
 		NodeID:             nodeID(text(envNodeID)),
+		WorkspaceLimit:     workspaceLimitOf(text(envWorkspaceLimit)),
 	}
+}
+
+// workspaceLimitOf is raw as a workspace size limit, or the default. It goes
+// into every step's Job as written, so it must be a quantity the API server
+// takes and one an operator means: a positive whole number of Ki, Mi, Gi or
+// Ti. A bare number is bytes, and a workspace of 20 bytes evicts every step.
+func workspaceLimitOf(raw string) string {
+	if isWorkspaceLimit(raw) {
+		return raw
+	}
+	return workspaceLimit
+}
+
+// isWorkspaceLimit reports whether s is a positive whole number of Ki, Mi, Gi
+// or Ti, written plainly: no sign, no leading zero, no space.
+func isWorkspaceLimit(s string) bool {
+	for _, unit := range []string{"Ki", "Mi", "Gi", "Ti"} {
+		if digits, ok := strings.CutSuffix(s, unit); ok {
+			n, err := strconv.Atoi(digits)
+			return err == nil && n > 0 && digits == strconv.Itoa(n)
+		}
+	}
+	return false
 }
 
 // clampedWhole reads raw as a positive whole number within lo..hi. Blank,

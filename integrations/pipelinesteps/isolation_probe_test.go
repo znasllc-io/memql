@@ -102,9 +102,14 @@ func TestBuildIsolationProbe(t *testing.T) {
 			if c.SecurityContext != nil && c.SecurityContext.RunAsUser != nil {
 				t.Errorf("%s pins uid %d; the probe needs no uid of its own", c.Name, *c.SecurityContext.RunAsUser)
 			}
-			if c.Resources == nil || c.Resources.Requests["cpu"] == "" || c.Resources.Requests["memory"] == "" ||
-				c.Resources.Limits["cpu"] == "" || c.Resources.Limits["memory"] == "" {
-				t.Errorf("%s resources = %+v, want explicit requests and limits: the LimitRange's defaults would ask 250m and 512Mi of each", c.Name, c.Resources)
+			// Every resource the LimitRange defaults, the probe states for
+			// itself: its defaults are a step's, and the probe's four
+			// containers would ask a whole CPU, 2 GiB and 4 GiB of the node's
+			// disk -- more than a step, on a node a step must fit beside.
+			for _, res := range []string{"cpu", "memory", "ephemeral-storage"} {
+				if c.Resources == nil || c.Resources.Requests[res] == "" || c.Resources.Limits[res] == "" {
+					t.Errorf("%s resources = %+v, want an explicit %s request and limit: the LimitRange's defaults are a step's", c.Name, c.Resources, res)
+				}
 			}
 		}
 	})

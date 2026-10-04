@@ -2,6 +2,7 @@ package pipelinesteps
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -47,6 +48,13 @@ type Observation struct {
 // pulled.
 var pullReasons = map[string]bool{"ErrImagePull": true, "ImagePullBackOff": true, "InvalidImageName": true}
 
+// localStorageEviction is the kubelet's sentence for a pod it evicted for the
+// local storage its own containers wrote, as the pod's status message: past an
+// emptyDir's sizeLimit, past the pod's total ephemeral-storage limit, or past
+// one container's own (measured, k3s v1.35.5). A node running low on disk is
+// another sentence ("The node was low on resource: ...").
+var localStorageEviction = regexp.MustCompile(`^(Usage of EmptyDir volume "[^"]*" exceeds the limit|Pod ephemeral local storage usage exceeds the total limit of containers|Container \S+ exceeded its local ephemeral storage limit)`)
+
 // Classify reads a step's Job and its newest pod (nil when there is none) and
 // says where the step stands. created is when the runner created or adopted
 // the Job; with now and cfg.ScheduleTimeout it bounds how long the pod may
@@ -59,26 +67,31 @@ var pullReasons = map[string]bool{"ErrImagePull": true, "ImagePullBackOff": true
 // order below is the classification, each rule taken only when none before it
 // applied:
 //
-//  1. The cluster is stopping the pod -- DisruptionTarget=True: a node drain,
+//  1. The kubelet evicted the pod for the disk its containers wrote -- past
+//     the workspace's size limit, the pod's ephemeral-storage limit or one
+//     container's own: the step wrote too much (pl.CodeStepDiskExceeded,
+//     review M4), unless the command ended on its own first, when its own
+//     answer stands.
+//  2. The cluster is stopping the pod -- DisruptionTarget=True: a node drain,
 //     a preemption, an eviction -- the cluster lost the step (pl.CodeNodeLost,
 //     ruling R24), unless the command ended before the disruption began, when
 //     its own answer stands.
-//  2. The Job is past its deadline: deadlineCode -- unless the command ended
+//  3. The Job is past its deadline: deadlineCode -- unless the command ended
 //     before the deadline, when its own answer stands.
-//  3. The step container ended: exit 0 succeeded; any other exit failed, with
+//  4. The step container ended: exit 0 succeeded; any other exit failed, with
 //     no code, because the exit code is the answer.
-//  4. The Job completed: succeeded.
-//  5. Something in the pod means the step can never run: an image that
+//  5. The Job completed: succeeded.
+//  6. Something in the pod means the step can never run: an image that
 //     cannot be pulled (pl.CodeImagePullFailed), a container that cannot be
 //     created or the step's cache directory (pl.CodeJobRejected), the clone
 //     (pl.CodeCloneFailed), a service that stopped before the step started
 //     (pl.CodeServiceFailed), a pod nobody can schedule
 //     (pl.CodeJobUnschedulable).
-//  6. The step container runs: running.
-//  7. The Job or its pod failed and nothing above says why -- rejected by the
+//  7. The step container runs: running.
+//  8. The Job or its pod failed and nothing above says why -- rejected by the
 //     kubelet, deleted, gone with its node: the cluster lost the step
 //     (pl.CodeNodeLost).
-//  8. Otherwise pending.
+//  9. Otherwise pending.
 //
 // Most of these rules exist because of what an API server was measured to
 // report (k3s v1.32, kept in classify_test.go's fixtures): a sidecar is
@@ -90,7 +103,8 @@ var pullReasons = map[string]bool{"ErrImagePull": true, "ImagePullBackOff": true
 // pull throttle reports ErrImagePull for an image that pulls on the next try;
 // and an evicted step is killed (137) and its services stopped after the pod
 // is marked, which read alone would be the command failing or a service
-// failing.
+// failing -- for the kubelet's eviction of a pod for its own disk with no
+// DisruptionTarget to read at all (k3s v1.35.5).
 func Classify(job Job, pod *Pod, created, now time.Time, cfg Config, deadlineCode string) Observation {
 	step := podContainer(pod, false, ContainerStep)
 	var stepEnd *ContainerStateTerminated
@@ -98,6 +112,11 @@ func Classify(job Job, pod *Pod, created, now time.Time, cfg Config, deadlineCod
 		stepEnd = step.State.Terminated
 	}
 
+	if diskEvicted(pod) && !endedOnItsOwn(stepEnd) {
+		return failed(pl.CodeStepDiskExceeded, "the step wrote more to disk than a pipeline step may, and the kubelet stopped it ("+
+			reasonAnd(pod.Status.Reason, pod.Status.Message)+"): its working copy, what its containers write anywhere else in "+
+			"their own filesystems and their logs all count; a declared cache does not")
+	}
 	if d := disruption(pod); d != nil && !endedBefore(stepEnd, d.LastTransitionTime) {
 		return failed(pl.CodeNodeLost, "the cluster stopped the step's pod ("+reasonAnd(d.Reason, d.Message)+
 			"): a node drain, a preemption or an eviction, not the step's command")
@@ -163,6 +182,23 @@ func jobDeadline(job Job) time.Time {
 // killed). Unknown times are not before.
 func endedBefore(t *ContainerStateTerminated, instant time.Time) bool {
 	return t != nil && !instant.IsZero() && !t.FinishedAt.IsZero() && t.FinishedAt.Before(instant)
+}
+
+// diskEvicted says the kubelet evicted the pod for the local storage its own
+// containers wrote (localStorageEviction). It marks no DisruptionTarget for
+// that (measured): the pod reads Failed, "Evicted", with its sentence, and the
+// step container killed.
+func diskEvicted(pod *Pod) bool {
+	return pod != nil && pod.Status.Reason == "Evicted" && localStorageEviction.MatchString(pod.Status.Message)
+}
+
+// endedOnItsOwn says the step container ended other than as an eviction ends
+// it. An eviction for disk kills at once (measured: 137, "Error", the moment
+// the pod is marked), so any other exit -- or the kernel's OOM kill, which is
+// the command's own memory -- is the command's answer, and a container still
+// running or never started has given none.
+func endedOnItsOwn(t *ContainerStateTerminated) bool {
+	return t != nil && (t.ExitCode != 137 || t.Reason == "OOMKilled")
 }
 
 // disruption is the pod's DisruptionTarget condition when it is True: the

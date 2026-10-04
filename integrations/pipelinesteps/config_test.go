@@ -39,6 +39,7 @@ func TestConfigFromEnvDefaultsAndClamps(t *testing.T) {
 			HeartbeatStale:     45 * time.Second,
 			IsolationTTL:       time.Hour,
 			NodeID:             "workbench-1",
+			WorkspaceLimit:     "20Gi",
 		}
 		if got != want {
 			t.Errorf("ConfigFromEnv(empty) =\n  %+v\nwant\n  %+v", got, want)
@@ -168,5 +169,40 @@ func TestNodeIDAgreesWithTheNodeIdentity(t *testing.T) {
 	got = ConfigFromEnv(nil).NodeID
 	if want := node.NewIdentity("test").ID; got != want || got != strings.TrimSpace(host) {
 		t.Errorf("NodeID with MEMQL_NODE_ID unset = %q, node identity = %q, want both the hostname %q", got, want, host)
+	}
+}
+
+// TestWorkspaceLimitIsAQuantityOrTheDefault (review M4): a step's workspace is
+// an emptyDir whose sizeLimit is the pipelines LimitRange's default
+// ephemeral-storage limit, which the component's ConfigMap hands the workbench
+// as MEMQL_PIPELINES_WORKSPACE_LIMIT (render_pipelines_test.go holds the two
+// equal in every overlay). It goes into every step's Job as written, so a
+// value the API server would refuse -- and every step's Job with it -- or that
+// no operator means, falls back to the default as every knob here does: a
+// whole number of Ki, Mi, Gi or Ti, and nothing else.
+func TestWorkspaceLimitIsAQuantityOrTheDefault(t *testing.T) {
+	for raw, want := range map[string]string{
+		"":        "20Gi",
+		"10Gi":    "10Gi",
+		" 512Mi ": "512Mi",
+		"1Ti":     "1Ti",
+		"2048Ki":  "2048Ki",
+		"20":      "20Gi", // bytes: a workspace of 20 bytes evicts every step
+		"20G":     "20Gi",
+		"20GB":    "20Gi",
+		"20gi":    "20Gi",
+		"0Gi":     "20Gi",
+		"-1Gi":    "20Gi",
+		"+1Gi":    "20Gi",
+		"1.5Gi":   "20Gi",
+		"010Gi":   "20Gi",
+		"Gi":      "20Gi",
+		"ten":     "20Gi",
+		"1Gi 2Gi": "20Gi",
+	} {
+		got := ConfigFromEnv(envOf(map[string]string{"MEMQL_PIPELINES_WORKSPACE_LIMIT": raw})).WorkspaceLimit
+		if got != want {
+			t.Errorf("MEMQL_PIPELINES_WORKSPACE_LIMIT=%q read as %q, want %q", raw, got, want)
+		}
 	}
 }

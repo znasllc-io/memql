@@ -193,7 +193,12 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 	initContainers = append(initContainers, cloneContainer(cfg, run, secretName))
 	initContainers = append(initContainers, serviceContainers(run.Services)...)
 
-	volumes := []Volume{{Name: workspaceVolume, EmptyDir: &EmptyDirVolumeSource{}}}
+	// The workspace is as large as a step may write (review M4): the
+	// LimitRange's default ephemeral-storage limit already bounds the whole
+	// pod, the workspace included, and stating the same number as its
+	// sizeLimit bounds the workspace however many services share that sum,
+	// and shows the bound on the Job.
+	volumes := []Volume{{Name: workspaceVolume, EmptyDir: &EmptyDirVolumeSource{SizeLimit: cfg.WorkspaceLimit}}}
 	if len(caches) > 0 {
 		volumes = append(volumes, Volume{
 			Name:                  cacheVolume,
@@ -249,6 +254,9 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 	ttl := int64(cfg.JobTTL / time.Second)
 	if ttl <= 0 || ttl > math.MaxInt32 {
 		return refuse("the Job TTL %v is not a positive number of seconds that fits the API: a zero TTL deletes the Job before its outcome is read", cfg.JobTTL)
+	}
+	if !isWorkspaceLimit(cfg.WorkspaceLimit) {
+		return refuse("the workspace size limit %q is not a whole number of Ki, Mi, Gi or Ti: the step's Job would show no bound on its disk, or one the API server refuses", cfg.WorkspaceLimit)
 	}
 	if strings.TrimSpace(run.OwnerUserID) == "" {
 		return refuse("the step has no owner: its cache, its Library files and its secrets are all an owner's")
@@ -817,13 +825,14 @@ if [ "$unclear" = 1 ]; then exit 23; fi
 exit 20`
 
 // probeResources is each probe container's: the listener and the connector
-// use a few MiB each, and the LimitRange's defaults (250m and 512Mi) would ask
-// a whole CPU and 2 GiB for the probe's four containers -- more than a step,
-// on a node a step must fit beside.
+// use a few MiB of memory each and write nothing but a few log lines, and the
+// LimitRange's defaults (250m, 512Mi and 1Gi of disk) would ask a whole CPU,
+// 2 GiB and 4 GiB of the node's disk for the probe's four containers -- more
+// than a step, on a node a step must fit beside.
 func probeResources() *Resources {
 	return &Resources{
-		Requests: map[string]string{"cpu": "10m", "memory": "32Mi"},
-		Limits:   map[string]string{"cpu": "100m", "memory": "64Mi"},
+		Requests: map[string]string{"cpu": "10m", "memory": "32Mi", "ephemeral-storage": "16Mi"},
+		Limits:   map[string]string{"cpu": "100m", "memory": "64Mi", "ephemeral-storage": "64Mi"},
 	}
 }
 

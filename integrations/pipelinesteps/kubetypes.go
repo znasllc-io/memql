@@ -243,8 +243,13 @@ type Volume struct {
 	PersistentVolumeClaim *PersistentVolumeClaimVolumeSource `json:"persistentVolumeClaim,omitempty"`
 }
 
-// EmptyDirVolumeSource marshals as {}: present, with every setting defaulted.
-type EmptyDirVolumeSource struct{}
+// EmptyDirVolumeSource is scratch on the node's disk. SizeLimit is a quantity
+// ("20Gi"): past it the kubelet evicts the pod, and the bound is there to read
+// on the Job. Empty, the field is omitted and the volume marshals as {} --
+// present, with every setting defaulted.
+type EmptyDirVolumeSource struct {
+	SizeLimit string `json:"sizeLimit,omitempty"`
+}
 
 // PersistentVolumeClaimVolumeSource mounts a claim by name.
 type PersistentVolumeClaimVolumeSource struct {

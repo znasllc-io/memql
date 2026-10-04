@@ -46,6 +46,7 @@ func testConfig() Config {
 		CacheClaim:         "steps-cache",
 		StepServiceAccount: "steps-sa",
 		JobTTL:             25 * time.Minute,
+		WorkspaceLimit:     "7Gi",
 	}
 }
 
@@ -591,18 +592,20 @@ func TestBuildJob(t *testing.T) {
 		}
 	})
 
-	t.Run("the workspace is scratch and the cache claim is mounted only when caches are declared", func(t *testing.T) {
+	// Review M4: the LimitRange's ephemeral-storage limit bounds the whole
+	// pod, the workspace included, and the workspace's own sizeLimit -- the
+	// same number, the Config's -- is that bound where the Job shows it.
+	t.Run("the workspace is scratch, as large as a step may write, and the cache claim is mounted only when caches are declared", func(t *testing.T) {
 		job := mustBuild(t, testConfig(), testRun())
 		wantVolumes := []Volume{
-			{Name: "workspace", EmptyDir: &EmptyDirVolumeSource{}},
+			{Name: "workspace", EmptyDir: &EmptyDirVolumeSource{SizeLimit: "7Gi"}},
 			{Name: "cache", PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{ClaimName: "steps-cache"}},
 		}
 		if got := job.Spec.Template.Spec.Volumes; !reflect.DeepEqual(got, wantVolumes) {
 			t.Errorf("volumes = %s, want %s", mustJSON(t, got), mustJSON(t, wantVolumes))
 		}
 		doc := wire(t, job)
-		// Present as an object: a volume with no source is refused by the API server.
-		wantField(t, doc, map[string]any{}, "spec", "template", "spec", "volumes", 0, "emptyDir")
+		wantField(t, doc, map[string]any{"sizeLimit": "7Gi"}, "spec", "template", "spec", "volumes", 0, "emptyDir")
 		wantField(t, doc, "steps-cache", "spec", "template", "spec", "volumes", 1, "persistentVolumeClaim", "claimName")
 
 		run := testRun()
@@ -755,6 +758,8 @@ func TestBuildJob(t *testing.T) {
 			{"a service with no image", func(_ *Config, r *StepRun) { r.Services["cache"] = pl.Service{} }, pl.CodeJobRejected},
 			{"no clone image configured", func(c *Config, _ *StepRun) { c.CloneImage = "" }, pl.CodeRunnerUnavailable},
 			{"no TTL configured", func(c *Config, _ *StepRun) { c.JobTTL = 0 }, pl.CodeJobRejected},
+			{"no workspace limit configured", func(c *Config, _ *StepRun) { c.WorkspaceLimit = "" }, pl.CodeJobRejected},
+			{"a workspace limit that is not a quantity", func(c *Config, _ *StepRun) { c.WorkspaceLimit = "lots" }, pl.CodeJobRejected},
 		}
 		for _, metachar := range []string{";", "&", "|", "$", `\`, "`", "'", `"`, "<", ">"} {
 			cases = append(cases, struct {

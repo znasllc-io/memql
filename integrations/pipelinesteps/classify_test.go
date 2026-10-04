@@ -85,6 +85,16 @@ func clsDisrupted(p *Pod, reason, message string, at time.Time) *Pod {
 	return p
 }
 
+// clsDiskEvicted is a step's pod as the kubelet leaves it after evicting it
+// for local storage (measured, k3s v1.35.5): Failed, reason Evicted, the
+// kubelet's sentence as the message -- trailing space and all -- the clone
+// done, the service stopped by the kill, and no DisruptionTarget.
+func clsDiskEvicted(message string, step ContainerStatus) *Pod {
+	p := clsPod("Failed", []ContainerStatus{clsCloneDone, clsTerminated("svc-db", 0, "Completed", "", clsStart.Add(2*time.Minute))}, step)
+	p.Status.Reason, p.Status.Message = "Evicted", message
+	return p
+}
+
 // clsPostgresNoPassword is what postgres:16 started without a password left as
 // its termination message under FallbackToLogsOnError (measured): its own
 // error, several lines of it.
@@ -272,6 +282,80 @@ func TestClassify(t *testing.T) {
 				return p
 			}(),
 			want: clsWant{phase: PhaseRunning, exitCode: -1},
+		},
+
+		// -- the step's own disk (review M4) --
+		//
+		// Measured on k3s v1.35.5 (a throwaway k3d cluster, 2026-10-04): the
+		// kubelet evicting a pod for the local storage its containers wrote --
+		// past the workspace's sizeLimit, past the pod's total limit, or past
+		// one container's own -- fails the pod "Evicted" with its sentence and
+		// kills the step (137), and marks NO DisruptionTarget. Read alone that
+		// is the command failing, exit 137, with nothing saying why.
+		{
+			name: "the kubelet evicted the step for its workspace past its sizeLimit",
+			job:  clsJob(1200, backoffExceeded),
+			pod:  clsDiskEvicted(`Usage of EmptyDir volume "workspace" exceeds the limit "40Mi". `, clsTerminated("step", 137, "Error", "", clsStart.Add(112*time.Second))),
+			want: wantFailed(pl.CodeStepDiskExceeded, "wrote more to disk", `Usage of EmptyDir volume "workspace" exceeds the limit "40Mi".`, "a declared cache does not"),
+		},
+		{
+			name: "the kubelet evicted the step for the pod's total past its containers' limits",
+			job:  clsJob(1200, backoffExceeded),
+			pod:  clsDiskEvicted("Pod ephemeral local storage usage exceeds the total limit of containers 50Mi. ", clsTerminated("step", 137, "Error", "", clsStart.Add(93*time.Second))),
+			want: wantFailed(pl.CodeStepDiskExceeded, "wrote more to disk", "Pod ephemeral local storage usage exceeds the total limit of containers 50Mi."),
+		},
+		{
+			name: "the kubelet evicted the step for its own container's files past its limit",
+			job:  clsJob(1200, backoffExceeded),
+			pod:  clsDiskEvicted(`Container step exceeded its local ephemeral storage limit "40Mi". `, clsTerminated("step", 137, "Error", "", clsStart.Add(9*time.Second))),
+			want: wantFailed(pl.CodeStepDiskExceeded, "wrote more to disk", `Container step exceeded its local ephemeral storage limit "40Mi".`),
+		},
+		{
+			// Constructed: evicted while a service was still starting, so the
+			// step never ran -- its disk is the clone's or the services'.
+			name: "a pod evicted for its disk before the step started",
+			job:  clsJob(1200, backoffExceeded),
+			pod:  clsDiskEvicted("Pod ephemeral local storage usage exceeds the total limit of containers 20Gi. ", clsStepInit),
+			want: wantFailed(pl.CodeStepDiskExceeded, "wrote more to disk"),
+		},
+		{
+			// Constructed: the command ended on its own -- exit 1, not the
+			// eviction's kill -- before its pod was evicted, so its own answer
+			// stands, as it does for any disruption it finished before.
+			name: "a step that ended on its own before its pod was evicted for disk keeps its own answer",
+			job:  clsJob(1200, backoffExceeded),
+			pod:  clsDiskEvicted(`Usage of EmptyDir volume "workspace" exceeds the limit "20Gi". `, clsTerminated("step", 1, "Error", "", clsStart.Add(40*time.Second))),
+			want: clsWant{phase: PhaseFailed, exitCode: 1},
+		},
+		{
+			// An OOM is the step's memory, not its disk: the kernel's kill, its
+			// own answer (as above), whatever else the pod says.
+			name: "an OOM-killed step in a pod evicted for disk is the OOM",
+			job:  clsJob(1200, backoffExceeded),
+			pod:  clsDiskEvicted(`Container step exceeded its local ephemeral storage limit "20Gi". `, clsTerminated("step", 137, "OOMKilled", "", clsStart.Add(40*time.Second))),
+			want: clsWant{phase: PhaseFailed, exitCode: 137, mentions: []string{"OOMKilled"}},
+		},
+		{
+			// The node running low is the cluster's doing: that eviction marks a
+			// DisruptionTarget, and rule 1 reads it as the node lost, whatever
+			// resource ran low.
+			name: "a node-pressure eviction for disk is still the cluster's",
+			job:  clsJob(1200, backoffExceeded),
+			pod: func() *Pod {
+				const msg = "The node was low on resource: ephemeral-storage. Threshold quantity: 10Gi, available: 9Gi. "
+				p := clsDisrupted(clsDiskEvicted(msg, clsTerminated("step", 137, "Error", "", clsStart.Add(40*time.Second))),
+					"TerminationByKubelet", msg, clsStart.Add(39*time.Second))
+				return p
+			}(),
+			want: wantFailed(pl.CodeNodeLost, "TerminationByKubelet"),
+		},
+		{
+			// Any other eviction with no DisruptionTarget is not a disk the step
+			// filled: the command's 137 stays its own.
+			name: "an eviction that names no local storage is not the step's disk",
+			job:  clsJob(1200, backoffExceeded),
+			pod:  clsDiskEvicted("The node had condition: [DiskPressure]. ", clsTerminated("step", 137, "Error", "", clsStart.Add(40*time.Second))),
+			want: clsWant{phase: PhaseFailed, exitCode: 137},
 		},
 
 		// -- the deadline --

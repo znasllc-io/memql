@@ -731,6 +731,12 @@ const COPY: Record<string, RefusalCopy> = {
     title: "The step was cancelled",
     next: "Re-run when ready.",
   },
+  pipeline_step_disk_exceeded: {
+    // The step's own doing, as a timeout is: what counts is its working copy,
+    // its containers' own files and their logs; a declared cache does not.
+    title: "The step wrote more to disk than a pipeline step may",
+    next: "Write less, or declare a cache for what a tool keeps between runs. An operator can raise the overlay's ephemeral-storage limit.",
+  },
   pipeline_node_lost: {
     title: "The node running the step went away before it finished",
     next: "Re-run the step.",

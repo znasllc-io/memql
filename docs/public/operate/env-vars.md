@@ -643,7 +643,8 @@ The pipelines substrate runs each command step of a pipeline run as a Kubernetes
 Job, created by the workbench node, or on one of the owner's machines,
 dispatched by the agent node (epic memql#5478). Registered
 `component: pipelines`, all optional; the pipelines component's
-`memql-pipelines` ConfigMap sets the first two on the workbench. Runbook:
+`memql-pipelines` ConfigMap sets the first two, and the workspace limit, on the
+workbench. Runbook:
 [Pipelines substrate](pipelines-substrate.md#environment-variables).
 
 | Variable                              | Default             | Purpose |
@@ -653,6 +654,7 @@ dispatched by the agent node (epic memql#5478). Registered
 | `MEMQL_PIPELINES_RUN_MAX_MINUTES`     | `120`               | A run's wall-clock ceiling in minutes (clamped 5..1440): a step is given only the time left under it, and fails `pipeline_run_ceiling` when that runs out. Read by the agent and the workbench. |
 | `MEMQL_PIPELINES_LOG_STORE_MAX_LINES` | `2000`              | How many lines of one step's output reach the log store (clamped 100..100000) before that copy stops with a `pipeline_log_capped` line; the full log is still archived to the Library. Read by the workbench (a cluster step) and the agent (a fleet step). |
 | `MEMQL_PIPELINES_ARTIFACT_MAX_BYTES`  | `67108864` (64 MiB) | The cap on one step's decoded artifact archive (clamped 1 MiB..256 MiB), past which the archive is dropped and the step fails `pipeline_artifact_too_large`. Read by the workbench and the agent. |
+| `MEMQL_PIPELINES_WORKSPACE_LIMIT`     | `20Gi`              | The size limit of every step's `/workspace` scratch volume, a whole number of `Ki`, `Mi`, `Gi` or `Ti`; anything else is the default. The ConfigMap sets it equal to the `memql-pipelines` LimitRange's default ephemeral-storage limit (20Gi, 10Gi on `cloud-entry`), which bounds the whole pod; a step that writes past either is evicted and fails `pipeline_step_disk_exceeded`. Read by the workbench. |
 | `MEMQL_PIPELINES_RUN_RETENTION_DAYS`  | `30`                | Days after a finished pipeline run's latest version before the nightly sweep archives and deletes its records: [Operational record retention](#operational-record-retention). |
 
 For the three clamped knobs, a value that is not a positive whole number falls

@@ -126,6 +126,10 @@ const (
 	// on a replica; a cluster whose policy engine does not enforce the
 	// pipelines namespace's NetworkPolicy starts no step at all.
 	CodeIsolationUnenforced = "pipeline_isolation_unenforced"
+	// The kubelet stopped a step for the disk its pod wrote: past its
+	// workspace's size limit, or past the namespace's ephemeral-storage limit
+	// on its containers. The step's doing, as a timeout is, not the cluster's.
+	CodeStepDiskExceeded = "pipeline_step_disk_exceeded"
 )
 
 var codeClasses = map[string]Class{
@@ -162,6 +166,7 @@ var codeClasses = map[string]Class{
 	CodeNodeLost:            ClassFailure,
 	CodeArtifactTooLarge:    ClassFailure,
 	CodeIsolationUnenforced: ClassFailure,
+	CodeStepDiskExceeded:    ClassFailure,
 
 	CodeStageBlocked:      ClassSkip,
 	CodeNotAffected:       ClassSkip,
