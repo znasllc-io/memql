@@ -91,6 +91,23 @@ func TestWaitBudgetIncludesTimeInsideKubectl(t *testing.T) {
 	}
 }
 
+// TestWaitNarratesEvenWhenOnePollSpendsTheBudget: a poll that outlives the
+// whole budget (a slow runner, a slow API server) must still say who the wait
+// was on before it gives up. The loop used to check the deadline first and
+// break, so a short budget spent inside one poll timed out with no
+// "still waiting" line -- the flake this pins, made deterministic.
+func TestWaitNarratesEvenWhenOnePollSpendsTheBudget(t *testing.T) {
+	ready, _, log := runWaitForWorkloadsEnv(t, "bff 1\nidentity 1\n", "identity", []string{
+		"WORKLOAD_TIMEOUT=1", "FAKE_WAIT_DELAY=2",
+	})
+	if ready != "false" {
+		t.Fatalf("WORKLOADS_READY = %q, want false\n%s", ready, log)
+	}
+	if !strings.Contains(log, "still waiting") {
+		t.Fatalf("a poll that spent the whole budget timed out without saying what it was waiting on\noutput:\n%s", log)
+	}
+}
+
 // TestUpDeclaresTheWorkloadTimeoutParam: an undeclared flag is an immediate
 // exit 2 at run time, so the declaration IS the feature reaching the wire.
 func TestUpDeclaresTheWorkloadTimeoutParam(t *testing.T) {
