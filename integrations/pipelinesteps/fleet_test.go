@@ -901,6 +901,62 @@ func TestFleetStepFailuresAreTyped(t *testing.T) {
 	})
 }
 
+// TestFleetStepCutByItsMachinesCapSaysSo (final review, M7): a machine runs a
+// pipeline step for no longer than its own policy allows
+// (pipelines.max_timeout_sec, 3600 seconds unless its policy.yaml says
+// otherwise), whatever the step asks for, and when it stops one it says the
+// timeout it ran it under: "the step ran past its 1h0m0s timeout"
+// (memql-cockpit, internal/worker/tools/pipeline_step.go). When that is less
+// than the step's own deadline, the machine's cap is what stopped the step
+// and what to raise: the failure names it, and is the step's timeout -- the
+// run's ceiling did not end it.
+func TestFleetStepCutByItsMachinesCapSaysSo(t *testing.T) {
+	const capped = "pipeline_step: the step ran past its 1h0m0s timeout and was stopped"
+	for _, c := range []struct {
+		name     string
+		words    string // what the machine said
+		deadline int    // the step's effective timeout, in seconds
+		code     string // the bound the StepRun names
+		wantCode string
+		says     []string
+		saysNot  []string
+	}{
+		{"the machine's cap was less than the step's deadline", capped, 7200, pl.CodeStepTimeout, pl.CodeStepTimeout,
+			[]string{"1h0m0s", "max_timeout_sec", "reg-1", "2h0m0s"}, []string{"within its 2h0m0s deadline"}},
+		{"so it is the step's timeout, though the run's ceiling bound its deadline", capped, 5400, pl.CodeRunCeiling, pl.CodeStepTimeout,
+			[]string{"1h0m0s", "max_timeout_sec", "1h30m0s"}, nil},
+		// The reachable positives: the machine's words are read, and only a
+		// cap below the step's own deadline changes the sentence.
+		{"the machine stopped it at the step's own deadline", "pipeline_step: the step ran past its 2h0m0s timeout and was stopped", 7200, pl.CodeRunCeiling, pl.CodeRunCeiling,
+			[]string{"within its 2h0m0s deadline on reg-1"}, []string{"max_timeout_sec"}},
+		{"the dispatcher timed the call out itself", "worker call timed out", 7200, pl.CodeStepTimeout, pl.CodeStepTimeout,
+			[]string{"within its 2h0m0s deadline on reg-1"}, []string{"max_timeout_sec"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+				return worker.Result{OK: false, ErrorCode: "timeout", ErrorMessage: c.words, WorkerId: "reg-1", NodeId: "agent-b"}, nil
+			}}
+			f, _, _, _ := newTestFleet(t, d)
+			req := fleetReq()
+			res, err := f.RunStep(context.Background(), req, stepRunFor(req, c.deadline, c.code))
+			if err != nil {
+				t.Fatalf("RunStep: %v", err)
+			}
+			wantFailure(t, res, pl.OutcomeFailed, c.wantCode)
+			for _, want := range c.says {
+				if !strings.Contains(res.Failure.Message, want) {
+					t.Errorf("failure %q, want it to say %q", res.Failure.Message, want)
+				}
+			}
+			for _, not := range c.saysNot {
+				if strings.Contains(res.Failure.Message, not) {
+					t.Errorf("failure %q says %q", res.Failure.Message, not)
+				}
+			}
+		})
+	}
+}
+
 // driverStepGrace is component/pipelinerun/driver.go's stepGrace: how long
 // past a step's run's ceiling the pipeline driver waits for Execute before it
 // stops waiting (ruling R31b). The driver does not export it, so it is pinned

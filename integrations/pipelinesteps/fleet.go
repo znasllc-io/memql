@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -402,6 +403,16 @@ func (f *Fleet) classify(ctx context.Context, req pl.StepRequest, run StepRun, r
 		return failed(pl.CodeNoMachineForNeed, fmt.Sprintf(
 			"%s refused the step under its own pipelines policy: %s", machine, msg))
 	case code == "timeout":
+		if allowed, ok := machineTimeout(msg); ok && allowed < limit {
+			// The machine stopped the step at its own cap, short of the
+			// step's deadline: the cap is what to raise, so the sentence
+			// names it, and the code is the step's timeout -- neither the
+			// step's own deadline nor its run's ceiling had come.
+			return failed(pl.CodeStepTimeout, fmt.Sprintf(
+				"The step did not finish within %s, the most %s lets a pipeline step run (pipelines.max_timeout_sec "+
+					"in its policy.yaml), which is less than the step's own %s deadline; it was stopped. Raise the "+
+					"machine's cap to give the step its whole deadline.", allowed, machine, limit))
+		}
 		return failed(run.DeadlineCode, fmt.Sprintf(
 			"The step did not finish within its %s deadline on %s; it was stopped.", limit, machine))
 	case code == "cancelled":
@@ -417,6 +428,24 @@ func (f *Fleet) classify(ctx context.Context, req pl.StepRequest, run StepRun, r
 		return failed(pl.CodeExecutorError, fmt.Sprintf(
 			"%s could not run the step (%s): %s", machine, code, msg))
 	}
+}
+
+// machineTimeoutWords is how a machine says it stopped a step at a timeout:
+// "the step ran past its 1h0m0s timeout" (memql-cockpit's
+// internal/worker/tools/pipeline_step.go), naming as a Go duration the
+// timeout it ran the step under -- the lesser of the step's own and its
+// policy's pipelines.max_timeout_sec.
+var machineTimeoutWords = regexp.MustCompile(`ran past its (\S+) timeout`)
+
+// machineTimeout is the timeout a machine says it stopped the step at, when
+// its words name one.
+func machineTimeout(words string) (time.Duration, bool) {
+	m := machineTimeoutWords.FindStringSubmatch(words)
+	if m == nil {
+		return 0, false
+	}
+	d, err := time.ParseDuration(m[1])
+	return d, err == nil && d > 0
 }
 
 // storeReturnedArtifacts files the artifacts the machine returned through the
