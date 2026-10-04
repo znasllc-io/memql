@@ -2,6 +2,7 @@ package pipelinesteps
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -287,25 +288,27 @@ func TestAnnotateJobReportsALostRaceAsAConflict(t *testing.T) {
 
 // TestCreateSecretTreatsAnExistingSecretAsReattached: the Secret's name is
 // derived from the Job's, so AlreadyExists is this step's Secret, left by an
-// earlier attempt of the same step.
+// earlier Run of the same step -- and the caller is told, since the clone
+// token in it is that Run's.
 func TestCreateSecretTreatsAnExistingSecretAsReattached(t *testing.T) {
 	secret := Secret{APIVersion: "v1", Kind: "Secret", Metadata: ObjectMeta{Name: kubeJobName + "-env", Namespace: "steps-ns"}, Type: "Opaque",
 		Data: map[string][]byte{"GIT_TOKEN": []byte("clone-" + strings.Repeat("x", 12))}}
 
 	for _, c := range []struct {
-		name    string
-		answer  kubeAnswer
-		wantErr bool
+		name        string
+		answer      kubeAnswer
+		wantExisted bool
+		wantErr     bool
 	}{
-		{"created", kubeOK(201, secret), false},
-		{"already there", kubeStatus(409, "AlreadyExists", `secrets "`+kubeJobName+`-env" already exists`), false},
-		{"refused", kubeStatus(403, "Forbidden", `secrets is forbidden: User "system:serviceaccount:memql:memql-engine" cannot create resource "secrets"`), true},
+		{"created", kubeOK(201, secret), false, false},
+		{"already there", kubeStatus(409, "AlreadyExists", `secrets "`+kubeJobName+`-env" already exists`), true, false},
+		{"refused", kubeStatus(403, "Forbidden", `secrets is forbidden: User "system:serviceaccount:memql:memql-engine" cannot create resource "secrets"`), false, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			kube, fake := newKubeFake(t, map[string]kubeAnswer{"POST " + kubeSecrets: c.answer})
-			err := kube.CreateSecret(context.Background(), secret)
-			if (err != nil) != c.wantErr {
-				t.Fatalf("CreateSecret err = %v, want error %v", err, c.wantErr)
+			existed, err := kube.CreateSecret(context.Background(), secret)
+			if (err != nil) != c.wantErr || existed != c.wantExisted {
+				t.Fatalf("CreateSecret = existed %v, err %v; want existed %v, error %v", existed, err, c.wantExisted, c.wantErr)
 			}
 			fake.wantRequests(t, "POST "+kubeSecrets)
 			r := fake.requests()[0]
@@ -315,6 +318,57 @@ func TestCreateSecretTreatsAnExistingSecretAsReattached(t *testing.T) {
 			if name, _ := kubeDecode(t, r.Body)["metadata"].(map[string]any)["name"].(string); name != kubeJobName+"-env" {
 				t.Errorf("created Secret named %q", name)
 			}
+		})
+	}
+}
+
+// TestSetCloneTokenPatchesOnlyTheTokenKey (fix round 1, minor 7): the token
+// is written with a merge patch naming the clone's key alone, so the step's
+// secrets beside it stay as they are.
+func TestSetCloneTokenPatchesOnlyTheTokenKey(t *testing.T) {
+	const token = "ghs_fresh-token-0042"
+	path := kubeSecrets + "/" + kubeJobName + "-env"
+	kube, fake := newKubeFake(t, map[string]kubeAnswer{"PATCH " + path: kubeOK(200, map[string]any{"kind": "Secret"})})
+	if err := kube.SetCloneToken(context.Background(), kubeJobName+"-env", token); err != nil {
+		t.Fatalf("SetCloneToken: %v", err)
+	}
+	fake.wantRequests(t, "PATCH "+path)
+	r := fake.requests()[0]
+	if r.ContentType != "application/merge-patch+json" {
+		t.Errorf("content type = %q, want application/merge-patch+json", r.ContentType)
+	}
+	want := map[string]any{"data": map[string]any{"GIT_TOKEN": base64.StdEncoding.EncodeToString([]byte(token))}}
+	if got := kubeDecode(t, r.Body); !reflect.DeepEqual(got, want) {
+		t.Errorf("patch = %v\nwant    %v (the token, base64, under GIT_TOKEN alone)", got, want)
+	}
+}
+
+// TestSecretCloneTokenReadsTheTokenAlone (fix round 1, minor 8): the one value
+// of a Secret that leaves Kube; a Secret without one answers "", and an absent
+// Secret the API server's 404.
+func TestSecretCloneTokenReadsTheTokenAlone(t *testing.T) {
+	path := kubeSecrets + "/" + kubeJobName + "-env"
+	withToken := Secret{APIVersion: "v1", Kind: "Secret", Metadata: ObjectMeta{Name: kubeJobName + "-env"},
+		Data: map[string][]byte{"GIT_TOKEN": []byte("ghs_held-token-0007"), "NPM_TOKEN": []byte("npm_planted")}}
+	without := withToken
+	without.Data = map[string][]byte{"NPM_TOKEN": []byte("npm_planted")}
+	for _, c := range []struct {
+		name     string
+		answer   kubeAnswer
+		want     string
+		notFound bool
+	}{
+		{"a Secret holding a token", kubeOK(200, withToken), "ghs_held-token-0007", false},
+		{"a Secret of an anonymous clone", kubeOK(200, without), "", false},
+		{"no Secret", kubeStatus(404, "NotFound", `secrets "`+kubeJobName+`-env" not found`), "", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			kube, fake := newKubeFake(t, map[string]kubeAnswer{"GET " + path: c.answer})
+			got, err := kube.SecretCloneToken(context.Background(), kubeJobName+"-env")
+			if got != c.want || deploycontrol.IsNotFound(err) != c.notFound || (err != nil && !c.notFound) {
+				t.Errorf("SecretCloneToken = %q, %v; want %q, not found %v", got, err, c.want, c.notFound)
+			}
+			fake.wantRequests(t, "GET "+path)
 		})
 	}
 }
@@ -363,12 +417,15 @@ func TestKubeRefusesAnEmptyName(t *testing.T) {
 		{"DeleteJob", func(k *Kube) error { return k.DeleteJob(ctx, "") }},
 		{"DeleteSecret", func(k *Kube) error { return k.DeleteSecret(ctx, "") }},
 		{"OwnSecret", func(k *Kube) error { return k.OwnSecret(ctx, "", kubeJob("uid-9", "3", nil)) }},
+		{"SetCloneToken", func(k *Kube) error { return k.SetCloneToken(ctx, "", "ghs_fresh-token-0042") }},
+		{"SecretCloneToken", func(k *Kube) error { _, err := k.SecretCloneToken(ctx, ""); return err }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			kube, fake := newKubeFake(t, map[string]kubeAnswer{
 				"GET " + kubeJobs:       kubeOK(200, map[string]any{"kind": "JobList", "apiVersion": "batch/v1", "items": []Job{kubeJob("uid-1", "8", nil)}}),
 				"PATCH " + kubeJobs:     kubeOK(200, map[string]any{"kind": "Job"}),
 				"DELETE " + kubeJobs:    kubeOK(200, map[string]any{"kind": "JobList", "apiVersion": "batch/v1", "items": []Job{}}),
+				"GET " + kubeSecrets:    kubeOK(200, map[string]any{"kind": "SecretList", "apiVersion": "v1", "items": []Secret{}}),
 				"PATCH " + kubeSecrets:  kubeOK(200, map[string]any{"kind": "Secret"}),
 				"DELETE " + kubeSecrets: kubeOK(200, map[string]any{"kind": "SecretList", "apiVersion": "v1", "items": []Secret{}}),
 			})

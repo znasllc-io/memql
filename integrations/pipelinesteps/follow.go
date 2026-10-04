@@ -193,7 +193,7 @@ const (
 // follower). final says the step had ended when the stream was opened, so a
 // last line with no newline is all there is.
 func (f *follower) consume(r io.Reader, final bool) error {
-	lines := newLogLines(r, followLineMax, captureMaskForms(f.s.secrets))
+	lines := newLogLines(r, followLineMax, captureMaskForms(f.s.maskSecrets()))
 	opened := f.fed
 	var (
 		fate  lineFate

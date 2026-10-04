@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -109,6 +110,11 @@ const (
 	// apiTroubleRepeat is how often a polling loop logs an API error again
 	// while what it says has not changed (apiTrouble).
 	apiTroubleRepeat = 5 * time.Minute
+	// tokenRefreshAge is how old a clone token may be when the step's Job is
+	// created: an installation token lasts an hour, the step queues for as
+	// long as the ceiling is full, and the clone runs once the pod is placed
+	// and its images pulled (freshenToken).
+	tokenRefreshAge = 30 * time.Minute
 )
 
 // stepJobNameShape is what JobName produces. Status and Ack refuse any other
@@ -364,8 +370,16 @@ type step struct {
 	// it only waits on another runner.
 	capture     *Capture
 	archivePath string
-	// token is the clone token this Run minted: masked in the archive.
-	token         string
+	// token is the clone token this Run minted last, at tokenAt; the step's
+	// Secret holds it once tokenWritten.
+	token        string
+	tokenAt      time.Time
+	tokenWritten bool
+	// tokens is every clone token the step may have cloned with, as far as
+	// this Run knows: each one it minted, and the one the Secret held once
+	// this Run held the claim (tokenRead). All are masked.
+	tokens        []string
+	tokenRead     bool
 	claimFailures int
 	// ownedSecret: this Run made the Job its Secret's owner.
 	ownedSecret bool
@@ -373,7 +387,7 @@ type step struct {
 	// is this Run's own claim, whatever answer was lost.
 	claimSent string
 	// secrets is what the capture masks: every piece the follower cuts a
-	// line into is cut outside them.
+	// line into is cut outside them. Guarded by mu: the follower reads it.
 	secrets []string
 	// adopted: this Run took over a Job another Run had claimed; adoptedAt
 	// is the cursor it was left at -- the store has every line up to it.
@@ -526,22 +540,31 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 		// Nothing exists yet, and without a token nothing should.
 		return s.failed(pl.CodeCloneFailed, "the clone token could not be minted: "+err.Error()), Job{}, true
 	}
-	s.token = token
+	s.token, s.tokenAt = token, s.r.now()
+	s.maskToken(token)
 	if err := s.ensureCapture(); err != nil {
 		return s.failed(pl.CodeRunnerUnavailable, "this workbench node cannot open the step's log archive: "+err.Error()), Job{}, true
 	}
 
 	secret := BuildSecret(s.r.cfg, s.run, s.jobName, token)
-	if err := s.retryAPI(func() error { return s.r.kube.CreateSecret(s.ctx, secret) }); err != nil {
+	var existed bool
+	if err := s.retryAPI(func() (err error) {
+		existed, err = s.r.kube.CreateSecret(s.ctx, secret)
+		return err
+	}); err != nil {
 		if s.ctx.Err() != nil {
 			return s.abandon(nil), Job{}, true
 		}
 		code, why := createFailure("Secret", err)
 		return s.failed(code, why), Job{}, true
 	}
+	// A Secret an earlier Run of the step left holds that Run's token, of
+	// any age: freshenToken writes this Run's over it.
+	s.tokenWritten = !existed
 
 	waiting, attempts := false, 0
 	for {
+		s.freshenToken()
 		j, made, err := s.r.kube.CreateJob(s.ctx, spec)
 		switch {
 		case err == nil:
@@ -649,6 +672,7 @@ func (s *step) own(job Job, mine bool) (pl.StepResult, bool) {
 	hb := s.startHeartbeat()
 	defer hb.stop()
 	s.ownSecret(claimed)
+	s.readToken()
 	if adopted {
 		cursor := logCursor(claimed)
 		s.publishCursor(cursor)
@@ -839,10 +863,10 @@ func (s *step) ensureCapture() error {
 	}
 	// The one list the capture masks and the follower keeps its cuts out
 	// of (secretValues, the fleet path's too).
-	s.secrets = secretValues(s.run, s.token)
+	secrets := s.setSecrets()
 	o := CaptureOptions{
 		RunID: s.run.RunID, WorkRunID: s.run.WorkRunID, StepKey: s.run.StepKey,
-		Secrets:       s.secrets,
+		Secrets:       secrets,
 		StoreMaxLines: s.r.cfg.LogStoreMaxLines,
 		ArchiveMax:    s.r.cfg.ArchiveMaxBytes,
 		ArtifactMax:   s.r.cfg.ArtifactMaxBytes,
@@ -897,6 +921,101 @@ func (s *step) mintToken() (string, error) {
 		return "", errors.New("this workbench node has no token minter")
 	}
 	return s.r.tokens.CloneToken(s.ctx, s.run.InstallationID, s.run.Repository.Owner, s.run.Repository.Name)
+}
+
+// setSecrets makes the step's secret list the run's secrets and every token
+// in tokens, and returns it.
+func (s *step) setSecrets() []string {
+	secrets := secretValues(s.run, s.tokens...)
+	s.mu.Lock()
+	s.secrets = secrets
+	s.mu.Unlock()
+	return secrets
+}
+
+// maskSecrets is what the capture masks now.
+func (s *step) maskSecrets() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.secrets
+}
+
+// maskToken masks a clone token from now on: in the capture open now, and in
+// every one this Run opens after it.
+func (s *step) maskToken(token string) {
+	if token == "" || slices.Contains(s.tokens, token) {
+		return
+	}
+	s.tokens = append(s.tokens, token)
+	s.setSecrets()
+	if s.capture != nil {
+		s.capture.AddSecrets(token)
+	}
+}
+
+// freshenToken sees, before each try at creating the Job, that the step's
+// Secret holds a clone token young enough to clone with (fix round 1, minor
+// 7): a token is minted before a wait under the ceiling that can outlast it,
+// and a Secret an earlier Run of the step left holds that Run's token, of any
+// age. One older than tokenRefreshAge is minted again, and the Secret's token
+// key is rewritten whenever it does not hold this Run's latest. A failure is
+// logged and tried again before the next try: the token the Secret holds may
+// serve yet.
+func (s *step) freshenToken() {
+	if s.token == "" {
+		return // an anonymous clone
+	}
+	if s.r.now().Sub(s.tokenAt) >= tokenRefreshAge {
+		token, err := s.mintToken()
+		switch {
+		case err != nil:
+			if s.ctx.Err() == nil {
+				s.trouble.warn(s, "minting a fresh clone token for the step", err)
+			}
+		case token != "":
+			s.maskToken(token)
+			s.token, s.tokenAt, s.tokenWritten = token, s.r.now(), false
+		}
+	}
+	if s.tokenWritten {
+		return
+	}
+	err := s.retryAPI(func() error { return s.r.kube.SetCloneToken(s.ctx, SecretName(s.jobName), s.token) })
+	switch {
+	case err == nil:
+		s.tokenWritten = true
+	case s.ctx.Err() == nil:
+		s.trouble.warn(s, "writing the clone token into the step's Secret", err)
+	}
+}
+
+// readToken masks the clone token the step's Secret holds, read once this Run
+// holds the claim and before anything the clone printed -- its tail, a
+// failure's message -- is masked (fix round 1, minor 8). An adopter minted no
+// token, and the Secret holds the one the clone ran with whoever wrote it:
+// the Run that created the Job, an earlier Run whose Secret was reused, or
+// one that raced this Run under the ceiling and freshened it last. A token is
+// written only before a try at creating the Job, so the Secret's settles once
+// the Job exists. Read once; a Secret that is gone, or holds no token, leaves
+// the mask without one.
+func (s *step) readToken() {
+	if s.tokenRead {
+		return
+	}
+	var token string
+	err := s.retryAPI(func() (err error) {
+		token, err = s.r.kube.SecretCloneToken(s.ctx, SecretName(s.jobName))
+		return err
+	})
+	switch {
+	case err == nil:
+		s.tokenRead = true
+		s.maskToken(token)
+	case deploycontrol.IsNotFound(err):
+		s.tokenRead = true
+	case s.ctx.Err() == nil:
+		s.log.Warn("pipelines: the clone token in the step's Secret could not be read, so what the clone printed is masked without it", "error", err)
+	}
 }
 
 // holdsClaim reads the Job and says this replica still holds it: the claim on

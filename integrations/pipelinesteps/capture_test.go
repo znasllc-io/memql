@@ -740,6 +740,29 @@ func TestCaptureMaskCleansLikeOutput(t *testing.T) {
 	}
 }
 
+// TestCaptureAddSecretsMasksFromThenOn (fix round 1, minors 7 and 8): a secret
+// the runner learns after the capture opened -- a clone token minted again, or
+// read from an adopted step's Secret -- is masked in every line after it and
+// in Mask, beside the ones the capture opened with.
+func TestCaptureAddSecretsMasksFromThenOn(t *testing.T) {
+	c, sink := newCaptureForTest(t, CaptureOptions{Secrets: []string{"opensesame"}})
+	c.Feed(captureKubeLine(captureTestClock, "before: ghs_learned-later opensesame"))
+	c.AddSecrets("ghs_learned-later")
+	c.Feed(captureKubeLine(captureTestClock, "after: ghs_learned-later opensesame"))
+	res := closeCaptureForTest(t, c)
+
+	want := []string{"before: ghs_learned-later ***", "after: *** ***"}
+	if got := sink.messages(); !reflect.DeepEqual(got, want) {
+		t.Errorf("store = %q, want %q", got, want)
+	}
+	if got := c.Mask("quoted ghs_learned-later"); got != "quoted ***" {
+		t.Errorf("Mask = %q, want the secret added masked", got)
+	}
+	if archive := readArchiveForTest(t, res); archive != strings.Join(want, "\n")+"\n" {
+		t.Errorf("archive = %q, want %q", archive, want)
+	}
+}
+
 // TestCaptureFeedArchivedIsOutputTheStoreHasAlready (ruling R36): an adopter
 // replays the lines its step printed before the adoption cursor so the
 // archive is whole. They are the step's output -- masked, archived, in the

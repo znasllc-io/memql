@@ -85,17 +85,19 @@ func wantsGoTimings(step pl.Step) bool {
 }
 
 // secretValues is every value a step's output must be masked for: the
-// resolved secrets and, when there is one, the clone token. Sorted, blanks
+// resolved secrets and each clone token it may have run with. Sorted, blanks
 // dropped.
-func secretValues(run StepRun, token string) []string {
-	out := make([]string, 0, len(run.Secrets)+1)
+func secretValues(run StepRun, tokens ...string) []string {
+	out := make([]string, 0, len(run.Secrets)+len(tokens))
 	for _, v := range run.Secrets {
 		if v != "" {
 			out = append(out, v)
 		}
 	}
-	if token != "" {
-		out = append(out, token)
+	for _, token := range tokens {
+		if token != "" {
+			out = append(out, token)
+		}
 	}
 	sort.Strings(out)
 	return out

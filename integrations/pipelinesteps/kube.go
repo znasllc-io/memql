@@ -33,9 +33,10 @@ import (
 //     leave the step running with its Job gone.
 //   - Gone is done. Deleting what is already absent succeeds: a retry, a
 //     second replica and the Job's TTL all delete the same objects.
-//   - A Secret's values never leave this file. The API answers a create, a
-//     patch and a delete of Secrets with the Secrets themselves, values
-//     included, and those answers are dropped unread.
+//   - A Secret's values never leave this file, but for one: the clone token
+//     SecretCloneToken reads, for the runner to mask. The API answers a
+//     create, a patch and a delete of Secrets with the Secrets themselves,
+//     values included, and those answers are dropped unread.
 type Kube struct {
 	api *deploycontrol.ClusterAPI
 	ns  string
@@ -70,18 +71,62 @@ var ErrContainerNotStarted = errors.New("pipelinesteps: the container has not st
 // have, a malformed parameter -- is the caller's mistake and stays one.
 var containerNoLog = regexp.MustCompile(`^container "[^"]*" in pod "[^"]*" is (waiting to start|not available|terminated)`)
 
-// CreateSecret creates the step's Secret. One that already exists is this
-// step's -- its name is derived from the Job's -- left by an earlier attempt of
-// the same step, and is used as it is.
-func (k *Kube) CreateSecret(ctx context.Context, s Secret) error {
+// CreateSecret creates the step's Secret; existed says it was there already.
+// One that exists is this step's -- its name is derived from the Job's -- left
+// by an earlier Run of the same step: it is used as it is, but for the clone
+// token it holds, which is that Run's and of any age (SetCloneToken).
+func (k *Kube) CreateSecret(ctx context.Context, s Secret) (existed bool, err error) {
 	body, err := json.Marshal(s)
 	if err != nil {
-		return fmt.Errorf("pipelinesteps: encoding secret %s: %w", s.Metadata.Name, err)
+		return false, fmt.Errorf("pipelinesteps: encoding secret %s: %w", s.Metadata.Name, err)
 	}
-	if _, err := k.api.Do(ctx, http.MethodPost, k.corePath("secrets", ""), contentJSON, body); err != nil && !deploycontrol.IsConflict(err) {
+	_, err = k.api.Do(ctx, http.MethodPost, k.corePath("secrets", ""), contentJSON, body)
+	if deploycontrol.IsConflict(err) {
+		return true, nil
+	}
+	return false, err
+}
+
+// SetCloneToken writes token into the step's Secret under the clone's key,
+// with a merge patch that leaves every other key as it is.
+func (k *Kube) SetCloneToken(ctx context.Context, secretName, token string) error {
+	if err := named("secret", secretName); err != nil {
 		return err
 	}
-	return nil
+	patch, err := json.Marshal(map[string]any{"data": map[string][]byte{gitTokenKey: []byte(token)}})
+	if err != nil {
+		return fmt.Errorf("pipelinesteps: encoding the clone token of secret %s: %w", secretName, err)
+	}
+	_, err = k.api.Do(ctx, http.MethodPatch, k.corePath("secrets", secretName), contentMergePatch, patch)
+	return err
+}
+
+// SecretCloneToken is the clone token the step's Secret holds, "" for none: the
+// runner masks it in what the clone printed. The Secret's other values are
+// never decoded. An absent Secret is the API server's 404.
+func (k *Kube) SecretCloneToken(ctx context.Context, secretName string) (string, error) {
+	if err := named("secret", secretName); err != nil {
+		return "", err
+	}
+	out, err := k.api.Do(ctx, http.MethodGet, k.corePath("secrets", secretName), "", nil)
+	if err != nil {
+		return "", err
+	}
+	var secret struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(out, &secret); err != nil {
+		return "", fmt.Errorf("pipelinesteps: reading secret %s: %w", secretName, err)
+	}
+	raw, ok := secret.Data[gitTokenKey]
+	if !ok {
+		return "", nil
+	}
+	var token []byte
+	if err := json.Unmarshal(raw, &token); err != nil {
+		return "", fmt.Errorf("pipelinesteps: reading the clone token of secret %s: %w", secretName, err)
+	}
+	return string(token), nil
 }
 
 // OwnSecret makes the Job its Secret's owner, so that collecting the Job --

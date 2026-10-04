@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -164,7 +165,10 @@ type Capture struct {
 	sink                      LineSink
 	bucket                    *captureBucket
 	now                       func() time.Time
-	mask                      *strings.Replacer // nil: nothing to mask
+	// mask is swapped whole when AddSecrets adds to secrets, so it is read
+	// without the lock; nil: nothing to mask.
+	mask    atomic.Pointer[strings.Replacer]
+	secrets []string
 
 	lines       int
 	storeLines  int
@@ -239,11 +243,12 @@ func newCapture(o CaptureOptions, now func() time.Time, bucket *captureBucket) (
 		sink:        o.Sink,
 		bucket:      bucket,
 		now:         now,
-		mask:        captureMasker(o.Secrets),
+		secrets:     append([]string(nil), o.Secrets...),
 		archivePath: o.ArchivePath,
 		archiveFile: f,
 		archive:     bufio.NewWriterSize(f, 64<<10),
 	}
+	c.mask.Store(captureMasker(c.secrets))
 	if o.Marker != "" {
 		c.frameBegin = o.Marker + " begin"
 		c.frameEnd = o.Marker + " end"
@@ -369,9 +374,18 @@ func (c *Capture) Notice(text string) {
 // of a tar entry it refused, quoted in a note -- and works before and after
 // Close.
 func (c *Capture) Mask(s string) string {
-	// c.mask is set once by newCapture and never written again, so it is
-	// read without the lock.
 	return c.clean(s)
+}
+
+// AddSecrets masks values too, in every line from now on and in Mask: a
+// secret the step's runner learned after the capture opened -- a clone token
+// minted again while the step waited under the ceiling, or read from the
+// Secret of a step the runner adopted.
+func (c *Capture) AddSecrets(values ...string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.secrets = append(c.secrets, values...)
+	c.mask.Store(captureMasker(c.secrets))
 }
 
 // Close finishes the capture: the archive's truncation line when it was
@@ -570,8 +584,8 @@ func captureTail(pieces []string, budget int) string {
 // replaced, secrets masked.
 func (c *Capture) clean(s string) string {
 	s = captureRepair(s)
-	if c.mask != nil {
-		s = c.mask.Replace(s)
+	if m := c.mask.Load(); m != nil {
+		s = m.Replace(s)
 	}
 	return s
 }

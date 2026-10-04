@@ -347,8 +347,10 @@ func (c *rtCluster) serve(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(p, kubeSecrets+"/"):
 		name := strings.TrimPrefix(p, kubeSecrets+"/")
 		switch r.Method {
+		case http.MethodGet:
+			c.getSecret(w, name)
 		case http.MethodPatch:
-			c.ownSecret(w, name, body)
+			c.patchSecret(w, name, body)
 		case http.MethodDelete:
 			c.deleteSecret(w, name, q)
 		default:
@@ -558,11 +560,24 @@ func (c *rtCluster) createSecret(w http.ResponseWriter, body []byte) {
 	rtJSON(w, 201, s)
 }
 
-func (c *rtCluster) ownSecret(w http.ResponseWriter, name string, body []byte) {
+func (c *rtCluster) getSecret(w http.ResponseWriter, name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s, ok := c.secrets[name]
+	if !ok {
+		rtAnswer(w, kubeStatus(404, "NotFound", fmt.Sprintf(`secrets %q not found`, name)))
+		return
+	}
+	rtJSON(w, 200, s)
+}
+
+// patchSecret applies a merge patch of a Secret's owners or of its data.
+func (c *rtCluster) patchSecret(w http.ResponseWriter, name string, body []byte) {
 	var patch struct {
 		Metadata struct {
 			OwnerReferences []OwnerReference `json:"ownerReferences"`
 		} `json:"metadata"`
+		Data map[string][]byte `json:"data"`
 	}
 	if err := json.Unmarshal(body, &patch); err != nil {
 		c.t.Errorf("a Secret patch that is not a merge patch: %v", err)
@@ -574,7 +589,21 @@ func (c *rtCluster) ownSecret(w http.ResponseWriter, name string, body []byte) {
 		rtAnswer(w, kubeStatus(404, "NotFound", fmt.Sprintf(`secrets %q not found`, name)))
 		return
 	}
-	s.Metadata.OwnerReferences = patch.Metadata.OwnerReferences
+	if patch.Metadata.OwnerReferences != nil {
+		s.Metadata.OwnerReferences = patch.Metadata.OwnerReferences
+	}
+	if len(patch.Data) > 0 {
+		data := make(map[string][]byte, len(s.Data)+len(patch.Data))
+		for k, v := range s.Data {
+			data[k] = v
+		}
+		for k, v := range patch.Data {
+			data[k] = v
+		}
+		s.Data = data
+	}
+	c.rv++
+	s.Metadata.ResourceVersion = strconv.Itoa(c.rv)
 	c.secrets[name] = s
 	rtJSON(w, 200, s)
 }
@@ -987,10 +1016,11 @@ func (l *rtLibrary) stored() []RunFile {
 	return append([]RunFile(nil), l.files...)
 }
 
-// rtTokens mints the clone token.
+// rtTokens mints the clone token: token, or the next of seq while it lasts.
 type rtTokens struct {
 	mu    sync.Mutex
 	token string
+	seq   []string
 	err   error
 	calls []string
 }
@@ -999,6 +1029,11 @@ func (m *rtTokens) CloneToken(_ context.Context, installationID int64, owner, na
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, fmt.Sprintf("%d %s/%s", installationID, owner, name))
+	if len(m.seq) > 0 {
+		token := m.seq[0]
+		m.seq = m.seq[1:]
+		return token, m.err
+	}
 	return m.token, m.err
 }
 
@@ -2548,6 +2583,140 @@ func TestRunnerReportsWhatTheAPIServerRefuses(t *testing.T) {
 			h.leftNoArchive(t)
 		})
 	}
+}
+
+// TestRunnerFreshensACloneTokenThatAgedInTheQueue (fix round 1, minor 7): the
+// token is minted before the wait under the ceiling, which can outlast it. One
+// older than tokenRefreshAge when the Job is finally created is minted again
+// and written into the Secret first -- and masked like the first.
+func TestRunnerFreshensACloneTokenThatAgedInTheQueue(t *testing.T) {
+	const first, second = "ghs_first-token-0001", "ghs_second-token-0002"
+	h := newRunnerHarness(t)
+	h.tokens.seq = []string{first, second}
+	h.c.with(func(c *rtCluster) { c.quotaRefusals = 1 << 30 })
+	script := rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "done"))
+	script.tails = map[string]string{ContainerClone: "fetching with " + second + "\n" + rtCloneTail}
+	h.c.script(testJobName, script)
+	done := h.start(context.Background(), rtRun())
+	rtWaitUntil(t, "a refused create", func() bool { return len(h.c.requestsFor(http.MethodPost, kubeJobs)) >= 1 })
+	h.clock.Advance(tokenRefreshAge + time.Minute)
+	h.c.with(func(c *rtCluster) { c.quotaRefusals = 0 })
+
+	res := h.await(t, done)
+
+	if res.Status != pl.OutcomeSucceeded {
+		t.Fatalf("result = %+v (failure %+v), want success", res, res.Failure)
+	}
+	if got := h.tokens.called(); len(got) != 2 {
+		t.Errorf("%d tokens minted, want the first and one more once it had aged", len(got))
+	}
+	if got := string(h.c.secretNow(t, testSecretName).Data[gitTokenKey]); got != second {
+		t.Errorf("the Secret holds %q, want the token minted again", got)
+	}
+	// Written before the create that was admitted, so the clone has it.
+	var written, admitted int
+	for i, r := range h.c.requests() {
+		switch {
+		case r.Method == http.MethodPatch && r.Path == kubeSecrets+"/"+testSecretName && strings.Contains(r.Body, `"data"`):
+			written = i
+		case r.Method == http.MethodPost && r.Path == kubeJobs:
+			admitted = i
+		}
+	}
+	if written == 0 || written > admitted {
+		t.Errorf("the token was written at request %d and the Job admitted at %d: the clone must find the fresh one", written, admitted)
+	}
+	if archive := string(h.file(t, "tests-go-tests-2.log").Bytes); strings.Contains(archive, second) || !strings.Contains(archive, "fetching with ***") {
+		t.Errorf("archive = %q, want the fresh token masked in the clone's output", archive)
+	}
+}
+
+// TestRunnerWritesItsTokenOverAReusedSecret (fix round 1, minor 7): a Secret an
+// earlier Run of the step left holds that Run's token, of any age. The Run
+// writes its own over it before creating the Job, and leaves the step's
+// secrets beside it as they are.
+func TestRunnerWritesItsTokenOverAReusedSecret(t *testing.T) {
+	h := newRunnerHarness(t)
+	h.c.putSecret(BuildSecret(h.cfg, rtRun(), testJobName, "ghs_left-by-an-earlier-run"))
+	h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "done")))
+
+	res := h.run(t, rtRun())
+
+	if res.Status != pl.OutcomeSucceeded {
+		t.Fatalf("result = %+v (failure %+v), want success", res, res.Failure)
+	}
+	secret := h.c.secretNow(t, testSecretName)
+	if got := string(secret.Data[gitTokenKey]); got != rtCloneToken {
+		t.Errorf("the Secret holds %q, want this Run's token written over the earlier one", got)
+	}
+	if string(secret.Data["NPM_TOKEN"]) != plantedNPM {
+		t.Errorf("the Secret holds %q, want the step's secrets kept", keysOf(secret.Data))
+	}
+}
+
+// TestRunnerMasksTheTokenTheSecretHolds (fix round 1, minor 8): a Run that
+// adopts a step minted no token; the clone ran with the creator's, which the
+// step's Secret holds. It is read before anything the clone printed is masked:
+// the clone's tail in the archive, and a failure's message.
+func TestRunnerMasksTheTokenTheSecretHolds(t *testing.T) {
+	const creators = "ghs_creators-token-0099"
+	stale := map[string]string{AnnotRunner: rtStamp(rtOther, rtT0.Add(-time.Minute))}
+
+	t.Run("in the clone's output", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		run := rtRun()
+		h.c.putSecret(BuildSecret(h.cfg, run, testJobName, creators))
+		script := rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "done"))
+		script.tails = map[string]string{ContainerClone: "fetching with " + creators + "\n" + rtCloneTail}
+		h.c.putJob(h.existingJob(t, run, stale), script)
+
+		res := h.run(t, run)
+
+		if res.Status != pl.OutcomeSucceeded {
+			t.Fatalf("result = %+v (failure %+v), want success", res, res.Failure)
+		}
+		if len(h.tokens.called()) != 0 {
+			t.Error("an adopter minted a clone token")
+		}
+		if archive := string(h.file(t, "tests-go-tests-2.log").Bytes); strings.Contains(archive, creators) || !strings.Contains(archive, "fetching with ***") {
+			t.Errorf("archive = %q, want the creator's token masked in the clone's output", archive)
+		}
+	})
+
+	t.Run("in a failure's message", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		run := rtRun()
+		h.c.putSecret(BuildSecret(h.cfg, run, testJobName, creators))
+		clone := clsTerminated(ContainerClone, 128, "Error", "fatal: could not read from https://x-access-token:"+creators+"@github.com", rtAt(2000))
+		waiting := ContainerStatus{Name: ContainerStep, State: ContainerState{Waiting: &ContainerStateWaiting{Reason: "PodInitializing"}}}
+		h.c.putJob(h.existingJob(t, run, stale), &rtScript{
+			states: []rtState{{pod: rtPod(testJobName, waiting, clone)}},
+			tails:  map[string]string{ContainerClone: "fatal: could not read from https://x-access-token:" + creators + "@github.com\n"},
+		})
+
+		res := h.run(t, run)
+
+		rtWantCode(t, res, pl.OutcomeFailed, pl.CodeCloneFailed)
+		if strings.Contains(res.Failure.Message, creators) || !strings.Contains(res.Failure.Message, "x-access-token:***@") {
+			t.Errorf("failure %q, want the creator's token masked", res.Failure.Message)
+		}
+		recorded := h.c.jobNow(t, testJobName).Metadata.Annotations[AnnotObservation]
+		if recorded == "" || strings.Contains(recorded, creators) {
+			t.Errorf("observation recorded on the Job = %q, want one, with the token masked", recorded)
+		}
+	})
+
+	t.Run("a Secret that is gone leaves the mask without it", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		run := rtRun()
+		h.c.putJob(h.existingJob(t, run, stale), rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "done")))
+
+		res := h.run(t, run)
+
+		if res.Status != pl.OutcomeSucceeded || res.Notes != nil {
+			t.Fatalf("result = %+v (failure %+v), want a plain success", res, res.Failure)
+		}
+	})
 }
 
 // TestRunnerKeepsAskingForAJobItHasSeen (fix round 1, minor 5): once a Run
