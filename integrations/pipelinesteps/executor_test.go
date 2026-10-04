@@ -1,0 +1,1001 @@
+package pipelinesteps
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/node"
+	nodev1 "github.com/znasllc-io/memql/component/node/gen"
+	pl "github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/integrations/workbench"
+)
+
+// executor_test.go -- the agent's executor against a scripted workbench
+// (epic memql#5478, #5493). Each test scripts what the workbench side
+// answers; executor_hop_test.go runs the same executor against real forward
+// handlers on two replicas.
+
+// exNow is the executor's clock in these tests. Timers run in real time; the
+// clock only decides how much of the run's ceiling is left.
+var exNow = time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+
+const exAgent = "agent-a"
+
+// exRequest is a cluster step of a run that started ten minutes before exNow.
+func exRequest() pl.StepRequest {
+	req := testRequest()
+	req.RunStartedAt = exNow.Add(-10 * time.Minute).Format(time.RFC3339)
+	return req
+}
+
+func exConfig() Config {
+	cfg := testConfig()
+	cfg.RunCeiling = 120 * time.Minute
+	cfg.DefaultStepTimeout = 20 * time.Minute
+	cfg.HeartbeatStale = 45 * time.Second
+	return cfg
+}
+
+func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+// newTestExecutor is an executor on the fixed clock, with every interval
+// small enough for a test and the give-up far enough away that only a test
+// about it reaches it.
+func newTestExecutor(fwd Forwarder, fleet FleetRouter) *Executor {
+	e := NewExecutor(exConfig(), fwd, fleet, quietLogger())
+	e.now = func() time.Time { return exNow }
+	e.statusEvery = 20 * time.Millisecond
+	e.peerWatch = 5 * time.Millisecond
+	e.lostGrace = time.Hour
+	e.noPeerWait = 5 * time.Millisecond
+	e.noPeerPatience = time.Hour
+	e.callTimeout = 2 * time.Second
+	// Longer than a status interval: a stale reading right after a
+	// re-forward is the adoption still on its way (see the test that pins it).
+	e.stalePatience = 50 * time.Millisecond
+	return e
+}
+
+// exForward is one request the scripted workbench was sent.
+type exForward struct {
+	req     *nodev1.WorkbenchForwardRequest
+	pin     string
+	watched bool
+	// ended is closed when the forward stopped waiting because its context
+	// ended -- the moment a real router sends WorkbenchForwardCancel.
+	ended chan struct{}
+}
+
+// scriptedWorkbench is a Forwarder whose answers the test writes. A step
+// forward with no script waits until its context ends, as a real one does
+// when its reply is lost.
+type scriptedWorkbench struct {
+	mu       sync.Mutex
+	forwards []*exForward
+
+	step   func(n int, f *exForward) (*nodev1.WorkbenchForwardResponse, string, error)
+	status func(n int, f *exForward) (*nodev1.WorkbenchForwardResponse, string, error)
+	ack    func(f *exForward) (*nodev1.WorkbenchForwardResponse, string, error)
+	cancel func(n int, f *exForward) (*nodev1.WorkbenchForwardResponse, string, error)
+
+	steps, statuses, cancels int
+}
+
+func (w *scriptedWorkbench) SelfNodeId() string   { return exAgent }
+func (w *scriptedWorkbench) SelfNodeType() string { return "agent" }
+
+func (w *scriptedWorkbench) ForwardWatched(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin string, _ time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
+	return w.forward(ctx, req, pin, true)
+}
+
+func (w *scriptedWorkbench) Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin string) (*nodev1.WorkbenchForwardResponse, string, error) {
+	return w.forward(ctx, req, pin, false)
+}
+
+func (w *scriptedWorkbench) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin string, watched bool) (*nodev1.WorkbenchForwardResponse, string, error) {
+	f := &exForward{req: req, pin: pin, watched: watched, ended: make(chan struct{})}
+	w.mu.Lock()
+	w.forwards = append(w.forwards, f)
+	var script func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error)
+	n := 0
+	switch req.GetAction() {
+	case workbench.PipelineStepAction:
+		w.steps++
+		n, script = w.steps, w.step
+	case workbench.PipelineStatusAction:
+		w.statuses++
+		n, script = w.statuses, w.status
+	case workbench.PipelineAckAction:
+		if w.ack != nil {
+			script = func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) { return w.ack(f) }
+		}
+	case workbench.PipelineCancelAction:
+		w.cancels++
+		n, script = w.cancels, w.cancel
+	}
+	w.mu.Unlock()
+
+	if script != nil {
+		if resp, servedBy, err := script(n, f); resp != nil || err != nil {
+			return resp, servedBy, err
+		}
+	}
+	if req.GetAction() != workbench.PipelineStepAction {
+		// Status, ack and cancel answer at once unless scripted otherwise.
+		return &nodev1.WorkbenchForwardResponse{RequestId: req.GetRequestId(), PayloadJson: defaultReply(req.GetAction())}, "workbench-a", nil
+	}
+	<-ctx.Done()
+	close(f.ended)
+	return nil, "workbench-a", ctx.Err()
+}
+
+func defaultReply(action string) []byte {
+	switch action {
+	case workbench.PipelineStatusAction:
+		return mustMarshal(StatusReply{State: StateRunning})
+	case workbench.PipelineCancelAction:
+		return []byte(`{"jobsDeleted":1}`)
+	}
+	return nil
+}
+
+func mustMarshal(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+// sent returns the forwards of one action, in order.
+func (w *scriptedWorkbench) sent(action string) []*exForward {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var out []*exForward
+	for _, f := range w.forwards {
+		if f.req.GetAction() == action {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func outcomeResponse(res pl.StepResult) *nodev1.WorkbenchForwardResponse {
+	return &nodev1.WorkbenchForwardResponse{PayloadJson: mustMarshal(res)}
+}
+
+func finishedResponse(res pl.StepResult) *nodev1.WorkbenchForwardResponse {
+	return &nodev1.WorkbenchForwardResponse{PayloadJson: mustMarshal(StatusReply{State: StateFinished, Result: &res})}
+}
+
+func stateResponse(state string) *nodev1.WorkbenchForwardResponse {
+	return &nodev1.WorkbenchForwardResponse{PayloadJson: mustMarshal(StatusReply{State: state})}
+}
+
+// exOutcome is what the runner answers for a step that passed.
+func exOutcome(node string) pl.StepResult {
+	return pl.StepResult{
+		Status:     pl.OutcomeSucceeded,
+		ExitCode:   0,
+		StartedAt:  "2026-10-04T12:00:05Z",
+		FinishedAt: "2026-10-04T12:03:05Z",
+		Where:      pl.Where{Surface: "cluster", NodeID: node, JobName: JobName("run-7f3a", "tests.go-tests#2", 2)},
+		LogFileID:  "file-log",
+		LogLines:   12,
+	}
+}
+
+// stepRunOf decodes the StepRun a step forward carries.
+func stepRunOf(t *testing.T, f *exForward) StepRun {
+	t.Helper()
+	var run StepRun
+	if err := json.Unmarshal(f.req.GetArgsJson(), &run); err != nil {
+		t.Fatalf("the step forward's args are not a StepRun: %v (%s)", err, f.req.GetArgsJson())
+	}
+	return run
+}
+
+func awaitCond(t *testing.T, cond func() bool, failure string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal(failure)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// executeAsync runs Execute on its own goroutine.
+func executeAsync(e *Executor, ctx context.Context, req pl.StepRequest) <-chan pl.StepResult {
+	out := make(chan pl.StepResult, 1)
+	go func() {
+		res, err := e.Execute(ctx, req)
+		if err != nil {
+			res = pl.StepResult{Status: "error: " + pl.Outcome(err.Error())}
+		}
+		out <- res
+	}()
+	return out
+}
+
+func awaitResult(t *testing.T, ch <-chan pl.StepResult, what string) pl.StepResult {
+	t.Helper()
+	select {
+	case res := <-ch:
+		return res
+	case <-time.After(5 * time.Second):
+		t.Fatalf("Execute did not return: %s", what)
+		return pl.StepResult{}
+	}
+}
+
+// fakeFleet records the steps handed to the fleet.
+type fakeFleet struct {
+	mu    sync.Mutex
+	calls []StepRun
+	// block, when set, parks RunStep until its context ends.
+	block bool
+}
+
+func (f *fakeFleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (pl.StepResult, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, run)
+	block := f.block
+	f.mu.Unlock()
+	if block {
+		<-ctx.Done()
+		return pl.StepResult{Status: pl.OutcomeCancelled, ExitCode: -1,
+			Failure: &pl.Failure{Code: pl.CodeStepCancelled, Message: "cancelled"}}, nil
+	}
+	return pl.StepResult{Status: pl.OutcomeSucceeded, Where: pl.Where{Surface: "fleet", WorkerID: "machine-1"}}, nil
+}
+
+func (f *fakeFleet) runs() []StepRun {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]StepRun(nil), f.calls...)
+}
+
+func wantFailure(t *testing.T, res pl.StepResult, status pl.Outcome, code string) {
+	t.Helper()
+	if res.Status != status || res.Failure == nil || res.Failure.Code != code {
+		t.Fatalf("result = %+v (failure %+v), want %s with %s", res, res.Failure, status, code)
+	}
+	if strings.TrimSpace(res.Failure.Message) == "" {
+		t.Errorf("the %s failure has no sentence; the check run shows it to a person", code)
+	}
+	if res.ExitCode != -1 {
+		t.Errorf("ExitCode = %d, want -1: the step's command never reported", res.ExitCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Refusals and the deadline
+// ---------------------------------------------------------------------------
+
+// TestExecuteRefusesAnUnknownNeedAndAnUnconsentedFleetStep: the executor never
+// routes on a name it does not know, never sends a step to a laptop its
+// pipeline did not consent to, and runs command steps only.
+func TestExecuteRefusesAnUnknownNeedAndAnUnconsentedFleetStep(t *testing.T) {
+	cases := []struct {
+		name    string
+		edit    func(*pl.StepRequest)
+		outcome pl.Outcome
+		code    string
+	}{
+		{"a need outside the closed set", func(r *pl.StepRequest) {
+			r.Compute, r.Step.Needs = pl.ComputeClusterAndFleet, []string{"docker", "teleporter"}
+		}, pl.OutcomeRefused, pl.CodeNeedUnknown},
+		{"a need on a cluster-only pipeline", func(r *pl.StepRequest) {
+			r.Compute, r.Step.Needs = pl.ComputeCluster, []string{"docker"}
+		}, pl.OutcomeRefused, pl.CodeFleetNotConsented},
+		{"a need where compute is absent, which means cluster", func(r *pl.StepRequest) {
+			r.Compute, r.Step.Needs = "", []string{"gpu"}
+		}, pl.OutcomeRefused, pl.CodeFleetNotConsented},
+		{"a notify step, which is the driver's", func(r *pl.StepRequest) {
+			r.Step.Kind, r.Step.Run, r.Step.Channel = pl.StepNotify, "", "znas-instance"
+		}, pl.OutcomeRefused, pl.CodeExecutorError},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			wb := &scriptedWorkbench{}
+			fleet := &fakeFleet{}
+			e := newTestExecutor(wb, fleet)
+			req := exRequest()
+			c.edit(&req)
+
+			res, err := e.Execute(context.Background(), req)
+			if err != nil {
+				t.Fatalf("Execute: %v -- a refusal is a typed outcome, not an executor error", err)
+			}
+			wantFailure(t, res, c.outcome, c.code)
+			if n := len(wb.sent(workbench.PipelineStepAction)) + len(fleet.runs()); n != 0 {
+				t.Fatalf("a refused step was handed on (%d time(s)): to the workbench %d, to the fleet %d",
+					n, len(wb.sent(workbench.PipelineStepAction)), len(fleet.runs()))
+			}
+		})
+	}
+
+	// THE REACHABLE POSITIVES, so each refusal above is about its own rule:
+	// the same need on a consenting pipeline goes to the fleet, and a step with
+	// no need goes to the workbench.
+	t.Run("a known need on a consenting pipeline goes to the fleet", func(t *testing.T) {
+		wb := &scriptedWorkbench{}
+		fleet := &fakeFleet{}
+		e := newTestExecutor(wb, fleet)
+		req := exRequest()
+		req.Compute, req.Step.Needs = pl.ComputeClusterAndFleet, []string{"docker"}
+		res, err := e.Execute(context.Background(), req)
+		if err != nil || res.Status != pl.OutcomeSucceeded {
+			t.Fatalf("Execute = %+v, %v; want the fleet's success", res, err)
+		}
+		if runs := fleet.runs(); len(runs) != 1 || runs[0].StepKey != req.StepKey {
+			t.Fatalf("fleet runs = %v, want the step once", runs)
+		}
+		if n := len(wb.sent(workbench.PipelineStepAction)); n != 0 {
+			t.Fatalf("a fleet step was also forwarded to the workbench %d time(s)", n)
+		}
+	})
+	t.Run("a step with no need goes to the workbench", func(t *testing.T) {
+		wb := &scriptedWorkbench{step: func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+			return outcomeResponse(exOutcome("workbench-a")), "workbench-a", nil
+		}}
+		fleet := &fakeFleet{}
+		e := newTestExecutor(wb, fleet)
+		req := exRequest()
+		req.Compute = pl.ComputeClusterAndFleet
+		res, err := e.Execute(context.Background(), req)
+		if err != nil || res.Status != pl.OutcomeSucceeded {
+			t.Fatalf("Execute = %+v, %v; want the workbench's success", res, err)
+		}
+		if len(fleet.runs()) != 0 {
+			t.Fatal("a step with no need went to the fleet")
+		}
+	})
+}
+
+// TestExecuteRefusesPastTheRunCeiling: once the run's wall-clock ceiling has
+// passed, a step fails pipeline_run_ceiling without a Job -- and so does one
+// that would be given less than a second, which no Job deadline can express.
+func TestExecuteRefusesPastTheRunCeiling(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		started time.Time
+	}{
+		{"a minute past the ceiling", exNow.Add(-121 * time.Minute)},
+		{"exactly at the ceiling", exNow.Add(-120 * time.Minute)},
+		{"under a second before it", exNow.Add(-120 * time.Minute).Add(500 * time.Millisecond)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			wb := &scriptedWorkbench{}
+			fleet := &fakeFleet{}
+			e := newTestExecutor(wb, fleet)
+			req := exRequest()
+			req.RunStartedAt = c.started.Format(time.RFC3339Nano)
+			res, err := e.Execute(context.Background(), req)
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			wantFailure(t, res, pl.OutcomeFailed, pl.CodeRunCeiling)
+			if len(wb.forwards) != 0 || len(fleet.runs()) != 0 {
+				t.Fatal("a step past the run's ceiling was handed on; it must fail without a Job")
+			}
+		})
+	}
+
+	t.Run("a run start the executor cannot read is not an unbounded run", func(t *testing.T) {
+		wb := &scriptedWorkbench{}
+		e := newTestExecutor(wb, &fakeFleet{})
+		req := exRequest()
+		req.RunStartedAt = "yesterday"
+		res, err := e.Execute(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		wantFailure(t, res, pl.OutcomeFailed, pl.CodeExecutorError)
+		if len(wb.forwards) != 0 {
+			t.Fatal("a step whose ceiling cannot be computed was forwarded")
+		}
+	})
+}
+
+// TestExecuteNamesTheBindingDeadline: the effective timeout is the lesser of
+// the step's own and what is left of the run's ceiling, and DeadlineCode
+// names whichever bound it is -- the code the step fails with when it passes.
+func TestExecuteNamesTheBindingDeadline(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		started     time.Duration // before exNow
+		stepTimeout int
+		needs       []string
+		wantSeconds int
+		wantCode    string
+	}{
+		{"the step's own timeout binds", 10 * time.Minute, 900, nil, 900, pl.CodeStepTimeout},
+		{"the run's ceiling binds", 110 * time.Minute, 900, nil, 600, pl.CodeRunCeiling},
+		{"a step with no timeout gets the default", 10 * time.Minute, 0, nil, 1200, pl.CodeStepTimeout},
+		{"a tie is the step's own", 105 * time.Minute, 900, nil, 900, pl.CodeStepTimeout},
+		{"the fleet is handed the same bound", 110 * time.Minute, 900, []string{"docker"}, 600, pl.CodeRunCeiling},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			wb := &scriptedWorkbench{step: func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+				return outcomeResponse(exOutcome("workbench-a")), "workbench-a", nil
+			}}
+			fleet := &fakeFleet{}
+			e := newTestExecutor(wb, fleet)
+			req := exRequest()
+			req.RunStartedAt = exNow.Add(-c.started).Format(time.RFC3339)
+			req.Step.TimeoutSeconds = c.stepTimeout
+			if len(c.needs) > 0 {
+				req.Compute, req.Step.Needs = pl.ComputeClusterAndFleet, c.needs
+			}
+			if _, err := e.Execute(context.Background(), req); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+
+			var run StepRun
+			if len(c.needs) > 0 {
+				runs := fleet.runs()
+				if len(runs) != 1 {
+					t.Fatalf("fleet runs = %d, want 1", len(runs))
+				}
+				run = runs[0]
+			} else {
+				steps := wb.sent(workbench.PipelineStepAction)
+				if len(steps) != 1 {
+					t.Fatalf("step forwards = %d, want 1", len(steps))
+				}
+				run = stepRunOf(t, steps[0])
+				if got := steps[0].req.GetTimeoutSec(); int(got) != c.wantSeconds {
+					t.Errorf("the forward's timeout hint = %d, want %d", got, c.wantSeconds)
+				}
+			}
+			if run.TimeoutSeconds != c.wantSeconds || run.DeadlineCode != c.wantCode {
+				t.Errorf("TimeoutSeconds, DeadlineCode = %d, %q; want %d, %q",
+					run.TimeoutSeconds, run.DeadlineCode, c.wantSeconds, c.wantCode)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The cluster path
+// ---------------------------------------------------------------------------
+
+// TestExecuteForwardsAClusterStepAndAcks: the step travels as a StepRun under
+// the engine's own SYSTEM-class assertion, the runner's outcome is the step's,
+// and the agent then acks so the Job and its Secret go now rather than at
+// their TTL.
+func TestExecuteForwardsAClusterStepAndAcks(t *testing.T) {
+	outcome := exOutcome("")
+	outcome.Where.NodeID = "" // a runner that left it blank: the replica that answered is named
+	wb := &scriptedWorkbench{step: func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+		return outcomeResponse(outcome), "workbench-b", nil
+	}}
+	e := newTestExecutor(wb, nil)
+	req := exRequest()
+
+	res, err := e.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if res.Status != pl.OutcomeSucceeded || res.LogFileID != "file-log" || res.LogLines != 12 {
+		t.Fatalf("result = %+v, want the runner's outcome", res)
+	}
+	if res.Where.Surface != "cluster" || res.Where.NodeID != "workbench-b" || res.Where.JobName != JobName(req.RunID, req.StepKey, req.Attempt) {
+		t.Errorf("Where = %+v, want the cluster, the replica that answered and the step's Job", res.Where)
+	}
+
+	steps := wb.sent(workbench.PipelineStepAction)
+	if len(steps) != 1 {
+		t.Fatalf("step forwards = %d, want 1", len(steps))
+	}
+	f := steps[0]
+	if !f.watched {
+		t.Error("the step was forwarded unwatched: a replica that dies mid-step would leave the agent waiting out the deadline")
+	}
+	if f.pin != "" {
+		t.Errorf("the first forward is pinned to %q; any healthy replica may create the Job", f.pin)
+	}
+	wantSystemAssertion(t, f.req)
+	if f.req.GetRequestId() == "" {
+		t.Error("the forward carries no request id")
+	}
+	if f.req.GetRunId() != req.RunID || f.req.GetStepId() != req.StepKey {
+		t.Errorf("forward runId/stepId = %q/%q, want %q/%q", f.req.GetRunId(), f.req.GetStepId(), req.RunID, req.StepKey)
+	}
+	run := stepRunOf(t, f)
+	want := stepRunFor(req, 900, pl.CodeStepTimeout)
+	if run.RunID != want.RunID || run.StepKey != want.StepKey || run.Attempt != want.Attempt || run.Command != want.Command ||
+		run.Secrets["NPM_TOKEN"] != plantedNPM || run.Env["MEMQL_RUN_ID"] != req.RunID {
+		t.Errorf("the forwarded StepRun = %v, want %v", run, want)
+	}
+
+	awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineAckAction)) == 1 },
+		"the outcome was never acked: the Job and its Secret would hold a slot of the ceiling until their TTL")
+	ack := wb.sent(workbench.PipelineAckAction)[0]
+	wantSystemAssertion(t, ack.req)
+	var ackReq AckRequest
+	if err := json.Unmarshal(ack.req.GetArgsJson(), &ackReq); err != nil || ackReq.JobName != JobName(req.RunID, req.StepKey, req.Attempt) {
+		t.Errorf("ack args = %s (%v), want the step's Job name", ack.req.GetArgsJson(), err)
+	}
+	if ack.req.GetRequestId() == f.req.GetRequestId() {
+		t.Error("the ack reuses the step forward's request id")
+	}
+	select {
+	case <-f.ended:
+		t.Error("the answered forward was cancelled")
+	default:
+	}
+}
+
+// wantSystemAssertion: every pipeline forward carries the engine's own
+// SYSTEM-class assertion -- the workbench refuses the four actions under any
+// other class -- naming no person.
+func wantSystemAssertion(t *testing.T, req *nodev1.WorkbenchForwardRequest) {
+	t.Helper()
+	a := node.ForwardedAuthorityFromProto(req.GetAuthority())
+	if _, err := auth.VerifyForwardedAuthority(a, time.Now()); err != nil {
+		t.Fatalf("%s: the assertion does not verify: %v", req.GetAction(), err)
+	}
+	if a.CredentialClass != auth.ForwardedClassSystem || a.Kind != auth.ForwardedPrincipalSystem {
+		t.Errorf("%s: assertion class %q kind %v, want the system class", req.GetAction(), a.CredentialClass, a.Kind)
+	}
+	if strings.HasPrefix(a.Subject, "v1:identity:user:") || a.Subject == "" {
+		t.Errorf("%s: assertion subject %q, want the engine, not a person", req.GetAction(), a.Subject)
+	}
+	if a.OriginNodeId != exAgent {
+		t.Errorf("%s: assertion origin %q, want this node %q", req.GetAction(), a.OriginNodeId, exAgent)
+	}
+}
+
+// TestExecuteTakesAFinishedStatusWhenTheReplyWasLost: a stream flap is
+// invisible to the watched forward -- the request rode the reconnecting
+// outbox and the reply on the old attempt is gone -- so the step's own status,
+// read every poll, is the only way the outcome is ever seen. Finished is
+// taken as the answer while the forward is still waiting; the forward is
+// abandoned, never cancelled to get there.
+func TestExecuteTakesAFinishedStatusWhenTheReplyWasLost(t *testing.T) {
+	persisted := exOutcome("workbench-a")
+	persisted.Status, persisted.ExitCode = pl.OutcomeFailed, 3
+	var cancelledFirst bool
+	wb := &scriptedWorkbench{}
+	wb.status = func(n int, _ *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+		if n < 3 {
+			return stateResponse(StateRunning), "workbench-b", nil
+		}
+		select {
+		case <-wb.sent(workbench.PipelineStepAction)[0].ended:
+			cancelledFirst = true
+		default:
+		}
+		return finishedResponse(persisted), "workbench-b", nil
+	}
+	e := newTestExecutor(wb, nil)
+	req := exRequest()
+
+	res := awaitResult(t, executeAsync(e, context.Background(), req), "the status said finished")
+	if res.Status != pl.OutcomeFailed || res.ExitCode != 3 || res.LogFileID != "file-log" {
+		t.Fatalf("result = %+v, want the persisted outcome the status carried", res)
+	}
+	if cancelledFirst {
+		t.Fatal("the step forward was cancelled before its outcome was taken from the status. Cancelling is how " +
+			"a forward stops waiting AND how the runner is told to delete the Job.")
+	}
+	if n := len(wb.sent(workbench.PipelineStepAction)); n != 1 {
+		t.Errorf("step forwards = %d, want 1: a finished step is never forwarded again", n)
+	}
+	for _, s := range wb.sent(workbench.PipelineStatusAction) {
+		wantSystemAssertion(t, s.req)
+		var sr StatusRequest
+		if err := json.Unmarshal(s.req.GetArgsJson(), &sr); err != nil || sr.JobName != JobName(req.RunID, req.StepKey, req.Attempt) {
+			t.Fatalf("status args = %s, want the step's Job name", s.req.GetArgsJson())
+		}
+	}
+	awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineAckAction)) == 1 },
+		"a finished status was taken and never acked")
+}
+
+// TestExecuteReforwardsWhenTheReplicaIsLostOrStale: the two signals that the
+// replica running a step is gone -- the watched forward's own, and a stale
+// heartbeat on the Job -- each send the step again, unpinned, under a fresh
+// request id, so another replica adopts the Job by its name.
+func TestExecuteReforwardsWhenTheReplicaIsLostOrStale(t *testing.T) {
+	t.Run("the watched forward lost its replica", func(t *testing.T) {
+		wb := &scriptedWorkbench{}
+		wb.step = func(n int, _ *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+			if n == 1 {
+				return nil, "workbench-a", workbench.ErrWorkbenchPeerLost
+			}
+			return outcomeResponse(exOutcome("workbench-b")), "workbench-b", nil
+		}
+		e := newTestExecutor(wb, nil)
+		res, err := e.Execute(context.Background(), exRequest())
+		if err != nil || res.Status != pl.OutcomeSucceeded || res.Where.NodeID != "workbench-b" {
+			t.Fatalf("Execute = %+v, %v; want the adopting replica's outcome", res, err)
+		}
+		wantReforwarded(t, wb)
+	})
+
+	t.Run("the Job's heartbeat went stale", func(t *testing.T) {
+		wb := &scriptedWorkbench{}
+		wb.status = func(n int, _ *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+			return stateResponse(StateStale), "workbench-b", nil
+		}
+		wb.step = func(n int, f *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+			if n == 1 {
+				return nil, "", nil // waits on its context, as a forward to a wedged replica does
+			}
+			return outcomeResponse(exOutcome("workbench-b")), "workbench-b", nil
+		}
+		e := newTestExecutor(wb, nil)
+		res, err := e.Execute(context.Background(), exRequest())
+		if err != nil || res.Status != pl.OutcomeSucceeded {
+			t.Fatalf("Execute = %+v, %v; want the adopting replica's outcome", res, err)
+		}
+		wantReforwarded(t, wb)
+	})
+
+	t.Run("a stale reading right after a re-forward waits for the adopter", func(t *testing.T) {
+		// A replica adopting the Job proves isolation, then annotates it; a
+		// stale reading inside that window is the adoption still on its way,
+		// not a second loss -- so no third forward within the patience.
+		wb := &scriptedWorkbench{}
+		wb.status = func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+			return stateResponse(StateStale), "workbench-b", nil
+		}
+		released := make(chan struct{})
+		wb.step = func(n int, f *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+			if n == 1 {
+				return nil, "", nil
+			}
+			<-released
+			return outcomeResponse(exOutcome("workbench-b")), "workbench-b", nil
+		}
+		e := newTestExecutor(wb, nil)
+		e.stalePatience = 300 * time.Millisecond
+		e.statusEvery = 5 * time.Millisecond
+		done := executeAsync(e, context.Background(), exRequest())
+		time.Sleep(60 * time.Millisecond) // a dozen polls, every one stale
+		if n := len(wb.sent(workbench.PipelineStepAction)); n != 1 {
+			t.Fatalf("step forwards = %d after stale readings inside the patience, want 1", n)
+		}
+		// Past the patience the stale readings are believed: one re-forward.
+		awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineStepAction)) == 2 },
+			"stale readings past the patience never re-forwarded the step")
+		close(released)
+		awaitResult(t, done, "the re-forward answered")
+	})
+}
+
+func wantReforwarded(t *testing.T, wb *scriptedWorkbench) {
+	t.Helper()
+	steps := wb.sent(workbench.PipelineStepAction)
+	if len(steps) != 2 {
+		t.Fatalf("step forwards = %d, want 2: the first, and one re-forward", len(steps))
+	}
+	if steps[1].pin != "" {
+		t.Errorf("the re-forward is pinned to %q; it must go to any healthy replica", steps[1].pin)
+	}
+	if steps[0].req.GetRequestId() == steps[1].req.GetRequestId() {
+		t.Error("the re-forward reuses the first request id: the router only fills an empty one, and two " +
+			"forwards under one id collide in its in-flight table and in the handler's")
+	}
+	if a, b := stepRunOf(t, steps[0]), stepRunOf(t, steps[1]); a.Attempt != b.Attempt || a.StepKey != b.StepKey {
+		t.Error("the re-forward names another attempt or step: the adopting replica would create a second Job")
+	}
+	wantSystemAssertion(t, steps[1].req)
+}
+
+// TestExecuteReadsAWorkbenchRefusal: an answer that is not an outcome ends the
+// step with a typed failure rather than a hang or a guess.
+func TestExecuteReadsAWorkbenchRefusal(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		resp   *nodev1.WorkbenchForwardResponse
+		status pl.Outcome
+		code   string
+	}{
+		{"a replica with no runner", &nodev1.WorkbenchForwardResponse{
+			ErrorCode: workbench.ErrCodePipelinesNotConfigured, ErrorMessage: "no runner"}, pl.OutcomeFailed, pl.CodeRunnerUnavailable},
+		{"a refused assertion", &nodev1.WorkbenchForwardResponse{
+			ErrorCode: "forwarded_authority_refused", ErrorMessage: "class"}, pl.OutcomeFailed, pl.CodeExecutorError},
+		{"a payload that is not an outcome", &nodev1.WorkbenchForwardResponse{
+			PayloadJson: []byte(`{"state":"running"`)}, pl.OutcomeFailed, pl.CodeExecutorError},
+		{"an outcome with no status", &nodev1.WorkbenchForwardResponse{
+			PayloadJson: []byte(`{"exitCode":0}`)}, pl.OutcomeFailed, pl.CodeExecutorError},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			wb := &scriptedWorkbench{step: func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+				return c.resp, "workbench-a", nil
+			}}
+			e := newTestExecutor(wb, nil)
+			res, err := e.Execute(context.Background(), exRequest())
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			wantFailure(t, res, c.status, c.code)
+		})
+	}
+
+	t.Run("an agent with no route to a workbench", func(t *testing.T) {
+		e := newTestExecutor(nil, nil)
+		res, err := e.Execute(context.Background(), exRequest())
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		wantFailure(t, res, pl.OutcomeFailed, pl.CodeRunnerUnavailable)
+	})
+}
+
+// TestExecuteGivesUpPastTheDeadline: nothing waits forever. Past the step's
+// effective deadline and the grace beyond it, one last status decides what
+// the step is reported as -- and the Job, if it is still there, is deleted.
+func TestExecuteGivesUpPastTheDeadline(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		status func() (*nodev1.WorkbenchForwardResponse, string, error)
+		want   pl.Outcome
+		code   string
+	}{
+		{"no replica answers for the step", func() (*nodev1.WorkbenchForwardResponse, string, error) {
+			return nil, "", workbench.ErrNoWorkbenchPeer
+		}, pl.OutcomeFailed, pl.CodeNodeLost},
+		{"the Job's runner went quiet", func() (*nodev1.WorkbenchForwardResponse, string, error) {
+			return stateResponse(StateStale), "workbench-b", nil
+		}, pl.OutcomeFailed, pl.CodeNodeLost},
+		{"the Job is still running: it started late", func() (*nodev1.WorkbenchForwardResponse, string, error) {
+			return stateResponse(StateRunning), "workbench-b", nil
+		}, pl.OutcomeFailed, pl.CodeStepTimeout},
+		{"the Job never started: it waited for a slot", func() (*nodev1.WorkbenchForwardResponse, string, error) {
+			return stateResponse(StateAbsent), "workbench-b", nil
+		}, pl.OutcomeFailed, pl.CodeStepTimeout},
+		{"the last look found the outcome", func() (*nodev1.WorkbenchForwardResponse, string, error) {
+			return finishedResponse(exOutcome("workbench-a")), "workbench-b", nil
+		}, pl.OutcomeSucceeded, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			wb := &scriptedWorkbench{}
+			wb.status = func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) { return c.status() }
+			e := newTestExecutor(wb, nil)
+			e.statusEvery = time.Hour // the give-up's own look is the only one
+			e.lostGrace = 0
+			req := exRequest()
+			req.Step.TimeoutSeconds = 1
+
+			res := awaitResult(t, executeAsync(e, context.Background(), req), "the step's deadline passed")
+			if c.code == "" {
+				if res.Status != c.want {
+					t.Fatalf("result = %+v, want %s", res, c.want)
+				}
+				return
+			}
+			wantFailure(t, res, c.want, c.code)
+			awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineAckAction)) == 1 },
+				"the step was given up on and its Job left to run: the give-up must delete it")
+		})
+	}
+
+	t.Run("no workbench replica for longer than the patience", func(t *testing.T) {
+		none := func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+			return nil, "", workbench.ErrNoWorkbenchPeer
+		}
+		wb := &scriptedWorkbench{step: none, status: none}
+		e := newTestExecutor(wb, nil)
+		e.noPeerPatience = 30 * time.Millisecond
+		res := awaitResult(t, executeAsync(e, context.Background(), exRequest()), "no replica was ever reachable")
+		wantFailure(t, res, pl.OutcomeFailed, pl.CodeRunnerUnavailable)
+		if n := len(wb.sent(workbench.PipelineStepAction)); n < 2 {
+			t.Errorf("step forwards = %d: a replica missing for a moment (a rolling deploy) must be tried again", n)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Cancel
+// ---------------------------------------------------------------------------
+
+// TestCancelReachesInFlightStepsAndDeletesJobs: a run's cancel stops every
+// step of it this node has in flight -- forwarded and fleet alike -- and asks a
+// workbench to delete the run's Jobs by label, which reaches the Jobs other
+// replicas hold too. Another run's steps are untouched.
+func TestCancelReachesInFlightStepsAndDeletesJobs(t *testing.T) {
+	wb := &scriptedWorkbench{}
+	fleet := &fakeFleet{block: true}
+	e := newTestExecutor(wb, fleet)
+	e.statusEvery = time.Hour
+
+	first := exRequest()
+	second := exRequest()
+	second.StepKey, second.Step.Key = "tests.go-tests#3", "tests.go-tests#3"
+	onFleet := exRequest()
+	onFleet.StepKey, onFleet.Step.Key = "tests.docker", "tests.docker"
+	onFleet.Compute, onFleet.Step.Needs = pl.ComputeClusterAndFleet, []string{"docker"}
+	other := exRequest()
+	other.RunID = "run-9b9b"
+
+	ctx := context.Background()
+	otherCtx, stopOther := context.WithCancel(ctx)
+	defer stopOther()
+	r1, r2, r3, r4 := executeAsync(e, ctx, first), executeAsync(e, ctx, second), executeAsync(e, ctx, onFleet), executeAsync(e, otherCtx, other)
+	awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineStepAction)) == 3 && len(fleet.runs()) == 1 },
+		"the four steps never all started")
+
+	// The first attempt at the run-wide delete is lost to a stream drop; the
+	// cancel is retried, because a run's Jobs left behind hold slots until
+	// their deadline.
+	wb.mu.Lock()
+	wb.cancel = func(n int, _ *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+		if n == 1 {
+			return nil, "workbench-a", context.DeadlineExceeded
+		}
+		return &nodev1.WorkbenchForwardResponse{PayloadJson: []byte(`{"jobsDeleted":2}`)}, "workbench-b", nil
+	}
+	wb.mu.Unlock()
+
+	cctx, done := context.WithTimeout(context.Background(), 5*time.Second)
+	defer done()
+	if err := e.Cancel(cctx, first.RunID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+
+	for _, ch := range []<-chan pl.StepResult{r1, r2, r3} {
+		res := awaitResult(t, ch, "a step of the cancelled run")
+		if res.Status != pl.OutcomeCancelled || res.Failure == nil || res.Failure.Code != pl.CodeStepCancelled {
+			t.Errorf("a step of the cancelled run ended %+v (failure %+v), want cancelled / %s", res, res.Failure, pl.CodeStepCancelled)
+		}
+	}
+	steps := wb.sent(workbench.PipelineStepAction)
+	var others []*exForward
+	for _, f := range steps {
+		run := stepRunOf(t, f)
+		if run.RunID != first.RunID {
+			others = append(others, f)
+			continue
+		}
+		select {
+		case <-f.ended:
+		case <-time.After(5 * time.Second):
+			t.Errorf("the forward of %s was never cancelled: the replica running it keeps its Job", run.StepKey)
+		}
+	}
+	if len(others) != 1 {
+		t.Fatalf("the other run's step forwards = %d, want 1", len(others))
+	}
+	select {
+	case <-others[0].ended:
+		t.Error("the other run's step forward was cancelled")
+	default:
+	}
+	select {
+	case res := <-r4:
+		t.Fatalf("the other run's step ended (%+v) when only the first run was cancelled", res)
+	default:
+	}
+
+	cancels := wb.sent(workbench.PipelineCancelAction)
+	if len(cancels) != 2 {
+		t.Fatalf("pipelineCancel forwards = %d, want 2: the lost one and its retry", len(cancels))
+	}
+	for _, c := range cancels {
+		wantSystemAssertion(t, c.req)
+		var cr CancelRequest
+		if err := json.Unmarshal(c.req.GetArgsJson(), &cr); err != nil || cr.RunID != first.RunID {
+			t.Errorf("cancel args = %s, want the run id %q", c.req.GetArgsJson(), first.RunID)
+		}
+		if c.watched {
+			t.Error("the run-wide delete was sent watched; it answers at once")
+		}
+	}
+	if cancels[0].req.GetRequestId() == cancels[1].req.GetRequestId() {
+		t.Error("the retried cancel reuses the lost one's request id")
+	}
+
+	t.Run("a run with nothing in flight is still deleted by label", func(t *testing.T) {
+		wb := &scriptedWorkbench{}
+		e := newTestExecutor(wb, nil)
+		if err := e.Cancel(context.Background(), "run-idle"); err != nil {
+			t.Fatalf("Cancel: %v", err)
+		}
+		if n := len(wb.sent(workbench.PipelineCancelAction)); n != 1 {
+			t.Fatalf("pipelineCancel forwards = %d, want 1: a predecessor's Jobs may still run on some replica", n)
+		}
+	})
+
+	t.Run("a cancel no workbench ever answers reports it", func(t *testing.T) {
+		wb := &scriptedWorkbench{cancel: func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+			return nil, "", workbench.ErrNoWorkbenchPeer
+		}}
+		e := newTestExecutor(wb, nil)
+		ctx, done := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer done()
+		if err := e.Cancel(ctx, "run-idle"); err == nil {
+			t.Fatal("Cancel = nil, though no workbench deleted anything; the driver logs this")
+		}
+	})
+
+	t.Run("a blank run id is refused", func(t *testing.T) {
+		wb := &scriptedWorkbench{}
+		e := newTestExecutor(wb, nil)
+		if err := e.Cancel(context.Background(), " "); err == nil {
+			t.Fatal("Cancel accepted a blank run id: the delete is by label")
+		}
+		if len(wb.forwards) != 0 {
+			t.Fatal("a blank run id was forwarded")
+		}
+	})
+}
+
+// TestExecuteStopsWhenItsContextEnds: the driver's own deadline, or the
+// drive ending around the step, stops the wait at once and tells the replica
+// -- the forward's context ends, which is the router's cancel.
+func TestExecuteStopsWhenItsContextEnds(t *testing.T) {
+	wb := &scriptedWorkbench{}
+	e := newTestExecutor(wb, nil)
+	e.statusEvery = time.Hour
+	ctx, stop := context.WithCancel(context.Background())
+	done := executeAsync(e, ctx, exRequest())
+	awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineStepAction)) == 1 }, "the step was never forwarded")
+	stop()
+	res := awaitResult(t, done, "the context ended")
+	if res.Status != pl.OutcomeCancelled {
+		t.Fatalf("result = %+v, want cancelled", res)
+	}
+	select {
+	case <-wb.sent(workbench.PipelineStepAction)[0].ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the forward kept waiting after the step's context ended")
+	}
+}
+
+// TestExecuteWithNoFleetFailsAFleetStep: an agent node whose dispatcher was
+// never wired cannot reach a machine, and says so rather than sending the
+// step to the cluster, which cannot meet its need.
+func TestExecuteWithNoFleetFailsAFleetStep(t *testing.T) {
+	wb := &scriptedWorkbench{}
+	e := newTestExecutor(wb, nil)
+	req := exRequest()
+	req.Compute, req.Step.Needs = pl.ComputeClusterAndFleet, []string{"display"}
+	res, err := e.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	wantFailure(t, res, pl.OutcomeFailed, pl.CodeRunnerUnavailable)
+	if len(wb.forwards) != 0 {
+		t.Fatal("a step needing a display was forwarded to the cluster")
+	}
+}
+
+// TestCancelledStepsAreTheRunsNotTheCallers: Cancel's own cause is what marks
+// a step cancelled by its run; a step whose caller merely stopped waiting is
+// cancelled too, and either way no Job is left behind by this node.
+func TestCancelledStepsAreTheRunsNotTheCallers(t *testing.T) {
+	wb := &scriptedWorkbench{}
+	e := newTestExecutor(wb, nil)
+	e.statusEvery = time.Hour
+	done := executeAsync(e, context.Background(), exRequest())
+	awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineStepAction)) == 1 }, "the step was never forwarded")
+	if err := e.Cancel(context.Background(), "run-7f3a"); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	res := awaitResult(t, done, "the run was cancelled")
+	if res.Failure == nil || !strings.Contains(res.Failure.Message, "cancelled") {
+		t.Fatalf("result = %+v, want a sentence saying the run was cancelled", res)
+	}
+	if e.inflightCount("run-7f3a") != 0 {
+		t.Error("the cancelled step is still tracked: a later cancel would reach a context nothing waits on")
+	}
+	if errors.Is(errRunCancelled, context.Canceled) {
+		t.Error("errRunCancelled must be its own cause, not context.Canceled")
+	}
+}

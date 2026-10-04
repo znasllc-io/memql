@@ -278,6 +278,27 @@ func (c *Capture) Feed(raw string) time.Time {
 	return at
 }
 
+// FeedLine consumes output that carries no timestamp -- a fleet machine's
+// stream, whose lines are the step's own text from the first byte (epic
+// memql#5478, #5494). Feed would read a line that BEGINS with an RFC 3339
+// token as the kubelet's stamp: it would eat the token and let the step
+// choose the line's time. Here the whole line is output, stamped with the
+// capture's clock, which it returns. One trailing newline is ignored, and
+// text holding several lines is taken line by line.
+func (c *Capture) FeedLine(text string) time.Time {
+	text = strings.TrimSuffix(strings.TrimSuffix(text, "\n"), "\r")
+	at := c.now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return at
+	}
+	for _, line := range strings.Split(text, "\n") {
+		c.feedLine(at, strings.TrimSuffix(line, "\r"))
+	}
+	return at
+}
+
 // Note appends a runner-authored line -- a clone section, an adoption
 // notice, a wait notice -- to the ARCHIVE only, cleaned and masked like
 // output and bound by the same cap. It never reaches the store, whose live

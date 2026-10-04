@@ -1418,8 +1418,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # integrations/pipelinesteps/fleet_test.go is //go:build agent: the
+          # pipelines executor's fleet half dispatches through the agent's
+          # worker dispatcher (epic memql#5478).
           - tag: agent
-            packages: ./app/ ./integrations/agent/ ./integrations/agent/worker/ ./component/node/
+            packages: ./app/ ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/
           # POST /sites/{id}/bundles (memql#3713): app/transport_sites_test.go
           # is //go:build bff.
           - tag: bff
