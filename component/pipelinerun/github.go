@@ -136,6 +136,14 @@ func (g *packagesGitHub) Tree(ctx context.Context, token, repository, sha string
 	return ReadTree(body, keep, maxBytes)
 }
 
+func (g *packagesGitHub) Installations(ctx context.Context) ([]githubapp.AppInstallation, error) {
+	c, err := g.client()
+	if err != nil {
+		return nil, err
+	}
+	return c.Installations(ctx)
+}
+
 func (g *packagesGitHub) target(repository string) (*githubapp.Client, string, string, error) {
 	c, err := g.client()
 	if err != nil {

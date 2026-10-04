@@ -573,6 +573,10 @@ type fakeGitHub struct {
 	// onBranchHead runs inside each BranchHead call: what another writer
 	// does while GitHub is being asked.
 	onBranchHead func()
+
+	// installations is what Installations answers, or installationsErr.
+	installations    []githubapp.AppInstallation
+	installationsErr error
 }
 
 type tokenMint struct{ CredentialID, Owner, Repository string }
@@ -731,6 +735,16 @@ func (g *fakeGitHub) Tree(ctx context.Context, _, repository, sha string, keep f
 		out[name] = &fstest.MapFile{Data: slices.Clone(f.Data)}
 	}
 	return out, nil
+}
+
+func (g *fakeGitHub) Installations(ctx context.Context) ([]githubapp.AppInstallation, error) {
+	watchGitHubCall(g.t, ctx, "Installations")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.unconfigured {
+		return nil, githubapp.ErrNotConfigured
+	}
+	return slices.Clone(g.installations), g.installationsErr
 }
 
 func (g *fakeGitHub) createdRuns() []checkWrite {

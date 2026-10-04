@@ -2629,6 +2629,25 @@ QueryClient.prototype.pipelinesDisconnect = function (this: QueryClient, args: P
   return this.executeNamed("pipelinesDisconnect", buildPipelinesDisconnect(args), opts);
 };
 
+/** The installations of this cluster's GitHub App whose accepted permissions lag what the app asks for (epic memql#5479, D15): when an app's permissions grow -- pipelines added checks write -- every existing installation keeps the old set until the account that installed it approves the change on GitHub, and until then every check-run write there answers 403. Asked of GitHub as the app itself. Answers one row, {installations [{installationId, account, accountType, htmlUrl, missingPermissions, suspended}]}: htmlUrl is the installation's settings page, where the change waits. A cluster with no GitHub App answers none; a GitHub that could not be asked is an error, never an empty list. */
+export interface PipelinesInstallationsArgs {
+}
+
+export function buildPipelinesInstallations(args: PipelinesInstallationsArgs): string {
+  void args;
+  return "builtin pipelinesInstallations()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesInstallations(args?: PipelinesInstallationsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesInstallations = function (this: QueryClient, args: PipelinesInstallationsArgs = {} as PipelinesInstallationsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesInstallations", buildPipelinesInstallations(args), opts);
+};
+
 /** Read what connecting one of the caller's sources would act on, and write nothing (epic memql#5479: the connect rail's first stop shows the stages before anything is confirmed). The same read pipelinesConnect makes: the caller must own the package; the grant is proved by minting a token through it; memql-package.yaml is read at the default branch's head and its pipeline block validated. Answers one row: {repository, defaultBranch, sha, name, checkName, stages [{name, on, channel, steps [{name, packages, only, shards, bucket, needs, secrets, services}]}], needs, secrets, suggestedDelivery, existing {pipelineId, status, delivery, compute, secretNames} or null, refusal {code, message, scope} or null}. A typed refusal -- no pipeline block, a block that does not validate, a repository another source runs, a grant that no longer reaches it -- is the answer's refusal, never an error, so the stop that asked can render it with its remedy. suggestedDelivery is webhook where GitHub can plausibly reach this cluster and poll otherwise. */
 export interface PipelinesPreviewArgs {
   /** The v1:platform:package source to read. Must be the caller's own. */

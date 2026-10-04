@@ -98,6 +98,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema:  map[string]string{"runId": "string (required) -- the caller's v1:pipelines:run"},
 		},
 		{
+			Name:        "installations",
+			Description: "The installations of the cluster's GitHub App whose accepted permissions lag what the app asks for (epic memql#5479, D15): an app whose permissions grew keeps every existing installation on the old set until its account approves, and until then every check-run write there answers 403. Asked of GitHub as the app itself. A cluster with no app has none. Answers {installations [{installationId, account, accountType, htmlUrl, missingPermissions, suspended}]}.",
+			Handler:     i.handleInstallations,
+			ArgsSchema:  map[string]string{},
+		},
+		{
 			Name:        "status",
 			Description: "The pipelines readiness self-report: whether this cluster has a GitHub App and whether this node has a step runner registered, in the integration-status envelope the readiness evaluator reads. No credential value and no network call.",
 			Handler:     i.handleStatus,
