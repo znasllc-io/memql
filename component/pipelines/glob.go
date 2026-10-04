@@ -136,3 +136,50 @@ func globSegmentRegexp(seg string) string {
 	}
 	return sb.String()
 }
+
+// PathSet compiles a list of globs into one predicate: a path is in the set
+// when some plain glob matches it and no `!` glob does. Order does not
+// matter, and a list of only `!` globs is refused because it includes
+// nothing.
+//
+// This is deliberately NOT paths-filter's reading. dorny/paths-filter ORs a
+// filter's patterns, so a `!` glob in a list WIDENS it to every path that
+// glob does not name -- ci.yml lives with that because its authors know the
+// tool. A manifest is written by somebody who reads `!` as "except", and the
+// paths-filter reading would quietly run a bucket's steps on nearly every
+// change. Each single glob still means exactly what CompileGlob says.
+func PathSet(globs []string) (func(path string) bool, error) {
+	var include, exclude []func(string) bool
+	for _, glob := range globs {
+		if rest, negated := strings.CutPrefix(glob, "!"); negated {
+			match, err := CompileGlob(rest)
+			if err != nil {
+				return nil, fmt.Errorf("pattern %q: %w", glob, err)
+			}
+			exclude = append(exclude, match)
+			continue
+		}
+		match, err := CompileGlob(glob)
+		if err != nil {
+			return nil, err
+		}
+		include = append(include, match)
+	}
+	if len(include) == 0 {
+		return nil, fmt.Errorf("the list names no path to include; a %q glob only narrows one that does", "!")
+	}
+	return func(path string) bool {
+		for _, in := range include {
+			if !in(path) {
+				continue
+			}
+			for _, out := range exclude {
+				if out(path) {
+					return false
+				}
+			}
+			return true
+		}
+		return false
+	}, nil
+}

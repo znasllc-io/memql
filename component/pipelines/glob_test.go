@@ -134,3 +134,36 @@ func TestCompileGlobRefusesWhatItDoesNotImplement(t *testing.T) {
 		}
 	}
 }
+
+// A `!` glob in a list means "except", not paths-filter's OR: the bucket
+// below must NOT match a change under its own exclusion, and must not widen
+// to unrelated paths either.
+func TestPathSetExcludesWhatANegatedGlobNames(t *testing.T) {
+	inSet, err := PathSet([]string{"clients/**", "!clients/vendor/**"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]bool{
+		"clients/os/src/main.tsx":     true,
+		"clients/vendor/lib/index.js": false,
+		"component/memql/engine.go":   false,
+		"clients":                     true,
+	}
+	for path, want := range cases {
+		if got := inSet(path); got != want {
+			t.Errorf("PathSet(clients/**, !clients/vendor/**)(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
+
+func TestPathSetRefusesAListThatIncludesNothing(t *testing.T) {
+	if _, err := PathSet([]string{"!docs/**"}); err == nil {
+		t.Error("a list of only ! globs compiled; it includes nothing and must be refused")
+	}
+	if _, err := PathSet(nil); err == nil {
+		t.Error("an empty list compiled; it includes nothing and must be refused")
+	}
+	if _, err := PathSet([]string{"docs/[a]"}); err == nil {
+		t.Error("an unsupported glob compiled inside a set")
+	}
+}

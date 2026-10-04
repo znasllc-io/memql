@@ -92,9 +92,9 @@ func NeedsSelector(spec *Spec) bool {
 //
 // What a step selects is decided last. A `when: { bucket }` step is skipped
 // only in affected mode, and only when the change list is known, holds at
-// least one path, and touches none of the bucket's globs; a bucket's globs
-// combine as paths-filter combines them, so a path is in the bucket when ANY
-// glob matches it. A packages step takes every package in any mode but
+// least one path, and touches none of the bucket's globs; a bucket is a
+// PathSet, so a path is in it when a plain glob matches and no `!` glob does.
+// A packages step takes every package in any mode but
 // affected, under `packages: all`, or when the affected selection is Full,
 // and the affected packages otherwise; `only` narrows that to the db-gated
 // trees or to the rest, and nothing left is one skipped step. A skip is
@@ -329,15 +329,13 @@ func (c *planCompiler) bucketUntouched(bucket string) bool {
 	if c.in.Mode != ModeAffected || !c.in.ChangedKnown || len(c.in.Changed) == 0 {
 		return false
 	}
-	for _, glob := range c.spec.Select.Buckets[bucket] {
-		match, err := CompileGlob(glob)
-		if err != nil {
-			return false // Validate compiled it; if it cannot, run rather than skip
-		}
-		for _, changed := range c.in.Changed {
-			if match(changed) {
-				return false
-			}
+	inBucket, err := PathSet(c.spec.Select.Buckets[bucket])
+	if err != nil {
+		return false // Validate compiled it; if it cannot, run rather than skip
+	}
+	for _, changed := range c.in.Changed {
+		if inBucket(changed) {
+			return false
 		}
 	}
 	return true

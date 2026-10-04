@@ -207,6 +207,9 @@ func TestValidate(t *testing.T) {
 			s.Select.Buckets["os"] = []string{"clients/[ab]/**"}
 		}), CodeSelectInvalid, "select/buckets/os"},
 		{"a bucket with no globs", fromValidateBase(func(s *Spec) { s.Select.Buckets["os"] = nil }), CodeSelectInvalid, "select/buckets/os"},
+		{"a bucket of only exclusions", fromValidateBase(func(s *Spec) {
+			s.Select.Buckets["os"] = []string{"!clients/vendor/**"}
+		}), CodeSelectInvalid, "select/buckets/os"},
 		{"a bucket name that is not a name", fromValidateBase(func(s *Spec) {
 			s.Select.Buckets["OS"] = []string{"clients/**"}
 		}), CodeSelectInvalid, "select/buckets"},

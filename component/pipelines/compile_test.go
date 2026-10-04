@@ -187,6 +187,16 @@ func TestCompileThePullRequestRunOfTheRecordsExample(t *testing.T) {
 		osSkipped,
 	})
 
+	// A bucket's `!` glob means "except": a change only under the excluded
+	// tree leaves os-checks skipped, where paths-filter's OR would run it.
+	excluding := d7ExampleSpec()
+	excluding.Select.Buckets["os"] = append(excluding.Select.Buckets["os"], "!clients/vendor/**")
+	vendorOnly := in
+	vendorOnly.Changed = []string{"clients/vendor/lib.js"}
+	if got := planStepByKey(t, mustCompilePlan(t, excluding, vendorOnly), "tests/os-checks"); got.Skip == nil {
+		t.Errorf("os-checks ran on a change only under an excluded path: %+v", got)
+	}
+
 	// The same run with a change under clients/: os-checks runs.
 	in.Changed = append(in.Changed, "clients/os/src/main.ts")
 	plan = mustCompilePlan(t, d7ExampleSpec(), in)

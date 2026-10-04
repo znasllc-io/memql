@@ -132,9 +132,9 @@ func validateSelect(sel *Select) *Refusal {
 				entry)
 		}
 	}
-	for _, glob := range sel.Full {
-		if _, err := CompileGlob(glob); err != nil {
-			return Refuse(CodeSelectInvalid, "select/full", "select.full glob %q cannot be read: %v.", glob, err)
+	if len(sel.Full) > 0 {
+		if _, err := PathSet(sel.Full); err != nil {
+			return Refuse(CodeSelectInvalid, "select/full", "select.full cannot be read: %v.", err)
 		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(sel.Buckets)) {
@@ -148,10 +148,8 @@ func validateSelect(sel *Select) *Refusal {
 			// every pull request: a silent green, not a choice anyone writes.
 			return Refuse(CodeSelectInvalid, scope, "Bucket %q lists no paths, so a step gated on it would never run on a pull request.", name)
 		}
-		for _, glob := range globs {
-			if _, err := CompileGlob(glob); err != nil {
-				return Refuse(CodeSelectInvalid, scope, "Bucket %q glob %q cannot be read: %v.", name, glob, err)
-			}
+		if _, err := PathSet(globs); err != nil {
+			return Refuse(CodeSelectInvalid, scope, "Bucket %q cannot be read: %v.", name, err)
 		}
 	}
 	return nil
