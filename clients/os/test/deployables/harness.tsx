@@ -36,6 +36,11 @@ export function rowsResult(rows: Row[]): Result {
   return new Result({ data: rows } as never);
 }
 
+/** A shape-projected page that names the cursor of the page after it. */
+export function rowsResultWithCursor(rows: Row[], cursor: string): Result {
+  return new Result({ data: rows, ...(cursor !== "" ? { meta: { cursor } } : {}) } as never);
+}
+
 /**
  * What a top-level `builtin X(...)` answers ON THE WIRE: one data value keyed
  * by node id, each value the node envelope with the handler's fields under
@@ -303,6 +308,32 @@ export interface FakeSeed {
   appSetupError?: string;
   /** What `githubAppRemove` answers as its reason. Defaults to `ok`, removed. */
   appRemoveReason?: string;
+
+  // ---- pipelines (epic memql#5479) ----
+  /** v1:pipelines:run rows `pipelineRunsForOwner` answers as its first page. */
+  pipelineRuns?: Row[];
+  /** The page after `pipelineRuns`, read with the cursor "older-runs". */
+  olderPipelineRuns?: Row[];
+  /** v1:pipelines:pipeline rows `pipelinesForOwner` answers. */
+  pipelines?: Row[];
+  /** v1:work:step rows, by the bare work run id `workStepsForOwnerRun` names. */
+  workSteps?: Record<string, Row[]>;
+  /** v1:library:artifact rows, by the work run id `artifactsForRun` names. */
+  runArtifacts?: Record<string, Row[]>;
+  /** What `pipelinesPreview` answers (one row). Absent answers no row. */
+  pipelinePreview?: Row;
+  pipelinePreviewError?: string;
+  /** What `pipelinesConnect` answers; defaults to the pipeline id derived from the package. */
+  pipelinesConnectResult?: Row;
+  pipelinesConnectError?: string;
+  pipelinesDisconnectError?: string;
+  /** What `pipelinesRerun` answers; defaults to a new attempt "run-rerun". */
+  pipelinesRerunResult?: Row;
+  pipelinesRerunError?: string;
+  pipelinesCancelError?: string;
+  /** What `pipelinesInstallations` answers as its installations list. */
+  laggingInstallations?: Row[];
+  laggingInstallationsError?: string;
 }
 
 export interface FakeConnection {
@@ -364,8 +395,50 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
     }) as Row));
 
   const stub = {
-    executeNamed: vi.fn(async (_name: string, call: string) => {
+    executeNamed: vi.fn(async (_name: string, call: string, opts?: { cursor?: string }) => {
       calls.push(call);
+
+      // ---- pipelines (epic memql#5479) ----
+      if (call === "query pipelineRunsForOwner()") {
+        if (opts?.cursor === "older-runs") return rowsResult(seed.olderPipelineRuns ?? []);
+        return rowsResultWithCursor(seed.pipelineRuns ?? [], seed.olderPipelineRuns ? "older-runs" : "");
+      }
+      if (call === "query pipelinesForOwner()") return rowsResult(seed.pipelines ?? []);
+      if (call.startsWith("query workStepsForOwnerRun(")) {
+        const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return rowsResult(seed.workSteps?.[id] ?? []);
+      }
+      if (call.startsWith("query artifactsForRun(")) {
+        const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return rowsResult(seed.runArtifacts?.[id] ?? []);
+      }
+      if (call.startsWith("builtin pipelinesPreview(")) {
+        if (seed.pipelinePreviewError !== undefined) throw new Error(seed.pipelinePreviewError);
+        return builtinReply("pipelinesPreview", seed.pipelinePreview ? [seed.pipelinePreview] : []);
+      }
+      if (call.startsWith("builtin pipelinesConnect(")) {
+        if (seed.pipelinesConnectError !== undefined) throw new Error(seed.pipelinesConnectError);
+        const pkg = /packageId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return builtinReply("pipelinesConnect", [seed.pipelinesConnectResult ?? ({ pipelineId: `pl-${pkg}`, reconnected: false } as unknown as Row)]);
+      }
+      if (call.startsWith("builtin pipelinesDisconnect(")) {
+        if (seed.pipelinesDisconnectError !== undefined) throw new Error(seed.pipelinesDisconnectError);
+        const id = /pipelineId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return builtinReply("pipelinesDisconnect", [{ pipelineId: id, status: "disconnected" } as unknown as Row]);
+      }
+      if (call.startsWith("builtin pipelinesRerun(")) {
+        if (seed.pipelinesRerunError !== undefined) throw new Error(seed.pipelinesRerunError);
+        return builtinReply("pipelinesRerun", [seed.pipelinesRerunResult ?? ({ runId: "run-rerun", attempt: 2, status: "queued" } as unknown as Row)]);
+      }
+      if (call.startsWith("builtin pipelinesCancel(")) {
+        if (seed.pipelinesCancelError !== undefined) throw new Error(seed.pipelinesCancelError);
+        const id = /runId: "([^"]*)"/.exec(call)?.[1] ?? "";
+        return builtinReply("pipelinesCancel", [{ runId: id, status: "in_progress", cancelRequested: true } as unknown as Row]);
+      }
+      if (call === "builtin pipelinesInstallations()") {
+        if (seed.laggingInstallationsError !== undefined) throw new Error(seed.laggingInstallationsError);
+        return builtinReply("pipelinesInstallations", [{ installations: seed.laggingInstallations ?? [] } as unknown as Row]);
+      }
 
       if (call.startsWith("query clientAccountsAll(")) return rowsResult(seed.accounts ?? [{ id: "self", name: "Operator organization", status: "active" }]);
       if (call === "query sitesAll()") { if (seed.sitesError) throw new Error(seed.sitesError); return rowsResult(sites); }
