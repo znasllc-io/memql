@@ -68,14 +68,14 @@ func validateOutboundSecretTargetWrite(ctx context.Context, prior, final map[str
 	if auth.OriginFromContext(ctx).IsInternal() {
 		return nil
 	}
-	if constructFieldChanged(prior, final, outboundTargetSecretField) {
+	if payloadFieldChanged(prior, final, outboundTargetSecretField) {
 		return errOutboundSecretTargetWrite(outboundTargetSecretField)
 	}
 	if !outboundRowNamesSecret(prior) && !outboundRowNamesSecret(final) {
 		return nil
 	}
 	for _, field := range outboundSecretRowContent {
-		if constructFieldChanged(prior, final, field) {
+		if payloadFieldChanged(prior, final, field) {
 			return errOutboundSecretTargetWrite(field)
 		}
 	}
