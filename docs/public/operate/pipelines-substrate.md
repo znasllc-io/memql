@@ -85,10 +85,10 @@ A step's pod runs up to four kinds of container, in this order:
 
 | Container | Kind | Image, user | What it sees |
 |---|---|---|---|
-| `cache-prep` | init, only when the step declares `caches` | the clone image, root | the cache claim's root, to open the owner's directory under it. A fixed script: no git, no token, no checkout |
+| `cache-prep` | init, only when the step declares `caches` | the clone image, root | the cache claim's root, to open the step's directory under it. A fixed script: no git, no token, no checkout |
 | `clone` | init | the clone image, root | the checkout volume and the clone token; never the cache |
 | `svc-<name>` | native sidecar, one per service the step names, in name order | the service's `image`, its own user | its declared `env` only: no checkout, no cache, no secret |
-| `step` | main | the pipeline's `image`, its own user | the checkout at `/workspace`, the owner's cache at `/cache`, the step's environment and its secrets |
+| `step` | main | the pipeline's `image`, its own user | the checkout at `/workspace`, its repository's cache at `/cache`, the step's environment and its secrets |
 
 Every container runs with `allowPrivilegeEscalation: false`, and the pod with
 the `RuntimeDefault` seccomp profile, `restartPolicy: Never` and a 10-second
@@ -158,13 +158,28 @@ kubelet expands no `$(NAME)` and turns no `$$` into `$`.
 ### Caches
 
 `caches:` names `go`, `npm` or both, the two the runner knows; any other name
-fails the step `pipeline_job_rejected`. A step that declares a cache mounts the
-owner's directory of the shared claim `memql-pipelines-cache` at `/cache`
-(`owners/` and 24 hex derived from the owner's id): every step of one owner
-shares a cache, and two owners never share one, because a step can rewrite any
-entry of the cache it is given. `cache-prep` creates that directory,
-world-writable and sticky (`1777`), before the clone runs, and the step's
-wrapper points each declared cache at a tree of the step's own uid:
+fails the step `pipeline_job_rejected`. A step that declares a cache mounts one
+directory of the shared claim `memql-pipelines-cache` at `/cache`, and only
+that one: its owner's, its repository's, and its run's trust's
+(`owners/<owner>/repos/<repository>/<trust>`, the owner and the repository each
+24 hex derived from their names). A step can rewrite any entry of the cache it
+is given, and Go trusts its build cache by its own key, so whoever writes a
+cache decides what a later build that reads it gets. Hence three walls:
+
+- **Two owners never share a cache**, and **two repositories of one owner never
+  do**.
+- **A pull request never writes what the default branch reads.** A run opened
+  for a push to the default branch, the merge queue or a published release is
+  `trusted`; a pull request's run is `untrusted`; each mounts its own half, so a
+  collaborator's unmerged change cannot plant a build the merge queue then
+  uses. A re-run keeps its original's trust: it is opened with the original's
+  event.
+
+Every step of one repository at one trust shares its cache, so the second run
+starts warm; the price is one cold cache per repository and trust.
+`cache-prep` creates the step's directory, world-writable and sticky (`1777`),
+before the clone runs, and the step's wrapper points each declared cache at a
+tree of the step's own uid:
 
 | Cache | Variables the wrapper sets |
 |---|---|
@@ -707,7 +722,7 @@ run's page and, for a failed step, the check run, with its sentence.
 | `pipeline_image_pull_failed` | failure | An image of the step's pod -- the step's, a service's, the clone image -- could not be pulled. The pod pulls with no credential, and the first failed pull decides, so a registry's passing error fails the step too | Check the reference, and that the registry allows anonymous pulls (a GHCR package must be public); re-run after a passing error |
 | `pipeline_clone_failed` | failure | The commit could not be fetched: the clone exited non-zero, the clone token could not be minted, or a fleet machine's fetch failed. The clone's last lines are in the step's log | Check that the GitHub App's installation still reaches the repository, and that the commit exists |
 | `pipeline_service_failed` | failure | A service stopped before the step started: it exited, or its `ready` check kept failing until the kubelet restarted it | Open the full log, which ends with each service's last 50 lines. Fix the service's image, `env` or `ready` |
-| `pipeline_job_rejected` | failure | The step could not be made into a safe Job (an artifact path that could leave the working copy, a secret named like a variable the platform sets, an unknown cache, a clone URL that is not plain `https`, no image or command); the cluster refused its Job or Secret; a container could not be created; or the owner's cache directory could not be prepared, a cache volume that would not mount within 10 minutes included | The message says which. Fix the manifest when it names the step; for the cache, the pod's events name the mount error |
+| `pipeline_job_rejected` | failure | The step could not be made into a safe Job (an artifact path that could leave the working copy, a secret named like a variable the platform sets, an unknown cache, a clone URL that is not plain `https`, no image or command); the cluster refused its Job or Secret; a container could not be created; or the step's cache directory could not be prepared, a cache volume that would not mount within 10 minutes included | The message says which. Fix the manifest when it names the step; for the cache, the pod's events name the mount error |
 | `pipeline_job_unschedulable` | failure | The step's pod could not be scheduled within 10 minutes: no node had room, or the cache claim it mounts is Pending (a storage class that does not exist; on AKS, no Blob CSI driver) | Give the steps room -- a dedicated node pool, or lower requests or ceiling in the overlay -- or turn the Blob CSI driver on (`azure-provision.sh` does) |
 | `pipeline_node_lost` | failure | The cluster stopped the step's pod (a drain, a preemption, an eviction) before its command ended; the pod or Job failed with nothing saying why; the Job was deleted while another replica held it; no workbench replica reported the step within its deadline and the 4 minutes 30 seconds past it; or a fleet machine's connection ended before it reported | Re-run the step |
 | `pipeline_step_cancelled` | failure | The step was cancelled: its run was cancelled or superseded, or the drive running it ended | Re-run when ready |

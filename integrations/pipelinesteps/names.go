@@ -3,6 +3,7 @@ package pipelinesteps
 import (
 	"regexp"
 
+	pl "github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -160,15 +161,59 @@ func IsolationProbeName(nodeID string) string {
 // the probe Job.
 func IsolationTargetName(probeName string) string { return probeName + "-target" }
 
-// CacheSubPath is the owner's directory of the cache claim, "owners/" plus 24
-// hex of the content address of the owner's id (ruling R15). The step mounts
-// this directory as /cache, never the claim's root, so every step of one owner
-// shares a cache and two owners never do: a step can rewrite any entry of the
-// cache it is given, so a cache shared across owners would let one owner's
-// step poison another's builds. Hashed, so no owner id can name a path of its
-// own choosing; derived, so every replica and every version mounts the same
-// directory.
-func CacheSubPath(ownerUserID string) string {
-	sum := namesEngine.MustFromMap(map[string]any{"ownerUserId": ownerUserID})
-	return "owners/" + string(sum)[:24]
+// CacheTrust is the half of a repository's cache a run reads and writes
+// (ruling R15b): CacheTrusted for what the repository has accepted,
+// CacheUntrusted for what a collaborator proposes.
+type CacheTrust string
+
+const (
+	CacheTrusted   CacheTrust = "trusted"
+	CacheUntrusted CacheTrust = "untrusted"
+)
+
+// CacheSubPath is a step's directory of the cache claim (rulings R15, R15b):
+// "owners/<owner>/repos/<repository>/<trust>", the owner 24 hex of the content
+// address of the owner's id, the repository 24 hex of that of its owner and
+// name, and the trust CacheTrusted or CacheUntrusted -- any other value is
+// CacheUntrusted. The step mounts this directory as /cache, never the claim's
+// root.
+//
+// A step can rewrite any entry of the cache it is given, and Go trusts its
+// build cache by action id, so whoever writes a cache decides what a later
+// build that reads it gets. Hence three walls: two owners never share a cache;
+// two repositories of one owner never do; and a pull request's run never
+// writes the cache a run of the default branch, the merge queue or a release
+// reads (cacheTrustOf). Hashed, so neither an owner id nor a repository name
+// can name a path of its own choosing, and over a keyed map, so an owner and
+// a name can never run together into another repository's; derived, so every
+// replica and every version mounts the same directory.
+func CacheSubPath(ownerUserID string, repository pl.Repository, trust CacheTrust) string {
+	if trust != CacheTrusted {
+		trust = CacheUntrusted
+	}
+	owner := namesEngine.MustFromMap(map[string]any{"ownerUserId": ownerUserID})
+	repo := namesEngine.MustFromMap(map[string]any{"repositoryOwner": repository.Owner, "repositoryName": repository.Name})
+	return "owners/" + string(owner)[:24] + "/repos/" + string(repo)[:24] + "/" + string(trust)
+}
+
+// eventVar is the contract variable pl.StepRequest.Environment renders the
+// run's event in, which reaches the runner as a plain value of StepRun.Env. No
+// step can set it: the seam keeps the platform's value over a secret of the
+// same name, the compiler and BuildJob refuse a secret named MEMQL_*, and a
+// manifest declares no environment of its own.
+const eventVar = "MEMQL_EVENT"
+
+// cacheTrustOf is the trust of a step's cache, by the event its run was opened
+// for (ruling R15b): a push to the default branch, the merge queue and a
+// published release build what the repository has accepted; a pull request
+// builds what a collaborator proposes. A re-run is opened with its original's
+// event, so it keeps its original's trust. An event this version does not
+// know, or none, is untrusted: a run the runner cannot place never writes the
+// cache the default branch reads.
+func cacheTrustOf(run StepRun) CacheTrust {
+	switch pl.Event(run.Env[eventVar]) {
+	case pl.EventPush, pl.EventMergeGroup, pl.EventRelease:
+		return CacheTrusted
+	}
+	return CacheUntrusted
 }

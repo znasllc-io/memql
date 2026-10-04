@@ -258,12 +258,12 @@ func TestStepWrapperLeavesTheCommandsUmaskAlone(t *testing.T) {
 	}
 }
 
-// TestStepWrapperGivesEachUIDItsOwnCacheTree (ruling R13b): steps of one owner
-// share the owner's cache directory, but a root step and a uid-1000 step never
-// share a tree inside it -- each uid writes its own, with its own umask -- so
-// nothing has to be world-writable but the owner directory itself. The Job
-// names the declared caches; the wrapper derives the paths from the uid it
-// actually runs as.
+// TestStepWrapperGivesEachUIDItsOwnCacheTree (ruling R13b): steps that share a
+// cache directory -- one repository's, at one trust -- never share a tree
+// inside it when their uids differ: a root step and a uid-1000 step each write
+// their own, with their own umask, so nothing has to be world-writable but the
+// cache directory itself. The Job names the declared caches; the wrapper
+// derives the paths from the uid it actually runs as.
 func TestStepWrapperGivesEachUIDItsOwnCacheTree(t *testing.T) {
 	requireTools(t, "id")
 	uid := strconv.Itoa(os.Getuid())
@@ -417,17 +417,18 @@ func TestCloneScriptChecksOutTheSHAAndNothingAfterIt(t *testing.T) {
 	}
 }
 
-// TestCachePrepScriptPreparesTheOwnersCacheDirectory (rulings R15, R15b): the
-// step mounts only its owner's directory of the cache claim, and kubelet would
-// create a missing one root-owned with the claim ROOT's mode -- unwritable for
-// a non-root step on a claim whose root is not world-writable. The cache-prep
-// init container runs first and alone with the claim's root, and creates the
-// directory world-writable and STICKY (round 2), or opens up one created
-// narrower before: any uid of the owner's steps can create its own tree there,
-// and none can rename or replace another uid's.
-func TestCachePrepScriptPreparesTheOwnersCacheDirectory(t *testing.T) {
-	prep := func(t *testing.T, ownerCache string) shellRun {
-		return runShell(t, cachePrepScript, []string{"PATH=" + os.Getenv("PATH"), "OWNER_CACHE=" + ownerCache})
+// TestCachePrepScriptPreparesTheStepsCacheDirectory (rulings R15, R15b): the
+// step mounts only its own directory of the cache claim -- its owner's, its
+// repository's, its trust's -- and kubelet would create a missing one
+// root-owned with the claim ROOT's mode, unwritable for a non-root step on a
+// claim whose root is not world-writable. The cache-prep init container runs
+// first and alone with the claim's root, and creates the directory, and the
+// ones above it, then makes it world-writable and STICKY (round 2), or opens
+// up one created narrower before: any uid of the steps that share it can
+// create its own tree there, and none can rename or replace another uid's.
+func TestCachePrepScriptPreparesTheStepsCacheDirectory(t *testing.T) {
+	prep := func(t *testing.T, cacheDir string) shellRun {
+		return runShell(t, cachePrepScript, []string{"PATH=" + os.Getenv("PATH"), "CACHE_DIR=" + cacheDir})
 	}
 	// stickyModeOf is a directory's permission bits and its sticky bit.
 	stickyModeOf := func(t *testing.T, path string) os.FileMode {
@@ -439,19 +440,22 @@ func TestCachePrepScriptPreparesTheOwnersCacheDirectory(t *testing.T) {
 		return info.Mode() & (os.ModePerm | os.ModeSticky)
 	}
 	const want = os.ModeSticky | 0o777 // 01777
+	stepCache := func(root string) string {
+		return filepath.Join(root, "owners", "0dde18ce172fff450b32bf41", "repos", "dd0a30e0680ded4f864cf7f8", "trusted")
+	}
 
-	t.Run("a missing owner directory is created world-writable and sticky", func(t *testing.T) {
-		dir := filepath.Join(t.TempDir(), "owners", "0dde18ce172fff450b32bf41")
+	t.Run("a missing directory is created, with the ones above it, world-writable and sticky", func(t *testing.T) {
+		dir := stepCache(t.TempDir())
 		if res := prep(t, dir); res.code != 0 {
 			t.Fatalf("cache-prep exited %d\nstderr %s", res.code, res.stderr)
 		}
 		if got := stickyModeOf(t, dir); got != want {
-			t.Errorf("the owner's cache directory has mode %v, want %v (01777)", got, want)
+			t.Errorf("the step's cache directory has mode %v, want %v (01777)", got, want)
 		}
 	})
 
-	t.Run("an owner directory made narrower before is opened up", func(t *testing.T) {
-		dir := filepath.Join(t.TempDir(), "owners", "0dde18ce172fff450b32bf41")
+	t.Run("a directory made narrower before is opened up", func(t *testing.T) {
+		dir := stepCache(t.TempDir())
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -462,7 +466,7 @@ func TestCachePrepScriptPreparesTheOwnersCacheDirectory(t *testing.T) {
 			t.Fatalf("cache-prep exited %d\nstderr %s", res.code, res.stderr)
 		}
 		if got := stickyModeOf(t, dir); got != want {
-			t.Errorf("the existing owner directory has mode %v, want %v (01777)", got, want)
+			t.Errorf("the existing cache directory has mode %v, want %v (01777)", got, want)
 		}
 	})
 
@@ -475,7 +479,7 @@ func TestCachePrepScriptPreparesTheOwnersCacheDirectory(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
-		dir := filepath.Join(root, "owners", "0dde18ce172fff450b32bf41")
+		dir := stepCache(root)
 		res := prep(t, dir)
 		if res.code == 0 {
 			t.Fatal("cache-prep succeeded with a directory it could not create; the step would meet an unwritable cache instead")

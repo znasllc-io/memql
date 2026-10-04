@@ -6,16 +6,17 @@ package pipelinesteps
 // toolchain -- so each script says what it does about that (rulings R13, R13b,
 // R15b):
 //
-//   - cache-prep opens up the OWNER's cache directory, the one directory every
-//     uid of that owner's steps has to be able to enter -- world-writable and
-//     sticky, so a uid can create its own tree there but never rename or
-//     replace another uid's.
+//   - cache-prep opens up the step's cache directory -- its owner's, its
+//     repository's, its run's trust's -- the one directory every uid of the
+//     steps that share it has to be able to enter: world-writable and sticky,
+//     so a uid can create its own tree there but never rename or replace
+//     another uid's.
 //   - the clone clears its umask, so the checkout in the pod's own scratch
 //     volume is writable by whichever uid the step runs as.
 //   - the step wrapper changes NO umask: the user's command inherits the one
 //     the container starts with, because tools refuse files others can write
 //     (OpenSSH a world-writable ~/.ssh/config, MySQL ~/.my.cnf). Instead it
-//     gives each uid its own tree of the owner's cache, so steps of different
+//     gives each uid its own tree of the step's cache, so steps of different
 //     uids never write into each other's files.
 //
 // The per-uid cache variables, and the git configuration BuildJob gives the
@@ -32,7 +33,7 @@ package pipelinesteps
 // without tar loses its artifacts (a note), never its outcome.
 //
 // MEMQL_CACHES names the declared caches. For each, the wrapper points the
-// tool at a tree of the owner's cache that belongs to the uid the step runs as
+// tool at a tree of the step's cache that belongs to the uid the step runs as
 // (/cache/go-u<uid>, /cache/npm-u<uid>); a step declaring no cache keeps
 // whatever its image sets. A step whose uid cannot be determined (no id in the
 // image) runs uncached: guessing a uid would put it among another uid's files,
@@ -88,14 +89,15 @@ git checkout -q FETCH_HEAD
 echo "memql: checked out $SHA"`
 
 // cachePrepScript is the cache-prep init container's entrypoint (ruling
-// R15b). OWNER_CACHE names the owner's directory of the cache claim, whose
-// root only this container mounts. It creates the directory world-writable and
-// sticky (1777), or opens up one created narrower before -- kubelet creates a
-// missing subPath root-owned with the claim root's mode -- so the step, which
-// mounts only that directory, can enter it as whatever uid its image runs as
-// and create its own uid's tree, while the sticky bit keeps one uid from
-// renaming or replacing another uid's. Nothing else: no git, no token, no
-// checkout. A directory that cannot be prepared fails the container with a
-// line naming it, which FallbackToLogsOnError carries into terminated.message.
+// R15b). CACHE_DIR names the step's directory of the cache claim
+// (CacheSubPath), whose root only this container mounts. It creates the
+// directory, and those above it, then makes it world-writable and sticky
+// (1777), or opens up one created narrower before -- kubelet creates a missing
+// subPath root-owned with the claim root's mode -- so the step, which mounts
+// only that directory, can enter it as whatever uid its image runs as and
+// create its own uid's tree, while the sticky bit keeps one uid from renaming
+// or replacing another uid's. Nothing else: no git, no token, no checkout. A
+// directory that cannot be prepared fails the container with a line naming
+// it, which FallbackToLogsOnError carries into terminated.message.
 const cachePrepScript = `umask 0000
-mkdir -p "$OWNER_CACHE" && chmod 1777 "$OWNER_CACHE" || { echo "memql: cannot prepare the cache directory $OWNER_CACHE" >&2; exit 1; }`
+mkdir -p "$CACHE_DIR" && chmod 1777 "$CACHE_DIR" || { echo "memql: cannot prepare the cache directory $CACHE_DIR" >&2; exit 1; }`

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"testing"
@@ -20,8 +21,10 @@ const testJobName = "mp-a7a72726d5075767e0b6d115"
 // testSecretName is the Secret every reference in testJobName's Job names.
 const testSecretName = testJobName + "-env"
 
-// testOwnerCache is CacheSubPath("user-5d1e"), pinned in names_test.go.
-const testOwnerCache = "owners/0dde18ce172fff450b32bf41"
+// testCache is testRun's directory of the cache claim: CacheSubPath for
+// user-5d1e's acme/widget, untrusted -- testRun names no event -- pinned in
+// names_test.go.
+const testCache = "owners/0dde18ce172fff450b32bf41/repos/dd0a30e0680ded4f864cf7f8/untrusted"
 
 // Planted values: distinctive enough that finding one in a marshalled Job can
 // only mean it leaked, and assembled from parts so a secret scanner reads
@@ -333,7 +336,7 @@ func TestBuildJob(t *testing.T) {
 	})
 
 	// Ruling R15b: a dedicated init container, before the clone, does the one
-	// thing that needs the claim's root -- preparing the owner's directory --
+	// thing that needs the claim's root -- preparing the step's directory --
 	// and nothing else: no git, no token, no checkout.
 	t.Run("cache-prep runs first, as root, and sees the claim's root and nothing else", func(t *testing.T) {
 		job := mustBuild(t, testConfig(), testRun())
@@ -347,9 +350,9 @@ func TestBuildJob(t *testing.T) {
 		if !reflect.DeepEqual(prep.Command, []string{"/bin/sh", "-c", cachePrepScript}) {
 			t.Errorf("cache-prep command = %q, want /bin/sh -c <cachePrepScript>", prep.Command)
 		}
-		wantEnv := []EnvVar{{Name: "OWNER_CACHE", Value: "/cache-root/" + testOwnerCache}}
+		wantEnv := []EnvVar{{Name: "CACHE_DIR", Value: "/cache-root/" + testCache}}
 		if !reflect.DeepEqual(prep.Env, wantEnv) {
-			t.Errorf("cache-prep env = %s, want only OWNER_CACHE", mustJSON(t, prep.Env))
+			t.Errorf("cache-prep env = %s, want only CACHE_DIR", mustJSON(t, prep.Env))
 		}
 		if !reflect.DeepEqual(prep.VolumeMounts, []VolumeMount{{Name: "cache", MountPath: "/cache-root"}}) {
 			t.Errorf("cache-prep mounts = %+v, want only the claim's root at /cache-root", prep.VolumeMounts)
@@ -481,10 +484,10 @@ func TestBuildJob(t *testing.T) {
 		}
 		wantMounts := []VolumeMount{
 			{Name: "workspace", MountPath: "/workspace"},
-			{Name: "cache", MountPath: "/cache", SubPath: testOwnerCache},
+			{Name: "cache", MountPath: "/cache", SubPath: testCache},
 		}
 		if !reflect.DeepEqual(step.VolumeMounts, wantMounts) {
-			t.Errorf("step mounts = %+v, want %+v (the cache is the OWNER's directory of the claim, never its root)", step.VolumeMounts, wantMounts)
+			t.Errorf("step mounts = %+v, want %+v (the cache is the step's own directory of the claim, never its root)", step.VolumeMounts, wantMounts)
 		}
 		if step.SecurityContext == nil || step.SecurityContext.AllowPrivilegeEscalation == nil ||
 			*step.SecurityContext.AllowPrivilegeEscalation {
@@ -508,43 +511,7 @@ func TestBuildJob(t *testing.T) {
 		}
 		wantField(t, doc, false, "spec", "template", "spec", "containers", 0, "securityContext", "allowPrivilegeEscalation")
 		wantField(t, doc, "/workspace", "spec", "template", "spec", "containers", 0, "workingDir")
-		wantField(t, doc, testOwnerCache, "spec", "template", "spec", "containers", 0, "volumeMounts", 1, "subPath")
-	})
-
-	t.Run("every step of one owner shares a cache and two owners never do", func(t *testing.T) {
-		cacheOf := func(run StepRun) (subPath, prepared string) {
-			job := mustBuild(t, testConfig(), run)
-			for _, m := range stepOf(t, job).VolumeMounts {
-				if m.Name == "cache" {
-					subPath = m.SubPath
-				}
-			}
-			if prep, _, ok := initNamed(job, "cache-prep"); ok {
-				if e, ok := envNamed(prep, "OWNER_CACHE"); ok {
-					prepared = e.Value
-				}
-			}
-			return subPath, prepared
-		}
-		first := testRun()
-		later := testRun()
-		later.RunID, later.StepKey, later.Attempt = "run-91d0", "checks/vet", 1
-		other := testRun()
-		other.OwnerUserID = "user-77aa"
-
-		mine, minePrepared := cacheOf(first)
-		again, _ := cacheOf(later)
-		theirs, theirsPrepared := cacheOf(other)
-		if mine == "" || mine != again {
-			t.Errorf("two steps of one owner mount %q and %q, want one shared cache", mine, again)
-		}
-		if theirs != "owners/97d5292f36414d4a6638d794" || theirs == mine {
-			t.Errorf("owners user-5d1e and user-77aa mount %q and %q, want two different caches", mine, theirs)
-		}
-		// The directory cache-prep prepares is exactly the one the step mounts.
-		if minePrepared != "/cache-root/"+mine || theirsPrepared != "/cache-root/"+theirs {
-			t.Errorf("cache-prep prepares %q and %q, but the steps mount %q and %q", minePrepared, theirsPrepared, mine, theirs)
-		}
+		wantField(t, doc, testCache, "spec", "template", "spec", "containers", 0, "volumeMounts", 1, "subPath")
 	})
 
 	// Ruling R13: the clone container's uid never matches every step image's,
@@ -830,6 +797,117 @@ func TestBuildJob(t *testing.T) {
 					t.Errorf("refusal scope = %q, want the step key", refusal.Scope)
 				}
 			})
+		}
+	})
+}
+
+// cacheOf is the directory of the cache claim a step's Job mounts at /cache,
+// and the one its cache-prep prepares ("" for none).
+func cacheOf(t *testing.T, job Job) (mounted, prepared string) {
+	t.Helper()
+	for _, m := range stepOf(t, job).VolumeMounts {
+		if m.Name == "cache" {
+			mounted = m.SubPath
+		}
+	}
+	if prep, _, ok := initNamed(job, "cache-prep"); ok {
+		if e, ok := envNamed(prep, "CACHE_DIR"); ok {
+			prepared = strings.TrimPrefix(e.Value, "/cache-root/")
+		}
+	}
+	return mounted, prepared
+}
+
+// TestEachStepMountsItsRepositorysCacheAtItsTrust (review I4, ruling R15b):
+// one read-write cache per owner let a collaborator's unmerged pull request
+// plant Go and npm cache entries that the merge queue and the default branch
+// then built with -- Go trusts its build cache by action id. So a step's
+// cache is its owner's, its repository's and its run's trust's, and a run of
+// the default branch never mounts a pull request's.
+func TestEachStepMountsItsRepositorysCacheAtItsTrust(t *testing.T) {
+	withEvent := func(run StepRun, event pl.Event) StepRun {
+		run.Env = maps.Clone(run.Env)
+		run.Env["MEMQL_EVENT"] = string(event)
+		return run
+	}
+	const (
+		widgetPR   = "owners/0dde18ce172fff450b32bf41/repos/dd0a30e0680ded4f864cf7f8/untrusted"
+		widgetMain = "owners/0dde18ce172fff450b32bf41/repos/dd0a30e0680ded4f864cf7f8/trusted"
+	)
+
+	t.Run("steps of one repository at one trust share a cache; another repository of the owner's never does", func(t *testing.T) {
+		first := withEvent(testRun(), pl.EventPush)
+		later := withEvent(testRun(), pl.EventPush)
+		later.RunID, later.StepKey, later.Attempt = "run-91d0", "checks/vet", 1
+		gadget := withEvent(testRun(), pl.EventPush)
+		gadget.Repository = pl.Repository{Owner: "acme", Name: "gadget", CloneURL: "https://github.com/acme/gadget.git"}
+		other := withEvent(testRun(), pl.EventPush)
+		other.OwnerUserID = "user-77aa"
+
+		mine, _ := cacheOf(t, mustBuild(t, testConfig(), first))
+		again, _ := cacheOf(t, mustBuild(t, testConfig(), later))
+		theirs, _ := cacheOf(t, mustBuild(t, testConfig(), gadget))
+		owners, _ := cacheOf(t, mustBuild(t, testConfig(), other))
+		if mine != widgetMain || again != mine {
+			t.Errorf("two steps of acme/widget on the default branch mount %q and %q, want both %q", mine, again, widgetMain)
+		}
+		if theirs != "owners/0dde18ce172fff450b32bf41/repos/f850af728594b092f8acc209/trusted" {
+			t.Errorf("acme/gadget mounts %q: two repositories of one owner must not share a cache (acme/widget's is %q)", theirs, mine)
+		}
+		if owners != "owners/97d5292f36414d4a6638d794/repos/dd0a30e0680ded4f864cf7f8/trusted" {
+			t.Errorf("another owner's acme/widget mounts %q, want its own owner's directory", owners)
+		}
+	})
+
+	t.Run("a pull request's run and a default-branch run of one repository mount two caches", func(t *testing.T) {
+		for _, tc := range []struct {
+			event pl.Event
+			want  string
+		}{
+			{pl.EventPullRequest, widgetPR},
+			{pl.EventPush, widgetMain},
+			{pl.EventMergeGroup, widgetMain},
+			{pl.EventRelease, widgetMain},
+			{"", widgetPR},
+		} {
+			job := mustBuild(t, testConfig(), withEvent(testRun(), tc.event))
+			mounted, prepared := cacheOf(t, job)
+			if mounted != tc.want {
+				t.Errorf("event %q: the step mounts %q, want %q", tc.event, mounted, tc.want)
+			}
+			// cache-prep prepares exactly the directory the step mounts, and
+			// the Job names no other directory of the claim at all.
+			if prepared != mounted {
+				t.Errorf("event %q: cache-prep prepares %q, but the step mounts %q", tc.event, prepared, mounted)
+			}
+			other := widgetPR
+			if tc.want == widgetPR {
+				other = widgetMain
+			}
+			if raw := mustJSON(t, job); strings.Contains(raw, other) {
+				t.Errorf("event %q: the Job names %s, the other trust's cache", tc.event, other)
+			}
+		}
+	})
+
+	// A re-run is opened with its original's event (pipelinerun's rerunOf):
+	// the event the seam hands over decides the trust, never the attempt.
+	t.Run("a re-run keeps its original's trust", func(t *testing.T) {
+		for _, event := range []pl.Event{pl.EventPush, pl.EventPullRequest} {
+			original := testRequest()
+			original.Event = event
+			rerun := original
+			rerun.RunID, rerun.WorkRunID, rerun.RunAttempt = "run-8e21", "work-77b0", 2
+			want := widgetPR
+			if event == pl.EventPush {
+				want = widgetMain
+			}
+			for _, req := range []pl.StepRequest{original, rerun} {
+				mounted, _ := cacheOf(t, mustBuild(t, testConfig(), stepRunFor(req, 600, pl.CodeStepTimeout)))
+				if mounted != want {
+					t.Errorf("a %s run, attempt %d: the step mounts %q, want %q", event, req.RunAttempt, mounted, want)
+				}
+			}
 		}
 	})
 }

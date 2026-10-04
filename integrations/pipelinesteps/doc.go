@@ -22,12 +22,13 @@
 // whichever replica asks next finds the same Job.
 //
 // The STEP'S POD is not a MemQL node at all, and that is the point. When the
-// step declares caches, an init container opens the owner's directory of the
+// step declares caches, an init container opens the step's directory of the
 // cache claim; another shallow-clones the commit; named services run as native
 // sidecars; and the manifest's own image runs the command through a POSIX
 // wrapper that frames declared artifacts on stdout. The step sees only its
-// owner's cache, in a tree of its own uid. Nothing in the pod holds a cluster
-// credential: no ServiceAccount token, no Service links, no platform Secret.
+// repository's cache at its run's trust, in a tree of its own uid. Nothing in
+// the pod holds a cluster credential: no ServiceAccount token, no Service
+// links, no platform Secret.
 // The one credential it ever sees is a short-lived clone token, which only the
 // clone container can read (TestTheCloneTokenReachesOnlyTheCloneContainer).
 //

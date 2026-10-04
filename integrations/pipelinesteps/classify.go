@@ -14,7 +14,7 @@ type Phase int
 
 const (
 	// PhasePending: nothing has decided the step yet. Its pod is not created
-	// or not scheduled, an image is being pulled, the owner's cache, the clone
+	// or not scheduled, an image is being pulled, the step's cache, the clone
 	// or a service is getting ready. Poll again.
 	PhasePending Phase = iota
 	// PhaseRunning: the step container runs. Follow its log.
@@ -70,7 +70,7 @@ var pullReasons = map[string]bool{"ErrImagePull": true, "ImagePullBackOff": true
 //  4. The Job completed: succeeded.
 //  5. Something in the pod means the step can never run: an image that
 //     cannot be pulled (pl.CodeImagePullFailed), a container that cannot be
-//     created or the owner's cache directory (pl.CodeJobRejected), the clone
+//     created or the step's cache directory (pl.CodeJobRejected), the clone
 //     (pl.CodeCloneFailed), a service that stopped before the step started
 //     (pl.CodeServiceFailed), a pod nobody can schedule
 //     (pl.CodeJobUnschedulable).
@@ -227,7 +227,7 @@ func podFailure(pod *Pod, step *ContainerStatus, created, now time.Time, cfg Con
 	return nil
 }
 
-// cachePrepFailure: the owner's cache directory is a cluster and storage
+// cachePrepFailure: the step's cache directory is a cluster and storage
 // matter, never the repository's, so every way it fails is a rejected Job.
 // cache-prep exits non-zero when it cannot make the directory; it waits on a
 // reason other than starting when its container cannot be made; and it never
@@ -239,7 +239,7 @@ func cachePrepFailure(cs *ContainerStatus, created, now time.Time, cfg Config) *
 	if cs == nil {
 		return nil
 	}
-	const prefix = "the owner's cache directory could not be prepared: "
+	const prefix = "the step's cache directory could not be prepared: "
 	switch s := cs.State; {
 	case s.Terminated != nil && s.Terminated.ExitCode != 0:
 		return &pl.Failure{Code: pl.CodeJobRejected, Message: prefix + "cache-prep " + exitPhrase(s.Terminated) + messageOf(s.Terminated)}

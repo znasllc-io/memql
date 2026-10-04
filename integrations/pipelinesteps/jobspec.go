@@ -17,8 +17,8 @@ import (
 // A step's pod, end to end (design record D10, rulings R13b, R15b, R17):
 //
 //	init  cache-prep     only when caches are declared: root, the claim's ROOT
-//	                     at /cache-root, opens the owner's directory -- no git,
-//	                     no token, no checkout
+//	                     at /cache-root, opens the step's directory under it
+//	                     (CacheSubPath) -- no git, no token, no checkout
 //	init  clone          cfg.CloneImage as root: shallow-fetches the SHA into
 //	                     /workspace, the ONLY container that can read the clone
 //	                     token; never sees the cache claim
@@ -28,7 +28,8 @@ import (
 //	main  step           the manifest's image as its own user, running the
 //	                     command through stepWrapper in /workspace, with the
 //	                     contract environment, the step's secrets by reference,
-//	                     and only the owner's directory of the cache at /cache
+//	                     and only its own directory of the cache at /cache: its
+//	                     owner's, its repository's and its run's trust's
 //
 // No cluster credential of any kind is present: the pod runs as an identity
 // with no RoleBinding, its token is never mounted, Service links are off, and
@@ -45,15 +46,16 @@ const (
 	cachePath       = "/cache"
 
 	// cacheRootPath is where cache-prep mounts the cache claim's ROOT, and
-	// ownerCacheVar names the owner's directory under it that cache-prep opens,
-	// world-writable and sticky (rulings R15, R15b). Kubelet creates a missing
-	// subPath root-owned with the claim root's mode, so on a claim whose root is
-	// not world-writable a non-root step would get a cache it cannot enter; the
-	// sticky bit keeps one uid of the owner's steps from renaming or replacing
-	// another uid's tree. Only cache-prep -- a fixed script, no git, no token --
-	// ever sees the claim's root, where every owner's cache lives.
+	// cacheDirVar names the step's directory under it (CacheSubPath) that
+	// cache-prep opens, world-writable and sticky (rulings R15, R15b). Kubelet
+	// creates a missing subPath root-owned with the claim root's mode, so on a
+	// claim whose root is not world-writable a non-root step would get a cache
+	// it cannot enter; the sticky bit keeps one uid of the steps that share the
+	// directory from renaming or replacing another uid's tree. Only cache-prep
+	// -- a fixed script, no git, no token -- ever sees the claim's root, where
+	// every owner's caches live.
 	cacheRootPath = "/cache-root"
-	ownerCacheVar = "OWNER_CACHE"
+	cacheDirVar   = "CACHE_DIR"
 
 	// failureFromLogs is the termination message policy of cache-prep, the
 	// clone and every sidecar: with the default (File) a failed container's
@@ -446,7 +448,7 @@ func imageContext() *SecurityContext {
 	}
 }
 
-// cachePrepContainer opens the owner's directory of the cache claim before
+// cachePrepContainer opens the step's directory of the cache claim before
 // anything else runs (ruling R15b). It mounts the claim's ROOT and nothing
 // else, and runs a fixed script: the container that sees every owner's cache
 // is the one that runs no repository content.
@@ -455,7 +457,7 @@ func cachePrepContainer(cfg Config, run StepRun) Container {
 		Name:                     ContainerCachePrep,
 		Image:                    cfg.CloneImage,
 		Command:                  []string{"/bin/sh", "-c", cachePrepScript},
-		Env:                      []EnvVar{plainVar(ownerCacheVar, cacheRootPath+"/"+CacheSubPath(run.OwnerUserID))},
+		Env:                      []EnvVar{plainVar(cacheDirVar, cacheRootPath+"/"+stepCacheDir(run))},
 		VolumeMounts:             []VolumeMount{{Name: cacheVolume, MountPath: cacheRootPath}},
 		SecurityContext:          rootContext(),
 		TerminationMessagePolicy: failureFromLogs,
@@ -540,8 +542,8 @@ func stepContainer(run StepRun, jobName, secretName string, caches []string) Con
 
 	mounts := []VolumeMount{{Name: workspaceVolume, MountPath: workspacePath}}
 	if len(caches) > 0 {
-		// The owner's directory only, never the claim's root (ruling R15).
-		mounts = append(mounts, VolumeMount{Name: cacheVolume, MountPath: cachePath, SubPath: CacheSubPath(run.OwnerUserID)})
+		// The step's own directory only, never the claim's root (ruling R15b).
+		mounts = append(mounts, VolumeMount{Name: cacheVolume, MountPath: cachePath, SubPath: stepCacheDir(run)})
 	}
 	return Container{
 		Name:            ContainerStep,
@@ -586,6 +588,15 @@ func declaredCaches(caches []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// stepCacheDir is the step's directory of the cache claim: its owner's, its
+// repository's, and the trust of the event its run was opened for. cache-prep
+// opens exactly this directory and the step mounts exactly this one, so a
+// run of the default branch never mounts a pull request's cache, nor the
+// other way round.
+func stepCacheDir(run StepRun) string {
+	return CacheSubPath(run.OwnerUserID, run.Repository, cacheTrustOf(run))
 }
 
 // plainVar is a literal environment variable, written through kubeLiteral:

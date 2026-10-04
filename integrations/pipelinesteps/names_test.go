@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	pl "github.com/znasllc-io/memql/component/pipelines"
 )
 
 // dnsLabel is an RFC 1123 label: what a Job name has to be, because the Job
@@ -102,30 +104,89 @@ func TestRunLabelValueIsAlwaysALabelValue(t *testing.T) {
 	}
 }
 
-// TestCacheSubPathIsPerOwner: every step of one owner shares a cache and two
-// owners never do (ruling R15). A step can rewrite any entry of the cache it
-// is given, so one cache across owners would let one owner's step poison
-// another owner's builds. The directory is derived, so every replica and every
-// version mounts the same one, and hashed, so no owner id can climb out of
-// owners/ or name a sibling.
-func TestCacheSubPathIsPerOwner(t *testing.T) {
+// TestCacheSubPathIsPerOwnerRepositoryAndTrust: a step can rewrite any entry
+// of the cache it is given, and Go trusts its build cache by action id, so
+// whoever writes a cache decides what a later build reading it gets (rulings
+// R15, R15b). Two owners never share a cache, two repositories of one owner
+// never do, and a pull request's run never writes the cache a run of the
+// default branch, the merge queue or a release reads. The directory is
+// derived, so every replica and every version mounts the same one, and its
+// owner and repository are hashed, so neither an owner id nor a repository
+// name can climb out of owners/ or name a sibling.
+func TestCacheSubPathIsPerOwnerRepositoryAndTrust(t *testing.T) {
+	widget := pl.Repository{Owner: "acme", Name: "widget"}
 	// "owners/" + the first 24 hex of core/id's content address of
-	// {"ownerUserId":"user-5d1e"}, derived like names_test.go's other literals.
-	if got := CacheSubPath("user-5d1e"); got != "owners/0dde18ce172fff450b32bf41" {
-		t.Errorf("CacheSubPath(user-5d1e) = %q, want owners/0dde18ce172fff450b32bf41", got)
+	// {"ownerUserId":"user-5d1e"}, "/repos/" + the first 24 hex of that of
+	// {"repositoryName":"widget","repositoryOwner":"acme"}, and the trust,
+	// derived like names_test.go's other literals.
+	for _, tc := range []struct {
+		owner string
+		repo  pl.Repository
+		trust CacheTrust
+		want  string
+	}{
+		{"user-5d1e", widget, CacheTrusted, "owners/0dde18ce172fff450b32bf41/repos/dd0a30e0680ded4f864cf7f8/trusted"},
+		{"user-5d1e", widget, CacheUntrusted, "owners/0dde18ce172fff450b32bf41/repos/dd0a30e0680ded4f864cf7f8/untrusted"},
+		{"user-5d1e", pl.Repository{Owner: "acme", Name: "gadget"}, CacheTrusted, "owners/0dde18ce172fff450b32bf41/repos/f850af728594b092f8acc209/trusted"},
+		{"user-77aa", widget, CacheTrusted, "owners/97d5292f36414d4a6638d794/repos/dd0a30e0680ded4f864cf7f8/trusted"},
+	} {
+		if got := CacheSubPath(tc.owner, tc.repo, tc.trust); got != tc.want {
+			t.Errorf("CacheSubPath(%s, %s, %s) = %q, want %q", tc.owner, tc.repo.FullName(), tc.trust, got, tc.want)
+		}
 	}
-	if got := CacheSubPath("user-77aa"); got != "owners/97d5292f36414d4a6638d794" {
-		t.Errorf("CacheSubPath(user-77aa) = %q, want owners/97d5292f36414d4a6638d794: two owners share a cache", got)
+
+	// Only a trust this package names is a trust: anything else is the
+	// untrusted directory, never a path segment a caller chose.
+	if got := CacheSubPath("user-5d1e", widget, CacheTrust("../trusted")); got != "owners/0dde18ce172fff450b32bf41/repos/dd0a30e0680ded4f864cf7f8/untrusted" {
+		t.Errorf("CacheSubPath with trust ../trusted = %q, want the untrusted directory", got)
 	}
-	shape := regexp.MustCompile(`^owners/[0-9a-f]{24}$`)
+
+	shape := regexp.MustCompile(`^owners/[0-9a-f]{24}/repos/[0-9a-f]{24}/(trusted|untrusted)$`)
 	for _, owner := range []string{"user-5d1e", "../../etc", "a/b", ".", strings.Repeat("x", 300)} {
-		got := CacheSubPath(owner)
-		if !shape.MatchString(got) {
-			t.Errorf("CacheSubPath(%q) = %q, want owners/ and 24 hex: anything else is a path an owner id chose", owner, got)
+		for _, repo := range []pl.Repository{widget, {Owner: "..", Name: ".."}, {Owner: "a/b", Name: "../../c"}, {}} {
+			for _, trust := range []CacheTrust{CacheTrusted, CacheUntrusted, ""} {
+				got := CacheSubPath(owner, repo, trust)
+				if !shape.MatchString(got) {
+					t.Errorf("CacheSubPath(%q, %q, %q) = %q, want owners/<24 hex>/repos/<24 hex>/<trust>: anything else is a path an input chose",
+						owner, repo.FullName(), trust, got)
+				}
+				if again := CacheSubPath(owner, repo, trust); again != got {
+					t.Errorf("CacheSubPath(%q, %q, %q) is not deterministic: %q then %q", owner, repo.FullName(), trust, got, again)
+				}
+			}
 		}
-		if again := CacheSubPath(owner); again != got {
-			t.Errorf("CacheSubPath(%q) is not deterministic: %q then %q", owner, got, again)
+	}
+	// Owner and name are two fields, not one joined string: "a-b"/"c" and
+	// "a"/"b-c" are two repositories, and so are two caches.
+	if CacheSubPath("user-5d1e", pl.Repository{Owner: "a-b", Name: "c"}, CacheTrusted) == CacheSubPath("user-5d1e", pl.Repository{Owner: "a", Name: "b-c"}, CacheTrusted) {
+		t.Error("two repositories whose owner and name join to the same string share a cache")
+	}
+}
+
+// TestCacheTrustIsTheRunsEvent (ruling R15b): what a run of the default
+// branch, the merge queue or a release builds is what the repository has
+// accepted; what a pull request's run builds is what a collaborator proposes.
+// The event is the seam's, rendered into the step's contract environment
+// (pl.StepRequest.Environment), which no secret and no manifest can set. An
+// event this version does not know, or none, is untrusted: a run the runner
+// cannot place never writes the cache the default branch reads.
+func TestCacheTrustIsTheRunsEvent(t *testing.T) {
+	for event, want := range map[string]CacheTrust{
+		string(pl.EventPush):        CacheTrusted,
+		string(pl.EventMergeGroup):  CacheTrusted,
+		string(pl.EventRelease):     CacheTrusted,
+		string(pl.EventPullRequest): CacheUntrusted,
+		"":                          CacheUntrusted,
+		"workflow_dispatch":         CacheUntrusted,
+		"PUSH":                      CacheUntrusted,
+	} {
+		run := StepRun{Env: map[string]string{"MEMQL_EVENT": event}}
+		if got := cacheTrustOf(run); got != want {
+			t.Errorf("event %q: trust %q, want %q", event, got, want)
 		}
+	}
+	if got := cacheTrustOf(StepRun{}); got != CacheUntrusted {
+		t.Errorf("a run with no environment: trust %q, want untrusted", got)
 	}
 }
 

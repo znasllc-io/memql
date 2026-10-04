@@ -403,7 +403,7 @@ func TestClassify(t *testing.T) {
 			want: wantFailed(pl.CodeJobRejected, `secret "mp-a7a72726d5075767e0b6d115-env" not found`),
 		},
 
-		// -- the owner's cache directory --
+		// -- the step's cache directory --
 		{
 			// Measured (the clone image running cache-prep's script on a claim it
 			// cannot write, FallbackToLogsOnError): mkdir's error and the
