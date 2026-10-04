@@ -46,9 +46,12 @@ it("walks through all existing setup choices and submits only on verification", 
   }
   fireEvent.click(screen.getByRole("combobox", { name: "Title in organization (optional)" }));
   fireEvent.click(screen.getByRole("option", { name: "Engineer" }));
-  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(screen.getByLabelText("Organization name")).toHaveProperty("required", true);
+  expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+  fireEvent.change(screen.getByLabelText("Organization name"), { target: { value: "   " } });
   expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
   fireEvent.change(screen.getByLabelText("Organization name"), { target: { value: "Example" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   fireEvent.change(screen.getByLabelText("Internal email domains (comma-separated)"), { target: { value: "example.test" } });
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   fireEvent.change(screen.getByLabelText("Approved email domains (comma-separated)"), { target: { value: "partner.test" } });

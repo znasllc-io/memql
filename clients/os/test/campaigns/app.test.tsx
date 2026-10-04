@@ -1145,6 +1145,8 @@ describe("the app's settings", () => {
       audiences: [audienceRow({ id: "reviewers", name: "Reviewers", accountId: "org" }), audienceRow({ id: "other", name: "Other client list", accountId: "other-org" })],
     });
     mount(conn, "settings");
+    openSelect(await screen.findByRole("combobox", { name: "Testing organization" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Client" }));
     const picker = await screen.findByRole("combobox", { name: "Testing audience" });
     await waitFor(() => expect(screen.queryByText("Testing settings are not confirmed.")).toBeNull());
     openSelect(picker);

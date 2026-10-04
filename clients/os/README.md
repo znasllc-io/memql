@@ -95,11 +95,13 @@ or client-visible session authority.
   widgets and sheets re-inherit the tokens but do NOT carry the attribute.
 - **Persistence**: `system/store.ts` (`DesktopStore`) — versioned
   localStorage; desks, items, pins, theme. Never windows.
-- **The interface language**: [DESIGN.md](DESIGN.md) — the ten owner-set
-  rules every app surface follows (epic memql#4848): Head-first sections,
+- **The interface language**: [DESIGN.md](DESIGN.md) — the twelve
+  rules every app surface follows: Head-first sections,
   filters behind one Refine affordance, quiet sort, the control line,
   one container grammar. When a rule and a surface disagree, the surface
-  is wrong.
+  is wrong. For UI/UX work, use the `frontend-design` skill and follow the
+  [design and verification workflow](DESIGN.md#applying-them), including the
+  owner's minimal-interface preference and real-browser visual review.
 - **Loading and nested navigation**: every app uses content-shaped, text-free
   skeletons for missing content, keeping accessible status labels off screen.
   Use `RecordListSkeleton`, `ContentSkeleton`, or `InlineSkeleton`; preserve
@@ -1137,7 +1139,9 @@ rules rather than repetitions of the five before it.
   change.
 
 - **ORGANIZATION OWNERSHIP IS ENFORCED BY THE ENGINE.** Campaigns and
-  deployables require one organization. The UI defaults from authoritative
+  deployables require one organization. The first ownership form requires the
+  cluster organization's name. Its reserved `self` account cannot be archived
+  or deleted; its name remains editable. The UI defaults from authoritative
   `MyAccess.everyAccount/accountIds`: operators use `self`, a client with one
   authorized organization uses that organization, and multiple memberships
   require an explicit choice. The engine independently resolves the default,

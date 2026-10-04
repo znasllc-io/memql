@@ -40,7 +40,8 @@ func TestOrganizationDefaultNeverSelectsAnotherOrganization(t *testing.T) {
 		want     string
 		fail     bool
 	}{
-		{true, nil, "", true}, {false, []string{"acme"}, "acme", false},
+		{true, nil, "self", false}, {true, []string{"acme", "beta"}, "self", false},
+		{false, []string{"acme"}, "acme", false},
 		{false, []string{"v1:accounts:account:acme", "acme"}, "acme", false},
 		{false, nil, "", true}, {false, []string{"acme", "beta"}, "", true},
 	} {

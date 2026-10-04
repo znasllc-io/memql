@@ -268,7 +268,7 @@ describe("one Azure configuration per cluster", () => {
     query(() => { throw Error("Connection unavailable"); }); render(withSession(<AzureEmailConnections/>));
     expect(await screen.findByText("Cluster email configuration could not be read.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Set up Azure" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "Cluster email" })).getByRole("button", { name: "Try again" })).toBeTruthy();
   });
   it("keeps configuration with owners and developers", async () => {
     const call = query(() => cluster); render(withSession(<AzureEmailConnections/>, { role: "writer" }));

@@ -28,16 +28,18 @@ export function OwnershipWizard({ data, busy, error, submit }: {
     id={name} label={label} value={form[name] || ""} onChange={next => setForm(f => ({ ...f, [name]: next }))}>
     {options.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
   </Select></Field>;
-  const valid = step === 0 ? Boolean((form.owner_first_name || "").trim() && (form.owner_last_name || "").trim() && /^[^\s@]+@[^\s@]+$/.test(form.owner_email || ""))
-    : step === 1 ? Boolean((form.domain || "").trim() && (form.brand_name || "").trim())
+  const valid = step === 0 ? Boolean((form.brand_name || "").trim() && (form.owner_first_name || "").trim() && (form.owner_last_name || "").trim() && /^[^\s@]+@[^\s@]+$/.test(form.owner_email || ""))
+    : step === 1 ? Boolean((form.domain || "").trim())
     : step === 2 && form.registration_mode === "domain_restricted" ? Boolean((form.registration_domains || "").trim()) : true;
   const bodies = [
-    <div className="os-identity-fields">{field("owner_first_name", "First name", "text", true)}{field("owner_last_name", "Last name", "text", true)}
+    <div className="os-identity-fields">{field("brand_name", "Organization name", "text", true)}
+      <p>Owns this cluster and is the default for new resources. This organization cannot be deleted.</p>
+      {field("owner_first_name", "First name", "text", true)}{field("owner_last_name", "Last name", "text", true)}
       {field("owner_email", "Owner email", "email", true)}<p>{local ? "Contact information only. This local installation does not verify email; your passkey will prove access." : "Verify this address, then register a passkey to become the cluster owner."}</p>
       {field("owner_phone", "Phone number (optional)", "tel")}<OrganizationTitle value={form.owner_primary_role || ""} onChange={next => setForm(f => ({ ...f, owner_primary_role: next }))} />
       </div>,
     <div className="os-identity-fields">{field("domain", "Cluster domain", "text", true)}<p>The hostname suffix for this installation, such as memql.localhost.</p>
-      {field("brand_name", "Organization name", "text", true)}<p>Your organization owns this installation and is the default for cluster operators.</p>{field("internal_domains", "Internal email domains (comma-separated)")}
+      {field("internal_domains", "Internal email domains (comma-separated)")}
       <p>People with an internal email domain receive the default cluster role. External people receive a personal partition.</p></div>,
     <div className="os-identity-fields">{select("registration_mode", "New accounts", [["open", "Open registration"], ["domain_restricted", "Approved email domains"], ["invite_only", "Invitation only"], ["waitlist", "Access requests"]])}
       {field("registration_domains", "Approved email domains (comma-separated)")}
@@ -49,7 +51,7 @@ export function OwnershipWizard({ data, busy, error, submit }: {
   return <Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title="Welcome to MemQL OS" lead="Set up this installation and verify cluster ownership."
     asideFooter={<SetupTheme />}
     label="Ownership setup" open={String(step)} onOpen={id => setStep(Number(id))}
-    steps={["Cluster owner", "Your installation", "Account access", local ? "Register passkey" : "Verify email", ...(local ? [] : ["Register passkey"])].map((name, i) => ({ id: String(i), name,
+    steps={["Organization and owner", "Your installation", "Account access", local ? "Register passkey" : "Verify email", ...(local ? [] : ["Register passkey"])].map((name, i) => ({ id: String(i), name,
       state: i < step ? "done" : i === step ? "open" : "ahead", body: bodies[i] }))}
     notices={error ? <p role="alert">{error}</p> : undefined}
     status={{ word: busy ? (local ? "Preparing passkey setup" : "Sending verification") : valid ? "Your turn" : "Complete the required fields", tone: busy ? "busy" : "none" }}

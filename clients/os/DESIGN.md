@@ -126,6 +126,22 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
 
 ## Applying them
 
+- For UI/UX design and implementation, use the `frontend-design` skill before
+  coding. Read its `SKILL.md` from the available skills catalog; its installed
+  path is machine-specific. If unavailable, follow the workflow below and say
+  so. The owner should not need to request the skill for each UI change.
+- Keep the owner's preference for simple, minimal interfaces explicit in the
+  design plan. Reuse MemQL's palette, typography, spacing and kit. Briefly plan
+  the control and its placement, compare that plan with the requested behavior,
+  then build and critique the rendered result.
+- Represent one preference with one control. Dark / Light / System is one
+  three-position toggle on a shared track with one moving selection, using
+  moon, sun and monitor icons. It needs no visible heading or option labels;
+  retain accessible names, tooltips, keyboard operation and visible focus.
+  This does not remove the labels that identify form fields.
+- Remove redundant labels, helper text, outlines and decoration. Keep copy
+  when it explains a consequence or helps the current decision. A skill's
+  general suggestions never override these repository rules or the brief.
 - Build with the kit pieces; a surface needing a control the kit lacks
   promotes it on second use (`src/kit/controls.tsx` header) rather than
   respelling it locally.
@@ -133,6 +149,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   rules is rendered screenshots, both modes, empty and populated -- not the
   diff. The audit that produced these rules was visual, and the drift it
   found had survived every code review.
+- Check the changed interaction in the local app, including keyboard access,
+  a narrow viewport and reduced motion where relevant. When local testing is
+  requested, rebuild through the supported local path and verify the result in
+  the requested browser before calling it ready.
 
 ## Record lists
 
