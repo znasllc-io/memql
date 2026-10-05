@@ -1,5 +1,3 @@
-//go:build agent || planner
-
 package worker
 
 // SHARED RESOLUTION for a USER's call (epic memql#5146, design D6).

@@ -1,5 +1,3 @@
-//go:build agent || planner
-
 package worker
 
 // The engine-side implementation of local inference (epic memql#4676,

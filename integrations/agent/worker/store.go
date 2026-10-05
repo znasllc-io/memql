@@ -1,5 +1,3 @@
-//go:build agent || planner
-
 package worker
 
 import (

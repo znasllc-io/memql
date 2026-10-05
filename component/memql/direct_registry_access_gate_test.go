@@ -161,7 +161,7 @@ var allowedFiles = map[string]string{
 	"app/engine.go":                    "constructs the Router from the registries; this IS the wiring the gate protects",
 	"app/fleet_catalog.go":             "installs the shared graph catalog reader during bootstrap; it selects no provider and calls no model",
 	"app/cluster_worker.go":            "hands the registry to the fleet seam so `fleet:` entries resolve per user; it calls no model",
-	"app/cluster_worker_planner.go":    "installs the planner's remote fleet inference transport during bootstrap; it selects no provider and calls no model",
+	"app/cluster_worker_remote.go":     "installs BFF/planner remote fleet inference transport during bootstrap; it selects no provider and calls no model",
 	"app/integrations_worker_agent.go": "the same fleet-seam wiring on the agent node",
 	"app/plugins.go":                   "builds the PluginContext, including the two resolver-backed closures below; it calls no model itself",
 	"integrations/router/plugin.go":    "the BYOK/catalog admin integration LISTS registry entries for v1:router:modelCatalog and v1:router:policyCatalog; listing is not calling",

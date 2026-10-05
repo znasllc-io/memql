@@ -1,5 +1,3 @@
-//go:build agent || planner
-
 // Package worker (agent-side) bridges the agent's tool loop to the
 // worker subsystem. It owns:
 //
