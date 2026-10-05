@@ -20,7 +20,7 @@ func workResponseToolDefinition() common.ToolDefinition {
 		"An unknown personal preference needs input from that person; it is not a completed lookup. " +
 		"Do not put an invitation to tell you later in a completed response. " +
 		"The runtime presents a needs_input question in Ask and pauses this task until answered. " +
-		"Use kind=text for an open answer, or choice/multi with useful options. Reuse earlier answers and avoid questions about minor preferences. " +
+		"Use kind=text for an open answer. When offering alternatives or requested suggestions, use choice/multi and supply options; every choice also accepts custom text. Reuse earlier answers and avoid questions about minor preferences. " +
 		"Call this tool alone. Computer-access approval uses requestComputerUseScope instead."
 	schema := def.InputSchema.(map[string]any)
 	schema["required"] = []string{"status"}

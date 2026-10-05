@@ -185,4 +185,12 @@ Set `sectionable: false` (the default) when:
 
 When in doubt, prefer `sectionable: false` -- a non-sectionable goal simply routes through the normal planner; a wrongly-sectioned one splits work that was not actually separable.
 
+## REQUEST TO CLASSIFY NOW
+{{.goal}}
+
+Classify only this current request. Earlier conversation messages are background
+for resolving references, not pending tasks to classify again. A new subject in
+this conversation is a new request even while earlier work waits for an answer.
+The workTitle and acknowledgement must name this request's subject and requested
+action. Discard previous task titles and wording that refer to a different subject.
 Output the JSON now.

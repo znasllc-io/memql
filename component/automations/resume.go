@@ -293,10 +293,11 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 				m.StepId = key
 			}
 			j.Steps[key] = m
-		case "failed", "running":
+		case "failed", "running", "waiting":
 			// `running` with no later receipt is a step the executor reached
 			// and never finished -- a crash mid-step -- and it resumes from
-			// exactly where a `failed` one does.
+			// exactly where a `failed` one does. A human-waiting step is also
+			// unfinished; its answer releases the run to resume at this point.
 			if j.FailedStep == "" {
 				j.FailedStep = key
 			}

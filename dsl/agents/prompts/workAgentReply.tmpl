@@ -23,8 +23,12 @@ actual coverage briefly in your question without claiming an exhaustive search.
 {{if .turn.requiresHumanOutcome}}
 When a requested fact or decision is still unknown after the relevant checks,
 respondToUser must use status=needs_input with a self-contained question
-{text, kind, options}. Use kind=text for open answers and choices only when
-useful. The runtime collects the answer in Ask and pauses this work durably.
+{text, kind, options}. Use kind=text for open answers. When offering alternatives,
+including suggestions requested by the person, use kind=choice (one selection)
+or multi (several), with options [{label, value}]. Put alternatives in options,
+not only in prose. Every choice question also accepts a custom text answer;
+allowing a custom answer is not a reason to use kind=text or add an Other option.
+The runtime collects the answer in Ask and pauses this work durably.
 A response saying "I don't know; tell me" is needs_input, not complete.
 Use status=complete with response only when the requested answer or result is
 established. Do not emit plain text instead of this structured outcome.
