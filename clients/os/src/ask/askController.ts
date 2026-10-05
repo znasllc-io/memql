@@ -25,6 +25,8 @@ export interface AskOptions {
 }
 
 export interface AskTransport {
+  openWork?: (runId: string) => Promise<import("./conversationSession").ConversationSummary>;
+  answerQuestion?: (approvalId: string, answer: Record<string, unknown>) => Promise<void>;
  cancelGoal?: (goalId: string) => Promise<void>;
   conversations?: AskConversationStore;
   startVoice?: (options: import("@znasllc-io/memql-sdk-core/voice").AskVoiceOptions, signal: AbortSignal) => Promise<import("@znasllc-io/memql-sdk-core/voice").AskVoiceCredentials>;

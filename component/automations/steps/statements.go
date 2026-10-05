@@ -9,11 +9,13 @@ package steps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/work"
 )
 
 // BlockExecutor runs a block step: a parallel statement's branch, a list of
@@ -94,6 +96,9 @@ func forEachStatements(ctx context.Context, step *automations.Step, stepCtx *Con
 		// are its own.
 		returned, value, rerr := automations.RunStatementBody(ctx, step.ID+"/"+strconv.Itoa(i), cfg.Do, stepCtx, iter)
 		if rerr != nil {
+			if isHumanWait(rerr) {
+				return finish(rerr)
+			}
 			failed++
 			lastErr = rerr
 			if step.OnError != automations.ErrorStrategyContinue {
@@ -115,4 +120,9 @@ func forEachStatements(ctx context.Context, step *automations.Step, stepCtx *Con
 		result.Metadata["lastError"] = lastErr.Error()
 	}
 	return finish(nil)
+}
+
+func isHumanWait(err error) bool {
+	var wait *work.HumanWait
+	return errors.As(err, &wait)
 }

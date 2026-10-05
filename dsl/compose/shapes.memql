@@ -24,6 +24,7 @@ shape composition compositionCard {
   format
   outputKind
   templateId
+  sourceFileId
   outputFileId
   folderId
   accountIds
@@ -51,6 +52,7 @@ shape composition compositionFull {
   outputKind
   sources
   templateId
+  sourceFileId
   outputFileId
   folderId
   accountIds
@@ -113,6 +115,7 @@ shape composition compositionExecution {
   status
   goalId
   runId
+  sourceFileId
   outputFileId
   format
   sha256

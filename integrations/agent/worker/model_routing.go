@@ -1,5 +1,3 @@
-//go:build agent || planner
-
 package worker
 
 // Selecting a machine for a MODEL call (epic memql#4676, task memql#4678).

@@ -115,9 +115,11 @@ func parseMaterializeArgs(args map[string]any) (materializeArgs, error) {
 // executionRequest is captured once under the requesting actor. Retrying on
 // another replica reads this snapshot rather than asking mutable sources again.
 type executionRequest struct {
-	Args     materializeArgs `json:"args"`
-	Resolved []Resolved      `json:"resolved"`
-	Started  time.Time       `json:"started"`
+	Args         materializeArgs    `json:"args"`
+	Resolved     []Resolved         `json:"resolved"`
+	Started      time.Time          `json:"started"`
+	Recipe       *pure.RenderRecipe `json:"recipe,omitempty"`
+	TemplateBody string             `json:"templateBody,omitempty"`
 }
 
 var materializeIDEngine = id.NewUntracked()
@@ -308,7 +310,7 @@ func (i *Integration) executeComposition(ctx context.Context, userId, userEmail,
 }
 func compositionResult(compositionId string, row map[string]any) map[string]any {
 	out := map[string]any{"compositionId": compositionId}
-	for _, key := range []string{"goalId", "runId", "outputFileId", "format", "name", "status", "sha256", "provenanceEmbedded", "provenanceNote", "modelsUsed", "deployableKind"} {
+	for _, key := range []string{"goalId", "runId", "outputFileId", "sourceFileId", "format", "name", "status", "sha256", "provenanceEmbedded", "provenanceNote", "modelsUsed", "deployableKind"} {
 		if value, ok := row[key]; ok {
 			out[key] = value
 		}
@@ -405,13 +407,26 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 	if err != nil {
 		return fail("checking an earlier output failed", err)
 	}
-	if existingFile != nil {
+	sourceFileId := ""
+	needsSource := a.Format != pure.FormatText && a.Format != pure.FormatMarkdown || a.DeployableKind != "" || a.OutputKind != ""
+	if needsSource {
+		sourceFileId = stableMaterializeID("materialized-source", compositionId)
+	}
+	sourceComplete := !needsSource
+	if needsSource {
+		source, sourceErr := st.libraryFileById(ctx, sourceFileId)
+		if sourceErr != nil {
+			return fail("checking the source package failed", sourceErr)
+		}
+		sourceComplete = source != nil && stringOf(source["status"]) == "ready"
+	}
+	if existingFile != nil && sourceComplete {
 		// The filing row is written only after uploading all bytes. Its identity is
 		// stable even when the final composition update was interrupted.
 		if err := st.setLibraryFileReady(ctx, existingFileId, stringOf(existingFile["summary"])); err != nil {
 			return fail("the output file could not be marked ready", err)
 		}
-		if err := st.updateCompositionState(ctx, map[string]any{"compositionId": compositionId, "status": "ready", "failureReason": "", "outputFileId": existingFileId, "sha256": existingFile["sha256"]}); err != nil {
+		if err := st.updateCompositionState(ctx, map[string]any{"compositionId": compositionId, "status": "ready", "failureReason": "", "outputFileId": existingFileId, "sourceFileId": sourceFileId, "sha256": existingFile["sha256"]}); err != nil {
 			return nil, err
 		}
 		row, err := st.compositionById(ctx, compositionId)
@@ -423,7 +438,7 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 
 	// --- the template, resolved under the caller ---
 	var templateName, templateBody string
-	if a.TemplateId != "" {
+	if a.TemplateId != "" && request.Recipe == nil {
 		row, terr := st.templateById(ctx, a.TemplateId)
 		if terr != nil {
 			return fail("the template could not be read: "+terr.Error(), terr)
@@ -437,7 +452,10 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 		}
 		templateName = stringOf(row["name"])
 		if fileId := strings.TrimSpace(stringOf(row["fileId"])); fileId != "" {
-			templateBody = i.templateBody(ctx, fileId)
+			templateBody, terr = i.templateBody(ctx, fileId)
+			if terr != nil {
+				return fail("the template contents could not be read: "+terr.Error(), terr)
+			}
 		}
 	}
 
@@ -451,6 +469,10 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 	draft := pure.Draft{Title: a.Name, Body: a.Draft}
 	var models []pure.ModelContribution
 	switch composer := i.composerRef(); {
+	case request.Recipe != nil:
+		draft, models = request.Recipe.Draft, request.Recipe.Provenance.Models
+		templateBody = request.TemplateBody
+		templateName = request.Recipe.Provenance.TemplateName
 	case composer != nil:
 		reply, cerr := composer.Compose(ctx, ComposeRequest{
 			Statement:    a.Statement,
@@ -515,18 +537,30 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 		CreatedAt:     started,
 	}
 
-	var rendered pure.Result
-	if a.OutputKind == "email_template" {
-		var embedded string
-		embedded, err = EmbedEmailAssets(draft.Body, resolved)
-		if err == nil {
-			rendered, err = pure.RenderEmailTemplate(embedded)
+	if a.OutputKind == "email_template" && request.Recipe == nil {
+		draft.Body, err = EmbedEmailAssets(draft.Body, resolved)
+		if err != nil {
+			return fail("embedding email assets failed", err)
 		}
-	} else if a.DeployableKind != "" {
-		rendered, err = i.renderDeployable(a, draft, prov)
-	} else {
-		rendered, err = pure.Render(a.Format, draft, prov)
 	}
+	recipe := pure.RenderRecipe{Name: a.Name, Format: a.Format, OutputKind: a.OutputKind, DeployableKind: a.DeployableKind, Draft: draft, Provenance: prov}
+	if request.Recipe != nil {
+		recipe = *request.Recipe
+	} else {
+		request.Recipe, request.TemplateBody = &recipe, templateBody
+		raw, marshalErr := json.Marshal(request)
+		if marshalErr != nil {
+			return fail("capturing render recipe failed", marshalErr)
+		}
+		var snapshot map[string]any
+		if err = json.Unmarshal(raw, &snapshot); err != nil {
+			return fail("capturing render recipe failed", err)
+		}
+		if err = st.writeInternal(ctx, "mutation "+call("saveCompositionRecipe", map[string]any{"compositionId": compositionId, "request": snapshot})); err != nil {
+			return fail("saving render recipe failed", err)
+		}
+	}
+	rendered, err := pure.RenderRecipeBytes(recipe)
 	if err != nil {
 		return fail("rendering the file failed: "+err.Error(), err)
 	}
@@ -544,6 +578,37 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 	mimeType := a.Format.MimeType()
 	if a.DeployableKind != "" {
 		mimeType = "application/zip"
+	}
+
+	if needsSource && !sourceComplete {
+		inputs, marshalErr := json.MarshalIndent(i.narrowed(resolved), "", "  ")
+		if marshalErr != nil {
+			return fail("capturing source inputs failed", marshalErr)
+		}
+		extras := map[string][]byte{"inputs/sources.json": inputs, "inputs/template.txt": []byte(templateBody)}
+		for _, source := range resolved {
+			for _, asset := range source.Files {
+				if len(asset.Image) > 0 {
+					extras["inputs/assets/"+asset.SHA256] = asset.Image
+				}
+			}
+		}
+		source, packageErr := pure.BuildSourcePackage(recipe, fileName, rendered, extras)
+		if packageErr != nil {
+			return fail("source package verification failed", packageErr)
+		}
+		sourceName := strings.TrimSuffix(fileName, "."+string(a.Format)) + "-source.zip"
+		blob, storageError := i.storeBytes(ctx, userId, sourceFileId, sourceName, "application/zip", source.Bytes)
+		if storageError != "" {
+			return fail(storageError, nil)
+		}
+		rc, _ := common.RunFromContext(ctx)
+		if err = st.createLibraryFile(ctx, map[string]any{"fileId": sourceFileId, "name": sourceName, "mimeType": "application/zip", "size": len(source.Bytes), "sha256": source.SHA256(), "blobUrl": blob, "source": "agent_generated", "producedByRunId": runId, "producedByStepKey": rc.StepKey, "format": "other", "summary": source.Note, "folderId": a.FolderId}); err != nil {
+			return fail("filing source package failed", err)
+		}
+		if err = st.setLibraryFileReady(ctx, sourceFileId, source.Note); err != nil {
+			return fail("completing source package failed", err)
+		}
 	}
 
 	if err := st.updateCompositionState(ctx, map[string]any{
@@ -597,6 +662,7 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 		"compositionId":      compositionId,
 		"status":             "ready",
 		"outputFileId":       fileId,
+		"sourceFileId":       sourceFileId,
 		"modelsUsed":         modelRows(models),
 		"provenanceEmbedded": rendered.Embedded,
 		"provenanceNote":     rendered.Note,
@@ -614,6 +680,7 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 		"goalId":             goalId,
 		"runId":              runId,
 		"outputFileId":       fileId,
+		"sourceFileId":       sourceFileId,
 		"name":               fileName,
 		"format":             string(a.Format),
 		"deployableKind":     a.DeployableKind,
@@ -698,22 +765,32 @@ func (i *Integration) narrowed(resolved []Resolved) []Resolved {
 	return out
 }
 
-// templateBody reads a template file's bytes.
-//
-// A TEMPLATE THAT CANNOT BE READ IS EMPTY RATHER THAN FATAL, and the
-// distinction from an UNREADABLE TEMPLATE ROW above is the point: the
-// row is an authorization question and its refusal must stop the run,
-// while the bytes are an availability question -- blob storage down,
-// a file still uploading -- and a composition that proceeds with the
-// template's NAME but not its content is a degraded answer rather than
-// a wrong one.
-func (i *Integration) templateBody(ctx context.Context, fileId string) string {
+// The source package includes the template actually used, not its summary.
+// An unavailable template cannot produce a success claiming to have used it.
+func (i *Integration) templateBody(ctx context.Context, fileId string) (string, error) {
 	row, err := i.store().libraryFileById(ctx, fileId)
 	if err != nil || row == nil {
-		i.log().Warn("compose: could not read the template file row", "error", err, "fileId", fileId)
-		return ""
+		return "", fmt.Errorf("template file is unavailable: %v", err)
 	}
-	return stringOf(row["summary"])
+	reader := i.sourceDownloader()
+	if reader == nil || stringOf(row["blobUrl"]) == "" {
+		return "", errors.New("template storage is unavailable")
+	}
+	data, err := reader.DownloadURLWithLimit(ctx, stringOf(row["blobUrl"]), maxReferenceText)
+	if err != nil {
+		return "", err
+	}
+	if digest := stringOf(row["sha256"]); digest != "" && digest != (pure.Result{Bytes: data}).SHA256() {
+		return "", errors.New("template bytes do not match their saved digest")
+	}
+	content, err := readReferenceMember(stringOf(row["name"]), data, &referenceBudget{})
+	if err != nil {
+		return "", err
+	}
+	if content.Text == "" {
+		return "", errors.New("use a text, Markdown, HTML or structured text template")
+	}
+	return content.Text, nil
 }
 
 // storeBytes writes the output to object storage. It returns the blobUrl

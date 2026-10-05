@@ -170,6 +170,15 @@ func TestAStatuslessProgressWriteKeepsTheStatus(t *testing.T) {
 	// both carry the owner's.
 	asOwner := auth.ContextWithUserActor(context.Background(), owner)
 	live := openAppSession(t, store, owner, "progress-live")
+	// Leave no open fixture for the stale-session sweep later in this suite.
+	t.Cleanup(func() {
+		if err := store.EndAppSession(context.Background(), workerservice.AppSessionRow{
+			ID: live, OwnerUserId: owner, Status: workerservice.AppSessionStatusEnded,
+			Billing: workerservice.BillingUnknown, EndedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Errorf("close live progress fixture: %v", err)
+		}
+	})
 	if err := store.RecordAppSessionProgress(asOwner, live, -1, -1, "", time.Time{}); err != nil {
 		t.Fatalf("status-less progress write: %v", err)
 	}

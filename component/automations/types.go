@@ -601,7 +601,7 @@ type StepResult struct {
 	// StepId identifies which step produced this result.
 	StepId string `json:"stepId"`
 
-	// Status is "success", "failed", "skipped".
+	// Status is "success", "failed", "skipped", "waiting".
 	Status string `json:"status"`
 
 	// Result contains the step's output data.
@@ -669,7 +669,7 @@ type AutomationExecution struct {
 	// AutomationName identifies which automation was run.
 	AutomationName string `json:"automationName"`
 
-	// Status is "running", "completed", "failed", "cancelled".
+	// Status is "running", "completed", "failed", "cancelled", "waiting".
 	Status string `json:"status"`
 
 	// Input contains the result of the input query.

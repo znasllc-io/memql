@@ -1,4 +1,4 @@
-//go:build planner
+//go:build !agent && !identity && !workbench && !mcp && !edge
 
 package app
 
@@ -12,13 +12,13 @@ import (
 	"github.com/znasllc-io/memql/component/node"
 )
 
-func TestPlannerCannotCompileTheWorkerForwardingNoop(t *testing.T) {
-	if !strings.Contains(readAppFile(t, "cluster_worker_noagent.go"), "//go:build !agent && !planner") {
+func TestRemoteInferenceCannotCompileTheWorkerForwardingNoop(t *testing.T) {
+	if !strings.Contains(readAppFile(t, "cluster_worker_noagent.go"), "//go:build !agent && !planner && (identity || workbench || mcp || edge)") {
 		t.Fatal("planner work compilation sees the fleet catalog but installs no callable fleet inference; it compiles the worker-forwarding no-op")
 	}
 }
 
-func TestPlannerInstallsFleetAndAppInferenceOnItsExistingAgentDialer(t *testing.T) {
+func TestBFFAndPlannerInstallInferenceOnTheirExistingAgentDialer(t *testing.T) {
 	engine, err := memql.New(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -29,7 +29,7 @@ func TestPlannerInstallsFleetAndAppInferenceOnItsExistingAgentDialer(t *testing.
 	if err := engine.Init(memorynodes.DefaultRegistry()); err != nil {
 		t.Fatal(err)
 	}
-	identity := &node.Identity{ID: "planner", Type: node.NodeTypePlanner}
+	identity := &node.Identity{ID: "remote", Type: node.CompiledNodeType()}
 	peers := node.NewPeerManager(identity, slog.Default())
 	dialer := node.NewWorkerDialer(identity, peers, engine, nil, nil, slog.Default())
 	if dialer == nil {

@@ -1,5 +1,3 @@
-//go:build agent || planner
-
 package worker
 
 // Cross-replica model probes (epic memql#5146, design D3).

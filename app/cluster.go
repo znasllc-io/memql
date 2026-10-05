@@ -453,8 +453,11 @@ func (a *App) cluster() {
 			// wiring failures above therefore log at ERROR -- the node boots,
 			// but its workbench surface will refuse everything until the
 			// wiring is fixed.
-			a.wireWorkerForwarding(nodeIdentity, peerMgr, nodeServer, parentConnector)
 		}
+
+		// The BFF also embeds memory; install its authenticated fleet transport
+		// after the shared dialer exists, outside the worker-only branch.
+		a.wireWorkerForwarding(nodeIdentity, peerMgr, nodeServer, parentConnector)
 
 		// Workbench forwarding is wired OUTSIDE the bff/worker split, on purpose.
 		// wireWorkbenchForwarding has carried a NodeTypeBFF case since epic

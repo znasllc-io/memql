@@ -345,3 +345,18 @@ func TestExecutionHopRestoresTheOwnersRouteChoice(t *testing.T) {
 		t.Fatalf("run context routing = %+v, want %+v", run.Routing, choice)
 	}
 }
+
+func TestHumanResumeClaimMustMatchLatestPersistedAnswer(t *testing.T) {
+	j := finishedDispatchJournal(nil)
+	j.HumanResumeId = "answer-2"
+	for _, tc := range []struct {
+		id             string
+		recovery, want bool
+	}{
+		{"", false, false}, {"answer-1", false, false}, {"answer-2", false, true}, {"", true, true},
+	} {
+		if got := workRerunServable(workspine.DispatchRequest{HumanResumeId: tc.id, Recovery: tc.recovery}, j); got != tc.want {
+			t.Fatalf("claim %+v = %v", tc, got)
+		}
+	}
+}

@@ -54,7 +54,7 @@ type runWriter interface {
 	RecordCompileOutcome(ctx context.Context, ownerUserId, runId string, fields map[string]any) error
 	// RunBudget reports the ceilings this run inherits from its goal.
 	RunBudget(ctx context.Context, ownerUserId, runId string) (work.Ceilings, error)
-	LimitReplyBudget(ctx context.Context, ownerUserId, runId string) error
+	LimitWorkloadBudget(ctx context.Context, ownerUserId, runId, workload string) error
 }
 
 // WorkCompiler satisfies workintegration.Compiler.
@@ -117,8 +117,8 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 		return
 	}
 
-	if out.Reply {
-		if err := c.writer.LimitReplyBudget(ctx, req.OwnerUserId, req.RunId); err != nil {
+	if out.Workload != "" {
+		if err := c.writer.LimitWorkloadBudget(ctx, req.OwnerUserId, req.RunId, out.Workload); err != nil {
 			c.failRun(ctx, req, fmt.Errorf("work compile: cannot persist reply budget: %w", err))
 			return
 		}
@@ -139,6 +139,7 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 		"goalSignature":  out.Signature,
 		"status":         "running",
 		"automationName": out.AutomationName,
+		"classification": map[string]any{"workload": out.Workload, "workTitle": out.WorkTitle, "acknowledgement": out.Acknowledgement},
 	}
 	if out.TemplateVersion != "" {
 		args["templateVersion"] = out.TemplateVersion
@@ -170,6 +171,11 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 		args["goalSignature"] = out.Signature
 	}
 	c.record(ctx, req.OwnerUserId, req.RunId, args)
+	// The protected compile receipt is the only source accepted by the cache.
+	// The run is already visible, so indexing does not delay its acknowledgment.
+	if out.Acknowledgement != "" && out.Workload != "quick" {
+		c.loop.cacheAcknowledgement(ctx, req.OwnerUserId, req.RunId, "store")
+	}
 
 	if c.loop.logger != nil {
 		c.loop.logger.Info("work compile decided",

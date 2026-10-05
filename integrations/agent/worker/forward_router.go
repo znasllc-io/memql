@@ -1,5 +1,3 @@
-//go:build agent || planner
-
 package worker
 
 // The SENDING half of cross-node worker dispatch (memql#4352).

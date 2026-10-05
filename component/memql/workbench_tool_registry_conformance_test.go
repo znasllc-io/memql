@@ -9,27 +9,8 @@ import (
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
-// TestWorkbenchHostRegistersFromCarrierTree is the memql#1133 FIX-1 conformance
-// guard.
-//
-// ROOT CAUSE (confirmed): `workbenchHost` -- the tool produceArtifact REQUIRES
-// to write its deliverable to the per-Plan workbench -- is NOT defined in this
-// engine repo's embedded DSL tree. It is a CARRIER tool, living in
-// the carrier repo's pack tools file, and is mounted on the
-// agent node at boot via `dsl.RegisterTree("<pack-domain>", carrierFS)` (the
-// agent node is carrier-built per CLAUDE.md's "carrier-built vs engine-built"
-// rule).
-// So `workbenchHost` only lands in the resolved registry on a carrier build;
-// the runaway's "toolsForToolCallingFiltered: tool not in registry" was the
-// agent node failing to resolve it.
-//
-// This test reproduces the carrier mount path EXACTLY -- RegisterTree a
-// pack-style overlay carrying a workbenchHost-shaped tool, then run the same
-// LoadUnifiedTools the agent node runs -- and asserts workbenchHost resolves in
-// the registry. It guards against any loader-skip / parse-drift regression that
-// would silently drop the deliverable surface again (the loader logs+skips
-// unparseable tool slices, so a future syntax change to the carrier tool could
-// regress without this guard).
+// The engine ships its workbench tool. A mounted bundle may declare another
+// tool with the same leaf name; both must remain reachable by namespace.
 func TestWorkbenchHostRegistersFromCarrierTree(t *testing.T) {
 	// A workbenchHost tool slice shaped like the carrier's pack tools
 	// file definition (discriminated by `action`).
@@ -84,13 +65,16 @@ tool workbenchHost {
 		t.Fatalf("LoadUnifiedTools failed: %v", err)
 	}
 
-	if !registry.Has("workbenchHost") {
+	if !registry.Has(domain + ".workbenchHost") {
 		t.Fatalf("workbenchHost MUST be in the resolved tool registry once the "+
 			"carrier tree is mounted -- it is the produceArtifact deliverable "+
 			"surface (memql#1133). Registered tools: %v", registry.Names())
 	}
 
-	tool, err := registry.Get("workbenchHost")
+	if !registry.Has("workbench.workbenchHost") {
+		t.Fatal("engine workbench tool is missing")
+	}
+	tool, err := registry.Get(domain + ".workbenchHost")
 	if err != nil {
 		t.Fatalf("registry.Get(workbenchHost): %v", err)
 	}

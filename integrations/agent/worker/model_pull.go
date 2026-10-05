@@ -1,5 +1,3 @@
-//go:build agent || planner
-
 package worker
 
 // Cross-replica model pulls (epic memql#5103, design D3).

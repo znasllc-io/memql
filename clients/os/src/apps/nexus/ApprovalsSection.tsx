@@ -4,6 +4,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import {
   Caption,
   ChoiceStack,
+  Check,
   Chip,
   CopyValue,
   Fact,
@@ -89,6 +90,7 @@ export interface ApprovalsSectionProps {
   selectedApprovalId: string;
   onSelectApproval: (approvalId: string) => void;
   onOpenRun: (runId: string) => void;
+  onAnswerInAsk?: (runId: string) => void;
   /**
    * The learned procedures, so a promotion can name the procedure it would
    * move -- and its parameters by the goal inputs that bind them. Empty until
@@ -105,11 +107,13 @@ export function ApprovalsSection({
   selectedApprovalId,
   onSelectApproval,
   onOpenRun,
+  onAnswerInAsk,
   procedures = [],
   onOpenProcedure,
 }: ApprovalsSectionProps) {
   const [search, setSearch] = useState("");
   const [choice, setChoice] = useState("");
+  const [choices, setChoices] = useState<string[]>([]);
   const [freeText, setFreeText] = useState("");
   const now = useNow(15_000);
 
@@ -151,29 +155,33 @@ export function ApprovalsSection({
   // both artifacts are intact.
   useEffect(() => {
     setChoice("");
+    setChoices([]);
     setFreeText("");
     decide.reset();
     // Deliberately keyed on the SELECTION alone.
   }, [selectedApprovalId]);
 
   const isFeedback = selected?.kind === "feedback";
+  const answerInAsk = isFeedback && ["text", "choice", "multi"].includes(String(selected?.subject?.kind)) && onAnswerInAsk;
   const hasOptions = (selected?.options.length ?? 0) > 0;
   const answerReady = isFeedback
     ? hasOptions
-      ? choice !== ""
+      ? selected?.subject?.kind === "multi" ? choices.length > 0 : choice !== ""
       : freeText.trim() !== ""
     : true;
 
   const acts: Act[] = [];
   if (selected !== null) {
-    if (isFeedback) {
+    if (answerInAsk) {
+      acts.push({ label: "Answer in Ask", tone: "primary", onAct: () => answerInAsk(selected.runId) });
+    } else if (isFeedback) {
       if (answerReady) {
         acts.push({
           label: "Send answer",
           tone: "primary",
           busy: decide.deciding === idTail(selected.id),
           onAct: () => {
-            void decide.decide(selected.id, "answered", answerPayload(selected, choice, freeText));
+            void decide.decide(selected.id, "answered", answerPayload(selected, choice, freeText, choices));
           },
         });
       }
@@ -211,9 +219,6 @@ export function ApprovalsSection({
         />
       </Head>
 
-      <div className="os-nexus-scope">
-        <Caption>Longest wait first -- a queue is answered from the front.</Caption>
-      </div>
 
       <div className="os-nexus-split">
         <div className="os-nexus-column">
@@ -224,7 +229,7 @@ export function ApprovalsSection({
             fingerprint={approvalFingerprint}
             emptyText={
               search.trim() === ""
-                ? "Nothing is waiting for you. A run that needs a decision puts it here and stops until you make it."
+                ? "Nothing needs your input."
                 : "No approval matches that."
             }
             renderRow={(approval) => (
@@ -245,9 +250,11 @@ export function ApprovalsSection({
             this section is for -- into a column. */}
         {selected === null ? null : (
           <div className="os-nexus-column os-nexus-aside">
-            <ApprovalDetail
+            {answerInAsk ? <p className="os-nexus-approval-ask">{selected.question}</p> : <ApprovalDetail
               approval={selected}
               run={runsById.get(idTail(selected.runId)) ?? null}
+              choices={choices}
+              onChoices={setChoices}
               choice={choice}
               onChoice={setChoice}
               freeText={freeText}
@@ -255,7 +262,7 @@ export function ApprovalsSection({
               onOpenRun={onOpenRun}
               procedures={procedures}
               onOpenProcedure={onOpenProcedure}
-            />
+            />}
           </div>
         )}
       </div>
@@ -268,7 +275,7 @@ export function ApprovalsSection({
           // succeed should not be offered -- but an empty bar with no
           // account of itself reads as something nobody built.
           detail={
-            isFeedback && !answerReady
+            answerInAsk ? undefined : isFeedback && !answerReady
               ? hasOptions
                 ? "pick an answer above to send it"
                 : "write an answer above to send it"
@@ -310,7 +317,9 @@ export function answerPayload(
   approval: ApprovalRow,
   choice: string,
   freeText: string,
+  choices: string[] = [],
 ): Record<string, unknown> {
+  if (approval.subject?.kind === "multi") return { values: choices };
   const option = approval.options.find((o) => o.value === choice);
   if (option !== undefined) return { value: option.value, label: option.label };
   // A CHOICE WHOSE OPTION IS GONE STILL SENDS THE CHOICE. The row can change
@@ -364,6 +373,8 @@ function ApprovalDetail({
   run,
   choice,
   onChoice,
+  choices,
+  onChoices,
   freeText,
   onFreeText,
   onOpenRun,
@@ -373,6 +384,8 @@ function ApprovalDetail({
   approval: ApprovalRow;
   run: RunRow | null;
   choice: string;
+  choices: string[];
+  onChoices: (next: string[]) => void;
   onChoice: (next: string) => void;
   freeText: string;
   onFreeText: (next: string) => void;
@@ -397,7 +410,7 @@ function ApprovalDetail({
   // technically present. A promotion's subject is the same case: it has a
   // panel of its own, so none of it is dumped here.
   const subjectEntries =
-    promotion !== null
+    promotion !== null || isFeedback || approval.kind === "scopeElevation"
       ? []
       : Object.entries(approval.subject ?? {}).filter(
           ([key]) => shutDoors === null || (key !== "doors" && key !== "code"),
@@ -408,10 +421,12 @@ function ApprovalDetail({
       <Panel label="What is being asked">
         <p className="os-nexus-approval-ask">{approvalSubjectLine(approval)}</p>
         {/* SAID ONCE: a promotion's question already says what promoting does. */}
-        {approval.kind === PROCEDURE_PROMOTION ? null : <Caption>{approvalKindMeaning(approval.kind)}</Caption>}
+        {approval.kind === PROCEDURE_PROMOTION || isFeedback ? null : <Caption>{approvalKindMeaning(approval.kind)}</Caption>}
 
         {isFeedback ? (
-          approval.options.length > 0 ? (
+          approval.subject?.kind === "multi" ? (
+            <div role="group" aria-label="Your answers">{approval.options.map(option => <Check key={option.value} checked={choices.includes(option.value)} onChange={checked => onChoices(checked ? [...choices, option.value] : choices.filter(value => value !== option.value))}>{option.label}</Check>)}</div>
+          ) : approval.options.length > 0 ? (
             <ChoiceStack
               name="work-approval-answer"
               label="Your answer"
@@ -436,13 +451,17 @@ function ApprovalDetail({
                 value={freeText}
                 onChange={onFreeText}
               />
-              <Caption>
-                This question came with no options, so it takes whatever you write.
-              </Caption>
+
             </>
           )
         ) : null}
       </Panel>
+
+      {approval.kind === "scopeElevation" ? <Panel label="Computer access"><Facts>
+        <Fact label="Access" value={approval.subject?.scope === "observe" ? "Read and observe" : "Read, write and control"} />
+        <Fact label="Machines" value={String(approval.subject?.target || "Your enrolled computers matching the request")} />
+        <Fact label="Expires" value={formatMoment(approval.expiresAt)} />
+      </Facts></Panel> : null}
 
       {promotion === null ? null : (
         <PromotionPanel
@@ -499,7 +518,7 @@ function ApprovalDetail({
           SAID ONCE on a promotion: "What you are promoting" carries its
           evidence -- the matches and the bindings the ladder counted -- and
           the generic panel would repeat the same reason in the data voice. */}
-      {approval.kind === PROCEDURE_PROMOTION ? null : (
+      {approval.kind === PROCEDURE_PROMOTION || isFeedback || !(approval.evidenceReason || approval.evidenceTier || approval.evidenceRuleId || approval.evidenceSource) ? null : (
         <Panel label="Why you were asked">
           <Subhead>The classifier's evidence</Subhead>
           <Facts>
@@ -508,14 +527,7 @@ function ApprovalDetail({
             <Fact label="Rule" value={approval.evidenceRuleId} mono />
             <Fact label="Source" value={approval.evidenceSource} mono />
           </Facts>
-          {approval.evidenceTier === "" &&
-          approval.evidenceReason === "" &&
-          approval.evidenceRuleId === "" ? (
-            <Caption>
-              No evidence was recorded with this one. That is a fact about the row rather than about
-              the decision -- it does not mean the gate fired for no reason.
-            </Caption>
-          ) : null}
+
         </Panel>
       )}
 
@@ -550,7 +562,7 @@ function ApprovalDetail({
           {/* TWO FACTS THAT ONLY EXIST ONCE THEY DO. An em dash beside
               "Decided by" on the queue's whole point -- an undecided approval
               -- is a line a reader takes in to learn nothing. */}
-          {approval.expiresAt === "" ? null : (
+          {approval.expiresAt === "" || approval.kind === "scopeElevation" ? null : (
             <Fact
               label="Lapses"
               value={formatMoment(approval.expiresAt)}
@@ -568,7 +580,7 @@ function ApprovalDetail({
             comparing two approvals of the same command needs the value. A
             promotion carries it in its own panel, beside the version it pins,
             so it is said there once. */}
-        {promotion !== null ? null : (
+        {promotion !== null || isFeedback || approval.kind === "scopeElevation" ? null : (
           <>
             <Subhead>The exact thing you are deciding</Subhead>
             <CopyValue value={approval.artifactHash} label="artifact hash" />

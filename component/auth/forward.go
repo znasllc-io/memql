@@ -129,7 +129,8 @@ func ContextWithForwardedClaims(ctx context.Context, m map[string]string) contex
 const forwardedAuthorityContextKey contextKey = "forwardedAuthority"
 
 // ContextWithForwardedAuthority records the assertion a receiver verified and
-// bound. It is chain-of-custody state, not an authorization input: nothing
+// bound, or a trusted stream boundary projected from its accepted session.
+// It is chain-of-custody state, not an authorization input: nothing
 // reads it to make a decision. The one consumer is a producer -- a node that
 // received a forward and is about to make one of its own (memql#3219).
 //
@@ -148,7 +149,7 @@ func ContextWithForwardedAuthority(ctx context.Context, a ForwardedAuthority) co
 }
 
 // ForwardedAuthorityFromContext returns the assertion this node accepted, and
-// ok=false when the work did not arrive over a mesh forward.
+// ok=false when no trusted session or mesh boundary bound an assertion.
 //
 // A false here is not an error: single-node dispatch and node-local startup work
 // legitimately have none. It IS a refusal for anything about to forward -- see

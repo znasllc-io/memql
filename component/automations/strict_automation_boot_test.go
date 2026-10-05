@@ -202,7 +202,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // a session is held by one replica and only that replica ends its row, so a
 // pod restart left it at `running` for good. One added, none removed;
 // measured by the strict loader on this tree.
-const shippedAutomationCount = 78
+// 78 -> 80: conversation source updates and completed background runs index
+// private semantic evidence without depending on an open Ask viewer.
+const shippedAutomationCount = 80
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

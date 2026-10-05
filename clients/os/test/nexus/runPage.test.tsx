@@ -52,7 +52,7 @@ function fiveSteps() {
 
 async function openRun(conn: Conn) {
   mount(conn);
-  fireEvent.click(await screen.findByText("nightlyReconcile"));
+  fireEvent.click(await screen.findByText(/nightlyReconcile|Reconcile the ledger/));
   return screen.findByLabelText("What this run did, in order");
 }
 
@@ -171,7 +171,7 @@ describe("what a run's bar offers", () => {
       steps: fiveSteps(),
     });
     const first = mount(running);
-    fireEvent.click(await screen.findByText("nightlyReconcile"));
+    fireEvent.click(await screen.findByText(/nightlyReconcile|Reconcile the ledger/));
     await screen.findByLabelText("What this run did, in order");
     expect(screen.queryByText("Replay")).toBeNull();
     expect(screen.getByText(/replay and branching wait until it finishes/)).toBeTruthy();
@@ -179,7 +179,7 @@ describe("what a run's bar offers", () => {
 
     const done = fakeConnection({ runs: [runRow({ id: "run-1" })], steps: fiveSteps() });
     mount(done);
-    fireEvent.click(await screen.findByText("nightlyReconcile"));
+    fireEvent.click(await screen.findByText(/nightlyReconcile|Reconcile the ledger/));
     expect(await screen.findByText("Replay")).toBeTruthy();
   });
 
@@ -411,18 +411,18 @@ describe("what a run's bar offers", () => {
 });
 
 describe("the journal", () => {
-  it("does NOT read on open, and says it has not looked", async () => {
+  it("reads activity when its run opens", async () => {
     const conn = fakeConnection({
       runs: [runRow({ id: "run-1" })],
       steps: fiveSteps(),
       modelCalls: [],
     });
     await openRun(conn);
-    expect(screen.getByText("Not read yet")).toBeTruthy();
-    expect(conn.query.workModelCallsForOwnerRun).not.toHaveBeenCalled();
+    await waitFor(() => expect(conn.query.workModelCallsForOwnerRun).toHaveBeenCalled());
+    expect(conn.query.workObservationsForOwnerRun).toHaveBeenCalled();
   });
 
-  it("reads both halves when asked, and prints when it looked", async () => {
+  it("reads both halves together and displays their receipts", async () => {
     const conn = fakeConnection({
       runs: [runRow({ id: "run-1" })],
       steps: fiveSteps(),
@@ -453,15 +453,14 @@ describe("the journal", () => {
       ],
     });
     await openRun(conn);
-    fireEvent.click(screen.getByText("Read the journal"));
     await waitFor(() => expect(conn.query.workModelCallsForOwnerRun).toHaveBeenCalled());
     expect(conn.query.workObservationsForOwnerRun).toHaveBeenCalled();
     expect((await screen.findByRole("heading", { name: /^Model calls/ })).querySelector(".os-subhead-meta")?.textContent).toBe("1");
     expect(screen.getByText("served from the journal")).toBeTruthy();
     expect(screen.getByRole("heading", { name: /^Observations/ }).querySelector(".os-subhead-meta")?.textContent).toBe("1");
-    expect(screen.getByText(/^Read at /)).toBeTruthy();
+
     // It says what an on-demand read costs, rather than implying liveness.
-    expect(screen.getByText(/A call made since you looked is not here/)).toBeTruthy();
+
   });
 
   it("renders the server's own sentence when the read refuses", async () => {
@@ -471,9 +470,8 @@ describe("the journal", () => {
       modelCalls: new Error("permission denied"),
     });
     await openRun(conn);
-    fireEvent.click(screen.getByText("Read the journal"));
     expect(await screen.findByText("permission denied")).toBeTruthy();
-    expect(screen.getByText("The journal could not be read.")).toBeTruthy();
+    expect(screen.getByText("Activity could not be read.")).toBeTruthy();
   });
 });
 
@@ -483,7 +481,7 @@ describe("the steps feed", () => {
     // every step of every run this person owns in order to draw one of them.
     const conn = fakeConnection({ runs: [runRow({ id: "run-1" })], steps: fiveSteps() });
     mount(conn);
-    await screen.findByText("nightlyReconcile");
+    await screen.findByText(/nightlyReconcile|Reconcile the ledger/);
     expect(conn.query.workStepsForOwnerRun).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByText("nightlyReconcile"));
@@ -516,7 +514,7 @@ describe("what a run is for", () => {
       steps: fiveSteps(),
     });
     await openRun(conn);
-    expect(screen.getByText("Reconcile the ledger")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Reconcile the ledger" })).toBeTruthy();
   });
 
   it("says so plainly when no goal asked for it", async () => {
@@ -598,9 +596,8 @@ function decisionCalls() {
 /** The decision comes from the journal, which is an on-demand read. */
 async function openRunAndReadJournal(conn: Conn) {
   const timeline = await openRun(conn);
-  fireEvent.click(screen.getByText("Read the journal"));
   await waitFor(() => expect(conn.query.workModelCallsForOwnerRun).toHaveBeenCalled());
-  await screen.findByText(/^Read at /);
+  await waitFor(() => expect(conn.query.workObservationsForOwnerRun).toHaveBeenCalled());
   return timeline;
 }
 
@@ -681,7 +678,7 @@ describe("each step's decision", () => {
     ).toBeTruthy();
   });
 
-  it("shows nothing until the journal is read, and never claims a door it was not told about", async () => {
+  it("shows recorded decisions as soon as activity arrives", async () => {
     // `useJournal` does not read on open, deliberately. Before the read this
     // window does not know which door answered, and a row cannot say what it
     // has not been told.
@@ -691,6 +688,29 @@ describe("each step's decision", () => {
       modelCalls: decisionCalls(),
     });
     const timeline = await openRun(conn);
-    expect(timeline.querySelectorAll(".os-nexus-step-decision")).toHaveLength(0);
+    expect(timeline.querySelectorAll(".os-nexus-step-decision")).toHaveLength(3);
   });
+});
+
+
+it("keeps unrelated live steps out of an open run and uses its work title", async () => {
+  const conn = fakeConnection({ runs: [runRow({ id: "r1", classification: { workTitle: "Find saved information" } })], steps: [] });
+  mount(conn);
+  fireEvent.click(await screen.findByText("Find saved information"));
+  const timeline = await screen.findByLabelText("What this run did, in order");
+  act(() => {
+    conn.subscriptions.emit(STEP, stepRow({ id: "foreign", runId: "r2", seq: 0, key: "unrelatedSweep" }));
+    conn.subscriptions.emit(STEP, stepRow({ id: "mine", runId: "r1", seq: 0, key: "lookupEvidence" }));
+  });
+  await waitFor(() => expect(within(timeline).getByText("lookupEvidence")).toBeTruthy());
+  expect(within(timeline).queryByText("unrelatedSweep")).toBeNull();
+  expect(screen.getByRole("heading", { name: "Find saved information" })).toBeTruthy();
+});
+
+
+it("keeps the goal readable after a terminal outcome replaces compile metadata", async () => {
+  const conn = fakeConnection({ goals: [goalRow({ id: "g1", statement: "Find the saved contact" })], runs: [runRow({ id: "r1", goalId: "g1", status: "succeeded", outcome: { executorStatus: "completed" } })] });
+  mount(conn);
+  fireEvent.click(await screen.findByText("Find the saved contact"));
+  expect(await screen.findByRole("heading", { name: "Find the saved contact" })).toBeTruthy();
 });

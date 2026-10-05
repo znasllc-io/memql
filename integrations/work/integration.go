@@ -35,6 +35,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/num"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
@@ -629,7 +630,7 @@ func (i *Integration) RunBudget(ctx context.Context, ownerUserId, runId string) 
 	if strings.TrimSpace(runId) == "" {
 		return out, fmt.Errorf("work: RunBudget needs a run id")
 	}
-	scoped := ownerActor(ctx, ownerUserId)
+	scoped := ownerActor(memql.ContextWithFreshRead(ctx), ownerUserId)
 	run, err := i.store().runForOwner(scoped, runId)
 	if err != nil {
 		return out, err
@@ -652,38 +653,59 @@ func (i *Integration) RunBudget(ctx context.Context, ownerUserId, runId string) 
 	if err != nil {
 		return out, fmt.Errorf("work: goal %s ceilings: %w", goalId, err)
 	}
-	return out, nil
+	return work.EffectiveWorkloadCeilings(out, rowString(rowMap(run, "classification"), "workload")), nil
 }
 
 // LimitReplyBudget is the compiler's narrow write seam. The run's ownership
 // is read under the caller's authority before any server-only mutation.
 func (i *Integration) LimitReplyBudget(ctx context.Context, ownerUserId, runId string) error {
-	ctx = memql.ContextWithFreshRead(ownerActor(ctx, ownerUserId))
-	run, err := i.store().runForOwner(ctx, runId)
-	if err != nil {
-		return err
+	return i.LimitWorkloadBudget(ctx, ownerUserId, runId, "quick")
+}
+
+// LimitWorkloadBudget records an estimate separately from the person's hard
+// limits. Discovery may revise that estimate; it can never revise those limits.
+func (i *Integration) LimitWorkloadBudget(ctx context.Context, ownerUserId, runId, workload string) error {
+	_, err := i.setWorkload(ctx, ownerUserId, runId, workload, false)
+	return err
+}
+
+// PrepareWorkTool promotes a quick estimate once execution actually needs a
+// capability. This is evidence from execution, not a second classifier call.
+func (i *Integration) PrepareWorkTool(ctx context.Context) (bool, error) {
+	run, ok := common.RunFromContext(ctx)
+	if !ok || run.GoalId == "" {
+		return false, nil
 	}
-	if run == nil || rowString(run, "goalId") == "" {
-		return fmt.Errorf("work: reply run is unavailable")
-	}
-	goalID := rowString(run, "goalId")
-	release, err := i.decisionGate(ctx, "reply-budget:"+goalID)
+	return i.setWorkload(ctx, run.OwnerUserId, run.RunId, "lookup", true)
+}
+
+func (i *Integration) setWorkload(ctx context.Context, owner, runID, workload string, promoteOnly bool) (bool, error) {
+	ctx = memql.ContextWithFreshRead(ownerActor(ctx, owner))
+	release, err := i.decisionGate(ctx, "workload:"+memql.BareShortId(runID))
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer release()
-	goal, err := i.store().goalForOwner(ctx, goalID)
+	run, err := i.store().runForOwner(ctx, runID)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if goal == nil {
-		return fmt.Errorf("work: reply goal is unavailable")
+	if run == nil || rowString(run, "goalId") == "" {
+		return false, fmt.Errorf("work: workload run is unavailable")
 	}
-	ceilings, err := ceilingsOf(goal)
-	if err != nil {
-		return err
+	outcome := rowMap(run, "classification")
+	if outcome == nil {
+		outcome = map[string]any{}
 	}
-	return i.store().writeInternal(ctx, "mutation "+call("updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": work.ReplyCeilings(ceilings), "versionTime": rfc(workRowVersionAfter(goal["createdAt"], i.clock()))}))
+	if promoteOnly && rowString(outcome, "workload") != "quick" {
+		return false, nil
+	}
+	outcome["workload"] = workload
+	if promoteOnly {
+		outcome["workloadReason"] = "Execution requires a capability beyond a direct reply."
+	}
+	err = i.store().updateRun(ctx, runID, map[string]any{"classification": outcome, "versionTime": rfc(workRowVersionAfter(run["createdAt"], i.clock()))})
+	return err == nil, err
 }
 
 // ceilingsOf decodes one goal row's declared ceilings.

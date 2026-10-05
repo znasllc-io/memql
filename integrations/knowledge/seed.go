@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/memql"
 	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -118,6 +119,7 @@ func wikipediaArticlesFor(domainId string) []string {
 // corpora register from a pack via RegisterSeedDomain (see registry.go) and
 // are merged in by allSeedDomains(); the engine never hardcodes them here.
 var standardDomains = []StandardDomain{
+	{ID: "work-guidance", Name: "MemQL work guidance", Description: "Evidence, delivery and escalation for goal-driven work", Category: "technical", RelevantForRoles: []string{"assistant", "specialist"}, RequiredByToolSlugs: []string{"discoverCapabilities", "composeFile", "requestUserFeedback", "requestComputerUseScope"}, Source: "appStructure", Tier: "A"},
 	// --- Core --------------------------------------------------------------
 	// business-administration was previously called general_business AND
 	// auto-attached + locked to every agent in the picker. Now it's a
@@ -1697,6 +1699,7 @@ func (i *Integration) seedStandardDomainsHandler(ctx context.Context, args map[s
 	ingestCorpus("computer-use", computerUseSeedCorpus)
 	ingestCorpus("workbench", workbenchSeedCorpus)
 	ingestCorpus("recent-chat", recentChatSeedCorpus)
+	ingestCorpus("work-guidance", workGuidanceCorpus)
 
 	// Pack-registered corpora (e.g. the product pack's UI domain). The
 	// engine carries none of these; they arrive via RegisterSeedDomain.
@@ -1821,7 +1824,7 @@ func (i *Integration) purgeChunksForSource(ctx context.Context, domainId, source
 	// picks up every chunk id matching the (domain, sourceRef) pair
 	// regardless of version/text hash.
 	vecSQL := `
-		DELETE FROM node_vectors
+		DELETE FROM %s
 		WHERE id IN (
 		    SELECT id FROM "MemoryNodes"
 		    WHERE concept = 'v1:knowledge:documentChunk'
@@ -1829,8 +1832,14 @@ func (i *Integration) purgeChunksForSource(ctx context.Context, domainId, source
 		      AND (payload->>'sourceRef') = $2
 		)
 	`
-	if _, err := i.db().ExecContext(ctx, vecSQL, domainId, sourceRef); err != nil {
-		return fmt.Errorf("delete node_vectors: %w", err)
+	tables, err := memql.EmbeddingVectorTables(ctx, i.db())
+	if err != nil {
+		return err
+	}
+	for _, table := range tables {
+		if _, err := i.db().ExecContext(ctx, fmt.Sprintf(vecSQL, table), domainId, sourceRef); err != nil {
+			return fmt.Errorf("delete vectors: %w", err)
+		}
 	}
 	chunkSQL := `
 		DELETE FROM "MemoryNodes"

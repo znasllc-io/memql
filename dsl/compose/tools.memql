@@ -1,6 +1,9 @@
 /// Create a finished file in the user's Library using the Materializer. During a work run this
 /// waits for the file and returns outputFileId. Supply the complete content request and optionally
 /// a starting draft or source references. Use for documents, reports, lists and data exports.
+/// PDF, DOCX and other compound formats automatically include a reproducible source ZIP;
+/// the completed receipt returns outputFileId and sourceFileId. No separate ZIP-building step
+/// or template lookup is needed. With no selected template, use the Materializer default style.
 @handler(type="function", name="composeMaterialize")
 @requiresAgentRole("assistant", "specialist")
 @executionTime("slow")

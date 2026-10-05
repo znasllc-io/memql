@@ -311,6 +311,7 @@ export function goalFingerprint(goal: GoalRow): string {
 
 export interface RunRow {
   id: string;
+  workTitle?: string;
   goalId: string;
   automationName: string;
   mode: string;
@@ -349,6 +350,7 @@ export function runFromRow(row: Row): RunRow {
     id: rowString(flat, "id"),
     goalId: rowString(flat, "goalId"),
     automationName: rowString(flat, "automationName"),
+    workTitle: rowString(objectField(flat, "classification") ?? {}, "workTitle"),
     mode: rowString(flat, "mode"),
     replayPolicy: rowString(flat, "replayPolicy"),
     status: rowString(flat, "status"),
@@ -376,6 +378,7 @@ export function runFromRow(row: Row): RunRow {
 }
 
 export function runTitle(run: RunRow): string {
+  if (run.workTitle?.trim()) return run.workTitle.trim();
   const trimmed = run.automationName.trim();
   if (trimmed !== "") return trimmed;
   const tail = idTail(run.id);
@@ -684,7 +687,7 @@ export function runSpend(run: RunRow): SpendFigure[] {
   const spent = run.spent;
   return [
     { one: "model call", many: "model calls", value: figure(spent, "modelCalls"), as: "count" },
-    { one: "token", many: "tokens", value: figure(spent, "tokens"), as: "tokens" },
+    { one: "token", many: "tokens", value: sumReported([figure(spent, "tokens"), figure(spent, "tokensLocal"), figure(spent, "tokensSubscription")]), as: "tokens" },
     { one: "cost", many: "cost", value: figure(spent, "cost"), as: "money" },
     { one: "retry", many: "retries", value: figure(spent, "retries"), as: "count" },
   ];

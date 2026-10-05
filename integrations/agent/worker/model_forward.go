@@ -1,5 +1,3 @@
-//go:build agent || planner
-
 package worker
 
 // Cross-replica model calls (epic memql#4676, task memql#4677).

@@ -17,7 +17,7 @@ import {
   Waypoints,
 } from "lucide-react";
 
-import { AskSurface, FLEET_ROUTING_SECTION } from "../ask/AskSurface";
+import { AskSurface } from "../ask/AskSurface";
 import { useAsk } from "../ask/AskProvider";
 import { Mark } from "../chrome/Mark";
 import type { OsAppManifest, OsRegistry, OsWidgetManifest } from "../system/registry";
@@ -704,6 +704,8 @@ const nexus: OsAppManifest = {
   // a run page opens. Advance the revision only when the surface itself
   // changes meaningfully, never because a run gained a version.
   attentionChanges: [
+    { id: "nexus:ask-work", revision: "background-1", sectionId: "runs", label: "Follow background work from Ask" },
+    { id: "nexus:questions", revision: "questions-1", sectionId: "approvals", label: "Answer questions and approve scoped computer access" },
     { id: "nexus:procedures", revision: "procedures-1", sectionId: "automations", label: "Learned procedures" },
     {
       id: "nexus:interventions",
@@ -772,11 +774,11 @@ function AskWidgetBody() {
           liveVoice={liveVoice}
       availability={availability}
       onOpenFleet={() => { actions.openApp("fleet"); }}
-      onManageRoutes={() => { actions.openApp("fleet", FLEET_ROUTING_SECTION); }}
       voicePorts={voice}
       settings={settings}
       variant="widget"
       onOpenFile={(fileId) => { actions.openApp("files", "browse", { fileId }); }}
+      onOpenWork={(runId, conversationId) => { actions.openApp("nexus", "runs", { runId, conversationId }); }}
     />
   );
 }

@@ -76,12 +76,9 @@ export function KindBand({ breakdown }: { breakdown: KindBreakdown }) {
           ))}
       </div>
 
-      {/* THE LEGEND CARRIES THE EXACT FIGURES, because a proportion is not a
-          number. Every slice appears, including the ones at zero: "no steps
-          are waiting on a person" is a reading somebody wants, and an omitted
-          row is silence about it. */}
+      {/* List only the categories represented in this run. */}
       <ul className="os-nexus-band-legend" aria-label="What this run's steps are made of">
-        {breakdown.segments.map((segment) => (
+        {breakdown.segments.filter((segment) => segment.count > 0).map((segment) => (
           <li key={segment.kind === "" ? "unclassified" : segment.kind} className="os-nexus-band-item">
             <span
               className="os-nexus-band-swatch"

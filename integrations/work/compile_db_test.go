@@ -506,3 +506,73 @@ func TestCompileDB_OutcomeCancelsAStalledHeartbeat(t *testing.T) {
 		t.Fatal("compile outcome blocked joining a heartbeat whose database call was never cancelled")
 	}
 }
+
+func TestCompileDB_QuickEstimatePromotesAcrossReplicasWithoutResettingSpend(t *testing.T) {
+	db, bff, _, _ := compileDB(t)
+	owner := canonicalUser("compile-alice")
+	ctx, cancel := context.WithTimeout(actorCtx(owner), 20*time.Second)
+	defer cancel()
+	nodes, err := bff.handleCreateGoal(ctx, map[string]any{"statement": "Recall a saved fact", "ceilings": map[string]any{"wallClockMs": 300000, "maxModelCalls": 5, "costCeiling": 0.25}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply := decodeReply(t, nodes)
+	runID, goalID := reply["runId"].(string), reply["goalId"].(string)
+	rc := common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner, StepKey: "answer", Mode: common.RunModeLive}
+	ctx = common.ContextWithRun(ctx, rc)
+	peer := workHeadsPeer(t, db)
+	receiver := New(dispatchDBEngine(t, peer), testLogger(), func() *bun.DB { return peer })
+	receiver.SetNow(func() time.Time { return time.Now().Add(-time.Hour) })
+	if err := receiver.LimitReplyBudget(ctx, owner, runID); err != nil {
+		t.Fatal(err)
+	}
+	guard := NewRunCeilings(bff.engine, testLogger())
+	quick, err := guard.Deadline(ctx, rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared, err := guard.DeclaredDeadline(ctx, rc)
+	if err != nil || declared.Sub(quick) != 3*time.Minute {
+		t.Fatalf("declared/estimated deadline %v %v: %v", declared, quick, err)
+	}
+	for range 3 {
+		if breach := guard.Admit(ctx, rc, 0); breach != nil {
+			t.Fatal(breach)
+		}
+		guard.Charge(ctx, rc, memql.ModelSpend{Served: memql.ServedLocal})
+	}
+	if breach := guard.Admit(ctx, rc, 0); breach == nil {
+		t.Fatal("quick estimate must still stop a direct loop")
+	}
+	if changed, err := receiver.PrepareWorkTool(ctx); err != nil || !changed {
+		t.Fatalf("promote: %v %v", changed, err)
+	}
+	if changed, err := receiver.PrepareWorkTool(ctx); err != nil || changed {
+		t.Fatalf("promotion must be idempotent: %v %v", changed, err)
+	}
+	for range 2 {
+		if breach := guard.Admit(ctx, rc, 0); breach != nil {
+			t.Fatalf("originating replica retained estimate: %v", breach)
+		}
+		guard.Charge(ctx, rc, memql.ModelSpend{Served: memql.ServedLocal})
+	}
+	if breach := guard.Admit(ctx, rc, 0); breach == nil || breach.Limit != "5 calls" || breach.Actual != "5 made" {
+		t.Fatalf("promotion reset spend or enlarged declared ceiling: %+v", breach)
+	}
+	lookup, err := guard.Deadline(ctx, rc)
+	if err != nil || !lookup.Equal(declared) {
+		t.Fatalf("promotion moved original deadline: %v %v", lookup, err)
+	}
+	budget, err := receiver.RunBudget(ctx, owner, runID)
+	if err != nil || budget.MaxModelCalls != 5 || budget.CostCeiling != 0.25 {
+		t.Fatalf("budget %+v %v", budget, err)
+	}
+	goal, err := bff.store().goalForOwner(memql.ContextWithFreshRead(ctx), goalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := ceilingsOf(goal)
+	if err != nil || original.MaxModelCalls != 5 || original.WallClockMs != 300000 {
+		t.Fatalf("classifier modified the goal: %+v %v", original, err)
+	}
+}

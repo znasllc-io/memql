@@ -6,12 +6,15 @@ import type { LiveVoiceSession } from "./liveVoiceSession";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { ArrowUp, Mic, Plus, X, Activity, MessageCircle, MessagesSquare, Maximize2, Minimize2, Square, AudioLines } from "lucide-react";
 
+import { conversationFeed } from "./conversationFeed";
 import { ConversationSession } from "./conversationSession";
 import { AskWait } from "./AskWait";
+import { AskWorkLink } from "./AskWorkLink";
+import { AskQuestion } from "./AskQuestion";
+import { AskWorkQueue } from "./AskWorkQueue";
 import { AskActivityLog } from "./AskActivityLog";
 import { AskConversations } from "./AskConversations";
 import { AskMessage } from "./AskMessage";
-import { AskRoutePicker, AskRoutePill } from "./AskRoutePicker";
 import type { AskTransport } from "./askController";
 import { CHECKING_ASK, type AskAvailability } from "./useAskReadiness";
 import { useReducedMotion, useVoice } from "./useVoice";
@@ -36,9 +39,6 @@ import { DEFAULT_ASK_SETTINGS, type AskSettings } from "../apps/settings/askSett
 // to animate one ring; it is written to a CSS custom property on the button
 // instead, from a rAF loop that only runs while the mic is live.
 
-/** Where "Manage routes" goes: Fleet's routing section, one id for every
- *  entry point that opens it. */
-export const FLEET_ROUTING_SECTION = "routing";
 
 /** What the caption says, per phase. Exported so the tests read the copy. */
 export const ASK_VOICE_HOLD = "Listening -- let go to send.";
@@ -88,8 +88,8 @@ export function AskSurface({
   conversation: providedConversation,
   liveVoice,
   onOpenFile,
+  onOpenWork,
   onOpenFleet,
-  onManageRoutes,
   onClose,
   onToggleMaximize,
   maximized = false,
@@ -111,8 +111,6 @@ export function AskSurface({
   maximized?: boolean;
   availability?: AskAvailability;
   onOpenFleet?: () => void;
-  /** Open Fleet's routing from the route picker. */
-  onManageRoutes?: () => void;
   draft?: string;
   onDraftChange?: (draft: string) => void;
   /** Absent = this window has no voice wiring; the control says so. */
@@ -123,6 +121,7 @@ export function AskSurface({
   variant: "sheet" | "widget";
   autoFocus?: boolean;
   onOpenFile?: (fileId: string) => void;
+  onOpenWork?: (runId?: string, conversationId?: string) => void;
 }) {
   const localConversation = useRef<ConversationSession | null>(null);
   if (!providedConversation && !localConversation.current) localConversation.current = new ConversationSession(transport);
@@ -131,6 +130,7 @@ export function AskSurface({
   const [panel, setPanel] = useState<"conversation" | "activity" | "conversations">("conversation");
   const showActivity = panel === "activity";
   const showConversations = panel === "conversations";
+  useEffect(() => { setPanel("conversation"); }, [state.selectedId]);
   const activityRef = useRef<HTMLButtonElement | null>(null);
   const conversationsRef = useRef<HTMLButtonElement | null>(null);
   const closePanel = useCallback(() => {
@@ -139,21 +139,11 @@ export function AskSurface({
   }, [panel]);
   const returnToComposer = useRef(false);
   useEffect(() => {
-    if (panel === "conversation" && !picking && returnToComposer.current) {
+    if (panel === "conversation" && returnToComposer.current) {
       returnToComposer.current = false;
       inputRef.current?.focus();
     }
   });
-  // The route picker REPLACES the content while it is open (AskRoutePicker).
-  const [picking, setPicking] = useState(false);
-  const pillRef = useRef<HTMLButtonElement | null>(null);
-  const returnToPill = useRef(false);
-  useEffect(() => {
-    if (picking || !returnToPill.current) return;
-    returnToPill.current = false;
-    pillRef.current?.focus();
-  }, [picking]);
-  const closePicker = useCallback(() => { returnToPill.current = true; setPicking(false); }, []);
   const draft = providedDraft ?? state.draft;
   const setDraft = onDraftChange ?? conversation.setDraft;
   const exchanges = state.turns;
@@ -166,7 +156,7 @@ export function AskSurface({
   useLayoutEffect(() => {
     const el = logRef.current;
     if (el) el.scrollTop = nearBottom.current ? el.scrollHeight : conversationScroll.current;
-  }, [panel, picking, maximized]);
+  }, [panel, maximized]);
   const micRef = useRef<HTMLButtonElement | null>(null);
   const reducedMotion = useReducedMotion();
 
@@ -201,6 +191,21 @@ export function AskSurface({
   useEffect(() => {
     if (nearBottom.current) logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [exchanges]);
+
+  useEffect(() => {
+    if (!state.focusQuestionId) return;
+    if (panel !== "conversation") { setPanel("conversation"); return; }
+    const question = Array.from(logRef.current?.querySelectorAll<HTMLElement>("[data-ask-question]") ?? [])
+      .find(element => element.dataset.askQuestion === state.focusQuestionId);
+    if (!question) return;
+    nearBottom.current = false;
+    const log = logRef.current!;
+    const target = Math.max(0, log.scrollTop + question.getBoundingClientRect().top - log.getBoundingClientRect().top - Math.max(0, (log.clientHeight - question.clientHeight) / 2));
+    conversationScroll.current = target;
+    log.scrollTo({ top: target });
+    question.querySelector<HTMLTextAreaElement>("textarea")?.focus({ preventScroll: true });
+    conversation.questionFocused();
+  }, [state.focusQuestionId, panel, exchanges, conversation]);
 
   // The level ring. Runs only while the mic is live, writes only a CSS
   // variable. Reduced motion holds it at a readable constant rather than
@@ -295,34 +300,38 @@ export function AskSurface({
       <header className="os-window-bar os-ask-header">
         <div className="os-ask-heading"><strong>MemQL</strong><span>{contextLabel || "Ask"}</span></div>
         <div className="os-window-controls os-ask-actions"><div className="os-window-control-group">
-          <button type="button" className="os-icon-button" title="New conversation" aria-label="New conversation" disabled={busy || state.voiceActive} onClick={() => { conversation.newConversation(); setPanel("conversation"); setPicking(false); returnToComposer.current = true; }}><Plus size={14} /></button>
+          <button type="button" className="os-icon-button" title="New conversation" aria-label="New conversation" disabled={busy || state.voiceActive} onClick={() => { conversation.newConversation(); setPanel("conversation"); returnToComposer.current = true; }}><Plus size={14} /></button>
           </div><div className="os-window-control-group">
-          <button ref={conversationsRef} type="button" className="os-icon-button" title={showConversations ? "Conversation" : "Conversations"} aria-label={showConversations ? "Conversation" : "Conversations"} onClick={() => { if (showConversations) { closePanel(); return; } controls?.cancel(); setPicking(false); setPanel("conversations"); void conversation.refresh(); }}>{showConversations ? <MessageCircle size={14} /> : <MessagesSquare size={14} />}</button>
-          <button ref={activityRef} type="button" className="os-icon-button" title={showActivity ? "Conversation" : "Activity"} aria-label={showActivity ? "Conversation" : "Activity"} onClick={() => { if (showActivity) { closePanel(); return; } controls?.cancel(); setPicking(false); setPanel("activity"); }}>{showActivity ? <MessageCircle size={14} /> : <Activity size={14} />}</button>
+          <button ref={conversationsRef} type="button" className="os-icon-button" title={showConversations ? "Conversation" : "Conversations"} aria-label={showConversations ? "Conversation" : "Conversations"} onClick={() => { if (showConversations) { closePanel(); return; } controls?.cancel(); setPanel("conversations"); void conversation.refresh(); }}>{showConversations ? <MessageCircle size={14} /> : <MessagesSquare size={14} />}</button>
+          <button ref={activityRef} type="button" className="os-icon-button" title={showActivity ? "Conversation" : "Activity"} aria-label={showActivity ? "Conversation" : "Activity"} onClick={() => { if (showActivity) { closePanel(); return; } controls?.cancel(); setPanel("activity"); }}>{showActivity ? <MessageCircle size={14} /> : <Activity size={14} />}</button>
           </div>{onClose || onToggleMaximize ? <div className="os-window-control-group">
           {onToggleMaximize ? <button type="button" className="os-icon-button" title={maximized ? "Restore Ask" : "Maximize Ask"} aria-label={maximized ? "Restore Ask" : "Maximize Ask"} onClick={onToggleMaximize}>{maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button> : null}
           {onClose ? <button type="button" className="os-icon-button os-window-close" title="Close Ask" aria-label="Close Ask" onClick={onClose}><X size={14} /></button> : null}</div> : null}
         </div>
       </header>
-      {showActivity ? <div className="os-ask-content"><AskActivityLog turns={exchanges} dictation={state.dictationActivity} onClose={closePanel} onStop={busy ? () => conversation.stop() : undefined} /></div> : showConversations ? <div className="os-ask-content"><AskConversations conversation={conversation} onOpen={changed => { if (changed) { nearBottom.current = true; conversationScroll.current = 0; } setPanel("conversation"); returnToComposer.current = true; }} /></div> : picking && !state.voiceActive ? <div className="os-ask-content"><AskRoutePicker routing={state.routing} onChoose={conversation.setRouting} onBack={closePicker} onManageRoutes={onManageRoutes ? () => { setPicking(false); onManageRoutes(); } : undefined} /></div> : state.voiceActive && liveVoice ? <div className="os-ask-content"><AskLiveVoice session={liveVoice} /></div> : <div className="os-ask-content">
+      {showActivity ? <div className="os-ask-content"><AskActivityLog turns={exchanges} dictation={state.dictationActivity} onClose={closePanel} onStop={busy ? () => conversation.stop() : undefined} /></div> : showConversations ? <div className="os-ask-content"><AskConversations conversation={conversation} onOpen={changed => { if (changed) { nearBottom.current = true; conversationScroll.current = 0; } setPanel("conversation"); returnToComposer.current = true; }} /></div> : state.voiceActive && liveVoice ? <div className="os-ask-content"><AskLiveVoice session={liveVoice} /></div> : <div className="os-ask-content">
         <div className="os-ask-log" ref={logRef} role="log" aria-label="Conversation" aria-live="polite" onScroll={() => { const el = logRef.current; if (el) { conversationScroll.current = el.scrollTop; nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 72; } }}>
           {state.loading ? <ContentSkeleton kind="conversation" label="Opening conversation" /> : null}
           {exchanges.length === 0 && !state.loading ? <div className="os-ask-empty"><strong>What would you like to do?</strong><p>Ask a question, explore your workspace, or let MemQL help you get something done.</p></div> : null}
-          {exchanges.map(turn => <div key={turn.id} className="os-ask-exchange" data-state={turn.state}>
-            <div className="os-ask-message"><AccountAvatar className="os-ask-avatar" /><div><div className="os-ask-byline"><strong>You</strong><time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div><p>{turn.prompt}</p></div></div>
-            <div className="os-ask-message"><span className="os-avatar os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span><div><div className="os-ask-byline"><strong>MemQL</strong>{turn.state === "done" && turn.endedAt ? <time dateTime={turn.endedAt}>{messageTime(turn.endedAt)}</time> : null}</div>
+          {conversationFeed(exchanges).map(({ turn, completion, key, workState }) => <div key={key} className="os-ask-exchange" data-state={turn.state}>
+            {!completion ? <div className="os-ask-message"><AccountAvatar className="os-ask-avatar" /><div><div className="os-ask-byline"><strong>You</strong><time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div><p>{turn.prompt}</p></div></div> : null}
+            {!turn.answerOnly ? <div className="os-ask-message"><span className="os-avatar os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span><div><div className="os-ask-byline"><strong>MemQL</strong>{turn.state === "done" && turn.endedAt ? <time dateTime={turn.endedAt}>{messageTime(turn.endedAt)}</time> : null}</div>
+              {completion ? <p className="os-ask-result-context">{turn.workTitle || turn.prompt}</p> : null}
               {turn.answer ? <AskMessage text={turn.answer} /> : null}
+              {turn.question && !completion ? <AskQuestion key={turn.question.id} question={turn.question} onAnswer={answer => conversation.answerQuestion(turn.question!, answer)} /> : null}
+              {!completion && (turn.background || turn.acknowledgement || turn.state === "queued" || turn.state === "waiting") && turn.runId && onOpenWork ? <AskWorkLink title={turn.workTitle || turn.prompt} state={workState} onOpen={() => onOpenWork(turn.runId, state.selectedId ?? undefined)} /> : null}
               {onOpenFile ? turn.activity.filter(event => event.kind === "artifact" && event.phase === "completed" && typeof event.arguments?.fileId === "string").map(event => <button key={event.id} type="button" className="os-ask-retry" onClick={() => onOpenFile(event.arguments!.fileId as string)}>Open {event.name || "file"}</button>) : null}
               {turn.state === "streaming" ? <AskWait activity={turn.activity} startedAt={turn.startedAt} hasText={Boolean(turn.answer)} /> : null}
               {turn.error ? <div className="os-ask-error"><p role="alert">{askErrorSummary(turn.error)}</p>{askErrorSummary(turn.error) !== turn.error ? <details><summary>Details</summary><p>{turn.error}</p></details> : null}{!busy ? <button type="button" className="os-ask-retry" onClick={() => { setDraft(turn.prompt); inputRef.current?.focus(); }}>Edit and try again</button> : null}{onOpenFleet ? <button type="button" className="os-ask-retry" onClick={onOpenFleet}>Open Fleet</button> : null}</div> : null}
-            </div></div>
+            </div></div> : null}
           </div>)}
         </div>
       </div>
       }
       {state.error ? <p className="os-ask-error" role="alert">{askErrorSummary(state.error)}</p> : null}
       {liveVoice && !state.voiceActive ? <AskLiveVoice session={liveVoice} errorsOnly /> : null}
-      {!state.voiceActive && !picking && panel === "conversation" ? <form className="os-ask-input" onSubmit={onSubmit}>
+      {!state.voiceActive && panel === "conversation" ? <AskWorkQueue turns={exchanges} onOpen={runId => onOpenWork?.(runId, state.selectedId ?? undefined)} /> : null}
+      {!state.voiceActive && panel === "conversation" ? <form className="os-ask-input" onSubmit={onSubmit}>
         <button
           ref={micRef}
           type="button"
@@ -394,9 +403,6 @@ export function AskSurface({
           readOnly={live}
           onChange={(event) => setDraft(event.target.value)}
         />
-        {/* The conversation's route (design brief section 6). The visible
-            words are the choice; the accessible name says what they are. */}
-        <AskRoutePill ref={pillRef} routing={state.routing} onOpen={() => { controls?.cancel(); setPanel("conversation"); setPicking(true); }} />
         {busy ? <button type="button" className="os-ask-send" aria-label="Stop reply" title="Stop this work" onClick={() => conversation.stop()}><Square size={13} /></button> : <button
           type="submit"
           className="os-ask-send"
@@ -407,7 +413,7 @@ export function AskSurface({
         </button>}
       </form> : null}
       {phase === "transcribing" && !state.voiceActive && panel === "conversation" ? <AskWait activity={state.dictationActivity} startedAt={state.dictationActivity.at(-1)?.at ?? new Date().toISOString()} hasText={false} label="Transcribing" /> : null}
-      {note && phase !== "transcribing" && !state.voiceActive && !picking && panel === "conversation" ? (
+      {note && phase !== "transcribing" && !state.voiceActive && panel === "conversation" ? (
         <p
           className="os-caption os-ask-micnote"
           data-note={!wired || voice?.state.problem ? "problem" : "state"}

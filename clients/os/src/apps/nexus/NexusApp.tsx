@@ -49,6 +49,7 @@ import {
   useRuns,
 } from "./useNexus";
 import { useSession } from "../../chrome/access";
+import { useOpenAskWork } from "../../ask/AskProvider";
 
 // WORK: what you asked the system to do, what it did about it, and the places
 // it had to stop and ask you.
@@ -106,10 +107,12 @@ export function NexusApp({
   const cancel = useCancelGoal();
   const derive = useDeriveRun();
   const decide = useDecideApproval();
+  const openAskWork = useOpenAskWork();
 
   const [selectedGoalId, setSelectedGoalId] = useState("");
   const [openGoalId, setOpenGoalId] = useState("");
   const [openRunId, setOpenRunId] = useState("");
+  const [conversationId, setConversationId] = useState("");
   // THE RUNS THE PERSON CAME THROUGH to reach the open one, from a run page:
   // a branch or a replay opened from a run, a child run, the run a branch
   // came from. Back pops it, so it returns to the run it was opened from
@@ -201,6 +204,11 @@ export function NexusApp({
 
   function openApproval(approvalId: string) {
     if (approvalId.trim() === "") return;
+    const approval = approvals.snapshot.rows.map(approvalFromRow).find(row => idTail(row.id) === idTail(approvalId));
+    if (openAskWork && approval?.kind === "feedback" && ["text", "choice", "multi"].includes(String(approval.subject?.kind))) {
+      openAskWork(approval.runId);
+      return;
+    }
     setSelectedApprovalId(approvalId);
     navigate("approvals");
   }
@@ -220,6 +228,7 @@ export function NexusApp({
   useEffect(() => {
     if (intent === undefined || intent.id === handled.current) return;
     const payload = intent.payload;
+    const conversation = typeof payload["conversationId"] === "string" ? payload["conversationId"] : "";
     const runId = typeof payload["runId"] === "string" ? payload["runId"] : "";
     const goalId = typeof payload["goalId"] === "string" ? payload["goalId"] : "";
     const approvalId = typeof payload["approvalId"] === "string" ? payload["approvalId"] : "";
@@ -229,11 +238,13 @@ export function NexusApp({
     // gets the goal drawn as it stood. Ignored on a run or approval payload,
     // because neither of those surfaces is rewindable.
     const at = typeof payload["at"] === "string" ? payload["at"] : "";
-    if (runId === "" && goalId === "" && approvalId === "" && procedureId === "") return;
+    if (conversation === "" && runId === "" && goalId === "" && approvalId === "" && procedureId === "") return;
     handled.current = intent.id;
+    setConversationId(conversation);
     if (runId !== "") openRun(runId);
     else if (approvalId !== "") openApproval(approvalId);
     else if (procedureId !== "") openProcedureById(procedureId);
+    else if (conversation) { setOpenRunId(""); navigate("runs"); }
     else {
       setOpenAt(at);
       openGoal(goalId);
@@ -315,6 +326,7 @@ export function NexusApp({
         decide={decide}
         selectedApprovalId={selectedApprovalId}
         onSelectApproval={setSelectedApprovalId}
+        onAnswerInAsk={openAskWork ?? undefined}
         onOpenRun={openRun}
         procedures={feeds.procedureRows}
         onOpenProcedure={openProcedureById}
@@ -371,6 +383,8 @@ export function NexusApp({
     return (
       <RunsSection
         runs={runs.source}
+        conversationId={conversationId}
+        onClearConversation={() => setConversationId("")}
         goalsById={goalsById}
         showFinished={settings.showFinishedRuns}
         onOpenRun={openRun}
@@ -494,7 +508,7 @@ function RunView({
   onRemember: (memory: RunPageMemory) => void;
 }) {
   const steps = useRunSteps(run.id);
-  const journal = useJournal(run.id);
+  const journal = useJournal(run.id, !["succeeded", "failed", "cancelled", "abandoned"].includes(run.status));
 
   // ORDERED BY `seq` HERE AND NOT BY THE READ. `workStepsForOwnerRun` carries
   // `@unbounded`, which excludes `sort`, so the rows arrive in whatever order

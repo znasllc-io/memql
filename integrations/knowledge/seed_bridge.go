@@ -382,7 +382,7 @@ func (i *Integration) generateBridgeContent(
 		if c.Title == "" || c.Body == "" {
 			continue
 		}
-		if err := i.storeSeedChunk(ctx, bridgeAsDomain, bridgeRecipeVersion, idx, c, "llm-bridge", "crossDomainBridge", provider); err != nil {
+		if err := i.storeSeedChunk(ctx, bridgeAsDomain, bridgeRecipeVersion, idx, c, "llm-bridge", "crossDomainBridge", boundEmbedder, provider); err != nil {
 			i.Logger.Warn("knowledge.bridge: chunk write failed",
 				"bridgeId", bridgeId, "chunkIndex", idx, "err", err)
 			continue

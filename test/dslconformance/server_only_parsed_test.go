@@ -1108,6 +1108,9 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// payloads. Owning the input via actor.userId does not authorize a
 		// browser to replace that execution authority after acceptance.
 		{Path: "compose/mutations.memql", Name: "createCompositionInput"}: true,
+		// The captured render recipe is execution evidence, not owner-authored
+		// content. Caller scoping cannot prevent forged recovery provenance.
+		{Path: "compose/mutations.memql", Name: "saveCompositionRecipe"}: true,
 		// The file-version supersede pair (epic memql#4806, design D10) --
 		// the same asset as the session pair above, one concept along.
 		// actor-scoping is again fully in place and again not the question:
@@ -1392,6 +1395,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// and by construction cannot gate a builtin.
 		{Path: "cluster/mutations.memql", Name: "createReleaseCut"}:       true,
 		{Path: "cluster/mutations.memql", Name: "updateReleaseCutStatus"}: true,
+
+		// Indexers attest to verified source content and classifier receipts.
+		// Caller-scoping prevents cross-owner writes but cannot prevent an
+		// owner from forging sourceHash/content or model-written wording.
+		{Path: "memory/conversation.memql", Name: "createConversationEvidence"}: true,
+		{Path: "memory/acknowledgement.memql", Name: "saveWorkAcknowledgement"}: true,
 
 		// THE WORK JOURNAL (work spine A1, design record
 		// docs/superpowers/specs/2026-09-05-work-spine-design.md section D).

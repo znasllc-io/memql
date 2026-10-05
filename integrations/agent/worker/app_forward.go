@@ -1,5 +1,3 @@
-//go:build agent || planner
-
 package worker
 
 // Cross-replica APP-DOOR calls (the planner/app-source design, section 3a).

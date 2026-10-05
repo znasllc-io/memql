@@ -119,3 +119,49 @@ func TestRemoteFleetInferenceFromPlannerCrossesActualModelHop(t *testing.T) {
 		t.Fatalf("planner's forwarded inference lost output or provenance: %+v target=%q", result, link.target)
 	}
 }
+
+func TestBFFEmbeddingCrossesModelHopWithAuthorityAndActualWidth(t *testing.T) {
+	const model = "local-embedder"
+	store := &remoteFleetStore{candidates: []Candidate{{RegistrationId: "laptop", ConnectedNodeId: "agent-with-stream", LastSeenAt: time.Now(), Capabilities: []string{workerservice.ModelCapability}, Labels: map[string]string{workerservice.ModelLabel(model): (ModelAttributes{Embeddings: true}).String()}}}}
+	registry := workerservice.NewRegistry(slog.Default(), time.Now)
+	worker := &workerservice.Worker{RegistrationId: "laptop", OwnerUserId: "alice", Capabilities: []string{workerservice.ModelCapability}, Labels: store.candidates[0].Labels, Concurrency: map[string]uint32{workerservice.ModelCapability: 1}}
+	calls := 0
+	worker.SetModelCallFunc(func(ctx context.Context, req workerservice.ModelCallRequest) (*workerservice.ModelCallHandle, error) {
+		access, ok := auth.AccessFromContext(ctx)
+		if !ok || access.UserId != "alice" || req.Kind != workerservice.ModelCallKindEmbedding || len(req.EmbeddingInput) != 1 {
+			return nil, fmt.Errorf("embedding lost owner or input across hop")
+		}
+		calls++
+		handle, _, finish := workerservice.NewModelCallLoopback(req, func(string) {})
+		vector := make([]float32, 1024)
+		vector[0] = 1
+		go finish(workerservice.ModelCallOutcome{FinishReason: workerservice.ModelFinishStop, Embeddings: [][]float32{vector}})
+		return handle, nil
+	})
+	registry.Add(worker)
+	link := &plannerModelLink{handler: NewForwardHandler(registry, store, slog.Default())}
+	link.router = newForwardRouter(link, func() (string, string) { return "bff", "bff" }, slog.Default())
+	fleet := NewRemoteFleetInference(store, link.router, "bff", slog.Default())
+	authority, err := auth.ForwardedAuthorityForUser(&auth.AccessContext{UserId: "alice", Role: auth.RoleOwner}, "", "", time.Time{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	access, err := auth.VerifyForwardedAuthority(authority, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(auth.BindForwardedContext(context.Background(), authority.Principal().Claims, access, authority), 5*time.Second)
+	defer cancel()
+	request := memqlengine.FleetCallRequest{ActingUserId: "alice", ModelId: model, Kind: memqlengine.FleetKindEmbedding, EmbeddingInput: []string{"memory evidence"}}
+	result, err := fleet.Call(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Embeddings) != 1 || len(result.Embeddings[0]) != 1024 || link.target != "agent-with-stream" {
+		t.Fatalf("lost embedding or receiver: %+v", result)
+	}
+	_, err = fleet.Call(context.Background(), request)
+	if err == nil || calls != 1 {
+		t.Fatalf("missing originating authority reached a worker: calls=%d err=%v", calls, err)
+	}
+}

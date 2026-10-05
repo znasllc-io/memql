@@ -229,6 +229,19 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// leaving it unstamped here is correct.
 
 	data := buildPromptData(msg)
+	if isOwnedWorkExecution(ctx) {
+		viewer, err := r.engine.Execute(memql.ContextWithFreshRead(ctx), "builtin work.workViewerContext()")
+		if err != nil {
+			return nil, fmt.Errorf("prepare work viewer context: %w", err)
+		}
+		if rows := memql.MaterializeRows(viewer); len(rows) > 0 {
+			encoded, err := json.Marshal(rows[0])
+			if err != nil {
+				return nil, err
+			}
+			data["viewerContext"] = string(encoded)
+		}
+	}
 
 	// Expand capability slugs + stamp operatorEnabled BEFORE rendering
 	// so the template can branch on the flag and agents see the
@@ -597,6 +610,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// template skips the block.
 	data["etiquette"] = r.loadAssistantEtiquette(ctx)
 
+	data["requiresHumanOutcome"] = isOwnedWorkExecution(ctx) && RoleAllowsTool(harnessRole, RespondToUserToolName)
 	renderStart := time.Now()
 	promptData := data
 	if promptName == "workAgentReply" {
@@ -642,7 +656,11 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// so respondToUser is injected for the assistant role only. A
 	// specialist never receives it.
 	if RoleAllowsTool(harnessRole, RespondToUserToolName) {
-		tools = append(tools, RespondToUserToolDefinition())
+		definition := RespondToUserToolDefinition()
+		if isOwnedWorkExecution(ctx) {
+			definition = workResponseToolDefinition()
+		}
+		tools = append(tools, definition)
 	}
 	// Defense in depth: scope the concrete tool schemas to the role so a
 	// specialist's WIRE tool set physically cannot carry respondToUser
@@ -716,19 +734,14 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 		IsProduceArtifactExecution: IsProduceArtifactExecutionTurn(msg.Hints),
 		IsWorkExecution:            isOwnedWorkExecution(ctx),
 	}
-	// On a post-approval execution turn the planner forwards
-	// hints["plan_id"] alongside hints["trigger"]="plan_approved".
-	// Pull it onto the turn context so worker tool dispatches stamp
-	// it onto args["planId"] (see agentContextStamps.StampRunId).
-	// That id propagates through Request.RunId into the
-	// v1:worker:invocation row -- without it the planner's
-	// outcome detector sees zero rows for the plan and stamps
-	// Plan failed even when the worker tool succeeded.
-	if msg.Hints != nil {
-		if pid := strings.TrimSpace(msg.Hints["plan_id"]); pid != "" {
-			turnCtx.RunId = pid
-		}
+	// Persisted run authority survives replica adoption and overrides any
+	// request hint. Non-work callers may still provide their execution hint.
+	if run, ok := common.RunFromContext(ctx); ok && isOwnedWorkExecution(ctx) {
+		turnCtx.RunId = run.RunId
+	} else if msg.Hints != nil {
+		turnCtx.RunId = strings.TrimSpace(msg.Hints["plan_id"])
 	}
+
 	r.logger.Info("agentReply: stage",
 		"stage", "turnContext",
 		"agent_id", msg.AgentId,
@@ -2030,9 +2043,10 @@ func citeNothing(_ map[string]any, _ string) string {
 // engine-owned domains, add them here; a product pack's operator domains
 // (e.g. its UI map) classify via the registered AppProfile instead.
 var appStructureDomainIds = map[string]bool{
-	"computer-use": true,
-	"workbench":    true,
-	"recent-chat":  true,
+	"work-guidance": true,
+	"computer-use":  true,
+	"workbench":     true,
+	"recent-chat":   true,
 }
 
 func isAppStructureDomain(domainId string) bool {

@@ -93,20 +93,18 @@ func (i *Integration) embedChunkHandler(ctx context.Context, args map[string]any
 		return nil, fmt.Errorf("knowledge.embedChunk: chunk %q has empty text", chunkId)
 	}
 
-	// Already indexed -- skip the embed call and acknowledge.
-	if has, herr := i.hasVector(ctx, chunkId); herr == nil && has {
-		return embedChunkResult(chunkId, false, true), nil
-	}
-
 	provider, err := i.embeddingProvider(ctx, providerName)
 	if err != nil {
 		return nil, fmt.Errorf("knowledge.embedChunk: resolve provider %q: %w", providerName, err)
+	}
+	if has, herr := i.hasVector(ctx, chunkId, providerName, provider.Dimensions()); herr == nil && has {
+		return embedChunkResult(chunkId, false, true), nil
 	}
 	vec, err := provider.Embed(ctx, chunk.text)
 	if err != nil {
 		return nil, fmt.Errorf("knowledge.embedChunk: embed chunk %q: %w", chunkId, err)
 	}
-	if err := i.storeVector(ctx, chunkId, "v1:knowledge:documentChunk", vec); err != nil {
+	if err := i.storeVector(ctx, providerName, chunkId, "v1:knowledge:documentChunk", vec); err != nil {
 		return nil, fmt.Errorf("knowledge.embedChunk: store vector for %q: %w", chunkId, err)
 	}
 
@@ -169,6 +167,7 @@ func (i *Integration) embedDomainItemsHandler(ctx context.Context, args map[stri
 		return nil, fmt.Errorf("knowledge.embedDomainItems: resolve provider %q: %w", providerName, err)
 	}
 
+	dimensions := memql.EmbeddingDimensions(ctx, providerName, provider.Dimensions())
 	embedded := 0
 	already := 0
 	failed := 0
@@ -180,7 +179,7 @@ func (i *Integration) embedDomainItemsHandler(ctx context.Context, args map[stri
 		if c.documentId != "" {
 			touchedDocuments[c.documentId] = struct{}{}
 		}
-		has, herr := i.hasVector(ctx, c.id)
+		has, herr := i.hasVector(ctx, c.id, providerName, dimensions)
 		if herr != nil {
 			i.Logger.Warn("knowledge.embedDomainItems: hasVector check failed",
 				"chunkId", c.id, "err", herr)
@@ -198,13 +197,14 @@ func (i *Integration) embedDomainItemsHandler(ctx context.Context, args map[stri
 			failed++
 			continue
 		}
-		if serr := i.storeVector(ctx, c.id, "v1:knowledge:documentChunk", vec); serr != nil {
+		if serr := i.storeVector(ctx, providerName, c.id, "v1:knowledge:documentChunk", vec); serr != nil {
 			i.Logger.Warn("knowledge.embedDomainItems: store vector failed",
 				"chunkId", c.id, "err", serr)
 			failed++
 			continue
 		}
 		embedded++
+		dimensions = len(vec)
 	}
 
 	// Drive the Document embeddingStatus rollup. When the caller scoped
@@ -215,7 +215,7 @@ func (i *Integration) embedDomainItemsHandler(ctx context.Context, args map[stri
 		touchedDocuments[documentId] = struct{}{}
 	}
 	for docId := range touchedDocuments {
-		if err := i.rollupDocumentEmbeddingStatus(ctx, docId); err != nil {
+		if err := i.rollupDocumentEmbeddingStatus(ctx, docId, providerName, dimensions); err != nil {
 			i.Logger.Warn("knowledge.embedDomainItems: document rollup failed",
 				"documentId", docId, "err", err)
 			continue
@@ -407,14 +407,22 @@ func (i *Integration) queryChunksForDomain(
 
 // hasVector reports whether a node already has a 'content' embedding.
 // Cheap point-lookup against the (id, vector_field) PK.
-func (i *Integration) hasVector(ctx context.Context, nodeId string) (bool, error) {
+func (i *Integration) hasVector(ctx context.Context, nodeId, provider string, dimensions int) (bool, error) {
+	dimensions = memql.EmbeddingDimensions(ctx, provider, dimensions)
+	if dimensions == 0 {
+		return false, nil
+	}
+	table, err := memql.EnsureEmbeddingVectorTable(ctx, i.db(), provider, dimensions)
+	if err != nil {
+		return false, err
+	}
 	row := i.db().QueryRowContext(
 		ctx,
-		`SELECT 1 FROM node_vectors WHERE id = $1 AND vector_field = 'content' LIMIT 1`,
+		`SELECT 1 FROM `+table+` WHERE id = $1 AND vector_field = 'content' LIMIT 1`,
 		nodeId,
 	)
 	var marker int
-	err := row.Scan(&marker)
+	err = row.Scan(&marker)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -451,12 +459,16 @@ func (i *Integration) hasVector(ctx context.Context, nodeId string) (bool, error
 // outer aggregate is either a no-op or skews `total` and `embedded` by
 // different amounts -- turning a wrong-but-consistent answer into an
 // inconsistent one.
-func (i *Integration) rollupDocumentEmbeddingStatus(ctx context.Context, documentId string) error {
+func (i *Integration) rollupDocumentEmbeddingStatus(ctx context.Context, documentId, provider string, dimensions int) error {
 	if documentId == "" {
 		return nil
 	}
+	table, err := memql.EnsureEmbeddingVectorTable(ctx, i.db(), provider, memql.EmbeddingDimensions(ctx, provider, dimensions))
+	if err != nil {
+		return err
+	}
 	var total, embedded int
-	err := i.db().QueryRowContext(
+	err = i.db().QueryRowContext(
 		ctx,
 		`SELECT
 		   COUNT(*) AS total,
@@ -469,7 +481,7 @@ func (i *Integration) rollupDocumentEmbeddingStatus(ctx context.Context, documen
 		     AND COALESCE(chunk.payload->>'validationStatus', '') <> 'rejected'
 		   ORDER BY chunk.id, chunk."createdAt" DESC
 		 ) live_chunk
-		 LEFT JOIN node_vectors nv
+		 LEFT JOIN `+table+` nv
 		   ON nv.id = live_chunk.id AND nv.vector_field = 'content'`,
 		documentId,
 	).Scan(&total, &embedded)

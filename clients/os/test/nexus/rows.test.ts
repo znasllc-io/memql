@@ -523,3 +523,9 @@ describe("which door answered a step", () => {
     expect(decisionLine(decision!)).toBe("somethingNew · claude-sonnet-4");
   });
 });
+
+
+it("includes local and subscription tokens in the run's displayed total", () => {
+  const run = runFromRow({ id: "run", spent: { tokens: 0, tokensLocal: 1200, tokensSubscription: 300 } });
+  expect(runSpend(run).find(figure => figure.many === "tokens")?.value).toBe(1500);
+});

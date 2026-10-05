@@ -1775,6 +1775,7 @@
         "recipeId",
         "runId",
         "sha256",
+        "sourceFileId",
         "sources",
         "statement",
         "status",
@@ -3444,6 +3445,50 @@
       "required": [
         "ownerUserId",
         "watermark"
+      ]
+    },
+    {
+      "concept": "v1:memory:conversationEvidence",
+      "file": "memory/conversation.memql",
+      "fields": [
+        "content",
+        "conversationId",
+        "domainId",
+        "ownerUserId",
+        "recordedAt",
+        "sourceHash",
+        "turnId"
+      ],
+      "required": [
+        "content",
+        "conversationId",
+        "domainId",
+        "ownerUserId",
+        "recordedAt",
+        "sourceHash",
+        "turnId"
+      ]
+    },
+    {
+      "concept": "v1:memory:workAcknowledgement",
+      "file": "memory/acknowledgement.memql",
+      "fields": [
+        "acknowledgement",
+        "domainId",
+        "expiresAt",
+        "ownerUserId",
+        "request",
+        "sourceRunId",
+        "workload"
+      ],
+      "required": [
+        "acknowledgement",
+        "domainId",
+        "expiresAt",
+        "ownerUserId",
+        "request",
+        "sourceRunId",
+        "workload"
       ]
     },
     {
@@ -8471,6 +8516,8 @@
         "cancelRequested",
         "cancelledBy",
         "chainHead",
+        "classification",
+        "continuation",
         "errorCode",
         "errorMessage",
         "executionAuthority",
@@ -8482,6 +8529,8 @@
         "goalSignature",
         "head",
         "heartbeatAt",
+        "humanResumeId",
+        "humanWaitMs",
         "initialChainHead",
         "input",
         "inputFingerprint",

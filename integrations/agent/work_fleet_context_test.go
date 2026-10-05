@@ -45,7 +45,7 @@ func (f *workContextFleet) Call(ctx context.Context, req memql.FleetCallRequest)
 	if req.OnDelta != nil {
 		req.OnDelta("Completed answer")
 	}
-	return memql.FleetCallResult{Content: "Completed answer"}, nil
+	return memql.FleetCallResult{ToolCalls: outcomeCall(`{"status":"complete","response":"Completed answer"}`)}, nil
 }
 
 // Start on the execution replica with identity restored from a persisted run,

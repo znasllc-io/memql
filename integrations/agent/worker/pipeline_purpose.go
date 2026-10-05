@@ -1,5 +1,3 @@
-//go:build agent || planner
-
 package worker
 
 // pipeline_purpose.go -- the PIPELINE PURPOSE (epic memql#5478, #5494).

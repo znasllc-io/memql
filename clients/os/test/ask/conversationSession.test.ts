@@ -6,6 +6,23 @@ function setup(overrides: Partial<NonNullable<AskTransport["conversations"]>> = 
  const store = { list: vi.fn(async () => []), create: vi.fn(async () => ({ id: "new", title: "New conversation" })), read: vi.fn(async () => []), ...overrides };
  return new ConversationSession({ ask: vi.fn(() => ({ cancel: vi.fn() })), conversations: store });
 }
+it.each(["queued", "waiting"] as const)("keeps an accepted %s run observable without invented reply text", phase => {
+ let callbacks!: import("../../src/ask/askController").AskCallbacks;
+ const session = new ConversationSession({ask:(_p,_c,on)=>{callbacks=on;return {cancel(){}}}});
+ session.send("Look up a saved fact",null);
+ callbacks.activity?.({id:"run",kind:"run",phase,at:"now",arguments:{goalId:"g",runId:"r",workTitle:"Saved fact"}});
+ callbacks.done();
+ expect(session.getSnapshot().busy).toBe(false);
+ expect(session.getSnapshot().turns[0]).toMatchObject({state:phase,runId:"r",answer:""});
+ expect(session.getSnapshot().turns[0]?.error).toBeUndefined();
+ expect(session.getSnapshot().turns[0]?.endedAt).toBeUndefined();
+});
+it("still reports an empty completed foreground response", () => {
+ let callbacks!: import("../../src/ask/askController").AskCallbacks;
+ const session = new ConversationSession({ask:(_p,_c,on)=>{callbacks=on;return {cancel(){}}}});
+ session.send("Hello",null); callbacks.done();
+ expect(session.getSnapshot().turns[0]?.error).toBe("MemQL finished without an answer.");
+});
 it("ignores a slow selection after New conversation", async () => {
  const read = deferred<AskTurn[]>(); const session = setup({ read: () => read.promise });
  const pending = session.select("old"); session.newConversation(); read.resolve([]); await pending;

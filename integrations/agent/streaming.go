@@ -345,6 +345,11 @@ func (r *Replier) runStreamingToolLoop(
 	requestId string,
 	turnCtx turnContext,
 ) (*TurnResult, error) {
+	resumed, resumeErr := r.restoreAfterQuestion(ctx, messages)
+	if resumeErr != nil {
+		return nil, resumeErr
+	}
+	messages = resumed
 	// NOTHING IS INSTALLED HERE ANY MORE (memql#5050) -- see the same note in
 	// nonstreaming.go. Tool calls are recorded against the run in context,
 	// and a turn with no run records nothing rather than minting an ad-hoc
@@ -369,6 +374,8 @@ func (r *Replier) runStreamingToolLoop(
 	// turn's FinalText (envelope.Response) and contributes Citations.
 	// See envelope.go for the protocol.
 	var terminalEnvelope *Envelope
+	workOutcomeRequired := requiresWorkOutcome(ctx, tools)
+	invalidOutcomes := 0
 	// ttftLogged tracks whether we've emitted the one-shot
 	// "first chunk from upstream" log line for this turn. We log it
 	// exactly once -- on the first non-empty content or tool-call chunk
@@ -464,7 +471,12 @@ StreamLoop:
 		)
 		attempt := 0
 		for {
-			attemptCtx, cancelAttempt := context.WithCancel(ctx)
+			budgetCtx, stopBudget, budgetErr := r.workCallContext(ctx)
+			if budgetErr != nil {
+				return nil, budgetErr
+			}
+			attemptCtx, stopAttempt := context.WithCancel(budgetCtx)
+			cancelAttempt := func() { stopAttempt(); stopBudget() }
 			chunks, err = provider.CallChatStreamWithTools(attemptCtx, messages, tools)
 			if err != nil {
 				cancelAttempt()
@@ -532,6 +544,22 @@ StreamLoop:
 			// Success: exit the inner retry loop and proceed to
 			// consume turnCalls / emit tool results.
 			break
+		}
+
+		if workOutcomeRequired && isDelegatedWorkSession(provider) {
+			workOutcomeRequired = false
+		}
+		if workOutcomeRequired {
+			normalized, outcomeErr := normalizeWorkOutcome(turnCalls)
+			if outcomeErr != nil {
+				invalidOutcomes++
+				messages = rejectedWorkOutcome(messages, turnText, turnCalls, outcomeErr, sink)
+				if invalidOutcomes >= 2 {
+					return nil, fmt.Errorf("invalid work outcome after bounded repair: %w", outcomeErr)
+				}
+				continue
+			}
+			turnCalls = normalized
 		}
 
 		assistantMsg := common.ChatMessage{Role: "assistant", Content: turnText}
@@ -615,28 +643,13 @@ StreamLoop:
 		// Emit each tool call to the sink so cognition can audit-log /
 		// forward them. The sink contract allows both ToolCall and
 		// ToolResult so cognition has the full picture.
-		for _, tc := range turnCalls {
-			sink.ToolCall(tc.ID, tc.Name, tc.Arguments)
-		}
-
-		if iter == maxIter-1 {
-			// Budget exhausted. Execute the final round's tools for their
-			// side effects (e.g. clawExecuteTask kicks off a task) but
-			// don't feed results back -- there's no turn left to consume.
-			for _, tc := range turnCalls {
-				args := parseToolArgs(tc.Arguments)
-				injectAgentContext(tc.Name, args, turnCtx)
-				if _, execErr := r.stamper.ExecuteToolByName(agentToolCallContext(ctx, tc.Name, turnCtx), tc.Name, args); execErr != nil {
-					r.logger.Warn("agent streaming: tool execution failed",
-						"tool", tc.Name, "error", execErr)
-					sink.ToolResult(tc.ID, "", execErr.Error())
-				}
-			}
-			break
-		}
-
 		hadSuccess := false
 		for _, tc := range turnCalls {
+			// Calls after a human question have not started yet.
+			if err := r.prepareWorkTool(ctx); err != nil {
+				return nil, err
+			}
+			sink.ToolCall(tc.ID, tc.Name, tc.Arguments)
 			args := parseToolArgs(tc.Arguments)
 			// Ensure args is a non-nil map BEFORE agent-context
 			// injection. parseToolArgs returns nil when the LLM
@@ -686,7 +699,16 @@ StreamLoop:
 				continue
 			}
 			injectAgentContext(tc.Name, args, turnCtx)
+			if err := r.saveBeforeQuestion(ctx, tc.Name, messages); err != nil {
+				return nil, err
+			}
 			result, execErr := r.stamper.ExecuteToolByName(agentToolCallContext(ctx, tc.Name, turnCtx), tc.Name, args)
+			if execErr == nil {
+				if wait := feedbackWait(tc.Name, result); wait != nil {
+					sink.ToolResult(tc.ID, result, "")
+					return nil, wait
+				}
+			}
 			var content string
 			if execErr != nil {
 				// Structured, typed tool error (#584): classify the raw
@@ -764,6 +786,9 @@ StreamLoop:
 				ToolCallId: tc.ID,
 				Content:    content,
 			})
+			if err := r.saveWorkProgress(ctx, messages); err != nil {
+				return nil, err
+			}
 		}
 
 		if !hadSuccess {
@@ -793,6 +818,10 @@ StreamLoop:
 		if terminalEnvelope != nil {
 			break
 		}
+	}
+
+	if workOutcomeRequired && terminalEnvelope == nil && terminalErr == nil {
+		terminalErr = fmt.Errorf("work ended without a valid completion or durable question")
 	}
 
 	// Resolve the user-facing reply. If the model emitted the envelope
@@ -1094,13 +1123,8 @@ type agentContextStamp struct {
 	// object rather than a flat string id, so this gets its own
 	// flag separate from StampAgentId.
 	StampActor bool
-	// StampRunId stamps args["planId"] when the turnContext carries
-	// one (set on post-approval execution turns -- see turnContext
-	// docs). Used by worker tools so the v1:worker:invocation row
-	// they persist downstream is filed under the right Plan id;
-	// without it the row lands with planId="" and the planner's
-	// invocationsForPlan filter misses it, surfacing as
-	// Plan-stamped-failed even when the worker tool succeeded.
+	// StampRunId stamps the persisted work run identity on tools whose
+	// contract declares runId. The same field is restored by tool defaults.
 	StampRunId bool
 	// StampThreadVisibility stamps args["visibility"] from the
 	// turnContext's ThreadVisibility, and args["forUserId"] from the
@@ -1121,7 +1145,7 @@ type agentContextStamp struct {
 	// The agent knows the plan id authoritatively (post-approval
 	// execution turns); the LLM never does, so we stamp it server-side
 	// in the publish path. Distinct from the flat StampRunId
-	// (args["planId"]) the worker tools use -- canvasPublish has no
+	// (args["runId"]) the worker tools use -- canvasPublish has no
 	// top-level planId in its schema, the provenance rides inside the
 	// card data.
 	StampDataPlanId bool
@@ -1228,7 +1252,7 @@ func injectAgentContext(toolName string, args map[string]any, ctx turnContext) {
 		// Always overwrite -- the LLM may have hallucinated a plan
 		// id (or left it empty); the runtime turn-context value is
 		// the source of truth.
-		args["planId"] = ctx.RunId
+		args["runId"] = ctx.RunId
 	}
 	if stamp.StampThreadVisibility && ctx.ThreadVisibility != "" {
 		// Phase 9 visibility inheritance: stamp the dispatching
@@ -1244,7 +1268,7 @@ func injectAgentContext(toolName string, args map[string]any, ctx turnContext) {
 	if stamp.StampProducedByRunId && ctx.RunId != "" {
 		// Always overwrite -- the runtime turn-context plan id is the source
 		// of truth for provenance; the LLM never knows its own plan id.
-		args["producedByPlanId"] = ctx.RunId
+		args["producedByRunId"] = ctx.RunId
 	}
 	if stamp.StampDataPlanId && ctx.RunId != "" {
 		// Stamp producedByPlanId onto the nested card `data` object so

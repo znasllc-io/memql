@@ -97,6 +97,7 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 		return authoringBundle{AutomationName: headline, Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: headline, Source: source}}}, nil
 	}
 	nativeFile := *dec.RequiresFile
+	investigate := nativeFile && dec.RequiresResearch
 	fileName, fileFormat := "", purecompose.Format("")
 	if nativeFile {
 		fileName = strings.TrimSpace(dec.FileName)
@@ -144,7 +145,7 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 	// goal. A section written as an automation of its own imports it there,
 	// and a decomposition the catalog serves whole calls none.
 	var b strings.Builder
-	templateTurns := !fanout && !nativeFile
+	templateTurns := !fanout && (!nativeFile || investigate)
 	var sectionAutos []memql.SandboxConstruct
 	fmt.Fprintf(&b, "\n@template\nautomation %s {\n", headline)
 	if len(inputNames) > 0 {
@@ -158,7 +159,13 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 		fmt.Fprintf(&b, "  %s\n", x.goalInputStatement)
 	}
 	if !fanout {
-		fmt.Fprintf(&b, "  reason := %s\n", delivery(goal, ""))
+		if investigate {
+			instruction := x.join(langparser.QuoteString(goal+"\nGather the evidence required for this deliverable using authorized capabilities. Preserve source references, uncertainties and the complete draft. Do not save the final file: the next step renders it from your result."+inputHeading), x.goalInput)
+			fmt.Fprintf(&b, "  research := builtin runAgentTurn(agentId: %s, prompt: %s)\n", langparser.QuoteString(agentId), instruction)
+			fmt.Fprintf(&b, "  reason := %s\n", delivery(goal, "toString(research)"))
+		} else {
+			fmt.Fprintf(&b, "  reason := %s\n", delivery(goal, ""))
+		}
 	} else {
 		// The sections run one after another, in triage's order, each bound
 		// to its own name: a later section and the assembly read earlier

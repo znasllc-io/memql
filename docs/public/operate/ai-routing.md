@@ -273,10 +273,12 @@ every decision record, and the cost ceiling still governs it.
 
 ---
 
-## A person's choice for one conversation (Ask)
+## Explicit API choices and automatic Ask routing
 
-The Ask route picker chooses, for one conversation, a **source** and a **level**.
-They arrive on the turn (`AiChatMsg.provider` and `AiChatMsg.level`) and apply to
+Ask uses the cluster's routing policies automatically for each step. It has no
+conversation-wide source picker. API callers may still supply an explicit
+**source** and **level** on a turn (`AiChatMsg.provider` and `AiChatMsg.level`).
+Those explicit choices apply to
 **every model call of the turn's goal on every node** -- the planner's triage and
 compile as much as the agent's reply.
 
@@ -305,7 +307,7 @@ step and keep the level they declare, while still going where the source says.
 Embeddings, vision and audio are never re-routed by a choice.
 
 A person's override for **one step** (re-run or branch) is more specific than their
-choice for the whole conversation, so its model and its level each win over it.
+explicit API choice for the goal, so its model and level each win over it.
 
 **Where it lives.** The choice is written onto `v1:work:goal.routing` and
 `v1:work:run.routing` (`{source, level, by}`, `by` stamped by the server) -- never

@@ -1,5 +1,3 @@
-//go:build agent || planner
-
 // Package worker (agent-side) bridges the agent's tool loop to the
 // worker subsystem. It owns:
 //
@@ -21,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/znasllc-io/memql/core/common"
 	"log/slog"
 	"maps"
 	"sort"
@@ -736,19 +735,19 @@ func (d *Dispatcher) preDispatchCheck(ctx context.Context, req Request) gateResu
 				requiredCapability: required.Capability,
 				requiredScope:      required.Scope,
 				errorCode:          "denied_no_per_task_approval",
-				errorMessage:       "per-task approval required: call requestComputerUseScope first and end your turn; the user clicks Allow on the canvas card and the planner will re-dispatch this turn",
+				errorMessage:       "Computer access needs approval. Call requestComputerUseScope; the work will resume after the person decides in Nexus.",
 				outcome:            "denied_by_policy",
 			}
 		}
 	}
 
+	if d.store == nil {
+		return gateResult{deny: true, errorCode: "authorization_lookup_failed", errorMessage: "Computer access authorization is unavailable.", outcome: "failure"}
+	}
 	if d.store != nil {
 		prefs, err := d.store.UserPreferences(ctx, req.OwnerUserId)
 		if err != nil {
-			d.logger.Warn("user preferences lookup failed; the kill switch reads as not engaged",
-				"owner_user_id", req.OwnerUserId,
-				"error", err,
-			)
+			return gateResult{deny: true, errorCode: "authorization_lookup_failed", errorMessage: "Could not verify whether computer use is enabled.", outcome: "failure"}
 		} else if prefs.KillSwitchEngaged {
 			return gateResult{
 				deny:               true,
@@ -778,21 +777,22 @@ func (d *Dispatcher) preDispatchCheck(ctx context.Context, req Request) gateResu
 			standingScope = auth.ComputerUseScope
 		}
 
-		// THE PER-WORK-UNIT SCOPE OVERRIDE IS GONE (memql#5053).
-		//
-		// A Plan could carry its own `computerUseScope`, and this branch let
-		// it NARROW the agent's standing scope for that Plan's calls (a wider
-		// one was refused outright). v1:work:run carries no such field, so
-		// there is nothing left to read, and the standing scope on
-		// v1:agents:agentAuthorization is now the only scope.
-		//
-		// That is a real reduction in what policy can EXPRESS: a caller can no
-		// longer say "this particular piece of work gets less than the agent
-		// normally has". It is NOT a widening of what any call is ALLOWED --
-		// the override could only ever narrow, and the standing scope was
-		// always the ceiling. Restoring it means a scope field on the run and
-		// a decision about who may set it, which is design rather than a port.
 		effectiveScope := standingScope
+		// A goal's id is not a grant. Owned work must present a current,
+		// matching decision read from storage on whichever replica dispatches.
+		if rc, ok := common.RunFromContext(ctx); ok && rc.GoalId != "" {
+			grants, has := d.store.(interface {
+				WorkComputerScope(context.Context, Request, time.Time) (string, error)
+			})
+			if !has {
+				return gateResult{deny: true, errorCode: "denied_no_per_task_approval", errorMessage: "Computer access needs approval in Nexus.", outcome: "denied_by_policy"}
+			}
+			scope, err := grants.WorkComputerScope(ctx, req, d.clock())
+			if err != nil || scope == "" {
+				return gateResult{deny: true, errorCode: "denied_no_per_task_approval", errorMessage: "Call requestComputerUseScope to request scoped computer access for this work.", outcome: "denied_by_policy"}
+			}
+			effectiveScope = scope
+		}
 
 		if !scopeAllows(effectiveScope, required.Scope) {
 			return gateResult{

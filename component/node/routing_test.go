@@ -2,6 +2,16 @@ package node
 
 import "testing"
 
+func TestConversationSourceUpdatesReachTheMemoryIndexer(t *testing.T) {
+	d := evaluateRouting(defaultRoutingRules(), "graph.node.updated.v1:os:askConversation")
+	if !d.Forward || d.TargetType != "agent" || d.Broadcast {
+		t.Fatalf("private memory source must reach agent replicas: %+v", d)
+	}
+	if d := evaluateRouting(defaultRoutingRules(), "graph.node.updated.v1:os:privateOtherConcept"); d.Forward {
+		t.Fatalf("unrelated private OS data must remain local: %+v", d)
+	}
+}
+
 func TestAccessRequestsReachReviewersOnOtherNodes(t *testing.T) {
 	for _, action := range []string{"created", "updated"} {
 		d := evaluateRouting(defaultRoutingRules(), "graph.node."+action+".v1:identity:accessRequest")

@@ -4,6 +4,29 @@
 @args(profile="object")
 builtin workCapabilities { search string! }
 
+/// Search the signed-in person's conversations across sessions. Returns exact
+/// speaker-attributed excerpts and source ids. No embedding coverage is assumed.
+@description("Search previous conversations and messages for personal facts, names, preferences or prior work. Exact phrase search with source conversation/turn ids. Follow cursor for older pages; try short alternate phrases on no matches.")
+@executor("workSearchConversations")
+@args(profile="object")
+builtin workSearchConversations {
+ search string! @description("Short exact word or phrase, case insensitive.")
+ cursor string @description("Opaque cursor from the previous search page, with the same search.")
+}
+
+/// Recall source evidence by meaning, across this person's conversations.
+/// Results preserve their original messages, dates and source ids. A match is
+/// relevant evidence, never permission or proof that an old assertion is true.
+@description("Recall earlier conversations, preferences and prior work by meaning. Uses indexed source evidence, revalidates originals and falls back to exact search when indexing is incomplete. Use a short natural-language question.")
+@executor("workRecallMemory")
+@args(profile="object")
+builtin workRecallMemory { search string! }
+
+/// Recall personal source evidence by meaning without rediscovering tools.
+@handler(type="query", query="query workRecallMemory(search: args.search)")
+@requiresAgentRole("assistant", "specialist")
+tool recallMemory { search string! @description("A short question about earlier conversations, preferences or prior work. Results are historical source evidence, not current-world facts.") }
+
 /// Execute a discovered capability under the original caller's authority.
 @description("Execute a discovered capability under the current caller authority using its exact arguments.")
 @executor("workExecute")
@@ -17,7 +40,7 @@ builtin workExecute {
 /// the relevant app or concept; narrow the search using the returned names.
 @handler(type="query", query="query workCapabilities(search: args.search)")
 @requiresAgentRole("assistant", "specialist")
-tool discoverCapabilities { search string! @description("Short words describing the app, data or operation, or an exact capability name.") }
+tool discoverCapabilities { search string! @description("Empty string lists accessible concepts and their reads. Otherwise short words describing the app, data or operation, or an exact capability name.") }
 
 /// Perform a discovered operation, rechecking caller and row permissions.
 @handler(type="query", query="query workExecute(name: args.name, arguments: args.arguments)")

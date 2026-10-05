@@ -227,8 +227,10 @@ func insertNode(t *testing.T, ctx context.Context, db *sql.DB, id string, create
 
 func insertVector(t *testing.T, ctx context.Context, db *sql.DB, id string, vec []float32) {
 	t.Helper()
+	table, tableErr := memql.EnsureEmbeddingVectorTable(ctx, db, "embedding3Small", embedDimensions)
+	require.NoError(t, tableErr)
 	_, err := db.ExecContext(ctx,
-		`INSERT INTO node_vectors (id, concept, vector_field, embedding, created_at, updated_at)
+		`INSERT INTO `+table+` (id, concept, vector_field, embedding, created_at, updated_at)
 		 VALUES ($1, $2, 'profile', $3::vector, NOW(), NOW())
 		 ON CONFLICT (id, vector_field) DO UPDATE SET embedding = EXCLUDED.embedding`,
 		id, probeConcept, vectorLiteral(vec))
@@ -247,6 +249,8 @@ func deleteProbeRows(t *testing.T, ctx context.Context, db *sql.DB) {
 	in := "(" + strings.Join(placeholders, ",") + ")"
 	_, err := db.ExecContext(ctx, `DELETE FROM "MemoryNodes" WHERE id IN `+in, params...)
 	require.NoError(t, err)
-	_, err = db.ExecContext(ctx, `DELETE FROM node_vectors WHERE id IN `+in, params...)
+	table, tableErr := memql.EnsureEmbeddingVectorTable(ctx, db, "embedding3Small", embedDimensions)
+	require.NoError(t, tableErr)
+	_, err = db.ExecContext(ctx, `DELETE FROM `+table+` WHERE id IN `+in, params...)
 	require.NoError(t, err)
 }

@@ -29,6 +29,9 @@ import (
 
 func renderPDF(d Draft, p Provenance) ([]byte, error) {
 	pdf := fpdf.New("P", "mm", "A4", "")
+	pdf.SetCreationDate(p.CreatedAt)
+	pdf.SetModificationDate(p.CreatedAt)
+	pdf.SetCatalogSort(true)
 	pdf.SetMargins(20, 20, 20)
 	pdf.SetAutoPageBreak(true, 20)
 
@@ -43,7 +46,8 @@ func renderPDF(d Draft, p Provenance) ([]byte, error) {
 	pdf.SetXmpMetadata(xmpPacket(d, p))
 
 	pdf.AddPage()
-	if title := strings.TrimSpace(firstNonEmpty(d.Title, p.Title)); title != "" {
+	// A filename is metadata, not an instruction to add a visible heading.
+	if title := strings.TrimSpace(d.Title); title != "" {
 		pdf.SetFont("Helvetica", "B", 20)
 		pdf.MultiCell(0, 9, tr(title), "", "L", false)
 		pdf.Ln(4)

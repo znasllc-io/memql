@@ -244,11 +244,34 @@ func (s *modelSeam) deadlineContext(ctx context.Context, rc common.RunContext) (
 	return ctx, func() {}, nil
 }
 
+// ContextWithWorkCallDeadline refreshes the current workload estimate before
+// each provider attempt; the containing tool loop keeps the declared ceiling.
+func (e *MemQLEngine) ContextWithWorkCallDeadline(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	rc, ok := common.RunFromContext(ctx)
+	if !ok || e == nil || e.modelSeam == nil {
+		return ctx, func() {}, nil
+	}
+	return e.modelSeam.deadlineContext(ctx, rc)
+}
+
 // ContextWithRunDeadline covers agent tool loops as well as single prompt
 // invocations. It is installed on the executing node using persisted state.
 func (e *MemQLEngine) ContextWithRunDeadline(ctx context.Context) (context.Context, context.CancelFunc, error) {
 	rc, ok := common.RunFromContext(ctx)
 	if !ok || e == nil || e.modelSeam == nil {
+		return ctx, func() {}, nil
+	}
+	if guard, ok := e.modelSeam.ceilings.(interface {
+		DeclaredDeadline(context.Context, common.RunContext) (time.Time, error)
+	}); ok {
+		deadline, err := guard.DeclaredDeadline(ctx, rc)
+		if err != nil {
+			return ctx, func() {}, err
+		}
+		if !deadline.IsZero() {
+			bounded, cancel := context.WithDeadline(ctx, deadline)
+			return bounded, cancel, nil
+		}
 		return ctx, func() {}, nil
 	}
 	return e.modelSeam.deadlineContext(ctx, rc)

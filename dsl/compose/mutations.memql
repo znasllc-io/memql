@@ -107,6 +107,7 @@ mutation composition updateCompositionState {
     status              string
     goalId              string
     runId               string
+    sourceFileId        string
     outputFileId        string
     modelsUsed          []object
     provenanceEmbedded  bool
@@ -115,7 +116,7 @@ mutation composition updateCompositionState {
     failureReason       string
   }
   update {
-    accept { status, goalId, runId, outputFileId, modelsUsed, provenanceEmbedded, provenanceNote, sha256, failureReason }
+    accept { status, goalId, runId, sourceFileId, outputFileId, modelsUsed, provenanceEmbedded, provenanceNote, sha256, failureReason }
     stamp {
       id: args.compositionId
       ownerUserId: actor.userId
@@ -345,4 +346,21 @@ mutation recipe restoreComposeRecipe {
       archived: false
     }
   }
+}
+
+/// Save the completed render recipe before writing output bytes. Owner scoping
+/// with actor.userId cannot prevent a caller from forging the source recipe
+/// that recovery uses as evidence of what actually produced their output; only
+/// trusted materialization code may replace this captured execution request.
+@actor
+@serverOnly
+mutation compositionInput saveCompositionRecipe {
+ args {
+ compositionId string!
+ request object!
+ }
+ update {
+  accept { request }
+  stamp { id: args.compositionId }
+ }
 }

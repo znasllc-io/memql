@@ -1,5 +1,19 @@
 use identity.concepts.{ user }
 
+/// Read this person's conversation with current progress and completed results
+/// projected from its durable work runs. Reconnects never execute work again.
+@sdk
+@executor("askConversationSnapshot")
+@args(profile="object")
+builtin askConversationSnapshot { conversationId string! }
+
+/// Open this owner's existing work in its Ask conversation, creating a private
+/// conversation for Nexus-originated work without starting another run.
+@sdk
+@executor("askWorkConversation")
+@args(profile="object")
+builtin askWorkConversation { runId string! }
+
 /// A private conversation with MemQL. The transcript is written by the agent
 /// service; ownership is always taken from the authenticated caller.
 // @no-displayCard: contains a private transcript object; Ask renders named message rows and a separate conversation list, not a generic concept card.
@@ -39,6 +53,16 @@ query askConversation myAskConversations {
 /// The same owner-scoped history is available to the person and their assistant.
 @actor
 query askConversation askRecentTimingHistory {
+  filter row => row.ownerUserId == actor.userId
+  sort "row.createdAt", "desc"
+  paginate 20
+  shape askConversationDetail
+}
+
+/// Private conversation evidence for the work harness. Page before folding
+/// transcripts; the owner's predicate applies on every replica and page.
+@actor
+query askConversation askMemoryConversations {
   filter row => row.ownerUserId == actor.userId
   sort "row.createdAt", "desc"
   paginate 20
@@ -85,9 +109,13 @@ mutation askConversation saveAskConversation {
     id string!
     title string! @maxLength(120)
     transcript object!
+    versionTime datetime!
   }
   insert {
     accept { id, title, transcript }
-    stamp { ownerUserId: actor.userId }
+    stamp {
+      ownerUserId: actor.userId
+      createdAt: args.versionTime
+    }
   }
 }

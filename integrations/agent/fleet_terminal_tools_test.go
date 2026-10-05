@@ -73,11 +73,16 @@ func TestFleetTerminalToolCallsExecuteBeforeCompletion(t *testing.T) {
 	}
 	executor := &fileReceiptExecutor{}
 	r := testReplier()
+	saved := &workPromptEngine{}
+	r.engine = saved
 	r.stamper = newToolRecorder(executor, r.logger)
 	sink := &captureSink{}
 	result, err := r.runStreamingToolLoop(ctx, selection.Client.(common.ChatStreamWithToolsProvider), []common.ChatMessage{{Role: "user", Content: "Save the heroes file"}}, []common.ToolDefinition{{Name: "composeFile"}}, sink, time.Now(), "terminal-tools", turnContext{IsWorkExecution: true, OwnerUserId: owner})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(saved.savedContinuation) < 2 {
+		t.Fatal("completed file receipt was not checkpointed")
 	}
 	if executor.calls != 1 || fleet.calls != 2 || len(result.ToolCalls) != 1 || result.FinalText != "Saved the file" || sink.toolResults != 1 {
 		t.Fatalf("terminal file call was lost: executions=%d fleetCalls=%d result=%+v sink=%+v", executor.calls, fleet.calls, result, sink)

@@ -1889,6 +1889,19 @@ session. History, draft, selected conversation, live voice and Activity stay
 consistent across both surfaces. `SdkAskTransport` calls the server's
 permission-scoped MemQL agent; test transports live under `test/ask`.
 
+Quick replies stay inline. Longer requests return a durable queue receipt, free
+the composer, and continue as independent Nexus runs. `AskWorkQueue` shows up to
+three cards above the composer, then a single count linked to the conversation's
+runs. A card opens its run; no new task is submitted by navigation or polling.
+`askConversationSnapshot` projects progress from persisted runs on any replica.
+`conversationFeed` keeps the acceptance in place and places a completed result
+at its completion time with the original request's title. Polling must preserve
+a newer local stream and reject stale reads after conversation selection changes.
+Ask always uses automatic per-step routing; no preference is kept per conversation.
+Human questions and scoped computer approvals use the existing Nexus inbox and
+footer actions. Journal polling is bounded to a visible active run, since model
+calls and observations are deliberately not broadcast collections.
+
 The microphone dictates into the editable composer. Press-and-hold ends an
 utterance on release; a short tap keeps listening until the next tap. Review
 before sending is the default, with immediate submission and hold-Space

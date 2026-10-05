@@ -1,3 +1,5 @@
+import { isWorkerOnline } from "../online";
+import { EmbeddingBinding } from "../models/EmbeddingBinding";
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
 import { Cpu } from "lucide-react";
@@ -5,7 +7,7 @@ import { useMemo, useState, type FormEvent } from "react";
 
 import { useSession } from "../../../chrome/access";
 import { Measure } from "../../../kit/MeasureView";
-import { Button, EmptyState, Notice, Subhead } from "../../../kit";
+import { Button, EmptyState, Notice, Subhead, useNow } from "../../../kit";
 import { formatBytes, formatMoment } from "../../../kit/format";
 import { formatContext, formatParams } from "../models/ordering";
 import { machineName, type MachineRow } from "../rows";
@@ -59,6 +61,7 @@ import { useModelPulls } from "./useModelPulls";
 
 export function ModelsGroup({ machine, standalone = false }: { machine: MachineRow; standalone?: boolean }) {
   const { access } = useSession();
+  const now = useNow();
   const { pulls, live, loading, feedError, start, starting } = useModelPulls(machine.id);
   const inference = useMachineInference(machine.id);
 
@@ -111,6 +114,7 @@ export function ModelsGroup({ machine, standalone = false }: { machine: MachineR
               key={model.modelId}
               model={model}
               measurement={inference.measurements.get(model.modelId) ?? null}
+              online={isWorkerOnline(machine, now)}
               isOwner={isOwner}
               probing={inference.probing === model.modelId}
               onProbe={inference.probe}
@@ -206,12 +210,14 @@ function RuntimeLine({ runtimes, modelCount }: { runtimes: string[]; modelCount:
  */
 function ModelRow({
   model,
+  online,
   measurement,
   isOwner,
   probing,
   onProbe,
 }: {
   model: MachineModel;
+  online: boolean;
   measurement: Measurement | null;
   isOwner: boolean;
   probing: boolean;
@@ -232,6 +238,7 @@ function ModelRow({
     <div><RecordRow name={model.modelId} secondary={facts.join(" · ") || "Size not reported"}
       open={open} onOpen={() => setOpen(value => !value)}>{can.join(", ") || "Capabilities not reported"}</RecordRow>
       {open ? <div className="fleet-record-detail">
+      {model.embeddings ? <EmbeddingBinding model={model.modelId} online={online} /> : null}
       <span className="os-fleet-machinemodel-readings">
         <MeasuredLine measurement={measurement} />
       </span>

@@ -1,6 +1,7 @@
 package embedding
 
 import (
+	"context"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -29,10 +30,10 @@ func TestCacheKeySeparatesBindingsOfDifferentWidth(t *testing.T) {
 	const text = "the same sentence, embedded twice"
 
 	memql.SetActiveEmbedderBinding(memql.EmbedderBinding{ProviderRef: provider, Dimensions: 4096})
-	wide := cacheKey(text, provider, activeBindingID())
+	wide := cacheKey(text, provider, activeBindingID(context.Background()))
 
 	memql.SetActiveEmbedderBinding(memql.EmbedderBinding{ProviderRef: provider, Dimensions: 1024})
-	narrow := cacheKey(text, provider, activeBindingID())
+	narrow := cacheKey(text, provider, activeBindingID(context.Background()))
 
 	if wide == narrow {
 		t.Fatalf("one provider at two widths produced one cache key (%s).\n"+
@@ -49,8 +50,8 @@ func TestCacheKeyIsStableForOneBinding(t *testing.T) {
 	t.Cleanup(memql.ClearActiveEmbedderBinding)
 
 	memql.SetActiveEmbedderBinding(memql.EmbedderBinding{ProviderRef: "embedding3Small", Dimensions: 1536})
-	first := cacheKey("some text", "embedding3Small", activeBindingID())
-	second := cacheKey("some text", "embedding3Small", activeBindingID())
+	first := cacheKey("some text", "embedding3Small", activeBindingID(context.Background()))
+	second := cacheKey("some text", "embedding3Small", activeBindingID(context.Background()))
 
 	if first != second {
 		t.Fatalf("the same text under the same binding produced two keys (%s, %s); nothing would ever hit the cache", first, second)
@@ -62,7 +63,7 @@ func TestCacheKeyIsStableForOneBinding(t *testing.T) {
 // is no cluster binding for the entry to belong to.
 func TestUnboundClusterKeysWithoutABinding(t *testing.T) {
 	memql.ClearActiveEmbedderBinding()
-	if got := activeBindingID(); got != "" {
+	if got := activeBindingID(context.Background()); got != "" {
 		t.Errorf("an unbound cluster reported binding id %q; it must be empty", got)
 	}
 }

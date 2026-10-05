@@ -107,3 +107,14 @@ type RetrievedChunk struct {
 	TextPreview string
 	Citation    string
 }
+
+// WorkRuntime is the complete durable execution contract. Production adapters
+// must implement it even though lightweight replier fixtures need only the
+// methods exercised by their test. The app asserts this at compile time.
+type WorkRuntime interface {
+	PrepareWorkTool(context.Context) error
+	ContextWithWorkCallDeadline(context.Context) (context.Context, context.CancelFunc, error)
+	SaveWorkContinuation(context.Context, []common.ChatMessage) error
+	RestoreWorkContinuation(context.Context, []common.ChatMessage) ([]common.ChatMessage, error)
+	CompactWorkContext(context.Context, []common.ChatMessage, []common.ToolDefinition, int) ([]common.ChatMessage, error)
+}

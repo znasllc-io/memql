@@ -95,11 +95,12 @@ type runBudget struct {
 	seeded bool
 	// ceilings are the goal's, with the two this seam cannot evaluate
 	// cleared. unbounded is true when nothing is left to check.
-	ceilings  work.Ceilings
-	unbounded bool
-	spent     work.Spent
-	startedAt time.Time
-	touched   time.Time
+	ceilings    work.Ceilings
+	unbounded   bool
+	spent       work.Spent
+	startedAt   time.Time
+	humanWaitMs int64
+	touched     time.Time
 }
 
 // NewRunCeilings builds the guard over an engine. Returns nil for a nil
@@ -141,7 +142,7 @@ func (c *RunCeilings) Admit(ctx context.Context, rc common.RunContext, estimated
 	}
 	spent := b.spent
 	if !b.startedAt.IsZero() {
-		spent.WallClockMs = c.clock().Sub(b.startedAt).Milliseconds()
+		spent.WallClockMs = max(int64(0), c.clock().Sub(b.startedAt).Milliseconds()-b.humanWaitMs)
 	}
 	breach := work.CheckCeilings(b.ceilings, spent, estimatedTokens)
 	if breach == nil {
@@ -212,7 +213,7 @@ func (c *RunCeilings) Spent(_ context.Context, rc common.RunContext) memqlengine
 		ModelCalls:         b.spent.ModelCalls,
 	}
 	if !b.startedAt.IsZero() {
-		out.WallClockMs = c.clock().Sub(b.startedAt).Milliseconds()
+		out.WallClockMs = max(int64(0), c.clock().Sub(b.startedAt).Milliseconds()-b.humanWaitMs)
 	}
 	return out
 }
@@ -242,6 +243,7 @@ func (c *RunCeilings) seed(ctx context.Context, rc common.RunContext, b *runBudg
 		return fmt.Errorf("run %s is not readable as %s", rc.RunId, owner)
 	}
 	b.startedAt, _ = time.Parse(time.RFC3339Nano, rowString(run, "startedAt"))
+	b.humanWaitMs = int64(rowInt(run, "humanWaitMs"))
 
 	declared, err := c.goalCeilings(ctx, rc)
 	if err != nil {
@@ -292,7 +294,7 @@ func (c *RunCeilings) goalCeilings(ctx context.Context, rc common.RunContext) (w
 	if owner == "" {
 		return work.Ceilings{}, fmt.Errorf("run %s names goal %s and carries no owner, so its ceilings cannot be read as anybody", rc.RunId, rc.GoalId)
 	}
-	goal, err := c.store.goalForOwner(ownerActor(ctx, owner), rc.GoalId)
+	goal, err := c.store.goalForOwner(ownerActor(memqlengine.ContextWithFreshRead(ctx), owner), rc.GoalId)
 	if err != nil {
 		return work.Ceilings{}, fmt.Errorf("reading goal %s: %w", rc.GoalId, err)
 	}
@@ -303,7 +305,11 @@ func (c *RunCeilings) goalCeilings(ctx context.Context, rc common.RunContext) (w
 	if err != nil {
 		return work.Ceilings{}, fmt.Errorf("goal %s ceilings: %w", rc.GoalId, err)
 	}
-	return ceilings, nil
+	run, err := c.store.runForOwner(ownerActor(memqlengine.ContextWithFreshRead(ctx), owner), rc.RunId)
+	if err != nil || run == nil {
+		return work.Ceilings{}, fmt.Errorf("run workload is unavailable: %v", err)
+	}
+	return work.EffectiveWorkloadCeilings(ceilings, rowString(rowMap(run, "classification"), "workload")), nil
 }
 
 // addSpent sums two spends, bucket by bucket.
@@ -426,5 +432,41 @@ func (c *RunCeilings) Deadline(ctx context.Context, rc common.RunContext) (time.
 	}
 	b.ceilings = enforceableHere(declared)
 	b.unbounded = b.ceilings == work.Ceilings{}
-	return work.RunDeadline(b.startedAt, declared.WallClockMs)
+	// Re-entry may land on this same replica; a cached budget must see the
+	// committed wait credit without resetting any model or token counters.
+	run, err := c.store.runForOwner(ownerActor(ctx, rc.OwnerUserId), rc.RunId)
+	if err != nil || run == nil {
+		return time.Time{}, fmt.Errorf("run wait budget is unavailable: %v", err)
+	}
+	b.humanWaitMs = int64(rowInt(run, "humanWaitMs"))
+	return work.RunDeadline(b.startedAt.Add(time.Duration(b.humanWaitMs)*time.Millisecond), declared.WallClockMs)
+}
+
+// DeclaredDeadline bounds the entire tool loop by the person's hard limit.
+// Each model call separately gets Deadline's current workload estimate. An
+// execution that discovers missing evidence can grow from quick to lookup
+// without inheriting an obsolete quick-response parent deadline.
+func (c *RunCeilings) DeclaredDeadline(ctx context.Context, rc common.RunContext) (time.Time, error) {
+	if rc.GoalId == "" {
+		return time.Time{}, nil
+	}
+	ctx = ownerActor(memqlengine.ContextWithFreshRead(ctx), rc.OwnerUserId)
+	run, err := c.store.runForOwner(ctx, rc.RunId)
+	if err != nil || run == nil {
+		return time.Time{}, fmt.Errorf("run deadline unavailable: %v", err)
+	}
+	goal, err := c.store.goalForOwner(ctx, rc.GoalId)
+	if err != nil || goal == nil {
+		return time.Time{}, fmt.Errorf("goal deadline unavailable: %v", err)
+	}
+	ceilings, err := ceilingsOf(goal)
+	if err != nil {
+		return time.Time{}, err
+	}
+	start, ok := rowTime(run, "startedAt")
+	if !ok {
+		return time.Time{}, fmt.Errorf("run start time unavailable")
+	}
+	credit := max(int64(0), min(int64(rowInt(run, "humanWaitMs")), max(int64(0), c.clock().Sub(start).Milliseconds())))
+	return work.RunDeadline(start.Add(time.Duration(credit)*time.Millisecond), ceilings.WallClockMs)
 }

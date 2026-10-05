@@ -883,6 +883,15 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 		stepExecCtx = e.engine.ObserveWorkCalls(callContext, cancel)
 	}
 	result, err := e.stepRegistry.Execute(stepExecCtx, step, stepCtx)
+	if isHumanWait(err) {
+		// The question is already persisted. Suspension is neither completion
+		// nor failure and must not trigger repair automations.
+		if result == nil {
+			result = &StepResult{StepId: step.ID}
+		}
+		result.Status, result.Error, result.CompletedAt = "waiting", "", time.Time{}
+		return result, err
+	}
 	if callContext != nil && context.Cause(callContext) != nil {
 		var stopped *memql.WorkCancelledError
 		if errors.As(context.Cause(callContext), &stopped) {
