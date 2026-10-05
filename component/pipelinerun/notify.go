@@ -135,7 +135,12 @@ func (dr *runDriver) runNotify(ctx context.Context, t *stepTrack) {
 	if !dr.stillHolds(ctx) {
 		return
 	}
-	t.handle = dr.work().Step(ctx, step.Key)
+	var journalErr error
+	t.handle, journalErr = dr.work().Step(ctx, step.Key)
+	if journalErr != nil {
+		dr.journalUnavailable(step.Key, journalErr)
+		return
+	}
 	running := t.snapshot()
 	running.Status = StepRunning
 	t.set(running)

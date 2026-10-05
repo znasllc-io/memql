@@ -231,7 +231,7 @@ func TestQueueStepsWritesEveryDeclaredStepPendingAtOpen(t *testing.T) {
 	}
 
 	before := len(engine.calls)
-	run.Step(context.Background(), "tests/go-tests#1")
+	mustJournalStep(t, run, context.Background(), "tests/go-tests#1")
 	intent := onlyCallNamed(t, engine.calls[before:], "createWorkStep")
 	if intent["stepId"] != parsedArgs(t, queued[1])["stepId"] {
 		t.Fatalf("the running intent wrote step %v, the queued row is %v -- one step became two rows",
@@ -262,7 +262,7 @@ func TestAStepWithNoDeclaredTypeIsStillAFunction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	run.Step(context.Background(), "extract")
+	mustJournalStep(t, run, context.Background(), "extract")
 	args := onlyCallNamed(t, engine.calls, "createWorkStep")
 	if args["stepType"] != "function" {
 		t.Fatalf("stepType = %v, want function", args["stepType"])
@@ -286,7 +286,7 @@ func TestFinishWritesTheWholeReceipt(t *testing.T) {
 		t.Fatalf("Begin: %v", err)
 	}
 	before := len(engine.calls)
-	step := run.Step(context.Background(), "tests/go-tests#1")
+	step := mustJournalStep(t, run, context.Background(), "tests/go-tests#1")
 	intent := onlyCallNamed(t, engine.calls[before:], "createWorkStep")
 	clock.advance(90 * time.Second)
 
@@ -331,7 +331,7 @@ func TestFinishWritesTheWholeReceipt(t *testing.T) {
 	// none of the optional fields -- every argument here is a read-merge
 	// write, and an empty one is a value -- and a duration the runner did not
 	// report is measured from the running write.
-	other := run.Step(context.Background(), "tests/go-tests#2")
+	other := mustJournalStep(t, run, context.Background(), "tests/go-tests#2")
 	clock.advance(1500 * time.Millisecond)
 	before = len(engine.calls)
 	other.Finish(context.Background(), Receipt{Status: "done"})
@@ -355,7 +355,7 @@ func TestFinishWritesOnlyTheStepConceptsTerminalStatuses(t *testing.T) {
 		t.Run(status, func(t *testing.T) {
 			engine := &countingEngine{}
 			run, _ := New(engine, nil, "agent-1").Begin(context.Background(), pipelineWork())
-			step := run.Step(context.Background(), "checks/build-vet")
+			step := mustJournalStep(t, run, context.Background(), "checks/build-vet")
 			before := len(engine.calls)
 			step.Finish(context.Background(), Receipt{Status: status})
 			if got := onlyCallNamed(t, engine.calls[before:], "updateWorkStep")["status"]; got != status {
@@ -367,7 +367,7 @@ func TestFinishWritesOnlyTheStepConceptsTerminalStatuses(t *testing.T) {
 		t.Run("refused "+status, func(t *testing.T) {
 			engine := &countingEngine{}
 			run, _ := New(engine, nil, "agent-1").Begin(context.Background(), pipelineWork())
-			step := run.Step(context.Background(), "checks/build-vet")
+			step := mustJournalStep(t, run, context.Background(), "checks/build-vet")
 			before := len(engine.calls)
 			step.Finish(context.Background(), Receipt{Status: status, Code: "x", Message: "y"})
 			if written := engine.calls[before:]; len(written) != 0 {
@@ -388,7 +388,7 @@ func TestCancelledClosesTheStepAndTheRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	step := run.Step(context.Background(), "checks/build-vet")
+	step := mustJournalStep(t, run, context.Background(), "checks/build-vet")
 	clock.advance(time.Minute)
 
 	before := len(engine.calls)
@@ -489,7 +489,7 @@ func TestReopenWritesNothingAndAddressesTheRowsBeginWrote(t *testing.T) {
 				t.Fatalf("reopened (%s, %s), opened (%s, %s)", reopened.GoalID(), reopened.RunID(), opened.GoalID(), opened.RunID())
 			}
 
-			reopened.Step(context.Background(), "tests/go-tests#2")
+			mustJournalStep(t, reopened, context.Background(), "tests/go-tests#2")
 			intent := onlyCallNamed(t, resumer.calls, "createWorkStep")
 			if intent["stepId"] != queued["stepId"] {
 				t.Fatalf("the resumed step wrote %v, the queued row is %v", intent["stepId"], queued["stepId"])
@@ -525,4 +525,13 @@ func TestAReopenedRunWithNoStartWritesNoWallClock(t *testing.T) {
 	if _, present := onlyCallNamed(t, engine.calls, "updateWorkRun")["spent"]; present {
 		t.Fatalf("a run with no start wrote a wall clock: %v", engine.calls)
 	}
+}
+
+func mustJournalStep(t *testing.T, run *Run, ctx context.Context, key string) *Step {
+	t.Helper()
+	step, err := run.Step(ctx, key)
+	if err != nil {
+		t.Fatalf("step intent: %v", err)
+	}
+	return step
 }

@@ -240,8 +240,9 @@ type runDriver struct {
 	token        string
 	installation int64
 
-	workRun atomic.Pointer[workjournal.Run]
-	facts   requestFacts
+	workRun       atomic.Pointer[workjournal.Run]
+	journalFailed atomic.Bool
+	facts         requestFacts
 
 	stages []stageTracks
 	tracks []*stepTrack
@@ -316,6 +317,9 @@ func (dr *runDriver) drive(ctx context.Context) driveOutcome {
 	stopBeat()
 	beating.Wait()
 	close(watched)
+	if dr.journalFailed.Load() {
+		return driveAborted
+	}
 	if dr.lease.isLost() {
 		return driveLost
 	}
@@ -1002,7 +1006,12 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 	if !dr.stillHolds(ctx) {
 		return
 	}
-	t.handle = dr.work().Step(ctx, step.Key)
+	var journalErr error
+	t.handle, journalErr = dr.work().Step(ctx, step.Key)
+	if journalErr != nil {
+		dr.journalUnavailable(step.Key, journalErr)
+		return
+	}
 	running := t.snapshot()
 	running.Status = StepRunning
 	t.set(running)
@@ -1055,13 +1064,29 @@ func (dr *runDriver) settle(ctx context.Context, t *stepTrack, rec receipt) {
 		return
 	}
 	if t.handle == nil {
-		t.handle = dr.work().Step(ctx, t.step.Key)
+		var err error
+		t.handle, err = dr.work().Step(ctx, t.step.Key)
+		if err != nil {
+			dr.journalUnavailable(t.step.Key, err)
+			return
+		}
 	}
-	t.handle.Finish(ctx, rec.journal())
+	if err := t.handle.Finish(ctx, rec.journal()); err != nil {
+		dr.journalUnavailable(t.step.Key, err)
+		return
+	}
 	s := t.snapshot()
 	s.Status, s.Code, s.Message, s.DurationMs, s.LogTail = rec.report, rec.code, rec.message, rec.durationMs, rec.logTail
 	s.ArtifactFileIDs = slices.Clone(rec.artifactFileIDs)
 	t.set(s)
+}
+
+// A missing intent or receipt is not permission to continue. Leave the run
+// unfinished for recovery, stop renewing this drive, and publish no verdict.
+func (dr *runDriver) journalUnavailable(step string, err error) {
+	dr.d.Logger.Error("pipelines: journal write failed; stopping this drive for recovery", "runId", dr.runID, "step", step, "error", dr.mask(err.Error()))
+	dr.journalFailed.Store(true)
+	dr.lease.lose()
 }
 
 // endKind is how waiting on a step ended.
@@ -1478,13 +1503,18 @@ func (dr *runDriver) conclude(ctx context.Context, v verdict) bool {
 	if !dr.stillHolds(ctx) {
 		return false
 	}
+	var journalErr error
 	switch v.conclusion {
 	case ConclusionSuccess:
-		dr.work().Succeeded(ctx, map[string]any{"conclusion": v.conclusion, "stages": stageList(stages)})
+		journalErr = dr.work().Succeeded(ctx, map[string]any{"conclusion": v.conclusion, "stages": stageList(stages)})
 	case ConclusionCancelled:
-		dr.work().Cancelled(ctx, v.workCode, v.workMessage)
+		journalErr = dr.work().Cancelled(ctx, v.workCode, v.workMessage)
 	default:
-		dr.work().Failed(ctx, v.workCode, v.workMessage)
+		journalErr = dr.work().Failed(ctx, v.workCode, v.workMessage)
+	}
+	if journalErr != nil {
+		dr.journalUnavailable("", journalErr)
+		return false
 	}
 	var written *CheckRunWrite
 	if dr.havePipeline {

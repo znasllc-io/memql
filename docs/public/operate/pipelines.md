@@ -741,6 +741,14 @@ records `written` once it lands. The republished report carries the stage table
 and each failed step's message and code, but not the log excerpt, which only
 the agent that drove the run held.
 
+**A journal outage stops advancement.** The driver requires a stored intent
+before starting a command or staging a notification, a stored receipt before
+advancing, and a stored terminal work record before publishing a successful
+check. A failed write leaves the pipeline unfinished and stops that drive.
+Recovery retries with bounded backoff after storage returns. This prevents a
+missing record from being reported as success; it does not make an external
+side effect safe to repeat without reconciliation.
+
 ## Readiness
 
 Pipelines is an optional item in the cluster's
