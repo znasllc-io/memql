@@ -134,8 +134,8 @@ Edition `2026`, grammar version `2026.09-dsl-v1-followups-9f344ecf`.
                         | "@executor" | "@requiresCapability" | "@sdk" ) [ <annotation-args> ]
 <capability-annotation> ::= ( "@description" | "@disabled" | "@sideEffect" ) [ <annotation-args> ]
 <concept-annotation>  ::= ( "@composable" | "@description" | "@displayCard"
-                        | "@mirroredTo" | "@origin" | "@rowAuthz" | "@type"
-                        | "@version" ) [ <annotation-args> ]
+                        | "@mirroredTo" | "@origin" | "@rowAuthz" | "@serverWritten"
+                        | "@type" | "@version" ) [ <annotation-args> ]
 <logic-annotation>    ::= ( "@actor" | "@description" | "@disabled" | "@eventField"
                         | "@requiresCapability" | "@requiresRank" ) [ <annotation-args> ]
 <mutation-annotation> ::= ( "@actor" | "@addToSet" | "@appendFields" | "@createOnly"

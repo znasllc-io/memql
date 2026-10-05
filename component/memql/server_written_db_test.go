@@ -9,6 +9,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Exercise the actual raw-write seam, not the named @serverOnly mutations.
@@ -48,7 +49,7 @@ func TestServerWrittenChannelAllowsInternalWriteButNotClientRewrite(t *testing.T
 	const kind = "v1:pipelines:channel"
 	id := fmt.Sprintf("guard-%d", time.Now().UnixNano())
 	ctx := auth.ContextWithUserActor(context.Background(), "v1:identity:user:record-owner")
-	if _, err := eng.Execute(auth.ContextWithInternalOrigin(ctx), fmt.Sprintf(`mutation createPipelineChannel(channelId: %q, name: "guard-test", kind: "email", recipients: ["test@example.test"])`, id)); err != nil {
+	if _, err := eng.Execute(auth.ContextWithInternalOrigin(ctx), fmt.Sprintf(`mutation createPipelineChannel(channelId: %s, name: "guard-test", kind: "email", recipients: ["test@example.test"])`, langparser.QuoteString(id))); err != nil {
 		t.Fatalf("validated server write: %v", err)
 	}
 	canonical := kind + ":" + id
@@ -65,7 +66,7 @@ func TestServerWrittenChannelAllowsInternalWriteButNotClientRewrite(t *testing.T
 
 func attemptServerRecordWrite(eng *MemQLEngine, ctx context.Context, verb, kind, id, payload string) error {
 	if verb == "insert" {
-		_, err := eng.Execute(ctx, fmt.Sprintf(`insert(%q, id=%q, payload=%s)`, kind, id, payload))
+		_, err := eng.Execute(ctx, fmt.Sprintf(`insert(%s, id=%s, payload=%s)`, langparser.QuoteString(kind), langparser.QuoteString(id), payload))
 		return err
 	}
 	_, _, err := eng.executeWrite(ctx, MutationNode{Concept: kind, ID: id, PayloadRaw: payload}, true)
