@@ -488,7 +488,7 @@ export function RunPage({
       ? null
       : newestVerdict(verdicts.feedback, { stepKey: composer.stepKey, version: composerVersions.current });
 
-  const title = runTitle(run);
+  const title = run.workTitle?.trim() || goal?.statement.trim() || runTitle(run);
 
   return (
     <div className="os-nexus-run">

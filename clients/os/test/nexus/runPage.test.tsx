@@ -514,7 +514,7 @@ describe("what a run is for", () => {
       steps: fiveSteps(),
     });
     await openRun(conn);
-    expect(screen.getByText("Reconcile the ledger")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Reconcile the ledger" })).toBeTruthy();
   });
 
   it("says so plainly when no goal asked for it", async () => {
@@ -705,4 +705,12 @@ it("keeps unrelated live steps out of an open run and uses its work title", asyn
   await waitFor(() => expect(within(timeline).getByText("lookupEvidence")).toBeTruthy());
   expect(within(timeline).queryByText("unrelatedSweep")).toBeNull();
   expect(screen.getByRole("heading", { name: "Find saved information" })).toBeTruthy();
+});
+
+
+it("keeps the goal readable after a terminal outcome replaces compile metadata", async () => {
+  const conn = fakeConnection({ goals: [goalRow({ id: "g1", statement: "Find the saved contact" })], runs: [runRow({ id: "r1", goalId: "g1", status: "succeeded", outcome: { executorStatus: "completed" } })] });
+  mount(conn);
+  fireEvent.click(await screen.findByText("Find the saved contact"));
+  expect(await screen.findByRole("heading", { name: "Find the saved contact" })).toBeTruthy();
 });
