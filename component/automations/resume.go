@@ -622,7 +622,17 @@ func (e *Executor) ResumeFrom(
 	if journalSkipsAutomation(automation) {
 		writer = nil
 	}
+	ctx, writer, stopJournal, journalErr := e.requireRunJournal(ctx, automation, writer)
+	if journalErr != nil {
+		exec.Fail(journalErr)
+		return exec, journalErr
+	}
+	defer stopJournal()
 	writer.reopenRun(ctx, exec)
+	if err := requiredJournalError(ctx); err != nil {
+		exec.Fail(err)
+		return exec, err
+	}
 	ctx = withRunJournal(ctx, exec.ID, writer)
 
 	// Set up step context.

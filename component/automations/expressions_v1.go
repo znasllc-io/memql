@@ -248,6 +248,9 @@ var prepareOnDemand sync.Mutex
 func ensurePrepared(a *Automation) error {
 	prepareOnDemand.Lock()
 	defer prepareOnDemand.Unlock()
+	if err := prepareJournalContract(a); err != nil {
+		return err
+	}
 	if a.exprsPrepared {
 		return nil
 	}

@@ -101,10 +101,14 @@ steps. Time-window milestones #5506–#5509 stay open until observed.
 | Capability | Evidence | Decision and verification |
 | --- | --- | --- |
 | Server-authored concepts | Named `@serverOnly` mutations did not protect raw writes to the same concept. | Added general `@serverWritten`, preserving separate read authorization. Real database tests reject client inserts and updates while authorized pipeline writers pass. Parser, annotation documentation and language conformance cases cover the declaration. |
-| Durable automation execution | `component/automations/journal.go` deliberately continues after journal failures; the shared driver journal also previously hid failed step writes. | Shared driver-journal writes now return errors. The pipeline driver stops on failed intent, receipt or terminal writes and recovers with backoff; regression tests cover each boundary. Still required before moving release orchestration onto the generic automation executor: an explicit durable contract for that executor, with independent crash/recovery tests. |
+| Required automation records | `component/automations/journal.go` continued after journal failures; the shared driver journal also previously hid failed step writes. | Shared driver-journal writes now return errors. Added opt-in `@journalRequired` for generic automations: require run/step intent, receipts and completion; stop on failed heartbeats; propagate the requirement to descendants. Fault, race and real-database tests cover a fresh executor resuming an unfinished read without repeating a completed read. This is not an external-effect or ownership guarantee. |
+| Definition identity on resume | The automation fingerprint covered step IDs/types/conditions, omitting call arguments, nested bodies and execution policy. | Fingerprint the complete serialized definition, excluding source location, caches and top-level prose. Changed definitions and old incomplete fingerprints refuse resume. Tests cover changes to callees, arguments, retry/error/journal policy, nested bodies and input contracts. Transitive callee identity still requires pinned engine/bundle versions in the release candidate. |
 | Safe replay | Generic resume guards side effects with `AllowSideEffects`; pipeline recovery has a separate driver. | Reuse the journal and recovery ownership primitives, but replace blanket replay permission with per-effect reconciliation. Validate pinned inputs, artifact availability and uncertain external outcomes before resuming. |
 | Default workflow policy | Event-to-mode selection and substantial orchestration currently live in `component/pipelines` and `component/pipelinerun`. | Move the default choices to sealed public DSL; preserve bounded execution, distributed ownership and protocol validation in runtime capabilities. Prove composition with a separately named workflow. |
 
-The durable execution entry is a discovered gap, not a claim that existing
-automations are fully resumable. Existing parser support for loops, branches,
-parallel blocks and retries should be reused before introducing new syntax.
+Remaining generic recovery gaps include ownership fencing, a run interrupted
+before its first step intent, a run whose steps completed but terminal receipt
+did not, and reconciliation before repeating uncertain effects. Do not turn
+an absent record into permission to replay: a different replica may still be
+working. Existing parser support for loops, branches, parallel blocks and
+retries should be reused before introducing new syntax.

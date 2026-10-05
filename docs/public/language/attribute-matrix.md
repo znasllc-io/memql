@@ -34,6 +34,7 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@disabled`](#disabled) | flag | flag | flag | flag |
 | [`@eventField`](#eventfield) |  |  | strings |  |
 | [`@filter`](#filter) |  |  |  | expression |
+| [`@journalRequired`](#journalrequired) |  |  |  | flag |
 | [`@loop`](#loop) |  |  |  | keywords |
 | [`@mcp`](#mcp) | flag | flag |  | flag |
 | [`@mergeFields`](#mergefields) |  | strings |  |  |
@@ -201,6 +202,7 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 | [`@description`](#description) | one string | `@description("On a new ticket, notify its owner.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
 | [`@filter`](#filter) | an expression | `@filter(row => row.status == "open")` |
+| [`@journalRequired`](#journalrequired) | no arguments | `@journalRequired` |
 | [`@loop`](#loop) | keyword arguments | `@loop(maxDepth=4, until=row => row.status == "done")` |
 | [`@mcp`](#mcp) | no arguments | `@mcp` |
 | [`@mode`](#mode) | keyword arguments | `@mode(queued, max=10)` |
@@ -723,6 +725,14 @@ Tool handler configuration. Format: @handler(type="query", query="...") / @handl
 | [concept field](#concept-field) | no arguments | `@internal` |
 
 On a concept field: server-only (memql#2035) -- never projected by a shape's default projection and never accepted from a mutation's caller args; emitted as x-internal. (On a construct, @internal is retired, #2708.)
+
+### @journalRequired
+
+| On | Written as | Example |
+|---|---|---|
+| [automation](#automation) | no arguments | `@journalRequired` |
+
+Require confirmed work-journal writes before an automation starts work, advances beyond a step or reports completion. A failed write stops the run even inside retry or on error continue. Preview runs remain sandboxed. This does not guarantee exactly-once external effects; reconcile uncertain effects before resuming.
 
 ### @level
 

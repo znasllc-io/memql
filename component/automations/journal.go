@@ -18,11 +18,13 @@ package automations
 // the owner's borrowed authority instead; nothing here assumes the rows
 // are unowned beyond the actor journalContext installs.
 //
-// A JOURNAL WRITE NEVER FAILS THE RUN. The run is the work and the
+// By default a journal write never fails the run. The run is the work and the
 // journal is its record; a failed write is logged at Warn and the
 // automation continues. The alternative -- failing a sweep because its
 // record could not be written -- would let a journal outage stop the
-// cluster.
+// cluster. An automation declaring @journalRequired opts into confirmed
+// journal boundaries instead: a failed write stops advancement and cancels
+// in-flight calls. It does not assert exactly-once external effects.
 //
 // TWO THINGS ARE DELIBERATELY NOT RECORDED. Resolved step arguments, which
 // may carry resolved secrets (epic A2 decides redaction), and a step's
@@ -78,6 +80,7 @@ type workJournal struct {
 	logger         *slog.Logger
 	nodeId         string
 	heartbeatEvery time.Duration
+	required       *journalRequirement
 
 	// classifier is the failure path's ONE model call, installed from app/ on
 	// a node that can reach a model. Nil is a working state: a table miss then
@@ -279,7 +282,11 @@ func (j *workJournal) call(ctx context.Context, name string, args map[string]any
 }
 
 // write renders and executes one journal call.
-func (j *workJournal) write(ctx context.Context, name string, args map[string]any) error {
+func (j *workJournal) write(ctx context.Context, name string, args map[string]any) (err error) {
+	if failure := j.required.failure(); failure != nil {
+		return failure
+	}
+	defer func() { j.required.fail(name, err) }()
 	query, err := journalArgs(name, args)
 	if err != nil {
 		j.warn(name, err)

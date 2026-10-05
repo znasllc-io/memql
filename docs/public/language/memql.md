@@ -2296,6 +2296,29 @@ A bare name is a statement's name, a loop variable, a lambda parameter or a rese
 
 A body compiles at load to a list of steps in the order written; nothing is reordered. Each call is one step: journaled on the run, previewed by a dry run, retried by `retry(n)` and by a resume. An `if` or a `switch` flattens into the steps of its branches, each carrying its branch's condition, so a switch compares with typed equality (`1 == "1"` is false). A logic called inside a run journals its statements as steps of that run.
 
+An automation may declare `@journalRequired` when work must stop if its record
+cannot be confirmed. This requires a persisted run before starting, a step
+intent before its call, a receipt before advancing, and a terminal write before
+reporting completion. Failed heartbeats cancel in-flight calls cooperatively.
+The requirement follows nested logic and child automations; `retry(n)` and
+`on error continue` cannot bypass a journal failure. Without this annotation,
+journaling remains best effort. Sandboxed previews still write no journal.
+Before-write hooks and automations reacting to work-journal rows cannot use it.
+
+This is a recording guarantee, not exactly-once execution. An external effect
+can succeed before its receipt fails. Recovery must reconcile that uncertain
+effect before retrying it; a process cannot be resumed at an arbitrary machine
+instruction. The journal retains the last confirmed state and the executor
+returns a `required work journal unavailable` error.
+
+Resume compares the recorded automation definition with the current one,
+including call arguments, nested bodies, input contracts and execution policy.
+A changed definition is refused. Runs carrying the older, incomplete
+definition fingerprint are also refused; prepare a new run after reconciling
+any external effects. The definition fingerprint does not pin the code of
+called integrations or other constructs; workflows that require reproducible
+recovery must also pin their engine and DSL bundle versions.
+
 A dry-run preview executes a builtin only when its executor is classified as a metadata read or a computation without side effects. Unclassified executors, including integration builtins, stop the preview with a refusal. This also applies to builtins called from a query or nested logic; a stopped preview does not claim successful execution.
 
 A statement's value depends on its kind:

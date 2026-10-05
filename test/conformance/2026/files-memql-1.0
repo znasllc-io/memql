@@ -24,6 +24,9 @@ cells/automation/disabled/with-true.memql
 cells/automation/disabled/written-bare.memql
 cells/automation/filter/an-expression.memql
 cells/automation/filter/with-empty-parentheses.memql
+cells/automation/journalRequired/on-work-rows.memql
+cells/automation/journalRequired/with-true.memql
+cells/automation/journalRequired/written-bare.memql
 cells/automation/loop/a-filter-that-does-not-exclude-until.memql
 cells/automation/loop/a-max-depth-of-zero.memql
 cells/automation/loop/a-misspelled-key.memql

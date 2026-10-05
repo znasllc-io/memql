@@ -211,7 +211,12 @@ func (e *Executor) withBodyRunner(ctx context.Context, parent *StepContext) cont
 }
 
 // runSequence runs one list of statement steps (see the file comment).
-func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequenceRun) (seqOutcome, error) {
+func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequenceRun) (out seqOutcome, err error) {
+	defer func() {
+		if failure := requiredJournalError(ctx); failure != nil {
+			out, err = seqOutcome{}, failure
+		}
+	}()
 	stepCtx := run.stepCtx
 	ev := stepCtx.Evaluator
 	exec := stepCtx.Execution
@@ -223,6 +228,9 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 	ctx = e.withBodyRunner(ctx, stepCtx)
 
 	for stepIndex, step := range steps {
+		if err := requiredJournalError(ctx); err != nil {
+			return seqOutcome{}, err
+		}
 		if step == nil {
 			continue
 		}
@@ -286,6 +294,9 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 			// like every other step: an intent row, then its receipt -- as
 			// the next version of the step, which on a fresh run is 1.
 			run.journalRunning(ctx, step, stepIndex, run.attemptBase(step)+1)
+			if err := requiredJournalError(ctx); err != nil {
+				return seqOutcome{}, err
+			}
 			started := time.Now()
 			var (
 				v   any
@@ -318,7 +329,7 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 		result, err := e.runStatementStep(ctx, step, stepIndex, run)
 		if err != nil {
 			var cancelled *runCancelled
-			if errors.As(err, &cancelled) {
+			if errors.Is(err, ErrJournalRequired) || errors.As(err, &cancelled) {
 				return seqOutcome{}, err
 			}
 			if step.OnError == ErrorStrategyContinue {
@@ -365,6 +376,9 @@ func (e *Executor) runStatementStep(ctx context.Context, step *Step, stepIndex i
 			stepCtx.PreviousChainHead = run.chainHead
 		}
 		run.journalRunning(ctx, step, stepIndex, run.attemptBase(step)+attempt)
+		if err := requiredJournalError(ctx); err != nil {
+			return nil, err
+		}
 		result, err = e.executeJournaledStep(ctx, run.heartbeatJournal(), step, stepCtx)
 		if result != nil && run.top && stepCtx.ChainTrackingEnabled {
 			result.PreviousChainHead = run.chainHead
@@ -378,11 +392,14 @@ func (e *Executor) runStatementStep(ctx context.Context, step *Step, stepIndex i
 			}
 			e.recordStep(ctx, run, step, result)
 		}
+		if failure := requiredJournalError(ctx); failure != nil {
+			return result, failure
+		}
 		if err == nil {
 			return result, nil
 		}
 		var cancelled *runCancelled
-		if errors.As(err, &cancelled) {
+		if errors.Is(err, ErrJournalRequired) || errors.As(err, &cancelled) {
 			return result, err
 		}
 		if attempt < attempts && stepCtx.Logger != nil {
@@ -401,14 +418,17 @@ func (e *Executor) runStatementStep(ctx context.Context, step *Step, stepIndex i
 // forEach's children always were: their ids are unique only within their own
 // list, so on the run they would collide.
 func (e *Executor) recordStep(ctx context.Context, run *sequenceRun, step *Step, result *StepResult) {
+	if result.Status != "skipped" {
+		run.journalFinished(ctx, step, result)
+	}
+	if requiredJournalError(ctx) != nil {
+		return
+	}
 	if run.top {
 		if exec := run.stepCtx.Execution; exec != nil {
 			exec.AddStepResult(result)
 		}
 		notifyStepObserver(ctx, result)
-	}
-	if result.Status != "skipped" {
-		run.journalFinished(ctx, step, result)
 	}
 }
 
@@ -528,7 +548,13 @@ func (c *runCancelled) Error() string { return "run cancelled by " + c.by }
 // with, on the execution and in the run's outcome. resumed is nil for a
 // fresh run; a resume (ResumeFrom) closes as the legacy resume does, with no
 // dedup registration and no error hook, and says so on the completed event.
-func (e *Executor) runStatementAutomation(ctx context.Context, automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, journal *workJournal, stepCtx *StepContext, chainHead string, resumed *resumedList) (*AutomationExecution, error) {
+func (e *Executor) runStatementAutomation(ctx context.Context, automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, journal *workJournal, stepCtx *StepContext, chainHead string, resumed *resumedList) (execution *AutomationExecution, runErr error) {
+	defer func() {
+		if failure := requiredJournalError(ctx); failure != nil {
+			exec.Fail(failure)
+			execution, runErr = exec, failure
+		}
+	}()
 	stepCtx.Evaluator.enterStatements()
 	run := &sequenceRun{
 		stepCtx:    stepCtx,
@@ -540,6 +566,13 @@ func (e *Executor) runStatementAutomation(ctx context.Context, automation *Autom
 	}
 	out, err := e.runSequence(ctx, automation.Steps, run)
 	chainHead = run.chainHead
+	if errors.Is(err, ErrJournalRequired) {
+		// No error hook, inference-based repair or terminal success can run
+		// on an unconfirmed boundary. The durable row remains at its last
+		// confirmed state for recovery to reconcile.
+		exec.Fail(err)
+		return exec, err
+	}
 	if err != nil {
 		var cancelled *runCancelled
 		switch {
@@ -554,6 +587,9 @@ func (e *Executor) runStatementAutomation(ctx context.Context, automation *Autom
 		}
 		exec.Fail(err)
 		journal.closeRun(ctx, exec, chainHead)
+		if failure := requiredJournalError(ctx); failure != nil {
+			return exec, failure
+		}
 		if resumed == nil {
 			e.handleAutomationError(ctx, automation, exec, triggeringEvent, err)
 		}
@@ -563,6 +599,10 @@ func (e *Executor) runStatementAutomation(ctx context.Context, automation *Autom
 	exec.Returned, exec.Output = out.Returned, out.Value
 	exec.Complete()
 	journal.closeRun(ctx, exec, chainHead)
+	if err := requiredJournalError(ctx); err != nil {
+		exec.Fail(err)
+		return exec, err
+	}
 	if e.chainTrackingEnabled {
 		exec.ChainHead = chainHead
 		if e.dedup != nil && resumed == nil {

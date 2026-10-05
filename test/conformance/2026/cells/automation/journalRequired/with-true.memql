@@ -1,0 +1,5 @@
+@template
+@journalRequired(true)
+automation recordedRequest {
+  return 1
+}

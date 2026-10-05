@@ -20,13 +20,13 @@ Edition `2026`, grammar version `2026.09-dsl-v1-followups-9f344ecf`.
 | Section | Entries |
 |---|---:|
 | [Constructs](#constructs) | 18 |
-| [Annotations](#annotations) | 77 |
+| [Annotations](#annotations) | 78 |
 | [Keywords](#keywords) | 37 |
 | [Operators](#operators) | 22 |
 | [Field types](#field-types) | 12 |
 | [Functions and methods](#functions-and-methods) | 46 |
 | [Builtins](#builtins) | 10 |
-| **Total** | **222** |
+| **Total** | **223** |
 
 ## Constructs
 
@@ -86,6 +86,7 @@ The `@name` directives a construct or a field carries. WHERE each is legal, and 
 | `@filter` | `@filter(row => row.status == "open")` | Filter for automation triggers: a lambda of one parameter over the triggering row, as in @filter(row => row.status == "open"). Written as an expression; legal on automation. |
 | `@handler` | `@handler(type="function", name="createTodo")` | Tool handler configuration. Format: @handler(type="query", query="...") / @handler(type="function", name="..."). Written as keyword arguments; legal on tool. |
 | `@internal` | `@internal` | On a concept field: server-only (memql#2035) -- never projected by a shape's default projection and never accepted from a mutation's caller args; emitted as x-internal. (On a construct, @internal is retired, #2708.) Written as no arguments; legal on concept field. |
+| `@journalRequired` | `@journalRequired` | Require confirmed work-journal writes before an automation starts work, advances beyond a step or reports completion. A failed write stops the run even inside retry or on error continue. Preview runs remain sandboxed. This does not guarantee exactly-once external effects; reconcile uncertain effects before resuming. Written as no arguments; legal on automation. |
 | `@level` | `@level("fast")` | How much intelligence the call needs: fast, strong, reasoning or embeddings. The router's rules branch on it, so a prompt never names a model (epic memql#5127). Required on every prompt: one without it is refused at load (`prompt_level_missing`), a @disabled prompt included. Written as one string; legal on prompt and rule. |
 | `@locked` | `@locked` | On a rule: evaluate before every unlocked rule regardless of precedence. Accepted only in the embedded tree -- the loader refuses it elsewhere. Written as no arguments; legal on rule. |
 | `@loop` | `@loop(maxDepth=4, until=row => row.status == "done")` | On an automation that closes a deliberate cycle: permits the cycle the load would otherwise refuse, bounds it to maxDepth runs of this automation per causal chain, and names the predicate that ends it. The @filter must exclude the rows where until holds. Written as keyword arguments; legal on automation. |

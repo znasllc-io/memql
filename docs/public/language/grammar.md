@@ -129,7 +129,8 @@ Edition `2026`, grammar version `2026.09-dsl-v1-followups-9f344ecf`.
    form each takes there is the attribute matrix, not a syntax rule. *)
 <action-annotation>   ::= ( "@description" | "@disabled" ) [ <annotation-args> ]
 <automation-annotation> ::= ( "@actor" | "@description" | "@disabled" | "@filter"
-                        | "@loop" | "@mcp" | "@mode" | "@template" | "@trigger" ) [ <annotation-args> ]
+                        | "@journalRequired" | "@loop" | "@mcp" | "@mode"
+                        | "@template" | "@trigger" ) [ <annotation-args> ]
 <builtin-annotation>  ::= ( "@alias" | "@args" | "@description" | "@disabled"
                         | "@executor" | "@requiresCapability" | "@sdk" ) [ <annotation-args> ]
 <capability-annotation> ::= ( "@description" | "@disabled" | "@sideEffect" ) [ <annotation-args> ]
