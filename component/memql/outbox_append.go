@@ -189,8 +189,8 @@ const outboxWriterActor = "system:outbox"
 // runInWriteTx runs fn inside one database transaction, handing it a
 // store bound to that transaction.
 //
-// Used ONLY on the origin-concept path. Every other write keeps the
-// single-statement path, which is why this takes a closure instead of
+// Used for mirrored origins and writes carrying a row-version fence. Other
+// writes keep the single-statement path, which is why this takes a closure instead of
 // executeWrite being restructured around a transaction it usually does
 // not need.
 func (e *MemQLEngine) runInWriteTx(ctx context.Context, fn func(store memorynodes.Store) error) error {
@@ -198,7 +198,23 @@ func (e *MemQLEngine) runInWriteTx(ctx context.Context, fn func(store memorynode
 	if db == nil {
 		return fmt.Errorf("memory engine database not configured")
 	}
+	fenced := len(rowVersionFences(ctx)) > 0
+	if fenced {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+	}
 	return db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if fenced {
+			// Server-side bounds still work while the client process is paused.
+			// A dead idle transaction must not hold every replacement's fence.
+			if _, err := tx.ExecContext(ctx, `SELECT set_config('statement_timeout', '15000', true), set_config('idle_in_transaction_session_timeout', '15000', true)`); err != nil {
+				return err
+			}
+		}
+		if err := e.checkRowVersionFences(ctx, tx); err != nil {
+			return err
+		}
 		// Constructed directly rather than through newBunStore, which
 		// takes a *bun.DB. bun.Tx is a STRUCT VALUE, so it can never be
 		// the typed nil that constructor exists to keep out of the

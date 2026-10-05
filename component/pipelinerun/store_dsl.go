@@ -199,8 +199,8 @@ func requireOwner(owner, call string) (string, error) {
 }
 
 // systemWrite runs a write as this package's own system actor, for a row with
-// no owner to borrow: an outbound row records a delivery, not a person's act,
-// and its concept declares no tier. It is stamped internal like every write
+// no owner to borrow: an outbound row records a deployment delivery and
+// declares the operator tier. The synthetic actor carries that authority. It is stamped internal like every write
 // here -- both stagings it reaches are @serverOnly, and the outbound write
 // guard wants internal origin on a row server code staged. The actor is
 // attribution and nothing more: no mutation it reaches stamps an owner from it.
@@ -545,6 +545,14 @@ func (s *dslStore) UpdatePipeline(ctx context.Context, owner, pipelineID string,
 // is OMITTED rather than written empty: the row is new, so absent is the
 // truth, and the mutation stamps conclusion and checkRunState empty itself.
 func (s *dslStore) CreateRun(ctx context.Context, r Run) error {
+	if _, err := requireOwner(r.OwnerUserID, mCreatePipelineRun); err != nil {
+		return err
+	}
+	var err error
+	ctx, err = s.fenceRunWrite(ctx, r.ID)
+	if err != nil {
+		return err
+	}
 	queued := r.QueuedAt
 	if queued.IsZero() {
 		queued = time.Now().UTC()
@@ -593,6 +601,14 @@ func (s *dslStore) CreateRun(ctx context.Context, r Run) error {
 
 // UpdateRun writes the named fields of patch and nothing else.
 func (s *dslStore) UpdateRun(ctx context.Context, owner, runID string, patch RunPatch) error {
+	if _, err := requireOwner(owner, mUpdatePipelineRun); err != nil {
+		return err
+	}
+	var err error
+	ctx, err = s.fenceRunWrite(ctx, runID)
+	if err != nil {
+		return err
+	}
 	args := map[string]any{"runId": bareID(runID)}
 	setNamed(args, "status", patch.Status)
 	setNamed(args, "conclusion", patch.Conclusion)
@@ -602,6 +618,7 @@ func (s *dslStore) UpdateRun(ctx context.Context, owner, runID string, patch Run
 	setNamed(args, "checkRunState", patch.CheckRunState)
 	setNamed(args, "workRunId", patch.WorkRunID)
 	setNamed(args, "driverNodeId", patch.DriverNodeID)
+	setNamed(args, "driverLeaseId", patch.DriverLeaseID)
 	setNamed(args, "cancelledBy", patch.CancelledBy)
 	if patch.CheckRunID != nil {
 		args["checkRunId"] = formatIDIfSet(*patch.CheckRunID)
@@ -996,6 +1013,7 @@ func runFromRow(row map[string]any) Run {
 		WorkRunID:         rowString(row, "workRunId"),
 		WorkGoalID:        bareID(rowString(row, "workGoalId")),
 		DriverNodeID:      rowString(row, "driverNodeId"),
+		DriverLeaseID:     rowString(row, "driverLeaseId"),
 		DriverHeartbeatAt: rowTime(row, "driverHeartbeatAt"),
 		CancelRequested:   rowBool(row, "cancelRequested"),
 		CancelledBy:       rowString(row, "cancelledBy"),
@@ -1291,4 +1309,22 @@ func rowTime(row map[string]any, key string) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+// Every writer of the ownership row participates, including cancellation and
+// re-staging. A caller's earlier witness must survive unchanged: refreshing it
+// here would authorize a decision made before another replica's claim.
+func (s *dslStore) fenceRunWrite(ctx context.Context, runID string) (context.Context, error) {
+	if memql.HasRowVersionFence(ctx, RunConcept, runID) {
+		return ctx, nil
+	}
+	run, err := s.RunByID(memql.ContextWithFreshRead(ctx), runID)
+	if err != nil {
+		return nil, err
+	}
+	var version time.Time
+	if run != nil {
+		version = run.CreatedAt
+	}
+	return memql.ContextWithRowVersionFence(ctx, RunConcept, runID, version), nil
 }

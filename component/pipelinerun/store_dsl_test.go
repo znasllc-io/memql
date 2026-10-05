@@ -298,7 +298,7 @@ func TestEachCallRunsUnderItsAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := engine.recorded()
-	if len(calls) != 3 {
+	if len(calls) != 4 {
 		t.Fatalf("calls = %d", len(calls))
 	}
 
@@ -315,7 +315,11 @@ func TestEachCallRunsUnderItsAuthority(t *testing.T) {
 		t.Errorf("a server-only read is the pipelines system actor (a synthetic cluster owner), not the caller: %+v", system.actor)
 	}
 
-	write := calls[2]
+	witness := calls[2]
+	if !witness.fresh || !witness.origin.IsInternal() || witness.actor == nil || !witness.actor.IsClusterOwner() || !strings.HasPrefix(witness.query, "query "+qPipelineRunByID+"(") {
+		t.Errorf("the fencing witness needs a fresh internal operator read: %+v", witness)
+	}
+	write := calls[3]
 	if !write.origin.IsInternal() || write.actor == nil || write.actor.UserId != "v1:identity:user:"+ownerID || write.actor.Synthetic {
 		t.Errorf("a write runs as the owner, stamped internal: origin %v actor %+v", write.origin, write.actor)
 	}
@@ -326,7 +330,7 @@ func TestEachCallRunsUnderItsAuthority(t *testing.T) {
 	if err := store.UpdatePipeline(caller, "  ", "p1", PipelinePatch{Status: ptr(PipelineActive)}); err == nil {
 		t.Errorf("an update with no owner must not be written")
 	}
-	if n := len(engine.recorded()); n != 3 {
+	if n := len(engine.recorded()); n != 4 {
 		t.Errorf("a refused write reached the engine: %d calls", n)
 	}
 
@@ -392,6 +396,7 @@ func TestTheRenderedCallsSayWhatTheRowsAre(t *testing.T) {
 	calls := engine.recorded()
 	// RenderCall's form: arguments in sorted order, values JSON-encoded.
 	want := []string{
+		`query pipelineRunById(runId: "r1")`,
 		`mutation createPipelineRun(attempt: 1, checkRunState: "refused", event: "pull_request", mode: "affected", notes: [{"code":"pipeline_check_permission_missing","message":"m"}], pipelineId: "p1", queuedAt: "2026-10-03T12:00:00Z", repository: "acme/shop", runId: "r1", runKey: "acme/shop@` + shaA + `:affected:pull_request", sha: "` + shaA + `", status: "queued", trigger: "webhook")`,
 		`query pipelineRunsForOwner()`,
 		`query pipelineRunByCheckRun(checkRunId: "42", repository: "acme/shop")`,

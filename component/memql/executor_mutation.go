@@ -882,6 +882,13 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	var organizationPrior map[string]any
 
 	id := strings.TrimSpace(mutation.ID)
+	if len(rowVersionFences(ctx)) > 0 && id != "" {
+		var err error
+		ctx, err = e.fenceWriteTarget(ctx, conceptMeta.Name, id)
+		if err != nil {
+			return nil, meta, err
+		}
+	}
 	if id != "" {
 		priorPayload, existed, err := e.loadPriorPayload(ctx, conceptMeta, id)
 		if err != nil {
@@ -1583,6 +1590,10 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		createParams.Clock = func() time.Time { return ts }
 	}
 
+	// A fenced mutation stays newer than its target's observed version even
+	// when the replacement process's clock is behind its predecessor's.
+	fenceWriteClock(ctx, conceptMeta.Name, id, &createParams)
+
 	// THE OUTBOX APPEND (epic memql#4378, D5). A concept whose dataState
 	// is `origin` is one MemQL owns and external systems mirror, so every
 	// write to it has to reach those systems -- and the record of that
@@ -1591,11 +1602,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// nothing will ever propagate. See outbox_append.go for both failure
 	// directions and why only a transaction closes them.
 	//
-	// The transaction is opened ONLY for such a concept. Every other
-	// write -- which is every concept in the tree an author has not
-	// declared -- takes the single-statement path below unchanged.
+	// Row-version fences also use this transaction, so losing a separate
+	// coordination connection cannot permit a stale writer to commit.
+	// Other writes retain the single-statement path below.
 	var result memorynodes.Node
-	if targets := outboxTargetsFor(conceptMeta.Name); len(targets) > 0 {
+	if targets := outboxTargetsFor(conceptMeta.Name); len(targets) > 0 || len(rowVersionFences(ctx)) > 0 {
 		retire := outboxPayloadRetires(payload)
 		txErr := e.runInWriteTx(ctx, func(txStore memorynodes.Store) error {
 			created, createErr := conceptMeta.Create(ctx, txStore, createParams)
@@ -1632,7 +1643,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		// the engine today; the observability rollups are the other family,
 		// and they are documented as TTL-only rather than fixed here
 		// because nothing in their loop is a MemQL write at all.
-		e.InvalidateCacheForConcept(OutboxEntryConcept)
+		if len(targets) > 0 {
+			e.InvalidateCacheForConcept(OutboxEntryConcept)
+		}
 	} else {
 		store := newBunStore(e.database())
 		created, createErr := conceptMeta.Create(ctx, store, createParams)

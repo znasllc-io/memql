@@ -126,13 +126,69 @@ The Go-driven journal checks all initial writes: goal, run, first heartbeat
 and step order, each pending step, and goal activation. Failure at each boundary
 refuses admission before a heartbeat loop or command starts.
 
-Still open: required journaling and replay admission are not ownership fencing.
-A paused executor can outlive its lease and return after a replacement claims
-the run. Claims and receipts need durable attempt ownership. Destination
-reconciliation must establish whether an uncertain publication landed before
-it can safely repeat. Definition fingerprints still need engine/bundle pins
-for transitive callees. No production release may rely on automatic effect
-replay until these boundaries are demonstrated.
+Still open: the automation executor needs ownership fencing as well as its
+required journal and replay admission. The pipeline driver's new fencing is
+described below; it does not automatically protect other execution paths.
+Destination reconciliation must establish whether an uncertain publication
+landed before it can safely repeat. Definition fingerprints still need
+engine/bundle pins for transitive callees. No production release may rely on
+automatic effect replay until these boundaries are demonstrated.
+
+## Transactional ownership progress
+
+Each pipeline claim now mints an opaque token, including a restarted process
+with the same pod name. A per-run `workjournal.WithWriteGuard` protects initial
+writes, queued steps, intents, receipts, bindings, terminal writes and background
+heartbeats without changing the shared journal. An unreadable lease refuses
+external-call admission. Ending a drive also ends its journal heartbeat.
+
+A separate advisory-lock connection was insufficient: losing that session
+releases its lock while the process can survive. The generic engine primitive
+`ContextWithRowVersionFence` now compares the observed row version and commits
+the protected mutation in one database transaction. It also checks the target's
+read-merge version and stamps its replacement after the observed timestamp,
+including under clock skew. Fenced critical sections have client and database
+time limits; killing the writer connection rolls back the receipt. Claims,
+updates and re-staging participate; adapters
+must preserve an existing witness instead of refreshing a stale decision.
+The context restricts writes and grants no authority. No CI policy is part of
+this primitive; non-CI tests use edits and results derived from to-do rows.
+
+```mermaid
+sequenceDiagram
+    participant Old as Old driver
+    participant DB as PostgreSQL
+    participant New as Replacement driver
+    Old->>DB: Read ownership version A
+    Note over Old: Paused after the read
+    Note over DB: Old coordination connection dies
+    New->>DB: Claim version B and save receipt
+    Old->>DB: Commit receipt, requiring version A
+    DB-->>Old: Refused: ownership version changed
+```
+
+Real PostgreSQL tests terminate the old driver's lock backend, let an independent
+driver claim and save a result, and prove the returning writer cannot overwrite
+it. Separate cases exercise same-node replacement, concurrent decisions, stale
+source data, unchanged authorization and clock skew. These are in-process
+engine/driver tests over real database connections, not a live two-pod rollout.
+
+All writers of an ownership row must use this protocol. Old engine processes
+must be drained before enabling it; a mixed-version fleet of unfenced writers
+is not covered. External requests already in flight still need destination
+reconciliation. Kubernetes result acknowledgment and the automation executor's
+own journal remain separate boundaries to complete.
+
+## Bounded outbound scan progress
+
+The outbound worker advances one page per status per poll and restarts at
+exhaustion. Other media, future retries and rows owned by another worker no
+longer permanently hide later deliveries. Tests cover independent pending and
+retry cursors and leave skipped rows unchanged. The real-row notification
+fixture now follows the same pagination and reaches its own rows in a populated
+test database. The full baseline exposed these gaps; its remaining corrections
+also preserve protected-field tests under operator authority and explain the
+cross-owner receipt read's `@serverOnly` contract.
 
 ## Child resource-limit isolation progress
 

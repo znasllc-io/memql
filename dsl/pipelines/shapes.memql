@@ -67,6 +67,7 @@ shape run pipelineRunFull {
   workRunId
   workGoalId
   driverNodeId
+  driverLeaseId
   driverHeartbeatAt
   cancelRequested
   cancelledBy

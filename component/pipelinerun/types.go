@@ -225,6 +225,7 @@ type Run struct {
 	WorkRunID         string
 	WorkGoalID        string
 	DriverNodeID      string
+	DriverLeaseID     string
 	DriverHeartbeatAt time.Time
 	CancelRequested   bool
 	CancelledBy       string
@@ -364,6 +365,7 @@ type RunPatch struct {
 	WorkRunID         *string
 	WorkGoalID        *string
 	DriverNodeID      *string
+	DriverLeaseID     *string
 	DriverHeartbeatAt *time.Time
 	CancelRequested   *bool
 	CancelledBy       *string

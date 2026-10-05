@@ -594,6 +594,7 @@ func (s *memStore) UpdateRun(_ context.Context, owner, runID string, patch RunPa
 	set(&r.WorkRunID, patch.WorkRunID)
 	set(&r.WorkGoalID, patch.WorkGoalID)
 	set(&r.DriverNodeID, patch.DriverNodeID)
+	set(&r.DriverLeaseID, patch.DriverLeaseID)
 	set(&r.CancelledBy, patch.CancelledBy)
 	at(&r.DriverHeartbeatAt, patch.DriverHeartbeatAt)
 	at(&r.StartedAt, patch.StartedAt)

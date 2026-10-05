@@ -200,7 +200,7 @@ func (i *Integration) claimAndDrive(runID string) {
 		return // finished, or another replica's
 	}
 	dr := &runDriver{
-		i: i, d: d, lease: l, runID: runID, run: run,
+		i: i, d: d, lease: l, runID: runID, run: run, claimID: run.DriverLeaseID,
 		log: d.Logger.With("component", "pipelinerun", logger.Subject(RunConcept, runID), "node", d.NodeID),
 	}
 	switch dr.drive(ctx) {
@@ -226,11 +226,12 @@ const (
 
 // runDriver is one drive of one run, on the replica holding its lease.
 type runDriver struct {
-	i     *Integration
-	d     Deps
-	lease *lease
-	runID string
-	log   *slog.Logger
+	i       *Integration
+	d       Deps
+	lease   *lease
+	runID   string
+	claimID string // immutable for this drive; a node name is not process ownership
+	log     *slog.Logger
 
 	// run is the row as this drive last wrote or read it. Only the drive's
 	// own goroutine touches it; a step's goroutine reads facts instead.
@@ -285,6 +286,9 @@ func refusedWith(r *pipelines.Refusal) verdict {
 // the run over mid-conclusion -- and a cancel stops the runner's in-flight
 // work at once.
 func (dr *runDriver) drive(ctx context.Context) driveOutcome {
+	ctx, stopJournal := context.WithCancel(ctx)
+	defer stopJournal()
+	dr.guardJournal()
 	dr.execCtx, dr.cancelExec = context.WithCancel(context.WithoutCancel(ctx))
 	if dr.run.CancelRequested {
 		dr.lease.cancel()
@@ -1084,6 +1088,9 @@ func (dr *runDriver) settle(ctx context.Context, t *stepTrack, rec receipt) {
 // A missing intent or receipt is not permission to continue. Leave the run
 // unfinished for recovery, stop renewing this drive, and publish no verdict.
 func (dr *runDriver) journalUnavailable(step string, err error) {
+	if driveStopped(err) {
+		return
+	}
 	dr.d.Logger.Error("pipelines: journal write failed; stopping this drive for recovery", "runId", dr.runID, "step", step, "error", dr.mask(err.Error()))
 	dr.journalFailed.Store(true)
 	dr.lease.lose()
@@ -1452,11 +1459,10 @@ func (dr *runDriver) verdictOfSteps() verdict {
 // run row completed -- in that order, so a replica that stops half-way leaves
 // the run unfinished, to be recovered and concluded again, rather than a work
 // run open that no sweep closes (a pipeline's run is its runner's own). Only
-// the row's write is under the gate, as one fresh read and one write: the
-// work run's close and the calls to GitHub come before it, outside, behind
-// the fresh-read fence every unguarded write of a drive takes, while the
-// heartbeat keeps the lease (drive). A successful FULL run then teaches the
-// pipeline its packages' timings. It answers whether the run is concluded.
+// individual run and journal writes are under the gate, each with a fresh
+// ownership check. GitHub calls remain outside it and require destination
+// reconciliation if ownership changes while a request is in flight. A
+// successful FULL run then teaches the pipeline its packages' timings. It answers whether the run is concluded.
 func (dr *runDriver) conclude(ctx context.Context, v verdict) bool {
 	if !dr.stillHolds(ctx) {
 		return false
@@ -1674,6 +1680,7 @@ func applyRunPatch(r *Run, p RunPatch) {
 	set(&r.WorkRunID, p.WorkRunID)
 	set(&r.WorkGoalID, p.WorkGoalID)
 	set(&r.DriverNodeID, p.DriverNodeID)
+	set(&r.DriverLeaseID, p.DriverLeaseID)
 	set(&r.CancelledBy, p.CancelledBy)
 	if p.CheckRunID != nil {
 		r.CheckRunID = *p.CheckRunID

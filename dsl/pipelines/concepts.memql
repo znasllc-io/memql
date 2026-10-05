@@ -103,6 +103,7 @@ concept run {
   workRunId          string  @description("The v1:work:run this run compiled into, once the driver opened it. Empty for a run refused before any work began. A plain string FK, not a @relationship, and not by choice: this domain declares its own `run`, and a relationship target resolves the owning domain's concept before any import, so the edge would canonicalize this value under v1:pipelines:run -- the wrong concept. Stored as the driver writes it.")
   workGoalId         string  @description("The v1:work:goal behind that work run.")
   driverNodeId       string  @description("MEMQL_NODE_ID of the agent replica holding this run's lease. Empty while queued. Compared byte for byte with a replica's own id, so it is stored exactly as the replica wrote it.")
+  driverLeaseId     string  @description("Opaque ownership token, replaced on every claim, including a restarted process with the same node id. Journal writers compare it under the run gate.")
   driverHeartbeatAt  datetime  @description("When the driving replica last renewed its lease. Renewed every 30 seconds; a lease older than 120 seconds may be claimed by another agent replica.")
   cancelRequested    bool  @description("Somebody asked this run to stop. The driving replica reads it at its next heartbeat and cancels what is executing.")
   cancelledBy        string  @description("v1:identity:user.id of the person who asked for the stop, or a system sentinel.")

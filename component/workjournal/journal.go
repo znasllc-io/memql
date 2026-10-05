@@ -137,7 +137,8 @@ type Journal struct {
 	now    func() time.Time
 	nodeID string
 	// beat overrides HeartbeatInterval so a test can watch several beats.
-	beat time.Duration
+	beat  time.Duration
+	guard WriteGuard
 }
 
 // New builds a journal. A nil engine yields a journal whose methods are all
@@ -150,6 +151,36 @@ func New(engine Executor, logger *slog.Logger, nodeID string) *Journal {
 		logger = slog.Default()
 	}
 	return &Journal{engine: engine, logger: logger, now: time.Now, nodeID: nodeID, beat: HeartbeatInterval}
+}
+
+// WriteGuard validates the caller's ownership and executes one journal write
+// within the same critical section. It must call write synchronously at most
+// once, propagate its error, and never hold a lock across an external effect.
+// The caller chooses the ownership record; the journal owns no lease policy.
+type WriteGuard func(ctx context.Context, write func(context.Context) error) error
+
+// WithWriteGuard returns an independent journal whose writes, including its
+// background heartbeat, pass through guard. The shared journal is unchanged.
+// Install the guard before Begin or Reopen; existing handles retain their
+// original journal. Guards compose so a second guard cannot remove the first.
+func (j *Journal) WithWriteGuard(guard WriteGuard) *Journal {
+	if j == nil {
+		return nil
+	}
+	next := *j
+	if guard == nil {
+		return &next
+	}
+	previous := j.guard
+	next.guard = func(ctx context.Context, write func(context.Context) error) error {
+		return guard(ctx, func(gctx context.Context) error {
+			if previous != nil {
+				return previous(gctx, write)
+			}
+			return write(gctx)
+		})
+	}
+	return &next
 }
 
 // Work describes the pass being opened.
@@ -304,7 +335,7 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 		arg("requestedVia", firstNonEmpty(w.RequestedVia, "api")),
 		objectArg("input", w.Input),
 	)
-	if _, err := j.engine.Execute(auth.ContextWithInternalOrigin(ctx), goalCall); err != nil {
+	if err := j.exec(ctx, goalCall); err != nil {
 		return nil, fmt.Errorf("workjournal: open goal: %w", err)
 	}
 
@@ -334,7 +365,7 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 		arg("parentRunId", w.ParentRunID),
 		objectArg("variables", w.Variables),
 	)
-	if _, err := j.engine.Execute(auth.ContextWithInternalOrigin(ctx), runCall); err != nil {
+	if err := j.exec(ctx, runCall); err != nil {
 		return nil, fmt.Errorf("workjournal: open run: %w", err)
 	}
 	// The first heartbeat rides this write: `createWorkRun` takes no
@@ -782,7 +813,17 @@ func (j *Journal) exec(ctx context.Context, q string) error {
 	if j == nil || j.engine == nil {
 		return fmt.Errorf("workjournal: no journal writer is configured")
 	}
-	if _, err := j.engine.Execute(auth.ContextWithInternalOrigin(ctx), q); err != nil {
+	write := func(wctx context.Context) error {
+		_, err := j.engine.Execute(auth.ContextWithInternalOrigin(wctx), q)
+		return err
+	}
+	var err error
+	if j.guard != nil {
+		err = j.guard(ctx, write)
+	} else {
+		err = write(ctx)
+	}
+	if err != nil {
 		j.logger.Warn("workjournal: a journal write did not land", "error", err, "call", firstWord(q))
 		return err
 	}
@@ -928,9 +969,6 @@ func (j *Journal) StampBinding(ctx context.Context, ownerUserID, stepID string, 
 	if owner == "" {
 		return fmt.Errorf("workjournal: a binding needs the step owner's id to be written under")
 	}
-	_, err := j.engine.Execute(
-		auth.ContextWithInternalOrigin(auth.ContextWithUserActor(ctx, owner)),
-		call("mutation updateWorkStep", arg("stepId", stepID), objectArg("binding", binding)),
-	)
-	return err
+	return j.exec(auth.ContextWithUserActor(ctx, owner),
+		call("mutation updateWorkStep", arg("stepId", stepID), objectArg("binding", binding)))
 }

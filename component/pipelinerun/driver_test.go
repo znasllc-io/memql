@@ -182,7 +182,7 @@ func waitDrives(t *testing.T, integ *Integration) {
 // the payload flattened at the top and whole under "payload".
 func graphEvent(base string, r Run) events.Event {
 	payload := map[string]any{
-		"status": r.Status, "driverNodeId": r.DriverNodeID, "cancelRequested": r.CancelRequested,
+		"status": r.Status, "driverNodeId": r.DriverNodeID, "driverLeaseId": r.DriverLeaseID, "cancelRequested": r.CancelRequested,
 		"runKey": r.RunKey, "pipelineId": r.PipelineID,
 	}
 	flat := map[string]any{"id": "v1:pipelines:run:" + r.ID, "concept": RunConcept, "payload": payload}
