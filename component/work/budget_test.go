@@ -73,7 +73,7 @@ func TestWorkloadBudgetsPreserveQuickPathAndNeverRaiseDeclaredLimits(t *testing.
 	for _, tc := range []struct {
 		tier        string
 		wall, calls float64
-	}{{"quick", 60000, 3}, {"lookup", 600000, 12}, {"research", 2700000, 48}, {"project", 7200000, 96}} {
+	}{{"quick", 120000, 3}, {"lookup", 600000, 12}, {"research", 2700000, 48}, {"project", 7200000, 96}} {
 		got := WorkloadCeilings(Ceilings{}, tc.tier)
 		if got["wallClockMs"] != tc.wall || got["maxModelCalls"] != tc.calls {
 			t.Fatalf("%s limits: %v", tc.tier, got)

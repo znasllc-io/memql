@@ -445,7 +445,7 @@ func (c *RunCeilings) Deadline(ctx context.Context, rc common.RunContext) (time.
 // DeclaredDeadline bounds the entire tool loop by the person's hard limit.
 // Each model call separately gets Deadline's current workload estimate. An
 // execution that discovers missing evidence can grow from quick to lookup
-// without inheriting an obsolete 60-second parent deadline.
+// without inheriting an obsolete quick-response parent deadline.
 func (c *RunCeilings) DeclaredDeadline(ctx context.Context, rc common.RunContext) (time.Time, error) {
 	if rc.GoalId == "" {
 		return time.Time{}, nil

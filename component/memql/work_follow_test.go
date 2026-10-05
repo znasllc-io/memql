@@ -111,3 +111,23 @@ func TestWorkObserverDeliversPersistedBuiltinFileReceipt(t *testing.T) {
 	steps[0]["status"] = "failed"
 	require.Empty(t, workResultFiles(steps), "a failed step is not a delivery receipt")
 }
+
+func TestSlowClassificationReleasesTheComposerWithoutResubmitting(t *testing.T) {
+	read := func(_ context.Context, name, _ string) ([]map[string]any, error) {
+		if name == "workRunForOwner" {
+			return []map[string]any{{"status": "compiling", "startedAt": time.Now().Add(-20 * time.Second).Format(time.RFC3339Nano)}}, nil
+		}
+		return nil, nil
+	}
+	ctx := context.WithValue(context.Background(), workFollowModeKey{}, followBackground)
+	_, err := followWorkRun(ctx, "run", read, nil, nil, time.Millisecond)
+	var pending *workPending
+	require.ErrorAs(t, err, &pending)
+	require.False(t, pending.Waiting)
+}
+
+func TestCapabilityDiscoveryRanksRelevantPartialMatches(t *testing.T) {
+	require.Greater(t, workCapabilityScore("memory search conversations", "work.workSearchConversations", "work.worksearchconversations private saved messages"), 0)
+	require.Greater(t, workCapabilityScore("workSearchConversations", "work.workSearchConversations", "work.worksearchconversations"), workCapabilityScore("workSearchConversations", "other", "mentions worksearchconversations"))
+	require.Zero(t, workCapabilityScore("invoices", "work.workSearchConversations", "saved messages"))
+}

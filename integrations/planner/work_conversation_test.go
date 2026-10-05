@@ -31,7 +31,7 @@ func TestConversationFollowupUsesHistoryAndNeverTextOnlyReuse(t *testing.T) {
 	if !strings.Contains(eng.aiData[0]["conversation"].(string), "your name") {
 		t.Fatalf("classifier lost history: %v", eng.aiData)
 	}
-	if remaining := time.Until(eng.deadlines[0]); remaining <= 0 || remaining > 15*time.Second {
+	if remaining := time.Until(eng.deadlines[0]); remaining <= 0 || remaining > 60*time.Second {
 		t.Fatalf("unbounded triage: %v", remaining)
 	}
 	for _, q := range eng.queries {

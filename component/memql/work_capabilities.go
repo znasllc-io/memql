@@ -90,6 +90,7 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 		return nil, fmt.Errorf("provide a short capability search")
 	}
 	matches := []map[string]any{}
+	scores := map[string]int{}
 	concepts := map[string][]string{}
 	for _, fn := range e.functions.List() {
 		if !e.workCapabilityAllowed(ctx, fn) {
@@ -113,16 +114,11 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 		for _, field := range workCapabilityFields(fn) {
 			haystack += " " + strings.ToLower(field.Name+" "+field.Description+" "+fmt.Sprint(field.Enum))
 		}
-		found := true
-		for _, word := range strings.Fields(search) {
-			if !strings.Contains(haystack, word) {
-				found = false
-				break
-			}
-		}
-		if !found {
+		score := workCapabilityScore(search, name, haystack)
+		if score == 0 {
 			continue
 		}
+		scores[name] = score
 		fields := []map[string]any{}
 		for _, field := range workCapabilityFields(fn) {
 			fields = append(fields, map[string]any{"name": field.Name, "type": field.Type, "optional": field.Optional, "description": field.Description, "enum": field.Enum})
@@ -133,7 +129,13 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 		}
 		matches = append(matches, map[string]any{"name": name, "kind": fn.FunctionKind, "description": description, "arguments": fields, "app": workCapabilityApp(fn), "concept": concept})
 	}
-	sort.Slice(matches, func(i, j int) bool { return matches[i]["name"].(string) < matches[j]["name"].(string) })
+	sort.Slice(matches, func(i, j int) bool {
+		a, b := matches[i]["name"].(string), matches[j]["name"].(string)
+		if scores[a] != scores[b] {
+			return scores[a] > scores[b]
+		}
+		return a < b
+	})
 	total := len(matches)
 	if len(matches) > 30 {
 		matches = matches[:30]
@@ -249,4 +251,28 @@ func workCapabilityFields(fn *Function) []*FunctionArgsField {
 		return fn.BuiltinArgs.Fields
 	}
 	return nil
+}
+
+// Natural-language discovery ranks partial term matches. Requiring every word
+// made extra descriptors turn a relevant capability into an empty result.
+func workCapabilityScore(search, name, description string) int {
+	search = strings.ToLower(search)
+	name = strings.ToLower(name)
+	if search == name || strings.HasSuffix(name, "."+search) {
+		return 10000
+	}
+	score, matched := 0, 0
+	for _, word := range strings.Fields(search) {
+		if strings.Contains(description, word) {
+			matched++
+			score++
+			if strings.Contains(name, word) {
+				score += 5
+			}
+		}
+	}
+	if matched == len(strings.Fields(search)) {
+		score += 20
+	}
+	return score
 }

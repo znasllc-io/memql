@@ -210,7 +210,7 @@ func (l *PlannerAgentLoop) CompileGoalForRun(ctx context.Context, req CompileReq
 	guidance := l.descriptionGuidance(ctx, req, sig)
 
 	// Tier 3: ONE classifier call answering complexity AND sectionability.
-	triageCtx, cancelTriage := context.WithTimeout(airoute.WithCallPurpose(ctx, "Understanding request", 0), 15*time.Second)
+	triageCtx, cancelTriage := context.WithTimeout(airoute.WithCallPurpose(ctx, "Understanding request", 0), 60*time.Second)
 	complexity, _, sectionable, cerr := l.classifyGoal(triageCtx, req.Statement, time.Now().UTC().Format(time.RFC3339), guidance, keys, conversation)
 	cancelTriage()
 	if cerr == nil || !memql.IsProviderUnavailable(cerr) {

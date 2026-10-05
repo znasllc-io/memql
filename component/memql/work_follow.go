@@ -160,7 +160,9 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 		outcome, _ := run["outcome"].(map[string]any)
 		workload, _ := outcome["workload"].(string)
 		title, _ := outcome["workTitle"].(string)
-		if mode == followSnapshot || (mode == followBackground && workload != "" && workload != "quick") {
+		started, hasStart := askTimestamp(run["startedAt"])
+		queuedClassification := run["status"] == "compiling" && hasStart && time.Since(started) >= 15*time.Second
+		if mode == followSnapshot || (mode == followBackground && ((workload != "" && workload != "quick") || queuedClassification)) {
 			return answer.String(), &workPending{Title: title, Workload: workload}
 		}
 		timer := time.NewTimer(interval)

@@ -278,7 +278,7 @@ func EffectiveWorkloadCeilings(c Ceilings, workload string) Ceilings {
 	switch workload {
 	case "lookup":
 	case "quick":
-		wall, calls = 60000, 3
+		wall, calls = 120000, 3
 	case "research":
 		wall, calls, retries = 2700000, 48, 2
 	case "project":

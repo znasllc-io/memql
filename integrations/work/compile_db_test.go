@@ -532,7 +532,7 @@ func TestCompileDB_QuickEstimatePromotesAcrossReplicasWithoutResettingSpend(t *t
 		t.Fatal(err)
 	}
 	declared, err := guard.DeclaredDeadline(ctx, rc)
-	if err != nil || declared.Sub(quick) != 4*time.Minute {
+	if err != nil || declared.Sub(quick) != 3*time.Minute {
 		t.Fatalf("declared/estimated deadline %v %v: %v", declared, quick, err)
 	}
 	for range 3 {
