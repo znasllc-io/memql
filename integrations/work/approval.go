@@ -333,8 +333,8 @@ func legacyFailureHash(stored string, subject map[string]any, runId string) bool
 // the run met the claim the failing execution still held -- a lease of four
 // minutes from its dispatch, and a person answers within that as a rule --
 // every agent lost it, no second event came, and the sweep closed the run as
-// abandoned. Every other approval is released bare, as before: what it parked
-// is a step waiting on a person, not a failure to run again.
+// abandoned. Every answered approval carries its own humanResumeId: a normal question
+// also resumes before the initial lease expires, without rerunning a finished step.
 func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, decision string, retry *failureRetry, now time.Time) (bool, error) {
 	if runId == "" {
 		return false, nil
@@ -384,6 +384,7 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 			}
 		}
 		fields["humanWaitMs"] = paused
+		fields["humanResumeId"] = memql.BareShortId(approvalId)
 		fields["status"] = runStatusRunning
 		fields["heartbeatAt"] = rfc(now)
 		if retry != nil {

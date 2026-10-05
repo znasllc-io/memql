@@ -51,6 +51,7 @@ shape run workRunFull {
   status
   waitingOn
   continuation
+  humanResumeId
   humanWaitMs
   spent
   nodeId

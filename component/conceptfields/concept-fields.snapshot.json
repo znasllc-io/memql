@@ -8529,6 +8529,7 @@
         "goalSignature",
         "head",
         "heartbeatAt",
+        "humanResumeId",
         "humanWaitMs",
         "initialChainHead",
         "input",

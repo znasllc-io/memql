@@ -3,6 +3,7 @@ package work
 import (
 	"context"
 	"github.com/uptrace/bun"
+	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	"sync"
@@ -62,9 +63,41 @@ func TestHumanFeedbackDBTwoReplicasAskOnceResumeAndRestoreCompletedTools(t *test
 	if _, err = peers[0].handleDecideApproval(runCtx, map[string]any{"approvalId": ids[0], "decision": "answered", "answer": map[string]any{"text": "PDF"}}, 0); err == nil {
 		t.Fatal("agent answered its own question")
 	}
+	// The initial execution's lease is still held when a person answers.
+	initial := automations.NewClusterExecutionGuard(func() *bun.DB { return db }, testLogger()).StrictClaimer()
+	if !initial.ClaimWithTTL(person, runClaimName, runID, runClaimTTL) {
+		t.Fatal("could not acquire original execution lease")
+	}
 	nodes, err = peers[1].handleDecideApproval(person, map[string]any{"approvalId": ids[0], "decision": "answered", "answer": map[string]any{"text": "PDF"}}, 0)
 	if err != nil || decodeReply(t, nodes)["runResumed"] != true {
 		t.Fatalf("answer did not resume: %v %v", nodes, err)
+	}
+	run, err = peers[0].store().runForOwner(memql.ContextWithFreshRead(person), runID)
+	if err != nil || rowString(run, "humanResumeId") != memql.BareShortId(ids[0]) {
+		t.Fatalf("answer lost its dispatch identity: %v %v", run, err)
+	}
+	dispatchers := []*capturingDispatcher{{}, {}}
+	for n, peer := range peers {
+		peer.SetDispatcher(dispatchers[n])
+		peer.SetRunClaimer(automations.NewClusterExecutionGuard(func() *bun.DB { return db }, testLogger()).StrictClaimer())
+	}
+	req, ok := runEventFields(remedyEvent(merged(run, map[string]any{"id": runID})))
+	if !ok || req.HumanResumeId == "" {
+		t.Fatal("run event lost answer identity")
+	}
+	for range 3 {
+		for _, peer := range peers {
+			wg.Add(1)
+			go func(p *Integration) { defer wg.Done(); p.dispatchRun(person, req) }(peer)
+		}
+		wg.Wait()
+	}
+	if got := len(dispatchers[0].seen()) + len(dispatchers[1].seen()); got != 1 {
+		t.Fatalf("answer dispatched %d times across two replicas with original lease held; want exactly once", got)
+	}
+	journal, err := automations.LoadRunJournal(person, engines[1], runID)
+	if err != nil || journal.HumanResumeId != req.HumanResumeId {
+		t.Fatalf("execution replica lost answer identity: %v %v", journal, err)
 	}
 	id, err := peers[0].AskFeedback(runCtx, owner, runID, "Which format?", "text", nil, time.Time{})
 	if err != nil || id != ids[0] {
