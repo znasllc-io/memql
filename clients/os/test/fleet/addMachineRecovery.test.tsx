@@ -63,7 +63,7 @@ it("the connected Back action finishes the flow and returns to Machines", async 
   const view = await connectedFlow(fakeConnection({ myWorkersWithStatus: [machine()] }));
   const onLeave = vi.fn();
   render(withSession(<AddMachinePage flow={view.result.current} onLeave={onLeave} />));
-  fireEvent.click(screen.getByRole("button", { name: "Back to Machines" }));
+  fireEvent.click(screen.getAllByRole("button", { name: "Back to Machines" })[0]!);
   expect(onLeave).toHaveBeenCalledWith("");
   expect(view.result.current.active).toBe(false);
   expect(view.result.current.facts.cancelAsked).toBe(false);

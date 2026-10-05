@@ -102,7 +102,7 @@ export function AddMachinePage({
       className="os-fleet-addpage"
       icon={<Monitor aria-hidden />}
       title="Add a machine"
-      lead="Connect a computer to this cluster so it can run work for it."
+      lead="Connect a computer to run work for this cluster."
       /* GOING BACK IS LEAVING, NOT CANCELLING. With a token waiting to be used
          it asks the Leave question -- the token is shown only here -- and
          never revokes anything; before the mint there is nothing to keep, so
@@ -175,7 +175,7 @@ export function AddMachinePage({
         return (
           <MachineStop
             draft={flow.draft}
-          localTest={localCockpitInstall(config.domain)}
+            localTest={localCockpitInstall(config.domain)}
             onDraft={flow.setDraft}
             connected={facts.connected}
             mintError={facts.mintError}

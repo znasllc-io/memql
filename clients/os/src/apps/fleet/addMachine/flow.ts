@@ -437,15 +437,15 @@ export function stopsFor(facts: FlowFacts, checks: readonly Check[]): FlowStop[]
   const machineStop: FlowStop = {
     id: "machine",
     name: "This machine",
-    sentence: "What it is called, and what it will run.",
+    sentence: "Choose a name and what this machine can do.",
     state: phase === "describe" ? "open" : phase === "minting" ? "current" : "done",
-    answer: phase === "describe" ? (facts.mintError === "" ? "" : "The token was not minted") : draftSummary(facts.draft),
+    answer: phase === "describe" ? (facts.mintError === "" ? "" : "Couldn’t prepare installation") : draftSummary(facts.draft),
   };
 
   const installStop: FlowStop = {
     id: "install",
     name: "Install",
-    sentence: "One line, on the machine itself.",
+    sentence: "Run in Terminal on the machine you’re adding.",
     state: phase === "describe" || phase === "minting" ? "ahead" : phase === "waiting" ? "open" : "done",
     answer:
       phase === "waiting"
@@ -460,7 +460,7 @@ export function stopsFor(facts: FlowFacts, checks: readonly Check[]): FlowStop[]
   const connectStop: FlowStop = {
     id: "connect",
     name: "Connect",
-    sentence: "The cluster listens. Nothing to reload.",
+    sentence: "This step completes when your machine connects.",
     state: phase === "describe" || phase === "minting" ? "ahead" : phase === "waiting" ? "current" : "done",
     answer:
       phase === "waiting"
@@ -479,7 +479,7 @@ export function stopsFor(facts: FlowFacts, checks: readonly Check[]): FlowStop[]
   const checksStop: FlowStop = {
     id: "checks",
     name: "Checks",
-    sentence: "Online, steady, and what you asked for.",
+    sentence: "Check that your machine is ready.",
     state:
       phase !== "connected"
         ? "ahead"
@@ -564,7 +564,7 @@ export function barFor(facts: FlowFacts, checks: readonly Check[]): FlowBar {
   const label = name === "" ? "the machine" : name;
 
   if (phase === "minting") {
-    return { state: "Minting a token", detail: `for ${label}`, tone: "busy", question: "", acts: [] };
+    return { state: "Preparing installation", detail: label, tone: "busy", question: "", acts: [] };
   }
 
   if (phase === "describe") {
@@ -573,22 +573,20 @@ export function barFor(facts: FlowFacts, checks: readonly Check[]): FlowBar {
       // THE SAME TWO WORDS EVERY WIZARD USES. What is still needed while the
       // step cannot go forward, and "Ready to ..." the moment it can -- so the
       // words change at the same instant the forward act appears beside them.
-      state: facts.mintError !== "" ? "The token was not minted" : canMint ? "Ready to mint" : "Describe the machine",
+      state: facts.mintError !== "" ? "Couldn’t prepare installation" : canMint ? "Ready to continue" : "Name your machine",
       detail:
         facts.mintError !== ""
-          ? "nothing was created; mint again"
+          ? "Try again."
           : !facts.connected
-            ? "a token can only be minted over a live connection to the cluster"
-            : name === ""
-              ? "a name, and which operating system it runs"
-              : `a token for ${name}, carried by the install command`,
+            ? "Reconnect to the cluster to continue."
+            : "",
       tone: "none",
       question: "",
       acts: [
         { id: "cancel", label: "Cancel", tone: "quiet", text: true },
         // ABSENT, NEVER DISABLED (rule 12): a mint with no name is refused by
         // the engine, so it is not offered until there is one.
-        ...(canMint ? [{ id: "mint" as const, label: "Mint a token", tone: "primary" as const }] : []),
+        ...(canMint ? [{ id: "mint" as const, label: "Continue", tone: "primary" as const }] : []),
       ],
     };
   }
@@ -614,40 +612,40 @@ export function barFor(facts: FlowFacts, checks: readonly Check[]): FlowBar {
         tone: "paused",
         question:
           facts.revokeError === ""
-            ? `Cancel adding ${label}? The token is revoked, so the install command stops working.`
+            ? `Cancel adding ${label}? This revokes the token and stops the install command from working.`
             : `The token was not revoked: ${facts.revokeError}. It is still live; try again, or leave and keep it.`,
         acts: [
-          { id: "keepWaiting", label: "Keep waiting", tone: "quiet", text: true },
+          { id: "keepWaiting", label: "Keep setting up", tone: "quiet", text: true },
           // A REFUSED REVOKE MUST NOT TRAP ANYBODY. The token is still live and
           // the cluster will not take it back, so going with it is offered
           // right here rather than two questions away.
           ...(facts.revokeError === "" ? [] : [{ id: "leaveKeepToken" as const, label: "Leave, keep the token", tone: "quiet" as const, text: true }]),
-          { id: "revokeAndLeave", label: "Revoke the token and cancel", tone: "danger", busy: facts.revoking },
+          { id: "revokeAndLeave", label: "Cancel setup", tone: "danger", busy: facts.revoking },
         ],
       };
     }
     if (facts.leaveAsked === true) {
       return {
-        state: "Leave?",
+        state: "Back to Machines?",
         detail: "",
         tone: "paused",
-        question: `The token keeps working: if the install finishes later, ${label} appears in Machines on its own. The token and the command are shown only here, so copy them first.`,
+        question: `Copy the install command before leaving; it won’t be shown again. ${label} will appear in Machines when it connects.`,
         acts: [
           { id: "keepWaiting", label: "Stay", tone: "quiet", text: true },
-          { id: "leaveKeepToken", label: "Leave", tone: "primary" },
+          { id: "leaveKeepToken", label: "Back to Machines", tone: "primary" },
         ],
       };
     }
     return {
       state: `Waiting for ${label}`,
       detail: waitedLong(facts)
-        ? "this is taking a while -- the Connect stop names what usually went wrong"
-        : "run the command on the machine; this moves on by itself the moment it registers",
+        ? "Taking longer than expected. See Connect for help."
+        : "Updates automatically when connected.",
       tone: "busy",
       question: "",
       acts: [
-        { id: "cancel", label: "Cancel", tone: "quiet", text: true },
-        { id: "leave", label: "Leave", tone: "quiet" },
+        { id: "cancel", label: "Cancel setup", tone: "quiet", text: true },
+        { id: "leave", label: "Back to Machines", tone: "quiet" },
       ],
     };
   }
@@ -661,7 +659,7 @@ export function barFor(facts: FlowFacts, checks: readonly Check[]): FlowBar {
   return {
     state: settled ? "Ready" : stopped ? "Connected, with a problem" : "Connected",
     detail: settled
-      ? `${shown} is online and steady, and every check settled`
+      ? `${shown} is ready to use.`
       : pending === undefined
         ? `${shown} is online`
         : `${pending.name}: ${pending.answer}`,
@@ -671,7 +669,7 @@ export function barFor(facts: FlowFacts, checks: readonly Check[]): FlowBar {
       { id: "open", label: `Open ${shown}`, tone: "quiet", text: true },
       // Leaving remains possible, but only completed checks earn Done. The
       // machine is registered by now, so there is nothing left to cancel.
-      { id: "done", label: settled ? "Done" : "Leave", tone: settled ? "primary" : "quiet" },
+      { id: "done", label: settled ? "Done" : "Back to Machines", tone: settled ? "primary" : "quiet" },
     ],
   };
 }

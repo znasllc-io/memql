@@ -363,13 +363,13 @@ describe("the action bar follows the state", () => {
   it("offers Mint only over a live connection with a name typed, and Cancel always", () => {
     expect(barFor(facts({ draft: { ...MAC, name: "" } }), []).acts.map((a) => a.id)).toEqual(["cancel"]);
     expect(barFor(facts({ connected: false }), []).acts.map((a) => a.id)).toEqual(["cancel"]);
-    expect(barFor(facts({ connected: false }), []).detail).toMatch(/live connection/);
+    expect(barFor(facts({ connected: false }), []).detail).toMatch(/Reconnect to the cluster/);
     expect(barFor(facts(), []).acts.map((a) => a.id)).toEqual(["cancel", "mint"]);
   });
 
   it("says a refused mint created nothing and offers Mint again", () => {
     const bar = barFor(facts({ mintError: "forbidden" }), []);
-    expect(bar.state).toBe("The token was not minted");
+    expect(bar.state).toBe("Couldn’t prepare installation");
     expect(bar.acts.map((a) => a.id)).toEqual(["cancel", "mint"]);
   });
 
@@ -387,7 +387,7 @@ describe("the action bar follows the state", () => {
     expect(bar.acts.map((a) => [a.id, a.text === true])).toEqual([["cancel", true], ["leave", false]]);
     const long = facts({ mint: MINT, mintedAt: new Date(NOW.getTime() - LONG_WAIT_MS) });
     expect(waitedLong(long)).toBe(true);
-    expect(barFor(long, []).detail).toMatch(/taking a while/);
+    expect(barFor(long, []).detail).toMatch(/Taking longer than expected/);
   });
 
   // CANCEL REVOKES A LIVE CREDENTIAL, so it asks -- and it is its OWN question
@@ -397,16 +397,16 @@ describe("the action bar follows the state", () => {
   it("asks before cancelling a minted token, because cancelling revokes it", () => {
     const bar = barFor(facts({ mint: MINT, cancelAsked: true }), []);
     expect(bar.state).toBe("Cancel?");
-    expect(bar.question).toMatch(/token is revoked/);
+    expect(bar.question).toMatch(/revokes the token/);
     expect(bar.acts.map((a) => [a.id, a.text === true])).toEqual([["keepWaiting", true], ["revokeAndLeave", false]]);
     expect(bar.acts.find((a) => a.id === "revokeAndLeave")?.tone).toBe("danger");
   });
 
   it("asks once before leaving, for the one thing leaving costs here: the token is shown only on this page", () => {
     const bar = barFor(facts({ mint: MINT, leaveAsked: true }), []);
-    expect(bar.state).toBe("Leave?");
-    expect(bar.question).toMatch(/keeps working/);
-    expect(bar.question).toMatch(/shown only here/);
+    expect(bar.state).toBe("Back to Machines?");
+    expect(bar.question).toMatch(/will appear in Machines when it connects/);
+    expect(bar.question).toMatch(/won’t be shown again/);
     expect(bar.acts.map((a) => [a.id, a.text === true])).toEqual([["keepWaiting", true], ["leaveKeepToken", false]]);
   });
 

@@ -291,7 +291,12 @@ every app epic after it:
   registration is MATCHED by the mint's identity, never counted: the
   population grows for every reason but this one. The pure reading
   (`addMachine/flow.ts`) is tested on fixtures; the page through the fake
-  connection.
+  connection. The install step presents the install command and, when asked
+  for, a second local-model setup command. `CopyField` copies from anywhere in
+  the row and confirms success in place. The standalone token is available
+  under “Connection token”; it is still never persisted. Shared `TrailRow`
+  provides the single contextual help entry on desktop and phone, with a
+  placeholder modal until the walkthrough video and option documentation ship.
 
 - **A live surface must be RETAINED.** A `LiveCollection` opens its
   subscription and runs its seed from `retain()` and from nowhere else;

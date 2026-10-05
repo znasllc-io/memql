@@ -14836,62 +14836,49 @@ button.os-cluster-mesh-peer:focus-visible {
   min-width: 0;
 }
 .os-copyfield-line {
-  position: relative;
   display: flex;
+  align-items: center;
   min-width: 0;
+  padding: 5px 8px 5px 12px;
+  gap: 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-raised);
+  cursor: pointer;
 }
-.os-copyfield-input {
+.os-copyfield-line:focus-within { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+.os-copyfield-input.os-input {
   flex: 1 1 auto;
   min-width: 0;
-  /* Room for the icon, so the last characters of a long value never sit
-   * under it. */
-  padding-right: 32px;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  outline: 0;
+  box-shadow: none;
+  background: transparent;
   text-overflow: ellipsis;
-  cursor: text;
+  cursor: pointer;
 }
-.os-copyfield-input.os-mono {
-  font-size: var(--os-text-sm);
-}
-/* THE ICON IS ALWAYS THERE. CopyValue's arrives on hover because a standing
- * icon on every line of a facts list is noise; here the icon is the field's
- * only control and the reason the field exists. Muted until the pointer
- * reaches it, the accent once it has copied. */
+.os-copyfield-input.os-mono { font-size: var(--os-text-sm); }
 .os-copyfield-copy {
-  position: absolute;
-  right: 5px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 70px;
+  min-height: 32px;
   padding: 0;
   border: 0;
   border-radius: var(--os-radius-xs);
   background: transparent;
   color: var(--os-muted);
-  cursor: pointer;
-  transition: color var(--os-duration-fast) var(--os-ease);
-}
-.os-copyfield-copy:hover {
-  color: var(--os-ink);
-}
-.os-copyfield-copy:focus-visible {
-  outline: 2px solid var(--os-accent);
-  outline-offset: 1px;
-}
-.os-copyfield-copy[data-copied] {
-  color: var(--os-accent);
-}
-.os-copyfield-note {
+  font: inherit;
   font-size: var(--os-text-xs);
-  color: var(--os-muted);
+  cursor: pointer;
 }
-@media (prefers-reduced-motion: reduce) {
-  .os-copyfield-copy {
-    transition: none;
-  }
-}
+.os-copyfield-copy[data-copied] { color: var(--os-accent); }
+.os-copyfield-note { font-size: var(--os-text-xs); color: var(--os-muted); }
 
 /* ---- the stops' bodies ---- */
 .os-fleet-addstop {
@@ -14901,6 +14888,18 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-fleet-addstop .os-subhead {
   margin: 4px 0 0;
 }
+.os-fleet-machine { max-width: 34rem; }
+.os-fleet-platforms { display: inline-flex; align-self: flex-start; padding: 3px; gap: 2px; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-raised); }
+.os-fleet-platforms label { position: relative; cursor: pointer; }
+.os-fleet-platforms span { display: block; padding: 5px 16px; border-radius: var(--os-radius-xs); color: var(--os-muted); font-size: var(--os-text-base); }
+.os-fleet-platforms input:checked + span { background: var(--os-hover); color: var(--os-ink); }
+.os-fleet-platforms input:focus-visible + span { outline: 2px solid var(--os-accent); outline-offset: 1px; }
+.os-fleet-install { gap: 20px; }
+.os-fleet-install-command { display: grid; gap: 8px; min-width: 0; }
+.os-fleet-install-token { font-size: var(--os-text-sm); color: var(--os-muted); }
+.os-fleet-install-token > summary { width: fit-content; cursor: pointer; }
+.os-fleet-install-token > summary:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 3px; }
+.os-fleet-install-token > .os-copyfield { margin-top: 10px; }
 /* The choice cards sit inside a rail body that is already indented, so they
  * take the remaining width rather than the panel's. */
 .os-fleet-addstop .os-choice-stack {
@@ -15213,10 +15212,9 @@ button.os-cluster-mesh-peer:focus-visible {
 }
 /* The numbered trail reflects registration events, never a fabricated Next. */
 .os-fleet-addpage { container-type: inline-size; }
-.fleet-install-options { display: flex; flex-direction: column; margin-top: 18px; }
-.fleet-install-options > div { position: relative; border-top: 1px solid var(--os-line); padding: 18px 36px 18px 0; }
-.fleet-install-options p { margin: 6px 0 0 24px; color: var(--os-muted); font-size: var(--os-text-sm); line-height: 1.6; }
-.fleet-install-options .os-info-detail { position: absolute; top: 15px; right: 0; }
+.fleet-install-options { display: flex; flex-direction: column; margin-top: 8px; }
+.fleet-install-options > div { position: relative; border-top: 1px solid var(--os-line); padding: 12px 0; }
+.fleet-install-options p { margin: 4px 0 0 42px; color: var(--os-muted); font-size: var(--os-text-sm); line-height: 1.6; }
 .os-activity-target { position: relative; min-width: 0; }
 .os-activity-target[data-activity] { outline: 2px dashed var(--os-accent); outline-offset: 5px; border-radius: 6px; }
 .os-activity-target[data-activity="running"] { outline-style: double; outline-width: 4px; }
@@ -15265,7 +15263,6 @@ button.os-cluster-mesh-peer:focus-visible {
 /* Keep the guided workflow's own scroller and fixed action floor intact. */
 .fleet-retained-workspace { height: 100%; min-height: 0; }
 .fleet-install-options > div { padding-block: 12px; }
-.fleet-install-options .os-info-detail { top: 9px; }
 
 /* Fleet details must fit the space left by the desktop navigation rail. */
 .fleet-retained-workspace { container-name: fleet-surface; container-type: inline-size; }
@@ -15506,6 +15503,7 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-trail-back:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 1px; }
 /* Inert at an app's root, and still drawn: a Back that appeared on the first
  * drill-down would shove the trail sideways under the cursor. */
+.os-trail-help { margin-left: 10px; }
 .os-trail-back:disabled { opacity: 0.32; cursor: default; }
 .os-trail-divider { flex: none; width: 1px; height: 16px; margin: 0 10px; background: color-mix(in srgb, var(--os-ink) 18%, transparent); }
 /* A real scroller with its bar hidden, pinned to its END by TrailRow, so the

@@ -53,6 +53,33 @@ describe("shared page return navigation", () => {
     expect(screen.getByRole("button", { name: "Back to Overview" })).toBeTruthy();
   });
 
+  it("keeps one contextual help entry after the trail and restores focus on dismissal", async () => {
+    render(<Harness returnToOverview={vi.fn()} returnToList={vi.fn()} />);
+    const help = await screen.findByRole("button", { name: "Help with MemQL OS" });
+    expect(screen.getAllByRole("button", { name: /^Help with/ })).toHaveLength(1);
+    expect(screen.getByRole("navigation", { name: "Breadcrumbs" }).compareDocumentPosition(help) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    help.focus();
+    fireEvent.click(help);
+    const dialog = screen.getByRole("dialog", { name: "MemQL OS" });
+    expect(within(dialog).getByText("Documentation is coming soon.")).toBeTruthy();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(help);
+    fireEvent.click(help);
+    fireEvent.click(screen.getByRole("button", { name: "Close help" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("updates help with the current visible page and closes stale help on navigation", async () => {
+    render(<Harness returnToOverview={vi.fn()} returnToList={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Help with MemQL OS" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show retained list" }));
+    const help = await screen.findByRole("button", { name: "Help with Deployables" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(help);
+    expect(screen.getByRole("dialog", { name: "Deployables" })).toBeTruthy();
+  });
+
   it("allows a workspace toolbar to leave the one trail with its nested inspector", async () => {
     function Workspace() {
       const root = useRef<HTMLDivElement>(null);

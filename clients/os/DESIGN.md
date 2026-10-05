@@ -153,6 +153,20 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   feed reach the desktop; subsequent refreshes do not reopen the entry loader.
   Reveal the destination once with a short opacity transition, without moving
   its content; respect reduced motion.
+- Keep one contextual information button at the far right of the shared
+  `TrailRow`, after Back and breadcrumbs, on desktop and phone. It opens the
+  current page's help modal; until documentation exists, say “Documentation is
+  coming soon.” Future help starts with a walkthrough video, followed by the
+  option details. Do not repeat information icons beside individual settings.
+  Keep essential permissions, download costs and destructive consequences in
+  the flow where someone makes that choice.
+- Add Machine keeps the shared wizard's steps-left/content-right layout and
+  pinned footer. Use plain forward actions (“Continue”), keep automatic
+  connection/check steps automatic, and distinguish returning to Machines
+  (keep the token) from canceling setup (revoke it). Commands are full-row copy
+  targets with visible “Copied” feedback; keep keyboard copying, manual
+  selection and an honest clipboard-failure message. Put the standalone token
+  behind a disclosure since the install command already includes it.
 - Remove redundant labels, helper text, outlines and decoration. Keep copy
   when it explains a consequence or helps the current decision. A skill's
   general suggestions never override these repository rules or the brief.
