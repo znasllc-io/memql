@@ -64,6 +64,8 @@ func rowVersionFences(ctx context.Context) []rowVersionFence {
 
 // checkRowVersionFences executes inside the mutation's own transaction. A
 // killed database session rolls back the mutation along with its locks.
+// staged-data: MUST-NOT-GATE -- an unpublished ownership version still
+// supersedes the witness; hiding it would admit a stale writer.
 func (e *MemQLEngine) checkRowVersionFences(ctx context.Context, tx bun.Tx) error {
 	fences := append([]rowVersionFence(nil), rowVersionFences(ctx)...)
 	sort.Slice(fences, func(i, j int) bool { return fences[i].id < fences[j].id })
@@ -100,6 +102,8 @@ func (e *MemQLEngine) checkRowVersionFences(ctx context.Context, tx bun.Tx) erro
 
 // fenceWriteTarget records the version whose payload is about to be merged.
 // A concurrent write invalidates the entire decision rather than losing fields.
+// staged-data: MUST-NOT-GATE -- the witness must include unpublished target
+// versions or a later merge could overwrite a write hidden by publication state.
 func (e *MemQLEngine) fenceWriteTarget(ctx context.Context, concept, rowID string) (context.Context, error) {
 	if HasRowVersionFence(ctx, concept, rowID) {
 		return ctx, nil

@@ -1,4 +1,4 @@
-package memql_test
+package main
 
 import (
 	"context"
