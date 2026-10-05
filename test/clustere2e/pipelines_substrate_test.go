@@ -147,7 +147,7 @@ const (
 	// deploy/k8s/components/pipelines/rbac.yaml binds the runner's Role to,
 	// and where config.yaml's ConfigMap lands.
 	substrateMeshNamespace = "memql"
-	substrateEngineAccount = "memql-engine"
+	substrateRunnerAccount = "memql-engine-workbench"
 	substrateConfigMap     = "memql-pipelines"
 
 	// The repository every step clones: this one, public, at a commit of
@@ -958,12 +958,12 @@ func deployedRunnerConfig(ctx context.Context, t *testing.T, c *substrateCluster
 // run, so a missing Role reads as one rather than as every step failing.
 func engineClusterAPI(ctx context.Context, t *testing.T, c *substrateCluster, namespace string) *deploycontrol.ClusterAPI {
 	t.Helper()
-	path := "api/v1/namespaces/" + substrateMeshNamespace + "/serviceaccounts/" + substrateEngineAccount + "/token"
+	path := "api/v1/namespaces/" + substrateMeshNamespace + "/serviceaccounts/" + substrateRunnerAccount + "/token"
 	request := []byte(`{"apiVersion":"authentication.k8s.io/v1","kind":"TokenRequest","spec":{"expirationSeconds":3600}}`)
 	body, status, err := c.call(ctx, http.MethodPost, path, "", request)
 	if err != nil || (status != http.StatusCreated && status != http.StatusOK) {
 		t.Fatalf("no token for %s/%s could be had (status %d, %v): the runners run as the engine, whose ServiceAccount "+
-			"the base deploys. %s", substrateMeshNamespace, substrateEngineAccount, status, err, body)
+			"the base deploys. %s", substrateMeshNamespace, substrateRunnerAccount, status, err, body)
 	}
 	var minted struct {
 		Status struct {
@@ -971,7 +971,7 @@ func engineClusterAPI(ctx context.Context, t *testing.T, c *substrateCluster, na
 		} `json:"status"`
 	}
 	if err := json.Unmarshal(body, &minted); err != nil || strings.TrimSpace(minted.Status.Token) == "" {
-		t.Fatalf("the TokenRequest for %s/%s answered no token (%v)", substrateMeshNamespace, substrateEngineAccount, err)
+		t.Fatalf("the TokenRequest for %s/%s answered no token (%v)", substrateMeshNamespace, substrateRunnerAccount, err)
 	}
 	api := deploycontrol.NewClusterAPIWith(c.server, minted.Status.Token, &http.Client{
 		Timeout:   30 * time.Second,
@@ -986,7 +986,7 @@ func engineClusterAPI(ctx context.Context, t *testing.T, c *substrateCluster, na
 	if _, err := api.Do(ctx, http.MethodGet, grantCheck, "", nil); !deploycontrol.IsNotFound(err) {
 		t.Fatalf("the engine (%s/%s) cannot read Jobs in %s (%v) -- the runner's Role and RoleBinding "+
 			"(deploy/k8s/components/pipelines/rbac.yaml) are not deployed, or do not reach it",
-			substrateMeshNamespace, substrateEngineAccount, namespace, err)
+			substrateMeshNamespace, substrateRunnerAccount, namespace, err)
 	}
 	return api
 }

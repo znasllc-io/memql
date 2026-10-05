@@ -22,40 +22,7 @@ import (
 // It creates only a disposable namespace on an explicitly selected local k3d
 // context. Neither the current kubectl context nor any mesh workload changes.
 func TestIsolationProofAgainstLocalNetworkPolicy(t *testing.T) {
-	cluster := os.Getenv("MEMQL_PIPELINES_ISOLATION_TEST_CONTEXT")
-	if cluster == "" {
-		t.Skip("set MEMQL_PIPELINES_ISOLATION_TEST_CONTEXT to a local k3d context")
-	}
-	if !strings.HasPrefix(cluster, "k3d-") {
-		t.Fatal("this destructive policy test accepts only an explicit local k3d context")
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
-	defer cancel()
-	kubectl := func(input []byte, args ...string) []byte {
-		t.Helper()
-		cmd := exec.CommandContext(ctx, "kubectl", append([]string{"--context", cluster}, args...)...)
-		cmd.Stdin = bytes.NewReader(input)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("kubectl %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-		return out
-	}
-	server := strings.TrimSpace(string(kubectl(nil, "config", "view", "--minify", "-o", "jsonpath={.clusters[0].cluster.server}")))
-	u, err := url.Parse(server)
-	if err != nil || (u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost" && u.Hostname() != "0.0.0.0" && u.Hostname() != "::1") {
-		t.Fatalf("refusing a non-local API server for the k3d policy test: %s", server)
-	}
-	ns := fmt.Sprintf("memql-probe-test-%d", time.Now().UnixNano())
-	kubectl(nil, "create", "namespace", ns)
-	t.Cleanup(func() {
-		cleanup, stop := context.WithTimeout(context.Background(), 30*time.Second)
-		defer stop()
-		out, err := exec.CommandContext(cleanup, "kubectl", "--context", cluster, "delete", "namespace", ns, "--wait=false").CombinedOutput()
-		if err != nil {
-			t.Errorf("clean up %s: %v: %s", ns, err, out)
-		}
-	})
+	ctx, cluster, ns, kubectl := localPipelineControls(t)
 	root := filepath.Join("..", "..", "deploy", "k8s", "components", "pipelines")
 	apply := func(file string) {
 		t.Helper()
@@ -143,4 +110,45 @@ func TestIsolationProofAgainstLocalNetworkPolicy(t *testing.T) {
 	apply("networkpolicy.yaml")
 	kubectl(nil, "-n", ns, "delete", "networkpolicy", "memql-pipelines-probe-listener")
 	t.Run("missing listener ingress makes proof inconclusive", func(t *testing.T) { prove(t, false, true) })
+}
+
+// localPipelineControls refuses cloud API servers and scopes all test writes
+// to one disposable namespace. Cleanup does not depend on the test context.
+func localPipelineControls(t *testing.T) (context.Context, string, string, func([]byte, ...string) []byte) {
+	t.Helper()
+	cluster := os.Getenv("MEMQL_PIPELINES_ISOLATION_TEST_CONTEXT")
+	if cluster == "" {
+		t.Skip("set MEMQL_PIPELINES_ISOLATION_TEST_CONTEXT to a local k3d context")
+	}
+	if !strings.HasPrefix(cluster, "k3d-") {
+		t.Fatal("this destructive policy test accepts only an explicit local k3d context")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
+	t.Cleanup(cancel)
+	kubectl := func(input []byte, args ...string) []byte {
+		t.Helper()
+		cmd := exec.CommandContext(ctx, "kubectl", append([]string{"--context", cluster}, args...)...)
+		cmd.Stdin = bytes.NewReader(input)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("kubectl %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return out
+	}
+	server := strings.TrimSpace(string(kubectl(nil, "config", "view", "--minify", "-o", "jsonpath={.clusters[0].cluster.server}")))
+	u, err := url.Parse(server)
+	if err != nil || (u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost" && u.Hostname() != "0.0.0.0" && u.Hostname() != "::1") {
+		t.Fatalf("refusing a non-local API server for the k3d policy test: %s", server)
+	}
+	ns := fmt.Sprintf("memql-probe-test-%d", time.Now().UnixNano())
+	kubectl(nil, "create", "namespace", ns)
+	t.Cleanup(func() {
+		cleanup, stop := context.WithTimeout(context.Background(), 30*time.Second)
+		defer stop()
+		out, err := exec.CommandContext(cleanup, "kubectl", "--context", cluster, "delete", "namespace", ns, "--wait=false").CombinedOutput()
+		if err != nil {
+			t.Errorf("clean up %s: %v: %s", ns, err, out)
+		}
+	})
+	return ctx, cluster, ns, kubectl
 }

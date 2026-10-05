@@ -54,7 +54,7 @@ reaches the executor.
 | Node | What it does for a step |
 |---|---|
 | agent | Drives the run (the seam's driver) and holds the executor: refuses what it must not route, computes the step's effective timeout, forwards a cluster step and watches for the answer, dispatches a fleet step and files that step's log and artifacts |
-| workbench | Holds the runner, the only MemQL process that creates, watches and deletes a step's Job and Secret -- through the API server, as the engine's identity `memql-engine`, whose Role reaches nothing outside `memql-pipelines` |
+| workbench | Holds the runner, the only MemQL process that creates, watches and deletes a step's Job and Secret -- through the API server, as the dedicated identity `memql-engine-workbench`, whose Role reaches nothing outside `memql-pipelines` |
 | the step's pod | Not a MemQL node. It holds no cluster credential |
 
 **What each node needs.** An agent node needs a route to a workbench replica
@@ -317,6 +317,18 @@ The network policy `memql-pipelines-isolate` selects every pod in the namespace:
 A network policy is enforced by the cluster's network policy engine, not by the
 object, which is why [the isolation proof](#the-isolation-proof) runs before any
 step does.
+
+### Workbench identity cutover
+
+Only `memql-engine-workbench` holds the pipeline runner Role. The other engine
+accounts cannot create pipeline Jobs or read step Secrets. Before switching a
+cloud workbench to this account, prepare the exact new subject in its external
+trusts: [OpenAI mapping](auth/openai-federation.md#the-cutover),
+[Anthropic prefix](auth/anthropic-federation.md#separate-kubernetes-identities),
+and any instance-specific Azure federation. Keep the existing engine subject
+for the other nodes. Verify both subjects, then roll out and verify the new
+workbench before allowing builds. Local RBAC verification does not establish
+that a cloud provider has accepted its token.
 
 ### Reading a step on the cluster
 
@@ -955,7 +967,7 @@ Each of these is understood, and accepted for this release.
   `install-cluster-e2e.yml`'s `pipelines` leg installs the cluster from source
   and runs `TestPipelinesSubstrate` (`test/clustere2e`): the real executor, its
   fleet half and two workbench runners in the test process, talking to the
-  cluster's real API server as `memql-engine`, under the deployed Role, quota,
+  cluster's real API server as `memql-engine-workbench`, under the deployed Role, quota,
   limits, cache claim, network policy and ConfigMap, cloning a public repository
   anonymously at a pinned commit. GitHub there is a test server whose check runs
   are held to recorded fixtures, and the fleet's dispatcher is a stand-in with no
@@ -976,16 +988,6 @@ Each of these is understood, and accepted for this release.
   The old replica may take the step's outcome and have its Job deleted before the
   new driver hands the same attempt over again, which then finds no Job and
   starts a fresh one. The answer is the second run's; the cost is a runner.
-- **The engine's grant reaches every engine pod.** The runner's Role is bound
-  to `memql-engine`, the ServiceAccount every engine Deployment runs as,
-  because the workbench's model calls federate as that account. Only the
-  workbench contains the runner, but a binary is not a boundary. Any engine pod
-  holds a `memql-engine` token, the edge and mcp among them, which face the
-  internet. A compromised one can create a Job in `memql-pipelines` and read
-  the Secrets of the steps in flight there: their clone tokens and resolved
-  secrets. This is an accepted risk for this release. A workbench-only account,
-  or an admission policy that admits only the runner's Jobs, narrows it
-  (memql#5811).
 - **The cloud cache on Azure Blob NFS is unmeasured.** Two things are untested
   (memql#5813):
   - cache-prep, which runs as root with every capability dropped, creates the

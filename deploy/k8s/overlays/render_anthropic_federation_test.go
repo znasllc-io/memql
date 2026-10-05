@@ -29,13 +29,14 @@ import (
 )
 
 const (
-	anthropicTokenVolume  = "anthropic-identity"
-	anthropicTokenPath    = "/var/run/secrets/anthropic.com/token"
-	anthropicMountPath    = "/var/run/secrets/anthropic.com"
-	anthropicAudience     = "https://api.anthropic.com"
-	anthropicTokenEnvName = "MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE"
-	federationConfigMap   = "memql-anthropic-federation"
-	engineServiceAccount  = "memql-engine"
+	anthropicTokenVolume    = "anthropic-identity"
+	anthropicTokenPath      = "/var/run/secrets/anthropic.com/token"
+	anthropicMountPath      = "/var/run/secrets/anthropic.com"
+	anthropicAudience       = "https://api.anthropic.com"
+	anthropicTokenEnvName   = "MEMQL_AI_ANTHROPIC_IDENTITY_TOKEN_FILE"
+	federationConfigMap     = "memql-anthropic-federation"
+	engineServiceAccount    = "memql-engine"
+	workbenchServiceAccount = "memql-engine-workbench"
 
 	// identityServiceAccount is the ONE documented exception, and it is not an
 	// oversight. The identity node already runs as `memql-deploy`, which holds
@@ -171,6 +172,8 @@ func assertAnthropicIdentity(t *testing.T, overlay, name string, w workload) {
 	wantSA := engineServiceAccount
 	if name == "identity" {
 		wantSA = identityServiceAccount
+	} else if name == "workbench" {
+		wantSA = workbenchServiceAccount
 	}
 	if spec.ServiceAccountName != wantSA {
 		t.Errorf("%s/%s: serviceAccountName is %q, want %q -- a pod running as `default` presents a subject the federation rule does not match",

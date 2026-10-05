@@ -170,23 +170,28 @@ OpenAI Platform -> Settings -> Workload identity federation.
 2. **Create a service account** named `memql-engine` in the project your
    inference should be billed to. Note its id: it is
    `MEMQL_AI_OPENAI_SERVICE_ACCOUNT_ID`.
-3. **Create ONE mapping** on that provider:
+3. Add a derived attribute named `engine_workload` (the dashboard supplies
+   the `openai.` prefix). Its CEL expression admits exactly the two engine
+   subjects that make model calls:
 
-   | Field | Value |
-   |---|---|
-   | claim | `sub` |
-   | value | `system:serviceaccount:memql:memql-engine` |
-   | audience | `https://api.openai.com/v1` |
-   | target | the `memql-engine` service account |
+   ```text
+   assertion.sub == "system:serviceaccount:memql:memql-engine" || assertion.sub == "system:serviceaccount:memql:memql-engine-workbench"
+   ```
 
-The subject is the ServiceAccount every engine Deployment runs as, in the
-namespace it runs in. If you install into a namespace other than `memql`, the
-subject changes with it -- the namespace is a value in this product, and this
-is one of the two places it leaves the cluster.
+4. Create or update the **one existing mapping** for this provider and OpenAI
+   service account. Require `openai.engine_workload` = `true`, retaining the
+   issuer, audience `https://api.openai.com/v1`, target account and permissions.
+   Replace the former single-subject `sub` condition; leaving it alongside the
+   new condition would still exclude the workbench. Keep any unrelated
+   restrictions.
 
-Limits worth knowing before you design around this: an organization may hold up
-to 50 identity providers, and a provider up to 50 mappings. One cluster needs
-one of each.
+OpenAI converts boolean transformation results to mapping strings and allows
+one mapping per provider/account pair. Do not create a competing mapping for
+this same pair. [Official federation guide](https://developers.openai.com/api/docs/guides/workload-identity-federation).
+
+The namespace is a deployment value: change both subjects if it is not
+`memql`. Before rolling out the dedicated workbench identity, verify exchanges
+for both subjects. The provider and target service-account IDs stay unchanged.
 
 ### Step 3 -- Put the ids in the overlay
 
@@ -317,10 +322,10 @@ Boot-time refusals are a different class and never reach OpenAI:
 
 ---
 
-## One node is not on the engine service account
+## Separate Kubernetes identities
 
-Every engine Deployment runs as `memql-engine` except **identity**, which runs
-as `memql-deploy` -- the account holding the deploy console's Rollout and
+The workbench runs as `memql-engine-workbench`, admitted by the exact allowlist
+above. Other inference nodes use `memql-engine`. **Identity** runs as `memql-deploy` -- the account holding the deploy console's Rollout and
 Application grants (memql#4257). Moving identity onto `memql-engine` would
 either strip that RBAC or put it on the account every engine node runs as,
 handing the whole mesh a privilege one node needs.
@@ -331,7 +336,8 @@ subject -- its token says `system:serviceaccount:memql:memql-deploy`, which the
 mapping does not name.
 
 This costs nothing today: identity does not call OpenAI. If it ever needs to,
-add a second mapping in the console -- not a change to the manifests.
+review its required authority and extend the explicit allowlist in the existing
+mapping; do not change its Kubernetes identity to inherit another node's grants.
 `provider-auth check` run against identity will report the subject mismatch,
 which is the honest answer rather than a surprise.
 

@@ -96,6 +96,18 @@ registry/marketplace permission, native signing, public webhook reachability,
 cloud storage behavior or production recovery. Those remain named rehearsal
 steps. Time-window milestones #5506–#5509 stay open until observed.
 
+## Workbench identity progress
+
+The workbench now has `memql-engine-workbench`; only that subject receives the
+pipeline Job/Secret Role. Existing custom-domain and package-roll operations
+retain explicit grants. Overlay and federation-shape tests pass. A disposable
+local namespace test asked the real API server about Job creation and Secret
+reads: workbench allowed, shared engine/identity/step accounts denied. Cloud
+activation still requires vendor trust preflight. OpenAI's current one-mapping
+rule requires an exact two-subject CEL allowlist in the existing mapping, not
+a second mapping for the same provider/account pair. The runbooks record the
+order; no external trust or deployed workload has been changed.
+
 ## Isolation proof progress
 
 The runner now requires a positive connection to the same listener used by
