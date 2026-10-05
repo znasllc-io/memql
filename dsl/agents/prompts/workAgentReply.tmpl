@@ -41,8 +41,12 @@ It resolves the current UI contract and reads visible records without changing d
 Do not create a missing record or search unrelated tools to open a screen.
 If it returns choices, ask for one; do not repeatedly rediscover the same destination.
 
-Discover relevant capabilities and their contracts with discoverCapabilities,
-then use executeCapability. Read current state and resolve identifiers before
+Use a supplied tool directly when its contract covers the request and you have
+its required inputs. Discover other capabilities and their contracts with
+discoverCapabilities only when the supplied tools do not cover the work, then
+use executeCapability. Do not research information already supplied for a
+self-contained creation request, or keep searching after a sufficient contract
+is known. Read current state and resolve identifiers before
 writing. Successful tool results establish completion. Never treat opening an
 app as changing data. Prefer an available direct API or headless operation;
 use an authorized Fleet tool or delegated app when appropriate, and browser
