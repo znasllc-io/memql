@@ -4,11 +4,12 @@ import { AccountAvatar } from "../chrome/AccountAvatar";
 import { AskLiveVoice } from "./AskLiveVoice";
 import type { LiveVoiceSession } from "./liveVoiceSession";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { ArrowUp, Mic, Plus, X, Activity, Square, AudioLines } from "lucide-react";
+import { ArrowUp, Mic, Plus, X, Activity, MessageCircle, MessagesSquare, Maximize2, Minimize2, Square, AudioLines } from "lucide-react";
 
 import { ConversationSession } from "./conversationSession";
 import { AskWait } from "./AskWait";
 import { AskActivityLog } from "./AskActivityLog";
+import { AskConversations } from "./AskConversations";
 import { AskMessage } from "./AskMessage";
 import { AskRoutePicker, AskRoutePill } from "./AskRoutePicker";
 import type { AskTransport } from "./askController";
@@ -90,6 +91,8 @@ export function AskSurface({
   onOpenFleet,
   onManageRoutes,
   onClose,
+  onToggleMaximize,
+  maximized = false,
   voicePorts = null,
   settings = DEFAULT_ASK_SETTINGS,
   context = null,
@@ -104,6 +107,8 @@ export function AskSurface({
   conversation?: ConversationSession;
   liveVoice?: LiveVoiceSession;
   onClose?: () => void;
+  onToggleMaximize?: () => void;
+  maximized?: boolean;
   availability?: AskAvailability;
   onOpenFleet?: () => void;
   /** Open Fleet's routing from the route picker. */
@@ -123,12 +128,18 @@ export function AskSurface({
   if (!providedConversation && !localConversation.current) localConversation.current = new ConversationSession(transport);
   const conversation = providedConversation ?? localConversation.current!;
   const state = useSyncExternalStore(conversation.subscribe, conversation.getSnapshot);
-  const [showActivity, setShowActivity] = useState(false);
+  const [panel, setPanel] = useState<"conversation" | "activity" | "conversations">("conversation");
+  const showActivity = panel === "activity";
+  const showConversations = panel === "conversations";
   const activityRef = useRef<HTMLButtonElement | null>(null);
-  const closeActivity = useCallback(() => { setShowActivity(false); activityRef.current?.focus(); }, []);
+  const conversationsRef = useRef<HTMLButtonElement | null>(null);
+  const closePanel = useCallback(() => {
+    setPanel("conversation");
+    (panel === "conversations" ? conversationsRef : activityRef).current?.focus();
+  }, [panel]);
   const returnToComposer = useRef(false);
   useEffect(() => {
-    if (!showActivity && !picking && returnToComposer.current) {
+    if (panel === "conversation" && !picking && returnToComposer.current) {
       returnToComposer.current = false;
       inputRef.current?.focus();
     }
@@ -155,7 +166,7 @@ export function AskSurface({
   useLayoutEffect(() => {
     const el = logRef.current;
     if (el) el.scrollTop = nearBottom.current ? el.scrollHeight : conversationScroll.current;
-  }, [showActivity, picking]);
+  }, [panel, picking, maximized]);
   const micRef = useRef<HTMLButtonElement | null>(null);
   const reducedMotion = useReducedMotion();
 
@@ -280,16 +291,20 @@ export function AskSurface({
   const note = voiceNote(voice?.state, settings, wired);
 
   return (
-    <div className="os-ask" data-os-ask={variant} onKeyDown={event => { if (event.key === "Escape" && showActivity) { event.stopPropagation(); closeActivity(); } }}>
+    <div className="os-ask" data-os-ask={variant} onKeyDown={event => { if (event.key === "Escape" && panel !== "conversation") { event.stopPropagation(); closePanel(); } }}>
       <header className="os-ask-header">
         <div className="os-ask-heading"><strong>MemQL</strong><span>{contextLabel || "Ask"}</span></div>
         <div className="os-ask-actions"><div className="os-window-control-group">
-          <button type="button" title="New conversation" aria-label="New conversation" disabled={busy || state.voiceActive} onClick={() => { conversation.newConversation(); setShowActivity(false); setPicking(false); returnToComposer.current = true; }}><Plus size={18} /></button>
-          <button ref={activityRef} type="button" title="Activity" aria-label="Activity" aria-pressed={showActivity} onClick={() => { controls?.cancel(); setPicking(false); setShowActivity(!showActivity); }}><Activity size={17} /></button>
-          </div>{onClose ? <div className="os-window-control-group"><button type="button" title="Close Ask" aria-label="Close Ask" onClick={onClose}><X size={17} /></button></div> : null}
+          <button type="button" title="New conversation" aria-label="New conversation" disabled={busy || state.voiceActive} onClick={() => { conversation.newConversation(); setPanel("conversation"); setPicking(false); returnToComposer.current = true; }}><Plus size={18} /></button>
+          </div><div className="os-window-control-group">
+          <button ref={conversationsRef} type="button" title={showConversations ? "Conversation" : "Conversations"} aria-label={showConversations ? "Conversation" : "Conversations"} onClick={() => { if (showConversations) { closePanel(); return; } controls?.cancel(); setPicking(false); setPanel("conversations"); void conversation.refresh(); }}>{showConversations ? <MessageCircle size={17} /> : <MessagesSquare size={17} />}</button>
+          <button ref={activityRef} type="button" title={showActivity ? "Conversation" : "Activity"} aria-label={showActivity ? "Conversation" : "Activity"} onClick={() => { if (showActivity) { closePanel(); return; } controls?.cancel(); setPicking(false); setPanel("activity"); }}>{showActivity ? <MessageCircle size={17} /> : <Activity size={17} />}</button>
+          </div>{onClose || onToggleMaximize ? <div className="os-window-control-group">
+          {onToggleMaximize ? <button type="button" title={maximized ? "Restore Ask" : "Maximize Ask"} aria-label={maximized ? "Restore Ask" : "Maximize Ask"} onClick={onToggleMaximize}>{maximized ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button> : null}
+          {onClose ? <button type="button" title="Close Ask" aria-label="Close Ask" onClick={onClose}><X size={17} /></button> : null}</div> : null}
         </div>
       </header>
-      {showActivity ? <div className="os-ask-content"><AskActivityLog turns={exchanges} dictation={state.dictationActivity} onClose={closeActivity} onStop={busy ? () => conversation.stop() : undefined} /></div> : picking && !state.voiceActive ? <div className="os-ask-content"><AskRoutePicker routing={state.routing} onChoose={conversation.setRouting} onBack={closePicker} onManageRoutes={onManageRoutes ? () => { setPicking(false); onManageRoutes(); } : undefined} /></div> : state.voiceActive && liveVoice ? <div className="os-ask-content"><AskLiveVoice session={liveVoice} /></div> : <div className="os-ask-content">
+      {showActivity ? <div className="os-ask-content"><AskActivityLog turns={exchanges} dictation={state.dictationActivity} onClose={closePanel} onStop={busy ? () => conversation.stop() : undefined} /></div> : showConversations ? <div className="os-ask-content"><AskConversations conversation={conversation} onOpen={changed => { if (changed) { nearBottom.current = true; conversationScroll.current = 0; } setPanel("conversation"); returnToComposer.current = true; }} /></div> : picking && !state.voiceActive ? <div className="os-ask-content"><AskRoutePicker routing={state.routing} onChoose={conversation.setRouting} onBack={closePicker} onManageRoutes={onManageRoutes ? () => { setPicking(false); onManageRoutes(); } : undefined} /></div> : state.voiceActive && liveVoice ? <div className="os-ask-content"><AskLiveVoice session={liveVoice} /></div> : <div className="os-ask-content">
         <div className="os-ask-log" ref={logRef} role="log" aria-label="Conversation" aria-live="polite" onScroll={() => { const el = logRef.current; if (el) { conversationScroll.current = el.scrollTop; nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 72; } }}>
           {state.loading ? <ContentSkeleton kind="conversation" label="Opening conversation" /> : null}
           {exchanges.length === 0 && !state.loading ? <div className="os-ask-empty"><strong>What would you like to do?</strong><p>Ask a question, explore your workspace, or let MemQL help you get something done.</p></div> : null}
@@ -307,7 +322,7 @@ export function AskSurface({
       }
       {state.error ? <p className="os-ask-error" role="alert">{askErrorSummary(state.error)}</p> : null}
       {liveVoice && !state.voiceActive ? <AskLiveVoice session={liveVoice} errorsOnly /> : null}
-      {!state.voiceActive && !picking && !showActivity ? <form className="os-ask-input" onSubmit={onSubmit}>
+      {!state.voiceActive && !picking && panel === "conversation" ? <form className="os-ask-input" onSubmit={onSubmit}>
         <button
           ref={micRef}
           type="button"
@@ -381,7 +396,7 @@ export function AskSurface({
         />
         {/* The conversation's route (design brief section 6). The visible
             words are the choice; the accessible name says what they are. */}
-        <AskRoutePill ref={pillRef} routing={state.routing} onOpen={() => { controls?.cancel(); setShowActivity(false); setPicking(true); }} />
+        <AskRoutePill ref={pillRef} routing={state.routing} onOpen={() => { controls?.cancel(); setPanel("conversation"); setPicking(true); }} />
         {busy ? <button type="button" className="os-ask-send" aria-label="Stop reply" title="Stop this work" onClick={() => conversation.stop()}><Square size={13} /></button> : <button
           type="submit"
           className="os-ask-send"
@@ -391,8 +406,8 @@ export function AskSurface({
           <ArrowUp size={15} aria-hidden />
         </button>}
       </form> : null}
-      {phase === "transcribing" && !state.voiceActive && !showActivity ? <AskWait activity={state.dictationActivity} startedAt={state.dictationActivity.at(-1)?.at ?? new Date().toISOString()} hasText={false} label="Transcribing" /> : null}
-      {note && phase !== "transcribing" && !state.voiceActive && !picking && !showActivity ? (
+      {phase === "transcribing" && !state.voiceActive && panel === "conversation" ? <AskWait activity={state.dictationActivity} startedAt={state.dictationActivity.at(-1)?.at ?? new Date().toISOString()} hasText={false} label="Transcribing" /> : null}
+      {note && phase !== "transcribing" && !state.voiceActive && !picking && panel === "conversation" ? (
         <p
           className="os-caption os-ask-micnote"
           data-note={!wired || voice?.state.problem ? "problem" : "state"}

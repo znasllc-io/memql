@@ -17,18 +17,23 @@ function setup() {
  return { ask, cancel, onClose, callbacks:()=>callbacks };
 }
 function draft(value:string) { fireEvent.change(screen.getByRole("textbox",{name:"Ask"}),{target:{value}}); }
-it("groups New and Activity before Close, removes history, and replaces the entire body",()=>{
+it("separates all header actions and toggles the entire body without a second back button",()=>{
  setup(); draft("unsent message");
  const activity=screen.getByRole("button",{name:"Activity"});
- expect(activity.parentElement).toBe(screen.getByRole("button",{name:"New conversation"}).parentElement);
+ expect(activity.parentElement).not.toBe(screen.getByRole("button",{name:"New conversation"}).parentElement);
  expect(activity.parentElement).not.toBe(screen.getByRole("button",{name:"Close Ask"}).parentElement);
- expect(screen.queryByRole("button",{name:/history|conversations/i})).toBeNull();
- fireEvent.click(activity);
+ expect(activity.parentElement).toBe(screen.getByRole("button", { name: "Conversations" }).parentElement);
+ activity.focus(); fireEvent.click(activity);
  expect(screen.getByRole("region",{name:"Conversation activity"})).toBeTruthy();
  expect(screen.queryByRole("log",{name:"Conversation"})).toBeNull();
  expect(screen.queryByRole("textbox",{name:"Ask"})).toBeNull();
- expect(document.activeElement).toBe(screen.getByRole("button",{name:"Close activity"}));
- fireEvent.click(screen.getByRole("button",{name:"Close activity"}));
+ const conversation = screen.getByRole("button", { name: "Conversation" });
+ expect(conversation).toBe(activity);
+ expect(document.activeElement).toBe(conversation);
+ expect(screen.queryByRole("button", { name: /back|close activity/i })).toBeNull();
+ expect(screen.queryByRole("button", { name: "Activity" })).toBeNull();
+ fireEvent.click(conversation);
+ expect(screen.getByRole("button", { name: "Activity" })).toBe(activity);
  expect((screen.getByRole("textbox",{name:"Ask"}) as HTMLTextAreaElement).value).toBe("unsent message");
  expect(document.activeElement).toBe(activity);
 });
@@ -41,14 +46,14 @@ it("keeps streaming while activity is open, shows terminal evidence, and returns
  act(()=>{ w.callbacks().delta("Nice to meet you, Jose."); w.callbacks().activity?.({...event,phase:"completed"});w.callbacks().done(); });
  expect(screen.queryByText("Working")).toBeNull();
  expect(screen.getByText("Completed")).toBeTruthy();
- fireEvent.click(screen.getByRole("button",{name:"Close activity"}));
+ fireEvent.click(screen.getByRole("button",{name:"Conversation"}));
  expect(screen.getByText("Nice to meet you, Jose.")).toBeTruthy();
  expect(w.cancel).not.toHaveBeenCalled();
  expect(w.ask).toHaveBeenCalledOnce();
 });
 it("Escape returns from Activity without closing Ask, including when focus is in the header",()=>{
  const w=setup(); const activity=screen.getByRole("button",{name:"Activity"});
- fireEvent.click(activity); fireEvent.keyDown(screen.getByRole("button",{name:"Close activity"}),{key:"Escape"});
+ fireEvent.click(activity); fireEvent.keyDown(screen.getByRole("region",{name:"Conversation activity"}),{key:"Escape"});
  expect(screen.queryByRole("region",{name:"Conversation activity"})).toBeNull();
  fireEvent.click(activity); activity.focus(); fireEvent.keyDown(activity,{key:"Escape"});
  expect(screen.queryByRole("region",{name:"Conversation activity"})).toBeNull();

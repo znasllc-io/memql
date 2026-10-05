@@ -1,10 +1,8 @@
-import { Fragment, useEffect, useRef } from "react";
-import { ArrowLeft, Square } from "lucide-react";
+import { Fragment } from "react";
+import { Square } from "lucide-react";
 import { Head } from "../kit";
 import type { AskActivity, AskTurn } from "./conversationSession";
 export function AskActivityLog({ turns, dictation = [], onClose, onStop }: { turns: AskTurn[]; dictation?: AskActivity[]; onClose: () => void; onStop?: () => void }) {
-  const back = useRef<HTMLButtonElement>(null);
-  useEffect(() => { back.current?.focus(); }, []);
   if (dictation.length) {
     const latest = new Map(dictation.map(event => [event.id, event]));
     const running = [...latest.values()].some(event => event.phase === "running");
@@ -12,7 +10,6 @@ export function AskActivityLog({ turns, dictation = [], onClose, onStop }: { tur
   }
   return <section className="os-ask-activity" aria-label="Conversation activity" tabIndex={-1} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
     <Head title="Activity" navigation={false}>
-      <button ref={back} type="button" className="os-icon-button" aria-label="Close activity" title="Back to conversation" onClick={onClose}><ArrowLeft size={17} /></button>
       {onStop ? <button type="button" className="os-icon-button" aria-label="Stop reply" title="Stop this work" onClick={onStop}><Square size={13} /></button> : null}
     </Head>
     {turns.every(turn => turn.activity.length === 0) ? <p className="os-caption">Model calls and completed actions appear here.</p> : null}

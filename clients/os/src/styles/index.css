@@ -940,6 +940,7 @@ button:not(:disabled):active {
   height: min(720px, calc(100dvh - var(--os-dock-h) - 84px));
   border-radius: var(--os-radius); box-shadow: var(--os-shadow-window); padding: 0; overflow: hidden;
 }
+.os-ask-sheet[data-maximized] { left: 0; top: 0; bottom: var(--ask-dock-reserve); transform: none; width: 100%; height: auto; border-radius: 0; }
 .os-ask { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 0; }
 .os-ask-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--os-line); }
 .os-ask-heading { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
@@ -989,6 +990,10 @@ button:not(:disabled):active {
 .os-ask-activity dl { font-size: var(--os-text-xs); overflow-wrap: anywhere; display: grid; grid-template-columns: minmax(72px, max-content) minmax(0, 1fr); gap: 8px 16px; line-height: 1.5; margin: 16px 0; }
 .os-ask-activity dt { color: var(--os-muted); }.os-ask-activity dd { margin: 0; }
 .os-ask-activity pre { white-space: pre-wrap; font-size: var(--os-text-xs); overflow-wrap: anywhere; }
+.os-ask-conversations { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.os-ask-conversations-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 22px; }
+.os-ask-conversations-search { margin-block: 20px 12px; }
+.os-ask-conversations-search .os-input { width: 100%; }
 .os-ask-wait { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--os-muted); font-size: var(--os-text-xs); }
 .os-ask-countdown { width: 24px; height: 3px; background: var(--os-line); overflow: hidden; border-radius: 2px; }
 .os-ask-countdown > span { display: block; width: 100%; height: 100%; background: var(--os-accent); transform: scaleX(var(--ask-remaining)); transform-origin: left; transition: transform .25s linear; }
@@ -1889,6 +1894,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   width: auto;
   border-radius: var(--os-radius) var(--os-radius) 0 0;
 }
+.os-root[data-layout="phone"] .os-ask-sheet[data-maximized] { border-radius: 0; }
 
 /* ---- the rail: the OS's one scrollbar ----
  *
