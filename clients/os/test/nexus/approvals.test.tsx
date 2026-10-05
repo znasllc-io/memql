@@ -9,6 +9,7 @@ vi.mock("../../src/live/connection", () => ({
   osBridgePath: "/_memql/ws",
 }));
 
+const { AskProvider } = await import("../../src/ask/AskProvider");
 const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
 const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
 const { answerPayload } = await import("../../src/apps/nexus/ApprovalsSection");
@@ -553,4 +554,19 @@ describe("crossing to the run", () => {
     fireEvent.click(within(detail).getByText("nightlyReconcile"));
     expect(navigate).toHaveBeenCalledWith("runs");
   });
+});
+
+
+it("opens a typed question in Ask without sending a decision from Nexus", async () => {
+ const conn = fakeConnection({ approvals: [approvalRow({id:"ask-question",runId:"original-run",kind:"feedback",question:"Which output format?",subject:{kind:"text"}})] });
+ h.connection = conn;
+ const openWork = vi.fn(async () => ({id:"original-conversation",title:"Original"}));
+ const transport = {ask:vi.fn(),openWork,conversations:{list:async()=>[],read:async()=>[],create:async()=>({id:"unused",title:"Unused"})}};
+ render(withSession(<AskProvider transport={transport}><NexusApp sectionId="approvals" navigate={()=>{}} askContext={()=>{}} /></AskProvider>));
+ fireEvent.click(await screen.findByText("Which output format?"));
+ expect(screen.queryByRole("textbox",{name:"Answer"})).toBeNull();
+ fireEvent.click(await screen.findByRole("button",{name:"Answer in Ask"}));
+ await waitFor(()=>expect(openWork).toHaveBeenCalledWith("original-run"));
+ expect(conn.query.decideApproval).not.toHaveBeenCalled();
+ expect(transport.ask).not.toHaveBeenCalled();
 });
