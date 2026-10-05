@@ -96,6 +96,14 @@ registry/marketplace permission, native signing, public webhook reachability,
 cloud storage behavior or production recovery. Those remain named rehearsal
 steps. Time-window milestones #5506–#5509 stay open until observed.
 
+## Queued Secret retention progress
+
+Jobs and Secrets now carry the agent's absolute run deadline. Orphan cleanup
+uses that deadline plus the outcome TTL, so a shorter workbench ceiling cannot
+remove credentials while a step is still queued. Tests cover different agent
+and workbench limits, the exact expiry boundary, and bounded cleanup of old or
+malformed metadata (#5823).
+
 ## Workbench identity progress
 
 The workbench now has `memql-engine-workbench`; only that subject receives the

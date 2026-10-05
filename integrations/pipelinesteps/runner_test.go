@@ -3405,6 +3405,8 @@ func TestRunnerReapsOrphanedSecrets(t *testing.T) {
 	young := rtT0.Add(-(rtConfig().RunCeiling + rtConfig().JobTTL - time.Minute))
 	secret := func(job string, created time.Time, mutate ...func(*Secret)) Secret {
 		s := BuildSecret(rtConfig(), rtRun(), job, rtCloneToken)
+		// These cases exercise the age fallback for pre-deadline metadata.
+		delete(s.Metadata.Annotations, AnnotRunDeadline)
 		s.Metadata.CreationTimestamp = created
 		for _, m := range mutate {
 			m(&s)
@@ -3519,6 +3521,44 @@ func TestRunnerReapsOrphanedSecrets(t *testing.T) {
 			t.Errorf("%d sweeps once the interval had passed, want a second", n)
 		}
 	})
+}
+
+func TestOrphanSweepKeepsQueuedSecretUntilItsOwnRunDeadline(t *testing.T) {
+	h := newRunnerHarness(t, func(cfg *Config) { cfg.RunCeiling = 20 * time.Minute })
+	run := rtRun()
+	deadline := rtT0.Add(8 * time.Hour)
+	run.RunDeadline = deadline.Format(time.RFC3339Nano)
+	job := JobName(run.RunID, run.StepKey, run.Attempt)
+	secret := BuildSecret(h.cfg, run, job, rtCloneToken)
+	secret.Metadata.CreationTimestamp = rtT0.Add(-2 * time.Hour)
+	if secret.Metadata.Annotations[AnnotRunDeadline] != run.RunDeadline {
+		t.Fatal("the queued step's Secret lost the agent's run deadline")
+	}
+	h.c.putSecret(secret)
+	if n := h.r.reap(); n != 0 || !h.c.hasSecret(secret.Metadata.Name) {
+		t.Fatal("another replica's shorter ceiling collected a still-queued Secret")
+	}
+	h.clock.Advance(deadline.Sub(rtT0) + h.cfg.JobTTL)
+	if n := h.r.reap(); n != 0 {
+		t.Fatal("the sweep deleted the Secret before the full retention interval elapsed")
+	}
+	h.clock.Advance(time.Nanosecond)
+	if n := h.r.reap(); n != 1 || h.c.hasSecret(secret.Metadata.Name) {
+		t.Fatal("the expired orphan was kept after its run deadline plus TTL")
+	}
+}
+
+func TestOrphanSweepMalformedDeadlineHasBoundedFallback(t *testing.T) {
+	h := newRunnerHarness(t)
+	run := rtRun()
+	job := JobName(run.RunID, run.StepKey, run.Attempt)
+	secret := BuildSecret(h.cfg, run, job, rtCloneToken)
+	secret.Metadata.CreationTimestamp = rtT0.Add(-h.cfg.RunCeiling - h.cfg.JobTTL - time.Minute)
+	secret.Metadata.Annotations[AnnotRunDeadline] = "not a timestamp"
+	h.c.putSecret(secret)
+	if n := h.r.reap(); n != 1 {
+		t.Fatal("malformed deadline kept an orphan's credentials indefinitely")
+	}
 }
 
 // TestTheAgentsGraceOutlastsSettling (fix round 2, minor 2): the agent gives a

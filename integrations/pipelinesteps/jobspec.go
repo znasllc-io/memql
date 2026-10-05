@@ -579,11 +579,15 @@ func objectLabels(run StepRun) map[string]string {
 // objectAnnotations carry what a label cannot hold (a step key has a slash
 // and a #) and what nobody selects on.
 func objectAnnotations(run StepRun) map[string]string {
-	return map[string]string{
+	annotations := map[string]string{
 		AnnotStepKey: run.StepKey,
 		AnnotWorkRun: run.WorkRunID,
 		AnnotOwner:   run.OwnerUserID,
 	}
+	if deadline, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(run.RunDeadline)); err == nil {
+		annotations[AnnotRunDeadline] = deadline.UTC().Format(time.RFC3339Nano)
+	}
+	return annotations
 }
 
 // declaredCaches is the set of declared caches, sorted, so the same
