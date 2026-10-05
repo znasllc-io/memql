@@ -679,11 +679,11 @@ const COPY: Record<string, RefusalCopy> = {
   // Where a step executes (epic memql#5478).
   pipeline_step_timeout: {
     title: "The step ran past its time limit and was stopped",
-    next: "Raise the step's timeout in memql-package.yaml, or split the work.",
+    next: "Raise the step's timeout in memql-package.yaml, or split the work. On one of your machines, its pipelines max_timeout_sec can be the limit.",
   },
   pipeline_run_ceiling: {
     title: "The run passed its wall-clock ceiling",
-    next: "Its unfinished steps were stopped. Shorten the run, or ask an operator to raise MEMQL_PIPELINES_RUN_MAX_MINUTES.",
+    next: "Its unfinished steps were stopped or never started. Shorten the run or run fewer steps at once, or ask an operator to raise MEMQL_PIPELINES_RUN_MAX_MINUTES.",
   },
   pipeline_no_machine_for_need: {
     title: "No online machine of yours offers what this step needs",
@@ -722,6 +722,12 @@ const COPY: Record<string, RefusalCopy> = {
   pipeline_step_cancelled: {
     title: "The step was cancelled",
     next: "Re-run when ready.",
+  },
+  pipeline_step_disk_exceeded: {
+    // The step's own doing, as a timeout is: what counts is its working copy,
+    // its containers' own files and their logs; a declared cache does not.
+    title: "The step wrote more to disk than a pipeline step may",
+    next: "Write less, or declare a cache for what a tool keeps between runs. An operator can raise the overlay's ephemeral-storage limit.",
   },
   pipeline_node_lost: {
     title: "The node running the step went away before it finished",
@@ -776,6 +782,16 @@ const COPY: Record<string, RefusalCopy> = {
     // delivery stood. One still being retried can arrive later.
     title: "The notification had not arrived when the step stopped waiting",
     next: "The message says where its delivery stood. One still being retried can arrive later; re-running sends another.",
+  },
+  pipeline_timings_unreadable: {
+    // A NOTE: the step's outcome stands; only the timing table missed a sample.
+    title: "The step's Go test timings could not be read from its log",
+    next: "Nothing to do: its packages keep their earlier timings until a run measures them again.",
+  },
+  pipeline_outcome_trimmed: {
+    // A NOTE: the record of the step was cut to fit, never its files.
+    title: "Some file ids or timings were left out of the step's recorded result",
+    next: "The files themselves are in the Library, filed under this run and step.",
   },
 };
 
@@ -868,13 +884,15 @@ const NOT_A_FAULT: ReadonlySet<string> = new Set([
   // refusal.go): a step not run because nothing it covers changed, because an
   // earlier stage failed or because an earlier attempt passed it; a check
   // GitHub refused, an artifact path that matched nothing, a live log at its
-  // limit.
+  // limit, timings that could not be read, a recorded result cut to fit.
   "pipeline_not_affected",
   "pipeline_stage_blocked",
   "pipeline_passed_earlier",
   "pipeline_check_permission_missing",
   "pipeline_artifact_missing",
   "pipeline_log_capped",
+  "pipeline_timings_unreadable",
+  "pipeline_outcome_trimmed",
   // And the ones whose cause is somebody's DECISION rather than a fault: a
   // fork's policy, a secret or the fleet the owner has not allowed, computer
   // use switched off, a pipeline disconnected, a step cancelled, a channel

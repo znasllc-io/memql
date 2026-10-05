@@ -66,7 +66,7 @@ func (c *Client) BranchHead(ctx context.Context, bearer, owner, repo, branch str
 	return payload.Commit.SHA, payload.Commit.Commit.Message, nil
 }
 
-// PullRequestHead is one open pull request's head, and where it came from.
+// PullRequestHead is one pull request's head, and where it came from.
 type PullRequestHead struct {
 	Number         int
 	Title          string
@@ -76,40 +76,65 @@ type PullRequestHead struct {
 	BaseSHA        string
 }
 
-// OpenPullRequests lists a repository's open pull requests: ONE page of a
-// hundred, newest first, which is GitHub's maximum page.
-//
-// HeadRepository is the full name of the repository the head lives in. It is
-// EMPTY when GitHub reports that repository deleted -- the caller cannot tell
-// such a head from a fork's, and must not read it as this repository's.
-func (c *Client) OpenPullRequests(ctx context.Context, bearer, owner, repo string) ([]PullRequestHead, error) {
-	var payload []struct {
-		Number int    `json:"number"`
-		Title  string `json:"title"`
-		Head   struct {
-			SHA  string `json:"sha"`
-			Ref  string `json:"ref"`
-			Repo *struct {
-				FullName string `json:"full_name"`
-			} `json:"repo"`
-		} `json:"head"`
-		Base struct {
-			SHA string `json:"sha"`
-		} `json:"base"`
+// pullRequestPayload is one pull request as GitHub sends it, cut to what a
+// PullRequestHead keeps. The list and the single read decode through it, so
+// the two can never read one pull request differently.
+type pullRequestPayload struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Head   struct {
+		SHA  string `json:"sha"`
+		Ref  string `json:"ref"`
+		Repo *struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
+	} `json:"head"`
+	Base struct {
+		SHA string `json:"sha"`
+	} `json:"base"`
+}
+
+// head is the payload as a PullRequestHead. HeadRepository is the full name
+// of the repository the head lives in, and EMPTY when GitHub reports that
+// repository deleted -- the caller cannot tell such a head from a fork's, and
+// must not read it as this repository's.
+func (pr pullRequestPayload) head() PullRequestHead {
+	head := PullRequestHead{Number: pr.Number, Title: pr.Title, HeadSHA: pr.Head.SHA, HeadRef: pr.Head.Ref, BaseSHA: pr.Base.SHA}
+	if pr.Head.Repo != nil {
+		head.HeadRepository = pr.Head.Repo.FullName
 	}
+	return head
+}
+
+// OpenPullRequests lists a repository's open pull requests: ONE page of a
+// hundred, newest first, which is GitHub's maximum page. An older pull request
+// in a busy repository is not on it; PullRequest reads any one by its number.
+func (c *Client) OpenPullRequests(ctx context.Context, bearer, owner, repo string) ([]PullRequestHead, error) {
+	var payload []pullRequestPayload
 	endpoint := repoEndpoint(owner, repo) + "/pulls?state=open&per_page=" + strconv.Itoa(RepositoriesPerPage)
 	if _, err := c.do(ctx, http.MethodGet, endpoint, bearer, nil, &payload, largeBody); err != nil {
 		return nil, err
 	}
 	out := make([]PullRequestHead, 0, len(payload))
 	for _, pr := range payload {
-		head := PullRequestHead{Number: pr.Number, Title: pr.Title, HeadSHA: pr.Head.SHA, HeadRef: pr.Head.Ref, BaseSHA: pr.Base.SHA}
-		if pr.Head.Repo != nil {
-			head.HeadRepository = pr.Head.Repo.FullName
-		}
-		out = append(out, head)
+		out = append(out, pr.head())
 	}
 	return out, nil
+}
+
+// PullRequest reads one pull request's head as GitHub reports it NOW, whatever
+// its age or state (GET /repos/{owner}/{repo}/pulls/{number}), decoded exactly
+// as OpenPullRequests decodes each entry. A number GitHub does not know is its
+// 404; a number of 0 or less is refused before anything is asked.
+func (c *Client) PullRequest(ctx context.Context, bearer, owner, repo string, number int) (PullRequestHead, error) {
+	if number <= 0 {
+		return PullRequestHead{}, fmt.Errorf("a pull request needs a positive number, not %d", number)
+	}
+	var payload pullRequestPayload
+	if _, err := c.call(ctx, http.MethodGet, repoEndpoint(owner, repo)+"/pulls/"+strconv.Itoa(number), bearer, &payload); err != nil {
+		return PullRequestHead{}, err
+	}
+	return payload.head(), nil
 }
 
 // compareFileLimit is where GitHub stops listing a compare's files.

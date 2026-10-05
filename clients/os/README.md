@@ -13,6 +13,11 @@ Signed-out users enter the OAuth/PKCE login flow automatically, without a
 separate landing-page button. The production login form shows both email-link
 and passkey actions; the local installation remains passkey-only. Unavailable
 identity services retain a retry view instead of an automatic redirect loop.
+The normal OS authorization and callback stay in the current document, retain
+one-use PKCE/state validation, and create a fresh credential source for each
+sign-in. Identity handoffs share one quiet entry frame; initial cluster entry
+waits briefly for readiness and setup facts before revealing the destination.
+An unavailable readiness feed still opens the desktop after that bounded wait.
 
 Identity and ownership setup live in OS. Before probing a session, OS reads
 identity's `/auth/setup/state`: only an explicit `unclaimed` answer opens the
@@ -29,6 +34,25 @@ admission rules. Organization name is required; setup configures the existing
 membership before sealing the claim or issuing a session. Every step is
 idempotent under the same claim lock. The optional “Title in organization” is
 profile text (`primaryRole`), never an authorization role.
+
+Setup's **Joining the cluster** step and **Settings → Cluster → Policy** share
+one joining-policy editor. Invitation only is the initial default and requires an invitation; Approved
+email domains allows exact listed domains (other domains may request access,
+but must be added before they can be invited); Admin approval queues requests;
+Open registration admits anyone after email verification. These are admission
+rules, independent from the optional internal-domain list: after admission,
+matching people receive the internal default role, other people start as
+Readers, and an invitation's explicit role wins. Changes apply to subsequent
+admission decisions and provisioning across replicas; existing accounts keep
+their roles. Outstanding credentials retain their existing lifetime. Local
+passkey-only installations retain that sign-in restriction in every mode.
+
+**Users → Access requests** reviews pending requests. Approval issues an
+invitation through the existing admission authority; rejection requires a note.
+A shared database lock serializes competing reviews. Creation and review events
+broadcast across nodes. Notification recipients are optional; an empty list
+uses cluster owners and admins. Notice throttling is shared across replicas,
+and failed delivery leaves the request available for review.
 
 The Identity app contains your profile, passkeys, sessions, personal access
 tokens, and sign-in policy. Email verification, invitations, recovery, and
@@ -95,11 +119,15 @@ or client-visible session authority.
   widgets and sheets re-inherit the tokens but do NOT carry the attribute.
 - **Persistence**: `system/store.ts` (`DesktopStore`) — versioned
   localStorage; desks, items, pins, theme. Never windows.
-- **The interface language**: [DESIGN.md](DESIGN.md) — the ten owner-set
-  rules every app surface follows (epic memql#4848): Head-first sections,
+- **The interface language**: [DESIGN.md](DESIGN.md) — the twelve
+  rules every app surface follows: Head-first sections,
   filters behind one Refine affordance, quiet sort, the control line,
   one container grammar. When a rule and a surface disagree, the surface
-  is wrong.
+  is wrong. For UI/UX work, start with the repository's
+  [memql-ui-design skill](../../.agents/skills/memql-ui-design/SKILL.md), which
+  loads this language, Supervised Visual Composition and the available
+  `frontend-design` skill. Follow the [design and verification workflow](DESIGN.md#applying-them),
+  including the owner's minimal-interface preference and real-browser review.
 - **Loading and nested navigation**: every app uses content-shaped, text-free
   skeletons for missing content, keeping accessible status labels off screen.
   Use `RecordListSkeleton`, `ContentSkeleton`, or `InlineSkeleton`; preserve
@@ -265,7 +293,12 @@ every app epic after it:
   registration is MATCHED by the mint's identity, never counted: the
   population grows for every reason but this one. The pure reading
   (`addMachine/flow.ts`) is tested on fixtures; the page through the fake
-  connection.
+  connection. The install step presents the install command and, when asked
+  for, a second local-model setup command. `CopyField` copies from anywhere in
+  the row and confirms success in place. The standalone token is available
+  under “Connection token”; it is still never persisted. Shared `TrailRow`
+  provides the single contextual help entry on desktop and phone, with a
+  placeholder modal until the walkthrough video and option documentation ship.
 
 - **A live surface must be RETAINED.** A `LiveCollection` opens its
   subscription and runs its seed from `retain()` and from nowhere else;
@@ -1137,7 +1170,9 @@ rules rather than repetitions of the five before it.
   change.
 
 - **ORGANIZATION OWNERSHIP IS ENFORCED BY THE ENGINE.** Campaigns and
-  deployables require one organization. The UI defaults from authoritative
+  deployables require one organization. The first ownership form requires the
+  cluster organization's name. Its reserved `self` account cannot be archived
+  or deleted; its name remains editable. The UI defaults from authoritative
   `MyAccess.everyAccount/accountIds`: operators use `self`, a client with one
   authorized organization uses that organization, and multiple memberships
   require an explicit choice. The engine independently resolves the default,

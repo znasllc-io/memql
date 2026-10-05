@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -120,36 +121,54 @@ func parse(t *testing.T, rendered string) []resource {
 }
 
 // TestTheCloudOverlayLandsWhollyInOneNamespace is the isolation the design
-// rests on at the Kubernetes layer.
+// rests on at the Kubernetes layer -- with ONE deliberate exception.
 //
-// Kustomize's namespace transformer is doing the work: it rewrites
-// metadata.namespace on every namespaced resource AND metadata.name on the
-// Namespace object base/namespace.yaml declares, which is why the base needs no
-// namespace-bearing manifest of its own. The risk it carries is a resource that
-// names a namespace somewhere the transformer does not reach -- a survivor
-// would put one workload outside the set the Application reconciles, so a sync
-// would neither create nor prune it.
+// The mesh namespace is the overlay's NamespaceTransformer
+// (namespace-transformer.yaml, `unsetOnly: true`), which fills in every
+// resource that states no namespace; base states `memql` on everything it
+// renders, which is why the base needs no namespace-bearing manifest of its
+// own. The risk is a resource that states a namespace of its own, which
+// unsetOnly keeps: it lands outside the mesh, where the bare Service names
+// every intra-mesh address uses stop resolving, and unless the AppProject
+// permits that namespace the sync refuses it.
+//
+// THE EXCEPTION is the pipelines substrate (epic memql#5478, task #5492): a
+// second namespace, memql-pipelines, rendered on purpose by
+// deploy/k8s/components/pipelines for the Jobs pipeline steps run as. Exactly
+// two Namespace objects are accepted, and only the objects wantPipelinesObjects
+// places in memql-pipelines may land there; anything else outside memql still
+// fails.
 func TestTheCloudOverlayLandsWhollyInOneNamespace(t *testing.T) {
-	var sawNamespaceObject bool
-	for _, r := range parse(t, render(t, cloudOverlay)) {
+	assertTheMeshNamespaceAndThePipelinesOne(t, cloudOverlay)
+}
+
+// assertTheMeshNamespaceAndThePipelinesOne is the body of both instance
+// overlays' one-namespace gates (TestCloudEntryLandsWhollyInOneNamespace is
+// the other), so the exception is stated once.
+func assertTheMeshNamespaceAndThePipelinesOne(t *testing.T, overlay string) {
+	t.Helper()
+	var namespaces []string
+	for _, r := range parse(t, render(t, overlay)) {
 		if r.Kind == "Namespace" {
-			sawNamespaceObject = true
-			if r.Metadata.Name != cloudNamespace {
-				t.Errorf("the Namespace object is named %q, want %q", r.Metadata.Name, cloudNamespace)
-			}
+			namespaces = append(namespaces, r.Metadata.Name)
 			continue
 		}
 		// A cluster-scoped resource legitimately carries none.
-		if r.Metadata.Namespace == "" {
+		if r.Metadata.Namespace == "" || r.Metadata.Namespace == cloudNamespace {
 			continue
 		}
-		if r.Metadata.Namespace != cloudNamespace {
-			t.Errorf("%s/%s lands in namespace %q, want %q -- a resource the namespace transformer did not reach is outside the reconciled set",
-				r.Kind, r.Metadata.Name, r.Metadata.Namespace, cloudNamespace)
+		if r.Metadata.Namespace == pipelinesNamespace &&
+			wantPipelinesObjects[r.Kind+"/"+r.Metadata.Name] == pipelinesNamespace {
+			continue
 		}
+		t.Errorf("%s/%s lands in namespace %q; the %s overlay renders into %q and, for the pipelines "+
+			"substrate's own objects alone, %q -- anything else is outside the mesh it was meant for",
+			r.Kind, r.Metadata.Name, r.Metadata.Namespace, overlay, cloudNamespace, pipelinesNamespace)
 	}
-	if !sawNamespaceObject {
-		t.Error("no Namespace object rendered; the overlay is relying on the namespace existing out of band")
+	slices.Sort(namespaces)
+	if want := []string{cloudNamespace, pipelinesNamespace}; !slices.Equal(namespaces, want) {
+		t.Errorf("the %s overlay renders Namespace objects %v, want exactly %v -- a namespace that does not "+
+			"render is one the overlay relies on existing out of band", overlay, namespaces, want)
 	}
 }
 
@@ -324,7 +343,9 @@ func TestTheApplicationPointsAtTheCloudOverlay(t *testing.T) {
 // never reconciled, and the only symptom is a cluster that is not running. The
 // AppProject is the same shape of trap from the other end -- an Application
 // whose destination namespace is missing from `destinations` is rejected at
-// sync time rather than at review time.
+// sync time rather than at review time. The Application renders into TWO
+// namespaces since the pipelines substrate (memql#5492), so both must be
+// permitted: memql for the mesh, memql-pipelines for the Jobs steps run as.
 func TestTheAppOfAppsRendersTheApplication(t *testing.T) {
 	root, err := os.ReadFile(filepath.Join("..", "..", "argocd", "apps", "root.yaml"))
 	if err != nil {
@@ -338,8 +359,31 @@ func TestTheAppOfAppsRendersTheApplication(t *testing.T) {
 	if !strings.Contains(string(root), cloudApp+".yaml") {
 		t.Errorf("root.yaml's include glob does not name %s.yaml, so the app-of-apps never renders it and the cluster is simply not deployed", cloudApp)
 	}
-	if !strings.Contains(string(project), "namespace: "+cloudNamespace) {
-		t.Errorf("the memql AppProject does not permit namespace %s, so %s is rejected at sync", cloudNamespace, cloudApp)
+	// Parsed, not substring-matched: "namespace: memql" is a substring of
+	// "namespace: memql-pipelines", so a text check for the mesh namespace
+	// could no longer fail once the second one is listed.
+	var appProject struct {
+		Spec struct {
+			Destinations []struct {
+				Server    string `yaml:"server"`
+				Namespace string `yaml:"namespace"`
+			} `yaml:"destinations"`
+		} `yaml:"spec"`
+	}
+	if err := yaml.Unmarshal(project, &appProject); err != nil {
+		t.Fatalf("parsing project.yaml: %v", err)
+	}
+	permitted := map[string]bool{}
+	for _, d := range appProject.Spec.Destinations {
+		if d.Server == "https://kubernetes.default.svc" {
+			permitted[d.Namespace] = true
+		}
+	}
+	for _, ns := range []string{cloudNamespace, pipelinesNamespace} {
+		if !permitted[ns] {
+			t.Errorf("the memql AppProject does not permit namespace %s on the in-cluster API server, so the %s "+
+				"Application's objects there are rejected at sync", ns, cloudApp)
+		}
 	}
 	// The retired second Application must not linger in either file: an include
 	// naming a file that does not exist is silently skipped by ArgoCD, and a

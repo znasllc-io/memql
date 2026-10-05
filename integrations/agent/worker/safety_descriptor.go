@@ -23,8 +23,14 @@ import (
 // the mouse_* + key_* input family) one-to-one -- every action name
 // passes through verbatim; there is no umbrella "gui_input" action
 // (the dead safety.ActionGUIInput constant was removed in #1338).
+// The one exception is pipeline_step, lowered to exec (see its case).
 // The Payload pulls just what the rules inspect; everything else
 // (timeouts, sub-args) stays in `Args`.
+//
+// THE PIPELINE PURPOSE BUILDS NO DESCRIPTOR (#5494). A pipeline step's
+// command is the repository's own manifest at a pinned SHA, admitted by
+// two owner consents rather than composed by a model, so preDispatchCheck
+// returns before this is called -- pipeline_purpose.go has the argument.
 //
 // workerComputer actions without a typed payload (screenshot,
 // cursor_position, display_info, window_list, window_focus, the
@@ -52,7 +58,18 @@ func buildSafetyDescriptor(req Request, effectiveScope, capability string) safet
 	}
 
 	switch req.Action {
-	case "exec":
+	case "exec", PipelineStepAction:
+		// pipeline_step is lowered to exec rather than passed through. No
+		// descriptor is BUILT for one today: the pipeline purpose does not
+		// consult the classifier (pipeline_purpose.go), and rule 0 refuses
+		// pipeline_step under every other purpose before the classifier runs.
+		// Mapped anyway so that if either ever changes, the classifier sees
+		// the command the step runs, and nothing else. The default branch
+		// would do worse twice over: an action no rule has an opinion on,
+		// escalating to the noop -- a classifier bypass by action name -- and
+		// the args copied verbatim, which for a pipeline step are its clone
+		// token and its secrets, into every record and log line built from
+		// the descriptor.
 		cmd, _ := req.Args["command"].(string)
 		return safety.NewExecAction(surface, cmd, caller)
 	case "fs_read":

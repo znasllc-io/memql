@@ -63,8 +63,15 @@ describe("native identity screens", () => {
     const { container } = render(<IdentityScreen initialPath="/test-entry" />);
     await screen.findByRole("heading", { level: 1, name: title });
     expect(screen.getByRole("main", { name: title })).toBeTruthy();
+    expect(screen.getAllByRole("group", { name: "Color theme" })).toHaveLength(1);
     expect(container.querySelector(".os-identity-brand svg")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Return to MemQL OS" })).toBeTruthy();
     if (page === "enroll" && "Rejection" in data) expect(screen.queryByRole("button", { name: "Add passkey" })).toBeNull();
+  });
+  it("leaves theme selection to the OS when identity is embedded", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json({ page: "me/profile", data: { Profile: { Name: "Ada" } } })));
+    render(<IdentityScreen initialPath="/me/profile" embedded />);
+    await screen.findByText("Ada");
+    expect(screen.queryByRole("group", { name: "Color theme" })).toBeNull();
   });
 });

@@ -163,7 +163,7 @@ export function Shell({
                     The roster's own siblings -- the return dispatchers, the
                     capture installer and SetupPresence -- stay OUTSIDE the
                     gate, because they must keep running while it draws. */}
-                <CoreGate onSignOut={onSignOut}>
+                <CoreGate onSignOut={onSignOut} waitForReadiness={!ports.disableConnection}>
                 {layout === "phone" ? (
                   <div
       className="os-root"
@@ -461,7 +461,7 @@ function DesktopChrome({
       />
       <ThemeStore open={themesOpen} onClose={() => setThemesOpen(false)} />
       <AskNavigator />
-      <AskSheet />
+      <AskSheet dockReserve={placement.dockReserve} />
     </div>
   );
 }

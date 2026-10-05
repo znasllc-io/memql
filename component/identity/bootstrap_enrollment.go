@@ -109,6 +109,9 @@ func (s *Store) BeginBootstrapEnrollmentLocked(ctx context.Context, cfg Config, 
 	default:
 		return "", errors.New("unknown registration mode")
 	}
+	if err := ValidateRegistrationLists(settings.RegistrationMode, settings.RegistrationDomains, settings.InternalDomains, settings.AccessRequestNotifyEmails); err != nil {
+		return "", err
+	}
 	if !cfg.LocalPasskeyOnly() && !verified {
 		return "", ErrBootstrapEnrollment
 	}

@@ -125,6 +125,18 @@ func (i *Integration) SetForwardRouter(r *ForwardRouter) {
 	i.router = r
 }
 
+// ForwardRouter is the router SetForwardRouter installed, or nil on a node
+// that dispatches locally. The pipelines executor on an agent node forwards
+// its steps over this same router (epic memql#5478): it is the one the node
+// stream delivers WorkbenchForwardResponses to, and a second router would
+// never hear its replies.
+func (i *Integration) ForwardRouter() *ForwardRouter {
+	if i == nil {
+		return nil
+	}
+	return i.router
+}
+
 // SetEngine injects the MemQL engine used by the memql#722
 // Library-promotion path (a successful fs_write records a
 // v1:library:generatedOutput row). Wired during plug-in

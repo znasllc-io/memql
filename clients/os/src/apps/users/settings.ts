@@ -19,6 +19,7 @@ import type { OsAppSection } from "../../system/registry";
  */
 export const USERS_SECTIONS: OsAppSection[] = [
   { id: "people", name: "People" },
+  { id: "requests", name: "Access requests" },
   { id: "groups", name: "Groups" },
   { id: "roles", name: "Roles" },
   // The app's slice of the cluster's logs (epic memql#4895): the lines it

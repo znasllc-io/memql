@@ -17,6 +17,20 @@
 
 ---
 
+## UI/UX work: load the project design skill
+
+Before designing, implementing or reviewing a MemQL interface, read
+[memql-ui-design](.agents/skills/memql-ui-design/SKILL.md), even when the
+session's skill catalog does not list it. This applies to OS apps, shared
+chrome, sign-in and setup pages, and human-facing terminal output.
+`AGENTS.md` links to this file, so the same entry point serves Codex and Claude.
+The skill routes to the existing [interface language](clients/os/DESIGN.md)
+and [Supervised Visual Composition](clients/os/SUPERVISED-VISUAL-COMPOSITION.md);
+keep those as the authoritative rules instead of copying competing guidelines.
+Use the available `frontend-design` skill within this MemQL brief. The owner
+expects simple, minimal interfaces without losing functionality, and should
+not have to repeat this preference or request a design skill each time.
+
 ## Quick Start
 
 **Prerequisites:** docker, k3d, kubectl (`brew install k3d kubectl`).
@@ -836,7 +850,7 @@ user's computer).
   to `integration.workbench.dispatchHost`.
 - **The environment hint and the reroute (memql#4353).**
   `workbenchDispatchHost` takes an OPTIONAL `environment { os, needs[] }`,
-  `needs` from the closed set `display` / `gpu` / `macos_tooling` /
+  `needs` from the closed set `display` / `docker` / `gpu` / `macos_tooling` /
   `user_files`. A mismatch returns a typed `environment_mismatch` having run
   NOTHING; an UNKNOWN need is `invalid_environment_hint`, so a typo can never
   send a call to somebody's laptop. Omitted means no hint; there is no default.

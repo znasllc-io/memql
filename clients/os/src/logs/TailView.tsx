@@ -4,8 +4,9 @@ import { formatFreshness } from "../kit/format";
 import { FollowControl } from "./facets";
 import { lineCount } from "./filters";
 import { LogDetail } from "./LogDetail";
-import { LogLine, ROW_HEIGHT } from "./LogLine";
+import { LogLine, type LogDensity } from "./LogLine";
 import type { LogRow } from "./rows";
+import { useLogRowLayout } from "./useLogRowLayout";
 import type { LogTail } from "./useLogTail";
 import { WindowedList } from "./WindowedList";
 
@@ -20,8 +21,6 @@ import { WindowedList } from "./WindowedList";
 // drifts: the pill's sentence in one, the paused state's dot in the other.
 // So each section keeps its Head, its facets and its state, and hands the
 // rest here.
-
-export type TailDensity = keyof typeof ROW_HEIGHT;
 
 export function TailView({
   tail,
@@ -50,7 +49,7 @@ export function TailView({
   onSubject: (subject: string, subjectConcept: string) => void;
   /** One clock per section, so no two rows disagree about "now". */
   now: Date;
-  density: TailDensity;
+  density: LogDensity;
   /** Names the grid for assistive tech. */
   label: string;
   /** The grid's DOM id prefix. */
@@ -65,6 +64,7 @@ export function TailView({
 }) {
   const selected = selectedId === "" ? undefined : rows.find((row) => row.id === selectedId);
   const pending = tail.newSinceScrolled;
+  const arrangement = useLogRowLayout(density);
 
   return (
     <>
@@ -104,10 +104,10 @@ export function TailView({
           </div>
         )
       ) : (
-        <div className="os-logs-list">
+        <div className="os-logs-list" ref={arrangement.listRef} data-layout={arrangement.layout}>
           <WindowedList
             rows={rows}
-            rowHeight={ROW_HEIGHT[density]}
+            rowHeight={arrangement.rowHeight}
             renderRow={(row) => <LogLine row={row} now={now} onSubject={onSubject} />}
             rowId={(row) => row.id}
             selectedId={selectedId}

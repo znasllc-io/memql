@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"strings"
@@ -79,6 +80,12 @@ func (a *App) transportBase() {
 	if a.engine != nil {
 		identityAdmin, err := adminops.New(&adminops.Service{
 			Engine: a.engine,
+			AccessRequests: &identity.Store{Engine: a.engine, Logger: a.Logger, DirectDB: func() *sql.DB {
+				if db := a.directDBGetter()(); db != nil {
+					return db.DB
+				}
+				return nil
+			}},
 			// Same two-sink logger the identity binary builds for its own
 			// audit trail: the slog stream for the operator tailing logs, and
 			// the engine sink so the event lands on v1:identity:auditEvent
@@ -475,10 +482,9 @@ func (a *App) sendInvitationEmail(ctx context.Context, in adminops.InvitationEma
 // change. Reading env first would let a redeploy silently revert a policy
 // decision nobody made again.
 //
-// Returns "" when neither answers, which adminops reads as `open` -- the mode
-// that adds no restriction. A node that cannot read the policy must not invent
-// one.
-func (a *App) registrationPolicy(ctx context.Context) (string, []string) {
+// Only an absent settings row uses installation configuration. A failed read
+// refuses issuance so it cannot bypass a saved domain restriction.
+func (a *App) registrationPolicy(ctx context.Context) (string, []string, error) {
 	split := func(list string) []string {
 		var out []string
 		for _, part := range strings.Split(list, ",") {
@@ -491,12 +497,18 @@ func (a *App) registrationPolicy(ctx context.Context) (string, []string) {
 
 	if a != nil && a.engine != nil {
 		store := &identity.Store{Engine: a.engine, Logger: a.Logger}
-		if row, err := store.ReadClusterSettings(ctx); err == nil && row != nil {
-			if mode := strings.TrimSpace(row.RegistrationMode); mode != "" {
-				return mode, split(row.RegistrationDomains)
+		row, err := store.ReadClusterSettings(memqlengine.ContextWithFreshRead(auth.ContextWithInternalOrigin(ctx)))
+		if err != nil {
+			return "", nil, fmt.Errorf("registration policy unavailable: %w", err)
+		}
+		if row != nil {
+			mode := identity.RegistrationMode(strings.TrimSpace(row.RegistrationMode))
+			if !mode.IsValid() {
+				return "", nil, fmt.Errorf("invalid saved registration mode %q", mode)
 			}
+			return string(mode), split(row.RegistrationDomains), nil
 		}
 	}
 	return strings.TrimSpace(os.Getenv("MEMQL_IDENTITY_REGISTRATION_MODE")),
-		split(os.Getenv("MEMQL_IDENTITY_REGISTRATION_DOMAINS"))
+		split(os.Getenv("MEMQL_IDENTITY_REGISTRATION_DOMAINS")), nil
 }

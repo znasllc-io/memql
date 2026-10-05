@@ -2,14 +2,19 @@
 
 Owner-approved design direction, 2026-09-15. Fleet is the first implementation.
 This complements [the OS interface language](DESIGN.md); it does not authorize a
-redesign of every app. The stable contract is the behavior below, not a particular
-prototype's sample content or pixel positions.
+redesign of every app. The interface language owns shared layout, controls,
+copy and interaction; this document owns object composition and supervision.
+Load both through the repository's [memql-ui-design skill](../../.agents/skills/memql-ui-design/SKILL.md).
+The stable contract is the behavior below, not a particular prototype's sample
+content or pixel positions.
 
 ## Presentation and composition
 
 Keep the interface clean while preserving **full functionality**. Write for
 moderately technical users: short labels, clear consequences, and accessible info
-details for supporting explanations. Simplification changes placement and wording;
+details for supporting explanations through the shared page-help control in
+the navigation row, rather than an information icon beside every option.
+Simplification changes placement and wording;
 it must not delete less common operations or conceal material effects.
 
 Make important objects and their capabilities tangible. A machine can anchor its
@@ -25,6 +30,14 @@ fragmented navigation around the user's entity or task; retain separate
 destinations where scope or complexity justifies them. Drilldowns need a clear
 return. Reuse layout and control patterns while allowing real differences between
 apps.
+
+Setup uses the shared steps-left/content-right wizard and a pinned action
+footer, collapsing to one column when space requires it. Continue, Back,
+Retry and completion follow the real state and remain in that footer; check
+content explains the result and remedy. A successful installation or advertised
+model is not proof of a working response. Keep verification honest and preserve
+the distinction between leaving a flow and canceling its effects. See
+[One wizard for adding](DESIGN.md#one-wizard-for-adding) for the shared contract.
 
 ## Human control and supervision
 

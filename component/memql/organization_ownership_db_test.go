@@ -136,15 +136,15 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 			t.Fatalf("named %s attribution failed: %v", concept, p)
 		}
 	}
-	if err := organizationInsert(t, engine, rankActorCtx(operator, auth.RoleOwner), "v1:campaigns:audience", "operator-audience-"+suffix, map[string]any{"name": "Default", "ownerUserId": operator}); err == nil || !strings.Contains(err.Error(), "organization_required") {
+	if err := organizationInsert(t, engine, rankActorCtx(operator, auth.RoleOwner), "v1:campaigns:audience", "operator-audience-"+suffix, map[string]any{"name": "Default", "ownerUserId": operator}); err != nil {
 		t.Fatalf("operator omitted organization: %v", err)
 	}
 	var own []memorynodes.MemoryNode
 	if err := db.NewSelect().Model(&own).Where("concept = ?", "v1:campaigns:audience").Where("id = ?", "v1:campaigns:audience:operator-audience-"+suffix).OrderExpr(`"createdAt" DESC`).Limit(1).Scan(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(own) != 0 {
-		t.Fatal("organization-less operator record was persisted")
+	if len(own) != 1 || stringFromAny(accountRowPayload(own[0])["accountId"]) != selfAccountId {
+		t.Fatal("operator resource did not persist the cluster's own organization")
 	}
 	if err := organizationInsert(t, engine, rankActorCtx(multi, auth.RoleWriter), "v1:campaigns:audience", "ambiguous-"+suffix, map[string]any{"name": "Ambiguous"}); err == nil {
 		t.Fatal("multiple memberships silently defaulted")
@@ -178,6 +178,39 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 	receiver.Logger = engine.Logger
 	if err := receiver.Init(memorynodes.DefaultRegistry()); err != nil {
 		t.Fatal(err)
+	}
+	// The receiving replica has no originating request state. Its verified
+	// operator identity resolves the same cluster default, while an explicit
+	// client selection still wins. Exercise the public create mutation too.
+	ownerAccess, _ := auth.AccessFromContext(rankActorCtx(operator, auth.RoleOwner))
+	ownerWire, err := auth.ForwardedAuthorityForUser(ownerAccess, auth.ForwardedClassUser, "", time.Time{}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteOwner, err := auth.VerifyForwardedAuthority(ownerWire, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	remoteOwnerCtx := auth.BindForwardedContext(context.Background(), ownerWire.Principal().Claims, remoteOwner, ownerWire)
+	for _, account := range []string{"", beta} {
+		id := "operator-site-" + account + "-" + suffix
+		argument, want := "", selfAccountId
+		if account != "" {
+			argument, want = ", accountId: "+langparser.QuoteString(account), conceptAccountsAccount+":"+account
+		}
+		if _, err := receiver.Execute(remoteOwnerCtx, fmt.Sprintf(`mutation createSite(siteId: %s, hostname: %s, bundleRef: "blob://operator/test"%s)`, langparser.QuoteString(id), langparser.QuoteString(id+"."+siteHostnamePolicyDomain()), argument)); err != nil {
+			t.Fatalf("operator site after hop (account %q): %v", account, err)
+		}
+		var rows []memorynodes.MemoryNode
+		if err := db.NewSelect().Model(&rows).Where("id = ?", "v1:platform:site:"+id).OrderExpr(`"createdAt" DESC`).Limit(1).Scan(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 1 || stringFromAny(accountRowPayload(rows[0])["accountId"]) != want {
+			t.Fatalf("operator site after hop did not persist organization %q", want)
+		}
+	}
+	if _, err := receiver.Execute(remoteOwnerCtx, `mutation archiveClientAccount(accountId: "self")`); err == nil || !strings.Contains(err.Error(), "cannot be archived") {
+		t.Fatalf("cluster organization archive after hop: %v", err)
 	}
 	ac, _ := auth.AccessFromContext(rankActorCtx(multi, auth.RoleWriter))
 	wire, err := auth.ForwardedAuthorityForUser(ac, auth.ForwardedClassUser, "", time.Time{}, time.Now())

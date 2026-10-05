@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	nethttp "net/http"
 	"os"
@@ -318,14 +319,12 @@ func (a *App) integrationsIdentity() {
 			// waitlist-mode emails, so this branch is the correct
 			// destination for that form variant. No row, no binding, no
 			// cookie -- there is nothing to complete.
-			return identityweb.IssueMagicLinkResult{}, store.CreateAccessRequest(ctx,
-				identity.NewRequestId(),
-				in.Email,
-				in.WaitlistName,
-				in.WaitlistContext,
-				0, "",
-				in.SourceIP, in.UserAgent,
-			)
+			err := mlIssuer.RequestAccess(ctx, magiclink.IssueInput{Email: in.Email, WaitlistName: in.WaitlistName,
+				WaitlistContext: in.WaitlistContext, SourceIP: in.SourceIP, UserAgent: in.UserAgent})
+			if errors.Is(err, magiclink.ErrAccessRequestPath) {
+				err = nil
+			}
+			return identityweb.IssueMagicLinkResult{}, err
 		}
 		res, err := mlIssuer.Issue(ctx, magiclink.IssueInput{
 			Email:               in.Email,
@@ -681,11 +680,15 @@ func (a *App) integrationsIdentity() {
 			// next to the stores, where a real-engine test can drive them
 			// (memql#4880). This closure only supplies what the node knows:
 			// the stores and the internal-domain policy.
+			policy, err := store.RegistrationConfig(ctx, cfg)
+			if err != nil {
+				return identityweb.InvitationAcceptResult{}, err
+			}
 			out, err := invitation.Accept(auth.ContextWithInternalOrigin(ctx), invitation.AcceptDeps{
 				Store:               store,
 				Enrolments:          enrolStore,
-				InternalEmail:       cfg.IsInternalEmail,
-				InternalDefaultRole: cfg.InternalDefaultRole,
+				InternalEmail:       policy.IsInternalEmail,
+				InternalDefaultRole: policy.InternalDefaultRole,
 				PlaceInGroups:       placer.placeInvitedUser,
 			}, plainToken, sourceIP)
 			if err != nil {

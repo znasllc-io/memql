@@ -26,11 +26,11 @@ func organizationOperator(ctx context.Context) bool {
 	return ac != nil && (ac.Unranked && ac.IsClusterOwner() || auth.IsClusterOperator(ac.Role))
 }
 
-// Defaults are resolved from verified identity and current shared memberships,
-// never from the requested account. Multiple memberships require a choice.
+// Operators default to the cluster's own organization. Other defaults resolve
+// from current shared memberships; multiple memberships require a choice.
 func organizationDefaultAccount(operator bool, scope *accountScope) (string, error) {
 	if operator {
-		return "", fmt.Errorf("organization_required: select the organization this record belongs to")
+		return BareShortId(selfAccountId), nil
 	}
 	choices := map[string]bool{}
 	if scope != nil {

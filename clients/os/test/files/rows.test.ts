@@ -135,20 +135,21 @@ describe("fileStory -- the provenance sentence and its dot", () => {
     expect(story.tone).toBe("reachable");
   });
 
-  it("tells 'produced by plan' for a goal's deliverable", () => {
+  it("tells 'produced by a run' for a goal's deliverable", () => {
     const row = artifactFromRow(
       artifact({
         id: "a-1",
         kind: "generated_output",
         source: "agent_generated",
-        producedByRunId: "pl-9",
+        producedByRunId: "run-9",
       }),
     );
     const story = fileStory(row, null);
-    // The id is deliberately absent: it is the `Plan` fact's job, with a
+    // The id is deliberately absent: it is the `Run` fact's job, with a
     // copy button, and in the story it was 32 characters of hex leading a
-    // panel (memql#4860 wave).
-    expect(story.sentence).toBe("Produced by a plan");
+    // panel (memql#4860 wave). A run, not a plan: plans are retired (epic
+    // memql#5000).
+    expect(story.sentence).toBe("Produced by a run");
     expect(story.tone).toBe("reachable");
   });
 

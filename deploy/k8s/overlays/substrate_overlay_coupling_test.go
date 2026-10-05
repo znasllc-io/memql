@@ -28,9 +28,19 @@
 //     zoneAgnosticStorageClasses below. The coupling genuinely does not apply
 //     to it, and saying so here is the way to record that.
 //
+// A SECOND COUPLING OF THE SAME SHAPE (memql#5492). The pipelines step cache
+// is ReadWriteMany on the cloud overlays, which on AKS is the Blob CSI driver's
+// NFS class (azureblob-nfs-premium) -- a class that exists only on a cluster
+// running the driver, which the same script has to turn on. Without it the
+// claim sits Pending naming a class that does not exist, and every step that
+// declares a cache waits out its scheduling timeout. Repair it the same two
+// ways: keep the script's `--enable-blob-driver` (create AND the existing-
+// cluster update), or move the overlays off the azureblob- classes.
+//
 // TEXT-LEVEL ON PURPOSE. render() skips without kustomize on the runner, and a
 // guard that silently skips is not a guard. This reads both files directly and
-// has no external dependency.
+// has no external dependency. (The RENDERED cache class is pinned separately,
+// per overlay, by TestPipelinesCacheClassAndAccessModeAreTheOverlaysValues.)
 package overlays
 
 import (
@@ -155,6 +165,115 @@ func TestTheZonalityCouplingIsStatedWhereTheStorageClassLives(t *testing.T) {
 			t.Errorf("%s pins a zone-requiring storage class without naming the other half of "+
 				"the coupling. Point at scripts/deploy/azure-provision.sh --zones, so a reader "+
 				"changing this value knows which file has to agree with it.", rel)
+		}
+	}
+}
+
+// blobDriverClassPrefix names the storage classes the Azure Blob CSI driver
+// provides. AKS creates them (azureblob-nfs-premium, azureblob-fuse-premium)
+// only on a cluster running the driver.
+const blobDriverClassPrefix = "azureblob-"
+
+var storageClassNameValue = regexp.MustCompile(`^\s*storageClassName:\s*["']?([A-Za-z0-9._-]+)`)
+
+// TestPipelinesCacheClassNeedsTheBlobDriver is the second coupling: if any
+// instance overlay names an azureblob- storage class, the provisioning script
+// must turn the Blob CSI driver on -- when it CREATES a cluster, and on a
+// cluster that already exists, without a prompt.
+//
+// Every YAML file of each instance overlay is read, not just
+// pipelines-values.yaml, so moving the pin to another file of the overlay
+// cannot walk it out of the gate. Comment lines are skipped: a class named in
+// prose is not a class anything provisions.
+func TestPipelinesCacheClassNeedsTheBlobDriver(t *testing.T) {
+	pinning := map[string][]string{}
+	var examined []string
+	for _, kustomization := range instanceOverlayKustomizations {
+		dir := filepath.Dir(kustomization)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read %s: %v", dir, err)
+		}
+		for _, e := range entries {
+			if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
+				continue
+			}
+			rel := filepath.Join(dir, e.Name())
+			examined = append(examined, rel)
+			body, err := os.ReadFile(rel)
+			if err != nil {
+				t.Fatalf("read %s: %v", rel, err)
+			}
+			for _, line := range strings.Split(string(body), "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "#") {
+					continue
+				}
+				if m := storageClassNameValue.FindStringSubmatch(line); m != nil && strings.HasPrefix(m[1], blobDriverClassPrefix) {
+					pinning[m[1]] = appendUnique(pinning[m[1]], rel)
+				}
+			}
+		}
+	}
+	if len(pinning) == 0 {
+		t.Logf("no instance overlay names an %s* storage class; the blob-driver coupling is inert. Examined: %v",
+			blobDriverClassPrefix, examined)
+		return
+	}
+
+	script, err := os.ReadFile(provisionScriptRel)
+	if err != nil {
+		t.Fatalf("read %s: %v", provisionScriptRel, err)
+	}
+	var onCreate, onUpdate, updatePrompts bool
+	inEnsureCluster := false
+	for _, line := range strings.Split(string(script), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "function ") {
+			inEnsureCluster = strings.HasPrefix(trimmed, "function ensure_cluster()")
+		}
+		if strings.HasPrefix(trimmed, "#") || !strings.Contains(trimmed, "--enable-blob-driver") {
+			continue
+		}
+		switch {
+		case strings.Contains(trimmed, "az aks update"):
+			onUpdate = true
+			// az asks "Please make sure there is no open-source Blob CSI
+			// driver installed before enabling" on an UPDATE (never on a
+			// create) unless told --yes, and a capability script never
+			// prompts: with stdin closed the call fails instead.
+			updatePrompts = !strings.Contains(trimmed, "--yes")
+		case inEnsureCluster:
+			onCreate = true
+		}
+	}
+	if !onCreate {
+		t.Errorf("%v name %v, but scripts/deploy/azure-provision.sh's ensure_cluster creates the AKS cluster "+
+			"without --enable-blob-driver. The class exists only on a cluster running the Blob CSI driver, so "+
+			"the pipelines cache claim would sit Pending naming a class that does not exist.",
+			flatten(pinning), keys(pinning))
+	}
+	if !onUpdate {
+		t.Errorf("%v name %v, but scripts/deploy/azure-provision.sh has no `az aks update ... --enable-blob-driver` "+
+			"for a cluster that already exists. A re-run against a cluster created before the driver was "+
+			"required would report converged while the cache class is still missing.",
+			flatten(pinning), keys(pinning))
+	}
+	if updatePrompts {
+		t.Error("scripts/deploy/azure-provision.sh enables the Blob CSI driver with `az aks update` but without " +
+			"--yes; az prompts on that update, and a capability script must never prompt (with stdin closed " +
+			"the call fails instead)")
+	}
+
+	// The reason beside the decision, as for the zonality coupling.
+	for _, rel := range flatten(pinning) {
+		body, err := os.ReadFile(rel)
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		if !strings.Contains(string(body), "azure-provision.sh") || !strings.Contains(string(body), "enable-blob-driver") {
+			t.Errorf("%s names an %s* class without naming the other half of the coupling. Point at "+
+				"scripts/deploy/azure-provision.sh --enable-blob-driver, so a reader changing the class knows "+
+				"which file has to agree with it.", rel, blobDriverClassPrefix)
 		}
 	}
 }

@@ -597,6 +597,14 @@ message WorkerForwardRequest {
   // Optional timeout hint; the receiver clamps to its own caps.
   int32 timeout_sec = 12;
   ForwardedAuthority authority = 13;
+  // Who is asking (#5494): empty for an agent's call, "pipeline" for a pipeline
+  // run's step. The one consent fact the receiver DOES re-check, because it can:
+  // workerHost.pipeline_step belongs to the pipeline purpose and the pipeline
+  // purpose to it alone, with no agent named. A pipeline_step arriving without
+  // it is refused before anything is dispatched -- on the machine it is a shell
+  // command admitted without a consent window, so a sender that forwarded one
+  // past its gate is not trusted to have been right.
+  string purpose = 14;
 }
 
 // WorkerForwardResponse carries the dispatch result back to the originating

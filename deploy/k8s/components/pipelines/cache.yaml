@@ -1,0 +1,28 @@
+# The shared step cache (epic memql#5478, task #5492): Go's module and build
+# caches and npm's, mounted at /cache by a step that declares `caches:`. One
+# claim for every run, so the second run of a repository starts warm.
+#
+# The CLASS, ACCESS MODE AND SIZE ARE THE OVERLAY'S (pipelines-values.yaml).
+# What ships here is what a local cluster can provision: no storageClassName --
+# the field ABSENT, so the cluster's default class (k3d's local-path) takes it;
+# `""` would mean "bind only to a pre-made volume" and sit Pending forever --
+# and ReadWriteOnce, which is per NODE, not per pod: a local-path volume pins
+# the step pods that mount it to its node, where they share it. A multi-node
+# cloud cluster needs ReadWriteMany, because the steps of one run land on
+# whichever node has room; on AKS that is the Blob CSI driver's NFS class,
+# which exists only when the cluster runs the driver
+# (scripts/deploy/azure-provision.sh, gated by
+# deploy/k8s/overlays/substrate_overlay_coupling_test.go).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: memql-pipelines-cache
+  namespace: memql-pipelines
+  labels:
+    app.kubernetes.io/part-of: memql
+    app.kubernetes.io/name: pipelines-cache
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi

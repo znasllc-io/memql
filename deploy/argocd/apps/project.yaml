@@ -1,7 +1,8 @@
 # AppProject scoping the memql GitOps surface (deployment-v2 Phase 2, #700).
-# Restricts what the reconciler may deploy: only THIS repo, only the memql (and
-# argocd, for the app-of-apps) namespaces, on the in-cluster API. A tighter blast
-# radius than the default project.
+# Restricts what the reconciler may deploy: only THIS repo, only the memql,
+# memql-pipelines (the Jobs pipeline steps run as) and argocd (for the
+# app-of-apps) namespaces, on the in-cluster API. A tighter blast radius than
+# the default project.
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
@@ -16,13 +17,22 @@ spec:
   # An Application whose destination namespace is missing from this list is
   # rejected at sync. There is ONE mesh namespace (epic memql#3943): a second
   # environment is a second install, with its own ArgoCD and its own project.
+  #
+  # memql-pipelines is NOT a second mesh. It is where pipeline steps run, as
+  # Jobs the workbench creates (epic memql#5478, task #5492): the instance
+  # overlays render that namespace and its Role, quota, limits, cache and
+  # network policy from deploy/k8s/components/pipelines, so the Application
+  # reconciles objects there and is refused at sync without this entry.
   destinations:
     - server: https://kubernetes.default.svc
       namespace: memql
     - server: https://kubernetes.default.svc
+      namespace: memql-pipelines
+    - server: https://kubernetes.default.svc
       namespace: argocd
   # Cluster-scoped resources the mesh legitimately needs (none today beyond the
-  # namespace, which is created by the overlay). Keep empty-ish; widen on need.
+  # two namespaces, memql and memql-pipelines, which the overlay creates). Keep
+  # empty-ish; widen on need.
   clusterResourceWhitelist:
     - group: ''
       kind: Namespace

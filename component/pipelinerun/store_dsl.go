@@ -57,6 +57,9 @@ const (
 	// The notify stage's: one pipeline's runs of one event, to learn whether
 	// the run before this one failed.
 	qPipelineRunsForPipelineEvent = "pipelineRunsForPipelineEvent" // (pipelineId, event)
+	// The opening's read of what a push supersedes, likewise server-only: a
+	// pull request's runs that have not finished, every mode (supersede.go).
+	qPipelineRunsUnfinishedForPullRequest = "pipelineRunsUnfinishedForPullRequest" // (pipelineId, pullRequest)
 
 	// The work spine's read of one run's steps (dsl/work), server-only and
 	// cluster-owner-conjoined like the reads above: a resumed driver reads the
@@ -387,6 +390,16 @@ func (s *dslStore) RunByCheckRun(ctx context.Context, repository string, checkRu
 
 func (s *dslStore) RunsUnfinished(ctx context.Context) ([]Run, error) {
 	return allRuns(s.systemRead(ctx, qPipelineRunsUnfinished, nil))
+}
+
+func (s *dslStore) RunsUnfinishedForPullRequest(ctx context.Context, pipelineID string, pullRequest int) ([]Run, error) {
+	if pullRequest <= 0 {
+		return nil, nil
+	}
+	return allRuns(s.systemRead(ctx, qPipelineRunsUnfinishedForPullRequest, map[string]any{
+		"pipelineId":  bareID(pipelineID),
+		"pullRequest": int64(pullRequest),
+	}))
 }
 
 func (s *dslStore) RunsFinalCheckRunUnavailable(ctx context.Context, since time.Time) ([]Run, error) {

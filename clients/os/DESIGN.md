@@ -1,8 +1,11 @@
 # The MemQL OS interface language
 
 [Supervised Visual Composition](SUPERVISED-VISUAL-COMPOSITION.md) extends this
-language for tangible configuration and supervised assistance. Fleet is its
-first approved implementation; broader app refactors require separate approval.
+language for tangible configuration and supervised assistance. This document
+owns the shared layout, controls, copy and interaction rules; composition uses
+those rules to expose objects and relationships. Fleet is its first approved
+implementation; broader app refactors require separate approval. Start UI/UX
+work with the repository's [memql-ui-design skill](../../.agents/skills/memql-ui-design/SKILL.md).
 
 Twelve rules. Ten are owner-set (epic memql#4848); 11 and 12 came out of
 epic memql#4937, and 11 is mostly a RATIFICATION -- Bin, Campaigns, Users,
@@ -49,7 +52,9 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
 5. **One control line.** Inputs, selects, buttons and choice pills all
    stand `--os-control-h` tall at `--os-text-base`. Field-shaped controls
    share `--os-radius-xs`; the choice pill keeps its own radius because it
-   is the shell's selection language, not a field. Selects drop UA chrome
+   is the shell's selection language, not a field. Ask shares the window header
+   and icon controls, app-content text scale and page gutters; its sheet
+   dimensions do not define a separate scale for its contents. Selects drop UA chrome
    (`Select` draws its own currentColor chevron). Forms use `Field` --
    label above, control on the line; nothing invents a third field size.
 
@@ -126,6 +131,55 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
 
 ## Applying them
 
+- For UI/UX work, load the repository's `memql-ui-design` skill before coding.
+  It connects these rules to Supervised Visual Composition and the available
+  `frontend-design` skill. Installed plugin paths are machine-specific; the
+  repository skill and rules remain usable without that plugin. The owner
+  should not need to request a skill for each UI change.
+- Keep the owner's preference for simple, minimal interfaces explicit in the
+  design plan. Reuse MemQL's palette, typography, spacing and kit. Briefly plan
+  the control and its placement, compare that plan with the requested behavior,
+  then build and critique the rendered result.
+- Represent one preference with one control. Dark / Light / System is one
+  three-position toggle on a shared track with one moving selection, using
+  moon, sun and monitor icons. It needs no visible heading or option labels;
+  retain accessible names, tooltips, keyboard operation and visible focus.
+  This does not remove the labels that identify form fields.
+- Identity and cluster setup pages share `kit/EntryLayout`: the theme toggle
+  stays at the upper left through sign-in, ownership setup, inference setup,
+  verification, recovery, legal and error states, including the page shown to
+  people waiting for an owner to finish setup. Reuse `kit/ThemeSwitch` and the
+  stored OS preference; never add a separate selector to each form or to
+  identity panels inside the OS.
+- Sign-in and sign-out use one quiet `EntryPending` handoff in that frame.
+  Keep same-origin authorization in the current document, preserve PKCE/state
+  validation, and reveal the cluster destination after its initial facts arrive.
+  Do not flash form skeletons, generic account pages, or the desktop on the way
+  to setup. A bounded first-read wait must still let an unavailable readiness
+  feed reach the desktop; subsequent refreshes do not reopen the entry loader.
+  Reveal the destination once with a short opacity transition, without moving
+  its content; respect reduced motion.
+- Keep one contextual information button at the far right of the shared
+  `TrailRow`, after Back and breadcrumbs, on desktop and phone. It opens the
+  current page's help modal; until documentation exists, say “Documentation is
+  coming soon.” Future help starts with a walkthrough video, followed by the
+  option details. Do not repeat information icons beside individual settings.
+  Keep essential permissions, download costs and destructive consequences in
+  the flow where someone makes that choice.
+- Add Machine keeps the shared wizard's steps-left/content-right layout and
+  pinned footer. Use plain forward actions (“Continue”), keep automatic
+  connection/check steps automatic, and distinguish returning to Machines
+  (keep the token) from canceling setup (revoke it). Commands are full-row copy
+  targets with visible “Copied” feedback; keep keyboard copying, manual
+  selection and an honest clipboard-failure message. Put the standalone token
+  behind a disclosure since the install command already includes it.
+- Remove redundant labels, helper text, outlines and decoration. Keep copy
+  when it explains a consequence or helps the current decision. A skill's
+  general suggestions never override these repository rules or the brief.
+- Editable collections, such as approved email domains, use an Add control
+  and individually removable entries with validation and keyboard support.
+  Do not require comma-separated input to manage a visible list. Explain the
+  consequence of the collection once, and show it only for modes that use it.
 - Build with the kit pieces; a surface needing a control the kit lacks
   promotes it on second use (`src/kit/controls.tsx` header) rather than
   respelling it locally.
@@ -133,6 +187,25 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   rules is rendered screenshots, both modes, empty and populated -- not the
   diff. The audit that produced these rules was visual, and the drift it
   found had survived every code review.
+- Check the changed interaction in the local app, including keyboard access,
+  a narrow viewport and reduced motion where relevant. When local testing is
+  requested, rebuild through the supported local path and verify the result in
+  the requested browser before calling it ready.
+
+### Human-facing terminal output
+
+Apply the same restraint to installer and uninstaller output. Use the canonical
+MemQL mark when it renders faithfully at terminal size; otherwise use the MemQL
+name. Keep the command's purpose, current stage and final outcome easy to scan.
+Progress should reflect real work; a small brand-specific animation may show
+activity, but must not invent completion percentages or imply success.
+
+Keep routine diagnostics in a local log, expose a verbose option, and print the
+log path with actionable failures. Summarize what was installed, retained or
+removed accurately, including partial completion and other cluster enrollments.
+Respect non-interactive output, narrow terminals and plain-text/no-color modes.
+These rules apply to human presentation; capability scripts retain their
+structured stdout contract and send human logs to stderr.
 
 ## Record lists
 
@@ -184,11 +257,11 @@ Each app supplies facts from its existing authorized reads; unavailable values
 use `Figure` absence semantics instead of zero. Only draw activity history when
 a real time series exists. Keep record lists and editors in their own sections.
 
-Maps use `MapHeading` for title-aligned information help, `MapControls` for
-bottom-right zoom and reset actions, and `usePanZoom` with wheel zoom disabled
-and fitted reset enabled. Dragging pans; wheel scrolling belongs to the page.
-Keep routine instructions inside the information control. Errors and stale-data
-notices remain visible.
+Maps use `MapHeading` for title alignment, `MapControls` for bottom-right zoom
+and reset actions, and `usePanZoom` with wheel zoom disabled and fitted reset
+enabled. Dragging pans; wheel scrolling belongs to the page. Keep routine map
+instructions in the shared page-help control described above, without adding
+another information icon. Errors and stale-data notices remain visible.
 
 Fleet and Deployables adopt this composition first. Other apps can reuse these
 components as their overview data is added, without changing their workflows.
@@ -387,6 +460,11 @@ surface in the shell that read as a single thought.
   act, primary last. **The forward act lives nowhere else** -- a step's body
   holds what is being answered, never the button that moves on. An act that is
   not legal yet is absent, and the words on the left say what is missing.
+  This includes recovery: failed machine checks offer **Back** and **Retry**
+  in the footer; a missing model offers **Download models** there. Check
+  content explains the result and any manual repair, without another action
+  button. Back returns to Machines and keeps the registration. While a check
+  runs, hide Retry; offer Done only after every required check passes.
 - **A wait is visible.** When it is the cluster's turn (`tone: "busy"`) there
   is no forward act, the bar's top hairline becomes a moving thread, the dot
   becomes a spinner, the state takes the accent, and `meta` measures the wait

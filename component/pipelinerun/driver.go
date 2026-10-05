@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
 	"slices"
 	"sort"
 	"strconv"
@@ -50,8 +51,9 @@ import (
 const (
 	// maxConcurrentSteps bounds one stage's steps in flight at once.
 	maxConcurrentSteps = 16
-	// stepGrace is how long past a step's own timeout the driver waits for
-	// the runner to report before it stops waiting (pipeline_step_timeout).
+	// stepGrace is how long past a run's ceiling the driver waits for the
+	// runner to report a step before it stops waiting (pipeline_run_ceiling;
+	// ruling R31b, stepDeadline).
 	stepGrace = 10 * time.Minute
 	// executorCancelTimeout bounds Executor.Cancel.
 	executorCancelTimeout = 30 * time.Second
@@ -1025,16 +1027,17 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 		return
 	}
 
-	end := dr.execStep(exec, dr.request(t, secrets), stepDeadline(step))
+	ceiling := pipelines.ParseRunCeiling(os.Getenv(pipelines.EnvRunCeiling))
+	end := dr.execStep(exec, dr.request(t, secrets), dr.stepDeadline(ceiling))
 	switch end.kind {
 	case endLost:
 		return
 	case endCancelled:
 		dr.settle(ctx, t, cancelReceipt())
 	case endTimeout:
-		dr.settle(ctx, t, failReceipt(pipelines.CodeStepTimeout, fmt.Sprintf(
-			"The step did not report within its %s timeout and the %s the runner is given past it, so the driver stopped waiting for it.",
-			time.Duration(timeoutSeconds(step))*time.Second, stepGrace)))
+		dr.settle(ctx, t, failReceipt(pipelines.CodeRunCeiling, fmt.Sprintf(
+			"The step did not report before its run's %s ceiling and the %s the runner is given past it, so the driver stopped waiting for it.",
+			ceiling, stepGrace)))
 	case endError:
 		dr.settle(ctx, t, failReceipt(pipelines.CodeExecutorError,
 			"The runner could not report how the step ended: "+dr.mask(end.err.Error())))
@@ -1140,17 +1143,20 @@ func (dr *runDriver) execStep(exec pipelines.Executor, req pipelines.StepRequest
 	return stepEnd{kind: endCancelled}
 }
 
-// stepDeadline is a step's own timeout plus the grace the runner is given to
-// report it.
-func stepDeadline(step pipelines.Step) time.Duration {
-	return time.Duration(timeoutSeconds(step))*time.Second + stepGrace
-}
-
-func timeoutSeconds(step pipelines.Step) int {
-	if step.TimeoutSeconds > 0 {
-		return step.TimeoutSeconds
+// stepDeadline is how long the driver waits on a step it hands the runner:
+// until its run's ceiling and the grace the runner is given past it (ruling
+// R31b, design record D11) -- not the step's own timeout. A step may wait in
+// the cluster's queue for a free slot under the pipelines ceiling, bounded by
+// its run's ceiling alone, and its own timeout runs from its Job's creation;
+// the runner holds it to both. Measured on the driver's clock from the run's
+// start that every request carries, so the driver and the executor bound a
+// step by the same moment.
+func (dr *runDriver) stepDeadline(ceiling time.Duration) time.Duration {
+	started, err := time.Parse(time.RFC3339, dr.facts.startedAt)
+	if err != nil {
+		started = dr.d.now()
 	}
-	return int(pipelines.DefaultStepTimeout / time.Second)
+	return started.Add(ceiling + stepGrace).Sub(dr.d.now())
 }
 
 // requestFacts are the run's facts every StepRequest carries, fixed once the

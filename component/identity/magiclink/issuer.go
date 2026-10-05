@@ -117,16 +117,17 @@ type Issuer struct {
 
 // IssueInput is the per-request payload the HTTP handler passes in.
 type IssueInput struct {
-	Email               string
-	ClientId            string
-	RedirectURI         string
-	State               string
-	CodeChallenge       string
-	CodeChallengeMethod string
-	SourceIP            string
-	UserAgent           string
-	InvitationId        string
-	CorrelationId       string
+	WaitlistName, WaitlistContext string
+	Email                         string
+	ClientId                      string
+	RedirectURI                   string
+	State                         string
+	CodeChallenge                 string
+	CodeChallengeMethod           string
+	SourceIP                      string
+	UserAgent                     string
+	InvitationId                  string
+	CorrelationId                 string
 
 	// Bootstrap=true marks the call as the /setup wizard's owner-mint
 	// path. Skips the bootstrap-state gate (chicken-and-egg: the
@@ -296,8 +297,11 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) (IssueResult, error) 
 		// allowlist was consulted. The value was never hashed, never looked
 		// up, and never checked against the address registering.
 		invite := i.resolveInvitation(ctx, in, email)
-		var err error
-		decision, err = registration.Decide(i.Cfg, email, invite)
+		cfg, err := i.Store.RegistrationConfig(ctx, i.Cfg)
+		if err != nil {
+			return out, fmt.Errorf("magiclink: registration policy unavailable: %w", err)
+		}
+		decision, err = registration.Decide(cfg, email, invite)
 		if err != nil {
 			i.audit(ctx, identity.AuditEvent{
 				Category:      identity.AuditCategoryAuth,
@@ -315,7 +319,7 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) (IssueResult, error) 
 
 	switch decision.Action {
 	case registration.ActionCreateAccessRequest:
-		return out, i.handleAccessRequest(ctx, email, in)
+		return out, i.RequestAccess(ctx, in)
 
 	case registration.ActionIssueMagicLink:
 		// fall through
@@ -512,9 +516,27 @@ func (i *Issuer) Issue(ctx context.Context, in IssueInput) (IssueResult, error) 
 	return out, nil
 }
 
-// handleAccessRequest creates a v1:identity:accessRequest row instead
-// of issuing a magic link (waitlist mode).
-func (i *Issuer) handleAccessRequest(ctx context.Context, email string, in IssueInput) error {
+// RequestAccess records an applicant under the current joining policy and
+// notifies the configured reviewers without issuing a sign-in credential.
+func (i *Issuer) RequestAccess(ctx context.Context, in IssueInput) error {
+	if i == nil || i.Store == nil {
+		return errors.New("access requests are unavailable")
+	}
+	if i.IsBootstrapped != nil && !i.IsBootstrapped(ctx) {
+		return ErrClusterNotBootstrapped
+	}
+	if i.Cfg.LocalPasskeyOnly() {
+		return errors.New("this local installation uses passkeys only")
+	}
+	cfg, err := i.Store.RegistrationConfig(ctx, i.Cfg)
+	if err != nil {
+		return err
+	}
+	email := strings.TrimSpace(in.Email)
+	if !strings.Contains(email, "@") || (cfg.RegistrationMode != identity.RegistrationModeWaitlist &&
+		!(cfg.RegistrationMode == identity.RegistrationModeDomainRestricted && !cfg.IsAllowedRegistrationDomain(email))) {
+		return ErrEmailNotAllowed
+	}
 	requestId, err := identity.NewRandomId("")
 	if err != nil {
 		return fmt.Errorf("magiclink: generate access-request id: %w", err)
@@ -523,8 +545,8 @@ func (i *Issuer) handleAccessRequest(ctx context.Context, email string, in Issue
 		ctx,
 		requestId,
 		email,
-		"", // name unknown at this stage
-		"", // additionalContext
+		in.WaitlistName,
+		in.WaitlistContext,
 		0,  // riskScore — Phase 4 plumbs the real value
 		"", // riskSignals
 		in.SourceIP,
@@ -543,6 +565,16 @@ func (i *Issuer) handleAccessRequest(ctx context.Context, email string, in Issue
 		CorrelationId: in.CorrelationId,
 		Outcome:       identity.AuditOutcomeSuccess,
 	})
+	if sender, ok := i.Sender.(interface {
+		SendAccessRequestNotice(context.Context, string) error
+	}); ok {
+		if err := i.Store.NotifyAccessRequests(ctx, cfg, sender.SendAccessRequestNotice); err != nil {
+			i.audit(ctx, identity.AuditEvent{Category: identity.AuditCategoryAuth, Action: "access_request_notification_failed", TargetType: "accessRequest", TargetId: requestId, Outcome: identity.AuditOutcomeFailure, FailureReason: "delivery_failed"})
+			if i.Logger != nil {
+				i.Logger.Warn("access request saved but notification failed", "error", err)
+			}
+		}
+	}
 	// Return ErrAccessRequestPath so the HTTP handler can shape the
 	// response body differently (still 200, but a "we received your
 	// request" message instead of a "check your email" message).

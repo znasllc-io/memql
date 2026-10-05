@@ -3299,7 +3299,15 @@ message IdentityAdminMsg {
     RevokeUserInvitationRequest revoke_user_invitation = 21;
     ResetSignInPolicyRequest reset_sign_in_policy = 22;
     SetUserSharedMailboxRequest set_user_shared_mailbox = 23;
+    ReviewAccessRequestRequest review_access_request = 24;
   }
+}
+
+message ReviewAccessRequestRequest {
+  string request_id = 1;
+  string decision = 2; // approve | reject
+  string role = 3; // empty uses the internal-domain default
+  string note = 4; // required when rejecting
 }
 
 // IdentityAdminResult is the reply to IdentityAdminMsg.

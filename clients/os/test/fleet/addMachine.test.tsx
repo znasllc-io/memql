@@ -120,7 +120,7 @@ async function describeAndMint(name = "studio-mac-mini", opts: { computerUse?: b
   if (opts.linux) await click(screen.getByRole("radio", { name: "Linux" }));
   if (opts.computerUse) await click(screen.getByLabelText(/^Computer use$/));
   if (opts.inference) await click(screen.getByLabelText(/Run local models/));
-  await click(screen.getByRole("button", { name: "Mint a token" }));
+  await click(screen.getByRole("button", { name: "Continue" }));
   await settle();
 }
 
@@ -197,9 +197,9 @@ describe("the page replaces the list", () => {
   it("offers Mint only once a name is typed, and Cancel before that leaves with nothing created", async () => {
     mount(fakeConnection());
     await openPage();
-    expect(within(bar()).queryByRole("button", { name: "Mint a token" })).toBeNull();
+    expect(within(bar()).queryByRole("button", { name: "Continue" })).toBeNull();
     await type(screen.getByLabelText("Machine name") as HTMLInputElement, "box");
-    expect(within(bar()).getByRole("button", { name: "Mint a token" })).toBeTruthy();
+    expect(within(bar()).getByRole("button", { name: "Continue" })).toBeTruthy();
     await click(within(bar()).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("region", { name: "Add a machine" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Machines" })).toBeTruthy();
@@ -213,11 +213,12 @@ describe("minting", () => {
     await describeAndMint();
     expect(h.mint).toHaveBeenCalledTimes(1);
     expect(h.mint.mock.calls[0]?.[1]).toEqual({ name: "studio-mac-mini" });
+    await click(screen.getByText("Connection token"));
     const token = screen.getByLabelText("the worker token") as HTMLInputElement;
     expect(token.value).toBe(TOKEN);
     expect(token.readOnly).toBe(true);
     expect(screen.getByRole("button", { name: "Copy the worker token" })).toBeTruthy();
-    expect(screen.getByText(/The token is shown only once/)).toBeTruthy();
+    expect(screen.getByText(/private token shown only during this setup/)).toBeTruthy();
   });
 
   it("NEVER writes the token to browser storage or a URL", async () => {
@@ -266,7 +267,7 @@ describe("minting", () => {
     expect((screen.getByLabelText("the local models setup command") as HTMLInputElement).value).toBe(
       "/usr/local/bin/memql worker setup --inference",
     );
-    expect(screen.getByText(/once the installer prints SUCCESS/)).toBeTruthy();
+    expect(screen.getByText(/Run after Cockpit is installed/)).toBeTruthy();
   });
 
   it("renders a refused mint in surface, creates nothing, and offers Mint again", async () => {
@@ -283,7 +284,7 @@ describe("minting", () => {
     await waitFor(() => expect(screen.getByText("this account may not mint worker tokens")).toBeTruthy());
     expect(screen.getByText("The connection token could not be created.")).toBeTruthy();
     expect(screen.queryByLabelText("the worker token")).toBeNull();
-    expect(within(bar()).getByRole("button", { name: "Mint a token" })).toBeTruthy();
+    expect(within(bar()).getByRole("button", { name: "Continue" })).toBeTruthy();
   });
 });
 
@@ -354,8 +355,7 @@ describe("the checks", () => {
     expect(within(checks()).getAllByRole("listitem")[0]?.getAttribute("data-state")).toBe("done");
     expect(within(checks()).getByText(/Online and steady/)).toBeTruthy();
     expect(within(bar()).getByText("Ready")).toBeTruthy();
-    // Done is primary now; Open names the machine.
-    expect(within(bar()).getByRole("button", { name: "Open mini.local" })).toBeTruthy();
+    expect(within(bar()).getByRole("button", { name: "Back" })).toBeTruthy();
     expect(within(bar()).getByRole("button", { name: "Done" }).getAttribute("data-tone")).toBe("primary");
   });
 
@@ -398,7 +398,8 @@ describe("the checks", () => {
     emit(connection, arrival({ hardware: { chip: "M2", memoryBytes: 1, runtimes: [{ name: "ollama", version: "0.11" }] } }));
     await settle();
     expect(screen.getByText("No models yet.")).toBeTruthy();
-    await click(screen.getByRole("button", { name: "Pull the recommended models" }));
+    expect(within(screen.getByRole("list", { name: "Checks on this machine" })).queryByRole("button", { name: "Download models" })).toBeNull();
+    await click(within(bar()).getByRole("button", { name: "Download models" }));
     await settle();
     expect(connection.query.fleetPullRecommended).toHaveBeenCalledExactlyOnceWith({
       registrationId: "v1:worker:registration:mini",
@@ -455,7 +456,8 @@ describe("cancel after a mint asks which of two things", () => {
 
   it("shows a retry after a failed response and never marks the failed setup ready", async () => {
     h.chat.mockRejectedValueOnce(new Error("Runtime unavailable"));
-    h.chat.mockResolvedValueOnce({ message: { content: "hello" } });
+    let answer!: (value: unknown) => void;
+    h.chat.mockImplementationOnce(() => new Promise(resolve => { answer = resolve; }));
     const connection = fakeConnection();
     mount(connection);
     await describeAndMint("mini", { inference: true });
@@ -463,12 +465,20 @@ describe("cancel after a mint asks which of two things", () => {
     emit(connection, row);
     await beat(connection, row, 15);
     await beat(connection, row, 30);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Retry check" })).toBeTruthy());
+    await waitFor(() => expect(within(bar()).getByRole("button", { name: "Retry" })).toBeTruthy());
+    expect(within(bar()).getAllByRole("button").map(b => b.textContent)).toEqual(["Back", "Retry"]);
+    expect(within(screen.getByRole("list", { name: "Checks on this machine" })).queryByRole("button")).toBeNull();
     expect(within(bar()).queryByText("Ready")).toBeNull();
     expect(within(bar()).queryByRole("button", { name: "Done" })).toBeNull();
-    await click(screen.getByRole("button", { name: "Retry check" }));
+    await click(within(bar()).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(h.chat).toHaveBeenCalledTimes(2));
+    expect(within(bar()).getAllByRole("button").map(b => b.textContent)).toEqual(["Back"]);
+    await beat(connection, row, 45);
+    expect(h.chat).toHaveBeenCalledTimes(2);
+    await act(async () => answer({ message: { content: "hello" } }));
     await waitFor(() => expect(within(bar()).getByText("Ready")).toBeTruthy());
     expect(h.chat).toHaveBeenCalledTimes(2);
+    expect(within(bar()).getAllByRole("button").map(b => b.textContent)).toEqual(["Back", "Done"]);
   });
 
   // THE FLOOR'S TWO VERBS. While the cluster listens there is ONE button, and
@@ -476,22 +486,22 @@ describe("cancel after a mint asks which of two things", () => {
   it("waits with one button on the floor: Leave, and Cancel as text beside it", async () => {
     mount(fakeConnection());
     await describeAndMint();
-    expect(within(bar()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cancel", "Leave"]);
+    expect(within(bar()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cancel setup", "Back to Machines"]);
     expect(bar().querySelectorAll(".os-button")).toHaveLength(1);
-    expect(bar().querySelector(".os-button")?.textContent).toBe("Leave");
-    expect(bar().querySelector(".os-actbar-text")?.textContent).toBe("Cancel");
+    expect(bar().querySelector(".os-button")?.textContent).toBe("Back to Machines");
+    expect(bar().querySelector(".os-actbar-text")?.textContent).toBe("Cancel setup");
   });
 
   it("leaves with the token kept, after saying the one thing leaving costs here", async () => {
     mount(fakeConnection());
     await describeAndMint();
-    await click(within(bar()).getByRole("button", { name: "Leave" }));
-    expect(within(bar()).getByText("Leave?")).toBeTruthy();
-    expect(screen.getByText(/keeps working/)).toBeTruthy();
-    expect(screen.getByText(/shown only here/)).toBeTruthy();
+    await click(within(bar()).getByRole("button", { name: "Back to Machines" }));
+    expect(within(bar()).getByText("Back to Machines?")).toBeTruthy();
+    expect(screen.getByText(/will appear in Machines when it connects/)).toBeTruthy();
+    expect(screen.getByText(/won’t be shown again/)).toBeTruthy();
     // Nothing is revoked by leaving, so there is nothing to uninstall.
     expect(screen.queryByLabelText("the uninstall command")).toBeNull();
-    await click(within(bar()).getByRole("button", { name: "Leave" }));
+    await click(within(bar()).getByRole("button", { name: "Back to Machines" }));
     expect(h.revoke).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { name: "Machines" })).toBeTruthy();
   });
@@ -499,16 +509,16 @@ describe("cancel after a mint asks which of two things", () => {
   it("revokes the minted identity and leaves on success", async () => {
     mount(fakeConnection());
     await describeAndMint();
-    await click(within(bar()).getByRole("button", { name: "Cancel" }));
+    await click(within(bar()).getByRole("button", { name: "Cancel setup" }));
     expect(within(bar()).getByText("Cancel?")).toBeTruthy();
-    expect(screen.getByText(/token is revoked/)).toBeTruthy();
+    expect(screen.getByText(/revokes the token/)).toBeTruthy();
     // The uninstall line is offered right here, for a person who already ran the install.
     // It names the cluster the install line enrolled the machine with, so the
     // uninstaller removes that enrollment rather than asking which one.
     expect((screen.getByLabelText("the uninstall command") as HTMLInputElement).value).toBe(
       uninstallCommand("mac", { clusterUrl: workerClusterUrl("memql.example.com") }),
     );
-    await click(within(bar()).getByRole("button", { name: "Revoke the token and cancel" }));
+    await click(within(bar()).getByRole("button", { name: "Cancel setup" }));
     await settle();
     expect(h.revoke).toHaveBeenCalledTimes(1);
     expect(h.revoke.mock.calls[0]?.[1]).toBe(IDENTITY);
@@ -519,8 +529,8 @@ describe("cancel after a mint asks which of two things", () => {
     h.revoke.mockResolvedValue({ success: false, errorCode: "not_found", errorMessage: "identity not found" });
     mount(fakeConnection());
     await describeAndMint();
-    await click(within(bar()).getByRole("button", { name: "Cancel" }));
-    await click(within(bar()).getByRole("button", { name: "Revoke the token and cancel" }));
+    await click(within(bar()).getByRole("button", { name: "Cancel setup" }));
+    await click(within(bar()).getByRole("button", { name: "Cancel setup" }));
     await settle();
     expect(screen.getByText(/identity not found/)).toBeTruthy();
     expect(within(bar()).getByRole("button", { name: "Leave, keep the token" })).toBeTruthy();
@@ -530,8 +540,8 @@ describe("cancel after a mint asks which of two things", () => {
   it("goes back to waiting on Keep waiting", async () => {
     mount(fakeConnection());
     await describeAndMint();
-    await click(within(bar()).getByRole("button", { name: "Cancel" }));
-    await click(within(bar()).getByRole("button", { name: "Keep waiting" }));
+    await click(within(bar()).getByRole("button", { name: "Cancel setup" }));
+    await click(within(bar()).getByRole("button", { name: "Keep setting up" }));
     expect(within(bar()).getByText("Waiting for studio-mac-mini")).toBeTruthy();
     expect(h.revoke).not.toHaveBeenCalled();
   });
@@ -541,8 +551,8 @@ describe("cancel after a mint asks which of two things", () => {
   it("asks the Leave question from the Head's arrow, and stays on Stay", async () => {
     mount(fakeConnection());
     await describeAndMint();
-    await click(screen.getByRole("button", { name: "Back to Machines" }));
-    expect(within(bar()).getByText("Leave?")).toBeTruthy();
+    await click(screen.getAllByRole("button", { name: "Back to Machines" })[0]!);
+    expect(within(bar()).getByText("Back to Machines?")).toBeTruthy();
     await click(within(bar()).getByRole("button", { name: "Stay" }));
     expect(within(bar()).getByText("Waiting for studio-mac-mini")).toBeTruthy();
     expect(h.revoke).not.toHaveBeenCalled();
@@ -554,8 +564,8 @@ describe("cancel after a mint asks which of two things", () => {
     await describeAndMint();
     emit(connection, arrival());
     await settle();
-    expect(within(bar()).queryByRole("button", { name: "Cancel" })).toBeNull();
-    await click(within(bar()).getByRole("button", { name: "Leave" }));
+    expect(within(bar()).queryByRole("button", { name: "Cancel setup" })).toBeNull();
+    await click(within(bar()).getByRole("button", { name: "Back" }));
     expect(screen.getByRole("heading", { name: "Machines" })).toBeTruthy();
   });
 });

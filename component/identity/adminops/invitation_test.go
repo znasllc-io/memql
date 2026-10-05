@@ -78,7 +78,10 @@ func TestDomainAllowedMatchesTheAddressHost(t *testing.T) {
 // cluster that never asked for that.
 func TestUnsetRegistrationPolicyDegradesToOpen(t *testing.T) {
 	s := &Service{}
-	mode, domains := s.registrationPolicy(context.Background())
+	mode, domains, err := s.registrationPolicy(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if mode != "open" {
 		t.Errorf("mode = %q, want %q", mode, "open")
 	}
@@ -319,6 +322,20 @@ func TestIssuingAnInvitationSendsItToTheInvitee(t *testing.T) {
 	}
 	if res.InvitationEmailError != "" {
 		t.Errorf("InvitationEmailError = %q on a successful send", res.InvitationEmailError)
+	}
+}
+
+func TestUnreadableSavedPolicyRefusesBeforeIssuingInvitation(t *testing.T) {
+	svc, eng, _, sent := newIssuingService(t, nil)
+	svc.RegistrationPolicy = func(context.Context) (string, []string, error) { return "", nil, errors.New("settings unavailable") }
+	result := svc.IssueUserInvitation(ctxAs(auth.RoleOwner), UserInvitation{Email: "person@example.test"})
+	if result.OK || sent.calls != 0 {
+		t.Fatalf("unreadable policy admitted an invitation: %+v", result)
+	}
+	for _, query := range eng.queries {
+		if strings.Contains(query, "mutation createUserInvitation(") {
+			t.Fatal("minted a credential before resolving admission policy")
+		}
 	}
 }
 

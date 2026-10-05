@@ -26,3 +26,9 @@ patches:
   # Raise the repo-server git/exec timeout above the 90s default so the first
   # fetch of the large memql repo (history + many tags) doesn't time out.
   - path: repo-server-exec-timeout.yaml
+  # How Argo CD reads a PersistentVolumeClaim's health (memql#5492): a Pending
+  # claim marked memql.io/binds-on-first-use=true is Healthy, so the local
+  # pipelines cache -- unbound until the first step mounts it -- does not hold
+  # the Application at Progressing forever. Every other claim keeps Argo CD's
+  # own answer. The file says why, and how it was verified.
+  - path: pvc-health.yaml

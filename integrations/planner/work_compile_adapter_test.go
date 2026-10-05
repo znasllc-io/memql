@@ -38,6 +38,8 @@ func (r *recordingRunWriter) RunBudget(_ context.Context, _, runId string) (work
 	return r.ceilings, r.budgetErr
 }
 
+func (r *recordingRunWriter) LimitReplyBudget(context.Context, string, string) error { return r.err }
+
 func adapterReq() workintegration.CompileRequest {
 	return workintegration.CompileRequest{
 		GoalId:      "v1:work:goal:g1",
@@ -184,10 +186,8 @@ func TestWorkCompiler_ReadsTheRunsCeilingsBeforeCompiling(t *testing.T) {
 	}
 }
 
-// A ceilings read that FAILS must leave the compile unbounded rather than
-// refuse it: a transient database blip is not a reason to make every goal
-// unrunnable, and the attempt cap still bounds the loop.
-func TestWorkCompiler_ACeilingsReadFailureDoesNotRefuseTheCompile(t *testing.T) {
+// An unreadable budget must never authorize unlimited work.
+func TestWorkCompiler_ACeilingsReadFailureRefusesTheCompile(t *testing.T) {
 	sig := work.GoalSignature(adapterReq().Statement, []string{"day"})
 	eng := &countingCompileEngine{catalogue: []map[string]any{
 		{"id": "v1:authoring:construct:c1", "name": "summariseTickets", "goalSignature": sig, "reliability": 0.9},
@@ -199,8 +199,8 @@ func TestWorkCompiler_ACeilingsReadFailureDoesNotRefuseTheCompile(t *testing.T) 
 	if len(w.fields) != 1 {
 		t.Fatalf("expected one write, got %d", len(w.fields))
 	}
-	if got := w.fields[0]["status"]; got != "running" {
-		t.Errorf("a ceilings read failure made the run %v; it must still compile", got)
+	if got := w.fields[0]["status"]; got != "failed" {
+		t.Errorf("a ceilings read failure must refuse the run; got %v", got)
 	}
 }
 

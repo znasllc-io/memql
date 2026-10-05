@@ -686,6 +686,8 @@ func defaultRoutingRules() []RoutingRule {
 		// v1:identity:user rule above intends.
 		{Pattern: "graph.node.created.v1:identity:invitation", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:identity:invitation", TargetType: ""},
+		{Pattern: "graph.node.created.v1:identity:accessRequest", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:identity:accessRequest", TargetType: ""},
 
 		// Groups and memberships (epic memql#5165, section I). The Users
 		// app's group page and person page are LIVE on these: a person

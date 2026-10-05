@@ -1,4 +1,4 @@
-import { ContentSkeleton } from "../kit/ContentSkeleton";
+import { EntryPending } from "../kit/EntryPending";
 import { useEffect, useState } from "react";
 
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
@@ -6,7 +6,6 @@ import { SignIn } from "../chrome/SignIn";
 import { Shell } from "../chrome/Shell";
 import { layoutFromWindow, type ChromeLayout } from "./layout";
 import { IdentityScreen } from "../auth/IdentityScreen";
-import { identityEntry } from "../auth/nativeIdentity";
 
 export function App() {
   return (
@@ -17,7 +16,7 @@ export function App() {
 }
 
 function OsBoot() {
-  const { status, signIn, signOut, config, authSource } = useAuth();
+  const { status, signIn, signOut, config, authSource, entry } = useAuth();
   const [layout, setLayout] = useState<ChromeLayout>(() => layoutFromWindow(window));
 
   useEffect(() => {
@@ -40,13 +39,8 @@ function OsBoot() {
   // Connection, and the Connection is created inside the Shell.
 
   if (status === "loading") {
-    return (
-      <div className="os-boot" data-os-boot="loading">
-        <ContentSkeleton kind="detail" label="Opening MemQL OS" />
-      </div>
-    );
+    return <EntryPending />;
   }
-  const entry = identityEntry();
   if (status !== "unavailable" && entry && !(status === "signed-in" && entry.startsWith("/me"))) return <IdentityScreen initialPath={entry} />;
   if (status === "unclaimed") return <IdentityScreen initialPath="/setup" />;
   if (status === "signed-out" || status === "unavailable") {

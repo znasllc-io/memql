@@ -22,6 +22,7 @@ const CLUSTER_SOURCES = new Set([
   "derived",
   "user_created",
   "live",
+  "pipeline",
 ]);
 
 export interface MachinePresence {
@@ -64,6 +65,7 @@ export function deriveProvenance(
       derived: "Derived from an artifact",
       user_created: "Written here",
       live: "Live source",
+      pipeline: "Made by a pipeline run",
     };
     return { tone: "reachable", origin: labels[file.source] ?? "In the Library" };
   }

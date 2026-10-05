@@ -1,0 +1,205 @@
+name: build-toolchain-image
+
+# Builds + pushes the pipeline TOOLCHAIN image (epic memql#5478, issue
+# memql#5496): the container a pipeline step's command runs in -- Go, Node,
+# protoc, git, make and the PostgreSQL client on Debian bookworm, as uid 1000.
+# The engine's own pipeline manifest (memql-package.yaml) names it BY DIGEST,
+# so the product of this workflow is the digest its summary prints.
+#
+# The step's Postgres is not built here: it is the ci-timescaledb mirror that
+# mirror-fixture-images.yml publishes and ci.yml already pins.
+#
+# Same shape as build-db-image.yml -- dispatch, build and LOAD, smoke-test,
+# only then push, digest in the summary -- with two differences, both because
+# this image is pulled by the cluster that runs a pipeline step, local or
+# cloud, with no registry credential:
+#
+#   - GHCR only, with the automatic GITHUB_TOKEN. No OIDC, no ACR: nothing
+#     here needs Azure, and the Job that pulls the image names no pull secret.
+#   - The package must be PUBLIC before anyone pins it (see the summary).
+#
+# MAIN ONLY. The first step refuses a dispatch against any ref but main, so a
+# routine dispatch cannot publish a feature branch's Dockerfile by mistake.
+# That is a guard against accident, not the security boundary: a dispatch runs
+# the workflow file of the ref it names, so a branch can drop the step. What
+# makes a published digest trustworthy is that nothing runs it until
+# memql-package.yaml pins it, through a reviewed pull request, and who holds
+# write access to the package.
+#
+# ONE TAG, ONE IMAGE. A published version is never silently replaced. Before
+# the push, the immutability guard asks the registry whether the tag exists and
+# refuses if it does, unless the dispatch sets allow_overwrite; and the
+# `concurrency:` group below runs two dispatches of one version one after the
+# other, so the second's guard sees the first's push instead of racing it.
+#
+# THE SMOKE TEST GATES THE PUSH. The image is built and LOADED, exercised by
+# deploy/toolchain-image/smoke-test.sh, and only then pushed. A broken
+# toolchain that reached the registry would be pinnable, and its symptom is
+# not a failed pull -- it is every pipeline step failing. Building twice costs
+# nothing: the push re-exports the layers the smoke test validated.
+#
+# linux/amd64 only, as every image workflow here builds; the Dockerfile itself
+# also carries the arm64 protoc checksum for a local build on arm64.
+#
+# scripts/ci/toolchain_image_workflow_test.go holds the trigger, the main-only
+# refusal, the job-scoped write, the pinned actions, the push target, the
+# immutability guard and its concurrency group, the smoke-before-push order,
+# the digest summary, and that no `run:` interpolates a `${{ }}` expression.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Image tag, e.g. 1.0.0. Tags are immutable: a rebuild takes a new one."
+        required: true
+        type: string
+      allow_overwrite:
+        description: "Re-push an existing tag (tags are normally immutable)."
+        required: false
+        default: false
+        type: boolean
+
+# Read-only at the top level (Scorecard Token-Permissions); the one write this
+# needs -- the GHCR push -- is granted on the single job below.
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/znasllc-io/memql-toolchain
+  CANDIDATE: memql-toolchain:candidate
+
+# Keyed on the version, and never cancelling: a second dispatch of one version
+# waits for the first to finish, then its immutability guard finds the tag the
+# first pushed. Without this both could pass the guard before either pushed.
+concurrency:
+  group: build-toolchain-image-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build memql-toolchain
+    runs-on: ubuntu-latest
+    # Bounded so a hang cannot hold a runner, and a registry-write token, for
+    # GitHub's 360-minute default. The build is two image pulls, one apt
+    # transaction and a protoc download; 30 is generous headroom.
+    timeout-minutes: 30
+    permissions:
+      contents: read # checkout
+      packages: write # push to GHCR
+    steps:
+      # Dispatch inputs reach the shell through `env:`, never through a `${{ }}`
+      # interpolated into a script body -- the shape of a workflow injection,
+      # in a job that holds a registry-write token.
+      - name: Check the dispatch
+        env:
+          REF: ${{ github.ref }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$REF" != "refs/heads/main" ]]; then
+            echo "::error::the toolchain image is built from main only; this run is on ${REF}. Dispatch it from main." >&2
+            exit 1
+          fi
+          if [[ ! "$VERSION" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "::error::'${VERSION}' is not a valid image tag (letters, digits, '_', '.', '-'; at most 128)." >&2
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: GHCR login
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # inspect succeeding means the tag exists: refuse. It failing is the
+      # expected answer for a new tag, but an auth or network error fails it
+      # too and would let a re-push through, so the notice says only that it
+      # failed and shows what it said on one line (a line break could start a
+      # workflow command). Never `continue-on-error`: the exit is the guard.
+      - name: Immutability guard
+        if: ${{ !inputs.allow_overwrite }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if out="$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" 2>&1)"; then
+            echo "::error::${IMAGE}:${VERSION} already exists -- tags are immutable. Bump version or re-run with allow_overwrite=true." >&2
+            exit 1
+          fi
+          echo "::notice::imagetools inspect found no ${IMAGE}:${VERSION}, which is what a new tag answers -- and what an auth or network failure answers too. It said: $(printf '%s' "$out" | tr '\r\n' '  ')"
+
+      # Built and LOADED, not pushed. The push happens below, only after the
+      # smoke test passes.
+      - name: Build memql-toolchain (local, for testing)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./deploy/toolchain-image
+          file: ./deploy/toolchain-image/Dockerfile
+          push: false
+          load: true
+          platforms: linux/amd64
+          provenance: false
+          tags: ${{ env.CANDIDATE }}
+          cache-from: type=gha,scope=memql-toolchain
+          cache-to: type=gha,mode=max,scope=memql-toolchain
+
+      # Reads the Go and protoc versions to expect from go.work and
+      # scripts/dev/proto-gen.sh in this checkout, and Node's major from the
+      # image's own Dockerfile, so it asserts the image carries the declared
+      # versions rather than a copy of them.
+      - name: Smoke test
+        run: ./deploy/toolchain-image/smoke-test.sh "$CANDIDATE"
+
+      # Same context, file and platform as the tested build, so this re-exports
+      # the layers the smoke test just validated rather than building anything
+      # new.
+      - name: Push memql-toolchain
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./deploy/toolchain-image
+          file: ./deploy/toolchain-image/Dockerfile
+          push: true
+          platforms: linux/amd64
+          provenance: false
+          tags: ${{ env.IMAGE }}:${{ inputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/znasllc-io/memql
+            org.opencontainers.image.version=${{ inputs.version }}
+          cache-from: type=gha,scope=memql-toolchain
+          cache-to: type=gha,mode=max,scope=memql-toolchain
+
+      - name: Digest summary
+        env:
+          VERSION: ${{ inputs.version }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          # An empty or malformed digest would print a pin that pulls nothing.
+          if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::the push reported no usable digest ('${DIGEST}'); nothing to pin." >&2
+            exit 1
+          fi
+          {
+            echo "### ${IMAGE}:${VERSION}"
+            echo ""
+            echo "Pin this digest in memql-package.yaml (\`pipeline.image\`):"
+            echo '```'
+            echo "${IMAGE}@${DIGEST}"
+            echo '```'
+            echo ""
+            echo "#### Before pinning it: make the package PUBLIC"
+            echo ""
+            echo "A new GHCR package defaults to **private**, and the Job that runs a"
+            echo "pipeline step pulls this image with no registry credential, on a local"
+            echo "cluster and in the cloud alike -- so a private package fails every step"
+            echo "with an image-pull error."
+            echo ""
+            echo "Set it at: Org -> Packages -> \`memql-toolchain\` -> Package settings ->"
+            echo "Change visibility -> Public. Nothing in it is secret: it is built from"
+            echo "this public repository's Dockerfile."
+          } >> "$GITHUB_STEP_SUMMARY"

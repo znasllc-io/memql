@@ -55,7 +55,9 @@ const (
 // is describing a cluster with no company, which is not a state this model has.
 func (e *MemQLEngine) validateSelfAccountNotArchived(ctx context.Context, id string, payload map[string]any) error {
 	_ = ctx
-	if payload == nil || strings.TrimSpace(id) != selfAccountId {
+	// Named mutations carry the client's bare id here; storage canonicalizes
+	// it later. Both spellings name the same protected account.
+	if payload == nil || BareShortId(strings.TrimSpace(id)) != BareShortId(selfAccountId) {
 		return nil
 	}
 	if strings.TrimSpace(stringFromAny(payload["status"])) != "archived" {

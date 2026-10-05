@@ -473,8 +473,10 @@ func TestAPrincipalsOwnStampSurvives(t *testing.T) {
 func TestTheSelfAccountCannotBeArchived(t *testing.T) {
 	e := &MemQLEngine{}
 	ctx := context.Background()
-	if err := e.validateSelfAccountNotArchived(ctx, selfAccountId, map[string]any{"status": "archived"}); err == nil {
-		t.Fatal("archiving the self account was allowed")
+	for _, id := range []string{selfAccountId, "self", " self "} {
+		if err := e.validateSelfAccountNotArchived(ctx, id, map[string]any{"status": "archived"}); err == nil {
+			t.Fatalf("archiving the self account as %q was allowed", id)
+		}
 	}
 	// Every other edit stays legal, including on the self row: a locked
 	// field would make a first-run typo permanent, and there is no delete.

@@ -265,3 +265,97 @@ func TestInventoryFromRowOfNothingIsAbsent(t *testing.T) {
 		t.Fatal("an empty hardware object must read as absent, not as a machine with nothing")
 	}
 }
+
+// dockerInventory is a reported inventory whose runtimes include Docker.
+func dockerInventory(t *testing.T) Inventory {
+	t.Helper()
+	inv, err := InventoryFromProto(inventoryProto(func(i *memqlv1.HardwareInventory) {
+		i.Runtimes = append(i.Runtimes, &memqlv1.RuntimeInfo{Name: "docker", Version: "27.3.1"})
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return inv
+}
+
+func TestDockerRuntimeDerivesTheDockerLabel(t *testing.T) {
+	// A pipeline step that needs Docker routes on the EXACT pair docker=true
+	// (#5494). Fleet labels match exactly and there is no "any value" form, so
+	// the label a Docker machine already carries -- runtime:docker, whose VALUE
+	// is the version and differs from machine to machine -- can never satisfy
+	// that requirement. The routing fact has to be stated as the pair itself,
+	// derived from the same report, beside the version-valued one.
+	inv := dockerInventory(t)
+
+	derived := RuntimeLabels(inv)
+	if derived["docker"] != "true" {
+		t.Fatalf("a machine reporting the docker runtime must derive docker=true, got %#v", derived)
+	}
+	if DockerLabel != "docker" || DockerLabelValue != "true" {
+		t.Fatalf("the constants spell %s=%s; the routing requirement is the literal pair docker=true", DockerLabel, DockerLabelValue)
+	}
+	if derived["runtime:docker"] != "27.3.1" {
+		t.Fatalf("the version-valued runtime label is unchanged beside it, got %#v", derived)
+	}
+
+	// The live registry entry, which is what a dispatch on this replica routes on.
+	w := &Worker{RegistrationId: "reg-1", Labels: map[string]string{"os": "linux"}}
+	w.SetHardware(inv)
+	if got := w.LabelsSnapshot(); got["docker"] != "true" || got["os"] != "linux" {
+		t.Fatalf("the registry entry must carry docker=true beside its other labels, got %#v", got)
+	}
+	// The ROW, which is what every other replica routes on: the register path
+	// writes mergeRuntimeLabels' answer, so a row and a registry entry that
+	// disagreed about docker would route the same step two ways.
+	if got := mergeRuntimeLabels(map[string]string{"os": "linux"}, inv); got["docker"] != "true" {
+		t.Fatalf("the registration row's labels must carry docker=true, got %#v", got)
+	}
+
+	// The negative control: the label is DERIVED from the runtime, not stamped
+	// on every machine that reports an inventory.
+	without, err := InventoryFromProto(inventoryProto())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, has := RuntimeLabels(without)["docker"]; has {
+		t.Fatalf("a machine with no docker runtime must not derive the docker label, got %#v", RuntimeLabels(without))
+	}
+}
+
+func TestAnUninstalledDockerStopsAdvertisingTheDockerLabel(t *testing.T) {
+	// mergeRuntimeLabels' rule, applied to the pair it now derives: it drops
+	// only what it could have written. docker=true from a machine whose present
+	// inventory no longer lists docker is the uninstalled case, and keeping it
+	// would send a step needing Docker to a machine that will fail it.
+	without, err := InventoryFromProto(inventoryProto())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := &Worker{RegistrationId: "reg-1", Labels: map[string]string{"os": "linux"}}
+	w.SetHardware(dockerInventory(t))
+	w.SetHardware(without)
+	got := w.LabelsSnapshot()
+	if _, still := got["docker"]; still {
+		t.Fatalf("docker=true must go when the machine stops reporting docker, got %#v", got)
+	}
+	if _, still := got["runtime:docker"]; still {
+		t.Fatalf("runtime:docker must go with it, got %#v", got)
+	}
+
+	// A value the engine could never have written is the cockpit's to make.
+	cockpit := &Worker{RegistrationId: "reg-2", Labels: map[string]string{"docker": "rootless"}}
+	cockpit.SetHardware(without)
+	if cockpit.LabelsSnapshot()["docker"] != "rootless" {
+		t.Fatalf("a docker label the engine did not derive must survive, got %#v", cockpit.LabelsSnapshot())
+	}
+
+	// An ABSENT inventory is a cockpit gone quiet, not one that uninstalled
+	// anything -- the rule TestAnAbsentInventoryLeavesTheReportedRuntimeLabelsAlone
+	// states for the runtime labels.
+	quiet := &Worker{RegistrationId: "reg-3", Labels: map[string]string{"docker": "true"}}
+	quiet.SetHardware(Inventory{})
+	if quiet.LabelsSnapshot()["docker"] != "true" {
+		t.Fatalf("an absent inventory must leave docker=true alone, got %#v", quiet.LabelsSnapshot())
+	}
+}

@@ -171,15 +171,24 @@ func newInClusterExecutor(repoRoot string) (*inClusterExecutor, error) {
 // pod's own projected ServiceAccount.
 //
 // It is the whole of this repository's in-cluster write substrate, and it is
-// deliberately small: a request method, a token that is re-read, and the
-// cluster CA. Everything above it composes paths and bodies. See the header of
-// this file for why the API server rather than kubectl, a sidecar or client-go
-// -- the reasoning applies unchanged to every caller, which is why this is one
-// type rather than one per feature.
+// deliberately small: a request method, a streaming GET for the reads that
+// outlive one, a token that is re-read, and the cluster CA. Everything above it
+// composes paths and bodies. See the header of this file for why the API server
+// rather than kubectl, a sidecar or client-go -- the reasoning applies unchanged
+// to every caller, which is why this is one type rather than one per feature.
 type ClusterAPI struct {
-	base   string // https://host:port
-	token  string
+	base  string // https://host:port
+	token string
+	// tokenPath is the projected ServiceAccount token tokenNow re-reads, with token as
+	// its fallback. Empty means there is no file to read and token is the whole
+	// credential, which is what NewClusterAPIWith builds.
+	tokenPath string
+	// client carries every Do. Its Timeout bounds the whole call, body read included.
 	client *http.Client
+	// stream carries Stream: client with the Timeout removed. The Transport is the same
+	// object, so the TLS config and the cluster CA pool are too, but a followed body may
+	// outlive any single call.
+	stream *http.Client
 }
 
 // NewClusterAPI builds the API-server client from the pod's projected
@@ -197,13 +206,20 @@ func NewClusterAPI() (*ClusterAPI, error) {
 	if host == "" {
 		return nil, fmt.Errorf("%s: KUBERNETES_SERVICE_HOST is unset", ReasonNoClusterAPI)
 	}
-	tok, err := os.ReadFile(saTokenPath)
+	return newInClusterAPI(host, port, saTokenPath, saCACertPath)
+}
+
+// newInClusterAPI is NewClusterAPI with the API server's address and the projected files as
+// parameters. The real paths exist only inside a pod, so this is the seam that lets a test
+// run the production assembly; NewClusterAPI passes the constants.
+func newInClusterAPI(host, port, tokenPath, caPath string) (*ClusterAPI, error) {
+	tok, err := os.ReadFile(tokenPath)
 	if err != nil {
-		return nil, fmt.Errorf("%s: no ServiceAccount token at %s: %w", ReasonNoClusterAPI, saTokenPath, err)
+		return nil, fmt.Errorf("%s: no ServiceAccount token at %s: %w", ReasonNoClusterAPI, tokenPath, err)
 	}
-	pem, err := os.ReadFile(saCACertPath)
+	pem, err := os.ReadFile(caPath)
 	if err != nil {
-		return nil, fmt.Errorf("%s: no cluster CA at %s: %w", ReasonNoClusterAPI, saCACertPath, err)
+		return nil, fmt.Errorf("%s: no cluster CA at %s: %w", ReasonNoClusterAPI, caPath, err)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(pem) {
@@ -211,18 +227,43 @@ func NewClusterAPI() (*ClusterAPI, error) {
 		// presenting a certificate from the cluster's own CA, so a system pool
 		// would reject it anyway, and InsecureSkipVerify on the channel that
 		// carries a cluster-admin-adjacent bearer token is not a fallback.
-		return nil, fmt.Errorf("%s: cluster CA at %s parsed to zero certificates", ReasonNoClusterAPI, saCACertPath)
+		return nil, fmt.Errorf("%s: cluster CA at %s parsed to zero certificates", ReasonNoClusterAPI, caPath)
 	}
-	return &ClusterAPI{
-		base:  "https://" + net_JoinHostPort(host, port),
-		token: strings.TrimSpace(string(tok)),
-		client: &http.Client{
-			Timeout: k8sRequestTimeout,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
-			},
+	return newClusterAPI("https://"+net_JoinHostPort(host, port), strings.TrimSpace(string(tok)), tokenPath, &http.Client{
+		Timeout: k8sRequestTimeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12},
 		},
-	}, nil
+	}), nil
+}
+
+// NewClusterAPIWith builds a ClusterAPI against an explicit API server. Tests pass an
+// httptest server; production code keeps NewClusterAPI.
+//
+// token is sent as given and is the whole credential: the projected ServiceAccount file
+// NewClusterAPI re-reads is never consulted, so a test that runs inside a pod does not
+// present the pod's own token to whatever server it named. client is the per-call client,
+// used as given, and its Timeout bounds every Do. Stream runs on a copy of it that shares
+// its Transport and has no Timeout. A nil client is the stock transport with the
+// per-call timeout.
+func NewClusterAPIWith(base, token string, client *http.Client) *ClusterAPI {
+	return newClusterAPI(base, token, "", client)
+}
+
+// newClusterAPI is the ONE place a ClusterAPI is assembled, so the streaming client cannot
+// be forgotten by one constructor and the two clients cannot be built from different
+// transports.
+func newClusterAPI(base, token, tokenPath string, client *http.Client) *ClusterAPI {
+	if client == nil {
+		client = &http.Client{Timeout: k8sRequestTimeout}
+	}
+	// A COPY, not a second client built beside the first: it keeps the Transport (and
+	// so the cluster CA pool), CheckRedirect and Jar, and differs only in having no
+	// Timeout. A followed pod log runs for its step's whole lifetime, and Timeout bounds
+	// the body read as well as the round trip.
+	stream := *client
+	stream.Timeout = 0
+	return &ClusterAPI{base: base, token: token, tokenPath: tokenPath, client: client, stream: &stream}
 }
 
 // Do issues one API-server request and returns the body. The exported form of
@@ -232,6 +273,23 @@ func NewClusterAPI() (*ClusterAPI, error) {
 // `apis/networking.k8s.io/v1/namespaces/memql/ingresses/x`.
 func (e *ClusterAPI) Do(ctx context.Context, method, path, contentType string, body []byte) ([]byte, error) {
 	return e.do(ctx, method, path, contentType, body)
+}
+
+// metadataListAccept asks the API server to answer a list with each object's
+// metadata alone: a meta.k8s.io/v1 PartialObjectMetadataList, whatever the
+// listed kind. No plain-JSON fallback follows it, so a server that cannot
+// answer the form refuses (406) rather than sending the objects whole.
+const metadataListAccept = "application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1"
+
+// ListMetadata issues a GET of a collection, as Do does, asking for the
+// objects' metadata alone (metadataListAccept): a list of Secrets carries
+// none of their values. Measured against a v1.35 k3s API server
+// (2026-10-04): the answer is a PartialObjectMetadataList whose items hold
+// metadata only, labelSelector, limit and continue apply as to a full list,
+// and metadata.continue is absent on the last page. `path` is as for Do,
+// query string included.
+func (e *ClusterAPI) ListMetadata(ctx context.Context, path string) ([]byte, error) {
+	return e.doAccepting(ctx, http.MethodGet, path, metadataListAccept, "", nil)
 }
 
 // net_JoinHostPort brackets an IPv6 literal. Spelled out rather than importing
@@ -248,21 +306,24 @@ func net_JoinHostPort(host, port string) string {
 // kubelet rewrites the file well before expiry -- so a process that caches the
 // first read starts 401ing after the token's lifetime, which for a deploy
 // console is "the console worked on the day it was deployed".
+//
+// A client built by NewClusterAPIWith has no such file (tokenPath is empty) and
+// answers with the token it was given.
 func (e *ClusterAPI) tokenNow() string {
-	if b, err := os.ReadFile(saTokenPath); err == nil {
-		if t := strings.TrimSpace(string(b)); t != "" {
-			return t
+	if e.tokenPath != "" {
+		if b, err := os.ReadFile(e.tokenPath); err == nil {
+			if t := strings.TrimSpace(string(b)); t != "" {
+				return t
+			}
 		}
 	}
 	return e.token
 }
 
-// do issues one API-server request and returns the body. A non-2xx is an
-// error carrying the status line and the body, because the API server's
-// message ("applications.argoproj.io \"memql\" is forbidden: User
-// \"system:serviceaccount:memql:memql-deploy\" cannot patch resource") is the
-// single most useful thing an operator can be handed when the RBAC is wrong.
-func (e *ClusterAPI) do(ctx context.Context, method, path, contentType string, body []byte) ([]byte, error) {
+// newRequest builds one API-server request: the URL under the API server's base, the
+// bearer (re-read per request, see tokenNow) and the JSON Accept header. It is the one
+// place a request is made, so Do and Stream cannot come to authenticate differently.
+func (e *ClusterAPI) newRequest(ctx context.Context, method, path, contentType string, body []byte) (*http.Request, error) {
 	var rdr io.Reader
 	if body != nil {
 		rdr = bytes.NewReader(body)
@@ -275,6 +336,27 @@ func (e *ClusterAPI) do(ctx context.Context, method, path, contentType string, b
 	req.Header.Set("Accept", "application/json")
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
+	}
+	return req, nil
+}
+
+// do issues one API-server request and returns the body. A non-2xx is an
+// error carrying the status line and the body, because the API server's
+// message ("applications.argoproj.io \"memql\" is forbidden: User
+// \"system:serviceaccount:memql:memql-deploy\" cannot patch resource") is the
+// single most useful thing an operator can be handed when the RBAC is wrong.
+func (e *ClusterAPI) do(ctx context.Context, method, path, contentType string, body []byte) ([]byte, error) {
+	return e.doAccepting(ctx, method, path, "", contentType, body)
+}
+
+// doAccepting is do with the Accept header replaced, unless accept is empty.
+func (e *ClusterAPI) doAccepting(ctx context.Context, method, path, accept, contentType string, body []byte) ([]byte, error) {
+	req, err := e.newRequest(ctx, method, path, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
 	}
 	resp, err := e.client.Do(req)
 	if err != nil {
@@ -289,15 +371,46 @@ func (e *ClusterAPI) do(ctx context.Context, method, path, contentType string, b
 		// successful deletion. The API server's message stays in the text
 		// because it is the single most useful thing an operator can be handed
 		// when the RBAC is wrong.
-		return out, &StatusError{
-			Method: method,
-			Path:   path,
-			Code:   resp.StatusCode,
-			Status: resp.Status,
-			Body:   strings.TrimSpace(string(out)),
-		}
+		return out, newStatusError(method, path, resp, out)
 	}
 	return out, readErr
+}
+
+// streamErrorBodyLimit caps how much of a non-2xx answer to Stream is read into the
+// StatusError. The API server's refusal is one small Status object; the cap is for the
+// proxy that answers a log request with a page of HTML.
+const streamErrorBodyLimit = 64 << 10
+
+// Stream issues a GET whose body the caller reads incrementally: a pod's log with
+// follow=true is the case it exists for. `path` is as for Do, query string included.
+//
+// It is NOT bounded by the per-call timeout (k8sRequestTimeout). A followed log runs for
+// its step's whole lifetime, and Client.Timeout would cut the body read off with it, so the
+// caller's context is the only bound: a caller that never cancels it holds the connection
+// until the server ends the stream. The caller owns the returned reader and must Close it.
+//
+// A non-2xx answer is a *StatusError, the same as Do's, carrying at most the first 64 KiB
+// of the body; the response body is closed before it is returned.
+//
+// The JSON Accept header it shares with Do is deliberate even though a log is text: the API
+// server negotiates a serializer before it streams, so `Accept: text/plain` alone is
+// refused with a 406, while `application/json` is answered 200 with the text body
+// (measured against a v1.32 k3s API server, 2026-10-03).
+func (e *ClusterAPI) Stream(ctx context.Context, path string) (io.ReadCloser, error) {
+	req, err := e.newRequest(ctx, http.MethodGet, path, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := e.stream.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %w", http.MethodGet, path, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer func() { _ = resp.Body.Close() }()
+		out, _ := io.ReadAll(io.LimitReader(resp.Body, streamErrorBodyLimit))
+		return nil, newStatusError(http.MethodGet, path, resp, out)
+	}
+	return resp.Body, nil
 }
 
 // StatusError is a non-2xx response from the API server.
@@ -318,10 +431,39 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("%s %s: %s: %s", e.Method, e.Path, e.Status, e.Body)
 }
 
+// newStatusError is the one construction of a non-2xx answer, so Do and Stream report the
+// same answer as the same error.
+func newStatusError(method, path string, resp *http.Response, body []byte) *StatusError {
+	return &StatusError{
+		Method: method,
+		Path:   path,
+		Code:   resp.StatusCode,
+		Status: resp.Status,
+		Body:   strings.TrimSpace(string(body)),
+	}
+}
+
 // IsNotFound reports whether err is a 404 from the API server.
 func IsNotFound(err error) bool {
 	var se *StatusError
 	return errors.As(err, &se) && se.Code == http.StatusNotFound
+}
+
+// IsConflict reports whether err is a 409 from the API server: AlreadyExists on a create,
+// or a resourceVersion mismatch on an update.
+func IsConflict(err error) bool {
+	var se *StatusError
+	return errors.As(err, &se) && se.Code == http.StatusConflict
+}
+
+// IsForbiddenQuota reports whether err is the API server refusing a create because it
+// would exceed a ResourceQuota: a 403 whose body names "exceeded quota". The code alone is
+// not the answer, because a 403 is also what a missing Role says, and the caller waits out
+// the one and must fail on the other.
+func IsForbiddenQuota(err error) bool {
+	var se *StatusError
+	return errors.As(err, &se) && se.Code == http.StatusForbidden &&
+		strings.Contains(strings.ToLower(se.Body), "exceeded quota")
 }
 
 // argoPath composes the collection or single-resource path for one of the

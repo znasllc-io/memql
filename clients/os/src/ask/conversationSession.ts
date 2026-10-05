@@ -4,7 +4,7 @@ import { AUTO_ROUTING, LocalAskRouteStore, isAuto, type AskRouteStore, type AskR
 export interface AskActivity {
   id: string;
   kind: "model" | "action" | "run" | "artifact";
-  phase: "running" | "completed" | "failed" | "fallback";
+  phase: "running" | "completed" | "failed" | "fallback" | "waiting" | "cancelled";
   at: string;
   provider?: string;
   model?: string;
@@ -15,7 +15,7 @@ export interface AskActivity {
   elapsedMs?: number;
   expectedMs?: number;
   estimateSource?: string;
-  call?: { vendor?: string; policy?: string; rule?: string; door?: string; modality?: string; executionSurface?: string; servedModel?: string; cacheKind?: string; inputTokens: number; outputTokens: number; tokensEstimated: boolean; totalCost: number; pricingConfigured: boolean; billing?: string; firstTokenMs: number };
+  call?: { promptName?: string; purpose?: string; attempt?: number; vendor?: string; policy?: string; rule?: string; door?: string; modality?: string; executionSurface?: string; servedModel?: string; cacheKind?: string; inputTokens: number; outputTokens: number; tokensEstimated: boolean; totalCost: number; pricingConfigured: boolean; billing?: string; firstTokenMs: number };
   error?: string;
 }
 export interface AskTurn {
@@ -41,6 +41,8 @@ export interface ConversationState {
   dictationActivity: AskActivity[];
   historyLoading: boolean;
   historyError: string;
+  selectionError: string;
+  openingId: string | null;
   selectedId: string | null;
   turns: AskTurn[];
   draft: string;
@@ -59,7 +61,7 @@ export interface ConversationState {
  * The one thing kept in this browser is the viewer's route choice per
  * conversation id (askRoute.ts) -- a preference, never content. */
 export class ConversationSession {
-  private state: ConversationState = { conversations: [], dictationActivity: [], historyLoading: false, historyError: "", selectedId: null, turns: [], draft: "", busy: false, loading: false, error: "", activity: null, voiceActive: false, routing: AUTO_ROUTING };
+  private state: ConversationState = { conversations: [], dictationActivity: [], historyLoading: false, historyError: "", selectionError: "", openingId: null, selectedId: null, turns: [], draft: "", busy: false, loading: false, error: "", activity: null, voiceActive: false, routing: AUTO_ROUTING };
   private listeners = new Set<() => void>();
   private active: AskHandle | null = null;
   private stopRequested = false;
@@ -111,26 +113,39 @@ export class ConversationSession {
     if (this.state.busy || this.state.voiceActive) return;
     this.selection++;
     this.opening = null;
-    this.patch({ selectedId: null, turns: [], dictationActivity: [], draft: "", error: "", loading: false, routing: AUTO_ROUTING });
+    this.patch({ selectedId: null, openingId: null, selectionError: "", turns: [], dictationActivity: [], draft: "", error: "", loading: false, routing: AUTO_ROUTING });
   };
   select = async (id: string) => {
-    if (this.state.busy || this.state.voiceActive || !this.transport.conversations) return;
+    if (id === this.state.selectedId && !this.opening) return true;
+    if (this.state.busy || this.state.voiceActive || !this.transport.conversations) return false;
     const selection = ++this.selection;
     // The route belongs to the conversation being opened from the moment it
     // is asked for, so a choice made while it loads lands on it -- not on the
     // one being left, and not overwritten when the transcript arrives.
     this.opening = { id, before: this.opening?.before ?? this.state.routing };
-    this.patch({ loading: true, error: "", routing: this.routes.load(id) });
+    this.patch({ loading: true, openingId: id, selectionError: "", error: "", routing: this.routes.load(id) });
     try {
       const turns = await this.transport.conversations.read(id);
-      if (selection === this.selection) { this.opening = null; this.patch({ selectedId: id, turns, dictationActivity: [], draft: "", loading: false }); }
+      if (selection === this.selection) {
+        this.opening = null;
+        this.patch({ selectedId: id, openingId: null, turns, dictationActivity: [], draft: "", loading: false });
+        return true;
+      }
     } catch (error) {
       if (selection === this.selection) {
         const before = this.opening?.before ?? this.state.routing;
         this.opening = null;
-        this.patch({ loading: false, error: message(error), routing: before });
+        this.patch({ loading: false, openingId: null, selectionError: message(error), routing: before });
       }
     }
+    return false;
+  };
+  /** Leaving the list cancels a pending selection, never the current reply. */
+  cancelSelection = () => {
+    this.selection++;
+    const routing = this.opening?.before ?? this.state.routing;
+    this.opening = null;
+    this.patch({ loading: false, openingId: null, selectionError: "", routing });
   };
   detach = (reason = "Connection ended. The work continues in Nexus.") => {
     this.epoch++;

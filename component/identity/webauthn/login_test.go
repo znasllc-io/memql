@@ -9,6 +9,7 @@ package webauthn
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -225,6 +226,44 @@ func TestFinishLogin_RejectsAUserHandleThatDoesNotMatchTheRow(t *testing.T) {
 	_, err = c.FinishLogin(challenge.ChallengeId, bytes.NewReader(body), resolverFor(row))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "verification failed")
+}
+
+// Bootstrap registers a bare user id; the graph resolves its reference to a
+// canonical id on persistence. Both spellings identify the same principal.
+func TestFinishLogin_BindsBothUserIDFormsToTheSameAccount(t *testing.T) {
+	bare := strings.TrimPrefix(testUserId, "v1:identity:user:")
+	for _, tc := range []struct {
+		name, owner, handle string
+		allowed             bool
+	}{
+		{"bootstrap handle", testUserId, bare, true},
+		{"canonical handle", testUserId, testUserId, true},
+		{"bare projection", bare, testUserId, true},
+		{"bare handle and projection", bare, bare, true},
+		{"another bare user", testUserId, "someone-else", false},
+		{"another canonical user", testUserId, "v1:identity:user:someone-else", false},
+		{"another concept", testUserId, "v1:identity:identity:" + bare, false},
+		{"repeated prefix", testUserId, "v1:identity:user:" + testUserId, false},
+		{"missing handle", testUserId, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newTestCeremony(t)
+			a := newSoftwareAuthenticator(t)
+			row := storedRow(a, tc.owner, 0)
+			challenge, err := c.BeginLogin(OAuthContext{})
+			require.NoError(t, err)
+			a.signCount = 1
+			asserted, err := c.FinishLogin(challenge.ChallengeId, bytes.NewReader(a.Assert(
+				challenge.Options.Response.Challenge.String(), testRPID, testOrigin, tc.handle)), resolverFor(row))
+			if tc.allowed {
+				require.NoError(t, err)
+				require.Equal(t, tc.owner, asserted.Row.UserId, "keep the stored owner for session issuance")
+			} else {
+				require.Error(t, err)
+				require.Nil(t, asserted)
+			}
+		})
+	}
 }
 
 // A user gesture is required: possession of the device is not identity.

@@ -269,6 +269,8 @@ describe("the mark on the Settings icon, through the real shell", () => {
   it("marks Settings for an owner while pipelines is optional and not set up", async () => {
     const fake = mountShell("owner", "unconfigured");
     await readinessAndReceiptsRead(fake);
+    // Let the bounded entry wait expire while the feed remains unavailable.
+    await screen.findByRole("toolbar", { name: "Apps" }, { timeout: 4000 });
     expect(settingsDotLabels()).not.toContain(LABEL);
     fake.openReadiness();
     await waitFor(() => expect(settingsDotLabels()).toContain(LABEL));

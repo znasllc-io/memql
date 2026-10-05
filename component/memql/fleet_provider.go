@@ -924,6 +924,10 @@ func (p *fleetProvider) ExecutionSurface() string {
 	return p.lastSurface
 }
 
+// Billing implements the router's optional accounting interface. Fleet
+// inference runs on an enrolled machine and is never a metered vendor call.
+func (p *fleetProvider) Billing() string { return "local" }
+
 // MachineOwner reports whose machine served the last call, and "" when it was
 // the caller's own or when nothing has been served (epic memql#5327, D15).
 //

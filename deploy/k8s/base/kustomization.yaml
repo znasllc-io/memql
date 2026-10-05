@@ -18,6 +18,11 @@
 # and an overlay may override it; kustomize's namespace transformer rewrites
 # both `metadata.namespace` on every resource here AND `metadata.name` on
 # namespace.yaml, so no overlay needs a namespace-bearing manifest of its own.
+# A tenant overlay overrides it with its own plain `namespace:` field. The
+# instance overlays (local, cloud, cloud-entry) do NOT: they set theirs with an
+# unsetOnly NamespaceTransformer, which fills in only what states no namespace,
+# so this line is their mesh's namespace too (memql#5492 -- the pipelines
+# component renders a second namespace a plain field would rename away).
 #
 # WHAT THIS BUYS ONLY IF NOTHING BREAKS IT: every intra-mesh address below is a
 # BARE Service name (`identity:50061`, `bff-active:50058`), resolved by

@@ -475,7 +475,7 @@ type Config struct {
 
 	// RegistrationMode — see RegistrationMode constants. Captured by
 	// first-run wizard if env unset.
-	// Env: MEMQL_IDENTITY_REGISTRATION_MODE (default "open")
+	// Env: MEMQL_IDENTITY_REGISTRATION_MODE (default "invite_only")
 	RegistrationMode RegistrationMode
 
 	// RegistrationDomains is the allowlist consulted when
@@ -800,7 +800,7 @@ func LoadConfigFromEnv() (Config, error) {
 	cfg.DataExportRateLimit = envDurationHours("MEMQL_IDENTITY_DATA_EXPORT_RATE_LIMIT_HOURS", DefaultDataExportRateLimitHours)
 	cfg.DeletionCooldown = envDurationDays("MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS", DefaultDeletionCooldownDays)
 
-	cfg.RegistrationMode = RegistrationMode(envString("MEMQL_IDENTITY_REGISTRATION_MODE", string(RegistrationModeOpen)))
+	cfg.RegistrationMode = RegistrationMode(envString("MEMQL_IDENTITY_REGISTRATION_MODE", string(RegistrationModeInviteOnly)))
 	cfg.OIDC = loadOIDCConfig()
 	cfg.GitHubApp = githubconnect.LoadFromEnv()
 	cfg.RegistrationDomains = envStringList("MEMQL_IDENTITY_REGISTRATION_DOMAINS")

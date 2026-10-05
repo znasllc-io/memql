@@ -123,7 +123,9 @@ function mountShell() {
 }
 
 async function openApp(name: string) {
-  const open = await screen.findByRole("button", { name: "Launcher" });
+  // These app-level cases deliberately withhold readiness beyond the bounded
+  // initial-entry wait, then deliver it while the app is already open.
+  const open = await screen.findByRole("button", { name: "Launcher" }, { timeout: 4000 });
   fireEvent.click(open);
   const dialog = await screen.findByRole("dialog", { name: "Launcher" });
   fireEvent.click(within(dialog).getByRole("button", { name: new RegExp(`^(?:Unseen change )?${name}$`) }));
@@ -161,9 +163,9 @@ describe("the core gate, mounted by the real shell", () => {
     h.connection = connection;
     mountShell();
 
-    // Before the rows land the shell OPENS -- only positive evidence holds
-    // anybody, and this is the frame every configured cluster passes through.
-    expect(await screen.findByRole("button", { name: "Launcher" })).toBeTruthy();
+    // The initial decision must not flash the desktop before setup takes over.
+    expect(screen.getByRole("status")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Launcher" })).toBeNull();
 
     openReadiness();
 

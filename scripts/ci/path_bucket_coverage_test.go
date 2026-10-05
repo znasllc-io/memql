@@ -212,6 +212,18 @@ var coverageAllowList = map[string]exemption{
 				"anything -- the duplication is the point of the comment",
 		},
 	},
+
+	// --- a cluster-e2e leg's fixtures, read outside ci.yml ---
+	// The pipelines leg's recorded GitHub delivery and check runs (memql#5497).
+	// ROUTING them would be the false coverage this guard's header warns
+	// about: every ci.yml lane a bucket could start leaves them unopened.
+	"test/clustere2e/testdata/pipelines/*.json": {
+		reason: "read only by TestPipelinesSubstrate (test/clustere2e, //go:build clustere2e && agent), which no ci.yml " +
+			"lane runs -- scripts/citags records why, and build-clustere2e compiles the package without reading " +
+			"its testdata. install-cluster-e2e.yml's pipelines leg is the lane that reads them, nightly and on " +
+			"that workflow's own paths: not every pull request, so the claim is not made through " +
+			"coveredByWorkflow either. The leg's manifest.yaml beside them is routed, by **/*.yaml",
+	},
 }
 
 // coverageScan is one pass of the guard: which tracked files reach a consumed

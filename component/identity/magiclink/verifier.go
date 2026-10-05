@@ -285,6 +285,20 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 		return &VerifyResult{Bootstrap: true, Email: row.Email, EnrollmentToken: token}, nil
 	}
 
+	// Resolve provisioning policy before consuming the credential. An unavailable
+	// settings read must leave the link usable for a retry.
+	user, err := v.Store.LookupUserByEmail(ctx, row.Email)
+	if err != nil {
+		return nil, fmt.Errorf("magiclink: user lookup: %w", err)
+	}
+	cfg := v.Cfg
+	if user == nil || user.ID == "" {
+		cfg, err = v.Store.RegistrationConfig(ctx, v.Cfg)
+		if err != nil {
+			return nil, fmt.Errorf("magiclink: registration policy unavailable: %w", err)
+		}
+	}
+
 	// EXACTLY ONCE. The store re-reads the row inside an advisory lock and
 	// writes only if consumedAt is still empty, so the loser of a race
 	// between the poller and a same-device click is TOLD it lost rather than
@@ -309,13 +323,6 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 		}
 	}
 
-	// Ensure user exists. If this is a brand-new email, provision a
-	// v1:identity:user + a magic_link v1:identity:identity row.
-	user, err := v.Store.LookupUserByEmail(ctx, row.Email)
-	if err != nil {
-		return nil, fmt.Errorf("magiclink: user lookup: %w", err)
-	}
-
 	newUser := false
 	var userId string
 	// effectiveRole is the cluster-wide role this sign-in carries -- read off
@@ -334,10 +341,10 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 			return nil, fmt.Errorf("magiclink: generate user id: %w", err)
 		}
 		userId = uid
-		internal := v.Cfg.IsInternalEmail(row.Email)
-		role := ""
+		internal := cfg.IsInternalEmail(row.Email)
+		role := string(auth.RoleReader)
 		if internal {
-			role = v.Cfg.InternalDefaultRole
+			role = cfg.InternalDefaultRole
 		}
 		// Display name defaults to local part of email; admin UI can
 		// override it later.

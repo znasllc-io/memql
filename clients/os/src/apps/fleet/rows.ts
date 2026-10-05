@@ -236,6 +236,28 @@ export function computerUseStatus(machine: MachineRow): {
   return { state: "available", answer: "Available — X11 desktop reported." };
 }
 
+/** The routing pair a machine advertises when its own Cockpit policy allows
+ *  pipeline steps (integrations/agent/worker/pipeline_purpose.go). */
+const PIPELINES_LABEL = "pipelines";
+const PIPELINES_ALLOWED = "allowed";
+
+/** Whether this machine takes pipeline steps (epic memql#5478), in the
+ *  machine's OWN words: the label its Cockpit reports when the `pipelines`
+ *  block of its policy.yaml allows them. REPORTED LABELS ONLY. A label set in
+ *  Fleet cannot make a machine accept a step -- the Cockpit refuses anything
+ *  its policy does not allow, and the engine dispatches on the label the
+ *  machine advertised -- so an operator label here would answer a question
+ *  the machine has already answered the other way. Exact, like every fleet
+ *  label: `Allowed` is not `allowed`. */
+export function pipelineStepsStatus(machine: MachineRow): {
+  state: "allowed" | "not_allowed";
+  answer: string;
+} {
+  return machine.reportedLabels[PIPELINES_LABEL] === PIPELINES_ALLOWED
+    ? { state: "allowed", answer: "Allowed by this machine's policy" }
+    : { state: "not_allowed", answer: "Not allowed" };
+}
+
 /** One local app on a machine. */
 export interface MachineApp {
   id: string;
@@ -581,8 +603,13 @@ export const STRATEGY_BLURB: Record<RoutingStrategy, string> = {
   labelMatch: "Most preferred labels matched first, then registration order.",
 };
 
+// The fallback governs an AGENT's calls. A pipeline step always tries the next
+// matching machine, whatever this says (integrations/agent/worker's
+// fallbackFor): its consents are the pipeline's and the machine's own, and a
+// refusal before start ran nothing. The `none` line says so, because an owner
+// who picks it would otherwise expect their pipeline steps to stop too.
 export const FALLBACK_BLURB: Record<RoutingFallback, string> = {
-  none: "Report the refusal.",
+  none: "Report the refusal. A pipeline step still tries the next match.",
   nextMatching:
     "Try the next candidate. Only ever before a call has started -- never a re-run.",
 };

@@ -103,6 +103,57 @@ func TestOpenPullRequestsReadsEachHeadAndWhereItCameFrom(t *testing.T) {
 	}
 }
 
+// One pull request, by its number, whatever its age or state: the list above
+// is ONE page of a hundred, newest first, and would miss an older pull request
+// in a busy repository. Decoded exactly as the list decodes each entry.
+func TestPullRequestReadsOneHeadByItsNumber(t *testing.T) {
+	now := time.Now().UTC()
+	hub := newHub().
+		json("/repos/acme/widget/pulls/7", http.StatusOK,
+			`{"number":7,"state":"open","title":"Add widgets","body":"long prose","head":{"sha":"head7","ref":"feature","repo":{"full_name":"acme/widget"}},"base":{"sha":"base7","ref":"main","repo":{"full_name":"acme/widget"}}}`).
+		json("/repos/acme/widget/pulls/9", http.StatusOK,
+			`{"number":9,"state":"closed","title":"Its fork was deleted","head":{"sha":"head9","ref":"gone","repo":null},"base":{"sha":"base9","ref":"main"}}`)
+	c := testClient(t, hub, &now)
+
+	got, err := c.PullRequest(context.Background(), installToken, "acme", "widget", 7)
+	if err != nil {
+		t.Fatalf("pull request: %v", err)
+	}
+	if want := (PullRequestHead{Number: 7, Title: "Add widgets", HeadSHA: "head7", HeadRef: "feature", HeadRepository: "acme/widget", BaseSHA: "base7"}); got != want {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+	if auth := hub.seen()[0].Header.Get("Authorization"); auth != "Bearer "+installToken {
+		t.Fatalf("the read must carry the bearer it was handed, got %q", auth)
+	}
+	if q := hub.seen()[0].URL.RawQuery; q != "" {
+		t.Fatalf("one pull request is asked for by its path alone, got query %q", q)
+	}
+
+	// A DELETED head repository answers empty, as in the list.
+	deleted, err := c.PullRequest(context.Background(), installToken, "acme", "widget", 9)
+	if err != nil {
+		t.Fatalf("pull request 9: %v", err)
+	}
+	if deleted.HeadRepository != "" || deleted.HeadSHA != "head9" || deleted.Number != 9 {
+		t.Fatalf("a deleted head repository reads empty: %+v", deleted)
+	}
+
+	// A number GitHub does not know is its 404, for the caller to read; a
+	// number that is no number asks nothing.
+	if _, err := c.PullRequest(context.Background(), installToken, "acme", "widget", 8); StatusOf(err) != http.StatusNotFound {
+		t.Fatalf("want a 404, got %v", err)
+	}
+	before := len(hub.seen())
+	for _, n := range []int{0, -3} {
+		if _, err := c.PullRequest(context.Background(), installToken, "acme", "widget", n); err == nil {
+			t.Fatalf("pull request %d must be refused", n)
+		}
+	}
+	if len(hub.seen()) != before {
+		t.Fatalf("a pull request numbered 0 or less reached GitHub")
+	}
+}
+
 // compareBody renders a compare reply with n files, each carrying a patch the
 // size GitHub sends for an ordinary change.
 func compareBody(n int, patch string) string {
@@ -337,6 +388,7 @@ func TestTheBearerCallsAnswerNotConfiguredOnANilClient(t *testing.T) {
 	_, checks["Repository"] = c.Repository(ctx, installToken, "acme", "widget")
 	_, _, checks["BranchHead"] = c.BranchHead(ctx, installToken, "acme", "widget", "main")
 	_, checks["OpenPullRequests"] = c.OpenPullRequests(ctx, installToken, "acme", "widget")
+	_, checks["PullRequest"] = c.PullRequest(ctx, installToken, "acme", "widget", 7)
 	_, _, checks["Compare"] = c.Compare(ctx, installToken, "acme", "widget", "a", "b")
 	_, _, checks["CommitForRef"] = c.CommitForRef(ctx, installToken, "acme", "widget", "main")
 	_, checks["Tarball"] = c.Tarball(ctx, installToken, "acme", "widget", headSHA)

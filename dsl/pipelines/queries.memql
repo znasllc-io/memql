@@ -210,6 +210,28 @@ query run pipelineRunsUnfinished {
   shape     pipelineRunFull
 }
 
+/// Every run of one pipeline's pull request not yet completed, in any mode -- what a new push to the
+/// pull request supersedes (D11): the runner asks each affected-mode one to stop and never a
+/// full-mode one, a rule it applies in Go, where it is tested. @serverOnly: the push is a GitHub
+/// delivery or the poll's, with no person behind it, and the run it supersedes must be found whoever
+/// owns it, so an actor.userId conjunct would match nothing and every earlier run would keep its
+/// runner. Unbounded and unsorted because the runner asks every row it is handed, in no order, and
+/// one pull request's unfinished runs are the few heads pushed before their runs were superseded.
+@serverOnly
+@unbounded("the unfinished runs of ONE pull request -- bounded by the heads pushed before their runs were superseded")
+@actor
+query run pipelineRunsUnfinishedForPullRequest {
+  args {
+    pipelineId   string!
+    pullRequest  int!
+  }
+  filter  row => row.pipelineId == args.pipelineId
+              && row.pullRequest == args.pullRequest
+              && row.status in ["queued", "in_progress"]
+              && actor.isClusterOwner == true
+  shape   pipelineRunFull
+}
+
 /// Every run concluded since a moment whose FINAL check run did not land -- recovery's other read: a
 /// run concluded while GitHub would not take its report keeps a check run that still shows it
 /// unfinished, which holds a merge on a required check, and recovery republishes it. @serverOnly:

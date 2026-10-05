@@ -220,6 +220,9 @@ func TestTheLastCallReportsItsMachineAndUsage(t *testing.T) {
 		t.Fatalf("CallChat: %v", err)
 	}
 	surface, usage := entry.Client.(*fleetProvider).LastCall()
+	if reporter, ok := entry.Client.(interface{ Billing() string }); !ok || reporter.Billing() != "local" {
+		t.Fatal("fleet attempts must report local billing to the router and work journal")
+	}
 	if surface != "fleet:laptop" {
 		t.Fatalf("surface = %q", surface)
 	}

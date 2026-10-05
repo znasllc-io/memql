@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -91,9 +92,52 @@ type Result struct {
 	BytesIn       int
 	BytesOut      int
 	OutputPreview string
+
+	// WorkerId, NodeId and Labels NAME THE MACHINE the dispatch was attempted
+	// on (#5494): its registration id, the replica that held its stream, and
+	// the labels the router matched it on. Set on every result that came back
+	// from a machine the router selected, local or forwarded -- a refusal
+	// before start included, which names the machine that refused. Empty when
+	// nothing was selected: a gate denial, or no candidate at all.
+	//
+	// A caller that routes by need, such as a pipeline step, has no other way
+	// to say where its work ran: the request carries no machine (design D4),
+	// so the answer can only come back on the result.
+	WorkerId string
+	NodeId   string
+	Labels   map[string]string
+
+	// RefusedBeforeStart is the dispatcher's own verdict that the call started
+	// on NO machine (#5494): refused at a gate, no candidate to route to, or
+	// every candidate tried refused before anything was sent to it -- this
+	// replica's own refusals (a stale row, a machine at its cap, one not
+	// allowing pipelines on its connection here) and a sibling's, under
+	// whatever code the sibling answered with, which travels through
+	// verbatim. False means a machine may have started it: the call reached
+	// one, or a forward's answer was lost after the envelope left this node,
+	// which is indistinguishable from a call that ran.
+	//
+	// It is the fact the re-pick loop moves on by, surfaced so a caller never
+	// guesses it from an error code: a code list misses the codes a sibling
+	// refuses with, and a step that never ran must not read as one that
+	// failed.
+	RefusedBeforeStart bool
+
+	// RefusedByGate says THIS engine refused the call before any routing
+	// decision, by its own checks or reads (rulings R33b, R33c): its gate
+	// (preDispatchCheck: rule 0, the pipeline gate, the agent gates), or a
+	// read the router could not make (the owner's machines, unreadable in a
+	// database outage). A decision about the request -- who asked, its shape,
+	// the owner's off switch -- or a fault of the engine's, rather than a fact
+	// about the owner's machines. Always alongside RefusedBeforeStart. Never
+	// set by a routing decision or a machine's refusal, a sibling replica's
+	// included, whatever code it carries: the same code from a sibling is
+	// that replica's word about a machine it holds.
+	RefusedByGate bool
 }
 
-// Request carries the inputs from the agent tool loop.
+// Request carries the inputs of one dispatch: from the agent tool loop, or --
+// with Purpose set -- from Go dispatching for itself.
 //
 // THERE IS NO WorkerId FIELD, and its absence is a design decision rather than
 // an omission (design D4, memql#4351). An agent says what the work NEEDS --
@@ -101,8 +145,17 @@ type Result struct {
 // owner's routing policy decides which of their machines that lands on. A
 // model cannot name a machine, so it cannot hallucinate one.
 type Request struct {
-	Tool          string
-	Action        string
+	Tool   string
+	Action string
+	// Purpose says WHO is asking, which decides which gates apply. Empty is an
+	// agent's call: per-task approval, the kill switch, standing scope and the
+	// classifier, exactly as before the field existed. PurposePipeline is a
+	// pipeline run's step, with no agent, admitted by two owner consents and
+	// the kill switch (pipeline_purpose.go). Any other value is refused.
+	//
+	// Set only by Go that dispatches for itself. The builtins never read it
+	// from their arguments, so nothing a model writes can choose it.
+	Purpose       string
 	Args          map[string]any
 	AgentId       string
 	OwnerUserId   string
@@ -118,9 +171,10 @@ type Request struct {
 
 	// OnStreamChunk, when set, receives the machine's streamed stdout / stderr
 	// as it arrives. Set by nothing in the tool loop today -- the loop takes a
-	// whole result -- and carried here so a chunk that crosses a node hop has
-	// somewhere to land rather than being dropped at the boundary that was
-	// supposed to relay it.
+	// whole result -- and by the pipeline executor, whose step log IS this
+	// stream (#5494). Delivered whichever replica holds the machine's stream:
+	// relayed by the forward from a sibling, directly from this one. It runs
+	// on a stream's receive goroutine either way, so it must not block.
 	OnStreamChunk func(*nodev1.WorkerForwardStream)
 
 	// ReroutedFrom records that this call is not where it was first sent:
@@ -270,6 +324,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 			OK:           false,
 			ErrorCode:    gate.errorCode,
 			ErrorMessage: gate.errorMessage,
+			// Refused at a gate: nothing was routed, so nothing started --
+			// and it was this engine's gate that said no.
+			RefusedBeforeStart: true,
+			RefusedByGate:      true,
 		}
 		// A denial never reached the pick, so the record carries only what was
 		// asked for -- not an empty candidate list, which would read as "the
@@ -287,15 +345,22 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 	record := plan.Record()
 	record.ReroutedFrom = req.ReroutedFrom
 	if err != nil {
-		res := Result{OK: false, ErrorCode: "no_worker_available", ErrorMessage: err.Error()}
+		// The router could not read what it routes over -- the owner's machines,
+		// in a database outage -- so it decided nothing about them: an engine
+		// fault, refused before any routing decision (ruling R33c), never "no
+		// machine of yours offers this". The code the agent tool loop reads
+		// stays no_worker_available.
+		res := Result{OK: false, ErrorCode: "no_worker_available", ErrorMessage: err.Error(),
+			RefusedBeforeStart: true, RefusedByGate: true}
 		d.recordInvocation(ctx, req, "", startedAt, d.clock(), res, "no_worker_available", record)
 		return res, nil
 	}
 	if len(plan.Candidates) == 0 {
 		res := Result{
-			OK:           false,
-			ErrorCode:    "no_worker_available",
-			ErrorMessage: noCandidateMessage(plan, gate.requiredCapability),
+			OK:                 false,
+			ErrorCode:          "no_worker_available",
+			ErrorMessage:       noCandidateMessage(plan, gate.requiredCapability),
+			RefusedBeforeStart: true,
 		}
 		d.recordInvocation(ctx, req, "", startedAt, d.clock(), res, "no_worker_available", record)
 		return res, nil
@@ -318,7 +383,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 			// exactly no side effect, so moving on is a re-pick rather than a
 			// second execution.
 			last := idx+1 == len(plan.Candidates)
-			if plan.Policy.Fallback == FallbackNextMatching && !last {
+			// The owner's fallback for an agent's call; always the next
+			// matching machine for a pipeline step (fallbackFor, RULING R19).
+			if fallbackFor(req, plan.Policy) == FallbackNextMatching && !last {
 				d.logger.Info("worker router: candidate refused before start, trying the next",
 					"owner_user_id", req.OwnerUserId,
 					"registration_id", cand.RegistrationId,
@@ -331,21 +398,27 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 				continue
 			}
 			d.recordInvocation(ctx, req, cand.RegistrationId, startedAt, d.clock(), res, res.classifyOutcome(), record)
-			return res, nil
+			// This return and the one below carry the MACHINE's words, so they
+			// are where a pipeline step's credentials are masked out of what
+			// the caller is handed (maskPipelineResult). The record is handed
+			// the raw result and masks its own copy, so neither mask leans on
+			// the other.
+			return maskPipelineResult(req, res), nil
 		}
 
 		// The call reached the machine. Whatever it returned, this is where
 		// the routing stops -- an exec that failed mid-run may have run.
 		d.recordInvocation(ctx, req, cand.RegistrationId, startedAt, d.clock(), res, res.classifyOutcome(), record)
-		return res, nil
+		return maskPipelineResult(req, res), nil
 	}
 
 	// Unreachable while the loop returns on every path; kept as the honest
 	// answer if it ever does not.
 	res := Result{
-		OK:           false,
-		ErrorCode:    "no_worker_available",
-		ErrorMessage: noCandidateMessage(plan, gate.requiredCapability),
+		OK:                 false,
+		ErrorCode:          "no_worker_available",
+		ErrorMessage:       noCandidateMessage(plan, gate.requiredCapability),
+		RefusedBeforeStart: true,
 	}
 	d.recordInvocation(ctx, req, "", startedAt, d.clock(), res, "no_worker_available", record)
 	return res, nil
@@ -353,6 +426,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 
 // attempt runs one candidate. It returns ForwardRefusedBeforeStart only when
 // it is CERTAIN nothing executed on the machine.
+//
+// Whatever came back names the machine (Result.WorkerId / NodeId / Labels):
+// the candidate it was attempted on, and the replica holding its stream --
+// this one for a local dispatch, the forward's target otherwise. NodeId falls
+// back to the row's connectedNodeId only on a single-node install with no node
+// id of its own, where the row is the one place an id is written.
 func (d *Dispatcher) attempt(
 	ctx context.Context,
 	req Request,
@@ -360,10 +439,26 @@ func (d *Dispatcher) attempt(
 	cand Candidate,
 	timeout time.Duration,
 ) (Result, ForwardOutcome) {
+	var (
+		res     Result
+		outcome ForwardOutcome
+		nodeId  = strings.TrimSpace(cand.ConnectedNodeId)
+	)
 	if d.isLocal(cand) {
-		return d.attemptLocal(ctx, req, capability, cand, timeout)
+		res, outcome = d.attemptLocal(ctx, req, capability, cand, timeout)
+		if d.selfNodeId != "" {
+			nodeId = d.selfNodeId
+		}
+	} else {
+		res, outcome = d.attemptRemote(ctx, req, capability, cand, timeout)
 	}
-	return d.attemptRemote(ctx, req, capability, cand, timeout)
+	// The verdict the re-pick loop moves on by, on the result itself: local
+	// and forwarded alike, a sibling's own refusal codes included.
+	res.RefusedBeforeStart = outcome == ForwardRefusedBeforeStart
+	res.WorkerId = cand.RegistrationId
+	res.NodeId = nodeId
+	res.Labels = maps.Clone(cand.Labels)
+	return res, outcome
 }
 
 // isLocal reports whether this replica holds the machine's stream.
@@ -401,6 +496,17 @@ func (d *Dispatcher) attemptLocal(
 			ErrorMessage: "machine " + cand.Label() + " is no longer connected to this replica",
 		}, ForwardRefusedBeforeStart
 	}
+	// The machine's own consent, re-read here because this replica is the one
+	// dispatching (machineAllowsPipelines, RULING R20) -- the same check the
+	// forward's receiver makes when a sibling dispatches instead.
+	if req.Purpose == PurposePipeline && !machineAllowsPipelines(w) {
+		return Result{
+			OK:        false,
+			ErrorCode: codePipelinesNotAllowed,
+			ErrorMessage: "machine " + cand.Label() + " does not advertise " + PipelinesLabel + "=" + PipelinesAllowed +
+				" on its connection here: its own policy does not allow pipeline steps",
+		}, ForwardRefusedBeforeStart
+	}
 
 	dispatchCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -417,7 +523,19 @@ func (d *Dispatcher) attemptLocal(
 	d.stampSelected(ctx, req.OwnerUserId, cand.RegistrationId)
 
 	envelope := buildToolDispatch(req, timeout)
-	res, err := w.Dispatch(dispatchCtx, envelope)
+	// The machine's stream is HERE, so its chunks reach the caller directly --
+	// in the shape a forward relays them in, so OnStreamChunk is one callback
+	// whichever replica holds the stream. Without this a caller whose log IS
+	// the stream (a pipeline step) got output only when a sibling held it.
+	var onChunk func(*memqlv1.ToolStream)
+	if req.OnStreamChunk != nil {
+		onChunk = func(chunk *memqlv1.ToolStream) {
+			if out := forwardStreamChunk(envelope.GetCallId(), chunk); out != nil {
+				req.OnStreamChunk(out)
+			}
+		}
+	}
+	res, err := w.DispatchWithStream(dispatchCtx, envelope, onChunk)
 	return translateResult(envelope.GetCallId(), res, err), ForwardCompleted
 }
 
@@ -578,7 +696,21 @@ type gateResult struct {
 //
 // workerStatus is exempt -- it's the cheap connectivity probe and
 // has no side effects on the user's machine.
+//
+// THE PURPOSE DECIDES WHICH GATES APPLY, and RULE 0 is decided before any of
+// them: an action and a purpose that do not belong together are refused
+// first -- above all pipeline_step under any purpose but the pipeline's,
+// however much standing scope an agent holds (purposeBinding). Then a pipeline
+// step takes gates of its own (pipelineGate), and everything below is an
+// agent's call.
 func (d *Dispatcher) preDispatchCheck(ctx context.Context, req Request) gateResult {
+	if refused, ok := purposeRefusal(req); ok {
+		return refused
+	}
+	if req.Purpose == PurposePipeline {
+		return d.pipelineGate(ctx, req)
+	}
+
 	required := actionRequiredScope(req.Tool, req.Action)
 	if required.Capability == "" || required.Scope == "" {
 		return gateResult{
@@ -710,11 +842,18 @@ func buildToolDispatch(req Request, timeout time.Duration) *memqlv1.ToolDispatch
 		"action":   req.Action,
 		req.Action: req.Args,
 	})
+	agentId := req.AgentId
+	if req.Purpose == PurposePipeline {
+		// A pipeline step has no agent, and the cockpit refuses a pipeline_step
+		// that names one. Rule 0 refuses such a request before it gets here;
+		// the envelope says so too, whatever path reaches it.
+		agentId = ""
+	}
 	return &memqlv1.ToolDispatch{
 		CallId:        newCallId(),
 		RunId:         req.RunId,
 		StepId:        req.StepId,
-		AgentId:       req.AgentId,
+		AgentId:       agentId,
 		CorrelationId: req.CorrelationId,
 		Tool:          req.Tool,
 		Action:        req.Action,
@@ -786,6 +925,24 @@ func (d *Dispatcher) recordInvocation(
 	if d.store == nil {
 		return
 	}
+	argsRedacted := redactArgs(req.Args)
+	preview := res.OutputPreview
+	errorMessage := res.ErrorMessage
+	// A pipeline step's clone token and secrets are masked by VALUE as well as
+	// by key: argsRedacted, outputPreview and errorMessage never carry them,
+	// wherever in the call they appeared (pipeline_purpose.go). The result
+	// arrives here RAW -- the caller's copy is masked at Dispatch's return --
+	// so this mask is the record's own. Masked before the preview is clamped,
+	// so a value cut in half by the clamp is not.
+	if mask := pipelineCredentialMasker(req); mask != nil {
+		if argsRedacted != nil {
+			if masked, ok := maskCredentials(argsRedacted, mask).(map[string]any); ok {
+				argsRedacted = masked
+			}
+		}
+		preview = mask(preview)
+		errorMessage = mask(errorMessage)
+	}
 	row := workerservice.InvocationRow{
 		ID:            newInvocationId(),
 		OwnerUserId:   req.OwnerUserId,
@@ -796,16 +953,16 @@ func (d *Dispatcher) recordInvocation(
 		CorrelationId: req.CorrelationId,
 		Tool:          req.Tool,
 		Action:        req.Action,
-		ArgsRedacted:  redactArgs(req.Args),
+		ArgsRedacted:  argsRedacted,
 		StartedAt:     startedAt,
 		CompletedAt:   completedAt,
 		DurationMs:    int(completedAt.Sub(startedAt).Milliseconds()),
 		Outcome:       outcome,
 		BytesIn:       res.BytesIn,
 		BytesOut:      res.BytesOut,
-		OutputPreview: clampPreview(res.OutputPreview),
+		OutputPreview: clampPreview(preview),
 		ErrorCode:     res.ErrorCode,
-		ErrorMessage:  res.ErrorMessage,
+		ErrorMessage:  errorMessage,
 		Routing:       routing.AsMap(),
 	}
 	if err := d.store.WriteInvocation(ctx, row); err != nil {
@@ -820,13 +977,16 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 	if d.auditor == nil {
 		return
 	}
-	// The AGENT is the actor, and an agent is not a v1:identity:identity
-	// credential: it rides as the label, and ActorIdentityId stays empty.
+	// "agent:<id>" for an agent's call; a pipeline step has no agent and is
+	// attributed to its run (auditActor). Neither is a v1:identity:identity
+	// credential: the actor rides as the LABEL, and ActorIdentityId stays
+	// empty.
+	actor := auditActor(req)
 	switch gate.outcome {
 	case "denied_by_scope":
 		d.auditor.Emit(ctx, workerservice.AuditEvent{
 			Action:        "scope_elevation_requested",
-			ActorLabel:    "agent:" + req.AgentId,
+			ActorLabel:    actor,
 			Target:        req.AgentId,
 			TargetType:    "agent",
 			OwnerUserId:   req.OwnerUserId,
@@ -843,7 +1003,7 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 	case "kill_switch_engaged":
 		d.auditor.Emit(ctx, workerservice.AuditEvent{
 			Action:        "worker_call_blocked_by_kill_switch",
-			ActorLabel:    "agent:" + req.AgentId,
+			ActorLabel:    actor,
 			Target:        req.OwnerUserId,
 			TargetType:    "user",
 			OwnerUserId:   req.OwnerUserId,
@@ -851,9 +1011,9 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 			Timestamp:     d.clock(),
 		})
 	case "denied_by_policy":
-		d.auditor.Emit(ctx, workerservice.AuditEvent{
+		ev := workerservice.AuditEvent{
 			Action:        "worker_call_denied_by_policy",
-			ActorLabel:    "agent:" + req.AgentId,
+			ActorLabel:    actor,
 			Target:        req.AgentId,
 			TargetType:    "agent",
 			OwnerUserId:   req.OwnerUserId,
@@ -862,7 +1022,21 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 				"errorMessage": gate.errorMessage,
 			},
 			Timestamp: d.clock(),
-		})
+		}
+		if req.Purpose == PurposePipeline || (req.Tool == "workerHost" && req.Action == PipelineStepAction) {
+			// A pipeline dispatch, or an attempt to name pipeline_step outside
+			// one (rule 0): either way a decision about what may reach the
+			// owner's machines, filed against the owner -- with the actor
+			// saying who asked. And "user" is a target type the durable audit
+			// row accepts, so this security signal survives as a row rather
+			// than a log line.
+			ev.Target, ev.TargetType = req.OwnerUserId, "user"
+			ev.Detail["purpose"] = req.Purpose
+			ev.Detail["action"] = req.Action
+			ev.Detail["runId"] = req.RunId
+			ev.Detail["stepId"] = req.StepId
+		}
+		d.auditor.Emit(ctx, ev)
 	case "denied_by_classifier":
 		// memql#229. The gate's per-decision SlogRecorder line is
 		// the lightweight observability sink; this auditEvent is the
@@ -885,7 +1059,7 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 		}
 		d.auditor.Emit(ctx, workerservice.AuditEvent{
 			Action:        "command_blocked",
-			ActorLabel:    "agent:" + req.AgentId,
+			ActorLabel:    actor,
 			Target:        req.AgentId,
 			TargetType:    "agent",
 			OwnerUserId:   req.OwnerUserId,

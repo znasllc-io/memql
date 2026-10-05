@@ -435,7 +435,7 @@ const CASES: ActsCase[] = [
       { name: "Back to Machines", count: 1 },
       { name: "Machine name", count: 1 },
       { name: "Operating system", count: 1 },
-      { name: "Mint a token", count: 1 },
+      { name: "Continue", count: 1 },
       { name: "Cancel", count: 1, note: "always reachable while there is something to cancel (D6)" },
       { name: /^Computer use$/, count: 1 },
       { name: /^Run local models$/, count: 1 },
@@ -454,23 +454,24 @@ const CASES: ActsCase[] = [
       await screen.findByText(MACHINE_LABEL);
       await click(screen.getByLabelText("Add a machine"));
       await type(screen.getByLabelText("Machine name") as HTMLInputElement, "mini");
-      await click(screen.getByRole("button", { name: "Mint a token" }));
+      await click(screen.getByRole("button", { name: "Continue" }));
       await settle();
+      await click(screen.getByText("Connection token"));
     },
     acts: [
       { name: "the worker token", count: 1, note: "the copy field itself" },
       { name: "Copy the worker token", count: 1 },
       { name: "the install command", count: 1 },
       { name: "Copy the install command", count: 1 },
-      { name: "Cancel", count: 1, note: "the one act while the cluster listens; after a mint it asks Keep or Revoke" },
-      { name: "Back to Machines", count: 1, note: "asks the same question Cancel does" },
+      { name: "Cancel setup", count: 1, note: "the one act while the cluster listens; after a mint it asks Keep or Revoke" },
+      { name: "Back to Machines", count: 2, note: "header navigation and footer exit both ask before leaving" },
       // GONE WITH THE PANEL, deliberately: the acknowledgement box that gated
       // Done is replaced by the cancel question (D6), Done is legal only once
       // the machine has registered, and a second mint is a second credential
       // that this flow does not offer while the first is waiting.
       { name: /^I have copied the token\b/, count: 0 },
       { name: "Done", count: 0 },
-      { name: "Mint a token", count: 0 },
+      { name: "Continue", count: 0 },
     ],
   },
 

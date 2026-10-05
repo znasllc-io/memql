@@ -293,13 +293,17 @@ saying what the action needs:
 ```
 
 - `os` is a GOOS string, compared against the evaluating node's own `runtime.GOOS`.
-- `needs` is a **closed four-value set**: `display`, `gpu`, `macos_tooling`,
-  `user_files`. They name exactly the four things a workbench is not -- a
-  headless Linux sandbox in the cluster with an empty directory tree -- so
-  declaring any of them is by construction a mismatch. It is written as a table
-  (`workbenchProvides`, `integrations/workbench/environment.go`) rather than as
-  `len(needs) > 0`, so the day a GPU-bearing workbench flavour exists one
-  `false` becomes `true` and nothing else moves.
+- `needs` is a **closed five-value set**: `display`, `docker`, `gpu`,
+  `macos_tooling`, `user_files`. They name exactly the five things a workbench
+  is not -- a headless Linux sandbox in the cluster with an empty directory tree
+  and no Docker daemon -- so declaring any of them is by construction a
+  mismatch. `docker` joined the set with pipeline steps (epic memql#5478), whose
+  manifests are validated against the same closed list
+  (`TestTheNeedVocabularyIsThePipelinesNeeds` holds the two together). It is
+  written as a table (`workbenchProvides`,
+  `integrations/workbench/environment.go`) rather than as `len(needs) > 0`, so
+  the day a GPU-bearing workbench flavour exists one `false` becomes `true` and
+  nothing else moves.
 
 **Omitting `environment` means "no hint", and there is deliberately no
 default.** Every caller predating the field, and every action that genuinely
@@ -394,6 +398,7 @@ need vocabulary from `integrations/workbench` rather than restating it):
 |---|---|---|
 | `user_files` alone | `observe` -- the workbench could not see the file and the machine is being asked to look at it | none. "The files are on the user's machine" is true of every machine they own |
 | `display` | `full` | `display=true` |
+| `docker` | `full` | `docker=true` -- the exact pair, which a machine carries when its Cockpit reports a Docker runtime (`docker=yes`, or a version in the value, would route nowhere) |
 | `gpu` | `full` | `gpu=true` |
 | `macos_tooling` | `full` | `os=darwin` -- a need for macOS tooling IS a need for macOS, stated as the os label so a machine the cockpit already tagged `os=darwin` matches without hand-tagging |
 | `os` (the hint named a different platform) | `full` | `os=<the requested goos>` |

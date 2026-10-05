@@ -18,7 +18,17 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: memql
+# The namespace is a VALUE, and namespace-transformer.yaml is where it is set --
+# a NamespaceTransformer with `unsetOnly: true`, not the plain `namespace:`
+# field (memql#5492). The plain field rewrites EVERY namespace it meets, so it
+# moved the pipelines component's objects out of memql-pipelines, the second
+# namespace this overlay renders on purpose, and then failed the render on that
+# namespace's own Namespace object ("namespace transformation produces ID
+# conflict"). unsetOnly fills in only what states no namespace; base states
+# `memql` on everything it renders, so nothing else moved -- the render was
+# byte-identical apart from the pipelines objects.
+transformers:
+  - namespace-transformer.yaml
 
 resources:
   - ../../base
@@ -296,6 +306,13 @@ patches:
       - { op: replace, path: /data/MEMQL_AI_OPENAI_IDENTITY_PROVIDER_ID, value: "REPLACE-WITH-OPENAI-IDENTITY-PROVIDER-ID" }
       - { op: replace, path: /data/MEMQL_AI_OPENAI_SERVICE_ACCOUNT_ID, value: "REPLACE-WITH-OPENAI-SERVICE-ACCOUNT-ID" }
 
+  # THE PIPELINES SUBSTRATE'S VALUES (epic memql#5478, task #5492): the step
+  # cache's class, access mode and size, the concurrency ceiling and the step
+  # limits, over ../../components/pipelines -- entry-sized. The cache class
+  # couples to scripts/deploy/azure-provision.sh's Blob CSI driver; the file
+  # says how.
+  - path: pipelines-values.yaml
+
 images:
   # Engine pins from v0.19.6 (actions run 32514995614). overlays/cloud
   # is untouched. MCP is omitted on purpose: replicas 0, so there is
@@ -329,3 +346,9 @@ components:
   - ../../components/internal-tls
   - ../../components/cnpg-db
   - ../../components/cnpg-db/presets/entry
+  # THE PIPELINES SUBSTRATE (epic memql#5478, task #5492): the memql-pipelines
+  # namespace every pipeline step runs in, as Jobs the workbench creates --
+  # Role, step identity, cache, ceiling, limits, network isolation -- and the
+  # ConfigMap that points the workbench at it. Its objects keep their explicit
+  # namespace only because this overlay's namespace transformer is unsetOnly.
+  - ../../components/pipelines

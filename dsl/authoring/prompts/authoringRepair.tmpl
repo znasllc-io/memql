@@ -16,6 +16,11 @@ Failing constructs (the source Gate 1 rejected):
 Gate-1 diagnostics (the exact error per construct):
 {{ .diagnostics }}
 
+Complete bundle (passing members are read-only context):
+{{ .bundle }}
+Resolved catalogue dependencies:
+{{ .reused }}
+
 # How to repair
 
 1. Read each diagnostic and fix the SPECIFIC problem it names. Do not
@@ -27,7 +32,8 @@ Gate-1 diagnostics (the exact error per construct):
 3. If a diagnostic reveals a MISSING dependency (e.g. an unresolved
    `use` import of a construct nothing defines), you may add that
    construct to your output -- emit it under its own (kind, name).
-4. Keep every fix grounded: real concept fields, real shapes/specs,
+4. Preserve the requested behavior. Do not invent a schedule, recipients, or additional responsibilities to make the bundle compile.
+5. Keep every fix grounded: real concept fields, real shapes/specs,
    correct `use` imports, valid grammar.
 
 # Grammar reminders

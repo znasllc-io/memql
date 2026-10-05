@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { canCoordinateIdentityRefresh } from "../auth/identityClient";
 import { IdentityFrame } from "../auth/IdentityFrame";
-import { ContentSkeleton } from "../kit/ContentSkeleton";
+import { EntryPending } from "../kit/EntryPending";
 import { Button } from "../kit/controls";
 
 export function SignIn({
@@ -20,7 +20,7 @@ export function SignIn({
     void onSignIn().catch(() => setFailed(true));
   }, [status, supportedBrowser, onSignIn]);
 
-  if (supportedBrowser && status === "signed-out" && !failed) return <IdentityFrame title="Sign in to MemQL OS"><ContentSkeleton kind="form" label="Opening sign-in" /></IdentityFrame>;
+  if (supportedBrowser && status === "signed-out" && !failed) return <EntryPending label="Opening sign-in" />;
 
   return (
     <IdentityFrame title="Sign-in is unavailable">

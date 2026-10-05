@@ -25,15 +25,82 @@ import (
 // same one the single-node MVP uses -- the only difference is the
 // envelope.
 //
-// Per-request cancel state is tracked so CancelForwardedRequest
-// can stop in-flight exec / http_fetch work when the originating
-// agent abandons the call.
+// Per-request cancel state is tracked so CancelForwardedRequest (a
+// WorkbenchForwardCancel from the originating agent) can stop the work: a
+// pipeline step, which runs on its own goroutine for the whole life of its
+// Job, and in-flight exec / http_fetch work.
 type ForwardHandler struct {
 	integration *Integration
 	logger      *slog.Logger
 
 	mu       sync.Mutex
-	inflight map[string]context.CancelFunc
+	inflight map[string]*inflightCall
+	// pipelines answers the four pipeline actions. Nil until the app wires a
+	// runner, and on a node that cannot run steps; every pipeline action then
+	// answers ErrCodePipelinesNotConfigured having run nothing.
+	pipelines PipelineRunner
+}
+
+// inflightCall is one tracked forward's cancel, held by pointer so a release
+// can tell its own entry from a later one under the same request id.
+type inflightCall struct {
+	cancel context.CancelFunc
+}
+
+// The pipeline actions (epic memql#5478, #5493): how the agent's pipeline
+// executor drives a CI step through the workbench replica that creates and
+// watches its Kubernetes Job. The names are this package's because the
+// transport owns its vocabulary; the executor and the runner both use these
+// constants rather than a second copy of the strings.
+const (
+	// PipelineStepAction runs, or adopts, the step's Job to completion and
+	// answers with its outcome. LONG: it lasts as long as the Job, so it runs
+	// on its own goroutine and never on the stream's receive loop.
+	PipelineStepAction = "pipelineStep"
+	// PipelineStatusAction asks after a step's Job: running, finished (with
+	// the outcome), absent or stale. Quick -- the runner bounds it at ten
+	// seconds -- and still answered off the receive loop, as are the next two.
+	PipelineStatusAction = "pipelineStatus"
+	// PipelineAckAction tells the runner its outcome was received, so the Job
+	// and its Secret can be deleted. Quick.
+	PipelineAckAction = "pipelineAck"
+	// PipelineCancelAction deletes every Job of a run. Quick.
+	PipelineCancelAction = "pipelineCancel"
+)
+
+// ErrCodePipelinesNotConfigured is the error_code every pipeline action
+// answers with on a workbench node that has no PipelineRunner. Nothing ran.
+const ErrCodePipelinesNotConfigured = "pipelines_not_configured"
+
+// PipelineRunner runs pipeline steps on this node. JSON in, JSON out: the
+// payloads are the runner's own wire (integrations/pipelinesteps), and this
+// package carries them verbatim so it never imports the runner -- which
+// imports this package for the action names. An adapter in app/ implements it
+// over the real runner.
+//
+// The runner reads a done ctx as a CANCEL (it deletes the step's Job), which is
+// why RunStep's ctx is ended only by WorkbenchForwardCancel and never by the
+// stream the request arrived on.
+type PipelineRunner interface {
+	RunStep(ctx context.Context, argsJSON []byte) (outcomeJSON []byte)
+	Status(ctx context.Context, argsJSON []byte) (replyJSON []byte, errorCode string)
+	Ack(ctx context.Context, argsJSON []byte) (errorCode string)
+	CancelRun(ctx context.Context, argsJSON []byte) (replyJSON []byte, errorCode string)
+}
+
+// SetPipelineRunner installs the runner behind the four pipeline actions. Left
+// nil, every one of them answers ErrCodePipelinesNotConfigured. Safe to call
+// while the stream is serving, since the wiring can land after it.
+func (h *ForwardHandler) SetPipelineRunner(p PipelineRunner) {
+	h.mu.Lock()
+	h.pipelines = p
+	h.mu.Unlock()
+}
+
+func (h *ForwardHandler) pipelineRunner() PipelineRunner {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.pipelines
 }
 
 // NewForwardHandler wraps an existing Integration for use as the
@@ -47,7 +114,7 @@ func NewForwardHandler(integ *Integration, logger *slog.Logger) *ForwardHandler 
 	return &ForwardHandler{
 		integration: integ,
 		logger:      logger,
-		inflight:    make(map[string]context.CancelFunc),
+		inflight:    make(map[string]*inflightCall),
 	}
 }
 
@@ -56,24 +123,18 @@ func NewForwardHandler(integ *Integration, logger *slog.Logger) *ForwardHandler 
 // then calls the local Integration's dispatch path against args reconstructed
 // from args_json and sends exactly one WorkbenchForwardResponse via the
 // provided callback.
+//
+// It is called on the peer stream's RECEIVE loop and returns before long work:
+// every pipeline action is answered on a goroutine of its own, which sends its
+// one response when it ends.
 func (h *ForwardHandler) HandleForwardedRequest(ctx context.Context, req *nodev1.WorkbenchForwardRequest, send func(*nodev1.NodeServerMessage) error) {
 	requestId := req.GetRequestId()
-	cctx, cancel := context.WithCancel(ctx)
-	h.mu.Lock()
-	h.inflight[requestId] = cancel
-	h.mu.Unlock()
-	defer func() {
-		h.mu.Lock()
-		delete(h.inflight, requestId)
-		h.mu.Unlock()
-		cancel()
-	}()
 
 	// THE GATE (memql#3205 / memql#3219). Refusal is a structured
 	// WorkbenchForwardResponse rather than a dropped message, so the agent's
 	// parked tool loop unblocks with a reason instead of waiting out its
 	// timeout.
-	cctx, err := h.bindAuthority(cctx, req)
+	actx, err := h.bindAuthority(ctx, req)
 	if err != nil {
 		h.logger.Warn("workbench: refused a forwarded request",
 			slog.String("requestId", requestId),
@@ -83,6 +144,22 @@ func (h *ForwardHandler) HandleForwardedRequest(ctx context.Context, req *nodev1
 		h.sendError(send, requestId, "forwarded_authority_refused", err.Error())
 		return
 	}
+
+	// THE PIPELINE ENTRIES (epic memql#5478) fork here, beside the build entry
+	// and for its reason, and BEFORE the request is tracked below: each one
+	// outlives this call, answered on a goroutine of its own, so it owns its
+	// tracking and its release, and a deferred release here would forget it
+	// the moment the receive loop moved on -- leaving a running step no cancel
+	// could reach.
+	if isPipelineAction(req.GetAction()) {
+		h.handleForwardedPipeline(actx, req, send)
+		return
+	}
+
+	// Everything below answers before it returns, so it is tracked for exactly
+	// that long.
+	cctx, release := h.track(actx, requestId)
+	defer release()
 
 	// THE BUILD ENTRY (epic memql#4900, task #4901) is a different caller with
 	// a different contract, and it forks here rather than inside
@@ -210,6 +287,179 @@ func (h *ForwardHandler) handleForwardedBuild(ctx context.Context, req *nodev1.W
 	}
 }
 
+func isPipelineAction(action string) bool {
+	switch action {
+	case PipelineStepAction, PipelineStatusAction, PipelineAckAction, PipelineCancelAction:
+		return true
+	}
+	return false
+}
+
+// handleForwardedPipeline answers the four pipeline actions.
+//
+// THE CLASS GATE is the build entry's, for the build entry's reason: the only
+// caller of these entries is the engine's own pipeline executor, which forwards
+// under a SYSTEM-class assertion, and only the engine can mint one. A person's
+// session -- an operator stream or the dev shim included -- reaches none of
+// them, because a step's command is a repository's, run with that repository's
+// secrets, and an ack or a cancel deletes Jobs. Checked before the runner, so
+// what a refused caller learns is the refusal, not this node's configuration.
+//
+// Each starts on a goroutine of its own and this returns: pipelineStep for
+// as long as its Job lasts, the other three for at most the runner's bound on
+// them.
+func (h *ForwardHandler) handleForwardedPipeline(ctx context.Context, req *nodev1.WorkbenchForwardRequest, send func(*nodev1.NodeServerMessage) error) {
+	requestId := req.GetRequestId()
+	action := req.GetAction()
+	if class := node.ForwardedAuthorityFromProto(req.GetAuthority()).CredentialClass; class != auth.ForwardedClassSystem {
+		h.logger.Warn("workbench: refused a pipeline forward -- the assertion is not the engine's own",
+			slog.String("requestId", requestId),
+			slog.String("action", action),
+			slog.String("runId", req.GetRunId()),
+			slog.String("credentialClass", class))
+		h.sendError(send, requestId, "forwarded_authority_refused",
+			"workbench: the pipeline entries answer only to this cluster's own engine, and this request carries a "+
+				class+" assertion. Nothing was run.")
+		return
+	}
+	runner := h.pipelineRunner()
+	if runner == nil {
+		h.sendError(send, requestId, ErrCodePipelinesNotConfigured,
+			"workbench: this node has no pipeline runner (its startup log says why), so it can neither run nor "+
+				"inspect a pipeline step. Nothing was run.")
+		return
+	}
+	if action == PipelineStepAction {
+		h.startPipelineStep(ctx, runner, req, send)
+		return
+	}
+	h.startPipelineQuick(ctx, runner, req, send)
+}
+
+// startPipelineQuick answers a status, an ack or a cancel on a goroutine of
+// its own and returns at once (final review, M2).
+//
+// OFF THE RECEIVE LOOP for the step's reason, at a smaller scale: each reads or
+// writes the API server, which the runner bounds at ten seconds
+// (quickCallTimeout), and an API server that hangs holds every one of them
+// that long. The agent asks after every step it waits on every thirty seconds,
+// so answered inline they would keep this loop blocked -- heartbeats, event
+// forwards, a running step's cancel and every other forward waiting behind
+// them. The reply goes out through the same send, which the node server
+// serializes with every other send on the stream (serializeStream).
+//
+// TRACKED BEFORE IT STARTS, here on the receive loop, as a step is, so a cancel
+// read next finds it. It keeps the stream's cancellation, unlike a step: a
+// stream that ends leaves nobody to answer, and all three are reads or
+// idempotent deletes the agent asks for again.
+func (h *ForwardHandler) startPipelineQuick(ctx context.Context, runner PipelineRunner, req *nodev1.WorkbenchForwardRequest, send func(*nodev1.NodeServerMessage) error) {
+	requestId, action, args := req.GetRequestId(), req.GetAction(), req.GetArgsJson()
+	cctx, release := h.track(ctx, requestId)
+	go func() {
+		var reply []byte
+		var code string
+		switch action {
+		case PipelineStatusAction:
+			reply, code = runner.Status(cctx, args)
+		case PipelineAckAction:
+			code = runner.Ack(cctx, args)
+		case PipelineCancelAction:
+			reply, code = runner.CancelRun(cctx, args)
+		}
+		// Released before the reply goes out, as a step's is.
+		release()
+		h.sendPipelineReply(send, requestId, action, reply, code)
+	}()
+}
+
+// startPipelineStep starts a step on its own goroutine and returns at once.
+//
+// ON ITS OWN GOROUTINE, because RunStep does not return until the step's Job
+// does -- up to the step's timeout, twenty minutes by default -- and this runs
+// on the peer stream's RECEIVE loop. Inline, one step would stop this node
+// reading heartbeats, event forwards and every other forward from that peer for
+// its whole life, until the liveness checker marked a healthy peer offline. It
+// would also make the cancel unreachable: WorkbenchForwardCancel arrives on the
+// SAME stream, so the one message that could end the block is the one the block
+// keeps us from reading.
+//
+// TRACKED BEFORE IT STARTS, here on the receive loop rather than inside the
+// goroutine. The next message this loop reads can be the cancel for this very
+// request, and a registration made inside the goroutine could lose that race
+// and leave the cancel nothing to reach.
+//
+// DETACHED FROM THE STREAM. The step keeps the request's values (the verified
+// assertion travels with it) and drops its cancellation, because the runner
+// reads a done context as a cancel and deletes the Job. A stream that ends --
+// a mesh flap, the agent replica restarting, this replica draining for a
+// deploy -- is not a cancel: the Job is meant to survive it and be adopted by
+// whichever replica the agent forwards to next. Only WorkbenchForwardCancel
+// ends a step.
+//
+// The reply goes out through the same send when the step ends. If the stream
+// it arrived on is gone by then, the send fails and is logged; the runner
+// records the outcome on the Job before it returns, which is where the agent's
+// next forward or pipelineStatus finds it.
+func (h *ForwardHandler) startPipelineStep(ctx context.Context, runner PipelineRunner, req *nodev1.WorkbenchForwardRequest, send func(*nodev1.NodeServerMessage) error) {
+	requestId := req.GetRequestId()
+	stepCtx, release := h.track(context.WithoutCancel(ctx), requestId)
+	args := req.GetArgsJson()
+	go func() {
+		outcome := runner.RunStep(stepCtx, args)
+		// Released before the reply goes out: once the step has answered there
+		// is nothing left for a cancel to reach.
+		release()
+		h.sendPipelineReply(send, requestId, PipelineStepAction, outcome, "")
+	}()
+}
+
+// sendPipelineReply answers a pipeline action with the runner's JSON verbatim,
+// and its refusal code, when it gave one, on error_code -- so the agent reads
+// success or failure off the envelope without parsing a payload whose shape
+// depends on the action.
+func (h *ForwardHandler) sendPipelineReply(send func(*nodev1.NodeServerMessage) error, requestId, action string, payload []byte, code string) {
+	resp := &nodev1.WorkbenchForwardResponse{RequestId: requestId, PayloadJson: payload, ErrorCode: code}
+	if code != "" {
+		resp.ErrorMessage = "workbench: the pipeline runner refused " + action + ": " + code
+	}
+	if err := send(&nodev1.NodeServerMessage{
+		MessageId:   id.NewShortId(),
+		CorrelateTo: requestId,
+		Payload: &nodev1.NodeServerMessage_WorkbenchForwardResponse{
+			WorkbenchForwardResponse: resp,
+		},
+	}); err != nil {
+		h.logger.Warn("workbench pipeline forward reply send failed",
+			"request_id", requestId, "action", action, "error", err)
+	}
+}
+
+// track registers a forward's cancel under its request id, so
+// CancelForwardedRequest reaches the work, and returns the context the work
+// runs under with the release that forgets it. A path that answers before it
+// returns defers the release; a pipeline step's goroutine calls it when the
+// step ends.
+//
+// The release removes only its OWN entry. Two forwards can carry one request
+// id -- a caller that re-sends the same envelope after losing a replica -- and
+// a release that deleted by id alone would strip the later one's cancel,
+// leaving a running step that nothing can stop.
+func (h *ForwardHandler) track(parent context.Context, requestId string) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(parent)
+	call := &inflightCall{cancel: cancel}
+	h.mu.Lock()
+	h.inflight[requestId] = call
+	h.mu.Unlock()
+	return ctx, func() {
+		h.mu.Lock()
+		if h.inflight[requestId] == call {
+			delete(h.inflight, requestId)
+		}
+		h.mu.Unlock()
+		cancel()
+	}
+}
+
 // bindAuthority verifies the request's assertion and returns the context every
 // downstream dispatch runs under.
 //
@@ -239,16 +489,17 @@ func (h *ForwardHandler) bindAuthority(ctx context.Context, req *nodev1.Workbenc
 
 // CancelForwardedRequest implements node.WorkbenchForwardHandler.
 // Cancels the per-request context registered in HandleForwardedRequest
-// so in-flight exec/http_fetch work stops promptly.
+// so in-flight work stops promptly -- for a pipeline step, the runner's
+// cue to delete the step's Job.
 func (h *ForwardHandler) CancelForwardedRequest(_ context.Context, requestId string) {
 	h.mu.Lock()
-	cancel, ok := h.inflight[requestId]
+	call, ok := h.inflight[requestId]
 	if ok {
 		delete(h.inflight, requestId)
 	}
 	h.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	if call != nil {
+		call.cancel()
 	}
 }
 

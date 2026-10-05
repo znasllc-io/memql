@@ -32,10 +32,10 @@ async function select(name: string) {
 }
 
 describe("compose account default", () => {
-  it("requires an operator managing several organizations to choose explicitly", async () => {
+  it("defaults an operator to the cluster organization and permits an explicit client choice", async () => {
     await open(fakeConnection({ accounts: [ACME, BETA, SELF] }));
-    await waitFor(() => expect(selection()).toContain("Choose an account"));
-    expect(screen.queryByText(cue)).toBeNull();
+    await waitFor(() => expect(selection()).toContain("Operator organization"));
+    expect(screen.getByText(cue)).toBeTruthy();
     await select("Acme");
     expect(selection()).toContain("Acme");
   });
@@ -62,8 +62,8 @@ describe("compose account default", () => {
     expect(screen.queryByText(cue)).toBeNull();
     await act(async () => answer(rowsResult([BETA, SELF])));
     await waitFor(() => expect(screen.queryByText("Loading accounts")).toBeNull());
-    expect(selection()).toContain("Choose an account");
-    expect(screen.queryByText(cue)).toBeNull();
+    expect(selection()).toContain("Operator organization");
+    expect(screen.getByText(cue)).toBeTruthy();
   });
 
   it("keeps an already selected default when a later feed update changes the available choices", async () => {

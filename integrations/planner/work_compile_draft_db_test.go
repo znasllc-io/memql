@@ -182,7 +182,7 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Run("navigation adopts Ask variables on a separate receiver", func(t *testing.T) {
-		bridge := &draftDBCompiler{engine: plannerEngine, triage: map[string]any{"complexity": "trivial", "requiresFile": false, "navigation": map[string]any{"app": "deployables", "section": "deployables"}}}
+		bridge := &draftDBCompiler{engine: plannerEngine, triage: map[string]any{"intent": "task", "complexity": "trivial", "requiresFile": false, "navigation": map[string]any{"app": "deployables", "section": "deployables"}}}
 		req := CompileRequest{GoalId: "v1:work:goal:nav", RunId: "v1:work:run:" + id.NewShortId(), OwnerUserId: "v1:identity:user:draft-owner", Statement: "Open Deployables", Input: map[string]any{"conversation": []any{map[string]any{"role": "user", "content": "Open Deployables"}}}}
 		out, err := (&PlannerAgentLoop{engine: bridge, logger: testLogger()}).CompileGoalForRun(ctx, req, nil, bridge)
 		if err != nil {

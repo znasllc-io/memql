@@ -106,6 +106,16 @@ const (
 	RuntimeDocker     = "docker"
 )
 
+// DockerLabel and DockerLabelValue are the routing pair a machine that can run
+// containers carries: exactly docker=true (#5494). Derived from a reported
+// docker runtime beside the version-valued runtime:docker (RuntimeLabels), and
+// required by a pipeline step that needs Docker -- integrations/agent/worker's
+// EnvironmentNeedsLabels spells the same pair for the docker need.
+const (
+	DockerLabel      = "docker"
+	DockerLabelValue = "true"
+)
+
 // MaxRuntimes bounds the reported runtime list. Well above the six the engine
 // knows, so an honest cockpit reporting extras is never near it; the bound
 // exists only so a misbehaving one cannot grow the registration row.
@@ -376,6 +386,13 @@ func RuntimeLabel(name string) string {
 // A runtime with no version reported gets the label with an EMPTY value rather
 // than no label: the machine has the runtime, which is the routing fact, and
 // the version is operator-facing detail it happened not to state.
+//
+// DOCKER ALSO DERIVES docker=true (#5494), the one label here outside the
+// prefix. A step that needs Docker routes on that exact pair, and the
+// version-valued runtime:docker can never satisfy it: there is no "any value"
+// form, and the value differs from machine to machine. It is derived from the
+// same report rather than left for a cockpit to state, so the two cannot
+// disagree about whether a machine has Docker.
 func RuntimeLabels(inv Inventory) map[string]string {
 	if !inv.Present() {
 		return nil
@@ -387,6 +404,9 @@ func RuntimeLabels(inv Inventory) map[string]string {
 			continue
 		}
 		out[RuntimeLabel(name)] = r.Version
+		if name == RuntimeDocker {
+			out[DockerLabel] = DockerLabelValue
+		}
 	}
 	if len(out) == 0 {
 		return nil
@@ -412,6 +432,10 @@ func RuntimeLabels(inv Inventory) map[string]string {
 // that runtime and the present inventory does not list it -- which is the
 // uninstalled case, and the only one this function is entitled to have an
 // opinion about. Everything else is left exactly as the cockpit reported it.
+//
+// docker=true follows the same rule (#5494): it is removed only when the present
+// inventory no longer lists docker, and only with the one value this function
+// writes. A `docker` label carrying any other value is the cockpit's.
 func mergeRuntimeLabels(base map[string]string, inv Inventory) map[string]string {
 	// An ABSENT inventory leaves the map exactly as it was. A cockpit that
 	// stopped reporting has not uninstalled anything -- it has gone quiet, and
@@ -430,6 +454,13 @@ func mergeRuntimeLabels(base map[string]string, inv Inventory) map[string]string
 				// The engine knows this runtime, the machine has just said what
 				// it has, and this is not in it. That is the uninstalled case,
 				// and the only one this function may act on.
+				continue
+			}
+		}
+		if k == DockerLabel && v == DockerLabelValue {
+			if _, stillDerived := derived[DockerLabel]; !stillDerived {
+				// Docker uninstalled. Kept, it would send a step that needs
+				// Docker to a machine that will fail it.
 				continue
 			}
 		}

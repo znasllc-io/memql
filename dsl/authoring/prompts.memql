@@ -74,6 +74,8 @@ prompt authoringEmit {
 @level("reasoning")
 @templateFile("prompts/authoringRepair.tmpl")
 prompt authoringRepair {
+  bundle []object @description("Complete current bundle, including passing constructs that must remain unchanged.")
+  reused []object @description("Resolved catalog dependencies; preserve these names and kinds.")
   responsibility  string! @description("The originating Responsibility, for grounding.")
   automationName  string             @description("The bundle's headline automation name, for context.")
   failing         []object! @description("The constructs Gate 1 rejected -- [{kind, name, source}]. Re-emit a corrected version for each.")

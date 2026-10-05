@@ -216,7 +216,10 @@ func (dr *runDriver) deliveryTimeout(step pipelines.Step) time.Duration {
 	if dr.d.notifyTimeout > 0 {
 		return dr.d.notifyTimeout
 	}
-	return time.Duration(timeoutSeconds(step)) * time.Second
+	if step.TimeoutSeconds > 0 {
+		return time.Duration(step.TimeoutSeconds) * time.Second
+	}
+	return pipelines.DefaultStepTimeout
 }
 
 // notifyWait is the wait on the rows ids name, stopped by the drive's stop and

@@ -8,13 +8,11 @@ import {
   checksFor,
   checksSettled,
   draftSummary,
-  installSteps,
   isSteady,
   matchRegistration,
   openStopFor,
   phaseOf,
   sameId,
-  serviceSentence,
   stopsFor,
   waitedLong,
   type Draft,
@@ -363,13 +361,13 @@ describe("the action bar follows the state", () => {
   it("offers Mint only over a live connection with a name typed, and Cancel always", () => {
     expect(barFor(facts({ draft: { ...MAC, name: "" } }), []).acts.map((a) => a.id)).toEqual(["cancel"]);
     expect(barFor(facts({ connected: false }), []).acts.map((a) => a.id)).toEqual(["cancel"]);
-    expect(barFor(facts({ connected: false }), []).detail).toMatch(/live connection/);
+    expect(barFor(facts({ connected: false }), []).detail).toMatch(/Reconnect to the cluster/);
     expect(barFor(facts(), []).acts.map((a) => a.id)).toEqual(["cancel", "mint"]);
   });
 
   it("says a refused mint created nothing and offers Mint again", () => {
     const bar = barFor(facts({ mintError: "forbidden" }), []);
-    expect(bar.state).toBe("The token was not minted");
+    expect(bar.state).toBe("Couldn’t prepare installation");
     expect(bar.acts.map((a) => a.id)).toEqual(["cancel", "mint"]);
   });
 
@@ -387,7 +385,7 @@ describe("the action bar follows the state", () => {
     expect(bar.acts.map((a) => [a.id, a.text === true])).toEqual([["cancel", true], ["leave", false]]);
     const long = facts({ mint: MINT, mintedAt: new Date(NOW.getTime() - LONG_WAIT_MS) });
     expect(waitedLong(long)).toBe(true);
-    expect(barFor(long, []).detail).toMatch(/taking a while/);
+    expect(barFor(long, []).detail).toMatch(/Taking longer than expected/);
   });
 
   // CANCEL REVOKES A LIVE CREDENTIAL, so it asks -- and it is its OWN question
@@ -397,16 +395,16 @@ describe("the action bar follows the state", () => {
   it("asks before cancelling a minted token, because cancelling revokes it", () => {
     const bar = barFor(facts({ mint: MINT, cancelAsked: true }), []);
     expect(bar.state).toBe("Cancel?");
-    expect(bar.question).toMatch(/token is revoked/);
+    expect(bar.question).toMatch(/revokes the token/);
     expect(bar.acts.map((a) => [a.id, a.text === true])).toEqual([["keepWaiting", true], ["revokeAndLeave", false]]);
     expect(bar.acts.find((a) => a.id === "revokeAndLeave")?.tone).toBe("danger");
   });
 
   it("asks once before leaving, for the one thing leaving costs here: the token is shown only on this page", () => {
     const bar = barFor(facts({ mint: MINT, leaveAsked: true }), []);
-    expect(bar.state).toBe("Leave?");
-    expect(bar.question).toMatch(/keeps working/);
-    expect(bar.question).toMatch(/shown only here/);
+    expect(bar.state).toBe("Back to Machines?");
+    expect(bar.question).toMatch(/will appear in Machines when it connects/);
+    expect(bar.question).toMatch(/won’t be shown again/);
     expect(bar.acts.map((a) => [a.id, a.text === true])).toEqual([["keepWaiting", true], ["leaveKeepToken", false]]);
   });
 
@@ -418,21 +416,16 @@ describe("the action bar follows the state", () => {
     expect(bar.acts.filter((a) => a.text !== true).map((a) => a.id)).toEqual(["revokeAndLeave"]);
   });
 
-  it("drops Cancel once connected and offers Open and Done, Done primary only when settled", () => {
+  it("offers only Back while checks run, and Done only when settled", () => {
     const m = machine();
     const pending = barFor(facts({ mint: MINT, machine: m }), checksFor(MAC, m, 0, NOW));
     expect(pending.state).toBe("Connected");
-    expect(pending.acts.map((a) => [a.id, a.tone])).toEqual([
-      ["open", "quiet"],
-      ["done", "quiet"],
-    ]);
-    // One button; opening the machine is the text action beside it.
-    expect(pending.acts.map((a) => a.text === true)).toEqual([true, false]);
-    expect(pending.acts[0]!.label).toBe("Open mini.local");
+    expect(pending.acts).toEqual([{ id: "back", label: "Back", tone: "quiet", text: true }]);
     const settled = barFor(facts({ mint: MINT, machine: m, beats: 2 }), checksFor(MAC, m, 2, NOW));
     expect(settled.state).toBe("Ready");
     expect(settled.tone).toBe("live");
     expect(settled.acts.find((a) => a.id === "done")?.tone).toBe("primary");
+    expect(settled.acts.map(a => a.label)).toEqual(["Back", "Done"]);
   });
 
   it("names a problem in the state word when a check stopped", () => {
@@ -443,7 +436,32 @@ describe("the action bar follows the state", () => {
   });
 });
 
-describe("the manual steps", () => {
+describe("local model readiness", () => {
+  it("offers Retry as the only forward action after a failed response", () => {
+    const m = machine({ labels: { "model:text-model": "tools=1" } });
+    const f = facts({ draft: MAC_INF, mint: MINT, machine: m, beats: STEADY_BEATS });
+    const checks = checksFor(MAC_INF, m, STEADY_BEATS, NOW, { live: null }, { state: "failed", error: "No response" });
+    expect(barFor(f, checks).acts).toEqual([
+      { id: "back", label: "Back", tone: "quiet", text: true },
+      { id: "retryResponse", label: "Retry", tone: "primary" },
+    ]);
+    for (const unavailable of [
+      { ...f, connected: false },
+      { ...f, machine: machine({ lastSeenAt: ago(200) }) },
+    ]) {
+      expect(barFor(unavailable, checks).acts.map(a => a.label)).toEqual(["Back"]);
+    }
+  });
+
+  it("offers one model download in the footer and prevents duplicate submissions", () => {
+    const m = machine({ hardware: { runtimes: [{ name: "ollama" }] } });
+    const f = facts({ draft: MAC_INF, mint: MINT, machine: m, beats: STEADY_BEATS });
+    const checks = checksFor(MAC_INF, m, STEADY_BEATS, NOW);
+    expect(barFor(f, checks).acts.map(a => a.label)).toEqual(["Back", "Download models"]);
+    expect(barFor(f, checks, true).acts.at(-1)).toMatchObject({ id: "pullRecommended", busy: true });
+    expect(barFor(f, checks, true).acts.filter(a => !a.text)).toHaveLength(1);
+  });
+
   it("requires a model response before Ready, Done, or completed Checks", () => {
     const m = machine({ labels: { "model:text-model": "tools=1" } });
     const f = facts({ draft: MAC_INF, mint: MINT, machine: m, beats: STEADY_BEATS });
@@ -465,27 +483,5 @@ describe("the manual steps", () => {
     const checks = checksFor(MAC_INF, m, STEADY_BEATS, NOW);
     expect(checks.find(c => c.id === "response")).toMatchObject({ state: "open", act: "pullRecommended" });
     expect(checksSettled(checks)).toBe(false);
-  });
-  it("are in the order they happen, and grow with what was asked for", () => {
-    const plain = installSteps(MAC);
-    expect(plain[0]).toMatch(/terminal on the machine/);
-    expect(plain[1]).toMatch(/password/);
-    expect(plain[plain.length - 1]).toContain("LaunchAgent");
-    expect(plain).toHaveLength(3);
-
-    const cu = installSteps(MAC_CU);
-    expect(cu).toHaveLength(4);
-    expect(cu[2]).toMatch(/Accessibility and Screen Recording/);
-
-    const inf = installSteps({ ...LINUX_CU, inference: true });
-    expect(inf).toHaveLength(5);
-    expect(inf[2]).toMatch(/Wayland/);
-    expect(inf[3]).toContain("systemd");
-    expect(inf[4]).toMatch(/several gigabytes/);
-  });
-
-  it("states the service as a fact of the command, per platform", () => {
-    expect(serviceSentence("mac")).toContain("com.znasllc.memql-worker");
-    expect(serviceSentence("linux")).toContain("memql-worker.service");
   });
 });

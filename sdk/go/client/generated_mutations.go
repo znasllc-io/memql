@@ -354,48 +354,6 @@ func ApplyResponsibilityIntakeBuild(args ApplyResponsibilityIntakeArgs) string {
 	return b.String()
 }
 
-// ApproveAccessRequest -- Approve an access request (status=approved, stamps reviewer + invitation).
-//
-// Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["approveAccessRequest"] in generated_concepts.go).
-type ApproveAccessRequestArgs struct {
-	RequestId    string
-	ReviewedBy   string
-	InvitationId string
-	ReviewerNote string
-}
-
-// ApproveAccessRequest calls the engine mutation approveAccessRequest.
-func (qc *QueryClient) ApproveAccessRequest(ctx context.Context, args ApproveAccessRequestArgs) (*Result, error) {
-	call := ApproveAccessRequestBuild(args)
-	return qc.executeNamed(ctx, "approveAccessRequest", call)
-}
-
-func ApproveAccessRequestBuild(args ApproveAccessRequestArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation approveAccessRequest(")
-	b.WriteString("requestId: ")
-	b.WriteString(quoteMemQL(args.RequestId))
-	if b.Len() > 30 {
-		b.WriteString(", ")
-	}
-	b.WriteString("reviewedBy: ")
-	b.WriteString(quoteMemQL(args.ReviewedBy))
-	if b.Len() > 30 {
-		b.WriteString(", ")
-	}
-	b.WriteString("invitationId: ")
-	b.WriteString(quoteMemQL(args.InvitationId))
-	if args.ReviewerNote != "" {
-		if b.Len() > 30 {
-			b.WriteString(", ")
-		}
-		b.WriteString("reviewerNote: ")
-		b.WriteString(quoteMemQL(args.ReviewerNote))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // ApproveDeviceCode -- Approve a pending device authorization. The approver is stamped from actor.userId -- the form cannot name someone else.
 //
 // Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["approveDeviceCode"] in generated_concepts.go).
@@ -1825,7 +1783,7 @@ type CreateArtifactArgs struct {
 	Lens string
 	// Enum: document | generated_output | note | todo | calendar_event | memory | live_source | file
 	Kind string
-	// Enum: uploaded | exported | workbench_generated | computer_use | agent_generated | derived | user_created | live | app_session | vision_input
+	// Enum: uploaded | exported | workbench_generated | computer_use | agent_generated | derived | user_created | live | app_session | vision_input | pipeline
 	Source  string
 	Title   string
 	Summary string
@@ -4247,7 +4205,7 @@ type CreateLibraryFileArgs struct {
 	Size              int
 	Sha256            string
 	BlobUrl           string
-	// Enum: uploaded | exported | agent_generated | derived | app_session | vision_input
+	// Enum: uploaded | exported | agent_generated | derived | app_session | vision_input | pipeline
 	Source string
 	// Enum: markdown | document | pdf | spreadsheet | image | text | conversation | other
 	Format                 string
@@ -10283,42 +10241,6 @@ func ReinforceMemoryBeliefBuild(args ReinforceMemoryBeliefArgs) string {
 	}
 	b.WriteString("sourceEpisodes: ")
 	b.WriteString(renderMemQLValue(args.SourceEpisodes))
-	b.WriteString(")")
-	return b.String()
-}
-
-// RejectAccessRequest -- Reject an access request (status=rejected, stamps reviewer + note).
-//
-// Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["rejectAccessRequest"] in generated_concepts.go).
-type RejectAccessRequestArgs struct {
-	RequestId    string
-	ReviewedBy   string
-	ReviewerNote string
-}
-
-// RejectAccessRequest calls the engine mutation rejectAccessRequest.
-func (qc *QueryClient) RejectAccessRequest(ctx context.Context, args RejectAccessRequestArgs) (*Result, error) {
-	call := RejectAccessRequestBuild(args)
-	return qc.executeNamed(ctx, "rejectAccessRequest", call)
-}
-
-func RejectAccessRequestBuild(args RejectAccessRequestArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation rejectAccessRequest(")
-	b.WriteString("requestId: ")
-	b.WriteString(quoteMemQL(args.RequestId))
-	if b.Len() > 29 {
-		b.WriteString(", ")
-	}
-	b.WriteString("reviewedBy: ")
-	b.WriteString(quoteMemQL(args.ReviewedBy))
-	if args.ReviewerNote != "" {
-		if b.Len() > 29 {
-			b.WriteString(", ")
-		}
-		b.WriteString("reviewerNote: ")
-		b.WriteString(quoteMemQL(args.ReviewerNote))
-	}
 	b.WriteString(")")
 	return b.String()
 }

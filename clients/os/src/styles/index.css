@@ -732,6 +732,8 @@ button:not(:disabled):active {
   position: relative;
 }
 
+.os-avatar-button { display: grid; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+
 .os-avatar {
   display: grid;
   place-items: center;
@@ -742,7 +744,6 @@ button:not(:disabled):active {
   background: var(--os-raised);
   font-size: var(--os-text-sm);
   font-weight: 600;
-  cursor: pointer;
 }
 
 /* ---- menus ---- */
@@ -939,30 +940,29 @@ button:not(:disabled):active {
   height: min(720px, calc(100dvh - var(--os-dock-h) - 84px));
   border-radius: var(--os-radius); box-shadow: var(--os-shadow-window); padding: 0; overflow: hidden;
 }
+.os-ask-sheet[data-maximized] { left: 0; top: 0; bottom: var(--ask-dock-reserve); transform: none; width: 100%; height: auto; border-radius: 0; }
 .os-ask { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 0; }
-.os-ask-header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--os-line); }
-.os-ask-heading { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.os-ask-heading strong { font-size: var(--os-text-base); }
-.os-ask-heading span { font-size: var(--os-text-xs); color: var(--os-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.os-ask-actions { display: flex; gap: 4px; }
-.os-ask-actions button, .os-ask-activity header button { display: grid; place-items: center; width: 30px; height: 30px; color: var(--os-muted); border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
-.os-ask-actions button:hover, .os-ask-actions button[aria-pressed="true"] { color: var(--os-ink); background: var(--os-plate); }
+.os-ask-header { justify-content: space-between; }
+.os-ask-heading { display: flex; flex: 1; align-items: baseline; gap: 8px; min-width: 0; margin-inline: 8px; }
+.os-ask-heading strong { font-size: var(--os-text-base); font-weight: 600; }
+.os-ask-heading span { font-size: var(--os-text-sm); color: var(--os-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.os-ask-actions { flex: none; }
 .os-ask-actions button:disabled { opacity: .4; cursor: default; }
-.os-ask-content { display: flex; flex: 1; min-height: 0; position: relative; }
-.os-ask-log { flex: 1; overflow-y: auto; min-width: 0; min-height: 0; padding: 24px 22px; display: flex; flex-direction: column; gap: 28px; overscroll-behavior: contain; }
+.os-ask-content { display: flex; flex: 1; min-height: 0; position: relative; font-size: var(--os-text-md); }
+.os-ask-log { flex: 1; overflow-y: auto; min-width: 0; min-height: 0; padding: 18px 20px; display: flex; flex-direction: column; gap: 28px; overscroll-behavior: contain; }
 .os-ask-empty { margin: auto; max-width: 340px; text-align: center; }
-.os-ask-empty strong { font-size: 20px; font-weight: 500; letter-spacing: -.025em; }
-.os-ask-empty p { color: var(--os-muted); font-size: var(--os-text-sm); line-height: 1.7; margin-top: 12px; }
+.os-ask-empty strong { font-size: var(--os-text-lg); font-weight: 500; letter-spacing: -.025em; }
+.os-ask-empty p { color: var(--os-muted); font-size: var(--os-text-md); line-height: 1.7; margin-top: 12px; }
 .os-ask-exchange {
   flex-shrink: 0; display: flex; flex-direction: column; gap: 24px; }
 .os-ask-message { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; }
-.os-ask-avatar { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--os-plate); color: var(--os-muted); font-size: 10px; font-weight: 600; }
+.os-ask-avatar { width: 34px; height: 34px; }
 .os-ask-avatar-memql { background: var(--os-accent-soft); color: var(--os-accent); font-size: 17px; }
 .os-ask-byline { display: flex; align-items: baseline; gap: 10px; margin: 1px 0 5px; }
-.os-ask-byline strong { font-size: var(--os-text-sm); font-weight: 600; }
-.os-ask-byline time { color: var(--os-muted); font-size: 10px; }
-.os-ask-message p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; font-size: var(--os-text-base); }
-.os-ask-answer { overflow-wrap: anywhere; line-height: 1.65; font-size: var(--os-text-base); }
+.os-ask-byline strong { font-size: var(--os-text-base); font-weight: 600; }
+.os-ask-byline time { color: var(--os-muted); font-size: var(--os-text-xs); }
+.os-ask-message p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; font-size: inherit; }
+.os-ask-answer { overflow-wrap: anywhere; line-height: 1.65; font-size: inherit; }
 .os-ask-answer > :first-child { margin-top: 0; }
 .os-ask-answer > :last-child { margin-bottom: 0; }
 .os-ask-answer p { white-space: normal; margin-block: 0.65em; }
@@ -974,31 +974,35 @@ button:not(:disabled):active {
 .os-ask-answer code { font-size: 0.9em; }
 .os-ask-answer table { display: block; max-width: 100%; overflow: auto; border-collapse: collapse; margin-block: 0.75em; }
 .os-ask-answer :is(th, td) { text-align: left; padding: 0.35em 0.75em; border-bottom: 1px solid var(--os-line); }
-.os-ask-history { flex: 0 0 210px; border-right: 1px solid var(--os-line); overflow-y: auto; padding: 16px 10px; }
-.os-ask-history > span { display: block; padding: 0 8px 10px; }
-.os-ask-history button { display: block; width: 100%; text-align: left; padding: 10px; font: inherit; font-size: var(--os-text-sm); color: var(--os-muted); background: none; border: 0; border-radius: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-.os-ask-history button:hover, .os-ask-history button[aria-current] { background: var(--os-plate); color: var(--os-ink); }
-.os-ask-activity { flex: 0 0 270px; min-width: 0; border-left: 1px solid var(--os-line); padding: 14px; overflow-y: auto; }
-.os-ask-activity header { display: flex; align-items: center; justify-content: space-between; font-size: var(--os-text-sm); }
-.os-ask-activity-question { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 20px; }
-.os-ask-activity details { border-top: 1px solid var(--os-line); padding: 10px 0; }
-.os-ask-activity summary { display: flex; justify-content: space-between; gap: 8px; cursor: pointer; font-size: var(--os-text-xs); }
-.os-ask-activity summary span { overflow-wrap: anywhere; }
-.os-ask-activity small { color: var(--os-muted); white-space: nowrap; }
-.os-ask-activity dl { font-size: 11px; overflow-wrap: anywhere; display: grid; grid-template-columns: 60px 1fr; gap: 8px; line-height: 1.5; }
-.os-ask-activity dt { color: var(--os-muted); }.os-ask-activity dd { margin: 0; }
-.os-ask-activity pre { white-space: pre-wrap; font-size: 10px; overflow-wrap: anywhere; }
-.os-ask-wait { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--os-muted); font-size: var(--os-text-xs); }
+.os-ask-activity { flex: 1; min-width: 0; min-height: 0; padding: 18px 20px; overflow-y: auto; overscroll-behavior: contain; }
+.os-ask-activity:focus { outline: none; }
+.os-ask-activity-turn { margin-top: 24px; }
+.os-ask-activity-turn + .os-ask-activity-turn { margin-top: 40px; }
+.os-ask-activity-question { margin: 0 0 8px; font-size: var(--os-text-md); line-height: 1.5; font-weight: 600; overflow-wrap: anywhere; }
+.os-ask-activity-steps { margin-left: 16px; }
+.os-ask-activity details + details { border-top: 1px solid var(--os-line); }
+.os-ask-activity details { padding: 12px 0; }
+.os-ask-activity summary { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; cursor: pointer; font-size: var(--os-text-base); }
+.os-ask-activity summary span { min-width: 0; overflow-wrap: anywhere; }
+.os-ask-activity small { color: var(--os-muted); white-space: nowrap; font-size: var(--os-text-sm); }
+.os-ask-activity dl { font-size: var(--os-text-base); overflow-wrap: anywhere; display: grid; grid-template-columns: minmax(72px, max-content) minmax(0, 1fr); gap: 8px 16px; line-height: 1.5; margin: 16px 0; }
+.os-ask-activity dt { color: var(--os-muted); font-size: var(--os-text-sm); }.os-ask-activity dd { margin: 0; }
+.os-ask-activity pre { white-space: pre-wrap; font-size: var(--os-text-base); overflow-wrap: anywhere; }
+.os-ask-conversations { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.os-ask-conversations-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px 20px; }
+.os-ask-conversations-search { margin-block: 20px 12px; }
+.os-ask-conversations-search .os-input { width: 100%; }
+.os-ask-wait { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: var(--os-muted); font-size: var(--os-text-sm); }
 .os-ask-countdown { width: 24px; height: 3px; background: var(--os-line); overflow: hidden; border-radius: 2px; }
 .os-ask-countdown > span { display: block; width: 100%; height: 100%; background: var(--os-accent); transform: scaleX(var(--ask-remaining)); transform-origin: left; transition: transform .25s linear; }
 .os-ask-input { display: flex; flex: none; align-items: flex-end; gap: 8px; margin: 0 18px 18px; padding: 10px; border: 1px solid var(--os-line); border-radius: 12px; background: var(--os-plate); }
-.os-ask-field { flex: 1; min-width: 0; resize: none; max-height: 160px; padding: 6px 0; font: inherit; color: inherit; border: 0; background: transparent; line-height: 1.5; }
+.os-ask-field { flex: 1; min-width: 0; resize: none; max-height: 160px; min-height: var(--os-control-h); padding: 5px 0; font: inherit; font-size: var(--os-text-base); color: inherit; border: 0; background: transparent; line-height: 1.5; }
 .os-ask-field:focus { outline: 0; }.os-ask-input:focus-within { border-color: color-mix(in srgb, var(--os-accent) 45%, var(--os-line)); }
-.os-ask-mic, .os-ask-send { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border: 0; border-radius: 8px; background: none; color: var(--os-muted); cursor: pointer; }
+.os-ask-mic, .os-ask-send { display: grid; place-items: center; width: var(--os-control-h); height: var(--os-control-h); flex: none; border: 0; border-radius: var(--os-radius-xs); background: none; color: var(--os-muted); cursor: pointer; }
 .os-ask-mic[aria-pressed="true"] { color: var(--os-accent); background: var(--os-accent-soft); }
 .os-ask-send:not(:disabled) { background: var(--os-accent); color: var(--os-accent-fg); }
 .os-ask-send:disabled { opacity: .4; cursor: default; }
-.os-ask-error { color: var(--os-error); font-size: var(--os-text-sm); overflow-wrap: anywhere; }
+.os-ask-error { color: var(--os-error); font-size: var(--os-text-base); overflow-wrap: anywhere; }
 .os-ask > .os-ask-error { margin: 0 20px 12px; }
 .os-ask-micnote { margin: -8px 22px 14px; font-size: var(--os-text-xs); }
 .os-ask-micnote[data-note="problem"] { color: var(--os-warn); }
@@ -1008,14 +1012,14 @@ button:not(:disabled):active {
  * replaces the content, so it is a column on the log's own gutters with
  * option rows at a readable measure -- the measure belongs to the rows, not
  * to the panel (rule 9). No accent beyond the kit's own checked state. */
-.os-ask-route-pill { flex: none; max-width: 13rem; height: var(--os-control-h); margin-bottom: 1px; padding: 0 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-size: var(--os-text-xs); color: var(--os-muted); background: none; border: 1px solid var(--os-line); border-radius: 999px; cursor: pointer; transition: color var(--os-duration-fast) var(--os-ease), border-color var(--os-duration-fast) var(--os-ease); }
+.os-ask-route-pill { flex: none; max-width: 13rem; height: var(--os-control-h); margin-bottom: 1px; padding: 0 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-size: var(--os-text-base); color: var(--os-muted); background: none; border: 1px solid var(--os-line); border-radius: 999px; cursor: pointer; transition: color var(--os-duration-fast) var(--os-ease), border-color var(--os-duration-fast) var(--os-ease); }
 .os-ask-route-pill:hover { color: var(--os-ink); border-color: var(--os-muted); }
 /* A pinned source that cannot serve now: the words take the warning tone and
  * the reason is the pill's description. The edge stays neutral -- a cue, not
  * an alarm. */
 .os-ask-route-pill[data-ready="false"], .os-ask-route-pill[data-ready="false"]:hover { color: var(--os-warn); }
 .os-ask-route-pill:focus-visible, .os-ask-route-back:focus-visible, .os-ask-route-manage:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 1px; }
-.os-ask-route { flex: 1; min-width: 0; overflow-y: auto; padding: 16px 22px 22px; display: flex; flex-direction: column; gap: 4px; overscroll-behavior: contain; }
+.os-ask-route { flex: 1; min-width: 0; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 4px; overscroll-behavior: contain; }
 /* The region takes focus only so a click on its background keeps Escape in
  * the picker; it is never a Tab stop, so it draws no ring of its own. */
 .os-ask-route:focus { outline: none; }
@@ -1031,11 +1035,10 @@ button:not(:disabled):active {
 .os-ask-route-manage { align-self: flex-start; margin-top: 16px; padding: 0; font: inherit; font-size: var(--os-text-sm); color: var(--os-muted); background: none; border: 0; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .os-ask-route-manage:hover { color: var(--os-ink); }
 [data-os-ask="widget"] .os-ask-route { padding: 12px 14px; }
-[data-os-ask="widget"] .os-ask-header { padding: 10px 12px; }
 [data-os-ask="widget"] .os-ask-log { padding: 18px 14px; }
-[data-os-ask="widget"] .os-ask-history, [data-os-ask="widget"] .os-ask-activity { position: absolute; inset: 0; z-index: 2; background: var(--os-plate); }
+[data-os-ask="widget"] .os-ask-activity { padding: 12px; }
 [data-os-ask="widget"] .os-ask-input { margin: 0 10px 10px; }
-@media (max-width: 640px) { .os-ask-history, .os-ask-activity { position: absolute; inset: 0; z-index: 2; background: var(--os-plate); } }
+
 @media (prefers-reduced-motion: reduce) { .os-ask-countdown > span { transition: none; } }
 
 /* ---- Ask voice (epic memql#4747) ----------------------------------------
@@ -1888,6 +1891,7 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   width: auto;
   border-radius: var(--os-radius) var(--os-radius) 0 0;
 }
+.os-root[data-layout="phone"] .os-ask-sheet[data-maximized] { border-radius: 0; }
 
 /* ---- the rail: the OS's one scrollbar ----
  *
@@ -4943,11 +4947,12 @@ a.os-button {
  * in a story that cannot wrap breaks rather than widening the panel.
  *
  * This is the SECOND source of the same overflow, and the one a guard would
- * have hidden most convincingly: `fileStory` composes "Produced by plan
- * <id>", so a plan id -- forty characters with no break opportunity anywhere
- * in it -- sits inside an ordinary sentence. The facts grid was the first
- * source and this would have been the next, clipped mid-sentence with no
- * ellipsis to say anything had been cut.
+ * have hidden most convincingly: `fileStory` once composed "Produced by plan
+ * <id>", so an id -- forty characters with no break opportunity anywhere in
+ * it -- sat inside an ordinary sentence. The facts grid was the first source
+ * and this would have been the next, clipped mid-sentence with no ellipsis to
+ * say anything had been cut. The id has since left the story for the `Run`
+ * fact, but a story still names a machine, whose name nobody here chose.
  *
  * A sentence WRAPS where a table value TRUNCATES, and the difference is
  * deliberate: a cell has one line to give and a paragraph has as many as it
@@ -8135,16 +8140,22 @@ a.os-button {
 
 /* ---- one line ----
  *
- * Fixed height per density (30px comfortable, 22px compact; LogLine.tsx's
- * ROW_HEIGHT carries the same numbers for the geometry), a two-pixel left
- * rule for warn and error only, and no per-row border: the rows are the
- * texture of the list, not cards in it. */
+ * A fixed height per density, set on the row by the windowed list (30px
+ * comfortable, 22px compact at the default font, growing with the reader's:
+ * LogLine.tsx's rowHeightAt), a two-pixel left rule for warn and error only,
+ * and no per-row border: the rows are the texture of the list, not cards in
+ * it.
+ *
+ * NO GAP BETWEEN CELLS. A flex gap stands between two items whatever their
+ * width, so an attribute cell the row had squeezed to nothing still took its
+ * gap from the message. The space belongs to the cells instead (below):
+ * `--os-logs-gap` is how much. */
 .os-logs-line {
+  --os-logs-gap: 10px;
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
   height: 100%;
   padding: 0 10px 0 8px;
   border-left: 2px solid transparent;
@@ -8189,18 +8200,52 @@ a.os-button {
   white-space: nowrap;
   color: var(--os-muted);
 }
+/* THE SPACE BETWEEN CELLS BELONGS TO THE CELLS, so a cell with nothing to
+ * show costs nothing. The three fixed cells, always there, carry theirs after
+ * them. The attributes carry theirs inside, as an indent their own overflow
+ * clips: squeezed to nothing, they take their space with them. The mark's
+ * cell carries its own before the mark, and an empty one is not laid out. */
+.os-logs-time,
+.os-logs-level,
+.os-logs-component {
+  margin-right: var(--os-logs-gap);
+}
+.os-logs-attrs {
+  text-indent: var(--os-logs-gap);
+}
+.os-logs-subject-cell {
+  padding-left: var(--os-logs-gap);
+}
+.os-logs-subject-cell:empty {
+  display: none;
+}
+/* THE MESSAGE AND THE ATTRIBUTES: three layouts, one per list (R40, R40b,
+ * R40c, epic memql#5478). useLogRowLayout names one on `.os-logs-list` as
+ * `data-layout`, from the list's width and the reader's font size. These two
+ * rules are WIDE's, and an unmeasured list is WIDE; MEDIUM and NARROW are
+ * below.
+ *
+ * WIDE: the row's flexible width -- what the fixed cells and the mark's fixed
+ * column (below) leave -- goes seventy percent to the message and thirty to
+ * the attributes. Both grow from nothing in that ratio, so the attribute
+ * column starts at one x on every line with a mark, and the message has the
+ * larger share: a column wider than its attributes is room the message did
+ * not get. A list is WIDE only from WIDE_FROM (src/logs/LogLine.tsx),
+ * measured so that the message's share is a comfortable sixty characters
+ * beside the widest mark. The 32-character minimum is MEDIUM's floor; WIDE
+ * never reaches it. */
 .os-logs-message {
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 7 1 0;
+  min-width: 32ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Inline attributes take at most forty percent of the row: they are the
- * quiet half, and a line whose attributes crowded out its message would
- * read backwards. */
+/* Inline attributes are the quiet half, and a line whose attributes crowded
+ * out its message would read backwards: at most forty percent of the row,
+ * and in every layout the first cell to give way. */
 .os-logs-attrs {
-  flex: 0 1 40%;
+  flex: 3 1 0;
   min-width: 0;
   max-width: 40%;
   overflow: hidden;
@@ -8218,8 +8263,23 @@ a.os-button {
 }
 /* The subject mark: a small quiet control at the row end that narrows the
  * surface to what the line is about. Chip-shaped, because it names a thing
- * rather than doing one to it. */
+ * rather than doing one to it.
+ *
+ * AT MOST EIGHTEEN CHARACTERS, then an ellipsis. The word is a concept's last
+ * segment, which nothing bounds, and the two measures that choose a list's
+ * layout can only hold a message beside a mark of known width. Eighteen keeps
+ * every subject the logs name today whole ("packageDeployment" is
+ * seventeen); the full name stays on the mark's title and in its label. The
+ * 16px is its padding and border.
+ *
+ * ITS LINE FOLLOWS ITS FONT: 16px at the default 11px, as a ratio rather than
+ * pixels. The overflow that cuts a long word would clip a fixed 16px line's
+ * descenders under a larger font. */
 .os-logs-subject {
+  max-width: calc(18ch + 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   border: 1px solid var(--os-line);
   border-radius: 999px;
   background: none;
@@ -8227,7 +8287,7 @@ a.os-button {
   font: inherit;
   font-family: var(--os-font-mono);
   font-size: var(--os-text-xs);
-  line-height: 16px;
+  line-height: calc(16 / 11);
   padding: 0 7px;
   cursor: pointer;
 }
@@ -8240,9 +8300,79 @@ a.os-button {
   outline-offset: 1px;
 }
 .os-app-stack[data-density="compact"] .os-logs-line {
-  gap: 8px;
+  --os-logs-gap: 8px;
   font-size: var(--os-text-xs);
 }
+
+/* WIDE: THE MARK'S COLUMN IS FIXED, at the width the mark is bounded to, so
+ * the attribute column before it starts at one x on every line with a mark,
+ * whichever mark it is. The cell takes the mark's own font so that its
+ * eighteen characters are the mark's; the mark sits at the row end. */
+.os-logs-list[data-layout="wide"] .os-logs-subject-cell {
+  justify-content: flex-end;
+  width: calc(var(--os-logs-gap) + 18ch + 16px);
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+}
+/* A line with no mark has no mark's cell (an empty one is not laid out), and
+ * its attributes run on through that column to the row end: starting from
+ * the column's width, they grow by the same thirty percent, so they start
+ * where every other line's do, and the room the absent mark leaves is theirs
+ * rather than blank. Their characters are the mark's (the same mono voice at
+ * the same size), so the column is the cell's exactly. */
+.os-logs-list[data-layout="wide"] .os-logs-attrs:has(+ .os-logs-subject-cell:empty) {
+  flex-basis: calc(var(--os-logs-gap) + 18ch + 16px);
+}
+
+/* ---- MEDIUM: the message first (R40b) ----
+ *
+ * From STACK_BELOW up to WIDE_FROM a row cannot hold the whole attribute
+ * column beside a comfortable message, so the column is what goes. The
+ * message is sized by its own length and is the only cell that can shrink,
+ * so it is cut only when the row has nothing else to give, and never below
+ * its 32 characters; the attributes have no basis and take only what it
+ * leaves -- truncated, then gone, before the message loses a character.
+ * Their auto margin seats them against the mark, so the column is ragged
+ * here: that is the price of the message. */
+.os-logs-list[data-layout="medium"] .os-logs-message {
+  flex: 0 1 auto;
+}
+.os-logs-list[data-layout="medium"] .os-logs-attrs {
+  flex: 1 1 0;
+  margin-left: auto;
+}
+/* A line with no attributes still ends at the row's edge: the message does
+ * not grow here, so the mark is pushed there. */
+.os-logs-list[data-layout="medium"] .os-logs-attrs:empty + .os-logs-subject-cell {
+  margin-left: auto;
+}
+
+/* ---- NARROW: the stacked row (R40) ----
+ *
+ * A list narrower than STACK_BELOW cannot hold the fixed cells and a readable
+ * message on one line, so the row takes two: time, level, component and the
+ * subject mark, then the whole message at full width. The same measurement
+ * tells the windowed list the taller row (src/logs/useLogRowLayout.ts) -- a
+ * container query here would restyle rows the list still spaced as one line.
+ * The inline attributes go: the line's detail lists every one of them and
+ * opens from the row (a click, or Enter on the focused list), and a third
+ * line of quiet text would cost every row a third of its height for what the
+ * detail holds. */
+.os-logs-list[data-layout="narrow"] .os-logs-line {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "time level component subject"
+    "message message message message";
+  align-content: center;
+  row-gap: 3px;
+}
+.os-logs-list[data-layout="narrow"] .os-logs-time { grid-area: time; }
+.os-logs-list[data-layout="narrow"] .os-logs-level { grid-area: level; }
+.os-logs-list[data-layout="narrow"] .os-logs-component { grid-area: component; width: auto; margin-right: 0; }
+.os-logs-list[data-layout="narrow"] .os-logs-subject-cell { grid-area: subject; }
+.os-logs-list[data-layout="narrow"] .os-logs-message { grid-area: message; min-width: 0; }
+.os-logs-list[data-layout="narrow"] .os-logs-attrs { display: none; }
 
 /* ---- the scope line ----
  *
@@ -8875,6 +9005,122 @@ a.os-button {
      an 18px title's centre and a 15px one's. */
   padding-top: 47px;
 }
+.os-wizard-aside-footer {
+  margin-top: 18px;
+}
+.os-entry-layout {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--os-ground);
+  color: var(--os-ink);
+}
+.os-entry-preferences { flex: none; padding: 20px 20px 0; }
+.os-entry-layout > .os-wizard { flex: 1; min-height: 0; }
+.os-entry-pending { flex: 1; display: grid; place-items: center; }
+.os-entry-pending-mark {
+  color: var(--os-muted);
+  opacity: 0;
+  animation: os-entry-wait 160ms ease-out 200ms forwards;
+}
+@keyframes os-entry-wait { to { opacity: 1; } }
+.os-entry-layout .os-signin-content,
+.os-entry-layout .os-core-gate-column { animation: os-entry-arrive 140ms ease-out; }
+@keyframes os-entry-arrive { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .os-entry-pending-mark { animation: none; opacity: 1; }
+  .os-entry-layout .os-signin-content,
+  .os-entry-layout .os-core-gate-column { animation: none; }
+}
+.os-theme-switch {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: repeat(3, 34px);
+  width: max-content;
+  height: var(--os-control-h);
+  margin: 0;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--os-line);
+  border-radius: 999px;
+  background: var(--os-ground);
+}
+.os-theme-switch::before {
+  content: "";
+  position: absolute;
+  inset: 2px auto 2px 2px;
+  width: 34px;
+  border-radius: inherit;
+  background: var(--os-hover);
+  transition: transform var(--os-duration-med) var(--os-ease);
+}
+.os-theme-switch[data-mode="light"]::before { transform: translateX(100%); }
+.os-theme-switch[data-mode="system"]::before { transform: translateX(200%); }
+.os-theme-switch-option {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--os-muted);
+  cursor: pointer;
+  transition: color var(--os-duration-fast) var(--os-ease);
+}
+.os-theme-switch-option:hover,
+.os-theme-switch-option:has(:checked) {
+  color: var(--os-ink);
+}
+.os-theme-switch-option:has(:focus-visible) {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 2px;
+}
+.os-entry-list > .os-form-row { flex-wrap: nowrap; }
+.os-entry-list > p { margin: 5px 0 0; }
+.os-entry-list-list {
+  list-style: none;
+  margin: 7px 0 0;
+  padding: 0;
+}
+.os-entry-list-list .os-chip {
+  max-width: 100%;
+  padding: 1px 3px 1px 10px;
+  color: var(--os-ink);
+}
+.os-entry-list-list .os-chip > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.os-entry-list-list .os-chip-remove {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+}
+.os-entry-list .os-entry-list-error { color: var(--os-error); }
+.os-joining-policy {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 34rem;
+}
+.os-joining-policy p { margin: 0; }
+.os-joining-defaults {
+  border-top: 1px solid var(--os-line);
+  padding-top: 14px;
+}
+.os-joining-defaults > summary {
+  cursor: pointer;
+  color: var(--os-ink);
+  font-size: var(--os-text-base);
+}
+.os-joining-defaults > summary:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 3px;
+}
+.os-joining-defaults > :not(summary) { margin-top: 12px; }
 .os-wizard-stage-title {
   margin: 0;
   font-size: var(--os-text-md);
@@ -13488,28 +13734,21 @@ button.os-cluster-mesh-peer:focus-visible {
    about mirroring `.os-rank-refused`. The reader's variant simply has less in
    it.
 
-   NO ENTRANCE AND NO EXIT. The gate appears because the shell booted, with
-   nothing to animate from, and disappears because the answer changed -- and
-   the desk arriving IS the confirmation. The setup widget's fold-away below is
-   a different case: it earns its beat because a person finished the last stop
-   while looking at it. */
+   Entry uses the shared short opacity reveal, without moving the column.
+   Live changes do not replay it. The setup widget's fold-away below is a
+   different case: a person finished the last stop while looking at it. */
 
 .os-core-gate {
-  position: absolute;
-  inset: 0;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   justify-content: center;
   background: var(--os-ground);
   color: var(--os-ink);
-  /* Top-anchored, and the number was set by looking: at a tenth of the
-     viewport the column sat in the top third of a 900px screen with a third of
-     the page empty beneath it. Fourteen brings it toward the optical centre
-     while still leaving the rail room to grow DOWNWARD rather than pushing the
-     mark somebody is reading away from their cursor -- which is the whole
-     reason this is not centred. Clamped at both ends so a laptop and a 4K
-     display both get a column that starts where the eye lands. */
-  padding: clamp(48px, 14vh, 160px) 24px 96px;
+  /* The entry header owns the theme control above this scrollable pane.
+     Keep the column top-anchored so expanding a stop grows downward. */
+  padding: clamp(32px, 8vh, 110px) 24px 96px;
 }
 
 .os-core-gate-column {
@@ -14851,9 +15090,8 @@ button.os-cluster-mesh-peer:focus-visible {
  * NO NEW VISUAL IDEA, deliberately. The page is the compose reading on the
  * Fleet: the pane and the scroll are Deployables' (`.os-deploy-pane`), the
  * stops are the kit rail's, the bar is the kit's. What is new is only what
- * the content needs -- a numbered list because the manual steps ARE a
- * sequence, a rail inside a stop because the checks are stops, and a field
- * whose only control is the copy icon at its end.
+ * the content needs: commands in their execution order, a rail of checks,
+ * and a value that copies from anywhere in its row.
  */
 
 /* ---- the copy field (kit CopyField, D15) ---- */
@@ -14870,62 +15108,49 @@ button.os-cluster-mesh-peer:focus-visible {
   flex: 1 1 12ch;
 }
 .os-copyfield-line {
-  position: relative;
   display: flex;
+  align-items: center;
   min-width: 0;
+  padding: 5px 8px 5px 12px;
+  gap: 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-raised);
+  cursor: pointer;
 }
-.os-copyfield-input {
+.os-copyfield-line:focus-within { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+.os-copyfield-input.os-input {
   flex: 1 1 auto;
   min-width: 0;
-  /* Room for the icon, so the last characters of a long value never sit
-   * under it. */
-  padding-right: 32px;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  outline: 0;
+  box-shadow: none;
+  background: transparent;
   text-overflow: ellipsis;
-  cursor: text;
+  cursor: pointer;
 }
-.os-copyfield-input.os-mono {
-  font-size: var(--os-text-sm);
-}
-/* THE ICON IS ALWAYS THERE. CopyValue's arrives on hover because a standing
- * icon on every line of a facts list is noise; here the icon is the field's
- * only control and the reason the field exists. Muted until the pointer
- * reaches it, the accent once it has copied. */
+.os-copyfield-input.os-mono { font-size: var(--os-text-sm); }
 .os-copyfield-copy {
-  position: absolute;
-  right: 5px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 70px;
+  min-height: 32px;
   padding: 0;
   border: 0;
   border-radius: var(--os-radius-xs);
   background: transparent;
   color: var(--os-muted);
-  cursor: pointer;
-  transition: color var(--os-duration-fast) var(--os-ease);
-}
-.os-copyfield-copy:hover {
-  color: var(--os-ink);
-}
-.os-copyfield-copy:focus-visible {
-  outline: 2px solid var(--os-accent);
-  outline-offset: 1px;
-}
-.os-copyfield-copy[data-copied] {
-  color: var(--os-accent);
-}
-.os-copyfield-note {
+  font: inherit;
   font-size: var(--os-text-xs);
-  color: var(--os-muted);
+  cursor: pointer;
 }
-@media (prefers-reduced-motion: reduce) {
-  .os-copyfield-copy {
-    transition: none;
-  }
-}
+.os-copyfield-copy[data-copied] { color: var(--os-accent); }
+.os-copyfield-note { font-size: var(--os-text-xs); color: var(--os-muted); }
 
 /* ---- the stops' bodies ---- */
 .os-fleet-addstop {
@@ -14935,28 +15160,22 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-fleet-addstop .os-subhead {
   margin: 4px 0 0;
 }
+.os-fleet-machine { max-width: 34rem; }
+.os-fleet-platforms { display: inline-flex; align-self: flex-start; padding: 3px; gap: 2px; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-raised); }
+.os-fleet-platforms label { position: relative; cursor: pointer; }
+.os-fleet-platforms span { display: block; padding: 5px 16px; border-radius: var(--os-radius-xs); color: var(--os-muted); font-size: var(--os-text-base); }
+.os-fleet-platforms input:checked + span { background: var(--os-hover); color: var(--os-ink); }
+.os-fleet-platforms input:focus-visible + span { outline: 2px solid var(--os-accent); outline-offset: 1px; }
+.os-fleet-install { gap: 20px; }
+.os-fleet-install-command { display: grid; gap: 8px; min-width: 0; }
+.os-fleet-install-token { font-size: var(--os-text-sm); color: var(--os-muted); }
+.os-fleet-install-token > summary { width: fit-content; cursor: pointer; }
+.os-fleet-install-token > summary:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 3px; }
+.os-fleet-install-token > .os-copyfield { margin-top: 10px; }
 /* The choice cards sit inside a rail body that is already indented, so they
  * take the remaining width rather than the panel's. */
 .os-fleet-addstop .os-choice-stack {
   gap: 4px;
-}
-
-/* THE MANUAL STEPS ARE NUMBERED because they are a sequence -- a terminal, a
- * paste, a password, a dialog, a download, each after the one before, on a
- * machine the reader is about to walk over to. The numbers are the shell's
- * own muted figures, not a device. */
-.os-fleet-steps {
-  margin: 4px 0 0;
-  padding: 0 0 0 1.4em;
-  display: grid;
-  gap: 6px;
-  font-size: var(--os-text-sm);
-  color: var(--os-ink);
-  text-wrap: pretty;
-}
-.os-fleet-steps li::marker {
-  color: var(--os-muted);
-  font-variant-numeric: tabular-nums;
 }
 
 /* The usual causes, after a long wait: a plain list, because there is no
@@ -15166,6 +15385,11 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-info-detail { display: inline-flex; vertical-align: middle; }
 .os-info-detail .os-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; background: transparent; color: var(--os-muted); border-radius: 50%; cursor: pointer; }
 .os-info-detail .os-icon-button:hover:not(:disabled), .os-info-detail .os-icon-button:focus-visible:not(:disabled) { background: var(--os-hover); color: var(--os-ink); }
+/* Beside a fact's value (Fleet's "Pipeline steps", epic memql#5478) the info
+ * control overflows the line rather than growing it -- the Reuse heading's
+ * rule, one container down. Grown, its 28px button pushed the value 6px below
+ * its own label and made the one row taller than every row around it. */
+.os-facts dd .os-info-detail { margin: -6px 0 -6px 6px; }
 .os-info-dialog { padding: 0; color: var(--os-ink); background: var(--os-raised); border: 1px solid var(--os-line-strong); border-radius: 12px; width: min(430px,calc(100vw - 40px)); max-height: calc(100vh - 60px); box-shadow: var(--os-shadow-float); }
 .os-info-dialog::backdrop { background: #0006; }
 .os-info-dialog-body { padding: 20px 24px; font-size: var(--os-text-sm); line-height: 1.65; }
@@ -15247,10 +15471,9 @@ button.os-cluster-mesh-peer:focus-visible {
 }
 /* The numbered trail reflects registration events, never a fabricated Next. */
 .os-fleet-addpage { container-type: inline-size; }
-.fleet-install-options { display: flex; flex-direction: column; margin-top: 18px; }
-.fleet-install-options > div { position: relative; border-top: 1px solid var(--os-line); padding: 18px 36px 18px 0; }
-.fleet-install-options p { margin: 6px 0 0 24px; color: var(--os-muted); font-size: var(--os-text-sm); line-height: 1.6; }
-.fleet-install-options .os-info-detail { position: absolute; top: 15px; right: 0; }
+.fleet-install-options { display: flex; flex-direction: column; margin-top: 8px; }
+.fleet-install-options > div { position: relative; border-top: 1px solid var(--os-line); padding: 12px 0; }
+.fleet-install-options p { margin: 4px 0 0 42px; color: var(--os-muted); font-size: var(--os-text-sm); line-height: 1.6; }
 .os-activity-target { position: relative; min-width: 0; }
 .os-activity-target[data-activity] { outline: 2px dashed var(--os-accent); outline-offset: 5px; border-radius: 6px; }
 .os-activity-target[data-activity="running"] { outline-style: double; outline-width: 4px; }
@@ -15299,7 +15522,6 @@ button.os-cluster-mesh-peer:focus-visible {
 /* Keep the guided workflow's own scroller and fixed action floor intact. */
 .fleet-retained-workspace { height: 100%; min-height: 0; }
 .fleet-install-options > div { padding-block: 12px; }
-.fleet-install-options .os-info-detail { top: 9px; }
 
 /* Fleet details must fit the space left by the desktop navigation rail. */
 .fleet-retained-workspace { container-name: fleet-surface; container-type: inline-size; }
@@ -15540,6 +15762,7 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-trail-back:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 1px; }
 /* Inert at an app's root, and still drawn: a Back that appeared on the first
  * drill-down would shove the trail sideways under the cursor. */
+.os-trail-help { margin-left: 10px; }
 .os-trail-back:disabled { opacity: 0.32; cursor: default; }
 .os-trail-divider { flex: none; width: 1px; height: 16px; margin: 0 10px; background: color-mix(in srgb, var(--os-ink) 18%, transparent); }
 /* A real scroller with its bar hidden, pinned to its END by TrailRow, so the
@@ -15700,11 +15923,10 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-ask-live { flex:1; min-height:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px; text-align:center; overflow:auto; }
 .os-ask-live-mark { display:grid; place-items:center; width:112px; height:112px; border-radius:50%; color:var(--os-accent); box-shadow:0 0 32px color-mix(in srgb,var(--os-accent) 14%,transparent); }
 .os-ask-live[data-state="speaking"] .os-ask-live-mark, .os-ask-live[data-state="listening"] .os-ask-live-mark { animation:os-ask-breathe 2.8s ease-in-out infinite; }
-.os-ask-live > p { margin:0; color:var(--os-ink-muted); font-size:13px; }
+.os-ask-live > p { margin:0; color:var(--os-ink-muted); font-size:var(--os-text-md); }
 .os-ask-live-controls { display:flex; gap:12px; align-items:center; margin-top:18px; }
-.os-ask-live-controls .os-ask-mic { width:42px; height:42px; }
-.os-ask-live-end { display:flex; align-items:center; gap:8px; padding:10px 16px; border-radius:24px; border:1px solid var(--os-line); background:var(--os-raised); color:var(--os-ink); cursor:pointer; }
-.os-ask-retry { border:0; background:none; color:var(--os-ink-muted); font:inherit; font-size:12px; text-decoration:underline; cursor:pointer; margin-right:12px; padding:4px 0; }
+.os-ask-live-end { display:flex; align-items:center; gap:8px; height:var(--os-control-h); padding:0 14px; font-size:var(--os-text-base); border-radius:var(--os-radius-xs); border:1px solid var(--os-line); background:var(--os-raised); color:var(--os-ink); cursor:pointer; }
+.os-ask-retry { border:0; background:none; color:var(--os-ink-muted); font:inherit; font-size:var(--os-text-base); text-decoration:underline; cursor:pointer; margin-right:12px; padding:4px 0; }
 @keyframes os-ask-breathe { 50% { box-shadow:0 0 48px color-mix(in srgb,var(--os-accent) 25%,transparent); transform:scale(1.025); } }
 @media (prefers-reduced-motion: reduce) { .os-ask-live-mark { animation:none!important; } }
 

@@ -145,6 +145,7 @@ type Compiler interface {
 // the planner. No caller-local run, actor, or budget context is assumed to
 // survive the graph event that crosses the node boundary.
 type CompileRequest struct {
+	StartedAt          time.Time
 	ExecutionAuthority map[string]any
 	GoalId             string
 	RunId              string
@@ -641,14 +642,48 @@ func (i *Integration) RunBudget(ctx context.Context, ownerUserId, runId string) 
 		return out, nil
 	}
 	goal, err := i.store().goalForOwner(scoped, goalId)
-	if err != nil || goal == nil {
+	if err != nil {
 		return out, err
+	}
+	if goal == nil {
+		return out, fmt.Errorf("work: goal %s is not readable as %s", goalId, ownerUserId)
 	}
 	out, err = ceilingsOf(goal)
 	if err != nil {
 		return out, fmt.Errorf("work: goal %s ceilings: %w", goalId, err)
 	}
 	return out, nil
+}
+
+// LimitReplyBudget is the compiler's narrow write seam. The run's ownership
+// is read under the caller's authority before any server-only mutation.
+func (i *Integration) LimitReplyBudget(ctx context.Context, ownerUserId, runId string) error {
+	ctx = memql.ContextWithFreshRead(ownerActor(ctx, ownerUserId))
+	run, err := i.store().runForOwner(ctx, runId)
+	if err != nil {
+		return err
+	}
+	if run == nil || rowString(run, "goalId") == "" {
+		return fmt.Errorf("work: reply run is unavailable")
+	}
+	goalID := rowString(run, "goalId")
+	release, err := i.decisionGate(ctx, "reply-budget:"+goalID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	goal, err := i.store().goalForOwner(ctx, goalID)
+	if err != nil {
+		return err
+	}
+	if goal == nil {
+		return fmt.Errorf("work: reply goal is unavailable")
+	}
+	ceilings, err := ceilingsOf(goal)
+	if err != nil {
+		return err
+	}
+	return i.store().writeInternal(ctx, "mutation "+call("updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": work.ReplyCeilings(ceilings), "versionTime": rfc(workRowVersionAfter(goal["createdAt"], i.clock()))}))
 }
 
 // ceilingsOf decodes one goal row's declared ceilings.

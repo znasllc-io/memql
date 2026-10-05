@@ -554,7 +554,7 @@ For the identity binary (`-tags identity`):
 | `MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY`            | `false`                  | Opt into per-pod ephemeral file keys (no `MEMQL_IDENTITY_SIGNING_KEY_B64`). GENUINELY single-process deployments only -- with >=2 replicas it allows JWKS divergence, and nothing in the process can detect the replica count. The fail-fast guard (#1515, narrowed in memql#3400) requires this to boot any deployment whose issuer is not a loopback host and which has no shared seed. |
 | `MEMQL_IDENTITY_KEY_DIR`                        | `var/identity/keys`      | On-disk Ed25519 keypair directory (file-key mode).                                                                   |
 | `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY`             | none (required in prod)  | Master secret (>=16 bytes) wrapping the private key (file-key mode).                                                 |
-| `MEMQL_IDENTITY_REGISTRATION_MODE`              | `open`                   | `open` / `domain_restricted` / `invite_only` / `waitlist`.                                                           |
+| `MEMQL_IDENTITY_REGISTRATION_MODE`              | `invite_only`                   | `open` / `domain_restricted` / `invite_only` / `waitlist`.                                                           |
 | `MEMQL_IDENTITY_AUTH_ACTIVITY_RETENTION_DAYS`   | `30`                     | Days of `v1:identity:authActivity` history kept before a daily job on the identity node **hard-deletes** the rest (memql#4330). Clamped to `[1, 365]`; an out-of-range value is silently clamped rather than refusing boot. Unlike the longer audit archive policy, this auth-activity policy deletes directly -- `authActivity` is one row per refresh-token rotation and one per PAT-authenticated request, so it is two orders of magnitude larger than the audit log and its value decays in weeks. **Refresh-token reuse detection looks back exactly this far** (memql#4329): a replayed token is recognised by matching a retired-token hash one of these rows recorded, and once the row is pruned the replay is indistinguishable from a stale cookie. The default is chosen to exceed both `MEMQL_IDENTITY_SESSION_IDLE_DAYS` (14) and the 30-day refresh-token TTL, so a token older than the window is already dead on its own account -- **lowering it below either of those opens a real detection gap, and nothing warns about it.** Watch `memql_auth_activity_pruned_total`: a flat zero over more than a day on a cluster that authenticates anyone means the sweep is not running. |
 | `MEMQL_DISCOVERY_GRPC_ENDPOINT`                 | the identity host + a scheme-appropriate port | The dial address published as `grpcEndpoint` in `GET /.well-known/memql-config.json`. **A bare `host[:port]`, never a URL** -- a scheme is read for its port and then dropped, and a value that cannot be read as a host falls back to the default. Set it to the FRONT DOOR (`api.<domain>:443`), the only host whose ingress carries gRPC to the bff; the default derives the identity host, which serves HTTP only. Declared in `deploy/k8s/base/identity.yaml` and patched per overlay, so a stale value in an operator's local environment cannot reach the wire (memql#3399). |
 | `MEMQL_DISCOVERY_CLIENT_ID`                     | the first registered client | The OAuth `client_id` published as `clientId` in the same document.                                              |
@@ -651,6 +651,32 @@ MemQL OS Logs app reads them (epic memql#4893). Runbook: [Logs](logs.md).
 | `MEMQL_LOGS_MAX_LINES_PER_SECOND`   | `2000`                        | Per-node, per-second cap on stored lines (clamped 10..100000). Beyond it a line is dropped and counted on `memql_logs_dropped_total{reason="rate"}`; the node writes one stored warning per minute naming the drops, so the gap is visible in the Logs app. |
 | `MEMQL_LOGS_RETENTION_DAYS`         | `30`                          | Days of lines kept before the nightly `logsRetentionSweep` archives a day to blob storage and then deletes it (clamped 1..365). No archive, no delete: with no container the sweep keeps every line and says so. |
 | `MEMQL_LOGS_ARCHIVE_CONTAINER`      | `MEMQL_AZURE_BLOB_CONTAINER`  | The blob container the archive objects (`logs/<day>/<nodeType>.ndjson.gz`) land in. Empty means no archive is configured. |
+
+#### Pipelines (the substrate)
+
+The pipelines substrate runs each command step of a pipeline run as a Kubernetes
+Job, created by the workbench node, or on one of the owner's machines,
+dispatched by the agent node (epic memql#5478). Registered
+`component: pipelines`, all optional; the pipelines component's
+`memql-pipelines` ConfigMap sets the first two, and the workspace limit, on the
+workbench. Runbook:
+[Pipelines substrate](pipelines-substrate.md#environment-variables).
+
+| Variable                              | Default             | Purpose |
+|---------------------------------------|---------------------|---------|
+| `MEMQL_PIPELINES_NAMESPACE`           | `memql-pipelines`   | The namespace the workbench node creates step Jobs and their Secrets in. It must be the namespace whose Role grants the engine's identity Jobs -- the pipelines component renders both into `memql-pipelines` -- or every create is a 403 and every step fails `pipeline_runner_unavailable`. |
+| `MEMQL_PIPELINES_CLONE_IMAGE`         | none                | The image every step's clone init container runs, pinned by digest and providing `git`, `base64` and `tr`. Unset, the workbench node cannot run pipeline steps and refuses them, rather than guess which image to hand a repository token to. |
+| `MEMQL_PIPELINES_RUN_MAX_MINUTES`     | `120`               | A run's wall-clock ceiling in minutes (clamped 5..1440): a step is given only the time left under it, and fails `pipeline_run_ceiling` when that runs out. Read by the agent and the workbench. |
+| `MEMQL_PIPELINES_LOG_STORE_MAX_LINES` | `2000`              | How many lines of one step's output reach the log store (clamped 100..100000) before that copy stops with a `pipeline_log_capped` line; the full log is still archived to the Library. Read by the workbench (a cluster step) and the agent (a fleet step). |
+| `MEMQL_PIPELINES_ARTIFACT_MAX_BYTES`  | `67108864` (64 MiB) | The cap on one step's decoded artifact archive (clamped 1 MiB..256 MiB), past which the archive is dropped and the step fails `pipeline_artifact_too_large`. Read by the workbench and the agent. |
+| `MEMQL_PIPELINES_WORKSPACE_LIMIT`     | `20Gi`              | The size limit of every step's `/workspace` scratch volume, a whole number of `Ki`, `Mi`, `Gi` or `Ti`; anything else is the default. The ConfigMap sets it equal to the `memql-pipelines` LimitRange's default ephemeral-storage limit (20Gi locally, 8Gi on the cloud overlays, sized for their nodes' 32 GiB OS disks), which bounds the whole pod; a step that writes past either is evicted and fails `pipeline_step_disk_exceeded`. Read by the workbench. |
+| `MEMQL_PIPELINES_RUN_RETENTION_DAYS`  | `30`                | Days after a finished pipeline run's latest version before the nightly sweep archives and deletes its records: [Operational record retention](#operational-record-retention). |
+
+For the three clamped knobs, a value that is not a positive whole number falls
+back to its default -- never to a bound, and never to "no limit" -- and a value
+past a bound is clamped to it. The ceiling and both caps are read on the agent
+and on the workbench, so set them where both read them: `memql-secrets`, which
+every node reads.
 
 ## Concept-stored config
 
@@ -1020,11 +1046,14 @@ block that declares it.
 The cron-leader job `workJournalRetentionSweep` runs nightly at 03:40 UTC. It
 archives complete historical versions, verifies the uploaded bytes, then removes
 only the archived versions in bounded transactions. Failed verification preserves
-the records. Active parent work and user-owned goals/runs remain protected.
+the records. Active parent work, goals and user-owned runs remain protected; a
+finished pipeline's runs, and its goal once no run of it remains, are the one
+exception, on their own window.
 
 | Variable | Default | Records |
 | --- | --- | --- |
 | `MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS` | `30` | Terminal, unowned scheduled runs, their steps and closed approvals |
+| `MEMQL_PIPELINES_RUN_RETENTION_DAYS` | `30` | Finished pipeline runs: the `v1:pipelines:run` row and the work run it compiled into, with that run's steps and closed approvals, then the pipeline's goal once no run of it remains. The Library files a run's steps archived (logs, artifacts) are the owner's and are kept |
 | `MEMQL_WORKER_INVOCATION_RETENTION_DAYS` | `90` | Completed worker invocation history |
 | `MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS` | `90` | Safety classification evidence |
 | `MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS` | `90` | Safety output-screening evidence |
@@ -1032,15 +1061,20 @@ the records. Active parent work and user-owned goals/runs remain protected.
 | `MEMQL_WORK_MODELCALL_RETENTION_DAYS` | `90` | Model-call detail; the run retains its summary |
 | `MEMQL_WORK_OBSERVATION_RETENTION_DAYS` | `180` | Observation detail; the run retains its summary |
 
-Ages use the latest stored version. System runs with retained model-call or
-observation detail, pending approvals, or recent children stay until those
-constraints clear. An explicit environment setting overrides a stored global
-variable; the first five policies honor existing global settings, including the
-legacy `WORKER_INVOCATION_RETENTION_DAYS` global variable. Invalid/nonpositive
-values use the documented defaults.
+Ages use the latest stored version. Runs with retained model-call or
+observation detail, pending approvals, recent children, or a child that is not
+the run's own -- an owned child of a system run, another person's child of a
+pipeline's run -- stay until those constraints clear. A batch whose versions
+exceed one archive object is split; a single record too large for one object is
+kept whole and named in the sweep's result. An explicit environment setting
+overrides a stored global variable; every window above except the two
+journal-detail windows honors an existing global setting, including the legacy
+`WORKER_INVOCATION_RETENTION_DAYS` global variable. Invalid/nonpositive values
+use the documented defaults.
 
 `MEMQL_WORK_ARCHIVE_CONTAINER` defaults to `MEMQL_AZURE_BLOB_CONTAINER`.
 Archives use `retention/<UTC-day>/<sha256>.ndjson.gz`, with the original node
 identity, timestamps, schema, metadata, provenance and payload. Archive lifecycle
 is managed separately from database retention. No default age-based deletion
-applies to other concepts, including catalogs, files, goals and customer records.
+applies to other concepts, including catalogs, files, goals other than a
+pipeline's, and customer records.

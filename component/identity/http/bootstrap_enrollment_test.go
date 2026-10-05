@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/magiclink"
 	identityweb "github.com/znasllc-io/memql/component/identity/web"
+	"github.com/znasllc-io/memql/component/identity/webauthn"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
@@ -92,7 +94,10 @@ func (e *bootstrapEngine) Execute(ctx context.Context, q string) (*memqlengine.E
 		e.user = map[string]any{"id": extractField(q, "userId"), "primaryEmail": extractField(q, "primaryEmail"), "role": "owner", "internal": true, "active": true}
 	case strings.HasPrefix(q, "mutation createPasskeyIdentity("):
 		cred := extractField(q, "credentialId")
-		e.byCredentialId[cred] = map[string]any{"id": extractField(q, "identityId"), "userId": extractField(q, "userId"), "active": true, "credentials": map[string]any{"credentialId": cred, "publicKey": extractField(q, "publicKey"), "signCount": float64(0), "backupEligible": true, "backupState": true}}
+		// Match the graph's reference resolution; echoing the bare input hid
+		// the bootstrap passkey's inability to sign back in after logout.
+		userID := "v1:identity:user:" + strings.TrimPrefix(extractField(q, "userId"), "v1:identity:user:")
+		e.byCredentialId[cred] = map[string]any{"id": extractField(q, "identityId"), "userId": userID, "active": true, "credentials": map[string]any{"credentialId": cred, "publicKey": extractField(q, "publicKey"), "signCount": float64(0), "backupEligible": true, "backupState": true}}
 	case strings.HasPrefix(q, "mutation createClusterSettings(") || strings.HasPrefix(q, "mutation updateClusterSettings("):
 		e.settings = map[string]any{"id": "cluster"}
 		for _, key := range []string{"brandName", "clusterDomain", "bootstrapEmail", "bootstrapFirstName", "bootstrapLastName", "bootstrappedAt"} {
@@ -252,6 +257,40 @@ func TestBootstrapLocalWizardSkipsEmailAndRequiresRealPasskeyAcrossReplicas(t *t
 	require.Equal(t, 200, replay.Code)
 	require.Empty(t, replay.Result().Cookies())
 	require.Equal(t, 1, e.users)
+}
+
+func TestBootstrapPasskeySignsInAgainWithoutTheEnrollmentSession(t *testing.T) {
+	first, second, e := bootstrapServers(t, "docker-local")
+	token := beginBootstrap(t, first, false)
+	begin := bootstrapRegister(t, first, token, false, map[string]string{})
+	require.Equal(t, http.StatusOK, begin.Code, begin.Body.String())
+	challenge := decodeBegin(t, begin)
+	handleBytes, err := base64.RawURLEncoding.DecodeString(challenge.CreationOptions.Response.User.ID.(string))
+	require.NoError(t, err)
+	handle := string(handleBytes)
+	require.NotContains(t, handle, ":")
+	a := newHTTPSoftwareAuthenticator(t)
+	a.origin = "https://os.test"
+	done := bootstrapRegister(t, second, token, true, WebAuthnRegisterFinishRequest{
+		ChallengeId: challenge.ChallengeId, Credential: a.create(challenge.CreationOptions.Response.Challenge.String()),
+	})
+	require.Equal(t, http.StatusOK, done.Code, done.Body.String())
+	stored, err := (&webauthn.Store{Engine: e}).LookupByCredentialId(context.Background(), a.credentialIdB64())
+	require.NoError(t, err)
+	require.Equal(t, "v1:identity:user:"+handle, stored.UserId)
+
+	// A new sign-in has neither the registration session nor the bootstrap
+	// cookie. Begin and finish on separate replicas sharing PostgreSQL.
+	login := beginPasskeyLogin(t, second, WebAuthnLoginBeginRequest{FirstParty: true})
+	require.Equal(t, http.StatusOK, login.Code, login.Body.String())
+	request := decodeLoginBegin(t, login)
+	a.signCount = 1
+	finish := drivePasskey(t, first, "/auth/webauthn/login/finish", "", WebAuthnLoginFinishRequest{
+		ChallengeId: request.ChallengeId, Credential: a.assert(request.RequestOptions.Response.Challenge.String(), handle),
+	}, first.handleWebAuthnLoginFinish)
+	require.Equal(t, http.StatusOK, finish.Code, finish.Body.String())
+	require.True(t, decodeLoginFinish(t, finish).Success)
+	require.NotEmpty(t, finish.Result().Cookies())
 }
 
 func TestBootstrapHostedEmailOnlyNeverCreatesOwnerOrSession(t *testing.T) {

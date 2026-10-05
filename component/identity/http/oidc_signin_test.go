@@ -1,13 +1,32 @@
 package http
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/oidc"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
+
+type oidcJoiningEngine struct {
+	mode   string
+	writes []string
+}
+
+func (e *oidcJoiningEngine) Execute(_ context.Context, q string) (*memqlengine.ExecuteResult, error) {
+	if q == "query clusterSettingsCurrent()" {
+		return memqlengine.NewResultWithOutput([]any{map[string]any{"id": "settings", "registrationMode": e.mode, "registrationDomains": "allowed.example", "internalDomains": "example.com", "internalDefaultRole": "writer"}}), nil
+	}
+	if strings.HasPrefix(q, "mutation createUserOnFirstLogin(") {
+		e.writes = append(e.writes, q)
+		return memqlengine.NewResultWithOutput([]any{}), nil
+	}
+	return nil, fmt.Errorf("unexpected construct: %s", q)
+}
 
 // THE POLICY EDGE OF FEDERATION (memql#4611).
 //
@@ -29,10 +48,12 @@ func TestOidcProvisionRespectsTheRegistrationMode(t *testing.T) {
 		identity.RegistrationModeInviteOnly,
 		identity.RegistrationModeWaitlist,
 	} {
-		s := &Server{Cfg: identity.Config{RegistrationMode: mode}}
+		s := &Server{Cfg: identity.Config{RegistrationMode: identity.RegistrationModeOpen}, Store: &identity.Store{Engine: &oidcJoiningEngine{mode: string(mode)}}}
 		if _, err := s.provisionOidcUser(t.Context(), claims); err == nil {
 			t.Errorf("%s admitted a federated stranger with no invitation; federation would be a "+
 				"way around the mode the operator chose", mode)
+		} else if !strings.Contains(err.Error(), "registration mode does not admit") {
+			t.Fatalf("did not reach the policy gate: %v", err)
 		}
 	}
 
@@ -40,9 +61,21 @@ func TestOidcProvisionRespectsTheRegistrationMode(t *testing.T) {
 	s := &Server{Cfg: identity.Config{
 		RegistrationMode:    identity.RegistrationModeDomainRestricted,
 		RegistrationDomains: []string{"allowed.example"},
-	}}
+	}, Store: &identity.Store{Engine: &oidcJoiningEngine{mode: "domain_restricted"}}}
 	if _, err := s.provisionOidcUser(t.Context(), claims); err == nil {
 		t.Error("domain_restricted admitted an address outside its allowlist through federation")
+	}
+}
+
+func TestOidcSavedOpenPolicyProvisionsWithSavedInternalRole(t *testing.T) {
+	engine := &oidcJoiningEngine{mode: "open"}
+	s := &Server{Cfg: identity.Config{RegistrationMode: identity.RegistrationModeInviteOnly, InternalDefaultRole: "owner"}, Store: &identity.Store{Engine: engine}}
+	_, err := s.provisionOidcUser(t.Context(), oidc.Claims{Issuer: "https://idp", Subject: "new", Email: "new@example.com", EmailVerified: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(engine.writes) != 1 || !strings.Contains(engine.writes[0], `role: "writer"`) {
+		t.Fatalf("saved internal role not applied: %v", engine.writes)
 	}
 }
 
