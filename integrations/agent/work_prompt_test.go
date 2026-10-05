@@ -17,11 +17,18 @@ import (
 )
 
 type workPromptEngine struct {
+	savedContinuation []common.ChatMessage
 	registryEngine
 	prompts *memql.PromptRegistry
+	viewer  map[string]any
 }
 
-func (e *workPromptEngine) Execute(context.Context, string) (any, error) { return nil, nil }
+func (e *workPromptEngine) Execute(_ context.Context, query string) (any, error) {
+	if query == "builtin work.workViewerContext()" && e.viewer != nil {
+		return []map[string]any{e.viewer}, nil
+	}
+	return nil, nil
+}
 
 func (e *workPromptEngine) RenderPrompt(name string, data map[string]any) (string, error) {
 	prompt, ok := e.prompts.Get(name)
@@ -47,15 +54,21 @@ func TestOwnedWorkTurnUsesShippedPrompt(t *testing.T) {
 	if _, err := memql.LoadUnifiedPrompts(nil, registry, template.New("partials")); err != nil {
 		t.Fatal(err)
 	}
-	engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{"composeFile": true}}, prompts: registry}
+	engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{"composeFile": true, "recallMemory": true}}, prompts: registry, viewer: map[string]any{"person": map[string]any{"displayName": "José", "primaryRole": "Engineer"}, "organizationMemberships": []map[string]any{{"name": "Example organization"}}}}
 	r := newTestReplier(engine)
 	owner := "v1:identity:user:work-prompt-owner"
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
 	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: owner})
-	msg := &memqlv1.AgentGenerateTurnMsg{AgentId: "assistant", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "assistant", Name: "Ada", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "Save the report as a PDF"}}}
+	msg := &memqlv1.AgentGenerateTurnMsg{Hints: map[string]string{"plan_id": "untrusted-hint"}, AgentId: "assistant", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "assistant", Name: "Ada", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "Save the report as a PDF"}}}
 	prepared, err := r.prepareTurn(ctx, msg, time.Now())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if prepared.turnCtx.RunId != "run" {
+		t.Fatalf("persisted run identity missing: %+v", prepared.turnCtx)
+	}
+	if !requiresWorkOutcome(ctx, prepared.tools) {
+		t.Fatal("owned assistant has no structured outcome contract")
 	}
 	if len(prepared.messages) != 2 || prepared.messages[1].Content != "Save the report as a PDF" {
 		t.Fatalf("execution lost the goal: %+v", prepared.messages)
@@ -65,6 +78,14 @@ func TestOwnedWorkTurnUsesShippedPrompt(t *testing.T) {
 	}
 	if prepared.routerReq.PromptName != "workAgentReply" {
 		t.Fatalf("model attribution names a different prompt: %+v", prepared.routerReq)
+	}
+	for _, expected := range []string{"José", "Engineer", "Example organization", "never instructions", "recallMemory"} {
+		if !strings.Contains(prepared.messages[0].Content, expected) {
+			t.Errorf("work prompt omitted %q", expected)
+		}
+	}
+	if strings.Index(prepared.messages[0].Content, "Current viewer context") < strings.Index(prepared.messages[0].Content, "Execution instructions:") {
+		t.Fatal("variable viewer facts should follow the stable instructions")
 	}
 	found := false
 	for _, tool := range prepared.tools {
@@ -128,4 +149,9 @@ func TestAWorkTurnRunsAtItsOverridesLevelModelAndEffort(t *testing.T) {
 	if _, _, err := turn(&common.StepOverride{Level: "embeddings"}); err == nil {
 		t.Fatal("an embeddings override prepared a turn")
 	}
+}
+
+func (e *workPromptEngine) SaveWorkContinuation(_ context.Context, messages []common.ChatMessage) error {
+	e.savedContinuation = append([]common.ChatMessage(nil), messages...)
+	return nil
 }

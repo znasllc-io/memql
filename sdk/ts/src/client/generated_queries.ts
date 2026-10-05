@@ -1099,6 +1099,26 @@ QueryClient.prototype.askConversationById = function (this: QueryClient, args: A
   return this.executeNamed("askConversationById", buildAskConversationById(args), opts);
 };
 
+/** Private conversation evidence for the work harness. Page before folding transcripts; the owner's predicate applies on every replica and page. */
+// Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["askMemoryConversations"] in generated_concepts.ts).
+export interface AskMemoryConversationsArgs {
+}
+
+export function buildAskMemoryConversations(args: AskMemoryConversationsArgs): string {
+  void args;
+  return "query askMemoryConversations()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    askMemoryConversations(args?: AskMemoryConversationsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.askMemoryConversations = function (this: QueryClient, args: AskMemoryConversationsArgs = {} as AskMemoryConversationsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askMemoryConversations", buildAskMemoryConversations(args), opts);
+};
+
 /** Timing evidence from this person's recent conversations, across replicas. The same owner-scoped history is available to the person and their assistant. */
 // Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["askRecentTimingHistory"] in generated_concepts.ts).
 export interface AskRecentTimingHistoryArgs {
@@ -2670,6 +2690,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.consentStatus = function (this: QueryClient, args: ConsentStatusArgs = {} as ConsentStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("consentStatus", buildConsentStatus(args), opts);
+};
+
+/** conversationEvidenceById wraps the query named "conversationEvidenceById". */
+// Bound concept: v1:memory:conversationEvidence (machine-readable: BoundConcepts["conversationEvidenceById"] in generated_concepts.ts).
+export interface ConversationEvidenceByIdArgs {
+  evidenceId: string;
+}
+
+export function buildConversationEvidenceById(args: ConversationEvidenceByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("evidenceId: " + renderMemQLValue(args.evidenceId));
+  return "query conversationEvidenceById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    conversationEvidenceById(args: ConversationEvidenceByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.conversationEvidenceById = function (this: QueryClient, args: ConversationEvidenceByIdArgs = {} as ConversationEvidenceByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("conversationEvidenceById", buildConversationEvidenceById(args), opts);
 };
 
 /** The credit limit for one company location -- the read a checkout validation's backing service makes. */
@@ -6878,6 +6920,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.recentSendJobs = function (this: QueryClient, args: RecentSendJobsArgs = {} as RecentSendJobsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("recentSendJobs", buildRecentSendJobs(args), opts);
+};
+
+/** Cheap availability check before spending anything on a semantic lookup. */
+// Bound concept: v1:memory:workAcknowledgement (machine-readable: BoundConcepts["recentWorkAcknowledgement"] in generated_concepts.ts).
+export interface RecentWorkAcknowledgementArgs {
+  domainId: string;
+}
+
+export function buildRecentWorkAcknowledgement(args: RecentWorkAcknowledgementArgs): string {
+  const parts: string[] = [];
+  parts.push("domainId: " + renderMemQLValue(args.domainId));
+  return "query recentWorkAcknowledgement(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    recentWorkAcknowledgement(args: RecentWorkAcknowledgementArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.recentWorkAcknowledgement = function (this: QueryClient, args: RecentWorkAcknowledgementArgs = {} as RecentWorkAcknowledgementArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("recentWorkAcknowledgement", buildRecentWorkAcknowledgement(args), opts);
 };
 
 /** One recipient by id.
@@ -11960,6 +12024,48 @@ QueryClient.prototype.workCheckpointForOwner = function (this: QueryClient, args
   return this.executeNamed("workCheckpointForOwner", buildWorkCheckpointForOwner(args), opts);
 };
 
+/** Read only this run's own computer-use decisions, including previous grants. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerScopesForOwnerRun"] in generated_concepts.ts).
+export interface WorkComputerScopesForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkComputerScopesForOwnerRun(args: WorkComputerScopesForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workComputerScopesForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workComputerScopesForOwnerRun(args: WorkComputerScopesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workComputerScopesForOwnerRun = function (this: QueryClient, args: WorkComputerScopesForOwnerRunArgs = {} as WorkComputerScopesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workComputerScopesForOwnerRun", buildWorkComputerScopesForOwnerRun(args), opts);
+};
+
+/** Latest durable tool exchange checkpoint for this owner's step. Separate receipts cannot overwrite concurrent run cancellation or human decisions. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workContinuationForOwnerRun"] in generated_concepts.ts).
+export interface WorkContinuationForOwnerRunArgs {
+}
+
+export function buildWorkContinuationForOwnerRun(args: WorkContinuationForOwnerRunArgs): string {
+  void args;
+  return "query workContinuationForOwnerRun()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workContinuationForOwnerRun(args?: WorkContinuationForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workContinuationForOwnerRun = function (this: QueryClient, args: WorkContinuationForOwnerRunArgs = {} as WorkContinuationForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workContinuationForOwnerRun", buildWorkContinuationForOwnerRun(args), opts);
+};
+
 /** The DESCRIPTION GUIDANCE a goal shape has accumulated (epic memql#5414, design D23): the caller's own dislikes whose run served this goal signature, newest first, each carrying the axes and the reason the person gave. It is read only when a MODEL is about to be used for that goal again -- an agent turn of a live run, compile's triage and design calls, the app a learned procedure hands the goal back to -- and never by a replay, a fork's shared prefix or a construct-served goal, because a replay reads rows and text is not a row it can act on. Owned: guidance mined from somebody else's dislikes would steer a person's goal by another person's taste. Bounded at 20, the most recent, because the reader keeps five. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workDescriptionGuidance"] in generated_concepts.ts).
 export interface WorkDescriptionGuidanceArgs {
@@ -12089,6 +12195,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.workObservationsForOwnerRun = function (this: QueryClient, args: WorkObservationsForOwnerRunArgs = {} as WorkObservationsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workObservationsForOwnerRun", buildWorkObservationsForOwnerRun(args), opts);
+};
+
+/** Questions and decisions on this owner's run, used to resume on any replica. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workQuestionsForOwnerRun"] in generated_concepts.ts).
+export interface WorkQuestionsForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkQuestionsForOwnerRun(args: WorkQuestionsForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workQuestionsForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workQuestionsForOwnerRun(args: WorkQuestionsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workQuestionsForOwnerRun = function (this: QueryClient, args: WorkQuestionsForOwnerRunArgs = {} as WorkQuestionsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workQuestionsForOwnerRun", buildWorkQuestionsForOwnerRun(args), opts);
 };
 
 /** One of the caller's runs by id. */
@@ -12240,6 +12368,48 @@ declare module "./query.js" {
 
 QueryClient.prototype.workStepsForOwnerRun = function (this: QueryClient, args: WorkStepsForOwnerRunArgs = {} as WorkStepsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workStepsForOwnerRun", buildWorkStepsForOwnerRun(args), opts);
+};
+
+/** Membership is evidence of affiliation, never evidence of employment or selection as the organization producing the current deliverable. */
+// Bound concept: v1:identity:groupMembership (machine-readable: BoundConcepts["workViewerMemberships"] in generated_concepts.ts).
+export interface WorkViewerMembershipsArgs {
+}
+
+export function buildWorkViewerMemberships(args: WorkViewerMembershipsArgs): string {
+  void args;
+  return "query workViewerMemberships()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workViewerMemberships(args?: WorkViewerMembershipsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workViewerMemberships = function (this: QueryClient, args: WorkViewerMembershipsArgs = {} as WorkViewerMembershipsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workViewerMemberships", buildWorkViewerMemberships(args), opts);
+};
+
+/** workViewerOrganization wraps the query named "workViewerOrganization". */
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["workViewerOrganization"] in generated_concepts.ts).
+export interface WorkViewerOrganizationArgs {
+  accountId: string;
+}
+
+export function buildWorkViewerOrganization(args: WorkViewerOrganizationArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "query workViewerOrganization(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workViewerOrganization(args: WorkViewerOrganizationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workViewerOrganization = function (this: QueryClient, args: WorkViewerOrganizationArgs = {} as WorkViewerOrganizationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workViewerOrganization", buildWorkViewerOrganization(args), opts);
 };
 
 /** Look up the worker registration owned by an identity row.

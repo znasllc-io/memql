@@ -47,6 +47,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/num"
+	"github.com/znasllc-io/memql/integrations/embedding"
 )
 
 const (
@@ -63,6 +64,7 @@ type Integration struct {
 	embeddingProvider func(ctx context.Context, name string) (memql.EmbeddingAIProvider, error)
 	partitionFunc     func(ctx context.Context) string
 	stagedConcept     func(conceptId string) bool
+	cachedEmbedder    *embedding.Integration
 }
 
 // New constructs a similarity integration.
@@ -70,13 +72,16 @@ func New(logger *slog.Logger) *Integration {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Integration{Logger: logger}
+	return &Integration{Logger: logger, cachedEmbedder: embedding.New(logger)}
 }
 
 // SetDBGetter injects the lazy DB handle getter. See
 // integrations/knowledge/plugin.go for the reason this is lazy
 // (bun.DB isn't live until MemoryNodesDatabase.Start has fired).
-func (i *Integration) SetDBGetter(f func() *sql.DB) { i.dbGetter = f }
+func (i *Integration) SetDBGetter(f func() *sql.DB) {
+	i.dbGetter = f
+	i.cachedEmbedder.SetDBGetter(f)
+}
 
 // SetStagedConceptPredicate injects the staged-DATA visibility question
 // (epic memql#3974, task memql#3984). See similarToHandler for why this
@@ -86,6 +91,7 @@ func (i *Integration) SetStagedConceptPredicate(f func(conceptId string) bool) {
 // SetEmbeddingProvider injects the provider registry lookup.
 func (i *Integration) SetEmbeddingProvider(f func(ctx context.Context, name string) (memql.EmbeddingAIProvider, error)) {
 	i.embeddingProvider = f
+	i.cachedEmbedder.SetEmbeddingProvider(f)
 }
 
 // SetPartitionFunc injects the context-to-partition resolver. The
@@ -261,17 +267,19 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 		providerName = bound
 	}
 
-	provider, err := i.embeddingProvider(ctx, providerName)
-	if err != nil {
-		return nil, fmt.Errorf("similarity.similarTo: resolve provider %q: %w", providerName, err)
-	}
 	embedStart := time.Now()
-	vec, err := provider.Embed(ctx, text)
+	// Reuse the same durable, binding-keyed 30-day embedding cache as writes.
+	// This caches the vector only. Source rows and permissions are read again.
+	vec, err := i.cachedEmbedder.Embed(ctx, text, providerName)
 	if err != nil {
 		return nil, fmt.Errorf("similarity.similarTo: embed query: %w", err)
 	}
 	embedElapsed := time.Since(embedStart)
 
+	table, err := memql.EmbeddingVectorTable(providerName, len(vec))
+	if err != nil {
+		return nil, err
+	}
 	vecLiteral := vectorLiteral(vec)
 
 	// Same-shape SQL as the retired knowledge.lookup but parameterised
@@ -292,7 +300,7 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 			SELECT latest.id, latest.payload,
 			       1 - (nv.embedding <=> $1::vector) AS similarity
 			FROM latest
-			JOIN node_vectors nv ON nv.id = latest.id
+			JOIN ` + table + ` nv ON nv.id = latest.id
 			WHERE nv.vector_field = 'content'
 			ORDER BY nv.embedding <=> $1::vector
 			LIMIT $3
@@ -310,7 +318,7 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 			SELECT latest.id, latest.payload,
 			       1 - (nv.embedding <=> $1::vector) AS similarity
 			FROM latest
-			JOIN node_vectors nv ON nv.id = latest.id
+			JOIN ` + table + ` nv ON nv.id = latest.id
 			WHERE nv.vector_field = 'content'
 			ORDER BY nv.embedding <=> $1::vector
 			LIMIT $4

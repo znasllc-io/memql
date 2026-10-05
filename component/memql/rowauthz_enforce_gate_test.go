@@ -182,11 +182,13 @@ var tierDecidesTheRead = map[string]string{
 	// TestGroupQueriesAnswerForSystemActorAndOrganizationMembers drives all
 	// five against a real database and asserts BOTH halves -- rows for the
 	// caller set the annotation admits, and none for a writer.
-	"groupsAll":        "epic memql#5165. ownerUserId is always empty on this concept, so the tier's owner arm matches nobody and unowned=\"admin\" admits exactly the caller set @requiresRank(\"admin\") already bounds. A conjunct would be false for every admin the read serves.",
-	"groupById":        "epic memql#5165, as groupsAll -- the same tier, the same annotation, the same always-empty owner.",
-	"groupsForAccount": "epic memql#5165, as groupsAll.",
-	"membersOfGroup":   "epic memql#5165, as groupsAll, over v1:identity:groupMembership -- whose ownerUserId is empty for the sharper reason that the natural owner field would be `userId`, and an owned row admits its owner's inserts.",
-	"groupsForUser":    "epic memql#5165, as membersOfGroup.",
+	"groupsAll":              "epic memql#5165. ownerUserId is always empty on this concept, so the tier's owner arm matches nobody and unowned=\"admin\" admits exactly the caller set @requiresRank(\"admin\") already bounds. A conjunct would be false for every admin the read serves.",
+	"groupById":              "epic memql#5165, as groupsAll -- the same tier, the same annotation, the same always-empty owner.",
+	"groupsForAccount":       "epic memql#5165, as groupsAll.",
+	"membersOfGroup":         "epic memql#5165, as groupsAll, over v1:identity:groupMembership -- whose ownerUserId is empty for the sharper reason that the natural owner field would be `userId`, and an owned row admits its owner's inserts.",
+	"groupsForUser":          "epic memql#5165, as membersOfGroup.",
+	"workViewerMemberships":  "memql#5832. Self-filtered by userId, still admitted by the groupMembership account/rank tier. Its ownerUserId is always empty; an owner conjunct would deny members their own active affiliation. TestWorkViewerOrganizationScope exercises membership removal and a different caller.",
+	"workViewerOrganization": "memql#5832. Reads one active organization admitted by its existing account/rank tier. The viewer builtin supplies only ids from the caller's active memberships; an owner conjunct would hide member-visible organizations. TestWorkViewerOrganizationScope verifies the boundary.",
 
 	// The four benchmark reads (memql#5216), and the property holds in its
 	// STRONGEST form here -- the tier decides the row set IDENTICALLY for

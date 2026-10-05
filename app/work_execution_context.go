@@ -97,6 +97,9 @@ func workResumeRefusal(exec *automations.AutomationExecution, err error) string 
 // run one request at once. The sweep's recovery is the exception: it read the
 // row itself rather than an event, and holds the run's own claim.
 func workRerunServable(req workspine.DispatchRequest, j *automations.RunJournal) bool {
+	if !req.Recovery && strings.TrimSpace(req.HumanResumeId) != strings.TrimSpace(j.HumanResumeId) {
+		return false
+	}
 	if j.Rerun == nil {
 		// An event claimed for a request the row no longer carries is late:
 		// that request closed, or a newer one replaced it and has its own.

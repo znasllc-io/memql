@@ -70,7 +70,7 @@ func statementResumePoint(j *RunJournal, automation *Automation) string {
 			return step.ID
 		}
 		switch state.Status {
-		case "running":
+		case "running", "waiting":
 			return step.ID
 		case "failed":
 			if step.OnError != ErrorStrategyContinue {

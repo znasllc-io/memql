@@ -262,6 +262,9 @@ func defaultRoutingRules() []RoutingRule {
 		// absence is a decision a reader can find rather than a silence.
 		{Pattern: "graph.node.created.v1:work:goal", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:work:goal", TargetType: ""},
+		// Private source updates reach the agent-side memory indexer even
+		// when the transcript was finalized on another replica.
+		{Pattern: "graph.node.updated.v1:os:askConversation", TargetType: "agent"},
 		{Pattern: "graph.node.deleted.v1:work:goal", TargetType: ""},
 		{Pattern: "graph.node.created.v1:work:run", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:work:run", TargetType: ""},

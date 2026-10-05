@@ -58,6 +58,13 @@ export function useAskActivity() {
   return useSyncExternalStore(session?.subscribe ?? noSubscription, session ? () => session.getSnapshot().activity : noActivity);
 }
 
+/** Nexus can route a human question to its conversation without requiring an
+ * Ask provider in isolated app fixtures. Permission approvals stay in Nexus. */
+export function useOpenAskWork() {
+  const ask = useContext(Ctx);
+  return ask ? (runId: string) => { ask.openAsk(); void ask.conversation.openWork(runId); } : null;
+}
+
 export function AskProvider({
   transport,
   voice = null,
@@ -74,10 +81,10 @@ export function AskProvider({
   const storeRef = useRef<AskSettingsStore | null>(null);
   if (!storeRef.current) storeRef.current = settingsStore ?? new LocalAskSettingsStore();
   const conversation = useMemo(() => new ConversationSession(transport), [transport]);
-  useEffect(() => { void conversation.refresh(); return () => conversation.dispose(); }, [conversation]);
+  useEffect(() => { conversation.activate(); void conversation.refresh(); return () => conversation.dispose(); }, [conversation]);
   const liveVoice = useMemo(() => new LiveVoiceSession(transport, conversation), [transport, conversation]);
   useEffect(() => () => liveVoice.dispose(), [liveVoice]);
-  useEffect(() => { if (availability.state === "ready") void conversation.refresh(); }, [availability.state, conversation]);
+  useEffect(() => { if (availability.state === "ready") { void conversation.refresh(); void conversation.reload(false); } }, [availability.state, conversation]);
   const [sheet, setSheet] = useState<AskSheetState>({ open: false, context: null });
   const [settings, setSettings] = useState<AskSettings>(() => storeRef.current!.load());
 

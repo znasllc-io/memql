@@ -1,31 +1,7 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
-import { Button, Caption, RecordList, RecordRow, Notice, Subhead, formatDuration, formatMoment } from "../../kit";
+import { Button, Caption, RecordList, RecordRow, Notice, Subhead, formatDuration } from "../../kit";
 import type { Journal as JournalState } from "./useNexus";
 import { formatMoney, formatTokens, observationKindWord, servedWord } from "./rows";
-
-// THE JOURNAL: the model calls and the observations of one run.
-//
-// ===========================================================================
-// THIS IS NOT LIVE, AND THE PANEL SAYS SO RATHER THAN IMPLYING IT
-// ===========================================================================
-// `v1:work:modelCall` and `v1:work:observation` carry no broadcast routing
-// rule -- deliberately, on volume grounds: one row per model request and one
-// per tool result, which is a burst proportional to the work rather than to
-// anything a person did. So there is no `graph.node.*` event for a
-// subscription to receive, and a live list over either would render "Loading
-// from the cluster" and then a list that silently never moved. That is WORSE
-// than a plain read, because the caption would be claiming wiring that is not
-// there.
-//
-// So it prints WHEN IT WAS READ and offers to look again -- the same call the
-// Training app made for the knowledge side and the Accounts app for its
-// ledger. And it says what that costs: a call made since you looked is not
-// here.
-//
-// IT DOES NOT READ ON OPEN. Most visits to a run are about the timeline, and
-// the journal is the expensive half; reading it unasked would make every run
-// page two extra reads. "Read at" is then never a claim about a read this
-// window did not take.
 
 export function JournalPanel({ journal }: { journal: JournalState }) {
   const empty =
@@ -35,49 +11,18 @@ export function JournalPanel({ journal }: { journal: JournalState }) {
 
   return (
     <section className="os-nexus-journal" aria-label="The journal for this run">
-      <div className="os-nexus-journal-head">
-        <Subhead meta={journal.state === "ready" && !journal.error ? journal.modelCalls.length + journal.observations.length : undefined}>Journal</Subhead>
-        <span className="os-nexus-journal-when">
-          {journal.state === "idle" ? (
-            <Caption>Not read yet</Caption>
-          ) : journal.state === "loading" ? (
-            <RecordListSkeleton label="Loading journal" />
-          ) : journal.readAt === "" ? null : (
-            <Caption>Read at {formatMoment(journal.readAt)}</Caption>
-          )}
-        </span>
-        <Button
-          onClick={journal.read}
-          busy={journal.state === "loading"}
-
-          ariaLabel={journal.state === "idle" ? "Read the journal" : "Read the journal again"}
-        >
-          {journal.state === "idle" ? "Read the journal" : "Look again"}
-        </Button>
-      </div>
-
-      {journal.state === "idle" ? (
-        <Caption>
-          The model calls and observations of this run. They are not part of the live feed -- this
-          panel reads them when you ask, and says when it looked.
-        </Caption>
-      ) : null}
-
+      <Subhead>Activity</Subhead>
+      {journal.state === "loading" && !journal.readAt ? <RecordListSkeleton label="Loading activity" /> : null}
       {journal.error === "" ? null : (
         <Notice
           tone="error"
-          sentence="The journal could not be read."
-          next="Nothing about the run changed. The timeline above is still live."
+          sentence="Activity could not be read."
           detail={journal.error}
         />
       )}
 
-      {empty ? (
-        <Caption>
-          Nothing journaled for this run. A run whose steps all ran without a model has no model
-          calls to show, which is the point.
-        </Caption>
-      ) : null}
+      {journal.error ? <Button onClick={journal.read}>Retry</Button> : null}
+      {empty ? <Caption>No activity recorded yet.</Caption> : null}
 
       {journal.modelCalls.length === 0 ? null : (
         <div className="os-nexus-journal-group">
@@ -96,13 +41,6 @@ export function JournalPanel({ journal }: { journal: JournalState }) {
         </div>
       )}
 
-      {journal.state === "ready" ? (
-        <Caption>
-          Read once, at the moment above. A call made since you looked is not here, and a run still
-          working will have more. The journal is kept until its retention window closes, after
-          which the run's summary stands in for it.
-        </Caption>
-      ) : null}
     </section>
   );
 }

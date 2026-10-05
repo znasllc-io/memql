@@ -657,3 +657,10 @@ builtin packageCampaigns {
   organization string
   confirmed boolean
 }
+
+/// Choose the cluster's first embedding model, after verifying its output.
+/// Existing bindings are idempotent; changing the model requires a reindex.
+@sdk
+@executor("bindEmbedder")
+@args(profile="object")
+builtin bindEmbedder { provider string! }

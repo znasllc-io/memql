@@ -247,6 +247,11 @@ func (r *Replier) runNonStreamingToolLoop(
 	requestId string,
 	turnCtx turnContext,
 ) (*TurnResult, error) {
+	resumed, resumeErr := r.restoreAfterQuestion(ctx, messages)
+	if resumeErr != nil {
+		return nil, resumeErr
+	}
+	messages = resumed
 	// NOTHING IS INSTALLED HERE ANY MORE (memql#5050). This used to stamp a
 	// taskstamp.PlanContext so every tool call wrote a v1:planner:task row,
 	// minting a synthetic ad-hoc Plan when turnCtx.RunId was empty -- which
@@ -284,6 +289,8 @@ func (r *Replier) runNonStreamingToolLoop(
 	var allToolCalls []common.ToolCall
 	iterations := 0
 	var terminalEnvelope *Envelope
+	workOutcomeRequired := requiresWorkOutcome(ctx, tools)
+	invalidOutcomes := 0
 	consecutiveAllErrored := 0
 	const maxConsecutiveAllErrored = 3
 	// Per-turn circuit breaker on repeated IDENTICAL tool failures
@@ -379,9 +386,14 @@ BackgroundLoop:
 		)
 		attempt := 0
 		for {
-			callCtx, cancel := context.WithTimeout(ctx, reqTimeout)
+			budgetCtx, stopBudget, budgetErr := r.workCallContext(ctx)
+			if budgetErr != nil {
+				return nil, budgetErr
+			}
+			callCtx, cancel := context.WithTimeout(budgetCtx, reqTimeout)
 			stepResult, stepErr = provider.CallChatWithTools(callCtx, messages, tools)
 			cancel()
+			stopBudget()
 			if stepErr == nil {
 				break
 			}
@@ -453,6 +465,22 @@ BackgroundLoop:
 			)
 		}
 
+		if workOutcomeRequired && isDelegatedWorkSession(provider) {
+			workOutcomeRequired = false
+		}
+		if workOutcomeRequired {
+			normalized, outcomeErr := normalizeWorkOutcome(turnCalls)
+			if outcomeErr != nil {
+				invalidOutcomes++
+				messages = rejectedWorkOutcome(messages, turnText, turnCalls, outcomeErr, sink)
+				if invalidOutcomes >= 2 {
+					return nil, fmt.Errorf("invalid work outcome after bounded repair: %w", outcomeErr)
+				}
+				continue
+			}
+			turnCalls = normalized
+		}
+
 		assistantMsg := common.ChatMessage{Role: "assistant", Content: turnText}
 		if len(turnCalls) > 0 {
 			assistantMsg.ToolCalls = turnCalls
@@ -492,30 +520,13 @@ BackgroundLoop:
 		}
 		allToolCalls = append(allToolCalls, turnCalls...)
 
-		for _, tc := range turnCalls {
-			sink.ToolCall(tc.ID, tc.Name, tc.Arguments)
-		}
-
-		if iter == maxIter-1 {
-			// Budget exhausted: run the final round's tools for their side
-			// effects but don't feed results back (no turn left to consume).
-			for _, tc := range turnCalls {
-				args := parseToolArgs(tc.Arguments)
-				if args == nil {
-					args = make(map[string]any)
-				}
-				injectAgentContext(tc.Name, args, turnCtx)
-				if _, execErr := r.stamper.ExecuteToolByName(agentToolCallContext(ctx, tc.Name, turnCtx), tc.Name, args); execErr != nil {
-					r.logger.Warn("agent background: tool execution failed",
-						"tool", tc.Name, "error", execErr)
-					sink.ToolResult(tc.ID, "", execErr.Error())
-				}
-			}
-			break
-		}
-
 		hadSuccess := false
 		for _, tc := range turnCalls {
+			// Calls after a human question have not started yet.
+			if err := r.prepareWorkTool(ctx); err != nil {
+				return nil, err
+			}
+			sink.ToolCall(tc.ID, tc.Name, tc.Arguments)
 			args := parseToolArgs(tc.Arguments)
 			if args == nil {
 				args = make(map[string]any)
@@ -555,7 +566,16 @@ BackgroundLoop:
 				continue
 			}
 			injectAgentContext(tc.Name, args, turnCtx)
+			if err := r.saveBeforeQuestion(ctx, tc.Name, messages); err != nil {
+				return nil, err
+			}
 			result, execErr := r.stamper.ExecuteToolByName(agentToolCallContext(ctx, tc.Name, turnCtx), tc.Name, args)
+			if execErr == nil {
+				if wait := feedbackWait(tc.Name, result); wait != nil {
+					sink.ToolResult(tc.ID, result, "")
+					return nil, wait
+				}
+			}
 			var content string
 			if execErr != nil {
 				se := memql.ClassifyToolError(execErr)
@@ -605,6 +625,9 @@ BackgroundLoop:
 				ToolCallId: tc.ID,
 				Content:    content,
 			})
+			if err := r.saveWorkProgress(ctx, messages); err != nil {
+				return nil, err
+			}
 		}
 
 		if !hadSuccess {
@@ -645,6 +668,10 @@ BackgroundLoop:
 		if terminalEnvelope != nil {
 			break
 		}
+	}
+
+	if workOutcomeRequired && terminalEnvelope == nil {
+		return nil, fmt.Errorf("work ended without a valid completion or durable question")
 	}
 
 	// Resolve the user-facing reply. The respondToUser envelope, when

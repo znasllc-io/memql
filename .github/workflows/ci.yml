@@ -509,6 +509,8 @@ jobs:
               - 'docs/public/overview/proving-scorecard.md'
               - 'docs/public/overview/proving/scorecard/**'
             go:
+              # Embedded license is included in every reproducible source bundle.
+              - 'component/compose/source.LICENSE'
               - 'integrations/email/azure-application.json' # delegated-sign-in permission contract
               - '**/*.go'
               # Embedded navigation contract drives engine authorization and record resolution.

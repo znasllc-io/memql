@@ -356,7 +356,7 @@ func (i *Integration) writeTierABChunks(ctx context.Context, d StandardDomain, t
 			Title:    "Disclaimer: general information only",
 			Body:     disclaimerChunkText,
 			KeyTerms: []string{"disclaimer", "professional advice", "safety", "consult"},
-		}, "seed-disclaimer", "llmSeeded", provider); err != nil {
+		}, "seed-disclaimer", "llmSeeded", boundEmbedder, provider); err != nil {
 			i.Logger.Warn("seedDomainContent: disclaimer write failed",
 				"domainId", d.ID, "err", err)
 		} else {
@@ -371,7 +371,7 @@ func (i *Integration) writeTierABChunks(ctx context.Context, d StandardDomain, t
 		if c.Title == "" || c.Body == "" {
 			continue
 		}
-		if err := i.storeSeedChunk(ctx, d, recipeVersion, chunkIndex, c, "llm-generated", "llmSeeded", provider); err != nil {
+		if err := i.storeSeedChunk(ctx, d, recipeVersion, chunkIndex, c, "llm-generated", "llmSeeded", boundEmbedder, provider); err != nil {
 			i.Logger.Warn("seedDomainContent: chunk write failed",
 				"domainId", d.ID, "title", c.Title, "err", err)
 			chunkIndex++
@@ -407,7 +407,7 @@ func (i *Integration) writeTierCPlaceholder(ctx context.Context, d StandardDomai
 		Body:     tierCPlaceholderText,
 		KeyTerms: []string{"placeholder", "specialist", "upload", "authoritative"},
 	}
-	if err := i.storeSeedChunk(ctx, d, recipeVersion, 0, chunk, "tier-c-placeholder", "llmSeeded", provider); err != nil {
+	if err := i.storeSeedChunk(ctx, d, recipeVersion, 0, chunk, "tier-c-placeholder", "llmSeeded", boundEmbedder, provider); err != nil {
 		return 0, err
 	}
 	return 1, nil
@@ -426,6 +426,7 @@ func (i *Integration) storeSeedChunk(
 	c seedChunk,
 	seedSource string,
 	chunkSource string, // chunk-level provenance class (llmSeeded / crossDomainBridge / ...). Required by the chunk concept.
+	providerName string,
 	provider interface {
 		Embed(ctx context.Context, text string) ([]float32, error)
 	},
@@ -485,7 +486,7 @@ func (i *Integration) storeSeedChunk(
 	if _, err := i.engine.Execute(ctx, insertQuery); err != nil {
 		return fmt.Errorf("insert chunk: %w", err)
 	}
-	if err := i.storeVector(ctx, chunkId, "v1:knowledge:documentChunk", vec); err != nil {
+	if err := i.storeVector(ctx, providerName, chunkId, "v1:knowledge:documentChunk", vec); err != nil {
 		return fmt.Errorf("persist vector: %w", err)
 	}
 	return nil

@@ -319,3 +319,18 @@ func TestToolRecorderForwardsTheContextItWasGiven(t *testing.T) {
 		}
 	}
 }
+
+// Stamped arguments and the defaults restored after anti-forgery stripping
+// must agree on the current contract's field names as well as their values.
+func TestAgentArgumentStampsAgreeWithToolDefaults(t *testing.T) {
+	turn := turnCtxAllFields()
+	for name := range agentContextStamps {
+		args := map[string]any{}
+		injectAgentContext(name, args, turn)
+		for key, expected := range agentToolDefaults(name, turn) {
+			if args[key] != expected {
+				t.Errorf("%s.%s: stamped %v, default %v", name, key, args[key], expected)
+			}
+		}
+	}
+}

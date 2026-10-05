@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -73,6 +74,18 @@ func workTurnHistory(ctx context.Context, engine interface {
 		history = append(history, &memqlv1.AgentTurnMessage{Role: "user", Content: guidance})
 	}
 	history = append(history, &memqlv1.AgentTurnMessage{Role: "user", Content: prompt})
+	questionsCall, _ := parser.RenderCall("workQuestionsForOwnerRun", map[string]any{"runId": run.RunId})
+	questions, err := engine.Execute(memql.ContextWithFreshRead(ctx), "query "+questionsCall)
+	if err != nil {
+		return nil, fmt.Errorf("work context: reading recorded answers: %w", err)
+	}
+	for _, question := range memql.MaterializeRows(questions) {
+		if question["decision"] != "answered" {
+			continue
+		}
+		raw, _ := json.Marshal(map[string]any{"question": question["question"], "answer": question["answer"], "decidedAt": question["decidedAt"]})
+		history = append(history, &memqlv1.AgentTurnMessage{Role: "user", Content: "[Recorded answer for this run; continue using this answer without asking it again]\n" + string(raw)})
+	}
 	for _, m := range memql.StepOverrideMessages(ctx) {
 		history = append(history, &memqlv1.AgentTurnMessage{Role: m.Role, Content: m.Content})
 	}

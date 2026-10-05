@@ -37,19 +37,5 @@ func askConversationMessages(turns []AskTurn) []map[string]any {
 // A voice interruption stops delivery while the shared run keeps its receipts.
 // Bring completed results back into history before answering the next turn.
 func (e *MemQLEngine) reconcileAskRuns(ctx context.Context, transcript *askTranscript) {
-	for index := range transcript.Turns {
-		turn := &transcript.Turns[index]
-		if turn.RunID == "" || turn.State == "done" {
-			continue
-		}
-		rows, err := e.workRows(ctx, "workRunForOwner", turn.RunID)
-		if err != nil || len(rows) != 1 || rows[0]["status"] != "succeeded" {
-			continue
-		}
-		answer, err := e.followWorkRun(ctx, turn.RunID, nil, nil)
-		if err != nil {
-			continue
-		}
-		turn.Answer, turn.State, turn.Error = answer, "done", ""
-	}
+	_ = e.refreshAskRuns(ctx, transcript)
 }

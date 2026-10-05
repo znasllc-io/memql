@@ -172,7 +172,7 @@ func (e *ParallelExecutor) Execute(ctx context.Context, step *automations.Step, 
 				execResult.ContentId = automations.ComputeBranchFingerprint(step.ID, branchStep.ID, execResult)
 			}
 
-			if err != nil && parallelCfg.FailFast {
+			if err != nil && (parallelCfg.FailFast || isHumanWait(err)) {
 				firstErrorMu.Lock()
 				if firstError == nil {
 					firstError = err
@@ -221,7 +221,24 @@ func (e *ParallelExecutor) Execute(ctx context.Context, step *automations.Step, 
 
 		for res := range resultsChan {
 			childResults = append(childResults, res.result)
+			if isHumanWait(res.err) {
+				cancel()
+				wg.Wait()
+				result.Children, result.Status = childResults, "waiting"
+				return result, res.err
+			}
 			if res.err == nil {
+				// Settle cancelled siblings before declaring completion. A
+				// sibling may have persisted a human question concurrently.
+				cancel()
+				for pending := range resultsChan {
+					childResults = append(childResults, pending.result)
+					if isHumanWait(pending.err) {
+						wg.Wait()
+						result.Children, result.Status = childResults, "waiting"
+						return result, pending.err
+					}
+				}
 				// Got a successful result
 				branchResults = append(branchResults, automations.UnwrapStepResult(res.result.Result))
 				result.Children = childResults
@@ -274,6 +291,12 @@ func (e *ParallelExecutor) Execute(ctx context.Context, step *automations.Step, 
 	}
 
 	result.Children = childResults
+	for _, err := range errors {
+		if isHumanWait(err) {
+			result.Status = "waiting"
+			return result, err
+		}
+	}
 
 	// Collect child fingerprints (sorted for determinism - parallel order is nondeterministic)
 	if stepCtx.ChainTrackingEnabled {

@@ -265,6 +265,8 @@ readonly DB_GATED_TREES=(
 	"component/worker/fleetcatalog"
 	"integrations/compose"
 	"integrations/embedding"
+	"integrations/knowledge"
+	"integrations/similarity"
 	"integrations/library"
 	"integrations/groups"
 	"integrations/planner"

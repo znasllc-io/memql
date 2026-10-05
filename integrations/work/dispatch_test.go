@@ -504,3 +504,13 @@ func TestTheDispatcherNeverAdmitsAPipelineRun(t *testing.T) {
 		t.Fatal("the control: an ordinary goal-less run is no longer admitted on recovery")
 	}
 }
+
+func TestEachHumanAnswerHasItsOwnOnceClaim(t *testing.T) {
+	first, ttl := runClaimKey(DispatchRequest{RunId: "r", HumanResumeId: "a1"})
+	second, _ := runClaimKey(DispatchRequest{RunId: "r", HumanResumeId: "a2"})
+	rerun, _ := runClaimKey(DispatchRequest{RunId: "r", HumanResumeId: "a1", RerunRequestId: "again"})
+	recovery, lease := runClaimKey(DispatchRequest{RunId: "r", HumanResumeId: "a1", Recovery: true})
+	if ttl != 0 || first == second || first == rerun || recovery != "r" || lease != runClaimTTL {
+		t.Fatalf("answer claims: %q %q %q recovery %q (%v, %v)", first, second, rerun, recovery, ttl, lease)
+	}
+}

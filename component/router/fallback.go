@@ -21,6 +21,8 @@ import (
 // method returns. It is safe to retry only before content or tool output. Raw
 // runtime errors and errors after output never replay a started generation.
 type fallbackStreamWithTools struct {
+	servedMu sync.Mutex
+	served   common.ChatStreamWithToolsProvider
 	router   *Router
 	chain    []string
 	req      ResolveRequest
@@ -32,6 +34,9 @@ func (f *fallbackStreamWithTools) CallChatStreamWithTools(
 	messages []common.ChatMessage,
 	tools []common.ToolDefinition,
 ) (<-chan common.StreamToolChunk, error) {
+	f.servedMu.Lock()
+	f.served = nil
+	f.servedMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -66,6 +71,9 @@ func (f *fallbackStreamWithTools) CallChatStreamWithTools(
 		}
 		ch, err := observed.CallChatStreamWithTools(ctx, messages, tools)
 		if err == nil {
+			f.servedMu.Lock()
+			f.served = inner
+			f.servedMu.Unlock()
 			return f.retryUnstartedStream(ctx, ch, messages, tools, i+1, resolved), nil
 		}
 		lastErr = err
@@ -121,8 +129,7 @@ func (f *fallbackStreamWithTools) retryUnstartedStream(
 					return
 				}
 				f.router.recordObserved(ctx, fallbackRecord(f.req, failed, chunk.Error))
-				remaining := *f
-				remaining.chain = f.chain[next:]
+				remaining := &fallbackStreamWithTools{router: f.router, req: f.req, chain: f.chain[next:]}
 				// The walk so far travels with the retry: `failed` carries every
 				// earlier failure noted on its decision, and this one is added.
 				remaining.resolved = f.resolved
@@ -138,6 +145,9 @@ func (f *fallbackStreamWithTools) retryUnstartedStream(
 					}
 					return
 				}
+				f.servedMu.Lock()
+				f.served = remaining
+				f.servedMu.Unlock()
 				for c := range retry {
 					select {
 					case out <- c:
@@ -241,6 +251,21 @@ type sessionReporter interface {
 // that run). Without this the only way to recover it would be to re-read the
 // step row the delegate stamped, which is a second account of one fact.
 func (f *fallbackWithTools) LastSession() (memql.AppSessionOutcome, bool) {
+	if f == nil {
+		return memql.AppSessionOutcome{}, false
+	}
+	f.servedMu.Lock()
+	served := f.served
+	f.servedMu.Unlock()
+	if r, ok := served.(sessionReporter); ok {
+		return r.LastSession()
+	}
+	return memql.AppSessionOutcome{}, false
+}
+
+// LastSession preserves the delegated-step receipt through the streaming
+// wrapper, including a pre-output fallback to another provider.
+func (f *fallbackStreamWithTools) LastSession() (memql.AppSessionOutcome, bool) {
 	if f == nil {
 		return memql.AppSessionOutcome{}, false
 	}

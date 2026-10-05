@@ -27,6 +27,15 @@ import (
 // so this test reads the source: the call must not sit inside the else branch
 // of the bff/worker split. Anywhere the bff also reaches is acceptable.
 func TestTheClusterPhaseWiresWorkbenchForwardingOnTheBff(t *testing.T) {
+	assertBFFForwardingReachable(t, "wireWorkbenchForwarding")
+}
+
+func TestTheClusterPhaseWiresWorkerForwardingOnTheBff(t *testing.T) {
+	assertBFFForwardingReachable(t, "wireWorkerForwarding")
+}
+
+func assertBFFForwardingReachable(t *testing.T, method string) {
+	t.Helper()
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "cluster.go", nil, 0)
 	if err != nil {
@@ -77,7 +86,7 @@ func TestTheClusterPhaseWiresWorkbenchForwardingOnTheBff(t *testing.T) {
 			return true
 		}
 		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "wireWorkbenchForwarding" {
+		if !ok || sel.Sel.Name != method {
 			return true
 		}
 		calls++
@@ -88,11 +97,11 @@ func TestTheClusterPhaseWiresWorkbenchForwardingOnTheBff(t *testing.T) {
 	})
 
 	if calls == 0 {
-		t.Fatal("cluster() never calls wireWorkbenchForwarding, so no node type gets a workbench router")
+		t.Fatalf("cluster() never calls %s", method)
 	}
 	if calls == insideWorkerElse {
-		t.Fatalf("every wireWorkbenchForwarding call (%d) sits inside the worker-side else branch of the bff split at %s, so the bff never wires its workbench router and every remote package build refuses",
-			calls, fset.Position(split.Pos()))
+		t.Fatalf("every %s call (%d) sits inside the worker-only branch at %s; the BFF never wires the transport",
+			method, calls, fset.Position(split.Pos()))
 	}
 }
 

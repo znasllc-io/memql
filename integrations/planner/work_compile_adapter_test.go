@@ -38,7 +38,9 @@ func (r *recordingRunWriter) RunBudget(_ context.Context, _, runId string) (work
 	return r.ceilings, r.budgetErr
 }
 
-func (r *recordingRunWriter) LimitReplyBudget(context.Context, string, string) error { return r.err }
+func (r *recordingRunWriter) LimitWorkloadBudget(context.Context, string, string, string) error {
+	return r.err
+}
 
 func adapterReq() workintegration.CompileRequest {
 	return workintegration.CompileRequest{

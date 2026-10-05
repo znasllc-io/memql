@@ -1,0 +1,46 @@
+/// Read whether this person's enrolled computers can serve the request.
+@handler(type="function", name="agentworkerStatus")
+@requiresAgentRole("assistant", "specialist")
+tool workerStatus {
+ ownerUserId string! @autoInjected
+ agentId string @autoInjected
+}
+
+/// Ask for time-limited computer access for the current goal. Explain the
+/// purpose and machine labels. Approval is shown in Nexus; no action runs first.
+@handler(type="function", name="agentworkerRequestScope")
+@requiresAgentRole("assistant", "specialist")
+tool requestComputerUseScope {
+ intent string!
+ requestedScope enum("observe", "full")!
+ summary string!
+ requireLabels object
+ ownerUserId string! @autoInjected
+ agentId string! @autoInjected
+ partitionId string @autoInjected
+}
+
+/// Perform a headless operation on an enrolled computer after scoped approval.
+/// Prefer workbenchHost when personal files or this person's computer are unnecessary.
+@handler(type="function", name="agentworkerDispatchHost")
+@requiresAgentRole("assistant", "specialist")
+tool workerHost {
+ action enum("exec", "fs_read", "fs_write", "fs_list", "fs_stat", "http_fetch")!
+ args object
+ requireLabels object
+ ownerUserId string! @autoInjected
+ agentId string! @autoInjected
+ runId string! @autoInjected
+}
+
+/// Interact with an enrolled computer's desktop after scoped approval.
+@handler(type="function", name="agentworkerDispatchComputer")
+@requiresAgentRole("assistant", "specialist")
+tool workerComputer {
+ action string!
+ args object
+ requireLabels object
+ ownerUserId string! @autoInjected
+ agentId string! @autoInjected
+ runId string! @autoInjected
+}

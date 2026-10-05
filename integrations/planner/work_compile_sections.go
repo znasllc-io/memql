@@ -573,5 +573,5 @@ func (d sectionableDecision) needsReasoningAgent(headline string) bool {
 	if d.fansOut(headline) {
 		return d.anyIntelligence(headline)
 	}
-	return !nativeFile
+	return !nativeFile || d.RequiresResearch
 }

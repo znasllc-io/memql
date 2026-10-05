@@ -9,6 +9,7 @@ vi.mock("../../src/live/connection", () => ({
   osBridgePath: "/_memql/ws",
 }));
 
+const { AskProvider } = await import("../../src/ask/AskProvider");
 const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
 const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
 const { answerPayload } = await import("../../src/apps/nexus/ApprovalsSection");
@@ -64,7 +65,7 @@ describe("the inbox", () => {
     mount(fakeConnection());
     expect(
       await screen.findByText(
-        /A run that needs a decision puts it here and stops until you make it\./,
+        "Nothing needs your input.",
       ),
     ).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Approvals" }).parentElement?.querySelector(".os-head-meta")?.textContent).toBe("0");
@@ -123,13 +124,12 @@ describe("deciding one", () => {
     expect(screen.getByText("high")).toBeTruthy();
   });
 
-  it("says an absent evidence block is a fact about the ROW, not about the decision", async () => {
+  it("omits an empty evidence block without inventing a reason", async () => {
     const conn = fakeConnection({ approvals: [approvalRow({ id: "a1" })] });
     mount(conn);
     fireEvent.click(await screen.findByText("Step sendInvoice"));
-    expect(
-      await screen.findByText(/it does not mean the gate fired for no reason/),
-    ).toBeTruthy();
+    await screen.findByRole("region", { name: "What is being asked" });
+    expect(screen.queryByRole("region", { name: "Why you were asked" })).toBeNull();
   });
 
   it("shows the artifact hash and says what it promises", async () => {
@@ -159,6 +159,16 @@ describe("deciding one", () => {
 });
 
 describe("a question", () => {
+  it("sends every selected option for a multi-select question", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({id:"multi",kind:"feedback",question:"Which formats?",subject:{kind:"multi"},options:[{label:"PDF",value:"pdf"},{label:"Markdown",value:"md"}]})] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Which formats?"));
+    fireEvent.click(await screen.findByRole("checkbox",{name:"PDF"}));
+    fireEvent.click(await screen.findByRole("checkbox",{name:"Markdown"}));
+    fireEvent.click(screen.getByText("Send answer"));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({approvalId:"multi",decision:"answered",answer:{values:["pdf","md"]}}));
+  });
+
   it("shows the question and its options, and holds Send back until one is picked", async () => {
     const conn = fakeConnection({
       approvals: [
@@ -365,7 +375,7 @@ describe("a promotion", () => {
   });
 
   it("keeps the classifier's evidence on every other kind", async () => {
-    mount(fakeConnection({ approvals: [approvalRow({ id: "a1" })] }));
+    mount(fakeConnection({ approvals: [approvalRow({ id: "a1", evidence: { tier: "high", ruleId: "scope-1" } })] }));
     fireEvent.click(await screen.findByText("Step sendInvoice"));
     const why = await screen.findByRole("region", { name: "Why you were asked" });
     expect(within(why).getByText("The classifier's evidence")).toBeTruthy();
@@ -544,4 +554,19 @@ describe("crossing to the run", () => {
     fireEvent.click(within(detail).getByText("nightlyReconcile"));
     expect(navigate).toHaveBeenCalledWith("runs");
   });
+});
+
+
+it("opens a typed question in Ask without sending a decision from Nexus", async () => {
+ const conn = fakeConnection({ approvals: [approvalRow({id:"ask-question",runId:"original-run",kind:"feedback",question:"Which output format?",subject:{kind:"text"}})] });
+ h.connection = conn;
+ const openWork = vi.fn(async () => ({id:"original-conversation",title:"Original"}));
+ const transport = {ask:vi.fn(),openWork,conversations:{list:async()=>[],read:async()=>[],create:async()=>({id:"unused",title:"Unused"})}};
+ render(withSession(<AskProvider transport={transport}><NexusApp sectionId="approvals" navigate={()=>{}} askContext={()=>{}} /></AskProvider>));
+ fireEvent.click(await screen.findByText("Which output format?"));
+ expect(screen.queryByRole("textbox",{name:"Answer"})).toBeNull();
+ fireEvent.click(await screen.findByRole("button",{name:"Answer in Ask"}));
+ await waitFor(()=>expect(openWork).toHaveBeenCalledWith("original-run"));
+ expect(conn.query.decideApproval).not.toHaveBeenCalled();
+ expect(transport.ask).not.toHaveBeenCalled();
 });

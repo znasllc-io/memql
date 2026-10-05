@@ -13,6 +13,9 @@ import (
 	"github.com/znasllc-io/memql/integrations/agents"
 )
 
+// Missing durable seams must fail the agent build, not silently disappear in an adapter.
+var _ agent.WorkRuntime = (*CognitionEngineAdapter)(nil)
+
 // integrationsAgent registers integration providers for an agent node.
 // Core plug-ins (database, auth, identity, embedding, files, storage)
 // self-register via memql.RegisterPlugin and are materialized in

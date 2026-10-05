@@ -68,3 +68,28 @@ func TestCheckCeilings_CostIsMeteredOnly(t *testing.T) {
 		t.Fatalf("cost is metered spend only; got %+v", b)
 	}
 }
+
+func TestWorkloadBudgetsPreserveQuickPathAndNeverRaiseDeclaredLimits(t *testing.T) {
+	for _, tc := range []struct {
+		tier        string
+		wall, calls float64
+	}{{"quick", 120000, 3}, {"lookup", 600000, 12}, {"research", 2700000, 48}, {"project", 7200000, 96}} {
+		got := WorkloadCeilings(Ceilings{}, tc.tier)
+		if got["wallClockMs"] != tc.wall || got["maxModelCalls"] != tc.calls {
+			t.Fatalf("%s limits: %v", tc.tier, got)
+		}
+		got = WorkloadCeilings(Ceilings{WallClockMs: 10000, MaxModelCalls: 2, CostCeiling: 0.25}, tc.tier)
+		if got["wallClockMs"] != float64(10000) || got["maxModelCalls"] != float64(2) || got["costCeiling"] != 0.25 {
+			t.Fatalf("classifier relaxed owner ceiling: %v", got)
+		}
+	}
+}
+
+func TestUnclassifiedWorkKeepsDeclaredCeilings(t *testing.T) {
+	for _, tier := range []string{"", "future-kind"} {
+		c := Ceilings{WallClockMs: 1234567, MaxModelCalls: 55, MaxRetries: 4}
+		if got := EffectiveWorkloadCeilings(c, tier); got != c {
+			t.Fatalf("%q changed unclassified work: %+v", tier, got)
+		}
+	}
+}

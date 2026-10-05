@@ -31,24 +31,40 @@ func (e *MemQLEngine) workRows(ctx context.Context, name, runID string) ([]map[s
 
 type workRowReader func(context.Context, string, string) ([]map[string]any, error)
 
+type workFollowModeKey struct{}
+
+const followBackground = "background"
+const followSnapshot = "snapshot"
+
+type workPending struct {
+	Waiting                          bool
+	Title, Workload, Acknowledgement string
+}
+
+func (p *workPending) Error() string {
+	if p.Waiting {
+		return "This work needs your input in Nexus."
+	}
+	return "work continues in the background"
+}
+
 func followWorkRun(ctx context.Context, runID string, read workRowReader, onText func(string), onEvent func(WorkEvent) error, interval time.Duration) (string, error) {
 	seen := map[string]string{}
-	texts := map[string]string{}
-	var answer strings.Builder
+	answer := ""
 	for {
 		// Read status first and evidence second: once terminal, the last progress
 		// write necessarily preceded this snapshot. The opposite order loses tails.
 		runs, err := read(ctx, "workRunForOwner", runID)
 		if err != nil {
-			return answer.String(), err
+			return answer, err
 		}
 		if len(runs) != 1 {
-			return answer.String(), fmt.Errorf("work run is unavailable")
+			return answer, fmt.Errorf("work run is unavailable")
 		}
 		run := runs[0]
 		observations, err := read(ctx, "workObservationsForOwnerRun", runID)
 		if err != nil {
-			return answer.String(), err
+			return answer, err
 		}
 		type item struct {
 			key   string
@@ -65,17 +81,14 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 			progress = append(progress, item{fmt.Sprint(row["id"]), event})
 		}
 		sort.SliceStable(progress, func(i, j int) bool { return progress[i].event.At.Before(progress[j].event.At) })
+		completedResponse := ""
 		for _, p := range progress {
 			event := p.event
 			if event.Kind == "response" {
-				prior := texts[p.key]
-				if strings.HasPrefix(event.Text, prior) && len(event.Text) > len(prior) {
-					delta := event.Text[len(prior):]
-					texts[p.key] = event.Text
-					answer.WriteString(delta)
-					if onText != nil {
-						onText(delta)
-					}
+				// A draft can be rejected, interrupted by a question, or replaced
+				// by a structured response. It is not an append-only answer.
+				if event.Phase == "completed" {
+					completedResponse = event.Text
 				}
 				continue
 			}
@@ -86,7 +99,7 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 			seen[p.key] = string(raw)
 			if onEvent != nil {
 				if err := onEvent(event); err != nil {
-					return answer.String(), err
+					return answer, err
 				}
 			}
 		}
@@ -94,23 +107,23 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 		case "succeeded":
 			steps, err := read(ctx, "workStepsForOwnerRun", runID)
 			if err != nil {
-				return answer.String(), err
+				return answer, err
 			}
 			for _, file := range workResultFiles(steps) {
 				if onEvent != nil {
 					if err := onEvent(WorkEvent{ID: "file-" + fmt.Sprint(file["fileId"]), Kind: "artifact", Phase: "completed", At: time.Now().UTC(), Name: fmt.Sprint(file["name"]), App: "files", Arguments: file}); err != nil {
-						return answer.String(), err
+						return answer, err
 					}
 				}
 			}
-			if answer.Len() == 0 {
-				text := workResultText(run, steps)
-				answer.WriteString(text)
-				if onText != nil {
-					onText(text)
-				}
+			// Delivery starts only after the run commits success. The journal
+			// identifies the successful attempt even when another replica's
+			// clock makes an older response event appear newer.
+			answer = workResultText(run, steps, completedResponse)
+			if onText != nil {
+				onText(answer)
 			}
-			return answer.String(), nil
+			return answer, nil
 		case "waiting":
 			waiting, _ := run["waitingOn"].(map[string]any)
 			kind, _ := waiting["kind"].(string)
@@ -118,10 +131,10 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 				message := "Work is waiting for input; inspect this run in Nexus."
 				if onEvent != nil {
 					if err := onEvent(WorkEvent{ID: "work:" + runID, Kind: "run", Phase: "waiting", Name: "Request", Error: message}); err != nil {
-						return answer.String(), err
+						return answer, err
 					}
 				}
-				return answer.String(), fmt.Errorf("%s", message)
+				return answer, &workPending{Waiting: true}
 			}
 		case "failed", "abandoned", "cancelled":
 			message, _ := run["errorMessage"].(string)
@@ -134,22 +147,52 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 					phase = "cancelled"
 				}
 				if err := onEvent(WorkEvent{ID: "work:" + runID, Kind: "run", Phase: phase, Name: "Request", Error: message}); err != nil {
-					return answer.String(), err
+					return answer, err
 				}
 			}
-			return answer.String(), fmt.Errorf("%s", message)
+			return answer, fmt.Errorf("%s", message)
+		}
+		mode, _ := ctx.Value(workFollowModeKey{}).(string)
+		outcome, _ := run["classification"].(map[string]any)
+		workload, _ := outcome["workload"].(string)
+		title, _ := outcome["workTitle"].(string)
+		ack, _ := outcome["acknowledgement"].(string)
+		started, hasStart := askTimestamp(run["startedAt"])
+		queuedClassification := run["status"] == "compiling" && hasStart && time.Since(started) >= 15*time.Second
+		if mode == followSnapshot || (mode == followBackground && ((workload != "" && workload != "quick") || queuedClassification)) {
+			return answer, &workPending{Title: title, Workload: workload, Acknowledgement: ack}
 		}
 		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return answer.String(), ctx.Err()
+			return answer, ctx.Err()
 		case <-timer.C:
 		}
 	}
 }
 
-func workResultText(run map[string]any, steps []map[string]any) string {
+func workResultText(run map[string]any, steps []map[string]any, completedResponse string) string {
+	// The query is intentionally unordered. Use the journal's sequence,
+	// not result arrival order or wall clocks, to select the final reply.
+	ordered := append([]map[string]any(nil), steps...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return intFromAny(ordered[i]["seq"]) < intFromAny(ordered[j]["seq"])
+	})
+	for i := len(ordered) - 1; i >= 0; i-- {
+		if ordered[i]["status"] != "done" {
+			continue
+		}
+		result, _ := ordered[i]["result"].(map[string]any)
+		for _, row := range MaterializeRows(result["value"]) {
+			if reply, ok := row["reply"].(string); ok && strings.TrimSpace(reply) != "" {
+				return reply
+			}
+		}
+	}
+	if completedResponse != "" {
+		return completedResponse
+	}
 	if files := workResultFiles(steps); len(files) > 0 {
 		names := make([]string, 0, len(files))
 		for _, file := range files {
@@ -161,19 +204,6 @@ func workResultText(run map[string]any, steps []map[string]any) string {
 		if result, ok := outcome["returned"]; ok {
 			raw, _ := json.Marshal(result)
 			return string(raw)
-		}
-	}
-	// Typed deterministic capabilities can return their own concise reply.
-	// A model call merely to paraphrase a navigation receipt adds latency.
-	for i := len(steps) - 1; i >= 0; i-- {
-		if steps[i]["status"] != "done" {
-			continue
-		}
-		result, _ := steps[i]["result"].(map[string]any)
-		for _, row := range MaterializeRows(result["value"]) {
-			if reply, ok := row["reply"].(string); ok && strings.TrimSpace(reply) != "" {
-				return reply
-			}
 		}
 	}
 	// Every completed template has receipts, even a deterministic one that
@@ -211,6 +241,10 @@ func workResultFiles(steps []map[string]any) []map[string]any {
 			}
 			seen[fileID] = true
 			files = append(files, map[string]any{"fileId": BareShortId(fileID), "name": name, "sha256": hash})
+			if sourceID, _ := row["sourceFileId"].(string); sourceID != "" && !seen[sourceID] {
+				seen[sourceID] = true
+				files = append(files, map[string]any{"fileId": BareShortId(sourceID), "name": "Source ZIP for " + name})
+			}
 		}
 	}
 	return files

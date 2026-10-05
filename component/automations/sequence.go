@@ -39,6 +39,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -258,6 +259,9 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 			if r.reread[step.ID] {
 				value, err := e.rereadStatement(ctx, step, stepCtx)
 				if err != nil {
+					if isHumanWait(err) {
+						return seqOutcome{}, err
+					}
 					if step.OnError == ErrorStrategyContinue {
 						continue
 					}
@@ -271,6 +275,9 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 		if step.Exprs != nil && step.Exprs.Condition != nil {
 			shouldRun, err := ev.StepCondition(ctx, step)
 			if err != nil {
+				if isHumanWait(err) {
+					return seqOutcome{}, err
+				}
 				// As the legacy loop does: a condition that cannot be decided
 				// does not run its step.
 				if stepCtx.Logger != nil {
@@ -309,6 +316,9 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 			res.Duration = res.CompletedAt.Sub(started)
 			if err != nil {
 				res.Status, res.Error = "failed", err.Error()
+				if isHumanWait(err) {
+					res.Status, res.Error, res.CompletedAt = "waiting", "", time.Time{}
+				}
 				e.recordStep(ctx, run, step, res)
 				return seqOutcome{}, fmt.Errorf("step %q: %w", step.ID, err)
 			}
@@ -329,7 +339,7 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 		result, err := e.runStatementStep(ctx, step, stepIndex, run)
 		if err != nil {
 			var cancelled *runCancelled
-			if errors.Is(err, ErrJournalRequired) || errors.As(err, &cancelled) {
+			if errors.Is(err, ErrJournalRequired) || errors.As(err, &cancelled) || isHumanWait(err) {
 				return seqOutcome{}, err
 			}
 			if step.OnError == ErrorStrategyContinue {
@@ -380,7 +390,7 @@ func (e *Executor) runStatementStep(ctx context.Context, step *Step, stepIndex i
 			return nil, err
 		}
 		result, err = e.executeJournaledStep(ctx, run.heartbeatJournal(), step, stepCtx)
-		if result != nil && run.top && stepCtx.ChainTrackingEnabled {
+		if result != nil && !isHumanWait(err) && run.top && stepCtx.ChainTrackingEnabled {
 			result.PreviousChainHead = run.chainHead
 			result.ContentId = StepDeterministicFingerprint(step, result)
 			run.chainHead = string(fingerprintEngine.Combine(id.ID(run.chainHead), id.ID(result.ContentId)))
@@ -399,7 +409,7 @@ func (e *Executor) runStatementStep(ctx context.Context, step *Step, stepIndex i
 			return result, nil
 		}
 		var cancelled *runCancelled
-		if errors.Is(err, ErrJournalRequired) || errors.As(err, &cancelled) {
+		if errors.Is(err, ErrJournalRequired) || errors.As(err, &cancelled) || isHumanWait(err) {
 			return result, err
 		}
 		if attempt < attempts && stepCtx.Logger != nil {
@@ -410,6 +420,11 @@ func (e *Executor) runStatementStep(ctx context.Context, step *Step, stepIndex i
 		exec.RecordFailedStep(step, attempts)
 	}
 	return result, err
+}
+
+func isHumanWait(err error) bool {
+	var wait *work.HumanWait
+	return errors.As(err, &wait)
 }
 
 // recordStep puts a top-level step's result on the run and tells the
@@ -576,6 +591,12 @@ func (e *Executor) runStatementAutomation(ctx context.Context, automation *Autom
 	if err != nil {
 		var cancelled *runCancelled
 		switch {
+		case isHumanWait(err):
+			// The feedback capability parked the shared run before returning.
+			// Do not overwrite it: another replica may already have its answer.
+			exec.Status, exec.ErrorValue = "waiting", err
+			exec.Duration = time.Since(exec.StartedAt)
+			return exec, err
 		case errors.As(err, &cancelled):
 			// Somebody decided the work should stop; nothing failed.
 			journal.cancelStop(ctx, exec, chainHead, cancelled.by)

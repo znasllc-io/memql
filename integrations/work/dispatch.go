@@ -130,6 +130,8 @@ type DispatchRequest struct {
 	// claim is keyed on it -- see runClaimKey -- and the seam serves the
 	// request only under a claim for that request.
 	RerunRequestId string
+	// HumanResumeId binds an answered question to its own once-only claim.
+	HumanResumeId string
 	// TriggeredBy is the run's triggeredBy, as the event or the sweep's row
 	// read carried it. Unlike Status it is not a hint: createWorkRun writes it
 	// once and updateWorkRun does not accept it, so every copy of it is the
@@ -492,6 +494,12 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 // ever a run no event dispatches (serveRetry): a goal's run is released under a
 // re-run request instead, which its own events claim under.
 func runClaimKey(req DispatchRequest) (string, time.Duration) {
+	// Recovery uses the leased run claim after the execution heartbeat expires.
+	if !req.Recovery {
+		if id := strings.TrimSpace(req.HumanResumeId); id != "" {
+			return req.RunId + "#answer:" + id + "#rerun:" + strings.TrimSpace(req.RerunRequestId), 0
+		}
+	}
 	if id := strings.TrimSpace(req.RerunRequestId); id != "" {
 		return req.RunId + "#rerun:" + id, 0
 	}
@@ -543,6 +551,7 @@ func runEventFields(ev events.Event) (DispatchRequest, bool) {
 		req.RerunRequestId, _ = rerun["requestId"].(string)
 	}
 	req.TriggeredBy, _ = payload["triggeredBy"].(string)
+	req.HumanResumeId, _ = payload["humanResumeId"].(string)
 	return req, true
 }
 

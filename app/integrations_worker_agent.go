@@ -76,6 +76,9 @@ func (a *App) setupWorkerService() {
 	}
 
 	integration := agentworker.NewIntegration(dispatcher, svc.Registry(), a.engine, a.Logger)
+	if work := a.lookupWorkIntegration(); work != nil {
+		integration.ScopeRequester = work.AskComputerScope
+	}
 	if err := a.engine.RegisterIntegration(integration); err != nil {
 		a.fatal("worker integration: register failed", "error", err)
 	}

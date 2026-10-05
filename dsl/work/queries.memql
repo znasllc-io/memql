@@ -386,3 +386,33 @@ query approval workApprovalForOwner {
   paginate 1
   shape workApprovalFull
 }
+
+/// Questions and decisions on this owner's run, used to resume on any replica.
+@actor
+query approval workQuestionsForOwnerRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.kind == "feedback"
+ sort "row.createdAt", "desc"
+ paginate 50
+ shape workApprovalFull
+}
+
+/// Latest durable tool exchange checkpoint for this owner's step. Separate
+/// receipts cannot overwrite concurrent run cancellation or human decisions.
+@actor
+query observation workContinuationForOwnerRun {
+ args { runId string! stepKey string! }
+ filter row => row.runId == args.runId && row.stepKey == args.stepKey && row.ownerUserId == actor.userId && row.?data.continuation == true
+ sort "row.createdAt", "desc"
+ paginate 1
+ shape workObservationFull
+}
+
+/// Read only this run's own computer-use decisions, including previous grants.
+@actor
+@unbounded("scope decisions of one owned work run")
+query approval workComputerScopesForOwnerRun {
+ args { runId string! }
+ filter row => row.ownerUserId == actor.userId && row.runId == args.runId && row.kind == "scopeElevation"
+ shape workApprovalFull
+}

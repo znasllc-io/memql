@@ -560,6 +560,9 @@ func (j *workJournal) stepFinished(ctx context.Context, exec *AutomationExecutio
 		return
 	}
 	j.stepFinishedRowOnly(ctx, exec, step, result)
+	if result.Status == "waiting" {
+		return // No finished head or late run write while a human answer can resume it.
+	}
 	if result.Status != "failed" || step.OnError == ErrorStrategyContinue {
 		exec.head.finished(step.ID)
 	}
@@ -587,6 +590,8 @@ func (j *workJournal) stepFinishedRowOnly(ctx context.Context, exec *AutomationE
 		status = "failed"
 	case "skipped":
 		status = "skipped"
+	case "waiting":
+		status = "waiting"
 	}
 	args := map[string]any{
 		"stepId":            workStepId(exec.ID, step.ID),
@@ -594,6 +599,10 @@ func (j *workJournal) stepFinishedRowOnly(ctx context.Context, exec *AutomationE
 		"resultFingerprint": StepDeterministicFingerprint(step, result),
 		"finishedAt":        rfc3339(result.CompletedAt),
 		"durationMs":        result.Duration.Milliseconds(),
+	}
+	if status == "waiting" {
+		delete(args, "finishedAt")
+		delete(args, "resultFingerprint")
 	}
 	if result.Error != "" {
 		args["errorMessage"] = result.Error
@@ -656,6 +665,13 @@ func (j *workJournal) reopenRun(ctx context.Context, exec *AutomationExecution) 
 // (completed / failed / cancelled) maps onto the spec's.
 func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, chainHead string) {
 	if j == nil || exec == nil {
+		return
+	}
+	var humanWait *work.HumanWait
+	if errors.As(runFailure(exec), &humanWait) {
+		// The question writer committed the wait under its decision lock.
+		// It may already have been answered on another replica; never overwrite
+		// that decision with a late failed/succeeded/second waiting receipt.
 		return
 	}
 	status := "succeeded"

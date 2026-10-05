@@ -15,6 +15,7 @@ import (
 
 	"github.com/uptrace/bun"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/pipelines"
 )
 
@@ -513,8 +514,17 @@ func (i *Integration) retireVerified(ctx context.Context, concept string, candid
 		deleted = int(count)
 		// Keep vectors for a concurrent/new version; otherwise remove them in the
 		// SAME transaction so a failed vector deletion cannot leave half a retire.
-		_, e = tx.ExecContext(ctx, `WITH keys AS (SELECT * FROM jsonb_to_recordset(?::jsonb) AS k(id text,concept text,at timestamptz)) DELETE FROM node_vectors v WHERE v.id IN (SELECT id FROM keys) AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" n WHERE n.id=v.id)`, string(rawKeys))
-		return e
+		tables, e := memql.EmbeddingVectorTables(ctx, tx)
+		if e != nil {
+			return e
+		}
+		for _, table := range tables {
+			_, e = tx.ExecContext(ctx, `WITH keys AS (SELECT * FROM jsonb_to_recordset(?::jsonb) AS k(id text,concept text,at timestamptz)) DELETE FROM `+table+` v WHERE v.id IN (SELECT id FROM keys) AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" n WHERE n.id=v.id)`, string(rawKeys))
+			if e != nil {
+				return e
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return len(kept), 0, object, err

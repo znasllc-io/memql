@@ -399,3 +399,28 @@ func TestAFailedRefreshLeavesTheRealBreachStanding(t *testing.T) {
 		t.Fatalf("breach = %+v; the answer we already had must survive a failed refresh", b)
 	}
 }
+
+func TestHumanWaitCreditSurvivesAReplicaChangeWithoutResettingModelSpend(t *testing.T) {
+	first, eng := newTestCeilings(t)
+	answerRows(eng, map[string]any{"wallClockMs": 60000.0, "maxModelCalls": 3.0})
+	rc := aGoalBackedRun()
+	if _, err := first.Deadline(context.Background(), rc); err != nil {
+		t.Fatal(err)
+	}
+	eng.reply("workRunForOwner", map[string]any{"id": ceilingRunId, "ownerUserId": ceilingOwner, "goalId": ceilingGoalId, "status": runStatusRunning, "startedAt": testNow.Format(time.RFC3339Nano), "humanWaitMs": 3600000})
+	second := NewRunCeilings(eng, testLogger())
+	for _, replica := range []*RunCeilings{first, second} {
+		replica.now = func() time.Time { return testNow.Add(time.Hour + 59*time.Second) }
+		deadline, err := replica.Deadline(context.Background(), rc)
+		if err != nil || !deadline.Equal(testNow.Add(time.Hour+time.Minute)) {
+			t.Fatalf("wait burned or renewed budget: %v %v", deadline, err)
+		}
+		if b := replica.Admit(context.Background(), rc, 1); b != nil {
+			t.Fatalf("human wait spent active budget: %+v", b)
+		}
+	}
+	second.now = func() time.Time { return testNow.Add(time.Hour + 61*time.Second) }
+	if b := second.Admit(context.Background(), rc, 1); b == nil || b.Ceiling != work.CeilingWallClock {
+		t.Fatalf("active time became unbounded: %+v", b)
+	}
+}

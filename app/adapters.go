@@ -170,7 +170,11 @@ func (a *CognitionEngineAdapter) ExecuteToolByName(ctx context.Context, name str
 	if a == nil || a.Engine == nil {
 		return "", fmt.Errorf("memql engine not configured")
 	}
-	return a.Engine.ExecuteToolByName(ctx, name, args)
+	raw, err := a.Engine.ExecuteToolByName(ctx, name, args)
+	if err != nil {
+		return "", err
+	}
+	return agentToolResultText(raw)
 }
 
 func (a *CognitionEngineAdapter) ResolveSkills(ctx context.Context, skillIds []string) (memql.SkillBundle, error) {
@@ -369,4 +373,17 @@ func (a *EdgeEngineAdapter) Execute(ctx context.Context, query string) (any, err
 // Shared context management for agent turns regardless of their UI surface.
 func (a *CognitionEngineAdapter) CompactWorkContext(ctx context.Context, messages []common.ChatMessage, tools []common.ToolDefinition, target int) ([]common.ChatMessage, error) {
 	return a.Engine.CompactWorkContext(ctx, messages, tools, target)
+}
+
+func (a *CognitionEngineAdapter) PrepareWorkTool(ctx context.Context) error {
+	return a.Engine.PrepareWorkTool(ctx)
+}
+func (a *CognitionEngineAdapter) ContextWithWorkCallDeadline(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	return a.Engine.ContextWithWorkCallDeadline(ctx)
+}
+func (a *CognitionEngineAdapter) SaveWorkContinuation(ctx context.Context, messages []common.ChatMessage) error {
+	return a.Engine.SaveWorkContinuation(ctx, messages)
+}
+func (a *CognitionEngineAdapter) RestoreWorkContinuation(ctx context.Context, messages []common.ChatMessage) ([]common.ChatMessage, error) {
+	return a.Engine.RestoreWorkContinuation(ctx, messages)
 }

@@ -1,5 +1,3 @@
-//go:build agent || planner
-
 package worker
 
 // app_gate_refusal.go -- the app gate's named refusals, in the file both the

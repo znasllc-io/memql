@@ -25,6 +25,7 @@ import (
 var toolHandlerCorpus = []struct {
 	tool, v1, rendered string
 }{
+	{"recallMemory", `query workRecallMemory(search: args.search)`, `query workRecallMemory(search: "v-search")`},
 	{"recallWorkHistory", `query workRecallHistory(search: args.search)`, `query workRecallHistory(search: "v-search")`},
 	{"discoverCapabilities", `query workCapabilities(search: args.search)`, `query workCapabilities(search: "v-search")`},
 	{"executeCapability", `query workExecute(name: args.name, arguments: args.arguments)`, `query workExecute(name: "v-name", arguments: {"done":true,"n":2,"title":"T arguments"})`},

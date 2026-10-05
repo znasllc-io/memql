@@ -1,5 +1,3 @@
-//go:build agent || planner
-
 package worker
 
 // The router: which of a user's machines gets a piece of work.

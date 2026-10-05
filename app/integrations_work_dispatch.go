@@ -28,6 +28,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
+	workstate "github.com/znasllc-io/memql/component/work"
 	workspine "github.com/znasllc-io/memql/integrations/work"
 )
 
@@ -306,6 +307,11 @@ func (d *workRunDispatcher) variables(req workspine.DispatchRequest, journal *au
 // executor did NOT get that far, or when it refused before any step ran.
 func (d *workRunDispatcher) report(ctx context.Context, req workspine.DispatchRequest, exec *automations.AutomationExecution, err error) {
 	log := d.app.Logger
+	var waiting *workstate.HumanWait
+	if errors.As(err, &waiting) {
+		log.Info("work run dispatch: waiting for human input", "component", "work.dispatch", "run", req.RunId, "approval", waiting.ApprovalID)
+		return
+	}
 	if err != nil {
 		log.Warn("work run dispatch: execution returned an error",
 			"component", "work.dispatch", "run", req.RunId, "error", err)

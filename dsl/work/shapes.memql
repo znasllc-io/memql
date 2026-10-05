@@ -50,6 +50,9 @@ shape run workRunFull {
   replayPolicy
   status
   waitingOn
+  continuation
+  humanResumeId
+  humanWaitMs
   spent
   nodeId
   heartbeatAt
@@ -57,6 +60,7 @@ shape run workRunFull {
   cancelledBy
   expectedFootprint
   actualFootprint
+  classification
   outcome
   errorCode
   errorMessage

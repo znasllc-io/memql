@@ -330,11 +330,12 @@ func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts As
 	}
 }
 func (e *MemQLEngine) appendAskActivity(ctx context.Context, conversationID, turnID string, events []WorkEvent, interrupted bool) error {
-	release, err := e.lockAskConversation(ctx, conversationID)
+	release, err := e.lockAskConversationKind(ctx, conversationID, "write")
 	if err != nil {
 		return err
 	}
 	defer release()
+	ctx = ContextWithFreshRead(ctx)
 	row, err := e.askRead(ctx, conversationID)
 	if err != nil {
 		return err

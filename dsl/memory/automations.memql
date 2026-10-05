@@ -44,3 +44,27 @@
 automation consolidateMemory {
   logic consolidateMemory(event: event)
 }
+
+/// Transcript writes are durable. Indexing can retry on another replica and
+/// never delays delivery of the answer. Stable evidence ids make repeats safe.
+@trigger(event="node.updated", concept="v1:os:askConversation")
+automation indexConversationMemoryOnUpdate {
+  args {
+    id any
+    ownerUserId any
+  }
+  indexed := builtin indexConversationMemory(conversationId: args.id ?? "", ownerUserId: args.ownerUserId ?? "")
+}
+
+/// A background answer can finish while Ask is closed. Its successful run
+/// supplies the durable result; indexing does not require a browser to return.
+@trigger(event="node.updated", concept="v1:work:run")
+@filter(row => row.status == "succeeded" && args.oldStatus != "succeeded" && row.ownerUserId != "" && row.goalId != "")
+automation indexCompletedWorkMemory {
+  args {
+    id any
+    oldStatus any
+    ownerUserId any
+  }
+  indexed := builtin indexConversationMemory(runId: args.id ?? "", ownerUserId: args.ownerUserId ?? "")
+}

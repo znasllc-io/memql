@@ -44,8 +44,8 @@ import (
 // runStreamingToolLoop recognises the name, parses the args as
 // Envelope, sets that as the turn's final text + citations, and breaks
 // the loop -- it never calls engine.ExecuteToolByName. The model's
-// system prompt instructs it to end EVERY turn with a respondToUser
-// call (the only way to surface text to the user).
+// system prompt instructs it to end completed work with a respondToUser call.
+// A durable human question pauses work through its own tool instead.
 
 // RespondToUserToolName is the sentinel tool the agent must call to
 // emit a user-facing reply. The streaming loop intercepts calls with
@@ -97,15 +97,18 @@ type Envelope struct {
 // `response` string, optional `citations` array of {domainId, matchedPhrase}.
 //
 // The description is the LLM-facing contract -- keep it explicit about
-// "you MUST call this exactly once at the end of every turn." The
+// completion versus suspension. The
 // agentReply.tmpl prompt repeats the rule so it survives the long
 // system-prompt context.
 func RespondToUserToolDefinition() common.ToolDefinition {
 	return common.ToolDefinition{
 		Name: RespondToUserToolName,
-		Description: "Deliver your final user-facing reply for this turn. " +
-			"You MUST call this exactly once at the end of EVERY turn -- it is " +
-			"the only way the user sees your response. Do not produce free-form " +
+		Description: "Deliver the final answer when the current work is complete. " +
+			"Call this exactly once for completed work. If a necessary fact or decision is missing, " +
+			"call requestUserFeedback instead: its question is shown to the user and pauses the work. " +
+			"Do not replace that question with a final invitation to tell you later. " +
+			"A computer-access approval also pauses through its own tool. " +
+			"Do not call this tool in the same response as a question or approval. Do not produce free-form " +
 			"assistant text; route everything through this tool. The `response` " +
 			"field carries the prose the user reads. The `citations` field lists " +
 			"the trained-knowledge sources (if any) you drew from -- one entry per " +

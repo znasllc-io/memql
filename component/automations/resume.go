@@ -84,6 +84,7 @@ type RunJournal struct {
 	ForkedFromRunId       string
 	ForkAtStepKey         string
 	WaitingOn             map[string]any
+	HumanResumeId         string
 	RunId                 string
 	AutomationName        string
 	TemplateVersion       string
@@ -258,6 +259,7 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 	}
 	j.HeartbeatAt, _ = time.Parse(time.RFC3339Nano, stringField(run, "heartbeatAt"))
 	j.WaitingOn, _ = run["waitingOn"].(map[string]any)
+	j.HumanResumeId = stringField(run, "humanResumeId")
 	j.Variables, _ = run["variables"].(map[string]any)
 	if ev, ok := run["triggerEvent"].(map[string]any); ok {
 		j.TriggerEvent = ev
@@ -295,10 +297,11 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 				m.StepId = key
 			}
 			j.Steps[key] = m
-		case "failed", "running":
+		case "failed", "running", "waiting":
 			// `running` with no later receipt is a step the executor reached
 			// and never finished -- a crash mid-step -- and it resumes from
-			// exactly where a `failed` one does.
+			// exactly where a `failed` one does. A human-waiting step is also
+			// unfinished; its answer releases the run to resume at this point.
 			if j.FailedStep == "" {
 				j.FailedStep = key
 			}

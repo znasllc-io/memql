@@ -18,6 +18,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -96,10 +97,11 @@ func formatForWorkerPath(p string) string {
 // tool loop via @executor("integration.agentworker.X") on the
 // builtin functions.
 type Integration struct {
-	dispatcher *Dispatcher
-	registry   *workerservice.Registry
-	engine     *memql.MemQLEngine
-	logger     *slog.Logger
+	ScopeRequester func(context.Context, string, string, map[string]any) (string, error)
+	dispatcher     *Dispatcher
+	registry       *workerservice.Registry
+	engine         *memql.MemQLEngine
+	logger         *slog.Logger
 	// uploader + bucket are the GCS attachment surface (memql#794). When
 	// present (injected on the agent node where a GCS bucket is configured),
 	// a successful computer-use fs_write uploads the bytes the agent forwarded
@@ -269,7 +271,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "requestScope",
-			Description: "Create a scope-elevation Plan + canvas card asking the user to approve a computer_use scope for the upcoming task. Used BEFORE attempting an out-of-scope worker call.",
+			Description: "Ask for a durable, run-scoped computer-access approval in Nexus before using a personal machine.",
 			Handler:     i.handleRequestScope,
 			ArgsSchema: map[string]string{
 				"intent":         "string (required) -- short imperative summary",
@@ -661,14 +663,9 @@ func (i *Integration) handleStatus(ctx context.Context, args map[string]any, _ i
 	}}, nil
 }
 
-// handleRequestScope creates a Plan in awaitingFeedback /
-// scope_elevation_required and lets the
-// emitScopeElevationCanvasCard automation emit the
-// plan.scopeElevationRequested canvas card. The agent gets back a
-// small ack payload with the runId so it can reference it in its
-// final respondToUser; user input on the card is the actual gate.
+// handleRequestScope parks owned work on the shared Nexus approval inbox.
 func (i *Integration) handleRequestScope(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	// The consent card asks the OWNER, and the plan is written as them, so the
+	// The consent card asks the OWNER, and the approval is written as them, so the
 	// owner is the caller unless the context may act for another user
 	// (memql.CallOwner) -- decided first, before anything else is consulted.
 	ownerUserId, err := memql.CallOwner(ctx, "requestComputerUseScope", asString(args["ownerUserId"]))
@@ -682,7 +679,6 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 	scope := strings.TrimSpace(asString(args["requestedScope"]))
 	summary := strings.TrimSpace(asString(args["summary"]))
 	agentId := strings.TrimSpace(asString(args["agentId"]))
-	partitionId := strings.TrimSpace(asString(args["partitionId"]))
 	if intent == "" || scope == "" || summary == "" {
 		return nil, fmt.Errorf("worker integration: intent, requestedScope, and summary are all required")
 	}
@@ -700,18 +696,6 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 	if agentId == "" || strings.TrimSpace(ownerUserId) == "" {
 		return nil, fmt.Errorf("worker integration: agentId and ownerUserId required (auto-injection failed)")
 	}
-
-	// The mutation runs as the OWNING USER. The agent-tool dispatch
-	// path doesn't carry the user's JWT into the per-tool context
-	// (cognition forwards AgentGenerateTurnMsg over NodeService and
-	// the per-call context is freshly built), so engine.Execute would
-	// fail with "no actor found in context" on the insert path. Stamp
-	// a synthetic TokenInfo with the user as the actor so the Plan's
-	// createdBy lands as the user (correct for ownership / audit) and
-	// downstream mutationActor calls succeed. Same pattern automations
-	// use via contextWithSystemActor (automations/executor.go) but
-	// scoped to a real user instead of a system actor.
-	mutationCtx := withUserActor(ctx, ownerUserId)
 
 	// D6: the card names the requirements AND the current choice, because the
 	// user's Allow covers the task on any machine that matches -- so the card
@@ -734,22 +718,31 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 		summary = strings.TrimRight(summary, " .") + ". Runs " + target + "."
 	}
 
-	runId := fmt.Sprintf("scope-elevation-%d", time.Now().UnixNano())
-	q := fmt.Sprintf(
-		`mutation createScopeElevationPlan(runId:%s, agentId:%s, ownerUserId:%s, partitionId:%s, intent:%s, summary:%s, requestedScope:%s)`,
-		langparser.QuoteString(runId), langparser.QuoteString(agentId), langparser.QuoteString(ownerUserId), langparser.QuoteString(partitionId), langparser.QuoteString(intent), langparser.QuoteString(summary), langparser.QuoteString(scope),
-	)
-	if _, err := i.engine.Execute(mutationCtx, q); err != nil {
-		return nil, fmt.Errorf("worker integration: createScopeElevationPlan failed: %w", err)
+	rc, ok := common.RunFromContext(ctx)
+	if !ok || rc.RunId == "" || memql.BareShortId(rc.OwnerUserId) != memql.BareShortId(ownerUserId) || i.ScopeRequester == nil {
+		return nil, fmt.Errorf("computer access requires an owned work run with durable approvals")
 	}
+	subject := map[string]any{"agentId": agentId, "scope": scope, "requireLabels": requireLabels, "intent": intent, "summary": summary, "target": target}
+	approvalID, err := i.ScopeRequester(ctx, ownerUserId, rc.RunId, subject)
+	if err != nil {
+		return nil, err
+	}
+	q, _ := langparser.RenderCall("workApprovalForOwner", map[string]any{"approvalId": approvalID})
+	response, err := i.engine.Execute(memql.ContextWithFreshRead(ctx), "query "+q)
+	if err != nil {
+		return nil, err
+	}
+	status := "awaiting_user"
+	for _, row := range memql.MaterializeRows(response.OutputPayload()) {
+		if row["decision"] == "approved" {
+			status = "approved"
+		}
+		if row["decision"] == "rejected" {
+			return nil, fmt.Errorf("computer access was declined")
+		}
+	}
+	payload, _ := json.Marshal(map[string]any{"status": status, "runId": rc.RunId, "approvalId": approvalID, "requestedScope": scope, "target": target})
 
-	payload, _ := json.Marshal(map[string]any{
-		"status":         "awaiting_user",
-		"runId":          runId,
-		"requestedScope": scope,
-		"target":         target,
-		"message":        "Scope-elevation request emitted on the canvas. The user will approve or deny; reply with a short acknowledgement and end your turn.",
-	})
 	return []memorynodes.MemoryNode{{
 		ID:        fmt.Sprintf("scope-elevation:%d", time.Now().UnixNano()),
 		Concept:   "integration:worker:scopeElevation",
