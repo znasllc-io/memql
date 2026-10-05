@@ -5,7 +5,11 @@ import type { AskActivity, AskTurn } from "./conversationSession";
 export function AskActivityLog({ turns, dictation = [], onClose, onStop }: { turns: AskTurn[]; dictation?: AskActivity[]; onClose: () => void; onStop?: () => void }) {
   const back = useRef<HTMLButtonElement>(null);
   useEffect(() => { back.current?.focus(); }, []);
-  if (dictation.length) turns = [...turns, { id: "dictation", prompt: "Dictation", answer: "", state: "done", startedAt: dictation[0]!.at, activity: dictation }];
+  if (dictation.length) {
+    const latest = new Map(dictation.map(event => [event.id, event]));
+    const running = [...latest.values()].some(event => event.phase === "running");
+    turns = [...turns, { id: "dictation", prompt: "Dictation", answer: "", state: running ? "streaming" : "done", startedAt: dictation[0]!.at, activity: dictation }];
+  }
   return <section className="os-ask-activity" aria-label="Conversation activity" tabIndex={-1} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
     <Head title="Activity" navigation={false}>
       <button ref={back} type="button" className="os-icon-button" aria-label="Close activity" title="Back to conversation" onClick={onClose}><ArrowLeft size={17} /></button>

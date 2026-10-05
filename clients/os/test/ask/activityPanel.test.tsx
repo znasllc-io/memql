@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { AskSurface } from "../../src/ask/AskSurface";
+import { AskActivityLog } from "../../src/ask/AskActivityLog";
 import type { AskCallbacks } from "../../src/ask/askController";
 import { SessionProvider } from "../../src/chrome/access";
 import { UNKNOWN_RUNTIME_CONFIG } from "../../src/cluster/config";
@@ -83,4 +84,13 @@ it("does not stamp a failed partial reply as a completed response", () => {
  const w = setup(); draft("Jose"); fireEvent.click(screen.getByRole("button", { name: "Send" }));
  act(() => { w.callbacks().delta("Nice to meet"); w.callbacks().error("Connection lost"); });
  expect(screen.getByRole("log", { name: "Conversation" }).querySelectorAll("time")).toHaveLength(1);
+});
+
+it("keeps active dictation working until its matching completion arrives", () => {
+ const event = { id: "transcribe", kind: "model" as const, phase: "running" as const, at: new Date().toISOString() };
+ const view = render(<AskActivityLog turns={[]} dictation={[event]} onClose={vi.fn()} />);
+ expect(screen.getByText("Working")).toBeTruthy();
+ view.rerender(<AskActivityLog turns={[]} dictation={[event, { ...event, phase: "completed" }]} onClose={vi.fn()} />);
+ expect(screen.queryByText("Working")).toBeNull();
+ expect(screen.getByText("Completed")).toBeTruthy();
 });
