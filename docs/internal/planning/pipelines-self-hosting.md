@@ -96,6 +96,17 @@ registry/marketplace permission, native signing, public webhook reachability,
 cloud storage behavior or production recovery. Those remain named rehearsal
 steps. Time-window milestones #5506–#5509 stay open until observed.
 
+## Queued routing progress
+
+The generic workbench router now reports the actual selected replica before
+sending a long-running request. Pipeline status prefers that route, with the
+existing healthy-peer fallback. This avoids treating another replica's absent
+local queue as lost work. An in-process hop through real forwarded handlers
+and two real runners verifies one forward for a healthy queue, recovery after
+restart or peer loss, and one eventual Kubernetes Job. The API server is a
+fixture in these cases; this is not a live two-pod claim. Partitions can still
+leave an old request alive, requiring the existing shared-Job deduplication.
+
 ## Queued Secret retention progress
 
 Jobs and Secrets now carry the agent's absolute run deadline. Orphan cleanup

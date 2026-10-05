@@ -64,6 +64,10 @@ type clusterStep struct {
 	// to delete the Job, which is the work the replacement exists to keep.
 	pending      chan forwardEnd
 	pendingSince time.Time
+	// selected belongs to this forward alone, so a late selection from an
+	// abandoned forward cannot overwrite its replacement's route.
+	selected    chan string
+	pendingNode string
 	// exclude is the replica the last forward steered away from: the one
 	// whose runner went quiet, for a stale re-forward. A forward that fails
 	// is retried with it, so the retry never hands the step back there.
@@ -113,8 +117,10 @@ func (e *Executor) runCluster(ctx context.Context, run StepRun, timeout time.Dur
 		select {
 		case <-ctx.Done():
 			return s.where(stoppedResult(ctx))
+		case selected := <-s.selected:
+			s.pendingNode, s.selected = selected, nil
 		case end := <-s.pending:
-			s.pending = nil
+			s.pending, s.selected, s.pendingNode = nil, nil, ""
 			if res, done := s.ended(ctx, end); done {
 				return res
 			}
@@ -194,6 +200,8 @@ func maxTime(a, b time.Time) time.Time {
 // healthy replica exists, and makes it the live forward.
 func (s *clusterStep) forward(ctx context.Context, exclude string) {
 	ch := make(chan forwardEnd, 1)
+	selected := make(chan string, 1)
+	s.selected, s.pendingNode = selected, ""
 	s.pending, s.pendingSince, s.exclude = ch, s.e.now(), exclude
 	req, err := s.e.request(workbench.PipelineStepAction, s.run.RunID, s.run.StepKey, s.args, s.run.TimeoutSeconds)
 	if err != nil {
@@ -201,7 +209,7 @@ func (s *clusterStep) forward(ctx context.Context, exclude string) {
 		return
 	}
 	go func() {
-		resp, servedBy, err := s.e.fwd.ForwardWatchedExcluding(ctx, req, "", exclude, s.e.peerWatch)
+		resp, servedBy, err := s.e.fwd.ForwardWatchedExcluding(ctx, req, "", exclude, s.e.peerWatch, func(nodeID string) { selected <- nodeID })
 		ch <- forwardEnd{resp: resp, servedBy: servedBy, err: err}
 	}()
 }
@@ -268,12 +276,13 @@ func (s *clusterStep) answer(ctx context.Context, resp *nodev1.WorkbenchForwardR
 	return s.fill(res, servedBy)
 }
 
-// poll reads the step's status from any replica -- every replica answers
-// from the Job -- and acts on it: a finished step's outcome is taken; a stale
+// poll prefers the active forward's replica: it can report a queued step
+// before its Job exists. Other replicas can still report the shared Job when
+// that route is unavailable. It acts on status: a finished step's outcome is taken; a stale
 // heartbeat forwards the step again, away from the replica that went quiet;
 // a Job still absent long after the forward forwards it again too.
 func (s *clusterStep) poll(ctx context.Context) (pl.StepResult, bool) {
-	reply, servedBy, ok := s.e.status(ctx, s.run, s.job)
+	reply, servedBy, ok := s.e.status(ctx, s.run, s.job, s.statusPin())
 	if !ok {
 		return pl.StepResult{}, false
 	}
@@ -305,11 +314,10 @@ func (s *clusterStep) poll(ctx context.Context) (pl.StepResult, bool) {
 	case StateAbsent:
 		// No Job long after the forward: the request may never have reached
 		// a runner (lost to a stream drop on the way). Forwarding again is
-		// safe -- a runner finds or creates the Job by its name -- but a Job
-		// is most often absent because its runner, on a replica other than
-		// the one that answered, is waiting for a free slot under the
-		// ceiling, which another forward cannot speed up, so each forward an
-		// absence causes waits twice as long as the one before.
+		// safe -- a runner finds or creates the Job by its name. Status prefers
+		// the selected replica, whose live queue reports running. Absence can
+		// still mean a lost request, a restarted runner, or a fallback replica
+		// that cannot see the old queue. Bound repeat forwards with backoff.
 		wait := s.e.stalePatience << min(s.absentForwards, absentBackoffMax)
 		if s.pending == nil || s.e.now().Sub(s.pendingSince) < wait {
 			return pl.StepResult{}, false
@@ -327,7 +335,7 @@ func (s *clusterStep) poll(ctx context.Context) (pl.StepResult, bool) {
 // last status decides how it reads; whatever it says, the Job and its Secret
 // are deleted, because nothing will report the step now.
 func (s *clusterStep) giveUp(ctx context.Context) pl.StepResult {
-	reply, servedBy, ok := s.e.status(ctx, s.run, s.job)
+	reply, servedBy, ok := s.e.status(ctx, s.run, s.job, s.statusPin())
 	if ok {
 		s.learn(reply)
 		if reply.State == StateFinished {
@@ -392,9 +400,20 @@ func withWhere(res pl.StepResult, where pl.Where) pl.StepResult {
 	return res
 }
 
-// status reads a step's status from any replica. ok is false when no replica
-// answered with a readable status.
-func (e *Executor) status(ctx context.Context, run StepRun, job string) (StatusReply, string, bool) {
+// statusPin drains a route notification even if the status tick won the
+// select. Only this execution goroutine owns pendingNode.
+func (s *clusterStep) statusPin() string {
+	select {
+	case selected := <-s.selected:
+		s.pendingNode, s.selected = selected, nil
+	default:
+	}
+	return s.pendingNode
+}
+
+// status prefers the queued request's replica, falling back when unavailable.
+// ok is false when no replica answered with a readable status.
+func (e *Executor) status(ctx context.Context, run StepRun, job, pinnedNode string) (StatusReply, string, bool) {
 	args, err := json.Marshal(StatusRequest{JobName: job})
 	if err != nil {
 		return StatusReply{}, "", false
@@ -405,7 +424,7 @@ func (e *Executor) status(ctx context.Context, run StepRun, job string) (StatusR
 	}
 	callCtx, done := context.WithTimeout(ctx, e.callTimeout)
 	defer done()
-	resp, servedBy, err := e.fwd.Forward(callCtx, req, "")
+	resp, servedBy, err := e.fwd.Forward(callCtx, req, pinnedNode)
 	if err != nil || resp.GetErrorCode() != "" {
 		e.logger.Debug("pipelines: a step's status went unanswered",
 			slog.String("runId", run.RunID), slog.String("stepKey", run.StepKey),

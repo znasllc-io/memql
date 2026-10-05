@@ -128,7 +128,10 @@ type scriptedWorkbench struct {
 func (w *scriptedWorkbench) SelfNodeId() string   { return exAgent }
 func (w *scriptedWorkbench) SelfNodeType() string { return "agent" }
 
-func (w *scriptedWorkbench) ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, _ time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
+func (w *scriptedWorkbench) ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, _ time.Duration, onSelected func(string)) (*nodev1.WorkbenchForwardResponse, string, error) {
+	if onSelected != nil {
+		onSelected("workbench-a")
+	}
 	return w.forward(ctx, req, pin, exclude, true)
 }
 

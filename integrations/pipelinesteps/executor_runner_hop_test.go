@@ -682,3 +682,65 @@ func TestExecuteHopAStageWiderThanTheCeilingRunsEveryStep(t *testing.T) {
 	}
 	w.h.leftNoArchive(t)
 }
+
+// The queue is local to a runner until Kubernetes admits the Job. A status
+// answered on the other replica cannot attest to it. Exercise both real
+// runners and the real forwarded handler, including a dead queue's Secret.
+func TestExecuteHopQueuedStepKeepsItsRouteAndRecoversADeadQueue(t *testing.T) {
+	for _, loss := range []string{"none", "restart", "peer-lost"} {
+		t.Run(loss, func(t *testing.T) {
+			w := newRunnerHop(t)
+			w.clock.set(rtT0)
+			w.mesh.statusNode = "workbench-b"
+			req := hopRequest()
+			req.RunStartedAt = rtT0.Format(time.RFC3339)
+			job := JobName(req.RunID, req.StepKey, req.Attempt)
+			w.h.c.with(func(c *rtCluster) { c.quotaJobs = map[string]bool{job: true} })
+			w.h.c.script(job, rtFinishingScript(job, 0, captureKubeLine(rtAt(1100), "ok")))
+			done := w.execute(req)
+			rtWaitUntil(t, "the first real runner queued with its Secret", func() bool {
+				var hasSecret bool
+				w.h.c.with(func(c *rtCluster) { _, hasSecret = c.secrets[SecretName(job)] })
+				return hasSecret && len(w.h.c.requestsFor(http.MethodPost, kubeJobs)) > 0
+			})
+			if reply := w.process("workbench-b").runner.Status(w.ctx, StatusRequest{JobName: job}); reply.State != StateAbsent {
+				t.Fatalf("the other replica knows the queue unexpectedly: %+v", reply)
+			}
+			before := len(w.mesh.sent(workbench.PipelineStatusAction))
+			w.clock.advance(30 * time.Minute) // beyond every absent-forward patience
+			rtWaitUntil(t, "status polls after the queue outlasted patience", func() bool {
+				return len(w.mesh.sent(workbench.PipelineStatusAction)) >= before+3
+			})
+			if sent := w.mesh.sent(workbench.PipelineStepAction); len(sent) != 1 {
+				t.Fatalf("a live queue was forwarded %d times: %+v", len(sent), sent)
+			}
+			for _, sent := range w.mesh.sent(workbench.PipelineStatusAction) {
+				if sent.node != "workbench-a" || sent.pinned != "workbench-a" {
+					t.Fatalf("queued status missed its actual forward route: %+v", sent)
+				}
+			}
+			switch loss {
+			case "restart":
+				w.restart("workbench-a")
+			case "peer-lost":
+				w.mesh.lose("workbench-a")
+				w.kill(w.process("workbench-a"))
+			}
+			if loss != "none" {
+				rtWaitUntil(t, "replacement for the dead queued request", func() bool {
+					return len(w.mesh.sent(workbench.PipelineStepAction)) >= 2
+				})
+			}
+			w.h.c.with(func(c *rtCluster) { delete(c.quotaJobs, job) })
+			res := awaitHop(t, done, "queued step after a slot becomes available")
+			if res.Status != pl.OutcomeSucceeded || res.Failure != nil {
+				t.Fatalf("queued step failed: %+v; failure %+v", res, res.Failure)
+			}
+			var made int
+			w.h.c.with(func(c *rtCluster) { made = len(c.made) })
+			if made != 1 {
+				t.Fatalf("created %d Jobs for one queued step", made)
+			}
+		})
+	}
+}

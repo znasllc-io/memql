@@ -703,8 +703,10 @@ Nothing about a running step lives in one process only:
   agent forwards the step again, to any replica, and that replica finds the Job
   by its name and adopts it once the old claim is 45 seconds unstamped
   ([When a workbench replica is lost](#when-a-workbench-replica-is-lost)).
-- **Beside the watch, the agent reads the step's status every 30 seconds**, from
-  any replica: they all read the same Job. A finished step's outcome is taken
+- **Beside the watch, the agent reads the step's status every 30 seconds**,
+  preferring the replica selected for the active forward. That replica can
+  report a queued step before its Job exists. An unavailable replica falls
+  back to another, and every replica reads the same Job once it exists. A finished step's outcome is taken
   from the Job, even when the reply to the forward was lost. A holder gone quiet
   while the mesh still counts it healthy is forwarded away from once the live
   forward is 3 minutes old -- an adopting replica may be proving isolation
@@ -1013,13 +1015,10 @@ Each of these is understood, and accepted for this release.
   covers each secret whole, trimmed, and each of its lines, trimmed. Like the
   check run's masking, it drops any form shorter than 4 bytes. So a secret
   printed one short line at a time is masked only where its longer lines appear.
-- **A queued step can wait on more than one replica.** While a step waits for
-  a slot, any workbench replica may answer its status. One that does not hold
-  it answers that it has no such step, and after its patience (3, 6, 12, then
-  24 minutes) the agent sends the step again. One step can then wait on
-  several replicas at once. They converge on one Job, because the second create
-  finds the first's, but each mints a clone token and retries its create every
-  10 seconds (memql#5821).
+- **A partition can leave an old queued request alive.** Status reads prefer
+  the active forward's replica, avoiding duplicate waits during ordinary quota
+  pressure. A replacement after a lost route can still overlap a surviving old
+  request; deterministic Job naming makes them converge on one Job (#5821).
 - **A cancel can miss a step still waiting for a slot.** A cancel deletes every
   Job the run has and stops every step its agent has in flight. A step still
   waiting for a slot on a workbench replica, forwarded by an agent replica that

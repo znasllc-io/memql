@@ -806,3 +806,38 @@ func TestAHungStatusDoesNotHoldTheReceiveLoop(t *testing.T) {
 	awaitCondition(t, func() bool { return trackedRequests(hop.handler) == 0 },
 		"a status or an ack is still tracked after it was answered")
 }
+
+func TestForwardWatchedReportsActualRouteBeforeCompletion(t *testing.T) {
+	hop := newPipelineHop(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	selected := make(chan string, 1)
+	ended := make(chan watchedOutcome, 1)
+	req := pipelineForward("route", PipelineStepAction, `{"stepKey":"route"}`, systemAuthority(t))
+	go func() {
+		resp, nodeID, err := hop.router.ForwardWatchedExcluding(ctx, req, "gone-replica", "", time.Millisecond,
+			func(nodeID string) { selected <- nodeID })
+		ended <- watchedOutcome{resp, nodeID, err}
+	}()
+	select {
+	case nodeID := <-selected:
+		if nodeID != hopWorkbenchId {
+			t.Fatalf("selected %q, want actual fallback %q", nodeID, hopWorkbenchId)
+		}
+	case <-ctx.Done():
+		t.Fatal("route was withheld until completion")
+	}
+	running := hop.runner.awaitStep(t, "step on the reported route")
+	defer running.finish()
+	select {
+	case <-ended:
+		t.Fatal("the step completed before its test allowed it")
+	default:
+	}
+	cancel()
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("forward did not end")
+	}
+}

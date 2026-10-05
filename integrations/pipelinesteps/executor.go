@@ -41,7 +41,7 @@ import (
 // replica exists; status, ack and cancel are plain forwards. SelfNodeId and
 // SelfNodeType stamp the assertion's origin.
 type Forwarder interface {
-	ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId, excludeNodeId string, interval time.Duration) (*nodev1.WorkbenchForwardResponse, string, error)
+	ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId, excludeNodeId string, interval time.Duration, onSelected func(string)) (*nodev1.WorkbenchForwardResponse, string, error)
 	Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId string) (*nodev1.WorkbenchForwardResponse, string, error)
 	SelfNodeId() string
 	SelfNodeType() string

@@ -131,7 +131,7 @@ func (r *ForwardRouter) WorkbenchNodeIDs() []string {
 // it with the pin, and that comparison is the difference between a recorded
 // re-provision and the silent split this change exists to remove.
 func (r *ForwardRouter) Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId string) (*nodev1.WorkbenchForwardResponse, string, error) {
-	return r.forward(ctx, req, pinnedNodeId, "", 0)
+	return r.forward(ctx, req, pinnedNodeId, "", 0, nil)
 }
 
 // ForwardWatched is Forward plus a liveness watch, for a request that runs for
@@ -153,7 +153,7 @@ func (r *ForwardRouter) Forward(ctx context.Context, req *nodev1.WorkbenchForwar
 //
 // A non-positive interval means defaultPeerWatchInterval.
 func (r *ForwardRouter) ForwardWatched(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId string, interval time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
-	return r.ForwardWatchedExcluding(ctx, req, pinnedNodeId, "", interval)
+	return r.ForwardWatchedExcluding(ctx, req, pinnedNodeId, "", interval, nil)
 }
 
 // ForwardWatchedExcluding is ForwardWatched that steers away from one
@@ -166,17 +166,21 @@ func (r *ForwardRouter) ForwardWatched(ctx context.Context, req *nodev1.Workbenc
 // handing the step back to the replica it went quiet on would wait out
 // another round of patience for nothing, while any other replica adopts the
 // Job by its name.
-func (r *ForwardRouter) ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId, excludeNodeId string, interval time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
+// onSelected, when supplied, is called once with the actual selected replica
+// before sending. It must return promptly. This reports routing, not delivery
+// or acceptance; a long-running caller can direct status reads to the same
+// replica without waiting for the final response. No selection means no call.
+func (r *ForwardRouter) ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId, excludeNodeId string, interval time.Duration, onSelected func(string)) (*nodev1.WorkbenchForwardResponse, string, error) {
 	if interval <= 0 {
 		interval = defaultPeerWatchInterval
 	}
-	return r.forward(ctx, req, pinnedNodeId, excludeNodeId, interval)
+	return r.forward(ctx, req, pinnedNodeId, excludeNodeId, interval, onSelected)
 }
 
 // forward is Forward and ForwardWatched: watch == 0 waits for the reply or ctx
 // alone, and a positive watch also re-checks the serving replica on that
 // cadence.
-func (r *ForwardRouter) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId, excludeNodeId string, watch time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
+func (r *ForwardRouter) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId, excludeNodeId string, watch time.Duration, onSelected func(string)) (*nodev1.WorkbenchForwardResponse, string, error) {
 	if r == nil || r.peerMgr == nil {
 		return nil, "", ErrNoWorkbenchPeer
 	}
@@ -206,6 +210,9 @@ func (r *ForwardRouter) forward(ctx context.Context, req *nodev1.WorkbenchForwar
 		Payload: &nodev1.NodeClientMessage_WorkbenchForwardRequest{
 			WorkbenchForwardRequest: req,
 		},
+	}
+	if onSelected != nil {
+		onSelected(servedBy)
 	}
 	peer.Connection.Send(msg)
 

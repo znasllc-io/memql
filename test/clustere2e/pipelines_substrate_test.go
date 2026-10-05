@@ -1443,11 +1443,11 @@ func (m *substrateMesh) SelfNodeId() string   { return substrateAgent }
 func (m *substrateMesh) SelfNodeType() string { return "agent" }
 
 func (m *substrateMesh) Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin string) (*nodev1.WorkbenchForwardResponse, string, error) {
-	return m.forward(ctx, req, pin, "")
+	return m.forward(ctx, req, pin, "", nil)
 }
 
-func (m *substrateMesh) ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, _ time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
-	return m.forward(ctx, req, pin, exclude)
+func (m *substrateMesh) ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, _ time.Duration, onSelected func(string)) (*nodev1.WorkbenchForwardResponse, string, error) {
+	return m.forward(ctx, req, pin, exclude, onSelected)
 }
 
 func (m *substrateMesh) pickLocked(req *nodev1.WorkbenchForwardRequest, pin, exclude string) *substrateReplica {
@@ -1481,7 +1481,7 @@ func (m *substrateMesh) pickLocked(req *nodev1.WorkbenchForwardRequest, pin, exc
 	return nil
 }
 
-func (m *substrateMesh) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string) (*nodev1.WorkbenchForwardResponse, string, error) {
+func (m *substrateMesh) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, onSelected func(string)) (*nodev1.WorkbenchForwardResponse, string, error) {
 	m.mu.Lock()
 	r := m.pickLocked(req, pin, exclude)
 	if r == nil {
@@ -1495,6 +1495,9 @@ func (m *substrateMesh) forward(ctx context.Context, req *nodev1.WorkbenchForwar
 	m.inflight[req.RequestId] = ch
 	m.sends = append(m.sends, substrateSend{node: r.node, action: req.GetAction(), runID: req.GetRunId(), stepKey: req.GetStepId()})
 	m.mu.Unlock()
+	if onSelected != nil {
+		onSelected(r.node)
+	}
 	defer func() {
 		m.mu.Lock()
 		delete(m.inflight, req.RequestId)

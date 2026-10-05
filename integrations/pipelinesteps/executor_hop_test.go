@@ -98,6 +98,8 @@ type hopMesh struct {
 	replicas []*hopReplica
 	inflight map[string]chan *nodev1.WorkbenchForwardResponse
 	sends    []hopSend
+	// statusNode makes unpinned status reads choose a different replica.
+	statusNode string
 }
 
 // newHopMesh is the named replicas, each a real ForwardHandler over the
@@ -132,14 +134,14 @@ func (m *hopMesh) WorkbenchNodeIDs() []string {
 }
 
 func (m *hopMesh) Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin string) (*nodev1.WorkbenchForwardResponse, string, error) {
-	return m.forward(ctx, req, pin, "", 0)
+	return m.forward(ctx, req, pin, "", 0, nil)
 }
 
-func (m *hopMesh) ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, every time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
+func (m *hopMesh) ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, every time.Duration, onSelected func(string)) (*nodev1.WorkbenchForwardResponse, string, error) {
 	if every <= 0 {
 		every = 5 * time.Millisecond
 	}
-	return m.forward(ctx, req, pin, exclude, every)
+	return m.forward(ctx, req, pin, exclude, every, onSelected)
 }
 
 // pickLocked is the router's choice: the pinned replica while it is one this
@@ -168,9 +170,13 @@ func (m *hopMesh) pickLocked(pin, exclude string) *hopReplica {
 	return excluded
 }
 
-func (m *hopMesh) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, watch time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
+func (m *hopMesh) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, watch time.Duration, onSelected func(string)) (*nodev1.WorkbenchForwardResponse, string, error) {
 	m.mu.Lock()
-	r := m.pickLocked(pin, exclude)
+	choice := pin
+	if choice == "" && req.GetAction() == workbench.PipelineStatusAction {
+		choice = m.statusNode
+	}
+	r := m.pickLocked(choice, exclude)
 	if r == nil {
 		m.mu.Unlock()
 		return nil, "", workbench.ErrNoWorkbenchPeer
@@ -188,6 +194,9 @@ func (m *hopMesh) forward(ctx context.Context, req *nodev1.WorkbenchForwardReque
 		r.dropNextStep, alive = false, false
 	}
 	m.mu.Unlock()
+	if onSelected != nil {
+		onSelected(r.id)
+	}
 	defer func() {
 		m.mu.Lock()
 		delete(m.inflight, req.RequestId)
