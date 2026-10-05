@@ -506,6 +506,21 @@ before retrying. Never clear a live migration's lock or mark a migration
 applied without completing its work. Increasing the migration context timeout
 alone does not change pgdriver's socket read deadline.
 
+A migration with more work than one attempt holds splits it into bounded
+statements instead. The `v1:platform:moduleReadiness` history collapse
+(`20260921000000`) deletes in committed batches and ends an attempt with
+nothing of its own left running: before the attempt's deadline, when the
+attempt is cancelled, or once the backend of a step whose connection was cut
+has no transaction open. It then releases the lock. A node resumes it on its
+next monitor tick, and `memql migrate` starts the next attempt itself, up to 20
+of them, so the migrate Job's retries are not spent on progress. On an upgrade
+carrying a large readiness history, expect a few attempts to end with
+`deferred to the next migration attempt`: that error is progress, not a
+failure, and needs no recovery. An attempt needs at least 3 s left for the
+collapse to start a step; the 30 s default leaves it most of every attempt.
+Until the walk finishes, its position is the one row of the
+`module_readiness_collapse_progress` table, which is dropped when it does.
+
 #### Connection pooling: hybrid endpoint split (`DIRECT_DSN`)
 
 Tiger Cloud PgBouncer transaction-mode pooling decouples client
@@ -636,6 +651,32 @@ MemQL OS Logs app reads them (epic memql#4893). Runbook: [Logs](logs.md).
 | `MEMQL_LOGS_MAX_LINES_PER_SECOND`   | `2000`                        | Per-node, per-second cap on stored lines (clamped 10..100000). Beyond it a line is dropped and counted on `memql_logs_dropped_total{reason="rate"}`; the node writes one stored warning per minute naming the drops, so the gap is visible in the Logs app. |
 | `MEMQL_LOGS_RETENTION_DAYS`         | `30`                          | Days of lines kept before the nightly `logsRetentionSweep` archives a day to blob storage and then deletes it (clamped 1..365). No archive, no delete: with no container the sweep keeps every line and says so. |
 | `MEMQL_LOGS_ARCHIVE_CONTAINER`      | `MEMQL_AZURE_BLOB_CONTAINER`  | The blob container the archive objects (`logs/<day>/<nodeType>.ndjson.gz`) land in. Empty means no archive is configured. |
+
+#### Pipelines (the substrate)
+
+The pipelines substrate runs each command step of a pipeline run as a Kubernetes
+Job, created by the workbench node, or on one of the owner's machines,
+dispatched by the agent node (epic memql#5478). Registered
+`component: pipelines`, all optional; the pipelines component's
+`memql-pipelines` ConfigMap sets the first two, and the workspace limit, on the
+workbench. Runbook:
+[Pipelines substrate](pipelines-substrate.md#environment-variables).
+
+| Variable                              | Default             | Purpose |
+|---------------------------------------|---------------------|---------|
+| `MEMQL_PIPELINES_NAMESPACE`           | `memql-pipelines`   | The namespace the workbench node creates step Jobs and their Secrets in. It must be the namespace whose Role grants the engine's identity Jobs -- the pipelines component renders both into `memql-pipelines` -- or every create is a 403 and every step fails `pipeline_runner_unavailable`. |
+| `MEMQL_PIPELINES_CLONE_IMAGE`         | none                | The image every step's clone init container runs, pinned by digest and providing `git`, `base64` and `tr`. Unset, the workbench node cannot run pipeline steps and refuses them, rather than guess which image to hand a repository token to. |
+| `MEMQL_PIPELINES_RUN_MAX_MINUTES`     | `120`               | A run's wall-clock ceiling in minutes (clamped 5..1440): a step is given only the time left under it, and fails `pipeline_run_ceiling` when that runs out. Read by the agent and the workbench. |
+| `MEMQL_PIPELINES_LOG_STORE_MAX_LINES` | `2000`              | How many lines of one step's output reach the log store (clamped 100..100000) before that copy stops with a `pipeline_log_capped` line; the full log is still archived to the Library. Read by the workbench (a cluster step) and the agent (a fleet step). |
+| `MEMQL_PIPELINES_ARTIFACT_MAX_BYTES`  | `67108864` (64 MiB) | The cap on one step's decoded artifact archive (clamped 1 MiB..256 MiB), past which the archive is dropped and the step fails `pipeline_artifact_too_large`. Read by the workbench and the agent. |
+| `MEMQL_PIPELINES_WORKSPACE_LIMIT`     | `20Gi`              | The size limit of every step's `/workspace` scratch volume, a whole number of `Ki`, `Mi`, `Gi` or `Ti`; anything else is the default. The ConfigMap sets it equal to the `memql-pipelines` LimitRange's default ephemeral-storage limit (20Gi locally, 8Gi on the cloud overlays, sized for their nodes' 32 GiB OS disks), which bounds the whole pod; a step that writes past either is evicted and fails `pipeline_step_disk_exceeded`. Read by the workbench. |
+| `MEMQL_PIPELINES_RUN_RETENTION_DAYS`  | `30`                | Days after a finished pipeline run's latest version before the nightly sweep archives and deletes its records: [Operational record retention](#operational-record-retention). |
+
+For the three clamped knobs, a value that is not a positive whole number falls
+back to its default -- never to a bound, and never to "no limit" -- and a value
+past a bound is clamped to it. The ceiling and both caps are read on the agent
+and on the workbench, so set them where both read them: `memql-secrets`, which
+every node reads.
 
 ## Concept-stored config
 
@@ -1005,11 +1046,14 @@ block that declares it.
 The cron-leader job `workJournalRetentionSweep` runs nightly at 03:40 UTC. It
 archives complete historical versions, verifies the uploaded bytes, then removes
 only the archived versions in bounded transactions. Failed verification preserves
-the records. Active parent work and user-owned goals/runs remain protected.
+the records. Active parent work, goals and user-owned runs remain protected; a
+finished pipeline's runs, and its goal once no run of it remains, are the one
+exception, on their own window.
 
 | Variable | Default | Records |
 | --- | --- | --- |
 | `MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS` | `30` | Terminal, unowned scheduled runs, their steps and closed approvals |
+| `MEMQL_PIPELINES_RUN_RETENTION_DAYS` | `30` | Finished pipeline runs: the `v1:pipelines:run` row and the work run it compiled into, with that run's steps and closed approvals, then the pipeline's goal once no run of it remains. The Library files a run's steps archived (logs, artifacts) are the owner's and are kept |
 | `MEMQL_WORKER_INVOCATION_RETENTION_DAYS` | `90` | Completed worker invocation history |
 | `MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS` | `90` | Safety classification evidence |
 | `MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS` | `90` | Safety output-screening evidence |
@@ -1017,15 +1061,20 @@ the records. Active parent work and user-owned goals/runs remain protected.
 | `MEMQL_WORK_MODELCALL_RETENTION_DAYS` | `90` | Model-call detail; the run retains its summary |
 | `MEMQL_WORK_OBSERVATION_RETENTION_DAYS` | `180` | Observation detail; the run retains its summary |
 
-Ages use the latest stored version. System runs with retained model-call or
-observation detail, pending approvals, or recent children stay until those
-constraints clear. An explicit environment setting overrides a stored global
-variable; the first five policies honor existing global settings, including the
-legacy `WORKER_INVOCATION_RETENTION_DAYS` global variable. Invalid/nonpositive
-values use the documented defaults.
+Ages use the latest stored version. Runs with retained model-call or
+observation detail, pending approvals, recent children, or a child that is not
+the run's own -- an owned child of a system run, another person's child of a
+pipeline's run -- stay until those constraints clear. A batch whose versions
+exceed one archive object is split; a single record too large for one object is
+kept whole and named in the sweep's result. An explicit environment setting
+overrides a stored global variable; every window above except the two
+journal-detail windows honors an existing global setting, including the legacy
+`WORKER_INVOCATION_RETENTION_DAYS` global variable. Invalid/nonpositive values
+use the documented defaults.
 
 `MEMQL_WORK_ARCHIVE_CONTAINER` defaults to `MEMQL_AZURE_BLOB_CONTAINER`.
 Archives use `retention/<UTC-day>/<sha256>.ndjson.gz`, with the original node
 identity, timestamps, schema, metadata, provenance and payload. Archive lifecycle
 is managed separately from database retention. No default age-based deletion
-applies to other concepts, including catalogs, files, goals and customer records.
+applies to other concepts, including catalogs, files, goals other than a
+pipeline's, and customer records.

@@ -744,8 +744,8 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	name := sanitizeLibraryFileName(firstNonBlank(r.FormValue(libraryFormNameKey), header.Filename))
-	mimeType := resolveLibraryMIME(header.Header.Get("Content-Type"), data)
+	name := SanitizeLibraryFileName(firstNonBlank(r.FormValue(libraryFormNameKey), header.Filename))
+	mimeType := ResolveLibraryMIME(header.Header.Get("Content-Type"), data)
 	format := LibraryFormatForMIME(mimeType)
 	sum := sha256.Sum256(data)
 	digest := hex.EncodeToString(sum[:])
@@ -1429,7 +1429,7 @@ func (h *ArtifactHandler) serveFileBytes(w http.ResponseWriter, r *http.Request,
 	// buffered fallback below survives for nodes whose downloader cannot
 	// stream -- correct, just not constant-memory and Range-blind.
 	if h.streamer != nil {
-		h.streamFileBytes(w, r, row, sanitizeLibraryFileName(firstNonBlank(row.Name, artifact.Title)))
+		h.streamFileBytes(w, r, row, SanitizeLibraryFileName(firstNonBlank(row.Name, artifact.Title)))
 		return
 	}
 	if h.downloader == nil {
@@ -1448,7 +1448,7 @@ func (h *ArtifactHandler) serveFileBytes(w http.ResponseWriter, r *http.Request,
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
 	}
-	name := sanitizeLibraryFileName(firstNonBlank(row.Name, artifact.Title))
+	name := SanitizeLibraryFileName(firstNonBlank(row.Name, artifact.Title))
 	writeDownload(w, mimeType, name, data)
 }
 
@@ -1551,7 +1551,7 @@ func LibraryFileConceptRef(fileId string) string {
 	return libraryFileConcept + ":" + fileId
 }
 
-// sanitizeLibraryFileName reduces a client-supplied name to something safe to
+// SanitizeLibraryFileName reduces a client-supplied name to something safe to
 // use as the last segment of a storage key AND as a Content-Disposition
 // filename -- the two places it lands.
 //
@@ -1560,7 +1560,12 @@ func LibraryFileConceptRef(fileId string) string {
 // header quotes the value), leading/trailing dots go (so "." and ".." cannot
 // survive), and the result is bounded by RUNES rather than bytes so the trim
 // cannot split a codepoint.
-func sanitizeLibraryFileName(name string) string {
+//
+// EXPORTED FOR THE LIBRARY'S OTHER WRITERS. A pipeline step's log and
+// artifacts are filed by app/pipelines_library_store.go, which calls this
+// rather than keeping a copy, so a file a pipeline files is named the way an
+// upload is.
+func SanitizeLibraryFileName(name string) string {
 	name = strings.TrimSpace(name)
 	name = strings.ReplaceAll(name, "\\", "/")
 	if i := strings.LastIndexByte(name, '/'); i >= 0 {
@@ -1586,21 +1591,21 @@ func sanitizeLibraryFileName(name string) string {
 
 // exportFileName derives a download filename from an artifact title.
 // Whitespace collapses to hyphens so the name survives a shell without
-// quoting; everything else goes through sanitizeLibraryFileName.
+// quoting; everything else goes through SanitizeLibraryFileName.
 func exportFileName(title, ext string) string {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		title = "artifact"
 	}
 	title = strings.Join(strings.Fields(title), "-")
-	name := sanitizeLibraryFileName(title)
+	name := SanitizeLibraryFileName(title)
 	if strings.HasSuffix(strings.ToLower(name), ext) {
 		return name
 	}
 	return name + ext
 }
 
-// resolveLibraryMIME normalizes the declared content type, and sniffs the
+// ResolveLibraryMIME normalizes the declared content type, and sniffs the
 // leading bytes when the client sent none.
 //
 // ANY type is accepted -- there is no allowlist, which is one of the reasons
@@ -1608,7 +1613,10 @@ func exportFileName(title, ext string) string {
 // an ABSENT header, not a second opinion about a present one: a client that
 // says what it is sending is believed, because it knows things the first 512
 // bytes do not.
-func resolveLibraryMIME(declared string, data []byte) string {
+//
+// Exported, like SanitizeLibraryFileName, for the pipeline store: a runner's
+// declared type is believed and normalized exactly as a client's is.
+func ResolveLibraryMIME(declared string, data []byte) string {
 	if mt := normalizeMIME(declared); mt != "" {
 		return mt
 	}

@@ -574,11 +574,14 @@ func grantRowId(slug string, g componentAuth.VerbResource) string {
 
 // auditRole writes one v1:identity:auditEvent per decision.
 //
-// NO INTERNAL-ORIGIN STAMP, deliberately: createAuditEvent is not @serverOnly,
-// and v1:identity:auditEvent declares @rowAuthz(owner="actorUserId",
-// clusterOwner) -- the actor recorded IS this caller, so the ordinary write
-// path admits it. Stamping anyway would widen a call that does not need
-// widening, which is how an escape becomes ambient.
+// INTERNAL ORIGIN, stamped for this one write (memql#5624). This used to say
+// no stamp was needed because auditEvent declared an owner tier on
+// actorUserId; it declares @rowAuthz(clusterOwner), and the write landed only
+// because nothing judged a create on that tier. Now something does -- a
+// cluster owner or server code -- and the admins who author roles are
+// neither, so without the stamp role authoring would leave no trail. The
+// statement is composed below with every value quoted, so the stamp reaches
+// this one createAuditEvent; the actor it records is still the caller.
 func (i *Integration) auditRole(ctx context.Context, access *componentAuth.AccessContext, action, slug string, detail map[string]any) {
 	if i.engine == nil {
 		return
@@ -604,7 +607,7 @@ func (i *Integration) auditRole(ctx context.Context, access *componentAuth.Acces
 		langparser.QuoteString(slug),
 		langparser.QuoteString("success"),
 		string(body))
-	_, _ = i.engine.Execute(ctx, query)
+	_, _ = i.engine.Execute(componentAuth.ContextWithInternalOrigin(ctx), query)
 }
 
 // decisionNodes wraps a decision in the single-node shape a builtin returns.

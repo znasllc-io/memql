@@ -3437,6 +3437,27 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .fleet-share-chip .os-chip-remove:hover:not(:disabled) {
   background: var(--os-hover);
 }
+/* A STAND-IN, NOT A NAME (memql#5659): the directory could not be read, so the
+ * chip says what it is and where it sits on the list ("Person 2") in the muted
+ * ink. The edge stays solid -- it is on the list, which a dashed, stale chip
+ * is only just. */
+.fleet-share-chip[data-stand-in] .fleet-share-chip-name {
+  color: var(--os-muted);
+}
+/* While the names are read, the chips' own shape: a pill per stored entry, the
+ * height of a real one (its 20px remove control plus the padding), so nothing
+ * moves when the names land. */
+.fleet-share-chip[data-shape] .os-chip {
+  height: 26px;
+  padding: 0 12px;
+}
+.fleet-share-chip-shape {
+  width: 60px;
+  height: 9px;
+}
+.fleet-share-chip[data-shape]:nth-child(3n + 2) .fleet-share-chip-shape {
+  width: 84px;
+}
 
 /* `flex: none` because `.os-input` is `flex: 1 1 12ch`, which is right in a
  * control ROW and wrong in this COLUMN: along a column's main axis that basis
@@ -3511,24 +3532,43 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 .fleet-share-option[data-active] .fleet-share-option-add {
   color: var(--os-accent);
 }
-/* The refusal takes focus (so it is scrolled to and read); its outline is the
- * notice's own edge, not a second ring around it. */
-/* Between the scrolling body and the floor: it never scrolls away, and the
- * body gives up the height it needs. flow-root keeps the notice's margins
- * inside, so the pinned band is exactly as tall as what it says. */
-.fleet-share-refusal {
+/* THE BAND between the scrolling body and the floor, for what the person must
+ * read before Save: a change made elsewhere, a refusal. It never scrolls away,
+ * and the body gives up the height it needs; as a flex column it holds its
+ * notices' margins inside, so it is exactly as tall as what it says. */
+.fleet-share-band {
   flex: none;
-  display: flow-root;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 12px 20px 14px;
   /* The body scrolls behind this band; the hairline says where it stops. */
   border-top: 1px solid var(--os-line);
 }
-.fleet-share-refusal:focus {
+/* A notice here can take focus -- the refusal, so it is read; a change made
+ * elsewhere, when the Save that held focus was disabled under it -- and its
+ * outline is the notice's own edge, not a second ring around it. */
+.fleet-share-refusal:focus,
+.fleet-share-moved:focus {
   outline: none;
 }
-.fleet-share-refusal:focus-visible > .os-notice {
+.fleet-share-refusal:focus-visible > .os-notice,
+.fleet-share-moved:focus-visible > .os-notice {
   outline: 2px solid var(--os-accent);
   outline-offset: 2px;
+}
+/* What is stored now is the half of the choice the dialog does not show, so it
+ * is set in the ink while its label stays quiet. */
+.fleet-share-moved-now {
+  color: var(--os-ink);
+}
+/* The two answers, side by side and equal: neither is the dialog's act -- that
+ * is Save, on the floor -- so neither is primary. */
+.fleet-share-moved-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
 }
 .fleet-share-terms {
   display: flex;
@@ -4903,11 +4943,12 @@ a.os-button {
  * in a story that cannot wrap breaks rather than widening the panel.
  *
  * This is the SECOND source of the same overflow, and the one a guard would
- * have hidden most convincingly: `fileStory` composes "Produced by plan
- * <id>", so a plan id -- forty characters with no break opportunity anywhere
- * in it -- sits inside an ordinary sentence. The facts grid was the first
- * source and this would have been the next, clipped mid-sentence with no
- * ellipsis to say anything had been cut.
+ * have hidden most convincingly: `fileStory` once composed "Produced by plan
+ * <id>", so an id -- forty characters with no break opportunity anywhere in
+ * it -- sat inside an ordinary sentence. The facts grid was the first source
+ * and this would have been the next, clipped mid-sentence with no ellipsis to
+ * say anything had been cut. The id has since left the story for the `Run`
+ * fact, but a story still names a machine, whose name nobody here chose.
  *
  * A sentence WRAPS where a table value TRUNCATES, and the difference is
  * deliberate: a cell has one line to give and a paragraph has as many as it
@@ -8095,16 +8136,22 @@ a.os-button {
 
 /* ---- one line ----
  *
- * Fixed height per density (30px comfortable, 22px compact; LogLine.tsx's
- * ROW_HEIGHT carries the same numbers for the geometry), a two-pixel left
- * rule for warn and error only, and no per-row border: the rows are the
- * texture of the list, not cards in it. */
+ * A fixed height per density, set on the row by the windowed list (30px
+ * comfortable, 22px compact at the default font, growing with the reader's:
+ * LogLine.tsx's rowHeightAt), a two-pixel left rule for warn and error only,
+ * and no per-row border: the rows are the texture of the list, not cards in
+ * it.
+ *
+ * NO GAP BETWEEN CELLS. A flex gap stands between two items whatever their
+ * width, so an attribute cell the row had squeezed to nothing still took its
+ * gap from the message. The space belongs to the cells instead (below):
+ * `--os-logs-gap` is how much. */
 .os-logs-line {
+  --os-logs-gap: 10px;
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
   height: 100%;
   padding: 0 10px 0 8px;
   border-left: 2px solid transparent;
@@ -8149,18 +8196,52 @@ a.os-button {
   white-space: nowrap;
   color: var(--os-muted);
 }
+/* THE SPACE BETWEEN CELLS BELONGS TO THE CELLS, so a cell with nothing to
+ * show costs nothing. The three fixed cells, always there, carry theirs after
+ * them. The attributes carry theirs inside, as an indent their own overflow
+ * clips: squeezed to nothing, they take their space with them. The mark's
+ * cell carries its own before the mark, and an empty one is not laid out. */
+.os-logs-time,
+.os-logs-level,
+.os-logs-component {
+  margin-right: var(--os-logs-gap);
+}
+.os-logs-attrs {
+  text-indent: var(--os-logs-gap);
+}
+.os-logs-subject-cell {
+  padding-left: var(--os-logs-gap);
+}
+.os-logs-subject-cell:empty {
+  display: none;
+}
+/* THE MESSAGE AND THE ATTRIBUTES: three layouts, one per list (R40, R40b,
+ * R40c, epic memql#5478). useLogRowLayout names one on `.os-logs-list` as
+ * `data-layout`, from the list's width and the reader's font size. These two
+ * rules are WIDE's, and an unmeasured list is WIDE; MEDIUM and NARROW are
+ * below.
+ *
+ * WIDE: the row's flexible width -- what the fixed cells and the mark's fixed
+ * column (below) leave -- goes seventy percent to the message and thirty to
+ * the attributes. Both grow from nothing in that ratio, so the attribute
+ * column starts at one x on every line with a mark, and the message has the
+ * larger share: a column wider than its attributes is room the message did
+ * not get. A list is WIDE only from WIDE_FROM (src/logs/LogLine.tsx),
+ * measured so that the message's share is a comfortable sixty characters
+ * beside the widest mark. The 32-character minimum is MEDIUM's floor; WIDE
+ * never reaches it. */
 .os-logs-message {
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 7 1 0;
+  min-width: 32ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Inline attributes take at most forty percent of the row: they are the
- * quiet half, and a line whose attributes crowded out its message would
- * read backwards. */
+/* Inline attributes are the quiet half, and a line whose attributes crowded
+ * out its message would read backwards: at most forty percent of the row,
+ * and in every layout the first cell to give way. */
 .os-logs-attrs {
-  flex: 0 1 40%;
+  flex: 3 1 0;
   min-width: 0;
   max-width: 40%;
   overflow: hidden;
@@ -8178,8 +8259,23 @@ a.os-button {
 }
 /* The subject mark: a small quiet control at the row end that narrows the
  * surface to what the line is about. Chip-shaped, because it names a thing
- * rather than doing one to it. */
+ * rather than doing one to it.
+ *
+ * AT MOST EIGHTEEN CHARACTERS, then an ellipsis. The word is a concept's last
+ * segment, which nothing bounds, and the two measures that choose a list's
+ * layout can only hold a message beside a mark of known width. Eighteen keeps
+ * every subject the logs name today whole ("packageDeployment" is
+ * seventeen); the full name stays on the mark's title and in its label. The
+ * 16px is its padding and border.
+ *
+ * ITS LINE FOLLOWS ITS FONT: 16px at the default 11px, as a ratio rather than
+ * pixels. The overflow that cuts a long word would clip a fixed 16px line's
+ * descenders under a larger font. */
 .os-logs-subject {
+  max-width: calc(18ch + 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   border: 1px solid var(--os-line);
   border-radius: 999px;
   background: none;
@@ -8187,7 +8283,7 @@ a.os-button {
   font: inherit;
   font-family: var(--os-font-mono);
   font-size: var(--os-text-xs);
-  line-height: 16px;
+  line-height: calc(16 / 11);
   padding: 0 7px;
   cursor: pointer;
 }
@@ -8200,9 +8296,79 @@ a.os-button {
   outline-offset: 1px;
 }
 .os-app-stack[data-density="compact"] .os-logs-line {
-  gap: 8px;
+  --os-logs-gap: 8px;
   font-size: var(--os-text-xs);
 }
+
+/* WIDE: THE MARK'S COLUMN IS FIXED, at the width the mark is bounded to, so
+ * the attribute column before it starts at one x on every line with a mark,
+ * whichever mark it is. The cell takes the mark's own font so that its
+ * eighteen characters are the mark's; the mark sits at the row end. */
+.os-logs-list[data-layout="wide"] .os-logs-subject-cell {
+  justify-content: flex-end;
+  width: calc(var(--os-logs-gap) + 18ch + 16px);
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-xs);
+}
+/* A line with no mark has no mark's cell (an empty one is not laid out), and
+ * its attributes run on through that column to the row end: starting from
+ * the column's width, they grow by the same thirty percent, so they start
+ * where every other line's do, and the room the absent mark leaves is theirs
+ * rather than blank. Their characters are the mark's (the same mono voice at
+ * the same size), so the column is the cell's exactly. */
+.os-logs-list[data-layout="wide"] .os-logs-attrs:has(+ .os-logs-subject-cell:empty) {
+  flex-basis: calc(var(--os-logs-gap) + 18ch + 16px);
+}
+
+/* ---- MEDIUM: the message first (R40b) ----
+ *
+ * From STACK_BELOW up to WIDE_FROM a row cannot hold the whole attribute
+ * column beside a comfortable message, so the column is what goes. The
+ * message is sized by its own length and is the only cell that can shrink,
+ * so it is cut only when the row has nothing else to give, and never below
+ * its 32 characters; the attributes have no basis and take only what it
+ * leaves -- truncated, then gone, before the message loses a character.
+ * Their auto margin seats them against the mark, so the column is ragged
+ * here: that is the price of the message. */
+.os-logs-list[data-layout="medium"] .os-logs-message {
+  flex: 0 1 auto;
+}
+.os-logs-list[data-layout="medium"] .os-logs-attrs {
+  flex: 1 1 0;
+  margin-left: auto;
+}
+/* A line with no attributes still ends at the row's edge: the message does
+ * not grow here, so the mark is pushed there. */
+.os-logs-list[data-layout="medium"] .os-logs-attrs:empty + .os-logs-subject-cell {
+  margin-left: auto;
+}
+
+/* ---- NARROW: the stacked row (R40) ----
+ *
+ * A list narrower than STACK_BELOW cannot hold the fixed cells and a readable
+ * message on one line, so the row takes two: time, level, component and the
+ * subject mark, then the whole message at full width. The same measurement
+ * tells the windowed list the taller row (src/logs/useLogRowLayout.ts) -- a
+ * container query here would restyle rows the list still spaced as one line.
+ * The inline attributes go: the line's detail lists every one of them and
+ * opens from the row (a click, or Enter on the focused list), and a third
+ * line of quiet text would cost every row a third of its height for what the
+ * detail holds. */
+.os-logs-list[data-layout="narrow"] .os-logs-line {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "time level component subject"
+    "message message message message";
+  align-content: center;
+  row-gap: 3px;
+}
+.os-logs-list[data-layout="narrow"] .os-logs-time { grid-area: time; }
+.os-logs-list[data-layout="narrow"] .os-logs-level { grid-area: level; }
+.os-logs-list[data-layout="narrow"] .os-logs-component { grid-area: component; width: auto; margin-right: 0; }
+.os-logs-list[data-layout="narrow"] .os-logs-subject-cell { grid-area: subject; }
+.os-logs-list[data-layout="narrow"] .os-logs-message { grid-area: message; min-width: 0; }
+.os-logs-list[data-layout="narrow"] .os-logs-attrs { display: none; }
 
 /* ---- the scope line ----
  *
@@ -8547,6 +8713,103 @@ a.os-button {
   gap: 8px;
   align-items: center;
   margin-top: 4px;
+}
+
+/* ---- a storefront's values per store (memql#5602) ----
+ * One group per store, headed by the store's DOMAIN in the ink and the
+ * website it supplies in the quiet voice beside it: which store a value is
+ * for is the one thing this section must never leave in doubt. The groups
+ * reuse the settings editor's rows, header and readable measure above. */
+.os-store-values {
+  display: grid;
+  gap: 18px;
+}
+.os-store-values-store {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.os-store-values-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin: 0;
+  font-size: var(--os-text-base);
+  font-weight: 500;
+  color: var(--os-ink);
+}
+.os-store-values-name {
+  overflow-wrap: anywhere;
+}
+.os-store-values-where {
+  font-size: var(--os-text-sm);
+  font-weight: 400;
+  color: var(--os-muted);
+}
+/* A ROW IS ITS FIELDS AND ITS NOTE, so rows stand further apart than a
+ * row's own parts do -- equal spacing left a note reading as the next row's. */
+.os-store-values .os-settings-rows {
+  gap: 14px;
+}
+/* What a store's value replaces, under the row it belongs to. */
+.os-store-values-note {
+  grid-column: 1 / -1;
+  margin: -3px 0 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  overflow-wrap: anywhere;
+}
+/* Stacked on a phone, a row's parts close up and Remove keeps its own
+ * width: three full-width controls a row read as three rows. */
+@media (max-width: 640px) {
+  .os-store-values .os-settings-row {
+    gap: 6px;
+  }
+  .os-store-values .os-settings-row > .os-button {
+    justify-self: start;
+  }
+}
+.os-store-values-kept {
+  display: grid;
+  gap: 4px;
+  max-width: 720px;
+}
+/* What a store holds NOW, in the ink: the half of the choice the fields
+ * above do not show. */
+.os-store-values-now {
+  color: var(--os-ink);
+  overflow-wrap: anywhere;
+}
+/* The two answers to a change made elsewhere, equal: neither is primary. */
+.os-store-values-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* ---- the confirm gate's "Deploy as" choice (memql#5601) ----
+ * A row of the Versions section like the attempt it follows, but its body is
+ * a choice whose cards explain themselves -- so the label holds to the first
+ * card's line rather than centring on a block two cards tall, and the cards
+ * keep a readable measure instead of running the width of a wide window. */
+.deployable-version-row.deployable-deploy-target {
+  align-items: start;
+}
+.deployable-deploy-target > span {
+  padding-top: 9px;
+}
+.deployable-deploy-target-body {
+  display: grid;
+  gap: 8px;
+  max-width: 34rem;
+  min-width: 0;
+}
+@container (max-width: 480px) {
+  .deployable-deploy-target > span {
+    padding-top: 0;
+  }
 }
 
 /* Motion is emphasis, never information: the strip carries its whole meaning
@@ -14834,6 +15097,12 @@ button.os-cluster-mesh-peer:focus-visible {
   gap: 2px;
   min-width: 0;
 }
+/* IN A FIELD, a copy field takes the field's width as an input does: sized
+ * to its content it cut a secret's name short, and a value cut short is one
+ * somebody copies without reading. */
+.os-form-row > .os-copyfield {
+  flex: 1 1 12ch;
+}
 .os-copyfield-line {
   display: flex;
   align-items: center;
@@ -15112,6 +15381,11 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-info-detail { display: inline-flex; vertical-align: middle; }
 .os-info-detail .os-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; background: transparent; color: var(--os-muted); border-radius: 50%; cursor: pointer; }
 .os-info-detail .os-icon-button:hover:not(:disabled), .os-info-detail .os-icon-button:focus-visible:not(:disabled) { background: var(--os-hover); color: var(--os-ink); }
+/* Beside a fact's value (Fleet's "Pipeline steps", epic memql#5478) the info
+ * control overflows the line rather than growing it -- the Reuse heading's
+ * rule, one container down. Grown, its 28px button pushed the value 6px below
+ * its own label and made the one row taller than every row around it. */
+.os-facts dd .os-info-detail { margin: -6px 0 -6px 6px; }
 .os-info-dialog { padding: 0; color: var(--os-ink); background: var(--os-raised); border: 1px solid var(--os-line-strong); border-radius: 12px; width: min(430px,calc(100vw - 40px)); max-height: calc(100vh - 60px); box-shadow: var(--os-shadow-float); }
 .os-info-dialog::backdrop { background: #0006; }
 .os-info-dialog-body { padding: 20px 24px; font-size: var(--os-text-sm); line-height: 1.65; }

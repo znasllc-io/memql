@@ -1,0 +1,76 @@
+# The pipeline the pipelines substrate's cluster-e2e leg runs end to end
+# (epic memql#5478, issue memql#5497): test/clustere2e/pipelines_substrate_test.go
+# reads it the way a run reads its tree's memql-package.yaml and compiles it with
+# the seam's own Compile, for a push to the default branch.
+#
+# EVERY IMAGE IS PUBLIC AND PINNED BY DIGEST. A step's Job pulls with no registry
+# credential, so a private image (ghcr.io/znasllc-io/ci-timescaledb is one) would
+# fail every step before it ran. The digest is the multi-arch INDEX, measured with
+#   docker buildx imagetools inspect docker.io/library/postgres:17.11-bookworm
+# on 2026-10-04; move it by measuring again, never by editing the tag alone.
+formatVersion: 1
+name: pipelines-e2e
+pipeline:
+  # Every command step runs in this image. The database step needs psql, and the
+  # wrapper that frames its artifact needs tar and base64: this image has all
+  # three, so one image serves every step.
+  image: docker.io/library/postgres:17.11-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
+  services:
+    postgres:
+      image: docker.io/library/postgres:17.11-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
+      env:
+        POSTGRES_USER: memql
+        # Configuration of a throwaway sidecar, not a secret. The step reads
+        # the same value through its own environment, as the secret PGPASSWORD
+        # the test's secret store resolves to it.
+        POSTGRES_PASSWORD: e2e-postgres-password
+        POSTGRES_DB: memql
+        # A password over TCP, from localhost too. The image's initdb trusts
+        # every local connection by default, so without this the step would
+        # connect with no password at all and the secret would prove nothing
+        # (measured: withholding it changed nothing). The socket stays trusted
+        # for the image's own initialization.
+        POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+      # Over TCP, the way the step connects: the image's first start runs its
+      # initialization on a server listening on its socket alone, then restarts
+      # it, so a socket probe can pass before the server the step reaches is up.
+      # The runner turns this into the sidecar's startup probe, which is what
+      # holds the step back until the server answers.
+      ready: pg_isready -h localhost -U memql -d memql
+  # The cache claim, mounted per owner: the cache-prep init container and the
+  # deployed PersistentVolumeClaim are part of what this leg drives.
+  caches: [go]
+  select:
+    go: import-graph
+  stages:
+    - name: database
+      steps:
+        # psql connects once, with no retry: a step that reaches the server at
+        # all reached it because the sidecar was ready before the step began.
+        - name: psql
+          services: [postgres]
+          secrets: [PGPASSWORD]
+          timeout: 10m
+          artifacts: [out/select-1.txt]
+          run: |
+            set -eu
+            mkdir -p out
+            psql -h localhost -U memql -d memql -v ON_ERROR_STOP=1 -tAc 'select 1' > out/select-1.txt
+            cat out/select-1.txt
+    - name: shards
+      steps:
+        # Split over two Jobs by the timing table (empty here, so by count),
+        # each told its slice in MEMQL_PACKAGES.
+        - name: packages
+          packages: all
+          shards: 2
+          timeout: 10m
+          run: echo "$MEMQL_PACKAGES"
+    - name: fleet
+      steps:
+        # A need no cluster Job can meet: the executor sends the step to the
+        # owner's machines, and the owner has none.
+        - name: display
+          needs: { display: true }
+          timeout: 10m
+          run: echo "this step needs a display, which no Job in the cluster offers"

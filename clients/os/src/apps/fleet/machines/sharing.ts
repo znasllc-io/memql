@@ -77,6 +77,47 @@ export function storedSubjects(machine: Pick<MachineRow, "sharedUserIds" | "shar
   ];
 }
 
+/** Whether two lists name the same subjects, as SETS of kind and bare id:
+ *  order is not a decision anybody made, and the spelling is not either. */
+function sameSubjects(a: readonly Subject[], b: readonly Subject[]): boolean {
+  const left = new Set(a.map((s) => subjectKey(s.kind, s.id)));
+  const right = new Set(b.map((s) => subjectKey(s.kind, s.id)));
+  if (left.size !== right.size) return false;
+  for (const key of left) if (!right.has(key)) return false;
+  return true;
+}
+
+/**
+ * A stand-in for each subject on a list nobody has named yet -- its kind and
+ * its place among that kind: "Person 2", "Group 1".
+ *
+ * NEVER THE ID. A person's id is an opaque 36-character token, and printing it
+ * in a name's place tells the owner nothing they can act on (the Deployables
+ * rule, apps/deployables/people.ts). NEVER "UNKNOWN" EITHER: that is the
+ * directory's own answer for a subject no row names any more, and here the
+ * directory has not answered at all.
+ *
+ * STABLE UNDER REMOVAL. The place is counted on the list the draft STARTED
+ * from, so removing Person 1 leaves Person 2 as Person 2: a label that
+ * renumbered under the person would have them remove the wrong one next. A
+ * subject that list does not hold is counted on after it.
+ */
+export function standInNames(
+  subjects: readonly Subject[],
+  start: Pick<MachineRow, "sharedUserIds" | "sharedGroupIds">,
+): Map<string, string> {
+  const names = new Map<string, string>();
+  const counted = { person: 0, group: 0 };
+  const word = { person: "Person", group: "Group" };
+  for (const subject of [...storedSubjects(start), ...subjects]) {
+    const key = subjectKey(subject.kind, subject.id);
+    if (names.has(key)) continue;
+    counted[subject.kind] += 1;
+    names.set(key, `${word[subject.kind]} ${counted[subject.kind]}`);
+  }
+  return names;
+}
+
 // ---------------------------------------------------------------------------
 // The one-line state
 // ---------------------------------------------------------------------------
@@ -166,8 +207,44 @@ export interface ShareDraft {
   subjects: Subject[];
 }
 
-export function draftFrom(machine: Pick<MachineRow, "sharingMode" | "sharedUserIds" | "sharedGroupIds">): ShareDraft {
+/** The stored decision, as the three fields a draft is taken from. */
+export type StoredShare = Pick<MachineRow, "sharingMode" | "sharedUserIds" | "sharedGroupIds">;
+
+export function draftFrom(machine: StoredShare): ShareDraft {
   return { mode: machine.sharingMode, subjects: storedSubjects(machine) };
+}
+
+/**
+ * A copy of the stored decision, taken when a draft is: the draft's STARTING
+ * value (memql#5659).
+ *
+ * Whether the stored share MOVED while the dialog was open is a question about
+ * the row and this value -- never about the row and the draft, which differ
+ * the moment anybody picks. Asking the second made a change from another tab
+ * look like the owner's own unsaved edit, and Save wrote the old draft back
+ * over it. It is the discipline the panel already keeps for its receipt
+ * (SharingGroup's `before`), which retires a stale receipt when the row moves
+ * away from the state the save was made against.
+ */
+export function storedShare(machine: StoredShare): StoredShare {
+  return {
+    sharingMode: machine.sharingMode,
+    sharedUserIds: [...machine.sharedUserIds],
+    sharedGroupIds: [...machine.sharedGroupIds],
+  };
+}
+
+/**
+ * Whether a draft is still exactly the share it was taken from: the same mode
+ * and the same people and groups -- INCLUDING a list kept under another mode,
+ * which the person built and which comes back if they choose people again.
+ *
+ * STRICTER THAN `draftDiffers` ON PURPOSE. This decides whether a change made
+ * elsewhere may replace the draft without asking, and a list the person
+ * assembled is theirs even while it is not in force.
+ */
+export function draftUntouched(draft: ShareDraft, start: StoredShare): boolean {
+  return draft.mode === start.sharingMode && sameSubjects(draft.subjects, storedSubjects(start));
 }
 
 /**
@@ -178,17 +255,10 @@ export function draftFrom(machine: Pick<MachineRow, "sharingMode" | "sharedUserI
  * draft differs from it. Lists are compared as SETS of bare ids -- order is
  * not a decision anybody made, and the spelling is not either.
  */
-export function draftDiffers(
-  draft: ShareDraft,
-  machine: Pick<MachineRow, "sharingMode" | "sharedUserIds" | "sharedGroupIds">,
-): boolean {
+export function draftDiffers(draft: ShareDraft, machine: StoredShare): boolean {
   if (draft.mode !== machine.sharingMode) return true;
   if (draft.mode !== "people") return false;
-  const drafted = new Set(draft.subjects.map((s) => subjectKey(s.kind, s.id)));
-  const stored = new Set(storedSubjects(machine).map((s) => subjectKey(s.kind, s.id)));
-  if (drafted.size !== stored.size) return true;
-  for (const key of drafted) if (!stored.has(key)) return true;
-  return false;
+  return !sameSubjects(draft.subjects, storedSubjects(machine));
 }
 
 /** A people share must name somebody (the engine's share_needs_someone). */

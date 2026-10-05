@@ -180,9 +180,16 @@ type Signal struct {
 	// RepeatedAction is set when this step has already been attempted
 	// with the same input and the same result -- the stall signal.
 	RepeatedAction bool
-	// Attempt is 1 on the first execution.
+	// Attempt is the failed STEP's attempt, 1 on its first execution. The
+	// classifier is shown it; ActFor does not read it, because a step's own
+	// attempts are the executor's retry(n) loop, already spent by the time
+	// the failure reaches the table.
 	Attempt int
-	// MaxRetries is the run-wide retry budget.
+	// RetriesSpent is how many re-attempts the failure path has already
+	// given the RUN: v1:work:run.spent.retries.
+	RetriesSpent int
+	// MaxRetries is the run-wide retry budget: the goal's ceilings.maxRetries,
+	// or DefaultMaxRetries when the goal declares none (RetryBudget).
 	MaxRetries int
 }
 
@@ -313,29 +320,71 @@ func ClassifyByRules(s Signal) (Symptom, Evidence, bool) {
 	return SymptomNone, Evidence{}, false
 }
 
-// ActFor maps a symptom onto its act (spec section E). The one branch is
-// transient: it retries INSIDE the run-wide retry budget and becomes a
-// question for a person past it, because a blip that will not stop being
-// a blip is not a blip.
-func ActFor(sym Symptom, attempt, maxRetries int) Act {
+// ActFor maps a symptom onto its act (spec section E).
+//
+// THE THREE ACTS THAT RUN THE WORK AGAIN SPEND THE RUN-WIDE RETRY BUDGET:
+// retry, repair and replan each hand the run back for another attempt, so
+// each is taken only while retriesSpent < maxRetries, and past it the run
+// asks a person. For transient that is the spec's own sentence -- a blip that
+// will not stop being a blip is not a blip. For contract it is the spec's
+// "bounded". For plan it is the same bound arrived at for the same reason: a
+// re-plan that fails again re-plans again, at the reasoning level, and the
+// budget is what stops that loop.
+//
+// The comparison is CheckCeilings' own (`spent.retries >= maxRetries` is the
+// retries ceiling reached), so the act and the ceiling agree on the boundary:
+// a budget of three is three retries, the fourth failure asks.
+//
+// THE INPUTS ARE THE RUN'S, never the failed step's. It used to be handed the
+// step's attempt and the step's retry(n), so the comparison was `1+n < n` and
+// ActRetry was unreachable (memql#5664). maxRetries arrives resolved: a goal
+// that declared no budget gets RetryBudget's default from the caller, and a
+// zero here is a budget of nothing -- which is what a caller that could not
+// read the budget passes, so an unreadable budget asks rather than loops.
+func ActFor(sym Symptom, retriesSpent, maxRetries int) Act {
+	again := retriesSpent < maxRetries
 	switch sym {
 	case SymptomTransient:
-		if attempt < maxRetries {
+		if again {
 			return ActRetry
 		}
 		return ActAsk
 	case SymptomEnvironment:
 		return ActHeal
 	case SymptomContract:
-		return ActRepair
+		if again {
+			return ActRepair
+		}
+		return ActAsk
 	case SymptomPlan:
-		return ActReplan
+		if again {
+			return ActReplan
+		}
+		return ActAsk
 	default:
 		// SymptomHuman, and anything unrecognised. An unknown symptom
 		// asks a person rather than acting on a guess: of the five acts
 		// this is the only one that cannot make things worse.
 		return ActAsk
 	}
+}
+
+// SpendsRetry reports whether an act hands the run back for another attempt,
+// and so spends one retry from the run-wide budget when it is recorded.
+func SpendsRetry(a Act) bool {
+	switch a {
+	case ActRetry, ActRepair, ActReplan:
+		return true
+	}
+	return false
+}
+
+// ActsAgain reports whether a symptom's act runs the work again while the
+// budget lasts -- and so whether deciding it needs the run's retry budget at
+// all. It asks ActFor with a budget of one unspent retry rather than listing
+// the symptoms a second time, so the two cannot disagree.
+func ActsAgain(sym Symptom) bool {
+	return SpendsRetry(ActFor(sym, 0, 1))
 }
 
 // ApprovalKindFor names the v1:work:approval kind an act raises, or ""

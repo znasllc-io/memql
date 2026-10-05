@@ -26,7 +26,9 @@ import (
 //     and install it on NodeServer so inbound
 //     WorkbenchForwardRequest envelopes dispatch into the same six
 //     action handlers (exec / fs_read / fs_write / fs_list /
-//     fs_stat / http_fetch) used in single-node mode.
+//     fs_stat / http_fetch) used in single-node mode, and the four
+//     pipeline actions into this node's pipeline runner
+//     (workbenchForwardHandler).
 //
 // All other node types: no-op.
 func (a *App) wireWorkbenchForwarding(
@@ -126,10 +128,26 @@ func (a *App) wireWorkbenchForwarding(
 			a.Logger.Warn("workbench node: NodeServer nil; inbound dispatches will be unhandled")
 			return
 		}
-		handler := workbench.NewForwardHandler(integ, a.Logger)
-		nodeServer.SetWorkbenchForwardHandler(handler)
-		a.Logger.Info("workbench node: forward handler installed on NodeService.Stream")
+		nodeServer.SetWorkbenchForwardHandler(a.workbenchForwardHandler(integ))
+		a.Logger.Info("workbench node: forward handler installed on NodeService.Stream",
+			"pipelineRunner", a.pipelineRunner != nil)
 	}
+}
+
+// workbenchForwardHandler is the workbench node's forward handler: the local
+// integration's actions, and the four pipeline actions (epic memql#5478)
+// answered by this node's runner -- the one the workbench's integrations phase
+// built, or none on a node that cannot run steps, which answers every one of
+// them pipelines_not_configured.
+//
+// The one place a workbench handler is made, so none can be made without the
+// runner (TestTheWorkbenchNodeInstallsItsPipelineRunner). a.pipelineRunner is
+// a nil INTERFACE when unset, never a typed nil: the handler refuses a nil
+// runner and would call a typed nil.
+func (a *App) workbenchForwardHandler(integ *workbench.Integration) *workbench.ForwardHandler {
+	handler := workbench.NewForwardHandler(integ, a.Logger)
+	handler.SetPipelineRunner(a.pipelineRunner)
+	return handler
 }
 
 // existingWorkerDialer returns the WorkerDialer this node has already

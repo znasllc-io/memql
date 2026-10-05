@@ -350,12 +350,11 @@ func (i *IdentityIntegration) auditTransfer(ctx context.Context, access *compone
 		langparser.QuoteString(to),
 		langparser.QuoteString("success"),
 		string(detail))
-	// NO INTERNAL-ORIGIN STAMP HERE, deliberately. createAuditEvent is not
-	// @serverOnly, and v1:identity:auditEvent declares
-	// `@rowAuthz(owner="actorUserId", clusterOwner)` -- the actor recorded IS
-	// this caller, who is a cluster owner by the check above, so the ordinary
-	// write path admits it. Stamping anyway would widen a call that does not
-	// need widening, which is how an escape becomes ambient.
+	// NO INTERNAL-ORIGIN STAMP HERE, deliberately. v1:identity:auditEvent
+	// declares @rowAuthz(clusterOwner), whose create admits a cluster owner or
+	// server code (memql#5624), and this caller is a cluster owner by the
+	// check above. Stamping anyway would widen a call that does not need
+	// widening, which is how an escape becomes ambient.
 	_, err = i.engine.Execute(ctx, query)
 	return err
 }

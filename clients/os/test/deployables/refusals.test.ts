@@ -317,7 +317,7 @@ describe("refusal copy coverage", () => {
     // duplicated credential rows, which are the cluster's fault.
     for (const code of [
       "site_not_writable", "not_a_storefront", "store_not_named", "store_redacted", "app_credentials_invalid",
-      "store_not_connected", "store_in_use", "storefront_token_required", "storefront_token_invalid", "shopify_app_not_saved",
+      "store_not_connected", "storefront_token_required", "storefront_token_invalid", "shopify_app_not_saved",
     ]) {
       expect(copyFor(code), code).not.toBeNull();
       expect(toneFor(code), code).toBe("warn");
@@ -405,6 +405,8 @@ describe("pipeline refusal copy", () => {
     expect(copyFor("pipeline_log_capped")?.next).toContain("Library");
     expect(copyFor("pipeline_artifact_missing")?.title).toBe("A declared artifact path matched no file");
     expect(copyFor("pipeline_isolation_unenforced")?.next).toContain("network policy");
+    expect(copyFor("pipeline_timings_unreadable")?.title).toBe("The step's Go test timings could not be read from its log");
+    expect(copyFor("pipeline_outcome_trimmed")?.next).toContain("Library");
     // And the engine's: a fork is refused with somewhere to go instead.
     expect(copyFor("pipeline_fork_refused")?.next).toContain("Push the branch");
   });

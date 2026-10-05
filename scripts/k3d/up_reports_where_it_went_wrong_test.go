@@ -35,9 +35,19 @@ import (
 // $FAKE_APP_SYNC. Both are read fresh on every call, and $FAKE_APP_CLEAR_AFTER
 // makes the conditions clear after N reads -- which is how a transient
 // ComparisonError is expressed.
+//
+// Two knobs for up_argocd_settings_test.go (memql#5492), both off by default
+// so every other caller sees exit 0 as before: $FAKE_ARGOCD_ABSENT=1 makes
+// `get namespace` find nothing (a cluster with no Argo CD yet), and
+// $FAKE_PATCH_EXIT is the exit status of `patch configmap`.
 const appFakeKubectl = `#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FAKE_KUBECTL_LOG"
 case "$*" in
+  *"get namespace"*)
+    if [ "${FAKE_ARGOCD_ABSENT:-}" = 1 ]; then exit 1; fi
+    exit 0 ;;
+  *"patch configmap"*)
+    exit "${FAKE_PATCH_EXIT:-0}" ;;
   *"get application"*)
     reads=0
     [ -f "$FAKE_APP_READS" ] && reads="$(cat "$FAKE_APP_READS")"

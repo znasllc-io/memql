@@ -472,6 +472,12 @@ func (a *App) cluster() {
 		a.wireWorkbenchForwarding(nodeIdentity, peerMgr, nodeServer, parentConnector)
 	}
 
+	// The pipelines executor (epic memql#5478), on agent nodes: AFTER the
+	// workbench router above, which it forwards cluster steps over, and
+	// outside the mesh block, so an agent with no mesh still registers one
+	// that names what it lacks. A no-op on every other node type.
+	a.wirePipelinesExecutor(nodeIdentity)
+
 	// Deploy-control receiving side (memql#3380). Installed on whichever node
 	// actually HAS a DeployControlService -- in practice the identity node,
 	// because the service shells out against an on-disk overlay checkout.

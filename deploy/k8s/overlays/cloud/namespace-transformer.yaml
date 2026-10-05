@@ -1,0 +1,27 @@
+# The mesh namespace. unsetOnly is load-bearing: the pipelines component renders
+# objects into a SECOND namespace (memql-pipelines), which the plain `namespace:`
+# field would rename into this one ("namespace transformation produces ID conflict").
+#
+# WHAT IT DOES (memql#5492). It sets metadata.namespace on every object that
+# states none -- the pipelines ConfigMap among them, which belongs beside the
+# workbench -- and leaves every stated namespace alone. base states `memql` on
+# everything it renders (its own `namespace:` field), so this renders
+# byte-identical to the plain field it replaced, apart from the pipelines
+# objects; measured on 2026-10-03.
+#
+# WHAT IT NO LONGER DOES: move what base already placed. Changing the value
+# below re-homes only the objects that state no namespace -- the database and
+# the other component objects that leave it unset, the pipelines ConfigMap
+# among them -- and leaves every Deployment where base put it: a split mesh,
+# not a moved one (measured with `foo`). A mesh under another name is a
+# tenant-style overlay (deploy/k8s/components/tenant/template), which sets the
+# plain field and does not compose the pipelines component.
+#
+# The same file sits in each instance overlay: kustomize's load restrictor
+# refuses a sibling overlay's copy.
+apiVersion: builtin
+kind: NamespaceTransformer
+metadata:
+  name: mesh-namespace
+  namespace: memql
+unsetOnly: true

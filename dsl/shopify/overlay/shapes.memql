@@ -27,6 +27,7 @@ shape store storeFull {
   health
   subscriptionsCheckedAt
   redactedAt
+  uninstalledAt
   isDevelopment
   developmentOfStoreId
   row.createdAt

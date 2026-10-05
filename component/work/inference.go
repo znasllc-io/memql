@@ -16,8 +16,8 @@ package work
 // Claude Code, a ceiling is raised. Failing it would throw away a compiled
 // plan and a journal because a lid was shut.
 //
-// WHY IT IS NOT A RETRY EITHER. `transient` retries inside the step's budget,
-// which is measured in seconds and attempts; a shut door is neither, and
+// WHY IT IS NOT A RETRY EITHER. `transient` retries inside the run's retry
+// budget, which is measured in attempts; a shut door is not a blip, and
 // burning the retry budget against it means the run fails anyway, later, with
 // a symptom that names the wrong thing.
 //

@@ -116,6 +116,11 @@ type writeMeta struct {
 	// reason: a CHANGE of the preview store is what the store part and the
 	// readability check judge (Connect Shopify 009).
 	priorPreviewBindingStoreId string
+	// priorStorefrontTokenRef is v1:shopify:store.storefrontTokenRef, for the
+	// same reason again: the store guard judges a reference this write
+	// CHANGES, and a store written before it with another name must stay
+	// writable (memql#5626, shopify_store_guard.go).
+	priorStorefrontTokenRef string
 	// priorKind is v1:platform:site.kind, which decides whether the go-live
 	// guard has a question to ask at all -- an spa or a static site has no
 	// store binding and is never refused by it.
@@ -971,6 +976,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			if b, ok := priorPayload["previewBinding"].(map[string]any); ok {
 				meta.priorPreviewBindingStoreId = stringFromAny(b[bindingStoreIdKey])
 			}
+			meta.priorStorefrontTokenRef = stringFromAny(priorPayload["storefrontTokenRef"])
 			// Capture the PRIOR client domain (epic memql#5165) for the
 			// reason above it: the walk's reset is a comparison against
 			// the stored value, which the merged payload has already
@@ -1014,12 +1020,12 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		}
 		return nil, meta, fmt.Errorf("update(): no existing row for concept %q id %q (use insert() to create)", conceptName, id)
 	}
-	// CREATE RANK FLOORS (create_rank_floor.go). Here rather than beside the
-	// write guard above because a create may carry no id at all, and that
-	// path never enters the prior-row block; at this point priorExisted is
-	// final for both.
+	// THE CREATE HALF OF THE CLUSTER-OWNER TIER (create_rank_floor.go,
+	// memql#5624). Here rather than beside the write guard above because a
+	// create may carry no id at all, and that path never enters the prior-row
+	// block; at this point priorExisted is final for both.
 	if !meta.priorExisted {
-		if err := e.refuseCreateBelowRankFloor(ctx, conceptMeta.Name); err != nil {
+		if err := refuseClusterOwnerTierCreate(ctx, conceptMeta.Name); err != nil {
 			return nil, meta, err
 		}
 	}
@@ -1127,6 +1133,18 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	undoNonPrincipalOwnerStamp(ctx, conceptMeta.Name, payload, ownerBefore)
 	if organizationRestore {
 		ownerBefore.restore(payload)
+	}
+
+	// A MACHINE'S SHARING IS ITS OWNER'S CONSENT (memql#5658), server-written
+	// only. Here rather than beside the construct ladder above for one reason:
+	// it also judges the OWNER, and the owner this write lands is only final
+	// after the stamps just above. Before canonicalization, so it compares the
+	// owner tolerantly (registrationOwnerChanged). See
+	// worker_sharing_write_guard.go.
+	if conceptMeta.Name == WorkerRegistrationConcept {
+		if err := validateWorkerConsentServerOnly(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
 	}
 
 	// Annotation-driven PII scrub (memql#1711). A mutation tagged
@@ -1447,6 +1465,12 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := e.validateSiteSettings(ctx, payload, meta.priorSystemOwned, actor); err != nil {
 			return nil, meta, err
 		}
+		// Per-store settings (memql#5602): the same rules for the values the
+		// edge merges over `settings` for one store, plus the bare store ids
+		// they are keyed by. See platform_site_settings_guard.go.
+		if err := e.validateSiteStoreSettings(ctx, payload, meta.priorSystemOwned, actor); err != nil {
+			return nil, meta, err
+		}
 		// The storefront binding (epic memql#5530, issue memql#5538), beside the
 		// four above and for their reason: whether the caller may read the store
 		// row the binding NAMES is a cross-row question, and no mutation body can
@@ -1472,6 +1496,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		if err := e.validateSitePreview(ctx, payload, meta.priorExisted, meta.priorSystemOwned,
 			meta.priorStatus, meta.priorKind, meta.priorBundleRef, meta.priorCandidateRef,
 			meta.priorBindingStoreId, actor); err != nil {
+			return nil, meta, err
+		}
+	}
+
+	// v1:shopify:store names its OWN Storefront token or none (memql#5626):
+	// the edge publishes a store's token only from the secret the store's id
+	// names, so a reference to anything else would read as connected and
+	// serve nothing. A comparison against the PRIOR row and a rule about ids,
+	// neither expressible in a mutation body. See shopify_store_guard.go.
+	if conceptMeta.Name == conceptShopifyStore {
+		if err := validateShopifyStoreWrite(payload, id, meta.priorExisted, meta.priorStorefrontTokenRef); err != nil {
 			return nil, meta, err
 		}
 	}

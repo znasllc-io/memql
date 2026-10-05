@@ -86,6 +86,7 @@ import (
 	"testing"
 	"time"
 
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 	memqlclient "github.com/znasllc-io/memql/sdk/go/client"
 )
@@ -360,8 +361,10 @@ func TestStorefrontServing_TheBoundStoreIsReachableUnderTheServedPolicy(t *testi
 		Name:    "clustere2e storefront fixture store",
 		// NAMES A SECRET THAT DOES NOT EXIST, deliberately: see the file
 		// header. The document's honest answer is an empty token, and that is
-		// what is asserted.
-		StorefrontTokenRef: "clustere2e_storefront_token_absent",
+		// what is asserted. It is the store's OWN token name, the only one
+		// createStore accepts and the edge resolves (memql#5626); nothing is
+		// sealed under it.
+		StorefrontTokenRef: memqlengine.StorefrontTokenSecretName(storeID),
 	}); err != nil {
 		t.Fatalf("createStore (needs a CLUSTER OWNER token): %v", err)
 	}

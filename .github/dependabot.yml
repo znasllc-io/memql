@@ -71,6 +71,7 @@ updates:
       - "/cmd/deploy-gate-check"
       - "/deploy/db-image"
       - "/deploy/fleet"
+      - "/deploy/toolchain-image"
       - "/docker"
     schedule:
       interval: "weekly"

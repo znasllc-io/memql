@@ -79,10 +79,17 @@ func (i *Integration) open(ctx context.Context, d Deps, p Pipeline, o Opening) (
 // driver claiming the run the moment its created event arrives finds a
 // complete row rather than racing the opener to a check run of its own.
 // Everything else GitHub is asked -- the token above all, several calls
-// through the owner's grant -- is asked BEFORE the gate, which then holds its
-// connection for one create, not for a mint. When GitHub refuses the create
-// (403) or no token could be had, the run opens anyway with checkRunState
-// saying so.
+// through the owner's grant, the pull request's head -- is asked before or
+// after the gate, never under it, which then holds its connection for one
+// create, not for a mint. When GitHub refuses the create (403) or no token
+// could be had, the run opens anyway with checkRunState saying so.
+//
+// A pull request's new head SUPERSEDES the pull request's earlier runs
+// (supersede.go): they are read before the gate, while the new run does not
+// exist yet, and asked to stop once the gate is released -- and only when
+// GitHub, asked then, names this opening's commit as the pull request's head.
+// The head read is a call to GitHub and each ask takes that run's own gate and
+// may write its check run, so neither happens under the open gate.
 func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o Opening, token string) (OpenResult, error) {
 	if d.Store == nil {
 		return OpenResult{}, errNoStore
@@ -114,14 +121,33 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 	if err != nil {
 		return OpenResult{}, err
 	}
-	if run, ok := answeredBy(runsOf(keyed, p.ID), o); ok {
+	runs := runsOf(keyed, p.ID)
+	// R37 (supersede.go): a run a newer push superseded does not answer its
+	// own head coming back. Whether this commit IS the pull request's head
+	// again is asked of GitHub here -- before the gate, and only when the
+	// key's newest attempt is such a run -- and the gated read reuses the
+	// answer rather than asking under the gate. The answer is about THAT
+	// attempt (headBackFor names it), and frees no other.
+	var tokenErr error
+	headBackFor := ""
+	if superseded, ok := supersededNewest(runs, o); ok {
+		if token == "" {
+			token, tokenErr = checkRunToken(ctx, d, p)
+		}
+		if headCameBack(ctx, d, p, o, sha, token, tokenErr, superseded) {
+			headBackFor = superseded.ID
+		}
+	}
+	if run, ok := answeredBy(runs, o, headBackFor); ok {
 		return OpenResult{Run: run}, nil
 	}
 
-	var tokenErr error
-	if token == "" {
+	if token == "" && tokenErr == nil {
 		token, tokenErr = checkRunToken(ctx, d, p)
 	}
+	// Before the run exists, so a run another opener creates meanwhile is
+	// never this opening's to stop (supersede.go).
+	earlier := supersedable(ctx, d, p, o, mode)
 
 	var result OpenResult
 	err = d.gate(ctx, OpenGateKey(key), func(gctx context.Context) error {
@@ -130,7 +156,7 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 			return err
 		}
 		runs := runsOf(keyed, p.ID)
-		if run, ok := answeredBy(runs, o); ok {
+		if run, ok := answeredBy(runs, o, headBackFor); ok {
 			result = OpenResult{Run: run}
 			return nil
 		}
@@ -194,6 +220,14 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 		result = OpenResult{Run: run, Opened: true}
 		return nil
 	})
+	if err == nil && result.Opened {
+		// The gate is released: only now may GitHub be asked for the pull
+		// request's head and a run be asked to stop. A failed mint is no token.
+		if tokenErr != nil {
+			token = ""
+		}
+		i.supersede(ctx, d, result.Run, earlier, token)
+	}
 	return result, err
 }
 
@@ -212,13 +246,28 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 // run answers the key, it answers a fork's opening too: the fork's head is
 // a commit this repository already runs, and a refused run beside it would
 // put a failing check run on the commit next to the real one.
-func answeredBy(runs []Run, o Opening) (Run, bool) {
+//
+// A SUPERSEDED RUN DOES NOT ANSWER ITS HEAD COMING BACK (R37, supersede.go).
+// When the key's newest attempt was stopped because a newer push superseded
+// it, and GitHub names this opening's commit as the pull request's head again
+// -- a force-push back -- the opening opens the next attempt, the way a
+// same-repository opening opens past a fork's refusal. headBackFor names the
+// attempt GitHub's answer was about ("" when it freed none): the answer is
+// asked ONCE, before the gate, about the newest attempt the ungated read
+// judged, and both dedup reads take it -- but it frees ONLY that attempt.
+// When the gated read finds a different newest attempt (another replica's
+// opening of the head that came back, or one a newer push superseded since),
+// the answer said nothing about it, and that attempt answers as usual.
+func answeredBy(runs []Run, o Opening, headBackFor string) (Run, bool) {
 	newest, attempts := newestAttempt(runs)
 	if attempts == 0 {
 		return Run{}, false
 	}
 	if o.Trigger != TriggerRerun {
 		if !o.Fork && onlyForkRefusals(runs) {
+			return Run{}, false
+		}
+		if headBackFor != "" && sameID(newest.ID, headBackFor) && stoppedBySupersede(newest) {
 			return Run{}, false
 		}
 		return newest, true

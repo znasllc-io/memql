@@ -95,7 +95,7 @@ func TestConstructLadderWriteGuard_AChangeIsAValueNotASpelling(t *testing.T) {
 		{"object with another member", map[string]any{"f": map[string]any{"a": 1.0}}, map[string]any{"f": map[string]any{"a": 1.0, "b": 2.0}}, true},
 		{"an empty object is a value", map[string]any{}, map[string]any{"f": map[string]any{}}, true},
 	} {
-		if got := constructFieldChanged(tc.prior, tc.final, "f"); got != tc.changed {
+		if got := payloadFieldChanged(tc.prior, tc.final, "f"); got != tc.changed {
 			t.Errorf("%s: changed = %v, want %v", tc.name, got, tc.changed)
 		}
 	}

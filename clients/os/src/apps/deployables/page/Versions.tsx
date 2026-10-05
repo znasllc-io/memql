@@ -58,6 +58,18 @@ export function Versions({ site, runs, canPublish, lifecycle }: {
       add({ bundleRef: outcome.bundleRef, createdAt: run.finishedAt || run.createdAt, status: "", artifactId: "" });
     }
   }
+  // Every version above is one this deployable has SERVED.
+  const served = new Set(versions.keys());
+  // A CANDIDATE THAT NEVER SERVED IS A VERSION TOO (memql#5601). A deploy as
+  // the candidate records candidateRef and never bundleRef, so neither the row
+  // history nor the runs' served versions name it -- and the list would leave
+  // out the newest version the deployable has. It is not one to roll back to:
+  // it never served. Promoting it is what serves it.
+  const candidate = site.kind !== "shopify_storefront" && !bundled ? site.candidateRef.trim() : "";
+  if (candidate !== "" && !served.has(candidate)) {
+    const madeBy = runs.find((run) => run.deployables.some((o) => (o.candidateRef ?? "") === candidate));
+    add({ bundleRef: candidate, createdAt: madeBy ? madeBy.finishedAt || madeBy.createdAt : "", status: "", artifactId: "" });
+  }
   const label = (ref: string) => ref.startsWith("file://") ? "Bundled with MemQL" : ref.replace(/\/$/, "").split("/").pop() || ref;
   const state = (ref: string) => ref === site.bundleRef ? "Current" : site.kind !== "shopify_storefront" && ref === site.candidateRef ? "Candidate" : "Available";
 
@@ -83,7 +95,8 @@ export function Versions({ site, runs, canPublish, lifecycle }: {
         {selected.createdAt ? <Fact label="Recorded" value={formatMoment(selected.createdAt)} /> : null}
       </Facts>
       {bundled ? <Caption>This app is included with the installed MemQL build. Earlier builds are managed with the cluster release.</Caption> : null}
-      {canPublish && !site.systemOwned && selected.bundleRef.startsWith("blob://") && selected.bundleRef !== site.bundleRef && (site.status === "live" || site.status === "disabled") ?
+      {!served.has(selected.bundleRef) ? <Caption>Deployed as the candidate and not served yet. Promote the candidate to serve it.</Caption> : null}
+      {canPublish && !site.systemOwned && selected.bundleRef.startsWith("blob://") && selected.bundleRef !== site.bundleRef && served.has(selected.bundleRef) && (site.status === "live" || site.status === "disabled") ?
         <Button busy={lifecycle.busy} onClick={() => void lifecycle.rollTo(site.id, selected.bundleRef)} ariaLabel={`Roll ${site.hostname} back to ${label(selected.bundleRef)}`}>Roll back to this version</Button> : null}
       {lifecycle.refusal ? <ProblemNotice problem={lifecycle.refusal} tone="error" /> : null}
     </DetailDialog> : null}

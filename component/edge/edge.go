@@ -216,7 +216,8 @@ func (e *engineExecutor) SiteForAccountFrontDoor(ctx context.Context, hostname s
 // the serving path cannot leak a reference it was never handed. Only
 // `storefrontTokenRef` comes across, because the runtime-config document
 // resolves it -- Shopify designs that one to be published to the shopper's own
-// browser.
+// browser. `uninstalledAt` and `redactedAt` are read for one bit,
+// Disconnected, and never carried (memql#5638).
 //
 // A miss (zero rows) is (nil, nil): a store that is gone is not a query
 // failure, it is a storefront with nothing to talk to, and the resolver
@@ -237,6 +238,7 @@ func (e *engineExecutor) StoreByID(ctx context.Context, storeId string) (*BoundS
 		Domain:             rowString(rows[0], "domain"),
 		StorefrontTokenRef: rowString(rows[0], "storefrontTokenRef"),
 		APIVersion:         rowString(rows[0], "apiVersion"),
+		Disconnected:       rowString(rows[0], "uninstalledAt") != "" || rowString(rows[0], "redactedAt") != "",
 	}, nil
 }
 
@@ -296,7 +298,28 @@ func siteFromRow(r map[string]any) *Site {
 		CandidateRef:         rowString(r, "candidateRef"),
 		PreviewBinding:       rowObject(r, "previewBinding"),
 		Settings:             rowStringMap(r, "settings"),
+		StoreSettings:        rowStoreSettings(r, "storeSettings"),
 	}
+}
+
+// rowStoreSettings projects v1:platform:site.storeSettings (memql#5602): an
+// object of store id to an object of plain string values. Each store's map is
+// projected as rowStringMap projects `settings`, keeping only the entries that
+// ARE strings, and a store entry that is not an object is dropped whole -- the
+// write guard admits neither, so either is a raw write that bypassed it.
+// Absent, null or a non-object yields an empty map, never nil.
+func rowStoreSettings(m map[string]any, key string) map[string]map[string]string {
+	out := map[string]map[string]string{}
+	stores, ok := m[key].(map[string]any)
+	if !ok {
+		return out
+	}
+	for storeId := range stores {
+		if _, isObject := stores[storeId].(map[string]any); isObject {
+			out[storeId] = rowStringMap(stores, storeId)
+		}
+	}
+	return out
 }
 
 // rowStringMap projects an object field whose values are meant to be plain

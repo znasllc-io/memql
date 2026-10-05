@@ -32,27 +32,13 @@ var entryMeshOn = []string{
 // enabling it is a values change on the tenant's own overlay.
 var entryHeldOff = []string{"mcp"}
 
+// TestCloudEntryLandsWhollyInOneNamespace is TestTheCloudOverlayLandsWhollyInOneNamespace
+// for the entry overlay: everything in memql, set by the overlay's unsetOnly
+// NamespaceTransformer, except the second namespace the pipelines substrate
+// renders on purpose (memql-pipelines, epic memql#5478, task #5492) -- exactly
+// two Namespace objects, and only wantPipelinesObjects' objects in the second.
 func TestCloudEntryLandsWhollyInOneNamespace(t *testing.T) {
-	var sawNamespaceObject bool
-	for _, r := range parse(t, render(t, entryOverlay)) {
-		if r.Kind == "Namespace" {
-			sawNamespaceObject = true
-			if r.Metadata.Name != cloudNamespace {
-				t.Errorf("the Namespace object is named %q, want %q", r.Metadata.Name, cloudNamespace)
-			}
-			continue
-		}
-		if r.Metadata.Namespace == "" {
-			continue
-		}
-		if r.Metadata.Namespace != cloudNamespace {
-			t.Errorf("%s/%s lands in namespace %q, want %q",
-				r.Kind, r.Metadata.Name, r.Metadata.Namespace, cloudNamespace)
-		}
-	}
-	if !sawNamespaceObject {
-		t.Error("no Namespace object rendered")
-	}
+	assertTheMeshNamespaceAndThePipelinesOne(t, entryOverlay)
 }
 
 func TestCloudEntryMeshReplicasAreOne(t *testing.T) {

@@ -23,7 +23,7 @@ import (
 // document; this greps the STRUCT, one rung earlier, so the admin token
 // cannot reach a header or a log line either.
 func TestTheBoundStoreCarriesOnlyWhatTheServingPathNeeds(t *testing.T) {
-	want := []string{"ID", "Domain", "StorefrontTokenRef", "APIVersion"}
+	want := []string{"ID", "Domain", "StorefrontTokenRef", "APIVersion", "Disconnected"}
 	typ := reflect.TypeOf(BoundStore{})
 	var got []string
 	for i := 0; i < typ.NumField(); i++ {

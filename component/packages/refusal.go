@@ -298,10 +298,6 @@ const (
 	// CodeStoreNotConnected: a Storefront token needs a store row to point
 	// from, and this store has none yet. Connect first.
 	CodeStoreNotConnected = "store_not_connected"
-	// CodeStoreInUse: the store's Storefront token is served under every
-	// storefront bound to it, and one of them is not the caller's to write, so
-	// changing the token is a cluster owner's act.
-	CodeStoreInUse = "store_in_use"
 	// CodeStorefrontTokenRequired: an empty token clears the store's, and a
 	// live storefront is bound to it and would stop serving its catalog.
 	CodeStorefrontTokenRequired = "storefront_token_required"
@@ -519,7 +515,10 @@ const (
 	CodePipelineArtifactTooLarge    = "pipeline_artifact_too_large"
 	CodePipelineArtifactMissing     = "pipeline_artifact_missing"
 	CodePipelineLogCapped           = "pipeline_log_capped"
+	CodePipelineTimingsUnreadable   = "pipeline_timings_unreadable"
+	CodePipelineOutcomeTrimmed      = "pipeline_outcome_trimmed"
 	CodePipelineIsolationUnenforced = "pipeline_isolation_unenforced"
+	CodePipelineStepDiskExceeded    = "pipeline_step_disk_exceeded"
 	CodePipelineAlreadyConnected    = "pipeline_already_connected"
 )
 

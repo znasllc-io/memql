@@ -1592,7 +1592,7 @@ func FleetModelPullBuild(args FleetModelPullArgs) string {
 	return b.String()
 }
 
-// FleetModels -- List every model the caller's fleet can run right now: the model id, its context window and capability flags, and the machines behind it with their online and busy state. Produced from live worker registrations, never persisted -- the answer is which machines are awake, so a stored copy's staleness would be indistinguishable from the condition it describes. Scoped to the caller's own machines plus the shared-inference set; a model call carries the caller's prompts and routes only to their machines. Feeds the portal's Providers page and the fleet machine cards.
+// FleetModels -- List every model the caller's fleet can run right now: the model id, its context window and capability flags, and the machines behind it with their online and busy state. Produced from live worker registrations, never persisted -- the answer is which machines are awake, so a stored copy's staleness would be indistinguishable from the condition it describes. Scoped to the caller's own machines plus the machines lent to them: shared with everyone, or with them or one of their groups. A model call carries the caller's prompts and routes only to those machines. Feeds the fleet machine cards.
 type FleetModelsArgs struct {
 }
 
@@ -3153,7 +3153,7 @@ type PackageDeployArgs struct {
 	// Pass true to proceed past the confirm gate. Absent or false parks the run with its report and returns.
 	Confirm    bool
 	ConfirmSet bool // set true to send confirm; required because zero-value bool is ambiguous
-	// Where each deployable goes on its FIRST deploy: an object keyed by deployable name, each value {hostname, accountId, ownDomain}. hostname is the site's own hostname under the cluster domain and is required for a never-deployed app (deployable_binding_missing otherwise); accountId ties the site to the client it is for; ownDomain binds the client's own domain. The pipeline applies the two optional halves itself after the site exists, as the same updateSiteAccount and customDomainAdd calls the page makes, under the caller's actor -- so the existing guards decide, and a refused one lands on the outcome without failing the publish. Chosen once and remembered on the site row.
+	// Where each deployable goes on its FIRST deploy: an object keyed by deployable name, each value {hostname, accountId, ownDomain}. hostname is the site's own hostname under the cluster domain and is required for a never-deployed app (deployable_binding_missing otherwise); accountId ties the site to the client it is for; ownDomain binds the client's own domain. The pipeline applies the two optional halves itself after the site exists, as the same updateSiteAccount and customDomainAdd calls the page makes, under the caller's actor -- so the existing guards decide, and a refused one lands on the outcome without failing the publish. Chosen once and remembered on the site row. Each value may also carry skip (true leaves that app out of this run, recorded as skipped) and target (memql#5601): 'serving', the default, or 'candidate', which publishes the build as the site's candidateRef -- served only under a preview grant, with bundleRef and the public view untouched -- and needs the preview part. Candidates are for spa and static apps: a shopify_storefront serves one build on Testing and Production and refuses one. A candidate run whose DSL differs from the cluster's is refused, a target chosen when the run opens is kept at the confirm gate unless the confirming call names another, and a target that is not one of the two strings refuses the call.
 	Placements map[string]any
 	// CONFIRM AN EXISTING RUN rather than starting a new one (memql#4954). A parked run is the one waiting for the person's answer, so the confirm that follows must ADVANCE it: pass the parked run's id with confirm:true and the pipeline resumes that row, re-reading the snapshot it already stored. Without it every call minted a fresh run -- including the confirm -- so confirming left the source with a row at awaiting_confirm nobody would ever answer, the list went on saying a deploy was waiting for a gate already answered, and the retry the person had just read the report for was replaced by a run that fetched the branch again. Ignored unless the named run belongs to this package and is parked; anything else opens a new run, which is what keeps a re-request of a run already in flight refused by the append-only rule rather than quietly resumed.
 	DeploymentId string
@@ -4547,6 +4547,7 @@ func ShopifyAccountConnectBeginBuild(args ShopifyAccountConnectBeginArgs) string
 
 // ShopifyConnectBegin -- Begin Connect Shopify for a storefront's store (design 12.4, D1, D10): answer the URL the browser navigates to -- Shopify's approve page for the shop the server resolved -- with a single-use state bound to the caller.
 // The app Shopify is asked to approve is the PENDING one a save left, when there is one, otherwise the store's current app and its webhook secret; with neither the reason is shopify_app_not_saved and nothing is written. The state (v1:identity:githubConnectState, purpose shopify_connect) names the shop, the site, the app's client id and which secret verifies the callback, and lives ten minutes. The plaintext state appears only inside authorizeUrl; only its digest is stored. The redirect is this cluster's own identity service, never anything the request said.
+// Reserved to a cluster owner (memql#5638), at Begin and again at the callback.
 type ShopifyConnectBeginArgs struct {
 	// The storefront deployable. The shop is resolved on the server from the package run that last published it.
 	SiteId string
@@ -4789,6 +4790,7 @@ func ShopifyRunComplianceJobsBuild(args ShopifyRunComplianceJobsArgs) string {
 
 // ShopifyStoreAppSave -- Save the Shopify app's client ID and secret from a storefront's Store panel (design 12.3, D7).
 // PENDING ONLY (D12). The client ID lands as the globalVariable SHOPIFY_<ID>_PENDING_CLIENT_ID and the secret, sealed on the server, as the globalSecret SHOPIFY_<ID>_PENDING_CLIENT_SECRET. The store row, its live appClientId and the secret that verifies its webhooks are never touched: saving proves nothing about the shop, so it can move nothing a webhook is checked with. They change only after the shop's own staff approve Connect Shopify.
+// Reserved to a cluster owner (memql#5638): any other caller is refused before anything is read.
 type ShopifyStoreAppSaveArgs struct {
 	// The storefront deployable whose store the app belongs to.
 	SiteId string
@@ -4846,7 +4848,7 @@ func ShopifyStoreHealthBuild(args ShopifyStoreHealthArgs) string {
 }
 
 // ShopifyStorefrontTokenSet -- Use a pasted Storefront API token for a storefront's store, or clear the one it has (design 12.5, D8).
-// Refused `store_in_use` unless the caller is a cluster owner or can write EVERY site bound to the store, serving or preview: a store's token is served under each of their hostnames. A token is checked with one Storefront request before it is sealed; an empty token clears the reference so the next Connect mints one, and is refused while a live storefront is bound to the store.
+// Reserved to a cluster owner (memql#5638), who may change the token served under every site bound to the store. A token is checked with one Storefront request before it is sealed; an empty token clears the reference so the next Connect mints one, and is refused while a live storefront is bound to the store.
 type ShopifyStorefrontTokenSetArgs struct {
 	// The storefront deployable whose store the token is for.
 	SiteId string

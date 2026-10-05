@@ -148,8 +148,17 @@ export interface PreviewReadiness {
   storeDomain: string;
   storeReadable: boolean;
   storeIsDevelopment: boolean;
+  /**
+   * Whether the edge will serve the PRODUCTION store's Storefront token
+   * (memql#5626): the store is readable and names its OWN token, the one
+   * secret the edge publishes for it. This, not a non-empty reference, is
+   * what "connected" means; the shell keeps no copy of the naming rule.
+   */
+  storeHasStorefrontToken: boolean;
   previewStoreId: string;
   previewStoreDomain: string;
+  /** The same answer for the TESTING store, the preview binding's. */
+  previewStoreHasStorefrontToken: boolean;
   testingUrl: string;
   canPreview: boolean;
   canPromote: boolean;
@@ -172,8 +181,10 @@ export function readinessFromRow(row: Row): PreviewReadiness {
     storeDomain: rowString(row, "storeDomain"),
     storeReadable: bool("storeReadable"),
     storeIsDevelopment: bool("storeIsDevelopment"),
+    storeHasStorefrontToken: bool("storeHasStorefrontToken"),
     previewStoreId: rowString(row, "previewStoreId"),
     previewStoreDomain: rowString(row, "previewStoreDomain"),
+    previewStoreHasStorefrontToken: bool("previewStoreHasStorefrontToken"),
     testingUrl: rowString(row, "testingUrl"),
     canPreview: bool("canPreview"),
     canPromote: bool("canPromote"),

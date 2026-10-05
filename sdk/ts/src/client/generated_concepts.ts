@@ -1045,6 +1045,7 @@ export const BoundConcepts = {
   updateSiteShopperForms: "v1:platform:site",
   updateSiteStatus: "v1:platform:site",
   updateSiteStoreBinding: "v1:platform:site",
+  updateSiteStoreSettings: "v1:platform:site",
   updateStore: "v1:shopify:store",
   updateTodo: "v1:todos:todo",
   updateWorkerApps: "v1:worker:registration",

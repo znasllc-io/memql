@@ -528,7 +528,7 @@ func TestSiteCreateAcceptsAShopifyStorefrontWithItsBinding(t *testing.T) {
 	if _, err := runSiteMutation(t, ctx, eng, "createStore", map[string]any{
 		"storeId":            storeId,
 		"domain":             "example-store.myshopify.com",
-		"storefrontTokenRef": "SHOPIFY_STOREFRONT_TOKEN",
+		"storefrontTokenRef": StorefrontTokenSecretName(storeId),
 	}); err != nil {
 		t.Fatalf("seeding the store this storefront fronts: %v", err)
 	}
@@ -796,7 +796,7 @@ func TestADeveloperBindsTheirStorefrontToAStoreAnOwnerRegistered(t *testing.T) {
 	if _, err := runSiteMutation(t, systemSiteCtx(), eng, "createStore", map[string]any{
 		"storeId":            storeId,
 		"domain":             "devbind-" + suffix + ".myshopify.com",
-		"storefrontTokenRef": "DEVBIND_STOREFRONT_TOKEN",
+		"storefrontTokenRef": StorefrontTokenSecretName(storeId),
 	}); err != nil {
 		t.Fatalf("an owner registering the store: %v", err)
 	}

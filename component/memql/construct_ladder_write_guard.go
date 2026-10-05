@@ -87,7 +87,7 @@ func validateConstructLadderServerOnly(ctx context.Context, prior, final map[str
 		return nil
 	}
 	for _, field := range constructLadderFields {
-		if constructFieldChanged(prior, final, field) {
+		if payloadFieldChanged(prior, final, field) {
 			return errConstructLadderWrite(field,
 				"where a learned procedure stands on its certification ladder, what it runs and the version a person approved")
 		}
@@ -96,12 +96,12 @@ func validateConstructLadderServerOnly(ctx context.Context, prior, final map[str
 		return nil
 	}
 	for _, field := range constructLearnedFields {
-		if constructFieldChanged(prior, final, field) {
+		if payloadFieldChanged(prior, final, field) {
 			return errConstructLadderWrite(field,
 				"on a learned procedure, the signature compile serves a goal from it by and the reliability that ranks it")
 		}
 	}
-	if constructFieldChanged(prior, final, constructLearnedSource) {
+	if payloadFieldChanged(prior, final, constructLearnedSource) {
 		return errConstructLadderWrite(constructLearnedSource,
 			"on a learned procedure, the source a person reads and approves beside the procedure a replay runs")
 	}
@@ -126,20 +126,22 @@ func constructIsLearned(row map[string]any) bool {
 	return strings.TrimSpace(s) != ""
 }
 
-// constructFieldChanged reports whether field differs between the stored row
-// (nil on a create) and the row about to be written.
-func constructFieldChanged(prior, final map[string]any, field string) bool {
+// payloadFieldChanged reports whether field differs between the stored row
+// (nil on a create) and the row about to be written. Not construct-specific:
+// the registration consent guard (worker_sharing_write_guard.go) asks the same
+// question of its block.
+func payloadFieldChanged(prior, final map[string]any, field string) bool {
 	before, after := prior[field], final[field]
-	beforeUnset, afterUnset := constructFieldUnset(before), constructFieldUnset(after)
+	beforeUnset, afterUnset := payloadFieldUnset(before), payloadFieldUnset(after)
 	if beforeUnset || afterUnset {
 		return beforeUnset != afterUnset
 	}
-	return !constructFieldEqual(before, after)
+	return !payloadFieldEqual(before, after)
 }
 
-// constructFieldUnset is the language's one unset value: absent, JSON null,
+// payloadFieldUnset is the language's one unset value: absent, JSON null,
 // or the empty string.
-func constructFieldUnset(v any) bool {
+func payloadFieldUnset(v any) bool {
 	if v == nil {
 		return true
 	}
@@ -147,12 +149,12 @@ func constructFieldUnset(v any) bool {
 	return ok && s == ""
 }
 
-// constructFieldEqual compares two payload values by their canonical JSON, so
+// payloadFieldEqual compares two payload values by their canonical JSON, so
 // a number decoded as float64 on one side and written as an int by Go on the
 // other is one value, and a nested object compares by content rather than by
 // key order. A value that will not encode is never equal to anything, which
 // refuses rather than admits.
-func constructFieldEqual(a, b any) bool {
+func payloadFieldEqual(a, b any) bool {
 	ja, errA := json.Marshal(a)
 	jb, errB := json.Marshal(b)
 	if errA != nil || errB != nil {

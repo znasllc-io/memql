@@ -251,6 +251,11 @@ const deployables: OsAppManifest = {
   logsSection: "logs",
   attentionChanges: [
     { id: "deployables:shopify-store", revision: "connect-1", sectionId: "deployables", target: "shopify-store", label: "Connect Shopify from a storefront’s Store page" },
+    // A NEW CAPABILITY ON THE SAME PAGE, so a new id on the same destination
+    // (memql#5602): the Store slot's marker and the Store page's
+    // acknowledgment already exist, and a storefront owner who must move a
+    // store's own values out of App values is told where they now go.
+    { id: "deployables:store-values", revision: "store-values-1", sectionId: "deployables", target: "shopify-store", label: "Give each store its own values on a storefront’s Store page" },
     { id: "deployables:organization", revision: "organization-1", sectionId: "deployables", label: "Organization ownership for sources and deployables" },
     { id: "deployables:github-accounts", revision: "account-settings-2", sectionId: "settings", label: "Manage connected GitHub accounts in Settings" },
     { id: "deployables:saved-sources", revision: "github-sources-3", sectionId: "sources", label: "Manage each source by GitHub account, organization and repository" },

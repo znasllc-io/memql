@@ -50,9 +50,17 @@ import { BLANK_STORE, useStoreList, type NewStore, type StoreWrites } from "./us
 // the token in a call string, which is rendered into logs on a parse error --
 // and would show it on a screen. The placeholders and the caption say so
 // where somebody is about to type, not in a refusal afterwards.
+//
+// THE STOREFRONT TOKEN IS NOT ASKED FOR HERE (memql#5626). The edge serves a
+// store's Storefront token only from the secret named for that store, and the
+// engine refuses any other name. The field used to take the name as free text
+// -- with a placeholder suggesting one the edge would never serve -- so it is
+// gone: the store registers without one, and connecting it in Settings seals
+// the token under the store's own name. If the engine refuses the write all
+// the same, its sentence renders above the form, which keeps what was typed.
 
 const NAMES_NOT_TOKENS =
-  "Each of the three is the NAME of a cluster secret, not the token itself. Create the secret first, then name it here.";
+  "The two credential fields each take the NAME of a cluster secret, never the token itself. Create the secret first, then name it here.";
 
 export function StorePicker({
   site,
@@ -89,7 +97,7 @@ export function StorePicker({
   );
 
   const domain = draft.domain.trim();
-  const canRegister = domain !== "" && draft.storefrontTokenRef.trim() !== "";
+  const canRegister = domain !== "";
   const canAttach = chosen !== "" && chosen !== currentStoreId;
 
   async function register() {
@@ -97,7 +105,7 @@ export function StorePicker({
     // never changes. A random id would make the same store attachable twice
     // under two rows, and every mirrored row is scoped by store id.
     const storeId = slugOf(domain);
-    const ok = await writes.createStore({ ...draft, storeId, domain });
+    const ok = await writes.createStore({ ...draft, storeId, domain, storefrontTokenRef: "" });
     if (!ok) return;
     const bound = await writes.bindSite(site.id, storeId);
     if (bound) onDone();
@@ -144,16 +152,9 @@ export function StorePicker({
                 placeholder="Acme Widgets"
               />
             </Field>
-            <Field label="Storefront token">
-              <Input
-                id="os-store-storefront-ref"
-                label="The name of the secret holding the Storefront API token"
-                value={draft.storefrontTokenRef}
-                onChange={(storefrontTokenRef) => setDraft((d) => ({ ...d, storefrontTokenRef }))}
-                placeholder="ACME_STOREFRONT_TOKEN"
-                code
-              />
-            </Field>
+            {domain === "" ? null : (
+              <Caption>Its Storefront token is added when the store is connected in Settings.</Caption>
+            )}
             <Field label="Admin token">
               <Input
                 id="os-store-admin-ref"
@@ -248,10 +249,7 @@ export function StorePicker({
                 If the second is refused the store still exists and you can attach it from the list.
               </Caption>
             ) : (
-              <Caption>
-                A domain and a Storefront token name are the least a storefront needs. The rest can
-                follow.
-              </Caption>
+              <Caption>A domain is the least a store needs here. The rest can follow.</Caption>
             )}
           </>
         ) : (

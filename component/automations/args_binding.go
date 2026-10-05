@@ -106,6 +106,17 @@ func bindEventArgs(automation *Automation, event *events.Event) (bound map[strin
 	return bound, extras, nil
 }
 
+// CheckArgs reports whether payload satisfies automation's declared args
+// contract: the bind a run's resume makes against its stored variables before
+// any step runs (ResumeFrom), asked of a template before it is installed on a
+// run (memql#5664) -- a re-planned draft declaring an argument the run never
+// had would otherwise be installed and refuse every resume. nil for an
+// automation that declares no args.
+func CheckArgs(automation *Automation, payload map[string]any) error {
+	_, _, err := bindEventArgs(automation, &events.Event{Payload: payload})
+	return err
+}
+
 // validateAutomationArg validates one declared field against the payload,
 // mirroring the memql function validator's rule set (presence / type / enum /
 // maxLength / pattern). Object + array element schemas are validated

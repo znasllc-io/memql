@@ -56,7 +56,11 @@ package citags
 // `-c` step would otherwise be the cheapest way to make any tag "covered".
 // ciLanes marks such a lane compileOnly and the coverage walk skips it; the
 // tag stays in deliberatelyNotRunInCI with its reason, and the compile lane
-// is pinned separately by TestClusterE2ECompileLaneGatesTheMerge.
+// is pinned separately by TestClusterE2ECompileLaneGatesTheMerge -- which also
+// holds every file of the package to the lane's own tag sets. An exclusion
+// excuses a file that needs the excluded tag and others besides
+// (needsExcludedTag), so without that hold such a file could be compiled by
+// nothing at all (memql#5497).
 //
 // Untagged on purpose: this must run in the default lane, because it is what
 // catches the tags that do not.
@@ -64,10 +68,12 @@ package citags
 import (
 	"fmt"
 	"go/build"
+	"go/build/constraint"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -81,7 +87,12 @@ import (
 // that would survive review. A tag that is merely inconvenient belongs in a
 // lane.
 var deliberatelyNotRunInCI = map[string]string{
-	"clustere2e": "needs a provisioned 2-replica parity cluster to run (make cluster-e2e); ci.yml's build-clustere2e job compiles and vets it under the tag so the package cannot rot uncompiled (memql#4212), which is not a run",
+	"clustere2e": "needs a provisioned cluster to run (make cluster-e2e for the 2-replica parity suite); ci.yml's build-clustere2e job " +
+		"compiles and vets it under the tag so the package cannot rot uncompiled (memql#4212), which is not a run. One test of the " +
+		"package, TestPipelinesSubstrate, does run: install-cluster-e2e.yml's pipelines leg runs it against the cluster that leg " +
+		"installs (memql#5497) -- nightly and on that workflow's own paths, so it gates no pull request and is not a lane here, " +
+		"and the tag stays out of the node-tag passes. That test also needs the agent's build (`//go:build clustere2e && agent`: " +
+		"it runs the executor's fleet half, which is agent-only), so the compile lane builds the package under both tag sets",
 }
 
 // prCriticalWorkflows are the workflow files whose lanes actually gate a pull
@@ -408,11 +419,72 @@ func testFiles(t *testing.T, root string) [][2]string {
 func excludedReason(t *testing.T, dir, name string) (string, bool) {
 	t.Helper()
 	for tag, reason := range deliberatelyNotRunInCI {
-		if buildsUnder(t, dir, name, []string{tag}) {
+		if needsExcludedTag(t, dir, name, tag) {
 			return reason, true
 		}
 	}
 	return "", false
+}
+
+// needsExcludedTag reports whether the file compiles once tag is supplied:
+// alone, or with the other tags its own constraint names. The second half is
+// for a file that needs an excluded tag AND a node type's build
+// (`//go:build clustere2e && agent`, memql#5497). Such a file needs what the
+// exclusion is about -- a cluster -- whatever else it needs, and it compiles
+// under no single tag. MatchFile still gives the verdict; the constraint is
+// read only to learn which tags to supply.
+func needsExcludedTag(t *testing.T, dir, name, tag string) bool {
+	t.Helper()
+	if buildsUnder(t, dir, name, []string{tag}) {
+		return true
+	}
+	named := constraintTags(t, dir, name)
+	return slices.Contains(named, tag) && buildsUnder(t, dir, name, named)
+}
+
+// constraintTags is every tag the file's build constraint names outside a
+// negation: the tags a build would set to compile it. The constraint is read
+// from every line before the package clause, so one placed after a licence
+// header is found, in either spelling.
+func constraintTags(t *testing.T, dir, name string) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatalf("reading %s: %v", filepath.Join(dir, name), err)
+	}
+	var tags []string
+	var collect func(e constraint.Expr, negated bool)
+	collect = func(e constraint.Expr, negated bool) {
+		switch x := e.(type) {
+		case *constraint.TagExpr:
+			if !negated && !slices.Contains(tags, x.Tag) {
+				tags = append(tags, x.Tag)
+			}
+		case *constraint.NotExpr:
+			collect(x.X, !negated)
+		case *constraint.AndExpr:
+			collect(x.X, negated)
+			collect(x.Y, negated)
+		case *constraint.OrExpr:
+			collect(x.X, negated)
+			collect(x.Y, negated)
+		}
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "package ") {
+			break
+		}
+		if !constraint.IsGoBuild(line) && !constraint.IsPlusBuild(line) {
+			continue
+		}
+		expr, err := constraint.Parse(line)
+		if err != nil {
+			t.Fatalf("%s: the build constraint %q does not parse: %v", filepath.Join(dir, name), line, err)
+		}
+		collect(expr, false)
+	}
+	return tags
 }
 
 // TestEveryTaggedTestFileIsRunSomewhere is the gate.
@@ -492,7 +564,7 @@ func TestDeliberateExclusionsAreHonest(t *testing.T) {
 		}
 		found := false
 		for _, f := range files {
-			if !buildsUnder(t, f[0], f[1], nil) && buildsUnder(t, f[0], f[1], []string{tag}) {
+			if !buildsUnder(t, f[0], f[1], nil) && needsExcludedTag(t, f[0], f[1], tag) {
 				found = true
 				break
 			}
@@ -546,6 +618,15 @@ func laneCovers(cmdArgs, tag, dir string) bool {
 	return lane{pkgs: pkgs}.covers(dir)
 }
 
+// tagSet is the tags one command's -tags flag names, nil for none.
+func tagSet(cmdArgs string) []string {
+	m := tagsFlag.FindStringSubmatch(cmdArgs)
+	if m == nil {
+		return nil
+	}
+	return strings.Split(m[1], ",")
+}
+
 var (
 	goVetCmd = regexp.MustCompile(`go vet\b([^\n]*)`)
 	flagC    = regexp.MustCompile(`(^|\s)-c(\s|$)`)
@@ -559,6 +640,16 @@ var (
 // point it at another package, let it run in workspace mode, or leave it out
 // of ci-required, and every other test in this package stays green while the
 // package goes back to rotting. Each of those edits is checked here.
+//
+// So is the one the lane's own discovery cannot see. The job is FOUND by any
+// vet and any `-c` step carrying the tag, and a file of the package can need
+// more tags than that: test/clustere2e/pipelines_substrate_test.go is
+// `//go:build clustere2e && agent` (memql#5497). The coverage gate excuses
+// such a file through needsExcludedTag, so if the steps that name its tags
+// were deleted, the lane would still be found, every gate would stay green,
+// and no pull request would compile the file. So every *_test.go of the
+// package must build under the tags of at least one `-c` step AND of at least
+// one vet step of this job.
 //
 // The lane runs with GOWORK=off because scripts/test/cluster-e2e.sh runs the
 // live suite with GOWORK=off: under the workspace a module silently satisfies
@@ -610,6 +701,50 @@ func TestClusterE2ECompileLaneGatesTheMerge(t *testing.T) {
 	}
 	jobName := found[0]
 	job := wf.Jobs[jobName]
+
+	// Every file of the package, compiled and vetted under a tag set the job
+	// itself uses (see the doc comment).
+	var vetSets, compileSets [][]string
+	for _, step := range job.Steps {
+		for _, cmd := range goVetCmd.FindAllStringSubmatch(step.Run, -1) {
+			if laneCovers(cmd[1], tag, dir) {
+				vetSets = append(vetSets, tagSet(cmd[1]))
+			}
+		}
+		for _, cmd := range goTestCmd.FindAllStringSubmatch(step.Run, -1) {
+			if laneCovers(cmd[1], tag, dir) && flagC.MatchString(cmd[1]) {
+				compileSets = append(compileSets, tagSet(cmd[1]))
+			}
+		}
+	}
+	pkgDir := filepath.Join(root, filepath.FromSlash(dir))
+	pkgFiles := 0
+	for _, f := range testFiles(t, pkgDir) {
+		if f[0] != pkgDir {
+			continue // a package below this one is not what `./test/clustere2e/` compiles
+		}
+		pkgFiles++
+		for _, half := range []struct {
+			verb, flag string
+			sets       [][]string
+		}{{"compiles", "go test -c", compileSets}, {"vets", "go vet", vetSets}} {
+			reached := false
+			for _, set := range half.sets {
+				if buildsUnder(t, f[0], f[1], set) {
+					reached = true
+					break
+				}
+			}
+			if !reached {
+				t.Errorf("%s/%s builds under none of the tag sets ci.yml job %q %s the package with (%v), so no pull "+
+					"request %s it -- memql#4212's rot. Add a `%s -tags <the tags its build constraint needs>` step "+
+					"for ./%s/ to the job.", dir, f[1], jobName, half.verb, half.sets, half.verb, half.flag, dir)
+			}
+		}
+	}
+	if pkgFiles == 0 {
+		t.Fatalf("found no *_test.go in %s: the hold above checked nothing, so it fails closed", dir)
+	}
 
 	if got := strings.TrimSpace(job.Env["GOWORK"]); got != "off" {
 		t.Errorf("ci.yml job %q must set GOWORK: 'off' at job level (got %q): scripts/test/cluster-e2e.sh "+

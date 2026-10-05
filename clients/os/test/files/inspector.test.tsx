@@ -222,10 +222,11 @@ describe("the inspector never scrolls sideways", () => {
   });
 
   it("breaks the unbreakable token a story sentence can contain", () => {
-    // THE SECOND SOURCE, and the one the guard would have hidden best:
-    // `fileStory` composes "Produced by plan <id>", so a forty-character plan
-    // id with no break opportunity sits inside an ordinary sentence. A cell
-    // truncates; a sentence wraps.
+    // THE SECOND SOURCE, and the one the guard would have hidden best: a
+    // story once carried a forty-character id ("Produced by plan <id>") and
+    // still carries a machine's name, either one a token with no break
+    // opportunity inside an ordinary sentence. A cell truncates; a sentence
+    // wraps.
     expect(block(".os-files-story > span:not(.os-dot)")).toContain("overflow-wrap: anywhere;");
     expect(block(".os-facts dd")).toContain("overflow-wrap: anywhere;");
   });

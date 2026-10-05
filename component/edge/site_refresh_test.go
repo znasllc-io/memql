@@ -78,6 +78,30 @@ func TestVersionCheckAvoidsReadingStoreCredentials(t *testing.T) {
 	}
 }
 
+// The version hashes the settings the runtime document SERVES (memql#5602):
+// a per-store value for the store the binding names reaches the document, so
+// a tab holding the old value must refresh; a value for a store no binding
+// names reaches nothing, so it must not.
+func TestDeploymentVersionFollowsTheServedPerStoreSettings(t *testing.T) {
+	site := &Site{
+		ID: "site", Kind: storefrontKind, Status: "live", BundleRef: "blob://one/",
+		Binding:       map[string]any{"storeId": "live"},
+		Store:         &BoundStore{ID: "live", Domain: "live.myshopify.com"},
+		Settings:      map[string]string{"title": "Shop"},
+		StoreSettings: map[string]map[string]string{"live": {"customerAccountClientId": "client-1"}},
+	}
+	before := deploymentVersion(site)
+	site.StoreSettings = map[string]map[string]string{"live": {"customerAccountClientId": "client-2"}}
+	if before == deploymentVersion(site) {
+		t.Fatal("a change to the bound store's served settings is invisible to a loaded storefront")
+	}
+	before = deploymentVersion(site)
+	site.StoreSettings["sandbox"] = map[string]string{"customerAccountClientId": "client-3"}
+	if before != deploymentVersion(site) {
+		t.Fatal("a change to an unbound store's settings, which nothing serves, refreshed the storefront")
+	}
+}
+
 func TestSiteRefreshBrowserRuntime(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {

@@ -115,6 +115,14 @@ type Integration struct {
 	// error the sweep reports rather than reading nothing.
 	rowsInFlight func(ctx context.Context) ([]map[string]any, error)
 
+	// armedRetries is the `retry` waits this replica has a timer armed for,
+	// keyed by run and wait (failure_waits.go, armRetry): every sighting of a
+	// wait's event -- the park, and each nudge the sweep makes -- would
+	// otherwise arm another timer for the same attempt.
+	armedRetries sync.Map
+	// schedule replaces time.AfterFunc for a retry's timer. Tests only.
+	schedule func(time.Duration, func())
+
 	now func() time.Time
 
 	mu sync.RWMutex

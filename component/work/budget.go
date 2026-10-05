@@ -129,6 +129,23 @@ func UnevaluatedBreach(reason string) *CeilingBreach {
 	}
 }
 
+// DefaultMaxRetries is the run-wide retry budget of a run whose goal declares
+// none -- or that has no goal at all, an automation's run. It is applied by
+// the caller, as this file's header says every unset ceiling is: zero is
+// UNSET, never "nothing allowed". It cannot read as "unbounded" either, the
+// reading CheckCeilings gives the other ceilings, because the failure path's
+// re-attempt acts are a loop and this budget is the thing that ends it.
+const DefaultMaxRetries = 3
+
+// RetryBudget is the run-wide retry budget a goal's ceilings declare, with
+// DefaultMaxRetries standing in for an unset one.
+func RetryBudget(c Ceilings) int {
+	if c.MaxRetries > 0 {
+		return c.MaxRetries
+	}
+	return DefaultMaxRetries
+}
+
 // Ceilings is v1:work:goal.ceilings, inherited by every run.
 type Ceilings struct {
 	TokenBudget   int     `json:"tokenBudget,omitempty"`

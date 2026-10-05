@@ -1342,6 +1342,27 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "shopify/overlay/mutations.memql", Name: "recordComplianceJob"}: true,
 		{Path: "commerce/mutations.memql", Name: "setProductContentStatus"}:    true,
 		{Path: "commerce/mutations.memql", Name: "markQuoteAccepted"}:          true,
+		// memql#5638, a store's uninstall and its reinstall. Each row is a
+		// claim about what Shopify did, so the argument is the one above:
+		// only the code that verified it can make it, and a store row has
+		// no owner a filter could scope a caller to.
+		//
+		// markStoreUninstalled is the connector's answer to an app/uninstalled
+		// the app's secret signed. Client-callable, it would take any store's
+		// storefronts offline and drop its Admin grant.
+		//
+		// markStoreReconnected clears that, and a shop/redact purge, once
+		// Connect Shopify's callback has verified the shop approved the app
+		// again. Client-callable, it would erase the record of a purge or put
+		// a disconnected store back online with a dead grant.
+		//
+		// markExternalConnectionDisconnected runs under the selection owner's
+		// borrowed identity, so actor.userId scoping would pass; what it
+		// asserts -- that the provider ended the grant -- is the verified
+		// delivery's to say, never the person's.
+		{Path: "shopify/overlay/mutations.memql", Name: "markStoreUninstalled"}:        true,
+		{Path: "shopify/overlay/mutations.memql", Name: "markStoreReconnected"}:        true,
+		{Path: "platform/mutations.memql", Name: "markExternalConnectionDisconnected"}: true,
 		// epic memql#4434, the release-cut pair. One argument covers both, and it
 		// is not "the caller is a machine" -- the caller here is a signed-in
 		// OWNER, which is the shape this map usually refuses.
@@ -1515,21 +1536,22 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// epic memql#5477, pipelines. Two arguments, and neither is "caller
 		// scoping was inconvenient".
 		//
-		// THE TEN READS have NO PERSON BEHIND THEIR CALLER. A delivery is
+		// THE ELEVEN READS have NO PERSON BEHIND THEIR CALLER. A delivery is
 		// GitHub's, the poll and recovery are a schedule's, the driver is an
 		// agent replica acting for a run, and the readiness report is the
 		// cluster asking about itself -- so actor.userId names nobody, and
 		// the reads span every owner by nature: the trigger must find
 		// whichever pipelines of a repository exist whoever connected them,
 		// the dedup read must find the other path's run for the same head
-		// whoever owns it (Review Focus 1: one run, one check run),
-		// recovery must find the run a lost replica stranded, which is the one
-		// its owner cannot rescue, and the concluded run whose final check run
-		// did not land, which its owner cannot see is stuck; and "is any
-		// repository connected" is a fact about the cluster, not about
-		// whichever owner asked. A self-scoped filter answers zero rows and
-		// no error, which reads exactly like a cluster with nothing
-		// connected.
+		// whoever owns it (Review Focus 1: one run, one check run), a push
+		// must find the earlier runs of its pull request it supersedes (D11)
+		// whoever owns them, recovery must find the run a lost replica
+		// stranded, which is the one its owner cannot rescue, and the
+		// concluded run whose final check run did not land, which its owner
+		// cannot see is stuck; and "is any repository connected" is a fact
+		// about the cluster, not about whichever owner asked. A self-scoped
+		// filter answers zero rows and no error, which reads exactly like a
+		// cluster with nothing connected.
 		// Each spells the cluster-owner arm out (`actor.isClusterOwner ==
 		// true`) and component/pipelinerun reads under its own synthetic
 		// cluster owner; the person-facing reads of the same rows are the
@@ -1550,6 +1572,7 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineSha"}:           true,
 		{Path: "pipelines/queries.memql", Name: "pipelineRunByCheckRun"}:                true,
 		{Path: "pipelines/queries.memql", Name: "pipelineRunsUnfinished"}:               true,
+		{Path: "pipelines/queries.memql", Name: "pipelineRunsUnfinishedForPullRequest"}: true,
 		{Path: "pipelines/queries.memql", Name: "pipelineRunsFinalCheckRunUnavailable"}: true,
 		{Path: "pipelines/queries.memql", Name: "pipelineRunById"}:                      true,
 		{Path: "pipelines/queries.memql", Name: "pipelinesActive"}:                      true,

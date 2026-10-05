@@ -41,6 +41,7 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/core/logger"
+	"github.com/znasllc-io/memql/integrations/workbench"
 )
 
 // Overrides holds injectable factory functions for testing.
@@ -156,6 +157,14 @@ type App struct {
 	// field is declared in every build and only the agent build has the
 	// package that fills it.
 	appInference any
+
+	// pipelineRunner answers the four pipeline forward actions on a
+	// workbench node (epic memql#5478): set by the workbench's integrations
+	// phase, installed on its forward handler by the cluster phase
+	// (workbenchForwardHandler). A NIL INTERFACE on every other node type and
+	// on a workbench that cannot run steps -- never a typed nil, which the
+	// handler would call rather than answer pipelines_not_configured.
+	pipelineRunner workbench.PipelineRunner
 
 	// Phase 5: transport
 	grpcServer *memqlgrpc.Server

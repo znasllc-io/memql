@@ -27,6 +27,12 @@ package worker
 //     sender read one heartbeat ago. This node reads it again at the moment of
 //     dispatch, because "revoked while a turn was in flight" is precisely the
 //     window that matters.
+//
+// And ONE consent rule IS re-run, because it needs nothing but the envelope:
+// rule 0 (purposeBinding, #5494). workerHost.pipeline_step is a shell command
+// the machine admits without a consent window, so it runs only under the
+// pipeline purpose the envelope carries -- a sender that forwarded one without
+// it is refused here rather than trusted to have checked.
 
 import (
 	"context"
@@ -75,8 +81,9 @@ type ForwardHandler struct {
 	apps        AppCallServer
 
 	// groups resolves the verified caller's ACTIVE groups for a machine lent
-	// to a group (epic memql#5344). Nil is workerservice.InstalledGroups --
-	// THIS replica's membership source, never anything the envelope says.
+	// to a group (epic memql#5344). Nil is workerservice.CachedGroups --
+	// THIS replica's membership source behind its per-person cache
+	// (memql#5660), never anything the envelope says.
 	groups workerservice.GroupResolver
 }
 
@@ -153,6 +160,17 @@ func (h *ForwardHandler) HandleForwardedRequest(
 		return
 	}
 
+	// RULE 0, re-decided from the envelope (purposeBinding): a pipeline_step
+	// without the pipeline purpose, the purpose on any other action or naming
+	// an agent, or a purpose nothing defines, runs nothing here.
+	if code, msg := purposeBinding(req.GetPurpose(), req.GetTool(), req.GetAction(), req.GetAgentId()); code != "" {
+		h.logger.Warn("worker forward: refused an envelope whose action does not belong to its purpose",
+			"request_id", requestId, "purpose", req.GetPurpose(), "tool", req.GetTool(),
+			"action", req.GetAction(), "error_code", code)
+		h.sendRefusal(send, requestId, code, msg)
+		return
+	}
+
 	registrationId := req.GetRegistrationId()
 	if err := h.verifyRegistration(cctx, owner, registrationId); err != nil {
 		h.sendRefusal(send, requestId, "registration_refused", err.Error())
@@ -171,6 +189,17 @@ func (h *ForwardHandler) HandleForwardedRequest(
 		// Belt and braces against a registry entry disagreeing with the row.
 		h.sendRefusal(send, requestId, "owner_mismatch",
 			"the connected machine is owned by a different user than the assertion names")
+		return
+	}
+	// THE MACHINE'S CONSENT, re-read where it is dispatched (RULING R20). The
+	// sender routed on the row; this replica holds the connection the machine
+	// advertised its policy on, so this is where its own word is read.
+	// Refused BEFORE START, so the sender moves the step on to a machine that
+	// does consent.
+	if req.GetPurpose() == PurposePipeline && !machineAllowsPipelines(w) {
+		h.sendRefusal(send, requestId, codePipelinesNotAllowed,
+			"the machine does not advertise "+PipelinesLabel+"="+PipelinesAllowed+
+				" on its connection here: its own policy does not allow pipeline steps")
 		return
 	}
 
@@ -201,6 +230,7 @@ func (h *ForwardHandler) HandleForwardedRequest(
 	envelope := buildToolDispatch(Request{
 		Tool:          req.GetTool(),
 		Action:        req.GetAction(),
+		Purpose:       req.GetPurpose(),
 		Args:          innerArgs,
 		AgentId:       req.GetAgentId(),
 		OwnerUserId:   owner,
@@ -258,7 +288,7 @@ func (h *ForwardHandler) verifyRegistration(ctx context.Context, ownerUserId, re
 		return err
 	}
 	for _, m := range machines {
-		if !sameSubject(m.RegistrationId, registrationId) {
+		if !sameRegistration(m.RegistrationId, registrationId) {
 			continue
 		}
 		if !m.RevokedAt.IsZero() {
@@ -320,9 +350,18 @@ func (h *ForwardHandler) verifySharedRegistration(ctx context.Context, actingUse
 	if err != nil {
 		return err
 	}
-	person := workerservice.NewPerson(ctx, actingUserId, h.groups)
+	// The groups come from THIS replica's membership cache unless a test set a
+	// resolver: one read per person, reused until a membership or a group
+	// changes anywhere in the mesh, and never for longer than
+	// MembershipCacheTTL (memql#5660). A fresh Person per call used to read
+	// them again for every call this receiver re-checked.
+	groups := h.groups
+	if groups == nil {
+		groups = workerservice.CachedGroups
+	}
+	person := workerservice.NewPerson(ctx, actingUserId, groups)
 	for _, m := range machines {
-		if !sameSubject(m.RegistrationId, registrationId) {
+		if !sameRegistration(m.RegistrationId, registrationId) {
 			continue
 		}
 		if !m.RevokedAt.IsZero() {
@@ -359,7 +398,7 @@ func (h *ForwardHandler) ownerOfSharedMachine(ctx context.Context, registrationI
 		return err
 	}
 	for _, m := range machines {
-		if !sameSubject(m.RegistrationId, registrationId) {
+		if !sameRegistration(m.RegistrationId, registrationId) {
 			continue
 		}
 		if sameSubject(m.OwnerUserId, registryOwner) {
@@ -370,10 +409,12 @@ func (h *ForwardHandler) ownerOfSharedMachine(ctx context.Context, registrationI
 	return errRegistrationNotOwned
 }
 
-// relayChunk forwards one ToolStream chunk across the hop.
-func (h *ForwardHandler) relayChunk(send func(*nodev1.NodeServerMessage) error, requestId string, chunk *memqlv1.ToolStream) {
+// forwardStreamChunk renders one machine chunk in the shape a forward relays
+// it in -- the shape Request.OnStreamChunk takes on either path -- or nil for
+// a payload the relay does not carry.
+func forwardStreamChunk(requestId string, chunk *memqlv1.ToolStream) *nodev1.WorkerForwardStream {
 	if chunk == nil {
-		return
+		return nil
 	}
 	out := &nodev1.WorkerForwardStream{RequestId: requestId}
 	switch payload := chunk.GetPayload().(type) {
@@ -384,6 +425,15 @@ func (h *ForwardHandler) relayChunk(send func(*nodev1.NodeServerMessage) error, 
 	case *memqlv1.ToolStream_DataChunk:
 		out.Payload = &nodev1.WorkerForwardStream_DataChunk{DataChunk: payload.DataChunk}
 	default:
+		return nil
+	}
+	return out
+}
+
+// relayChunk forwards one ToolStream chunk across the hop.
+func (h *ForwardHandler) relayChunk(send func(*nodev1.NodeServerMessage) error, requestId string, chunk *memqlv1.ToolStream) {
+	out := forwardStreamChunk(requestId, chunk)
+	if out == nil {
 		return
 	}
 	if err := send(&nodev1.NodeServerMessage{
@@ -440,12 +490,12 @@ func (h *ForwardHandler) send(send func(*nodev1.NodeServerMessage) error, resp *
 // (`v1:identity:user:abc`) on one side and bare (`abc`) on the other. The
 // engine bare-ifies on egress and canonicalizes on write, so both spellings
 // are in play on any given comparison -- see docs/public/concepts/identifiers.md.
+//
+// It compares PEOPLE, by component/worker.SameSubjectId's rule, never by the
+// text after the last colon: that read `system:automation:ana` as `ana`.
+// Registration ids keep that rule, through sameRegistration.
 func sameSubject(a, b string) bool {
-	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
-	if a == b {
-		return a != ""
-	}
-	return a != "" && b != "" && lastSegment(a) == lastSegment(b)
+	return workerservice.SameSubjectId(a, b)
 }
 
 func lastSegment(s string) string {

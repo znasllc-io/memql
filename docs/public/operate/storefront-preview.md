@@ -95,13 +95,30 @@ configuration, public Storefront token resolution, Shopify content-security
 policy origins, and shopper-form store context follow that selected store.
 Admin tokens and webhook secrets never enter the browser configuration.
 
-`sitePreviewReadiness(siteId)` reports the Testing URL and availability.
-Non-storefront candidate previews retain their existing behavior. Storefronts
-use the shared published build instead of `candidateRef`.
+`sitePreviewReadiness(siteId)` reports the Testing URL and availability, and
+whether each destination's store names its own Storefront token
+(`storeHasStorefrontToken`, `previewStoreHasStorefrontToken`) -- the one secret
+the edge publishes for a store, so the console never treats a store as
+connected while it serves nothing.
 
-Site runtime settings are shared between destinations. Store-specific Customer
-Account API settings still require separate work; independent catalog bindings
-do not imply independent account-client settings.
+**Testing and Production serve ONE build, each against its own store.** That
+is the storefront model, decided on 2026-09-25: there is no candidate version
+of a storefront. Candidates -- a version published beside the serving one and
+shown only under a preview -- are a `spa` and `static` feature
+([Deployables](deployables.md#publishing-the-candidate-version-instead)). A
+package deploy's `target: candidate` placement is refused for a storefront, and
+`setSiteCandidate` and `POST /sites/{id}/bundles?target=candidate` refuse any
+version but the one it already serves, with `storefront_has_no_candidate`.
+
+Site runtime settings are shared between destinations. Values that belong to
+ONE STORE -- the Customer Account API client of that store's Headless channel,
+the wholesale adapter configured for it -- go in the deployable's
+`storeSettings`, keyed by store id, and travel with the store each destination
+selects (memql#5602): the edge merges the entry of the in-force binding's store
+over `settings`, so Testing hands the testing store its own client and
+Production hands the live store its own. The document keeps its shape: a bundle
+reads `config.settings.customerAccountClientId` either way. See
+[Deployables](deployables.md#settings-that-belong-to-one-store).
 
 ## Store connection state
 

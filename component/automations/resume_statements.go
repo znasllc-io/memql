@@ -38,12 +38,39 @@ import "strings"
 // crash mid-statement). The journal's FailedStep is the first such ROW, in the
 // order the rows came back, and a continued failure is one; this is the first
 // in the body's order that resume can act on.
+//
+// "" MEANS THERE IS NOTHING TO RESUME, and ResumeFrom refuses it (memql#5664).
+// It used to fall back to FailedStep, which for a journal whose only failures
+// were continued past named one of them: a run still executing on another
+// replica, between two statements, then looked resumable to a second replica
+// the moment the first one's dispatch lease lapsed, and the second resumed it
+// from the continued failure -- running that statement, and every finished
+// one after it, again, beside the replica still running the run. A journal
+// with no failure at all was already refused for exactly that reason; a
+// failure the body continued past is not a failure of the run, so it is
+// refused the same way.
+//
+// There is NO fallback for a template that no longer has the failed step. A
+// re-plan (epic memql#5127) replaces the run's template from the failed step
+// on, and the install says where the run resumes: a `replan` re-run request
+// naming the new template's first step, served by PrepareRerun under a claim
+// of its own. Without that request such a journal has nothing to resume --
+// falling back to the first step the run never reached is what let a second
+// replica, after the first one's dispatch lease lapsed, start a re-planned run
+// it was still executing.
 func statementResumePoint(j *RunJournal, automation *Automation) string {
 	for _, step := range automation.Steps {
 		if step == nil {
 			continue
 		}
-		switch j.StepStates[step.ID].Status {
+		state, recorded := j.StepStates[step.ID]
+		if step.ID == j.FailedStep && !recorded {
+			// A journal that names its failed step and records nothing else
+			// about it -- one built by hand; LoadRunJournal records every
+			// row's state -- resumes there, as it always has.
+			return step.ID
+		}
+		switch state.Status {
 		case "running":
 			return step.ID
 		case "failed":
@@ -52,7 +79,7 @@ func statementResumePoint(j *RunJournal, automation *Automation) string {
 			}
 		}
 	}
-	return j.FailedStep
+	return ""
 }
 
 // resumedStatements is what the body knows from its journal when it resumes

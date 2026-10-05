@@ -2743,6 +2743,49 @@ variables:
     optional: true
     description: "Filesystem root under which each Plan's sandboxed workspace directory is lazily provisioned, as <root>/<planId>/. Point it at a project-local path for dev, or a mounted volume where the default is not durable. The directory tree IS the workspace state -- it persists across calls within a Plan so multi-Task agents share files, and is torn down on Plan terminal status -- so moving this on a running node abandons live workspaces rather than relocating them."
 
+  # --- pipelines, the substrate (epic memql#5478) ---
+
+  - name: MEMQL_PIPELINES_NAMESPACE
+    component: pipelines
+    scope: node
+    default: "memql-pipelines"
+    optional: true
+    description: "The Kubernetes namespace the workbench node creates pipeline step Jobs and their Secrets in, which must be the namespace whose Role grants the engine's identity Jobs (the pipelines component renders both)."
+
+  - name: MEMQL_PIPELINES_CLONE_IMAGE
+    component: pipelines
+    scope: node
+    optional: true
+    description: "The image every pipeline step's clone init container runs, pinned by digest and providing git, base64 and tr; unset means this workbench node cannot run pipeline steps and refuses them rather than guessing which image to hand a repository token to."
+
+  - name: MEMQL_PIPELINES_RUN_MAX_MINUTES
+    component: pipelines
+    scope: node
+    default: "120"
+    optional: true
+    description: "The wall-clock ceiling on one pipeline run in minutes (default 120, clamped to 5..1440): a step is given only the time left under it and fails pipeline_run_ceiling when that runs out, and a value that is not a positive whole number falls back to the default."
+
+  - name: MEMQL_PIPELINES_LOG_STORE_MAX_LINES
+    component: pipelines
+    scope: node
+    default: "2000"
+    optional: true
+    description: "How many lines of one pipeline step's output the log store keeps (default 2000, clamped to 100..100000) before that copy stops with a pipeline_log_capped note, the full log still archived to the Library; a value that is not a positive whole number falls back to the default."
+
+  - name: MEMQL_PIPELINES_ARTIFACT_MAX_BYTES
+    component: pipelines
+    scope: node
+    default: "67108864"
+    optional: true
+    description: "The cap in bytes on one pipeline step's decoded artifact archive (default 67108864, 64 MiB, clamped to 1 MiB..256 MiB), past which the archive is dropped and reported as pipeline_artifact_too_large; a value that is not a positive whole number falls back to the default."
+
+  - name: MEMQL_PIPELINES_WORKSPACE_LIMIT
+    component: pipelines
+    scope: node
+    default: "20Gi"
+    optional: true
+    description: "The size limit of every pipeline step's /workspace scratch volume, as a whole number of Ki, Mi, Gi or Ti (default 20Gi): the pipelines component's ConfigMap sets it equal to the memql-pipelines LimitRange's default ephemeral-storage limit, which bounds the whole pod, so the bound the kubelet evicts a step for (pipeline_step_disk_exceeded) is the one its Job shows. Any other value falls back to the default."
+
   # --- the work spine's journal retention (epic memql#4966) ---
 
   - name: MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS
@@ -2751,6 +2794,13 @@ variables:
     default: "30"
     optional: true
     description: "Days after the latest terminal version before unowned scheduled runs and their step/closed-approval histories can be archived and deleted. Active work, user goals, pending approvals and longer-lived detail are preserved. Nightly 03:40 UTC; archive read-back verification is required."
+
+  - name: MEMQL_PIPELINES_RUN_RETENTION_DAYS
+    component: pipelines
+    scope: node
+    default: "30"
+    optional: true
+    description: "Days after the latest version of a finished pipeline run before the nightly 03:40 UTC operational retention sweep archives and deletes it: the v1:pipelines:run row once completed, the v1:work:run it compiled into (triggeredBy pipeline:<mode>, at succeeded, failed or cancelled) with the steps and closed approvals its owner wrote, and the pipeline's v1:work:goal once no run of it remains. A work run with model-call or observation detail, a pending approval, a recent child, a child with no owner or a child someone else owns is kept until that clears, its goal with it, and the Library files a run's steps archived (logs, artifacts) are the owner's and are never retired. Archive read-back verification is required, so no archive means no delete; a non-positive or unparseable value falls back to 30."
 
   - name: MEMQL_WORKER_INVOCATION_RETENTION_DAYS
     component: worker

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/envregistry"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/secret"
 )
 
@@ -196,7 +197,11 @@ type engineInjectStore struct {
 // platform concept under the active partition context. A query error is
 // returned to the caller, which treats it as "present" (conservative).
 func (s *engineInjectStore) valuePresent(ctx context.Context, conceptName, name string) (bool, error) {
-	query := fmt.Sprintf(`concept==%s&&payload.name=="%s"`, conceptName, name)
+	// QuoteString for the reason readNamedRowFields gives (memql#5625). The
+	// names here come from the compiled env-var registry rather than from a
+	// row, so this one was never reachable with a quote; it is the same
+	// lookup and it renders its literal the same way.
+	query := fmt.Sprintf(`concept==%s&&payload.name==%s`, conceptName, langparser.QuoteString(name))
 	result, err := s.engine.Execute(systemActorContext(ctx), query)
 	if err != nil {
 		return false, err

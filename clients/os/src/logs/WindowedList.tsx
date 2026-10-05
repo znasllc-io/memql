@@ -98,6 +98,29 @@ export function WindowedList<T>({
     setScrollTop(target);
   }, [follow, total, height]);
 
+  // A NEW ROW HEIGHT KEEPS THE READER'S PLACE (R40, epic memql#5478). A log
+  // list re-lays its lines on two rows when it narrows past its measure, and
+  // back when it widens, while the scroll position is pixels: left alone it
+  // would land on whichever row now sits at that offset. So the row being
+  // read stays where it was -- the cursor's row while it is on screen, at its
+  // own place in the view and wholly visible; otherwise the first visible
+  // row, to the fraction. Following needs none of it: the pin above puts the
+  // newest row back at the bottom. Keyed on the row height alone, because
+  // everything else it reads is the position as it stood when that changed.
+  const laidOutAt = useRef(rowHeight);
+  useLayoutEffect(() => {
+    const before = laidOutAt.current;
+    laidOutAt.current = rowHeight;
+    if (before === rowHeight || follow) return;
+    const cursorOnScreen = active >= 0 && (active + 1) * before > scrollTop && active * before < scrollTop + height;
+    let next = (scrollTop / before) * rowHeight;
+    if (cursorOnScreen) {
+      const top = active * rowHeight;
+      next = Math.min(top, Math.max(top - (active * before - scrollTop), top + rowHeight - height));
+    }
+    scrollTo(Math.max(0, Math.min(next, total - height)));
+  }, [rowHeight]);
+
   function scrollTo(next: number): void {
     const el = rootRef.current;
     if (el !== null) el.scrollTop = next;
@@ -175,6 +198,11 @@ export function WindowedList<T>({
   const start = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
   const end = Math.min(rows.length, Math.ceil((scrollTop + height) / rowHeight) + overscan);
   const slice = rows.slice(start, end);
+  // The cursor is NAMED only while its row is in the DOM: an id that resolves
+  // to nothing is a cursor assistive technology cannot find. It is still
+  // remembered: the next arrow key moves it from there and scrolls its new
+  // row into view.
+  const cursorRendered = active >= start && active < end;
 
   return (
     <div
@@ -184,7 +212,7 @@ export function WindowedList<T>({
       role="grid"
       aria-label={label}
       aria-rowcount={rows.length}
-      aria-activedescendant={active >= 0 ? `${id}-row-${active}` : undefined}
+      aria-activedescendant={cursorRendered ? `${id}-row-${active}` : undefined}
       tabIndex={0}
       onScroll={onScroll}
       onKeyDown={onKeyDown}

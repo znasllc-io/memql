@@ -1,4 +1,4 @@
-//go:build bff || agent
+//go:build bff || agent || workbench
 
 package app
 
@@ -12,6 +12,11 @@ import (
 // resolveBlobStore builds the Azure Blob uploader and returns it with its
 // container name, so the agent node can hand both to the workbench / worker
 // integrations for server-side fs_write promotion.
+//
+// The WORKBENCH builds one too (epic memql#5478): its pipeline runner files a
+// step's log and artifacts in the owner's Library (integrations_workbench.go),
+// and only when the node can run steps -- the runner's construction asks for
+// it, so a workbench without pipelines builds no blob client.
 //
 // It used to also mount `POST|GET /spaces/{partitionId}/attachments`. That
 // route and its handler went with the space concept (memql#4990); the Library's

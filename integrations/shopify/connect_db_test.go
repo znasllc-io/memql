@@ -174,10 +174,22 @@ func TestConnectResolvesAndSavesAgainstARealEngine(t *testing.T) {
 		t.Fatalf("the refused save wrote %s", pendingID)
 	}
 
-	// The developer's save lands PENDING, and only pending.
+	// The developer holds the store part and writes the site, and is still
+	// refused: the per-storefront builtins are a cluster owner's (memql#5638,
+	// G9). Nothing is written.
+	if _, err := save(devCtx, "dev-client", "dev-secret"); err == nil || !strings.Contains(err.Error(), "reserved to a cluster owner") {
+		t.Fatalf("a developer's save was not refused by the owner floor: %v", err)
+	}
+	if v, err := eng.ResolveSystemVariable(ownerCtx(), pendingID); err == nil && v != "" {
+		t.Fatalf("the developer's refused save wrote %s", pendingID)
+	}
+
+	// The same person as a cluster owner: the save lands PENDING, and only
+	// pending.
+	ownerDevCtx := actorCtx(dev, auth.RoleOwner)
 	for _, secretValue := range []string{"first-secret-" + suffix, "second-secret-" + suffix} {
-		if _, err := save(devCtx, "client-"+secretValue, secretValue); err != nil {
-			t.Fatalf("the developer's save: %v", err)
+		if _, err := save(ownerDevCtx, "client-"+secretValue, secretValue); err != nil {
+			t.Fatalf("the owner's save: %v", err)
 		}
 		if v, err := eng.ResolveSystemVariable(ownerCtx(), pendingID); err != nil || v != "client-"+secretValue {
 			t.Fatalf("pending client id = %q (%v)", v, err)
@@ -245,8 +257,9 @@ func TestConnectResolvesAndSavesAgainstARealEngine(t *testing.T) {
 			langparser.QuoteString(mine), langparser.QuoteString(token)))
 	}
 	pasted := "pasted-token-" + suffix
-	if got := tokenSet(devCtx, pasted)["reason"]; got != connectReasonStoreInUse {
-		t.Fatalf("a developer changed the token of a store bound to a stranger's site: reason %v", got)
+	if _, err := eng.Execute(devCtx, fmt.Sprintf(`builtin shopifyStorefrontTokenSet(siteId: %s, token: %s)`,
+		langparser.QuoteString(mine), langparser.QuoteString(pasted))); err == nil || !strings.Contains(err.Error(), "reserved to a cluster owner") {
+		t.Fatalf("a developer's token set was not refused by the owner floor: %v", err)
 	}
 	if storefront.requests() != 0 {
 		t.Fatal("the refused token set reached Shopify")

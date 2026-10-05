@@ -471,10 +471,15 @@ the strategies it already has. Two properties are security-load-bearing:
   and to machines LENT TO YOU.** Another person's machine reaches your call
   only when its owner shared it with everyone, with you, or with a group you
   are in, AND the machine itself agreed (`inference.serve: cluster` in its
-  `policy.yaml`). A machine nobody lent you is never a candidate.
+  `policy.yaml`). A machine nobody lent you is never a candidate. The same
+  holds for a call pinned to one machine: it may name a machine lent to you,
+  and nothing else.
 - **System work** — automations and cluster maintenance, with no acting user
-  — reaches only machines **lent to everyone**, with both consents. A machine
-  shared with specific people never serves it. [Sharing a
+  or under the cluster's synthetic identity — reaches only machines **lent to
+  everyone**, with both consents. A machine shared with specific people never
+  serves it. An automation acting under a person's borrowed authority is that
+  person's work and uses what is lent to them
+  ([memql#5662](https://github.com/znasllc-io/memql/issues/5662)). [Sharing a
   machine](shared-machines.md) is the whole story, including who you can lend
   a machine to and what the lender is told afterwards.
 

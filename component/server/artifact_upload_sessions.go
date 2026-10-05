@@ -360,7 +360,7 @@ func (h *ArtifactHandler) handleUploadInit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	name := sanitizeLibraryFileName(req.Name)
+	name := SanitizeLibraryFileName(req.Name)
 	if strings.TrimSpace(req.Name) == "" {
 		http.Error(w, "name is required", http.StatusBadRequest)
 		return

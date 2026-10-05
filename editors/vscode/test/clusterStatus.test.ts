@@ -22,6 +22,7 @@ import {
   versionNote,
 } from "../src/clusters/status.js";
 import type { ConnectionState } from "../src/connection/manager.js";
+import { DEFAULT_STACK_TAG } from "../src/install/stackPin.js";
 
 const SESSION: ClusterFacts = { session: true, signedIn: true, ownerSetup: false, consoleUrl: "https://os.memql.localhost/" };
 const NOTHING: ClusterFacts = { session: false, signedIn: false, ownerSetup: false, consoleUrl: "https://os.memql.localhost/" };
@@ -97,9 +98,13 @@ test("the state words are the person's, and local and remote outages differ", ()
 });
 
 test("the version is on the row only when it tells something", () => {
-  const listing = { tags: ["v0.21.0", "v0.19.1"], fetchedAt: 1 };
-  assert.equal(versionNote(cluster({ version: "v0.19.1" }), listing), "v0.21.0 available");
-  assert.equal(versionNote(cluster({ version: "v0.21.0" }), listing), "");
+  // The listing's newest is the release this extension is pinned to, as it is
+  // the day the pin moves. A literal newer than the pin stops meaning "current"
+  // once the pin passes it: the row then rightly says "Needs an update"
+  // (memql#5632).
+  const listing = { tags: [DEFAULT_STACK_TAG, "v0.19.1"], fetchedAt: 1 };
+  assert.equal(versionNote(cluster({ version: "v0.19.1" }), listing), `${DEFAULT_STACK_TAG} available`);
+  assert.equal(versionNote(cluster({ version: DEFAULT_STACK_TAG }), listing), "");
   assert.equal(versionNote(cluster({ version: "main" }), listing), "", "a branch cannot be compared");
   assert.equal(versionNote(cluster({ version: "v0.18.0" }), undefined), "Needs an update", "older than this extension expects");
   assert.equal(versionNote(cluster(), listing), "");

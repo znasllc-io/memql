@@ -74,10 +74,13 @@ func registerTimescaleMigrations(m *migrate.Migrations, logger *slog.Logger) {
 	// restamp logs what it could not repair, and pgdriver discards a SQL
 	// NOTICE (memql#5292); the concept-index pair inspects the catalog before
 	// it trusts an index it did not see built, and builds per chunk only on a
-	// hypertable (memql#5252).
+	// hypertable (memql#5252); the readiness collapse deletes in bounded,
+	// committed batches, which a .sql file can only write as one statement
+	// (memql#5604).
 	registerSiteOwnerRestamp(m, logger)
 	registerMemoryNodesConceptIndex(m, logger)
 	registerMemoryNodesConceptIndexVerified(m, logger)
+	registerModuleReadinessHistoryCollapse(m, logger)
 	registerWorkRecoveryIndex(m, logger)
 	registerWorkJournalLookupIndex(m, logger)
 }

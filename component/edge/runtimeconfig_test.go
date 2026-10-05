@@ -257,8 +257,8 @@ func TestServeRuntimeConfig_DomainKeyIsAlwaysPresent(t *testing.T) {
 func storefrontSecrets(t *testing.T) (SecretResolver, map[string]string) {
 	t.Helper()
 	secrets := map[string]string{
-		"acme_storefront_token": "shpat_PUBLIC_STOREFRONT_TOKEN",
-		"acme_admin_token":      "shpat_ADMIN_TOKEN_MUST_NEVER_BE_SERVED",
+		"SHOPIFY_STORE-1_STOREFRONT_TOKEN": "shpat_PUBLIC_STOREFRONT_TOKEN",
+		"SHOPIFY_STORE-1_ADMIN_TOKEN":      "shpat_ADMIN_TOKEN_MUST_NEVER_BE_SERVED",
 	}
 	return func(_ context.Context, name string) (string, error) {
 		v, ok := secrets[name]
@@ -279,10 +279,12 @@ func storefrontSite() *Site {
 		// names a v1:shopify:store row and the resolver reads it alongside
 		// the site; the document is built from that resolution.
 		Binding: map[string]any{"storeId": "store-1"},
+		// The ref is the store's own token: the only name the edge resolves
+		// for it (memql#5626, StorefrontTokenSecretName).
 		Store: &BoundStore{
 			ID:                 "store-1",
 			Domain:             "acme-demo.myshopify.com",
-			StorefrontTokenRef: "acme_storefront_token",
+			StorefrontTokenRef: "SHOPIFY_STORE-1_STOREFRONT_TOKEN",
 		},
 	}
 }
@@ -360,7 +362,7 @@ func TestRuntimeConfigForSite_BindingOnANonStorefrontKindResolvesNoSecret(t *tes
 // appear in the bytes we served".
 func TestRuntimeConfigNeverCarriesTheShopifyAdminToken(t *testing.T) {
 	resolve, secrets := storefrontSecrets(t)
-	admin := secrets["acme_admin_token"]
+	admin := secrets["SHOPIFY_STORE-1_ADMIN_TOKEN"]
 
 	// EVERY NAME THE SERVE PATH ASKS FOR (epic memql#5530). The grep below
 	// proves the admin token's VALUE did not reach the bytes; this proves the
@@ -392,7 +394,7 @@ func TestRuntimeConfigNeverCarriesTheShopifyAdminToken(t *testing.T) {
 	// The instrument can move: the PUBLIC token IS in this same document, so
 	// a document that failed to carry any secret at all would fail here
 	// first and this test could not pass vacuously.
-	if !strings.Contains(body, secrets["acme_storefront_token"]) {
+	if !strings.Contains(body, secrets["SHOPIFY_STORE-1_STOREFRONT_TOKEN"]) {
 		t.Fatalf("the served document does not carry the public Storefront token, so the "+
 			"admin-token check below would prove nothing: %s", body)
 	}
@@ -402,8 +404,8 @@ func TestRuntimeConfigNeverCarriesTheShopifyAdminToken(t *testing.T) {
 	if strings.Contains(strings.ToLower(body), "admin") {
 		t.Errorf("the served runtime-config document mentions an admin credential: %s", body)
 	}
-	if len(asked) != 1 || asked[0] != "acme_storefront_token" {
-		t.Errorf("the secret store was asked for %v, want exactly [acme_storefront_token] -- "+
+	if len(asked) != 1 || asked[0] != "SHOPIFY_STORE-1_STOREFRONT_TOKEN" {
+		t.Errorf("the secret store was asked for %v, want exactly [SHOPIFY_STORE-1_STOREFRONT_TOKEN] -- "+
 			"the serve path resolves the Storefront token reference and nothing else", asked)
 	}
 }

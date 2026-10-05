@@ -39,8 +39,9 @@ package rbac
 // let two admins get different answers about one person. The WRITE keeps the
 // caller's identity and stamps internal origin, as writeRole does, so
 // `createdBy` on the grant row is the person who decided rather than the
-// engine. The AUDIT row is written under the caller's plain context: the actor
-// recorded IS this caller, and the ordinary write path admits it.
+// engine. The AUDIT row records the caller too, written with internal origin
+// stamped for that one write: auditEvent's create admits a cluster owner or
+// server code (memql#5624), and an admin granting is neither.
 
 import (
 	"context"
@@ -459,10 +460,8 @@ func (i *Integration) readGrant(ctx context.Context, id string) (grantSpec, bool
 // ---------------------------------------------------------------------
 
 // auditGrant writes one v1:identity:auditEvent per decision, targetType
-// `grant`, the subject, verb, resource and effect in detail. Under the
-// caller's plain context, for auditRole's reason: the actor recorded IS this
-// caller, and stamping internal origin would widen a call that does not need
-// widening.
+// `grant`, the subject, verb, resource and effect in detail. Stamped with
+// internal origin for this one write, for auditRole's reason (memql#5624).
 func (i *Integration) auditGrant(ctx context.Context, access *componentAuth.AccessContext, action, grantId string, spec grantSpec) {
 	if i.engine == nil {
 		return
@@ -491,7 +490,7 @@ func (i *Integration) auditGrant(ctx context.Context, access *componentAuth.Acce
 		langparser.QuoteString(grantId),
 		langparser.QuoteString("success"),
 		string(body))
-	_, _ = i.engine.Execute(ctx, query)
+	_, _ = i.engine.Execute(componentAuth.ContextWithInternalOrigin(ctx), query)
 }
 
 // ---------------------------------------------------------------------

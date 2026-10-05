@@ -101,6 +101,7 @@ shape site siteFull {
   candidateRef
   previewBinding
   settings
+  storeSettings
   packageId
   packageDeployableName
   accountId
@@ -299,6 +300,7 @@ shape packageDeployment packageDeploymentFull {
   deployables
   snapshotArtifactId
   scopedTo
+  candidates
   fromDeploymentId
   buildLogTail
   builtOn

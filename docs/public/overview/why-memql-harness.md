@@ -173,10 +173,12 @@ and its two controls. The figure is on [the scorecard](proving-scorecard.md).
   (`component/work/budget.go`, enforced in `integrations/work/runceilings.go`):
   a run parks instead of making the next call when it would cross a ceiling
   its goal declares -- tokens, cost, model calls or wall-clock time -- and
-  carries on when a person raises that ceiling. A goal can also declare
-  `maxRetries` and `maxEvents`, but nothing enforces those two yet: they are
-  the executor's counters and never reach a model call, so the run logs a
-  warning that they bound nothing rather than pretending to check them.
+  carries on when a person raises that ceiling. A goal's `maxRetries` bounds
+  the failure path instead: every retry, repair and re-plan it orders counts
+  against it (three when unset), and past it the run asks a person. A goal
+  can also declare `maxEvents`, but nothing enforces it yet: it is the
+  executor's counter and never reaches a model call, so the run logs a
+  warning that it bounds nothing rather than pretending to check it.
 - **Loop breakers** -- repeat-failure and redelegation-refusal guards
   stop the classic "model apologizes and tries the same thing forever".
 - **Model tiering** that is cheap by default and escalates only on an

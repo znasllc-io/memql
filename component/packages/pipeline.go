@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/znasllc-io/memql/component/edge"
 	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/core/logger"
 )
@@ -289,6 +290,15 @@ type Placement struct {
 	// reader asking "why is there no site for this" wants one answer shape,
 	// not two.
 	Skip bool
+	// Target is which of the site's versions this run's build becomes
+	// (memql#5601): the serving version, which is the default and what every
+	// run did before the field existed, or the CANDIDATE, which writes
+	// candidateRef and leaves bundleRef -- and so every visitor -- where it
+	// was. A placement-time choice for skip's reason. Empty until
+	// prepareDeployment reads it; an unknown value refuses the request before
+	// a run opens, and a storefront refuses the candidate after analysis,
+	// because a storefront has no candidate version (refuseUnservedCandidates).
+	Target edge.Target
 }
 
 // DeployOutcome is what a run produced.
@@ -394,6 +404,16 @@ func StartAnalysis(ctx context.Context, d *Deps, req DeployRequest) (*DeployOutc
 }
 
 func prepareDeployment(ctx context.Context, d *Deps, req DeployRequest) (map[string]any, *DeployOutcome, DeployRequest, error) {
+	// THE PLACEMENTS ARE READ BEFORE ANYTHING IS OPENED. An unknown target is a
+	// request this pipeline cannot honour in either direction -- reading it as
+	// the serving version would put in front of the public a build somebody
+	// asked to keep from them -- so it is refused before a run row exists.
+	placements, err := placementTargets(req.Placements)
+	if err != nil {
+		return nil, nil, req, err
+	}
+	req.Placements = placements
+
 	pkg, err := d.Store.packageById(ctx, req.PackageId)
 	if err != nil {
 		return nil, nil, req, err
@@ -424,8 +444,20 @@ func prepareDeployment(ctx context.Context, d *Deps, req DeployRequest) (map[str
 		// apps they meant: a compose gate opens with no placements at all and
 		// closes with the skips somebody ticked, so a scope fixed at open
 		// would have the run report progress on apps it was told not to build.
-		if len(scope) > 0 {
-			if serr := d.Store.recordScope(ctx, deploymentId, scope); serr != nil {
+		//
+		// AND THE TARGETS (memql#5601): an explicit target on this call wins,
+		// an omitted one keeps what the run recorded at open, and the result is
+		// re-stamped when it differs -- so a run opened as a candidate cannot
+		// fall toward the serving version because the confirm left it out.
+		recorded := rowStrings(resumed, "candidates")
+		req.Placements = withRecordedCandidates(req.Placements, recorded)
+		candidates := candidateNames(req.Placements)
+		if len(scope) > 0 || !sameNames(candidates, recorded) {
+			stamped := scope
+			if len(stamped) == 0 {
+				stamped = rowStrings(resumed, "scopedTo")
+			}
+			if serr := d.Store.recordScope(ctx, deploymentId, stamped, candidates); serr != nil {
 				return nil, nil, req, serr
 			}
 		}
@@ -455,7 +487,7 @@ func prepareDeployment(ctx context.Context, d *Deps, req DeployRequest) (map[str
 				// refused rather than quietly shipping other bytes.
 			}
 		}
-	} else if err := d.Store.openDeployment(ctx, deploymentSeed{
+	} else if err := d.openRun(ctx, &req, deploymentSeed{
 		DeploymentId: deploymentId,
 		PackageId:    req.PackageId,
 		OwnerUserId:  ownerUserId,
@@ -648,6 +680,11 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 		aerr = validateAssetRepositories(rep, repository)
 	}
 
+	// WHETHER DEPLOYING WOULD CHANGE THE ACTIVE DSL (memql#5601), on the
+	// report before it is recorded, so the confirm gate shows it and MemQL OS
+	// can offer a candidate exactly where the confirm would accept one.
+	d.recordDslChanges(ctx, snapshot, rep)
+
 	snapshotArtifactId := d.storeSnapshot(ctx, req, out.DeploymentId, snapshot)
 	if rerr := d.Store.recordReport(ctx, out.DeploymentId, rep, snapshotArtifactId); rerr != nil {
 		d.log().Warn("packages: could not record the analysis report",
@@ -696,6 +733,20 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 		return refuse(CodeDslRequiresAuthoring,
 			"this package ships MemQL DSL (%s), and deploying DSL changes what this whole cluster can do -- so it is owner or developer only. A package of web apps alone deploys under your own account.",
 			describeDomains(rep.DslDomains))
+	}
+
+	// ---- candidates only where a candidate is served (memql#5601) ----
+	//
+	// After the analysis, because the KIND and the DSL domains decide and the
+	// analysis is what knows them; before the build, the stage and every site
+	// write, because a storefront's publish re-points its store bindings first
+	// (a binding reaches the live site the moment it is written) and a DSL
+	// stage rolls the whole cluster.
+	if err := refuseUnservedCandidates(rep, req.Placements); err != nil {
+		return err
+	}
+	if err := d.refuseCandidateDslChange(ctx, snapshot, rep, req.Placements); err != nil {
+		return err
 	}
 
 	// ---- confirm (D12) ----
@@ -784,6 +835,15 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 	out.Deployables = outcomes
 	if perr != nil {
 		return perr
+	}
+
+	// A RUN THAT ONLY PUBLISHED CANDIDATES DEPLOYED NOTHING (memql#5601).
+	// deployedVersion is the source currently LIVE, and every visitor is
+	// served exactly what they were before this run -- so it is not
+	// recorded, and the auto-deploy feed goes on seeing the update as
+	// unshipped, which it is.
+	if candidatesOnly(outcomes) {
+		return nil
 	}
 
 	// Compare with the observation at the ORIGINAL fetch, including across

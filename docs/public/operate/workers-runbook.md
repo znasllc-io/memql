@@ -493,7 +493,7 @@ user who never opened the page has no row, and the router applies
 | `strategy` | how the surviving candidates are ORDERED |
 | `requireLabels` | a machine must carry these to be a candidate at all. AND-ed with the agent's own requirement; narrows, never widens |
 | `preferLabels` | ordering hint only, never a filter |
-| `fallback` | `nextMatching` (try the next candidate when one refuses BEFORE starting) or `none` (report the refusal) |
+| `fallback` | `nextMatching` (try the next candidate when one refuses BEFORE starting) or `none` (report the refusal). It governs an agent's calls: a pipeline step always tries the next matching candidate, whatever it says ([Pipelines substrate](pipelines-substrate.md#the-fleet)) |
 
 **The four strategies, and what each actually orders by.** Every sort is
 STABLE over registration order (`sort "row.createdAt", "asc"` in
@@ -704,11 +704,11 @@ running it locally would fail in a way that blames the machine.
 **`refused_before_start` is the re-pick predicate**, and it is the one field on
 the wire that must never be guessed. True means the receiver is CERTAIN nothing
 executed -- it held no stream for the registration, or the machine was at its
-concurrency cap -- so the sender may try the next candidate under
-`fallback=nextMatching`. False means the dispatch reached the machine and the
-sender must **not** re-pick even on failure: an exec that lost its stream
-mid-run may have run, and running it elsewhere is a second side effect rather
-than a retry (design D5).
+concurrency cap -- so the sender may try the next candidate: under
+`fallback=nextMatching` for an agent's call, and always for a pipeline step.
+False means the dispatch reached the machine and the sender must **not**
+re-pick even on failure: an exec that lost its stream mid-run may have run, and
+running it elsewhere is a second side effect rather than a retry (design D5).
 
 **What the receiver re-checks, and what it deliberately does not.** The consent
 gates -- per-task approval, the kill switch, standing scope, the classifier --
@@ -745,7 +745,7 @@ landed where it did. It is rendered per machine in the activity list on
 | `strategy` | `firstFit` / `roundRobin` / `leastLoaded` / `labelMatch` |
 | `candidatesConsidered` | registration ids that survived the filter, IN THE ORDER the router would try them |
 | `rejected` | per machine, why it was NOT a candidate. Present even -- especially -- when the candidate list is empty |
-| `attempts` | 1 unless `fallback=nextMatching` moved past a refusal |
+| `attempts` | 1 unless the dispatch moved past a refusal: under `fallback=nextMatching` for an agent's call, always for a pipeline step |
 | `selectedBy` | `policy` / `reroute` / `only_candidate` |
 | `reroutedFrom` | `workbench` (the workbench answered `environment_mismatch`) or `worker:<registrationId>` (a candidate refused before starting) |
 | `requireLabels` / `preferLabels` | the MERGED agent+policy requirement the candidates were filtered and ordered by |

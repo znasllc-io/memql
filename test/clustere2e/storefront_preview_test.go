@@ -203,7 +203,7 @@ func TestStorefrontPreview_TwoDestinationsShareOneBuild(t *testing.T) {
 		StoreId:            liveStoreID,
 		Domain:             liveStoreHost,
 		Name:               "clustere2e preview, the store shoppers reach",
-		StorefrontTokenRef: "clustere2e_storefront_token_absent",
+		StorefrontTokenRef: memqlengine.StorefrontTokenSecretName(liveStoreID),
 	}); err != nil {
 		t.Fatalf("createStore (needs a CLUSTER OWNER token): %v", err)
 	}
@@ -211,7 +211,7 @@ func TestStorefrontPreview_TwoDestinationsShareOneBuild(t *testing.T) {
 		StoreId:              devStoreID,
 		Domain:               devStoreHost,
 		Name:                 "clustere2e preview, the development store",
-		StorefrontTokenRef:   "clustere2e_dev_storefront_token_absent",
+		StorefrontTokenRef:   memqlengine.StorefrontTokenSecretName(devStoreID),
 		IsDevelopment:        true,
 		IsDevelopmentSet:     true,
 		DevelopmentOfStoreId: liveStoreID,

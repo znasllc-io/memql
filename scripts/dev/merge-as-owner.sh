@@ -293,7 +293,7 @@ function report_pr() {
 # An earlier version of this comment said install-cluster-e2e "installs a
 # PINNED RELEASED STACK rather than the branch under test". That is wrong and
 # is corrected here rather than deleted, because it was load-bearing in the
-# argument. All three legs check the PR's own commit out, and the ArgoCD
+# argument. All five legs check the PR's own commit out, and the ArgoCD
 # Application the bring-up creates points at that SHA
 # (`memql-local (<sha> -> deploy/k8s/overlays/local)`); only the `upgrade` leg
 # additionally resolves DEFAULT_STACK_TAG, and that is its FROM version. So the

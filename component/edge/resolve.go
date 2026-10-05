@@ -162,6 +162,17 @@ type Site struct {
 	// slipped one past it must not put a number where a bundle reads a
 	// string.
 	Settings map[string]string
+
+	// StoreSettings is the site row's per-store runtime settings (memql#5602):
+	// for each store id, BARE, the plain string values that belong to that
+	// store rather than to the site -- the Customer Account API client of one
+	// store's Headless channel, the wholesale adapter configured for one
+	// store. settingsForSite merges the map of the store the in-force binding
+	// names over Settings, so the values travel with whichever store the edge
+	// chose: Production's binding, or under a grant the Testing binding
+	// previewSite substituted. Never nil; only string values survive the
+	// projection, for Settings' reason.
+	StoreSettings map[string]map[string]string
 }
 
 // BoundStore is the v1:shopify:store row as the SERVING PATH sees it: the
@@ -192,6 +203,12 @@ type BoundStore struct {
 	// APIVersion supplies the Storefront API version unless the site explicitly
 	// pins its own. It follows the connected store without rewriting the site.
 	APIVersion string
+	// Disconnected is true when Shopify no longer authorizes the app for the
+	// store: it reported the app uninstalled (uninstalledAt), or shop/redact
+	// purged the store after one (redactedAt). The storefront block then reads
+	// "unavailable" and publishes no token (memql#5638). A yes or a no, never
+	// the timestamps: the serving path needs the decision, not the history.
+	Disconnected bool
 }
 
 // SiteAccount is the account behind a reserved front door, as the served page
@@ -265,6 +282,10 @@ type resolver struct {
 	mu    sync.RWMutex
 	cache map[string]entry
 
+	// tokenWarnings throttles the warning a store whose Storefront token
+	// reference the edge will not serve gets at resolution (memql#5626).
+	tokenWarnings *refusalLog
+
 	// sf collapses concurrent cold-cache resolutions for the SAME hostname
 	// into one query, the same shape as integrations/cognition's cache-miss
 	// singleflight groups (e.g. recentUtterSF / spaceInfoSF in
@@ -291,7 +312,7 @@ type resolver struct {
 // served from, and this cache lives on every edge replica, so the TTL is the
 // backstop behind the change-feed invalidation in Task 9.
 func NewResolver(exec QueryExecutor, ttl time.Duration) Resolver {
-	return &resolver{exec: exec, ttl: ttl, cache: map[string]entry{}, logger: slog.Default()}
+	return &resolver{exec: exec, ttl: ttl, cache: map[string]entry{}, logger: slog.Default(), tokenWarnings: newRefusalLog()}
 }
 
 // normalizeHost strips the port and lowercases. A Host header carries a port
@@ -420,6 +441,7 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 						"component", "edge", "siteId", site.ID, "storeId", storeId, "err", serr)
 				} else {
 					site.Store = store
+					r.warnUnservedToken(site, store, "binding")
 				}
 			}
 			// THE PREVIEW BINDING'S STORE, resolved beside the serving one and
@@ -440,6 +462,7 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 						"component", "edge", "siteId", site.ID, "storeId", storeId, "err", serr)
 				} else {
 					site.PreviewStore = store
+					r.warnUnservedToken(site, store, "previewBinding")
 				}
 			}
 		}
@@ -467,6 +490,73 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 	// *Site the closure returned, nil or not.
 	site, _ := anySite.(*Site)
 	return site, nil
+}
+
+// warnUnservedToken tells the operator -- once an hour for each site, store
+// and reference -- that a store names a Storefront token the edge will not
+// publish, and what clears it (memql#5626).
+//
+// AT RESOLUTION, because that is where the edge first learns the store, for
+// every destination, whether or not anybody has asked for the runtime
+// document yet. The served document only ever says "unavailable", by design:
+// naming the secret there would tell every visitor which secrets exist. A
+// store row written before the write guard refused such references is the
+// case this is for; there is no migration, because the repair is one act.
+//
+// `via` is the site field that named the store -- binding or previewBinding --
+// spelled as the row spells it, which is also what keeps an environment word
+// out of engine code (TestNoEnvironmentBranchingInEngineCode).
+func (r *resolver) warnUnservedToken(site *Site, store *BoundStore, via string) {
+	if site == nil || store == nil || !storefrontTokenRefRefused(store) {
+		return
+	}
+	ref := strings.TrimSpace(store.StorefrontTokenRef)
+	if !r.tokenWarnings.due(site.ID + "\x00" + store.ID + "\x00" + ref) {
+		return
+	}
+	want := StorefrontTokenSecretName(store.ID)
+	remedy := "seal the store's Storefront token again with Connect Shopify or the store's panel, which writes it under " + want
+	if want == "" {
+		remedy = "the store id is not one Connect Shopify derives (lower-case letters, digits, '_' and '-'), so it can name no token; attach the store through Connect Shopify, which registers it under its own id"
+	}
+	r.logger.Warn("edge: this storefront serves no Storefront token: its store names a secret that is not the store's own token",
+		"component", "edge", "siteId", site.ID, "via", via, "storeId", store.ID,
+		"storefrontTokenRef", ref, "expected", want, "remedy", remedy)
+}
+
+// tokenWarningWindow is how long one warning stays logged before the same
+// site, store and reference are logged again.
+const tokenWarningWindow = time.Hour
+
+// refusalLog remembers when each warning was last logged.
+//
+// THE KEYS COME FROM ROWS, not from requests -- a site id, a store id and the
+// reference the store row names -- so nothing a visitor sends can grow the map.
+// It is bounded anyway, and dropping it whole is right for the reason
+// previewCache gives: there is nothing here worth an eviction policy.
+type refusalLog struct {
+	mu   sync.Mutex
+	seen map[string]time.Time
+}
+
+func newRefusalLog() *refusalLog { return &refusalLog{seen: map[string]time.Time{}} }
+
+// due reports whether key should be logged now, and records that it was.
+func (l *refusalLog) due(key string) bool {
+	if l == nil {
+		return true
+	}
+	now := time.Now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if at, ok := l.seen[key]; ok && now.Sub(at) < tokenWarningWindow {
+		return false
+	}
+	if len(l.seen) > 1000 {
+		l.seen = map[string]time.Time{}
+	}
+	l.seen[key] = now
+	return true
 }
 
 func (r *resolver) Invalidate(hostname string) {

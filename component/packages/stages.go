@@ -282,6 +282,11 @@ type Stager interface {
 	// the same hash and therefore the same prefix, so re-staging overwrites
 	// bytes with themselves.
 	StageDomain(ctx context.Context, domain string, tree fs.FS) (prefix string, err error)
+	// PrefixFor is the prefix StageDomain WOULD write tree under, computed
+	// without writing anything. It is how a run asks "would this change the
+	// active set" before the confirm gate and the build (memql#5601), and it
+	// is the stager's to answer because the stager is what names a prefix.
+	PrefixFor(domain string, tree fs.FS) (prefix string, err error)
 	ReadActiveSet(ctx context.Context) (map[string]string, error)
 	WriteActiveSet(ctx context.Context, set map[string]string) error
 }
@@ -424,9 +429,10 @@ type SitePublisher interface {
 	// it created one.
 	EnsureSite(ctx context.Context, req EnsureSiteRequest) (siteId, hostname string, created bool, err error)
 	// PublishBundle uploads under a fresh content-addressed prefix and only
-	// then flips the site row -- so a failed publish leaves the site serving
-	// exactly what it was serving.
-	PublishBundle(ctx context.Context, siteId string, bundle edge.Bundle) (PublishResult, error)
+	// then points the target version at it -- so a failed publish leaves the
+	// site serving exactly what it was serving. TargetCandidate writes
+	// candidateRef and leaves the serving version alone (memql#5601).
+	PublishBundle(ctx context.Context, siteId string, bundle edge.Bundle, target edge.Target) (PublishResult, error)
 	// BindSiteToStore re-points an EXISTING site at the store its manifest
 	// names. Called only when the two differ.
 	BindSiteToStore(ctx context.Context, siteId, storeId string) error
@@ -691,7 +697,14 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 			outcome.Refusal = storeNote
 		}
 
-		res, perr := d.Publisher.PublishBundle(ctx, siteId, bundle)
+		// The target was read by prepareDeployment, and a storefront asking
+		// for a candidate was refused before the build; an absent target is
+		// the serving version, as it was before targets existed.
+		target := placement.Target
+		if target == "" {
+			target = edge.TargetServing
+		}
+		res, perr := d.Publisher.PublishBundle(ctx, siteId, bundle, target)
 		if perr != nil {
 			outcome.SiteId = siteId
 			outcome.Refusal = &Problem{Code: "deployable_publish_failed", Message: perr.Error(), Scope: dep.Name, Fatal: true}
@@ -700,7 +713,11 @@ func (d *Deps) publish(ctx context.Context, req DeployRequest, pkg map[string]an
 		}
 		outcome.SiteId = siteId
 		outcome.Hostname = firstNonEmpty(res.Hostname, hostname)
-		outcome.BundleRef = res.BundleRef
+		if target == edge.TargetCandidate {
+			outcome.CandidateRef = res.BundleRef
+		} else {
+			outcome.BundleRef = res.BundleRef
+		}
 		outcome.Version = res.Version
 		outcome.Created = created
 		outcomes = append(outcomes, outcome)

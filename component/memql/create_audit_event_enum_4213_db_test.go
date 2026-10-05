@@ -22,6 +22,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/znasllc-io/memql/component/auth"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -31,6 +32,10 @@ func TestCreateAuditEvent_EveryDeclaredTargetTypeIsWritable(t *testing.T) {
 	if eng == nil {
 		return // skipped: no database
 	}
+	// Written the way every Go audit writer writes: internal origin stamped
+	// for the call. auditEvent is cluster-owner-tier, and its create admits a
+	// cluster owner or server code and nobody else (memql#5624).
+	ctx = auth.ContextWithInternalOrigin(ctx)
 	fn, _ := eng.functions.Get("createAuditEvent")
 	require.NotNil(t, fn, "createAuditEvent must be registered from the embedded tree")
 	require.NotNil(t, fn.ArgsSchema)

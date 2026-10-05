@@ -111,7 +111,9 @@ That route takes a `class="service_account"` JWT and nothing else -- a
 signed-in person's session gets a `403`, not a `401`. The full worked example,
 including why every file rides its own multipart part named for its path within
 the bundle, is in [site-hosting.md](site-hosting.md); the credential itself is
-[service-account-jwt.md](auth/service-account-jwt.md).
+[service-account-jwt.md](auth/service-account-jwt.md). Adding
+`?target=candidate` publishes the build as the site's candidate version instead
+of the serving one ([below](#publishing-the-candidate-version-instead)).
 
 The Live stop then waits for the first push, which arrives as the `bundleRef`
 flip the site row already broadcasts. Nothing polls.
@@ -233,6 +235,65 @@ is recorded beside it as `accountId` and `ownDomain`.
 a bound domain stays "waiting on your DNS records" until both records check
 out. The verification, the two records and the certificate are the custom-domain
 flow ([front-door.md](front-door.md)).
+
+### Publishing the candidate version instead
+
+A placement may also carry **`target`** (memql#5601): `"serving"`, the default
+and what every run did before the field existed, or `"candidate"`:
+
+```
+placements: {
+  "web": { "target": "candidate" }
+}
+```
+
+A candidate run builds and uploads exactly as any other, then writes the
+version as the site's **`candidateRef`** through `setSiteCandidate` and leaves
+`bundleRef` -- and so every visitor -- where it was. A preview grant is served
+the candidate, on a draft deployable and on a live one, while the public goes on
+getting the serving version; promoting it is `promoteSiteCandidate`, as for a
+candidate set any other way. It is a placement rather than a manifest field for
+`skip`'s reason: whether this run's build goes in front of the public is a
+decision about the run, not about the software.
+
+- **The part is `preview`, not `publish`.** The run needs `deploy` as ever, and
+  writing the candidate needs `execute app:deployables/preview` on the
+  deployable's organization -- the part whose definition is "publish a candidate
+  version".
+- **The outcome says which.** A candidate publish records `candidateRef` on the
+  run's outcome, never `bundleRef`, so rolling back to that run re-points
+  nothing for that app: the run left the serving version where it found it. A
+  run that published only candidates does not record the source's
+  `deployedVersion` either, so the source still reads as having an update to
+  ship.
+- **A candidate is a `spa` and `static` feature.** A `shopify_storefront`
+  serves ONE build on both of its destinations, Testing and Production, each
+  against its own store ([storefront-preview.md](storefront-preview.md)), so
+  a storefront candidate would be served by nothing. A run asking for one is
+  refused after the analysis and before anything is built, uploaded or bound,
+  and the engine refuses, from any route, a storefront candidate that is not
+  the version it already serves (`storefront_has_no_candidate`).
+- **A candidate run carries no DSL change.** Staging a changed MemQL domain
+  rolls every node onto it for every visitor, while a candidate leaves the
+  public on the serving build -- so a run with any candidate whose DSL
+  differs from what the cluster runs is refused before the build. Publish it
+  to the serving version, or deploy the DSL first in a run with every app
+  skipped and then publish the candidate. The run's report says in advance
+  whether that applies: `report.dslChanges` is `true`, `false`, or absent
+  when unknown ([packages.md](packages.md#the-order-and-why-it-never-changes)),
+  and the confirm checks again.
+- **The target survives the confirm gate.** A run records its candidates when
+  it opens (`candidates` on the run row). At the gate, a target the
+  confirming call names wins -- choosing there, with the plan on screen, is
+  the ordinary flow -- and a target it leaves out keeps the recorded one, so
+  a run opened as a candidate never falls back to the serving version. A
+  retry of a lost run keeps that run's candidates the same way.
+- **The candidate is not the auto-deploy baseline.** An automatic run
+  publishes to the serving version and confirms itself only against the last
+  run that published to the public; a run that published only candidates is
+  skipped, so a plan approved only as a candidate parks the next push.
+- **Any other value is refused** before a run opens, and so is a `target`
+  that is not a string (`null` reads as unset).
 
 ---
 
@@ -744,6 +805,49 @@ then.
 Enforced beside the engine's write path
 (`component/memql/platform_site_settings_guard.go`), not in the mutation
 body: a mutation sees a value and never an object's KEYS.
+
+### Settings that belong to one store
+
+A `shopify_storefront` deployable also carries **`storeSettings`**
+(memql#5602): for each store, by its bare id, the values that belong to THAT
+store rather than to the site -- the Customer Account API client id of one
+store's Headless channel, the wholesale adapter configured for one store.
+
+```
+mutation updateSiteStoreSettings(siteId: "v1:platform:site:abc", storeSettings: {
+  "acme":     {customerAccountClientId: "shp_live_client", wholesaleAdapter: "shopifyB2B"},
+  "acme-dev": {customerAccountClientId: "shp_dev_client",  wholesaleAdapter: "customerTag"}
+})
+```
+
+The edge merges the entry of the store the in-force binding names over
+`settings`, into the same flat `settings` object of the runtime document, so a
+bundle reads `config.settings.customerAccountClientId` as it always did.
+Production is served its own store's values; the Testing destination, which
+swaps in the Testing store, is served the Testing store's
+([storefront-preview.md](storefront-preview.md)). Nothing branches on which
+destination it is: the store the edge chose decides, so both destinations
+bound to one store get that store's values.
+
+- **A store's value overrides the site's for that store alone.** A key no
+  store sets keeps the site's value, and an unbound destination gets the
+  site's settings and no store's. A value that belongs to one store belongs in
+  `storeSettings` only: left in `settings`, it reaches every store that does
+  not set its own.
+- **Keyed by store, not by destination.** Re-pointing a binding picks up the
+  new store's entry; pointing it back restores the old one.
+- **The same rules as `settings`, store by store** -- key form, the `Ref`
+  refusal, plain strings, the per-deployable caps -- plus bare store ids
+  (`acme-widgets`, never `v1:shopify:store:acme-widgets`), at most 16 stores,
+  and one budget for every store's values together: no more characters than
+  one full `settings` object can hold (`MEMQL_SITE_SETTINGS_MAX_KEYS` values
+  of `MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH`). Public by construction, like
+  every setting.
+- **The write REPLACES**, for `updateSiteSettings`' reason, and has its
+  authorization: the deployable's owner, or a cluster owner. It needs no
+  store part -- which store a deployable is bound to stays
+  `updateSiteStoreBinding`'s -- and an entry for a store the deployable is not
+  bound to is never served.
 
 ---
 

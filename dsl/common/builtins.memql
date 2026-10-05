@@ -659,7 +659,7 @@ builtin languageStatus { }
 
 @sdk
 @executor("fleetModels")
-@description("List every model the caller's fleet can run right now: the model id, its context window and capability flags, and the machines behind it with their online and busy state. Produced from live worker registrations, never persisted -- the answer is which machines are awake, so a stored copy's staleness would be indistinguishable from the condition it describes. Scoped to the caller's own machines plus the shared-inference set; a model call carries the caller's prompts and routes only to their machines. Feeds the portal's Providers page and the fleet machine cards.")
+@description("List every model the caller's fleet can run right now: the model id, its context window and capability flags, and the machines behind it with their online and busy state. Produced from live worker registrations, never persisted -- the answer is which machines are awake, so a stored copy's staleness would be indistinguishable from the condition it describes. Scoped to the caller's own machines plus the machines lent to them: shared with everyone, or with them or one of their groups. A model call carries the caller's prompts and routes only to those machines. Feeds the fleet machine cards.")
 builtin fleetModels { }
 
 @sdk

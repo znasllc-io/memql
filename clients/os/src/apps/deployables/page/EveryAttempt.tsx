@@ -7,7 +7,7 @@ import { OpenLogsButton } from "../../../logs/OpenLogs";
 import type { LiveView } from "../../../live/liveView";
 import { usePackageActions } from "../packages/actions";
 import { BuildLog, ProblemNotice } from "../packages/ReportView";
-import { deploymentFingerprint, runIsScopedToApp, shortVersion, type DeploymentRow, type PackageRow } from "../packages/rows";
+import { deploymentFingerprint, publishedOnlyCandidates, runIsScopedToApp, shortVersion, type DeploymentRow, type PackageRow } from "../packages/rows";
 import type { PartsHeld } from "../parts";
 import { Rail } from "./RailView";
 
@@ -47,7 +47,11 @@ export function EveryAttempt({
 }) {
   // Its own write hook: a rollback refused here renders here.
   const actions = usePackageActions();
-  const latest = deployments?.snapshot.rows[0] ?? null;
+  // THE NEWEST RUN THAT CHANGED WHAT IS SERVED (memql#5601). A run that only
+  // deployed candidates left every site serving what the run before it
+  // served, so that earlier run is still the one live, and rolling back to it
+  // would change nothing -- it is not offered.
+  const latest = deployments?.snapshot.rows.find((d) => !publishedOnlyCandidates(d)) ?? null;
 
   return (
     <section className="os-report-part deployable-history">
@@ -71,8 +75,11 @@ export function EveryAttempt({
                     {d.sourceVersion === "" ? "no version" : shortVersion(d.sourceVersion)}
                   </span>
                   <span className="os-caption">{formatMoment(d.startedAt || d.createdAt)}</span>
-                  <span className="os-attempt-status" data-status={d.status}>
-                    {statusWord(d.status)}
+                  {/* A CANDIDATE RUN IS NOT "live" (memql#5601): it succeeded and
+                      the live site did not change, which is the whole point of
+                      it, so it reads as what it made and keeps the quiet tone. */}
+                  <span className="os-attempt-status" data-status={publishedOnlyCandidates(d) ? "candidate" : d.status}>
+                    {publishedOnlyCandidates(d) ? "candidate" : statusWord(d.status)}
                   </span>
                   {d.automatic ? (
                     /* WHO STARTED IT (memql#4900). A run nobody clicked is
@@ -99,7 +106,9 @@ export function EveryAttempt({
                     subjectConcept={Concepts.PLATFORM_PACKAGE_DEPLOYMENT}
                     ariaLabel={`Logs of the ${d.sourceVersion === "" ? "unversioned" : shortVersion(d.sourceVersion)} deploy`}
                   />
-                  {!scopedApp && can.publish && d.status === "succeeded" && d.id !== latest?.id ? (
+                  {/* NOT TO A CANDIDATE RUN: its outcomes name no serving
+                      version, so a rollback to it would re-point nothing. */}
+                  {!scopedApp && can.publish && d.status === "succeeded" && d.id !== latest?.id && !publishedOnlyCandidates(d) ? (
                     <Button
                       onClick={() => void actions.rollback(pkg.id, d.id).then(reseed)}
                       busy={actions.busy}
@@ -137,6 +146,11 @@ export function EveryAttempt({
                         <span className="os-report-name">{o.name}</span>
                         {o.hostname === "" ? null : <span className="os-mono">{o.hostname}</span>}
                         {o.created ? <Chip tone="accent">created</Chip> : null}
+                        {(o.candidateRef ?? "") !== "" ? (
+                          <Chip tone="muted" title="Deployed as the candidate: the live site kept serving its version.">
+                            candidate
+                          </Chip>
+                        ) : null}
                         {o.refusal ? <Chip tone="muted">{o.refusal.code}</Chip> : null}
                       </li>
                     ))}

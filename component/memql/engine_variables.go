@@ -6,6 +6,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/structpb"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/secret"
 )
 
@@ -123,11 +124,20 @@ func (e *MemQLEngine) readSecret(ctx context.Context, conceptName, name string) 
 	return plaintext, nil
 }
 
-// readNamedRowFields executes a concept==CONCEPT;payload.name==NAME
+// readNamedRowFields executes a concept==CONCEPT&&payload.name==NAME
 // query and returns the first row's payload field map. `kind` is used
 // only in error messages ("variable" / "secret" / "apikey").
+//
+// The name is rendered with langparser.QuoteString, never pasted between
+// literal quotes (memql#5625). Pasted, a name carrying a `"` closed the
+// literal early and the rest of it was read as query: a name ending in
+// `" || payload.name=="X` resolved the row named X, and a lone quote or
+// backslash made the lookup unparseable. Names reach here from rows other
+// people write (a store's token reference, a provider's auth field), so the
+// name is data and only ever a literal. The concept is one of this file's
+// four constants and stays bare.
 func (e *MemQLEngine) readNamedRowFields(ctx context.Context, conceptName, name, kind string) (map[string]*structpb.Value, error) {
-	query := fmt.Sprintf(`concept==%s&&payload.name=="%s"`, conceptName, name)
+	query := fmt.Sprintf(`concept==%s&&payload.name==%s`, conceptName, langparser.QuoteString(name))
 	result, err := e.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query %s %q: %w", kind, name, err)

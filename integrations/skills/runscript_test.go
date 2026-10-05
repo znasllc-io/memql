@@ -7,6 +7,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/integrations/workbench"
 )
 
 // runscript_test.go -- the ship / verify / run rules, with both surfaces
@@ -328,6 +330,39 @@ func TestAnEnvironmentNeedTheWorkbenchLacksRunsOnTheFleet(t *testing.T) {
 	}
 	if receipt.Surface != SurfaceMachine {
 		t.Fatalf("surface = %q, want the fleet", receipt.Surface)
+	}
+}
+
+// TestEveryNeedTheWorkbenchCannotMeetRunsOnTheFleet holds needsBeyondWorkbench
+// to the workbench's OWN closed set rather than to a copy of it. The shape
+// check here is a list of the same names, and a need the workbench learns
+// (docker, #5494) and this list does not is a step sent to the one surface the
+// caller just said cannot run it -- where the evaluator refuses it with
+// environment_mismatch, and the script never runs anywhere.
+//
+// Every need so far is one a workbench cannot meet. If a workbench flavour ever
+// provides one, this test fails for it, and the fix is to drop that need from
+// needsBeyondWorkbench and from this rule together -- not to loosen the test.
+func TestEveryNeedTheWorkbenchCannotMeetRunsOnTheFleet(t *testing.T) {
+	needs := workbench.EnvironmentNeeds()
+	if len(needs) == 0 {
+		t.Fatal("workbench.EnvironmentNeeds() is empty; this check would pass by examining nothing")
+	}
+	for _, need := range needs {
+		t.Run(need, func(t *testing.T) {
+			runner, _, _, _, _, _ := fixture(t)
+			r := req()
+			r.Environment = map[string]any{"needs": []any{need}}
+
+			receipt, err := runner.Run(context.Background(), r)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if receipt.Surface != SurfaceMachine {
+				t.Fatalf("surface = %q, want the fleet -- the workbench refuses %q as a need it cannot meet",
+					receipt.Surface, need)
+			}
+		})
 	}
 }
 

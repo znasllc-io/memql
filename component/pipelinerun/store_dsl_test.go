@@ -112,6 +112,7 @@ func everyStoreCall(s Store, value string) []struct {
 		{"RunsForPipelineSHA", func() error { _, err := s.RunsForPipelineSHA(ctx, value, value); return err }},
 		{"RunByCheckRun", func() error { _, err := s.RunByCheckRun(ctx, value, 30431907812); return err }},
 		{"RunsUnfinished", func() error { _, err := s.RunsUnfinished(ctx); return err }},
+		{"RunsUnfinishedForPullRequest", func() error { _, err := s.RunsUnfinishedForPullRequest(ctx, value, 42); return err }},
 		{"RunsFinalCheckRunUnavailable", func() error { _, err := s.RunsFinalCheckRunUnavailable(ctx, now); return err }},
 		{"RunByID", func() error { _, err := s.RunByID(ctx, value); return err }},
 		{"CreatePipeline", func() error { return s.CreatePipeline(ctx, p) }},
@@ -223,7 +224,8 @@ func TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares(t *testing.T) {
 	for _, want := range []string{
 		qPipelinesForOwner, qPipelineForOwner, qPipelineForPackage, qPipelineRunsForOwner, qPipelineRunForOwner,
 		qPipelinesForRepository, qPipelinesPolled, qPipelineByID, qPipelineRunsForKey, qPipelineRunsForPipelineSha,
-		qPipelineRunByCheckRun, qPipelineRunsUnfinished, qPipelineRunsCheckRunLost, qPipelineRunByID, qPipelinesActive, qWorkStepsForRun,
+		qPipelineRunByCheckRun, qPipelineRunsUnfinished, qPipelineRunsUnfinishedForPullRequest, qPipelineRunsCheckRunLost,
+		qPipelineRunByID, qPipelinesActive, qWorkStepsForRun,
 		mCreatePipeline, mUpdatePipeline, mCreatePipelineRun, mUpdatePipelineRun, qPackageByID, qInboundRequestByID,
 	} {
 		if !seen[want] {
@@ -517,6 +519,40 @@ func TestAStagedDeliveryIsReadBackAsStaged(t *testing.T) {
 	}
 	if none, err := NewDSLStore(engine).InboundDelivery(context.Background(), " "); err != nil || none != nil || len(engine.recorded()) != 2 {
 		t.Errorf("no delivery id is no read: %v %v", none, err)
+	}
+}
+
+// What a push supersedes is read by the pipeline's BARE id and the pull
+// request's NUMBER -- an int, as createPipelineRun writes it -- as the
+// pipelines system actor, stamped internal; and a pull request numbered 0 or
+// less is no pull request, so nothing is read for it (a read of 0 would ask
+// for every run that carries no number).
+func TestAPullRequestsUnfinishedRunsAreReadByItsNumber(t *testing.T) {
+	engine := newRecordingEngine()
+	engine.answers[qPipelineRunsUnfinishedForPullRequest] = []any{map[string]any{
+		"id": "v1:pipelines:run:r1", "pipelineId": "v1:pipelines:pipeline:p1", "pullRequest": float64(42),
+		"mode": "affected", "status": "in_progress",
+	}}
+	store := NewDSLStore(engine)
+
+	runs, err := store.RunsUnfinishedForPullRequest(personCtx(ownerID), "v1:pipelines:pipeline:p1", 42)
+	if err != nil || len(runs) != 1 || runs[0].ID != "r1" || runs[0].PullRequest != 42 || runs[0].Mode != pipelines.ModeAffected {
+		t.Fatalf("RunsUnfinishedForPullRequest: %+v %v", runs, err)
+	}
+	calls := engine.recorded()
+	if len(calls) != 1 || calls[0].query != `query pipelineRunsUnfinishedForPullRequest(pipelineId: "p1", pullRequest: 42)` {
+		t.Fatalf("calls = %+v", calls)
+	}
+	if !calls[0].origin.IsInternal() || calls[0].actor == nil || calls[0].actor.UserId != "system:pipelines" {
+		t.Errorf("the read is the pipelines system actor's, stamped internal, whoever asked: %+v", calls[0].actor)
+	}
+	for _, none := range []int{0, -1} {
+		if got, err := store.RunsUnfinishedForPullRequest(context.Background(), "p1", none); err != nil || got != nil {
+			t.Errorf("pull request %d: %+v %v", none, got, err)
+		}
+	}
+	if n := len(engine.recorded()); n != 1 {
+		t.Errorf("no pull request is no read: %d calls", n)
 	}
 }
 

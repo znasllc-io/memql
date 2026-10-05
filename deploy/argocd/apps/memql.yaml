@@ -35,8 +35,11 @@ spec:
     syncOptions:
       # The namespace is not a side effect of the sync option -- it is a
       # resource in the reconciled set. deploy/k8s/base/namespace.yaml declares
-      # it and the overlay's `namespace: memql` keeps that name, which is the
-      # same one-base mechanism as everything else here.
+      # it under the name base's own `namespace: memql` gives it, which the
+      # overlay's unsetOnly namespace transformer keeps -- the same one-base
+      # mechanism as everything else here. The second namespace the overlay
+      # renders, memql-pipelines (deploy/k8s/components/pipelines), is a
+      # resource in the same set on the same terms.
       - CreateNamespace=false
   ignoreDifferences:
     # Replica counts are a RUNTIME dimension as well as a committed value.

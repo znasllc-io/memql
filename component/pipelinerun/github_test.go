@@ -200,3 +200,49 @@ func TestThePortMintsThroughTheGrantAndAsksForTheClientPerCall(t *testing.T) {
 		t.Errorf("manifest = %q, %v", body, err)
 	}
 }
+
+// The port reads ONE pull request's head by its number, end to end over HTTP:
+// GET /repos/{owner}/{repo}/pulls/{number} under the bearer it is handed,
+// "owner/name" split for the client, the reply decoded as the list decodes an
+// entry -- a deleted head repository included.
+func TestThePortReadsOnePullRequestsHeadByItsNumber(t *testing.T) {
+	var asked []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.Method+" "+r.URL.RequestURI())
+		if r.Header.Get("Authorization") != "Bearer ghs_t" {
+			http.Error(w, `{"message":"Bad credentials"}`, http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/repos/acme/shop/pulls/42":
+			_, _ = w.Write([]byte(`{"number":42,"state":"open","title":"Show the cart count","head":{"sha":"` + shaC +
+				`","ref":"cart-badge","repo":{"full_name":"acme/shop"}},"base":{"sha":"` + shaBase + `","ref":"main"}}`))
+		case "/repos/acme/shop/pulls/7":
+			_, _ = w.Write([]byte(`{"number":7,"state":"closed","title":"Gone","head":{"sha":"` + shaA + `","ref":"x","repo":null},"base":{"sha":"` + shaBase + `"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	port := NewGitHub(&fakePackages{client: githubapp.New(githubapp.Config{}, githubapp.WithAPIBase(srv.URL), githubapp.WithHTTPClient(srv.Client()))})
+
+	head, err := port.PullRequestHead(context.Background(), "ghs_t", "acme/shop", 42)
+	if err != nil {
+		t.Fatalf("PullRequestHead: %v", err)
+	}
+	if want := (githubapp.PullRequestHead{Number: 42, Title: "Show the cart count", HeadSHA: shaC, HeadRef: "cart-badge", HeadRepository: "acme/shop", BaseSHA: shaBase}); head != want {
+		t.Errorf("head = %+v, want %+v", head, want)
+	}
+	if deleted, err := port.PullRequestHead(context.Background(), "ghs_t", "acme/shop", 7); err != nil || deleted.HeadRepository != "" || deleted.HeadSHA != shaA {
+		t.Errorf("a deleted head repository reads empty: %+v %v", deleted, err)
+	}
+	if _, err := port.PullRequestHead(context.Background(), "ghs_t", "acme/shop", 8); githubapp.StatusOf(err) != http.StatusNotFound {
+		t.Errorf("an unknown number is GitHub's 404: %v", err)
+	}
+	if _, err := port.PullRequestHead(context.Background(), "ghs_t", "not-a-repository", 42); err == nil {
+		t.Errorf("a repository that is not owner/name is refused")
+	}
+	if want := []string{"GET /repos/acme/shop/pulls/42", "GET /repos/acme/shop/pulls/7", "GET /repos/acme/shop/pulls/8"}; strings.Join(asked, "|") != strings.Join(want, "|") {
+		t.Errorf("asked %v, want %v", asked, want)
+	}
+}

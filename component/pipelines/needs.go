@@ -3,10 +3,10 @@ package pipelines
 import "sort"
 
 // The closed set of environment needs a step may name (D8). It is the
-// workbench's environment hint (integrations/workbench, EnvironmentNeeds)
-// plus docker. The substrate (epic memql#5478) adds docker to that list and a
-// parity test to the integrations module holding the two together; until it
-// lands, no test does. An unknown need is a typed refusal, never a silent
+// workbench's environment hint (integrations/workbench, EnvironmentNeeds),
+// which the substrate (epic memql#5478) extended with docker, and
+// integrations/workbench's TestTheNeedVocabularyIsThePipelinesNeeds holds the
+// two lists together. An unknown need is a typed refusal, never a silent
 // fallback to somebody's laptop.
 const (
 	NeedDisplay      = "display"

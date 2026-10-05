@@ -278,7 +278,11 @@ export function placementsFrom(
       accountId: skipped ? "" : held.accountId.trim(),
       ownDomain: "",
       domains: skipped ? [] : domainNames(held.ownDomain),
-      ...(held.skip === true ? { skip: true } : {}),
+      // A DEPLOYED APP NAMES ITS TARGET (memql#5601): the engine keeps a run's
+      // recorded target when the confirm omits one, so a confirm from here --
+      // which never offers a candidate -- says "serving" rather than leaving
+      // a run somebody opened as a candidate to publish as one.
+      ...(held.skip === true ? { skip: true } : { target: "serving" as const }),
     };
   }
   return out;

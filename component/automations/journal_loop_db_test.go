@@ -60,7 +60,7 @@ func numberOf(v any) float64 {
 }
 
 func TestLoopRefusal_DB_TheRefusedRunIsOneFailedRowNamingTheChain(t *testing.T) {
-	engine := openTestEngine(t)
+	engine := sharedJournalEngine(t)
 	t.Setenv(maxChainDepthEnv, "16")
 	sharedAutomationBudget.reset()
 	e := NewExecutor(ExecutorOptions{Engine: engine, StepRegistry: &causeProbeRegistry{}})
@@ -134,7 +134,7 @@ func (r *causeFailOnceRegistry) Execute(ctx context.Context, step *Step, _ *Step
 // the cause the first attempt's steps did. A resume that restarted the chain
 // would let a loop that fails and is resumed run past the cap forever.
 func TestLoopDepth_DB_AResumedRunKeepsItsDepth(t *testing.T) {
-	engine := openTestEngine(t)
+	engine := sharedJournalEngine(t)
 	sharedAutomationBudget.reset()
 	reg := &causeFailOnceRegistry{causes: map[string][]events.Cause{}}
 	e := NewExecutor(ExecutorOptions{Engine: engine, StepRegistry: reg})

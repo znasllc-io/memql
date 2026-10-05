@@ -280,3 +280,53 @@ func TestAClusterOwnedSourceCannotAutoDeploy(t *testing.T) {
 		t.Fatal("a cluster-owned source has no owner to deploy as")
 	}
 }
+
+// A CANDIDATES-ONLY RUN IS NOT A PLAN ANYBODY APPROVED FOR THE PUBLIC
+// (memql#5601). The plan fingerprint does not include the target, so if the
+// newest succeeded run published only candidates and the auto-confirm took it
+// as the baseline, the next push with the same plan would confirm itself --
+// and an automatic run publishes to the SERVING version. The baseline skips
+// such a run: here the newest success is a candidate run of exactly this plan,
+// the older one a serving run of a different plan, and the push must park.
+func TestACandidatesOnlyRunIsNotTheBaselineAnAutoRunConfirmsAgainst(t *testing.T) {
+	h := newHarness(t, spaOnlyPackage(), autoPackage())
+	same, err := Analyze(spaOnlyPackage(), Options{SourceVersion: "sha-candidate"})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	other := spaOnlyPackage()
+	other[ManifestName] = file("formatVersion: 1\nname: acme\ndeployables:\n  - name: docs\n    path: clients/docs\n    kind: static\n")
+	older, err := Analyze(other, Options{SourceVersion: "sha-old"})
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	h.engine.rows["query packageDeployments"] = []map[string]any{
+		{
+			"id": "v1:platform:packageDeployment:candidate", "packageId": "v1:platform:package:abc",
+			"status": StatusSucceeded, "report": reportMap(t, same),
+			"deployables": []any{
+				map[string]any{"name": "storefront", "refusal": map[string]any{"code": CodeDeployableSkipped}},
+				map[string]any{"name": "docs", "siteId": "v1:platform:site:docs", "candidateRef": "blob://sites/docs/v2/"},
+			},
+		},
+		{
+			"id": "v1:platform:packageDeployment:serving", "packageId": "v1:platform:package:abc",
+			"status": StatusSucceeded, "report": reportMap(t, older),
+			"deployables": []any{map[string]any{"name": "docs", "siteId": "v1:platform:site:docs", "bundleRef": "blob://sites/docs/v1/"}},
+		},
+	}
+	h.engine.rows["query sitesForPackage"] = []map[string]any{
+		{"id": "v1:platform:site:storefront", "hostname": "shop.example.com", "packageDeployableName": "storefront"},
+		{"id": "v1:platform:site:docs", "hostname": "docs.example.com", "packageDeployableName": "docs"},
+	}
+
+	if _, err := h.deps.startAutoRun(context.Background(), autoPackage(), "sha-new"); err != nil {
+		t.Fatalf("auto run: %v", err)
+	}
+	if len(h.publisher.published) != 0 {
+		t.Fatalf("a plan approved only as a candidate confirmed itself to the serving version: %v", h.publisher.published)
+	}
+	if !h.engine.sawStatement(`"` + StatusAwaitingConfirm + `"`) {
+		t.Fatalf("it must park at the confirm gate; statements: %v", h.engine.statements())
+	}
+}

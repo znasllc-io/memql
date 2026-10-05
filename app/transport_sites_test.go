@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/edge"
 	"github.com/znasllc-io/memql/component/server"
 )
 
@@ -98,3 +99,46 @@ type fakeFileUploader struct{}
 func (fakeFileUploader) Upload(_ context.Context, _, objectName string, _ []byte, _ string) (string, error) {
 	return "https://example.blob.core.windows.net/c/" + objectName, nil
 }
+
+// THE ADAPTER IS WHERE A TARGET BECOMES A RESPONSE KEY (memql#5601). An
+// uploaded version's ref is reported as `bundleRef` only when it became the
+// serving version, and as `candidateRef` when it became the candidate -- CI
+// keeps this response as its rollback record, so a candidate under
+// `bundleRef` would read as the version that serves.
+func TestSitePublisherAdapterReportsACandidateAsACandidate(t *testing.T) {
+	stores := &recordingSiteStore{}
+	adapter := sitePublisherAdapter{pub: edge.NewPublisher(discardingBlobs{}, stores)}
+	bundle := map[string][]byte{"index.html": []byte("<html>next</html>")}
+
+	candidate, err := adapter.Publish(context.Background(), "s1", bundle, server.SiteBundleTargetCandidate)
+	if err != nil {
+		t.Fatalf("candidate publish: %v", err)
+	}
+	if candidate.CandidateRef == "" || candidate.BundleRef != "" || candidate.Target != server.SiteBundleTargetCandidate {
+		t.Fatalf("candidate response = %+v, want candidateRef and target only", candidate)
+	}
+	serving, err := adapter.Publish(context.Background(), "s1", bundle, server.SiteBundleTargetServing)
+	if err != nil {
+		t.Fatalf("serving publish: %v", err)
+	}
+	if serving.BundleRef == "" || serving.CandidateRef != "" || serving.Target != server.SiteBundleTargetServing {
+		t.Fatalf("serving response = %+v, want bundleRef and target only", serving)
+	}
+	if got := stores.targets; len(got) != 2 || got[0] != edge.TargetCandidate || got[1] != edge.TargetServing {
+		t.Fatalf("the site store was asked for %v, want [candidate serving]", got)
+	}
+	if _, err := adapter.Publish(context.Background(), "s1", bundle, "staging"); err == nil {
+		t.Fatal("the adapter accepted an unknown target")
+	}
+}
+
+type recordingSiteStore struct{ targets []edge.Target }
+
+func (s *recordingSiteStore) PointVersion(_ context.Context, _ string, target edge.Target, _ string) error {
+	s.targets = append(s.targets, target)
+	return nil
+}
+
+type discardingBlobs struct{}
+
+func (discardingBlobs) Put(context.Context, string, []byte) error { return nil }

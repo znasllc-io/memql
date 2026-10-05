@@ -90,7 +90,7 @@ func TestScheduledMaintenanceFailureDoesNotCreateHumanWait(t *testing.T) {
 }
 
 func TestJournalDB_FeedbackWaitHasPersistedApproval(t *testing.T) {
-	engine := openTestEngine(t)
+	engine := sharedJournalEngine(t)
 	j := newWorkJournal(engine, nil)
 	auto := &Automation{Name: "approvalPersistenceProbe"}
 	run := NewExecution(auto.Name, "manual")
