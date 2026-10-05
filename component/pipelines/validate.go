@@ -376,7 +376,7 @@ func validateStep(spec *Spec, stage string, j int, step StepSpec, seen map[strin
 				"Secret name %q begins %s, which is reserved for the platform's own environment.", name, reservedSecretPrefix)
 		}
 	}
-	return nil
+	return validateStepRuntime(spec, step, scope)
 }
 
 // dbGatedTree reads one select.dbGated entry as the CI bridge reads a class

@@ -67,8 +67,9 @@ const PipelineStepAction = "pipeline_step"
 // policy allows pipeline steps advertises. Exact, like every fleet label: a
 // requirement is this pair or it matches nothing.
 const (
-	PipelinesLabel   = "pipelines"
-	PipelinesAllowed = "allowed"
+	PipelinesLabel       = "pipelines"
+	PipelinesAllowed     = "allowed"
+	PipelineStepContract = 2
 )
 
 // The refusal codes this purpose introduces.
@@ -117,8 +118,15 @@ func fallbackFor(req Request, policy Policy) string {
 // router matched the ROW, up to a heartbeat old; the replica that dispatches
 // re-reads the live registration, so a machine whose policy stopped allowing
 // pipelines, or never did, is refused before anything reaches it.
-func machineAllowsPipelines(w *workerservice.Worker) bool {
-	return w.LabelsSnapshot()[PipelinesLabel] == PipelinesAllowed
+func machineAllowsPipelines(w *workerservice.Worker, args map[string]any) bool {
+	if args["execution"] == "native" {
+		platform, _ := args["platform"].(string)
+		if w == nil || platform == "" || w.CapabilityDescriptor.NativePlatform() != platform {
+			return false
+		}
+	}
+	return w != nil && w.LabelsSnapshot()[PipelinesLabel] == PipelinesAllowed &&
+		w.CapabilityDescriptor != nil && w.CapabilityDescriptor.ActionContracts.Supports("workerHost."+PipelineStepAction, PipelineStepContract)
 }
 
 // purposeBinding is RULE 0, asked before every other gate and on BOTH halves of
@@ -428,4 +436,19 @@ func maskCredentials(v any, mask func(string) string) any {
 		return out
 	}
 	return v
+}
+
+// These v2 refusals occur before checkout/command execution. No transport
+// failure, timeout, uncertain cleanup or ordinary command failure can enter
+// this list: those might already have performed external effects.
+func pipelineRefusedBeforeStart(purpose string, result Result, dispatchErr error) bool {
+	if purpose != PurposePipeline || dispatchErr != nil || result.OK {
+		return false
+	}
+	switch result.ErrorCode {
+	case "pipeline_capacity_busy", "pipeline_capacity_unavailable", "pipeline_runtime_unavailable", "denied_by_policy":
+		return true
+	default:
+		return false
+	}
 }

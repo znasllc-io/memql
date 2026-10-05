@@ -68,6 +68,7 @@ func d7Selector(affected Selection) selectorStub {
 // before any packages are chosen.
 func d7Command(stage, name, run string, dependsOn ...string) Step {
 	return Step{
+		Execution: ExecutionContainer, Placement: PlacementCluster,
 		Key: StepKey(stage, name), Stage: stage, Name: name, Kind: StepCommand, Run: run,
 		Image: d7Image, Caches: []string{"go", "npm"},
 		TimeoutSeconds: int(DefaultStepTimeout.Seconds()), DependsOn: dependsOn,
@@ -91,7 +92,8 @@ var (
 	}()
 	d7OSChecks = func() Step {
 		s := d7Command("tests", "os-checks", "make os-typecheck os-test os-build", "checks.build-vet")
-		s.Needs = []string{NeedDocker}
+		s.Placement = PlacementFleet
+		s.Platform = "linux/amd64"
 		return s
 	}()
 )
@@ -302,8 +304,8 @@ func TestCompileRefusesANeedOnAClusterOnlyPipeline(t *testing.T) {
 			t.Errorf("compute %q: Compile = %v, want pipeline_fleet_not_consented (tests/os-checks)", compute, r)
 			continue
 		}
-		if !strings.Contains(r.Detail, NeedDocker) {
-			t.Errorf("detail %q does not name the need", r.Detail)
+		if !strings.Contains(r.Detail, "fleet placement") {
+			t.Errorf("detail %q does not explain placement", r.Detail)
 		}
 	}
 

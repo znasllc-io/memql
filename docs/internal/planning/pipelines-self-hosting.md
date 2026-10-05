@@ -317,8 +317,18 @@ and removal. Multiline secrets travel on container stdin, outside the Docker
 client's arguments/environment. The local real-Docker test verifies exact
 commit, environment separation, artifacts, masked logs, cancellation and
 orphan reconciliation. Focused race tests, the serial Cockpit suite and its
-GitHub checks pass. Engine dispatch/manifest wiring is the next integration
-step; no installed worker has been upgraded.
+GitHub checks pass. Engine manifest/dispatch wiring now preserves execution, placement and platform
+through the compiled plan, cross-replica dispatch and Kubernetes node selector.
+Native steps use binary-reported OS/architecture. Fleet workers must advertise
+exact action contract 2, checked again on the live connection. Host requirements
+do not pass through a container boundary; ordinary fleet containers declare
+placement separately. A native Docker requirement receives a live daemon probe.
+The OS connect preview carries fleet placement even without host needs and
+requires consent; its fleet count excludes unsupported worker contracts.
+Focused runner/compiler suites, a database catalog read on another reader,
+cross-replica refusal/race tests, Cockpit's full suite and UI tests cover these
+paths. Browser and actual two-replica cluster validation remain outstanding.
+No installed worker has been upgraded.
 
 One build slot is shared across cluster enrollments and worker processes under
 the same OS user. A durable record survives process death. A replacement

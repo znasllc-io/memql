@@ -75,6 +75,7 @@ func fresh() time.Time    { return fleetNow().Add(-time.Second) }
 
 func machine(id string, opts ...func(*Candidate)) Candidate {
 	c := Candidate{
+		ActionContracts:  workerservice.ActionContracts{"workerHost.pipeline_step": PipelineStepContract},
 		RepositoryScopes: workerservice.RepositoryScopes{"workerHost.pipeline_step": {}},
 		RegistrationId:   id,
 		Name:             id,

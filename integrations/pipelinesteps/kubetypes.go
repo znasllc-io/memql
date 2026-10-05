@@ -107,10 +107,11 @@ type PodTemplateSpec struct {
 
 // PodSpec is the step's pod.
 type PodSpec struct {
-	RestartPolicy                string `json:"restartPolicy,omitempty"`
-	ServiceAccountName           string `json:"serviceAccountName,omitempty"`
-	AutomountServiceAccountToken *bool  `json:"automountServiceAccountToken,omitempty"`
-	EnableServiceLinks           *bool  `json:"enableServiceLinks,omitempty"`
+	NodeSelector                 map[string]string `json:"nodeSelector,omitempty"`
+	RestartPolicy                string            `json:"restartPolicy,omitempty"`
+	ServiceAccountName           string            `json:"serviceAccountName,omitempty"`
+	AutomountServiceAccountToken *bool             `json:"automountServiceAccountToken,omitempty"`
+	EnableServiceLinks           *bool             `json:"enableServiceLinks,omitempty"`
 	// TerminationGracePeriodSeconds is a pointer because 0 means "kill at
 	// once", while absent is the API's 30 seconds.
 	TerminationGracePeriodSeconds *int64              `json:"terminationGracePeriodSeconds,omitempty"`

@@ -17,6 +17,8 @@ import (
 // field: this struct serialized as JSON. Unknown JSON fields are
 // tolerated (additive evolution does not bump schemaVersion).
 type CapabilityDescriptor struct {
+	Architecture         string           `json:"architecture,omitempty"`
+	ActionContracts      ActionContracts  `json:"actionContracts,omitempty"`
 	RepositoryScopes     RepositoryScopes `json:"repositoryScopes,omitempty"`
 	Platform             string           `json:"platform"`
 	DisplayServer        string           `json:"displayServer"`
@@ -98,6 +100,9 @@ func ParseCapabilityDescriptor(raw string) (*CapabilityDescriptor, error) {
 		return nil, fmt.Errorf("capability descriptor: unknown inferenceServe %q (want %s|%s)",
 			d.InferenceServe, InferenceServeOwner, InferenceServeCluster)
 	}
+	if d.Architecture != "" && !capabilityNamePattern.MatchString(d.Architecture) {
+		return nil, fmt.Errorf("capability descriptor: invalid architecture %q", d.Architecture)
+	}
 	if !capabilityNamePattern.MatchString(d.Platform) {
 		return nil, fmt.Errorf("capability descriptor: invalid platform %q", d.Platform)
 	}
@@ -113,6 +118,9 @@ func ParseCapabilityDescriptor(raw string) (*CapabilityDescriptor, error) {
 			return nil, fmt.Errorf("capability descriptor: duplicate action %q", a)
 		}
 		seen[a] = struct{}{}
+	}
+	if err := d.ActionContracts.validate(); err != nil {
+		return nil, fmt.Errorf("capability descriptor: %w", err)
 	}
 	if err := d.RepositoryScopes.validate(); err != nil {
 		return nil, fmt.Errorf("capability descriptor: %w", err)
@@ -140,6 +148,16 @@ func (d *CapabilityDescriptor) AsMap() map[string]any {
 		"computerUseAvailable": d.ComputerUseAvailable,
 		"actions":              actions,
 		"schemaVersion":        d.SchemaVersion,
+	}
+	if d.Architecture != "" {
+		out["architecture"] = d.Architecture
+	}
+	if len(d.ActionContracts) > 0 {
+		contracts := map[string]any{}
+		for action, version := range d.ActionContracts {
+			contracts[action] = version
+		}
+		out["actionContracts"] = contracts
 	}
 	if len(d.RepositoryScopes) > 0 {
 		scopes := map[string]any{}
@@ -172,4 +190,17 @@ func capabilityDescriptorFromMap(m map[string]any) *CapabilityDescriptor {
 		return nil
 	}
 	return d
+}
+
+// NativePlatform names the binary's OS/architecture, independently of labels.
+// An older descriptor without architecture has not established a platform.
+func (d *CapabilityDescriptor) NativePlatform() string {
+	if d == nil || d.Architecture == "" {
+		return ""
+	}
+	return d.Platform + "/" + d.Architecture
+}
+func NativePlatformFromMap(value any) string {
+	m, _ := value.(map[string]any)
+	return capabilityDescriptorFromMap(m).NativePlatform()
 }

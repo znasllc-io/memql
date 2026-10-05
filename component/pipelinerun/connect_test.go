@@ -421,6 +421,8 @@ pipeline:
       steps:
         - name: sign
           run: make sign
+          execution: native
+          platform: darwin/arm64
           needs: { macos_tooling: true }
 `
 	h := connectHarness(t, fleetManifest)

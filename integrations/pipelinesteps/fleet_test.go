@@ -37,6 +37,10 @@ func fleetReq() pl.StepRequest {
 	req := exRequest()
 	req.Compute = pl.ComputeClusterAndFleet
 	req.Step.Needs = []string{"docker", "gpu"}
+	req.Step.Execution = pl.ExecutionNative
+	req.Step.Image = ""
+	req.Step.Caches = nil
+	req.Step.Services = nil
 	req.Step.Artifacts = []string{"coverage.out", "dist/report.json", "missing.txt"}
 	return req
 }

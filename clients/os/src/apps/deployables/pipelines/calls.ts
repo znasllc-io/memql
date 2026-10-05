@@ -86,6 +86,9 @@ export async function disconnectPipeline(query: QueryClient, pipelineId: string)
 // ---------------------------------------------------------------------------
 
 export interface PreviewStep {
+  execution: string;
+  platform: string;
+  requiresFleet: boolean;
   name: string;
   packages: string;
   only: string;
@@ -141,6 +144,9 @@ export function previewFromRow(row: Row): PipelinePreview {
       on: strings(st["on"]),
       channel: rowString(st, "channel"),
       steps: objects(st["steps"]).map((sp) => ({
+        execution: rowString(sp, "execution"),
+        platform: rowString(sp, "platform"),
+        requiresFleet: sp["requiresFleet"] === true,
         name: rowString(sp, "name"),
         packages: rowString(sp, "packages"),
         only: rowString(sp, "only"),

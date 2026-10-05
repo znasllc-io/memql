@@ -133,6 +133,15 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 		return failedResult(pl.CodeRunnerUnavailable,
 			"This agent node has no dispatcher to reach the owner's machines with. Nothing ran."), nil
 	}
+	if err := pl.CheckExecution(run.Execution, run.Platform, true); err != nil {
+		return refusedResult(pl.CodeStepInvalid, err.Error()), nil
+	}
+	if err := pl.CheckExecutionNeeds(run.Execution, run.Needs); err != nil {
+		return refusedResult(pl.CodeStepInvalid, err.Error()), nil
+	}
+	if run.Execution == pl.ExecutionNative && run.Image != "" {
+		return refusedResult(pl.CodeStepInvalid, "Native execution cannot carry a container image."), nil
+	}
 	token, refusal, ok := f.cloneToken(ctx, run)
 	if !ok {
 		return refusal, nil
@@ -296,7 +305,11 @@ func fleetArgs(run StepRun, token string) map[string]any {
 	if artifacts == nil {
 		artifacts = []string{}
 	}
-	return map[string]any{
+	args := map[string]any{
+		"execution":  run.Execution,
+		"needs":      run.Needs,
+		"platform":   run.Platform,
+		"image":      run.Image,
 		"cloneUrl":   fleetCloneURL(run.Repository),
 		"sha":        run.SHA,
 		"token":      token,
@@ -307,6 +320,13 @@ func fleetArgs(run StepRun, token string) map[string]any {
 		"artifacts":  artifacts,
 		"timeoutSec": run.TimeoutSeconds,
 	}
+	if len(run.Services) > 0 {
+		args["services"] = run.Services
+	}
+	if len(run.Caches) > 0 {
+		args["caches"] = run.Caches
+	}
+	return args
 }
 
 // fleetCloneURL is https://<host>/<owner>/<name>.git, the host taken from the

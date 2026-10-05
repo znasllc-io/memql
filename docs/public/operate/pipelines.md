@@ -260,7 +260,6 @@ pipeline:
         - name: os-checks
           run: make os-typecheck os-test os-build
           when: { bucket: os }
-          needs: { docker: true }
     - name: deploy
       on: [push]
       steps:
@@ -272,8 +271,7 @@ pipeline:
       channel: znas-instance
 ```
 
-Connected with `compute: cluster_and_fleet` (the `os-checks` step needs
-`docker`) and `secretNames: [VERIFY_TOKEN]`, it runs `checks` and then `tests`
+Connected with `secretNames: [VERIFY_TOKEN]`, it runs `checks` and then `tests`
 on every run, and `deploy` and `notify` only on a push to the default branch.
 `dbGated` is what `only: db-gated` reads, and the block is refused without it;
 the sidecar's `env` and `ready` are what a Postgres image needs to start and to
@@ -307,7 +305,8 @@ refusal's scope, so it never holds a dot, a slash or a hash.
 
 | Key | Value | Default | Refused when |
 |---|---|---|---|
-| `image` | The toolchain image every command step runs in. Pin it by digest | none | -- |
+| `platform` | Default container platform (`linux/amd64` or `linux/arm64`); a step may override it | either Linux architecture on the cluster | Unknown OS/architecture: `pipeline_step_invalid` |
+| `image` | The toolchain image container steps run in. Pin it by digest | none | -- |
 | `services` | Named sidecars a step may ask for, each with `image` (required), `env` (plain `NAME: value` configuration, never a secret) and `ready` (a shell probe the runner waits on before the step's command starts) | none | A name that breaks the rule, a service with no image, or an `env` name that is not upper-case letters, digits and underscores starting with a letter or underscore: `pipeline_step_invalid`, scoped `services` or `services/<name>` |
 | `caches` | Caches the runner mounts for every step, such as `go` and `npm` | none | -- |
 | `select` | How steps choose what to run. Required once a step names `packages` | none | [Below](#select) |
@@ -341,12 +340,15 @@ mounts is the runner's ([Caches](pipelines-substrate.md#caches)): it knows
 | Key | Value | Default | Refused when |
 |---|---|---|---|
 | `name` | The step's name, unique in its stage | required | Missing, breaking the rule, or used twice in the stage: `pipeline_step_invalid` |
-| `run` | A shell command, run in the image's working copy of the commit -- the same contract as a deployable's `build.command`. There is no step language | required | Blank: `pipeline_step_invalid` |
+| `execution` | `container` or `native`; native uses the host toolchain and ignores the pipeline image | `container` | Native steps with services or shared caches: `pipeline_step_invalid` |
+| `placement` | `cluster` or `fleet`, independently of execution | fleet for native execution or host needs, otherwise cluster | Native execution on the cluster, unknown placement, or fleet without consent |
+| `platform` | Step OS/architecture; overrides the pipeline platform | pipeline platform | Fleet requires an explicit platform; containers require Linux |
+| `run` | A shell command, run in a fresh working copy of the commit -- the same contract as a deployable's `build.command`. There is no step language | required | Blank: `pipeline_step_invalid` |
 | `packages` | `affected` or `all`: select Go packages into `MEMQL_PACKAGES` | none: the step selects no packages | Another value: `pipeline_step_invalid`. No `select.go`: `pipeline_select_missing` |
 | `only` | `db-gated` or `not-db-gated`: keep the selected packages under a `select.dbGated` tree, or the rest | none | Another value, or set without `packages`: `pipeline_step_invalid`. No `select.dbGated`: `pipeline_select_invalid` |
 | `shards` | Split the packages over up to this many steps, at most 8. 0 and 1 mean one step | one step | Below 0 or above 8, or above 1 without `packages`: `pipeline_step_invalid` |
 | `when` | `{ bucket: <name> }`: skip the step on a pull request that touches nothing in the bucket | always runs | A bucket `select.buckets` does not declare: `pipeline_bucket_unknown` |
-| `needs` | `{ <need>: true }`, the need one of `display`, `docker`, `gpu`, `macos_tooling`, `user_files`: the step needs a fleet machine that offers it. A need set `false` is the same as none | runs on the cluster | A need outside the set: `pipeline_need_unknown`. Any need on a pipeline whose compute is `cluster`: `pipeline_fleet_not_consented` |
+| `needs` | `{ <need>: true }`, the need one of `display`, `docker`, `gpu`, `macos_tooling`, `user_files`: a native step needs a fleet machine that offers it. Host needs cannot pass through a container boundary; use `placement: fleet` to request an ordinary Docker container on a worker. A need set `false` is the same as none | runs on the cluster | A need outside the set: `pipeline_need_unknown`. Any need on a pipeline whose compute is `cluster`: `pipeline_fleet_not_consented` |
 | `services` | Declared services the step runs beside | none | A name `services` does not declare: `pipeline_service_unknown` |
 | `timeout` | A duration such as `20m` or `1h30m`, from 1 minute to 2 hours. A step still running at its timeout is stopped and fails `pipeline_step_timeout` | `20m` | Not a duration, under `1m` or over `2h`: `pipeline_step_invalid` |
 | `artifacts` | Paths the runner saves as Library files owned by the pipeline's owner ([Artifacts](pipelines-substrate.md#artifacts)) | none | -- |

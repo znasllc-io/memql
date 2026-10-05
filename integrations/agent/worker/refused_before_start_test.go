@@ -124,12 +124,12 @@ func TestTheResultSaysWhetherAnyMachineStartedTheCall(t *testing.T) {
 			res, _ := f.d.Dispatch(asPipelineExecutor(), pipelineRequest())
 			return res
 		}, "worker_disconnected", true, false},
-		{"the machine refused under its own policy: it was reached", func(t *testing.T) Result {
+		{"the v2 machine refused under its own policy before checkout", func(t *testing.T) Result {
 			f := newPipelineFleet(t)
 			f.failure = &memqlv1.Failure{ErrorCode: "denied_by_policy", ErrorMessage: "pipelines.repos does not list o/r"}
 			res, _ := f.d.Dispatch(asPipelineExecutor(), pipelineRequest())
 			return res
-		}, "denied_by_policy", false, false},
+		}, "denied_by_policy", true, false},
 		{"the machine answered", func(t *testing.T) Result {
 			f := newPipelineFleet(t)
 			res, _ := f.d.Dispatch(asPipelineExecutor(), pipelineRequest())

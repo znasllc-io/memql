@@ -191,15 +191,24 @@ func (h *ForwardHandler) HandleForwardedRequest(
 			"the connected machine is owned by a different user than the assertion names")
 		return
 	}
+	innerArgs := map[string]any{}
+	if raw := req.GetArgsJson(); len(raw) > 0 {
+		if err := json.Unmarshal(raw, &innerArgs); err != nil {
+			// No worker slot was acquired and nothing has been sent.
+			h.sendRefusal(send, requestId, "decode_args", err.Error())
+			return
+		}
+	}
+
 	// THE MACHINE'S CONSENT, re-read where it is dispatched (RULING R20). The
 	// sender routed on the row; this replica holds the connection the machine
 	// advertised its policy on, so this is where its own word is read.
 	// Refused BEFORE START, so the sender moves the step on to a machine that
 	// does consent.
-	if req.GetPurpose() == PurposePipeline && !machineAllowsPipelines(w) {
+	if req.GetPurpose() == PurposePipeline && !machineAllowsPipelines(w, innerArgs) {
 		h.sendRefusal(send, requestId, codePipelinesNotAllowed,
 			"the machine does not advertise "+PipelinesLabel+"="+PipelinesAllowed+
-				" on its connection here: its own policy does not allow pipeline steps")
+				" with pipeline action contract 2 and the requested native platform on its connection here")
 		return
 	}
 
@@ -216,16 +225,6 @@ func (h *ForwardHandler) HandleForwardedRequest(
 		return
 	}
 	defer w.Release(capability)
-
-	innerArgs := map[string]any{}
-	if raw := req.GetArgsJson(); len(raw) > 0 {
-		if err := json.Unmarshal(raw, &innerArgs); err != nil {
-			// The slot is already held, but nothing has been sent to the
-			// machine, so this is still a pre-start refusal.
-			h.sendRefusal(send, requestId, "decode_args", err.Error())
-			return
-		}
-	}
 
 	envelope := buildToolDispatch(Request{
 		Tool:          req.GetTool(),
@@ -249,23 +248,22 @@ func (h *ForwardHandler) HandleForwardedRequest(
 		return
 	}
 
-	// FROM HERE ON, NOTHING IS RE-PICKABLE. The envelope is on its way to the
-	// machine, so every remaining answer is reported with
-	// refused_before_start false, including a mid-call disconnect: an exec
-	// whose stream died may have run.
+	// After dispatch, only the versioned worker contract's explicit admission
+	// refusals prove nothing started. A mid-call disconnect remains uncertain.
 	res, err := w.DispatchWithStream(dispatchCtx, envelope, func(chunk *memqlv1.ToolStream) {
 		h.relayChunk(send, requestId, chunk)
 	})
 	out := translateResult(envelope.GetCallId(), res, err)
 	h.send(send, &nodev1.WorkerForwardResponse{
-		RequestId:     requestId,
-		Ok:            out.OK,
-		OutputJson:    []byte(out.OutputJSON),
-		ErrorCode:     out.ErrorCode,
-		ErrorMessage:  out.ErrorMessage,
-		BytesIn:       uint64(max(out.BytesIn, 0)),
-		BytesOut:      uint64(max(out.BytesOut, 0)),
-		OutputPreview: out.OutputPreview,
+		RefusedBeforeStart: pipelineRefusedBeforeStart(req.GetPurpose(), out, err),
+		RequestId:          requestId,
+		Ok:                 out.OK,
+		OutputJson:         []byte(out.OutputJSON),
+		ErrorCode:          out.ErrorCode,
+		ErrorMessage:       out.ErrorMessage,
+		BytesIn:            uint64(max(out.BytesIn, 0)),
+		BytesOut:           uint64(max(out.BytesOut, 0)),
+		OutputPreview:      out.OutputPreview,
 	})
 }
 

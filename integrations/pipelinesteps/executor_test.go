@@ -333,12 +333,15 @@ func TestExecuteRefusesAnUnknownNeedAndAnUnconsentedFleetStep(t *testing.T) {
 	}{
 		{"a need outside the closed set", func(r *pl.StepRequest) {
 			r.Compute, r.Step.Needs = pl.ComputeClusterAndFleet, []string{"docker", "teleporter"}
+			r.Step.Execution, r.Step.Image = pl.ExecutionNative, ""
 		}, pl.OutcomeRefused, pl.CodeNeedUnknown},
 		{"a need on a cluster-only pipeline", func(r *pl.StepRequest) {
 			r.Compute, r.Step.Needs = pl.ComputeCluster, []string{"docker"}
+			r.Step.Execution, r.Step.Image = pl.ExecutionNative, ""
 		}, pl.OutcomeRefused, pl.CodeFleetNotConsented},
 		{"a need where compute is absent, which means cluster", func(r *pl.StepRequest) {
 			r.Compute, r.Step.Needs = "", []string{"gpu"}
+			r.Step.Execution, r.Step.Image = pl.ExecutionNative, ""
 		}, pl.OutcomeRefused, pl.CodeFleetNotConsented},
 		{"a notify step, which is the driver's", func(r *pl.StepRequest) {
 			r.Step.Kind, r.Step.Run, r.Step.Channel = pl.StepNotify, "", "znas-instance"
@@ -373,6 +376,7 @@ func TestExecuteRefusesAnUnknownNeedAndAnUnconsentedFleetStep(t *testing.T) {
 		e := newTestExecutor(wb, fleet)
 		req := exRequest()
 		req.Compute, req.Step.Needs = pl.ComputeClusterAndFleet, []string{"docker"}
+		req.Step.Execution, req.Step.Image = pl.ExecutionNative, ""
 		res, err := e.Execute(context.Background(), req)
 		if err != nil || res.Status != pl.OutcomeSucceeded {
 			t.Fatalf("Execute = %+v, %v; want the fleet's success", res, err)
@@ -476,6 +480,7 @@ func TestExecuteNamesTheBindingDeadline(t *testing.T) {
 			req.Step.TimeoutSeconds = c.stepTimeout
 			if len(c.needs) > 0 {
 				req.Compute, req.Step.Needs = pl.ComputeClusterAndFleet, c.needs
+				req.Step.Execution, req.Step.Image = pl.ExecutionNative, ""
 			}
 			if _, err := e.Execute(context.Background(), req); err != nil {
 				t.Fatalf("Execute: %v", err)
@@ -1307,6 +1312,7 @@ func TestCancelReachesInFlightStepsAndDeletesJobs(t *testing.T) {
 	onFleet := exRequest()
 	onFleet.StepKey, onFleet.Step.Key = "tests.docker", "tests.docker"
 	onFleet.Compute, onFleet.Step.Needs = pl.ComputeClusterAndFleet, []string{"docker"}
+	onFleet.Step.Execution, onFleet.Step.Image = pl.ExecutionNative, ""
 	other := exRequest()
 	other.RunID = "run-9b9b"
 
@@ -1453,6 +1459,7 @@ func TestExecuteWithNoFleetFailsAFleetStep(t *testing.T) {
 	e := newTestExecutor(wb, nil)
 	req := exRequest()
 	req.Compute, req.Step.Needs = pl.ComputeClusterAndFleet, []string{"display"}
+	req.Step.Execution, req.Step.Image = pl.ExecutionNative, ""
 	res, err := e.Execute(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)

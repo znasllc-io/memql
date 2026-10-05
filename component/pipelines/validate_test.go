@@ -41,8 +41,9 @@ func d7ExampleSpec() *Spec {
 					Packages: PackagesAffected, Only: OnlyDBGated, Services: []string{"postgres"}, Shards: 4,
 				},
 				{
-					Name: "os-checks", Run: "make os-typecheck os-test os-build",
-					When: &When{Bucket: "os"}, Needs: map[string]bool{NeedDocker: true},
+					Platform: "linux/amd64",
+					Name:     "os-checks", Run: "make os-typecheck os-test os-build",
+					When: &When{Bucket: "os"}, Placement: PlacementFleet,
 				},
 			}},
 			{Name: "deploy", On: []string{"push"}, Steps: []StepSpec{

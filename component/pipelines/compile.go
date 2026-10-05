@@ -183,6 +183,9 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 
 	step := Step{
 		Key: StepKey(stage, declared.Name), Stage: stage, Name: declared.Name, Kind: StepCommand, Run: declared.Run,
+		Execution:      ExecutionOf(declared.Execution),
+		Placement:      PlacementOf(declared),
+		Platform:       PlatformOf(c.spec, declared),
 		Image:          c.spec.Image,
 		Services:       c.servicesFor(declared.Services),
 		Caches:         compiledCopy(c.spec.Caches),
@@ -191,6 +194,10 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 		Artifacts:      compiledCopy(declared.Artifacts),
 		Secrets:        compiledCopy(declared.Secrets),
 		DependsOn:      compiledCopy(dependsOn),
+	}
+
+	if step.Execution == ExecutionNative {
+		step.Image = ""
 	}
 
 	if declared.When != nil && c.bucketUntouched(declared.When.Bucket) {
@@ -419,13 +426,13 @@ func stepNeeds(declared StepSpec) []string {
 // stepConsent refuses a step whose needs the owner has not consented to send
 // to the fleet, or whose secrets the owner has not allowed.
 func stepConsent(scope string, declared StepSpec, compute Compute, allowedSecrets []string) *Refusal {
-	if needs := stepNeeds(declared); len(needs) > 0 && compute != ComputeClusterAndFleet {
+	if PlacementOf(declared) == PlacementFleet && compute != ComputeClusterAndFleet {
 		if compute == "" {
 			compute = ComputeCluster
 		}
 		return Refuse(CodeFleetNotConsented, scope,
-			"The step needs %s, which sends it to a fleet machine, and this pipeline's compute is %s: the owner has not consented to the fleet (compute: %s).",
-			strings.Join(needs, ", "), compute, ComputeClusterAndFleet)
+			"The step requests fleet placement, and this pipeline's compute is %s: the owner has not consented to the fleet (compute: %s).",
+			compute, ComputeClusterAndFleet)
 	}
 	var notAllowed []string
 	for _, name := range declared.Secrets {

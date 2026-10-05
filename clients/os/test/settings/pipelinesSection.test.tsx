@@ -96,7 +96,7 @@ function readinessOf(verdicts: Verdict[]): Readiness {
 }
 
 function machine(id: string, over: Record<string, unknown> = {}): Row {
-  return { id, ownerUserId: "u-me", name: id, labels: { pipelines: "allowed" }, revokedAt: "", ...over } as unknown as Row;
+  return { id, ownerUserId: "u-me", name: id, capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 2 } }, labels: { pipelines: "allowed" }, revokedAt: "", ...over } as unknown as Row;
 }
 
 interface Seed extends FakeSeed {

@@ -222,6 +222,7 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 			Template: PodTemplateSpec{
 				Metadata: ObjectMeta{Labels: objectLabels(run)},
 				Spec: PodSpec{
+					NodeSelector:                  stepNodeSelector(run.Platform),
 					RestartPolicy:                 "Never",
 					ServiceAccountName:            cfg.StepServiceAccount,
 					AutomountServiceAccountToken:  ptr(false),
@@ -245,6 +246,16 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 	scope := run.StepKey
 	refuse := func(format string, args ...any) (int32, *pl.Refusal) {
 		return 0, pl.Refuse(pl.CodeJobRejected, scope, format, args...)
+	}
+
+	if err := pl.CheckExecutionNeeds(run.Execution, run.Needs); err != nil {
+		return 0, pl.Refuse(pl.CodeStepInvalid, run.StepKey, "%s", err)
+	}
+	if run.Execution != pl.ExecutionContainer {
+		return refuse("Kubernetes Jobs require container execution")
+	}
+	if err := pl.CheckExecution(run.Execution, run.Platform, false); err != nil {
+		return refuse("%s", err)
 	}
 
 	if strings.TrimSpace(cfg.CloneImage) == "" {

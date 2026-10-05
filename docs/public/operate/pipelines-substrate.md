@@ -34,13 +34,13 @@ before the first one.
 The agent node driving a run hands each command step to the substrate's
 executor (`integrations/pipelinesteps`), which decides where it runs:
 
-- **On the cluster**, for a step that names no need: a Kubernetes Job in the
+- **On the cluster**, for a container step placed on the cluster: a Kubernetes Job in the
   `memql-pipelines` namespace. The agent forwards the step over the node mesh
   to a workbench replica, whose runner creates the Job, watches it, captures its
   output, files its log and artifacts and records its outcome. Every name the
   runner uses is derived from the run, the step and the attempt, so whichever
   replica is asked next finds the same Job.
-- **On one of the owner's own machines**, for a step that names a need --
+- **On one of the owner's own machines**, for `placement: fleet`, native execution, or a step that names a host need --
   `display`, `docker`, `gpu`, `macos_tooling` or `user_files`, which no step pod
   offers -- and only on a pipeline connected with `compute: cluster_and_fleet`
   ([Compute](pipelines.md#compute)). The agent dispatches the step to a machine
@@ -460,7 +460,7 @@ local cluster (k3s) enforces network policy as installed, so its proof passes.
 
 ## The fleet
 
-A step that names a need runs on one of the pipeline owner's own machines. The
+A fleet step runs on one of the pipeline owner's opted-in machines. The
 agent dispatches it through its worker dispatcher as `workerHost.pipeline_step`
 under the pipeline purpose: no agent is named, and the gates that ask about an
 agent -- per-task approval, standing scope, the classifier -- are not asked,
@@ -494,6 +494,10 @@ because there is none. Three other things must hold instead.
    capability descriptor. The router requires an explicit scope accepting the
    requested repository before dispatch. Missing scope metadata is unknown
    consent: upgrade and reconnect older workers before using them for builds.
+   It must also report `workerHost.pipeline_step` action contract **2**. An older,
+   missing or unknown contract refuses before dispatch; operator labels cannot
+   override it. Native OS/architecture comes from the binary descriptor and is
+   rechecked on the receiving replica.
    An empty advertised list accepts every repository; a nonempty list matches
    exact names, ignoring case, surrounding whitespace and a `.git` suffix.
    A repository-only policy change triggers re-registration. The worker still
@@ -530,12 +534,28 @@ A refusal before start ran nothing, and a machine whose stream another agent
 replica holds is reached over a forward under the owner's authority -- skipped,
 never failed, when it cannot be. With no machine that offers the need, allows
 pipelines and is online, the step is refused `pipeline_no_machine_for_need`, and
-nothing ran. A machine whose own policy refuses the step once it arrives (its
-`repos` does not list the repository, say) fails it
-`pipeline_no_machine_for_need` with the machine's sentence: a refusal on the
-machine is not re-picked (memql#5812). Each dispatch is recorded like an agent's call, as a
+nothing ran. Under contract 2, policy rejection, busy build capacity and an unavailable
+runtime are confirmed pre-execution refusals and permit another candidate.
+Timeouts, disconnects, uncertain cleanup and interrupted prior attempts do not: a
+command might already have performed an external effect. Each dispatch is recorded like an agent's call, as a
 `v1:worker:invocation` of `workerHost.pipeline_step` naming no agent, filed under
 the work run and the step.
+
+**Execution is explicit.** `execution: container` uses the exact digest-pinned
+Linux image with the declared architecture, even on a Mac. It cannot inherit
+host Docker, GPU, display or file access through a `needs` label. Use native
+execution for host tools. A container on the fleet uses `placement: fleet`,
+without host needs. Docker must answer a live daemon identity/platform probe;
+architecture emulation is refused. Native execution also probes Docker when
+`needs: { docker: true }` is declared. Labels alone do not prove daemon health.
+
+The current worker admits one pipeline command per OS user across all its
+cluster connections. A durable attempt record outlives process death. A new
+worker reconciles an orphan container only against the same Docker daemon;
+unknown daemon identity, uncertain cleanup and interrupted native execution
+remain blocked for reconciliation. This reservation does not reserve agent
+work or another OS user's capacity. Fleet sidecars and shared caches are not
+yet implemented and are refused rather than omitted.
 
 **What the machine does with the step** -- the clone (the cluster Job's own
 clone script, over `https` only), the command in the machine's own environment,

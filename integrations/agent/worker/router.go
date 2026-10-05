@@ -546,3 +546,38 @@ func (p *RoutePlan) RequireRepository(action, repository string) {
 	}
 	p.Candidates = kept
 }
+
+// RequireActionContract excludes older implementations that might silently
+// ignore newer request fields. Operator labels cannot override this metadata.
+func (p *RoutePlan) RequireActionContract(action string, version int) {
+	kept := make([]Candidate, 0, len(p.Candidates))
+	if p.Rejected == nil {
+		p.Rejected = map[string]string{}
+	}
+	for _, candidate := range p.Candidates {
+		if candidate.ActionContracts.Supports(action, version) {
+			kept = append(kept, candidate)
+		} else {
+			p.Rejected[candidate.RegistrationId] = fmt.Sprintf("%s has not reported %s contract %d", candidate.Label(), action, version)
+		}
+	}
+	p.Candidates = kept
+}
+
+// RequireNativePlatform uses build metadata, never an operator's placement label.
+// Containers use the Docker daemon's live platform check instead: a Mac may
+// serve Linux containers, and the daemon may differ from the worker host.
+func (p *RoutePlan) RequireNativePlatform(platform string) {
+	kept := make([]Candidate, 0, len(p.Candidates))
+	if p.Rejected == nil {
+		p.Rejected = map[string]string{}
+	}
+	for _, candidate := range p.Candidates {
+		if platform != "" && candidate.NativePlatform == platform {
+			kept = append(kept, candidate)
+		} else {
+			p.Rejected[candidate.RegistrationId] = fmt.Sprintf("%s has not reported native platform %s", candidate.Label(), platform)
+		}
+	}
+	p.Candidates = kept
+}
