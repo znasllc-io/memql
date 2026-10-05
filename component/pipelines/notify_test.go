@@ -1305,3 +1305,19 @@ func TestEmailSubjectEqualsTheDiscordTitleExceptWhereMarkdownNeededEscaping(t *t
 		t.Errorf("title = %q, subject = %q", e.Title, subject)
 	}
 }
+
+// A sentence the driver writes beside a message spells a time the way the
+// message and the check run do.
+func TestFormatDurationIsTheChecksOwnFormat(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		time.Second:      "1s",
+		45 * time.Second: "45s",
+		62 * time.Second: "1m 02s",
+		20 * time.Minute: "20m 00s",
+		time.Hour + 2*time.Minute + 5*time.Second: "1h 02m 05s",
+	} {
+		if got := FormatDuration(d); got != want {
+			t.Errorf("FormatDuration(%v) = %q, want %q", d, got, want)
+		}
+	}
+}

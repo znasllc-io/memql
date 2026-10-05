@@ -606,16 +606,27 @@ func TestTheChannelsAndTheOutboxOverRealRows(t *testing.T) {
 	if row := systemRead(secretRow.RequestID); rowString(row, "status") != "sent" || rowString(row, "body") != restage.Body || rowString(row, "targetSecret") != "DISCORD_RELEASES" {
 		t.Errorf("a re-stage keeps `sent` and refreshes the body: %+v", row)
 	}
-	// The secret-target staging and the by-id status read are not a client's.
-	// (The plain staging, stageOutboundRequest, is the client-reachable surface;
-	// this package calls both with internal origin.)
+	// Neither staging this package makes, nor the by-id status read, is a
+	// client's. (stageOutboundRequest, the client-reachable staging surface, is
+	// not this package's.)
 	for _, call := range []string{
 		fmt.Sprintf(`mutation stageOutboundRequestToSecret(requestId: %s, targetSecret: "DISCORD_RELEASES", body: "x")`, langparser.QuoteString("pr6c-forged-a-"+suffix)),
+		fmt.Sprintf(`mutation stageServerOutboundRequest(requestId: %s, medium: "email", target: "ops@example.test", body: "x")`, langparser.QuoteString("pr6c-forged-b-"+suffix)),
 		fmt.Sprintf(`query outboundRequestById(requestId: %s)`, langparser.QuoteString(secretRow.RequestID)),
 	} {
 		if _, err := eng.Execute(signedIn(owner), call); err == nil || !strings.Contains(err.Error(), "server-only") {
 			t.Errorf("a client may not reach %s: %v", constructOf(call), err)
 		}
+	}
+	// And the email row the notify stage staged is the server's too: a client
+	// marking it sent -- which the stage would report as delivered -- is
+	// refused, and the row stays as the worker left it.
+	if _, err := eng.Execute(signedIn(owner), fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "sent")`,
+		langparser.QuoteString(plainRow.RequestID))); err == nil || !strings.Contains(err.Error(), "`status`") {
+		t.Errorf("a client stamped the notify stage's email row: %v", err)
+	}
+	if after, err := store.OutboundStatuses(fresh, []string{plainRow.RequestID}); err != nil || len(after) != 1 || after[0].Status != "pending" {
+		t.Errorf("the email row is as the stage staged it: %+v %v", after, err)
 	}
 
 	// ---- a Library file's name, read under its owner ----

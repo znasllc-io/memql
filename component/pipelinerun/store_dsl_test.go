@@ -268,7 +268,7 @@ func TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares(t *testing.T) {
 		qPipelineRunByCheckRun, qPipelineRunsUnfinished, qPipelineRunsCheckRunLost, qPipelineRunByID, qPipelinesActive, qWorkStepsForRun,
 		mCreatePipeline, mUpdatePipeline, mCreatePipelineRun, mUpdatePipelineRun, qPackageByID, qInboundRequestByID,
 		qPipelineChannelsForOwner, qPipelineChannelForOwnerByName, qPipelineRunsForPipelineEvent, mCreatePipelineChannel, mUpdatePipelineChannel,
-		mStageOutboundRequest, mStageOutboundRequestToSecret, qOutboundRequestByID, qLibraryFileByID,
+		mStageServerOutboundRequest, mStageOutboundRequestToSecret, qOutboundRequestByID, qLibraryFileByID,
 	} {
 		if !seen[want] {
 			t.Errorf("%s is named in store_dsl.go and no Store method calls it", want)
@@ -941,7 +941,7 @@ func TestTheChannelAndOutboundCallsSayWhatTheRowsAre(t *testing.T) {
 		`query pipelineChannelForOwnerByName(name: "releases")`,
 		`query pipelineRunsForPipelineEvent(event: "release", pipelineId: "p1")`,
 		`mutation stageOutboundRequestToSecret(body: "{\"username\":\"MemQL\"}", dedupeKey: "pn1", requestId: "pn1", requestedBy: "pipelines:notify:r1", targetSecret: "DISCORD_RELEASES")`,
-		`mutation stageOutboundRequest(body: "text", medium: "email", requestId: "pn2", subject: "memql - Release v1 passed", target: "a@example.test")`,
+		`mutation stageServerOutboundRequest(body: "text", medium: "email", requestId: "pn2", subject: "memql - Release v1 passed", target: "a@example.test")`,
 		`query outboundRequestById(requestId: "pn1")`,
 		`query outboundRequestById(requestId: "pn2")`,
 		// One read per FILE, however its id is spelled.

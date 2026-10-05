@@ -760,10 +760,12 @@ const COPY: Record<string, RefusalCopy> = {
     next: "Allow the pipeline on the channel in Deployables > Settings > Channels, then re-run.",
   },
   pipeline_channel_invalid: {
-    // A Discord secret that holds no webhook's URL, an address that is no
-    // address: the server's sentence says which, and never repeats a value.
+    // Two repairs in two places: the channel's own settings (a secret name, a
+    // recipient), or the VALUE stored in the globalSecret it names, which must
+    // be a Discord webhook URL. The server's sentence says which, and never
+    // repeats a value.
     title: "The channel cannot deliver as it is set up",
-    next: "The message says what is wrong. Correct the channel in Deployables > Settings > Channels, then re-run.",
+    next: "The message says what is wrong. Correct the channel in Deployables > Settings > Channels; or, when the secret's value is not a Discord webhook URL, store the webhook's URL in that globalSecret. Then re-run.",
   },
   pipeline_notify_failed: {
     title: "The notification was not delivered",

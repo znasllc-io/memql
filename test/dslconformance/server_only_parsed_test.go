@@ -560,9 +560,17 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// stage, after it has checked the person's right to the channel naming
 		// the secret. This bars the named call only; a raw insert() never
 		// consults @serverOnly, and component/memql's
-		// outbound_secret_target_write_guard.go refuses the same row arriving
+		// outbound_protected_row_write_guard.go refuses the same row arriving
 		// that way.
 		{Path: "platform/mutations.memql", Name: "stageOutboundRequestToSecret"}: true,
+		// Its twin for a delivery to a plain target -- the notify stage's
+		// email: it stamps the row serverStaged, and the write guard then
+		// refuses every write to it without internal origin, so no client can
+		// fake the delivery the stage reports or retarget it. A client able to
+		// call it could mint rows nobody but the server may write. actor.userId
+		// scoping would not help: the row has no owner, and the property is who
+		// staged it, not who asks.
+		{Path: "platform/mutations.memql", Name: "stageServerOutboundRequest"}: true,
 		// Its by-id read, which is how the notify stage learns the delivery
 		// went. v1:platform:outboundRequest declares no tier (memql#5804), so a
 		// client-reachable by-id read would hand any caller any delivery's

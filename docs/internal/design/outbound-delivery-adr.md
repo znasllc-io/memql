@@ -275,25 +275,32 @@ notify stage learns that its delivery was sent.
 writes its content chooses what is posted to a channel a cluster owner
 configured. Whoever writes its delivery state decides what the pipelines
 notify stage reports, because the stage says "delivered" when the row it
-staged reads `sent`. So only server-side Go writes either:
+staged reads `sent`. The second reason holds for the stage's EMAIL rows as
+much, whose targets are plain addresses: whoever stamps one `sent` fakes the
+delivery, and whoever re-stages one at its id sends it elsewhere. So a row
+server code stages is PROTECTED -- one naming a secret, or one marked
+`serverStaged` -- and only server-side Go writes it:
 
-- the notify stage stages the row, through `stageOutboundRequestToSecret`;
+- the notify stage stages the row, through `stageOutboundRequestToSecret`
+  (a Discord webhook) or `stageServerOutboundRequest` (an email), both
+  `@serverOnly` and both stamping `serverStaged: true`;
 - the outbound worker stamps each status transition.
 
 Both run under internal origin, and the worker stamps it inline on each
 status stamp alone. Its drain scan and its secret lookup run without it.
-`@serverOnly` on the stage bars only the named call. A raw `insert()` never
+`@serverOnly` on the stages bars only the named calls. A raw `insert()` never
 consults it, and the concept declares no row tier, so the engine holds the
-line itself. `validateOutboundSecretTargetWrite`
-(`component/memql/outbound_secret_target_write_guard.go`) sits at the
+line itself. `validateProtectedOutboundWrite`
+(`component/memql/outbound_protected_row_write_guard.go`) sits at the
 post-read-merge seam every write path shares. Without internal origin it
 refuses:
 
-- any write that sets, changes or clears `targetSecret`;
-- every write to a row whose stored or final version names a secret: its
+- any write that sets, changes or clears `targetSecret` or `serverStaged`,
+  so no client can mint a protected row or unmark one;
+- every write to a row whose stored or final version is protected: its
   content, its delivery state, even an unchanged rewrite.
 
-An operator's requeue of a failed secret row through
+An operator's requeue of a failed protected row through
 `updateOutboundRequestStatus` is refused with the rest. The remedy is to
 re-run the pipeline's notify step, which stages a fresh delivery.
 
@@ -351,12 +358,15 @@ webhook row, because the transport cannot tell which of its URLs is a
 credential.
 
 **What it does not close.** `v1:platform:outboundRequest` declares no row
-tier (memql#5804). Any signed-in caller can still read every row through
-`outboundRequestsByStatus`, which for a secret row shows the body and the
-secret's name but never its URL. A PLAIN row, one naming no secret, is not
-the guard's at all. Any signed-in caller can still stage, re-stage, stamp
-and requeue a plain row as before, and anyone waiting on one reads a status
-a stranger could have written. Both close when the concept declares a tier.
+tier (memql#5804). READS stay open: any signed-in caller can still read
+every row through `outboundRequestsByStatus` -- a protected row's body and
+target included (for a secret row the secret's name, never its URL; for an
+email the recipient's address). WRITES to a protected row do not stay open:
+no client stamps, requeues or re-stages one. A row a product or a client
+staged through `stageOutboundRequest` is not the guard's at all: any
+signed-in caller can still stage, re-stage, stamp and requeue it as before,
+and anyone waiting on one reads a status a stranger could have written. Both
+close when the concept declares a tier.
 
 ## 8. References
 

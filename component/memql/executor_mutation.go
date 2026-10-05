@@ -1063,14 +1063,16 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 	}
-	// SECRET TARGETS are server-written only (memql#5480), at the same seam
-	// for the ladder's reasons: the rule is about a CHANGE, so it needs the
-	// stored row and the final one -- after the read-merge, which carries a
-	// row's targetSecret through a write that never names it, so a judge of
-	// the delta alone would pass a foreign body under someone else's secret.
-	// See outbound_secret_target_write_guard.go.
+	// PROTECTED OUTBOUND ROWS -- secret targets and server-staged deliveries --
+	// are server-written only (memql#5480), at the same seam for the ladder's
+	// reasons: the rule is about a CHANGE, so it needs the stored row and the
+	// final one -- after the read-merge, which carries a row's targetSecret
+	// and serverStaged through a write that never names them, so a judge of
+	// the delta alone would pass a foreign body under someone else's secret,
+	// or a client's stamp on a delivery the server reports. See
+	// outbound_protected_row_write_guard.go.
 	if conceptMeta.Name == conceptPlatformOutboundRequest {
-		if err := validateOutboundSecretTargetWrite(ctx, organizationPrior, payload); err != nil {
+		if err := validateProtectedOutboundWrite(ctx, organizationPrior, payload); err != nil {
 			return nil, meta, err
 		}
 	}

@@ -12,20 +12,22 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-// outbound_secret_target_db_test.go -- memql#5480, on a real engine over a
+// outbound_protected_row_db_test.go -- memql#5480, on a real engine over a
 // real Postgres.
 //
 // A webhook row may name the v1:platform:globalSecret holding its URL instead
-// of carrying the URL, because a Discord webhook's token is in its path. The
-// outbound worker's own tests drive it against a fake engine, which makes every
-// engine half of that contract true by construction: that the stamp's
+// of carrying the URL, because a Discord webhook's token is in its path; and a
+// row whose outcome server code reports -- the pipelines notify stage's email
+// -- is staged by server code and marked so (serverStaged). The outbound
+// worker's own tests drive it against a fake engine, which makes every engine
+// half of that contract true by construction: that the stamp's
 // "secret:" + args.targetSecret writes the descriptor, that outboundRequestFull
-// carries targetSecret to the worker, that a client is refused both
-// server-only constructs, and -- the half that matters most -- that no write
-// without internal origin reaches a secret row at all: not its target, not
-// what it sends, not its delivery state. @serverOnly bars a NAMED call; a raw
-// insert() never consults it, so the last is the write guard's
-// (outbound_secret_target_write_guard.go). component/outbound is not in the
+// carries targetSecret to the worker, that a client is refused the server-only
+// constructs, and -- the half that matters most -- that no write without
+// internal origin reaches a protected row at all: not its target, not what it
+// sends, not its delivery state. @serverOnly bars a NAMED call; a raw insert()
+// never consults it, so the last is the write guard's
+// (outbound_protected_row_write_guard.go). component/outbound is not in the
 // db-tests lane, so all of it is pinned here, on the shared engine this
 // package's DSL-over-real-rows tests already boot.
 
@@ -78,6 +80,7 @@ func TestStageOutboundRequestToSecretStagesTheDescriptor(t *testing.T) {
 	require.Equal(t, "secret:DISCORD_RELEASES", stored["target"],
 		"target must hold the descriptor, so the row and every error name the secret and never the URL")
 	require.Equal(t, "DISCORD_RELEASES", stored["targetSecret"])
+	require.Equal(t, true, stored["serverStaged"], "a secret row is staged by server code, and marked so")
 	require.Equal(t, "pending", stored["status"])
 	require.EqualValues(t, 0, stored["attempts"])
 
@@ -129,7 +132,7 @@ func TestAClientRawInsertNamingASecretIsRefused(t *testing.T) {
 		`"medium":"webhook","target":"secret:DISCORD_RELEASES","targetSecret":"DISCORD_RELEASES",`+
 		`"body":"not from this cluster","status":"pending","attempts":0})`)
 	require.Error(t, err, "a client raw insert named a secret")
-	require.Contains(t, err.Error(), "targetSecret")
+	require.Contains(t, err.Error(), "`targetSecret`")
 	require.Zero(t, outboundRowCount(t, db, reqId), "the refused insert wrote a row")
 
 	// The refusal is about the secret, not about raw writes: the same insert
@@ -247,10 +250,11 @@ func TestAClientCannotStampASecretRowsStatus(t *testing.T) {
 	}
 }
 
-// TestAClientStatusStampOnAPlainRowLands: the rule is about rows naming a
-// secret. A plain row's delivery state stays as open as it always was --
-// stamped and requeued by any signed-in caller -- until the concept declares
-// a tier (memql#5804).
+// TestAClientStatusStampOnAPlainRowLands: the rule is about protected rows --
+// naming a secret, or staged by server code. A row a client or a product
+// staged keeps a delivery state as open as it always was -- stamped and
+// requeued by any signed-in caller -- until the concept declares a tier
+// (memql#5804).
 func TestAClientStatusStampOnAPlainRowLands(t *testing.T) {
 	eng, db, ctx := sharedReadMergeEngine(t)
 	client := outboundClient(ctx, "writer-5480")
@@ -295,4 +299,153 @@ func TestAnInternalReStageThroughThePlainMutationLeavesAPlainRow(t *testing.T) {
 	require.Equal(t, productBody, stored["body"], "precondition: the internal re-stage landed on the same row")
 	require.Empty(t, stored["targetSecret"],
 		"a re-stage through the plain mutation kept the secret target, so the worker would POST that body to the URL the secret holds")
+	require.Equal(t, true, stored["serverStaged"],
+		"the row stays the server's: the re-stage was internal, and the mark is not the plain mutation's to clear")
+}
+
+// stageServerRow stages an email row the way the notify stage does: through
+// stageServerOutboundRequest, under internal origin.
+func stageServerRow(t *testing.T, eng *MemQLEngine, ctx context.Context, reqId string) string {
+	t.Helper()
+	return runMutation(t, auth.ContextWithInternalOrigin(ctx), eng, "stageServerOutboundRequest", map[string]any{
+		"requestId":   reqId,
+		"medium":      "email",
+		"target":      "ops@example.test",
+		"subject":     "shop - Push to main passed",
+		"body":        "All 2 stages passed.",
+		"dedupeKey":   "pn-" + reqId,
+		"requestedBy": "pipelines:notify:run-42",
+	})
+}
+
+// TestStageServerOutboundRequestMarksTheRow: the server-side stage of a plain
+// delivery writes the row stageOutboundRequest would, marked serverStaged and
+// naming no secret. A client is refused the construct, a cluster owner
+// included, and writes no row.
+func TestStageServerOutboundRequestMarksTheRow(t *testing.T) {
+	eng, db, ctx := sharedReadMergeEngine(t)
+	internal := auth.ContextWithInternalOrigin(ctx)
+	reqId := "out5480-" + uniqueSuffix("server-staged")
+
+	canonicalId := stageServerRow(t, eng, ctx, reqId)
+	stored := latestPayload(t, internal, db, outboundRequestConcept, canonicalId)
+	require.Equal(t, "email", stored["medium"])
+	require.Equal(t, "ops@example.test", stored["target"])
+	require.Equal(t, true, stored["serverStaged"])
+	require.Empty(t, stored["targetSecret"], "a plain delivery names no secret")
+	require.Equal(t, "pending", stored["status"])
+	require.EqualValues(t, 0, stored["attempts"])
+
+	owner := auth.ContextWithClientOrigin(auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: "owner-5480", Role: auth.RoleOwner}))
+	clientId := reqId + "-client"
+	_, err := eng.Execute(owner, `mutation stageServerOutboundRequest(requestId: "`+clientId+`", medium: "email", target: "ops@example.test", body: "x")`)
+	require.Error(t, err, "a client staged a row the server alone may write")
+	require.Contains(t, err.Error(), "server-only")
+	require.Zero(t, outboundRowCount(t, db, clientId), "the refused stage wrote a row")
+}
+
+// TestAClientRawInsertMarkingARowServerStagedIsRefused: insert() never
+// consults stageServerOutboundRequest's @serverOnly, so the mark itself is
+// the guard's: a client could otherwise mint a row that reads `sent`, staged
+// in the server's name.
+func TestAClientRawInsertMarkingARowServerStagedIsRefused(t *testing.T) {
+	eng, db, ctx := sharedReadMergeEngine(t)
+	client := outboundClient(ctx, "writer-5480")
+	reqId := "out5480-" + uniqueSuffix("raw-staged")
+
+	_, err := eng.Execute(client, `insert("v1:platform:outboundRequest", id="`+reqId+`", payload={`+
+		`"medium":"email","target":"ops@example.test","body":"not from this cluster","status":"sent","attempts":1,"serverStaged":true})`)
+	require.Error(t, err, "a client raw insert marked a row server-staged")
+	require.Contains(t, err.Error(), "`serverStaged`")
+	require.Zero(t, outboundRowCount(t, db, reqId), "the refused insert wrote a row")
+}
+
+// TestAClientCannotReVersionAServerStagedRow: a re-stage at the same id would
+// change where the delivery goes or what it says, and a raw insert could drop
+// the mark that keeps the row the server's. Each is refused, and the row is as
+// staged.
+func TestAClientCannotReVersionAServerStagedRow(t *testing.T) {
+	eng, db, ctx := sharedReadMergeEngine(t)
+	internal := auth.ContextWithInternalOrigin(ctx)
+	client := outboundClient(ctx, "writer-5480")
+	reqId := "out5480-" + uniqueSuffix("staged-reversion")
+	canonicalId := stageServerRow(t, eng, ctx, reqId)
+
+	for _, tc := range []struct {
+		name, call, field string
+	}{
+		{"re-stage to another address through stageOutboundRequest",
+			`mutation stageOutboundRequest(requestId: "` + reqId + `", medium: "email", target: "eve@example.test", body: "All 2 stages passed.")`, "target"},
+		{"raw insert under a foreign body",
+			`insert("v1:platform:outboundRequest", id="` + reqId + `", payload={"body":"not from this pipeline"})`, "body"},
+		{"raw insert dropping the mark",
+			`insert("v1:platform:outboundRequest", id="` + reqId + `", payload={"serverStaged":false})`, "serverStaged"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := eng.Execute(client, tc.call)
+			require.Error(t, err, "a client re-versioned a server-staged row")
+			require.Contains(t, err.Error(), "`"+tc.field+"`")
+			stored := latestPayload(t, internal, db, outboundRequestConcept, canonicalId)
+			require.Equal(t, "ops@example.test", stored["target"], "the refused write changed the target")
+			require.Equal(t, "All 2 stages passed.", stored["body"], "the refused write changed the body")
+			require.Equal(t, true, stored["serverStaged"], "the refused write dropped the mark")
+		})
+	}
+}
+
+// TestTheWorkersStatusStampsOnAServerStagedRowLand: the worker stamps under
+// internal origin, so the guard admits its walk of a delivery.
+func TestTheWorkersStatusStampsOnAServerStagedRowLand(t *testing.T) {
+	eng, db, ctx := sharedReadMergeEngine(t)
+	reqId := "out5480-" + uniqueSuffix("staged-stamps")
+	canonicalId := stageServerRow(t, eng, ctx, reqId)
+	worker := auth.ContextWithInternalOrigin(outboundWorkerActor())
+
+	for _, call := range []string{
+		`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "sending")`,
+		`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "sent", lastError: "", sentAt: "2026-10-04T12:00:31Z")`,
+	} {
+		_, err := eng.Execute(worker, call)
+		require.NoError(t, err, "the worker's status stamp was refused: %s", call)
+	}
+	stored := latestPayload(t, auth.ContextWithInternalOrigin(ctx), db, outboundRequestConcept, canonicalId)
+	require.Equal(t, "sent", stored["status"])
+	require.Equal(t, true, stored["serverStaged"])
+}
+
+// TestAClientCannotStampAServerStagedRowsStatus: the notify stage reports its
+// email delivered when the row reads `sent`, so a client marking one sent
+// would fake the delivery, and requeueing one would send it again. Both are
+// refused, as is the worker's own actor arriving without internal origin, and
+// the row keeps the state the worker gave it.
+func TestAClientCannotStampAServerStagedRowsStatus(t *testing.T) {
+	eng, db, ctx := sharedReadMergeEngine(t)
+	internal := auth.ContextWithInternalOrigin(ctx)
+	reqId := "out5480-" + uniqueSuffix("staged-client-stamp")
+	canonicalId := stageServerRow(t, eng, ctx, reqId)
+	_, err := eng.Execute(auth.ContextWithInternalOrigin(outboundWorkerActor()),
+		`mutation updateOutboundRequestStatus(requestId: "`+reqId+`", status: "failed", attempts: 5, lastError: "target not in email allowlist")`)
+	require.NoError(t, err, "precondition: the worker failed the row")
+
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		call string
+	}{
+		{"a client marking it sent", outboundClient(ctx, "writer-5480"),
+			`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "sent", lastError: "", sentAt: "2026-10-04T12:00:31Z")`},
+		{"a client requeueing it", outboundClient(ctx, "writer-5480"),
+			`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "pending")`},
+		{"the worker's actor without internal origin", auth.ContextWithClientOrigin(outboundWorkerActor()),
+			`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "pending")`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := eng.Execute(tc.ctx, tc.call)
+			require.Error(t, err, "a status stamp without internal origin landed on a server-staged row")
+			require.Contains(t, err.Error(), "`status`")
+			stored := latestPayload(t, internal, db, outboundRequestConcept, canonicalId)
+			require.Equal(t, "failed", stored["status"], "the refused stamp changed the row's state")
+			require.EqualValues(t, 5, stored["attempts"])
+		})
+	}
 }

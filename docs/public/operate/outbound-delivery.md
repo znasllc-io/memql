@@ -125,4 +125,8 @@ their medium.
   jittered) up to `MEMQL_OUTBOUND_MAX_ATTEMPTS`; other 4xx and policy
   refusals fail permanently. Operators can requeue a failed row by
   setting `status` back to `"pending"` via
-  `updateOutboundRequestStatus`.
+  `updateOutboundRequestStatus` -- except a row server code staged
+  (`serverStaged`, as a pipeline's notification is) or one naming a secret
+  target (`targetSecret`): its delivery state is the server's alone, so the
+  requeue is refused. Re-run the pipeline's notify step instead, which
+  stages a fresh delivery.

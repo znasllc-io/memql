@@ -4423,6 +4423,7 @@
         "nextAttemptAt",
         "requestedBy",
         "sentAt",
+        "serverStaged",
         "status",
         "subject",
         "target",

@@ -42,7 +42,11 @@ import (
 // resumed after a lost lease the row its predecessor staged, read as this
 // drive's delivery. So a resumed drive stages rows of its own, and a
 // notification can arrive twice when a driver stops mid-delivery -- at least
-// once, and never falsely confirmed.
+// once, and never falsely confirmed. And once staged, a row is the server's:
+// both stagings mark it serverStaged, and the engine refuses every write to it
+// without internal origin (component/memql's protected-row write guard), so no
+// client can stamp it `sent`, requeue it, or re-stage it somewhere else, an
+// email as much as a Discord webhook. Its state is the worker's alone.
 //
 // A WEBHOOK'S URL IS A CREDENTIAL. A Discord channel names the globalSecret
 // holding it; the row names the same secret, and the worker resolves it at
@@ -69,9 +73,9 @@ const (
 	// how many names the Library is asked for.
 	notifyListedFiles = 5
 
-	// maxChannelRecipients is the channel builtin's limit on an email
-	// channel's list, held again at delivery: a channel row can reach this
-	// stage without the builtin having written it.
+	// maxChannelRecipients is the most addresses an email channel delivers
+	// to. A channel's row carries whatever list was written to it, so the
+	// stage holds the list to this itself, at delivery.
 	maxChannelRecipients = 20
 
 	// channelSecretNamePattern is the rule a Discord channel's secret NAME is
@@ -185,7 +189,7 @@ func (dr *runDriver) runNotify(ctx context.Context, t *stepTrack) {
 	dr.log.Info("pipelines: a notification was handed to the outbound worker",
 		"step", step.Key, "channel", target.name, "kind", target.channel.Kind, "requests", ids)
 
-	timeout := dr.notifyTimeout(step)
+	timeout := dr.deliveryTimeout(step)
 	end, statuses, readErr := dr.notifyWait(ctx, ids, timeout).await(ctx)
 	switch end {
 	case deliveryStopped:
@@ -205,10 +209,10 @@ func (dr *runDriver) runNotify(ctx context.Context, t *stepTrack) {
 	}
 }
 
-// notifyTimeout is how long the stage waits on its delivery: the step's own
+// deliveryTimeout is how long the stage waits on its delivery: the step's own
 // timeout, which is the default step timeout for every notify stage, or a
-// test's.
-func (dr *runDriver) notifyTimeout(step pipelines.Step) time.Duration {
+// test's (Deps.notifyTimeout).
+func (dr *runDriver) deliveryTimeout(step pipelines.Step) time.Duration {
 	if dr.d.notifyTimeout > 0 {
 		return dr.d.notifyTimeout
 	}
@@ -497,8 +501,9 @@ func (dr *runDriver) notifyRequests(ctx context.Context, step pipelines.Step, ta
 // or was cancelled by its runner (the run itself was not, or the stage would
 // not be running): the first such step, in the order declared, is the one it
 // names. Otherwise it is RECOVERED when the run before this one did not pass,
-// and PASSED. Stages counts the earlier stages that passed: a stage the run
-// skipped whole is not one that ran.
+// and PASSED. Stages counts the earlier stages that passed, in this attempt or
+// in an earlier one a failed-only re-run carried them from; a stage skipped
+// whole for any other reason -- nothing it covers changed -- did not pass.
 //
 // EVERY TEXT IN IT IS MASKED with every value the drive resolved, here, before
 // a composer sees it: the composers escape what they are given, and a value
@@ -543,7 +548,7 @@ func (dr *runDriver) notification(ctx context.Context, step pipelines.Step) pipe
 				n.FailedStep, n.FailedCode, n.FailedMessage = mask(s.Stage+"/"+name), mask(s.Code), mask(s.Message)
 			}
 		}
-		if stageStatus(states) == StagePassed {
+		if passedOrCarried(states) {
 			n.Stages++
 		}
 	}
@@ -555,6 +560,19 @@ func (dr *runDriver) notification(ctx context.Context, step pipelines.Step) pipe
 		}
 	}
 	return n
+}
+
+// passedOrCarried reports a stage that passed: one of its steps passed in this
+// attempt and none did worse, or every step was skipped and one of them was
+// carried as passed in an earlier attempt (pipeline_passed_earlier).
+func passedOrCarried(states []StepState) bool {
+	switch stageStatus(states) {
+	case StagePassed:
+		return true
+	case StageSkipped:
+		return slices.ContainsFunc(states, func(s StepState) bool { return s.Code == pipelines.CodePassedEarlier })
+	}
+	return false
 }
 
 // stagesBefore is the planned stages before the one named stage.
@@ -653,8 +671,9 @@ const (
 
 // deliveryWait waits on outbound rows by reading them, and by nothing else:
 // the worker delivering them may be on any replica, and the rows are where it
-// says how a delivery went. It is the one wait for everything that stages a
-// delivery and must say how it went.
+// says how a delivery went. Everything it waits by is a field -- the rows, the
+// pace, the stop and the fence -- and nothing ties it to the notify stage's
+// drive.
 type deliveryWait struct {
 	store Store
 	ids   []string
@@ -776,16 +795,18 @@ func notifyCancelReceipt(name string) receipt {
 	return receipt{status: WorkStepCancelled, report: StepCancelled, message: why, result: map[string]any{"reason": why}}
 }
 
-// stagingFailed is a stage that could not hand every row over: what WAS handed
-// over is the worker's, and may still arrive.
+// stagingFailed is a stage that could not hand every row over. A staging that
+// answered an error may still have written its row, so the one it failed on
+// MAY NOT have been handed over -- never "nothing was sent" -- and what was
+// handed over before it is the worker's, and may still arrive.
 func stagingFailed(name string, handed, total int, why string) *pipelines.Failure {
 	if handed == 0 {
 		return notifyFailure(pipelines.CodeNotifyFailed,
-			"Nothing was sent to %s: handing the notification to the outbound worker failed (%s). Re-run to try again.", name, why)
+			"The notification to %s may not have been handed to the outbound worker: handing it over failed (%s). Re-run to send it.", name, why)
 	}
 	return notifyFailure(pipelines.CodeNotifyFailed,
-		"Delivery to %s was cut short: %d of %d deliveries had been handed to the outbound worker when handing over the next failed (%s); those may still arrive.",
-		name, handed, total, why)
+		"Delivery to %s was cut short: handing delivery %d of %d to the outbound worker failed (%s), so it may not have been handed over; the %d handed over before it may still arrive.",
+		name, handed+1, total, why, handed)
 }
 
 // failedDelivery names the delivery the outbound worker gave up on, after how
@@ -816,7 +837,7 @@ func failedDelivery(name string, statuses []OutboundStatus, mask func(string) st
 // says otherwise: a row left `sending` by a replica that died mid-send is not
 // taken up again.
 func undeliveredNotice(target notifyTarget, timeout time.Duration, statuses []OutboundStatus, readErr error, mask func(string) string) string {
-	lead := fmt.Sprintf("Not delivered to %s within %s", target.name, timeout)
+	lead := fmt.Sprintf("Not delivered to %s within %s", target.name, pipelines.FormatDuration(timeout))
 	if statuses == nil {
 		why := "no read answered"
 		if readErr != nil {

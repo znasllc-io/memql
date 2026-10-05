@@ -228,11 +228,12 @@ mutation missingCapability updateMissingCapabilityStatus {
 // through the read-merge under a body of the caller's choosing, and the
 // worker would POST that body to the secret's URL. From a client the engine
 // refuses such a re-stage outright (component/memql/
-// outbound_secret_target_write_guard.go); the stamp is what answers a caller
-// the guard admits, an internal-origin one such as a product automation's
-// step. Cleared, its re-stage leaves an ordinary row whose target is the
-// descriptor secret:<NAME>, which no allowlist admits: the worker fails it
-// loudly instead of delivering it.
+// outbound_protected_row_write_guard.go), as it refuses a client's re-stage
+// onto any row server code staged (serverStaged); the stamp is what answers a
+// caller the guard admits, an internal-origin one such as a product
+// automation's step. Cleared, its re-stage leaves an ordinary row whose target
+// is the descriptor secret:<NAME>, which no allowlist admits: the worker fails
+// it loudly instead of delivering it.
 
 /// Stage an outbound delivery (memql#2521): insert a v1:platform:outboundRequest row with
 /// status='pending' for the engine outbound worker to drain. Credentials are never part of the row;
@@ -274,10 +275,11 @@ mutation outboundRequest stageOutboundRequest {
 /// row to the caller would not change which secret it names. The writers are server-side Go -- the
 /// pipelines notify stage -- after they have checked the caller's right to the channel that names the
 /// secret. @serverOnly bars only this named call; the engine's write guard
-/// (component/memql/outbound_secret_target_write_guard.go) refuses the same row arriving any other
+/// (component/memql/outbound_protected_row_write_guard.go) refuses the same row arriving any other
 /// way without internal origin, a raw insert() included. The name is held to
 /// ^[A-Z][A-Z0-9_]{0,63}$ because the resolver interpolates it into its lookup, and the worker
-/// re-checks the rule before it resolves anything.
+/// re-checks the rule before it resolves anything. The row is stamped serverStaged, as
+/// stageServerOutboundRequest's are.
 @serverOnly
 @createOnly("status", "attempts")
 mutation outboundRequest stageOutboundRequestToSecret {
@@ -297,6 +299,46 @@ mutation outboundRequest stageOutboundRequestToSecret {
       target: "secret:" + args.targetSecret
       status: "pending"
       attempts: 0
+      serverStaged: true
+    }
+  }
+}
+
+// ---- mutations/v1/platform/stageServerOutboundRequest.memql ----
+
+/// Stage a delivery whose outcome server code reports (memql#5480): the pipelines notify stage's email,
+/// which it reports delivered when the row reads `sent`. The same row stageOutboundRequest stages,
+/// stamped serverStaged, so the engine's write guard (component/memql/
+/// outbound_protected_row_write_guard.go) refuses every write to it without internal origin: a
+/// client's status stamp could otherwise fake the delivery, and its re-stage at the same id could
+/// change where the row goes or what it says. targetSecret is stamped empty: a URL that is a secret
+/// goes through stageOutboundRequestToSecret. Idempotent by requestId like stageOutboundRequest.
+///
+/// @serverOnly rather than actor.userId scoping: the row has no owner to compare against, and the
+/// property is who STAGED it -- server-side Go, after it has checked the right to the channel the
+/// delivery is for -- not who is asking; any signed-in caller could otherwise mint rows the guard
+/// protects from everyone but the server. @serverOnly bars only this named call; the guard refuses a
+/// raw insert() that sets serverStaged without internal origin.
+@serverOnly
+@createOnly("status", "attempts")
+mutation outboundRequest stageServerOutboundRequest {
+  args {
+    requestId    string!
+    medium       string!
+    target       string!
+    subject      string
+    body         string!
+    dedupeKey    string
+    requestedBy  string
+  }
+  insert {
+    accept { medium, target, subject, body, dedupeKey, requestedBy }
+    stamp {
+      id: args.requestId
+      status: "pending"
+      attempts: 0
+      targetSecret: ""
+      serverStaged: true
     }
   }
 }
@@ -311,19 +353,20 @@ mutation outboundRequest stageOutboundRequestToSecret {
 // it (an operator can requeue a failed row by setting status='pending')
 // but products should treat delivery state as read-only.
 //
-// A row naming a secret target (targetSecret, memql#5480) is the exception:
-// its delivery state is server-written end to end, because the pipelines
-// notify stage reports a delivery when the row it staged reads `sent`. The
-// worker stamps it under internal origin, and the engine refuses any stamp
-// on it without that (component/memql/outbound_secret_target_write_guard.go),
-// an operator's requeue included. A plain row stays open until the concept
-// declares a tier (memql#5804).
+// A row server code staged (serverStaged) or naming a secret target
+// (targetSecret, memql#5480) is the exception: its delivery state is
+// server-written end to end, because the pipelines notify stage reports a
+// delivery when the row it staged reads `sent`. The worker stamps it under
+// internal origin, and the engine refuses any stamp on it without that
+// (component/memql/outbound_protected_row_write_guard.go), an operator's
+// requeue included. A row a product or a client staged stays open until the
+// concept declares a tier (memql#5804).
 
 /// Stamp a delivery-state transition on a v1:platform:outboundRequest row (memql#2521). Called by
 /// the engine outbound worker (sending/sent/retrying/failed + attempt metadata); operators may set
-/// status='pending' to requeue a failed row. Not a row naming a secret target (targetSecret): its
-/// delivery state is the server's alone, so a requeue of one is refused -- re-run the pipeline's
-/// notify step instead, which stages a fresh delivery.
+/// status='pending' to requeue a failed row. Not a row server code staged (serverStaged) or naming
+/// a secret target (targetSecret): its delivery state is the server's alone, so a requeue of one is
+/// refused -- re-run the pipeline's notify step instead, which stages a fresh delivery.
 mutation outboundRequest updateOutboundRequestStatus {
   args {
     requestId      string!

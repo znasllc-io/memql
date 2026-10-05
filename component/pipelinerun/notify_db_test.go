@@ -144,7 +144,7 @@ func TestANotifyStageDeliversOverRealRows(t *testing.T) {
 	integ.EnableDriver()
 
 	// ---- the outbound worker, on another replica ----
-	worker := startRowWorker(t, eng, "pipelines:notify:")
+	worker := startRowWorker(t, eng)
 	defer worker.close()
 
 	drive := func(sha string) Run {
@@ -155,6 +155,7 @@ func TestANotifyStageDeliversOverRealRows(t *testing.T) {
 		if err != nil || !opened.Opened {
 			t.Fatalf("open %s: %+v %v", sha, opened, err)
 		}
+		worker.serve(opened.Run)
 		integ.HandleRunEvent(graphEvent(events.TopicGraphNodeCreated, opened.Run))
 		waitDrives(t, integ)
 		return mustRun(t, store, opened.Run.ID)
@@ -266,15 +267,34 @@ func notifyRequestIDsOf(t *testing.T, s Store, workRunID string) []string {
 // component/outbound does -- outboundRequestsByStatus, as a system actor --
 // and stamps each it takes `sending`, then `sent`, under internal origin, as
 // the worker's own stamp does. It shares the database with the driver and
-// nothing else, and takes only the rows a notify stage staged.
+// nothing else.
+//
+// It takes only the rows staged for a run this test opened, by the
+// provenance on the row: the database is shared with every other db-gated
+// test, other packages' running at the same time included, and theirs are
+// not this worker's to deliver.
 type rowWorker struct {
 	stop, done chan struct{}
 	mu         sync.Mutex
+	runs       map[string]bool // "pipelines:notify:<run id>" of the runs it serves
 	moved      []string
 }
 
-func startRowWorker(t *testing.T, eng *memqlengine.MemQLEngine, requestedBy string) *rowWorker {
-	w := &rowWorker{stop: make(chan struct{}), done: make(chan struct{})}
+// serve makes the worker deliver the notifications staged for run.
+func (w *rowWorker) serve(run Run) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.runs["pipelines:notify:"+bareID(run.ID)] = true
+}
+
+func (w *rowWorker) serves(requestedBy string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.runs[requestedBy]
+}
+
+func startRowWorker(t *testing.T, eng *memqlengine.MemQLEngine) *rowWorker {
+	w := &rowWorker{stop: make(chan struct{}), done: make(chan struct{}), runs: map[string]bool{}}
 	actor := auth.ContextWithSystemActor(context.Background(), "pr6d-outbound")
 	stamp := func(query string) {
 		if _, err := eng.Execute(auth.ContextWithInternalOrigin(actor), query); err != nil {
@@ -297,7 +317,7 @@ func startRowWorker(t *testing.T, eng *memqlengine.MemQLEngine, requestedBy stri
 				continue
 			}
 			for _, row := range rowsOf(res) {
-				if !strings.HasPrefix(rowString(row, "requestedBy"), requestedBy) {
+				if !w.serves(rowString(row, "requestedBy")) {
 					continue
 				}
 				rid := bareID(rowString(row, "id"))

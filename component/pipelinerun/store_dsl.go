@@ -81,12 +81,14 @@ const (
 	// on from the row, never from its own arguments.
 	qInboundRequestByID = "inboundRequestById" // (requestId)
 
-	// The outbound seam's two stagings and its by-id read (dsl/platform): the
-	// notify stage stages a delivery as the system actor and polls the row
-	// the outbound worker moves. Only stageOutboundRequestToSecret and the
-	// by-id read are @serverOnly; stageOutboundRequest is the client-reachable
-	// staging surface, and this package calls both with internal origin.
-	mStageOutboundRequest         = "stageOutboundRequest"         // (requestId, medium, target, subject?, body, dedupeKey?, requestedBy?)
+	// The outbound seam's two server stagings and its by-id read
+	// (dsl/platform), all three @serverOnly: the notify stage stages a delivery
+	// as the system actor, with internal origin, and polls the row the
+	// outbound worker moves. Both stagings mark the row serverStaged, so the
+	// engine refuses every write to it without internal origin, and the state
+	// the stage reads is the worker's (the client-reachable stageOutboundRequest
+	// is not this package's).
+	mStageServerOutboundRequest   = "stageServerOutboundRequest"   // (requestId, medium, target, subject?, body, dedupeKey?, requestedBy?)
 	mStageOutboundRequestToSecret = "stageOutboundRequestToSecret" // (requestId, targetSecret, subject?, body, dedupeKey?, requestedBy?)
 	qOutboundRequestByID          = "outboundRequestById"          // (requestId)
 )
@@ -196,9 +198,8 @@ func requireOwner(owner, call string) (string, error) {
 // systemWrite runs a write as this package's own system actor, for a row with
 // no owner to borrow: an outbound row records a delivery, not a person's act,
 // and its concept declares no tier. It is stamped internal like every write
-// here -- stageOutboundRequestToSecret is @serverOnly, and the outbound write
-// guard wants internal origin on a secret-target row; stageOutboundRequest is
-// not @serverOnly, and is called with the stamp all the same. The actor is
+// here -- both stagings it reaches are @serverOnly, and the outbound write
+// guard wants internal origin on a row server code staged. The actor is
 // attribution and nothing more: no mutation it reaches stamps an owner from it.
 func (s *dslStore) systemWrite(ctx context.Context, name string, args map[string]any) error {
 	query, err := render("mutation", name, args)
@@ -658,12 +659,13 @@ func (s *dslStore) UpdateChannel(ctx context.Context, owner, channelID string, p
 	return s.ownerWrite(ctx, owner, mUpdatePipelineChannel, args)
 }
 
-// StageNotification stages one outbound row as the system actor. A row naming
-// a secret goes through stageOutboundRequestToSecret, which stamps the medium
-// and the secret:<NAME> descriptor itself, so a row naming a secret names no
-// Target (validate refuses one beside it): its target is the descriptor and
-// never a URL. Any other row is a plain stageOutboundRequest. An optional field
-// nobody set is omitted.
+// StageNotification stages one outbound row as the system actor, through a
+// server staging that marks it serverStaged. A row naming a secret goes
+// through stageOutboundRequestToSecret, which stamps the medium and the
+// secret:<NAME> descriptor itself, so a row naming a secret names no Target
+// (validate refuses one beside it): its target is the descriptor and never a
+// URL. Any other row -- an email -- goes through stageServerOutboundRequest.
+// An optional field nobody set is omitted.
 func (s *dslStore) StageNotification(ctx context.Context, n NotificationRequest) error {
 	if err := n.validate(); err != nil {
 		return err
@@ -678,7 +680,7 @@ func (s *dslStore) StageNotification(ctx context.Context, n NotificationRequest)
 	}
 	args["medium"] = strings.TrimSpace(n.Medium)
 	args["target"] = strings.TrimSpace(n.Target)
-	return s.systemWrite(ctx, mStageOutboundRequest, args)
+	return s.systemWrite(ctx, mStageServerOutboundRequest, args)
 }
 
 // ---------------------------------------------------------------------------

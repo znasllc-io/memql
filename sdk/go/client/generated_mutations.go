@@ -14208,7 +14208,7 @@ func UpdateNoteBuild(args UpdateNoteArgs) string {
 	return b.String()
 }
 
-// UpdateOutboundRequestStatus -- Stamp a delivery-state transition on a v1:platform:outboundRequest row (memql#2521). Called by the engine outbound worker (sending/sent/retrying/failed + attempt metadata); operators may set status='pending' to requeue a failed row. Not a row naming a secret target (targetSecret): its delivery state is the server's alone, so a requeue of one is refused -- re-run the pipeline's notify step instead, which stages a fresh delivery.
+// UpdateOutboundRequestStatus -- Stamp a delivery-state transition on a v1:platform:outboundRequest row (memql#2521). Called by the engine outbound worker (sending/sent/retrying/failed + attempt metadata); operators may set status='pending' to requeue a failed row. Not a row server code staged (serverStaged) or naming a secret target (targetSecret): its delivery state is the server's alone, so a requeue of one is refused -- re-run the pipeline's notify step instead, which stages a fresh delivery.
 //
 // Bound concept: v1:platform:outboundRequest (machine-readable: BoundConcepts["updateOutboundRequestStatus"] in generated_concepts.go).
 type UpdateOutboundRequestStatusArgs struct {

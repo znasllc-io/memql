@@ -74,7 +74,7 @@ type Notification struct {
 	PullRequest int
 	Title       string // the commit message's first line or the pull request's title
 	Outcome     NotifyOutcome
-	Stages      int   // stages before the notify stage that ran
+	Stages      int   // stages before the notify stage that passed, in this attempt or carried from an earlier one
 	DurationMs  int64 // the run so far
 	// The first failed step, for NotifyFailed: its name as "stage/step" (a
 	// refusal's scope) or "stage.step" (a step's key), its code and its message.
@@ -797,3 +797,8 @@ func plainFacts(n Notification) []string {
 	}
 	return facts
 }
+
+// FormatDuration is a time as every pipeline text writes one -- 45s, 1m 02s,
+// 1h 02m 05s -- for a sentence the driver composes beside a message, such as
+// how long a notify stage waited for its delivery.
+func FormatDuration(d time.Duration) string { return formatDuration(d.Milliseconds()) }

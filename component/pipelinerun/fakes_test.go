@@ -746,7 +746,7 @@ func (s *memStore) PreviousRuns(ctx context.Context, pipelineID string, event pi
 	return out, nil
 }
 
-// StageNotification is stageOutboundRequest / stageOutboundRequestToSecret,
+// StageNotification is stageServerOutboundRequest / stageOutboundRequestToSecret,
 // @createOnly("status", "attempts") included: a second stage at an id
 // refreshes what the row says and leaves where the worker has taken it.
 func (s *memStore) StageNotification(_ context.Context, n NotificationRequest) error {

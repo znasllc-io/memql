@@ -154,18 +154,19 @@ type Store interface {
 
 	// StageNotification stages one outbound row for the outbound worker to
 	// deliver: a webhook to the globalSecret n.TargetSecret names
-	// (stageOutboundRequestToSecret, which is server-only), else a plain row
-	// for n.Medium and n.Target (stageOutboundRequest, the client-reachable
-	// staging surface). Both are called as the system actor with internal
-	// origin: the row is nobody's. The stage is idempotent by RequestID, and
-	// the worker owns the row's delivery state: a second stage at an id
-	// refreshes what the row says and leaves where the worker has taken it
-	// (@createOnly).
+	// (stageOutboundRequestToSecret), else a row for n.Medium and n.Target
+	// (stageServerOutboundRequest). Both are server-only, called as the system
+	// actor with internal origin -- the row is nobody's -- and both mark the row
+	// serverStaged, so the engine refuses every later write to it without
+	// internal origin: the delivery state a caller reads back is the worker's.
+	// The stage is idempotent by RequestID, and the worker owns the row's
+	// delivery state: a second stage at an id refreshes what the row says and
+	// leaves where the worker has taken it (@createOnly).
 	//
-	// THAT IS WHY A REQUEST ID MUST BE UNGUESSABLE. A client can pre-stage a
-	// plain row at a guessable id and leave it `sent` or `failed`, and the
-	// stage the server makes there later inherits that state. Callers use a
-	// random id, one per row.
+	// THAT IS WHY A REQUEST ID MUST BE UNGUESSABLE. A client can still stage a
+	// plain row of its own (stageOutboundRequest) at a guessable id and leave it
+	// `sent` or `failed`, and the stage the server makes there later inherits
+	// that state. Callers use a random id, one per row.
 	//
 	// A notification that cannot be sent as written -- no id, nothing to say, a
 	// secret with a medium other than webhook or with a target beside it, a

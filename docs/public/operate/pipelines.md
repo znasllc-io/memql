@@ -451,15 +451,35 @@ once. Every step waits for every step of the stage before it, whatever `needs`
 says. The first stage that fails stops the run: every later step is skipped
 `pipeline_stage_blocked`, and the check run's table says *Not run: an earlier
 stage failed* -- except a notify stage's, which runs, because announcing the
-failure is what it is for. A run cancelled before its notify stage hands the
-notification to the outbound worker sends nothing; one handed over already may
-still arrive, and the step says so.
+failure is what it is for ([Notify stages](#notify-stages)).
 
 `on` names events, modes or both. `on: [push]` runs on the default branch's
 pushes only; `on: [full]` on the merge queue, pushes and releases;
 `on: [pull_request, merge_group]` before a change lands. A stage whose `on`
 leaves a run out is absent from that run's plan: it is not a skipped stage, and
 the check run does not list it.
+
+### Notify stages
+
+A notify stage announces the run on the channel it names. The agent driving the
+run hands the message to the cluster's outbound worker -- one delivery for a
+Discord channel, one per recipient for an email channel -- and the step reports
+what the delivery's row reports: delivered, failed, or not there yet when its
+time ran out. Write the notify stage last:
+
+- **It runs after an earlier stage failed**, to say so; every other stage
+  after a failure is *Not run*.
+- **A notify stage that fails fails the run**, and blocks every stage written
+  after it, as any failed stage does.
+- **A cancel before the hand-over sends nothing.** A cancel after it cannot
+  recall a staged notification: the step is cancelled and says the
+  notification may still arrive.
+
+The rows the stage stages are the server's: staged by server code and marked
+so, they take no write from a client -- no status stamp, no requeue, no
+re-stage elsewhere -- so the delivery a step reports is the one the outbound
+worker made. The rows are still readable by any signed-in reader
+(memql#5804), so a message carries nothing the run page does not.
 
 ### When a step is skipped
 

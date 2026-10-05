@@ -1223,9 +1223,9 @@ pipeline:
 	if e.Title != "shop · Push to main recovered" {
 		t.Errorf("the re-run's title %q", e.Title)
 	}
-	// The checks stage was carried, not run: a pass it counts is one this
-	// attempt ran.
-	if !strings.HasSuffix(e.Description, "\nPassed after the previous run failed. All 1 stage passed.") {
+	// The checks stage was carried as passed in the first attempt, and the
+	// tests stage passed in this one: both passed.
+	if !strings.HasSuffix(e.Description, "\nPassed after the previous run failed. All 2 stages passed.") {
 		t.Errorf("the re-run's description %q", e.Description)
 	}
 	got, _ := dh.store.run(next.ID)
@@ -1307,15 +1307,18 @@ func (s *namesTap) asked() [][]string {
 	return slices.Clone(s.calls)
 }
 
-// A notification half handed over says so: what was staged may still arrive.
+// A notification half handed over says so: what was staged may still arrive,
+// and the row the staging failed on MAY NOT have been handed over -- a staging
+// that answered an error may have written it -- which is never "nothing was
+// sent".
 func TestAStagingThatFailsSaysWhatWasHandedOver(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		failAt  int
 		message string
 	}{
-		{"the first row", 1, "Nothing was sent to ops: handing the notification to the outbound worker failed (memQ). Re-run to try again."},
-		{"the second row", 2, "Delivery to ops was cut short: 1 of 2 deliveries had been handed to the outbound worker when handing over the next failed (memQ); those may still arrive."},
+		{"the first row", 1, "The notification to ops may not have been handed to the outbound worker: handing it over failed (memQ). Re-run to send it."},
+		{"the second row", 2, "Delivery to ops was cut short: handing delivery 2 of 2 to the outbound worker failed (memQ), so it may not have been handed over; the 1 handed over before it may still arrive."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dh := newNotifyHarness(t, opsManifest)
@@ -1546,4 +1549,53 @@ func (s *cancelOnStage) StageNotification(ctx context.Context, n NotificationReq
 	err := s.Store.StageNotification(ctx, n)
 	s.once.Do(s.cancel)
 	return err
+}
+
+// A stage skipped whole because nothing it covers changed did not pass: the
+// message counts the stages that did.
+func TestAStageNothingTouchedIsNotCountedAsPassed(t *testing.T) {
+	dh := newNotifyHarness(t, `formatVersion: 1
+name: shop
+pipeline:
+  image: ghcr.io/acme/toolchain@sha256:abc
+  select:
+    buckets:
+      os: ["web/**"]
+  stages:
+    - name: tests
+      steps:
+        - name: unit
+          run: go test ./...
+    - name: ui
+      steps:
+        - name: os
+          run: make os
+          when: { bucket: os }
+    - name: notify
+      on: [pull_request]
+      channel: releases
+`)
+	dh.github.mu.Lock()
+	dh.github.compare[repoName+"@"+shaBase+"..."+shaA] = compareAnswer{Files: []string{"a/a.go"}, Complete: true}
+	dh.github.mu.Unlock()
+	dh.deliverAt(1)
+	deliver(t, dh.integ, dh.openRun(t, prOpening()))
+
+	if os := dh.receiptOf(t, "ui.os"); argString(os, "errorCode") != pipelines.CodeNotAffected {
+		t.Fatalf("precondition: the ui stage is skipped, not affected: %v", os)
+	}
+	e := decodeDiscord(t, dh.onlyStaged(t).Body).Embeds[0]
+	if want := "Show the cart (1111111)\nAll 1 stage passed."; e.Title != "shop · Pull request #42 passed" || e.Description != want {
+		t.Errorf("title %q description %q, want %q", e.Title, e.Description, want)
+	}
+}
+
+// The time a delivery was waited for reads as every pipeline text writes a
+// time, not as Go prints a duration.
+func TestAnUndeliveredNoticeSaysItsTimeAsPeopleRead(t *testing.T) {
+	notice := undeliveredNotice(notifyTarget{name: "releases", secret: "DISCORD_RELEASES"}, 20*time.Minute,
+		[]OutboundStatus{{ID: "pn1", Status: outboundPending}}, nil, func(s string) string { return s })
+	if want := "Not delivered to releases within 20m 00s; "; !strings.HasPrefix(notice, want) {
+		t.Errorf("notice %q, want it to open %q", notice, want)
+	}
 }
