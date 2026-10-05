@@ -17,6 +17,7 @@ import (
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/worker"
 	"github.com/znasllc-io/memql/component/worker/fleetcatalog"
 )
 
@@ -77,8 +78,30 @@ func TestFleetCatalogGraphReaderEnforcesOwnerAndSharedBoundaries(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A newly admitted stream uses the generated short ID. The real engine
+	// catalog read must resolve that same stream before and after query caching.
+	registry := worker.NewRegistry(engine.Logger, time.Now)
+	live := &worker.Worker{RegistrationId: prefix + "-mine", OwnerUserId: alice}
+	registry.Add(live)
 	for range 2 {
-		reader := &fleetcatalog.Reader{Store: &fleetcatalog.EngineStore{Engine: engine}}
+		store := &fleetcatalog.EngineStore{Engine: engine}
+		candidates, err := store.WorkersForOwner(ctx, alice)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, candidate := range candidates {
+			if candidate.Name == "mine" {
+				found = true
+				if registry.WorkerById(candidate.RegistrationId) != live {
+					t.Fatalf("real catalog ID %q cannot find newly registered stream %q", candidate.RegistrationId, live.RegistrationId)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("owner's live machine missing from real catalog read")
+		}
+		reader := &fleetcatalog.Reader{Store: store}
 		engine.Providers().SetFleetCatalog(reader)
 		owner, err := reader.Catalog(ctx, alice)
 		if err != nil {

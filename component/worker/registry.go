@@ -125,6 +125,13 @@ func NewRegistry(logger *slog.Logger, clock func() time.Time) *Registry {
 	}
 }
 
+// registrationKey gives fresh, bare registration IDs and IDs read back from
+// the graph the same stream identity. Strip only this concept's prefix: an
+// unrelated row with the same suffix must never resolve to a worker.
+func registrationKey(registrationId string) string {
+	return strings.TrimPrefix(strings.TrimSpace(registrationId), RegistrationConcept+":")
+}
+
 // Add inserts a worker into the registry. Replaces any existing
 // entry with the same registration id (a reconnect).
 func (r *Registry) Add(w *Worker) {
@@ -140,10 +147,11 @@ func (r *Registry) Add(w *Worker) {
 	if w.activePerCap == nil {
 		w.activePerCap = make(map[string]uint32, len(w.Capabilities))
 	}
-	if existing, ok := r.byId[w.RegistrationId]; ok {
+	key := registrationKey(w.RegistrationId)
+	if existing, ok := r.byId[key]; ok {
 		r.removeLocked(existing)
 	}
-	r.byId[w.RegistrationId] = w
+	r.byId[key] = w
 	r.byOwner[w.OwnerUserId] = append(r.byOwner[w.OwnerUserId], w)
 }
 
@@ -157,7 +165,7 @@ func (r *Registry) Remove(registrationId string) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	w, ok := r.byId[registrationId]
+	w, ok := r.byId[registrationKey(registrationId)]
 	if !ok {
 		return
 	}
@@ -174,7 +182,7 @@ func (r *Registry) RemoveSession(w *Worker) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	cur, ok := r.byId[w.RegistrationId]
+	cur, ok := r.byId[registrationKey(w.RegistrationId)]
 	if !ok || cur != w {
 		return
 	}
@@ -182,7 +190,7 @@ func (r *Registry) RemoveSession(w *Worker) {
 }
 
 func (r *Registry) removeLocked(w *Worker) {
-	delete(r.byId, w.RegistrationId)
+	delete(r.byId, registrationKey(w.RegistrationId))
 	owners := r.byOwner[w.OwnerUserId]
 	out := owners[:0]
 	for _, candidate := range owners {
@@ -243,7 +251,7 @@ func (r *Registry) Terminate(registrationId, reason string) bool {
 		return false
 	}
 	r.mu.RLock()
-	w := r.byId[registrationId]
+	w := r.byId[registrationKey(registrationId)]
 	r.mu.RUnlock()
 	if w == nil {
 		return false
@@ -314,7 +322,7 @@ func (r *Registry) WorkerById(registrationId string) *Worker {
 	if r.draining {
 		return nil
 	}
-	return r.byId[registrationId]
+	return r.byId[registrationKey(registrationId)]
 }
 
 // Snapshot returns every worker in the registry sorted by registration ID.

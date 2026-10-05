@@ -355,8 +355,7 @@ describe("the checks", () => {
     expect(within(checks()).getAllByRole("listitem")[0]?.getAttribute("data-state")).toBe("done");
     expect(within(checks()).getByText(/Online and steady/)).toBeTruthy();
     expect(within(bar()).getByText("Ready")).toBeTruthy();
-    // Done is primary now; Open names the machine.
-    expect(within(bar()).getByRole("button", { name: "Open mini.local" })).toBeTruthy();
+    expect(within(bar()).getByRole("button", { name: "Back" })).toBeTruthy();
     expect(within(bar()).getByRole("button", { name: "Done" }).getAttribute("data-tone")).toBe("primary");
   });
 
@@ -399,7 +398,8 @@ describe("the checks", () => {
     emit(connection, arrival({ hardware: { chip: "M2", memoryBytes: 1, runtimes: [{ name: "ollama", version: "0.11" }] } }));
     await settle();
     expect(screen.getByText("No models yet.")).toBeTruthy();
-    await click(screen.getByRole("button", { name: "Pull the recommended models" }));
+    expect(within(screen.getByRole("list", { name: "Checks on this machine" })).queryByRole("button", { name: "Download models" })).toBeNull();
+    await click(within(bar()).getByRole("button", { name: "Download models" }));
     await settle();
     expect(connection.query.fleetPullRecommended).toHaveBeenCalledExactlyOnceWith({
       registrationId: "v1:worker:registration:mini",
@@ -456,7 +456,8 @@ describe("cancel after a mint asks which of two things", () => {
 
   it("shows a retry after a failed response and never marks the failed setup ready", async () => {
     h.chat.mockRejectedValueOnce(new Error("Runtime unavailable"));
-    h.chat.mockResolvedValueOnce({ message: { content: "hello" } });
+    let answer!: (value: unknown) => void;
+    h.chat.mockImplementationOnce(() => new Promise(resolve => { answer = resolve; }));
     const connection = fakeConnection();
     mount(connection);
     await describeAndMint("mini", { inference: true });
@@ -464,12 +465,20 @@ describe("cancel after a mint asks which of two things", () => {
     emit(connection, row);
     await beat(connection, row, 15);
     await beat(connection, row, 30);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Retry check" })).toBeTruthy());
+    await waitFor(() => expect(within(bar()).getByRole("button", { name: "Retry" })).toBeTruthy());
+    expect(within(bar()).getAllByRole("button").map(b => b.textContent)).toEqual(["Back", "Retry"]);
+    expect(within(screen.getByRole("list", { name: "Checks on this machine" })).queryByRole("button")).toBeNull();
     expect(within(bar()).queryByText("Ready")).toBeNull();
     expect(within(bar()).queryByRole("button", { name: "Done" })).toBeNull();
-    await click(screen.getByRole("button", { name: "Retry check" }));
+    await click(within(bar()).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(h.chat).toHaveBeenCalledTimes(2));
+    expect(within(bar()).getAllByRole("button").map(b => b.textContent)).toEqual(["Back"]);
+    await beat(connection, row, 45);
+    expect(h.chat).toHaveBeenCalledTimes(2);
+    await act(async () => answer({ message: { content: "hello" } }));
     await waitFor(() => expect(within(bar()).getByText("Ready")).toBeTruthy());
     expect(h.chat).toHaveBeenCalledTimes(2);
+    expect(within(bar()).getAllByRole("button").map(b => b.textContent)).toEqual(["Back", "Done"]);
   });
 
   // THE FLOOR'S TWO VERBS. While the cluster listens there is ONE button, and
@@ -556,7 +565,7 @@ describe("cancel after a mint asks which of two things", () => {
     emit(connection, arrival());
     await settle();
     expect(within(bar()).queryByRole("button", { name: "Cancel setup" })).toBeNull();
-    await click(within(bar()).getByRole("button", { name: "Back to Machines" }));
+    await click(within(bar()).getByRole("button", { name: "Back" }));
     expect(screen.getByRole("heading", { name: "Machines" })).toBeTruthy();
   });
 });

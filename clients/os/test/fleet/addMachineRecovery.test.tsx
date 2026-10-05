@@ -42,7 +42,7 @@ afterEach(cleanup);
 it("shows a partial-start refusal while another recommended model is downloading", () => {
   render(<ChecksStop machine={machineFromRow(machine())}
     checks={[{ id: "models", name: "Models", state: "current", answer: "Pulling a-embed" }]}
-    pulling={false} pullError="The text download could not start" onPullRecommended={vi.fn()} />);
+    pullError="The text download could not start" />);
   expect(screen.getByText("The text download could not start")).toBeTruthy();
   expect(screen.getByText(/Some models may already be downloading/)).toBeTruthy();
 });
@@ -63,7 +63,7 @@ it("the connected Back action finishes the flow and returns to Machines", async 
   const view = await connectedFlow(fakeConnection({ myWorkersWithStatus: [machine()] }));
   const onLeave = vi.fn();
   render(withSession(<AddMachinePage flow={view.result.current} onLeave={onLeave} />));
-  fireEvent.click(screen.getAllByRole("button", { name: "Back to Machines" })[0]!);
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
   expect(onLeave).toHaveBeenCalledWith("");
   expect(view.result.current.active).toBe(false);
   expect(view.result.current.facts.cancelAsked).toBe(false);
@@ -98,7 +98,7 @@ it("a live pull failure reaches Checks even with partial inventory, with the run
   });
   render(withSession(<AddMachinePage flow={view.result.current} onLeave={vi.fn()} />));
   expect(screen.getByText(/Not enough disk space/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: /Pull.*recommended models/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Download models" }));
   await waitFor(() => expect(connection.query.fleetPullRecommended).toHaveBeenCalledWith({ registrationId: "recovery-machine" }));
 });
 

@@ -435,6 +435,11 @@ surface in the shell that read as a single thought.
   act, primary last. **The forward act lives nowhere else** -- a step's body
   holds what is being answered, never the button that moves on. An act that is
   not legal yet is absent, and the words on the left say what is missing.
+  This includes recovery: failed machine checks offer **Back** and **Retry**
+  in the footer; a missing model offers **Download models** there. Check
+  content explains the result and any manual repair, without another action
+  button. Back returns to Machines and keeps the registration. While a check
+  runs, hide Retry; offer Done only after every required check passes.
 - **A wait is visible.** When it is the cluster's turn (`tone: "busy"`) there
   is no forward act, the bar's top hairline becomes a moving thread, the dot
   becomes a spinner, the state takes the accent, and `meta` measures the wait

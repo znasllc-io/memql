@@ -156,9 +156,13 @@ export function AddMachinePage({
         flow.leaveKeepToken();
         onLeave("");
         return;
-      case "open":
-        onLeave(flow.finish());
+      case "retryResponse":
+        flow.retryResponse();
         return;
+      case "pullRecommended":
+        void flow.pullRecommended();
+        return;
+      case "back":
       case "done":
         flow.finish();
         onLeave("");
@@ -205,10 +209,7 @@ export function AddMachinePage({
           <ChecksStop
             checks={checks}
             machine={facts.machine}
-            pulling={flow.pulling}
             pullError={flow.pullError}
-            onPullRecommended={() => void flow.pullRecommended()}
-            onRetryResponse={flow.retryResponse}
           />
         );
     }

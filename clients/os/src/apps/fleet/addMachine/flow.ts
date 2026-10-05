@@ -163,8 +163,8 @@ export interface Check {
   repair?: string;
   /** The exact command the repair takes, when it takes one. */
   command?: string;
-  /** An act the OS can take on the person's behalf, offered beside the
-   *  repair: pull the recommended models onto the machine (D13), or ask the
+  /** An act the OS can take on the person's behalf, offered in the footer:
+   *  pull the recommended models onto the machine (D13), or ask the
    *  served model something to prove the whole path (D14). */
   act?: "pullRecommended" | "retryResponse";
 }
@@ -531,7 +531,7 @@ export function openStopFor(stops: readonly FlowStop[]): StopId {
 // The action bar (D6, interface rule 12)
 // ---------------------------------------------------------------------------
 
-export type ActId = "cancel" | "mint" | "leave" | "keepWaiting" | "revokeAndLeave" | "leaveKeepToken" | "open" | "done";
+export type ActId = "cancel" | "mint" | "leave" | "keepWaiting" | "revokeAndLeave" | "leaveKeepToken" | "back" | "done" | "retryResponse" | "pullRecommended";
 
 export interface FlowAct {
   id: ActId;
@@ -558,7 +558,7 @@ export function waitedLong(facts: Pick<FlowFacts, "mintedAt" | "now">): boolean 
   return facts.mintedAt !== null && facts.now.getTime() - facts.mintedAt.getTime() >= LONG_WAIT_MS;
 }
 
-export function barFor(facts: FlowFacts, checks: readonly Check[]): FlowBar {
+export function barFor(facts: FlowFacts, checks: readonly Check[], pulling = false): FlowBar {
   const phase = phaseOf(facts);
   const name = facts.draft.name.trim();
   const label = name === "" ? "the machine" : name;
@@ -656,6 +656,15 @@ export function barFor(facts: FlowFacts, checks: readonly Check[]): FlowBar {
   const settled = checksSettled(checks);
   const pending = checks.find((c) => !checkIsSettled(c) && c.state !== "ahead");
   const stopped = checks.some((c) => c.state === "stopped");
+  const repair = checks.find((c) => c.act !== undefined)?.act;
+  const canRepair = facts.connected && machine !== null && isWorkerOnline(machine, facts.now);
+  const forward: FlowAct[] = settled
+    ? [{ id: "done", label: "Done", tone: "primary" }]
+    : pulling
+      ? [{ id: "pullRecommended", label: "Download models", tone: "primary", busy: true }]
+      : canRepair && repair
+        ? [{ id: repair, label: repair === "retryResponse" ? "Retry" : "Download models", tone: "primary" }]
+        : [];
   return {
     state: settled ? "Ready" : stopped ? "Connected, with a problem" : "Connected",
     detail: settled
@@ -666,10 +675,10 @@ export function barFor(facts: FlowFacts, checks: readonly Check[]): FlowBar {
     tone: settled ? "live" : stopped ? "paused" : "busy",
     question: "",
     acts: [
-      { id: "open", label: `Open ${shown}`, tone: "quiet", text: true },
-      // Leaving remains possible, but only completed checks earn Done. The
-      // machine is registered by now, so there is nothing left to cancel.
-      { id: "done", label: settled ? "Done" : "Back to Machines", tone: settled ? "primary" : "quiet" },
+      // Back keeps the registration and returns to Machines. Only completed
+      // checks earn Done; recovery is the primary action while blocked.
+      { id: "back", label: "Back", tone: "quiet", text: true },
+      ...forward,
     ],
   };
 }

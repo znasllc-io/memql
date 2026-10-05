@@ -212,7 +212,7 @@ func (s *server) admitRegistration(
 			},
 		},
 	}); err != nil {
-		s.registry.Remove(registration.ID)
+		s.registry.RemoveSession(w)
 		cancel()
 		return nil, fmt.Errorf("send register ack: %w", err)
 	}
