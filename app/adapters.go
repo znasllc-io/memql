@@ -170,7 +170,11 @@ func (a *CognitionEngineAdapter) ExecuteToolByName(ctx context.Context, name str
 	if a == nil || a.Engine == nil {
 		return "", fmt.Errorf("memql engine not configured")
 	}
-	return a.Engine.ExecuteToolByName(ctx, name, args)
+	raw, err := a.Engine.ExecuteToolByName(ctx, name, args)
+	if err != nil {
+		return "", err
+	}
+	return agentToolResultText(raw)
 }
 
 func (a *CognitionEngineAdapter) ResolveSkills(ctx context.Context, skillIds []string) (memql.SkillBundle, error) {

@@ -23,6 +23,22 @@ func TestOnlyDurableQuestionToolsCanSuspendWork(t *testing.T) {
 	if feedbackWait("requestUserFeedback", `{"status":"awaiting_user"}`) != nil {
 		t.Fatal("receipt without an approval cannot suspend")
 	}
+	// Actual engine function-tool shape after the model adapter removes the
+	// outer MCP text block. The receipt is inside a data row's node payload.
+	wrapped := `{"data":[{"feedback":{"id":"feedback","payload":{"status":"awaiting_user","approvalId":"q1"}}}]}`
+	var wait *work.HumanWait
+	if !errors.As(feedbackWait("requestUserFeedback", wrapped), &wait) || wait.ApprovalID != "q1" {
+		t.Fatal("engine-wrapped question did not suspend")
+	}
+	for _, rejected := range []string{
+		`{"isError":true,"data":[{"status":"awaiting_user","approvalId":"q1"}]}`,
+		`{"description":{"status":"awaiting_user","approvalId":"q1"}}`,
+		`{"data":[{"feedback":{"id":"another-id","payload":{"status":"awaiting_user","approvalId":"q1"}}}]}`,
+	} {
+		if feedbackWait("requestUserFeedback", rejected) != nil {
+			t.Fatalf("non-receipt suspended work: %s", rejected)
+		}
+	}
 }
 func TestContinuationKeepsCompletedEffectsAndClosesUnexecutedCalls(t *testing.T) {
 	messages := []common.ChatMessage{{Role: "assistant", ToolCalls: []common.ToolCall{{ID: "done", Name: "composeFile"}, {ID: "question", Name: "requestUserFeedback"}, {ID: "later", Name: "workerHost"}}}, {Role: "tool", ToolCallId: "done", Content: `{"outputFileId":"saved"}`}}

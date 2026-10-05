@@ -24,9 +24,27 @@ func feedbackWait(tool, result string) error {
 	find = func(value any) string {
 		switch v := value.(type) {
 		case map[string]any:
+			if failed, _ := v["isError"].(bool); failed {
+				return ""
+			}
 			if v["status"] == "awaiting_user" {
 				id, _ := v["approvalId"].(string)
 				return id
+			}
+			// Query/function receipts cross the engine's data/node envelope.
+			// Only these structural slots are traversed, not arbitrary strings
+			// or user-authored fields that merely mention awaiting_user.
+			for _, key := range []string{"data", "nodes", "payload"} {
+				if id := find(v[key]); id != "" {
+					return id
+				}
+			}
+			for key, item := range v {
+				if node, ok := item.(map[string]any); ok && node["id"] == key {
+					if id := find(node["payload"]); id != "" {
+						return id
+					}
+				}
 			}
 		case []any:
 			for _, item := range v {
