@@ -16,7 +16,7 @@ export function AskActivityLog({ turns, dictation = [], onClose, onStop }: { tur
       const calls = new Map<string, AskActivity>();
       for (const event of turn.activity) calls.set(event.id, { ...calls.get(event.id), ...event });
       if (!calls.size) return null;
-      return <section key={turn.id}><h4 className="os-ask-activity-question">{turn.prompt}</h4>{[...calls.values()].map(event => <details key={event.id}>
+      return <section key={turn.id} className="os-ask-activity-turn"><h4 className="os-ask-activity-question">{turn.prompt}</h4><div className="os-ask-activity-steps">{[...calls.values()].map(event => <details key={event.id}>
         <summary><span>{activityName(event)}</span><small>{activityState(event, turn)}</small></summary>
         <dl><dt>Time</dt><dd>{new Date(event.at).toLocaleString()}</dd>{event.provider ? <><dt>Route</dt><dd>{event.provider}</dd></> : null}{event.model ? <><dt>Model</dt><dd>{event.model}</dd></> : null}{event.kind === "model" ? event.call && event.phase !== "running" ? <>
           <dt>Tokens</dt><dd>{event.call.inputTokens} in · {event.call.outputTokens} out{event.call.tokensEstimated ? " (estimated)" : ""}</dd>
@@ -26,7 +26,7 @@ export function AskActivityLog({ turns, dictation = [], onClose, onStop }: { tur
         </> : <><dt>Usage</dt><dd>{turn.state === "streaming" ? "Awaiting call completion" : "Not reported"}</dd></> : null}{event.expectedMs ? <><dt>Expected</dt><dd>About {Math.round(event.expectedMs / 1000)}s · {event.estimateSource}</dd></> : null}</dl>
         {event.error || (event.kind === "run" && turn.error) ? <p className="os-ask-error">{event.error || turn.error}</p> : null}
         {event.arguments && Object.keys(event.arguments).length ? <pre>{JSON.stringify(event.arguments, null, 2)}</pre> : null}
-      </details>)}</section>;
+      </details>)}</div></section>;
     })}
   </section>;
 }

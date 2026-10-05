@@ -732,6 +732,8 @@ button:not(:disabled):active {
   position: relative;
 }
 
+.os-avatar-button { display: grid; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+
 .os-avatar {
   display: grid;
   place-items: center;
@@ -742,7 +744,6 @@ button:not(:disabled):active {
   background: var(--os-raised);
   font-size: var(--os-text-sm);
   font-weight: 600;
-  cursor: pointer;
 }
 
 /* ---- menus ---- */
@@ -956,7 +957,7 @@ button:not(:disabled):active {
 .os-ask-exchange {
   flex-shrink: 0; display: flex; flex-direction: column; gap: 24px; }
 .os-ask-message { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; }
-.os-ask-avatar { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--os-plate); color: var(--os-muted); font-size: 10px; font-weight: 600; }
+.os-ask-avatar { width: 34px; height: 34px; }
 .os-ask-avatar-memql { background: var(--os-accent-soft); color: var(--os-accent); font-size: 17px; }
 .os-ask-byline { display: flex; align-items: baseline; gap: 10px; margin: 1px 0 5px; }
 .os-ask-byline strong { font-size: var(--os-text-sm); font-weight: 600; }
@@ -976,7 +977,10 @@ button:not(:disabled):active {
 .os-ask-answer :is(th, td) { text-align: left; padding: 0.35em 0.75em; border-bottom: 1px solid var(--os-line); }
 .os-ask-activity { flex: 1; min-width: 0; min-height: 0; padding: 20px 22px; overflow-y: auto; overscroll-behavior: contain; }
 .os-ask-activity:focus { outline: none; }
-.os-ask-activity-question { margin: 24px 0 8px; font-size: var(--os-text-sm); font-weight: 500; overflow-wrap: anywhere; }
+.os-ask-activity-turn { margin-top: 24px; }
+.os-ask-activity-turn + .os-ask-activity-turn { margin-top: 40px; }
+.os-ask-activity-question { margin: 0 0 8px; font-size: var(--os-text-base); line-height: 1.5; font-weight: 600; overflow-wrap: anywhere; }
+.os-ask-activity-steps { margin-left: 16px; }
 .os-ask-activity details + details { border-top: 1px solid var(--os-line); }
 .os-ask-activity details { padding: 12px 0; }
 .os-ask-activity summary { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; cursor: pointer; font-size: var(--os-text-sm); }

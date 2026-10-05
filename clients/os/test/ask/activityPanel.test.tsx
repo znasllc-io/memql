@@ -2,14 +2,17 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, expect, it, vi } from "vitest";
 import { AskSurface } from "../../src/ask/AskSurface";
 import type { AskCallbacks } from "../../src/ask/askController";
+import { SessionProvider } from "../../src/chrome/access";
+import { UNKNOWN_RUNTIME_CONFIG } from "../../src/cluster/config";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 function setup() {
  let callbacks: AskCallbacks;
  const cancel = vi.fn();
  const onClose = vi.fn();
  const ask = vi.fn((_p: string, _c: string | null, on: AskCallbacks) => { callbacks = on; return { cancel }; });
- render(<AskSurface transport={{ ask }} variant="sheet" onClose={onClose} availability={{ state:"ready", message:"", refresh:vi.fn() }} />);
+ const session = { config: UNKNOWN_RUNTIME_CONFIG, access: { userId: "user", primaryEmail: "znas@example.test", role: "owner", roleName: "Owner", rank: 400 } };
+ render(<SessionProvider value={session}><AskSurface transport={{ ask }} variant="sheet" onClose={onClose} availability={{ state:"ready", message:"", refresh:vi.fn() }} /></SessionProvider>);
  return { ask, cancel, onClose, callbacks:()=>callbacks };
 }
 function draft(value:string) { fireEvent.change(screen.getByRole("textbox",{name:"Ask"}),{target:{value}}); }
@@ -61,4 +64,23 @@ it("shows failed run details without an indefinite Working state",()=>{
  fireEvent.click(screen.getByRole("button",{name:"New conversation"}));
  expect(screen.queryByRole("region",{name:"Conversation activity"})).toBeNull();
  expect(document.activeElement).toBe(screen.getByRole("textbox",{name:"Ask"}));
+});
+
+it("uses the account avatar and timestamps a reply only at successful completion", () => {
+ vi.useFakeTimers(); vi.setSystemTime(new Date("2026-10-05T14:00:00Z"));
+ const w = setup(); draft("Jose"); fireEvent.click(screen.getByRole("button", { name: "Send" }));
+ const log = screen.getByRole("log", { name: "Conversation" });
+ expect(within(log).getByText("Z")).toBeTruthy();
+ expect(within(log).getAllByText("You")).toHaveLength(1);
+ expect([...log.querySelectorAll("time")].map(time => time.dateTime)).toEqual(["2026-10-05T14:00:00.000Z"]);
+ act(() => { vi.setSystemTime(new Date("2026-10-05T14:01:00Z")); w.callbacks().delta("Nice to meet you, Jose."); });
+ expect(log.querySelectorAll("time")).toHaveLength(1);
+ act(() => { vi.setSystemTime(new Date("2026-10-05T14:02:00Z")); w.callbacks().done(); });
+ expect([...log.querySelectorAll("time")].map(time => time.dateTime)).toEqual(["2026-10-05T14:00:00.000Z", "2026-10-05T14:02:00.000Z"]);
+});
+
+it("does not stamp a failed partial reply as a completed response", () => {
+ const w = setup(); draft("Jose"); fireEvent.click(screen.getByRole("button", { name: "Send" }));
+ act(() => { w.callbacks().delta("Nice to meet"); w.callbacks().error("Connection lost"); });
+ expect(screen.getByRole("log", { name: "Conversation" }).querySelectorAll("time")).toHaveLength(1);
 });
