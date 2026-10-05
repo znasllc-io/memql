@@ -46,7 +46,8 @@ func renderPDF(d Draft, p Provenance) ([]byte, error) {
 	pdf.SetXmpMetadata(xmpPacket(d, p))
 
 	pdf.AddPage()
-	if title := strings.TrimSpace(firstNonEmpty(d.Title, p.Title)); title != "" {
+	// A filename is metadata, not an instruction to add a visible heading.
+	if title := strings.TrimSpace(d.Title); title != "" {
 		pdf.SetFont("Helvetica", "B", 20)
 		pdf.MultiCell(0, 9, tr(title), "", "L", false)
 		pdf.Ln(4)
