@@ -342,6 +342,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 	}
 
 	plan, err := d.router.Plan(ctx, req.OwnerUserId, gate.requiredCapability, req.RequireLabels, req.PreferLabels)
+	if err == nil && req.Purpose == PurposePipeline {
+		repository, _ := req.Args["repository"].(string)
+		plan.RequireRepository(req.Tool+"."+req.Action, repository)
+	}
 	record := plan.Record()
 	record.ReroutedFrom = req.ReroutedFrom
 	if err != nil {

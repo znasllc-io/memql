@@ -96,6 +96,17 @@ registry/marketplace permission, native signing, public webhook reachability,
 cloud storage behavior or production recovery. Those remain named rehearsal
 steps. Time-window milestones #5506–#5509 stay open until observed.
 
+## Fleet repository routing progress
+
+Capability descriptors now carry generic, action-specific repository scopes.
+Pipeline selection uses them before dispatch; an older or malformed scope is
+unknown consent. Cockpit advertises its live allow flag and repository list as
+one policy snapshot and re-registers when either changes. The command retains
+its independent live-policy check. Cross-replica tests cover skipping a narrow
+machine for an eligible one, refusal before dispatch when none accepts the
+repository, and missing advertisements. This requires a coordinated Cockpit
+upgrade; no existing machine policy has been changed.
+
 ## Queued routing progress
 
 The generic workbench router now reports the actual selected replica before

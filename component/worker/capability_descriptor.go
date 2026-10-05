@@ -17,10 +17,11 @@ import (
 // field: this struct serialized as JSON. Unknown JSON fields are
 // tolerated (additive evolution does not bump schemaVersion).
 type CapabilityDescriptor struct {
-	Platform             string   `json:"platform"`
-	DisplayServer        string   `json:"displayServer"`
-	ComputerUseAvailable bool     `json:"computerUseAvailable"`
-	Actions              []string `json:"actions"`
+	RepositoryScopes     RepositoryScopes `json:"repositoryScopes,omitempty"`
+	Platform             string           `json:"platform"`
+	DisplayServer        string           `json:"displayServer"`
+	ComputerUseAvailable bool             `json:"computerUseAvailable"`
+	Actions              []string         `json:"actions"`
 	// InferenceServe is the COCKPIT's half of the sharing consent (epic
 	// memql#5146, D6), read from that machine's own policy.yaml
 	// `inference.serve`: "owner" or "cluster".
@@ -113,6 +114,9 @@ func ParseCapabilityDescriptor(raw string) (*CapabilityDescriptor, error) {
 		}
 		seen[a] = struct{}{}
 	}
+	if err := d.RepositoryScopes.validate(); err != nil {
+		return nil, fmt.Errorf("capability descriptor: %w", err)
+	}
 	if d.Actions == nil {
 		// Keep downstream JSON shape stable: "actions": [] -- never null.
 		d.Actions = []string{}
@@ -130,13 +134,25 @@ func (d *CapabilityDescriptor) AsMap() map[string]any {
 	for _, a := range d.Actions {
 		actions = append(actions, a)
 	}
-	return map[string]any{
+	out := map[string]any{
 		"platform":             d.Platform,
 		"displayServer":        d.DisplayServer,
 		"computerUseAvailable": d.ComputerUseAvailable,
 		"actions":              actions,
 		"schemaVersion":        d.SchemaVersion,
 	}
+	if len(d.RepositoryScopes) > 0 {
+		scopes := map[string]any{}
+		for action, repositories := range d.RepositoryScopes {
+			values := make([]any, 0, len(repositories))
+			for _, repository := range repositories {
+				values = append(values, repository)
+			}
+			scopes[action] = values
+		}
+		out["repositoryScopes"] = scopes
+	}
+	return out
 }
 
 // capabilityDescriptorFromMap decodes a persisted payload object

@@ -14,9 +14,10 @@ import (
 // -- a candidate may be held by another replica, in which case this node has
 // no handle for it at all and dispatch goes over the forward.
 type Candidate struct {
-	RegistrationId string
-	Name           string
-	DisplayName    string
+	RepositoryScopes workerservice.RepositoryScopes
+	RegistrationId   string
+	Name             string
+	DisplayName      string
 	// OwnerUserId is always stamped when known: SharedInferenceWorkers reads
 	// it from the row; WorkersForOwner stamps the scoped owner so recovery in
 	// PlanUserModelWithShared can still attribute a machine if a later shared

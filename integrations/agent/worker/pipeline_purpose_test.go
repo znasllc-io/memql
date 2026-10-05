@@ -1144,3 +1144,48 @@ func TestBuildSafetyDescriptor_PipelineStepIsTheCommandItRuns(t *testing.T) {
 		t.Fatalf("a credential reached the descriptor: %s", rendered)
 	}
 }
+
+func TestPipelineRepositoryScopeSelectsBeforeTheCrossReplicaHop(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		fallback, known bool
+	}{
+		{"another machine accepts it", true, true},
+		{"only a restricted machine", false, true},
+		{"old advertisement is unknown", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := 0
+			h := pipelineHop(t, func(_ context.Context, d *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
+				called++
+				return okResult(d.GetCallId()), nil
+			})
+			restricted := machine("restricted", withLabels(pipelineLabels()))
+			restricted.ConnectedNodeId = nodeA
+			restricted.RepositoryScopes = nil
+			if tc.known {
+				restricted.RepositoryScopes = workerservice.RepositoryScopes{"workerHost.pipeline_step": {"o/a"}}
+			}
+			if tc.fallback {
+				h.store.machines = append([]Candidate{restricted}, h.store.machines...)
+			} else {
+				h.store.machines = []Candidate{restricted}
+			}
+			req := ownersPipelineRequest(h)
+			req.Args["repository"] = "o/b"
+			req.Args["cloneUrl"] = "https://github.com/o/b.git"
+			res, err := h.dispatch.Dispatch(asPipelineAcrossTheMesh(t, h), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := h.store.lastInvocation(t)
+			if tc.fallback {
+				if !res.OK || called != 1 || res.NodeId != nodeB || row.Routing["attempts"] != 1 {
+					t.Fatalf("eligible remote machine was not the first dispatch: %+v, calls=%d, routing=%v", res, called, row.Routing)
+				}
+			} else if res.OK || !res.RefusedBeforeStart || called != 0 || !strings.Contains(res.ErrorMessage, "o/b") || !strings.Contains(res.ErrorMessage, "repository policy") {
+				t.Fatalf("expected a repository-specific refusal without dispatch: %+v; calls=%d", res, called)
+			}
+		})
+	}
+}

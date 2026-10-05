@@ -529,3 +529,20 @@ func LabelsFromArgs(v any) map[string]string {
 	}
 	return out
 }
+
+// RequireRepository narrows a plan using the machine-reported action scope.
+// Missing metadata is unknown consent, and cannot be repaired by labels.
+func (p *RoutePlan) RequireRepository(action, repository string) {
+	kept := make([]Candidate, 0, len(p.Candidates))
+	if p.Rejected == nil {
+		p.Rejected = map[string]string{}
+	}
+	for _, candidate := range p.Candidates {
+		if candidate.RepositoryScopes.Accepts(action, repository) {
+			kept = append(kept, candidate)
+		} else {
+			p.Rejected[candidate.RegistrationId] = fmt.Sprintf("%s's reported repository policy does not accept %s for %s", candidate.Label(), repository, action)
+		}
+	}
+	p.Candidates = kept
+}

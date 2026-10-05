@@ -490,6 +490,16 @@ because there is none. Three other things must hold instead.
    | `workspace_root` | Where each step's checkout is made, and removed again |
    | `max_timeout_sec` | The longest a step may run there, whatever its own timeout |
 
+   Cockpit also reports an action-specific `repositoryScopes` entry in its
+   capability descriptor. The router requires an explicit scope accepting the
+   requested repository before dispatch. Missing scope metadata is unknown
+   consent: upgrade and reconnect older workers before using them for builds.
+   An empty advertised list accepts every repository; a nonempty list matches
+   exact names, ignoring case, surrounding whitespace and a `.git` suffix.
+   A repository-only policy change triggers re-registration. The worker still
+   checks its current policy on arrival, so stale advertisements cannot grant
+   execution after a withdrawal.
+
    **An operator label cannot allow a machine.** The router matches a machine's
    reported and operator labels together, but the replica about to dispatch
    re-reads the machine's live registration and refuses before start, sending
@@ -1003,10 +1013,6 @@ Each of these is understood, and accepted for this release.
     root that another user owns and keeps closed to others.)
   - Blob NFS has no NLM locking, while concurrent steps of one repository and
     trust on two nodes share one Go build and module cache.
-- **A narrowed machine attracts other repositories' steps.** Routing reads a
-  machine's `pipelines=allowed`, not its `repos` list. So a machine narrowed to
-  some repositories is picked for others too, and refuses them when they arrive
-  ([The fleet](#the-fleet); memql#5812).
 - **A fleet step inherits the worker's shell limits.** The first time a Cockpit
   runs a `workerHost.exec` call, it applies the shell policy's `max_*` limits to
   its own process. Every process it starts after that inherits them until it
