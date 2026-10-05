@@ -1,5 +1,8 @@
 /// Ask for information or a decision that blocks the current goal. The run
-/// pauses durably and the person answers in Nexus. Reuse earlier answers and
+/// pauses durably and the person answers in Ask; Nexus opens that conversation.
+/// Use this when a requested personal fact remains unknown after checking
+/// available sources. Do not substitute a final "tell me" invitation.
+/// Reuse earlier answers and
 /// choose sensible defaults for minor preferences. Approval to access a
 /// computer is a separate requestComputerUseScope decision.
 @handler(type="function", name="requestUserFeedback")

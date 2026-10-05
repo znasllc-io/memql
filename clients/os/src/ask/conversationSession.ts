@@ -278,7 +278,7 @@ export class ConversationSession {
             if (event.kind === "action" && event.navigate) this.patch({ activity: event });
             if (event.kind === "run" && this.stopRequested) void this.cancelCurrentGoal();
           },
-          done: () => finish(turn.answer.trim() ? undefined : "MemQL finished without an answer."),
+          done: () => finish(turn.answer.trim() || isBackgroundTurn(turn) ? undefined : "MemQL finished without an answer."),
           error: error => finish(error),
         }, id ? { conversationId: id, turnId: turn.id, routing } : undefined);
         if (epoch === this.epoch) this.active = handle;
