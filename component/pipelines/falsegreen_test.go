@@ -101,7 +101,7 @@ func fgGreen(pullRequest int, prRunID, fullRunID string, steps ...FalseGreenStep
 
 // fgWantAll is a report whose lists are never nil: the report's contract is
 // that they marshal as [], not null.
-func fgWantAll(fullRuns, fullRunsFailed, afterGreen int, falseGreens, notOnPullRequests, siblings []FalseGreen) FalseGreenReport {
+func fgWantAll(counted, failed, afterGreen int, falseGreens, notOnPullRequests, siblings []FalseGreen) FalseGreenReport {
 	nonNil := func(l []FalseGreen) []FalseGreen {
 		if l == nil {
 			return []FalseGreen{}
@@ -109,16 +109,17 @@ func fgWantAll(fullRuns, fullRunsFailed, afterGreen int, falseGreens, notOnPullR
 		return l
 	}
 	return FalseGreenReport{
-		FullRuns: fullRuns, FullRunsFailed: fullRunsFailed, AfterGreen: afterGreen,
+		FullRuns: counted, FullRunsFailed: failed, AfterGreen: afterGreen,
 		FalseGreens: nonNil(falseGreens), NotOnPullRequests: nonNil(notOnPullRequests), SiblingOrFlake: nonNil(siblings),
+		Unread: []string{},
 	}
 }
 
 // fgWant is a report with nothing in NotOnPullRequests, which is what most
 // fixtures expect: a landing there is the exception, and each test that
 // expects one says so.
-func fgWant(fullRuns, fullRunsFailed, afterGreen int, falseGreens, siblings []FalseGreen) FalseGreenReport {
-	return fgWantAll(fullRuns, fullRunsFailed, afterGreen, falseGreens, nil, siblings)
+func fgWant(counted, failed, afterGreen int, falseGreens, siblings []FalseGreen) FalseGreenReport {
+	return fgWantAll(counted, failed, afterGreen, falseGreens, nil, siblings)
 }
 
 // fgAssertReport compares a report with the one wanted, and holds every report
@@ -260,7 +261,7 @@ func TestAStepThePullRequestNeverPlannedIsNotAFalseGreen(t *testing.T) {
 	}{
 		{"a stage that runs on pushes alone", fgFailed("docs.bundle")},
 		{"a deploy stage", StepFacts{Key: "deploy.verify-rollout", Status: "failed", Code: CodeStepTimeout}},
-		{"a notification that was not delivered", StepFacts{Key: "notify.releases", Status: "failed", Code: CodeNotifyFailed}},
+		{"a notification that was not delivered", StepFacts{Key: "notify.notify", Status: "failed", Code: CodeNotifyFailed}}, // a notify stage's one step is <stage>.notify
 		{"a step a sibling merge added to the manifest", fgFailed("checks.generated-docs")},
 		{"a shard of a lane the pull request never had", fgFailed("tests.new-lane#3")},
 	} {
@@ -375,17 +376,36 @@ func TestShardsAreComparedAsOneLane(t *testing.T) {
 		fgAssertReport(t, CountFalseGreens(runs, steps), fgWant(1, 1, 1,
 			[]FalseGreen{fgGreen(10, "pr-a", "main-a", fgOn("tests.go-tests", "not selected"))}, nil))
 	})
-	t.Run("one shard running is the lane running", func(t *testing.T) {
-		// An affected selection that leaves a shard with nothing skips that
-		// shard; the lane still ran, which is the granularity the count has.
+	t.Run("a failed-only re-run carries one shard over and runs the other", func(t *testing.T) {
+		// The compiler never skips ONE shard of a lane as not affected: a lane
+		// with nothing selected is a single skip under the plain key. What does
+		// leave a lane's shards in different states is a failed-only re-run,
+		// which carries the shards that passed and runs the rest; the lane ran.
 		runs := []RunFacts{fgPullRequestRun("pr-a", 11, 0, "success"), fgPushRun("main-a", 11, 50, "failure")}
 		steps := map[string][]StepFacts{
-			"pr-a":   {fgNotAffected("tests.go-tests#1"), fgDone("tests.go-tests#2")},
+			"pr-a":   {fgCarried("tests.go-tests#1"), fgDone("tests.go-tests#2")},
 			"main-a": {fgFailed("tests.go-tests#1")},
 		}
 		fgAssertReport(t, CountFalseGreens(runs, steps), fgWant(1, 1, 1, nil,
 			[]FalseGreen{fgGreen(11, "pr-a", "main-a", fgOn("tests.go-tests", "passed"))}))
 	})
+}
+
+// Within one lane a pass outranks a skip as not affected. The compiler never
+// makes that mixture, so this is the rule of the reading and no scenario: a
+// lane is judged as a whole, and a lane with a step that passed ran.
+func TestAPassOutranksANotAffectedSkipWithinALane(t *testing.T) {
+	for name, pr := range map[string][]StepFacts{
+		"the skip first": {fgNotAffected("tests.lane#1"), fgDone("tests.lane#2")},
+		"the pass first": {fgDone("tests.lane#2"), fgNotAffected("tests.lane#1")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			runs := []RunFacts{fgPullRequestRun("pr-a", 19, 0, "success"), fgPushRun("main-a", 19, 50, "failure")}
+			steps := map[string][]StepFacts{"pr-a": pr, "main-a": {fgFailed("tests.lane#3")}}
+			fgAssertReport(t, CountFalseGreens(runs, steps), fgWant(1, 1, 1, nil,
+				[]FalseGreen{fgGreen(19, "pr-a", "main-a", fgOn("tests.lane", "passed"))}))
+		})
+	}
 }
 
 // A false green lists every failed step with what the pull request did with
@@ -458,14 +478,76 @@ func TestWhatThePullRequestsRunRecordedDecidesWhereAFailedStepGoes(t *testing.T)
 	}
 }
 
-// A run whose steps were not given reads as having recorded nothing, so its
-// landing is filed as not planned. That is quiet, and it is the caller's to
-// avoid by loading the steps of every run RunsNeedingSteps names.
-func TestAPullRequestRunWhoseStepsWereNotGivenFilesItsLandingAsNotPlanned(t *testing.T) {
-	runs := []RunFacts{fgPullRequestRun("pr-a", 20, 0, "success"), fgPushRun("main-a", 20, 50, "failure")}
-	steps := map[string][]StepFacts{"main-a": {fgFailed("tests.lane")}} // pr-a's steps were never loaded
-	fgAssertReport(t, CountFalseGreens(runs, steps), fgWantAll(1, 1, 1, nil,
-		[]FalseGreen{fgGreen(20, "pr-a", "main-a", fgOn("tests.lane", "not planned"))}, nil))
+// The count says what it was not given. A steps map that is nil, that lacks a
+// run, or that is keyed by something other than the run's id would otherwise
+// read as a clean count: every landing quietly filed as though its run recorded
+// nothing, and no false green found. So the runs RunsNeedingSteps names that the
+// map has no key for are reported in Unread, and a caller treats any as an
+// error. A key that is present and empty is a read that found nothing, and is
+// no fault.
+func TestTheCountReportsTheRunsItWasGivenNoStepsFor(t *testing.T) {
+	runs := []RunFacts{
+		fgPullRequestRun("pr-a", 20, 0, "success"),
+		fgPushRun("main-a", 20, 50, "failure"),
+		fgPushRun("main-b", 21, 60, "success"), // a run no landing needs the steps of
+	}
+	given := func() map[string][]StepFacts {
+		return map[string][]StepFacts{"pr-a": {fgNotAffected("tests.lane")}, "main-a": {fgFailed("tests.lane")}}
+	}
+	t.Run("every run RunsNeedingSteps names was given", func(t *testing.T) {
+		fgAssertReport(t, CountFalseGreens(runs, given()), fgWant(2, 1, 1,
+			[]FalseGreen{fgGreen(20, "pr-a", "main-a", fgOn("tests.lane", "not selected"))}, nil))
+	})
+	t.Run("the pull request's steps are missing", func(t *testing.T) {
+		steps := given()
+		delete(steps, "pr-a")
+		if got, want := CountFalseGreens(runs, steps).Unread, []string{"pr-a"}; !slices.Equal(got, want) {
+			t.Fatalf("Unread = %v, want %v", got, want)
+		}
+	})
+	t.Run("the full run's steps are missing", func(t *testing.T) {
+		steps := given()
+		delete(steps, "main-a")
+		if got, want := CountFalseGreens(runs, steps).Unread, []string{"main-a"}; !slices.Equal(got, want) {
+			t.Fatalf("Unread = %v, want %v", got, want)
+		}
+	})
+	t.Run("no map at all", func(t *testing.T) {
+		if got, want := CountFalseGreens(runs, nil).Unread, []string{"main-a", "pr-a"}; !slices.Equal(got, want) {
+			t.Fatalf("Unread = %v, want %v", got, want)
+		}
+	})
+	t.Run("a map keyed by the work run's id", func(t *testing.T) {
+		steps := map[string][]StepFacts{
+			"work-pr-a": {fgNotAffected("tests.lane")}, "work-main-a": {fgFailed("tests.lane")},
+		}
+		if got, want := CountFalseGreens(runs, steps).Unread, []string{"main-a", "pr-a"}; !slices.Equal(got, want) {
+			t.Fatalf("Unread = %v, want %v", got, want)
+		}
+	})
+	t.Run("a key that is present and empty is a read that found nothing", func(t *testing.T) {
+		// A run refused before any step began has no work run, and so no steps:
+		// the loader seeds an empty list for it, and that is no fault.
+		steps := map[string][]StepFacts{"pr-a": {}, "main-a": {}}
+		fgAssertReport(t, CountFalseGreens(runs, steps), fgWant(2, 1, 1, nil, []FalseGreen{fgGreen(20, "pr-a", "main-a")}))
+	})
+	t.Run("a key holding no list at all is present too", func(t *testing.T) {
+		steps := map[string][]StepFacts{"pr-a": nil, "main-a": nil}
+		if got := CountFalseGreens(runs, steps).Unread; len(got) != 0 {
+			t.Fatalf("Unread = %v, want none", got)
+		}
+	})
+	t.Run("it is the report's own word on the wire", func(t *testing.T) {
+		windowRuns, _ := fgWindow()
+		raw, err := json.Marshal(CountFalseGreens(windowRuns, nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		const tail = `"unread":["main-13","main-3","pr13-a","pr3-a","pr4-a","queue-4"]}`
+		if !strings.HasSuffix(string(raw), tail) {
+			t.Errorf("the report does not end in %s\n got: %s", tail, raw)
+		}
+	})
 }
 
 // What makes a step of the tree's run a failure of it, in either vocabulary a
@@ -504,7 +586,7 @@ func TestAFailedFullRunWithNoFailedStepIsNotASelectionMiss(t *testing.T) {
 		"pr-a":   {fgDone("checks.build-vet")},
 		"main-a": {fgDone("checks.build-vet")}, // every step passed, and the run failed
 		"pr-b":   {fgDone("checks.build-vet")},
-		// no work run at all: the run was refused before any step began
+		"main-b": {}, // no work run at all: the run was refused before any step began, and the loader seeds an empty list
 	}
 	fgAssertReport(t, CountFalseGreens(runs, steps), fgWant(2, 2, 2, nil, []FalseGreen{
 		fgGreen(23, "pr-b", "main-b"),
@@ -724,6 +806,16 @@ func TestAFullRunIsJudgedByItsLatestAttemptToReachAVerdict(t *testing.T) {
 			fgGreen(31, "pr-a", "main-a", fgOn("tests.lane", "not selected")),
 		}, nil))
 	})
+	t.Run("the commit's first queue time is the earliest of its attempts, whichever arrives first", func(t *testing.T) {
+		// The attempts arrive newest first, so the first row seen is not the
+		// first queued.
+		runs := []RunFacts{
+			pr, fgPullRequestRun("pr-b", 31, 60, "failure"),
+			attempt("main-a2", 70, "failure"), attempt("main-a1", 50, "failure"),
+		}
+		steps := map[string][]StepFacts{"pr-a": prSteps, "main-a2": {fgFailed("tests.lane")}}
+		fgAssertReport(t, CountFalseGreens(runs, steps), fgWant(1, 1, 1, miss("main-a2"), nil))
+	})
 	t.Run("the pull request's runs are read as of when the commit first landed", func(t *testing.T) {
 		// A red re-run of the pull request, queued after the commit landed
 		// and before its second attempt, is nothing the pull request said
@@ -777,6 +869,19 @@ func TestAPullRequestIsOneEntryJudgedByItsEarliestFailedFullRun(t *testing.T) {
 		}
 		fgAssertReport(t, CountFalseGreens([]RunFacts{pr, queue, push}, steps), fgWantAll(2, 2, 1, nil,
 			[]FalseGreen{fgGreen(41, "pr-a", "queue-a", fgOn("docs.bundle", "not planned"))}, nil))
+	})
+	t.Run("the run first queued judges, whatever its re-run did after", func(t *testing.T) {
+		// The queue's run was re-run after the push's run began: by its latest
+		// attempt it is the later of the two, by when it first landed the commit
+		// it is the earlier, and that is what decides.
+		queueAgain := fgOfCommit(fgMergeGroupRun("queue-a2", 41, 80, "failure"), merged)
+		steps := map[string][]StepFacts{
+			"pr-a":     prSteps,
+			"queue-a2": {fgFailed("docs.bundle")},
+			"main-a":   {fgFailed("tests.os-checks")},
+		}
+		fgAssertReport(t, CountFalseGreens([]RunFacts{pr, queue, push, queueAgain}, steps), fgWantAll(2, 2, 1, nil,
+			[]FalseGreen{fgGreen(41, "pr-a", "queue-a2", fgOn("docs.bundle", "not planned"))}, nil))
 	})
 	t.Run("two failed runs queued in the same instant: the lower id judges, whatever the order", func(t *testing.T) {
 		// A tie is rare and must still be settled the same way every time.
@@ -935,6 +1040,16 @@ func fgBusyWindow() ([]RunFacts, map[string][]StepFacts) {
 	steps["pr16-a"] = []StepFacts{fgNotAffected("tests.lane")}
 	steps["main-16a"] = []StepFacts{fgFailed("tests.lane")}
 	steps["main-16b"] = []StepFacts{fgDone("tests.lane")}
+
+	// A landing between the first and the latest attempt of another commit's
+	// run (main-15a, main-15b): ordered by when each commit first landed it is
+	// newer than that run, ordered by that run's latest attempt it would not be.
+	runs = append(runs,
+		fgPullRequestRun("pr17-a", 17, 225, "success"),
+		fgPushRun("main-17", 17, 260, "failure"),
+	)
+	steps["pr17-a"] = []StepFacts{fgNotAffected("tests.lane")}
+	steps["main-17"] = []StepFacts{fgFailed("tests.lane")}
 	return runs, steps
 }
 
@@ -943,8 +1058,9 @@ func fgBusyWindow() ([]RunFacts, map[string][]StepFacts) {
 // least stable cannot pass them.
 func TestTheBusyWindowCountsAsRulingFourteenSays(t *testing.T) {
 	runs, steps := fgBusyWindow()
-	fgAssertReport(t, CountFalseGreens(runs, steps), fgWantAll(13, 10, 6,
+	fgAssertReport(t, CountFalseGreens(runs, steps), fgWantAll(14, 11, 7,
 		[]FalseGreen{ // newest landing first, by when each commit was first queued
+			fgGreen(17, "pr17-a", "main-17", fgOn("tests.lane", "not selected")),
 			fgGreen(15, "pr15-a", "main-15b", fgOn("tests.lane", "not selected")),
 			fgGreen(14, "pr14-a", "queue-14", fgOn("tests.lane", "not selected")),
 			fgGreen(12, "pr12-a", "main-11", fgOn("tests.lane", "not selected")),
@@ -963,6 +1079,24 @@ func TestARowGivenTwiceIsOneRun(t *testing.T) {
 	fgAssertReport(t, twice, once)
 }
 
+// A run read twice -- once before it concluded and once after, as two pages of
+// a table that is being written to can bring it -- is the run as it concluded,
+// whichever copy comes first.
+func TestARowReadBeforeAndAfterItConcludedIsTheConcludedRun(t *testing.T) {
+	steps := map[string][]StepFacts{"pr-a": {fgNotAffected("tests.lane")}, "main-a": {fgFailed("tests.lane")}}
+	prGoing, prDone := fgPullRequestRun("pr-a", 20, 0, ""), fgPullRequestRun("pr-a", 20, 0, "success")
+	pushGoing, pushDone := fgPushRun("main-a", 20, 50, ""), fgPushRun("main-a", 20, 50, "failure")
+	want := fgWant(1, 1, 1, []FalseGreen{fgGreen(20, "pr-a", "main-a", fgOn("tests.lane", "not selected"))}, nil)
+	for name, runs := range map[string][]RunFacts{
+		"the unfinished copies first":        {prGoing, pushGoing, prDone, pushDone},
+		"the concluded copies first":         {prDone, pushDone, prGoing, pushGoing},
+		"the pull request's concluded first": {prDone, pushGoing, prGoing, pushDone},
+		"the full run's concluded first":     {prGoing, pushDone, prDone, pushGoing},
+	} {
+		t.Run(name, func(t *testing.T) { fgAssertReport(t, CountFalseGreens(runs, steps), want) })
+	}
+}
+
 // The report does not depend on the order the runs arrive in, ties between
 // runs queued in the same instant included.
 func TestTheCountDoesNotDependOnTheOrderOfItsInput(t *testing.T) {
@@ -978,11 +1112,11 @@ func TestTheCountDoesNotDependOnTheOrderOfItsInput(t *testing.T) {
 	steps["pr6-b"] = []StepFacts{fgDone("tests.lane")}
 	steps["main-10"] = []StepFacts{fgFailed("tests.lane")}
 	want := CountFalseGreens(runs, steps)
-	// The six landings of the busy window pair whatever the tie decides;
+	// The seven landings of the busy window pair whatever the tie decides;
 	// main-10 is the landing the tie is about, and the shuffles are what show
 	// it settled.
-	if want.AfterGreen < 6 {
-		t.Fatalf("the fixture should pair at least six pull requests, paired %d: %+v", want.AfterGreen, want)
+	if want.AfterGreen < 7 {
+		t.Fatalf("the fixture should pair at least seven pull requests, paired %d: %+v", want.AfterGreen, want)
 	}
 	rng := rand.New(rand.NewPCG(7, 11))
 	for i := 0; i < 50; i++ {
@@ -1034,7 +1168,8 @@ func TestTheReportIsTheWire(t *testing.T) {
 	want := `{"fullRuns":8,"fullRunsFailed":6,"afterGreen":3,` +
 		`"falseGreens":[{"pullRequest":3,"prRunId":"pr3-a","fullRunId":"main-3","steps":[{"key":"tests.os-checks","onPullRequest":"not selected"}]}],` +
 		`"notOnPullRequests":[{"pullRequest":13,"prRunId":"pr13-a","fullRunId":"main-13","steps":[{"key":"docs.bundle","onPullRequest":"not planned"}]}],` +
-		`"siblingOrFlake":[{"pullRequest":4,"prRunId":"pr4-a","fullRunId":"queue-4","steps":[{"key":"tests.db-tests","onPullRequest":"passed"}]}]}`
+		`"siblingOrFlake":[{"pullRequest":4,"prRunId":"pr4-a","fullRunId":"queue-4","steps":[{"key":"tests.db-tests","onPullRequest":"passed"}]}],` +
+		`"unread":[]}`
 	if string(got) != want {
 		t.Errorf("wire form\n got: %s\nwant: %s", got, want)
 	}
@@ -1043,8 +1178,55 @@ func TestTheReportIsTheWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `{"fullRuns":0,"fullRunsFailed":0,"afterGreen":0,"falseGreens":[],"notOnPullRequests":[],"siblingOrFlake":[]}`; string(empty) != want {
+	if want := `{"fullRuns":0,"fullRunsFailed":0,"afterGreen":0,"falseGreens":[],"notOnPullRequests":[],"siblingOrFlake":[],"unread":[]}`; string(empty) != want {
 		t.Errorf("an empty report\n got: %s\nwant: %s", empty, want)
+	}
+}
+
+// A skip code is how a run says why a step did not run, and the count has to
+// read each one as a pass, as the selection's doing, or as neither. A new code
+// read quietly as the default would be a failure with no one deciding it, so
+// every skip code of the catalogue must have a stated reading, and what is
+// stated must be what the count does.
+func TestEverySkipCodeHasAStatedReading(t *testing.T) {
+	skips := 0
+	for _, code := range Codes() {
+		if class, _ := ClassOf(code); class != ClassSkip {
+			continue
+		}
+		skips++
+		if _, stated := skipReadings[code]; !stated {
+			t.Errorf("%s is a skip code and the false-green count states no reading of it: decide whether a step skipped with it is a pass, the selection's doing, or neither, and add it to skipReadings", code)
+		}
+	}
+	if skips == 0 {
+		t.Fatal("the catalogue holds no skip code, so this gate checks nothing")
+	}
+	disposition := map[skipReading]string{
+		skipIsAPass: "passed", skipIsTheSelections: "not selected", skipSaysNothing: "not planned",
+	}
+	for code, reading := range skipReadings {
+		if class, known := ClassOf(code); !known || class != ClassSkip {
+			t.Errorf("skipReadings reads %s, which is not a skip code of the catalogue", code)
+		}
+		t.Run(code, func(t *testing.T) {
+			runs := []RunFacts{fgPullRequestRun("pr-a", 20, 0, "success"), fgPushRun("main-a", 20, 50, "failure")}
+			steps := map[string][]StepFacts{
+				"pr-a":   {{Key: "tests.lane", Status: "skipped", Code: code}},
+				"main-a": {fgFailed("tests.lane")},
+			}
+			got := CountFalseGreens(runs, steps)
+			var entries []FalseGreen
+			entries = append(entries, got.FalseGreens...)
+			entries = append(entries, got.NotOnPullRequests...)
+			entries = append(entries, got.SiblingOrFlake...)
+			if len(entries) != 1 || len(entries[0].Steps) != 1 {
+				t.Fatalf("expected one entry holding one step, got %+v", got)
+			}
+			if on := entries[0].Steps[0].OnPullRequest; on != disposition[reading] {
+				t.Errorf("a step skipped with %s reads %q, its stated reading is %q", code, on, disposition[reading])
+			}
+		})
 	}
 }
 
@@ -1063,8 +1245,8 @@ func TestRunsNeedingStepsAreTheRunsTheCountReads(t *testing.T) {
 	runs, steps := fgBusyWindow()
 	got := RunsNeedingSteps(runs)
 	want := []string{
-		"main-11", "main-13", "main-15b", "main-3", "pr12-a", "pr13-a",
-		"pr14-a", "pr15-a", "pr3-a", "pr4-a", "queue-14", "queue-4",
+		"main-11", "main-13", "main-15b", "main-17", "main-3", "pr12-a", "pr13-a",
+		"pr14-a", "pr15-a", "pr17-a", "pr3-a", "pr4-a", "queue-14", "queue-4",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("RunsNeedingSteps = %v, want %v", got, want)

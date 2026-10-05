@@ -24,7 +24,9 @@ import (
 // and that alone is a false green. A step it never planned -- a stage that
 // runs on pushes alone, a notification that was not delivered, a step a
 // sibling merge added -- was never the selection's to run. A step that ran and
-// passed there failed on a tree that differed: a sibling merge, or a flake.
+// passed there as a step may still have failed in a package its slice left
+// out; the count compares steps, cannot tell that from a tree that differed (a
+// sibling merge) or a flake, and files all three alike.
 
 // RunFacts is what the count reads off a v1:pipelines:run row.
 //
@@ -70,7 +72,9 @@ const (
 	// kind that makes a false green.
 	OnPullRequestNotSelected = "not selected"
 	// OnPullRequestPassed: the pull request's run executed the step and it
-	// passed, or carried a pass over from an earlier attempt.
+	// passed, or carried a pass over from an earlier attempt. That is the
+	// step's pass, not each package's: the failing package may not have been
+	// in the step's slice.
 	OnPullRequestPassed = "passed"
 	// OnPullRequestNotPlanned: the pull request's run holds neither of those
 	// for the step. It never planned it -- a stage that runs on pushes alone
@@ -111,21 +115,28 @@ type FalseGreenStep struct {
 
 // FalseGreenReport is the count over the runs it was given.
 //
-// A pull request is one entry in one of the three lists, however many full
-// runs failed on it, filed by the worst of its failed steps: a selection miss
-// makes it a false green; failing that, a step it never planned puts it in
-// NotOnPullRequests; otherwise every failed step ran and passed. The
-// comparison is by step, not by package. A failing package that a lane which
-// did run left out of its selection reads as passed, and lands in
-// SiblingOrFlake: the count is a floor under the selection's misses, never a
-// ceiling.
+// The units differ, and are named: FullRuns and FullRunsFailed count full-mode
+// run keys; AfterGreen and the three lists count pull requests. A pull request
+// is one entry in one of the lists, however many full runs failed on it, filed
+// by the worst of its failed steps: a selection miss makes it a false green;
+// failing that, a step it never planned puts it in NotOnPullRequests;
+// otherwise every failed step ran and passed as a step on the pull request.
+//
+// The comparison is by step, not by package. A step that selects packages runs
+// on a pull request over a slice of them, and a failing package outside that
+// slice reads as a step that passed: it lands in SiblingOrFlake. The count is
+// a floor on the package axis, so no list proves the selection missed nothing,
+// and a SiblingOrFlake entry on a lane that selects packages is for a person
+// to look at.
+//
+// While Unread is not empty none of the lists is to be believed.
 type FalseGreenReport struct {
-	// FullRuns is the full-mode runs that reached a verdict on the tree they
-	// ran, which is a conclusion of success or failure, each run once however
-	// often it was re-run. One still going, cancelled or refused says nothing
-	// about the tree, and is not counted.
+	// FullRuns is the full-mode run keys that reached a verdict on the tree
+	// they ran, which is a conclusion of success or failure, each run once
+	// however often it was re-run. One still going, cancelled or refused says
+	// nothing about the tree, and is not counted.
 	FullRuns int `json:"fullRuns"`
-	// FullRunsFailed is those that failed: runs, not pull requests, so a
+	// FullRunsFailed is those that failed: run keys, not pull requests, so a
 	// merge group and the push of its merge commit that both failed are two.
 	FullRunsFailed int `json:"fullRunsFailed"`
 	// AfterGreen is the pull requests whose last run before a failed full run
@@ -133,9 +144,9 @@ type FalseGreenReport struct {
 	// then failed. Each is counted once. It is FalseGreens, NotOnPullRequests
 	// and SiblingOrFlake together, always.
 	AfterGreen int `json:"afterGreen"`
-	// FalseGreens are those with a failed step the pull request's run planned
-	// and skipped as not affected: the selection missed it, which is what the
-	// affected-subset decision rests on.
+	// FalseGreens are those with a failed step the pull request's run did not
+	// run: it planned the step and the selection left it out (skipped as not
+	// affected), which is what the affected-subset decision rests on.
 	FalseGreens []FalseGreen `json:"falseGreens"`
 	// NotOnPullRequests are those with no selection miss and at least one
 	// failed step the pull request's run never planned: a stage that runs on
@@ -143,12 +154,25 @@ type FalseGreenReport struct {
 	// merge added. It is no fault of the selection, and it is kept apart from
 	// the false greens so that none of those reads as one.
 	NotOnPullRequests []FalseGreen `json:"notOnPullRequests"`
-	// SiblingOrFlake are the rest: every failed step ran and passed on the
-	// pull request, so the content passed there and the tree the queue built
-	// differed -- a sibling merge -- or the step is flaky. A failed run with
-	// no failed step of its own (a manifest that would not compile, a runner
-	// that was not there) is listed here too, with no steps.
+	// SiblingOrFlake are the rest: every failed step ran and passed as a step
+	// on the pull request; the failing package may not have been in that
+	// step's slice. So the tree the queue built differed from the pull
+	// request's -- a sibling merge -- or the step is flaky, or the failing
+	// package was one the step did not run on the pull request, which a count
+	// by step cannot tell. A failed run with no failed step of its own (a
+	// manifest that would not compile, a runner that was not there) is listed
+	// here too, with no steps.
 	SiblingOrFlake []FalseGreen `json:"siblingOrFlake"`
+	// Unread is the runs whose step facts the count needed and was not given:
+	// every id RunsNeedingSteps names that has no key in the steps map. A key
+	// that is present and empty is the legitimate no-steps state (a run
+	// refused before any step began, a pipeline none of whose stages run on
+	// pull requests); an absent one is a read that did not happen -- a nil
+	// map, a run left out, a map keyed by something other than RunFacts.ID. A
+	// landing whose steps were not read is filed as though its run recorded
+	// nothing, so a caller treats a non-empty Unread as an error and believes
+	// no list. Sorted; never nil.
+	Unread []string `json:"unread"`
 }
 
 // The words the count compares against. The work journal's status for a pass
@@ -309,6 +333,30 @@ type laneRecord struct {
 	notAffected bool
 }
 
+// skipReading is what a step skipped with a given code is evidence of on a
+// pull request's run.
+type skipReading int
+
+const (
+	// skipSaysNothing: the step did not run and the skip is neither a pass nor
+	// the selection's doing. It is the reading of a code that is not stated.
+	skipSaysNothing skipReading = iota
+	// skipIsAPass: the step passed in an earlier attempt and was carried over.
+	skipIsAPass
+	// skipIsTheSelections: the step was planned and the selection left it out.
+	skipIsTheSelections
+)
+
+// skipReadings states, for every skip code of the catalogue (ClassSkip), what
+// the count reads a step skipped with it as. A skip code added without a line
+// here fails TestEverySkipCodeHasAStatedReading, so a new one is decided on
+// and not read quietly as skipSaysNothing.
+var skipReadings = map[string]skipReading{
+	CodeNotAffected:   skipIsTheSelections,
+	CodePassedEarlier: skipIsAPass,
+	CodeStageBlocked:  skipSaysNothing,
+}
+
 // laneRecords is what a run recorded for each lane it holds steps of.
 func laneRecords(facts []StepFacts) map[string]laneRecord {
 	records := make(map[string]laneRecord, len(facts))
@@ -318,10 +366,13 @@ func laneRecords(facts []StepFacts) map[string]laneRecord {
 		switch {
 		case f.Status == statusDone || f.Status == statusSucceeded:
 			rec.passed = true
-		case f.Status == statusSkipped && f.Code == CodePassedEarlier:
-			rec.passed = true
-		case f.Status == statusSkipped && f.Code == CodeNotAffected:
-			rec.notAffected = true
+		case f.Status == statusSkipped:
+			switch skipReadings[f.Code] {
+			case skipIsAPass:
+				rec.passed = true
+			case skipIsTheSelections:
+				rec.notAffected = true
+			}
 		}
 		records[lane] = rec
 	}
@@ -494,17 +545,23 @@ func newestQueuedBefore(runs []RunFacts, t time.Time) (RunFacts, bool) {
 	return newest, found
 }
 
-// distinctRuns drops a row seen twice, keeping the first. A read of a table
-// that is being written to, in pages, can return one run on two of them.
+// distinctRuns drops a row seen twice. A read of a table that is being written
+// to, in pages, can return one run on two of them -- once before it concluded
+// and once after -- so the copy that has a verdict is kept over one that has
+// none, and no order the pages arrive in changes an answer. Of two copies alike
+// in that, the first is kept.
 func distinctRuns(runs []RunFacts) []RunFacts {
-	seen := make(map[string]bool, len(runs))
+	at := make(map[string]int, len(runs)) // where each run id was first kept
 	out := make([]RunFacts, 0, len(runs))
 	for _, r := range runs {
 		if r.ID != "" {
-			if seen[r.ID] {
+			if i, seen := at[r.ID]; seen {
+				if hasVerdict(r) && !hasVerdict(out[i]) {
+					out[i] = r
+				}
 				continue
 			}
-			seen[r.ID] = true
+			at[r.ID] = len(out)
 		}
 		out = append(out, r)
 	}
@@ -531,6 +588,36 @@ func (l landing) judge(steps map[string][]StepFacts) (green FalseGreen, selectio
 	return green, selectionMiss, notPlanned
 }
 
+// runsRead is what the count decides from the run rows alone: the full runs it
+// counts, and the pull requests that were green and whose commits failed.
+// CountFalseGreens and RunsNeedingSteps both read the rows through it, so
+// neither can read them another way.
+type runsRead struct {
+	full     []fullRun
+	landings []landing
+}
+
+// readRuns reads one pipeline's run rows: the distinct runs, the full runs they
+// make, and the landings among those.
+func readRuns(runs []RunFacts) runsRead {
+	runs = distinctRuns(runs)
+	full := fullRuns(runs)
+	return runsRead{full: full, landings: landings(runs, full)}
+}
+
+// stepsNeeded is the ids of the runs whose step facts the count reads to judge
+// these landings: each one's judging full run and its pull request's run,
+// sorted. A pull request is one landing and a run belongs to one, so no id is
+// named twice.
+func stepsNeeded(ls []landing) []string {
+	ids := []string{}
+	for _, l := range ls {
+		ids = append(ids, l.full.ID, l.pr.ID)
+	}
+	slices.Sort(ids)
+	return ids
+}
+
 // CountFalseGreens counts the false greens among runs: the measure M1 rests
 // on, and the number the affected-subset decision (D1) is held to.
 //
@@ -549,7 +636,8 @@ func (l landing) judge(steps map[string][]StepFacts) (green FalseGreen, selectio
 // is one entry, judged by the earliest of them that followed a green run of
 // it. A failed run that names no pull request, or whose pull request has no
 // run before it in runs, or whose last run did not pass, is counted in
-// FullRuns and FullRunsFailed and nowhere else.
+// FullRuns and FullRunsFailed and nowhere else. Those count run keys; the
+// entries, AfterGreen and the lists count pull requests.
 //
 // The entry is filed by what the pull request's run did with the steps the
 // full run failed, by lane (shard suffix removed, so tests.go-tests#2 compares
@@ -559,8 +647,17 @@ func (l landing) judge(steps map[string][]StepFacts) (green FalseGreen, selectio
 //     the entry is a false green;
 //   - failing that, a step it never planned -- no pass and no such skip --
 //     puts it in NotOnPullRequests: the selection was not asked about it;
-//   - otherwise every failed step ran and passed there, or the run failed with
-//     no failed step of its own, and it is a sibling merge or a flake.
+//   - otherwise every failed step ran and passed as a step on the pull
+//     request, or the run failed with no failed step of its own: a sibling
+//     merge, a flake, or a failing package outside the step's slice, which a
+//     count by step cannot tell apart.
+//
+// That last is the count's limit. It compares steps, not packages, so it is a
+// floor on the package axis: a step that selects packages runs on a pull
+// request over a slice of them, and a failing package outside that slice files
+// as a sibling or a flake. No list proves the selection missed nothing, and a
+// SiblingOrFlake entry on a lane that selects packages is for a person to look
+// at.
 //
 // runs is one pipeline's runs: the window's, and as many earlier pull_request
 // runs as the caller wants a landing to be able to pair with, since a pull
@@ -568,27 +665,31 @@ func (l landing) judge(steps map[string][]StepFacts) (green FalseGreen, selectio
 // holds is counted, so the window is the caller's cut of them. A row given
 // twice is one run, and the order of runs changes nothing.
 //
-// steps holds each run's step facts, keyed by RunFacts.ID, and only for the
-// runs RunsNeedingSteps names are they read. A run with none reads as having
-// recorded nothing, so a pull-request run whose steps were not loaded makes
-// every failed step of its landing "not planned" and files it in
-// NotOnPullRequests, which is quiet: a caller loads the steps of every run
-// RunsNeedingSteps names, and treats one it could not load as its own error.
+// steps holds each run's step facts, keyed by RunFacts.ID, for the runs
+// RunsNeedingSteps names; only those are read. A caller seeds an empty list
+// for each of them before it fills them: present and empty is the legitimate
+// no-steps state, a run refused before any step began or one whose pipeline
+// has no stage that runs on pull requests. An id RunsNeedingSteps names with
+// no key at all is a read that did not happen -- a nil map, a run left out, a
+// map keyed by the work run's id -- and is reported in Unread. A landing whose
+// steps were not read is filed as though its run recorded nothing (a pull
+// request's as not planned, quietly; a full run's as having failed no step),
+// so a caller treats a non-empty Unread as an error and believes no list.
 //
 // The lists come newest landing first, and are never nil.
 func CountFalseGreens(runs []RunFacts, steps map[string][]StepFacts) FalseGreenReport {
-	runs = distinctRuns(runs)
-	full := fullRuns(runs)
+	read := readRuns(runs)
 	report := FalseGreenReport{
 		FalseGreens: []FalseGreen{}, NotOnPullRequests: []FalseGreen{}, SiblingOrFlake: []FalseGreen{},
+		Unread: []string{},
 	}
-	for _, f := range full {
+	for _, f := range read.full {
 		report.FullRuns++
 		if f.verdict.Conclusion == conclusionFailure {
 			report.FullRunsFailed++
 		}
 	}
-	for _, l := range landings(runs, full) {
+	for _, l := range read.landings {
 		report.AfterGreen++
 		green, selectionMiss, notPlanned := l.judge(steps)
 		switch {
@@ -600,6 +701,11 @@ func CountFalseGreens(runs []RunFacts, steps map[string][]StepFacts) FalseGreenR
 			report.SiblingOrFlake = append(report.SiblingOrFlake, green)
 		}
 	}
+	for _, id := range stepsNeeded(read.landings) {
+		if _, given := steps[id]; !given {
+			report.Unread = append(report.Unread, id)
+		}
+	}
 	return report
 }
 
@@ -609,14 +715,10 @@ func CountFalseGreens(runs []RunFacts, steps map[string][]StepFacts) FalseGreenR
 // failed run) and the pull request's run it is judged against. Every other
 // run is counted from its row alone, so a caller that loads the steps of these
 // and of no others -- a dozen runs of a window of hundreds -- has read what
-// the count needs. The ids are sorted and the list is never nil; a pull
-// request is one landing and a run belongs to one, so no id is named twice.
+// the count needs, and seeds an empty list under each id before it fills them
+// (see CountFalseGreens, and the report's Unread). The ids are sorted and the
+// list is never nil; a pull request is one landing and a run belongs to one,
+// so no id is named twice.
 func RunsNeedingSteps(runs []RunFacts) []string {
-	runs = distinctRuns(runs)
-	ids := []string{}
-	for _, l := range landings(runs, fullRuns(runs)) {
-		ids = append(ids, l.full.ID, l.pr.ID)
-	}
-	slices.Sort(ids)
-	return ids
+	return stepsNeeded(readRuns(runs).landings)
 }
