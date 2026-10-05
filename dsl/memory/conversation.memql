@@ -35,6 +35,8 @@ query conversationEvidence conversationEvidenceById {
   shape conversationEvidenceFull
 }
 
+/// Only the source indexer may assert a conversation turn hash and content.
+/// Scoping to actor.userId alone would let a caller forge evidence attributed to a source.
 @actor
 @serverOnly
 @createOnly("domainId", "conversationId", "turnId", "sourceHash", "content", "recordedAt")

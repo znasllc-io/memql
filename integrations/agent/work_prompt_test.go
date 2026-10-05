@@ -59,10 +59,16 @@ func TestOwnedWorkTurnUsesShippedPrompt(t *testing.T) {
 	owner := "v1:identity:user:work-prompt-owner"
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
 	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: owner})
-	msg := &memqlv1.AgentGenerateTurnMsg{AgentId: "assistant", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "assistant", Name: "Ada", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "Save the report as a PDF"}}}
+	msg := &memqlv1.AgentGenerateTurnMsg{Hints: map[string]string{"plan_id": "untrusted-hint"}, AgentId: "assistant", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "assistant", Name: "Ada", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "Save the report as a PDF"}}}
 	prepared, err := r.prepareTurn(ctx, msg, time.Now())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if prepared.turnCtx.RunId != "run" {
+		t.Fatalf("persisted run identity missing: %+v", prepared.turnCtx)
+	}
+	if !requiresWorkOutcome(ctx, prepared.tools) {
+		t.Fatal("owned assistant has no structured outcome contract")
 	}
 	if len(prepared.messages) != 2 || prepared.messages[1].Content != "Save the report as a PDF" {
 		t.Fatalf("execution lost the goal: %+v", prepared.messages)

@@ -12,6 +12,8 @@ concept workAcknowledgement {
   expiresAt datetime!
 }
 
+/// Only the receipt indexer may assert that wording came from a classifier.
+/// Scoping to actor.userId alone would let a caller forge that provenance and its TTL.
 @actor
 @serverOnly
 mutation workAcknowledgement saveWorkAcknowledgement {

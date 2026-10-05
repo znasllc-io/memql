@@ -374,6 +374,8 @@ func (r *Replier) runStreamingToolLoop(
 	// turn's FinalText (envelope.Response) and contributes Citations.
 	// See envelope.go for the protocol.
 	var terminalEnvelope *Envelope
+	workOutcomeRequired := requiresWorkOutcome(ctx, tools)
+	invalidOutcomes := 0
 	// ttftLogged tracks whether we've emitted the one-shot
 	// "first chunk from upstream" log line for this turn. We log it
 	// exactly once -- on the first non-empty content or tool-call chunk
@@ -542,6 +544,22 @@ StreamLoop:
 			// Success: exit the inner retry loop and proceed to
 			// consume turnCalls / emit tool results.
 			break
+		}
+
+		if workOutcomeRequired && isDelegatedWorkSession(provider) {
+			workOutcomeRequired = false
+		}
+		if workOutcomeRequired {
+			normalized, outcomeErr := normalizeWorkOutcome(turnCalls)
+			if outcomeErr != nil {
+				invalidOutcomes++
+				messages = rejectedWorkOutcome(messages, turnText, turnCalls, outcomeErr, sink)
+				if invalidOutcomes >= 2 {
+					return nil, fmt.Errorf("invalid work outcome after bounded repair: %w", outcomeErr)
+				}
+				continue
+			}
+			turnCalls = normalized
 		}
 
 		assistantMsg := common.ChatMessage{Role: "assistant", Content: turnText}
@@ -800,6 +818,10 @@ StreamLoop:
 		if terminalEnvelope != nil {
 			break
 		}
+	}
+
+	if workOutcomeRequired && terminalEnvelope == nil && terminalErr == nil {
+		terminalErr = fmt.Errorf("work ended without a valid completion or durable question")
 	}
 
 	// Resolve the user-facing reply. If the model emitted the envelope
@@ -1101,13 +1123,8 @@ type agentContextStamp struct {
 	// object rather than a flat string id, so this gets its own
 	// flag separate from StampAgentId.
 	StampActor bool
-	// StampRunId stamps args["planId"] when the turnContext carries
-	// one (set on post-approval execution turns -- see turnContext
-	// docs). Used by worker tools so the v1:worker:invocation row
-	// they persist downstream is filed under the right Plan id;
-	// without it the row lands with planId="" and the planner's
-	// invocationsForPlan filter misses it, surfacing as
-	// Plan-stamped-failed even when the worker tool succeeded.
+	// StampRunId stamps the persisted work run identity on tools whose
+	// contract declares runId. The same field is restored by tool defaults.
 	StampRunId bool
 	// StampThreadVisibility stamps args["visibility"] from the
 	// turnContext's ThreadVisibility, and args["forUserId"] from the
@@ -1128,7 +1145,7 @@ type agentContextStamp struct {
 	// The agent knows the plan id authoritatively (post-approval
 	// execution turns); the LLM never does, so we stamp it server-side
 	// in the publish path. Distinct from the flat StampRunId
-	// (args["planId"]) the worker tools use -- canvasPublish has no
+	// (args["runId"]) the worker tools use -- canvasPublish has no
 	// top-level planId in its schema, the provenance rides inside the
 	// card data.
 	StampDataPlanId bool
@@ -1235,7 +1252,7 @@ func injectAgentContext(toolName string, args map[string]any, ctx turnContext) {
 		// Always overwrite -- the LLM may have hallucinated a plan
 		// id (or left it empty); the runtime turn-context value is
 		// the source of truth.
-		args["planId"] = ctx.RunId
+		args["runId"] = ctx.RunId
 	}
 	if stamp.StampThreadVisibility && ctx.ThreadVisibility != "" {
 		// Phase 9 visibility inheritance: stamp the dispatching
@@ -1251,7 +1268,7 @@ func injectAgentContext(toolName string, args map[string]any, ctx turnContext) {
 	if stamp.StampProducedByRunId && ctx.RunId != "" {
 		// Always overwrite -- the runtime turn-context plan id is the source
 		// of truth for provenance; the LLM never knows its own plan id.
-		args["producedByPlanId"] = ctx.RunId
+		args["producedByRunId"] = ctx.RunId
 	}
 	if stamp.StampDataPlanId && ctx.RunId != "" {
 		// Stamp producedByPlanId onto the nested card `data` object so

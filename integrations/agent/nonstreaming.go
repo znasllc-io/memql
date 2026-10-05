@@ -289,6 +289,8 @@ func (r *Replier) runNonStreamingToolLoop(
 	var allToolCalls []common.ToolCall
 	iterations := 0
 	var terminalEnvelope *Envelope
+	workOutcomeRequired := requiresWorkOutcome(ctx, tools)
+	invalidOutcomes := 0
 	consecutiveAllErrored := 0
 	const maxConsecutiveAllErrored = 3
 	// Per-turn circuit breaker on repeated IDENTICAL tool failures
@@ -461,6 +463,22 @@ BackgroundLoop:
 				"textChars", len(turnText),
 				"requestId", requestId,
 			)
+		}
+
+		if workOutcomeRequired && isDelegatedWorkSession(provider) {
+			workOutcomeRequired = false
+		}
+		if workOutcomeRequired {
+			normalized, outcomeErr := normalizeWorkOutcome(turnCalls)
+			if outcomeErr != nil {
+				invalidOutcomes++
+				messages = rejectedWorkOutcome(messages, turnText, turnCalls, outcomeErr, sink)
+				if invalidOutcomes >= 2 {
+					return nil, fmt.Errorf("invalid work outcome after bounded repair: %w", outcomeErr)
+				}
+				continue
+			}
+			turnCalls = normalized
 		}
 
 		assistantMsg := common.ChatMessage{Role: "assistant", Content: turnText}
@@ -650,6 +668,10 @@ BackgroundLoop:
 		if terminalEnvelope != nil {
 			break
 		}
+	}
+
+	if workOutcomeRequired && terminalEnvelope == nil {
+		return nil, fmt.Errorf("work ended without a valid completion or durable question")
 	}
 
 	// Resolve the user-facing reply. The respondToUser envelope, when

@@ -1,3 +1,5 @@
+use common.traits.{ statusIsActive }
+
 /// Minimal organization facts for authenticated work context.
 @row
 shape account workOrganizationContext {
@@ -10,6 +12,6 @@ shape account workOrganizationContext {
 @unbounded("one organization, still subject to current row permissions")
 query account workViewerOrganization {
   args { accountId string! }
-  filter row => row.id == args.accountId && row.status == "active"
+  filter row => row.id == args.accountId && statusIsActive(row)
   shape workOrganizationContext
 }

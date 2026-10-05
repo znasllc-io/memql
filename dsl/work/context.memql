@@ -1,3 +1,5 @@
+use common.traits.{ statusIsActive }
+
 use identity.concepts.{ groupMembership }
 
 @row
@@ -10,7 +12,7 @@ shape groupMembership workViewerMembership {
 /// selection as the organization producing the current deliverable.
 @actor
 query groupMembership workViewerMemberships {
-  filter row => row.userId == actor.userId && row.status == "active"
+  filter row => row.userId == actor.userId && statusIsActive(row)
   paginate 20
   shape workViewerMembership
 }
