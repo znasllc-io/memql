@@ -1550,10 +1550,12 @@ func (w *fakeWork) receiptsOf(key string) []journalCall {
 // fakeExecutor is a runner: it records every request in the order Execute was
 // entered and every Cancel, and answers through answer (a pass when nil).
 type fakeExecutor struct {
-	mu       sync.Mutex
-	requests []pipelines.StepRequest
-	cancels  []string
-	answer   func(ctx context.Context, req pipelines.StepRequest) (pipelines.StepResult, error)
+	acks          []pipelines.StepRequest
+	onAcknowledge func(pipelines.StepRequest)
+	mu            sync.Mutex
+	requests      []pipelines.StepRequest
+	cancels       []string
+	answer        func(ctx context.Context, req pipelines.StepRequest) (pipelines.StepResult, error)
 	// entered is told each step key as its Execute begins.
 	entered chan string
 }
@@ -1570,6 +1572,21 @@ func (e *fakeExecutor) Execute(ctx context.Context, req pipelines.StepRequest) (
 		return passed(req), nil
 	}
 	return answer(ctx, req)
+}
+
+func (e *fakeExecutor) AcknowledgeReceipt(_ context.Context, req pipelines.StepRequest) {
+	e.mu.Lock()
+	e.acks = append(e.acks, req)
+	fn := e.onAcknowledge
+	e.mu.Unlock()
+	if fn != nil {
+		fn(req)
+	}
+}
+func (e *fakeExecutor) acknowledged() []pipelines.StepRequest {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.acks)
 }
 
 func (e *fakeExecutor) Cancel(_ context.Context, runID string) error {

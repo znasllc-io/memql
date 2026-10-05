@@ -3,6 +3,7 @@ package pipelinerun
 import (
 	"context"
 	"errors"
+	"github.com/znasllc-io/memql/component/pipelines"
 	"testing"
 	"time"
 )
@@ -20,6 +21,14 @@ func TestJournalFailureCannotStartUnrecordedWorkOrPublishSuccess(t *testing.T) {
 		t.Run(tc.mutation, func(t *testing.T) {
 			dh := newDriveHarness(t, driveManifest)
 			dh.work.refuseCall, dh.work.refuseErr = tc.mutation, errors.New("journal unavailable")
+			dh.exec.onAcknowledge = func(req pipelines.StepRequest) {
+				if rows := dh.work.receiptsOf(req.StepKey); len(rows) == 0 {
+					t.Errorf("acknowledged %s without its durable receipt", req.StepKey)
+				}
+				if len(req.Secrets) != 0 {
+					t.Error("cleanup retained resolved secrets")
+				}
+			}
 			run := dh.openRun(t, prOpening())
 			deliver(t, dh.integ, run)
 			got, _ := dh.store.run(run.ID)
@@ -28,6 +37,9 @@ func TestJournalFailureCannotStartUnrecordedWorkOrPublishSuccess(t *testing.T) {
 			}
 			if sent := dh.exec.sentKeys(); len(sent) > tc.maxSteps {
 				t.Fatalf("work advanced without its record: %v", sent)
+			}
+			if (tc.mutation == "createWorkStep" || tc.mutation == "updateWorkStep") && len(dh.exec.acknowledged()) != 0 {
+				t.Fatal("a failed receipt discarded recoverable executor evidence")
 			}
 			if last := dh.lastUpdate(t).Run; last.Conclusion == "success" {
 				t.Fatal("GitHub was told success without durable evidence")

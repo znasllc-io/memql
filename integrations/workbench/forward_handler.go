@@ -56,14 +56,16 @@ const (
 	// PipelineStepAction runs, or adopts, the step's Job to completion and
 	// answers with its outcome. LONG: it lasts as long as the Job, so it runs
 	// on its own goroutine and never on the stream's receive loop.
-	PipelineStepAction = "pipelineStep"
+	// The version is part of the action: an older replica must reject the
+	// request, not silently discard execution/recovery fields it cannot enforce.
+	PipelineStepAction = "pipelineStepV2"
 	// PipelineStatusAction asks after a step's Job: running, finished (with
 	// the outcome), absent or stale. Quick -- the runner bounds it at ten
 	// seconds -- and still answered off the receive loop, as are the next two.
 	PipelineStatusAction = "pipelineStatus"
-	// PipelineAckAction tells the runner its outcome was received, so the Job
+	// PipelineAckAction tells the runner its outcome was durably journaled, so the Job
 	// and its Secret can be deleted. Quick.
-	PipelineAckAction = "pipelineAck"
+	PipelineAckAction = "pipelineReceiptAck"
 	// PipelineCancelAction deletes every Job of a run. Quick.
 	PipelineCancelAction = "pipelineCancel"
 	// PipelineReadinessAction reads this replica's runner and last isolation

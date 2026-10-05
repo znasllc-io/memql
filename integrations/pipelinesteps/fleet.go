@@ -133,6 +133,9 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 		return failedResult(pl.CodeRunnerUnavailable,
 			"This agent node has no dispatcher to reach the owner's machines with. Nothing ran."), nil
 	}
+	if req.RecoverOnly || run.RecoverOnly {
+		return failedResult(pl.CodeExecutionUncertain, "The previous fleet attempt has no durable result. No replacement command was sent; reconcile the original attempt first."), nil
+	}
 	if err := pl.CheckExecution(run.Execution, run.Platform, true); err != nil {
 		return refusedResult(pl.CodeStepInvalid, err.Error()), nil
 	}

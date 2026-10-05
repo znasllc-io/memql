@@ -485,6 +485,11 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 			}
 			dr.workRun.Store(w)
 			dr.setFacts()
+			for _, track := range dr.tracks {
+				if track.finished() && track.step.Kind == pipelines.StepCommand {
+					dr.acknowledgeReceipt(ctx, pipelines.CurrentExecutor(), dr.request(track, nil))
+				}
+			}
 			return nil, true
 		}
 		// A work run with no step rows never queued its steps: opening it
@@ -1041,7 +1046,8 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 	}
 
 	ceiling := pipelines.ParseRunCeiling(os.Getenv(pipelines.EnvRunCeiling))
-	end := dr.execStep(exec, dr.request(t, secrets), dr.stepDeadline(ceiling))
+	req := dr.request(t, secrets)
+	end := dr.execStep(exec, req, dr.stepDeadline(ceiling))
 	switch end.kind {
 	case endLost:
 		return
@@ -1055,7 +1061,18 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 		dr.settle(ctx, t, failReceipt(pipelines.CodeExecutorError,
 			"The runner could not report how the step ended: "+dr.mask(end.err.Error())))
 	default:
-		dr.settle(ctx, t, dr.receiptFor(end.result, end.elapsed))
+		if dr.settle(ctx, t, dr.receiptFor(end.result, end.elapsed)) {
+			dr.acknowledgeReceipt(ctx, exec, req)
+		}
+	}
+}
+
+func (dr *runDriver) acknowledgeReceipt(ctx context.Context, exec pipelines.Executor, req pipelines.StepRequest) {
+	if acknowledger, ok := exec.(pipelines.ReceiptAcknowledger); ok {
+		// Cleanup needs identity, not credentials. No resolved secret survives
+		// into a background acknowledgement or a recovered driver's cleanup.
+		req.Secrets = nil
+		acknowledger.AcknowledgeReceipt(ctx, req)
 	}
 }
 
@@ -1063,26 +1080,27 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 // without having run, so every declared step reads as begun and ended -- and
 // records it in memory, the artifacts it names included: a notify stage later
 // in the run lists them. On a lost lease it writes nothing.
-func (dr *runDriver) settle(ctx context.Context, t *stepTrack, rec receipt) {
+func (dr *runDriver) settle(ctx context.Context, t *stepTrack, rec receipt) bool {
 	if !dr.stillHolds(ctx) {
-		return
+		return false
 	}
 	if t.handle == nil {
 		var err error
 		t.handle, err = dr.work().Step(ctx, t.step.Key)
 		if err != nil {
 			dr.journalUnavailable(t.step.Key, err)
-			return
+			return false
 		}
 	}
 	if err := t.handle.Finish(ctx, rec.journal()); err != nil {
 		dr.journalUnavailable(t.step.Key, err)
-		return
+		return false
 	}
 	s := t.snapshot()
 	s.Status, s.Code, s.Message, s.DurationMs, s.LogTail = rec.report, rec.code, rec.message, rec.durationMs, rec.logTail
 	s.ArtifactFileIDs = slices.Clone(rec.artifactFileIDs)
 	t.set(s)
+	return true
 }
 
 // A missing intent or receipt is not permission to continue. Leave the run
@@ -1246,6 +1264,7 @@ func (dr *runDriver) setFacts() {
 func (dr *runDriver) request(t *stepTrack, secrets map[string]string) pipelines.StepRequest {
 	f := dr.facts
 	return pipelines.StepRequest{
+		RecoverOnly:    t.sent,
 		RunID:          f.runID,
 		WorkRunID:      f.workRunID,
 		StepKey:        t.step.Key,

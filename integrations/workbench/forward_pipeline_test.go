@@ -326,6 +326,21 @@ func TestPipelineStepDoesNotBlockTheReceiveLoop(t *testing.T) {
 	}
 }
 
+func TestLegacyPipelineActionsCannotBypassRecoveryOrReceiptContracts(t *testing.T) {
+	runner := newFakePipelineRunner(t)
+	h := pipelineHandler(runner)
+	for _, action := range []string{"pipelineStep", "pipelineAck"} {
+		out := newReplyLog()
+		h.HandleForwardedRequest(context.Background(), pipelineForward("legacy-"+action, action, `{}`, systemAuthority(t)), out.send)
+		if response := out.next(t, action); response.GetErrorCode() == "" {
+			t.Fatalf("legacy action accepted: %s", action)
+		}
+	}
+	if len(runner.called()) != 0 {
+		t.Fatal("legacy action reached the pipeline runner")
+	}
+}
+
 // TestPipelineActionsNeedSystemAuthority is the class gate -- the build
 // entry's rule, applied to the four pipeline entries for the build entry's
 // reason. Only this cluster's own engine can mint a SYSTEM-class assertion, and

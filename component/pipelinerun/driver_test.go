@@ -1445,6 +1445,9 @@ func TestResumeCarriesOutThePlanTheRowsRecord(t *testing.T) {
 		t.Fatalf("the rows and the plan agree: %s", why)
 	}
 	one, two, os, web, docs := dr.tracks[0], dr.tracks[1], dr.tracks[2], dr.tracks[3], dr.tracks[4]
+	if !dr.request(two, nil).RecoverOnly || !dr.request(os, nil).RecoverOnly || dr.request(web, nil).RecoverOnly {
+		t.Fatal("the driver lost the distinction between an uncertain intent and work never begun")
+	}
 	if !one.finished() || one.snapshot().Status != StepSucceeded || one.snapshot().DurationMs != 9 {
 		t.Errorf("a receipt is kept: %+v", one.snapshot())
 	}

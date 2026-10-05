@@ -33,7 +33,8 @@ import (
 // again too (the runner finds or creates the Job by its name). A stale
 // re-forward steers AWAY from the replica whose runner went quiet, and so
 // does every retry of it that a failed send makes. The outcome, however it
-// arrives, is acked so the Job and its Secret go now rather than at their TTL.
+// arrives, remains recoverable until the driver durably journals it and calls
+// AcknowledgeReceipt, or retention expires.
 //
 // Nothing waits forever, and a step waits for what it is waiting on (ruling
 // R31b). While its Job does not exist -- its runner waiting for a free slot
@@ -41,7 +42,7 @@ import (
 // Once a status says when its Job was created, by the Job's own deadline: its
 // timeout from that creation, never past the run's ceiling. Past the bound
 // and lostGrace, one last status decides how the step is reported, and its
-// Job is deleted.
+// result is returned without deleting its evidence.
 
 // forwardEnd is how one step forward ended.
 type forwardEnd struct {
@@ -272,7 +273,6 @@ func (s *clusterStep) answer(ctx context.Context, resp *nodev1.WorkbenchForwardR
 		return s.where(failedResult(pl.CodeExecutorError, fmt.Sprintf(
 			"The workbench replica %s answered something that is not a step's outcome: %v", servedBy, err)))
 	}
-	s.e.ack(ctx, s.run, s.job)
 	return s.fill(res, servedBy)
 }
 
@@ -299,7 +299,6 @@ func (s *clusterStep) poll(ctx context.Context) (pl.StepResult, bool) {
 		// the outcome is persisted with nothing, and the step is done.
 		s.e.logger.Info("pipelines: took a step's outcome from its status; the reply to its forward was lost",
 			slog.String("runId", s.run.RunID), slog.String("stepKey", s.run.StepKey), slog.String("jobName", s.job))
-		s.e.ack(ctx, s.run, s.job)
 		return s.fill(res, servedBy), true
 	case StateStale:
 		if s.pending == nil || s.e.now().Sub(s.pendingSince) < s.e.stalePatience {
@@ -332,20 +331,18 @@ func (s *clusterStep) poll(ctx context.Context) (pl.StepResult, bool) {
 }
 
 // giveUp ends a step nothing reported by its bound and the grace past it. One
-// last status decides how it reads; whatever it says, the Job and its Secret
-// are deleted, because nothing will report the step now.
+// last status decides how it reads. The Job and its Secret remain until the
+// driver commits this outcome and acknowledges it, or retention expires.
 func (s *clusterStep) giveUp(ctx context.Context) pl.StepResult {
 	reply, servedBy, ok := s.e.status(ctx, s.run, s.job, s.statusPin())
 	if ok {
 		s.learn(reply)
 		if reply.State == StateFinished {
 			if res, done := statusOutcome(reply); done {
-				s.e.ack(ctx, s.run, s.job)
 				return s.fill(res, servedBy)
 			}
 		}
 	}
-	s.e.ack(ctx, s.run, s.job)
 	_, atCeiling := s.bound()
 	code, deadline := pl.CodeRunCeiling, fmt.Sprintf("its run's %s ceiling", s.e.cfg.RunCeiling)
 	if !atCeiling {

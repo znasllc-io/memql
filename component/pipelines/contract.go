@@ -140,6 +140,9 @@ type Step struct {
 // StepRequest is what the driver hands an Executor for one step. It crosses
 // NodeService as JSON, so it carries plain data only.
 type StepRequest struct {
+	// RecoverOnly means a previous driver recorded an intent without a receipt.
+	// The executor may adopt existing work, but cannot start a replacement effect.
+	RecoverOnly bool `json:"recoverOnly,omitempty"`
 	// RunID is the v1:pipelines:run id (bare): what log lines bind to.
 	RunID string `json:"runId"`
 	// WorkRunID is the v1:work:run id (bare): what Library files bind to.

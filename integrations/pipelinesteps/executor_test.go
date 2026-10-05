@@ -253,13 +253,16 @@ func awaitCond(t *testing.T, cond func() bool, failure string) {
 	}
 }
 
-// executeAsync runs Execute on its own goroutine.
-func executeAsync(e *Executor, ctx context.Context, req pl.StepRequest) <-chan pl.StepResult {
+// executeAndCommitAsync models the driver accepting and committing an outcome.
+// Raw Execute tests separately verify that returning an outcome never ACKs it.
+func executeAndCommitAsync(e *Executor, ctx context.Context, req pl.StepRequest) <-chan pl.StepResult {
 	out := make(chan pl.StepResult, 1)
 	go func() {
 		res, err := e.Execute(ctx, req)
 		if err != nil {
 			res = pl.StepResult{Status: "error: " + pl.Outcome(err.Error())}
+		} else if res.Status != pl.OutcomeCancelled {
+			e.AcknowledgeReceipt(ctx, req)
 		}
 		out <- res
 	}()
@@ -406,6 +409,22 @@ func TestExecuteRefusesAnUnknownNeedAndAnUnconsentedFleetStep(t *testing.T) {
 	})
 }
 
+func TestFleetRecoveryDoesNotRedispatchAnUncertainEffect(t *testing.T) {
+	fleet := &fakeFleet{}
+	e := newTestExecutor(nil, fleet)
+	req := exRequest()
+	req.RecoverOnly, req.Compute = true, pl.ComputeClusterAndFleet
+	req.Step.Execution, req.Step.Image = pl.ExecutionNative, ""
+	res, err := e.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFailure(t, res, pl.OutcomeFailed, pl.CodeExecutionUncertain)
+	if len(fleet.runs()) != 0 {
+		t.Fatal("a replacement worker could have repeated an external effect")
+	}
+}
+
 // TestExecuteRefusesPastTheRunCeiling: once the run's wall-clock ceiling has
 // passed, a step fails pipeline_run_ceiling without a Job -- and so does one
 // that would be given less than a second, which no Job deadline can express.
@@ -519,7 +538,7 @@ func TestExecuteNamesTheBindingDeadline(t *testing.T) {
 // the engine's own SYSTEM-class assertion, the runner's outcome is the step's,
 // and the agent then acks so the Job and its Secret go now rather than at
 // their TTL.
-func TestExecuteForwardsAClusterStepAndAcks(t *testing.T) {
+func TestExecuteRetainsItsResultUntilReceiptAcknowledgement(t *testing.T) {
 	outcome := exOutcome("")
 	outcome.Where.NodeID = "" // a runner that left it blank: the replica that answered is named
 	wb := &scriptedWorkbench{step: func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
@@ -564,6 +583,10 @@ func TestExecuteForwardsAClusterStepAndAcks(t *testing.T) {
 		t.Errorf("the forwarded StepRun = %v, want %v", run, want)
 	}
 
+	if len(wb.sent(workbench.PipelineAckAction)) != 0 {
+		t.Fatal("Execute discarded evidence before a durable receipt")
+	}
+	e.AcknowledgeReceipt(context.Background(), req)
 	awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineAckAction)) == 1 },
 		"the outcome was never acked: the Job and its Secret would hold a slot of the ceiling until their TTL")
 	ack := wb.sent(workbench.PipelineAckAction)[0]
@@ -612,6 +635,7 @@ func TestALostAckIsSentAgain(t *testing.T) {
 		if res, err := e.Execute(context.Background(), exRequest()); err != nil || res.Status != pl.OutcomeSucceeded {
 			t.Fatalf("Execute = %+v, %v; want the runner's outcome", res, err)
 		}
+		e.AcknowledgeReceipt(context.Background(), exRequest())
 		select {
 		case end := <-ended:
 			return end, wb.sent(workbench.PipelineAckAction)
@@ -710,7 +734,7 @@ func TestExecuteTakesAFinishedStatusWhenTheReplyWasLost(t *testing.T) {
 	e := newTestExecutor(wb, nil)
 	req := exRequest()
 
-	res := awaitResult(t, executeAsync(e, context.Background(), req), "the status said finished")
+	res := awaitResult(t, executeAndCommitAsync(e, context.Background(), req), "the status said finished")
 	if res.Status != pl.OutcomeFailed || res.ExitCode != 3 || res.LogFileID != "file-log" {
 		t.Fatalf("result = %+v, want the persisted outcome the status carried", res)
 	}
@@ -772,7 +796,7 @@ func TestExecuteReforwardsWhenTheReplicaIsLostOrStale(t *testing.T) {
 		e := newTestExecutor(wb, nil)
 		clock = withClock(e)
 		e.stalePatience = time.Minute
-		res := awaitResult(t, executeAsync(e, context.Background(), exRequest()), "the stale Job was forwarded again")
+		res := awaitResult(t, executeAndCommitAsync(e, context.Background(), exRequest()), "the stale Job was forwarded again")
 		if res.Status != pl.OutcomeSucceeded {
 			t.Fatalf("result = %+v; want the adopting replica's outcome", res)
 		}
@@ -808,7 +832,7 @@ func TestExecuteReforwardsWhenTheReplicaIsLostOrStale(t *testing.T) {
 		clock := withClock(e)
 		e.stalePatience = time.Minute
 		e.statusEvery = 2 * time.Millisecond
-		done := executeAsync(e, context.Background(), exRequest())
+		done := executeAndCommitAsync(e, context.Background(), exRequest())
 		awaitPolls(t, polls, 10)
 		if n := len(wb.sent(workbench.PipelineStepAction)); n != 1 {
 			t.Fatalf("step forwards = %d after ten stale readings inside the patience, want 1", n)
@@ -864,7 +888,7 @@ func TestExecuteKeepsAvoidingTheQuietReplicaWhenAReforwardFails(t *testing.T) {
 			clock = withClock(e)
 			e.stalePatience = time.Minute
 
-			res := awaitResult(t, executeAsync(e, context.Background(), exRequest()), "the retried re-forward answered")
+			res := awaitResult(t, executeAndCommitAsync(e, context.Background(), exRequest()), "the retried re-forward answered")
 			if res.Status != pl.OutcomeSucceeded || res.Where.NodeID != "workbench-b" {
 				t.Fatalf("result = %+v; want the adopting replica's outcome", res)
 			}
@@ -970,7 +994,7 @@ func TestExecuteReforwardsAStepWhoseJobStaysAbsent(t *testing.T) {
 	clock := withClock(e)
 	e.stalePatience = time.Minute
 	e.statusEvery = 2 * time.Millisecond
-	done := executeAsync(e, context.Background(), exRequest())
+	done := executeAndCommitAsync(e, context.Background(), exRequest())
 	steps := func() int { return len(wb.sent(workbench.PipelineStepAction)) }
 
 	awaitPolls(t, polls, 10)
@@ -1115,7 +1139,7 @@ func TestExecuteWaitsForAQueuedStepUntilItsRunsCeiling(t *testing.T) {
 	e.lostGrace = time.Minute
 	e.statusEvery = 2 * time.Millisecond
 	// Its own timeout is fifteen minutes; its run's ceiling is 110 away.
-	done := executeAsync(e, context.Background(), exRequest())
+	done := executeAndCommitAsync(e, context.Background(), exRequest())
 	awaitPolls(t, polls, 1) // handed over, on the clock as it stands
 
 	clock.set(exNow.Add(15*time.Minute + time.Minute + time.Second))
@@ -1164,7 +1188,7 @@ func TestExecuteGivesUpOnACreatedJobByItsCreation(t *testing.T) {
 			clock := withClock(e)
 			e.lostGrace = time.Minute
 			e.statusEvery = 2 * time.Millisecond
-			done := executeAsync(e, context.Background(), exRequest())
+			done := executeAndCommitAsync(e, context.Background(), exRequest())
 			awaitPolls(t, polls, 1) // handed over at exNow
 
 			clock.set(exNow.Add(c.giveUpAt - time.Second))
@@ -1233,7 +1257,7 @@ func TestExecuteGivesUpPastTheDeadline(t *testing.T) {
 				return c.look(n)
 			}
 
-			res := awaitResult(t, executeAsync(e, context.Background(), exRequest()), "every bound and the grace passed")
+			res := awaitResult(t, executeAndCommitAsync(e, context.Background(), exRequest()), "every bound and the grace passed")
 			if c.code == "" {
 				if res.Status != c.want {
 					t.Fatalf("result = %+v, want %s", res, c.want)
@@ -1265,7 +1289,7 @@ func TestExecuteGivesUpPastTheDeadline(t *testing.T) {
 		e := newTestExecutor(wb, nil)
 		clock = withClock(e)
 		e.noPeerPatience = 30 * time.Second
-		res := awaitResult(t, executeAsync(e, context.Background(), exRequest()), "no replica was ever reachable")
+		res := awaitResult(t, executeAndCommitAsync(e, context.Background(), exRequest()), "no replica was ever reachable")
 		wantFailure(t, res, pl.OutcomeFailed, pl.CodeRunnerUnavailable)
 		if n := len(wb.sent(workbench.PipelineStepAction)); n < 2 {
 			t.Errorf("step forwards = %d: a replica missing for a moment (a rolling deploy) must be tried again", n)
@@ -1284,7 +1308,7 @@ func TestExecuteReadsTheDriversDeadlineAsTheRunsCeiling(t *testing.T) {
 	defer cancel()
 	req := exRequest() // its own timeout binds: the StepRun names pipeline_step_timeout
 
-	res := awaitResult(t, executeAsync(e, ctx, req), "the driver's deadline had passed")
+	res := awaitResult(t, executeAndCommitAsync(e, ctx, req), "the driver's deadline had passed")
 
 	wantFailure(t, res, pl.OutcomeFailed, pl.CodeRunCeiling)
 	if res.Failure.Message != driverDeadlineMessage {
@@ -1319,7 +1343,7 @@ func TestCancelReachesInFlightStepsAndDeletesJobs(t *testing.T) {
 	ctx := context.Background()
 	otherCtx, stopOther := context.WithCancel(ctx)
 	defer stopOther()
-	r1, r2, r3, r4 := executeAsync(e, ctx, first), executeAsync(e, ctx, second), executeAsync(e, ctx, onFleet), executeAsync(e, otherCtx, other)
+	r1, r2, r3, r4 := executeAndCommitAsync(e, ctx, first), executeAndCommitAsync(e, ctx, second), executeAndCommitAsync(e, ctx, onFleet), executeAndCommitAsync(e, otherCtx, other)
 	awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineStepAction)) == 3 && len(fleet.runs()) == 1 },
 		"the four steps never all started")
 
@@ -1436,7 +1460,7 @@ func TestExecuteStopsWhenItsContextEnds(t *testing.T) {
 	e := newTestExecutor(wb, nil)
 	e.statusEvery = time.Hour
 	ctx, stop := context.WithCancel(context.Background())
-	done := executeAsync(e, ctx, exRequest())
+	done := executeAndCommitAsync(e, ctx, exRequest())
 	awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineStepAction)) == 1 }, "the step was never forwarded")
 	stop()
 	res := awaitResult(t, done, "the context ended")
@@ -1477,7 +1501,7 @@ func TestCancelledStepsAreTheRunsNotTheCallers(t *testing.T) {
 	wb := &scriptedWorkbench{}
 	e := newTestExecutor(wb, nil)
 	e.statusEvery = time.Hour
-	done := executeAsync(e, context.Background(), exRequest())
+	done := executeAndCommitAsync(e, context.Background(), exRequest())
 	awaitCond(t, func() bool { return len(wb.sent(workbench.PipelineStepAction)) == 1 }, "the step was never forwarded")
 	if err := e.Cancel(context.Background(), "run-7f3a"); err != nil {
 		t.Fatalf("Cancel: %v", err)

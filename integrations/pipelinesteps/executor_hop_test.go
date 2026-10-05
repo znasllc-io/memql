@@ -695,7 +695,7 @@ func TestExecuteReattachesWhenTheWorkbenchIsLost(t *testing.T) {
 	req := exRequest()
 	job := JobName(req.RunID, req.StepKey, req.Attempt)
 
-	done := executeAsync(e, context.Background(), req)
+	done := executeAndCommitAsync(e, context.Background(), req)
 	awaitCond(t, func() bool { return cluster.holder(job) == "workbench-a" },
 		"workbench-a never created the step's Job")
 
@@ -739,7 +739,7 @@ func TestExecuteHopRecoversALostReplyThroughTheStatus(t *testing.T) {
 	req := exRequest()
 	job := JobName(req.RunID, req.StepKey, req.Attempt)
 
-	done := executeAsync(e, context.Background(), req)
+	done := executeAndCommitAsync(e, context.Background(), req)
 	awaitCond(t, func() bool { return cluster.holder(job) == "workbench-a" }, "the step never started")
 	mesh.flap("workbench-a")
 	cluster.release(job)
@@ -768,8 +768,8 @@ func TestCancelHopDeletesTheRunsJobsOnEveryReplica(t *testing.T) {
 	first := exRequest()
 	second := exRequest()
 	second.StepKey, second.Step.Key = "tests.go-tests#3", "tests.go-tests#3"
-	r1 := executeAsync(e, context.Background(), first)
-	r2 := executeAsync(e, context.Background(), second)
+	r1 := executeAndCommitAsync(e, context.Background(), first)
+	r2 := executeAndCommitAsync(e, context.Background(), second)
 	firstJob := JobName(first.RunID, first.StepKey, first.Attempt)
 	secondJob := JobName(second.RunID, second.StepKey, second.Attempt)
 	awaitCond(t, func() bool { return cluster.holder(firstJob) != "" && cluster.holder(secondJob) != "" },
@@ -810,7 +810,7 @@ func TestExecuteHopForwardsAwayFromTheReplicaThatWentQuiet(t *testing.T) {
 	req := exRequest()
 	job := JobName(req.RunID, req.StepKey, req.Attempt)
 
-	done := executeAsync(e, context.Background(), req)
+	done := executeAndCommitAsync(e, context.Background(), req)
 	awaitCond(t, func() bool { return cluster.holder(job) == "workbench-a" }, "workbench-a never created the step's Job")
 	cluster.stall("workbench-a")
 	// The patience since the forward has run out: the next stale reading --
@@ -846,7 +846,7 @@ func TestExecuteHopReforwardsAStepWhoseRequestNeverArrived(t *testing.T) {
 	job := JobName(req.RunID, req.StepKey, req.Attempt)
 	mesh.dropNextStepTo("workbench-a")
 
-	done := executeAsync(e, context.Background(), req)
+	done := executeAndCommitAsync(e, context.Background(), req)
 	awaitCond(t, func() bool { return len(mesh.sent(workbench.PipelineStatusAction)) >= 3 },
 		"the lost step's status was never read")
 	if created := cluster.jobsCreated(); len(created) != 0 {

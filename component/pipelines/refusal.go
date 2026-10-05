@@ -111,9 +111,11 @@ const (
 	CodeServiceFailed    = "pipeline_service_failed"
 	CodeStepCancelled    = "pipeline_step_cancelled"
 	CodeNodeLost         = "pipeline_node_lost"
-	CodeArtifactTooLarge = "pipeline_artifact_too_large"
-	CodeArtifactMissing  = "pipeline_artifact_missing"
-	CodeLogCapped        = "pipeline_log_capped"
+	// Prior execution lacks a recoverable receipt; repeating may duplicate effects.
+	CodeExecutionUncertain = "pipeline_execution_uncertain"
+	CodeArtifactTooLarge   = "pipeline_artifact_too_large"
+	CodeArtifactMissing    = "pipeline_artifact_missing"
+	CodeLogCapped          = "pipeline_log_capped"
 	// A step's Go test timings could not be read from its log: its packages
 	// keep their earlier weights.
 	CodeTimingsUnreadable = "pipeline_timings_unreadable"
@@ -186,6 +188,7 @@ var codeClasses = map[string]Class{
 	CodeServiceFailed:       ClassFailure,
 	CodeStepCancelled:       ClassFailure,
 	CodeNodeLost:            ClassFailure,
+	CodeExecutionUncertain:  ClassFailure,
 	CodeArtifactTooLarge:    ClassFailure,
 	CodeIsolationUnenforced: ClassFailure,
 	CodeChannelMissing:      ClassFailure,

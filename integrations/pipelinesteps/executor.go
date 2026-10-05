@@ -194,6 +194,9 @@ func (e *Executor) Execute(ctx context.Context, req pl.StepRequest) (pl.StepResu
 	stepCtx, release := e.track(ctx, req.RunID)
 	defer release()
 
+	if req.Step.RequiresFleet() && req.RecoverOnly {
+		return failedResult(pl.CodeExecutionUncertain, "A previous driver may have started this fleet command, and no durable result was recorded. Reconcile its outcome before authorizing new work; no replacement command was sent."), nil
+	}
 	if req.Step.RequiresFleet() {
 		if e.fleet == nil {
 			return failedResult(pl.CodeRunnerUnavailable, fmt.Sprintf(

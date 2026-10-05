@@ -31,6 +31,7 @@ func stepRunFor(req pl.StepRequest, timeoutSeconds int, deadlineCode string) Ste
 		}
 	}
 	return StepRun{
+		RecoverOnly:    req.RecoverOnly,
 		Execution:      req.Step.Execution,
 		Needs:          slices.Clone(req.Step.Needs),
 		Platform:       req.Step.Platform,

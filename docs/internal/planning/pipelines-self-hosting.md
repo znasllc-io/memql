@@ -338,3 +338,27 @@ container bounds are 2 CPUs, 2 GiB and 512 processes. Services and caches still
 refuse on the fleet contract. Agent workloads and other OS users are outside
 this reservation; resource admission, native reconciliation and complete fleet
 parity remain open. These limits are not evidence of a finished build fleet.
+
+
+## Receipt acknowledgement and conservative recovery
+
+The executor now retains a completed Job until the driver durably commits its
+work-step receipt, then calls the optional `ReceiptAcknowledger` contract.
+Journal failures send no acknowledgement. A replacement driver can retrieve
+that Job's recorded result without another command or Library publication;
+completed journal rows repeat cleanup idempotently. Cleanup retains bounded
+retry and TTL behavior.
+
+A resumed unfinished intent carries `recoverOnly` across the mesh. A missing
+Job refuses with `pipeline_execution_uncertain` before resource or token
+creation; a fleet intent without a durable remote receipt is never redispatched.
+The versioned workbench action prevents an older binary silently ignoring this
+flag. Real two-runner handler tests (against a fake Kubernetes API), journal
+fault tests and focused race/database regressions verify these seams.
+
+This does not finish recovery: an uncertain initial forward needs durable
+external-attempt identity and reconciliation, artifacts written before the
+final runner outcome need deduplication, and ordinary automation executions
+still need ownership fencing. Retention expiry and late delivery must be
+included in that generic execution contract. Until those are implemented,
+uncertain fleet attempts stop for reconciliation instead of automatic failover.

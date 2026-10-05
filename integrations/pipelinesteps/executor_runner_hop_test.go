@@ -322,7 +322,7 @@ func (w *runnerHop) execute(req pl.StepRequest) <-chan pl.StepResult {
 	w.mu.Lock()
 	w.steps = append(w.steps, hopStepRef{run: req.RunID, job: JobName(req.RunID, req.StepKey, req.Attempt)})
 	w.mu.Unlock()
-	return executeAsync(w.e, w.ctx, req)
+	return executeAndCommitAsync(w.e, w.ctx, req)
 }
 
 func (w *runnerHop) executed() []hopStepRef {
@@ -399,6 +399,45 @@ func (w *runnerHop) ackedAway(t *testing.T, job string) {
 	jobs, secrets := w.h.c.requestsFor(http.MethodDelete, kubeJobs+"/"+job), w.h.c.requestsFor(http.MethodDelete, kubeSecrets+"/"+secret)
 	if len(jobs) != 1 || len(secrets) != 1 {
 		t.Errorf("the Job was deleted %d time(s) and its Secret %d, want once each", len(jobs), len(secrets))
+	}
+}
+
+// A returned result is not a committed work-journal receipt. A fresh agent
+// executor must still be able to recover the same result across the mesh.
+func TestFinishedJobSurvivesUntilTheDriverCommitsItsReceipt(t *testing.T) {
+	w := newRunnerHop(t)
+	req := hopRequest()
+	job := JobName(req.RunID, req.StepKey, req.Attempt)
+	w.h.c.script(job, rtFinishingScript(job, 0, captureKubeLine(rtAt(1100), "completed once")))
+	first, err := w.e.Execute(w.ctx, req)
+	if err != nil || first.Status != pl.OutcomeSucceeded {
+		t.Fatalf("first result: %+v %v", first, err)
+	}
+	if !w.h.c.hasJob(job) || !w.h.c.hasSecret(SecretName(job)) || len(w.mesh.sent(workbench.PipelineAckAction)) != 0 {
+		t.Fatal("result evidence was deleted before its durable receipt")
+	}
+	replacement := newTestExecutor(w.mesh, nil)
+	withClock(replacement).set(w.clock.now())
+	req.RecoverOnly = true
+	second, err := replacement.Execute(w.ctx, req)
+	if err != nil || !reflect.DeepEqual(first, second) {
+		t.Fatalf("recovered result: %+v %v; first: %+v", second, err, first)
+	}
+	if len(w.h.c.requestsFor(http.MethodPost, kubeJobs)) != 1 || len(w.h.lib.stored()) != 1 {
+		t.Fatal("agent replacement repeated execution or artifact publication")
+	}
+	replacement.AcknowledgeReceipt(w.ctx, req)
+	w.ackedAway(t, job)
+}
+
+func TestRecoveryWithNoJobNeverStartsAReplacement(t *testing.T) {
+	h := newRunnerHarness(t)
+	run := testRun()
+	run.RecoverOnly = true
+	res := h.r.Run(context.Background(), run)
+	wantFailure(t, res, pl.OutcomeFailed, pl.CodeExecutionUncertain)
+	if len(h.c.requestsFor(http.MethodPost, kubeJobs)) != 0 || len(h.c.requestsFor(http.MethodPost, kubeSecrets)) != 0 || len(h.tokens.called()) != 0 || len(h.lib.stored()) != 0 {
+		t.Fatal("an uncertain recovery created resources, credentials or artifacts")
 	}
 }
 

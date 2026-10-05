@@ -246,7 +246,9 @@ running step, and the API server counts it atomically across every workbench
 replica. A step that finds the quota full waits, says so once in its log
 (`memql: waiting for a free slot under the pipelines ceiling`), and tries again
 every 10 seconds until a slot frees or its run reaches its ceiling. A finished
-Job counts until the agent's acknowledgement deletes it. The agent sends that
+Job counts until the agent has durably committed its work-step receipt and
+acknowledges it. Returning an execution result does not delete the evidence.
+The agent sends that
 acknowledgement up to 5 times, waiting twice as long before each send, and if
 every send is lost, the Job's TTL deletes it 30 minutes after it finished.
 
@@ -673,6 +675,26 @@ A step's `artifacts:` are paths or globs relative to the working copy.
 
 ## Lifecycle
 
+### Recovering an interrupted driver
+
+A replacement driver preserves completed journal receipts and acknowledges
+retained resources idempotently. An unfinished intent is sent as `recoverOnly`:
+a cluster runner may adopt an existing Job or its stored outcome, but a missing
+Job is `pipeline_execution_uncertain`, without creating a replacement or minting
+a clone token. Fleet execution currently has no durable remote receipt lookup;
+an interrupted fleet intent is also uncertain and is not dispatched again.
+Inspect the original attempt before authorizing new work.
+
+The workbench action is `pipelineStepV2` and its receipt acknowledgement is
+`pipelineReceiptAck`. Older replicas reject these actions instead of ignoring
+new execution or recovery fields. Upgrade the coordinated engine set and drain
+old drivers before enabling the new protocol.
+
+Retention is bounded. Durable external-attempt identity, late-delivery
+reconciliation, and deduplicating artifacts if interruption happens before the
+runner records its final outcome remain required for complete recovery. A
+missing receipt is never proof that the external work did not run.
+
 ### Cancel
 
 `pipelinesCancel`, or **Cancel** on the run's page, flags the run
@@ -850,6 +872,7 @@ run's page and, for a failed step, the check run, with its sentence.
 | `pipeline_job_rejected` | failure | The step could not be made into a safe Job (an artifact path that could leave the working copy, a secret named like a variable the platform sets, an unknown cache, a clone URL that is not plain `https`, no image or command); the cluster refused its Job or Secret; a container could not be created; or the step's cache directory could not be prepared, a cache volume that would not mount within 10 minutes included | The message says which. Fix the manifest when it names the step; for the cache, the pod's events name the mount error |
 | `pipeline_job_unschedulable` | failure | The step's pod could not be scheduled within 10 minutes: no node had room, or the cache claim it mounts is Pending (a storage class that does not exist; on AKS, no Blob CSI driver) | Give the steps room -- a dedicated node pool, or lower requests or ceiling in the overlay -- or turn the Blob CSI driver on (`azure-provision.sh` does) |
 | `pipeline_step_disk_exceeded` | failure | The kubelet stopped the step for the disk its pod wrote: its working copy past the workspace's size limit, or the pod's or one container's files past the namespace's ephemeral-storage limit. The working copy, what the containers write anywhere in their own filesystems and their logs all count; a declared cache does not. The message quotes the kubelet's sentence | Write less, or declare a cache for what a tool keeps between runs (Go's build cache otherwise lands in the image's home directory); an operator raises the overlay's limit |
+| `pipeline_execution_uncertain` | failure | A prior intent has no recoverable Job or fleet receipt; no replacement effect is started | Reconcile the original attempt before authorizing new work |
 | `pipeline_node_lost` | failure | The cluster stopped the step's pod (a drain, a preemption, an eviction) before its command ended; the pod or Job failed with nothing saying why; the Job was deleted while another replica held it; no workbench replica reported the step within its deadline and the 4 minutes 30 seconds past it; or a fleet machine's connection ended before it reported | Re-run the step |
 | `pipeline_step_cancelled` | failure | The step was cancelled: its run was cancelled or superseded, or the drive running it ended | Re-run when ready |
 | `pipeline_no_machine_for_need` | failure | No machine of the owner's that offers the need, allows pipeline steps and is online could take the step, and nothing ran; or the machine's own pipelines policy refused it | Turn on a machine that has the need and allows pipelines in its `policy.yaml` (listing the repository, when `repos` lists any), or drop the need |
