@@ -18,6 +18,13 @@ import (
 // follows is that count as a function over values: the engine side reads the
 // run rows, and the work steps of the runs that need them (RunsNeedingSteps),
 // and hands them over as RunFacts and StepFacts.
+//
+// What the count settles is whose miss a failed full run is. A step the pull
+// request's run planned and skipped as not affected is the selection's miss,
+// and that alone is a false green. A step it never planned -- a stage that
+// runs on pushes alone, a notification that was not delivered, a step a
+// sibling merge added -- was never the selection's to run. A step that ran and
+// passed there failed on a tree that differed: a sibling merge, or a flake.
 
 // RunFacts is what the count reads off a v1:pipelines:run row.
 //
@@ -26,9 +33,13 @@ import (
 // nothing about the tree it ran. PullRequest is set on a pull_request run and
 // absent on every other event, which is why the pull request a full-mode run
 // landed is read off its words (PullRequestOf). HeadBranch and Title are the
-// row's: a merge group's head branch, and a commit's first line. SHA is not
-// read: a merge writes a new commit, so a landing is never paired with its
-// pull request by commit.
+// row's: a merge group's head branch, and a commit's first line.
+//
+// SHA, with Mode and Event, is the key a run was opened under (RunKey; one
+// pipeline's runs share a repository): every re-run of a run is another row
+// with the same key, which is how the count knows it for another attempt of
+// that run. A run with no SHA is a key of its own. A landing is never paired
+// with its pull request by commit: a merge writes a new one.
 type RunFacts struct {
 	ID, SHA, HeadBranch, Title, Conclusion string
 	Event                                  Event
@@ -49,39 +60,50 @@ type RunFacts struct {
 // says why.
 type StepFacts struct{ Key, Status, Code string }
 
-// What a pull request's run did with a step the full-mode run failed.
+// What a pull request's run did with a step the full-mode run failed. Each is
+// read off what the run recorded for the step, by lane, and only evidence
+// counts.
 const (
-	// OnPullRequestNotSelected: the pull request's run did not execute the
-	// step. The affected selection left it out, the pull request's plan never
-	// held it (a stage that runs on a push alone), or the run recorded no
-	// pass for it -- the pull request gave no evidence about this step.
+	// OnPullRequestNotSelected: the pull request's run planned the step and
+	// skipped it as not affected (pipeline_not_affected). The selection was
+	// asked about the step and left it out: that is its miss, and the only
+	// kind that makes a false green.
 	OnPullRequestNotSelected = "not selected"
 	// OnPullRequestPassed: the pull request's run executed the step and it
 	// passed, or carried a pass over from an earlier attempt.
 	OnPullRequestPassed = "passed"
+	// OnPullRequestNotPlanned: the pull request's run holds neither of those
+	// for the step. It never planned it -- a stage that runs on pushes alone
+	// (docs, deploy, verify-rollout), a notification that was not delivered,
+	// a step a sibling merge added to the manifest -- or it recorded nothing
+	// else usable for it. A selection can only miss a step it was asked
+	// about, so this is no miss of it.
+	OnPullRequestNotPlanned = "not planned"
 )
 
-// FalseGreen is one landing: a pull request whose last run before it landed
-// concluded success, and whose full-mode run then failed. It is a false green
-// proper when a step reads OnPullRequestNotSelected, which is what keeps it in
-// FalseGreenReport.FalseGreens; the rest are in SiblingOrFlake.
+// FalseGreen is one landing: a pull request whose last run before its commit
+// first landed concluded success, and whose full-mode run then failed. The
+// list it is in says what the pull request's run did with the failed steps:
+// FalseGreenReport.FalseGreens for a selection miss, NotOnPullRequests for a
+// step it never planned, SiblingOrFlake for steps that passed.
 type FalseGreen struct {
 	PullRequest int `json:"pullRequest"`
 	// PRRunID is the pull request's run that reported success, FullRunID the
-	// full-mode run that failed on the tree that landed.
+	// full-mode run that failed on the tree that landed: the latest attempt to
+	// reach a verdict of the earliest failed run (see CountFalseGreens).
 	PRRunID   string `json:"prRunId"`
 	FullRunID string `json:"fullRunId"`
 	// Steps are the full run's failed steps, each once and by lane (a shard's
 	// "#i" suffix removed), in the order the full run holds them, with what
-	// the pull request's run did with each: OnPullRequestNotSelected or
-	// OnPullRequestPassed. Never nil; a run that failed with no failed step
-	// of its own holds none.
+	// the pull request's run did with each: OnPullRequestNotSelected,
+	// OnPullRequestPassed or OnPullRequestNotPlanned. Never nil; a run that
+	// failed with no failed step of its own holds none.
 	Steps []FalseGreenStep `json:"steps"`
 }
 
 // FalseGreenStep is one failed step of the full run, by lane, and what the
-// pull request's run did with it (OnPullRequestNotSelected or
-// OnPullRequestPassed).
+// pull request's run did with it (OnPullRequestNotSelected,
+// OnPullRequestPassed or OnPullRequestNotPlanned).
 type FalseGreenStep struct {
 	Key           string `json:"key"`
 	OnPullRequest string `json:"onPullRequest"`
@@ -89,25 +111,38 @@ type FalseGreenStep struct {
 
 // FalseGreenReport is the count over the runs it was given.
 //
-// The comparison is by step, not by package. A failing package that a lane
-// which did run left out of its selection reads as passed, and lands in
+// A pull request is one entry in one of the three lists, however many full
+// runs failed on it, filed by the worst of its failed steps: a selection miss
+// makes it a false green; failing that, a step it never planned puts it in
+// NotOnPullRequests; otherwise every failed step ran and passed. The
+// comparison is by step, not by package. A failing package that a lane which
+// did run left out of its selection reads as passed, and lands in
 // SiblingOrFlake: the count is a floor under the selection's misses, never a
 // ceiling.
 type FalseGreenReport struct {
 	// FullRuns is the full-mode runs that reached a verdict on the tree they
-	// ran, which is a conclusion of success or failure. One still going,
-	// cancelled or refused says nothing about the tree, and is not counted.
+	// ran, which is a conclusion of success or failure, each run once however
+	// often it was re-run. One still going, cancelled or refused says nothing
+	// about the tree, and is not counted.
 	FullRuns int `json:"fullRuns"`
-	// FullRunsFailed is those that failed.
+	// FullRunsFailed is those that failed: runs, not pull requests, so a
+	// merge group and the push of its merge commit that both failed are two.
 	FullRunsFailed int `json:"fullRunsFailed"`
-	// AfterGreen is the failed full runs whose pull request's last run before
-	// them concluded success: the pull request reported green and the tree
-	// then failed. It is FalseGreens and SiblingOrFlake together, always.
+	// AfterGreen is the pull requests whose last run before a failed full run
+	// of them concluded success: the pull request reported green and the tree
+	// then failed. Each is counted once. It is FalseGreens, NotOnPullRequests
+	// and SiblingOrFlake together, always.
 	AfterGreen int `json:"afterGreen"`
-	// FalseGreens are those with a failed step the pull request's run did not
-	// execute: the affected selection missed it, which is what the
+	// FalseGreens are those with a failed step the pull request's run planned
+	// and skipped as not affected: the selection missed it, which is what the
 	// affected-subset decision rests on.
 	FalseGreens []FalseGreen `json:"falseGreens"`
+	// NotOnPullRequests are those with no selection miss and at least one
+	// failed step the pull request's run never planned: a stage that runs on
+	// pushes alone, a notification that was not delivered, a step a sibling
+	// merge added. It is no fault of the selection, and it is kept apart from
+	// the false greens so that none of those reads as one.
+	NotOnPullRequests []FalseGreen `json:"notOnPullRequests"`
 	// SiblingOrFlake are the rest: every failed step ran and passed on the
 	// pull request, so the content passed there and the tree the queue built
 	// differed -- a sibling merge -- or the step is flaky. A failed run with
@@ -261,64 +296,176 @@ func failedLanes(facts []StepFacts) []string {
 	return lanes
 }
 
-// passedLanes is the lanes a run recorded a pass for. A pass takes evidence:
-// a step that succeeded, or one a failed-only re-run carried over from an
-// earlier attempt that passed it. One shard passing is the lane having run,
-// which is the granularity the count has.
-func passedLanes(facts []StepFacts) map[string]bool {
-	passed := make(map[string]bool, len(facts))
-	for _, f := range facts {
-		switch {
-		case f.Status == statusDone || f.Status == statusSucceeded:
-			passed[laneOf(f.Key)] = true
-		case f.Status == statusSkipped && f.Code == CodePassedEarlier:
-			passed[laneOf(f.Key)] = true
-		}
-	}
-	return passed
+// laneRecord is what a pull request's run recorded for a lane that bears on a
+// failure of it. These two are the only evidence: anything else the run
+// recorded for the lane, or nothing, is neither.
+type laneRecord struct {
+	// passed: a step of the lane succeeded, or a failed-only re-run carried
+	// one over from an earlier attempt that passed it. One shard passing is
+	// the lane having run, which is the granularity the count has.
+	passed bool
+	// notAffected: a step of the lane was skipped as not affected -- planned,
+	// and left out by the selection.
+	notAffected bool
 }
 
-// landing is a failed full-mode run and the pull-request run that reported
-// success before it: a pull request that was green and a tree that was not.
+// laneRecords is what a run recorded for each lane it holds steps of.
+func laneRecords(facts []StepFacts) map[string]laneRecord {
+	records := make(map[string]laneRecord, len(facts))
+	for _, f := range facts {
+		lane := laneOf(f.Key)
+		rec := records[lane]
+		switch {
+		case f.Status == statusDone || f.Status == statusSucceeded:
+			rec.passed = true
+		case f.Status == statusSkipped && f.Code == CodePassedEarlier:
+			rec.passed = true
+		case f.Status == statusSkipped && f.Code == CodeNotAffected:
+			rec.notAffected = true
+		}
+		records[lane] = rec
+	}
+	return records
+}
+
+// fullRun is a full-mode run as the count judges it: a run key, by its latest
+// attempt that reached a verdict.
+type fullRun struct {
+	// verdict is that attempt: the latest row of the key concluded success or
+	// failure.
+	verdict RunFacts
+	// queued is when the key was first queued, which is when its commit
+	// landed. The pull request's runs are read as of this moment, and not as
+	// of a re-run's, which may come after anything.
+	queued time.Time
+}
+
+// fullRuns is the full-mode runs of runs, each run key once. A run key is the
+// commit, mode and event the run was opened for, with the repository left out
+// because one pipeline has one (RunKey): every re-run of a run is another row
+// sharing it. A key none of whose attempts reached a verdict has said nothing,
+// and is left out. The order is not defined.
+func fullRuns(runs []RunFacts) []fullRun {
+	type attempts struct {
+		queued     time.Time
+		verdict    RunFacts
+		hasVerdict bool
+	}
+	byKey := map[string]*attempts{}
+	for row, r := range runs {
+		if r.Mode != ModeFull {
+			continue
+		}
+		key := runKeyOf(r, row)
+		a := byKey[key]
+		if a == nil {
+			a = &attempts{queued: r.QueuedAt}
+			byKey[key] = a
+		}
+		if r.QueuedAt.Before(a.queued) {
+			a.queued = r.QueuedAt
+		}
+		if hasVerdict(r) && (!a.hasVerdict || newestFirst(r, a.verdict) < 0) {
+			a.verdict, a.hasVerdict = r, true
+		}
+	}
+	out := make([]fullRun, 0, len(byKey))
+	for _, a := range byKey {
+		if a.hasVerdict {
+			out = append(out, fullRun{verdict: a.verdict, queued: a.queued})
+		}
+	}
+	return out
+}
+
+// runKeyOf is the key a run was opened under: RunKey without its repository.
+// A run that names no commit has nothing to be grouped by, and is a key of its
+// own.
+func runKeyOf(r RunFacts, row int) string {
+	if strings.TrimSpace(r.SHA) == "" {
+		return "row " + strconv.Itoa(row)
+	}
+	return RunKey("", r.SHA, r.Mode, r.Event)
+}
+
+// hasVerdict reports whether a run concluded on the tree it ran.
+func hasVerdict(r RunFacts) bool {
+	return r.Conclusion == conclusionSuccess || r.Conclusion == conclusionFailure
+}
+
+// landing is a pull request that was green and whose commit then failed: the
+// failed full run that judges it, when that run's key was first queued, and
+// the pull request's run that reported success before then.
 type landing struct {
 	pullRequest int
 	full, pr    RunFacts
+	queued      time.Time
 }
 
-// landings pairs each failed full-mode run that names a pull request with
-// that pull request's newest pull_request run queued before it, and keeps the
-// pairs whose pull-request run concluded success. Newest full run first. The
-// runs must be distinct (distinctRuns).
+// landings is the pull requests that were green and whose commits failed, one
+// per pull request, newest first. Each failed full run that names a pull
+// request is paired with that pull request's newest pull_request run queued
+// before its key was first queued, and the pair stands when that run
+// concluded success. A pull request that several failed runs landed -- a merge
+// group, and the push of its merge commit -- is judged by the earliest of
+// those that stand: the first full run to find the failure. Only a pair that
+// stands competes, so a failed run that followed a red run of the pull
+// request, with nothing green yet, does not hide a later one that followed a
+// green. The runs must be distinct (distinctRuns), and full is fullRuns of
+// them.
 //
 // The newest run is the one that stands for the pull request: an older green
 // run does not vouch for a newer one that failed, was cancelled or has not
 // finished, because the head that landed is the newest.
-func landings(runs []RunFacts) []landing {
+func landings(runs []RunFacts, full []fullRun) []landing {
 	byPullRequest := map[int][]RunFacts{}
-	var failed []RunFacts
 	for _, r := range runs {
-		switch {
-		case r.Event == EventPullRequest && r.PullRequest > 0:
+		if r.Event == EventPullRequest && r.PullRequest > 0 {
 			byPullRequest[r.PullRequest] = append(byPullRequest[r.PullRequest], r)
-		case r.Mode == ModeFull && r.Conclusion == conclusionFailure:
-			failed = append(failed, r)
 		}
 	}
-	slices.SortFunc(failed, newestFirst)
-
-	var out []landing
-	for _, full := range failed {
-		n, ok := PullRequestOf(full)
+	earliest := map[int]landing{}
+	for _, f := range full {
+		if f.verdict.Conclusion != conclusionFailure {
+			continue
+		}
+		n, ok := PullRequestOf(f.verdict)
 		if !ok {
 			continue
 		}
-		last, ok := newestQueuedBefore(byPullRequest[n], full.QueuedAt)
+		last, ok := newestQueuedBefore(byPullRequest[n], f.queued)
 		if !ok || last.Conclusion != conclusionSuccess {
 			continue
 		}
-		out = append(out, landing{pullRequest: n, full: full, pr: last})
+		l := landing{pullRequest: n, full: f.verdict, pr: last, queued: f.queued}
+		if prev, seen := earliest[n]; !seen || firstLanded(l, prev) {
+			earliest[n] = l
+		}
 	}
+	out := make([]landing, 0, len(earliest))
+	for _, l := range earliest {
+		out = append(out, l)
+	}
+	slices.SortFunc(out, newestLanding)
 	return out
+}
+
+// firstLanded reports whether a landed before b: its commit was first queued
+// earlier, or in the same instant with a run whose id sorts first.
+func firstLanded(a, b landing) bool {
+	if c := a.queued.Compare(b.queued); c != 0 {
+		return c < 0
+	}
+	return a.full.ID < b.full.ID
+}
+
+// newestLanding orders landings newest first, and by the failed run's id
+// within one instant, so no order the rows arrive in changes an answer.
+func newestLanding(a, b landing) int {
+	if c := b.queued.Compare(a.queued); c != 0 {
+		return c
+	}
+	return strings.Compare(a.full.ID, b.full.ID)
 }
 
 // newestFirst orders runs by when they were queued, newest first, and by id
@@ -365,36 +512,55 @@ func distinctRuns(runs []RunFacts) []RunFacts {
 }
 
 // judge says what the pull request's run did with each step the full run
-// failed, and whether any was a step it did not execute.
-func (l landing) judge(steps map[string][]StepFacts) (green FalseGreen, missed bool) {
+// failed, and whether any was a selection miss or a step it never planned.
+func (l landing) judge(steps map[string][]StepFacts) (green FalseGreen, selectionMiss, notPlanned bool) {
 	green = FalseGreen{PullRequest: l.pullRequest, PRRunID: l.pr.ID, FullRunID: l.full.ID, Steps: []FalseGreenStep{}}
-	passed := passedLanes(steps[l.pr.ID])
+	records := laneRecords(steps[l.pr.ID])
 	for _, lane := range failedLanes(steps[l.full.ID]) {
-		on := OnPullRequestPassed
-		if !passed[lane] {
-			on, missed = OnPullRequestNotSelected, true
+		var on string
+		switch rec := records[lane]; {
+		case rec.passed:
+			on = OnPullRequestPassed
+		case rec.notAffected:
+			on, selectionMiss = OnPullRequestNotSelected, true
+		default:
+			on, notPlanned = OnPullRequestNotPlanned, true
 		}
 		green.Steps = append(green.Steps, FalseGreenStep{Key: lane, OnPullRequest: on})
 	}
-	return green, missed
+	return green, selectionMiss, notPlanned
 }
 
 // CountFalseGreens counts the false greens among runs: the measure M1 rests
 // on, and the number the affected-subset decision (D1) is held to.
 //
-// A full-mode run counts once it has a verdict on the tree it ran, which is a
-// conclusion of success or failure. Each failed one is paired with the
-// pull-request run of the pull request it landed (PullRequestOf) that was
-// queued latest before it, and the pair counts, in AfterGreen, only when that
-// run concluded success: the pull request reported green on content whose
-// full run then failed. It is a FALSE GREEN when at least one failed step of
-// the full run -- shard suffix removed, so tests.go-tests#2 compares as
-// tests.go-tests -- was not executed by the pull-request run. When every
-// failed step ran and passed there, the content passed and the tree the queue
-// built differed from it: a sibling merge or a flake, listed apart. A full
-// run that names no pull request, or one whose pull request has no run
-// before it in runs, or whose last run did not pass, is counted in FullRuns
-// and FullRunsFailed and nowhere else.
+// A full-mode run is a run key -- the commit, mode and event it was opened
+// for, which every re-run of it shares -- and is judged by its latest attempt
+// that reached a verdict, a conclusion of success or failure. A failure that
+// passed on a re-run was a flake and is no failure; a failure re-run into
+// another is one failure, as the latest attempt saw it. An attempt still going
+// or cancelled says nothing, and the one before it stands.
+//
+// A failed run that names a pull request (PullRequestOf) is paired with that
+// pull request's run queued latest before the commit first landed, and counts
+// in AfterGreen only when that run concluded success: the pull request
+// reported green on content whose full run then failed. A pull request that
+// several failed runs landed (a merge group, and the push of its merge commit)
+// is one entry, judged by the earliest of them that followed a green run of
+// it. A failed run that names no pull request, or whose pull request has no
+// run before it in runs, or whose last run did not pass, is counted in
+// FullRuns and FullRunsFailed and nowhere else.
+//
+// The entry is filed by what the pull request's run did with the steps the
+// full run failed, by lane (shard suffix removed, so tests.go-tests#2 compares
+// as tests.go-tests), and by the worst of them:
+//
+//   - a step it planned and skipped as not affected is a selection miss, and
+//     the entry is a false green;
+//   - failing that, a step it never planned -- no pass and no such skip --
+//     puts it in NotOnPullRequests: the selection was not asked about it;
+//   - otherwise every failed step ran and passed there, or the run failed with
+//     no failed step of its own, and it is a sibling merge or a flake.
 //
 // runs is one pipeline's runs: the window's, and as many earlier pull_request
 // runs as the caller wants a landing to be able to pair with, since a pull
@@ -404,47 +570,53 @@ func (l landing) judge(steps map[string][]StepFacts) (green FalseGreen, missed b
 //
 // steps holds each run's step facts, keyed by RunFacts.ID, and only for the
 // runs RunsNeedingSteps names are they read. A run with none reads as having
-// executed nothing, so a pull-request run whose steps were not loaded makes
-// every failed step of its landing "not selected": a caller loads them.
+// recorded nothing, so a pull-request run whose steps were not loaded makes
+// every failed step of its landing "not planned" and files it in
+// NotOnPullRequests, which is quiet: a caller loads the steps of every run
+// RunsNeedingSteps names, and treats one it could not load as its own error.
 //
-// Both lists come newest landing first, and are never nil.
+// The lists come newest landing first, and are never nil.
 func CountFalseGreens(runs []RunFacts, steps map[string][]StepFacts) FalseGreenReport {
 	runs = distinctRuns(runs)
-	report := FalseGreenReport{FalseGreens: []FalseGreen{}, SiblingOrFlake: []FalseGreen{}}
-	for _, r := range runs {
-		if r.Mode != ModeFull {
-			continue
-		}
-		switch r.Conclusion {
-		case conclusionSuccess:
-			report.FullRuns++
-		case conclusionFailure:
-			report.FullRuns++
+	full := fullRuns(runs)
+	report := FalseGreenReport{
+		FalseGreens: []FalseGreen{}, NotOnPullRequests: []FalseGreen{}, SiblingOrFlake: []FalseGreen{},
+	}
+	for _, f := range full {
+		report.FullRuns++
+		if f.verdict.Conclusion == conclusionFailure {
 			report.FullRunsFailed++
 		}
 	}
-	for _, l := range landings(runs) {
+	for _, l := range landings(runs, full) {
 		report.AfterGreen++
-		if green, missed := l.judge(steps); missed {
+		green, selectionMiss, notPlanned := l.judge(steps)
+		switch {
+		case selectionMiss:
 			report.FalseGreens = append(report.FalseGreens, green)
-		} else {
+		case notPlanned:
+			report.NotOnPullRequests = append(report.NotOnPullRequests, green)
+		default:
 			report.SiblingOrFlake = append(report.SiblingOrFlake, green)
 		}
 	}
 	return report
 }
 
-// RunsNeedingSteps names the runs whose step facts CountFalseGreens reads: the
-// failed full-mode run of each landing, and the pull-request run it is judged
-// against. Every other run is counted from its row alone, so a caller that
-// loads the steps of these and of no others -- a few runs of a window of
-// hundreds -- has read what the count needs. The ids are sorted, each once,
-// and the list is never nil.
+// RunsNeedingSteps names the runs whose step facts CountFalseGreens reads: for
+// each pull request that was green and whose commit failed, the failed full
+// run that judges it (the latest attempt to reach a verdict of the earliest
+// failed run) and the pull request's run it is judged against. Every other
+// run is counted from its row alone, so a caller that loads the steps of these
+// and of no others -- a dozen runs of a window of hundreds -- has read what
+// the count needs. The ids are sorted and the list is never nil; a pull
+// request is one landing and a run belongs to one, so no id is named twice.
 func RunsNeedingSteps(runs []RunFacts) []string {
+	runs = distinctRuns(runs)
 	ids := []string{}
-	for _, l := range landings(distinctRuns(runs)) {
+	for _, l := range landings(runs, fullRuns(runs)) {
 		ids = append(ids, l.full.ID, l.pr.ID)
 	}
 	slices.Sort(ids)
-	return slices.Compact(ids)
+	return ids
 }
