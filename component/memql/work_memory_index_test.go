@@ -119,6 +119,27 @@ func TestConversationSemanticEvidenceAcrossReplicasAndSourceChanges(t *testing.T
 	forged := auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "system:automation:untrusted", Synthetic: true}))
 	_, err = b.indexConversationMemoryBuiltin(forged, map[string]any{"conversationId": conversation, "ownerUserId": owner.UserId}, 0)
 	require.Error(t, err)
+	// A trusted update trigger on another replica carries the source owner
+	// into remote embedding, rather than lending the maintenance actor or
+	// losing authority at the model-dispatch boundary.
+	var backgroundEmbedded bool
+	backgroundStore := memoryIndexTestIntegration{handler: func(c context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+		assertion, ok := auth.ForwardedAuthorityFromContext(c)
+		require.True(t, ok)
+		receiver, err := auth.VerifyForwardedAuthority(assertion, time.Now())
+		require.NoError(t, err)
+		require.Equal(t, owner.UserId, receiver.UserId)
+		require.Equal(t, auth.RoleWriter, receiver.Role)
+		require.False(t, receiver.IsClusterOwner())
+		backgroundEmbedded = true
+		return store.handler(c, args, 0)
+	}}
+	background, _, _ := readMergeTestEngine(t)
+	require.NoError(t, background.integrations.Register(backgroundStore))
+	trusted := auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), auth.SystemActor("automation:indexConversationMemoryOnUpdate")))
+	_, err = background.indexConversationMemoryBuiltin(trusted, map[string]any{"conversationId": conversation, "ownerUserId": owner.UserId}, 0)
+	require.NoError(t, err)
+	require.True(t, backgroundEmbedded)
 }
 
 func TestWorkViewerContextFreshAndMinimal(t *testing.T) {

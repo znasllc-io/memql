@@ -47,7 +47,15 @@ func (e *MemQLEngine) indexConversationMemoryBuiltin(ctx context.Context, args m
 		if !auth.OriginFromContext(ctx).IsInternal() || !trusted || owner == "" {
 			return nil, fmt.Errorf("only the source-update trigger may supply a memory owner")
 		}
-		ctx = auth.ContextWithUserActor(ctx, owner)
+		// The trigger may execute on a planner while the owner's model is
+		// held by an agent replica. Borrowed attribution alone cannot cross
+		// that hop; bind the same writer-limited owner assertion as durable
+		// background work, never the maintenance parent's authority.
+		var err error
+		ctx, err = auth.ContextWithPersistedOwner(ctx, owner, nil, nil)
+		if err != nil {
+			return nil, err
+		}
 	}
 	conversationID := stringArg(args, "conversationId")
 	if runID := stringArg(args, "runId"); runID != "" {
