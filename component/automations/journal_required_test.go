@@ -151,7 +151,7 @@ func (j failRequiredReceipt) Execute(ctx context.Context, query string) (*memql.
 
 func TestRequiredJournalDBResumesOnAnotherExecutor(t *testing.T) {
 	engine := sharedJournalEngine(t)
-	a := statementAutomation(t, fmt.Sprintf("@template\n@journalRequired\nautomation durableRead%d { query first()\nquery second()\nquery third() }", time.Now().UnixNano()))
+	a := statementAutomation(t, fmt.Sprintf("@template\n@journalRequired\nautomation durableRead%d { query first()\nbuiltin serviceVersion()\nquery third() }", time.Now().UnixNano()))
 	firstProbe := newStmtProbe()
 	firstProbe.answers["first"] = memql.NewResultWithOutput(map[string]any{"value": "kept"})
 	first := NewExecutor(ExecutorOptions{Engine: engine, StepRegistry: firstProbe})
@@ -178,7 +178,7 @@ func TestRequiredJournalDBResumesOnAnotherExecutor(t *testing.T) {
 	if err != nil || resumed.ID != exec.ID || resumed.Status != "completed" {
 		t.Fatalf("resume on another executor: %+v %v", resumed, err)
 	}
-	if got := strings.Join(secondProbe.callees(), ","); got != "second,third" {
-		t.Fatalf("resumed calls=%s, want second,third", got)
+	if got := strings.Join(secondProbe.callees(), ","); got != "serviceVersion,third" {
+		t.Fatalf("resumed calls=%s, want serviceVersion,third", got)
 	}
 }

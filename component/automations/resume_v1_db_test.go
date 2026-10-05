@@ -62,7 +62,7 @@ func runThenResume(t *testing.T, engine *memql.MemQLEngine, probe resumeDBProbe,
 	if err != nil {
 		t.Fatalf("LoadRunJournal: %v", err)
 	}
-	resumed, err = e.ResumeFrom(context.Background(), journal, a, nil)
+	resumed, err = e.ResumeFrom(context.Background(), journal, a, &ResumeOptions{AllowSideEffects: true})
 	if err != nil {
 		t.Fatalf("ResumeFrom: %v", err)
 	}

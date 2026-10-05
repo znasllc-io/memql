@@ -63,6 +63,8 @@ const (
 // workResumeArgsRefused is the code a run is failed with when its resume was
 // refused on its args contract (memql#5664).
 const workResumeArgsRefused = "resume_args_refused"
+const workResumeEffectUncertain = "resume_effect_uncertain"
+const workResumeResultMissing = "resume_result_missing"
 
 // workResumeRefusal is the code a refused resume fails its run with, or "" for
 // one the dispatcher reports and leaves. A resume refused on its args contract
@@ -72,6 +74,12 @@ const workResumeArgsRefused = "resume_args_refused"
 // later with a sentence about a node going away. A refusal that came with an
 // execution was the executor's to close, and any other is reported as before.
 func workResumeRefusal(exec *automations.AutomationExecution, err error) string {
+	if exec == nil && errors.Is(err, automations.ErrResumeResultMissing) {
+		return workResumeResultMissing
+	}
+	if exec == nil && errors.Is(err, automations.ErrNonRetryableStep) {
+		return workResumeEffectUncertain
+	}
 	if exec == nil && errors.Is(err, automations.ErrResumeArgsContract) {
 		return workResumeArgsRefused
 	}

@@ -632,6 +632,8 @@ type StepResult struct {
 	// nothing, and for a query's rows past maxJournaledRows (resume re-reads
 	// those).
 	Bound any `json:"-"`
+	// BoundRecorded distinguishes a saved nil from a value omitted for size.
+	BoundRecorded bool `json:"-"`
 }
 
 // AutomationExecution represents a complete automation run.
@@ -836,5 +838,6 @@ type MinimalStepResult struct {
 	ContentId string         `json:"contentId,omitempty"`
 	// Value is StepResult.Bound: the value a statement bound its name to,
 	// which a resumed statement body rebinds the name to.
-	Value any `json:"value,omitempty"`
+	Value         any  `json:"value,omitempty"`
+	ValueRecorded bool `json:"valueRecorded,omitempty"`
 }

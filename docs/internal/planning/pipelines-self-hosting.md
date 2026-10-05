@@ -98,26 +98,41 @@ steps. Time-window milestones #5506–#5509 stay open until observed.
 
 ## Generic recovery gaps found during dogfooding
 
-Before replacing the pipeline driver with authored orchestration, close these
-cross-domain gaps with independent regressions:
+Recovery now classifies the registered operation and nested logic, loop and
+parallel bodies. Known reads and computations may repeat; unknown callees,
+external effects and sub-automations require explicit authorization. Query
+classification follows registered calls and specifications, refusing unknown
+IR, model predicates and unclassified forms. This applies equally to email,
+file processing and delivery. Run-private calls remain conservatively refused
+by automatic recovery until their scoped registry is included in the proof.
 
-- Resume's type-only rule currently assumes every builtin, logic, loop and
-  sub-automation can be repeated. A logic can mutate, and an integration
-  builtin can publish. Classify the actual registered operation and nested
-  body; unknown or uncertain effects require reconciliation or explicit
-  operator authorization. This applies equally to email and file processing.
-- A completed statement whose receipt has no saved value can currently run
-  again while rebuilding a resume prefix. Preserve confirmed effects and
-  refuse missing evidence instead of replaying it silently.
-- Required journaling is not ownership fencing. A paused executor can outlive
-  its lease and return after a replacement claims the run. Claims, receipts
-  and external-effect reconciliation need durable attempt ownership.
-The Go-driven journal now checks all initial writes: goal, run, first heartbeat
-and step order, each pending step, and goal activation. Injecting a failure at
-each boundary refuses admission before a heartbeat loop or command starts.
+The work dispatcher no longer sets `AllowSideEffects` for automatic recovery.
+Its previous justification used `runId:step:attempt`, but resume increments the
+attempt, so that key cannot suppress a prior attempt's duplicate effect.
+`resume_effect_uncertain` records this refusal; `resume_result_missing` records
+a completed producer whose value cannot be recovered. Explicit user-requested
+reruns retain their separate authorization path.
 
-These are identified gaps, not completion claims. No production release may
-rely on automatic replay until these boundaries are demonstrated.
+Completed unbound effects and skipped decisions are preserved. A saved nil
+has an explicit receipt marker, distinct from an omitted result. Missing bound
+values from completed effects refuse before reopening the journal; oversized
+query results may be reread under replay admission without replacing the
+original receipt. They read current state, not a snapshot. Tests cover nested
+writes disguised as query calls, unknown executors, preserved prefix effects,
+missing values and a nil receipt surviving JSON. The real-database automation
+suite passed, including recovery on a separate executor after receipt failure.
+
+The Go-driven journal checks all initial writes: goal, run, first heartbeat
+and step order, each pending step, and goal activation. Failure at each boundary
+refuses admission before a heartbeat loop or command starts.
+
+Still open: required journaling and replay admission are not ownership fencing.
+A paused executor can outlive its lease and return after a replacement claims
+the run. Claims and receipts need durable attempt ownership. Destination
+reconciliation must establish whether an uncertain publication landed before
+it can safely repeat. Definition fingerprints still need engine/bundle pins
+for transitive callees. No production release may rely on automatic effect
+replay until these boundaries are demonstrated.
 
 ## Child resource-limit isolation progress
 

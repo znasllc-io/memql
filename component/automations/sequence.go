@@ -84,7 +84,7 @@ type resumedList struct {
 	// bases, on a re-run, is the attempt base of every step it may execute
 	// (rerunBases): each runs one past the highest version it recorded.
 	bases map[string]int
-	// reread, on a re-run, names the finished reads before the resume point
+	// reread names the finished reads before the resume point
 	// whose rows were too many to record: they are read again for their
 	// value, and write no row, because the version the head names is still
 	// the version the run shows.
@@ -113,15 +113,15 @@ const maxJournaledRows = 100
 
 // journaledValue is the value the journal records for a statement that binds
 // or returns one (StepResult.Bound), as its consumers read it.
-func journaledValue(step *Step, value any) any {
+func journaledValue(step *Step, value any) (any, bool) {
 	if step.Binds == "" && !step.Returns {
-		return nil
+		return nil, false
 	}
 	v := unwrapStatementValue(value)
 	if rows, ok := v.([]any); ok && len(rows) > maxJournaledRows && isQueryStatement(step) {
-		return nil
+		return nil, false
 	}
-	return v
+	return v, true
 }
 
 // isQueryStatement reports whether a statement is a query call: a read, which
@@ -314,7 +314,7 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 			}
 			res.Status, res.Result = "success", unwrapStatementValue(v)
 			if step.Type == StepTypeExpression {
-				res.Bound = journaledValue(step, v)
+				res.Bound, res.BoundRecorded = journaledValue(step, v)
 				e.recordStep(ctx, run, step, res)
 				ev.names.bind(step.Binds, v)
 				continue
@@ -388,7 +388,7 @@ func (e *Executor) runStatementStep(ctx context.Context, step *Step, stepIndex i
 		if result != nil {
 			if err == nil {
 				// Before the receipt, which records it.
-				result.Bound = journaledValue(step, statementValue(step, result))
+				result.Bound, result.BoundRecorded = journaledValue(step, statementValue(step, result))
 			}
 			e.recordStep(ctx, run, step, result)
 		}

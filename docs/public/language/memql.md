@@ -2319,6 +2319,22 @@ any external effects. The definition fingerprint does not pin the code of
 called integrations or other constructs; workflows that require reproducible
 recovery must also pin their engine and DSL bundle versions.
 
+Automatic resume inspects registered functions and nested logic, loop and
+parallel bodies. Proven reads and computations may repeat; mutations,
+publication, sub-automations and unclassified operations require reconciliation
+or an explicit rerun. A builtin's name or the word `query` at its call site
+does not prove safety. The work dispatcher records `resume_effect_uncertain`
+when it cannot safely repeat an unfinished operation.
+
+Completed prefix steps keep their saved values, and skipped conditions remain
+skipped. A saved `nil` is distinguished from a value omitted from the journal.
+A missing bound result from a completed effect refuses recovery with
+`resume_result_missing`; it is not recreated by repeating the effect. Oversized
+query results can be read again under the same replay checks, without replacing
+the original receipt. Such reads observe current state, not a historical
+snapshot. Unclassified query forms and run-private calls conservatively require
+explicit recovery authorization.
+
 A dry-run preview executes a builtin only when its executor is classified as a metadata read or a computation without side effects. Unclassified executors, including integration builtins, stop the preview with a refusal. This also applies to builtins called from a query or nested logic; a stopped preview does not claim successful execution.
 
 A statement's value depends on its kind:

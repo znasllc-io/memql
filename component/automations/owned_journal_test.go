@@ -91,7 +91,7 @@ func TestResumeBindsPersistedMaterializerArguments(t *testing.T) {
 	a := adoptProbeAutomation()
 	a.Args = &ArgsSchema{Fields: []*ArgsField{{Name: "compositionId", Type: "string"}}}
 	j := &RunJournal{RunId: "r", GoalId: "g", AutomationName: "demo", FailedStep: "a", CallerSuppliedPayload: true, Variables: map[string]any{"compositionId": "composition"}}
-	result, err := e.ResumeFrom(context.Background(), j, a, nil)
+	result, err := e.ResumeFrom(context.Background(), j, a, &ResumeOptions{AllowSideEffects: true})
 	if err != nil || result.Status != "completed" {
 		t.Fatalf("resume: %v %v", result, err)
 	}
@@ -112,7 +112,7 @@ func TestJournalRecordsForkOrderWithoutChainTracking(t *testing.T) {
 		t.Fatalf("fork lost executed prefix order: %v", first.StepOrder)
 	}
 	j := &RunJournal{RunId: "r", AutomationName: "demo", FailedStep: "b", StepOrder: first.StepOrder, Steps: map[string]*MinimalStepResult{"a": {StepId: "a", Status: "completed"}}}
-	resumed, err := e.ResumeFrom(context.Background(), j, a, nil)
+	resumed, err := e.ResumeFrom(context.Background(), j, a, &ResumeOptions{AllowSideEffects: true})
 	if err != nil {
 		t.Fatal(err)
 	}
