@@ -260,6 +260,17 @@ describe("shared attention", () => {
     view.rerender(node(true));
     await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
   });
+  it("acknowledges the access-request feature only when its queue is opened", async () => {
+    const fake = setup();
+    const app = OS_REGISTRY.apps.find(app => app.id === "users")!;
+    const node = (sectionId: string) => withSession(<AttentionProvider apps={[app]}><AttentionMarker appId="users" /><AttentionDestination appId="users" sectionId={sectionId}>{sectionId}</AttentionDestination></AttentionProvider>);
+    const view = render(node("people"));
+    await screen.findByRole("img", { name: "Unseen change" });
+    expect(fake.executeNamed.mock.calls.some(([name]) => name === "acknowledgeAttention")).toBe(false);
+    view.rerender(node("requests"));
+    await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
+    expect(fake.executeNamed.mock.calls.filter(([name]) => name === "acknowledgeAttention")).toHaveLength(1);
+  });
   it("reports only manual pending revisions; automatic success and acknowledgments do not change availability", () => {
     const pkg = packageFromRow({ id: "p", status: "active", sourceKind: "repo", deployedVersion: "a", latestKnownVersion: "b", updateAvailable: true });
     expect(packageAttention(pkg)).toHaveLength(1);

@@ -9001,6 +9001,122 @@ a.os-button {
      an 18px title's centre and a 15px one's. */
   padding-top: 47px;
 }
+.os-wizard-aside-footer {
+  margin-top: 18px;
+}
+.os-entry-layout {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--os-ground);
+  color: var(--os-ink);
+}
+.os-entry-preferences { flex: none; padding: 20px 20px 0; }
+.os-entry-layout > .os-wizard { flex: 1; min-height: 0; }
+.os-entry-pending { flex: 1; display: grid; place-items: center; }
+.os-entry-pending-mark {
+  color: var(--os-muted);
+  opacity: 0;
+  animation: os-entry-wait 160ms ease-out 200ms forwards;
+}
+@keyframes os-entry-wait { to { opacity: 1; } }
+.os-entry-layout .os-signin-content,
+.os-entry-layout .os-core-gate-column { animation: os-entry-arrive 140ms ease-out; }
+@keyframes os-entry-arrive { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .os-entry-pending-mark { animation: none; opacity: 1; }
+  .os-entry-layout .os-signin-content,
+  .os-entry-layout .os-core-gate-column { animation: none; }
+}
+.os-theme-switch {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: repeat(3, 34px);
+  width: max-content;
+  height: var(--os-control-h);
+  margin: 0;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--os-line);
+  border-radius: 999px;
+  background: var(--os-ground);
+}
+.os-theme-switch::before {
+  content: "";
+  position: absolute;
+  inset: 2px auto 2px 2px;
+  width: 34px;
+  border-radius: inherit;
+  background: var(--os-hover);
+  transition: transform var(--os-duration-med) var(--os-ease);
+}
+.os-theme-switch[data-mode="light"]::before { transform: translateX(100%); }
+.os-theme-switch[data-mode="system"]::before { transform: translateX(200%); }
+.os-theme-switch-option {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--os-muted);
+  cursor: pointer;
+  transition: color var(--os-duration-fast) var(--os-ease);
+}
+.os-theme-switch-option:hover,
+.os-theme-switch-option:has(:checked) {
+  color: var(--os-ink);
+}
+.os-theme-switch-option:has(:focus-visible) {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 2px;
+}
+.os-entry-list > .os-form-row { flex-wrap: nowrap; }
+.os-entry-list > p { margin: 5px 0 0; }
+.os-entry-list-list {
+  list-style: none;
+  margin: 7px 0 0;
+  padding: 0;
+}
+.os-entry-list-list .os-chip {
+  max-width: 100%;
+  padding: 1px 3px 1px 10px;
+  color: var(--os-ink);
+}
+.os-entry-list-list .os-chip > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.os-entry-list-list .os-chip-remove {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+}
+.os-entry-list .os-entry-list-error { color: var(--os-error); }
+.os-joining-policy {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 34rem;
+}
+.os-joining-policy p { margin: 0; }
+.os-joining-defaults {
+  border-top: 1px solid var(--os-line);
+  padding-top: 14px;
+}
+.os-joining-defaults > summary {
+  cursor: pointer;
+  color: var(--os-ink);
+  font-size: var(--os-text-base);
+}
+.os-joining-defaults > summary:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 3px;
+}
+.os-joining-defaults > :not(summary) { margin-top: 12px; }
 .os-wizard-stage-title {
   margin: 0;
   font-size: var(--os-text-md);
@@ -13614,28 +13730,21 @@ button.os-cluster-mesh-peer:focus-visible {
    about mirroring `.os-rank-refused`. The reader's variant simply has less in
    it.
 
-   NO ENTRANCE AND NO EXIT. The gate appears because the shell booted, with
-   nothing to animate from, and disappears because the answer changed -- and
-   the desk arriving IS the confirmation. The setup widget's fold-away below is
-   a different case: it earns its beat because a person finished the last stop
-   while looking at it. */
+   Entry uses the shared short opacity reveal, without moving the column.
+   Live changes do not replay it. The setup widget's fold-away below is a
+   different case: a person finished the last stop while looking at it. */
 
 .os-core-gate {
-  position: absolute;
-  inset: 0;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   justify-content: center;
   background: var(--os-ground);
   color: var(--os-ink);
-  /* Top-anchored, and the number was set by looking: at a tenth of the
-     viewport the column sat in the top third of a 900px screen with a third of
-     the page empty beneath it. Fourteen brings it toward the optical centre
-     while still leaving the rail room to grow DOWNWARD rather than pushing the
-     mark somebody is reading away from their cursor -- which is the whole
-     reason this is not centred. Clamped at both ends so a laptop and a 4K
-     display both get a column that starts where the eye lands. */
-  padding: clamp(48px, 14vh, 160px) 24px 96px;
+  /* The entry header owns the theme control above this scrollable pane.
+     Keep the column top-anchored so expanding a stop grows downward. */
+  padding: clamp(32px, 8vh, 110px) 24px 96px;
 }
 
 .os-core-gate-column {
@@ -14977,9 +15086,8 @@ button.os-cluster-mesh-peer:focus-visible {
  * NO NEW VISUAL IDEA, deliberately. The page is the compose reading on the
  * Fleet: the pane and the scroll are Deployables' (`.os-deploy-pane`), the
  * stops are the kit rail's, the bar is the kit's. What is new is only what
- * the content needs -- a numbered list because the manual steps ARE a
- * sequence, a rail inside a stop because the checks are stops, and a field
- * whose only control is the copy icon at its end.
+ * the content needs: commands in their execution order, a rail of checks,
+ * and a value that copies from anywhere in its row.
  */
 
 /* ---- the copy field (kit CopyField, D15) ---- */
@@ -14996,62 +15104,49 @@ button.os-cluster-mesh-peer:focus-visible {
   flex: 1 1 12ch;
 }
 .os-copyfield-line {
-  position: relative;
   display: flex;
+  align-items: center;
   min-width: 0;
+  padding: 5px 8px 5px 12px;
+  gap: 12px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-raised);
+  cursor: pointer;
 }
-.os-copyfield-input {
+.os-copyfield-line:focus-within { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+.os-copyfield-input.os-input {
   flex: 1 1 auto;
   min-width: 0;
-  /* Room for the icon, so the last characters of a long value never sit
-   * under it. */
-  padding-right: 32px;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  outline: 0;
+  box-shadow: none;
+  background: transparent;
   text-overflow: ellipsis;
-  cursor: text;
+  cursor: pointer;
 }
-.os-copyfield-input.os-mono {
-  font-size: var(--os-text-sm);
-}
-/* THE ICON IS ALWAYS THERE. CopyValue's arrives on hover because a standing
- * icon on every line of a facts list is noise; here the icon is the field's
- * only control and the reason the field exists. Muted until the pointer
- * reaches it, the accent once it has copied. */
+.os-copyfield-input.os-mono { font-size: var(--os-text-sm); }
 .os-copyfield-copy {
-  position: absolute;
-  right: 5px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 70px;
+  min-height: 32px;
   padding: 0;
   border: 0;
   border-radius: var(--os-radius-xs);
   background: transparent;
   color: var(--os-muted);
-  cursor: pointer;
-  transition: color var(--os-duration-fast) var(--os-ease);
-}
-.os-copyfield-copy:hover {
-  color: var(--os-ink);
-}
-.os-copyfield-copy:focus-visible {
-  outline: 2px solid var(--os-accent);
-  outline-offset: 1px;
-}
-.os-copyfield-copy[data-copied] {
-  color: var(--os-accent);
-}
-.os-copyfield-note {
+  font: inherit;
   font-size: var(--os-text-xs);
-  color: var(--os-muted);
+  cursor: pointer;
 }
-@media (prefers-reduced-motion: reduce) {
-  .os-copyfield-copy {
-    transition: none;
-  }
-}
+.os-copyfield-copy[data-copied] { color: var(--os-accent); }
+.os-copyfield-note { font-size: var(--os-text-xs); color: var(--os-muted); }
 
 /* ---- the stops' bodies ---- */
 .os-fleet-addstop {
@@ -15061,28 +15156,22 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-fleet-addstop .os-subhead {
   margin: 4px 0 0;
 }
+.os-fleet-machine { max-width: 34rem; }
+.os-fleet-platforms { display: inline-flex; align-self: flex-start; padding: 3px; gap: 2px; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-raised); }
+.os-fleet-platforms label { position: relative; cursor: pointer; }
+.os-fleet-platforms span { display: block; padding: 5px 16px; border-radius: var(--os-radius-xs); color: var(--os-muted); font-size: var(--os-text-base); }
+.os-fleet-platforms input:checked + span { background: var(--os-hover); color: var(--os-ink); }
+.os-fleet-platforms input:focus-visible + span { outline: 2px solid var(--os-accent); outline-offset: 1px; }
+.os-fleet-install { gap: 20px; }
+.os-fleet-install-command { display: grid; gap: 8px; min-width: 0; }
+.os-fleet-install-token { font-size: var(--os-text-sm); color: var(--os-muted); }
+.os-fleet-install-token > summary { width: fit-content; cursor: pointer; }
+.os-fleet-install-token > summary:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 3px; }
+.os-fleet-install-token > .os-copyfield { margin-top: 10px; }
 /* The choice cards sit inside a rail body that is already indented, so they
  * take the remaining width rather than the panel's. */
 .os-fleet-addstop .os-choice-stack {
   gap: 4px;
-}
-
-/* THE MANUAL STEPS ARE NUMBERED because they are a sequence -- a terminal, a
- * paste, a password, a dialog, a download, each after the one before, on a
- * machine the reader is about to walk over to. The numbers are the shell's
- * own muted figures, not a device. */
-.os-fleet-steps {
-  margin: 4px 0 0;
-  padding: 0 0 0 1.4em;
-  display: grid;
-  gap: 6px;
-  font-size: var(--os-text-sm);
-  color: var(--os-ink);
-  text-wrap: pretty;
-}
-.os-fleet-steps li::marker {
-  color: var(--os-muted);
-  font-variant-numeric: tabular-nums;
 }
 
 /* The usual causes, after a long wait: a plain list, because there is no
@@ -15378,10 +15467,9 @@ button.os-cluster-mesh-peer:focus-visible {
 }
 /* The numbered trail reflects registration events, never a fabricated Next. */
 .os-fleet-addpage { container-type: inline-size; }
-.fleet-install-options { display: flex; flex-direction: column; margin-top: 18px; }
-.fleet-install-options > div { position: relative; border-top: 1px solid var(--os-line); padding: 18px 36px 18px 0; }
-.fleet-install-options p { margin: 6px 0 0 24px; color: var(--os-muted); font-size: var(--os-text-sm); line-height: 1.6; }
-.fleet-install-options .os-info-detail { position: absolute; top: 15px; right: 0; }
+.fleet-install-options { display: flex; flex-direction: column; margin-top: 8px; }
+.fleet-install-options > div { position: relative; border-top: 1px solid var(--os-line); padding: 12px 0; }
+.fleet-install-options p { margin: 4px 0 0 42px; color: var(--os-muted); font-size: var(--os-text-sm); line-height: 1.6; }
 .os-activity-target { position: relative; min-width: 0; }
 .os-activity-target[data-activity] { outline: 2px dashed var(--os-accent); outline-offset: 5px; border-radius: 6px; }
 .os-activity-target[data-activity="running"] { outline-style: double; outline-width: 4px; }
@@ -15430,7 +15518,6 @@ button.os-cluster-mesh-peer:focus-visible {
 /* Keep the guided workflow's own scroller and fixed action floor intact. */
 .fleet-retained-workspace { height: 100%; min-height: 0; }
 .fleet-install-options > div { padding-block: 12px; }
-.fleet-install-options .os-info-detail { top: 9px; }
 
 /* Fleet details must fit the space left by the desktop navigation rail. */
 .fleet-retained-workspace { container-name: fleet-surface; container-type: inline-size; }
@@ -15671,6 +15758,7 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-trail-back:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 1px; }
 /* Inert at an app's root, and still drawn: a Back that appeared on the first
  * drill-down would shove the trail sideways under the cursor. */
+.os-trail-help { margin-left: 10px; }
 .os-trail-back:disabled { opacity: 0.32; cursor: default; }
 .os-trail-divider { flex: none; width: 1px; height: 16px; margin: 0 10px; background: color-mix(in srgb, var(--os-ink) 18%, transparent); }
 /* A real scroller with its bar hidden, pinned to its END by TrailRow, so the

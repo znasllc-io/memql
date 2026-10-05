@@ -1,6 +1,6 @@
+import { useId } from "react";
 import type { LocalCockpitInstall } from "../localInstall";
 import { Caption, Switch, Field, Input, Notice, type ChoiceOption } from "../../../../kit";
-import { InfoDetail } from "../../../../kit/InfoDetail";
 import type { Draft } from "../flow";
 import { INSTALL_PLATFORMS, INSTALL_PLATFORM_LABEL, type InstallPlatform } from "../install";
 
@@ -34,9 +34,10 @@ export function MachineStop({
    *  this only asks. */
   onMint: () => void;
 }) {
+  const platformGroup = useId();
   const localTest = draft.platform === "mac" ? configuredTest : null;
   return (
-    <div className="os-stop-body os-fleet-addstop">
+    <div className="os-stop-body os-fleet-addstop os-fleet-machine">
       {mintError === "" ? null : (
         <Notice
           tone="error"
@@ -46,7 +47,7 @@ export function MachineStop({
         />
       )}
 
-      {localTest ? <Notice sentence={`Local Cockpit test · ${localTest.version}`} next="Installs the tested macOS app for your account with computer use enabled. Run this command on this Mac; the download is served locally." /> : null}
+      {localTest ? <Notice sentence={`Local Cockpit test · ${localTest.version}`} next="Use this Mac. Account-only installation and computer use are included." /> : null}
       <Field label="Machine name">
         <Input
           id="fleet-add-name"
@@ -57,30 +58,25 @@ export function MachineStop({
           onEnter={onMint}
         />
       </Field>
-      {/* THE CHOICE ROW, not the choice stack. The stack is for options that
-          each need a sentence; "macOS" and "Linux" explain themselves, and as
-          two full-width cards they were the heaviest thing in a form whose
-          first question is the name above them. */}
       <Field label="Operating system">
-        <div className="os-choice-row" role="radiogroup" aria-label="Operating system">
+        <div className="os-fleet-platforms" role="radiogroup" aria-label="Operating system">
           {PLATFORMS.map((option) => (
-            <button key={option.value} type="button" role="radio" className="os-choice" aria-checked={draft.platform === option.value}
-              onClick={() => onDraft({ platform: option.value })}>
-              {option.label}
-            </button>
+            <label key={option.value}>
+              <input className="os-sr-only" type="radio" name={platformGroup} value={option.value}
+                checked={draft.platform === option.value} onChange={() => onDraft({ platform: option.value })} />
+              <span>{option.label}</span>
+            </label>
           ))}
         </div>
       </Field>
 
       <div className="fleet-install-options">
         <div><Switch disabled={localTest !== null} checked={draft.userLocal ?? false} onChange={(userLocal) => onDraft({ userLocal })}>Install for my account only</Switch>
-          <p>No password needed. Otherwise, installation uses your account password.</p>
-          <InfoDetail title="Installation location"><p>Account-only installs in ~/.memql/bin. System installation places a protected command in /usr/local/bin. Both connect this computer to your cluster.</p></InfoDetail></div>
+          <p>{draft.userLocal ? "No administrator password needed." : "Installation will ask for your administrator password."}</p></div>
         <div><Switch disabled={localTest !== null} checked={draft.computerUse} onChange={(computerUse) => onDraft({ computerUse })}>Computer use</Switch>
-          <p>{draft.platform === "mac" ? "Mouse, keyboard and screenshots. Requires Accessibility and Screen Recording permission." : "Mouse, keyboard and screenshots require an X11 desktop. Other tools also work on Wayland."}</p></div>
+          <p>{draft.platform === "mac" ? "Mouse, keyboard and screenshots. Requires Accessibility and Screen Recording access." : "Mouse, keyboard and screenshots require X11. Other tools work on Wayland."}</p></div>
         <div><Switch checked={draft.inference} onChange={(inference) => onDraft({ inference })}>Run local models</Switch>
-          <p>Downloads models after installation. Allow several gigabytes of disk space.</p>
-          <InfoDetail title="Local model setup"><p>A second command checks your hardware and asks you to approve the runtime setup before downloading recommended models. Downloads may take time; progress and readiness stay visible here.</p></InfoDetail></div>
+          <p>Run models on this machine. Downloads require several gigabytes.</p></div>
       </div>
 
       {connected ? null : (

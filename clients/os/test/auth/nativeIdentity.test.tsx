@@ -46,13 +46,20 @@ it("walks through all existing setup choices and submits only on verification", 
   }
   fireEvent.click(screen.getByRole("combobox", { name: "Title in organization (optional)" }));
   fireEvent.click(screen.getByRole("option", { name: "Engineer" }));
-  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  expect(screen.getByLabelText("Organization name")).toHaveProperty("required", true);
+  expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+  fireEvent.change(screen.getByLabelText("Organization name"), { target: { value: "   " } });
   expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
   fireEvent.change(screen.getByLabelText("Organization name"), { target: { value: "Example" } });
-  fireEvent.change(screen.getByLabelText("Internal email domains (comma-separated)"), { target: { value: "example.test" } });
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-  fireEvent.change(screen.getByLabelText("Approved email domains (comma-separated)"), { target: { value: "partner.test" } });
-  fireEvent.change(screen.getByLabelText("Notify these emails about access requests (comma-separated)"), { target: { value: "ops@example.test" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(screen.getByText("Internal team defaults"));
+  fireEvent.change(screen.getByLabelText("Internal email domains (optional)"), { target: { value: "example.test" } });
+  fireEvent.click(screen.getByRole("button", { name: "Add internal domain" }));
+  fireEvent.click(screen.getByRole("combobox", { name: "How people join" }));
+  fireEvent.click(screen.getByRole("option", { name: "Approved email domains" }));
+  fireEvent.change(screen.getByLabelText("Approved email domains"), { target: { value: "partner.test" } });
+  fireEvent.change(screen.getByLabelText("Notify about requests (optional)"), { target: { value: "ops@example.test" } });
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   expect(submit).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Send verification link" }));
@@ -96,7 +103,7 @@ it("requires allowed domains before choosing domain-restricted registration", ()
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
-  fireEvent.change(screen.getByLabelText("Approved email domains (comma-separated)"), { target: { value: "example.test" } });
+  fireEvent.change(screen.getByLabelText("Approved email domains"), { target: { value: "example.test" } });
   expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
 });
 

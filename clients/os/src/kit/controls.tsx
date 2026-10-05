@@ -1301,27 +1301,9 @@ export function CopyValue({
   );
 }
 
-/**
- * A single-line value in a FIELD, copied by the one control at its end.
- *
- * The token a person pastes into a terminal, the install line, the uninstall
- * line, a repair command: each is a value that is read once and copied whole,
- * and the owner's first run of the guided install said what was wrong with two
- * labelled "Copy token" / "Copy command" buttons beneath them -- they read as
- * furniture, and the eye looking for the copy affordance looks at the END of
- * the thing it wants to copy. So this is `CopyValue`'s treatment on a field:
- * a read-only input in the kit's own field rule, the icon at its end, the
- * confirmation that decays and the refusal that stands (design record
- * 2026-09-08-cockpit-install-wizard, D15).
- *
- * READ-ONLY, NOT DISABLED. A disabled field cannot be focused, selected or
- * scrolled, and a value wider than the field -- every install line is -- would
- * then be unreadable past its edge. Focus selects the whole value, so a
- * clipboard the browser refuses still leaves the person one keystroke from it.
- *
- * ALWAYS VISIBLE, unlike `CopyValue`'s icon, which arrives on hover. That
- * control sits in a facts list where a standing icon on every line is noise;
- * this one is the field's only control and the reason the field is here.
+/** A selectable value whose entire row copies, with a stable visible receipt.
+ * Keep the native read-only input for keyboard selection and manual copying
+ * when clipboard permission is unavailable. Enter/Space also copy from it.
  */
 export function CopyField({
   value,
@@ -1337,15 +1319,18 @@ export function CopyField({
 }) {
   const [state, setState] = useState<"idle" | "copied" | "refused" | "unavailable">("idle");
   const decay = useRef<number | null>(null);
+  const attempt = useRef(0);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    setState("idle");
+    return () => {
+      attempt.current++;
       if (decay.current !== null) window.clearTimeout(decay.current);
-    },
-    [],
-  );
+    };
+  }, [value]);
 
   async function copy(): Promise<void> {
+    const current = ++attempt.current;
     if (decay.current !== null) window.clearTimeout(decay.current);
     const clipboard = globalThis.navigator?.clipboard;
     if (!clipboard) {
@@ -1354,9 +1339,11 @@ export function CopyField({
     }
     try {
       await clipboard.writeText(value);
+      if (attempt.current !== current) return;
       setState("copied");
       decay.current = window.setTimeout(() => setState("idle"), 2000);
     } catch {
+      if (attempt.current !== current) return;
       setState("refused");
     }
   }
@@ -1364,25 +1351,30 @@ export function CopyField({
   const copied = state === "copied";
   return (
     <span className="os-copyfield">
-      <span className="os-copyfield-line">
+      <span className="os-copyfield-line" onClick={() => void copy()}>
         <input
           id={id}
           className={mono ? "os-input os-copyfield-input os-mono" : "os-input os-copyfield-input"}
           value={value}
           readOnly
           aria-label={label}
-          onFocus={(e) => e.currentTarget.select()}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            void copy();
+          }}
         />
         <button
           type="button"
           className="os-copyfield-copy"
           data-copied={copied || undefined}
           aria-label={copied ? "Copied" : `Copy ${label}`}
-          onClick={() => void copy()}
         >
           {copied ? <CheckGlyph size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
+          <span>{copied ? "Copied" : "Copy"}</span>
         </button>
       </span>
+      <span className="os-sr-only" role="status">{copied ? `Copied ${label}` : ""}</span>
       {state === "refused" || state === "unavailable" ? (
         <span className="os-copyfield-note" role="status">
           {state === "unavailable"

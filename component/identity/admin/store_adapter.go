@@ -131,9 +131,7 @@ func (r *LiveSettingsReader) Snapshot(ctx context.Context) identityweb.Settings 
 	if v := identity.RegistrationMode(strings.TrimSpace(row.RegistrationMode)); v != "" {
 		out.RegistrationMode = v
 	}
-	if v := strings.TrimSpace(row.RegistrationDomains); v != "" {
-		out.RegistrationDomains = v
-	}
+	out.RegistrationDomains = strings.TrimSpace(row.RegistrationDomains)
 	return out
 }
 
@@ -177,7 +175,7 @@ func (r *LiveSettingsReader) read(ctx context.Context) (*ClusterSettingsRow, err
 	if r == nil || r.Engine == nil {
 		return nil, nil
 	}
-	res, err := r.Engine.Execute(ctx, `query clusterSettingsCurrent()`)
+	res, err := r.Engine.Execute(memqlengine.ContextWithFreshRead(ctx), `query clusterSettingsCurrent()`)
 	if err != nil {
 		return nil, err
 	}

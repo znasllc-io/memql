@@ -180,6 +180,10 @@ mutation identity revokeAccountTokenIdentity {
 }
 
 /// Approve an access request (status=approved, stamps reviewer + invitation).
+/// The identity-admin service authorizes the reviewer and serializes review
+/// with invitation issuance. Scoping to actor.userId cannot express that:
+/// the applicant has no user account yet, and the reviewer acts for them.
+@serverOnly
 mutation accessRequest approveAccessRequest {
   args {
     requestId     string!
@@ -1892,6 +1896,10 @@ mutation workerPairingCode redeemWorkerPairingCode {
 //
 
 /// Reject an access request (status=rejected, stamps reviewer + note).
+/// The identity-admin service stamps the authenticated reviewer under the
+/// shared review lock. Scoping to actor.userId cannot express that: the
+/// applicant has no user account yet, and rejection acts on their request.
+@serverOnly
 mutation accessRequest rejectAccessRequest {
   args {
     requestId     string!

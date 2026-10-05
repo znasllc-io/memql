@@ -145,6 +145,9 @@ func (s *streamSession) handleIdentityAdmin(envelope *memqlv1.MemqlClientMessage
 		})
 	case *memqlv1.IdentityAdminMsg_RevokeUserInvitation:
 		res = svc.RevokeUserInvitation(ctx, req.RevokeUserInvitation.GetInvitationId())
+	case *memqlv1.IdentityAdminMsg_ReviewAccessRequest:
+		p := req.ReviewAccessRequest
+		res = svc.ReviewAccessRequest(ctx, adminops.AccessRequestReview{RequestID: p.GetRequestId(), Decision: p.GetDecision(), Role: p.GetRole(), Note: p.GetNote()})
 	case *memqlv1.IdentityAdminMsg_SetOauthClientCorsOrigins:
 		p := req.SetOauthClientCorsOrigins
 		// The origin list is passed through verbatim. Validation lives in

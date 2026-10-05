@@ -92,6 +92,8 @@ describe("the groups list", () => {
     await act(async () => {
       fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Reviewers" } });
     });
+    await click(screen.getByRole("combobox", { name: "Organization this group belongs to" }));
+    await click(screen.getByRole("option", { name: "Acme" }));
     await click(screen.getByRole("button", { name: "Create group" }));
 
     await waitFor(() => expect(connection.query.groupCreate.mock.calls).toHaveLength(1));

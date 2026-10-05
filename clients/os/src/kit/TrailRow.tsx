@@ -1,8 +1,9 @@
-import { useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeft, ChevronRight } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ArrowLeft, ChevronRight, Info } from "lucide-react";
 
 import type { Breadcrumb } from "./Breadcrumbs";
 import { useWindowTrail, type PageTrail } from "./pageNavigation";
+import { Dialog } from "./Dialog";
 
 // THE TRAIL ROW -- one per window, drawn by the window frame directly UNDER
 // the section tabs. Always present. The order is the hierarchy: the tabs
@@ -57,6 +58,7 @@ export function TrailRow({ fallback }: {
   const nav = useWindowTrail();
   const scroller = useRef<HTMLElement>(null);
   const [clipped, setClipped] = useState(false);
+  const [helpFor, setHelpFor] = useState<string | null>(null);
 
   // `nav.page()` reads the heading's LATEST publication. The row re-renders
   // when the published signature changes, so what is drawn matches it; the
@@ -64,6 +66,8 @@ export function TrailRow({ fallback }: {
   const read = () => compute(nav?.trail ?? [], nav?.page() ?? null, fallback);
   const { items, destination } = read();
   const drawn = items.map(item => item.label).join("\u001f");
+  const title = items.at(-1)?.label ?? fallback;
+  useEffect(() => setHelpFor(null), [drawn]);
 
   useLayoutEffect(() => {
     const element = scroller.current;
@@ -116,6 +120,20 @@ export function TrailRow({ fallback }: {
           })}
         </ol>
       </nav>
+      <button
+        type="button"
+        className="os-trail-back os-trail-help"
+        aria-label={`Help with ${title}`}
+        title={`Help with ${title}`}
+        onClick={() => setHelpFor(drawn)}
+      >
+        <Info size={14} aria-hidden />
+      </button>
+      {helpFor === drawn ? (
+        <Dialog title={title} subtitle="Help" closeLabel="Close help" onDismiss={() => setHelpFor(null)}>
+          <p>Documentation is coming soon.</p>
+        </Dialog>
+      ) : null}
     </div>
   );
 }

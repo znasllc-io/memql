@@ -128,6 +128,8 @@ export interface WizardProps {
   confirm?: ReactNode;
   /** Refusals and warnings that belong to the whole flow rather than to a step. */
   notices?: ReactNode;
+  /** Beneath the rail in split layout; above the steps when stacked. */
+  asideFooter?: ReactNode;
   /** Drawn beneath the steps: the one line a flow has to say that no step owns. */
   children?: ReactNode;
   /** Where the person is, for Ask. */
@@ -158,6 +160,7 @@ export function Wizard({
   acts = [],
   confirm,
   notices,
+  asideFooter,
   children,
   context,
   className,
@@ -270,6 +273,7 @@ export function Wizard({
                 <Head title={title} breadcrumbs={breadcrumbs} back={back} />
                 {lead ? <p className="os-wizard-lead">{lead}</p> : null}
                 {steps.length > 0 ? rail : null}
+                {asideFooter ? <div className="os-wizard-aside-footer">{asideFooter}</div> : null}
               </div>
               <div className="os-wizard-stage">
                 {notices}
@@ -297,6 +301,7 @@ export function Wizard({
               </div>
               <Head title={title} breadcrumbs={breadcrumbs} back={back} />
               {lead ? <p className="os-wizard-lead">{lead}</p> : null}
+              {asideFooter ? <div className="os-wizard-aside-footer">{asideFooter}</div> : null}
               {notices}
               {rail}
               {children}

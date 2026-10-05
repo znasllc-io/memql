@@ -361,7 +361,7 @@ export function useAddMachineFlow(): AddMachineFlow {
     live: pulls.live, failed: failedPull, feedError: pulls.feedError, loading: pulls.loading,
   }, response), [draft, machine, beats, now, pulls.live, failedPull, pulls.feedError, pulls.loading, response]);
   const stops = useMemo(() => stopsFor(facts, checks), [facts, checks]);
-  const bar = useMemo(() => barFor(facts, checks), [facts, checks]);
+  const bar = useMemo(() => barFor(facts, checks, pulling), [facts, checks, pulling]);
 
   return {
     active,

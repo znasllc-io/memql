@@ -175,6 +175,12 @@ export type ClusterSettingsEdit = IdentityAdminClusterSettingsPayload;
  * writes and nothing else.
  */
 export class IdentityAdminClient {
+  /** Review a pending request through the server's serialized, audited gate. */
+  async reviewAccessRequest(requestId: string, decision: "approve" | "reject", role = "", note = "", opts: IdentityAdminCallOptions = {}): Promise<AdminWriteResult & { url: string; emailSent: boolean; emailError: string }> {
+    requireArg("reviewing an access request", "requestId", requestId);
+    const { result, raw } = await this.callRaw("reviewing an access request", { reviewAccessRequest: { requestId, decision, role, note } }, opts);
+    return { ...result, url: raw.invitationUrl ?? "", emailSent: raw.invitationEmailSent === true, emailError: raw.invitationEmailError ?? "" };
+  }
   constructor(private readonly dispatcher: Dispatcher) {
     if (!dispatcher) throw new Error("IdentityAdminClient: dispatcher is required");
   }

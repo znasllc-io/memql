@@ -102,7 +102,7 @@ export function AddMachinePage({
       className="os-fleet-addpage"
       icon={<Monitor aria-hidden />}
       title="Add a machine"
-      lead="Connect a computer to this cluster so it can run work for it."
+      lead="Connect a computer to run work for this cluster."
       /* GOING BACK IS LEAVING, NOT CANCELLING. With a token waiting to be used
          it asks the Leave question -- the token is shown only here -- and
          never revokes anything; before the mint there is nothing to keep, so
@@ -156,9 +156,13 @@ export function AddMachinePage({
         flow.leaveKeepToken();
         onLeave("");
         return;
-      case "open":
-        onLeave(flow.finish());
+      case "retryResponse":
+        flow.retryResponse();
         return;
+      case "pullRecommended":
+        void flow.pullRecommended();
+        return;
+      case "back":
       case "done":
         flow.finish();
         onLeave("");
@@ -175,7 +179,7 @@ export function AddMachinePage({
         return (
           <MachineStop
             draft={flow.draft}
-          localTest={localCockpitInstall(config.domain)}
+            localTest={localCockpitInstall(config.domain)}
             onDraft={flow.setDraft}
             connected={facts.connected}
             mintError={facts.mintError}
@@ -205,10 +209,7 @@ export function AddMachinePage({
           <ChecksStop
             checks={checks}
             machine={facts.machine}
-            pulling={flow.pulling}
             pullError={flow.pullError}
-            onPullRecommended={() => void flow.pullRecommended()}
-            onRetryResponse={flow.retryResponse}
           />
         );
     }

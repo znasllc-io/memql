@@ -1,9 +1,11 @@
 import { AttentionMarker, AttentionDestination } from "../attention/Attention";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowLeft, LayoutGrid } from "lucide-react";
 
 import { useAsk } from "../ask/AskProvider";
 import { ProvenanceDot } from "../kit";
+import { PageNavigationProvider } from "../kit/pageNavigation";
+import { TrailRow } from "../kit/TrailRow";
 import {
   canConfigure,
   gateFor,
@@ -34,6 +36,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
   const { openAsk } = useAsk();
   const [currentAppId, setCurrentAppId] = useState<string | null>(null);
   const [sectionId, setSectionId] = useState("");
+  const pageRoot = useRef<HTMLElement>(null);
 
   const apps = appsFor(registry);
   const current = currentAppId ? apps.find((a) => a.id === currentAppId) ?? null : null;
@@ -87,52 +90,55 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
         </button>
       </header>
       {current ? (
-        <main className="os-phone-app">
-          {sections.length > 1 ? (
-            <nav className="os-phone-sections" aria-label={`${current.name} sections`}>
-              {sections.filter((section) => !section.parent).map((section) => (
-                <button
-                  key={section.id}
-                  type="button"
-                  className="os-phone-section"
-                  data-os-setup={
-                    settingsTone && section.id === current.settingsSection ? "" : undefined
-                  }
-                  aria-label={
-                    settingsTone && section.id === current.settingsSection
-                      ? `${section.name}, ${current.name} is ${settingsStatePhrase}`
-                      : undefined
-                  }
-                  aria-current={section.id === (activeSection?.parent ?? activeSection?.id) ? "page" : undefined}
-                  onClick={() => setSectionId(section.id)}
-                >
-                  {section.name}<AttentionMarker appId={current.id} sectionId={section.id} />
-                  {settingsTone && section.id === current.settingsSection ? (
-                    <ProvenanceDot tone={settingsTone} />
-                  ) : null}
-                </button>
-              ))}
-            </nav>
-          ) : null}
-          {gate.state === "unconfigured" ? (
-            <SurfaceUnconfigured
-              surface={unmetIsSectionOnly ? (activeSection?.name ?? current.name) : current.name}
-              unmet={gate.unmet}
-              descriptions={MODULE_DESCRIPTIONS}
-              canSetUp={canConfigure(actorRole)}
-              onSetUp={() => setSectionId(current.settingsSection)}
-            />
-          ) : (
-            <WindowErrorBoundary key={current.id} app={current.id} section={activeSection?.id ?? ""}>
-              <AttentionDestination appId={current.id} sectionId={activeSection?.id ?? ""}><current.component
-                sectionId={activeSection?.id ?? ""}
-                reportSetupState={reportSetupState}
-                navigate={setSectionId}
-                askContext={appAsk.askContext}
-                askAbout={appAsk.askAbout}
-              /></AttentionDestination>
-            </WindowErrorBoundary>
-          )}
+        <main className="os-phone-app" ref={pageRoot}>
+          <PageNavigationProvider key={current.id} root={pageRoot} trail={[]}>
+            {sections.length > 1 ? (
+              <nav className="os-phone-sections" aria-label={`${current.name} sections`}>
+                {sections.filter((section) => !section.parent).map((section) => (
+                  <button
+                    key={section.id}
+                    type="button"
+                    className="os-phone-section"
+                    data-os-setup={
+                      settingsTone && section.id === current.settingsSection ? "" : undefined
+                    }
+                    aria-label={
+                      settingsTone && section.id === current.settingsSection
+                        ? `${section.name}, ${current.name} is ${settingsStatePhrase}`
+                        : undefined
+                    }
+                    aria-current={section.id === (activeSection?.parent ?? activeSection?.id) ? "page" : undefined}
+                    onClick={() => setSectionId(section.id)}
+                  >
+                    {section.name}<AttentionMarker appId={current.id} sectionId={section.id} />
+                    {settingsTone && section.id === current.settingsSection ? (
+                      <ProvenanceDot tone={settingsTone} />
+                    ) : null}
+                  </button>
+                ))}
+              </nav>
+            ) : null}
+            <TrailRow fallback={activeSection?.name ?? current.name} />
+            {gate.state === "unconfigured" ? (
+              <SurfaceUnconfigured
+                surface={unmetIsSectionOnly ? (activeSection?.name ?? current.name) : current.name}
+                unmet={gate.unmet}
+                descriptions={MODULE_DESCRIPTIONS}
+                canSetUp={canConfigure(actorRole)}
+                onSetUp={() => setSectionId(current.settingsSection)}
+              />
+            ) : (
+              <WindowErrorBoundary key={current.id} app={current.id} section={activeSection?.id ?? ""}>
+                <AttentionDestination appId={current.id} sectionId={activeSection?.id ?? ""}><current.component
+                  sectionId={activeSection?.id ?? ""}
+                  reportSetupState={reportSetupState}
+                  navigate={setSectionId}
+                  askContext={appAsk.askContext}
+                  askAbout={appAsk.askAbout}
+                /></AttentionDestination>
+              </WindowErrorBoundary>
+            )}
+          </PageNavigationProvider>
         </main>
       ) : (
         <main className="os-phone-home">

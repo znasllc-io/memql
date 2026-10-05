@@ -58,7 +58,7 @@ describe("the Users manifest", () => {
     // naming a section the manifest does not declare leaves the window on
     // People with the nav highlighting nothing.
     expect(users?.sections).toBe(USERS_SECTIONS);
-    expect(USERS_SECTION_IDS).toEqual(["people", "groups", "roles", "logs", "settings"]);
+    expect(USERS_SECTION_IDS).toEqual(["people", "requests", "groups", "roles", "logs", "settings"]);
   });
 
   it("declares no section-level `wants`, because only SENDING needs a mailbox", () => {

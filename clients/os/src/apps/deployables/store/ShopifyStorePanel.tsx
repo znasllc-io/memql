@@ -14,7 +14,7 @@ import type { DeploymentRow } from "../packages/rows";
 import { RefusalNotice } from "../preview/PreviewSection";
 import { usePreviewReadiness, usePreviewWrites } from "../preview/usePreview";
 import type { StorePanelProps } from "./StorePanel";
-import { StoreValues } from "./StoreValues";
+import { StoreValues } from "./StoreValuesPanel";
 import { connectionWord, storeConnection, storeLabel, type StoreConnection, type StoreRow } from "./rows";
 import { useStore, useStoreList, useStoreWrites } from "./useStore";
 

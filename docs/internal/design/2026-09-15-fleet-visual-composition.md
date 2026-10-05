@@ -1,13 +1,22 @@
 ---
 title: Fleet Visual Composition
 audience: internal
-status: draft
+status: historical
 area: design
 sinceVersion: 0.22.0
 owner: znas
 ---
 
 # Fleet Visual Composition
+
+> Historical: Fleet implementation record, kept for rationale. Current design rules are linked below.
+
+Implementation record. Current UI/UX work starts with
+[memql-ui-design](../../../.agents/skills/memql-ui-design/SKILL.md) and follows
+the [interface language](../../../clients/os/DESIGN.md) together with
+[Supervised Visual Composition](../../../clients/os/SUPERVISED-VISUAL-COMPOSITION.md).
+Those maintained rules incorporate the later setup, footer, page-help and
+minimal-control decisions; this record is not a competing design system.
 
 ## Interaction model
 
@@ -31,9 +40,10 @@ checks. The step trail reflects real lifecycle transitions. Info dialogs support
 Escape, modal focus and return to their trigger. Critical installation, computer
 use and metered-source consequences remain visible.
 
-Fleet Settings and Logs retain their existing functionality. Their proposed
-redesigns require separate user approval. This change does not redesign other
-apps; the shared rule editor gains the backend integration needed by Fleet.
+Fleet Settings and Logs retain their existing functionality. Their later
+approval and shared-window behavior are recorded in Supervised Visual
+Composition. This record does not authorize unrelated app redesigns; the
+shared rule editor gains the backend integration needed by Fleet.
 
 ## Reachability and existing operations
 

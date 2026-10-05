@@ -2227,7 +2227,7 @@ variables:
   - name: MEMQL_IDENTITY_REGISTRATION_MODE
     component: identity
     scope: node
-    default: "open"
+    default: "invite_only"
     optional: true
     description: "Controls who can self-register; one of open, domain_restricted, invite_only, waitlist, or directory. `directory` means directory membership IS the invitation -- nobody self-registers by email and the upstream OIDC provider is the gate (memql#4611)."
 
