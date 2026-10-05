@@ -107,6 +107,7 @@ type Worker struct {
 	readyCh     chan struct{}
 	doneCh      chan struct{}
 	mu          sync.Mutex
+	scanCursors map[string]string // bounded scans advance past rows this node cannot deliver
 }
 
 // NewWorker constructs the drain worker. transports maps medium ->
@@ -230,7 +231,11 @@ func (w *Worker) loop(ctx context.Context) {
 func (w *Worker) drainOnce(ctx context.Context) {
 	sysCtx := SystemActorContext(ctx)
 	for _, status := range []string{"pending", "retrying"} {
-		res, err := w.engine.Execute(sysCtx, fmt.Sprintf(`query outboundRequestsByStatus(status: %s)`, langparser.QuoteString(status)))
+		w.mu.Lock()
+		cursor := w.scanCursors[status]
+		w.mu.Unlock()
+		pageCtx := memql.ContextWithCursor(memql.ContextWithFreshRead(sysCtx), cursor)
+		res, err := w.engine.Execute(pageCtx, fmt.Sprintf(`query outboundRequestsByStatus(status: %s)`, langparser.QuoteString(status)))
 		if err != nil {
 			w.logger.Debug("outbound worker: scan failed (engine likely not ready)", "status", status, "error", err)
 			return
@@ -238,6 +243,22 @@ func (w *Worker) drainOnce(ctx context.Context) {
 		for _, row := range memql.MaterializeRows(res) {
 			w.processRow(sysCtx, row, status)
 		}
+		// One page per status per poll bounds work. Skipped rows (another
+		// medium, a future retry, a peer's live claim) must not starve later
+		// rows. Exhaustion starts a new pass, which revisits due retries.
+		next := ""
+		if result, ok := res.(*memql.ExecuteResult); ok && result.GetMeta() != nil {
+			next = result.GetMeta().Cursor
+		}
+		if next == cursor {
+			next = ""
+		}
+		w.mu.Lock()
+		if w.scanCursors == nil {
+			w.scanCursors = make(map[string]string)
+		}
+		w.scanCursors[status] = next
+		w.mu.Unlock()
 	}
 }
 

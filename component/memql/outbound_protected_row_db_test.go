@@ -33,9 +33,12 @@ import (
 
 const outboundRequestConcept = "v1:platform:outboundRequest"
 
-// outboundClient is a signed-in person on the wire: client origin, an actor.
+// outboundClient is an operator on the wire. The operator-only row tier
+// admits this caller so these cases exercise the deeper protected-field guard:
+// even an operator cannot forge a server-owned receipt. Ordinary-user refusal
+// is covered by delivery_privacy_db_test.go.
 func outboundClient(ctx context.Context, userID string) context.Context {
-	return auth.ContextWithClientOrigin(auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: userID, Role: auth.RoleWriter}))
+	return auth.ContextWithClientOrigin(auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: userID, Role: auth.RoleOwner}))
 }
 
 // stageSecretRow stages a secret-target row the way the notify stage will:
@@ -125,7 +128,7 @@ func TestStageOutboundRequestToSecretRefusesANameOutsideThePattern(t *testing.T)
 // cluster owner stored.
 func TestAClientRawInsertNamingASecretIsRefused(t *testing.T) {
 	eng, db, ctx := sharedReadMergeEngine(t)
-	client := outboundClient(ctx, "writer-5480")
+	client := outboundClient(ctx, "operator-5480")
 	reqId := "out5480-" + uniqueSuffix("raw-insert")
 
 	_, err := eng.Execute(client, `insert("v1:platform:outboundRequest", id="`+reqId+`", payload={`+
@@ -151,7 +154,7 @@ func TestAClientRawInsertNamingASecretIsRefused(t *testing.T) {
 func TestAClientCannotReVersionASecretRow(t *testing.T) {
 	eng, db, ctx := sharedReadMergeEngine(t)
 	internal := auth.ContextWithInternalOrigin(ctx)
-	client := outboundClient(ctx, "writer-5480")
+	client := outboundClient(ctx, "operator-5480")
 	reqId := "out5480-" + uniqueSuffix("secret-reversion")
 	canonicalId := stageSecretRow(t, eng, ctx, reqId)
 
@@ -180,10 +183,7 @@ func TestAClientCannotReVersionASecretRow(t *testing.T) {
 // component/outbound.SystemActorContext builds it: a system token, no person.
 // The worker adds internal origin on each status stamp, inline.
 func outboundWorkerActor() context.Context {
-	return auth.ContextWithToken(context.Background(), &auth.TokenInfo{
-		Subject: "system:outbound",
-		Claims:  map[string]any{"sub": "system:outbound", "role": "system"},
-	})
+	return auth.ContextWithSystemActor(context.Background(), "system:outbound")
 }
 
 // TestTheWorkersStatusStampsOnASecretRowLand: the outbound worker stamps
@@ -232,9 +232,9 @@ func TestAClientCannotStampASecretRowsStatus(t *testing.T) {
 		ctx  context.Context
 		call string
 	}{
-		{"a client marking it sent", outboundClient(ctx, "writer-5480"),
+		{"a client marking it sent", outboundClient(ctx, "operator-5480"),
 			`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "sent", lastError: "", sentAt: "2026-10-04T12:00:31Z")`},
-		{"a client requeueing it", outboundClient(ctx, "writer-5480"),
+		{"a client requeueing it", outboundClient(ctx, "operator-5480"),
 			`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "pending")`},
 		{"the worker's actor without internal origin", auth.ContextWithClientOrigin(outboundWorkerActor()),
 			`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "pending")`},
@@ -250,14 +250,13 @@ func TestAClientCannotStampASecretRowsStatus(t *testing.T) {
 	}
 }
 
-// TestAClientStatusStampOnAPlainRowLands: the rule is about protected rows --
-// naming a secret, or staged by server code. A row a client or a product
-// staged keeps a delivery state as open as it always was -- stamped and
-// requeued by any signed-in caller -- until the concept declares a tier
-// (memql#5804).
-func TestAClientStatusStampOnAPlainRowLands(t *testing.T) {
+// TestAnOperatorStatusStampOnAPlainRowLands: the rule is about protected rows --
+// naming a secret, or staged by server code. Operators may still manage a
+// plain row that carries neither marker; ordinary users cannot access the
+// concept (memql#5804).
+func TestAnOperatorStatusStampOnAPlainRowLands(t *testing.T) {
 	eng, db, ctx := sharedReadMergeEngine(t)
-	client := outboundClient(ctx, "writer-5480")
+	client := outboundClient(ctx, "operator-5480")
 	reqId := "out5480-" + uniqueSuffix("plain-client-stamp")
 	canonicalId := runMutation(t, client, eng, "stageOutboundRequest", map[string]any{
 		"requestId": reqId,
@@ -350,7 +349,7 @@ func TestStageServerOutboundRequestMarksTheRow(t *testing.T) {
 // in the server's name.
 func TestAClientRawInsertMarkingARowServerStagedIsRefused(t *testing.T) {
 	eng, db, ctx := sharedReadMergeEngine(t)
-	client := outboundClient(ctx, "writer-5480")
+	client := outboundClient(ctx, "operator-5480")
 	reqId := "out5480-" + uniqueSuffix("raw-staged")
 
 	_, err := eng.Execute(client, `insert("v1:platform:outboundRequest", id="`+reqId+`", payload={`+
@@ -367,7 +366,7 @@ func TestAClientRawInsertMarkingARowServerStagedIsRefused(t *testing.T) {
 func TestAClientCannotReVersionAServerStagedRow(t *testing.T) {
 	eng, db, ctx := sharedReadMergeEngine(t)
 	internal := auth.ContextWithInternalOrigin(ctx)
-	client := outboundClient(ctx, "writer-5480")
+	client := outboundClient(ctx, "operator-5480")
 	reqId := "out5480-" + uniqueSuffix("staged-reversion")
 	canonicalId := stageServerRow(t, eng, ctx, reqId)
 
@@ -432,9 +431,9 @@ func TestAClientCannotStampAServerStagedRowsStatus(t *testing.T) {
 		ctx  context.Context
 		call string
 	}{
-		{"a client marking it sent", outboundClient(ctx, "writer-5480"),
+		{"a client marking it sent", outboundClient(ctx, "operator-5480"),
 			`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "sent", lastError: "", sentAt: "2026-10-04T12:00:31Z")`},
-		{"a client requeueing it", outboundClient(ctx, "writer-5480"),
+		{"a client requeueing it", outboundClient(ctx, "operator-5480"),
 			`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "pending")`},
 		{"the worker's actor without internal origin", auth.ContextWithClientOrigin(outboundWorkerActor()),
 			`mutation updateOutboundRequestStatus(requestId: "` + reqId + `", status: "pending")`},

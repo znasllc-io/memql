@@ -303,6 +303,7 @@ func startRowWorker(t *testing.T, eng *memqlengine.MemQLEngine) *rowWorker {
 	}
 	go func() {
 		defer close(w.done)
+		cursor := ""
 		tick := time.NewTicker(20 * time.Millisecond)
 		defer tick.Stop()
 		for {
@@ -311,11 +312,15 @@ func startRowWorker(t *testing.T, eng *memqlengine.MemQLEngine) *rowWorker {
 				return
 			case <-tick.C:
 			}
-			// The first page, oldest first, as the worker drains it.
-			res, err := eng.Execute(memqlengine.ContextWithFreshRead(actor), `query outboundRequestsByStatus(status: "pending")`)
+			// Match the worker's bounded continuation. This fixture must leave
+			// other tests' pending rows alone without being stuck behind them.
+			pageCtx := memqlengine.ContextWithCursor(memqlengine.ContextWithFreshRead(actor), cursor)
+			res, err := eng.Execute(pageCtx, `query outboundRequestsByStatus(status: "pending")`)
 			if err != nil {
 				continue
 			}
+			cursor = ""
+			if res.GetMeta() != nil { cursor = res.GetMeta().Cursor }
 			for _, row := range rowsOf(res) {
 				if !w.serves(rowString(row, "requestedBy")) {
 					continue

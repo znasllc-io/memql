@@ -150,8 +150,8 @@ query missingCapability missingCapabilityByKindAndName {
 
 /// Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker
 /// drains 'pending' and 'retrying' through this; operators and products use it to audit delivery
-/// state. Bounded first page: the worker drains batches per poll, so a burst larger than one page
-/// simply takes extra polls.
+/// state. The worker advances one bounded page per status per poll and starts again at exhaustion,
+/// so rows awaiting another medium or a future retry do not hide later ready work.
 @actor
 query outboundRequest outboundRequestsByStatus {
   args {
@@ -167,7 +167,9 @@ query outboundRequest outboundRequestsByStatus {
 
 /// One outbound request by its id (memql#5480): how the pipelines notify stage learns whether the
 /// delivery it staged was sent. This server-only receipt read and the concept's operator tier
-/// protect delivery bodies and targets (memql#5804). The worker reads as the deployment actor.
+/// protect delivery bodies and targets (memql#5804). Scoping by actor.userId cannot serve the
+/// cross-owner drain: transport rows are deployment records, not personal inbox entries. The
+/// worker reads as the deployment actor.
 @serverOnly
 @actor
 query outboundRequest outboundRequestById {

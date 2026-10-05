@@ -5791,7 +5791,7 @@ func OrdersInWindowBuild(args OrdersInWindowArgs) string {
 	return b.String()
 }
 
-// OutboundRequestsByStatus -- Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker drains 'pending' and 'retrying' through this; operators and products use it to audit delivery state. Bounded first page: the worker drains batches per poll, so a burst larger than one page simply takes extra polls.
+// OutboundRequestsByStatus -- Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker drains 'pending' and 'retrying' through this; operators and products use it to audit delivery state. The worker advances one bounded page per status per poll and starts again at exhaustion, so rows awaiting another medium or a future retry do not hide later ready work.
 //
 // Bound concept: v1:platform:outboundRequest (machine-readable: BoundConcepts["outboundRequestsByStatus"] in generated_concepts.go).
 type OutboundRequestsByStatusArgs struct {
