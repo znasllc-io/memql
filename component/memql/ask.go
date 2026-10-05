@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"sort"
@@ -30,6 +31,9 @@ type AskTurn struct {
 	Error            string      `json:"error,omitempty"`
 	GoalID           string      `json:"goalId,omitempty"`
 	RunID            string      `json:"runId,omitempty"`
+	Workload         string      `json:"workload,omitempty"`
+	Acknowledgement  string      `json:"acknowledgement,omitempty"`
+	WorkTitle        string      `json:"workTitle,omitempty"`
 	// Route is the source choice the turn's goal was opened with; absent for
 	// Auto. The run row carries the choice every node honours -- this is the
 	// conversation's own record of it.
@@ -50,7 +54,7 @@ type askTranscript struct {
 }
 
 // RunAsk is shared by text and live voice. Only the server can append an
-// assistant message. The lock spans replicas and rejects overlapping turns;
+// assistant message. Per-turn observation and short write locks span replicas;
 // a lost request is never automatically re-executed with its side effects.
 //
 // route is the turn's source choice. It is checked FIRST -- a word outside the
@@ -87,11 +91,22 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 	if _, err = e.askRead(ctx, conversationID); err != nil {
 		return "", err
 	}
-	release, err := e.lockAskConversation(ctx, conversationID)
+	observer, err := e.lockAskConversationKind(ctx, conversationID, "observer:"+turnID)
 	if err != nil {
 		return "", err
 	}
-	defer release()
+	defer observer()
+	release, err := e.lockAskConversationKind(ctx, conversationID, "write")
+	if err != nil {
+		return "", err
+	}
+	locked := true
+	defer func() {
+		if locked {
+			release()
+		}
+	}()
+	ctx = ContextWithFreshRead(ctx)
 	row, err := e.askRead(ctx, conversationID)
 	if err != nil {
 		return "", err
@@ -117,12 +132,6 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 			return "", fmt.Errorf("this turn already started; inspect its activity before trying again")
 		}
 	}
-	// Preserve interrupted turns as evidence rather than replaying operations.
-	for i := range transcript.Turns {
-		if transcript.Turns[i].State == "streaming" {
-			transcript.Turns[i].State = "interrupted"
-		}
-	}
 	title, _ := row["title"].(string)
 	if len(transcript.Turns) == 0 {
 		runes := []rune(strings.Join(strings.Fields(prompt), " "))
@@ -139,6 +148,12 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 		resumeIndex = len(transcript.Turns) - 1
 	}
 	turn := &transcript.Turns[resumeIndex]
+	saveTurn := func(saveCtx context.Context) error {
+		if locked {
+			return e.askSave(saveCtx, conversationID, title, transcript)
+		}
+		return e.askSaveTurn(saveCtx, conversationID, *turn)
+	}
 	turn.State, turn.Error, turn.Answer = "streaming", "", ""
 	if err = e.askSave(ctx, conversationID, title, transcript); err != nil {
 		return "", err
@@ -161,7 +176,7 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 			event.ExpectedMS, event.EstimateSource = askExpectedFor(timingHistory, *event.Call)
 		}
 		turn.Activity = append(turn.Activity, event)
-		if err := e.askSave(ctx, conversationID, title, transcript); err != nil {
+		if err := saveTurn(ctx); err != nil {
 			return err
 		}
 		if onEvent != nil {
@@ -170,6 +185,9 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 		return nil
 	}
 	defer func() {
+		if turn.State == "queued" || turn.State == "waiting" {
+			return
+		}
 		ended := time.Now().UTC()
 		turn.EndedAt = &ended
 		turn.State = "done"
@@ -183,7 +201,7 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 		// Persist cancellation too, but do not give any model/tool a detached context.
 		saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		if saveErr := e.askSave(saveCtx, conversationID, title, transcript); saveErr != nil {
+		if saveErr := saveTurn(saveCtx); saveErr != nil {
 			err = fmt.Errorf("conversation could not be saved: %w", saveErr)
 		}
 	}()
@@ -193,7 +211,7 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 	if turn.RunID == "" {
 		call, callErr := parser.RenderCall("work.createGoal", map[string]any{
 			"statement": prompt, "requestedVia": "ask",
-			"ceilings": map[string]any{"wallClockMs": 600000, "maxModelCalls": 12, "maxRetries": 1},
+			"ceilings": map[string]any{"wallClockMs": 7200000, "maxModelCalls": 96, "maxRetries": 2},
 			"input": map[string]any{"conversation": map[string]any{
 				"id": conversationID, "turnId": turnID, "messages": history, "pageContext": pageContext,
 			}},
@@ -220,10 +238,12 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 			return "", err
 		}
 	}
+	release()
+	locked = false
 	if err = emit(WorkEvent{ID: "work:" + turn.RunID, Kind: "run", Phase: "running", Name: turn.RunID, Arguments: map[string]any{"goalId": turn.GoalID, "runId": turn.RunID}}); err != nil {
 		return "", err
 	}
-	answer, err = e.followWorkRun(ctx, turn.RunID, func(text string) {
+	answer, err = e.followWorkRun(context.WithValue(ctx, workFollowModeKey{}, followBackground), turn.RunID, func(text string) {
 		mu.Lock()
 		turn.Answer += text
 		mu.Unlock()
@@ -231,6 +251,23 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 			onText(text)
 		}
 	}, emit)
+	var pending *workPending
+	if errors.As(err, &pending) {
+		turn.State, turn.EndedAt, turn.Error = "queued", nil, ""
+		turn.WorkTitle, turn.Workload = pending.Title, pending.Workload
+		if pending.Waiting {
+			turn.State = "waiting"
+		}
+		turn.Answer = pending.Error()
+		turn.Acknowledgement = turn.Answer
+		if err = emit(WorkEvent{ID: "work:" + turn.RunID, Kind: "run", Phase: turn.State, Name: turn.WorkTitle, Arguments: map[string]any{"goalId": turn.GoalID, "runId": turn.RunID, "workload": turn.Workload, "workTitle": turn.WorkTitle}}); err != nil {
+			return "", err
+		}
+		if onText != nil && answer == "" {
+			onText(turn.Answer)
+		}
+		return turn.Answer, nil
+	}
 	if err == nil {
 		err = emit(WorkEvent{ID: "work:" + turn.RunID, Kind: "run", Phase: "completed", Name: turn.RunID, Arguments: map[string]any{"goalId": turn.GoalID, "runId": turn.RunID}})
 	}
@@ -312,6 +349,16 @@ func (e *MemQLEngine) askRead(ctx context.Context, conversationID string) (map[s
 }
 
 func (e *MemQLEngine) askSave(ctx context.Context, conversationID, title string, transcript askTranscript) error {
+	// Writers hold the conversation lock. Read the persisted version freshly:
+	// another replica's clock may be ahead, so wall time alone cannot order it.
+	row, err := e.askRead(ContextWithFreshRead(ctx), conversationID)
+	if err != nil {
+		return err
+	}
+	version := time.Now().UTC()
+	if previous, valid := askTimestamp(row["createdAt"]); valid && !version.After(previous) {
+		version = previous.Add(time.Microsecond)
+	}
 	raw, err := json.Marshal(transcript)
 	if err != nil {
 		return err
@@ -320,12 +367,20 @@ func (e *MemQLEngine) askSave(ctx context.Context, conversationID, title string,
 	if err = json.Unmarshal(raw, &document); err != nil {
 		return err
 	}
-	call, err := parser.RenderCall("saveAskConversation", map[string]any{"id": conversationID, "title": title, "transcript": document})
+	call, err := parser.RenderCall("saveAskConversation", map[string]any{"id": conversationID, "title": title, "transcript": document, "versionTime": version.Format(time.RFC3339Nano)})
 	if err != nil {
 		return err
 	}
 	_, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
 	return err
+}
+
+func askTimestamp(value any) (time.Time, bool) {
+	if at, ok := value.(time.Time); ok {
+		return at, !at.IsZero()
+	}
+	at, err := time.Parse(time.RFC3339Nano, fmt.Sprint(value))
+	return at, err == nil
 }
 
 func (e *MemQLEngine) lockAskConversation(ctx context.Context, conversationID string) (func(), error) {
@@ -349,7 +404,13 @@ func (e *MemQLEngine) lockAskConversationKind(ctx context.Context, conversationI
 	_, _ = hash.Write([]byte("ask:" + kind + ":" + bareID))
 	key := int64(hash.Sum64())
 	var held bool
-	if err = conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", key).Scan(&held); err != nil || !held {
+	if kind == "write" {
+		_, err = conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key)
+		held = err == nil
+	} else {
+		err = conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", key).Scan(&held)
+	}
+	if err != nil || !held {
 		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 		_ = conn.Close()
 		if err != nil {

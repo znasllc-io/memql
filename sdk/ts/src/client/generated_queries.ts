@@ -1099,6 +1099,26 @@ QueryClient.prototype.askConversationById = function (this: QueryClient, args: A
   return this.executeNamed("askConversationById", buildAskConversationById(args), opts);
 };
 
+/** Private conversation evidence for the work harness. Page before folding transcripts; the owner's predicate applies on every replica and page. */
+// Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["askMemoryConversations"] in generated_concepts.ts).
+export interface AskMemoryConversationsArgs {
+}
+
+export function buildAskMemoryConversations(args: AskMemoryConversationsArgs): string {
+  void args;
+  return "query askMemoryConversations()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    askMemoryConversations(args?: AskMemoryConversationsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.askMemoryConversations = function (this: QueryClient, args: AskMemoryConversationsArgs = {} as AskMemoryConversationsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askMemoryConversations", buildAskMemoryConversations(args), opts);
+};
+
 /** Timing evidence from this person's recent conversations, across replicas. The same owner-scoped history is available to the person and their assistant. */
 // Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["askRecentTimingHistory"] in generated_concepts.ts).
 export interface AskRecentTimingHistoryArgs {
@@ -11938,6 +11958,28 @@ QueryClient.prototype.workCheckpointForOwner = function (this: QueryClient, args
   return this.executeNamed("workCheckpointForOwner", buildWorkCheckpointForOwner(args), opts);
 };
 
+/** Read only this run's own computer-use decisions, including previous grants. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerScopesForOwnerRun"] in generated_concepts.ts).
+export interface WorkComputerScopesForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkComputerScopesForOwnerRun(args: WorkComputerScopesForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workComputerScopesForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workComputerScopesForOwnerRun(args: WorkComputerScopesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workComputerScopesForOwnerRun = function (this: QueryClient, args: WorkComputerScopesForOwnerRunArgs = {} as WorkComputerScopesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workComputerScopesForOwnerRun", buildWorkComputerScopesForOwnerRun(args), opts);
+};
+
 /** The DESCRIPTION GUIDANCE a goal shape has accumulated (epic memql#5414, design D23): the caller's own dislikes whose run served this goal signature, newest first, each carrying the axes and the reason the person gave. It is read only when a MODEL is about to be used for that goal again -- an agent turn of a live run, compile's triage and design calls, the app a learned procedure hands the goal back to -- and never by a replay, a fork's shared prefix or a construct-served goal, because a replay reads rows and text is not a row it can act on. Owned: guidance mined from somebody else's dislikes would steer a person's goal by another person's taste. Bounded at 20, the most recent, because the reader keeps five. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workDescriptionGuidance"] in generated_concepts.ts).
 export interface WorkDescriptionGuidanceArgs {
@@ -12067,6 +12109,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.workObservationsForOwnerRun = function (this: QueryClient, args: WorkObservationsForOwnerRunArgs = {} as WorkObservationsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workObservationsForOwnerRun", buildWorkObservationsForOwnerRun(args), opts);
+};
+
+/** Questions and decisions on this owner's run, used to resume on any replica. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workQuestionsForOwnerRun"] in generated_concepts.ts).
+export interface WorkQuestionsForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkQuestionsForOwnerRun(args: WorkQuestionsForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workQuestionsForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workQuestionsForOwnerRun(args: WorkQuestionsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workQuestionsForOwnerRun = function (this: QueryClient, args: WorkQuestionsForOwnerRunArgs = {} as WorkQuestionsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workQuestionsForOwnerRun", buildWorkQuestionsForOwnerRun(args), opts);
 };
 
 /** One of the caller's runs by id. */

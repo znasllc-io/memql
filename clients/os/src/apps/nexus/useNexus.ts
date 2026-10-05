@@ -53,9 +53,9 @@ import { modelCallFromRow, observationFromRow, type ModelCallRow, type Observati
 // per tool result (design record section D). A `useLiveCollection` over either
 // would render "Loading from the cluster" and then a list that silently never
 // moved, which is WORSE than a plain read: the caption would be claiming
-// wiring that is not there. So the journal is an on-demand read that prints
-// when it was taken and offers to look again -- the same call the Training app
-// made for the knowledge side and Accounts made for its ledger.
+// wiring that is not there. The visible journal therefore polls while its run is active, retains
+// useful rows during a failed refresh, and offers Retry. It stops polling when
+// the run finishes or the page closes.
 
 /** Every goal this caller owns, newest first. */
 export function useGoals(): LiveCollectionHandle<Row> {
@@ -205,22 +205,9 @@ const IDLE: Omit<Journal, "read"> = {
   readAt: "",
 };
 
-/**
- * One run's model calls and observations, read when asked.
- *
- * BOTH HALVES SETTLE TOGETHER, which is the opposite of the Accounts ledger's
- * band-by-band rule -- and the difference is what a refusal would mean. There,
- * one of four bands is genuinely gated and the other three must survive it.
- * Here both reads carry the same owner conjunct against the same run, so they
- * succeed together or refuse together; splitting them would offer a "look
- * again" that re-reads one half of one reading.
- *
- * IT DOES NOT READ ON OPEN. The journal is the expensive half of a run and
- * most visits to a run page are about the timeline, so it is read when the
- * person asks for it. That also means "read at" is never a lie about a read
- * this window did not take.
- */
-export function useJournal(runId: string): Journal {
+/** Owner-scoped snapshots while this run page is visible. Journal rows do not
+ * broadcast; bounded polling keeps the story current without a cluster-wide feed. */
+export function useJournal(runId: string, active = true): Journal {
   const connection = useOsConnection();
   const [state, setState] = useState<Omit<Journal, "read">>(IDLE);
   const [nonce, setNonce] = useState(0);
@@ -235,7 +222,6 @@ export function useJournal(runId: string): Journal {
   }, [runId]);
 
   useEffect(() => {
-    if (nonce === 0) return;
     const query = connection?.query ?? null;
     if (query === null || runId.trim() === "") {
       setState({ ...IDLE, state: "error", error: "Not connected to the cluster." });
@@ -243,7 +229,8 @@ export function useJournal(runId: string): Journal {
     }
     const controller = new AbortController();
     const signal = controller.signal;
-    setState((prev) => ({ ...prev, state: "loading", error: "" }));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    setState((prev) => ({ ...prev, state: prev.readAt ? prev.state : "loading", error: "" }));
 
     void (async () => {
       try {
@@ -261,20 +248,21 @@ export function useJournal(runId: string): Journal {
         });
       } catch (err: unknown) {
         if (signal.aborted) return;
-        setState({
-          modelCalls: [],
-          observations: [],
+        setState(prev => ({
+          ...prev,
           state: "error",
           // VERBATIM. A refusal here is the server's own sentence and is the
           // most useful thing this panel can carry.
           error: err instanceof Error ? err.message : String(err),
-          readAt: new Date().toISOString(),
-        });
+          readAt: prev.readAt,
+        }));
+      } finally {
+        if (!signal.aborted && active) timer = setTimeout(read, 4000);
       }
     })();
 
-    return () => controller.abort();
-  }, [connection, runId, nonce]);
+    return () => { controller.abort(); if (timer) clearTimeout(timer); };
+  }, [connection, runId, nonce, active, read]);
 
   return { ...state, read };
 }

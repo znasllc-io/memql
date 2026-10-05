@@ -1,10 +1,10 @@
 import type { AskHandle, AskTransport } from "./askController";
-import { AUTO_ROUTING, LocalAskRouteStore, isAuto, type AskRouteStore, type AskRouting } from "./askRoute";
+import { AUTO_ROUTING } from "./askRoute";
 
 export interface AskActivity {
   id: string;
   kind: "model" | "action" | "run" | "artifact";
-  phase: "running" | "completed" | "failed" | "fallback" | "waiting" | "cancelled";
+  phase: "running" | "queued" | "completed" | "failed" | "fallback" | "waiting" | "cancelled";
   at: string;
   provider?: string;
   model?: string;
@@ -21,10 +21,13 @@ export interface AskActivity {
 export interface AskTurn {
   goalId?: string;
   runId?: string;
+  acknowledgement?: string;
+  workTitle?: string;
+  workload?: string;
   id: string;
   prompt: string;
   answer: string;
-  state: "streaming" | "done" | "error" | "interrupted";
+  state: "streaming" | "queued" | "waiting" | "done" | "error" | "interrupted";
   startedAt: string;
   endedAt?: string;
   activity: AskActivity[];
@@ -51,19 +54,17 @@ export interface ConversationState {
   error: string;
   activity: AskActivity | null;
   voiceActive: boolean;
-  /** Where this conversation's replies are answered, and with what effort.
-   *  Auto until the viewer chooses; see askRoute.ts. */
-  routing: AskRouting;
 }
 
 /** One session survives closing the overlay and is observed by both surfaces.
  * Transcripts live on the cluster; no private conversation enters localStorage.
- * The one thing kept in this browser is the viewer's route choice per
- * conversation id (askRoute.ts) -- a preference, never content. */
+ * Routing stays automatic; deliberate overrides belong to run controls. */
 export class ConversationSession {
-  private state: ConversationState = { conversations: [], dictationActivity: [], historyLoading: false, historyError: "", selectionError: "", openingId: null, selectedId: null, turns: [], draft: "", busy: false, loading: false, error: "", activity: null, voiceActive: false, routing: AUTO_ROUTING };
+  private state: ConversationState = { conversations: [], dictationActivity: [], historyLoading: false, historyError: "", selectionError: "", openingId: null, selectedId: null, turns: [], draft: "", busy: false, loading: false, error: "", activity: null, voiceActive: false };
   private listeners = new Set<() => void>();
   private active: AskHandle | null = null;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private disposed = false;
   private stopRequested = false;
   private cancelling = false;
   private requestStarted = false;
@@ -74,26 +75,11 @@ export class ConversationSession {
   private voiceRevision = 0;
   private voiceTurnId: string | null = null;
   private pendingVoiceActivity = new Map<string, AskActivity[]>();
-  /** The conversation being opened, and the route of the one still showing
-   *  (given back if the open fails). A route chosen meanwhile is the opening
-   *  conversation's: the pill already names it. */
-  private opening: { id: string; before: AskRouting } | null = null;
-  constructor(private transport: AskTransport, private routes: AskRouteStore = new LocalAskRouteStore()) {}
+  constructor(private transport: AskTransport) {}
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private patch(patch: Partial<ConversationState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach(listener => listener()); }
   setDraft = (draft: string) => this.patch({ draft });
-  /** Choose this conversation's route. It applies to the NEXT message -- a
-   *  reply already streaming keeps the route it was sent with -- and it is
-   *  remembered with the conversation. A conversation not yet created (the
-   *  first message creates it) adopts the choice when it is. */
-  setRouting = (routing: AskRouting) => {
-    this.patch({ routing: { source: routing.source, level: routing.level } });
-    const id = this.opening?.id ?? this.state.selectedId;
-    if (id) this.routes.save(id, this.state.routing);
-  };
-  /** A conversation this session just created takes the choice made before it existed. */
-  private adopt(id: string) { if (!isAuto(this.state.routing)) this.routes.save(id, this.state.routing); }
   recordDictation = (activity: AskActivity) => {
     const previous = this.state.dictationActivity.find(item => item.id === activity.id);
     const completed = this.state.dictationActivity.filter(item => item.phase === "completed" && item.provider === activity.provider && item.model === activity.model && (item.elapsedMs ?? 0) > 0).slice(-20).map(item => item.elapsedMs!).sort((a, b) => a - b);
@@ -112,30 +98,23 @@ export class ConversationSession {
   newConversation = () => {
     if (this.state.busy || this.state.voiceActive) return;
     this.selection++;
-    this.opening = null;
-    this.patch({ selectedId: null, openingId: null, selectionError: "", turns: [], dictationActivity: [], draft: "", error: "", loading: false, routing: AUTO_ROUTING });
+    this.patch({ selectedId: null, openingId: null, selectionError: "", turns: [], dictationActivity: [], draft: "", error: "", loading: false });
   };
   select = async (id: string) => {
-    if (id === this.state.selectedId && !this.opening) return true;
+    if (id === this.state.selectedId && !this.state.openingId) return true;
     if (this.state.busy || this.state.voiceActive || !this.transport.conversations) return false;
     const selection = ++this.selection;
-    // The route belongs to the conversation being opened from the moment it
-    // is asked for, so a choice made while it loads lands on it -- not on the
-    // one being left, and not overwritten when the transcript arrives.
-    this.opening = { id, before: this.opening?.before ?? this.state.routing };
-    this.patch({ loading: true, openingId: id, selectionError: "", error: "", routing: this.routes.load(id) });
+    this.patch({ loading: true, openingId: id, selectionError: "", error: "" });
     try {
       const turns = await this.transport.conversations.read(id);
       if (selection === this.selection) {
-        this.opening = null;
         this.patch({ selectedId: id, openingId: null, turns, dictationActivity: [], draft: "", loading: false });
+        this.scheduleRefresh();
         return true;
       }
     } catch (error) {
       if (selection === this.selection) {
-        const before = this.opening?.before ?? this.state.routing;
-        this.opening = null;
-        this.patch({ loading: false, openingId: null, selectionError: message(error), routing: before });
+        this.patch({ loading: false, openingId: null, selectionError: message(error) });
       }
     }
     return false;
@@ -143,14 +122,13 @@ export class ConversationSession {
   /** Leaving the list cancels a pending selection, never the current reply. */
   cancelSelection = () => {
     this.selection++;
-    const routing = this.opening?.before ?? this.state.routing;
-    this.opening = null;
-    this.patch({ loading: false, openingId: null, selectionError: "", routing });
+    this.patch({ loading: false, openingId: null, selectionError: "" });
   };
   detach = (reason = "Connection ended. The work continues in Nexus.") => {
     this.epoch++;
     this.active?.cancel(); this.active = null;
     this.patch({ busy: false, activity: null, turns: this.state.turns.map(turn => turn.state === "streaming" ? { ...turn, state: "interrupted", error: reason } : turn) });
+    this.scheduleRefresh();
   };
   navigationFailed = (error: string) => { this.patch({ error, activity: null }); };
   stop = () => {
@@ -172,7 +150,15 @@ export class ConversationSession {
     } catch (error) { if (epoch === this.epoch) { this.stopRequested = false; this.patch({ error: `Could not stop work: ${message(error)}` }); } }
     finally { this.cancelling = false; }
   }
-  dispose = () => { this.detach(); this.selection++; this.opening = null; this.historyEpoch++; this.voiceEpoch++; this.listeners.clear(); };
+  activate = () => { this.disposed = false; this.scheduleRefresh(); };
+  dispose = () => {
+    this.disposed = true;
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = null;
+    this.detach();
+    this.selection++; this.historyEpoch++; this.voiceEpoch++;
+    this.listeners.clear();
+  };
   beginVoice = async (): Promise<string> => {
     if (this.state.busy || this.state.loading || this.state.voiceActive) throw new Error("Finish the current turn first.");
     const epoch = ++this.voiceEpoch;
@@ -182,20 +168,33 @@ export class ConversationSession {
       if (!this.transport.conversations) throw new Error("Conversations are unavailable.");
       const item = await this.transport.conversations.create();
       if (epoch !== this.voiceEpoch) throw new Error("Voice start was cancelled.");
-      this.adopt(item.id);
       this.patch({ selectedId: item.id, conversations: [item, ...this.state.conversations], turns: [] });
       return item.id;
     } catch (error) { if (epoch === this.voiceEpoch) this.patch({ voiceActive: false }); throw error; }
   };
   endVoice = () => { this.voiceEpoch++; this.voiceRevision++; this.voiceTurnId = null; this.pendingVoiceActivity.clear(); this.patch({ voiceActive: false, busy: false, activity: null }); void this.reload(); };
-  reload = async () => {
+  private scheduleRefresh() {
+    if (this.refreshTimer) clearTimeout(this.refreshTimer);
+    this.refreshTimer = null;
+    if (this.disposed || !this.state.turns.some(isBackgroundTurn)) return;
+    this.refreshTimer = setTimeout(() => { this.refreshTimer = null; void this.reload(false); }, this.state.error ? 10000 : this.state.turns.some(turn => isBackgroundTurn(turn) && turn.state !== "waiting") ? 2500 : 10000);
+  }
+  reload = async (refreshHistory = true) => {
     const id = this.state.selectedId;
     const selection = this.selection;
     const revision = this.voiceRevision;
     if (!id || !this.transport.conversations) return;
-    try { const turns = await this.transport.conversations.read(id); if (this.state.selectedId === id && selection === this.selection && revision === this.voiceRevision && !this.state.busy) this.patch({ turns }); }
+    try { const turns = await this.transport.conversations.read(id); if (this.state.selectedId === id && selection === this.selection && revision === this.voiceRevision) {
+      // A background completion may arrive while a newer foreground reply is
+      // streaming. Preserve that local stream and any not-yet-accepted turn.
+      const local = new Map(this.state.turns.filter(turn => turn.state === "streaming").map(turn => [turn.id, turn]));
+      const merged = turns.map(turn => local.get(turn.id) ?? turn);
+      for (const turn of local.values()) if (!merged.some(item => item.id === turn.id)) merged.push(turn);
+      this.patch({ turns: merged, error: "" });
+    } }
     catch (error) { if (selection === this.selection && revision === this.voiceRevision) this.patch({ error: message(error) }); }
-    void this.refresh();
+    if (refreshHistory) void this.refresh();
+    this.scheduleRefresh();
   };
   voiceEvent = (event: { type: string; turnId?: string; text?: string; error?: string; activity?: AskActivity }) => {
     if (!this.state.voiceActive || !event.turnId) return;
@@ -225,9 +224,7 @@ export class ConversationSession {
     const epoch = ++this.epoch;
     this.stopRequested = false; this.requestStarted = false;
     const turn: AskTurn = { id: crypto.randomUUID(), prompt: prompt.trim(), answer: "", state: "streaming", startedAt: new Date().toISOString(), activity: [] };
-    // Captured at SEND time: a choice made while this reply streams applies
-    // to the next message, never to this one.
-    const routing = this.state.routing;
+    const routing = AUTO_ROUTING;
     this.patch({ busy: true, draft: "", error: "", turns: [...this.state.turns, turn] });
     const patchTurn = (patch: Partial<AskTurn>) => {
       if (epoch !== this.epoch) return;
@@ -236,10 +233,13 @@ export class ConversationSession {
     };
     const finish = (error?: string) => {
       if (epoch !== this.epoch) return;
-      patchTurn({ state: error ? "error" : "done", error, endedAt: new Date().toISOString() });
+      const background = isBackgroundTurn(turn);
+      const observing = background || Boolean(error && turn.runId);
+      patchTurn({ state: error ? turn.runId ? "interrupted" : "error" : background ? turn.state : "done", error, endedAt: observing ? undefined : new Date().toISOString(), ...(background && !error ? { acknowledgement: turn.answer } : {}) });
       this.epoch++;
       this.active = null;
       this.patch({ busy: false });
+      this.scheduleRefresh();
       void this.refresh();
     };
     void (async () => {
@@ -249,7 +249,6 @@ export class ConversationSession {
           const conversation = await this.transport.conversations.create();
           if (epoch !== this.epoch) return;
           id = conversation.id;
-          this.adopt(id);
           this.patch({ selectedId: id, conversations: [conversation, ...this.state.conversations] });
         }
         if (epoch !== this.epoch) return;
@@ -258,7 +257,7 @@ export class ConversationSession {
           delta: text => patchTurn({ answer: turn.answer + text }),
           activity: event => {
             if (epoch !== this.epoch) return;
-            patchTurn({ activity: [...turn.activity, event], ...runIdentity(event) });
+            patchTurn({ activity: [...turn.activity, event], ...runIdentity(event), ...(event.kind === "run" && (event.phase === "queued" || event.phase === "waiting") ? { state: event.phase, workTitle: typeof event.arguments?.workTitle === "string" ? event.arguments.workTitle : undefined, workload: typeof event.arguments?.workload === "string" ? event.arguments.workload : undefined } : {}) });
             if (event.kind === "action" && event.navigate) this.patch({ activity: event });
             if (event.kind === "run" && this.stopRequested) void this.cancelCurrentGoal();
           },
@@ -273,6 +272,8 @@ export class ConversationSession {
 }
 
 function message(error: unknown) { return error instanceof Error ? error.message : String(error); }
+
+export function isBackgroundTurn(turn: AskTurn) { return Boolean(turn.runId) && (turn.state === "queued" || turn.state === "waiting" || turn.state === "interrupted"); }
 
 function runIdentity(event: AskActivity): Partial<AskTurn> {
   if (event.kind !== "run") return {};

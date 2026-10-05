@@ -2,17 +2,19 @@ package agent
 
 import (
 	"context"
+	"slices"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
 
-const workExecutionDirective = `You are executing the current MemQL request now. Complete the requested work in this run. For a file or document, use composeFile to write it to the user's Library. Supply a descriptive name, the requested format (markdown by default), and a complete statement of the requested content; optionally provide your finished draft or source references. The call finishes the file before returning its outputFileId. Confirm success only after receiving that outputFileId. Do not use produceArtifact or open another goal to delegate this same work. A plain answer is appropriate only when the goal asks for an answer rather than a saved file.`
+const workExecutionDirective = `You are executing the current MemQL request now. Complete the requested work in this run. A research or section step returns evidence, source references and a complete draft for its next step; it must not save the final file itself. When this step is responsible for a final file or document, use composeFile to write it to the user's Library. Supply a descriptive name, the requested format (markdown by default), and a complete statement of the requested content; optionally provide your finished draft or source references. The call finishes the file before returning its outputFileId. Confirm success only after receiving that outputFileId. Do not use produceArtifact or open another goal to delegate this same work. A plain answer is appropriate only when the goal asks for an answer rather than a saved file.`
 
 func isOwnedWorkExecution(ctx context.Context) bool {
 	run, ok := common.RunFromContext(ctx)
 	ac, _ := auth.AccessFromContext(ctx)
-	return ok && run.IsRun() && run.GoalId != "" && run.OwnerUserId != "" && ac != nil && ac.UserId == run.OwnerUserId
+	return ok && run.IsRun() && run.GoalId != "" && run.OwnerUserId != "" && ac != nil && memql.BareShortId(ac.UserId) == memql.BareShortId(run.OwnerUserId)
 }
 
 // A background goal already owns the asynchronous work. Its turn needs the
@@ -33,8 +35,8 @@ func (r *Replier) scopeWorkExecution(ctx context.Context, data map[string]any, n
 	if r.engine != nil && len(r.engine.ToolDefinitionsForNames([]string{"composeFile"})) > 0 {
 		out = append(out, "composeFile")
 	}
-	for _, name := range []string{"discoverCapabilities", "executeCapability", "recallWorkHistory", "navigateOS"} {
-		if r.engine != nil && len(r.engine.ToolDefinitionsForNames([]string{name})) > 0 {
+	for _, name := range []string{"discoverCapabilities", "executeCapability", "recallWorkHistory", "navigateOS", "requestUserFeedback", "workerStatus", "requestComputerUseScope", "workerHost", "workerComputer", "workbenchHost"} {
+		if r.engine != nil && !slices.Contains(out, name) && len(r.engine.ToolDefinitionsForNames([]string{name})) > 0 {
 			out = append(out, name)
 		}
 	}

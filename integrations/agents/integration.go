@@ -44,6 +44,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -506,6 +507,18 @@ func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[st
 	})
 	if err != nil {
 		return nil, fmt.Errorf("requestUserFeedback: raise approval: %w", err)
+	}
+	if i.engine != nil {
+		result, readErr := i.engine.Execute(memql.ContextWithFreshRead(ctx), "query workApprovalForOwner(approvalId: "+parser.QuoteString(approvalId)+")")
+		if readErr != nil {
+			return nil, fmt.Errorf("requestUserFeedback: read decision: %w", readErr)
+		}
+		for _, row := range memql.MaterializeRows(result) {
+			if row["decision"] == "answered" {
+				payload, marshalErr := json.Marshal(map[string]any{"status": "answered", "approvalId": approvalId, "answer": row["answer"]})
+				return []memorynodes.MemoryNode{{ID: approvalId, Payload: payload}}, marshalErr
+			}
+		}
 	}
 
 	payload, err := json.Marshal(map[string]any{

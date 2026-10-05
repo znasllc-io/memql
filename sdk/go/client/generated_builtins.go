@@ -35,6 +35,26 @@ func ArtifactProbeBuild(args ArtifactProbeArgs) string {
 	return b.String()
 }
 
+// AskConversationSnapshot -- Read this person's conversation with current progress and completed results projected from its durable work runs. Reconnects never execute work again.
+type AskConversationSnapshotArgs struct {
+	ConversationId string
+}
+
+// AskConversationSnapshot calls the engine builtin askConversationSnapshot.
+func (qc *QueryClient) AskConversationSnapshot(ctx context.Context, args AskConversationSnapshotArgs) (*Result, error) {
+	call := AskConversationSnapshotBuild(args)
+	return qc.executeNamed(ctx, "askConversationSnapshot", call)
+}
+
+func AskConversationSnapshotBuild(args AskConversationSnapshotArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin askConversationSnapshot(")
+	b.WriteString("conversationId: ")
+	b.WriteString(quoteMemQL(args.ConversationId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // AutomationGraph -- The static loop graph over the automations this node registered, one v1:platform:automationNode row per automation: its trigger, filter, writes, the calls the graph cannot see into, its @loop and @mode, the automations it starts and why, its stratum, and the cycle it lies on. Built once per registered set and never persisted. Carries no run and no payload.
 type AutomationGraphArgs struct {
 }

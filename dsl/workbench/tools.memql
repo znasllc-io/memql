@@ -1,0 +1,11 @@
+/// Work inside this run's isolated Linux workspace. Use for files, code and
+/// headless tools; it has no access to the person's computer or private files.
+@handler(type="function", name="workbenchDispatchHost")
+@requiresAgentRole("assistant", "specialist")
+tool workbenchHost {
+ action enum("exec", "fs_read", "fs_write", "fs_list", "fs_stat", "http_fetch")!
+ args object
+ environment object
+ runId string! @autoInjected
+ agentId string! @autoInjected
+}

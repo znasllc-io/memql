@@ -353,6 +353,11 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 			for index, format := range append(formats, purecompose.FormatMarkdown) {
 				t.Run("native_file_"+string(format), func(t *testing.T) {
 					triage["requiresFile"], triage["fileName"], triage["fileFormat"] = true, "native-report", string(format)
+					triage["workload"] = "quick"
+					researchFile := !sectionable && format == purecompose.FormatPDF
+					if researchFile {
+						triage["workload"] = "research"
+					}
 					req.RunId = "v1:work:run:" + id.NewShortId()
 					req.Statement = "Create a \"Marvel\" report and save it in the Library.\nInclude the literal path C:\\notes\\hero.txt and the characters \\n."
 					out, err := (&PlannerAgentLoop{engine: bridge, logger: testLogger()}).CompileGoalForRun(ctx, req, nil, bridge)
@@ -395,6 +400,9 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 						t.Fatalf("native file execution failed: result=%+v err=%v", execution, runErr)
 					}
 					stepKey, wantTurns := "reason", 0
+					if researchFile {
+						wantTurns = 1
+					}
 					if sectionable {
 						stepKey, wantTurns = "assemble", 2
 					}
@@ -415,7 +423,14 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 						t.Fatalf("native assembly lost completed section content: %+v", composed)
 					}
 					files := read("libraryFilesForOwner", map[string]any{"runId": req.RunId, "stepKey": stepKey, "status": "ready"})
-					if len(files) != 1 || len(uploaderProbe.data) == 0 || files[0]["mimeType"] != format.MimeType() || files[0]["producedByStepKey"] != stepKey {
+					wantFiles := 1
+					if format != purecompose.FormatMarkdown && format != purecompose.FormatText {
+						wantFiles = 2
+					}
+					if wantFiles == 2 && (len(files) != 2 || files[1]["mimeType"] != "application/zip" || files[1]["producedByStepKey"] != stepKey) {
+						t.Fatalf("source package missing from this step: %+v", files)
+					}
+					if len(files) != wantFiles || len(uploaderProbe.data) == 0 || files[0]["mimeType"] != format.MimeType() || files[0]["producedByStepKey"] != stepKey {
 						t.Fatalf("native file was not durably saved by this step: files=%+v bytes=%d", files, len(uploaderProbe.data))
 					}
 					journal, err := automations.LoadRunJournal(ctx, receiver, req.RunId)

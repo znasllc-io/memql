@@ -16,6 +16,8 @@ type workTurnDeltas struct {
 	engine   *memql.MemQLEngine
 	id, text string
 	last     time.Time
+	tools    map[string]memql.WorkEvent
+	started  map[string]time.Time
 	cancel   context.CancelCauseFunc
 }
 
@@ -31,8 +33,36 @@ func (s *workTurnDeltas) TextDelta(text string) {
 		s.cancel(err)
 	}
 }
-func (s *workTurnDeltas) ToolCall(string, string, string)   {}
-func (s *workTurnDeltas) ToolResult(string, string, string) {}
+func (s *workTurnDeltas) ToolCall(id, name, _ string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.tools == nil {
+		s.tools = map[string]memql.WorkEvent{}
+		s.started = map[string]time.Time{}
+	}
+	event := memql.WorkEvent{ID: "tool-" + id, Kind: "action", Phase: "running", Name: name}
+	s.tools[id], s.started[id] = event, time.Now()
+	if err := s.engine.RecordWorkProgress(s.ctx, event); err != nil {
+		s.cancel(err)
+	}
+}
+func (s *workTurnDeltas) ToolResult(id, _ string, failure string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	event, ok := s.tools[id]
+	if !ok {
+		return
+	}
+	event.Phase, event.ElapsedMS = "completed", time.Since(s.started[id]).Milliseconds()
+	if failure != "" {
+		event.Phase, event.Error = "failed", failure
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), 5*time.Second)
+	defer cancel()
+	if err := s.engine.RecordWorkProgress(ctx, event); err != nil {
+		s.cancel(err)
+	}
+}
 func (s *workTurnDeltas) finish(text string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

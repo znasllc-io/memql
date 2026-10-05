@@ -64,7 +64,7 @@ describe("the inbox", () => {
     mount(fakeConnection());
     expect(
       await screen.findByText(
-        /A run that needs a decision puts it here and stops until you make it\./,
+        "Nothing needs your input.",
       ),
     ).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Approvals" }).parentElement?.querySelector(".os-head-meta")?.textContent).toBe("0");
@@ -123,13 +123,12 @@ describe("deciding one", () => {
     expect(screen.getByText("high")).toBeTruthy();
   });
 
-  it("says an absent evidence block is a fact about the ROW, not about the decision", async () => {
+  it("omits an empty evidence block without inventing a reason", async () => {
     const conn = fakeConnection({ approvals: [approvalRow({ id: "a1" })] });
     mount(conn);
     fireEvent.click(await screen.findByText("Step sendInvoice"));
-    expect(
-      await screen.findByText(/it does not mean the gate fired for no reason/),
-    ).toBeTruthy();
+    await screen.findByRole("region", { name: "What is being asked" });
+    expect(screen.queryByRole("region", { name: "Why you were asked" })).toBeNull();
   });
 
   it("shows the artifact hash and says what it promises", async () => {
@@ -159,6 +158,16 @@ describe("deciding one", () => {
 });
 
 describe("a question", () => {
+  it("sends every selected option for a multi-select question", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({id:"multi",kind:"feedback",question:"Which formats?",subject:{kind:"multi"},options:[{label:"PDF",value:"pdf"},{label:"Markdown",value:"md"}]})] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Which formats?"));
+    fireEvent.click(await screen.findByRole("checkbox",{name:"PDF"}));
+    fireEvent.click(await screen.findByRole("checkbox",{name:"Markdown"}));
+    fireEvent.click(screen.getByText("Send answer"));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({approvalId:"multi",decision:"answered",answer:{values:["pdf","md"]}}));
+  });
+
   it("shows the question and its options, and holds Send back until one is picked", async () => {
     const conn = fakeConnection({
       approvals: [
@@ -365,7 +374,7 @@ describe("a promotion", () => {
   });
 
   it("keeps the classifier's evidence on every other kind", async () => {
-    mount(fakeConnection({ approvals: [approvalRow({ id: "a1" })] }));
+    mount(fakeConnection({ approvals: [approvalRow({ id: "a1", evidence: { tier: "high", ruleId: "scope-1" } })] }));
     fireEvent.click(await screen.findByText("Step sendInvoice"));
     const why = await screen.findByRole("region", { name: "Why you were asked" });
     expect(within(why).getByText("The classifier's evidence")).toBeTruthy();

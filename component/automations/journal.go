@@ -651,6 +651,13 @@ func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, c
 	if j == nil || exec == nil {
 		return
 	}
+	var humanWait *work.HumanWait
+	if errors.As(runFailure(exec), &humanWait) {
+		// The question writer committed the wait under its decision lock.
+		// It may already have been answered on another replica; never overwrite
+		// that decision with a late failed/succeeded/second waiting receipt.
+		return
+	}
 	status := "succeeded"
 	switch exec.Status {
 	case "failed":

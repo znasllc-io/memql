@@ -12,8 +12,10 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/work"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	fleetcatalog "github.com/znasllc-io/memql/component/worker/fleetcatalog"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/num"
 )
 
@@ -465,3 +467,64 @@ func outputPayloadRows(payload any) []map[string]any {
 	}
 	return nil
 }
+
+// WorkComputerScope reads persisted approval decisions; neither a run ID nor an
+// agent's cached permission is evidence of consent for this task or machine set.
+func (s *EngineStore) WorkComputerScope(ctx context.Context, req Request, now time.Time) (string, error) {
+	rc, ok := common.RunFromContext(ctx)
+	if !ok || memqlengine.BareShortId(rc.RunId) != memqlengine.BareShortId(req.RunId) || memqlengine.BareShortId(rc.OwnerUserId) != memqlengine.BareShortId(req.OwnerUserId) {
+		return "", fmt.Errorf("computer grant requires the current owned run")
+	}
+	ctx = memqlengine.ContextWithFreshRead(ctx)
+	call, _ := langparser.RenderCall("workRunForOwner", map[string]any{"runId": req.RunId})
+	result, err := s.Engine.Execute(ctx, "query "+call)
+	if err != nil {
+		return "", err
+	}
+	runs := memqlengine.MaterializeRows(result.OutputPayload())
+	if len(runs) != 1 || runs[0]["status"] != "running" || runs[0]["cancelRequested"] == true {
+		return "", fmt.Errorf("computer work is no longer active")
+	}
+	call, _ = langparser.RenderCall("workComputerScopesForOwnerRun", map[string]any{"runId": req.RunId})
+	result, err = s.Engine.Execute(ctx, "query "+call)
+	if err != nil {
+		return "", err
+	}
+	return approvedComputerScope(memqlengine.MaterializeRows(result.OutputPayload()), req, now), nil
+}
+func approvedComputerScope(rows []map[string]any, req Request, now time.Time) string {
+	scope := ""
+	for _, row := range rows {
+		if row["decision"] != "approved" || memqlengine.BareShortId(scopeString(row["ownerUserId"])) != memqlengine.BareShortId(req.OwnerUserId) || memqlengine.BareShortId(scopeString(row["runId"])) != memqlengine.BareShortId(req.RunId) {
+			continue
+		}
+		expires, err := time.Parse(time.RFC3339Nano, scopeString(row["expiresAt"]))
+		if err != nil || !now.Before(expires) {
+			continue
+		}
+		subject, _ := row["subject"].(map[string]any)
+		if work.ArtifactHash(subject) != scopeString(row["artifactHash"]) || memqlengine.BareShortId(scopeString(subject["agentId"])) != memqlengine.BareShortId(req.AgentId) {
+			continue
+		}
+		labels := LabelsFromArgs(subject["requireLabels"])
+		matches := true
+		for key, value := range labels {
+			if req.RequireLabels[key] != value {
+				matches = false
+			}
+		}
+		if !matches {
+			continue
+		}
+		allowed := scopeString(subject["scope"])
+		if allowed == "full" {
+			return "full"
+		}
+		if allowed == "observe" {
+			scope = allowed
+		}
+	}
+	return scope
+}
+
+func scopeString(v any) string { s, _ := v.(string); return s }

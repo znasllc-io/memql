@@ -31,6 +31,23 @@ func (e *MemQLEngine) workRows(ctx context.Context, name, runID string) ([]map[s
 
 type workRowReader func(context.Context, string, string) ([]map[string]any, error)
 
+type workFollowModeKey struct{}
+
+const followBackground = "background"
+const followSnapshot = "snapshot"
+
+type workPending struct {
+	Waiting         bool
+	Title, Workload string
+}
+
+func (p *workPending) Error() string {
+	if p.Waiting {
+		return "This work needs your input in Nexus."
+	}
+	return "I’m working on this and will bring the result back here. You can keep chatting."
+}
+
 func followWorkRun(ctx context.Context, runID string, read workRowReader, onText func(string), onEvent func(WorkEvent) error, interval time.Duration) (string, error) {
 	seen := map[string]string{}
 	texts := map[string]string{}
@@ -121,7 +138,7 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 						return answer.String(), err
 					}
 				}
-				return answer.String(), fmt.Errorf("%s", message)
+				return answer.String(), &workPending{Waiting: true}
 			}
 		case "failed", "abandoned", "cancelled":
 			message, _ := run["errorMessage"].(string)
@@ -138,6 +155,13 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 				}
 			}
 			return answer.String(), fmt.Errorf("%s", message)
+		}
+		mode, _ := ctx.Value(workFollowModeKey{}).(string)
+		outcome, _ := run["outcome"].(map[string]any)
+		workload, _ := outcome["workload"].(string)
+		title, _ := outcome["workTitle"].(string)
+		if mode == followSnapshot || (mode == followBackground && workload != "" && workload != "quick") {
+			return answer.String(), &workPending{Title: title, Workload: workload}
 		}
 		timer := time.NewTimer(interval)
 		select {
@@ -211,6 +235,10 @@ func workResultFiles(steps []map[string]any) []map[string]any {
 			}
 			seen[fileID] = true
 			files = append(files, map[string]any{"fileId": BareShortId(fileID), "name": name, "sha256": hash})
+			if sourceID, _ := row["sourceFileId"].(string); sourceID != "" && !seen[sourceID] {
+				seen[sourceID] = true
+				files = append(files, map[string]any{"fileId": BareShortId(sourceID), "name": "Source ZIP for " + name})
+			}
 		}
 	}
 	return files

@@ -64,6 +64,8 @@ concept composition {
 
   templateId   string  @description("v1:compose:template this was rendered through. Empty for a composition with no template -- the format's own default rendering is used, which is the common case for markdown and the impossible case for docx branding.")
 
+  sourceFileId string @description("Library source ZIP containing the editable draft, captured inputs and verified renderer. Required for compound outputs; plain text and Markdown need no companion.")
+
   outputFileId string  @description("v1:library:file holding the produced bytes. Empty until status reaches ready. The file is an ORDINARY Library file -- it browses, downloads, versions, moves between folders and archives to the Bin like any other, and the Files app's Materializer place is a shortcut to the subset that came from here.")
 
   folderId     string  @description("v1:library:folder the output was filed into, chosen in the Target column. Empty means the Library root.")

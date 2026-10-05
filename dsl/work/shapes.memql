@@ -50,6 +50,8 @@ shape run workRunFull {
   replayPolicy
   status
   waitingOn
+  continuation
+  humanWaitMs
   spent
   nodeId
   heartbeatAt

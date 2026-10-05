@@ -247,6 +247,11 @@ func (r *Replier) runNonStreamingToolLoop(
 	requestId string,
 	turnCtx turnContext,
 ) (*TurnResult, error) {
+	resumed, resumeErr := r.restoreAfterQuestion(ctx, messages)
+	if resumeErr != nil {
+		return nil, resumeErr
+	}
+	messages = resumed
 	// NOTHING IS INSTALLED HERE ANY MORE (memql#5050). This used to stamp a
 	// taskstamp.PlanContext so every tool call wrote a v1:planner:task row,
 	// minting a synthetic ad-hoc Plan when turnCtx.RunId was empty -- which
@@ -496,24 +501,6 @@ BackgroundLoop:
 			sink.ToolCall(tc.ID, tc.Name, tc.Arguments)
 		}
 
-		if iter == maxIter-1 {
-			// Budget exhausted: run the final round's tools for their side
-			// effects but don't feed results back (no turn left to consume).
-			for _, tc := range turnCalls {
-				args := parseToolArgs(tc.Arguments)
-				if args == nil {
-					args = make(map[string]any)
-				}
-				injectAgentContext(tc.Name, args, turnCtx)
-				if _, execErr := r.stamper.ExecuteToolByName(agentToolCallContext(ctx, tc.Name, turnCtx), tc.Name, args); execErr != nil {
-					r.logger.Warn("agent background: tool execution failed",
-						"tool", tc.Name, "error", execErr)
-					sink.ToolResult(tc.ID, "", execErr.Error())
-				}
-			}
-			break
-		}
-
 		hadSuccess := false
 		for _, tc := range turnCalls {
 			args := parseToolArgs(tc.Arguments)
@@ -555,7 +542,16 @@ BackgroundLoop:
 				continue
 			}
 			injectAgentContext(tc.Name, args, turnCtx)
+			if err := r.saveBeforeQuestion(ctx, tc.Name, messages); err != nil {
+				return nil, err
+			}
 			result, execErr := r.stamper.ExecuteToolByName(agentToolCallContext(ctx, tc.Name, turnCtx), tc.Name, args)
+			if execErr == nil {
+				if wait := feedbackWait(tc.Name, result); wait != nil {
+					sink.ToolResult(tc.ID, result, "")
+					return nil, wait
+				}
+			}
 			var content string
 			if execErr != nil {
 				se := memql.ClassifyToolError(execErr)

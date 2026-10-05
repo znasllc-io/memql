@@ -2030,9 +2030,10 @@ func citeNothing(_ map[string]any, _ string) string {
 // engine-owned domains, add them here; a product pack's operator domains
 // (e.g. its UI map) classify via the registered AppProfile instead.
 var appStructureDomainIds = map[string]bool{
-	"computer-use": true,
-	"workbench":    true,
-	"recent-chat":  true,
+	"work-guidance": true,
+	"computer-use":  true,
+	"workbench":     true,
+	"recent-chat":   true,
 }
 
 func isAppStructureDomain(domainId string) bool {

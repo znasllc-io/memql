@@ -22,11 +22,9 @@ Fleet and Cockpit, or configure a federated provider in Settings. Ask follows
 MemQL routing policies; adding OpenAI does not silently override a person's
 policy choices. Fleet's Model Library and routing views show the available doors.
 
-A conversation can choose its own source (Auto, an app such as Claude Code, a
-local model, a vendor, or a route) and level (Auto, Fast, Strong, Reasoning).
-The choice is stored on the turn's goal and run, so the planner and the agent
-both honour it; a chosen single source is never replaced by another. See
-[AI routing: a person's choice for one conversation](ai-routing.md#a-persons-choice-for-one-conversation-ask).
+Ask routes automatically for each step through the available Fleet models and
+configured policies. The conversation has no source selector. Deliberate model
+or reasoning overrides remain available on individual runs and steps in Nexus.
 
 MemQL discovers named DSL capabilities and executes them with the person's
 original authority. Role, app capability, account scope and row authorization
@@ -40,6 +38,39 @@ detaching. Model calls observe cancellation through the shared journal; writes
 finish at a safe boundary and keep their receipts. A lost connection only
 detaches the viewer. Fresh-data questions
 still read fresh sources even when the procedure is reused.
+
+## Background work and memory
+
+The same classifier separates quick replies, saved-data lookups, research and
+projects. Greetings and answers supported by the current context stay inline.
+Longer work is acknowledged after its goal and run are saved, then continues
+while you send other messages in the same conversation. Each request keeps its
+own captured context. Later messages do not silently alter accepted work.
+
+Above the composer, up to three cards show the active tasks and their current
+steps. More than three collapse into a count. Open a card to inspect its run in
+Nexus, or the count to see work from that conversation. Results appear when the
+work finishes, beside a reminder of the original request. Closing Ask or losing
+the connection does not discard the work.
+
+For facts missing from the current context, MemQL can discover authorized
+concepts and search earlier conversations through named MemQL reads. Results
+identify their conversation, speaker and time. Semantic similarity applies
+where content is indexed; an empty index is not proof that a fact was never
+provided. Retrieved material cannot grant permissions or issue instructions.
+
+Blocking questions and requests for personal computer access pause the run in
+Nexus. Computer access names the purpose, access level, eligible machines and
+expiry. Recorded decisions survive replica changes; completed tool exchanges
+are preserved when work resumes. Time spent waiting for you does not consume
+the active execution allowance. Model calls, cost and retry limits still apply.
+
+Compound generated files include a companion source ZIP with their editable
+draft, captured inputs and template, assets, exact renderer source, pinned
+dependencies and rebuild instructions. The renderer verifies the output hash.
+A single Markdown or plain-text file needs no companion. Runnable web products
+use Deployables; native desktop, mobile and game distribution remain coming
+soon.
 
 Replies default to English without emojis unless explicitly requested.
 Recent conversation messages remain verbatim. When context grows, the shared

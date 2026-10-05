@@ -658,6 +658,11 @@ func (i *Integration) RunBudget(ctx context.Context, ownerUserId, runId string) 
 // LimitReplyBudget is the compiler's narrow write seam. The run's ownership
 // is read under the caller's authority before any server-only mutation.
 func (i *Integration) LimitReplyBudget(ctx context.Context, ownerUserId, runId string) error {
+	return i.LimitWorkloadBudget(ctx, ownerUserId, runId, "quick")
+}
+
+// LimitWorkloadBudget narrows a run to its classifier tier; it never raises a person's ceiling.
+func (i *Integration) LimitWorkloadBudget(ctx context.Context, ownerUserId, runId, workload string) error {
 	ctx = memql.ContextWithFreshRead(ownerActor(ctx, ownerUserId))
 	run, err := i.store().runForOwner(ctx, runId)
 	if err != nil {
@@ -683,7 +688,7 @@ func (i *Integration) LimitReplyBudget(ctx context.Context, ownerUserId, runId s
 	if err != nil {
 		return err
 	}
-	return i.store().writeInternal(ctx, "mutation "+call("updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": work.ReplyCeilings(ceilings), "versionTime": rfc(workRowVersionAfter(goal["createdAt"], i.clock()))}))
+	return i.store().writeInternal(ctx, "mutation "+call("updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": work.WorkloadCeilings(ceilings, workload), "versionTime": rfc(workRowVersionAfter(goal["createdAt"], i.clock()))}))
 }
 
 // ceilingsOf decodes one goal row's declared ceilings.

@@ -94,6 +94,7 @@ mutation run createWorkRun {
 mutation run updateWorkRun {
   args {
     runId            string!
+    versionTime      datetime
     goalSignature    string
     status           string
     automationName   string
@@ -107,6 +108,8 @@ mutation run updateWorkRun {
     chainHead        string
     stepOrder        []string
     waitingOn        object
+    continuation     object
+    humanWaitMs      int
     spent            object
     outcome          object
     errorCode        string
@@ -123,9 +126,10 @@ mutation run updateWorkRun {
     validation       object
   }
   update {
-    accept { status, goalSignature, automationName, templateConstructId, templateVersion, templateFingerprint, variables, nodeId, callerSuppliedPayload, heartbeatAt, chainHead, stepOrder, waitingOn, spent, outcome, errorCode, errorMessage, finishedAt, cancelRequested, cancelledBy, actualFootprint, summary, parentRunId, head, staleSteps, rerun, validation }
+    accept { status, goalSignature, automationName, templateConstructId, templateVersion, templateFingerprint, variables, nodeId, callerSuppliedPayload, heartbeatAt, chainHead, stepOrder, waitingOn, continuation, humanWaitMs, spent, outcome, errorCode, errorMessage, finishedAt, cancelRequested, cancelledBy, actualFootprint, summary, parentRunId, head, staleSteps, rerun, validation }
     stamp {
       id: args.runId
+      createdAt: args.versionTime ?? now
     }
   }
 }

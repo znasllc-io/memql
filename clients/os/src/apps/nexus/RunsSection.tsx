@@ -1,3 +1,4 @@
+import { flatten } from "../../kit/rows";
 import { useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -59,9 +60,11 @@ export interface RunsSectionProps {
   goalsById: Map<string, GoalRow>;
   showFinished: boolean;
   onOpenRun: (runId: string) => void;
+  conversationId?: string;
+  onClearConversation?: () => void;
 }
 
-export function RunsSection({ runs, goalsById, showFinished, onOpenRun }: RunsSectionProps) {
+export function RunsSection({ runs, goalsById, showFinished, onOpenRun, conversationId, onClearConversation }: RunsSectionProps) {
   const [search, setSearch] = useState("");
   const [ascending, setAscending] = useState(false);
   const now = useNow(15_000);
@@ -69,9 +72,10 @@ export function RunsSection({ runs, goalsById, showFinished, onOpenRun }: RunsSe
   // THE VIEW KEY RE-BASELINES THE CUE WHEN THE QUESTION CHANGES. Revealing
   // rows the browser already had is not the cluster sending them, so flipping
   // "show finished" must not announce every finished run as new.
-  const viewKey = `runs:${showFinished ? "all" : "live"}:${ascending ? "asc" : "desc"}:${search.trim().toLowerCase()}`;
+  const viewKey = `runs:${conversationId ?? ""}:${showFinished ? "all" : "live"}:${ascending ? "asc" : "desc"}:${search.trim().toLowerCase()}`;
   const view = useLiveView<Row, RunRow>(runs, viewKey, (rows) => {
     const projected = rows
+      .filter(row => !conversationId || conversationOf(row) === conversationId)
       .map(runFromRow)
       .filter((run) => run.id !== "")
       .filter((run) => showFinished || !runIsTerminal(run))
@@ -94,6 +98,7 @@ export function RunsSection({ runs, goalsById, showFinished, onOpenRun }: RunsSe
         meta={listCount(view?.snapshot) === undefined ? undefined : `${listCount(view?.snapshot)}${parked > 0 ? ` · ${parked} waiting for you` : ""}`}
       >
         <Refine
+          chips={conversationId ? [{ id: "conversation", label: "This conversation", onRemove: () => onClearConversation?.() }] : []}
           search={search}
           onSearch={setSearch}
           placeholder="Automation, status or mode"
@@ -162,7 +167,7 @@ export function RunLine({
   const moving = run.status === "running" || run.status === "compiling";
   return (
     <KitRow
-      name={<span className="os-nexus-run-name">{runTitle(run)}</span>}
+      name={<span className="os-nexus-run-name">{showContext && goal ? goalTitle(goal) : runTitle(run)}</span>}
       onOpen={onOpen}
       // `current` takes a row from muted to full ink: a run that is moving or
       // one that is stuck on you is what this list is about, and everything
@@ -171,7 +176,7 @@ export function RunLine({
       dim={runIsTerminal(run) && !parked}
       state={runStatusWord(run.status)}
       tone={moving || parked ? "accent" : "muted"}
-      secondary={showContext ? goal === null ? run.goalId === "" ? "an automation" : "a goal" : goalTitle(goal) : undefined}
+      secondary={undefined}
       stateExtra={
         <>
           {parked ? (
@@ -218,4 +223,9 @@ export function RunMarks({ runs }: { runs: readonly RunRow[] }) {
       ))}
     </span>
   );
+}
+
+function conversationOf(row: Row): string {
+  const input = flatten(row).input as { conversation?: { id?: string } } | undefined;
+  return input?.conversation?.id ?? "";
 }

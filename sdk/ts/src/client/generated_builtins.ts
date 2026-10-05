@@ -27,6 +27,27 @@ QueryClient.prototype.artifactProbe = function (this: QueryClient, args: Artifac
   return this.executeNamed("artifactProbe", buildArtifactProbe(args), opts);
 };
 
+/** Read this person's conversation with current progress and completed results projected from its durable work runs. Reconnects never execute work again. */
+export interface AskConversationSnapshotArgs {
+  conversationId: string;
+}
+
+export function buildAskConversationSnapshot(args: AskConversationSnapshotArgs): string {
+  const parts: string[] = [];
+  parts.push("conversationId: " + renderMemQLValue(args.conversationId));
+  return "builtin askConversationSnapshot(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    askConversationSnapshot(args: AskConversationSnapshotArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.askConversationSnapshot = function (this: QueryClient, args: AskConversationSnapshotArgs = {} as AskConversationSnapshotArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askConversationSnapshot", buildAskConversationSnapshot(args), opts);
+};
+
 /** The static loop graph over the automations this node registered, one v1:platform:automationNode row per automation: its trigger, filter, writes, the calls the graph cannot see into, its @loop and @mode, the automations it starts and why, its stratum, and the cycle it lies on. Built once per registered set and never persisted. Carries no run and no payload. */
 export interface AutomationGraphArgs {
 }

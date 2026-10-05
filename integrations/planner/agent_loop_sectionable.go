@@ -90,6 +90,8 @@ type workNavigationDecision struct {
 }
 
 type sectionableDecision struct {
+	Workload   string                  `json:"workload"`
+	WorkTitle  string                  `json:"workTitle"`
 	Intent     string                  `json:"intent"`
 	Navigation *workNavigationDecision `json:"navigation"`
 	// RequiresFile is the goal's semantic delivery contract, independent of
@@ -344,6 +346,8 @@ func parseSectionableDecision(resp any) sectionableDecision {
 	}
 	raw = extractJSONObject(raw)
 	var env struct {
+		Workload     string                  `json:"workload"`
+		WorkTitle    string                  `json:"workTitle"`
 		Intent       string                  `json:"intent"`
 		Navigation   *workNavigationDecision `json:"navigation"`
 		RequiresFile *bool                   `json:"requiresFile"`
@@ -357,6 +361,8 @@ func parseSectionableDecision(resp any) sectionableDecision {
 		return sectionableDecision{}
 	}
 	return sectionableDecision{
+		Workload:     env.Workload,
+		WorkTitle:    env.WorkTitle,
 		Intent:       env.Intent,
 		Navigation:   env.Navigation,
 		RequiresFile: env.RequiresFile,
@@ -524,11 +530,11 @@ func (l *PlannerAgentLoop) classifyGoal(ctx context.Context, goal, nowRFC3339 st
 		data["inputKeys"] = goalInputs
 	}
 	if conversation != nil {
-		raw, err := json.Marshal(conversation)
+		preview, err := conversationPreview(conversation)
 		if err != nil {
 			return complexityUnknown, "", sectionableDecision{}, err
 		}
-		data["conversation"] = string(raw)
+		data["conversation"] = preview
 	}
 	resp, err := l.engine.InvokeAI(systemActorContext(ctx), "goalComplexityTriage", data)
 	if err != nil {

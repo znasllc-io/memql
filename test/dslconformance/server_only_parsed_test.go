@@ -1108,6 +1108,9 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// payloads. Owning the input via actor.userId does not authorize a
 		// browser to replace that execution authority after acceptance.
 		{Path: "compose/mutations.memql", Name: "createCompositionInput"}: true,
+		// The captured render recipe is execution evidence, not owner-authored
+		// content. Caller scoping cannot prevent forged recovery provenance.
+		{Path: "compose/mutations.memql", Name: "saveCompositionRecipe"}: true,
 		// The file-version supersede pair (epic memql#4806, design D10) --
 		// the same asset as the session pair above, one concept along.
 		// actor-scoping is again fully in place and again not the question:

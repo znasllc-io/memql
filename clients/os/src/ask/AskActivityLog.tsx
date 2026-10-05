@@ -24,7 +24,7 @@ export function AskActivityLog({ turns, dictation = [], onClose, onStop }: { tur
           <dt>Cost</dt><dd>{event.call.cacheKind ? "No model call" : event.call.billing === "local" ? "Local inference" : event.call.pricingConfigured ? `$${event.call.totalCost.toFixed(6)}${event.call.tokensEstimated ? " (estimated)" : ""}` : "Not reported"}</dd>
           {event.call.firstTokenMs > 0 ? <><dt>First response</dt><dd>{(event.call.firstTokenMs / 1000).toFixed(2)}s</dd></> : null}
           {([ ["Prompt", event.call.promptName], ["Vendor", event.call.vendor], ["Policy", event.call.policy], ["Rule", event.call.rule], ["Surface", event.call.executionSurface], ["Served model", event.call.servedModel], ["Reuse", event.call.cacheKind] ] as const).map(([label, value]) => value ? <Fragment key={label}><dt>{label}</dt><dd>{value}</dd></Fragment> : null)}
-        </> : <><dt>Usage</dt><dd>{turn.state === "streaming" ? "Awaiting call completion" : "Not reported"}</dd></> : null}{event.expectedMs ? <><dt>Expected</dt><dd>About {Math.round(event.expectedMs / 1000)}s · {event.estimateSource}</dd></> : null}</dl>
+        </> : <><dt>Usage</dt><dd>{turn.state === "streaming" ? "Awaiting call completion" : "Not reported"}</dd></> : null}{event.expectedMs ? <><dt>Expected</dt><dd>{Math.round(event.expectedMs / 1000)}s · {event.estimateSource}</dd></> : null}</dl>
         {event.error || (event.kind === "run" && turn.error) ? <p className="os-ask-error">{event.error || turn.error}</p> : null}
         {event.arguments && Object.keys(event.arguments).length ? <pre>{JSON.stringify(event.arguments, null, 2)}</pre> : null}
       </details>)}</div></section>;
@@ -47,6 +47,7 @@ function activityState(event: AskActivity, turn: AskTurn): string {
     return "Working";
   }
   if (event.phase === "failed") return "Failed";
+  if (event.phase === "queued") return "Working in background";
   if (event.phase === "waiting") return "Needs input";
   if (event.phase === "cancelled") return "Stopped";
   if (event.phase === "fallback") return "Fallback";

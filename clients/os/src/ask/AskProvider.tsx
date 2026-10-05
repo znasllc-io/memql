@@ -74,10 +74,10 @@ export function AskProvider({
   const storeRef = useRef<AskSettingsStore | null>(null);
   if (!storeRef.current) storeRef.current = settingsStore ?? new LocalAskSettingsStore();
   const conversation = useMemo(() => new ConversationSession(transport), [transport]);
-  useEffect(() => { void conversation.refresh(); return () => conversation.dispose(); }, [conversation]);
+  useEffect(() => { conversation.activate(); void conversation.refresh(); return () => conversation.dispose(); }, [conversation]);
   const liveVoice = useMemo(() => new LiveVoiceSession(transport, conversation), [transport, conversation]);
   useEffect(() => () => liveVoice.dispose(), [liveVoice]);
-  useEffect(() => { if (availability.state === "ready") void conversation.refresh(); }, [availability.state, conversation]);
+  useEffect(() => { if (availability.state === "ready") { void conversation.refresh(); void conversation.reload(false); } }, [availability.state, conversation]);
   const [sheet, setSheet] = useState<AskSheetState>({ open: false, context: null });
   const [settings, setSettings] = useState<AskSettings>(() => storeRef.current!.load());
 

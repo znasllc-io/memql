@@ -31,7 +31,7 @@ export class SdkAskTransport implements AskTransport {
         return flatten(row) as unknown as ConversationSummary;
       },
       read: async conversationId => {
-        const result = await query().askConversationById({ conversationId });
+        const result = await query().askConversationSnapshot({ conversationId });
         const row = result.rows()[0];
         if (!row) throw new Error("This conversation is unavailable.");
         const transcript = flatten(row).transcript as { turns?: AskTurn[] } | undefined;

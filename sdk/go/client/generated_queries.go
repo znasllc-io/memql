@@ -1064,6 +1064,23 @@ func AskConversationByIdBuild(args AskConversationByIdArgs) string {
 	return b.String()
 }
 
+// AskMemoryConversations -- Private conversation evidence for the work harness. Page before folding transcripts; the owner's predicate applies on every replica and page.
+//
+// Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["askMemoryConversations"] in generated_concepts.go).
+type AskMemoryConversationsArgs struct {
+}
+
+// AskMemoryConversations calls the engine query askMemoryConversations.
+func (qc *QueryClient) AskMemoryConversations(ctx context.Context, args AskMemoryConversationsArgs) (*Result, error) {
+	call := AskMemoryConversationsBuild(args)
+	return qc.executeNamed(ctx, "askMemoryConversations", call)
+}
+
+func AskMemoryConversationsBuild(args AskMemoryConversationsArgs) string {
+	_ = args
+	return "query askMemoryConversations()"
+}
+
 // AskRecentTimingHistory -- Timing evidence from this person's recent conversations, across replicas. The same owner-scoped history is available to the person and their assistant.
 //
 // Bound concept: v1:os:askConversation (machine-readable: BoundConcepts["askRecentTimingHistory"] in generated_concepts.go).
@@ -12603,6 +12620,28 @@ func WorkCheckpointForOwnerBuild(args WorkCheckpointForOwnerArgs) string {
 	return b.String()
 }
 
+// WorkComputerScopesForOwnerRun -- Read only this run's own computer-use decisions, including previous grants.
+//
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerScopesForOwnerRun"] in generated_concepts.go).
+type WorkComputerScopesForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkComputerScopesForOwnerRun calls the engine query workComputerScopesForOwnerRun.
+func (qc *QueryClient) WorkComputerScopesForOwnerRun(ctx context.Context, args WorkComputerScopesForOwnerRunArgs) (*Result, error) {
+	call := WorkComputerScopesForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workComputerScopesForOwnerRun", call)
+}
+
+func WorkComputerScopesForOwnerRunBuild(args WorkComputerScopesForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workComputerScopesForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkDescriptionGuidance -- The DESCRIPTION GUIDANCE a goal shape has accumulated (epic memql#5414, design D23): the caller's own dislikes whose run served this goal signature, newest first, each carrying the axes and the reason the person gave. It is read only when a MODEL is about to be used for that goal again -- an agent turn of a live run, compile's triage and design calls, the app a learned procedure hands the goal back to -- and never by a replay, a fork's shared prefix or a construct-served goal, because a replay reads rows and text is not a row it can act on. Owned: guidance mined from somebody else's dislikes would steer a person's goal by another person's taste. Bounded at 20, the most recent, because the reader keeps five.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workDescriptionGuidance"] in generated_concepts.go).
@@ -12725,6 +12764,28 @@ func (qc *QueryClient) WorkObservationsForOwnerRun(ctx context.Context, args Wor
 func WorkObservationsForOwnerRunBuild(args WorkObservationsForOwnerRunArgs) string {
 	var b strings.Builder
 	b.WriteString("query workObservationsForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkQuestionsForOwnerRun -- Questions and decisions on this owner's run, used to resume on any replica.
+//
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workQuestionsForOwnerRun"] in generated_concepts.go).
+type WorkQuestionsForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkQuestionsForOwnerRun calls the engine query workQuestionsForOwnerRun.
+func (qc *QueryClient) WorkQuestionsForOwnerRun(ctx context.Context, args WorkQuestionsForOwnerRunArgs) (*Result, error) {
+	call := WorkQuestionsForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workQuestionsForOwnerRun", call)
+}
+
+func WorkQuestionsForOwnerRunBuild(args WorkQuestionsForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workQuestionsForOwnerRun(")
 	b.WriteString("runId: ")
 	b.WriteString(quoteMemQL(args.RunId))
 	b.WriteString(")")

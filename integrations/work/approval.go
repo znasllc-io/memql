@@ -101,6 +101,9 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// recorded -- spending the approval -- and then move nothing, leaving the
 	// construct waiting on an approval nobody can decide again. So it is
 	// refused before anything is read or written.
+	if kind == "scopeElevation" && decision == "answered" {
+		return nil, fmt.Errorf("work: computer access requires approval or rejection")
+	}
 	if kind == work.ApprovalKindProcedurePromotion && decision == "answered" {
 		return nil, fmt.Errorf("work: a procedure promotion is decided approved (the procedure moves from shadow to canary) or rejected (it stays in shadow); it takes no answer")
 	}
@@ -155,7 +158,18 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	}
 
 	now := i.clock().UTC()
+	if kind == "scopeElevation" && decision == "approved" {
+		until, valid := rowTime(approval, "expiresAt")
+		if !valid || !now.Before(until) {
+			return nil, fmt.Errorf("work: this computer-access request has expired")
+		}
+	}
 	answer := argMap(args, "answer")
+	if kind == "feedback" && decision != "rejected" {
+		if err := validateFeedbackAnswer(rowMap(approval, "subject"), decision, answer); err != nil {
+			return nil, err
+		}
+	}
 	if decision == "answered" && len(answer) == 0 {
 		return nil, fmt.Errorf("work: an `answered` decision needs an answer -- a feedback approval with no answer resumes a run with nothing to act on")
 	}
@@ -215,7 +229,7 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		runDecision = decisionAbandoned
 	}
 	var retry *failureRetry
-	if work.IsFailureQuestion(approval["options"]) {
+	if work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation") || (kind == "feedback" && rowString(rowMap(approval, "subject"), "question") != "") {
 		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: strings.TrimSpace(ac.UserId)}
 	}
 	resumed, err := i.resumeParkedRun(writeCtx, runId, approvalId, runDecision, retry, now)
@@ -349,7 +363,8 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 		// An EMPTY OBJECT, not an omitted argument: updateWorkRun is a
 		// read-merge, so leaving waitingOn out would keep the stale wait and
 		// the run would read as parked while running.
-		"waitingOn": map[string]any{},
+		"waitingOn":   map[string]any{},
+		"versionTime": rfc(workRowVersionAfter(run["createdAt"], now)),
 	}
 	switch decision {
 	case "rejected", decisionAbandoned:
@@ -361,6 +376,14 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 		}
 		fields["finishedAt"] = rfc(now)
 	default:
+		paused := rowInt(run, "humanWaitMs")
+		if since, err := time.Parse(time.RFC3339Nano, rowString(rowMap(run, "waitingOn"), "since")); err == nil && since.Before(now) {
+			elapsed := now.Sub(since).Milliseconds()
+			if elapsed > 0 && elapsed < 365*24*60*60*1000 {
+				paused += int(elapsed)
+			}
+		}
+		fields["humanWaitMs"] = paused
 		fields["status"] = runStatusRunning
 		fields["heartbeatAt"] = rfc(now)
 		if retry != nil {

@@ -118,3 +118,14 @@ func TestJournalDB_FeedbackWaitHasPersistedApproval(t *testing.T) {
 		t.Fatalf("waiting run names no persisted approval: %+v", result)
 	}
 }
+
+func TestHumanQuestionIsNotClassifiedRepairedOrClosedAgain(t *testing.T) {
+	store := &recordingJournalExecutor{}
+	j := newWorkJournal(store, nil)
+	run := failedRun("human-wait", "waiting for person", 4, 3)
+	run.ErrorValue = fmt.Errorf("tool requestUserFeedback: %w", &work.HumanWait{ApprovalID: "q1"})
+	j.closeRun(context.Background(), run, "")
+	if len(store.calls) != 0 {
+		t.Fatalf("late close overwrote a persisted or already answered question: %v", store.calls)
+	}
+}

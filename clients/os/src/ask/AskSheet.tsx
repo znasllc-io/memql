@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 
 import { useOs } from "../chrome/state";
 import { useAsk } from "./AskProvider";
-import { AskSurface, FLEET_ROUTING_SECTION } from "./AskSurface";
+import { AskSurface } from "./AskSurface";
 
 // The Ask sheet: anchored above the dock (a bottom sheet on phones via
 // CSS), or expanded over the same work area as maximized apps. It stays
@@ -51,13 +51,13 @@ export function AskSheet({ dockReserve = 0 }: { dockReserve?: number }) {
           maximized={maximized}
           onToggleMaximize={() => setMaximized(value => !value)}
           onOpenFleet={() => { actions.openApp("fleet"); closeAsk(); }}
-          onManageRoutes={() => { actions.openApp("fleet", FLEET_ROUTING_SECTION); closeAsk(); }}
           voicePorts={voice}
           settings={settings}
           context={sheet.context}
           contextLabel={sheet.contextLabel}
           variant="sheet"
           onOpenFile={(fileId) => { actions.openApp("files", "browse", { fileId }); }}
+          onOpenWork={(runId, conversationId) => { actions.openApp("nexus", "runs", { runId, conversationId }); closeAsk(); }}
           autoFocus
         />
       </div>

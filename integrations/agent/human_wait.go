@@ -1,0 +1,89 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"github.com/znasllc-io/memql/core/common"
+	"strings"
+
+	"github.com/znasllc-io/memql/component/work"
+)
+
+// Only the feedback capability can yield this suspension. Arbitrary web or
+// file content saying "awaiting_user" must never steer the control plane.
+func feedbackWait(tool, result string) error {
+	if tool != "requestUserFeedback" && tool != "requestComputerUseScope" && !strings.HasSuffix(tool, ".requestUserFeedback") && !strings.HasSuffix(tool, ".requestComputerUseScope") {
+		return nil
+	}
+	var value any
+	if json.Unmarshal([]byte(result), &value) != nil {
+		return nil
+	}
+	var find func(any) string
+	find = func(value any) string {
+		switch v := value.(type) {
+		case map[string]any:
+			if v["status"] == "awaiting_user" {
+				id, _ := v["approvalId"].(string)
+				return id
+			}
+		case []any:
+			for _, item := range v {
+				if id := find(item); id != "" {
+					return id
+				}
+			}
+		}
+		return ""
+	}
+	if id := find(value); id != "" {
+		return &work.HumanWait{ApprovalID: id}
+	}
+	return nil
+}
+
+// A batch may contain calls after the question. Record them as unexecuted so
+// every tool-call ID has a result and a resumed model can plan the remaining work.
+func closePendingCalls(messages []common.ChatMessage) []common.ChatMessage {
+	out := append([]common.ChatMessage(nil), messages...)
+	answered := map[string]bool{}
+	for _, m := range out {
+		if m.Role == "tool" {
+			answered[m.ToolCallId] = true
+		}
+	}
+	for _, m := range messages {
+		for _, c := range m.ToolCalls {
+			if !answered[c.ID] {
+				out = append(out, common.ChatMessage{Role: "tool", Name: c.Name, ToolCallId: c.ID, Content: "Not executed: waiting for the person's answer. Use the recorded answer when continuing."})
+				answered[c.ID] = true
+			}
+		}
+	}
+	return out
+}
+
+func (r *Replier) saveBeforeQuestion(ctx context.Context, name string, messages []common.ChatMessage) error {
+	if !isOwnedWorkExecution(ctx) || (name != "requestUserFeedback" && name != "requestComputerUseScope" && !strings.HasSuffix(name, ".requestUserFeedback") && !strings.HasSuffix(name, ".requestComputerUseScope")) {
+		return nil
+	}
+	writer, ok := r.engine.(interface {
+		SaveWorkContinuation(context.Context, []common.ChatMessage) error
+	})
+	if !ok {
+		return fmt.Errorf("durable work continuation is unavailable")
+	}
+	return writer.SaveWorkContinuation(ctx, closePendingCalls(messages))
+}
+func (r *Replier) restoreAfterQuestion(ctx context.Context, messages []common.ChatMessage) ([]common.ChatMessage, error) {
+	if !isOwnedWorkExecution(ctx) {
+		return messages, nil
+	}
+	if reader, ok := r.engine.(interface {
+		RestoreWorkContinuation(context.Context, []common.ChatMessage) ([]common.ChatMessage, error)
+	}); ok {
+		return reader.RestoreWorkContinuation(ctx, messages)
+	}
+	return messages, nil
+}

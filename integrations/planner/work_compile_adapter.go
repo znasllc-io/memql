@@ -54,7 +54,7 @@ type runWriter interface {
 	RecordCompileOutcome(ctx context.Context, ownerUserId, runId string, fields map[string]any) error
 	// RunBudget reports the ceilings this run inherits from its goal.
 	RunBudget(ctx context.Context, ownerUserId, runId string) (work.Ceilings, error)
-	LimitReplyBudget(ctx context.Context, ownerUserId, runId string) error
+	LimitWorkloadBudget(ctx context.Context, ownerUserId, runId, workload string) error
 }
 
 // WorkCompiler satisfies workintegration.Compiler.
@@ -117,8 +117,8 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 		return
 	}
 
-	if out.Reply {
-		if err := c.writer.LimitReplyBudget(ctx, req.OwnerUserId, req.RunId); err != nil {
+	if out.Workload != "" {
+		if err := c.writer.LimitWorkloadBudget(ctx, req.OwnerUserId, req.RunId, out.Workload); err != nil {
 			c.failRun(ctx, req, fmt.Errorf("work compile: cannot persist reply budget: %w", err))
 			return
 		}
@@ -139,6 +139,7 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 		"goalSignature":  out.Signature,
 		"status":         "running",
 		"automationName": out.AutomationName,
+		"outcome":        map[string]any{"workload": out.Workload, "workTitle": out.WorkTitle},
 	}
 	if out.TemplateVersion != "" {
 		args["templateVersion"] = out.TemplateVersion

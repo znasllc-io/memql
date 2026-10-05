@@ -29,6 +29,9 @@ import (
 
 func renderPDF(d Draft, p Provenance) ([]byte, error) {
 	pdf := fpdf.New("P", "mm", "A4", "")
+	pdf.SetCreationDate(p.CreatedAt)
+	pdf.SetModificationDate(p.CreatedAt)
+	pdf.SetCatalogSort(true)
 	pdf.SetMargins(20, 20, 20)
 	pdf.SetAutoPageBreak(true, 20)
 

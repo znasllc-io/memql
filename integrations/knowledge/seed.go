@@ -118,6 +118,7 @@ func wikipediaArticlesFor(domainId string) []string {
 // corpora register from a pack via RegisterSeedDomain (see registry.go) and
 // are merged in by allSeedDomains(); the engine never hardcodes them here.
 var standardDomains = []StandardDomain{
+	{ID: "work-guidance", Name: "MemQL work guidance", Description: "Evidence, delivery and escalation for goal-driven work", Category: "technical", RelevantForRoles: []string{"assistant", "specialist"}, RequiredByToolSlugs: []string{"discoverCapabilities", "composeFile", "requestUserFeedback", "requestComputerUseScope"}, Source: "appStructure", Tier: "A"},
 	// --- Core --------------------------------------------------------------
 	// business-administration was previously called general_business AND
 	// auto-attached + locked to every agent in the picker. Now it's a
@@ -1697,6 +1698,7 @@ func (i *Integration) seedStandardDomainsHandler(ctx context.Context, args map[s
 	ingestCorpus("computer-use", computerUseSeedCorpus)
 	ingestCorpus("workbench", workbenchSeedCorpus)
 	ingestCorpus("recent-chat", recentChatSeedCorpus)
+	ingestCorpus("work-guidance", workGuidanceCorpus)
 
 	// Pack-registered corpora (e.g. the product pack's UI domain). The
 	// engine carries none of these; they arrive via RegisterSeedDomain.

@@ -112,7 +112,7 @@ type referenceReader struct {
 
 func (r *referenceReader) DownloadURLWithLimit(_ context.Context, _ string, limit int64) ([]byte, error) {
 	r.calls++
-	if limit != maxReferenceBytes {
+	if limit != maxReferenceBytes && limit != maxReferenceText {
 		panic("unbounded reference read")
 	}
 	return r.data, nil
@@ -200,5 +200,25 @@ func TestEmailMaterializationRequiresOneAccessibleOrganization(t *testing.T) {
 		if err == nil || len(e.compositions) != 0 || len(e.inputs) != 0 {
 			t.Fatal("invalid organization started work")
 		}
+	}
+}
+
+func TestTemplateCapturesActualContentsAndRefusesMissingOrChangedBytes(t *testing.T) {
+	e := newMaterializeEngine(t)
+	i := New(e, nil)
+	data := []byte("# Template\n{{content}}")
+	e.files["template"] = map[string]any{"name": "template.md", "blobUrl": "stored-template", "sha256": (pure.Result{Bytes: data}).SHA256(), "summary": "This is only metadata"}
+	ctx := materializeContext()
+	if _, err := i.templateBody(ctx, "template"); err == nil {
+		t.Fatal("template silently fell back to metadata")
+	}
+	i.SetSourceDownloader(&referenceReader{data: data})
+	body, err := i.templateBody(ctx, "template")
+	if err != nil || body != string(data) {
+		t.Fatalf("not actual template: %q %v", body, err)
+	}
+	i.SetSourceDownloader(&referenceReader{data: []byte("changed")})
+	if _, err := i.templateBody(ctx, "template"); err == nil {
+		t.Fatal("changed template silently accepted")
 	}
 }

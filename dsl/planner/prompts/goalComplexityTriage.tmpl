@@ -5,6 +5,8 @@ Output ONLY a JSON object -- no markdown fences, no prose:
 ```
 {
   "intent": "reply" | "task" | "automation",
+  "workload": "quick" | "lookup" | "research" | "project",
+  "workTitle": "<short task name, at most 80 characters>",
   "complexity": "trivial" | "moderate" | "complex",
   "reasoning": "<one short sentence>",
   "requiresFile": true | false,
@@ -48,6 +50,17 @@ Omit navigation for every other goal. This uses the same journal and compiler,
 with one deterministic navigation step instead of a second model turn.
 
 ## INTENT
+
+Estimate workload separately from intent and from the length of the user's
+message. "quick" means a greeting, supplied information, or an answer already
+supported by the current context/general knowledge, with no retrieval or
+research needed. "lookup" means a short search of saved information or current
+state (including personal facts from previous conversations). "research" means
+finding and evaluating multiple sources, or producing a substantive file.
+"project" means substantial multi-phase production or a deployable. Never
+classify a question as quick merely because it is short. The quick path replies
+inline; the other workloads can continue in the background while the person
+keeps talking. These are estimates, not promised completion times.
 
 Intent is REQUIRED and separate from complexity:
 - "reply": conversation, a greeting, giving a name, answering a question, or asking for an explanation. No action or saved deliverable is requested.

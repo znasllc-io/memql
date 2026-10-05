@@ -18,17 +18,18 @@ import (
 // State lives in the engine seam, so a second integration represents a different
 // replica with none of the first replica's local state.
 type materializeEngine struct {
-	t             *testing.T
-	compositions  map[string]map[string]any
-	inputs        map[string]map[string]any
-	files         map[string]map[string]any
-	calls         []string
-	source        map[string]any
-	account       map[string]any
-	recipe        map[string]any
-	failReady     bool
-	failFileReady bool
-	afterFile     func()
+	t              *testing.T
+	compositions   map[string]map[string]any
+	inputs         map[string]map[string]any
+	files          map[string]map[string]any
+	calls          []string
+	source         map[string]any
+	account        map[string]any
+	recipe         map[string]any
+	failReady      bool
+	failFileReady  bool
+	fileReadyError string
+	afterFile      func()
 }
 
 func newMaterializeEngine(t *testing.T) *materializeEngine {
@@ -50,6 +51,15 @@ func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.E
 		row = maps.Clone(args)
 		row["ownerUserId"] = ac.UserId
 		e.inputs[stringOf(args["compositionId"])] = row
+	case "saveCompositionRecipe":
+		if auth.OriginFromContext(ctx) != auth.OriginInternal {
+			return nil, fmt.Errorf("missing internal origin")
+		}
+		row = e.inputs[stringOf(args["compositionId"])]
+		if row == nil {
+			return nil, fmt.Errorf("missing input")
+		}
+		maps.Copy(row, args)
 	case "compositionInputById":
 		row = e.inputs[stringOf(args["compositionId"])]
 	case "createComposition":
@@ -79,6 +89,9 @@ func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.E
 		}
 	case "setLibraryFileStatus":
 		if e.failFileReady {
+			if e.fileReadyError != "" {
+				return nil, fmt.Errorf("%s", e.fileReadyError)
+			}
 			return nil, fmt.Errorf("file receipt write interrupted")
 		}
 		row = e.files[stringOf(args["fileId"])]
@@ -548,5 +561,49 @@ func TestBriefOnlyRecipeStartsMaterializerWithSavedClient(t *testing.T) {
 	}
 	if opener.calls != 1 {
 		t.Fatal("empty recipe opened another goal")
+	}
+}
+
+func TestCompoundOutputRecoveryRetainsRecipeAndSourceZIPAcrossReplicas(t *testing.T) {
+	for _, interruptFileReceipt := range []bool{false, true} {
+		t.Run(fmt.Sprint(interruptFileReceipt), func(t *testing.T) {
+			i, e, u := materializeFixture(t)
+			drafts := 0
+			i.SetComposer(materializeComposerFunc(func(context.Context, ComposeRequest) (ComposeReply, error) {
+				drafts++
+				return ComposeReply{Draft: pure.Draft{Title: "Report", Body: "Exact source"}}, nil
+			}))
+			args := materializeDraft()
+			args.Format = pure.FormatPDF
+			e.fileReadyError = "connection reset by peer"
+			e.failFileReady = interruptFileReceipt
+			e.failReady = !interruptFileReceipt
+			if _, err := i.materialize(nestedMaterializeContext(), "u-alice", "", args); err == nil {
+				t.Fatal("injected receipt failure was ignored")
+			}
+			e.failFileReady = false
+			e.failReady = false
+			sibling := New(e, nil)
+			sibling.SetUploader(u, "files")
+			sibling.SetComposer(materializeComposerFunc(func(context.Context, ComposeRequest) (ComposeReply, error) {
+				t.Fatal("retry regenerated the captured recipe")
+				return ComposeReply{}, nil
+			}))
+			out, err := sibling.materialize(nestedMaterializeContext(), "u-alice", "", args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if drafts != 1 || out["sourceFileId"] == "" || out["sourceFileId"] == nil || len(e.files) != 2 {
+				t.Fatalf("incomplete compound recovery: %v drafts=%d files=%d", out, drafts, len(e.files))
+			}
+			uploads := u.calls
+			again, err := sibling.materialize(nestedMaterializeContext(), "u-alice", "", args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if again["sourceFileId"] != out["sourceFileId"] || u.calls != uploads {
+				t.Fatalf("completed compound delivery repeated: %v", again)
+			}
+		})
 	}
 }

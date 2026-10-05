@@ -19,8 +19,6 @@ package app
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 
 	"github.com/znasllc-io/memql/integrations/agents"
 	workspine "github.com/znasllc-io/memql/integrations/work"
@@ -88,14 +86,5 @@ func (a *agentWorkGoals) OpenDirectGoal(ctx context.Context, g agents.DirectGoal
 // else, or leaving it empty, would let an answer apply to a question the
 // person never saw.
 func (a *agentWorkGoals) RaiseFeedbackApproval(ctx context.Context, ownerUserId string, f agents.FeedbackApproval) (string, error) {
-	sum := sha256.Sum256([]byte(f.Question))
-	return a.work.RaiseApproval(ctx, ownerUserId, workspine.ApprovalSeed{
-		RunId:        f.RunId,
-		Kind:         "feedback",
-		Question:     f.Question,
-		Options:      f.Options,
-		ArtifactHash: hex.EncodeToString(sum[:]),
-		Subject:      map[string]any{"kind": f.Kind},
-		ExpiresAt:    f.ExpiresAt,
-	})
+	return a.work.AskFeedback(ctx, ownerUserId, f.RunId, f.Question, f.Kind, f.Options, f.ExpiresAt)
 }

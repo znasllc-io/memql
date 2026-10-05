@@ -258,16 +258,29 @@ func RunDeadline(start time.Time, wallClockMs int64) (time.Time, error) {
 	return start.Add(time.Duration(wallClockMs) * time.Millisecond), nil
 }
 
-// ReplyCeilings bounds conversation while preserving stricter owner limits.
-func ReplyCeilings(c Ceilings) map[string]any {
-	if c.WallClockMs == 0 || c.WallClockMs > 60000 {
-		c.WallClockMs = 60000
+// ReplyCeilings bounds the classifier's quick-response path. Retrieval and
+// research retain their declared work budget even when their output is prose.
+func ReplyCeilings(c Ceilings) map[string]any { return WorkloadCeilings(c, "quick") }
+
+// WorkloadCeilings selects bounded work by effort without relaxing any declared limit.
+func WorkloadCeilings(c Ceilings, workload string) map[string]any {
+	wall, calls, retries := int64(600000), 12, 1
+	switch workload {
+	case "quick":
+		wall, calls = 60000, 3
+	case "research":
+		wall, calls, retries = 2700000, 48, 2
+	case "project":
+		wall, calls, retries = 7200000, 96, 2
 	}
-	if c.MaxModelCalls == 0 || c.MaxModelCalls > 3 {
-		c.MaxModelCalls = 3
+	if c.WallClockMs == 0 || c.WallClockMs > wall {
+		c.WallClockMs = wall
 	}
-	if c.MaxRetries == 0 || c.MaxRetries > 1 {
-		c.MaxRetries = 1
+	if c.MaxModelCalls == 0 || c.MaxModelCalls > calls {
+		c.MaxModelCalls = calls
+	}
+	if c.MaxRetries == 0 || c.MaxRetries > retries {
+		c.MaxRetries = retries
 	}
 	raw, _ := json.Marshal(c)
 	var out map[string]any
