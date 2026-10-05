@@ -44,7 +44,7 @@ export function InstallStop({
           {draft.userLocal ? "" : "Enter your administrator password when asked. "}
           {draft.computerUse && draft.platform === "mac" ? "Allow Accessibility and Screen Recording when prompted. " : ""}
           {localTest ? `Local test build ${localTest.version}. Use this Mac. ` : ""}
-          Wait for SUCCESS before closing the terminal.
+          Wait until Cockpit is installed before closing the terminal.
         </Caption>
       </div>
 
@@ -58,7 +58,7 @@ export function InstallStop({
           <Subhead>2. Set up local models</Subhead>
           <CopyField value={setupCommand(draft.userLocal, true)} label="the local models setup command" id="fleet-add-inference" />
           <Caption>
-            Run once the installer prints SUCCESS. Approve the runtime setup to download the recommended models.
+            Run after Cockpit is installed. Approve the runtime setup to download the recommended models.
           </Caption>
         </div>
       ) : null}

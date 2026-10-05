@@ -267,7 +267,7 @@ describe("minting", () => {
     expect((screen.getByLabelText("the local models setup command") as HTMLInputElement).value).toBe(
       "/usr/local/bin/memql worker setup --inference",
     );
-    expect(screen.getByText(/once the installer prints SUCCESS/)).toBeTruthy();
+    expect(screen.getByText(/Run after Cockpit is installed/)).toBeTruthy();
   });
 
   it("renders a refused mint in surface, creates nothing, and offers Mint again", async () => {

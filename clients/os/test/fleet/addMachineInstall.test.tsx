@@ -27,7 +27,7 @@ describe("Linux installation choices", () => {
     expect((screen.getByLabelText("the local models setup command") as HTMLInputElement).value).toBe(
       `${userLocal ? '"$HOME/.memql/bin/memql"' : "/usr/local/bin/memql"} worker setup --inference`,
     );
-    expect(screen.getByText(/once the installer prints SUCCESS/)).toBeTruthy();
+    expect(screen.getByText(/Run after Cockpit is installed/)).toBeTruthy();
   });
 });
 
