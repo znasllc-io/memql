@@ -757,13 +757,20 @@ there for the three things a pipeline's checks need: a GitHub App whose
 installations hold checks write, a connected repository, and a runner to
 execute steps. A repository counts as connected once a pipeline is.
 
-The item reports configured when this cluster has a GitHub App, at least one
-active pipeline and an agent dispatcher, and every known workbench reports a
+The setup item records configuration: a GitHub App, an active pipeline and an
+agent dispatcher. The integration status report calls execution configured
+only when those are present and every known workbench reports a
 runner with a current isolation proof. The agent reads each replica through
 the authenticated mesh. Each report names the replica, namespace, isolation
 state, check time and expiry. Missing runners, unanswered requests, failed or
 inconclusive proofs, and expired proofs do not count as ready. A substituted
 reply from another replica cannot vouch for the one that disappeared.
+
+Settings → Pipelines → Compute separates the installed dispatcher from each
+workbench's observed readiness. Refresh reads the last isolation results; it
+does not launch a probe. Missing reports, failed reads and expired observations
+never display as ready. The same operator-only report is available through
+`builtin pipelinesStatus()` and the generated SDK method.
 
 Reading readiness starts no build or probe. Before the first step proves
 isolation, the report explicitly says `not_proven`; the runner proves it

@@ -42,6 +42,13 @@ builtin pipelinesTrigger {
 builtin pipelinesPoll {
 }
 
+/// Read pipeline configuration and each workbench's last runner isolation verdict.
+/// This read never starts a build or an isolation probe. Restricted to cluster operators.
+@sdk
+@executor("integration.pipelines.status")
+builtin pipelinesStatus {
+}
+
 @sdk
 @executor("integration.pipelines.connect")
 @args(profile="object")

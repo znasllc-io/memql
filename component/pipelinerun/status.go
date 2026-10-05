@@ -48,14 +48,14 @@ const (
 	statusSourceUnset = "unset"
 )
 
-func (i *Integration) handleStatus(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+func (i *Integration) handleStatus(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if err := statusAuthorized(ctx); err != nil {
 		return nil, err
 	}
 	report := i.Status(ctx)
 	raw, err := json.Marshal(map[string]any{
 		"checkedAt":    time.Now().UTC().Format(time.RFC3339),
-		"probed":       boolArg(args, "probe"),
+		"probed":       false,
 		"integrations": []StatusReport{report},
 	})
 	if err != nil {

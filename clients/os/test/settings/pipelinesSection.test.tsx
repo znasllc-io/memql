@@ -291,7 +291,8 @@ describe("Settings > Pipelines", () => {
     expect(stopStates()).toEqual(["done", "open", "done"]);
     expect(await screen.findByText("Registered as memql-znas.")).toBeTruthy();
     expect(screen.getByText("No repository's pipeline is connected yet. Connect one from its source's page.")).toBeTruthy();
-    expect(screen.getByText("This cluster can run steps.")).toBeTruthy();
+    expect(screen.getByText("The step dispatcher is installed.")).toBeTruthy();
+    expect(screen.queryByText("This cluster can run steps.")).toBeNull();
     expect(await screen.findByText("2 of your machines allow pipelines.")).toBeTruthy();
     expect(within(bar()).getByText("Partly set up")).toBeTruthy();
     expect(within(bar()).getByText("2 of 3 done")).toBeTruthy();

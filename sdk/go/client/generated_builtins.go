@@ -3504,6 +3504,21 @@ func PipelinesRerunBuild(args PipelinesRerunArgs) string {
 	return b.String()
 }
 
+// PipelinesStatus -- Read pipeline configuration and each workbench's last runner isolation verdict. This read never starts a build or an isolation probe. Restricted to cluster operators.
+type PipelinesStatusArgs struct {
+}
+
+// PipelinesStatus calls the engine builtin pipelinesStatus.
+func (qc *QueryClient) PipelinesStatus(ctx context.Context, args PipelinesStatusArgs) (*Result, error) {
+	call := PipelinesStatusBuild(args)
+	return qc.executeNamed(ctx, "pipelinesStatus", call)
+}
+
+func PipelinesStatusBuild(args PipelinesStatusArgs) string {
+	_ = args
+	return "builtin pipelinesStatus()"
+}
+
 // ProviderAuthStatus -- List every AI provider this NODE has registered: its vendor and model, whether this node can call it, which tier of the resolution chain supplied its credential (federation | globalSecret | globalVariable | env | unresolved), and -- when it cannot be called -- why not. Produced from the live provider registry, never persisted, and carrying no credential or fingerprint of one. Per-node on purpose: two replicas genuinely can disagree, and that disagreement is the most useful thing this read surfaces. Owner-only.
 type ProviderAuthStatusArgs struct {
 }
