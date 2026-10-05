@@ -2152,6 +2152,12 @@ func (e *MemQLEngine) effectiveWindow(limitPtr *int, defaultLimit int) int {
 	if limit > e.config.MaxWindow {
 		limit = e.config.MaxWindow
 	}
+	// The evaluator already clamps to MaxResults. Cursor emission and cache
+	// identity must use that SAME window; otherwise a clamped full page looks
+	// short and silently claims exhaustion (memql#5836).
+	if e.config.MaxResults > 0 && limit > e.config.MaxResults {
+		limit = e.config.MaxResults
+	}
 
 	if limit < 0 {
 		limit = 0

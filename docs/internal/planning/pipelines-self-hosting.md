@@ -287,3 +287,44 @@ did not, and reconciliation before repeating uncertain effects. Do not turn
 an absent record into permission to replay: a different replica may still be
 working. Existing parser support for loops, branches, parallel blocks and
 retries should be reused before introducing new syntax.
+
+## Bounded query traversal (#5836)
+
+The full database-backed suite at 6c0dbc019 found that a seed sweep returned
+exactly 500 user IDs and silently omitted older users. The evaluator already
+clamped a requested page to MaxResults, but cursor emission compared that
+result with the larger requested window. The engine now uses the same
+bounded window for execution, cursor emission and cache identity. No read
+ceiling was raised.
+
+`WalkQueryPages` preserves caller authority and visits bounded pages until
+exhaustion. It refuses missing continuations, repeated/cyclic cursors, failed
+reads/visitors, cancellation and an exhausted explicit page budget. Startup
+user sweeps walk the existing server-only query at one fixed `asOf` instant,
+using the DSL's existing temporal-read construct. They return no partial
+success. Real PostgreSQL regressions cover 601 users, older users, version
+churn, inactive users and an update between pages. Pagination and root access
+guards pass; the cross-consumer authorization test now lives in the root
+module so engine-local `GOWORK=off go vet ./...` also passes. The next full
+workspace run remains required after coordinated worker-contract changes.
+
+## Fleet container execution progress
+
+Cockpit 3c69da8 requires explicit native/container execution and platform,
+reports `actionContracts["workerHost.pipeline_step"] = 2`, probes the live
+Docker daemon, executes a pinned image, and confirms terminal container state
+and removal. Multiline secrets travel on container stdin, outside the Docker
+client's arguments/environment. The local real-Docker test verifies exact
+commit, environment separation, artifacts, masked logs, cancellation and
+orphan reconciliation. Focused race tests, the serial Cockpit suite and its
+GitHub checks pass. Engine dispatch/manifest wiring is the next integration
+step; no installed worker has been upgraded.
+
+One build slot is shared across cluster enrollments and worker processes under
+the same OS user. A durable record survives process death. A replacement
+reconciles only its recorded container on the original daemon; interrupted
+native work, corrupt records and uncertain cleanup remain blocked. Current
+container bounds are 2 CPUs, 2 GiB and 512 processes. Services and caches still
+refuse on the fleet contract. Agent workloads and other OS users are outside
+this reservation; resource admission, native reconciliation and complete fleet
+parity remain open. These limits are not evidence of a finished build fleet.

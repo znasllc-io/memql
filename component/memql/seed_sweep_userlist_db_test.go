@@ -26,21 +26,18 @@ import (
 // So this drives the real listUserIds against a real database, over a user set
 // shaped like the one that breaks it:
 //
-//	60 active users, older than "now", one of them carrying extra versions.
+//	601 active users, older than "now", one of them carrying extra versions.
 //
 // Every part of that shape is load-bearing:
 //
-//   - 60 > the `paginate 50` on activeUsers, which listUserIds used to call.
+//   - 601 exceeds both the former UI page of 50 and the default engine ceiling of 500.
 //   - OLDER, because activeUsers sorts `row.createdAt desc` -- so the users a
 //     paged read drops are the OLDEST, and the oldest users are exactly the
 //     population the sweep exists to serve. A user created after a seed was
 //     added already gets its rows from the
 //     graph.node.created.v1:identity:user subscription.
-//   - The extra VERSIONS, because the engine fills a page from `target*2`
-//     PHYSICAL version rows and dedupes to logical rows afterwards. Under
-//     churn a paged read returns a short page that looks exhausted, which is
-//     the failure memql#3209 hit on allAgents and the reason following the
-//     cursor is not a fix either. v1:identity:user churns on every login
+//   - The extra VERSIONS exercise the SQL latest-row collapse added after
+//     memql#3388: physical version churn must not shorten logical pages. v1:identity:user churns on every login
 //     (lastSeenAt), so this is the normal state of the concept, not a corner.
 //
 // ONE engine boot and ONE insert for the whole file, deliberately: the
@@ -106,7 +103,7 @@ func TestSeedSweepListUserIds(t *testing.T) {
 	// Deliberately in the PAST: a paged, newest-first read reaches the most
 	// recently created users, and these are not those.
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	const total = 60
+	const total = 601
 	rows := make([]*memorynodes.MemoryNode, 0, total+21)
 	active := make(map[string]bool, total)
 	for i := 0; i < total; i++ {
@@ -163,9 +160,7 @@ func TestSeedSweepListUserIds(t *testing.T) {
 				"A sweep set is not a UI page. activeUsers is `sort row.createdAt desc` + "+
 				"`paginate 50`, so it drops the OLDEST users -- precisely the ones the sweep "+
 				"exists to backfill, since newer users get their perUser seeds from the "+
-				"graph.node.created.v1:identity:user subscription instead. Version churn "+
-				"shortens that page further, because the engine fills it from physical rows and "+
-				"dedupes after. usersForSeedSweep is the complete-set sibling. memql#3217.",
+				"graph.node.created.v1:identity:user subscription instead. The sweep must follow the engine cursor until exhaustion, including after MaxResults clamps a full page. memql#5836.",
 			len(ids), len(missing), total)
 	})
 
@@ -214,4 +209,57 @@ func TestSeedSweepListUserIds(t *testing.T) {
 				"scoping it to actor.userId would evaluate against an empty actor and sweep "+
 				"nobody.")
 	})
+}
+
+// A login/update between pages cannot move an older user out of a sweep that
+// already passed the newer timestamps. The sweep's authored asOf argument
+// preserves one observation while the normal query still sees the latest row.
+func TestSeedSweepPagesKeepOneSnapshotDuringUserChurn(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+	ctx := auth.ContextWithInternalOrigin(systemActorContext(context.Background()))
+	marker := "ssweep:" + uniqueSuffix("snapshot")
+	t.Cleanup(func() {
+		_, _ = db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("concept = ?", seedSweepUserConcept).Where(`"createdBy" = ?`, marker).Exec(context.Background())
+	})
+	base := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+	rows := make([]*memorynodes.MemoryNode, 0, 601)
+	for i := 0; i < 601; i++ {
+		rows = append(rows, seedSweepUser(t, fmt.Sprintf("%s:%s-%d", seedSweepUserConcept, marker, i), base.Add(time.Duration(i)*time.Minute), marker, true))
+	}
+	_, err := db.NewInsert().Model(&rows).Exec(ctx)
+	require.NoError(t, err)
+	at := time.Now().UTC()
+	query := fmt.Sprintf(`query usersForSeedSweep(asOf: "%s")`, at.Format(time.RFC3339Nano))
+	oldest := rows[0].ID
+	calls := 0
+	found := map[string]bool{}
+	err = WalkQueryPages(ctx, func(ctx context.Context, text string) (*ExecuteResult, error) {
+		calls++
+		if calls == 2 {
+			updated := seedSweepUser(t, oldest, at.Add(time.Second), marker, false)
+			_, err := db.NewInsert().Model(updated).Exec(ctx)
+			require.NoError(t, err)
+		}
+		return eng.Execute(ctx, text)
+	}, query, 100, func(result *ExecuteResult) error {
+		for _, id := range extractRowIds(result) {
+			found[id] = true
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.Greater(t, calls, 1)
+	for _, row := range rows {
+		require.True(t, found[row.ID], "snapshot lost %s after a later update", row.ID)
+	}
+	// A later snapshot must exclude the now-inactive user.
+	active := map[string]bool{}
+	err = WalkQueryPages(ctx, eng.Execute, fmt.Sprintf(`query usersForSeedSweep(asOf: "%s")`, at.Add(2*time.Second).Format(time.RFC3339Nano)), 100, func(result *ExecuteResult) error {
+		for _, id := range extractRowIds(result) {
+			active[id] = true
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.False(t, active[oldest], "latest liveness ignored the inactive version")
 }
