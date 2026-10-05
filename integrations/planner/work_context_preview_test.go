@@ -34,7 +34,7 @@ func TestConversationalWorkloadPreservesFastPathAndResearchBeforeFile(t *testing
 		})
 	}
 	yes := true
-	decision := sectionableDecision{RequiresFile: &yes, FileName: "birds", FileFormat: "pdf", Workload: "research"}
+	decision := sectionableDecision{RequiresFile: &yes, FileName: "birds", FileFormat: "pdf", Workload: "research", RequiresResearch: true}
 	bundle, err := synthesizeWorkReasoningBundle(compileReq(), "assistant", decision)
 	if err != nil {
 		t.Fatal(err)
@@ -42,5 +42,19 @@ func TestConversationalWorkloadPreservesFastPathAndResearchBeforeFile(t *testing
 	source := bundle.Constructs[0].Source
 	if !decision.needsReasoningAgent("birds") || !strings.Contains(source, "research := builtin runAgentTurn") || strings.Index(source, "research :=") > strings.Index(source, "composeMaterialize(") || !strings.Contains(source, "draft: toString(research)") {
 		t.Fatalf("file rendered before evidence was gathered:\n%s", source)
+	}
+}
+
+func TestSelfContainedFilesSkipEvidenceAcquisitionRegardlessOfEstimate(t *testing.T) {
+	for _, tier := range []string{"quick", "lookup", "research", "project"} {
+		d := parseSectionableDecision(map[string]any{"requiresFile": true, "requiresResearch": false, "fileName": "supplied-note", "fileFormat": "pdf", "workload": tier})
+		bundle, err := synthesizeWorkReasoningBundle(compileReq(), "assistant", d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src := bundle.Constructs[0].Source
+		if d.needsReasoningAgent("supplied note") || strings.Contains(src, "runAgentTurn") || !strings.Contains(src, "composeMaterialize(") {
+			t.Fatalf("%s inserted unnecessary evidence work:\n%s", tier, src)
+		}
 	}
 }

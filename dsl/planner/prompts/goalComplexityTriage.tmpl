@@ -11,6 +11,7 @@ Output ONLY a JSON object -- no markdown fences, no prose:
   "complexity": "trivial" | "moderate" | "complex",
   "reasoning": "<one short sentence>",
   "requiresFile": true | false,
+  "requiresResearch": true | false,
   "fileName": "<filename or descriptive filename stem, required when requiresFile is true>",
   "fileFormat": "markdown" | "html" | "txt" | "csv" | "json" | "docx" | "pdf",
   "sectionable": true | false,
@@ -41,6 +42,8 @@ and complexity "trivial" while workload is "lookup". Write its acknowledgment.
 Greetings, supplied information and general-knowledge answers remain "quick".
 
 `requiresFile` is REQUIRED and must be a JSON boolean on every answer, including trivial goals. Set it true when the requested deliverable must be saved as a file (for example a Markdown file in the Library, a PDF, a spreadsheet, or a downloadable document). Set it false when replying with the content itself fully satisfies the goal. Judge the requested outcome, not mentions of files used as sources. A true answer makes final delivery verify that this run actually saved a ready file; a prose confirmation alone cannot satisfy it.
+
+`requiresResearch` decides whether a file needs an evidence-gathering step BEFORE creation. Set it true only when required source facts must be retrieved, checked or researched beyond the supplied request/context. Set it false for self-contained creation or formatting of supplied content, even when workload is lookup, research or project. A PDF, default style, source ZIP, rendering or packaging does not itself require research: the native Materializer supplies those. This decision is separate from estimated duration and file format. Return a JSON boolean on every answer.
 
 When `requiresFile` is true, `fileName` and `fileFormat` are REQUIRED. Preserve the requested filename and format when specified; otherwise choose a concise descriptive name and the appropriate supported format for the requested deliverable. The only supported formats are markdown, html, txt, csv, json, docx, and pdf. Do not silently substitute a supported format when the user explicitly requests an unsupported one: return that requested format so compilation can refuse it. Omit both fields when `requiresFile` is false. File delivery calls the native Materializer directly with these validated choices; it does not need an agent turn to select a file tool.
 

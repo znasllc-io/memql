@@ -97,7 +97,7 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 		return authoringBundle{AutomationName: headline, Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: headline, Source: source}}}, nil
 	}
 	nativeFile := *dec.RequiresFile
-	investigate := nativeFile && (dec.Workload == "lookup" || dec.Workload == "research" || dec.Workload == "project")
+	investigate := nativeFile && dec.RequiresResearch
 	fileName, fileFormat := "", purecompose.Format("")
 	if nativeFile {
 		fileName = strings.TrimSpace(dec.FileName)

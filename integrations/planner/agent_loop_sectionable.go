@@ -98,6 +98,8 @@ type sectionableDecision struct {
 	// RequiresFile is the goal's semantic delivery contract, independent of
 	// sectionability. Nil is a malformed/omitted answer, never false.
 	RequiresFile *bool `json:"requiresFile"`
+	// RequiresResearch is evidence acquisition, independent of duration or format.
+	RequiresResearch bool `json:"requiresResearch"`
 	// FileName and FileFormat are required semantic output choices when the
 	// goal requests a saved file; the format is validated by the Materializer.
 	FileName   string `json:"fileName"`
@@ -347,33 +349,35 @@ func parseSectionableDecision(resp any) sectionableDecision {
 	}
 	raw = extractJSONObject(raw)
 	var env struct {
-		Acknowledgement string                  `json:"acknowledgement"`
-		Workload        string                  `json:"workload"`
-		WorkTitle       string                  `json:"workTitle"`
-		Intent          string                  `json:"intent"`
-		Navigation      *workNavigationDecision `json:"navigation"`
-		RequiresFile    *bool                   `json:"requiresFile"`
-		FileName        string                  `json:"fileName"`
-		FileFormat      string                  `json:"fileFormat"`
-		Sectionable     bool                    `json:"sectionable"`
-		Sections        []sectionSpec           `json:"sections"`
-		Assembly        string                  `json:"assembly"`
+		Acknowledgement  string                  `json:"acknowledgement"`
+		Workload         string                  `json:"workload"`
+		WorkTitle        string                  `json:"workTitle"`
+		Intent           string                  `json:"intent"`
+		Navigation       *workNavigationDecision `json:"navigation"`
+		RequiresFile     *bool                   `json:"requiresFile"`
+		RequiresResearch bool                    `json:"requiresResearch"`
+		FileName         string                  `json:"fileName"`
+		FileFormat       string                  `json:"fileFormat"`
+		Sectionable      bool                    `json:"sectionable"`
+		Sections         []sectionSpec           `json:"sections"`
+		Assembly         string                  `json:"assembly"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return sectionableDecision{}
 	}
 	return sectionableDecision{
-		Acknowledgement: env.Acknowledgement,
-		Workload:        env.Workload,
-		WorkTitle:       env.WorkTitle,
-		Intent:          env.Intent,
-		Navigation:      env.Navigation,
-		RequiresFile:    env.RequiresFile,
-		FileName:        env.FileName,
-		FileFormat:      env.FileFormat,
-		Sectionable:     env.Sectionable,
-		Sections:        env.Sections,
-		Assembly:        env.Assembly,
+		Acknowledgement:  env.Acknowledgement,
+		Workload:         env.Workload,
+		WorkTitle:        env.WorkTitle,
+		Intent:           env.Intent,
+		Navigation:       env.Navigation,
+		RequiresFile:     env.RequiresFile,
+		RequiresResearch: env.RequiresResearch,
+		FileName:         env.FileName,
+		FileFormat:       env.FileFormat,
+		Sectionable:      env.Sectionable,
+		Sections:         env.Sections,
+		Assembly:         env.Assembly,
 	}
 }
 

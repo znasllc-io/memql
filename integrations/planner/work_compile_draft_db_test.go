@@ -357,6 +357,7 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 					researchFile := !sectionable && format == purecompose.FormatPDF
 					if researchFile {
 						triage["workload"] = "research"
+						triage["requiresResearch"] = true
 					}
 					req.RunId = "v1:work:run:" + id.NewShortId()
 					req.Statement = "Create a \"Marvel\" report and save it in the Library.\nInclude the literal path C:\\notes\\hero.txt and the characters \\n."
