@@ -9,6 +9,8 @@ owner: znas
 
 # Fleet Visual Composition
 
+> Historical: Fleet implementation record, kept for rationale. Current design rules are linked below.
+
 Implementation record. Current UI/UX work starts with
 [memql-ui-design](../../../.agents/skills/memql-ui-design/SKILL.md) and follows
 the [interface language](../../../clients/os/DESIGN.md) together with
