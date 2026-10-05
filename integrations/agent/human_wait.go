@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/znasllc-io/memql/core/common"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // Only the feedback capability can yield this suspension. Arbitrary web or
@@ -86,4 +86,25 @@ func (r *Replier) restoreAfterQuestion(ctx context.Context, messages []common.Ch
 		return reader.RestoreWorkContinuation(ctx, messages)
 	}
 	return messages, nil
+}
+
+func (r *Replier) prepareWorkTool(ctx context.Context) error {
+	if !isOwnedWorkExecution(ctx) {
+		return nil
+	}
+	if writer, ok := r.engine.(interface{ PrepareWorkTool(context.Context) error }); ok {
+		return writer.PrepareWorkTool(ctx)
+	}
+	return nil
+}
+
+func (r *Replier) workCallContext(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	if isOwnedWorkExecution(ctx) {
+		if guard, ok := r.engine.(interface {
+			ContextWithWorkCallDeadline(context.Context) (context.Context, context.CancelFunc, error)
+		}); ok {
+			return guard.ContextWithWorkCallDeadline(ctx)
+		}
+	}
+	return ctx, func() {}, nil
 }

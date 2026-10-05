@@ -469,7 +469,12 @@ StreamLoop:
 		)
 		attempt := 0
 		for {
-			attemptCtx, cancelAttempt := context.WithCancel(ctx)
+			budgetCtx, stopBudget, budgetErr := r.workCallContext(ctx)
+			if budgetErr != nil {
+				return nil, budgetErr
+			}
+			attemptCtx, stopAttempt := context.WithCancel(budgetCtx)
+			cancelAttempt := func() { stopAttempt(); stopBudget() }
 			chunks, err = provider.CallChatStreamWithTools(attemptCtx, messages, tools)
 			if err != nil {
 				cancelAttempt()
@@ -620,12 +625,13 @@ StreamLoop:
 		// Emit each tool call to the sink so cognition can audit-log /
 		// forward them. The sink contract allows both ToolCall and
 		// ToolResult so cognition has the full picture.
-		for _, tc := range turnCalls {
-			sink.ToolCall(tc.ID, tc.Name, tc.Arguments)
-		}
-
 		hadSuccess := false
 		for _, tc := range turnCalls {
+			// Calls after a human question have not started yet.
+			if err := r.prepareWorkTool(ctx); err != nil {
+				return nil, err
+			}
+			sink.ToolCall(tc.ID, tc.Name, tc.Arguments)
 			args := parseToolArgs(tc.Arguments)
 			// Ensure args is a non-nil map BEFORE agent-context
 			// injection. parseToolArgs returns nil when the LLM

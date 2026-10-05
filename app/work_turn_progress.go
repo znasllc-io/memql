@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/agent"
 )
 
 type workTurnDeltas struct {
@@ -34,6 +35,10 @@ func (s *workTurnDeltas) TextDelta(text string) {
 	}
 }
 func (s *workTurnDeltas) ToolCall(id, name, _ string) {
+	// The response envelope is delivery, not an executed capability.
+	if name == agent.RespondToUserToolName {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.tools == nil {

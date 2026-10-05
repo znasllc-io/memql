@@ -264,14 +264,27 @@ func ReplyCeilings(c Ceilings) map[string]any { return WorkloadCeilings(c, "quic
 
 // WorkloadCeilings selects bounded work by effort without relaxing any declared limit.
 func WorkloadCeilings(c Ceilings, workload string) map[string]any {
+	c = EffectiveWorkloadCeilings(c, workload)
+	raw, _ := json.Marshal(c)
+	var out map[string]any
+	_ = json.Unmarshal(raw, &out)
+	return out
+}
+
+// EffectiveWorkloadCeilings applies an estimate without replacing the declared
+// limits. Runs without a classification keep their original budget.
+func EffectiveWorkloadCeilings(c Ceilings, workload string) Ceilings {
 	wall, calls, retries := int64(600000), 12, 1
 	switch workload {
+	case "lookup":
 	case "quick":
 		wall, calls = 60000, 3
 	case "research":
 		wall, calls, retries = 2700000, 48, 2
 	case "project":
 		wall, calls, retries = 7200000, 96, 2
+	default:
+		return c
 	}
 	if c.WallClockMs == 0 || c.WallClockMs > wall {
 		c.WallClockMs = wall
@@ -282,8 +295,5 @@ func WorkloadCeilings(c Ceilings, workload string) map[string]any {
 	if c.MaxRetries == 0 || c.MaxRetries > retries {
 		c.MaxRetries = retries
 	}
-	raw, _ := json.Marshal(c)
-	var out map[string]any
-	_ = json.Unmarshal(raw, &out)
-	return out
+	return c
 }

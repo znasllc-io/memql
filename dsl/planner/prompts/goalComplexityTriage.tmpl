@@ -55,7 +55,8 @@ Estimate workload separately from intent and from the length of the user's
 message. "quick" means a greeting, supplied information, or an answer already
 supported by the current context/general knowledge, with no retrieval or
 research needed. "lookup" means a short search of saved information or current
-state (including personal facts from previous conversations). "research" means
+state (including personal facts from previous conversations). Missing a personal
+fact in this conversation is a lookup, not a quick denial of knowledge. "research" means
 finding and evaluating multiple sources, or producing a substantive file.
 "project" means substantial multi-phase production or a deployable. Never
 classify a question as quick merely because it is short. The quick path replies

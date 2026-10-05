@@ -64,3 +64,21 @@ func (e *MemQLEngine) RestoreWorkContinuation(ctx context.Context, messages []co
 	}
 	return prior, nil
 }
+
+// PrepareWorkTool revises only a classifier estimate, through the work
+// integration's durable writer. It never grants permission or changes a goal.
+func (e *MemQLEngine) PrepareWorkTool(ctx context.Context) error {
+	run, ok := common.RunFromContext(ctx)
+	ac, _ := auth.AccessFromContext(ctx)
+	if !ok || ac == nil || BareShortId(ac.UserId) != BareShortId(run.OwnerUserId) {
+		return fmt.Errorf("workload transition requires owned work")
+	}
+	writer, ok := e.IntegrationByName("work").(interface {
+		PrepareWorkTool(context.Context) (bool, error)
+	})
+	if !ok {
+		return fmt.Errorf("workload coordination is unavailable")
+	}
+	_, err := writer.PrepareWorkTool(ctx)
+	return err
+}

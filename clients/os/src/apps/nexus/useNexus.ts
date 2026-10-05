@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { readArtifact } from "../../nexus/scene/world";
 import { useOsConnection } from "../../live/connection";
 import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
 import {
@@ -10,7 +11,7 @@ import {
   RUN_CONCEPT,
   STEP_CONCEPT,
 } from "./concepts";
-import { modelCallFromRow, observationFromRow, type ModelCallRow, type ObservationRow } from "./rows";
+import { modelCallFromRow, observationFromRow, sameRow, stepFromRow, type ModelCallRow, type ObservationRow } from "./rows";
 
 // The Nexus app's feeds, and the one read that is deliberately not a feed.
 //
@@ -136,6 +137,7 @@ export function useRunSteps(runId: string): LiveCollectionHandle<Row> {
   const key = runId.trim() === "" ? null : `work:steps:${runId}`;
   return useLiveCollection<Row>(key, (connection) => ({
     concept: STEP_CONCEPT,
+    inScope: (row) => sameRow(stepFromRow(row).runId, runId),
     seed: async (_cursor, signal) => {
       const result = await connection.query.workStepsForOwnerRun({ runId }, { signal });
       return { rows: result.rows(), nextCursor: "" };
@@ -170,6 +172,7 @@ export function useRunArtifacts(runId: string): LiveCollectionHandle<Row> {
   const key = runId.trim() === "" ? null : `work:artifacts:${runId}`;
   return useLiveCollection<Row>(key, (connection) => ({
     concept: ARTIFACT_CONCEPT,
+    inScope: (row) => sameRow(readArtifact(row).runId, runId),
     seed: async (_cursor, signal) => {
       const result = await connection.query.artifactsForRun({ runId }, { signal });
       return { rows: result.rows(), nextCursor: "" };

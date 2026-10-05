@@ -93,3 +93,39 @@ func TestRunDeadlineInterruptsAnInFlightModelAndRecordsFailure(t *testing.T) {
 		t.Fatalf("timed-out call was not journaled: %d", journal.records)
 	}
 }
+
+type adaptiveDeadlineGuard struct {
+	deadlineGuard
+	declared time.Time
+}
+
+func (g *adaptiveDeadlineGuard) DeclaredDeadline(context.Context, common.RunContext) (time.Time, error) {
+	return g.declared, nil
+}
+
+func TestAgentModelDeadlineCanGrowWithinTheOriginalToolLoop(t *testing.T) {
+	start := time.Now()
+	guard := &adaptiveDeadlineGuard{deadlineGuard: deadlineGuard{at: start.Add(time.Minute)}, declared: start.Add(5 * time.Minute)}
+	e := &MemQLEngine{modelSeam: &modelSeam{ceilings: guard}}
+	ctx := common.ContextWithRun(context.Background(), aRun())
+	loop, stop, err := e.ContextWithRunDeadline(ctx)
+	defer stop()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, duration := range []time.Duration{time.Minute, 5 * time.Minute} {
+		guard.at = start.Add(duration)
+		call, stopCall, err := e.ContextWithWorkCallDeadline(loop)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deadline, ok := call.Deadline()
+		stopCall()
+		if !ok || !deadline.Equal(start.Add(duration)) {
+			t.Fatalf("call inherited stale estimate: %v", deadline)
+		}
+		if loop.Err() != nil {
+			t.Fatal("finishing a model call cancelled the run")
+		}
+	}
+}

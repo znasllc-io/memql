@@ -84,3 +84,12 @@ func TestWorkloadBudgetsPreserveQuickPathAndNeverRaiseDeclaredLimits(t *testing.
 		}
 	}
 }
+
+func TestUnclassifiedWorkKeepsDeclaredCeilings(t *testing.T) {
+	for _, tier := range []string{"", "future-kind"} {
+		c := Ceilings{WallClockMs: 1234567, MaxModelCalls: 55, MaxRetries: 4}
+		if got := EffectiveWorkloadCeilings(c, tier); got != c {
+			t.Fatalf("%q changed unclassified work: %+v", tier, got)
+		}
+	}
+}

@@ -691,3 +691,18 @@ describe("each step's decision", () => {
     expect(timeline.querySelectorAll(".os-nexus-step-decision")).toHaveLength(3);
   });
 });
+
+
+it("keeps unrelated live steps out of an open run and uses its work title", async () => {
+  const conn = fakeConnection({ runs: [runRow({ id: "r1", outcome: { workTitle: "Find saved information" } })], steps: [] });
+  mount(conn);
+  fireEvent.click(await screen.findByText("Find saved information"));
+  const timeline = await screen.findByLabelText("What this run did, in order");
+  act(() => {
+    conn.subscriptions.emit(STEP, stepRow({ id: "foreign", runId: "r2", seq: 0, key: "unrelatedSweep" }));
+    conn.subscriptions.emit(STEP, stepRow({ id: "mine", runId: "r1", seq: 0, key: "lookupEvidence" }));
+  });
+  await waitFor(() => expect(within(timeline).getByText("lookupEvidence")).toBeTruthy());
+  expect(within(timeline).queryByText("unrelatedSweep")).toBeNull();
+  expect(screen.getByRole("heading", { name: "Find saved information" })).toBeTruthy();
+});

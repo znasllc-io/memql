@@ -384,9 +384,14 @@ BackgroundLoop:
 		)
 		attempt := 0
 		for {
-			callCtx, cancel := context.WithTimeout(ctx, reqTimeout)
+			budgetCtx, stopBudget, budgetErr := r.workCallContext(ctx)
+			if budgetErr != nil {
+				return nil, budgetErr
+			}
+			callCtx, cancel := context.WithTimeout(budgetCtx, reqTimeout)
 			stepResult, stepErr = provider.CallChatWithTools(callCtx, messages, tools)
 			cancel()
+			stopBudget()
 			if stepErr == nil {
 				break
 			}
@@ -497,12 +502,13 @@ BackgroundLoop:
 		}
 		allToolCalls = append(allToolCalls, turnCalls...)
 
-		for _, tc := range turnCalls {
-			sink.ToolCall(tc.ID, tc.Name, tc.Arguments)
-		}
-
 		hadSuccess := false
 		for _, tc := range turnCalls {
+			// Calls after a human question have not started yet.
+			if err := r.prepareWorkTool(ctx); err != nil {
+				return nil, err
+			}
+			sink.ToolCall(tc.ID, tc.Name, tc.Arguments)
 			args := parseToolArgs(tc.Arguments)
 			if args == nil {
 				args = make(map[string]any)
