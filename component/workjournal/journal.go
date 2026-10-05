@@ -344,20 +344,26 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 	if len(order) > 0 {
 		opened = append(opened, stringListArg("stepOrder", order))
 	}
-	j.exec(ctx, call("mutation updateWorkRun", opened...))
+	if err := j.exec(ctx, call("mutation updateWorkRun", opened...)); err != nil {
+		return nil, fmt.Errorf("workjournal: record initial heartbeat and step order: %w", err)
+	}
 	run := &Run{
 		j: j, goalID: goalID, runID: runID, owner: owner, order: w.Steps, started: started,
 		stop: make(chan struct{}), done: make(chan struct{}),
 	}
 	if w.QueueSteps {
-		run.queue(ctx)
+		if err := run.queue(ctx); err != nil {
+			return nil, err
+		}
 	}
 	// The goal is now being worked. `createWorkGoal` stamps `open` and has
 	// no status argument, so this is the only thing that can say so.
-	j.exec(ctx, call("mutation updateWorkGoal",
+	if err := j.exec(ctx, call("mutation updateWorkGoal",
 		arg("goalId", goalID),
 		arg("status", "active"),
-	))
+	)); err != nil {
+		return nil, fmt.Errorf("workjournal: activate goal: %w", err)
+	}
 	go run.heartbeat(ctx)
 	return run, nil
 }
@@ -434,7 +440,7 @@ func workIDs(template, goalKey, runKey string) (goalID, runID string) {
 // is a new version of this row rather than a second row beside it. A pending
 // step has not started, so it carries no startedAt. A key declared twice is
 // queued once: both declarations name one row.
-func (r *Run) queue(ctx context.Context) {
+func (r *Run) queue(ctx context.Context) error {
 	ctx = auth.ContextWithUserActor(ctx, r.owner)
 	queued := map[string]bool{}
 	for _, s := range r.order {
@@ -443,7 +449,7 @@ func (r *Run) queue(ctx context.Context) {
 		}
 		queued[s.Key] = true
 		seq, decl := r.decl(s.Key)
-		r.j.exec(ctx, call("mutation createWorkStep",
+		if err := r.j.exec(ctx, call("mutation createWorkStep",
 			arg("stepId", deriveID("step", r.runID, s.Key)),
 			arg("runId", r.runID),
 			arg("key", s.Key),
@@ -455,8 +461,11 @@ func (r *Run) queue(ctx context.Context) {
 			arg("status", "pending"),
 			intArg("attempt", 1),
 			arg("idempotencyKey", r.runID+":"+s.Key+":1"),
-		))
+		)); err != nil {
+			return fmt.Errorf("workjournal: queue step %s: %w", s.Key, err)
+		}
 	}
+	return nil
 }
 
 // Reopen returns a handle on a run this journal -- or another replica's --

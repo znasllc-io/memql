@@ -2,6 +2,7 @@ package workjournal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -534,4 +535,31 @@ func mustJournalStep(t *testing.T, run *Run, ctx context.Context, key string) *S
 		t.Fatalf("step intent: %v", err)
 	}
 	return step
+}
+
+func TestBeginRefusesAnIncompleteInitialJournal(t *testing.T) {
+	fault := errors.New("journal storage unavailable")
+	for _, failAt := range []int{1, 2, 3, 4, 5, 6, 7} {
+		t.Run(fmt.Sprint(failAt), func(t *testing.T) {
+			calls := 0
+			j, _ := newClockedJournal(ExecutorFunc(func(_ context.Context, q string) (any, error) {
+				calls++
+				if calls == failAt {
+					return nil, fault
+				}
+				return nil, nil
+			}))
+			run, err := j.Begin(context.Background(), pipelineWork())
+			if run != nil {
+				run.stopHeartbeat()
+				t.Fatal("an incomplete journal handed back an executable run")
+			}
+			if !errors.Is(err, fault) {
+				t.Fatalf("open error=%v, want storage failure at write %d", err, failAt)
+			}
+			if calls != failAt {
+				t.Fatalf("open continued after failed write: %d calls, failure at %d", calls, failAt)
+			}
+		})
+	}
 }

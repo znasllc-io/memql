@@ -1013,10 +1013,6 @@ Each of these is understood, and accepted for this release.
     root that another user owns and keeps closed to others.)
   - Blob NFS has no NLM locking, while concurrent steps of one repository and
     trust on two nodes share one Go build and module cache.
-- **A fleet step inherits the worker's shell limits.** The first time a Cockpit
-  runs a `workerHost.exec` call, it applies the shell policy's `max_*` limits to
-  its own process. Every process it starts after that inherits them until it
-  restarts, a pipeline step included (znasllc-io/memql-cockpit#484).
 - **A multi-line secret's short lines are not masked one by one.** Masking
   covers each secret whole, trimmed, and each of its lines, trimmed. Like the
   check run's masking, it drops any form shorter than 4 bytes. So a secret

@@ -96,6 +96,40 @@ registry/marketplace permission, native signing, public webhook reachability,
 cloud storage behavior or production recovery. Those remain named rehearsal
 steps. Time-window milestones #5506–#5509 stay open until observed.
 
+## Generic recovery gaps found during dogfooding
+
+Before replacing the pipeline driver with authored orchestration, close these
+cross-domain gaps with independent regressions:
+
+- Resume's type-only rule currently assumes every builtin, logic, loop and
+  sub-automation can be repeated. A logic can mutate, and an integration
+  builtin can publish. Classify the actual registered operation and nested
+  body; unknown or uncertain effects require reconciliation or explicit
+  operator authorization. This applies equally to email and file processing.
+- A completed statement whose receipt has no saved value can currently run
+  again while rebuilding a resume prefix. Preserve confirmed effects and
+  refuse missing evidence instead of replaying it silently.
+- Required journaling is not ownership fencing. A paused executor can outlive
+  its lease and return after a replacement claims the run. Claims, receipts
+  and external-effect reconciliation need durable attempt ownership.
+The Go-driven journal now checks all initial writes: goal, run, first heartbeat
+and step order, each pending step, and goal activation. Injecting a failure at
+each boundary refuses admission before a heartbeat loop or command starts.
+
+These are identified gaps, not completion claims. No production release may
+rely on automatic replay until these boundaries are demonstrated.
+
+## Child resource-limit isolation progress
+
+Cockpit shell calls now apply limits inside the command's child, preserving
+worker limits and those inherited by later pipeline builds. A refused limit
+stops before the command. Child start errors no longer produce exit-zero
+results, and cancellation kills the process group. macOS race tests and real
+Linux/ARM64 execution in an existing local container image verify unchanged
+worker limits, a subsequent real pipeline clone/command, policy loosening,
+limit refusal and cancellation; Linux also verifies address-space limits.
+The container had no network. No installed worker has been upgraded (#484).
+
 ## Fleet repository routing progress
 
 Capability descriptors now carry generic, action-specific repository scopes.
