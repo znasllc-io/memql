@@ -13,6 +13,11 @@ Signed-out users enter the OAuth/PKCE login flow automatically, without a
 separate landing-page button. The production login form shows both email-link
 and passkey actions; the local installation remains passkey-only. Unavailable
 identity services retain a retry view instead of an automatic redirect loop.
+The normal OS authorization and callback stay in the current document, retain
+one-use PKCE/state validation, and create a fresh credential source for each
+sign-in. Identity handoffs share one quiet entry frame; initial cluster entry
+waits briefly for readiness and setup facts before revealing the destination.
+An unavailable readiness feed still opens the desktop after that bounded wait.
 
 Identity and ownership setup live in OS. Before probing a session, OS reads
 identity's `/auth/setup/state`: only an explicit `unclaimed` answer opens the

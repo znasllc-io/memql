@@ -18,7 +18,7 @@ import {
 import { authorizeUrl, exchangeCode, logout, probeSession, redirectUriFor } from "./identityClient";
 import { forgetPending, rememberPending, takePending } from "./pending";
 import { challengeFor, generateCodeVerifier, generateState } from "./pkce";
-import { identityLocation, ownershipState } from "./nativeIdentity";
+import { identityEntry, identityLocation, ownershipState } from "./nativeIdentity";
 
 export type AuthStatus = "loading" | "signed-out" | "signed-in" | "unavailable" | "unclaimed";
 
@@ -29,6 +29,8 @@ export interface AuthContextValue {
   authSource: OsAuthSource;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
+  entry: string | null;
+  completeSignIn: (destination: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -42,6 +44,8 @@ export function useAuth(): AuthContextValue {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<OsRuntimeConfig>(UNKNOWN_RUNTIME_CONFIG);
   const [status, setStatus] = useState<AuthStatus>("loading");
+  const [entry, setEntry] = useState(identityEntry);
+  const [sessionVersion, setSessionVersion] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,29 +103,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const challenge = await challengeFor(verifier);
     const state = generateState();
     if (!rememberPending(verifier, state)) throw new Error("Browser sign-in storage is unavailable");
-    window.location.assign(identityLocation(
-      authorizeUrl(config, {
-        redirectUri: redirectUriFor(window.location.origin),
-        state,
-        codeChallenge: challenge,
-      }),
-    ));
+    const destination = identityLocation(authorizeUrl(config, {
+      redirectUri: redirectUriFor(window.location.origin),
+      state,
+      codeChallenge: challenge,
+    }));
+    history.replaceState({}, "", destination);
+    setEntry(identityEntry());
+  }, [config]);
+
+  const completeSignIn = useCallback(async (destination: string) => {
+    const target = new URL(destination, window.location.origin);
+    if (target.origin !== window.location.origin || target.pathname !== "/auth/callback" || target.username || target.password) {
+      window.location.assign(destination);
+      return;
+    }
+    // The in-document handoff has the same one-use PKCE/state checks as a
+    // callback opened by email or an external provider in a new document.
+    const pending = takePending();
+    const code = target.searchParams.get("code");
+    if (!pending || !code || target.searchParams.get("state") !== pending.state) {
+      history.replaceState({}, "", "/");
+      setEntry(null);
+      setStatus("unavailable");
+      throw new Error("Sign-in confirmation expired. Start sign-in again.");
+    }
+    try {
+      if (!await exchangeCode(config, { code, codeVerifier: pending.verifier, redirectUri: redirectUriFor(window.location.origin) })) {
+        throw new Error("Sign-in could not be completed");
+      }
+    } catch (error) {
+      history.replaceState({}, "", "/");
+      setEntry(null);
+      setStatus("unavailable");
+      throw error;
+    }
+    history.replaceState({}, "", "/");
+    setEntry(null);
+    setSessionVersion(version => version + 1);
+    setStatus("signed-in");
   }, [config]);
 
   const signOut = useCallback(async () => {
     forgetPending();
+    // Unmount authenticated consumers before revoking their cookie, so no
+    // background read competes with logout or paints a half-cleared desktop.
+    setStatus("loading");
     await logout(config);
+    history.replaceState({}, "", "/");
+    setEntry(null);
     setStatus("signed-out");
   }, [config]);
 
   const authSource = useMemo<OsAuthSource>(
-    () => (isRuntimeConfigReady(config) || !config.authEnabled ? identitySource(config) : anonymousSource),
-    [config],
+    // A same-document sign-in must never reuse the preceding session's bearer.
+    () => (status === "signed-in" ? identitySource(config) : anonymousSource),
+    [config, status, sessionVersion],
   );
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, config, authSource, signIn, signOut }),
-    [status, config, authSource, signIn, signOut],
+    () => ({ status, config, authSource, signIn, signOut, entry, completeSignIn }),
+    [status, config, authSource, signIn, signOut, entry, completeSignIn],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

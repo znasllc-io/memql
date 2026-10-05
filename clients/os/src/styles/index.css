@@ -8752,6 +8752,21 @@ a.os-button {
 }
 .os-entry-preferences { flex: none; padding: 20px 20px 0; }
 .os-entry-layout > .os-wizard { flex: 1; min-height: 0; }
+.os-entry-pending { flex: 1; display: grid; place-items: center; }
+.os-entry-pending-mark {
+  color: var(--os-muted);
+  opacity: 0;
+  animation: os-entry-wait 160ms ease-out 200ms forwards;
+}
+@keyframes os-entry-wait { to { opacity: 1; } }
+.os-entry-layout .os-signin-content,
+.os-entry-layout .os-core-gate-column { animation: os-entry-arrive 140ms ease-out; }
+@keyframes os-entry-arrive { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .os-entry-pending-mark { animation: none; opacity: 1; }
+  .os-entry-layout .os-signin-content,
+  .os-entry-layout .os-core-gate-column { animation: none; }
+}
 .os-theme-switch {
   position: relative;
   display: inline-grid;
@@ -13452,11 +13467,9 @@ button.os-cluster-mesh-peer:focus-visible {
    about mirroring `.os-rank-refused`. The reader's variant simply has less in
    it.
 
-   NO ENTRANCE AND NO EXIT. The gate appears because the shell booted, with
-   nothing to animate from, and disappears because the answer changed -- and
-   the desk arriving IS the confirmation. The setup widget's fold-away below is
-   a different case: it earns its beat because a person finished the last stop
-   while looking at it. */
+   Entry uses the shared short opacity reveal, without moving the column.
+   Live changes do not replay it. The setup widget's fold-away below is a
+   different case: a person finished the last stop while looking at it. */
 
 .os-core-gate {
   flex: 1;

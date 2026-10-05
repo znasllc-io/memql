@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { Button, Rail, type Stop } from "../kit";
 import { EntryLayout } from "../kit/EntryLayout";
+import { EntryPending } from "../kit/EntryPending";
 import { canConfigure } from "../kit/ReadinessStates";
 import { useSetupFacts } from "../apps/setup/context";
 import { InferenceStop } from "../apps/setup/InferenceStop";
@@ -36,52 +37,41 @@ import { Mark } from "./Mark";
 // otherwise a screen that looks like it wants all four.
 //
 // ===========================================================================
-// THREE SILENCES, AND ONLY ONE OF THEM HOLDS ANYBODY
+// INITIAL ENTRY WAITS FOR ITS DESTINATION
 // ===========================================================================
-//   THE FEED HAS NOT SAID   unloaded, absent, `unreported`, `configured`,
-//                           `partial`. The desk OPENS. `unreported` is the
-//                           sharp one: a broken cluster is not an unconfigured
-//                           one, and a gate that claimed it was would lock
-//                           somebody out of the Cluster app they need in order
-//                           to go and find out why nothing is reporting.
-//   THE LADDER OR THE       nothing at all is drawn. The cluster IS
-//   IDENTITY HAS NOT SAID   unconfigured, so the desk must not open -- but
-//                           which VARIANT is not decided, and telling an owner
-//                           to go and find an owner is worse than a beat of
-//                           ground.
-//   UNCONFIGURED            the one state that holds.
-//
-// The PASSKEY read is a fourth wait and it is not one of these: by the time it
-// is outstanding the verdict is already in, so the surface draws and only the
-// rail waits.
+// Briefly hold the shared entry frame while readiness, access and setup facts
+// arrive. Once entered, refreshes never replace the page with a loading frame.
+// A missing feed still opens the desktop after the bounded initial wait: an
+// outage is not evidence that the cluster needs configuration.
 //
 // Nothing is dismissed and nothing is remembered in a browser: the verdict IS
 // the state, so there is no Skip and nothing to remember. It lifts on a feed
 // change with no reload, and a door that is configured but not live -- a
 // laptop asleep -- lifts it: configuration opens the OS, presence decides a
 // call.
-export function CoreGate({ onSignOut, children }: { onSignOut: () => void; children: ReactNode }) {
+export function CoreGate({ onSignOut, children, waitForReadiness = true }: {
+  onSignOut: () => void; children: ReactNode; waitForReadiness?: boolean;
+}) {
   const { access, ladderLoaded, readiness } = useSession();
   const { state } = useOs();
   const facts = useSetupFacts();
   const role = access?.role ?? "";
   const [override, setOverride] = useState<string | null>(null);
 
-  // ONLY POSITIVE EVIDENCE HOLDS ANYBODY, and this one line is every silence
-  // at once. An unloaded feed answers `null` for every module (`of` reads a
-  // map built only when `loaded`), an absent feed answers `null`, an
-  // unreported module answers `unreported`, and a configured one answers
-  // `configured`. All of them open the desk; only a loaded feed SAYING
-  // `unconfigured` does not.
-  //
-  // FAIL-OPEN ON THE FEED, which costs one flash and buys another. A shell
-  // that drew nothing until the feed seeded would put a blank ground in front
-  // of every person on every boot of every cluster, to spare the rare
-  // unconfigured one a brief desk. The record's own words for this are "the
-  // gate draws nothing, the shell opens", and it is the same direction
-  // `gateFor` takes for an unknown verdict and `access.tsx` takes for an
-  // absent feed: a shell that does not yet know must show the app rather than
-  // a screen the person cannot dismiss.
+  const [entered, setEntered] = useState(false);
+  const [waitExpired, setWaitExpired] = useState(false);
+  const unconfigured = readiness?.of("ai")?.state === "unconfigured";
+  const resolving = readiness != null && (!readiness.loaded ||
+    (unconfigured && (ladderLoaded !== true || access === null || (canConfigure(role) && facts?.known !== true))));
+  const waiting = waitForReadiness && !entered && !waitExpired && resolving && Object.keys(state.shell.windows).length === 0;
+  useEffect(() => {
+    if (!waiting) { setEntered(true); return; }
+    const timer = setTimeout(() => setWaitExpired(true), 3000);
+    return () => clearTimeout(timer);
+  }, [waiting]);
+  if (waiting) return <EntryPending />;
+
+  // Only a reported unconfigured verdict holds the desktop after entry.
   if (readiness?.of("ai")?.state !== "unconfigured") return <>{children}</>;
 
   // A HOLD, NOT A PRISON. The gate's own acts OPEN AN APP -- Fleet to pair a
@@ -107,7 +97,7 @@ export function CoreGate({ onSignOut, children }: { onSignOut: () => void; child
   // ?? ""` while it is still null hands an OWNER the reader variant -- "an
   // owner or developer has to set up inference", to the owner, with Sign out
   // as the only control. Both reads, or neither variant.
-  if (ladderLoaded !== true || access === null) return null;
+  if (ladderLoaded !== true || access === null) return <EntryPending />;
   // Bound once so `bodyFor` below reads the narrowed value: TypeScript does
   // not carry a narrowing through a closure, and the alternative is a non-null
   // assertion at the one place a wrong answer would be silent. Non-null is
@@ -117,13 +107,9 @@ export function CoreGate({ onSignOut, children }: { onSignOut: () => void; child
 
   if (!canConfigure(role)) return <ToldVariant onSignOut={onSignOut} />;
 
-  // THE RAIL WAITS FOR ITS OWN READING, and the chrome above it does not.
-  //
-  // The stops need this person's passkeys, which is a second read that lands
-  // after the feed. The headline and the sentence are already TRUE by the time
-  // the `ai` verdict says so, and holding them back would put a blank screen
-  // in front of the one person who can act. So the surface draws, and the rail
-  // arrives beneath text that does not move.
+  // If the initial wait expires before the passkey read completes, the known
+  // setup heading can still appear. The rail needs its own facts and must not
+  // present an unknown passkey as a missing one.
   const stops = facts !== null && facts.known ? facts.stops : [];
   const openStop = openStopForGate(stops, override);
   const drawn: Stop[] = stops.map((stop) => ({

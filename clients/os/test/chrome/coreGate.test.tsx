@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -30,6 +30,7 @@ import type { Readiness } from "../../src/live/readiness";
 afterEach(() => {
   cleanup();
   h.connection = null;
+  vi.useRealTimers();
 });
 
 const DESK = <p data-testid="desk">the desk</p>;
@@ -66,15 +67,34 @@ function WindowDriver() {
 }
 
 describe("what the gate does while it cannot say", () => {
-  it("OPENS THE DESK while the feed has not loaded, and draws no gate", async () => {
-    // ONLY POSITIVE EVIDENCE HOLDS. A shell that drew nothing until the feed
-    // seeded would put a blank ground in front of every person on every boot
-    // of every cluster, to spare the rare unconfigured one a brief desk. The
-    // record's own words are "the gate draws nothing, the shell opens".
+  it("waits for the first verdict without mounting the wrong destination", async () => {
+    h.connection = fakeConnection({ passkeysForSelf: [] });
+    const view = render(gate("owner", readiness(false, [])));
+    expect(screen.getByRole("status").textContent).toBe("Opening MemQL OS");
+    expect(screen.queryByTestId("desk")).toBeNull();
+    view.rerender(gate("owner", UNCONFIGURED()));
+    expect(await screen.findByRole("list", { name: "Set up this cluster" })).toBeTruthy();
+    expect(screen.queryByTestId("desk")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("bounds the first-read wait so an unavailable feed still permits troubleshooting", async () => {
+    vi.useFakeTimers();
     h.connection = fakeConnection({ passkeysForSelf: [] });
     render(gate("owner", readiness(false, [])));
-    expect(await screen.findByTestId("desk")).toBeTruthy();
-    expect(document.querySelector("[data-os-core-gate]")).toBeNull();
+    await act(async () => vi.advanceTimersByTime(2999));
+    expect(screen.queryByTestId("desk")).toBeNull();
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(screen.getByTestId("desk")).toBeTruthy();
+  });
+
+  it("does not replace an entered desktop with the entry frame during a reseed", async () => {
+    h.connection = fakeConnection({ passkeysForSelf: [] });
+    const view = render(gate("owner", coreAt("configured", "configured", "configured")));
+    expect(screen.getByTestId("desk")).toBeTruthy();
+    view.rerender(gate("owner", readiness(false, [])));
+    expect(screen.getByTestId("desk")).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("draws nothing at all while the ladder has not landed AND the cluster is unconfigured", async () => {

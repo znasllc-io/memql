@@ -145,6 +145,14 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   people waiting for an owner to finish setup. Reuse `kit/ThemeSwitch` and the
   stored OS preference; never add a separate selector to each form or to
   identity panels inside the OS.
+- Sign-in and sign-out use one quiet `EntryPending` handoff in that frame.
+  Keep same-origin authorization in the current document, preserve PKCE/state
+  validation, and reveal the cluster destination after its initial facts arrive.
+  Do not flash form skeletons, generic account pages, or the desktop on the way
+  to setup. A bounded first-read wait must still let an unavailable readiness
+  feed reach the desktop; subsequent refreshes do not reopen the entry loader.
+  Reveal the destination once with a short opacity transition, without moving
+  its content; respect reduced motion.
 - Remove redundant labels, helper text, outlines and decoration. Keep copy
   when it explains a consequence or helps the current decision. A skill's
   general suggestions never override these repository rules or the brief.

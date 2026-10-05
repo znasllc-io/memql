@@ -6,6 +6,7 @@ import { nativeIdentity, oauthFields, value, IdentityRequestError, type Identity
 import { Wizard } from "../kit/Wizard";
 import { OwnershipWizard } from "./OwnershipWizard";
 import { EntryLayout } from "../kit/EntryLayout";
+import { EntryPending } from "../kit/EntryPending";
 import { loginWithPasskey, registerPasskey } from "./passkeys";
 import { Field, Button, Head } from "../kit/controls";
 import { IdentityAccount } from "../apps/identity/IdentityAccount";
@@ -16,10 +17,11 @@ import { Mark } from "../chrome/Mark";
 import ReactMarkdown from "react-markdown";
 
 export function IdentityScreen({ initialPath, embedded = false }: { initialPath: string; embedded?: boolean }) {
-  const { config, authSource, status } = useAuth();
+  const { config, authSource, status, completeSignIn } = useAuth();
   const [page, setPage] = useState<IdentityPage>();
   const [path, setPath] = useState(initialPath);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
+  const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState("");
   const [refreshNeeded, setRefreshNeeded] = useState(false);
   const [loginProblem, setLoginProblem] = useState<SignInProblem>();
@@ -39,7 +41,9 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
         const target = new URL(result.redirect, config.identityUrl);
         if (target.origin !== new URL(config.identityUrl).origin) {
           // A redirect is emitted only by identity after its OAuth validation.
-          window.location.assign(target.toString()); return;
+          if (revision !== generation.current) return;
+          setLeaving(true);
+          await completeSignIn(target.toString()); return;
         }
         next = target.pathname + target.search;
         result = await nativeIdentity(config, next, { bearer: bearer || undefined });
@@ -52,11 +56,12 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
       setFields({ email: value(result.data || {}, "PrefillEmail"), user_code: value(result.data || {}, "PrefillCode") });
     } catch (err) {
       if (revision === generation.current) {
+        setLeaving(false);
         setError(err instanceof Error ? err.message : "Identity is unavailable");
         setRefreshNeeded(err instanceof IdentityRequestError && err.code === "csrf_expired");
       }
     } finally { if (revision === generation.current) setBusy(false); }
-  }, [config, authSource, status]);
+  }, [config, authSource, status, completeSignIn]);
 
   useEffect(() => { void load(initialPath); return () => { generation.current++; }; }, [initialPath, load]);
   const data = page?.data || {};
@@ -66,6 +71,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
     actionPending.current = true;
     setBusy(true); setError(""); setRefreshNeeded(false); setLoginProblem(undefined); setPasskeyPending(signingIn);
     try { await action(); } catch (err) {
+      setLeaving(false);
       if (signingIn) setLoginProblem(signInProblem(err));
       else setError(err instanceof Error ? err.message : "Identity operation failed");
     } finally { actionPending.current = false; setBusy(false); setPasskeyPending(false); }
@@ -99,6 +105,8 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
     return () => { stopped = true; clearTimeout(timer); };
   }, [page, config, load]);
 
+  if (leaving || (!page && busy && !embedded)) return <EntryPending label={leaving ? "Completing sign-in" : "Opening identity"} />;
+
   if (page?.page === "setup_wizard") return <EntryLayout><OwnershipWizard data={data} busy={busy} error={error} submit={submit} /></EntryLayout>;
 
   if (page?.page === "setup_passkey") {
@@ -126,7 +134,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
       // A protected identity entry (such as a device request) remains the
       // destination after first-party sign-in; do not lose it at the OS home.
       if (!value(data, "ClientID") && initialPath !== "/login" && initialPath !== "/authorize") window.location.reload();
-      else window.location.assign(destination);
+      else { setLeaving(true); await completeSignIn(destination); }
     }, true)}
     onLegal={next => void load(next)} />;
 
