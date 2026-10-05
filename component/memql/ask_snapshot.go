@@ -102,9 +102,8 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 				seen[answer.ID] = true
 			}
 		}
-		if turn.State == "done" {
-			continue
-		}
+		// The journal is authoritative even for a saved completed turn: an
+		// earlier observer may have persisted drafts from a superseded attempt.
 		outcome, _ := run["classification"].(map[string]any)
 		if ack, _ := outcome["acknowledgement"].(string); ack != "" && (turn.State == "queued" || turn.State == "waiting" || turn.Acknowledgement != "") {
 			turn.Acknowledgement = ack

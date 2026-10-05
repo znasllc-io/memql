@@ -88,3 +88,75 @@ func TestAskTextQuestionAlwaysSerializesAnOptionsArray(t *testing.T) {
 		require.Contains(t, string(raw), `"options":[]`)
 	}
 }
+
+func TestAskHumanAnswerReplacesDraftAcrossReplicasAndSavedHistory(t *testing.T) {
+	a, _, _ := readMergeTestEngine(t)
+	b, _, _ := readMergeTestEngine(t)
+	previous := auth.InstalledCapabilityCatalog()
+	auth.SetCapabilityCatalog(nil)
+	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
+	ctx := askTestActor()
+	ac, _ := auth.AccessFromContext(ctx)
+	conversation := askTestConversation(t, a, ctx)
+	runID, approvalID := id.NewShortId(), id.NewShortId()
+	const draft = "I don't have a record of the synthetic project's launch month."
+	const reply = "Recorded: the synthetic project launches in November."
+	const ack = "I'll check the project notes."
+	write := func(e *MemQLEngine, name string, args map[string]any) {
+		t.Helper()
+		call, err := parser.RenderCall(name, args)
+		require.NoError(t, err)
+		_, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
+		require.NoError(t, err)
+	}
+	write(a, "createWorkRun", map[string]any{"runId": runID, "goalId": "goal", "automationName": "feedback", "templateFingerprint": "test", "triggeredBy": "manual", "status": "running", "mode": "live", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	turn := AskTurn{ID: "request", RunID: runID, Prompt: "Which month is the synthetic project launching?", State: "queued", Background: true, Acknowledgement: ack, Answer: ack}
+	require.NoError(t, a.askSave(ctx, conversation, "Launch month", askTranscript{Turns: []AskTurn{turn}}))
+	runCtx := common.ContextWithRun(ctx, common.RunContext{RunId: runID, GoalId: "goal", OwnerUserId: ac.UserId, StepKey: "reason"})
+	require.NoError(t, a.RecordWorkProgress(runCtx, WorkEvent{ID: "before-question", Kind: "response", Phase: "streaming", Text: draft}))
+	write(a, "createWorkApproval", map[string]any{"approvalId": approvalID, "runId": runID, "stepKey": "reason", "kind": "feedback", "subject": map[string]any{"kind": "text"}, "artifactHash": "question", "question": "What is the launch month?", "requestedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	write(a, "updateWorkRun", map[string]any{"runId": runID, "status": "waiting", "waitingOn": map[string]any{"kind": "feedback", "subject": approvalID}})
+	read := func(e *MemQLEngine) askTranscript {
+		t.Helper()
+		nodes, err := e.askConversationSnapshotBuiltin(ctx, map[string]any{"conversationId": conversation}, 0)
+		require.NoError(t, err)
+		var result struct {
+			Transcript askTranscript `json:"transcript"`
+		}
+		require.NoError(t, json.Unmarshal(nodes[0].Payload, &result))
+		return result.Transcript
+	}
+	waiting := read(b)
+	require.Equal(t, "waiting", waiting.Turns[0].State)
+	require.Equal(t, ack, waiting.Turns[0].Answer)
+	require.NotNil(t, waiting.Turns[0].Question)
+	// The answer and successful continuation land on a different engine.
+	write(b, "decideWorkApproval", map[string]any{"approvalId": approvalID, "decision": "answered", "decidedBy": ac.UserId, "decidedAt": time.Now().UTC().Format(time.RFC3339Nano), "answer": map[string]any{"text": "November — synthetic test data."}})
+	require.NoError(t, b.RecordWorkProgress(runCtx, WorkEvent{ID: "after-answer", Kind: "response", Phase: "completed", Text: reply}))
+	write(b, "createWorkStep", map[string]any{"stepId": id.NewShortId(), "runId": runID, "key": "reason", "seq": 1, "stepType": "call", "status": "done", "attempt": 2, "result": responseStep(1, "done", reply)["result"]})
+	write(b, "updateWorkRun", map[string]any{"runId": runID, "status": "succeeded", "finishedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	completed := read(a)
+	require.Len(t, completed.Turns, 2)
+	require.Equal(t, "done", completed.Turns[0].State)
+	require.Equal(t, reply, completed.Turns[0].Answer)
+	require.Nil(t, completed.Turns[0].Question)
+	require.Contains(t, completed.Turns[1].Prompt, "November")
+	require.True(t, completed.Turns[1].AnswerOnly)
+	// Repair an already-saved aggregate too, including duplicate delivery and
+	// the source text used by exact/semantic recall and subsequent messages.
+	completed.Turns[0].Answer = draft + reply
+	staleHash := conversationSourceHash(completed.Turns[0])
+	require.NoError(t, a.askSave(ctx, conversation, "Launch month", completed))
+	refreshed := read(b)
+	require.Equal(t, reply, refreshed.Turns[0].Answer)
+	require.NotEqual(t, staleHash, conversationSourceHash(refreshed.Turns[0]), "a previously indexed aggregate must fail source-hash validation")
+	replayed, err := b.RunAsk(ctx, conversation, "request", "Duplicate request", "", AskRoute{}, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, reply, replayed)
+	memory, err := b.workSearchConversationsBuiltin(ctx, map[string]any{"search": "synthetic project"}, 0)
+	require.NoError(t, err)
+	require.NotContains(t, string(memory[0].Payload), draft)
+	require.Contains(t, string(memory[0].Payload), reply)
+	_, err = b.askConversationSnapshotBuiltin(askTestActor(), map[string]any{"conversationId": conversation}, 0)
+	require.Error(t, err)
+}

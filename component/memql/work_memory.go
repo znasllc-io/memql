@@ -41,6 +41,9 @@ func (e *MemQLEngine) workSearchConversationsBuiltin(ctx context.Context, args m
 		if err := json.Unmarshal(raw, &transcript); err != nil {
 			return nil, fmt.Errorf("conversation evidence could not be decoded: %w", err)
 		}
+		if err := e.refreshAskRuns(ctx, &transcript); err != nil {
+			return nil, err
+		}
 		for n := len(transcript.Turns) - 1; n >= 0; n-- {
 			turn := transcript.Turns[n]
 			for _, message := range []struct{ role, text string }{{"user", turn.Prompt}, {"assistant", turn.Answer}} {
