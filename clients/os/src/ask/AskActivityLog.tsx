@@ -40,6 +40,14 @@ function activityName(event: AskActivity): string {
 }
 
 function activityState(event: AskActivity, turn: AskTurn): string {
+  // The intake/queue event is historical; the current transcript knows whether
+  // its durable request has since completed or is waiting for a person.
+  if (event.kind === "run") {
+    if (turn.state === "done") return "Completed";
+    if (turn.state === "error") return event.phase === "cancelled" ? "Stopped" : "Failed";
+    if (turn.state === "waiting") return "Needs input";
+    if (turn.state === "interrupted") return "Updates interrupted";
+  }
   if (event.phase === "running") {
     if (turn.state === "error") return "Completion not reported";
     if (turn.state === "interrupted") return "Updates interrupted";

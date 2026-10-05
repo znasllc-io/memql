@@ -7,6 +7,16 @@ import { SessionProvider } from "../../src/chrome/access";
 import { UNKNOWN_RUNTIME_CONFIG } from "../../src/cluster/config";
 
 afterEach(() => { cleanup(); vi.useRealTimers(); });
+it("updates a historical queue receipt when the durable request finishes", () => {
+ const turn = {id:"turn",prompt:"Recall a preference",answer:"",state:"queued" as const,runId:"run",startedAt:"2026-10-05T10:00:00Z",activity:[{id:"run",kind:"run" as const,phase:"queued" as const,at:"2026-10-05T10:00:00Z"}]};
+ const view=render(<AskActivityLog turns={[turn]} onClose={vi.fn()} />);
+ expect(screen.getByText("Working in background")).toBeTruthy();
+ view.rerender(<AskActivityLog turns={[{...turn,state:"waiting"}]} onClose={vi.fn()} />);
+ expect(screen.getByText("Needs input")).toBeTruthy();
+ view.rerender(<AskActivityLog turns={[{...turn,state:"done",answer:"Done"}]} onClose={vi.fn()} />);
+ expect(screen.getByText("Completed")).toBeTruthy();
+ expect(screen.queryByText("Working in background")).toBeNull();
+});
 function setup() {
  let callbacks: AskCallbacks;
  const cancel = vi.fn();
