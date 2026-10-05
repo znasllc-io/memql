@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
@@ -15,6 +16,9 @@ import (
 type countingCompileEngine struct {
 	queries   []string
 	aiCalls   []string
+	aiData    []map[string]any
+	deadlines []time.Time
+	aiErr     error
 	catalogue []map[string]any
 	// procedures answers procedureConstructsForGoalSignature, filtered by
 	// the signature the same way the catalogue is (epic memql#5408).
@@ -68,8 +72,14 @@ func (e *countingCompileEngine) Execute(_ context.Context, q string) (any, error
 	return []map[string]any{}, nil
 }
 
-func (e *countingCompileEngine) InvokeAI(_ context.Context, templateId string, _ map[string]any) (any, error) {
+func (e *countingCompileEngine) InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error) {
 	e.aiCalls = append(e.aiCalls, templateId)
+	e.aiData = append(e.aiData, data)
+	deadline, _ := ctx.Deadline()
+	e.deadlines = append(e.deadlines, deadline)
+	if e.aiErr != nil {
+		return nil, e.aiErr
+	}
 	if templateId == "goalComplexityTriage" && e.triage != nil {
 		return e.triage, nil
 	}

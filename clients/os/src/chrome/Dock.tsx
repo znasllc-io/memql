@@ -21,6 +21,7 @@ import { useConnectionStatus } from "./connection";
 import { connectionDotTone, connectionDotTooltip } from "../ask/useAskReadiness";
 import { ContextMenu, type MenuEntry } from "./ContextMenu";
 import { Mark } from "./Mark";
+import { AccountAvatar } from "./AccountAvatar";
 import { useOs, type OsNotice } from "./state";
 
 // The one bar (spec A): Launcher at the left end; pinned then running apps
@@ -232,8 +233,6 @@ function AvatarMenu({ onSignOut }: { onSignOut: () => void }) {
     return () => window.removeEventListener("pointerdown", onPointer, true);
   }, [open]);
 
-  const initial = (access?.primaryEmail || "?").slice(0, 1).toUpperCase();
-
   function choose(choice: ThemeChoice) {
     setMode(choice);
     setTheme(choice);
@@ -243,13 +242,13 @@ function AvatarMenu({ onSignOut }: { onSignOut: () => void }) {
     <div className="os-avatar-anchor" ref={ref}>
       <button
         type="button"
-        className="os-avatar"
+        className="os-avatar-button"
         aria-label="Account menu"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        {initial}
+        <AccountAvatar />
       </button>
       {open ? (
         <div role="menu" aria-label="Account" className="os-menu os-avatar-menu">

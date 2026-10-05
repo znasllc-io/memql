@@ -405,3 +405,26 @@ func breachOf(b *work.CeilingBreach) *memqlengine.RunCeilingBreach {
 		Reason:  b.Reason,
 	}
 }
+
+// Deadline reloads the declared budget so a reply classified on one planner
+// cannot retain an older task allowance on another replica. Keep the original
+// run start across retries, reconnects, and different serving nodes.
+func (c *RunCeilings) Deadline(ctx context.Context, rc common.RunContext) (time.Time, error) {
+	if rc.GoalId == "" {
+		return time.Time{}, nil
+	}
+	ctx = memqlengine.ContextWithFreshRead(ctx)
+	b := c.budgetFor(rc)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if err := c.seed(ctx, rc, b); err != nil {
+		return time.Time{}, err
+	}
+	declared, err := c.goalCeilings(ctx, rc)
+	if err != nil {
+		return time.Time{}, err
+	}
+	b.ceilings = enforceableHere(declared)
+	b.unbounded = b.ceilings == work.Ceilings{}
+	return work.RunDeadline(b.startedAt, declared.WallClockMs)
+}

@@ -9,6 +9,26 @@ import (
 	"time"
 )
 
+func TestWorkObserverReportsTerminalRunEvidenceFromAnotherReplica(t *testing.T) {
+	for _, tc := range []struct{ status, phase string }{{"failed", "failed"}, {"abandoned", "failed"}, {"cancelled", "cancelled"}, {"waiting", "waiting"}} {
+		t.Run(tc.status, func(t *testing.T) {
+			read := func(_ context.Context, query, _ string) ([]map[string]any, error) {
+				if query == "workRunForOwner" {
+					return []map[string]any{{"status": tc.status, "errorMessage": "model deadline exceeded", "waitingOn": map[string]any{"kind": "budget"}}}, nil
+				}
+				return nil, nil
+			}
+			var events []WorkEvent
+			_, err := followWorkRun(context.Background(), "remote-run", read, nil, func(e WorkEvent) error { events = append(events, e); return nil }, time.Millisecond)
+			require.Error(t, err)
+			require.Len(t, events, 1)
+			require.Equal(t, "work:remote-run", events[0].ID)
+			require.Equal(t, tc.phase, events[0].Phase)
+			require.NotEmpty(t, events[0].Error)
+		})
+	}
+}
+
 func TestWorkObserverSurvivesReplicaHopAndAutomaticRecovery(t *testing.T) {
 	polls := 0
 	read := func(_ context.Context, name, run string) ([]map[string]any, error) {

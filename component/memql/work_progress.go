@@ -77,9 +77,17 @@ func (e *MemQLEngine) RecordWorkProgress(ctx context.Context, event WorkEvent) e
 // compilation. It records the exact router metadata available at that moment.
 func (e *MemQLEngine) ObserveWorkCalls(ctx context.Context, cancel context.CancelCauseFunc) context.Context {
 	watch := e.modelCancellation(ctx, cancel)
+	spend := e.modelSeam.observeAgentSpend(ctx, cancel)
 	return airoute.WithObserver(ctx, func(call airoute.CallObservation) {
 		watch(call)
-		if err := e.RecordWorkProgress(ctx, WorkEvent{ID: call.ID, Kind: "model", Phase: call.Phase, Provider: call.Provider, Model: call.Model, ElapsedMS: int64(call.ElapsedMS), Error: call.Error, Call: &call}); err != nil {
+		spend(call)
+		recordCtx := ctx
+		cleanup := func() {}
+		if ctx.Err() != nil {
+			recordCtx, cleanup = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		}
+		defer cleanup()
+		if err := e.RecordWorkProgress(recordCtx, WorkEvent{Name: call.Purpose, ID: call.ID, Kind: "model", Phase: call.Phase, Provider: call.Provider, Model: call.Model, ElapsedMS: int64(call.ElapsedMS), Error: call.Error, Call: &call}); err != nil {
 			cancel(err)
 		}
 	})

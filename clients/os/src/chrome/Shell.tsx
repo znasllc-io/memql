@@ -461,7 +461,7 @@ function DesktopChrome({
       />
       <ThemeStore open={themesOpen} onClose={() => setThemesOpen(false)} />
       <AskNavigator />
-      <AskSheet />
+      <AskSheet dockReserve={placement.dockReserve} />
     </div>
   );
 }

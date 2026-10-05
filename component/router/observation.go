@@ -16,7 +16,7 @@ func startObservation(ctx context.Context, req ResolveRequest, resolved Resolved
 	ctx = context.WithValue(ctx, attemptKey{}, attempt)
 	ctx = context.WithValue(ctx, modalityKey{}, string(req.Modality))
 	airoute.Observe(ctx, airoute.CallObservation{ID: attempt, Phase: "running", StartedAt: start,
-		Provider: resolved.ProviderName, Model: resolved.Model, Vendor: resolved.Vendor,
+		PromptName: req.PromptName, Provider: resolved.ProviderName, Model: resolved.Model, Vendor: resolved.Vendor,
 		Policy: resolved.Decision.Policy, Rule: resolved.Decision.Rule, Door: resolved.Decision.Door, Modality: string(req.Modality)})
 	return ctx
 }
@@ -62,7 +62,7 @@ func (r *Router) recordObserved(ctx context.Context, rec CallRecord) {
 		phase = "fallback"
 	}
 	airoute.Observe(ctx, airoute.CallObservation{ID: attempt, Phase: phase, StartedAt: rec.StartedAt,
-		Provider: rec.ProviderName, Model: rec.Model, Vendor: rec.Vendor, Modality: modality, Policy: rec.Policy, Rule: rec.Rule,
+		PromptName: rec.PromptName, Provider: rec.ProviderName, Model: rec.Model, Vendor: rec.Vendor, Modality: modality, Policy: rec.Policy, Rule: rec.Rule,
 		Door: rec.Door, ExecutionSurface: rec.ExecutionSurface, ServedModel: rec.ServedModel, CacheKind: rec.CacheKind,
 		InputTokens: rec.InputTokens, OutputTokens: rec.OutputTokens, TokensEstimated: rec.TokensEstimated,
 		TotalCost: rec.TotalCost, PricingConfigured: rec.PricingConfigured, Billing: rec.Billing,

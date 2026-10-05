@@ -8,6 +8,9 @@ import (
 // CallObservation is public execution evidence from the actual provider attempt.
 // It contains no messages, credentials, tool results or private model reasoning.
 type CallObservation struct {
+	PromptName        string    `json:"promptName,omitempty"`
+	Purpose           string    `json:"purpose,omitempty"`
+	Attempt           int       `json:"attempt,omitempty"`
 	ID                string    `json:"id"`
 	Phase             string    `json:"phase"`
 	StartedAt         time.Time `json:"startedAt"`
@@ -39,7 +42,22 @@ type Observer func(CallObservation)
 func WithObserver(ctx context.Context, observe Observer) context.Context {
 	return context.WithValue(ctx, observationKey{}, observe)
 }
+
+type purposeKey struct{}
+type callPurpose struct {
+	Name    string
+	Attempt int
+}
+
+// WithCallPurpose supplies public stage metadata on the executing replica.
+func WithCallPurpose(ctx context.Context, name string, attempt int) context.Context {
+	return context.WithValue(ctx, purposeKey{}, callPurpose{name, attempt})
+}
+
 func Observe(ctx context.Context, event CallObservation) {
+	if p, ok := ctx.Value(purposeKey{}).(callPurpose); ok {
+		event.Purpose, event.Attempt = p.Name, p.Attempt
+	}
 	if observe, ok := ctx.Value(observationKey{}).(Observer); ok {
 		observe(event)
 	}

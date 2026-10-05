@@ -255,6 +255,13 @@ func (s *modelSeam) serve(
 		return out.Value, err
 	}
 
+	bounded, cancelDeadline, deadlineErr := s.deadlineContext(ctx, rc)
+	if deadlineErr != nil {
+		return nil, deadlineErr
+	}
+	defer cancelDeadline()
+	ctx = bounded
+
 	// THE RUN'S CEILINGS, BEFORE ANYTHING IS SPENT (memql#5580). The check
 	// sits above the journal lookup as well as above the provider call, so a
 	// run past its loop cap is refused whether the answer would have come
@@ -276,7 +283,9 @@ func (s *modelSeam) serve(
 			OutputTokens: call.OutputTokens,
 			Cost:         call.Cost,
 		})
-		s.record(ctx, rc, call)
+		recordCtx, cancelRecord := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancelRecord()
+		s.record(recordCtx, rc, call)
 		for _, observer := range observers {
 			observer(call)
 		}

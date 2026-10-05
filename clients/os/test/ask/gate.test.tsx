@@ -65,3 +65,22 @@ it("keeps the sheet draft across availability flips without Open Fleet banners",
   fireEvent.click(screen.getByRole("button", { name: "Return to Ask" }));
   expect((screen.getByRole("textbox", { name: "Ask" }) as HTMLInputElement).value).toBe("Save this question while I connect a machine");
 });
+
+it("maximizes and restores the same sheet without losing its draft or current panel", () => {
+ render(withSession(withOs(<AskProvider transport={{ ask: vi.fn(() => ({ cancel: vi.fn() })) }} availability={READY_ASK}>
+   <OpenOnMount /><AskSheet dockReserve={118} />
+ </AskProvider>, "owner")));
+ fireEvent.change(screen.getByRole("textbox", { name: "Ask" }), { target: { value: "Keep this draft" } });
+ const sheet = screen.getByRole("dialog", { name: "Ask" });
+ const maximize = screen.getByRole("button", { name: "Maximize Ask" });
+ expect(maximize.parentElement).toBe(screen.getByRole("button", { name: "Close Ask" }).parentElement);
+ fireEvent.click(maximize);
+ expect(sheet.getAttribute("data-maximized")).toBe("true");
+ expect(sheet.style.getPropertyValue("--ask-dock-reserve")).toBe("118px");
+ fireEvent.click(screen.getByRole("button", { name: "Activity" }));
+ fireEvent.click(screen.getByRole("button", { name: "Restore Ask" }));
+ expect(sheet.hasAttribute("data-maximized")).toBe(false);
+ expect(screen.getByRole("region", { name: "Conversation activity" })).toBeTruthy();
+ fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
+ expect((screen.getByRole("textbox", { name: "Ask" }) as HTMLTextAreaElement).value).toBe("Keep this draft");
+});

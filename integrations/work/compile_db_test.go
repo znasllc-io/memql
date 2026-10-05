@@ -34,7 +34,7 @@ type compileProbe struct {
 
 func (p *compileProbe) Compile(ctx context.Context, req CompileRequest) {
 	rc, _ := common.RunFromContext(ctx)
-	airoute.Observe(ctx, airoute.CallObservation{ID: "compile-probe", Phase: "completed", Provider: "fleet:test", Model: "test-model"})
+	airoute.Observe(airoute.WithCallPurpose(ctx, "Repairing automation", 2), airoute.CallObservation{ID: "compile-probe", Phase: "completed", PromptName: "authoringRepair", Provider: "fleet:test", Model: "test-model"})
 	authority, hasAuthority := auth.ForwardedAuthorityFromContext(ctx)
 	p.called <- compileObservation{request: req, run: rc, actor: callerUserId(ctx), budget: hasBudgetScope(ctx), cancelled: ctx.Err() != nil, authority: authority, hasAuthority: hasAuthority}
 	if p.proceed != nil {
@@ -116,6 +116,9 @@ func TestCompileDB_BFFRunEventCrossesToOnePlannerReplica(t *testing.T) {
 		t.Fatal("BFF with event-forward must report compileDispatched; the run graph event is the handoff")
 	}
 	got := awaitCompile(t, probe)
+	if got.request.StartedAt.IsZero() {
+		t.Fatal("the receiving planner lost the persisted run start used by its deadline")
+	}
 	if got.request.RunId != reply["runId"] || got.request.GoalId != reply["goalId"] || got.request.Statement != "reconcile the invoices" || got.request.Input["month"] != "September" {
 		t.Fatalf("planner did not reconstruct persisted goal/run: %+v", got)
 	}
@@ -141,6 +144,10 @@ func TestCompileDB_BFFRunEventCrossesToOnePlannerReplica(t *testing.T) {
 	if len(rows) != 1 || rowMap(rowMap(rows[0], "data"), "execution")["model"] != "test-model" {
 		t.Fatalf("compilation model call was lost across the BFF/planner hop: %+v", rows)
 	}
+	call := rowMap(rowMap(rowMap(rows[0], "data"), "execution"), "call")
+	if call["purpose"] != "Repairing automation" || call["promptName"] != "authoringRepair" || call["attempt"] != float64(2) {
+		t.Fatalf("stage metadata was lost across replicas: %+v", call)
+	}
 	// Duplicate delivery and stale events after the outcome must both be inert.
 	ev := runEvent(reply["runId"].(string), "compiling", "work.compile", canonicalUser("compile-alice"))
 	for range 10 {
@@ -152,6 +159,57 @@ func TestCompileDB_BFFRunEventCrossesToOnePlannerReplica(t *testing.T) {
 	case duplicate := <-probe.called:
 		t.Fatalf("duplicate planner compile: %+v", duplicate)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestCompileDB_ReplyBudgetIsDurableAcrossReplicasAndClockSkew(t *testing.T) {
+	db, bff, _, _ := compileDB(t)
+	owner := canonicalUser("compile-alice")
+	ctx, cancel := context.WithTimeout(actorCtx(owner), 10*time.Second)
+	defer cancel()
+	nodes, err := bff.handleCreateGoal(ctx, map[string]any{"statement": "Jose", "ceilings": map[string]any{"wallClockMs": 600000, "maxModelCalls": 12}}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply := decodeReply(t, nodes)
+	runID, goalID := reply["runId"].(string), reply["goalId"].(string)
+	// Warm an originating node's result cache before a peer writes newer state.
+	if _, err := bff.RunBudget(ctx, owner, runID); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(time.Minute)
+	insertSweepRow(t, db, goalID, goalConcept, future, map[string]any{"ownerUserId": owner, "statement": "Jose", "status": "open", "origin": "user", "ceilings": map[string]any{"wallClockMs": 30000, "maxModelCalls": 2, "costCeiling": 0.25}})
+	// The receiver has a separate pool and clock. Coordination holds a separate
+	// connection from the engine's reads/writes, as in the production pool.
+	peer := workHeadsPeer(t, db)
+	receiver := New(dispatchDBEngine(t, peer), testLogger(), func() *bun.DB { return peer })
+	receiver.SetNow(func() time.Time { return time.Now().Add(-time.Hour) })
+	if err := receiver.LimitReplyBudget(ctx, owner, runID); err != nil {
+		t.Fatal(err)
+	}
+	c := NewRunCeilings(bff.engine, testLogger())
+	deadline, err := c.Deadline(ctx, common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := bff.store().runForOwner(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start, _ := time.Parse(time.RFC3339Nano, rowString(run, "startedAt"))
+	if !deadline.Equal(start.Add(30 * time.Second)) {
+		t.Fatalf("receiving node reset or widened deadline: %v from %v", deadline, start)
+	}
+	goal, err := bff.store().goalForOwner(memql.ContextWithFreshRead(ctx), goalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ceilingsOf(goal)
+	if err != nil || got.MaxModelCalls != 2 || got.CostCeiling != 0.25 {
+		t.Fatalf("stricter owner limits lost: %+v %v", got, err)
+	}
+	if err := receiver.LimitReplyBudget(actorCtx("compile-bob"), canonicalUser("compile-bob"), runID); err == nil {
+		t.Fatal("another owner tightened a private run")
 	}
 }
 

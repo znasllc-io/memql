@@ -672,12 +672,12 @@ func (n *noProviderTriage) InvokeAI(ctx context.Context, templateId string, data
 // to be authored exactly as before.
 func TestATriageThatReachedNoProviderIsNotAModelCall(t *testing.T) {
 	eng := &noProviderTriage{countingCompileEngine: &countingCompileEngine{}}
-	out, _ := (&PlannerAgentLoop{engine: eng}).CompileGoalForRun(context.Background(), compileReq(), nil, nil)
+	out, err := (&PlannerAgentLoop{engine: eng}).CompileGoalForRun(context.Background(), compileReq(), nil, nil)
 	if out.ModelCalls != 0 {
 		t.Fatalf("ModelCalls = %d after a triage no provider answered, want 0", out.ModelCalls)
 	}
-	if out.Route != work.RouteAuthor {
-		t.Fatalf("route = %q, want the author route a missing classifier falls back to", out.Route)
+	if out.Route != "" || err == nil {
+		t.Fatalf("missing classifier must stop before authoring: %+v, %v", out, err)
 	}
 }
 

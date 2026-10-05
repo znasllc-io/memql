@@ -165,7 +165,7 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// came off the approval row this caller already read under their own
 	// actor.
 	writeCtx := ownerActor(ctx, owner)
-	if err := st.decideApprovalRow(writeCtx, approvalId, decision, strings.TrimSpace(ac.UserId), now, answer, approvalVersionAfter(approval["createdAt"], now)); err != nil {
+	if err := st.decideApprovalRow(writeCtx, approvalId, decision, strings.TrimSpace(ac.UserId), now, answer, workRowVersionAfter(approval["createdAt"], now)); err != nil {
 		return nil, err
 	}
 
@@ -619,9 +619,9 @@ func subjectFrom(desc safety.ActionDescriptor) map[string]any {
 	return subject
 }
 
-// Decisions must sort after the proposal even when another replica's clock is
+// Writes must sort after the row read even when another replica's clock is
 // behind its author. A shared lock alone cannot repair a non-latest version.
-func approvalVersionAfter(value any, now time.Time) time.Time {
+func workRowVersionAfter(value any, now time.Time) time.Time {
 	prior, ok := value.(time.Time)
 	if !ok {
 		prior, _ = time.Parse(time.RFC3339Nano, fmt.Sprint(value))

@@ -46,6 +46,8 @@ package memql
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
@@ -220,4 +222,70 @@ func estimateRequestTokens(req common.ModelRequest) int {
 		parts = append(parts, string(req.Schema.Schema))
 	}
 	return airoute.EstimateMinContextTokensFor(0, parts...)
+}
+
+// runDeadlineGuard is optional for test guards, but the installed work guard
+// always implements it. Deadline uses stored run time, never time of admission.
+type runDeadlineGuard interface {
+	Deadline(context.Context, common.RunContext) (time.Time, error)
+}
+
+func (s *modelSeam) deadlineContext(ctx context.Context, rc common.RunContext) (context.Context, context.CancelFunc, error) {
+	if guard, ok := s.ceilings.(runDeadlineGuard); ok {
+		deadline, err := guard.Deadline(ctx, rc)
+		if err != nil {
+			return ctx, func() {}, err
+		}
+		if !deadline.IsZero() {
+			bounded, cancel := context.WithDeadline(ctx, deadline)
+			return bounded, cancel, nil
+		}
+	}
+	return ctx, func() {}, nil
+}
+
+// ContextWithRunDeadline covers agent tool loops as well as single prompt
+// invocations. It is installed on the executing node using persisted state.
+func (e *MemQLEngine) ContextWithRunDeadline(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	rc, ok := common.RunFromContext(ctx)
+	if !ok || e == nil || e.modelSeam == nil {
+		return ctx, func() {}, nil
+	}
+	return e.modelSeam.deadlineContext(ctx, rc)
+}
+
+// observeAgentSpend accounts for direct streaming/tool calls, which bypass
+// InvokeAI. Prompt calls remain owned by modelSeam.serve to avoid double charges.
+func (s *modelSeam) observeAgentSpend(ctx context.Context, cancel context.CancelCauseFunc) airoute.Observer {
+	var mu sync.Mutex
+	admitted := map[string]bool{}
+	return func(call airoute.CallObservation) {
+		if call.PromptName == "workAgentReply" && s != nil {
+			mu.Lock()
+			if call.Phase == "running" {
+				if err := s.admit(ctx, 0); err != nil {
+					cancel(err)
+				} else {
+					admitted[call.ID] = true
+				}
+			} else if admitted[call.ID] {
+				delete(admitted, call.ID)
+				served := ServedLive
+				if call.Billing == "local" {
+					served = ServedLocal
+				} else if call.Billing == "subscription" {
+					served = ServedSubscription
+				}
+				s.charge(ctx, ModelSpend{Served: served, InputTokens: call.InputTokens, OutputTokens: call.OutputTokens, Cost: call.TotalCost})
+				if rc, ok := common.RunFromContext(ctx); ok {
+					receiptCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+					// This is an attempt receipt, not a reusable model response: its unique
+					// hash cannot accidentally serve an empty answer from the replay cache.
+					s.record(receiptCtx, rc, JournaledCall{RunId: rc.RunId, StepKey: rc.StepKey, RequestHash: "attempt:" + call.ID, PromptRef: call.PromptName, Provider: call.Provider, Model: call.Model, InputTokens: call.InputTokens, OutputTokens: call.OutputTokens, Cost: call.TotalCost, LatencyMs: call.ElapsedMS, Served: served, Error: call.Error})
+					stop()
+				}
+			}
+			mu.Unlock()
+		}
+	}
 }
