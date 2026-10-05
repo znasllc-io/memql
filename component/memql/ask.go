@@ -126,6 +126,7 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 	if err = json.Unmarshal(raw, &transcript); err != nil {
 		return "", fmt.Errorf("conversation transcript is unreadable")
 	}
+	e.reconcileAskRuns(ctx, &transcript)
 	resumeIndex := -1
 	for index, prior := range transcript.Turns {
 		if prior.ID == turnID {
@@ -147,7 +148,6 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 		runes := []rune(strings.Join(strings.Fields(prompt), " "))
 		title = string(runes[:min(80, len(runes))])
 	}
-	e.reconcileAskRuns(ctx, &transcript)
 	history := askConversationMessages(transcript.Turns)
 	if resumeIndex < 0 {
 		turn := AskTurn{ID: turnID, Prompt: prompt, Context: pageContext, State: "streaming", StartedAt: time.Now().UTC(), Activity: []WorkEvent{}}
