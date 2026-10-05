@@ -722,6 +722,13 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	}
 	meta.conceptName = conceptMeta.Name
 
+	// A concept can reserve its writes for validated server capabilities.
+	// Check before reading the stored row, covering raw and named writes alike;
+	// this is independent of the caller's role and the concept's read tier.
+	if conceptMeta.ServerWritten && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("%s: @serverWritten requires internal origin; use the concept's authorized capability", conceptMeta.Name)
+	}
+
 	// RETIRED CONCEPT: registered, readable, CLOSED TO NEW WRITES (memql#3756).
 	// A promoted concept demoted while rows already existed under it keeps its
 	// registry entry precisely so those rows stay readable -- which means the

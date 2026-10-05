@@ -1,0 +1,4 @@
+@serverWritten("yes")
+concept receipt {
+  value string
+}

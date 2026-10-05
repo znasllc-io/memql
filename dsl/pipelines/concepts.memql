@@ -36,6 +36,7 @@ use work.concepts.{ goal }
 /// execute, which secrets they may resolve, and what the poll has already seen. The manifest itself
 /// is NOT copied here: every run reads it from the repository at the run's own SHA, so a row can never
 /// describe a pipeline the tree no longer declares.
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="name", secondary="repository", tertiary="delivery", status="status")
 concept pipeline {
@@ -69,6 +70,7 @@ concept pipeline {
 /// node claims under a lease and drives over the work spine, and the GitHub check run reports. A
 /// re-run is a NEW row with the attempt incremented; a finished row is never reopened, so the rows of
 /// one run key are the literal history of what was attempted.
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="sha", secondary="title", tertiary="conclusion", status="status")
 concept run {
@@ -121,6 +123,7 @@ concept run {
 /// written by component/pipelinerun -- createPipelineChannel and updatePipelineChannel, both
 /// server-only -- after the pipelinesChannelSave builtin has validated it; a person's own channels are
 /// read through pipelineChannelsForOwner.
+@serverWritten
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="name", secondary="kind", status="status")
 concept channel {

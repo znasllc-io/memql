@@ -94,6 +94,8 @@ cells/concept/rowAuthz/a-flag-given-a-value.memql
 cells/concept/rowAuthz/a-misspelled-key.memql
 cells/concept/rowAuthz/keyword-arguments.memql
 cells/concept/rowAuthz/with-a-positional-value.memql
+cells/concept/serverWritten/flag.memql
+cells/concept/serverWritten/with-a-value.memql
 cells/concept/type/a-collection-that-contains-nothing.memql
 cells/concept/type/a-collection.memql
 cells/concept/type/with-an-unquoted-kind.memql

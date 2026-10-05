@@ -181,6 +181,10 @@ type (
 		// declaration means.
 		RowAuthz *parser.RowAuthzDecl `json:"rowAuthz,omitempty"`
 
+		// ServerWritten requires internal origin at the engine's common write
+		// boundary. Read admission remains the separate RowAuthz contract.
+		ServerWritten bool `json:"serverWritten,omitempty"`
+
 		// Origin and MirroredTo carry the data-origins declaration
 		// (epic memql#4378): WHERE changes to this concept are made,
 		// and WHO ELSE holds a copy. Together they derive DataState --
