@@ -104,6 +104,9 @@ const (
 // package only reads them.
 type WorkStep struct {
 	Key string
+	// DefinitionFingerprint binds the complete execution definition recorded
+	// before admission. Older receipts without it cannot authorize recovery.
+	DefinitionFingerprint string
 	// Seq is the step's place in the plan the work run was opened with.
 	Seq          int
 	Status       string

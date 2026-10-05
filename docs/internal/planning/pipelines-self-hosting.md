@@ -362,3 +362,27 @@ final runner outcome need deduplication, and ordinary automation executions
 still need ownership fencing. Retention expiry and late delivery must be
 included in that generic execution contract. Until those are implemented,
 uncertain fleet attempts stop for reconciliation instead of automatic failover.
+
+## Complete execution definitions at recovery
+
+Work journals now fingerprint each complete declaration: call metadata, step
+kind and type, dependency graph and order. Unencodable definitions are refused
+before any goal or run write. Pipelines record a digest of the command, image,
+services, placement/platform, package slice and run inputs, including the driver
+engine's immutable source revision and cluster domain. Only the digest enters
+the call metadata; resolved secrets and command text do not.
+
+A replacement first restores the original package selection and skip decisions,
+then checks every definition and its order. Missing, duplicate, changed and
+legacy unproven definitions refuse recovery. Unknown or dirty engine revisions
+cannot authorize recovery. Failed-only reruns carry a prior success only with
+the same execution definition. Confirmed receipts remain unchanged when an
+unfinished run is refused. Two-driver tests cover command/image/engine/domain
+changes; focused race tests pass. This binds this pipeline driver's compiled
+contract; transitive DSL/bundle identity remains part of the future generic
+execution contract, not a claim made by this fingerprint.
+
+Main was integrated at b4be5df2b, preserving both human-question suspension and
+required-journal failure propagation. The combined automation suite passes.
+The merge conflict had prevented new pull-request CI runs; checks resumed
+at 603edce54. The branch remains a draft and no production change is approved.

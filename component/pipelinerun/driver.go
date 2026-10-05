@@ -619,6 +619,9 @@ func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
 		if !passed && !carried {
 			continue
 		}
+		if t.definition == "" || row.DefinitionFingerprint != t.definition {
+			continue
+		}
 		if !slices.Equal(row.Packages, t.step.Packages) {
 			continue
 		}
@@ -641,6 +644,7 @@ func (dr *runDriver) decls() []workjournal.StepDecl {
 	out := make([]workjournal.StepDecl, 0, len(dr.tracks))
 	for _, t := range dr.tracks {
 		call := map[string]any{"construct": "pipeline", "name": t.step.Name, "stage": t.step.Stage}
+		call["definitionFingerprint"] = t.definition
 		if len(t.step.Packages) > 0 {
 			call["packages"] = slices.Clone(t.step.Packages)
 		}
@@ -670,29 +674,15 @@ func (dr *runDriver) resume(rows []WorkStep) string {
 	stored := make(map[string]WorkStep, len(rows))
 	for _, row := range rows {
 		if row.Key != "" {
+			if _, duplicate := stored[row.Key]; duplicate {
+				return "the journal contains duplicate step " + row.Key
+			}
 			stored[row.Key] = row
 		}
 	}
 	planned := make(map[string]bool, len(dr.tracks))
 	for _, t := range dr.tracks {
 		planned[t.step.Key] = true
-		row, ok := stored[t.step.Key]
-		if !ok {
-			continue
-		}
-		t.attempt = max(row.Attempt, 1)
-		t.sent = row.Status == WorkStepRunning
-		if len(row.Packages) > 0 {
-			t.step.Packages = slices.Clone(row.Packages)
-		}
-		t.step.Skip = nil
-		if row.Skip != nil {
-			skip := *row.Skip
-			t.step.Skip = &skip
-		}
-		if row.Finished() {
-			t.set(stateFromRow(t.snapshot(), row))
-		}
 	}
 	var missing []string
 	for key := range stored {
@@ -700,11 +690,32 @@ func (dr *runDriver) resume(rows []WorkStep) string {
 			missing = append(missing, key)
 		}
 	}
-	if len(missing) == 0 {
-		return ""
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Sprintf("the plan read again at %s no longer holds %s", shortSHA(dr.run.SHA), strings.Join(missing, ", "))
 	}
-	sort.Strings(missing)
-	return fmt.Sprintf("the plan read again at %s no longer holds %s", shortSHA(dr.run.SHA), strings.Join(missing, ", "))
+	for index, t := range dr.tracks {
+		row, ok := stored[t.step.Key]
+		if !ok {
+			return "the journal has no definition for step " + t.step.Key
+		}
+		t.attempt = max(row.Attempt, 1)
+		t.sent = row.Status == WorkStepRunning
+		t.step.Packages = slices.Clone(row.Packages)
+		t.step.Skip = nil
+		if row.Skip != nil {
+			skip := *row.Skip
+			t.step.Skip = &skip
+		}
+		t.definition = dr.definitionOf(t.step)
+		if row.Seq != index || t.definition == "" || row.DefinitionFingerprint != t.definition {
+			return "the execution definition or order changed for step " + t.step.Key
+		}
+		if row.Finished() {
+			t.set(stateFromRow(t.snapshot(), row))
+		}
+	}
+	return ""
 }
 
 // diverged ends a resumed run whose plan, read again, is not the plan its
@@ -739,10 +750,11 @@ func (dr *runDriver) adoptRows(rows []WorkStep) {
 			stage, _, _ = strings.Cut(row.Key, ".")
 		}
 		t := &stepTrack{
-			step:    pipelines.Step{Key: row.Key, Stage: stage, Name: name, Kind: pipelines.StepCommand},
-			attempt: max(row.Attempt, 1),
-			sent:    row.Status == WorkStepRunning,
-			state:   StepState{Key: row.Key, Stage: stage, Name: name, Status: StepPending},
+			step:       pipelines.Step{Key: row.Key, Stage: stage, Name: name, Kind: pipelines.StepCommand},
+			definition: row.DefinitionFingerprint,
+			attempt:    max(row.Attempt, 1),
+			sent:       row.Status == WorkStepRunning,
+			state:      StepState{Key: row.Key, Stage: stage, Name: name, Status: StepPending},
 		}
 		if row.Finished() {
 			t.set(stateFromRow(t.snapshot(), row))
@@ -844,8 +856,9 @@ type stageTracks struct {
 
 // stepTrack is one compiled step as this drive follows it.
 type stepTrack struct {
-	step    pipelines.Step
-	attempt int
+	step       pipelines.Step
+	attempt    int
+	definition string
 	// sent: the rows say running with no receipt -- a previous driver handed
 	// it to the runner, which may still be at it. Re-sent with the same
 	// attempt when the run goes on; when the run ends instead, the runner is
@@ -887,7 +900,8 @@ func (dr *runDriver) buildTracks(plan pipelines.Plan) {
 		for _, step := range stage.Steps {
 			t := &stepTrack{
 				step: step, attempt: 1,
-				state: StepState{Key: step.Key, Stage: step.Stage, Name: step.Name, Status: StepPending},
+				definition: dr.definitionOf(step),
+				state:      StepState{Key: step.Key, Stage: step.Stage, Name: step.Name, Status: StepPending},
 			}
 			st.tracks = append(st.tracks, t)
 			dr.tracks = append(dr.tracks, t)

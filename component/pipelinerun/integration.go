@@ -62,6 +62,9 @@ type Deps struct {
 	// MEMQL_DOMAIN to reach the cluster's public hosts from outside. Nil or ""
 	// sends no MEMQL_DOMAIN.
 	Domain func() string
+	// EngineRevision is the immutable source revision of this driver binary.
+	// Defaults to the build stamp; tests supply the revision of their fake engine.
+	EngineRevision func() string
 	// NodeID is this replica's MEMQL_NODE_ID: what a driver writes as its
 	// lease, and what RequestCancel compares a run's driverNodeId with.
 	NodeID string

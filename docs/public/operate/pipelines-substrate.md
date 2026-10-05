@@ -1084,3 +1084,14 @@ Each of these is understood, and accepted for this release.
   retention
 - [Workbench](workbench-runbook.md) -- the workbench node, which also holds the
   pipelines runner
+
+### Recovery keeps the original execution definition
+
+A pipeline records a digest of each complete compiled step and its immutable
+run inputs before execution. Recovery restores the recorded package selection,
+then verifies the command, image, services, placement, dependencies, step order,
+source commit, driver engine revision and cluster domain. A changed definition,
+missing proof or unknown/dirty engine revision stops recovery. Finished receipts
+are preserved; an explicit new attempt can run a newly reviewed definition.
+A failed-only rerun reuses earlier success only when that definition matches.
+This does not yet pin the transitive definitions of arbitrary DSL automations.

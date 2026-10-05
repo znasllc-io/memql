@@ -92,6 +92,7 @@ func (dh *driveHarness) configureDriver(integ *Integration, node string) {
 	journal := workjournal.New(dh.work, dh.logger, node)
 	integ.Configure(func(d *Deps) {
 		d.NodeID = node
+		d.EngineRevision = func() string { return "test-engine-revision" }
 		d.Logger = dh.logger
 		d.Journal = journal
 		d.Secrets = func(_ context.Context, name string) (string, error) {
@@ -1419,7 +1420,7 @@ func TestARecoveredRunRefusedOnResumeClosesItsPredecessorsWork(t *testing.T) {
 // and is a skip exactly when its row says the plan skipped it, whatever a
 // compare read now says.
 func TestResumeCarriesOutThePlanTheRowsRecord(t *testing.T) {
-	dr := &runDriver{run: Run{SHA: shaA}}
+	dr := &runDriver{run: Run{SHA: shaA}, d: Deps{EngineRevision: func() string { return "test-engine-revision" }}}
 	notAffected := &pipelines.Skip{Code: pipelines.CodeNotAffected, Reason: "No change under bucket os."}
 	dr.buildTracks(pipelines.Plan{Stages: []pipelines.PlanStage{{
 		Name: "tests",
@@ -1434,13 +1435,20 @@ func TestResumeCarriesOutThePlanTheRowsRecord(t *testing.T) {
 			{Key: "tests.docs", Stage: "tests", Name: "docs"},
 		},
 	}}})
-	why := dr.resume([]WorkStep{
+	rows := []WorkStep{
 		{Key: "tests.go#1", Status: WorkStepDone, Attempt: 1, Packages: []string{"a", "b"}, DurationMs: 9},
 		{Key: "tests.go#2", Status: WorkStepRunning, Attempt: 1, Packages: []string{"c"}},
 		{Key: "tests.os", Status: WorkStepRunning, Attempt: 1},
 		{Key: "tests.web", Status: WorkStepPending, Attempt: 1},
 		{Key: "tests.docs", Status: WorkStepPending, Attempt: 1, Skip: &pipelines.Skip{Code: pipelines.CodeNotAffected, Reason: "No change under bucket docs."}},
-	})
+	}
+	for i := range rows {
+		step := dr.tracks[i].step
+		step.Packages = slices.Clone(rows[i].Packages)
+		rows[i].Seq = i
+		rows[i].DefinitionFingerprint = dr.definitionOf(step)
+	}
+	why := dr.resume(rows)
 	if why != "" {
 		t.Fatalf("the rows and the plan agree: %s", why)
 	}
@@ -1870,7 +1878,7 @@ func TestARerunOfFailedStepsRunsOnlyWhatDidNotPass(t *testing.T) {
 // delivered announced the attempt it ran in, and this one is another.
 func TestCarryPassedCarriesOnlyIdenticalPasses(t *testing.T) {
 	track := func(key string, packages ...string) *stepTrack {
-		return &stepTrack{step: pipelines.Step{Key: key, Packages: packages}}
+		return &stepTrack{step: pipelines.Step{Key: key, Packages: packages}, definition: "same-definition"}
 	}
 	vet, shardSame, shardMoved, db, carried := track("checks.vet"), track("tests.go#1", "a", "b"), track("tests.go#2", "c"), track("tests.db"), track("tests.lint")
 	planned := track("tests.os")
@@ -1885,6 +1893,9 @@ func TestCarryPassedCarriesOnlyIdenticalPasses(t *testing.T) {
 		{Key: "tests.lint", Status: WorkStepSkipped, Skip: &pipelines.Skip{Code: pipelines.CodePassedEarlier, Reason: "Passed in attempt 1."}},
 		{Key: "tests.os", Status: WorkStepDone},
 		{Key: "notify.notify", Status: WorkStepDone},
+	}
+	for i := range prior {
+		prior[i].DefinitionFingerprint = "same-definition"
 	}
 	carryPassed([]*stepTrack{vet, shardSame, shardMoved, db, carried, planned, notify}, prior, 2)
 	if notify.step.Skip != nil {

@@ -1082,6 +1082,7 @@ func workStepFromRow(row map[string]any) WorkStep {
 		ArtifactFileIDs: rowStrings(row, "artifactFileIds"),
 	}
 	if call, ok := row["call"].(map[string]any); ok {
+		s.DefinitionFingerprint = rowString(call, "definitionFingerprint")
 		s.Stage = rowString(call, "stage")
 		s.Name = rowString(call, "name")
 		s.Packages = rowStrings(call, "packages")

@@ -318,6 +318,10 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 	if template == "" {
 		return nil, fmt.Errorf("workjournal: template is required")
 	}
+	definition, err := DefinitionFingerprint(template, w.Steps)
+	if err != nil {
+		return nil, err
+	}
 
 	started := j.now().UTC()
 	runKey := strings.TrimSpace(w.RunKey)
@@ -350,7 +354,7 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 		arg("runId", runID),
 		arg("goalId", goalID),
 		arg("automationName", template),
-		arg("templateFingerprint", fingerprint(template, w.Steps)),
+		arg("templateFingerprint", definition),
 		objectArg("input", w.Input),
 		// DRIVER-OWNED: this package writes and closes the run, and the
 		// dispatcher must never adopt it. A runner that names its own trigger
@@ -906,16 +910,25 @@ func deriveID(kind, scope, key string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-// fingerprint is what changes when the template changes. It covers the step
-// KEYS and KINDS, so re-ordering the stages or making a deterministic stage
-// reasoning is visible on every run written afterwards.
-func fingerprint(template string, steps []StepDecl) string {
-	h := sha256.New()
-	h.Write([]byte(template))
-	for _, s := range steps {
-		h.Write([]byte("\x00" + s.Key + "\x00" + s.Kind))
+// DefinitionFingerprint binds the complete declared work, including call
+// identity, dependencies and ordering. Call must contain definition data only,
+// never resolved credentials. JSON sorts object keys and refuses unsupported
+// values; a failure must not become a shared empty fingerprint.
+func DefinitionFingerprint(template string, steps []StepDecl) (string, error) {
+	normalized := make([]StepDecl, len(steps))
+	for n, step := range steps {
+		step.Kind, step.StepType = step.kind(), step.stepType()
+		normalized[n] = step
 	}
-	return hex.EncodeToString(h.Sum(nil))[:32]
+	data, err := json.Marshal(struct {
+		Template string
+		Steps    []StepDecl
+	}{strings.TrimSpace(template), normalized})
+	if err != nil {
+		return "", fmt.Errorf("workjournal: encode definition: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	return "work-definition-v2:" + hex.EncodeToString(sum[:]), nil
 }
 
 func firstNonEmpty(vals ...string) string {

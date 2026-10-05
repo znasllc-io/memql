@@ -506,7 +506,7 @@ func TestWorkStepsAreReadBackForAResume(t *testing.T) {
 		"durationMs":   float64(1200),
 		"errorCode":    pipelines.CodeStageBlocked,
 		"errorMessage": "Not run: stage checks failed.",
-		"call":         map[string]any{"construct": "pipeline", "name": "go", "stage": "tests", "packages": []any{"acme.test/a", "acme.test/b"}},
+		"call":         map[string]any{"construct": "pipeline", "name": "go", "stage": "tests", "definitionFingerprint": "definition-proof", "packages": []any{"acme.test/a", "acme.test/b"}},
 		"result":       map[string]any{"reason": "Not run: stage checks failed."},
 	}}
 	steps, err := NewDSLStore(engine).WorkSteps(context.Background(), "v1:work:run:w1")
@@ -519,7 +519,7 @@ func TestWorkStepsAreReadBackForAResume(t *testing.T) {
 		Stage: "tests", Name: "go", Packages: []string{"acme.test/a", "acme.test/b"}, Reason: "Not run: stage checks failed.",
 	}
 	got := steps[0]
-	if got.Key != want.Key || got.Seq != want.Seq || got.Status != want.Status || got.Attempt != want.Attempt ||
+	if got.DefinitionFingerprint != "definition-proof" || got.Key != want.Key || got.Seq != want.Seq || got.Status != want.Status || got.Attempt != want.Attempt ||
 		got.DurationMs != want.DurationMs || got.ErrorCode != want.ErrorCode || got.ErrorMessage != want.ErrorMessage ||
 		got.Stage != want.Stage || got.Name != want.Name || got.Reason != want.Reason || !slices.Equal(got.Packages, want.Packages) {
 		t.Errorf("step = %+v, want %+v", got, want)
