@@ -192,6 +192,21 @@ export function AskSurface({
     if (nearBottom.current) logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [exchanges]);
 
+  useEffect(() => {
+    if (!state.focusQuestionId) return;
+    if (panel !== "conversation") { setPanel("conversation"); return; }
+    const question = Array.from(logRef.current?.querySelectorAll<HTMLElement>("[data-ask-question]") ?? [])
+      .find(element => element.dataset.askQuestion === state.focusQuestionId);
+    if (!question) return;
+    nearBottom.current = false;
+    const log = logRef.current!;
+    const target = Math.max(0, log.scrollTop + question.getBoundingClientRect().top - log.getBoundingClientRect().top - Math.max(0, (log.clientHeight - question.clientHeight) / 2));
+    conversationScroll.current = target;
+    log.scrollTo({ top: target });
+    question.querySelector<HTMLTextAreaElement>("textarea")?.focus({ preventScroll: true });
+    conversation.questionFocused();
+  }, [state.focusQuestionId, panel, exchanges, conversation]);
+
   // The level ring. Runs only while the mic is live, writes only a CSS
   // variable. Reduced motion holds it at a readable constant rather than
   // dropping the cue: "no animation" would leave those readers with no way to

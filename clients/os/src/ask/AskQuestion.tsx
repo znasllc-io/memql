@@ -19,7 +19,7 @@ export function AskQuestion({ question, onAnswer }: { question: Question; onAnsw
     catch (error) { setError(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   }
-  return <form className="os-ask-question" onSubmit={submit} aria-label="Question from MemQL">
+  return <form className="os-ask-question" data-ask-question={question.id} onSubmit={submit} aria-label="Question from MemQL">
     <p>{question.text}</p>
     {options.length ? <div className="os-ask-question-options" role="group" aria-label="Suggested answers">{options.map(option => <button key={option.value} type="button" aria-pressed={selected.includes(option.value)} disabled={busy} onClick={() => {
       setText(""); setSelected(question.kind === "multi" ? selected.includes(option.value) ? selected.filter(value => value !== option.value) : [...selected, option.value] : [option.value]);

@@ -44,6 +44,7 @@ export interface AskConversationStore {
   read(id: string): Promise<AskTurn[]>;
 }
 export interface ConversationState {
+  focusQuestionId?: string | null;
   conversations: ConversationSummary[];
   dictationActivity: AskActivity[];
   historyLoading: boolean;
@@ -84,12 +85,20 @@ export class ConversationSession {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private patch(patch: Partial<ConversationState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach(listener => listener()); }
   setDraft = (draft: string) => this.patch({ draft });
+  questionFocused = () => this.patch({ focusQuestionId: null });
   openWork = async (runId: string) => {
     if (this.state.busy || this.state.voiceActive) { this.patch({ error: "Finish the current reply before opening another conversation." }); return; }
+    const before = this.selection;
     try {
       if (!this.transport.openWork) throw new Error("Opening work in Ask is unavailable.");
       const conversation = await this.transport.openWork(runId);
-      if (await this.select(conversation.id)) await this.reload();
+      if (before !== this.selection || this.disposed) return;
+      if (await this.select(conversation.id)) {
+        const selected = this.selection;
+        await this.reload();
+        if (selected !== this.selection || this.state.selectedId !== conversation.id) return;
+        this.patch({ focusQuestionId: this.state.turns.find(turn => turn.runId === runId && turn.question)?.question?.id ?? null });
+      }
     } catch (error) { this.patch({ error: message(error) }); }
   };
   answerQuestion = async (question: AskQuestion, answer: Record<string, unknown>) => {
@@ -115,13 +124,13 @@ export class ConversationSession {
   newConversation = () => {
     if (this.state.busy || this.state.voiceActive) return;
     this.selection++;
-    this.patch({ selectedId: null, openingId: null, selectionError: "", turns: [], dictationActivity: [], draft: "", error: "", loading: false });
+    this.patch({ selectedId: null, openingId: null, selectionError: "", turns: [], dictationActivity: [], draft: "", error: "", loading: false, focusQuestionId: null });
   };
   select = async (id: string) => {
     if (id === this.state.selectedId && !this.state.openingId) return true;
     if (this.state.busy || this.state.voiceActive || !this.transport.conversations) return false;
     const selection = ++this.selection;
-    this.patch({ loading: true, openingId: id, selectionError: "", error: "" });
+    this.patch({ loading: true, openingId: id, selectionError: "", error: "", focusQuestionId: null });
     try {
       const turns = await this.transport.conversations.read(id);
       if (selection === this.selection) {
