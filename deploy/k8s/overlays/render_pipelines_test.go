@@ -55,14 +55,16 @@ const (
 
 // The objects the component must render, by kind and name, in memql-pipelines.
 var wantPipelinesObjects = map[string]string{
-	"ServiceAccount/memql-pipelines-step":         pipelinesNamespace,
-	"Role/memql-pipelines-runner":                 pipelinesNamespace,
-	"RoleBinding/memql-pipelines-runner":          pipelinesNamespace,
-	"PersistentVolumeClaim/memql-pipelines-cache": pipelinesNamespace,
-	"ResourceQuota/memql-pipelines-ceiling":       pipelinesNamespace,
-	"LimitRange/memql-pipelines-limits":           pipelinesNamespace,
-	"NetworkPolicy/memql-pipelines-isolate":       pipelinesNamespace,
-	"ConfigMap/memql-pipelines":                   cloudNamespace, // the workbench's env
+	"ServiceAccount/memql-pipelines-step":          pipelinesNamespace,
+	"Role/memql-pipelines-runner":                  pipelinesNamespace,
+	"RoleBinding/memql-pipelines-runner":           pipelinesNamespace,
+	"PersistentVolumeClaim/memql-pipelines-cache":  pipelinesNamespace,
+	"ResourceQuota/memql-pipelines-ceiling":        pipelinesNamespace,
+	"LimitRange/memql-pipelines-limits":            pipelinesNamespace,
+	"NetworkPolicy/memql-pipelines-isolate":        pipelinesNamespace,
+	"NetworkPolicy/memql-pipelines-probe-listener": pipelinesNamespace,
+	"NetworkPolicy/memql-pipelines-probe-control":  pipelinesNamespace,
+	"ConfigMap/memql-pipelines":                    cloudNamespace, // the workbench's env
 }
 
 // pipelinesOverlays are the instance overlays that compose the component.
@@ -607,6 +609,83 @@ type networkPolicySpec struct {
 			EndPort  *int   `yaml:"endPort"`
 		} `yaml:"ports"`
 	} `yaml:"egress"`
+}
+
+// The positive control must gain exactly one exception. Giving that exception
+// to the restricted connector, or admitting ordinary steps to the listener,
+// would either invalidate the measurement or widen the execution sandbox.
+func TestPipelinesProbeExceptionsExcludeStepsAndTheRestrictedConnector(t *testing.T) {
+	type selector struct {
+		MatchLabels      map[string]string `yaml:"matchLabels"`
+		MatchExpressions []any             `yaml:"matchExpressions"`
+	}
+	type peer struct {
+		PodSelector       *selector      `yaml:"podSelector"`
+		NamespaceSelector map[string]any `yaml:"namespaceSelector"`
+		IPBlock           map[string]any `yaml:"ipBlock"`
+	}
+	type rule struct {
+		From  []peer `yaml:"from"`
+		To    []peer `yaml:"to"`
+		Ports []struct {
+			Protocol string `yaml:"protocol"`
+			Port     int    `yaml:"port"`
+			EndPort  *int   `yaml:"endPort"`
+		} `yaml:"ports"`
+	}
+	wantSelector := func(t *testing.T, s *selector, index string) {
+		t.Helper()
+		count := 1
+		if index != "" {
+			count++
+		}
+		if s == nil || len(s.MatchLabels) != count || len(s.MatchExpressions) != 0 || s.MatchLabels["memql.io/probe"] != "isolation" || s.MatchLabels["batch.kubernetes.io/job-completion-index"] != index {
+			t.Fatalf("probe selector leaks or loses index %q: %+v", index, s)
+		}
+	}
+	for _, overlay := range pipelinesOverlays {
+		t.Run(overlay, func(t *testing.T) {
+			objs := renderedObjects(t, overlay)
+			for _, control := range []bool{false, true} {
+				name, direction, selected, allowed := "memql-pipelines-probe-listener", "Ingress", "0", ""
+				if control {
+					name, direction, selected, allowed = "memql-pipelines-probe-control", "Egress", "2", "0"
+				}
+				var np struct {
+					Spec struct {
+						PodSelector selector `yaml:"podSelector"`
+						PolicyTypes []string `yaml:"policyTypes"`
+						Ingress     []rule   `yaml:"ingress"`
+						Egress      []rule   `yaml:"egress"`
+					} `yaml:"spec"`
+				}
+				theOne(t, objs, "NetworkPolicy", name).decode(t, &np)
+				wantSelector(t, &np.Spec.PodSelector, selected)
+				if !slices.Equal(np.Spec.PolicyTypes, []string{direction}) {
+					t.Fatalf("%s changes more than %s", name, direction)
+				}
+				rules, other := np.Spec.Ingress, np.Spec.Egress
+				if control {
+					rules, other = np.Spec.Egress, np.Spec.Ingress
+				}
+				if len(rules) != 1 || len(other) != 0 {
+					t.Fatalf("%s has an unbounded rule set", name)
+				}
+				r := rules[0]
+				peers, wrong := r.From, r.To
+				if control {
+					peers, wrong = r.To, r.From
+				}
+				if len(peers) != 1 || len(wrong) != 0 || peers[0].NamespaceSelector != nil || peers[0].IPBlock != nil {
+					t.Fatalf("%s widens the peer scope", name)
+				}
+				wantSelector(t, peers[0].PodSelector, allowed)
+				if len(r.Ports) != 1 || r.Ports[0].Protocol != "TCP" || r.Ports[0].Port != 8080 || r.Ports[0].EndPort != nil {
+					t.Fatalf("%s widens the listener port", name)
+				}
+			}
+		})
+	}
 }
 
 // TestPipelinesNetworkPolicyIsolatesTheNamespace pins what a step can reach:

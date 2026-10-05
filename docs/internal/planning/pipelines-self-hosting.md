@@ -96,6 +96,17 @@ registry/marketplace permission, native signing, public webhook reachability,
 cloud storage behavior or production recovery. Those remain named rehearsal
 steps. Time-window milestones #5506–#5509 stay open until observed.
 
+## Isolation proof progress
+
+The runner now requires a positive connection to the same listener used by
+its restricted connector. Both share the listener ingress rule; only the
+control has a narrow egress exception. Unit, real shell and rendered-overlay
+suites pass. An opt-in test on local k3d created and removed a disposable
+namespace and verified four actual CNI cases: normal rules pass; missing
+egress fails; a missing IP exception list fails; missing listener ingress is
+inconclusive. No running engine Deployment was replaced. This addresses the
+ingress-masking failure in #5810; cloud and multi-node rollout remain unverified.
+
 ## Delivery privacy progress
 
 Inbound and outbound concepts now declare the cluster-operator row tier.

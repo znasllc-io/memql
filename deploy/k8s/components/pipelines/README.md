@@ -218,12 +218,14 @@ namespace isolated before it creates a step, refuses every step there
 
 **So the workbench proves it before it starts a step.** Before the first step
 it creates -- and again once a pass is an hour old -- each workbench replica
-runs a probe here: one Indexed Job (`memql.io/probe=isolation`) whose pods each
-listen on a port, one of which tries to reach the other while it reaches the
-cluster's DNS, which the policy allows. Reaching DNS but not a listener that
-provably held its port throughout is a pass (the operator page says what
-holding takes, and what the proof does not exercise). Reaching the listener
-refuses every step `pipeline_isolation_unenforced`,
+runs a probe here: one Indexed Job (`memql.io/probe=isolation`) with three
+pods. Index 0 listens, index 1 tests the egress restriction, and index 2 is a
+positive control with a narrow egress exception. Both connectors match the
+same listener ingress rule. A pass requires DNS and the positive control to
+answer every time, the restricted connector to fail every time, and the same
+listener to remain ready throughout. Thus ingress denial cannot hide missing
+egress protection. The probe exceptions grant ordinary steps no access.
+Reaching the listener from index 1 refuses every step `pipeline_isolation_unenforced`,
 naming the fix: a network policy engine. A probe that cannot decide (DNS
 unreachable, the listener gone) refuses every step too, until a later proof
 passes; its refusal says what it saw and, should it persist, where to look:

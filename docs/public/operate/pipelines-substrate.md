@@ -358,16 +358,19 @@ Before the first step it creates, each workbench replica proves that
 another pod -- and it creates no step until the proof passes.
 
 - **The probe** is one Indexed Job in the namespace: index 0 listens, index 1
-  connects. It takes one slot of the ceiling, so it waits for room as a step
+  tests the egress restriction, and index 2 is a positive control. The listener
+  admits both connectors through the same ingress rule; only index 2 has a
+  narrow egress exception to that listener on TCP 8080. Ordinary steps carry
+  no probe label and gain no exception. It takes one slot of the ceiling, so it waits for room as a step
   does, bounded by the creating step's run's ceiling.
 - **After a 5-second settle** -- a new pod's egress can be open for its first
   second or two while the policy engine programs it -- the connector makes three
   attempts one second apart, each at the cluster's DNS, which the policy allows,
   and at the listener.
-- **The verdict.** Connected on any attempt: not isolated. Isolated takes all
-  three of these:
+- **The verdict.** Connected on any attempt: not isolated. Isolated requires all of these:
   - every listener attempt was refused or timed out;
   - DNS answered every attempt;
+  - the positive control reached the same listener on every attempt;
   - the listener held throughout.
 
   The listener has held when, read again once the connector has ended, all of
@@ -400,10 +403,26 @@ nothing new, and never waits on the proof.
 It refuses rather than warns because a step is a repository's code: on a cluster
 that does not enforce the policy, it could reach the cloud's instance-metadata
 endpoint (on AKS, a source of tokens for the node's identity), the mesh's
-in-cluster `/metrics` and the database's Service. The proof tests one pod
-reaching another inside the namespace, which the ingress rule alone can refuse;
-it does not exercise the egress rule's exceptions ([Known
-limitations](#known-limitations)).
+in-cluster `/metrics` and the database's Service. The positive control proves that listener ingress is open to the restricted
+connector as well. Missing egress protection or a missing IP exception list
+therefore fails the probe instead of being hidden by ingress denial. A missing
+control path is inconclusive and refuses execution.
+
+This is a representative egress check, not a scan of every cluster address or
+cloud endpoint. Operators must keep all pod, service, node and metadata ranges
+inside the denied ranges when configuring a different cluster network. The
+probe uses Indexed Job pod labels (Kubernetes 1.28 or later); see the
+[Kubernetes Job contract](https://kubernetes.io/docs/concepts/workloads/controllers/job/)
+and [additive network policies](https://kubernetes.io/docs/concepts/services-networking/network-policies/).
+
+The opt-in local regression creates and removes its own namespace, without
+replacing the installed engine. It checks the shipped rules, missing egress,
+a missing `except` list and a missing listener ingress exception:
+
+```bash
+MEMQL_PIPELINES_ISOLATION_TEST_CONTEXT=k3d-memql \
+  go test ./integrations/pipelinesteps -run '^TestIsolationProofAgainstLocalNetworkPolicy$' -count=1 -v
+```
 
 **On AKS as `azure-provision.sh` creates it, every step is refused.** The script
 passes no `--network-policy`, so the cluster runs no network policy engine: the
@@ -967,15 +986,6 @@ Each of these is understood, and accepted for this release.
   secrets. This is an accepted risk for this release. A workbench-only account,
   or an admission policy that admits only the runner's Jobs, narrows it
   (memql#5811).
-- **The isolation proof tests pod to pod, not the egress exceptions.** The
-  proof's negative is that the connector cannot reach the listener. The
-  namespace's ingress deny-all satisfies that as fully as the connector's
-  egress rules do, so the proof never exercises the egress rule's `except`
-  list, which keeps a step off the instance-metadata endpoints, WireServer and
-  the mesh. Two kinds of cluster pass the proof while a step can still reach
-  the mesh: one whose policy engine enforces ingress but mishandles egress, and
-  one whose pod or service range lies outside RFC 1918 (100.64.0.0/10, say)
-  (memql#5810).
 - **The cloud cache on Azure Blob NFS is unmeasured.** Two things are untested
   (memql#5813):
   - cache-prep, which runs as root with every capability dropped, creates the
