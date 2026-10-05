@@ -52,7 +52,9 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
 5. **One control line.** Inputs, selects, buttons and choice pills all
    stand `--os-control-h` tall at `--os-text-base`. Field-shaped controls
    share `--os-radius-xs`; the choice pill keeps its own radius because it
-   is the shell's selection language, not a field. Selects drop UA chrome
+   is the shell's selection language, not a field. Ask shares the window header
+   and icon controls, app-content text scale and page gutters; its sheet
+   dimensions do not define a separate scale for its contents. Selects drop UA chrome
    (`Select` draws its own currentColor chevron). Forms use `Field` --
    label above, control on the line; nothing invents a third field size.
 
