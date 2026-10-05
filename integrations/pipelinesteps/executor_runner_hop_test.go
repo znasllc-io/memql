@@ -195,6 +195,11 @@ func (a hopRunnerAdapter) RunStep(ctx context.Context, args []byte) []byte {
 	return mustMarshal(a.r.Run(ctx, run))
 }
 
+func (a hopRunnerAdapter) Readiness(context.Context) ([]byte, string) {
+	raw, _ := json.Marshal(a.r.Readiness())
+	return raw, ""
+}
+
 func (a hopRunnerAdapter) Status(ctx context.Context, args []byte) ([]byte, string) {
 	var req StatusRequest
 	if err := json.Unmarshal(args, &req); err != nil {

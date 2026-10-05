@@ -54,6 +54,7 @@ type pipelineStepRunner interface {
 	Status(ctx context.Context, req pipelinesteps.StatusRequest) pipelinesteps.StatusReply
 	Ack(ctx context.Context, req pipelinesteps.AckRequest) error
 	CancelRun(ctx context.Context, req pipelinesteps.CancelRequest) (int, error)
+	Readiness() pl.RunnerReadiness
 }
 
 var (
@@ -66,6 +67,14 @@ var (
 type pipelinesRunnerAdapter struct {
 	runner pipelineStepRunner
 	logger *slog.Logger
+}
+
+func (p *pipelinesRunnerAdapter) Readiness(context.Context) ([]byte, string) {
+	raw, err := json.Marshal(p.runner.Readiness())
+	if err != nil {
+		return nil, pipelineReplyUnencodable
+	}
+	return raw, ""
 }
 
 // pipelineCancelReply is the pipelineCancel reply: how many of the run's Jobs

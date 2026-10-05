@@ -99,6 +99,21 @@ func (r *ForwardRouter) SelfNodeType() string {
 	return r.peerMgr.SelfNodeType()
 }
 
+// WorkbenchNodeIDs includes known unhealthy peers: a readiness report must
+// show a missing replica instead of silently dropping it from the denominator.
+func (r *ForwardRouter) WorkbenchNodeIDs() []string {
+	if r == nil || r.peerMgr == nil {
+		return nil
+	}
+	var ids []string
+	for _, peer := range r.peerMgr.ByType(node.NodeTypeWorkbench) {
+		if peer != nil && peer.Info != nil && peer.Info.GetNodeId() != "" {
+			ids = append(ids, peer.Info.GetNodeId())
+		}
+	}
+	return ids
+}
+
 // Forward dispatches a workbench call to a remote workbench peer
 // and waits for the response. Caller fills in (runId, action, args,
 // agentId, stepId, authority) on the request; this method stamps

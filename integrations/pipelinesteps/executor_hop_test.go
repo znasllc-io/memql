@@ -121,6 +121,16 @@ func hopHandler(runner workbench.PipelineRunner) *workbench.ForwardHandler {
 func (m *hopMesh) SelfNodeId() string   { return exAgent }
 func (m *hopMesh) SelfNodeType() string { return "agent" }
 
+func (m *hopMesh) WorkbenchNodeIDs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var ids []string
+	for _, replica := range m.replicas {
+		ids = append(ids, replica.id)
+	}
+	return ids
+}
+
 func (m *hopMesh) Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin string) (*nodev1.WorkbenchForwardResponse, string, error) {
 	return m.forward(ctx, req, pin, "", 0)
 }
@@ -495,6 +505,10 @@ func (r *hopRunner) RunStep(ctx context.Context, args []byte) []byte {
 			return r.own(ctx, name, run)
 		}
 	}
+}
+
+func (r *hopRunner) Readiness(context.Context) ([]byte, string) {
+	return nil, "readiness_unavailable"
 }
 
 // own holds the Job: heartbeats it while this replica lives, and finishes it

@@ -749,14 +749,18 @@ there for the three things a pipeline's checks need: a GitHub App whose
 installations hold checks write, a connected repository, and a runner to
 execute steps. A repository counts as connected once a pipeline is.
 
-Today the item reports configured once all three hold: this cluster has a
-GitHub App, at least one pipeline is connected and active -- whoever owns it --
-and a runner is registered on the agent node reporting it. Until then it says
-which are missing. Every agent node registers a runner, so that fact cannot
-tell whether a workbench replica can run steps, or whether the cluster passes
-the substrate's isolation proof
-([Known limitations](pipelines-substrate.md#known-limitations)). Nor can the
-item see whether an installation accepted checks write, which is a fact per
+The item reports configured when this cluster has a GitHub App, at least one
+active pipeline and an agent dispatcher, and every known workbench reports a
+runner with a current isolation proof. The agent reads each replica through
+the authenticated mesh. Each report names the replica, namespace, isolation
+state, check time and expiry. Missing runners, unanswered requests, failed or
+inconclusive proofs, and expired proofs do not count as ready. A substituted
+reply from another replica cannot vouch for the one that disappeared.
+
+Reading readiness starts no build or probe. Before the first step proves
+isolation, the report explicitly says `not_proven`; the runner proves it
+before starting work. Configured GitHub credentials alone do not establish
+whether an installation accepted checks write, which is a fact per
 installation: a run that could not write its check run says so itself
 ([The check run](#the-check-run)).
 Nothing needs the item, so the first-run wizard does not walk it, and an owner

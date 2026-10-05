@@ -10,9 +10,10 @@ import (
 // The runner's own wire: what the agent node forwards to a workbench replica
 // over NodeService, as JSON, and what comes back.
 //
-// The four forward action NAMES are integrations/workbench's
+// The forward action NAMES are integrations/workbench's
 // (PipelineStepAction "pipelineStep", PipelineStatusAction "pipelineStatus",
-// PipelineAckAction "pipelineAck", PipelineCancelAction "pipelineCancel"). The
+// PipelineAckAction "pipelineAck", PipelineCancelAction "pipelineCancel",
+// PipelineReadinessAction "pipelineReadiness"). The
 // transport owns its vocabulary, and integrations/workbench cannot import this
 // package, so a second spelling here would be a literal that drifts silently.
 //

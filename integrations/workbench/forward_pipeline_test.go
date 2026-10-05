@@ -26,7 +26,7 @@ import (
 // was sent" means nothing unless the same stream is shown to carry one.
 
 // pipelineActions is the four actions, in one place for the table tests.
-var pipelineActions = []string{PipelineStepAction, PipelineStatusAction, PipelineAckAction, PipelineCancelAction}
+var pipelineActions = []string{PipelineStepAction, PipelineStatusAction, PipelineAckAction, PipelineCancelAction, PipelineReadinessAction}
 
 // The outcomes the fake runner answers a step with: released by the test, or
 // ended by its context -- the two ways a real step ends.
@@ -57,6 +57,11 @@ type fakePipelineRunner struct {
 	// statusEntered is told each Status that began.
 	statusHold    chan struct{}
 	statusEntered chan struct{}
+}
+
+func (f *fakePipelineRunner) Readiness(context.Context) ([]byte, string) {
+	f.record(PipelineReadinessAction, nil)
+	return []byte(`{"available":true,"isolation":"not_proven"}`), ""
 }
 
 // fakeStep is one RunStep in progress: the context the handler ran it under,
@@ -347,10 +352,11 @@ func TestPipelineActionsNeedSystemAuthority(t *testing.T) {
 		{"no assertion at all", func(*testing.T) *nodev1.ForwardedAuthority { return nil }},
 	}
 	wantPayload := map[string]string{
-		PipelineStepAction:   fakeStepSucceeded,
-		PipelineStatusAction: `{"state":"running"}`,
-		PipelineAckAction:    "",
-		PipelineCancelAction: `{"jobsDeleted":2}`,
+		PipelineReadinessAction: `{"available":true,"isolation":"not_proven"}`,
+		PipelineStepAction:      fakeStepSucceeded,
+		PipelineStatusAction:    `{"state":"running"}`,
+		PipelineAckAction:       "",
+		PipelineCancelAction:    `{"jobsDeleted":2}`,
 	}
 
 	for _, action := range pipelineActions {
@@ -386,7 +392,11 @@ func TestPipelineActionsNeedSystemAuthority(t *testing.T) {
 			if got := string(resp.GetPayloadJson()); got != wantPayload[action] {
 				t.Errorf("payload = %q, want the runner's JSON %q", got, wantPayload[action])
 			}
-			if calls := runner.called(); len(calls) != 1 || calls[0] != action+` {"runId":"r1"}` {
+			wantCall := action + ` {"runId":"r1"}`
+			if action == PipelineReadinessAction {
+				wantCall = action + " "
+			}
+			if calls := runner.called(); len(calls) != 1 || calls[0] != wantCall {
 				t.Errorf("runner calls = %q, want exactly one %s with the forwarded args", calls, action)
 			}
 		})

@@ -105,7 +105,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "status",
-			Description: "The pipelines readiness self-report: whether this cluster has a GitHub App and whether this node has a step runner registered, in the integration-status envelope the readiness evaluator reads. No credential value and no network call.",
+			Description: "The pipelines readiness report: GitHub App and repository configuration, plus each known workbench's runner and last isolation proof, read through the authenticated mesh. No credential values; starts no builds or probes.",
 			Handler:     i.handleStatus,
 			ArgsSchema:  map[string]string{"probe": "boolean -- accepted for the envelope's contract; this report never reaches out"},
 		},

@@ -21,6 +21,35 @@ func (stubExecutor) Execute(context.Context, pipelines.StepRequest) (pipelines.S
 	return pipelines.StepResult{Status: pipelines.OutcomeSucceeded}, nil
 }
 func (stubExecutor) Cancel(context.Context, string) error { return nil }
+func (stubExecutor) Readiness(context.Context) []pipelines.RunnerReadiness {
+	return []pipelines.RunnerReadiness{{NodeID: "workbench-a", Available: true, Isolation: "passed"}}
+}
+
+type reportingExecutor struct {
+	stubExecutor
+	reports []pipelines.RunnerReadiness
+}
+
+func (e reportingExecutor) Readiness(context.Context) []pipelines.RunnerReadiness { return e.reports }
+
+func TestReadinessDoesNotConfuseDispatcherRegistrationWithHealthyRunners(t *testing.T) {
+	for _, reports := range [][]pipelines.RunnerReadiness{
+		nil,
+		{{NodeID: "a", Available: false, Isolation: "unknown"}},
+		{{NodeID: "a", Available: true, Isolation: "not_proven"}},
+		{{NodeID: "a", Available: true, Isolation: "expired"}},
+		{{NodeID: "a", Available: true, Isolation: "passed"}, {NodeID: "b", Available: true, Isolation: "failed"}},
+	} {
+		h := newHarness(t)
+		h.store.addPipeline(testPipeline(DeliveryWebhook))
+		previous := pipelines.RegisterExecutor(reportingExecutor{reports: reports})
+		report := h.integ.Status(evaluatorCtx())
+		pipelines.RegisterExecutor(previous)
+		if report.State != "unhealthy" {
+			t.Fatalf("readiness must not pass with %+v: %+v", reports, report)
+		}
+	}
+}
 
 // evaluatorCtx is how readiness asks: the cluster's own owner-role actor.
 func evaluatorCtx() context.Context {
