@@ -145,10 +145,11 @@ Afterwards:
   over as skipped `pipeline_passed_earlier` (*Passed in attempt 1.*), and
   everything else runs. A shard whose slice moved since -- the timing table
   learned between the attempts -- runs again, because a pass over other
-  packages is not a pass of these. A run with no failed or cancelled step (one
-  that passed, or one refused before any step) is refused
-  `pipeline_nothing_to_rerun`. GitHub's own re-request stays a whole re-run:
-  one check run reports the whole run.
+  packages is not a pass of these. A notify stage is never carried: it
+  announces the new attempt, which has an outcome of its own. A run with no
+  failed or cancelled step (one that passed, or one refused before any step) is
+  refused `pipeline_nothing_to_rerun`. GitHub's own re-request stays a whole
+  re-run: one check run reports the whole run.
 - **Cancel** with `builtin pipelinesCancel(runId: "<run id>")` (`execute` on
   `app:deployables/cancel`). It flags the run; the agent driving it cancels
   what is executing at its next heartbeat and concludes the run cancelled. A
@@ -449,7 +450,10 @@ Stages run one at a time, in the order written, and the steps of a stage run at
 once. Every step waits for every step of the stage before it, whatever `needs`
 says. The first stage that fails stops the run: every later step is skipped
 `pipeline_stage_blocked`, and the check run's table says *Not run: an earlier
-stage failed*.
+stage failed* -- except a notify stage's, which runs, because announcing the
+failure is what it is for. A run cancelled before its notify stage hands the
+notification to the outbound worker sends nothing; one handed over already may
+still arrive, and the step says so.
 
 `on` names events, modes or both. `on: [push]` runs on the default branch's
 pushes only; `on: [full]` on the merge queue, pushes and releases;
@@ -686,7 +690,7 @@ Mode full · Push to the default branch · Commit 3f9c2ab
 | checks | Passed                           | 1 passed           | 52s    |
 | tests  | Failed                           | 8 passed, 1 failed | 7m 40s |
 | deploy | Not run: an earlier stage failed | 1 not run          | -      |
-| notify | Not run: an earlier stage failed | 1 not run          | -      |
+| notify | Passed                           | 1 passed           | 3s     |
 ```
 
 A stage reads *Passed*, *Failed*, *Cancelled*, *Running*, *Waiting*, *Not run*,
@@ -756,7 +760,7 @@ for later epics:
 | Not yet | Arrives with | Until then |
 |---|---|---|
 | A runner to execute command steps: a Kubernetes Job per step, a fleet machine for a step naming a need, logs into the log store, artifacts into the Library | epic memql#5478 | Every command step that would execute fails `pipeline_runner_unavailable`. The first stage holding one fails, every later stage is *Not run*, and the run concludes failure. Nothing in the repository is wrong |
-| Channels and notify delivery | epic memql#5480 | A notify stage's step is skipped `pipeline_notify_unavailable`, which fails nothing |
+| Channels a person can create (the channel builtins, and Deployables > Settings > Channels) | epic memql#5480 | A notify stage delivers over the outbound path to a channel of its pipeline's owner; while none exists, it fails `pipeline_channel_missing`, and so does the run |
 
 Everything decided before a step executes works today: which deliveries open
 runs, the mode, the run key, fork refusal, the manifest's refusals, the plan
@@ -791,10 +795,15 @@ says where: `<stage>/<step>`, a stage, or a path into the block.
 | `pipeline_nothing_to_rerun` | refusal | Re-run failed only: the run has no failed or cancelled step to run again | Re-run it whole |
 | `pipeline_runner_unavailable` | failure | This cluster has no runner to execute steps | Install the runner (epic memql#5478). Nothing in the repository is wrong |
 | `pipeline_executor_error` | failure | The runner could not report how the step ended | Re-run; if it repeats, look at the runner |
-| `pipeline_secret_missing` | failure | An allowed secret has no value on this cluster | Store a value under that name, then re-run |
+| `pipeline_secret_missing` | failure | An allowed secret has no value on this cluster; or a Discord channel's secret has none | Store a value under that name, then re-run |
+| `pipeline_channel_missing` | failure | No channel of the name the notify stage gives belongs to the pipeline's owner | Create it, or correct the name, then re-run |
+| `pipeline_channel_archived` | failure | The notify stage's channel is archived, and delivers nothing | Name an active channel, then re-run |
+| `pipeline_channel_not_allowed` | failure | The channel does not accept deliveries from this pipeline | Allow the pipeline on the channel, then re-run |
+| `pipeline_channel_invalid` | failure | The channel cannot deliver as it is set up: a Discord secret name outside `^[A-Z][A-Z0-9_]{0,63}$` or in `MEMQL_`, a secret that holds no Discord webhook URL, or a recipient that is not a bare email address | Correct the channel, then re-run |
+| `pipeline_notify_failed` | failure | The outbound worker gave the delivery up, or it could not be handed over | Read the worker's error the sentence quotes, then re-run |
+| `pipeline_notify_undelivered` | failure | The delivery had not arrived when the step's time ran out; the sentence says where it stood | Wait for a delivery still being retried, or re-run, which sends another |
 | `pipeline_stage_blocked` | skip | An earlier stage failed | Fix that stage |
 | `pipeline_not_affected` | skip | The change touched nothing the step covers | Nothing |
-| `pipeline_notify_unavailable` | skip | Notify delivery arrives with epic memql#5480 | Nothing |
 | `pipeline_passed_earlier` | skip | A failed-only re-run carried the step over: the attempt it re-ran passed it with the same packages | Nothing |
 | `pipeline_check_permission_missing` | note | GitHub answered 403 to a check-run write; the run went ahead | Accept the app's wider permissions on GitHub |
 

@@ -583,6 +583,10 @@ func (dr *runDriver) carryFromOriginal(ctx context.Context) bool {
 // since (the timing table learned between the attempts) runs again: a pass
 // over other packages is not a pass of these. A failed, cancelled or never
 // reached step runs, and a step the plan skips keeps the plan's reason.
+//
+// A NOTIFY STEP IS NEVER CARRIED. What it delivered announced the attempt it
+// ran in; this attempt has an outcome of its own -- most often, that the
+// pipeline recovered -- and a carried notification would leave it unsaid.
 func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
 	byKey := make(map[string]WorkStep, len(prior))
 	for _, row := range prior {
@@ -592,7 +596,7 @@ func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
 	}
 	for _, t := range tracks {
 		row, ok := byKey[t.step.Key]
-		if !ok || t.step.Skip != nil {
+		if !ok || t.step.Skip != nil || t.step.Kind == pipelines.StepNotify {
 			continue
 		}
 		passed := row.Status == WorkStepDone
@@ -790,13 +794,16 @@ func (dr *runDriver) reopenFromRows(rows []WorkStep) bool {
 	return true
 }
 
-// stateFromRow is a step's state as its row's receipt says it ended.
+// stateFromRow is a step's state as its row's receipt says it ended -- its
+// artifacts too, so a notify stage of a resumed run lists the files of steps
+// its predecessor ran.
 func stateFromRow(s StepState, row WorkStep) StepState {
 	s.Code, s.DurationMs = row.ErrorCode, row.DurationMs
 	s.Message = row.ErrorMessage
 	if s.Message == "" {
 		s.Message = row.Reason
 	}
+	s.ArtifactFileIDs = slices.Clone(row.ArtifactFileIDs)
 	switch row.Status {
 	case WorkStepDone:
 		s.Status = StepSucceeded
@@ -876,9 +883,12 @@ func (dr *runDriver) buildTracks(plan pipelines.Plan) {
 
 // execute runs the stages strictly in the order written (decision 2): a
 // stage's steps at once, at most maxConcurrentSteps in flight; the first
-// stage that fails blocks every later stage's steps (pipeline_stage_blocked).
-// A cancel stops it between stages and inside one; a lost lease stops it
-// with nothing more written.
+// stage that fails blocks every later stage's steps (pipeline_stage_blocked)
+// -- except a notify stage's, which runs: announcing the failure is what it
+// is for (D16). The block keeps naming the stage that failed first. A cancel
+// stops it between stages and inside one, a notify stage's included: one the
+// cancel reaches before it hands its notification over sends nothing. A lost
+// lease stops it with nothing more written.
 func (dr *runDriver) execute(ctx context.Context) {
 	blockedBy := ""
 	for i, st := range dr.stages {
@@ -888,7 +898,7 @@ func (dr *runDriver) execute(ctx context.Context) {
 		if dr.lease.isCancelled() {
 			break
 		}
-		if blockedBy != "" {
+		if blockedBy != "" && !announces(st) {
 			for _, t := range st.tracks {
 				if !t.finished() {
 					dr.settle(ctx, t, skipReceipt(pipelines.CodeStageBlocked, "Not run: stage "+blockedBy+" failed."))
@@ -903,7 +913,7 @@ func (dr *runDriver) execute(ctx context.Context) {
 		if dr.lease.isCancelled() {
 			break
 		}
-		if stageFailed(st) {
+		if blockedBy == "" && stageFailed(st) {
 			blockedBy = st.name
 		}
 		if i < len(dr.stages)-1 {
@@ -955,6 +965,20 @@ func stageFailed(st stageTracks) bool {
 	return false
 }
 
+// announces reports a notify stage: one whose every step is a notify step,
+// which runs after an earlier stage failed rather than being blocked by it.
+func announces(st stageTracks) bool {
+	if len(st.tracks) == 0 {
+		return false
+	}
+	for _, t := range st.tracks {
+		if t.step.Kind != pipelines.StepNotify {
+			return false
+		}
+	}
+	return true
+}
+
 // runStep takes one step from pending to its receipt.
 func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 	if dr.lease.isLost() || dr.lease.isCancelled() {
@@ -966,8 +990,9 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 		dr.settle(ctx, t, skipReceipt(step.Skip.Code, step.Skip.Reason))
 		return
 	case step.Kind == pipelines.StepNotify:
-		dr.settle(ctx, t, skipReceipt(pipelines.CodeNotifyUnavailable, fmt.Sprintf(
-			"Nothing was sent to channel %s: notify stages deliver once channels arrive (epic memql#5480).", step.Channel)))
+		// The driver delivers a notification itself, over the outbound path
+		// (notify.go): a notify step is never the step runner's.
+		dr.runNotify(ctx, t)
 		return
 	}
 
@@ -1020,7 +1045,8 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 
 // settle writes a step's receipt -- its intent first, for a step that ends
 // without having run, so every declared step reads as begun and ended -- and
-// records it in memory. On a lost lease it writes nothing.
+// records it in memory, the artifacts it names included: a notify stage later
+// in the run lists them. On a lost lease it writes nothing.
 func (dr *runDriver) settle(ctx context.Context, t *stepTrack, rec receipt) {
 	if !dr.stillHolds(ctx) {
 		return
@@ -1031,6 +1057,7 @@ func (dr *runDriver) settle(ctx context.Context, t *stepTrack, rec receipt) {
 	t.handle.Finish(ctx, rec.journal())
 	s := t.snapshot()
 	s.Status, s.Code, s.Message, s.DurationMs, s.LogTail = rec.report, rec.code, rec.message, rec.durationMs, rec.logTail
+	s.ArtifactFileIDs = slices.Clone(rec.artifactFileIDs)
 	t.set(s)
 }
 
@@ -1139,6 +1166,13 @@ type requestFacts struct {
 	installation                        int64
 	compute                             pipelines.Compute
 	domain                              string
+
+	// What a notification says of the run besides (notify.go): its commit's
+	// or pull request's title, the branch, the pull request, and when the run
+	// was queued and started.
+	title, branch     string
+	pullRequest       int
+	queuedAt, started time.Time
 }
 
 func (dr *runDriver) setFacts() {
@@ -1164,6 +1198,8 @@ func (dr *runDriver) setFacts() {
 		sha: dr.run.SHA, version: version, mode: dr.run.Mode, event: dr.run.Event,
 		installation: dr.installation, compute: dr.p.Compute,
 		domain: dr.d.Domain(),
+		title:  dr.run.Title, branch: dr.run.HeadBranch, pullRequest: dr.run.PullRequest,
+		queuedAt: dr.run.QueuedAt, started: started,
 	}
 }
 

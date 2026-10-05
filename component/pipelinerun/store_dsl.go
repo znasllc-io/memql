@@ -1035,16 +1035,18 @@ func outboundStatusFromRow(row map[string]any) OutboundStatus {
 
 // workStepFromRow reads a v1:work:step through workStepFull. The call is the
 // driver's own declaration ({construct, name, stage, packages}); the result
-// carries a skipped or cancelled step's reason.
+// carries a skipped or cancelled step's reason; and the receipt names the
+// Library files the step's artifacts became.
 func workStepFromRow(row map[string]any) WorkStep {
 	s := WorkStep{
-		Key:          rowString(row, "key"),
-		Seq:          rowInt(row, "seq"),
-		Status:       rowString(row, "status"),
-		Attempt:      rowInt(row, "attempt"),
-		DurationMs:   rowInt64(row, "durationMs"),
-		ErrorCode:    rowString(row, "errorCode"),
-		ErrorMessage: rowString(row, "errorMessage"),
+		Key:             rowString(row, "key"),
+		Seq:             rowInt(row, "seq"),
+		Status:          rowString(row, "status"),
+		Attempt:         rowInt(row, "attempt"),
+		DurationMs:      rowInt64(row, "durationMs"),
+		ErrorCode:       rowString(row, "errorCode"),
+		ErrorMessage:    rowString(row, "errorMessage"),
+		ArtifactFileIDs: rowStrings(row, "artifactFileIds"),
 	}
 	if call, ok := row["call"].(map[string]any); ok {
 		s.Stage = rowString(call, "stage")

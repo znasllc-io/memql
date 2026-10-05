@@ -124,6 +124,10 @@ type WorkStep struct {
 	Skip *pipelines.Skip
 	// Reason is a skipped or cancelled step's reason (result.reason).
 	Reason string
+	// ArtifactFileIDs are the Library files the step's receipt names as its
+	// artifacts, as the driver wrote them (already masked): what a resumed
+	// run's notification lists for a step its predecessor ran.
+	ArtifactFileIDs []string
 }
 
 // Finished reports whether the row carries the step's receipt.
@@ -284,6 +288,10 @@ type StepState struct {
 	Code       string
 	Message    string
 	LogTail    string
+	// ArtifactFileIDs are the Library files the step's receipt names as its
+	// artifacts (masked, as the receipt is): what a notify stage later in
+	// the run lists in its message.
+	ArtifactFileIDs []string
 }
 
 // Report is the step as the check run reports it.

@@ -80,9 +80,8 @@ const (
 	CodeCheckPermission  = "pipeline_check_permission_missing"
 
 	// Skips.
-	CodeStageBlocked      = "pipeline_stage_blocked"
-	CodeNotAffected       = "pipeline_not_affected"
-	CodeNotifyUnavailable = "pipeline_notify_unavailable"
+	CodeStageBlocked = "pipeline_stage_blocked"
+	CodeNotAffected  = "pipeline_not_affected"
 )
 
 // Re-running only what failed (epic memql#5479, D13's "Re-run failed").
@@ -121,6 +120,29 @@ const (
 	CodeIsolationUnenforced = "pipeline_isolation_unenforced"
 )
 
+// The notify stage's (epic memql#5480, D16). Each fails the notify step: a
+// channel the stage may not deliver to, and a delivery that failed or had not
+// arrived when the stage stopped waiting. Nothing announced is not a pass.
+const (
+	// CodeChannelMissing: no channel of the name the stage gives belongs to
+	// the pipeline's owner.
+	CodeChannelMissing = "pipeline_channel_missing"
+	// CodeChannelArchived: the channel is archived, and delivers nothing.
+	CodeChannelArchived = "pipeline_channel_archived"
+	// CodeChannelNotAllowed: the channel does not accept deliveries from this
+	// pipeline (the pipeline's channelIds).
+	CodeChannelNotAllowed = "pipeline_channel_not_allowed"
+	// CodeChannelInvalid: the channel cannot deliver as it is set up -- a
+	// Discord secret that is no webhook's URL, an address that is no address.
+	CodeChannelInvalid = "pipeline_channel_invalid"
+	// CodeNotifyFailed: the outbound worker gave the delivery up, or it could
+	// not be handed over at all.
+	CodeNotifyFailed = "pipeline_notify_failed"
+	// CodeNotifyUndelivered: the delivery had not arrived when the step's
+	// time ran out. It may still: the sentence says where it stood.
+	CodeNotifyUndelivered = "pipeline_notify_undelivered"
+)
+
 var codeClasses = map[string]Class{
 	CodeNotDeclared:       ClassRefusal,
 	CodeStageInvalid:      ClassRefusal,
@@ -155,11 +177,16 @@ var codeClasses = map[string]Class{
 	CodeNodeLost:            ClassFailure,
 	CodeArtifactTooLarge:    ClassFailure,
 	CodeIsolationUnenforced: ClassFailure,
+	CodeChannelMissing:      ClassFailure,
+	CodeChannelArchived:     ClassFailure,
+	CodeChannelNotAllowed:   ClassFailure,
+	CodeChannelInvalid:      ClassFailure,
+	CodeNotifyFailed:        ClassFailure,
+	CodeNotifyUndelivered:   ClassFailure,
 
-	CodeStageBlocked:      ClassSkip,
-	CodeNotAffected:       ClassSkip,
-	CodeNotifyUnavailable: ClassSkip,
-	CodePassedEarlier:     ClassSkip,
+	CodeStageBlocked:  ClassSkip,
+	CodeNotAffected:   ClassSkip,
+	CodePassedEarlier: ClassSkip,
 
 	CodeCheckPermission: ClassNote,
 	CodeArtifactMissing: ClassNote,

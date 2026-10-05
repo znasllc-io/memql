@@ -58,7 +58,9 @@ type driveHarness struct {
 	logs    *lockedBuffer
 	logger  *slog.Logger
 	secrets map[string]string
-	p       Pipeline
+	// asked is every name the secret resolver was asked for.
+	asked *namesAsked
+	p     Pipeline
 }
 
 // newDriveHarness is an agent node ("agent-a") that drives runs of the shop's
@@ -68,7 +70,7 @@ func newDriveHarness(t *testing.T, manifest string) *driveHarness {
 	h := newHarness(t)
 	dh := &driveHarness{
 		harness: h, work: newFakeWork(), exec: &fakeExecutor{entered: make(chan string, 64)}, logs: &lockedBuffer{},
-		secrets: map[string]string{"SHOP_TOKEN": shopSecret},
+		secrets: map[string]string{"SHOP_TOKEN": shopSecret}, asked: &namesAsked{},
 	}
 	dh.logger = slog.New(slog.NewTextHandler(dh.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	h.store.work = dh.work
@@ -92,6 +94,7 @@ func (dh *driveHarness) configureDriver(integ *Integration, node string) {
 		d.Logger = dh.logger
 		d.Journal = journal
 		d.Secrets = func(_ context.Context, name string) (string, error) {
+			dh.asked.add(name)
 			if v, ok := dh.secrets[name]; ok {
 				return v, nil
 			}
@@ -101,6 +104,11 @@ func (dh *driveHarness) configureDriver(integ *Integration, node string) {
 		// A final check-run write retried at the production pace would make
 		// every test that fails one wait ten seconds.
 		d.publishBackoff = []time.Duration{time.Millisecond, time.Millisecond}
+		// A notification's delivery polled at the production pace -- two
+		// seconds, then longer -- would make every notify test wait seconds
+		// for each read, and a delivery that never comes twenty minutes.
+		d.notifyPoll = time.Millisecond
+		d.notifyTimeout = 10 * time.Second
 	})
 	integ.EnableDriver()
 }
@@ -512,31 +520,6 @@ pipeline:
 	}
 	if got, _ := dh.store.run(run.ID); got.Conclusion != ConclusionSuccess {
 		t.Errorf("run = %s", got.Conclusion)
-	}
-}
-
-// A notify stage is skipped until channels deliver (epic memql#5480), and a
-// skip fails nothing.
-func TestANotifyStageIsSkippedUntilChannelsArrive(t *testing.T) {
-	dh := newDriveHarness(t, driveManifest+`    - name: notify
-      on: [push]
-      channel: team-chat
-`)
-	run := dh.openRun(t, pushOpening())
-	deliver(t, dh.integ, run)
-
-	notify := dh.work.receiptsOf("notify.notify")
-	if len(notify) != 1 || argString(notify[0].Args, "status") != WorkStepSkipped ||
-		argString(notify[0].Args, "errorCode") != pipelines.CodeNotifyUnavailable ||
-		!strings.Contains(argString(notify[0].Args, "errorMessage"), "team-chat") {
-		t.Errorf("notify is skipped pipeline_notify_unavailable: %+v", notify)
-	}
-	got, _ := dh.store.run(run.ID)
-	if got.Conclusion != ConclusionSuccess || len(got.Stages) != 3 || got.Stages[2].Status != StageSkipped {
-		t.Errorf("run = %s stages %+v", got.Conclusion, got.Stages)
-	}
-	if slices.Contains(dh.exec.sentKeys(), "notify.notify") {
-		t.Errorf("a notify step is never handed to the step runner")
 	}
 }
 
@@ -1750,7 +1733,8 @@ func TestARerunOfFailedStepsRunsOnlyWhatDidNotPass(t *testing.T) {
 // step is carried when the attempt it re-runs PASSED it with the same package
 // slice, or carried it already (keeping the attempt it first passed in); a
 // failed step, a shard whose slice moved since, and a step the plan already
-// skips are left to the plan.
+// skips are left to the plan. A notify step is never carried: what it
+// delivered announced the attempt it ran in, and this one is another.
 func TestCarryPassedCarriesOnlyIdenticalPasses(t *testing.T) {
 	track := func(key string, packages ...string) *stepTrack {
 		return &stepTrack{step: pipelines.Step{Key: key, Packages: packages}}
@@ -1758,6 +1742,8 @@ func TestCarryPassedCarriesOnlyIdenticalPasses(t *testing.T) {
 	vet, shardSame, shardMoved, db, carried := track("checks.vet"), track("tests.go#1", "a", "b"), track("tests.go#2", "c"), track("tests.db"), track("tests.lint")
 	planned := track("tests.os")
 	planned.step.Skip = &pipelines.Skip{Code: pipelines.CodeNotAffected, Reason: "No change under bucket os."}
+	notify := track("notify.notify")
+	notify.step.Kind = pipelines.StepNotify
 	prior := []WorkStep{
 		{Key: "checks.vet", Status: WorkStepDone},
 		{Key: "tests.go#1", Status: WorkStepDone, Packages: []string{"a", "b"}},
@@ -1765,8 +1751,12 @@ func TestCarryPassedCarriesOnlyIdenticalPasses(t *testing.T) {
 		{Key: "tests.db", Status: WorkStepFailed},
 		{Key: "tests.lint", Status: WorkStepSkipped, Skip: &pipelines.Skip{Code: pipelines.CodePassedEarlier, Reason: "Passed in attempt 1."}},
 		{Key: "tests.os", Status: WorkStepDone},
+		{Key: "notify.notify", Status: WorkStepDone},
 	}
-	carryPassed([]*stepTrack{vet, shardSame, shardMoved, db, carried, planned}, prior, 2)
+	carryPassed([]*stepTrack{vet, shardSame, shardMoved, db, carried, planned, notify}, prior, 2)
+	if notify.step.Skip != nil {
+		t.Errorf("a notify step that delivered is sent again, announcing this attempt: %+v", notify.step.Skip)
+	}
 
 	for _, c := range []struct {
 		name   string

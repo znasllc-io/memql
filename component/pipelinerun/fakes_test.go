@@ -21,6 +21,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/component/pipelines"
 )
@@ -70,6 +71,27 @@ type memStore struct {
 	failCreateRun error
 	failUpdateRun error
 	failStage     error
+	// failStageAt fails the n-th StageNotification call (1-based) and no
+	// other; failOutboundRead every OutboundStatuses call; failPreviousRuns
+	// every PreviousRuns call.
+	failStageAt      int
+	failOutboundRead error
+	failPreviousRuns error
+
+	// outboundReads counts the OutboundStatuses calls, and onOutboundRead runs
+	// at the start of each, OUTSIDE the store's lock, with the call's number
+	// and the ids it asks for: what the outbound worker does between two of a
+	// notify stage's polls.
+	outboundReads  int
+	onOutboundRead func(read int, ids []string)
+	// stageCalls counts the StageNotification calls that reached the store,
+	// an injected failure included.
+	stageCalls int
+
+	// fresh records, by method, whether each call's context asked for a fresh
+	// read: the notify stage decides on the channel and the previous runs, so
+	// it must not take this node's cached answer for either.
+	fresh map[string][]bool
 
 	// afterCreatePipeline runs after each CreatePipeline lands, outside the
 	// store's lock: what another writer does right after a connect.
@@ -109,8 +131,21 @@ func newMemStore() *memStore {
 	return &memStore{
 		packages: map[string]PackageSource{}, pipelines: map[string]Pipeline{}, runs: map[string]Run{},
 		deliveries: map[string]InboundDelivery{}, channels: map[string]Channel{}, files: map[string]libraryFile{},
-		outbound: map[string]outboundRow{},
+		outbound: map[string]outboundRow{}, fresh: map[string][]bool{},
 	}
+}
+
+// noteFresh records whether a call to method asked for a fresh read. Callers
+// hold s.mu.
+func (s *memStore) noteFresh(ctx context.Context, method string) {
+	s.fresh[method] = append(s.fresh[method], memql.FreshReadFromContext(ctx))
+}
+
+// freshCalls is whether each call to method asked for a fresh read, in order.
+func (s *memStore) freshCalls(method string) []bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.fresh[method])
 }
 
 // stageDelivery puts a row on the inbound seam, as the receiver stages one.
@@ -611,7 +646,7 @@ func (s *memStore) ChannelsForOwner(ctx context.Context) ([]Channel, error) {
 // borrowed authority: the owner is an argument, not whoever the context
 // carries, and a blank one is refused before a blank name is. The newest of two
 // rows sharing a name answers.
-func (s *memStore) ChannelForOwnerByName(_ context.Context, owner, name string) (*Channel, error) {
+func (s *memStore) ChannelForOwnerByName(ctx context.Context, owner, name string) (*Channel, error) {
 	if strings.TrimSpace(owner) == "" {
 		return nil, errors.New("memStore: a channel is read only under its owner")
 	}
@@ -621,6 +656,7 @@ func (s *memStore) ChannelForOwnerByName(_ context.Context, owner, name string) 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.noteFresh(ctx, "ChannelForOwnerByName")
 	for i := len(s.channelOrder) - 1; i >= 0; i-- {
 		if c := s.channels[s.channelOrder[i]]; c.Name == name && sameID(c.OwnerUserID, owner) {
 			c.Recipients = slices.Clone(c.Recipients)
@@ -687,12 +723,16 @@ func (s *memStore) UpdateChannel(_ context.Context, owner, channelID string, pat
 
 // PreviousRuns is pipelineRunsForPipelineEvent: one pipeline's runs of one
 // event, newest queued first, one page of twenty, whoever owns them.
-func (s *memStore) PreviousRuns(_ context.Context, pipelineID string, event pipelines.Event) ([]Run, error) {
+func (s *memStore) PreviousRuns(ctx context.Context, pipelineID string, event pipelines.Event) ([]Run, error) {
 	if strings.TrimSpace(pipelineID) == "" || event == "" {
 		return nil, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.noteFresh(ctx, "PreviousRuns")
+	if s.failPreviousRuns != nil {
+		return nil, s.failPreviousRuns
+	}
 	var out []Run
 	for _, r := range s.runs {
 		if sameID(r.PipelineID, pipelineID) && r.Event == event {
@@ -715,8 +755,12 @@ func (s *memStore) StageNotification(_ context.Context, n NotificationRequest) e
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.stageCalls++
 	if s.failStage != nil {
 		return s.failStage
+	}
+	if s.failStageAt > 0 && s.stageCalls == s.failStageAt {
+		return fmt.Errorf("memStore: staging %s failed", n.RequestID)
 	}
 	s.staged = append(s.staged, n)
 	id := bareID(n.RequestID)
@@ -730,8 +774,19 @@ func (s *memStore) StageNotification(_ context.Context, n NotificationRequest) e
 }
 
 // OutboundStatuses is outboundRequestById, once per id, in the order asked: a
-// row nothing staged is an entry with no status.
+// row nothing staged is an entry with no status. The hook a test installs runs
+// first, outside the lock, so what it moves is what this read answers.
 func (s *memStore) OutboundStatuses(_ context.Context, ids []string) ([]OutboundStatus, error) {
+	s.mu.Lock()
+	s.outboundReads++
+	read, hook, fail := s.outboundReads, s.onOutboundRead, s.failOutboundRead
+	s.mu.Unlock()
+	if hook != nil {
+		hook(read, slices.Clone(ids))
+	}
+	if fail != nil {
+		return nil, fail
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]OutboundStatus, 0, len(ids))
@@ -779,6 +834,13 @@ func (s *memStore) outboundRows() []outboundRow {
 	out := slices.Collect(maps.Values(s.outbound))
 	sort.Slice(out, func(i, j int) bool { return out[i].State.ID < out[j].State.ID })
 	return out
+}
+
+// reads is how many times OutboundStatuses has been called.
+func (s *memStore) reads() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.outboundReads
 }
 
 // setOutbound is the outbound worker moving a row: the delivery state, and

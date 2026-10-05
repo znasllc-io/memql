@@ -91,6 +91,13 @@ type Deps struct {
 	// publishBackoff is the wait before each retry of a concluded run's
 	// check-run write; nil is finalPublishBackoff. A test shortens it.
 	publishBackoff []time.Duration
+	// notifyPoll, when set, is the wait before EVERY read of a notification's
+	// delivery rows, in place of the production pace (notifyPollAfter); and
+	// notifyTimeout, when set, is how long the notify stage waits in all, in
+	// place of the step's own timeout. A test shortens both: it cannot wait
+	// two seconds a read, or twenty minutes for a delivery that never comes.
+	notifyPoll    time.Duration
+	notifyTimeout time.Duration
 }
 
 // Integration is the `pipelines` plug-in.

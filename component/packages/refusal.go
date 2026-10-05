@@ -496,9 +496,8 @@ const (
 	CodePipelineCheckPermissionMissing = "pipeline_check_permission_missing"
 
 	// Skips: a step the plan or the run decided not to execute.
-	CodePipelineStageBlocked      = "pipeline_stage_blocked"
-	CodePipelineNotAffected       = "pipeline_not_affected"
-	CodePipelineNotifyUnavailable = "pipeline_notify_unavailable"
+	CodePipelineStageBlocked = "pipeline_stage_blocked"
+	CodePipelineNotAffected  = "pipeline_not_affected"
 
 	// The substrate's (epic memql#5478): where a step executes.
 	CodePipelineStepTimeout         = "pipeline_step_timeout"
@@ -524,6 +523,18 @@ const (
 const (
 	CodePipelinePassedEarlier  = "pipeline_passed_earlier"
 	CodePipelineNothingToRerun = "pipeline_nothing_to_rerun"
+)
+
+// The notify stage (epic memql#5480): a channel it may not deliver to, and a
+// delivery that failed or had not arrived when the stage stopped waiting.
+// Each fails the notify step, on the pipeline run, never a deploy.
+const (
+	CodePipelineChannelMissing    = "pipeline_channel_missing"
+	CodePipelineChannelArchived   = "pipeline_channel_archived"
+	CodePipelineChannelNotAllowed = "pipeline_channel_not_allowed"
+	CodePipelineChannelInvalid    = "pipeline_channel_invalid"
+	CodePipelineNotifyFailed      = "pipeline_notify_failed"
+	CodePipelineNotifyUndelivered = "pipeline_notify_undelivered"
 )
 
 // Refusal is an analysis or pipeline failure carrying a stable Code.
