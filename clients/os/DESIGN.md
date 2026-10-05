@@ -255,11 +255,11 @@ Each app supplies facts from its existing authorized reads; unavailable values
 use `Figure` absence semantics instead of zero. Only draw activity history when
 a real time series exists. Keep record lists and editors in their own sections.
 
-Maps use `MapHeading` for title-aligned information help, `MapControls` for
-bottom-right zoom and reset actions, and `usePanZoom` with wheel zoom disabled
-and fitted reset enabled. Dragging pans; wheel scrolling belongs to the page.
-Keep routine instructions inside the information control. Errors and stale-data
-notices remain visible.
+Maps use `MapHeading` for title alignment, `MapControls` for bottom-right zoom
+and reset actions, and `usePanZoom` with wheel zoom disabled and fitted reset
+enabled. Dragging pans; wheel scrolling belongs to the page. Keep routine map
+instructions in the shared page-help control described above, without adding
+another information icon. Errors and stale-data notices remain visible.
 
 Fleet and Deployables adopt this composition first. Other apps can reuse these
 components as their overview data is added, without changing their workflows.
