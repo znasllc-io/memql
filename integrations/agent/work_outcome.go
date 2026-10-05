@@ -127,7 +127,11 @@ func normalizeWorkOutcome(calls []common.ToolCall) ([]common.ToolCall, error) {
 			default:
 				return nil, fmt.Errorf("question.kind must be text, choice or multi")
 			}
-			args, err := json.Marshal(map[string]any{"question": strings.TrimSpace(q.Text), "kind": q.Kind, "options": q.Options})
+			feedback := map[string]any{"question": strings.TrimSpace(q.Text), "kind": q.Kind}
+			if len(q.Options) > 0 {
+				feedback["options"] = q.Options
+			}
+			args, err := json.Marshal(feedback)
 			if err != nil {
 				return nil, err
 			}

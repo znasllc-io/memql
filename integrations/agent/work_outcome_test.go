@@ -2,8 +2,14 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/santhosh-tekuri/jsonschema/v5"
+	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/component"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -173,5 +179,50 @@ func TestWorkOutcomeDoesNotGrantAuthorityOrConstrainSpecialists(t *testing.T) {
 	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner"})
 	if requiresWorkOutcome(ctx, ScopeToolDefinitionsForRole(RoleSpecialist, tools)) {
 		t.Fatal("specialist required to use forbidden human response tool")
+	}
+}
+
+// Validate serialized adapter output against the shipped engine tool schema,
+// not a permissive fake executor. Optional arrays must be omitted, not null.
+func TestWorkQuestionMatchesTheShippedToolSchema(t *testing.T) {
+	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
+		t.Fatal(err)
+	}
+	e, err := memql.New(nil, (&component.Component{}).WithLoggerWriter(io.Discard))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = e.Init(concept.DefaultRegistry()); err != nil {
+		t.Fatal(err)
+	}
+	tool := e.Tools().LookupIndex()["requestUserFeedback"]
+	if tool == nil {
+		t.Fatal("shipped feedback tool missing")
+	}
+	schema, err := jsonschema.CompileString("tool:requestUserFeedback", string(tool.InputSchema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{
+		`{"status":"needs_input","question":{"text":"Which supplier?","kind":"text"}}`,
+		`{"status":"needs_input","question":{"text":"Which region?","kind":"choice","options":[{"label":"West","value":"west"}]}}`,
+	} {
+		calls, err := normalizeWorkOutcome(outcomeCall(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		args := parseToolArgs(calls[0].Arguments)
+		injectAgentContext(calls[0].Name, args, turnCtxAllFields())
+		encoded, err := json.Marshal(args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded any
+		if err = json.Unmarshal(encoded, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if err = schema.Validate(decoded); err != nil {
+			t.Fatalf("serialized question rejected by real contract: %v", err)
+		}
 	}
 }

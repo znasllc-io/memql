@@ -77,3 +77,14 @@ func TestAskWorkConversationAndContinuationSurviveReplicaChanges(t *testing.T) {
 	require.Equal(t, messages[1:], restored[1:])
 	require.NotContains(t, fmt.Sprint(restored), "Old profile")
 }
+
+func TestAskTextQuestionAlwaysSerializesAnOptionsArray(t *testing.T) {
+	for _, options := range []any{nil, []any{}} {
+		q, answer := askFeedbackProjection(map[string]any{"id": "q", "kind": "feedback", "question": "Which supplier?", "subject": map[string]any{"kind": "text"}, "options": options})
+		require.NotNil(t, q)
+		require.Nil(t, answer)
+		raw, err := json.Marshal(q)
+		require.NoError(t, err)
+		require.Contains(t, string(raw), `"options":[]`)
+	}
+}

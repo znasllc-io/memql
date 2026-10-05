@@ -23,6 +23,9 @@ func askFeedbackProjection(row map[string]any) (*AskQuestion, *AskTurn) {
 	raw, _ := json.Marshal(row["options"])
 	options := []map[string]any{}
 	_ = json.Unmarshal(raw, &options)
+	if options == nil {
+		options = []map[string]any{}
+	}
 	text, _ := row["question"].(string)
 	id := BareShortId(fmt.Sprint(row["id"]))
 	decision, _ := row["decision"].(string)

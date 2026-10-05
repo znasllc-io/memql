@@ -5,6 +5,7 @@ import type { AskQuestion as Question } from "./conversationSession";
 /** A temporary question within the original exchange. Suggested answers never
  * exclude the person's own words; submitting resumes the existing work. */
 export function AskQuestion({ question, onAnswer }: { question: Question; onAnswer: (answer: Record<string, unknown>) => Promise<void> }) {
+  const options = Array.isArray(question.options) ? question.options : [];
   const [text, setText] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -20,7 +21,7 @@ export function AskQuestion({ question, onAnswer }: { question: Question; onAnsw
   }
   return <form className="os-ask-question" onSubmit={submit} aria-label="Question from MemQL">
     <p>{question.text}</p>
-    {question.options.length ? <div className="os-ask-question-options" role="group" aria-label="Suggested answers">{question.options.map(option => <button key={option.value} type="button" aria-pressed={selected.includes(option.value)} disabled={busy} onClick={() => {
+    {options.length ? <div className="os-ask-question-options" role="group" aria-label="Suggested answers">{options.map(option => <button key={option.value} type="button" aria-pressed={selected.includes(option.value)} disabled={busy} onClick={() => {
       setText(""); setSelected(question.kind === "multi" ? selected.includes(option.value) ? selected.filter(value => value !== option.value) : [...selected, option.value] : [option.value]);
     }}>{option.label}</button>)}</div> : null}
     <div className="os-ask-question-input"><textarea aria-label="Your answer" placeholder="Your answer" maxLength={8000} rows={2} value={text} disabled={busy} onChange={event => { setText(event.target.value); setSelected([]); }} />

@@ -40,3 +40,13 @@ it("opens the server-selected work conversation without submitting another reque
   await session.answerQuestion(question,{text:"PDF"});
   expect(answerQuestion).toHaveBeenCalledWith("q",{text:"PDF"}); expect(ask).not.toHaveBeenCalled(); session.dispose();
 });
+
+it.each([null, undefined])("renders a persisted free-text question without options (%s)", async (options) => {
+  const answer = vi.fn(async () => {});
+  const restored = JSON.parse(JSON.stringify({...question, kind:"text", options}));
+  render(<AskQuestion question={restored} onAnswer={answer} />);
+  expect(screen.queryByRole("group",{name:"Suggested answers"})).toBeNull();
+  fireEvent.change(screen.getByRole("textbox",{name:"Your answer"}),{target:{value:"Example supplier"}});
+  fireEvent.click(screen.getByRole("button",{name:"Send answer"}));
+  await waitFor(()=>expect(answer).toHaveBeenCalledWith({text:"Example supplier"}));
+});
