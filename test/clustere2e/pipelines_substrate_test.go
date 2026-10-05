@@ -1570,6 +1570,10 @@ type runnerAdapter struct {
 
 var _ workbench.PipelineRunner = runnerAdapter{}
 
+func (a runnerAdapter) Readiness(context.Context) ([]byte, string) {
+	return encodeJSON(a.runner.Readiness()), ""
+}
+
 func (a runnerAdapter) RunStep(ctx context.Context, argsJSON []byte) []byte {
 	var run pipelinesteps.StepRun
 	if err := json.Unmarshal(argsJSON, &run); err != nil {
