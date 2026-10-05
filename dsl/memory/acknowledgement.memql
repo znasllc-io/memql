@@ -1,0 +1,65 @@
+/// Model-written wording offered to the classifier as a candidate, never a
+/// cached answer or authority to act. TTL, context and prompt version scope it.
+@rowAuthz(owner="ownerUserId")
+@displayCard(primary="acknowledgement", secondary="request", status="workload")
+concept workAcknowledgement {
+  ownerUserId string! @serverSet
+  domainId string!
+  request string!
+  acknowledgement string!
+  workload string!
+  sourceRunId string!
+  expiresAt datetime!
+}
+
+@actor
+@serverOnly
+mutation workAcknowledgement saveWorkAcknowledgement {
+  args {
+    acknowledgementId string!
+    domainId string!
+    request string!
+    acknowledgement string!
+    workload string!
+    sourceRunId string!
+    expiresAt datetime!
+  }
+  insert {
+    accept { domainId, request, acknowledgement, workload, sourceRunId, expiresAt }
+    stamp {
+      id: args.acknowledgementId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Read or index wording from the authenticated owner's actual compile receipt.
+/// The caller supplies no text to store; the protected run is the source.
+@executor("workAcknowledgementCache")
+@args(profile="object")
+builtin workAcknowledgementCache {
+  runId string!
+  action string!
+}
+
+@row
+shape workAcknowledgement workAcknowledgementFull {
+  row.id
+  ownerUserId
+  domainId
+  request
+  acknowledgement
+  workload
+  sourceRunId
+  expiresAt
+}
+
+/// Cheap availability check before spending anything on a semantic lookup.
+@actor
+query workAcknowledgement recentWorkAcknowledgement {
+  args { domainId string! }
+  filter row => row.ownerUserId == actor.userId && row.domainId == args.domainId && row.expiresAt > now
+  sort "row.createdAt", "desc"
+  paginate 1
+  shape workAcknowledgementFull
+}

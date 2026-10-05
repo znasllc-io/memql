@@ -139,7 +139,7 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 		"goalSignature":  out.Signature,
 		"status":         "running",
 		"automationName": out.AutomationName,
-		"outcome":        map[string]any{"workload": out.Workload, "workTitle": out.WorkTitle},
+		"classification": map[string]any{"workload": out.Workload, "workTitle": out.WorkTitle, "acknowledgement": out.Acknowledgement},
 	}
 	if out.TemplateVersion != "" {
 		args["templateVersion"] = out.TemplateVersion
@@ -171,6 +171,11 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 		args["goalSignature"] = out.Signature
 	}
 	c.record(ctx, req.OwnerUserId, req.RunId, args)
+	// The protected compile receipt is the only source accepted by the cache.
+	// The run is already visible, so indexing does not delay its acknowledgment.
+	if out.Acknowledgement != "" && out.Workload != "quick" {
+		c.loop.cacheAcknowledgement(ctx, req.OwnerUserId, req.RunId, "store")
+	}
 
 	if c.loop.logger != nil {
 		c.loop.logger.Info("work compile decided",

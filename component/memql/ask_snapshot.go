@@ -81,7 +81,10 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 			return fmt.Errorf("conversation work is unavailable")
 		}
 		run := runs[0]
-		outcome, _ := run["outcome"].(map[string]any)
+		outcome, _ := run["classification"].(map[string]any)
+		if ack, _ := outcome["acknowledgement"].(string); ack != "" && (turn.State == "queued" || turn.State == "waiting" || turn.Acknowledgement != "") {
+			turn.Acknowledgement = ack
+		}
 		if title, _ := outcome["workTitle"].(string); title != "" {
 			turn.WorkTitle = title
 		}
@@ -101,6 +104,7 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 		var pending *workPending
 		switch {
 		case errors.As(err, &pending):
+			turn.Answer = turn.Acknowledgement
 			turn.State, turn.Error, turn.EndedAt = "queued", "", nil
 			if pending.Waiting {
 				turn.State = "waiting"

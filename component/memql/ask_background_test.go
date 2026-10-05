@@ -82,12 +82,12 @@ func TestAskBackgroundResultReconstructedOnAnotherReplica(t *testing.T) {
 	calls := 0
 	a.builtinExecutorHandlers["integration.work.createGoal"] = func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 		calls++
-		call, _ := parser.RenderCall("createWorkRun", map[string]any{"runId": runID, "goalId": "goal", "automationName": "background", "templateFingerprint": "test", "triggeredBy": "manual", "status": "running", "mode": "live", "startedAt": time.Now().UTC().Format(time.RFC3339Nano), "outcome": map[string]any{"workload": "research", "workTitle": "Bird research"}})
+		call, _ := parser.RenderCall("createWorkRun", map[string]any{"runId": runID, "goalId": "goal", "automationName": "background", "templateFingerprint": "test", "triggeredBy": "manual", "status": "running", "mode": "live", "startedAt": time.Now().UTC().Format(time.RFC3339Nano), "classification": map[string]any{"workload": "research", "workTitle": "Bird research", "acknowledgement": "I’ll look into the birds you asked about."}})
 		_, err := a.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
 		if err != nil {
 			return nil, err
 		}
-		update, _ := parser.RenderCall("updateWorkRun", map[string]any{"runId": runID, "outcome": map[string]any{"workload": "research", "workTitle": "Bird research"}})
+		update, _ := parser.RenderCall("updateWorkRun", map[string]any{"runId": runID, "classification": map[string]any{"workload": "research", "workTitle": "Bird research", "acknowledgement": "I’ll look into the birds you asked about."}})
 		if _, err = a.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+update); err != nil {
 			return nil, err
 		}
@@ -100,7 +100,7 @@ func TestAskBackgroundResultReconstructedOnAnotherReplica(t *testing.T) {
 	runCtx := common.ContextWithRun(ctx, common.RunContext{RunId: runID, GoalId: "goal", OwnerUserId: ac.UserId, StepKey: "reason"})
 	require.NoError(t, b.RecordWorkProgress(runCtx, WorkEvent{ID: "result", Kind: "response", Phase: "completed", Text: "The research is complete."}))
 	ended := time.Now().UTC()
-	call, _ := parser.RenderCall("updateWorkRun", map[string]any{"runId": runID, "status": "succeeded", "finishedAt": ended.Format(time.RFC3339Nano)})
+	call, _ := parser.RenderCall("updateWorkRun", map[string]any{"runId": runID, "status": "succeeded", "outcome": map[string]any{"returned": "terminal receipt"}, "finishedAt": ended.Format(time.RFC3339Nano)})
 	_, err = b.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
 	require.NoError(t, err)
 	snapshot, err := b.askConversationSnapshotBuiltin(ctx, map[string]any{"conversationId": conversation}, 0)

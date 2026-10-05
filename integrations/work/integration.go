@@ -653,7 +653,7 @@ func (i *Integration) RunBudget(ctx context.Context, ownerUserId, runId string) 
 	if err != nil {
 		return out, fmt.Errorf("work: goal %s ceilings: %w", goalId, err)
 	}
-	return work.EffectiveWorkloadCeilings(out, rowString(rowMap(run, "outcome"), "workload")), nil
+	return work.EffectiveWorkloadCeilings(out, rowString(rowMap(run, "classification"), "workload")), nil
 }
 
 // LimitReplyBudget is the compiler's narrow write seam. The run's ownership
@@ -693,7 +693,7 @@ func (i *Integration) setWorkload(ctx context.Context, owner, runID, workload st
 	if run == nil || rowString(run, "goalId") == "" {
 		return false, fmt.Errorf("work: workload run is unavailable")
 	}
-	outcome := rowMap(run, "outcome")
+	outcome := rowMap(run, "classification")
 	if outcome == nil {
 		outcome = map[string]any{}
 	}
@@ -704,7 +704,7 @@ func (i *Integration) setWorkload(ctx context.Context, owner, runID, workload st
 	if promoteOnly {
 		outcome["workloadReason"] = "Execution requires a capability beyond a direct reply."
 	}
-	err = i.store().updateRun(ctx, runID, map[string]any{"outcome": outcome, "versionTime": rfc(workRowVersionAfter(run["createdAt"], i.clock()))})
+	err = i.store().updateRun(ctx, runID, map[string]any{"classification": outcome, "versionTime": rfc(workRowVersionAfter(run["createdAt"], i.clock()))})
 	return err == nil, err
 }
 

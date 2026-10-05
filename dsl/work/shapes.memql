@@ -59,6 +59,7 @@ shape run workRunFull {
   cancelledBy
   expectedFootprint
   actualFootprint
+  classification
   outcome
   errorCode
   errorMessage

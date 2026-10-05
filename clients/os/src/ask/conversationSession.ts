@@ -22,6 +22,7 @@ export interface AskTurn {
   goalId?: string;
   runId?: string;
   acknowledgement?: string;
+  background?: boolean;
   workTitle?: string;
   workload?: string;
   id: string;
@@ -257,7 +258,7 @@ export class ConversationSession {
           delta: text => patchTurn({ answer: turn.answer + text }),
           activity: event => {
             if (epoch !== this.epoch) return;
-            patchTurn({ activity: [...turn.activity, event], ...runIdentity(event), ...(event.kind === "run" && (event.phase === "queued" || event.phase === "waiting") ? { state: event.phase, workTitle: typeof event.arguments?.workTitle === "string" ? event.arguments.workTitle : undefined, workload: typeof event.arguments?.workload === "string" ? event.arguments.workload : undefined } : {}) });
+            patchTurn({ activity: [...turn.activity, event], ...runIdentity(event), ...(event.kind === "run" && (event.phase === "queued" || event.phase === "waiting") ? { state: event.phase, background: true, workTitle: typeof event.arguments?.workTitle === "string" ? event.arguments.workTitle : undefined, workload: typeof event.arguments?.workload === "string" ? event.arguments.workload : undefined } : {}) });
             if (event.kind === "action" && event.navigate) this.patch({ activity: event });
             if (event.kind === "run" && this.stopRequested) void this.cancelCurrentGoal();
           },

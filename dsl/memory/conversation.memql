@@ -1,0 +1,68 @@
+use identity.concepts.{ user }
+
+/// Searchable source evidence, not an inferred personal fact. The original
+/// conversation remains authoritative; readers revalidate its turn hash.
+@rowAuthz(owner="ownerUserId")
+@displayCard(primary="content", secondary="conversationId", tertiary="turnId")
+concept conversationEvidence {
+  ownerUserId string! @serverSet
+  domainId string!
+  conversationId string!
+  turnId string!
+  sourceHash string!
+  content string!
+  recordedAt datetime!
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
+@row
+shape conversationEvidence conversationEvidenceFull {
+  row.id
+  ownerUserId
+  domainId
+  conversationId
+  turnId
+  sourceHash
+  content
+  recordedAt
+}
+
+@actor
+@unbounded("one immutable evidence version belonging to the authenticated owner")
+query conversationEvidence conversationEvidenceById {
+  args { evidenceId string! }
+  filter row => row.id == args.evidenceId && row.ownerUserId == actor.userId
+  shape conversationEvidenceFull
+}
+
+@actor
+@serverOnly
+@createOnly("domainId", "conversationId", "turnId", "sourceHash", "content", "recordedAt")
+mutation conversationEvidence createConversationEvidence {
+  args {
+    evidenceId string!
+    domainId string!
+    conversationId string!
+    turnId string!
+    sourceHash string!
+    content string!
+    recordedAt datetime!
+  }
+  insert {
+    accept { domainId, conversationId, turnId, sourceHash, content, recordedAt }
+    stamp {
+      id: args.evidenceId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Called only by the engine-owned source-update trigger or its owner during
+/// lazy backfill. Every source is re-read as that owner before indexing.
+@executor("indexConversationMemory")
+@args(profile="object")
+builtin indexConversationMemory {
+  conversationId string
+  runId string
+  ownerUserId string
+}

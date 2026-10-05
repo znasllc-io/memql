@@ -309,7 +309,7 @@ func (c *RunCeilings) goalCeilings(ctx context.Context, rc common.RunContext) (w
 	if err != nil || run == nil {
 		return work.Ceilings{}, fmt.Errorf("run workload is unavailable: %v", err)
 	}
-	return work.EffectiveWorkloadCeilings(ceilings, rowString(rowMap(run, "outcome"), "workload")), nil
+	return work.EffectiveWorkloadCeilings(ceilings, rowString(rowMap(run, "classification"), "workload")), nil
 }
 
 // addSpent sums two spends, bucket by bucket.

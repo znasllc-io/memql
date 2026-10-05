@@ -9,6 +9,7 @@ import { ArrowUp, Mic, Plus, X, Activity, MessageCircle, MessagesSquare, Maximiz
 import { conversationFeed } from "./conversationFeed";
 import { ConversationSession } from "./conversationSession";
 import { AskWait } from "./AskWait";
+import { AskWorkLink } from "./AskWorkLink";
 import { AskWorkQueue } from "./AskWorkQueue";
 import { AskActivityLog } from "./AskActivityLog";
 import { AskConversations } from "./AskConversations";
@@ -295,11 +296,12 @@ export function AskSurface({
         <div className="os-ask-log" ref={logRef} role="log" aria-label="Conversation" aria-live="polite" onScroll={() => { const el = logRef.current; if (el) { conversationScroll.current = el.scrollTop; nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 72; } }}>
           {state.loading ? <ContentSkeleton kind="conversation" label="Opening conversation" /> : null}
           {exchanges.length === 0 && !state.loading ? <div className="os-ask-empty"><strong>What would you like to do?</strong><p>Ask a question, explore your workspace, or let MemQL help you get something done.</p></div> : null}
-          {conversationFeed(exchanges).map(({ turn, completion, key }) => <div key={key} className="os-ask-exchange" data-state={turn.state}>
+          {conversationFeed(exchanges).map(({ turn, completion, key, workState }) => <div key={key} className="os-ask-exchange" data-state={turn.state}>
             {!completion ? <div className="os-ask-message"><AccountAvatar className="os-ask-avatar" /><div><div className="os-ask-byline"><strong>You</strong><time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div><p>{turn.prompt}</p></div></div> : null}
             <div className="os-ask-message"><span className="os-avatar os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span><div><div className="os-ask-byline"><strong>MemQL</strong>{turn.state === "done" && turn.endedAt ? <time dateTime={turn.endedAt}>{messageTime(turn.endedAt)}</time> : null}</div>
               {completion ? <p className="os-ask-result-context">{turn.workTitle || turn.prompt}</p> : null}
               {turn.answer ? <AskMessage text={turn.answer} /> : null}
+              {!completion && (turn.background || turn.acknowledgement || turn.state === "queued" || turn.state === "waiting") && turn.runId && onOpenWork ? <AskWorkLink title={turn.workTitle || turn.prompt} state={workState} onOpen={() => onOpenWork(turn.runId, state.selectedId ?? undefined)} /> : null}
               {onOpenFile ? turn.activity.filter(event => event.kind === "artifact" && event.phase === "completed" && typeof event.arguments?.fileId === "string").map(event => <button key={event.id} type="button" className="os-ask-retry" onClick={() => onOpenFile(event.arguments!.fileId as string)}>Open {event.name || "file"}</button>) : null}
               {turn.state === "streaming" ? <AskWait activity={turn.activity} startedAt={turn.startedAt} hasText={Boolean(turn.answer)} /> : null}
               {turn.error ? <div className="os-ask-error"><p role="alert">{askErrorSummary(turn.error)}</p>{askErrorSummary(turn.error) !== turn.error ? <details><summary>Details</summary><p>{turn.error}</p></details> : null}{!busy ? <button type="button" className="os-ask-retry" onClick={() => { setDraft(turn.prompt); inputRef.current?.focus(); }}>Edit and try again</button> : null}{onOpenFleet ? <button type="button" className="os-ask-retry" onClick={onOpenFleet}>Open Fleet</button> : null}</div> : null}

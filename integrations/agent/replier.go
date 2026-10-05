@@ -229,6 +229,19 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// leaving it unstamped here is correct.
 
 	data := buildPromptData(msg)
+	if isOwnedWorkExecution(ctx) {
+		viewer, err := r.engine.Execute(memql.ContextWithFreshRead(ctx), "builtin work.workViewerContext()")
+		if err != nil {
+			return nil, fmt.Errorf("prepare work viewer context: %w", err)
+		}
+		if rows := memql.MaterializeRows(viewer); len(rows) > 0 {
+			encoded, err := json.Marshal(rows[0])
+			if err != nil {
+				return nil, err
+			}
+			data["viewerContext"] = string(encoded)
+		}
+	}
 
 	// Expand capability slugs + stamp operatorEnabled BEFORE rendering
 	// so the template can branch on the flag and agents see the

@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { AskWorkLink } from "../../src/ask/AskWorkLink";
 import { AskWorkQueue } from "../../src/ask/AskWorkQueue";
 import { conversationFeed } from "../../src/ask/conversationFeed";
 import { ConversationSession, type AskTurn } from "../../src/ask/conversationSession";
@@ -66,4 +67,20 @@ it("resumes observation after a Strict Mode effect cleanup and a lost stream", a
  await vi.advanceTimersByTimeAsync(2600);
  expect(read.mock.calls.length).toBeGreaterThan(1);
  session.dispose(); expect(vi.getTimerCount()).toBe(0);
+});
+
+it("keeps a link and orders the result when classification queued without prose", () => {
+ const task = turn("a", {background:true, acknowledgement:"", answer:"Research result", state:"done", endedAt:"2026-10-05T10:03:00Z"});
+ const feed = conversationFeed([task]);
+ expect(feed).toHaveLength(2); expect(feed[0]?.turn.answer).toBe("");
+ expect(feed[0]?.workState).toBe("done"); expect(feed[1]?.turn.answer).toBe("Research result");
+});
+
+it("opens the acknowledgment receipt from its whole target and reflects real state", () => {
+ const onOpen = vi.fn(); const view = render(<AskWorkLink title="Find prior report preferences" state="queued" onOpen={onOpen} />);
+ fireEvent.click(screen.getByRole("button", {name:/Queued work: Find prior report preferences/})); expect(onOpen).toHaveBeenCalledOnce();
+ view.rerender(<AskWorkLink title="Find prior report preferences" state="waiting" onOpen={onOpen} />);
+ expect(screen.getByText("Needs your input")).toBeTruthy();
+ view.rerender(<AskWorkLink title="Find prior report preferences" state="done" onOpen={onOpen} />);
+ expect(screen.getByText("View work")).toBeTruthy(); expect(screen.queryByText("Queued work")).toBeNull();
 });

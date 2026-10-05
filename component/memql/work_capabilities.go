@@ -16,7 +16,7 @@ import (
 )
 
 func (e *MemQLEngine) workCapabilityAllowed(ctx context.Context, fn *Function) bool {
-	if fn == nil || !fn.Enabled || fn.ServerOnly || (strings.HasPrefix(fn.Name, "ask") && fn.Name != "askConversationById") || fn.Name == "workCapabilities" || fn.Name == "workExecute" || fn.Name == "createGoal" || fn.Name == "runAgentTurn" || strings.HasSuffix(fn.Name, "AskConversation") {
+	if fn == nil || !fn.Enabled || fn.ServerOnly || (strings.HasPrefix(fn.Name, "ask") && fn.Name != "askConversationById") || fn.Name == "workAcknowledgementCache" || fn.Name == "indexConversationMemory" || fn.Name == "workCapabilities" || fn.Name == "workExecute" || fn.Name == "createGoal" || fn.Name == "runAgentTurn" || strings.HasSuffix(fn.Name, "AskConversation") {
 		return false
 	}
 	// Human gates must use their dedicated tools so the agent loop persists
@@ -46,7 +46,7 @@ func (e *MemQLEngine) workCapabilityAllowed(ctx context.Context, fn *Function) b
 }
 
 func workCapabilityApp(fn *Function) string {
-	if fn.Name == "workSearchConversations" || fn.Name == "askConversationById" {
+	if fn.Name == "workSearchConversations" || fn.Name == "workRecallMemory" || fn.Name == "workViewerContext" || fn.Name == "askConversationById" {
 		return "ask"
 	}
 	if fn.Name == "workNavigate" {

@@ -32,6 +32,7 @@ type AskTurn struct {
 	GoalID           string      `json:"goalId,omitempty"`
 	RunID            string      `json:"runId,omitempty"`
 	Workload         string      `json:"workload,omitempty"`
+	Background       bool        `json:"background,omitempty"`
 	Acknowledgement  string      `json:"acknowledgement,omitempty"`
 	WorkTitle        string      `json:"workTitle,omitempty"`
 	// Route is the source choice the turn's goal was opened with; absent for
@@ -254,11 +255,12 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 	var pending *workPending
 	if errors.As(err, &pending) {
 		turn.State, turn.EndedAt, turn.Error = "queued", nil, ""
+		turn.Background = true
 		turn.WorkTitle, turn.Workload = pending.Title, pending.Workload
 		if pending.Waiting {
 			turn.State = "waiting"
 		}
-		turn.Answer = pending.Error()
+		turn.Answer = pending.Acknowledgement
 		turn.Acknowledgement = turn.Answer
 		if err = emit(WorkEvent{ID: "work:" + turn.RunID, Kind: "run", Phase: turn.State, Name: turn.WorkTitle, Arguments: map[string]any{"goalId": turn.GoalID, "runId": turn.RunID, "workload": turn.Workload, "workTitle": turn.WorkTitle}}); err != nil {
 			return "", err
@@ -404,7 +406,7 @@ func (e *MemQLEngine) lockAskConversationKind(ctx context.Context, conversationI
 	_, _ = hash.Write([]byte("ask:" + kind + ":" + bareID))
 	key := int64(hash.Sum64())
 	var held bool
-	if kind == "write" {
+	if kind == "write" || kind == "memory-index" {
 		_, err = conn.ExecContext(ctx, "SELECT pg_advisory_lock($1)", key)
 		held = err == nil
 	} else {

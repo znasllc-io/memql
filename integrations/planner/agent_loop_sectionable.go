@@ -90,10 +90,11 @@ type workNavigationDecision struct {
 }
 
 type sectionableDecision struct {
-	Workload   string                  `json:"workload"`
-	WorkTitle  string                  `json:"workTitle"`
-	Intent     string                  `json:"intent"`
-	Navigation *workNavigationDecision `json:"navigation"`
+	Acknowledgement string                  `json:"acknowledgement"`
+	Workload        string                  `json:"workload"`
+	WorkTitle       string                  `json:"workTitle"`
+	Intent          string                  `json:"intent"`
+	Navigation      *workNavigationDecision `json:"navigation"`
 	// RequiresFile is the goal's semantic delivery contract, independent of
 	// sectionability. Nil is a malformed/omitted answer, never false.
 	RequiresFile *bool `json:"requiresFile"`
@@ -346,31 +347,33 @@ func parseSectionableDecision(resp any) sectionableDecision {
 	}
 	raw = extractJSONObject(raw)
 	var env struct {
-		Workload     string                  `json:"workload"`
-		WorkTitle    string                  `json:"workTitle"`
-		Intent       string                  `json:"intent"`
-		Navigation   *workNavigationDecision `json:"navigation"`
-		RequiresFile *bool                   `json:"requiresFile"`
-		FileName     string                  `json:"fileName"`
-		FileFormat   string                  `json:"fileFormat"`
-		Sectionable  bool                    `json:"sectionable"`
-		Sections     []sectionSpec           `json:"sections"`
-		Assembly     string                  `json:"assembly"`
+		Acknowledgement string                  `json:"acknowledgement"`
+		Workload        string                  `json:"workload"`
+		WorkTitle       string                  `json:"workTitle"`
+		Intent          string                  `json:"intent"`
+		Navigation      *workNavigationDecision `json:"navigation"`
+		RequiresFile    *bool                   `json:"requiresFile"`
+		FileName        string                  `json:"fileName"`
+		FileFormat      string                  `json:"fileFormat"`
+		Sectionable     bool                    `json:"sectionable"`
+		Sections        []sectionSpec           `json:"sections"`
+		Assembly        string                  `json:"assembly"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return sectionableDecision{}
 	}
 	return sectionableDecision{
-		Workload:     env.Workload,
-		WorkTitle:    env.WorkTitle,
-		Intent:       env.Intent,
-		Navigation:   env.Navigation,
-		RequiresFile: env.RequiresFile,
-		FileName:     env.FileName,
-		FileFormat:   env.FileFormat,
-		Sectionable:  env.Sectionable,
-		Sections:     env.Sections,
-		Assembly:     env.Assembly,
+		Acknowledgement: env.Acknowledgement,
+		Workload:        env.Workload,
+		WorkTitle:       env.WorkTitle,
+		Intent:          env.Intent,
+		Navigation:      env.Navigation,
+		RequiresFile:    env.RequiresFile,
+		FileName:        env.FileName,
+		FileFormat:      env.FileFormat,
+		Sectionable:     env.Sectionable,
+		Sections:        env.Sections,
+		Assembly:        env.Assembly,
 	}
 }
 
@@ -535,6 +538,12 @@ func (l *PlannerAgentLoop) classifyGoal(ctx context.Context, goal, nowRFC3339 st
 			return complexityUnknown, "", sectionableDecision{}, err
 		}
 		data["conversation"] = preview
+	}
+	if viewer, ok := ctx.Value(classificationViewerKey{}).(string); ok {
+		data["viewerContext"] = viewer
+	}
+	if candidate, ok := ctx.Value(acknowledgementCandidateKey{}).(string); ok {
+		data["acknowledgementCandidate"] = candidate
 	}
 	resp, err := l.engine.InvokeAI(systemActorContext(ctx), "goalComplexityTriage", data)
 	if err != nil {

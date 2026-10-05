@@ -2690,6 +2690,28 @@ func ConsentStatusBuild(args ConsentStatusArgs) string {
 	return b.String()
 }
 
+// ConversationEvidenceById wraps the query named "conversationEvidenceById".
+//
+// Bound concept: v1:memory:conversationEvidence (machine-readable: BoundConcepts["conversationEvidenceById"] in generated_concepts.go).
+type ConversationEvidenceByIdArgs struct {
+	EvidenceId string
+}
+
+// ConversationEvidenceById calls the engine query conversationEvidenceById.
+func (qc *QueryClient) ConversationEvidenceById(ctx context.Context, args ConversationEvidenceByIdArgs) (*Result, error) {
+	call := ConversationEvidenceByIdBuild(args)
+	return qc.executeNamed(ctx, "conversationEvidenceById", call)
+}
+
+func ConversationEvidenceByIdBuild(args ConversationEvidenceByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query conversationEvidenceById(")
+	b.WriteString("evidenceId: ")
+	b.WriteString(quoteMemQL(args.EvidenceId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreditLimitForLocation -- The credit limit for one company location -- the read a checkout validation's backing service makes.
 //
 // Bound concept: v1:commerce:creditLimit (machine-readable: BoundConcepts["creditLimitForLocation"] in generated_concepts.go).
@@ -6934,6 +6956,28 @@ func (qc *QueryClient) RecentSendJobs(ctx context.Context, args RecentSendJobsAr
 func RecentSendJobsBuild(args RecentSendJobsArgs) string {
 	_ = args
 	return "query recentSendJobs()"
+}
+
+// RecentWorkAcknowledgement -- Cheap availability check before spending anything on a semantic lookup.
+//
+// Bound concept: v1:memory:workAcknowledgement (machine-readable: BoundConcepts["recentWorkAcknowledgement"] in generated_concepts.go).
+type RecentWorkAcknowledgementArgs struct {
+	DomainId string
+}
+
+// RecentWorkAcknowledgement calls the engine query recentWorkAcknowledgement.
+func (qc *QueryClient) RecentWorkAcknowledgement(ctx context.Context, args RecentWorkAcknowledgementArgs) (*Result, error) {
+	call := RecentWorkAcknowledgementBuild(args)
+	return qc.executeNamed(ctx, "recentWorkAcknowledgement", call)
+}
+
+func RecentWorkAcknowledgementBuild(args RecentWorkAcknowledgementArgs) string {
+	var b strings.Builder
+	b.WriteString("query recentWorkAcknowledgement(")
+	b.WriteString("domainId: ")
+	b.WriteString(quoteMemQL(args.DomainId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // RecipientById -- One recipient by id.
@@ -12930,6 +12974,45 @@ func WorkStepsForOwnerRunBuild(args WorkStepsForOwnerRunArgs) string {
 	b.WriteString("query workStepsForOwnerRun(")
 	b.WriteString("runId: ")
 	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkViewerMemberships -- Membership is evidence of affiliation, never evidence of employment or selection as the organization producing the current deliverable.
+//
+// Bound concept: v1:identity:groupMembership (machine-readable: BoundConcepts["workViewerMemberships"] in generated_concepts.go).
+type WorkViewerMembershipsArgs struct {
+}
+
+// WorkViewerMemberships calls the engine query workViewerMemberships.
+func (qc *QueryClient) WorkViewerMemberships(ctx context.Context, args WorkViewerMembershipsArgs) (*Result, error) {
+	call := WorkViewerMembershipsBuild(args)
+	return qc.executeNamed(ctx, "workViewerMemberships", call)
+}
+
+func WorkViewerMembershipsBuild(args WorkViewerMembershipsArgs) string {
+	_ = args
+	return "query workViewerMemberships()"
+}
+
+// WorkViewerOrganization wraps the query named "workViewerOrganization".
+//
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["workViewerOrganization"] in generated_concepts.go).
+type WorkViewerOrganizationArgs struct {
+	AccountId string
+}
+
+// WorkViewerOrganization calls the engine query workViewerOrganization.
+func (qc *QueryClient) WorkViewerOrganization(ctx context.Context, args WorkViewerOrganizationArgs) (*Result, error) {
+	call := WorkViewerOrganizationBuild(args)
+	return qc.executeNamed(ctx, "workViewerOrganization", call)
+}
+
+func WorkViewerOrganizationBuild(args WorkViewerOrganizationArgs) string {
+	var b strings.Builder
+	b.WriteString("query workViewerOrganization(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
 	b.WriteString(")")
 	return b.String()
 }

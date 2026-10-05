@@ -350,7 +350,7 @@ export function runFromRow(row: Row): RunRow {
     id: rowString(flat, "id"),
     goalId: rowString(flat, "goalId"),
     automationName: rowString(flat, "automationName"),
-    workTitle: rowString(objectField(flat, "outcome") ?? {}, "workTitle"),
+    workTitle: rowString(objectField(flat, "classification") ?? {}, "workTitle"),
     mode: rowString(flat, "mode"),
     replayPolicy: rowString(flat, "replayPolicy"),
     status: rowString(flat, "status"),

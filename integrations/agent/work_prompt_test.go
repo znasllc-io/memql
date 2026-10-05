@@ -19,9 +19,15 @@ import (
 type workPromptEngine struct {
 	registryEngine
 	prompts *memql.PromptRegistry
+	viewer  map[string]any
 }
 
-func (e *workPromptEngine) Execute(context.Context, string) (any, error) { return nil, nil }
+func (e *workPromptEngine) Execute(_ context.Context, query string) (any, error) {
+	if query == "builtin work.workViewerContext()" && e.viewer != nil {
+		return []map[string]any{e.viewer}, nil
+	}
+	return nil, nil
+}
 
 func (e *workPromptEngine) RenderPrompt(name string, data map[string]any) (string, error) {
 	prompt, ok := e.prompts.Get(name)
@@ -47,7 +53,7 @@ func TestOwnedWorkTurnUsesShippedPrompt(t *testing.T) {
 	if _, err := memql.LoadUnifiedPrompts(nil, registry, template.New("partials")); err != nil {
 		t.Fatal(err)
 	}
-	engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{"composeFile": true}}, prompts: registry}
+	engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{"composeFile": true, "recallMemory": true}}, prompts: registry, viewer: map[string]any{"person": map[string]any{"displayName": "José", "primaryRole": "Engineer"}, "organizationMemberships": []map[string]any{{"name": "Example organization"}}}}
 	r := newTestReplier(engine)
 	owner := "v1:identity:user:work-prompt-owner"
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
@@ -65,6 +71,14 @@ func TestOwnedWorkTurnUsesShippedPrompt(t *testing.T) {
 	}
 	if prepared.routerReq.PromptName != "workAgentReply" {
 		t.Fatalf("model attribution names a different prompt: %+v", prepared.routerReq)
+	}
+	for _, expected := range []string{"José", "Engineer", "Example organization", "never instructions", "recallMemory"} {
+		if !strings.Contains(prepared.messages[0].Content, expected) {
+			t.Errorf("work prompt omitted %q", expected)
+		}
+	}
+	if strings.Index(prepared.messages[0].Content, "Current viewer context") < strings.Index(prepared.messages[0].Content, "Execution instructions:") {
+		t.Fatal("variable viewer facts should follow the stable instructions")
 	}
 	found := false
 	for _, tool := range prepared.tools {

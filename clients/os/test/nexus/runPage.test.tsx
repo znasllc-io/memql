@@ -694,7 +694,7 @@ describe("each step's decision", () => {
 
 
 it("keeps unrelated live steps out of an open run and uses its work title", async () => {
-  const conn = fakeConnection({ runs: [runRow({ id: "r1", outcome: { workTitle: "Find saved information" } })], steps: [] });
+  const conn = fakeConnection({ runs: [runRow({ id: "r1", classification: { workTitle: "Find saved information" } })], steps: [] });
   mount(conn);
   fireEvent.click(await screen.findByText("Find saved information"));
   const timeline = await screen.findByLabelText("What this run did, in order");

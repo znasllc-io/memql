@@ -82,6 +82,7 @@ concept run {
   cancelledBy            string  @description("v1:identity:user.id when a person cancelled, or a system sentinel.")
   expectedFootprint      object  @description("The union of the declared effects of the steps (epic A2).")
   actualFootprint        object  @description("What the run observed itself touching (epic A2).")
+  classification         object  @description("The workload estimate, task title and model-written acknowledgment. Persisted separately from terminal outcome so completion never erases the intake decision.")
   outcome                object  @description("The terminal result, structured.")
   errorCode              string  @description("A catalogued code when the run failed.")
   errorMessage           string  @description("The failure in words.")

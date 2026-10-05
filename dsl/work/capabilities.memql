@@ -14,6 +14,19 @@ builtin workSearchConversations {
  cursor string @description("Opaque cursor from the previous search page, with the same search.")
 }
 
+/// Recall source evidence by meaning, across this person's conversations.
+/// Results preserve their original messages, dates and source ids. A match is
+/// relevant evidence, never permission or proof that an old assertion is true.
+@description("Recall earlier conversations, preferences and prior work by meaning. Uses indexed source evidence, revalidates originals and falls back to exact search when indexing is incomplete. Use a short natural-language question.")
+@executor("workRecallMemory")
+@args(profile="object")
+builtin workRecallMemory { search string! }
+
+/// Recall personal source evidence by meaning without rediscovering tools.
+@handler(type="query", query="query workRecallMemory(search: args.search)")
+@requiresAgentRole("assistant", "specialist")
+tool recallMemory { search string! @description("A short question about earlier conversations, preferences or prior work. Results are historical source evidence, not current-world facts.") }
+
 /// Execute a discovered capability under the original caller's authority.
 @description("Execute a discovered capability under the current caller authority using its exact arguments.")
 @executor("workExecute")

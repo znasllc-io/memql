@@ -3448,6 +3448,50 @@
       ]
     },
     {
+      "concept": "v1:memory:conversationEvidence",
+      "file": "memory/conversation.memql",
+      "fields": [
+        "content",
+        "conversationId",
+        "domainId",
+        "ownerUserId",
+        "recordedAt",
+        "sourceHash",
+        "turnId"
+      ],
+      "required": [
+        "content",
+        "conversationId",
+        "domainId",
+        "ownerUserId",
+        "recordedAt",
+        "sourceHash",
+        "turnId"
+      ]
+    },
+    {
+      "concept": "v1:memory:workAcknowledgement",
+      "file": "memory/acknowledgement.memql",
+      "fields": [
+        "acknowledgement",
+        "domainId",
+        "expiresAt",
+        "ownerUserId",
+        "request",
+        "sourceRunId",
+        "workload"
+      ],
+      "required": [
+        "acknowledgement",
+        "domainId",
+        "expiresAt",
+        "ownerUserId",
+        "request",
+        "sourceRunId",
+        "workload"
+      ]
+    },
+    {
       "concept": "v1:models:modelProfile",
       "file": "models/concepts.memql",
       "fields": [
@@ -8472,6 +8516,7 @@
         "cancelRequested",
         "cancelledBy",
         "chainHead",
+        "classification",
         "continuation",
         "errorCode",
         "errorMessage",

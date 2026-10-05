@@ -62,9 +62,10 @@ type CompileRequest struct {
 
 // CompileOutcome is what compile decided and what it cost.
 type CompileOutcome struct {
-	Reply     bool
-	Workload  string
-	WorkTitle string
+	Acknowledgement string
+	Reply           bool
+	Workload        string
+	WorkTitle       string
 	// Route is the tier that answered.
 	Route work.Route
 	// ConstructId identifies the reused catalog template or the stored run draft.
@@ -208,6 +209,9 @@ func (l *PlannerAgentLoop) CompileGoalForRun(ctx context.Context, req CompileReq
 	// replay can act on. The same guidance reaches the design pass if the
 	// goal is authored.
 	guidance := l.descriptionGuidance(ctx, req, sig)
+	if conversational {
+		ctx = l.withAcknowledgementCandidate(ctx, req)
+	}
 
 	// Tier 3: ONE classifier call answering complexity AND sectionability.
 	triageCtx, cancelTriage := context.WithTimeout(airoute.WithCallPurpose(ctx, "Understanding request", 0), 60*time.Second)
@@ -232,6 +236,11 @@ func (l *PlannerAgentLoop) CompileGoalForRun(ctx context.Context, req CompileReq
 	}
 	in.Complexity = string(complexity)
 	out.Workload, out.WorkTitle = sectionable.Workload, strings.TrimSpace(sectionable.WorkTitle)
+	// Missing or malformed model prose leaves a truthful task status, never a canned reply.
+	ack := strings.TrimSpace(sectionable.Acknowledgement)
+	if len([]rune(ack)) <= 280 {
+		out.Acknowledgement = ack
+	}
 	switch out.Workload {
 	case "quick", "lookup", "research", "project":
 	case "":

@@ -37,15 +37,15 @@ const followBackground = "background"
 const followSnapshot = "snapshot"
 
 type workPending struct {
-	Waiting         bool
-	Title, Workload string
+	Waiting                          bool
+	Title, Workload, Acknowledgement string
 }
 
 func (p *workPending) Error() string {
 	if p.Waiting {
 		return "This work needs your input in Nexus."
 	}
-	return "I’m working on this and will bring the result back here. You can keep chatting."
+	return "work continues in the background"
 }
 
 func followWorkRun(ctx context.Context, runID string, read workRowReader, onText func(string), onEvent func(WorkEvent) error, interval time.Duration) (string, error) {
@@ -157,13 +157,14 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 			return answer.String(), fmt.Errorf("%s", message)
 		}
 		mode, _ := ctx.Value(workFollowModeKey{}).(string)
-		outcome, _ := run["outcome"].(map[string]any)
+		outcome, _ := run["classification"].(map[string]any)
 		workload, _ := outcome["workload"].(string)
 		title, _ := outcome["workTitle"].(string)
+		ack, _ := outcome["acknowledgement"].(string)
 		started, hasStart := askTimestamp(run["startedAt"])
 		queuedClassification := run["status"] == "compiling" && hasStart && time.Since(started) >= 15*time.Second
 		if mode == followSnapshot || (mode == followBackground && ((workload != "" && workload != "quick") || queuedClassification)) {
-			return answer.String(), &workPending{Title: title, Workload: workload}
+			return answer.String(), &workPending{Title: title, Workload: workload, Acknowledgement: ack}
 		}
 		timer := time.NewTimer(interval)
 		select {

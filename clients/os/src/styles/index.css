@@ -16505,3 +16505,8 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-ask-work-card > svg:last-child { margin-left: auto; flex: none; color: var(--os-muted); }
 
 .os-ask-result-context { color: var(--os-muted); font-size: var(--os-text-sm); margin: 0 0 8px; }
+
+.os-ask-work-link { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin-top: 6px; padding: 6px 8px; border: 0; border-radius: var(--os-radius-sm); color: var(--os-muted); background: var(--os-plate); font: inherit; font-size: var(--os-text-sm); cursor: pointer; text-align: left; }
+.os-ask-work-link:hover { background: var(--os-hover); color: var(--os-ink); }
+.os-ask-work-link:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+.os-ask-work-link > svg { flex: none; }

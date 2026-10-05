@@ -1,0 +1,22 @@
+use identity.concepts.{ groupMembership }
+
+@row
+shape groupMembership workViewerMembership {
+  row.id
+  accountId
+}
+
+/// Membership is evidence of affiliation, never evidence of employment or
+/// selection as the organization producing the current deliverable.
+@actor
+query groupMembership workViewerMemberships {
+  filter row => row.userId == actor.userId && row.status == "active"
+  paginate 20
+  shape workViewerMembership
+}
+
+/// Fresh server-assembled facts about the authenticated person. This does not
+/// select an organization, change authority, or infer a missing job title.
+@executor("workViewerContext")
+@args(profile="object")
+builtin workViewerContext { }

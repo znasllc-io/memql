@@ -2692,6 +2692,28 @@ QueryClient.prototype.consentStatus = function (this: QueryClient, args: Consent
   return this.executeNamed("consentStatus", buildConsentStatus(args), opts);
 };
 
+/** conversationEvidenceById wraps the query named "conversationEvidenceById". */
+// Bound concept: v1:memory:conversationEvidence (machine-readable: BoundConcepts["conversationEvidenceById"] in generated_concepts.ts).
+export interface ConversationEvidenceByIdArgs {
+  evidenceId: string;
+}
+
+export function buildConversationEvidenceById(args: ConversationEvidenceByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("evidenceId: " + renderMemQLValue(args.evidenceId));
+  return "query conversationEvidenceById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    conversationEvidenceById(args: ConversationEvidenceByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.conversationEvidenceById = function (this: QueryClient, args: ConversationEvidenceByIdArgs = {} as ConversationEvidenceByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("conversationEvidenceById", buildConversationEvidenceById(args), opts);
+};
+
 /** The credit limit for one company location -- the read a checkout validation's backing service makes. */
 // Bound concept: v1:commerce:creditLimit (machine-readable: BoundConcepts["creditLimitForLocation"] in generated_concepts.ts).
 export interface CreditLimitForLocationArgs {
@@ -6876,6 +6898,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.recentSendJobs = function (this: QueryClient, args: RecentSendJobsArgs = {} as RecentSendJobsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("recentSendJobs", buildRecentSendJobs(args), opts);
+};
+
+/** Cheap availability check before spending anything on a semantic lookup. */
+// Bound concept: v1:memory:workAcknowledgement (machine-readable: BoundConcepts["recentWorkAcknowledgement"] in generated_concepts.ts).
+export interface RecentWorkAcknowledgementArgs {
+  domainId: string;
+}
+
+export function buildRecentWorkAcknowledgement(args: RecentWorkAcknowledgementArgs): string {
+  const parts: string[] = [];
+  parts.push("domainId: " + renderMemQLValue(args.domainId));
+  return "query recentWorkAcknowledgement(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    recentWorkAcknowledgement(args: RecentWorkAcknowledgementArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.recentWorkAcknowledgement = function (this: QueryClient, args: RecentWorkAcknowledgementArgs = {} as RecentWorkAcknowledgementArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("recentWorkAcknowledgement", buildRecentWorkAcknowledgement(args), opts);
 };
 
 /** One recipient by id.
@@ -12282,6 +12326,48 @@ declare module "./query.js" {
 
 QueryClient.prototype.workStepsForOwnerRun = function (this: QueryClient, args: WorkStepsForOwnerRunArgs = {} as WorkStepsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workStepsForOwnerRun", buildWorkStepsForOwnerRun(args), opts);
+};
+
+/** Membership is evidence of affiliation, never evidence of employment or selection as the organization producing the current deliverable. */
+// Bound concept: v1:identity:groupMembership (machine-readable: BoundConcepts["workViewerMemberships"] in generated_concepts.ts).
+export interface WorkViewerMembershipsArgs {
+}
+
+export function buildWorkViewerMemberships(args: WorkViewerMembershipsArgs): string {
+  void args;
+  return "query workViewerMemberships()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workViewerMemberships(args?: WorkViewerMembershipsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workViewerMemberships = function (this: QueryClient, args: WorkViewerMembershipsArgs = {} as WorkViewerMembershipsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workViewerMemberships", buildWorkViewerMemberships(args), opts);
+};
+
+/** workViewerOrganization wraps the query named "workViewerOrganization". */
+// Bound concept: v1:accounts:account (machine-readable: BoundConcepts["workViewerOrganization"] in generated_concepts.ts).
+export interface WorkViewerOrganizationArgs {
+  accountId: string;
+}
+
+export function buildWorkViewerOrganization(args: WorkViewerOrganizationArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "query workViewerOrganization(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workViewerOrganization(args: WorkViewerOrganizationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workViewerOrganization = function (this: QueryClient, args: WorkViewerOrganizationArgs = {} as WorkViewerOrganizationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workViewerOrganization", buildWorkViewerOrganization(args), opts);
 };
 
 /** Look up the worker registration owned by an identity row.
