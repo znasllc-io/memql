@@ -336,11 +336,13 @@ mutation goal updateWorkGoal {
     closeReason  string
     accountIds   []string
     ceilings     object
+    versionTime  datetime
   }
   update {
     accept { status, closedAt, closeReason, accountIds, ceilings }
     stamp {
       id: args.goalId
+      createdAt: args.versionTime ?? now
     }
   }
 }

@@ -209,6 +209,12 @@ type replierTurnRunner struct {
 }
 
 func (r *replierTurnRunner) RunTurn(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg) (string, error) {
+	bounded, stopBudget, err := r.engine.ContextWithRunDeadline(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer stopBudget()
+	ctx = bounded
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	sink := &workTurnDeltas{ctx: ctx, engine: r.engine, id: msg.RequestId, cancel: cancel}

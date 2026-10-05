@@ -4,7 +4,7 @@ import { AUTO_ROUTING, LocalAskRouteStore, isAuto, type AskRouteStore, type AskR
 export interface AskActivity {
   id: string;
   kind: "model" | "action" | "run" | "artifact";
-  phase: "running" | "completed" | "failed" | "fallback";
+  phase: "running" | "completed" | "failed" | "fallback" | "waiting" | "cancelled";
   at: string;
   provider?: string;
   model?: string;
@@ -15,7 +15,7 @@ export interface AskActivity {
   elapsedMs?: number;
   expectedMs?: number;
   estimateSource?: string;
-  call?: { vendor?: string; policy?: string; rule?: string; door?: string; modality?: string; executionSurface?: string; servedModel?: string; cacheKind?: string; inputTokens: number; outputTokens: number; tokensEstimated: boolean; totalCost: number; pricingConfigured: boolean; billing?: string; firstTokenMs: number };
+  call?: { promptName?: string; purpose?: string; attempt?: number; vendor?: string; policy?: string; rule?: string; door?: string; modality?: string; executionSurface?: string; servedModel?: string; cacheKind?: string; inputTokens: number; outputTokens: number; tokensEstimated: boolean; totalCost: number; pricingConfigured: boolean; billing?: string; firstTokenMs: number };
   error?: string;
 }
 export interface AskTurn {

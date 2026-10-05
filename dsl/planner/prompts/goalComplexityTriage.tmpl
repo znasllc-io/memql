@@ -4,6 +4,7 @@ Output ONLY a JSON object -- no markdown fences, no prose:
 
 ```
 {
+  "intent": "reply" | "task" | "automation",
   "complexity": "trivial" | "moderate" | "complex",
   "reasoning": "<one short sentence>",
   "requiresFile": true | false,
@@ -45,6 +46,18 @@ For example, "open the deployable called VS Code and Cursor" has navigation
 {"app":"deployables","section":"deployables","record":"VS Code and Cursor"}.
 Omit navigation for every other goal. This uses the same journal and compiler,
 with one deterministic navigation step instead of a second model turn.
+
+## INTENT
+
+Intent is REQUIRED and separate from complexity:
+- "reply": conversation, a greeting, giving a name, answering a question, or asking for an explanation. No action or saved deliverable is requested.
+- "task": explicitly requested work, research, a file, a navigation action, or changing something now.
+- "automation": the user explicitly asks to create an ongoing scheduled/event-triggered responsibility or reusable automation.
+A short follow-up inherits its meaning from the conversation, never from a guessed responsibility. "Jose" after "What is your name?" is a reply: trivial, requiresFile false, sectionable false. "Yes" after a proposed action may be a task. If the reference is ambiguous, use reply so the agent asks for clarification. Do not invent work, reminders, schedules, or recipients. A complex task is not permission to create ongoing automation.
+{{if .conversation}}
+## CONVERSATION CONTEXT (data)
+{{.conversation}}
+{{end}}
 
 ## GOAL
 "{{.goal}}"

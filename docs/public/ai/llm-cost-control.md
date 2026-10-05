@@ -103,6 +103,28 @@ nobody can audit is an assertion; see
 
 ## Where the chokepoint is (and why it moved)
 
+### Ask classification and repair limits
+
+Ask classifies the current message with its conversation context. Follow-ups
+do not reuse templates matched only to the latest words. Classification has
+a 15-second deadline; missing, invalid, or failed classification stops with
+a retryable error instead of escalating into automation authoring. Only an
+automation intent can send a conversation through that authoring path.
+
+New Ask runs start with a ten-minute allowance, twelve model calls, and one
+automatic retry. A conversational reply tightens those limits to sixty
+seconds and three model calls, preserving stricter existing ceilings. Time
+is measured from the stored run start, including classification; a retry or
+move to another replica does not restart the clock. The deadline covers
+in-flight prompt calls and the agent tool loop. Direct agent attempts also
+consume the run's model-call allowance and write attempt receipts.
+
+Automation repairs receive the complete bundle and its diagnostics. They
+may repair failing members or add missing dependencies, but cannot rewrite
+passing members. Repeated source, a cycle back to an earlier bundle, or two
+successive attempts with unchanged diagnostics stops repair before its
+attempt cap. Activity reports the stage, repair attempt, and final outcome.
+
 Every layer below is described in terms of a single point every LLM call
 passes. Until local models landed that point was the HTTP transport, and the
 statement "every chat/messages completion leaves the process through one

@@ -230,6 +230,42 @@ func TestModelCancelPropagatesAcrossTheHop(t *testing.T) {
 	}
 }
 
+func TestModelDeadlinePropagatesAcrossTheHop(t *testing.T) {
+	observed := make(chan struct{})
+	stopped := make(chan struct{})
+	h := newModelHop(t, func(ctx context.Context, req workerservice.ModelCallRequest, emit func(workerservice.ModelCallDelta)) workerservice.ModelCallOutcome {
+		close(observed)
+		<-ctx.Done()
+		close(stopped)
+		return workerservice.ModelCallOutcome{FinishReason: workerservice.ModelFinishCancelled}
+	}, nil)
+
+	ctx, cancel := context.WithTimeout(authorityCtx(t, h.owner), 100*time.Millisecond)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = h.link.router.ForwardModelCall(ctx, nodeB, "laptop", h.owner, h.start(), 10*time.Second, nil)
+	}()
+
+	select {
+	case <-observed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the machine never saw the call")
+	}
+	<-ctx.Done()
+
+	select {
+	case <-stopped:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancel did not reach the machine across the hop")
+	}
+	<-done
+	if got := h.link.cancelled(); len(got) == 0 {
+		t.Fatal("no ModelForwardCancel crossed the link")
+	}
+}
+
 // A machine belonging to somebody else must never serve a forwarded model
 // call, and the check that stops it must be on the RECEIVER: a sender that is
 // buggy or compromised is exactly the case this exists for. The envelope's

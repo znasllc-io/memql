@@ -24,7 +24,12 @@ package work
 // defaults applied by the caller, not a ceiling of nothing -- reading 0
 // as "nothing allowed" would park every run that did not fill the form in.
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+	"time"
+)
 
 // Ceiling names, as they appear on a budget approval.
 const (
@@ -237,4 +242,35 @@ func CheckCeilings(c Ceilings, s Spent, estimatedTokens int) *CeilingBreach {
 		}
 	}
 	return nil
+}
+
+// RunDeadline is absolute: resuming a run never gives it a fresh allowance.
+func RunDeadline(start time.Time, wallClockMs int64) (time.Time, error) {
+	if wallClockMs <= 0 {
+		return time.Time{}, nil
+	}
+	if start.IsZero() {
+		return time.Time{}, fmt.Errorf("a wall-clock budget requires a valid run start time")
+	}
+	if wallClockMs > math.MaxInt64/int64(time.Millisecond) {
+		return time.Time{}, fmt.Errorf("wall-clock budget is too large")
+	}
+	return start.Add(time.Duration(wallClockMs) * time.Millisecond), nil
+}
+
+// ReplyCeilings bounds conversation while preserving stricter owner limits.
+func ReplyCeilings(c Ceilings) map[string]any {
+	if c.WallClockMs == 0 || c.WallClockMs > 60000 {
+		c.WallClockMs = 60000
+	}
+	if c.MaxModelCalls == 0 || c.MaxModelCalls > 3 {
+		c.MaxModelCalls = 3
+	}
+	if c.MaxRetries == 0 || c.MaxRetries > 1 {
+		c.MaxRetries = 1
+	}
+	raw, _ := json.Marshal(c)
+	var out map[string]any
+	_ = json.Unmarshal(raw, &out)
+	return out
 }

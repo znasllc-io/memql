@@ -193,6 +193,7 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 	if turn.RunID == "" {
 		call, callErr := parser.RenderCall("work.createGoal", map[string]any{
 			"statement": prompt, "requestedVia": "ask",
+			"ceilings": map[string]any{"wallClockMs": 600000, "maxModelCalls": 12, "maxRetries": 1},
 			"input": map[string]any{"conversation": map[string]any{
 				"id": conversationID, "turnId": turnID, "messages": history, "pageContext": pageContext,
 			}},

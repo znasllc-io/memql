@@ -40,11 +40,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/airoute"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // maxRepairAttempts caps how many times the loop re-emits a failing bundle
@@ -100,7 +103,13 @@ func (l *PlannerAgentLoop) emitAndRepairBundle(ctx context.Context, budget budge
 		return authoringBundle{}, memql.SandboxReport{}, false, fmt.Errorf("authoring emit: nil sandbox (Gate 1 unavailable on this binary)")
 	}
 
-	bundle, err := l.emitBundle(ctx, statement, plan)
+	if err := ctx.Err(); err != nil {
+		return authoringBundle{}, memql.SandboxReport{}, false, err
+	}
+	if blocked, reason := budget(ctx, 0); blocked {
+		return authoringBundle{}, memql.SandboxReport{}, false, fmt.Errorf("authoring budget exhausted before emission: %s", reason)
+	}
+	bundle, err := l.emitBundle(airoute.WithCallPurpose(ctx, "Writing automation", 0), statement, plan)
 	if err != nil {
 		return authoringBundle{}, memql.SandboxReport{}, false, err
 	}
@@ -123,7 +132,13 @@ func (l *PlannerAgentLoop) emitAndRepairBundle(ctx context.Context, budget budge
 	// would compare a real ceiling to a zero meaning "nobody measured" and
 	// never block.
 	calls := 1
+	seen := map[string]bool{bundleFingerprint(bundle.Constructs): true}
+	sameDiagnostics := 0
+	previousDiagnostics := fmt.Sprint(failingDiagnostics(report))
 	for attempt := 1; attempt <= repairAttemptCap(); attempt++ {
+		if err := ctx.Err(); err != nil {
+			return bundle, report, false, err
+		}
 		if blocked, reason := budget(ctx, calls); blocked {
 			l.logger.Warn("authoring repair: the LLM budget for this job is spent; stopping repair loop",
 				"attempt", attempt, "calls", calls, "reason", reason)
@@ -137,20 +152,39 @@ func (l *PlannerAgentLoop) emitAndRepairBundle(ctx context.Context, budget budge
 			break
 		}
 
-		repaired, rerr := l.repairConstructs(ctx, statement, bundle, failing, report)
+		repaired, rerr := l.repairConstructs(airoute.WithCallPurpose(ctx, "Repairing automation", attempt), statement, bundle, failing, report)
 		if rerr != nil {
 			l.logger.Warn("authoring repair: re-emit failed; stopping",
 				"attempt", attempt, "calls", calls, "error", rerr)
 			return bundle, report, false, rerr
 		}
 		calls++
-		bundle.Constructs = mergeRepaired(bundle.Constructs, repaired)
+		if err := validateRepair(bundle.Constructs, failing, repaired); err != nil {
+			return bundle, report, false, err
+		}
+		candidate := mergeRepaired(bundle.Constructs, repaired)
+		fingerprint := bundleFingerprint(candidate)
+		if seen[fingerprint] {
+			return bundle, report, false, fmt.Errorf("authoring repair stopped at attempt %d: repeated source; diagnostics: %v", attempt, failingDiagnostics(report))
+		}
+		seen[fingerprint] = true
+		bundle.Constructs = candidate
 
 		report = sandbox.CompileBundle(bundle.Constructs)
 		if report.OK {
 			l.logger.Info("authoring repair: bundle compiled clean",
 				"automation", bundle.AutomationName, "attempt", attempt, "calls", calls)
 			return bundle, report, true, nil
+		}
+		diagnostics := fmt.Sprint(failingDiagnostics(report))
+		if diagnostics == previousDiagnostics {
+			sameDiagnostics++
+		} else {
+			sameDiagnostics = 0
+		}
+		previousDiagnostics = diagnostics
+		if sameDiagnostics >= 2 {
+			return bundle, report, false, fmt.Errorf("authoring repair stopped after %d attempts without diagnostic progress: %v", attempt, failingDiagnostics(report))
 		}
 		l.logger.Info("authoring repair: bundle still failing; re-attempting",
 			"attempt", attempt, "calls", calls, "failures", len(failingConstructs(bundle.Constructs, report)))
@@ -225,6 +259,8 @@ func (l *PlannerAgentLoop) repairConstructs(ctx context.Context, statement strin
 		"responsibility": statement,
 		"automationName": bundle.AutomationName,
 		"failing":        sandboxConstructsToMaps(failing),
+		"bundle":         sandboxConstructsToMaps(bundle.Constructs),
+		"reused":         bundle.ReuseEdges,
 		"diagnostics":    failingDiagnostics(report),
 		"now":            time.Now().UTC().Format(time.RFC3339),
 	})
@@ -406,4 +442,38 @@ func parseEmittedConstructs(resp any) ([]memql.SandboxConstruct, error) {
 		return nil, fmt.Errorf("authoring emit produced no usable constructs (raw=%s)", truncate(string(raw), 200))
 	}
 	return out, nil
+}
+
+// A repair can add a missing dependency, but cannot rewrite a passing member.
+func validateRepair(original, failing, repaired []memql.SandboxConstruct) error {
+	allowed := map[string]bool{}
+	existing := map[string]string{}
+	seen := map[string]bool{}
+	for _, c := range failing {
+		allowed[c.Kind+"/"+c.Name] = true
+	}
+	for _, c := range original {
+		existing[c.Kind+"/"+c.Name] = c.Source
+	}
+	for _, c := range repaired {
+		key := c.Kind + "/" + c.Name
+		if seen[key] {
+			return fmt.Errorf("authoring repair returned duplicate construct %s", key)
+		}
+		seen[key] = true
+		if source, ok := existing[key]; ok && !allowed[key] && source != c.Source {
+			return fmt.Errorf("authoring repair tried to change passing construct %s", key)
+		}
+	}
+	return nil
+}
+
+func bundleFingerprint(constructs []memql.SandboxConstruct) string {
+	parts := make([]string, 0, len(constructs))
+	for _, c := range constructs {
+		parts = append(parts, c.Kind+"/"+c.Name+"\n"+strings.TrimSpace(c.Source))
+	}
+	sort.Strings(parts)
+	raw, _ := json.Marshal(parts)
+	return string(id.NewUntracked().FromBytes(raw))
 }

@@ -28,6 +28,31 @@ func newTestCeilings(t *testing.T) (*RunCeilings, *recordingEngine) {
 	return c, eng
 }
 
+func TestRunDeadlineSurvivesReplicaChangeAndTighterReplyBudget(t *testing.T) {
+	first, eng := newTestCeilings(t)
+	answerRows(eng, map[string]any{"wallClockMs": 600000.0, "maxModelCalls": 12.0})
+	rc := aGoalBackedRun()
+	before, err := first.Deadline(context.Background(), rc)
+	if err != nil || !before.Equal(testNow.Add(10*time.Minute)) {
+		t.Fatalf("task deadline: %v %v", before, err)
+	}
+	eng.reply("workGoalForOwner", map[string]any{"id": ceilingGoalId, "ownerUserId": ceilingOwner, "ceilings": map[string]any{"wallClockMs": 60000.0, "maxModelCalls": 3.0}})
+	// A receiving agent has no originating planner's cache or caller deadline.
+	second := NewRunCeilings(eng, testLogger())
+	second.now = func() time.Time { return testNow.Add(59 * time.Second) }
+	for _, replica := range []*RunCeilings{first, second} {
+		deadline, err := replica.Deadline(context.Background(), rc)
+		if err != nil || !deadline.Equal(testNow.Add(time.Minute)) {
+			t.Fatalf("replica reset/staled the reply allowance: %v %v", deadline, err)
+		}
+	}
+	second.now = func() time.Time { return testNow.Add(61 * time.Second) }
+	breach := second.Admit(context.Background(), rc, 1)
+	if breach == nil || breach.Ceiling != work.CeilingWallClock {
+		t.Fatalf("resuming an expired run renewed its budget: %+v", breach)
+	}
+}
+
 // aGoalBackedRun is the context a dispatched work run carries.
 func aGoalBackedRun() common.RunContext {
 	return common.RunContext{

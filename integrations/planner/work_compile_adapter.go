@@ -54,6 +54,7 @@ type runWriter interface {
 	RecordCompileOutcome(ctx context.Context, ownerUserId, runId string, fields map[string]any) error
 	// RunBudget reports the ceilings this run inherits from its goal.
 	RunBudget(ctx context.Context, ownerUserId, runId string) (work.Ceilings, error)
+	LimitReplyBudget(ctx context.Context, ownerUserId, runId string) error
 }
 
 // WorkCompiler satisfies workintegration.Compiler.
@@ -85,20 +86,23 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 	}
 	near, sandbox := c.seams()
 
-	// THE CEILING IS READ BEFORE THE COMPILE, not during it. A read failure
-	// leaves it UNSET -- unbounded by this gate -- rather than blocking the
-	// compile, which matches every other ceiling here and keeps a transient
-	// database blip from making goals unrunnable. The attempt cap still
-	// bounds the loop, and the failure is logged rather than swallowed.
-	var maxCalls int
-	if ceilings, cerr := c.writer.RunBudget(ctx, req.OwnerUserId, req.RunId); cerr != nil {
-		if c.loop.logger != nil {
-			c.loop.logger.Warn("work compile: could not read the run's ceilings; the authoring repair loop is bounded by its attempt cap alone",
-				"runId", req.RunId, "error", cerr)
-		}
-	} else {
-		maxCalls = ceilings.MaxModelCalls
+	// Missing budget evidence must not silently turn into unlimited work.
+	runCeilings, err := c.writer.RunBudget(ctx, req.OwnerUserId, req.RunId)
+	if err != nil {
+		c.failRun(ctx, req, fmt.Errorf("work compile: cannot read run budget: %w", err))
+		return
 	}
+	deadline, err := work.RunDeadline(req.StartedAt, runCeilings.WallClockMs)
+	if err != nil {
+		c.failRun(ctx, req, err)
+		return
+	}
+	if !deadline.IsZero() {
+		bounded, cancel := context.WithDeadline(ctx, deadline)
+		defer cancel()
+		ctx = bounded
+	}
+	maxCalls := runCeilings.MaxModelCalls
 
 	out, err := c.loop.CompileGoalForRun(ctx, CompileRequest{
 		GoalId:        req.GoalId,
@@ -111,6 +115,13 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 	if err != nil {
 		c.failRun(ctx, req, err)
 		return
+	}
+
+	if out.Reply {
+		if err := c.writer.LimitReplyBudget(ctx, req.OwnerUserId, req.RunId); err != nil {
+			c.failRun(ctx, req, fmt.Errorf("work compile: cannot persist reply budget: %w", err))
+			return
+		}
 	}
 
 	if strings.TrimSpace(out.AutomationName) == "" {
@@ -215,6 +226,9 @@ func (c *WorkCompiler) failRun(ctx context.Context, req workintegration.CompileR
 // record hands the outcome to the work integration, which stamps internal
 // origin at its one site and borrows the owner's authority.
 func (c *WorkCompiler) record(ctx context.Context, ownerUserId, runId string, fields map[string]any) {
+	// A cancelled model call still needs a durable terminal receipt.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	delete(fields, "runId")
 	if err := c.writer.RecordCompileOutcome(ctx, ownerUserId, runId, fields); err != nil && c.loop.logger != nil {
 		c.loop.logger.Warn("work compile: recording the outcome failed; the run keeps its previous status",

@@ -90,6 +90,7 @@ type workNavigationDecision struct {
 }
 
 type sectionableDecision struct {
+	Intent     string                  `json:"intent"`
 	Navigation *workNavigationDecision `json:"navigation"`
 	// RequiresFile is the goal's semantic delivery contract, independent of
 	// sectionability. Nil is a malformed/omitted answer, never false.
@@ -343,6 +344,7 @@ func parseSectionableDecision(resp any) sectionableDecision {
 	}
 	raw = extractJSONObject(raw)
 	var env struct {
+		Intent       string                  `json:"intent"`
 		Navigation   *workNavigationDecision `json:"navigation"`
 		RequiresFile *bool                   `json:"requiresFile"`
 		FileName     string                  `json:"fileName"`
@@ -355,6 +357,7 @@ func parseSectionableDecision(resp any) sectionableDecision {
 		return sectionableDecision{}
 	}
 	return sectionableDecision{
+		Intent:       env.Intent,
 		Navigation:   env.Navigation,
 		RequiresFile: env.RequiresFile,
 		FileName:     env.FileName,
@@ -502,6 +505,10 @@ func withSectionableLogic(bundle authoringBundle) authoringBundle {
 // normally. guidance is the goal's description guidance (D23), passed only
 // when there is some.
 func (l *PlannerAgentLoop) classifySectionable(ctx context.Context, goal, nowRFC3339 string, guidance []map[string]any, goalInputs []string) (goalComplexity, string, sectionableDecision, error) {
+	return l.classifyGoal(ctx, goal, nowRFC3339, guidance, goalInputs, nil)
+}
+
+func (l *PlannerAgentLoop) classifyGoal(ctx context.Context, goal, nowRFC3339 string, guidance []map[string]any, goalInputs []string, conversation any) (goalComplexity, string, sectionableDecision, error) {
 	data := map[string]any{
 		"goal": truncate(goal, maxGoalChars),
 		"now":  nowRFC3339,
@@ -515,6 +522,13 @@ func (l *PlannerAgentLoop) classifySectionable(ctx context.Context, goal, nowRFC
 	// that work, and would bind nothing from the goal's input.
 	if len(goalInputs) > 0 {
 		data["inputKeys"] = goalInputs
+	}
+	if conversation != nil {
+		raw, err := json.Marshal(conversation)
+		if err != nil {
+			return complexityUnknown, "", sectionableDecision{}, err
+		}
+		data["conversation"] = string(raw)
 	}
 	resp, err := l.engine.InvokeAI(systemActorContext(ctx), "goalComplexityTriage", data)
 	if err != nil {

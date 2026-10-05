@@ -209,8 +209,8 @@ func TestEmitAndRepair_ExhaustsAttemptCap(t *testing.T) {
 	fe := emitFakeEngine(
 		emitJSON(t, []memql.SandboxConstruct{automationCon, brokenSpec}),
 		[]string{
-			emitJSON(t, []memql.SandboxConstruct{brokenSpec}),
-			emitJSON(t, []memql.SandboxConstruct{brokenSpec}),
+			emitJSON(t, []memql.SandboxConstruct{{Kind: brokenSpec.Kind, Name: brokenSpec.Name, Source: brokenSpec.Source + "// revision one"}}),
+			emitJSON(t, []memql.SandboxConstruct{{Kind: brokenSpec.Kind, Name: brokenSpec.Name, Source: brokenSpec.Source + "// revision two"}}),
 			emitJSON(t, []memql.SandboxConstruct{brokenSpec}),
 		},
 		planRowWithCalls("p1", 0),
@@ -218,7 +218,7 @@ func TestEmitAndRepair_ExhaustsAttemptCap(t *testing.T) {
 	l := newDesignLoop(fe)
 	// Always-fail report.
 	alwaysFail := failReport("spec", "specDigestItemActive", "syntax error", automationCon, brokenSpec)
-	sb := &fakeSandbox{reports: []memql.SandboxReport{alwaysFail}}
+	sb := &fakeSandbox{reports: []memql.SandboxReport{alwaysFail, failReport("spec", brokenSpec.Name, "different syntax error", automationCon, brokenSpec), alwaysFail}}
 
 	plan := designPlanWith(resolvedDependency{
 		designDependency: designDependency{Kind: "spec", Name: "specDigestItemActive", CandidateSource: brokenSpec.Source},
@@ -271,8 +271,8 @@ func TestEmitAndRepair_BudgetExhaustedStopsLoop(t *testing.T) {
 		Disposition:      dispAuthor,
 	})
 	_, _, clean, err := l.emitAndRepairBundle(context.Background(), exhaustedBudget, "digest", plan, sb)
-	if err != nil {
-		t.Fatalf("budget-exhausted stop must not error: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "before emission") {
+		t.Fatalf("expected exhausted budget before any call: %v", err)
 	}
 	if clean {
 		t.Fatalf("budget-exhausted bundle must not be reported clean")
@@ -424,14 +424,17 @@ func TestEmitAndRepair_ACallCeilingStopsTheLoop(t *testing.T) {
 	fe := emitFakeEngine(
 		emitJSON(t, []memql.SandboxConstruct{automationCon, brokenSpec}),
 		[]string{
-			emitJSON(t, []memql.SandboxConstruct{brokenSpec}),
-			emitJSON(t, []memql.SandboxConstruct{brokenSpec}),
+			emitJSON(t, []memql.SandboxConstruct{{Kind: brokenSpec.Kind, Name: brokenSpec.Name, Source: brokenSpec.Source + "// one"}}),
+			emitJSON(t, []memql.SandboxConstruct{{Kind: brokenSpec.Kind, Name: brokenSpec.Name, Source: brokenSpec.Source + "// two"}}),
 		},
 		nil,
 	)
 	l := newDesignLoop(fe)
 	sb := &fakeSandbox{reports: []memql.SandboxReport{
 		failReport("spec", "specDigestItemActive", "syntax error", automationCon, brokenSpec),
+		failReport("spec", "specDigestItemActive", "second error", automationCon, brokenSpec),
+		failReport("spec", "specDigestItemActive", "third error", automationCon, brokenSpec),
+		failReport("spec", "specDigestItemActive", "fourth error", automationCon, brokenSpec),
 	}}
 	plan := designPlanWith(resolvedDependency{
 		designDependency: designDependency{Kind: "spec", Name: "specDigestItemActive", CandidateSource: brokenSpec.Source},
@@ -458,15 +461,18 @@ func TestEmitAndRepair_ACallCeilingStopsTheLoop(t *testing.T) {
 	fe2 := emitFakeEngine(
 		emitJSON(t, []memql.SandboxConstruct{automationCon, brokenSpec}),
 		[]string{
-			emitJSON(t, []memql.SandboxConstruct{brokenSpec}),
-			emitJSON(t, []memql.SandboxConstruct{brokenSpec}),
-			emitJSON(t, []memql.SandboxConstruct{brokenSpec}),
+			emitJSON(t, []memql.SandboxConstruct{{Kind: brokenSpec.Kind, Name: brokenSpec.Name, Source: brokenSpec.Source + "// one"}}),
+			emitJSON(t, []memql.SandboxConstruct{{Kind: brokenSpec.Kind, Name: brokenSpec.Name, Source: brokenSpec.Source + "// two"}}),
+			emitJSON(t, []memql.SandboxConstruct{{Kind: brokenSpec.Kind, Name: brokenSpec.Name, Source: brokenSpec.Source + "// three"}}),
 		},
 		nil,
 	)
 	l2 := newDesignLoop(fe2)
 	sb2 := &fakeSandbox{reports: []memql.SandboxReport{
 		failReport("spec", "specDigestItemActive", "syntax error", automationCon, brokenSpec),
+		failReport("spec", "specDigestItemActive", "second error", automationCon, brokenSpec),
+		failReport("spec", "specDigestItemActive", "third error", automationCon, brokenSpec),
+		failReport("spec", "specDigestItemActive", "fourth error", automationCon, brokenSpec),
 	}}
 	if _, _, _, err := l2.emitAndRepairBundle(context.Background(), unboundedBudget, "digest", plan, sb2); err != nil {
 		t.Fatalf("control: %v", err)

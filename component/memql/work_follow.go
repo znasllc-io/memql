@@ -115,12 +115,27 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 			waiting, _ := run["waitingOn"].(map[string]any)
 			kind, _ := waiting["kind"].(string)
 			if kind != "retry" && kind != "replan" && kind != "repair" {
-				return answer.String(), fmt.Errorf("work is waiting for input; inspect this run in Nexus")
+				message := "Work is waiting for input; inspect this run in Nexus."
+				if onEvent != nil {
+					if err := onEvent(WorkEvent{ID: "work:" + runID, Kind: "run", Phase: "waiting", Name: "Request", Error: message}); err != nil {
+						return answer.String(), err
+					}
+				}
+				return answer.String(), fmt.Errorf("%s", message)
 			}
 		case "failed", "abandoned", "cancelled":
 			message, _ := run["errorMessage"].(string)
 			if message == "" {
 				message = "work " + fmt.Sprint(run["status"])
+			}
+			if onEvent != nil {
+				phase := "failed"
+				if run["status"] == "cancelled" {
+					phase = "cancelled"
+				}
+				if err := onEvent(WorkEvent{ID: "work:" + runID, Kind: "run", Phase: phase, Name: "Request", Error: message}); err != nil {
+					return answer.String(), err
+				}
 			}
 			return answer.String(), fmt.Errorf("%s", message)
 		}

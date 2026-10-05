@@ -125,6 +125,7 @@ func (i *Integration) pendingCompile(ctx context.Context, runId string) (Compile
 		RunId:              runId, GoalId: goalId, OwnerUserId: rowString(run, "ownerUserId"),
 		Statement: rowString(goal, "statement"), Input: rowMap(run, "input"), Ceilings: rowMap(goal, "ceilings"),
 	}
+	req.StartedAt, _ = time.Parse(time.RFC3339Nano, rowString(run, "startedAt"))
 	rc = common.RunContext{
 		RunId: runId, GoalId: goalId, OwnerUserId: req.OwnerUserId,
 		Mode: rowString(run, "mode"), ReplayPolicy: rowString(run, "replayPolicy"),
