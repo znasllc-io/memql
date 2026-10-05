@@ -1,8 +1,11 @@
 # The MemQL OS interface language
 
 [Supervised Visual Composition](SUPERVISED-VISUAL-COMPOSITION.md) extends this
-language for tangible configuration and supervised assistance. Fleet is its
-first approved implementation; broader app refactors require separate approval.
+language for tangible configuration and supervised assistance. This document
+owns the shared layout, controls, copy and interaction rules; composition uses
+those rules to expose objects and relationships. Fleet is its first approved
+implementation; broader app refactors require separate approval. Start UI/UX
+work with the repository's [memql-ui-design skill](../../.agents/skills/memql-ui-design/SKILL.md).
 
 Twelve rules. Ten are owner-set (epic memql#4848); 11 and 12 came out of
 epic memql#4937, and 11 is mostly a RATIFICATION -- Bin, Campaigns, Users,
@@ -126,10 +129,11 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
 
 ## Applying them
 
-- For UI/UX design and implementation, use the `frontend-design` skill before
-  coding. Read its `SKILL.md` from the available skills catalog; its installed
-  path is machine-specific. If unavailable, follow the workflow below and say
-  so. The owner should not need to request the skill for each UI change.
+- For UI/UX work, load the repository's `memql-ui-design` skill before coding.
+  It connects these rules to Supervised Visual Composition and the available
+  `frontend-design` skill. Installed plugin paths are machine-specific; the
+  repository skill and rules remain usable without that plugin. The owner
+  should not need to request a skill for each UI change.
 - Keep the owner's preference for simple, minimal interfaces explicit in the
   design plan. Reuse MemQL's palette, typography, spacing and kit. Briefly plan
   the control and its placement, compare that plan with the requested behavior,
@@ -170,6 +174,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
 - Remove redundant labels, helper text, outlines and decoration. Keep copy
   when it explains a consequence or helps the current decision. A skill's
   general suggestions never override these repository rules or the brief.
+- Editable collections, such as approved email domains, use an Add control
+  and individually removable entries with validation and keyboard support.
+  Do not require comma-separated input to manage a visible list. Explain the
+  consequence of the collection once, and show it only for modes that use it.
 - Build with the kit pieces; a surface needing a control the kit lacks
   promotes it on second use (`src/kit/controls.tsx` header) rather than
   respelling it locally.
@@ -181,6 +189,21 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
   a narrow viewport and reduced motion where relevant. When local testing is
   requested, rebuild through the supported local path and verify the result in
   the requested browser before calling it ready.
+
+### Human-facing terminal output
+
+Apply the same restraint to installer and uninstaller output. Use the canonical
+MemQL mark when it renders faithfully at terminal size; otherwise use the MemQL
+name. Keep the command's purpose, current stage and final outcome easy to scan.
+Progress should reflect real work; a small brand-specific animation may show
+activity, but must not invent completion percentages or imply success.
+
+Keep routine diagnostics in a local log, expose a verbose option, and print the
+log path with actionable failures. Summarize what was installed, retained or
+removed accurately, including partial completion and other cluster enrollments.
+Respect non-interactive output, narrow terminals and plain-text/no-color modes.
+These rules apply to human presentation; capability scripts retain their
+structured stdout contract and send human logs to stderr.
 
 ## Record lists
 

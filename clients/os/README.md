@@ -123,9 +123,11 @@ or client-visible session authority.
   rules every app surface follows: Head-first sections,
   filters behind one Refine affordance, quiet sort, the control line,
   one container grammar. When a rule and a surface disagree, the surface
-  is wrong. For UI/UX work, use the `frontend-design` skill and follow the
-  [design and verification workflow](DESIGN.md#applying-them), including the
-  owner's minimal-interface preference and real-browser visual review.
+  is wrong. For UI/UX work, start with the repository's
+  [memql-ui-design skill](../../.agents/skills/memql-ui-design/SKILL.md), which
+  loads this language, Supervised Visual Composition and the available
+  `frontend-design` skill. Follow the [design and verification workflow](DESIGN.md#applying-them),
+  including the owner's minimal-interface preference and real-browser review.
 - **Loading and nested navigation**: every app uses content-shaped, text-free
   skeletons for missing content, keeping accessible status labels off screen.
   Use `RecordListSkeleton`, `ContentSkeleton`, or `InlineSkeleton`; preserve
