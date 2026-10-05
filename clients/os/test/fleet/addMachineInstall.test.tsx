@@ -17,6 +17,7 @@ describe("Linux installation choices", () => {
     expect(onDraft).toHaveBeenCalledWith({ userLocal: true });
     expect(screen.queryByText(/Screen Recording/)).toBeNull();
     expect(screen.getByText(/X11/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^About / })).toBeNull();
   });
 
   it.each([false, true])("runs setup from the chosen install location (user local: %s)", (userLocal) => {
@@ -27,6 +28,26 @@ describe("Linux installation choices", () => {
       `${userLocal ? '"$HOME/.memql/bin/memql"' : "/usr/local/bin/memql"} worker setup --inference`,
     );
     expect(screen.getByText(/once the installer prints SUCCESS/)).toBeTruthy();
+  });
+});
+
+describe("concise install instructions", () => {
+  it.each([false, true])("shows only the commands needed for local models=%s and reveals the separate token on demand", (inference) => {
+    render(<InstallStop draft={{ ...EMPTY_DRAFT, inference }} token="test-worker-token" domain="example.com" />);
+    expect(screen.getByRole("button", { name: "Copy the install command" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Copy the local models setup command" }) !== null).toBe(inference);
+    const tokenDetails = screen.getByLabelText("the worker token").closest("details")!;
+    expect(tokenDetails.open).toBe(false);
+    fireEvent.click(screen.getByText("Connection token"));
+    expect(tokenDetails.open).toBe(true);
+    expect(screen.getByRole("button", { name: "Copy the worker token" })).toBeTruthy();
+    expect(screen.getByText(/private token shown only during this setup/)).toBeTruthy();
+  });
+
+  it("keeps a missing cluster address visible as a required change before running the command", () => {
+    render(<InstallStop draft={EMPTY_DRAFT} token="test-worker-token" domain="" />);
+    expect(screen.getByText("Set the cluster address before running this command.")).toBeTruthy();
+    expect(screen.getByText(/including https:\/\//)).toBeTruthy();
   });
 });
 

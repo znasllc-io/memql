@@ -14823,9 +14823,8 @@ button.os-cluster-mesh-peer:focus-visible {
  * NO NEW VISUAL IDEA, deliberately. The page is the compose reading on the
  * Fleet: the pane and the scroll are Deployables' (`.os-deploy-pane`), the
  * stops are the kit rail's, the bar is the kit's. What is new is only what
- * the content needs -- a numbered list because the manual steps ARE a
- * sequence, a rail inside a stop because the checks are stops, and a field
- * whose only control is the copy icon at its end.
+ * the content needs: commands in their execution order, a rail of checks,
+ * and a value that copies from anywhere in its row.
  */
 
 /* ---- the copy field (kit CopyField, D15) ---- */
@@ -14904,24 +14903,6 @@ button.os-cluster-mesh-peer:focus-visible {
  * take the remaining width rather than the panel's. */
 .os-fleet-addstop .os-choice-stack {
   gap: 4px;
-}
-
-/* THE MANUAL STEPS ARE NUMBERED because they are a sequence -- a terminal, a
- * paste, a password, a dialog, a download, each after the one before, on a
- * machine the reader is about to walk over to. The numbers are the shell's
- * own muted figures, not a device. */
-.os-fleet-steps {
-  margin: 4px 0 0;
-  padding: 0 0 0 1.4em;
-  display: grid;
-  gap: 6px;
-  font-size: var(--os-text-sm);
-  color: var(--os-ink);
-  text-wrap: pretty;
-}
-.os-fleet-steps li::marker {
-  color: var(--os-muted);
-  font-variant-numeric: tabular-nums;
 }
 
 /* The usual causes, after a long wait: a plain list, because there is no

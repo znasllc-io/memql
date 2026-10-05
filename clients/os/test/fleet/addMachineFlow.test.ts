@@ -8,13 +8,11 @@ import {
   checksFor,
   checksSettled,
   draftSummary,
-  installSteps,
   isSteady,
   matchRegistration,
   openStopFor,
   phaseOf,
   sameId,
-  serviceSentence,
   stopsFor,
   waitedLong,
   type Draft,
@@ -443,7 +441,7 @@ describe("the action bar follows the state", () => {
   });
 });
 
-describe("the manual steps", () => {
+describe("local model readiness", () => {
   it("requires a model response before Ready, Done, or completed Checks", () => {
     const m = machine({ labels: { "model:text-model": "tools=1" } });
     const f = facts({ draft: MAC_INF, mint: MINT, machine: m, beats: STEADY_BEATS });
@@ -465,27 +463,5 @@ describe("the manual steps", () => {
     const checks = checksFor(MAC_INF, m, STEADY_BEATS, NOW);
     expect(checks.find(c => c.id === "response")).toMatchObject({ state: "open", act: "pullRecommended" });
     expect(checksSettled(checks)).toBe(false);
-  });
-  it("are in the order they happen, and grow with what was asked for", () => {
-    const plain = installSteps(MAC);
-    expect(plain[0]).toMatch(/terminal on the machine/);
-    expect(plain[1]).toMatch(/password/);
-    expect(plain[plain.length - 1]).toContain("LaunchAgent");
-    expect(plain).toHaveLength(3);
-
-    const cu = installSteps(MAC_CU);
-    expect(cu).toHaveLength(4);
-    expect(cu[2]).toMatch(/Accessibility and Screen Recording/);
-
-    const inf = installSteps({ ...LINUX_CU, inference: true });
-    expect(inf).toHaveLength(5);
-    expect(inf[2]).toMatch(/Wayland/);
-    expect(inf[3]).toContain("systemd");
-    expect(inf[4]).toMatch(/several gigabytes/);
-  });
-
-  it("states the service as a fact of the command, per platform", () => {
-    expect(serviceSentence("mac")).toContain("com.znasllc.memql-worker");
-    expect(serviceSentence("linux")).toContain("memql-worker.service");
   });
 });
