@@ -68,9 +68,14 @@ func (e *MemQLEngine) askConversationSnapshotBuiltin(ctx context.Context, args m
 }
 
 func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscript) error {
+	var answers []AskTurn
+	seen := map[string]bool{}
+	for _, turn := range transcript.Turns {
+		seen[turn.ID] = true
+	}
 	for n := range transcript.Turns {
 		turn := &transcript.Turns[n]
-		if turn.RunID == "" || turn.State == "done" {
+		if turn.RunID == "" {
 			continue
 		}
 		runs, err := e.workRows(ctx, "workRunForOwner", turn.RunID)
@@ -81,6 +86,25 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 			return fmt.Errorf("conversation work is unavailable")
 		}
 		run := runs[0]
+		waiting, _ := run["waitingOn"].(map[string]any)
+		questions, err := e.workRows(ctx, "workQuestionsForOwnerRun", turn.RunID)
+		if err != nil {
+			return err
+		}
+		turn.Question = nil
+		for _, row := range questions {
+			question, answer := askFeedbackProjection(row)
+			if question != nil && run["status"] == "waiting" && BareShortId(fmt.Sprint(waiting["subject"])) == question.ID {
+				turn.Question = question
+			}
+			if answer != nil && !seen[answer.ID] {
+				answers = append(answers, *answer)
+				seen[answer.ID] = true
+			}
+		}
+		if turn.State == "done" {
+			continue
+		}
 		outcome, _ := run["classification"].(map[string]any)
 		if ack, _ := outcome["acknowledgement"].(string); ack != "" && (turn.State == "queued" || turn.State == "waiting" || turn.Acknowledgement != "") {
 			turn.Acknowledgement = ack
@@ -117,6 +141,9 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 		default:
 			turn.State, turn.Error = "done", ""
 		}
+		if turn.State != "waiting" {
+			turn.Question = nil
+		}
 		if answer != "" && turn.State == "done" {
 			turn.Answer = answer
 		}
@@ -126,5 +153,6 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 			}
 		}
 	}
+	transcript.Turns = append(transcript.Turns, answers...)
 	return nil
 }

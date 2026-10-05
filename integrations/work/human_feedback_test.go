@@ -51,6 +51,9 @@ func TestFeedbackValidatesRecordedAnswersAgainstTheQuestion(t *testing.T) {
 		answer         map[string]any
 		valid          bool
 	}{
+		{"choice", "answered", map[string]any{"text": "A spreadsheet instead"}, true},
+		{"multi", "answered", map[string]any{"text": "A spreadsheet instead"}, true},
+		{"choice", "answered", map[string]any{"text": "Other", "value": "invented"}, false},
 		{"text", "answered", map[string]any{"text": "PDF please"}, true}, {"text", "answered", map[string]any{"text": " "}, false},
 		{"choice", "answered", map[string]any{"value": "pdf"}, true}, {"choice", "approved", nil, false}, {"choice", "answered", map[string]any{"value": "invented"}, false},
 		{"multi", "answered", map[string]any{"values": []string{"pdf", "txt"}}, true}, {"multi", "answered", map[string]any{"values": []string{"pdf", "pdf"}}, false},

@@ -56,7 +56,7 @@ func closePendingCalls(messages []common.ChatMessage) []common.ChatMessage {
 	for _, m := range messages {
 		for _, c := range m.ToolCalls {
 			if !answered[c.ID] {
-				out = append(out, common.ChatMessage{Role: "tool", Name: c.Name, ToolCallId: c.ID, Content: "Not executed: waiting for the person's answer. Use the recorded answer when continuing."})
+				out = append(out, common.ChatMessage{Role: "tool", Name: c.Name, ToolCallId: c.ID, Content: "Not executed before the saved checkpoint. Inspect recorded results and any human answer before continuing."})
 				answered[c.ID] = true
 			}
 		}
@@ -66,6 +66,16 @@ func closePendingCalls(messages []common.ChatMessage) []common.ChatMessage {
 
 func (r *Replier) saveBeforeQuestion(ctx context.Context, name string, messages []common.ChatMessage) error {
 	if !isOwnedWorkExecution(ctx) || (name != "requestUserFeedback" && name != "requestComputerUseScope" && !strings.HasSuffix(name, ".requestUserFeedback") && !strings.HasSuffix(name, ".requestComputerUseScope")) {
+		return nil
+	}
+	return r.saveWorkProgress(ctx, messages)
+}
+
+// Persist completed tool receipts before another model call can fail. A
+// recovery on another replica continues from those results instead of replaying
+// the goal. Unexecuted calls in a partially completed batch remain explicit.
+func (r *Replier) saveWorkProgress(ctx context.Context, messages []common.ChatMessage) error {
+	if !isOwnedWorkExecution(ctx) {
 		return nil
 	}
 	writer, ok := r.engine.(interface {

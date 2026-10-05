@@ -19,6 +19,8 @@ export interface AskActivity {
   error?: string;
 }
 export interface AskTurn {
+  question?: AskQuestion;
+  answerOnly?: boolean;
   goalId?: string;
   runId?: string;
   acknowledgement?: string;
@@ -34,6 +36,7 @@ export interface AskTurn {
   activity: AskActivity[];
   error?: string;
 }
+export interface AskQuestion { id: string; text: string; kind: "text" | "choice" | "multi"; options: { value: string; label: string }[] }
 export interface ConversationSummary { id: string; title: string; createdAt?: string }
 export interface AskConversationStore {
   list(): Promise<ConversationSummary[]>;
@@ -81,6 +84,19 @@ export class ConversationSession {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private patch(patch: Partial<ConversationState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach(listener => listener()); }
   setDraft = (draft: string) => this.patch({ draft });
+  openWork = async (runId: string) => {
+    if (this.state.busy || this.state.voiceActive) { this.patch({ error: "Finish the current reply before opening another conversation." }); return; }
+    try {
+      if (!this.transport.openWork) throw new Error("Opening work in Ask is unavailable.");
+      const conversation = await this.transport.openWork(runId);
+      if (await this.select(conversation.id)) await this.reload();
+    } catch (error) { this.patch({ error: message(error) }); }
+  };
+  answerQuestion = async (question: AskQuestion, answer: Record<string, unknown>) => {
+    if (!this.transport.answerQuestion) throw new Error("Answering questions is unavailable.");
+    await this.transport.answerQuestion(question.id, answer);
+    await this.reload(false);
+  };
   recordDictation = (activity: AskActivity) => {
     const previous = this.state.dictationActivity.find(item => item.id === activity.id);
     const completed = this.state.dictationActivity.filter(item => item.phase === "completed" && item.provider === activity.provider && item.model === activity.model && (item.elapsedMs ?? 0) > 0).slice(-20).map(item => item.elapsedMs!).sort((a, b) => a - b);

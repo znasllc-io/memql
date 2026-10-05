@@ -17,6 +17,7 @@ import (
 )
 
 type workPromptEngine struct {
+	savedContinuation []common.ChatMessage
 	registryEngine
 	prompts *memql.PromptRegistry
 	viewer  map[string]any
@@ -142,4 +143,9 @@ func TestAWorkTurnRunsAtItsOverridesLevelModelAndEffort(t *testing.T) {
 	if _, _, err := turn(&common.StepOverride{Level: "embeddings"}); err == nil {
 		t.Fatal("an embeddings override prepared a turn")
 	}
+}
+
+func (e *workPromptEngine) SaveWorkContinuation(_ context.Context, messages []common.ChatMessage) error {
+	e.savedContinuation = append([]common.ChatMessage(nil), messages...)
+	return nil
 }

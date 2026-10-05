@@ -18,7 +18,7 @@ const workAcknowledgementConcept = "v1:memory:workAcknowledgement"
 // Context, owner and prompt changes produce a separate search domain. A similar
 // request is only a wording candidate: the fresh classifier must adopt or rewrite
 // it. This cache never bypasses classification or reuses a plan/answer/permission.
-func (e *MemQLEngine) acknowledgementDomain(owner string, input map[string]any) (string, error) {
+func (e *MemQLEngine) acknowledgementDomain(ctx context.Context, owner string, input map[string]any) (string, error) {
 	conversation, _ := input["conversation"].(map[string]any)
 	contextData := map[string]any{}
 	for k, v := range conversation {
@@ -35,7 +35,7 @@ func (e *MemQLEngine) acknowledgementDomain(owner string, input map[string]any) 
 	if !ok {
 		return "", fmt.Errorf("classifier prompt unavailable")
 	}
-	binding, _ := ActiveEmbedderBinding()
+	binding, _ := CurrentEmbedderBinding(ctx)
 	raw, err := json.Marshal([]any{BareShortId(owner), inputData, prompt.TemplateSource, binding})
 	if err != nil {
 		return "", err
@@ -80,7 +80,7 @@ func (e *MemQLEngine) workAcknowledgementCacheBuiltin(ctx context.Context, args 
 	if strings.TrimSpace(statement) == "" || len([]rune(statement)) > 1200 {
 		return nil, nil
 	}
-	domain, err := e.acknowledgementDomain(subject.UserId, input)
+	domain, err := e.acknowledgementDomain(ctx, subject.UserId, input)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func (e *MemQLEngine) workAcknowledgementCacheBuiltin(ctx context.Context, args 
 		if !ok {
 			return nil, fmt.Errorf("acknowledgment embedding is unavailable")
 		}
-		_, err = embed(ctx, map[string]any{"nodeId": workAcknowledgementConcept + ":" + shortID, "text": statement, "concept": workAcknowledgementConcept, "vectorField": "request"}, 0)
+		_, err = embed(ctx, map[string]any{"nodeId": workAcknowledgementConcept + ":" + shortID, "text": statement, "concept": workAcknowledgementConcept, "vectorField": "content"}, 0)
 		return nil, err
 	}
 	candidates, err := e.memoryCall(ctx, "query", "memory.recentWorkAcknowledgement", map[string]any{"domainId": domain})

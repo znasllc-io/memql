@@ -2,10 +2,10 @@ package memql
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/parser"
@@ -20,7 +20,17 @@ func (e *MemQLEngine) SaveWorkContinuation(ctx context.Context, messages []commo
 	if !ok || ac == nil || BareShortId(ac.UserId) != BareShortId(run.OwnerUserId) {
 		return fmt.Errorf("continuation requires owned work")
 	}
-	call, err := parser.RenderCall("updateWorkRun", map[string]any{"runId": run.RunId, "continuation": map[string]any{"stepKey": run.StepKey, "messages": messages, "at": time.Now().UTC()}})
+	raw, err := json.Marshal(messages)
+	if err != nil {
+		return err
+	}
+	// Append a receipt rather than read-merging the run row. Heartbeats,
+	// cancellation and answers can arrive on another replica during this write.
+	call, err := parser.RenderCall("createWorkObservation", map[string]any{
+		"observationId": fmt.Sprintf("continuation-%s-%x", BareShortId(run.RunId), sha256.Sum256(append([]byte(run.StepKey), raw...))),
+		"runId":         run.RunId, "stepKey": run.StepKey, "kind": "note", "content": "Saved execution progress",
+		"data": map[string]any{"continuation": true, "messages": messages},
+	})
 	if err != nil {
 		return err
 	}
@@ -40,10 +50,19 @@ func (e *MemQLEngine) RestoreWorkContinuation(ctx context.Context, messages []co
 	if len(rows) != 1 {
 		return nil, fmt.Errorf("work continuation is unavailable")
 	}
-	saved, _ := rows[0]["continuation"].(map[string]any)
-	if saved["stepKey"] != run.StepKey {
+	call, err := parser.RenderCall("workContinuationForOwnerRun", map[string]any{"runId": run.RunId, "stepKey": run.StepKey})
+	if err != nil {
+		return nil, err
+	}
+	result, err := e.Execute(ContextWithFreshRead(ctx), "query "+call)
+	if err != nil {
+		return nil, err
+	}
+	checkpoints := MaterializeRows(result.OutputPayload())
+	if len(checkpoints) == 0 {
 		return messages, nil
 	}
+	saved, _ := checkpoints[0]["data"].(map[string]any)
 	raw, err := json.Marshal(saved["messages"])
 	if err != nil {
 		return nil, err
@@ -55,11 +74,25 @@ func (e *MemQLEngine) RestoreWorkContinuation(ctx context.Context, messages []co
 	if len(prior) == 0 {
 		return messages, nil
 	}
+	// Refresh instructions/profile context rather than resurrecting the system
+	// prompt captured by a previous replica or before a profile change.
+	if len(messages) > 0 && messages[0].Role == "system" && prior[0].Role == "system" {
+		prior[0] = messages[0]
+	}
 	// Keep current instructions and the person's newly recorded answers. The
 	// saved tail already contains the original request and completed results.
 	for _, m := range messages {
 		if m.Role == "user" && strings.HasPrefix(m.Content, "[Recorded answer for this ") {
-			prior = append(prior, m)
+			found := false
+			for _, previous := range prior {
+				if previous.Role == m.Role && previous.Content == m.Content {
+					found = true
+					break
+				}
+			}
+			if !found {
+				prior = append(prior, m)
+			}
 		}
 	}
 	return prior, nil

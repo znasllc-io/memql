@@ -25,6 +25,7 @@ import (
 // that can run in degraded mode should return an instance that no-ops
 // instead, so the app still boots.
 func (a *App) materializePlugins() {
+	memql.SetEmbedderBindingReader(a.engine.ReadEmbedderBinding)
 	plugins := memql.RegisteredPlugins()
 	if len(plugins) == 0 {
 		return

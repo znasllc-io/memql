@@ -85,13 +85,13 @@ func TestAcknowledgementReuseValidatesScopeTTLAndSourceAcrossReplicas(t *testing
 func TestAcknowledgementDomainSeparatesOwnerContextAndPrompt(t *testing.T) {
 	e, _, _ := readMergeTestEngine(t)
 	input := map[string]any{"conversation": map[string]any{"id": "a", "turnId": "1", "messages": []any{}}}
-	domain, err := e.acknowledgementDomain("owner", input)
+	domain, err := e.acknowledgementDomain(context.Background(), "owner", input)
 	require.NoError(t, err)
 	input["conversation"].(map[string]any)["id"] = "b"
-	same, err := e.acknowledgementDomain("owner", input)
+	same, err := e.acknowledgementDomain(context.Background(), "owner", input)
 	require.NoError(t, err)
 	require.Equal(t, domain, same)
-	other, err := e.acknowledgementDomain("another", input)
+	other, err := e.acknowledgementDomain(context.Background(), "another", input)
 	require.NoError(t, err)
 	require.NotEqual(t, domain, other)
 	prompt, _ := e.prompts.Get("goalComplexityTriage")
@@ -100,7 +100,7 @@ func TestAcknowledgementDomainSeparatesOwnerContextAndPrompt(t *testing.T) {
 	e.prompts.mu.Lock()
 	e.prompts.byName[copyPrompt.Name] = &copyPrompt
 	e.prompts.mu.Unlock()
-	changed, err := e.acknowledgementDomain("owner", input)
+	changed, err := e.acknowledgementDomain(context.Background(), "owner", input)
 	require.NoError(t, err)
 	require.NotEqual(t, domain, changed)
 }

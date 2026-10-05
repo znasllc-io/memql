@@ -133,10 +133,10 @@ func (i *Integration) Embed(ctx context.Context, text, providerName string) ([]f
 	}
 
 	// Check cache first.
-	key := cacheKey(text, providerName, activeBindingID())
+	key := cacheKey(text, providerName, activeBindingID(ctx))
 	if i.db() != nil {
 		cached, err := i.lookupCache(ctx, key)
-		if err == nil && cached != nil {
+		if err == nil && cached != nil && memql.ValidateEmbeddingVector(ctx, providerName, 0, cached) == nil {
 			return cached, nil
 		}
 	}
@@ -150,6 +150,10 @@ func (i *Integration) Embed(ctx context.Context, text, providerName string) ([]f
 	vec, err := provider.Embed(ctx, text)
 	if err != nil {
 		return nil, fmt.Errorf("embed: compute embedding: %w", err)
+	}
+
+	if err := memql.ValidateEmbeddingVector(ctx, providerName, provider.Dimensions(), vec); err != nil {
+		return nil, err
 	}
 
 	// Store in cache (best-effort).
@@ -194,7 +198,7 @@ func (i *Integration) embedHandler(ctx context.Context, args map[string]any, _ i
 		"provider":   providerName,
 		"textLen":    len(text),
 		"dimensions": len(vec),
-		"cacheKey":   cacheKey(text, providerName, activeBindingID()),
+		"cacheKey":   cacheKey(text, providerName, activeBindingID(ctx)),
 	})
 
 	return []memorynodes.MemoryNode{{
@@ -260,9 +264,21 @@ func (i *Integration) findSimilarHandler(ctx context.Context, args map[string]an
 
 	// Embed query text.
 	providerName, _ := args["provider"].(string)
+	if providerName == "" {
+		var err error
+		providerName, err = memql.ResolveEmbedderProvider(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 	vec, err := i.Embed(ctx, text, providerName)
 	if err != nil {
 		return nil, fmt.Errorf("findSimilar: %w", err)
+	}
+
+	table, err := memql.EmbeddingVectorTable(providerName, len(vec))
+	if err != nil {
+		return nil, err
 	}
 
 	// Format embedding as pgvector literal: [0.1,0.2,...]
@@ -332,7 +348,7 @@ func (i *Integration) findSimilarHandler(ctx context.Context, args map[string]an
 		SELECT latest.id, latest.concept, latest.payload,
 		       1 - (nv.embedding <=> $1::vector) AS similarity
 		FROM latest
-		JOIN node_vectors nv ON nv.id = latest.id
+		JOIN ` + table + ` nv ON nv.id = latest.id
 		WHERE nv.vector_field = $3
 		ORDER BY nv.embedding <=> $1::vector
 		LIMIT $4
@@ -419,10 +435,14 @@ func (i *Integration) storeHandler(ctx context.Context, args map[string]any, _ i
 		return nil, fmt.Errorf("store: %w", err)
 	}
 
+	table, err := memql.EnsureEmbeddingVectorTable(ctx, i.db(), providerName, len(vec))
+	if err != nil {
+		return nil, err
+	}
 	vecLiteral := vectorLiteral(vec)
 
 	query := `
-		INSERT INTO node_vectors (id, concept, vector_field, embedding, created_at, updated_at)
+  INSERT INTO ` + table + ` (id, concept, vector_field, embedding, created_at, updated_at)
 		VALUES ($1, $2, $3, $4::vector, NOW(), NOW())
 		ON CONFLICT (id, vector_field) DO UPDATE SET
 		  embedding = EXCLUDED.embedding,
@@ -503,7 +523,7 @@ func (i *Integration) storeCache(ctx context.Context, key, provider string, vec 
 		   binding_id = EXCLUDED.binding_id,
 		   created_at = NOW(),
 		   expires_at = EXCLUDED.expires_at`,
-		key, vecLiteral, provider, activeBindingID(),
+		key, vecLiteral, provider, activeBindingID(ctx),
 		fmt.Sprintf("%d seconds", int(embeddingCacheTTL.Seconds())),
 	)
 	return err
@@ -543,9 +563,9 @@ func cacheKey(text, provider, bindingID string) string {
 // it were the new one: not a stale answer, a vector from another space, with a
 // cosine distance against it that is a number with no meaning. The width is the
 // part that differs, so the width is in the key.
-func activeBindingID() string {
-	b, ok := memql.ActiveEmbedderBinding()
-	if !ok {
+func activeBindingID(ctx context.Context) string {
+	b, err := memql.CurrentEmbedderBinding(ctx)
+	if err != nil {
 		return ""
 	}
 	return fmt.Sprintf("%s@%d", b.ProviderRef, b.Dimensions)

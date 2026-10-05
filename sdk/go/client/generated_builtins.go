@@ -55,6 +55,26 @@ func AskConversationSnapshotBuild(args AskConversationSnapshotArgs) string {
 	return b.String()
 }
 
+// AskWorkConversation -- Open this owner's existing work in its Ask conversation, creating a private conversation for Nexus-originated work without starting another run.
+type AskWorkConversationArgs struct {
+	RunId string
+}
+
+// AskWorkConversation calls the engine builtin askWorkConversation.
+func (qc *QueryClient) AskWorkConversation(ctx context.Context, args AskWorkConversationArgs) (*Result, error) {
+	call := AskWorkConversationBuild(args)
+	return qc.executeNamed(ctx, "askWorkConversation", call)
+}
+
+func AskWorkConversationBuild(args AskWorkConversationArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin askWorkConversation(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // AutomationGraph -- The static loop graph over the automations this node registered, one v1:platform:automationNode row per automation: its trigger, filter, writes, the calls the graph cannot see into, its @loop and @mode, the automations it starts and why, its stratum, and the cycle it lies on. Built once per registered set and never persisted. Carries no run and no payload.
 type AutomationGraphArgs struct {
 }
@@ -83,6 +103,26 @@ func (qc *QueryClient) AutomationLoopStops(ctx context.Context, args AutomationL
 func AutomationLoopStopsBuild(args AutomationLoopStopsArgs) string {
 	_ = args
 	return "builtin automationLoopStops()"
+}
+
+// BindEmbedder -- Choose the cluster's first embedding model, after verifying its output. Existing bindings are idempotent; changing the model requires a reindex.
+type BindEmbedderArgs struct {
+	Provider string
+}
+
+// BindEmbedder calls the engine builtin bindEmbedder.
+func (qc *QueryClient) BindEmbedder(ctx context.Context, args BindEmbedderArgs) (*Result, error) {
+	call := BindEmbedderBuild(args)
+	return qc.executeNamed(ctx, "bindEmbedder", call)
+}
+
+func BindEmbedderBuild(args BindEmbedderArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin bindEmbedder(")
+	b.WriteString("provider: ")
+	b.WriteString(quoteMemQL(args.Provider))
+	b.WriteString(")")
+	return b.String()
 }
 
 // BranchRun -- Branch one of the caller's finished runs at a step: a NEW run (mode fork) whose steps before the branch point are served by REFERENCE from the source run -- they do not run again -- and whose branch step runs live with the person's changes, followed by everything after it (design D19). The source run is untouched. When the branch step was answered by an app session, the branch is a NEW session started against the workspace as it was before that step, rebuilt from the recording's content-addressed files; a branch whose snapshot is missing a file's content is refused naming the file, because a branch from a partial workspace would diverge without saying so. Returns {runId, forkedFromRunId, forkAtStepKey}.

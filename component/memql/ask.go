@@ -19,26 +19,35 @@ import (
 )
 
 type AskTurn struct {
-	VoiceInterrupted bool        `json:"voiceInterrupted,omitempty"`
-	ID               string      `json:"id"`
-	Prompt           string      `json:"prompt"`
-	Answer           string      `json:"answer"`
-	Context          string      `json:"context,omitempty"`
-	State            string      `json:"state"`
-	StartedAt        time.Time   `json:"startedAt"`
-	EndedAt          *time.Time  `json:"endedAt,omitempty"`
-	Activity         []WorkEvent `json:"activity"`
-	Error            string      `json:"error,omitempty"`
-	GoalID           string      `json:"goalId,omitempty"`
-	RunID            string      `json:"runId,omitempty"`
-	Workload         string      `json:"workload,omitempty"`
-	Background       bool        `json:"background,omitempty"`
-	Acknowledgement  string      `json:"acknowledgement,omitempty"`
-	WorkTitle        string      `json:"workTitle,omitempty"`
+	VoiceInterrupted bool         `json:"voiceInterrupted,omitempty"`
+	ID               string       `json:"id"`
+	Prompt           string       `json:"prompt"`
+	Answer           string       `json:"answer"`
+	Context          string       `json:"context,omitempty"`
+	State            string       `json:"state"`
+	StartedAt        time.Time    `json:"startedAt"`
+	EndedAt          *time.Time   `json:"endedAt,omitempty"`
+	Activity         []WorkEvent  `json:"activity"`
+	Error            string       `json:"error,omitempty"`
+	GoalID           string       `json:"goalId,omitempty"`
+	RunID            string       `json:"runId,omitempty"`
+	Workload         string       `json:"workload,omitempty"`
+	Background       bool         `json:"background,omitempty"`
+	Acknowledgement  string       `json:"acknowledgement,omitempty"`
+	WorkTitle        string       `json:"workTitle,omitempty"`
+	Question         *AskQuestion `json:"question,omitempty"`
+	AnswerOnly       bool         `json:"answerOnly,omitempty"`
 	// Route is the source choice the turn's goal was opened with; absent for
 	// Auto. The run row carries the choice every node honours -- this is the
 	// conversation's own record of it.
 	Route *AskRoute `json:"route,omitempty"`
+}
+
+type AskQuestion struct {
+	ID      string           `json:"id"`
+	Text    string           `json:"text"`
+	Kind    string           `json:"kind"`
+	Options []map[string]any `json:"options"`
 }
 
 // AskRoute is the conversation's source choice for one turn, as the wire

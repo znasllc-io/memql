@@ -130,6 +130,13 @@ func validateFeedbackAnswer(subject map[string]any, decision string, answer map[
 	if decision != "answered" {
 		return fmt.Errorf("work: this question needs an answer")
 	}
+	// Every human question accepts an ad hoc answer as well as its suggestions.
+	// A supplied invalid option is still rejected rather than hidden by prose.
+	if text := strings.TrimSpace(rowString(answer, "text")); len(text) > 8000 {
+		return fmt.Errorf("work: the answer exceeds 8000 characters")
+	} else if text != "" && rowString(answer, "value") == "" && len(rowStringSlice(answer, "values")) == 0 {
+		return nil
+	}
 	if kind == "text" {
 		if strings.TrimSpace(rowString(answer, "text")) == "" {
 			return fmt.Errorf("work: enter an answer before continuing")

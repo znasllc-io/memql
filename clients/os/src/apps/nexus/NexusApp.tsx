@@ -49,6 +49,7 @@ import {
   useRuns,
 } from "./useNexus";
 import { useSession } from "../../chrome/access";
+import { useOpenAskWork } from "../../ask/AskProvider";
 
 // WORK: what you asked the system to do, what it did about it, and the places
 // it had to stop and ask you.
@@ -106,6 +107,7 @@ export function NexusApp({
   const cancel = useCancelGoal();
   const derive = useDeriveRun();
   const decide = useDecideApproval();
+  const openAskWork = useOpenAskWork();
 
   const [selectedGoalId, setSelectedGoalId] = useState("");
   const [openGoalId, setOpenGoalId] = useState("");
@@ -202,6 +204,11 @@ export function NexusApp({
 
   function openApproval(approvalId: string) {
     if (approvalId.trim() === "") return;
+    const approval = approvals.snapshot.rows.map(approvalFromRow).find(row => idTail(row.id) === idTail(approvalId));
+    if (openAskWork && approval?.kind === "feedback" && ["text", "choice", "multi"].includes(String(approval.subject?.kind))) {
+      openAskWork(approval.runId);
+      return;
+    }
     setSelectedApprovalId(approvalId);
     navigate("approvals");
   }
@@ -319,6 +326,7 @@ export function NexusApp({
         decide={decide}
         selectedApprovalId={selectedApprovalId}
         onSelectApproval={setSelectedApprovalId}
+        onAnswerInAsk={openAskWork ?? undefined}
         onOpenRun={openRun}
         procedures={feeds.procedureRows}
         onOpenProcedure={openProcedureById}

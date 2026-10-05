@@ -7,6 +7,13 @@ use identity.concepts.{ user }
 @args(profile="object")
 builtin askConversationSnapshot { conversationId string! }
 
+/// Open this owner's existing work in its Ask conversation, creating a private
+/// conversation for Nexus-originated work without starting another run.
+@sdk
+@executor("askWorkConversation")
+@args(profile="object")
+builtin askWorkConversation { runId string! }
+
 /// A private conversation with MemQL. The transcript is written by the agent
 /// service; ownership is always taken from the authenticated caller.
 // @no-displayCard: contains a private transcript object; Ask renders named message rows and a separate conversation list, not a generic concept card.

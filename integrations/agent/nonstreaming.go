@@ -607,6 +607,9 @@ BackgroundLoop:
 				ToolCallId: tc.ID,
 				Content:    content,
 			})
+			if err := r.saveWorkProgress(ctx, messages); err != nil {
+				return nil, err
+			}
 		}
 
 		if !hadSuccess {

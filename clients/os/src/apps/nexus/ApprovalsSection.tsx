@@ -90,6 +90,7 @@ export interface ApprovalsSectionProps {
   selectedApprovalId: string;
   onSelectApproval: (approvalId: string) => void;
   onOpenRun: (runId: string) => void;
+  onAnswerInAsk?: (runId: string) => void;
   /**
    * The learned procedures, so a promotion can name the procedure it would
    * move -- and its parameters by the goal inputs that bind them. Empty until
@@ -106,6 +107,7 @@ export function ApprovalsSection({
   selectedApprovalId,
   onSelectApproval,
   onOpenRun,
+  onAnswerInAsk,
   procedures = [],
   onOpenProcedure,
 }: ApprovalsSectionProps) {
@@ -160,6 +162,7 @@ export function ApprovalsSection({
   }, [selectedApprovalId]);
 
   const isFeedback = selected?.kind === "feedback";
+  const answerInAsk = isFeedback && ["text", "choice", "multi"].includes(String(selected?.subject?.kind)) && onAnswerInAsk;
   const hasOptions = (selected?.options.length ?? 0) > 0;
   const answerReady = isFeedback
     ? hasOptions
@@ -169,7 +172,9 @@ export function ApprovalsSection({
 
   const acts: Act[] = [];
   if (selected !== null) {
-    if (isFeedback) {
+    if (answerInAsk) {
+      acts.push({ label: "Answer in Ask", tone: "primary", onAct: () => answerInAsk(selected.runId) });
+    } else if (isFeedback) {
       if (answerReady) {
         acts.push({
           label: "Send answer",
@@ -245,7 +250,7 @@ export function ApprovalsSection({
             this section is for -- into a column. */}
         {selected === null ? null : (
           <div className="os-nexus-column os-nexus-aside">
-            <ApprovalDetail
+            {answerInAsk ? <p className="os-nexus-approval-ask">{selected.question}</p> : <ApprovalDetail
               approval={selected}
               run={runsById.get(idTail(selected.runId)) ?? null}
               choices={choices}
@@ -257,7 +262,7 @@ export function ApprovalsSection({
               onOpenRun={onOpenRun}
               procedures={procedures}
               onOpenProcedure={onOpenProcedure}
-            />
+            />}
           </div>
         )}
       </div>
@@ -270,7 +275,7 @@ export function ApprovalsSection({
           // succeed should not be offered -- but an empty bar with no
           // account of itself reads as something nobody built.
           detail={
-            isFeedback && !answerReady
+            answerInAsk ? undefined : isFeedback && !answerReady
               ? hasOptions
                 ? "pick an answer above to send it"
                 : "write an answer above to send it"

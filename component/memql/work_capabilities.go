@@ -137,8 +137,17 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 		return a < b
 	})
 	total := len(matches)
-	if len(matches) > 30 {
-		matches = matches[:30]
+	// Discovery is a shortlist, not the entire tool registry in each model
+	// turn. Large catalogs previously filled the local model's context before
+	// it had executed a single read. An exact-name lookup retains the contract.
+	if len(matches) > 6 {
+		matches = matches[:6]
+	}
+	for _, match := range matches {
+		if !strings.EqualFold(search, fmt.Sprint(match["name"])) {
+			delete(match, "arguments")
+			match["description"] = boundedMemoryText(fmt.Sprint(match["description"]), 500)
+		}
 	}
 	catalog := []map[string]any{}
 	for concept, reads := range concepts {
@@ -150,7 +159,7 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 		catalog = append(catalog, map[string]any{"concept": concept, "reads": reads, "readCount": count})
 	}
 	sort.Slice(catalog, func(i, j int) bool { return catalog[i]["concept"].(string) < catalog[j]["concept"].(string) })
-	raw, _ := json.Marshal(map[string]any{"capabilities": matches, "concepts": catalog, "total": total, "truncated": total > len(matches), "note": "Read contracts describe available data, not proof that rows exist. Search a returned read name to inspect its arguments. Use common.similarTo for semantic search where indexed; empty semantic results do not prove absence."})
+	raw, _ := json.Marshal(map[string]any{"capabilities": matches, "concepts": catalog, "total": total, "truncated": total > len(matches), "note": "Read contracts describe available data, not proof that rows exist. Search a returned qualified name exactly to inspect its arguments. Use recallMemory for prior conversations and preferences. Empty semantic results do not prove absence."})
 	return []memorynodes.MemoryNode{{ID: "capabilities", Payload: raw}}, nil
 }
 

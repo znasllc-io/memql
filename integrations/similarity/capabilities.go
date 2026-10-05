@@ -276,6 +276,10 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 	}
 	embedElapsed := time.Since(embedStart)
 
+	table, err := memql.EmbeddingVectorTable(providerName, len(vec))
+	if err != nil {
+		return nil, err
+	}
 	vecLiteral := vectorLiteral(vec)
 
 	// Same-shape SQL as the retired knowledge.lookup but parameterised
@@ -296,7 +300,7 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 			SELECT latest.id, latest.payload,
 			       1 - (nv.embedding <=> $1::vector) AS similarity
 			FROM latest
-			JOIN node_vectors nv ON nv.id = latest.id
+			JOIN ` + table + ` nv ON nv.id = latest.id
 			WHERE nv.vector_field = 'content'
 			ORDER BY nv.embedding <=> $1::vector
 			LIMIT $3
@@ -314,7 +318,7 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 			SELECT latest.id, latest.payload,
 			       1 - (nv.embedding <=> $1::vector) AS similarity
 			FROM latest
-			JOIN node_vectors nv ON nv.id = latest.id
+			JOIN ` + table + ` nv ON nv.id = latest.id
 			WHERE nv.vector_field = 'content'
 			ORDER BY nv.embedding <=> $1::vector
 			LIMIT $4

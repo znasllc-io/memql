@@ -48,6 +48,27 @@ QueryClient.prototype.askConversationSnapshot = function (this: QueryClient, arg
   return this.executeNamed("askConversationSnapshot", buildAskConversationSnapshot(args), opts);
 };
 
+/** Open this owner's existing work in its Ask conversation, creating a private conversation for Nexus-originated work without starting another run. */
+export interface AskWorkConversationArgs {
+  runId: string;
+}
+
+export function buildAskWorkConversation(args: AskWorkConversationArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "builtin askWorkConversation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    askWorkConversation(args: AskWorkConversationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.askWorkConversation = function (this: QueryClient, args: AskWorkConversationArgs = {} as AskWorkConversationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askWorkConversation", buildAskWorkConversation(args), opts);
+};
+
 /** The static loop graph over the automations this node registered, one v1:platform:automationNode row per automation: its trigger, filter, writes, the calls the graph cannot see into, its @loop and @mode, the automations it starts and why, its stratum, and the cycle it lies on. Built once per registered set and never persisted. Carries no run and no payload. */
 export interface AutomationGraphArgs {
 }
@@ -84,6 +105,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.automationLoopStops = function (this: QueryClient, args: AutomationLoopStopsArgs = {} as AutomationLoopStopsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("automationLoopStops", buildAutomationLoopStops(args), opts);
+};
+
+/** Choose the cluster's first embedding model, after verifying its output. Existing bindings are idempotent; changing the model requires a reindex. */
+export interface BindEmbedderArgs {
+  provider: string;
+}
+
+export function buildBindEmbedder(args: BindEmbedderArgs): string {
+  const parts: string[] = [];
+  parts.push("provider: " + renderMemQLValue(args.provider));
+  return "builtin bindEmbedder(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    bindEmbedder(args: BindEmbedderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.bindEmbedder = function (this: QueryClient, args: BindEmbedderArgs = {} as BindEmbedderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("bindEmbedder", buildBindEmbedder(args), opts);
 };
 
 /** Branch one of the caller's finished runs at a step: a NEW run (mode fork) whose steps before the branch point are served by REFERENCE from the source run -- they do not run again -- and whose branch step runs live with the person's changes, followed by everything after it (design D19). The source run is untouched. When the branch step was answered by an app session, the branch is a NEW session started against the workspace as it was before that step, rebuilt from the recording's content-addressed files; a branch whose snapshot is missing a file's content is refused naming the file, because a branch from a partial workspace would diverge without saying so. Returns {runId, forkedFromRunId, forkAtStepKey}. */

@@ -18,14 +18,11 @@ import (
 // produced a table full of vectors of the wrong width, which is not an error
 // anywhere. It is a search space that quietly returns wrong neighbours.
 //
-// WHAT REPLACES IT. One row, `v1:platform:embedderBinding` at the literal id
-// `active`, naming a providerRef and the width that provider produces. Vectors
-// live in one table per width, `node_vectors_<dims>`, created when a binding of
-// a new width is activated. Switching the binding opens the `reembedLibrary`
-// work goal, which fills the new table and flips `active` only when the count
-// matches -- so a switch part-way through still serves the OLD space, because a
-// half-written vector column is a corrupt search space rather than a degraded
-// one.
+// Runtime activation probes the chosen model and records one active binding.
+// Vectors are separated by provider identity AND width. Every replica reads the
+// durable binding; switching an existing corpus is refused until its reindex
+// workflow exists. Legacy vectors remain stored, but are not mixed into a new
+// model space whose provenance cannot be established.
 //
 // WHY A LITERAL ID. The same reason v1:cluster:database is at `primary`
 // (memql#4766): a re-write is then a new VERSION of one logical row rather than
@@ -45,7 +42,7 @@ type EmbedderBinding struct {
 	// resolved against the ACTING USER's machines like any other fleet call.
 	ProviderRef string
 	// Dimensions is the vector width this provider produces, and therefore
-	// which node_vectors_<dims> table its vectors live in. Never zero on a
+	// which model-specific vector table its vectors live in. Never zero on a
 	// valid binding: a width of zero cannot have a table and cannot have an
 	// index, and pgvector refuses both rather than accepting them silently.
 	Dimensions int
@@ -92,9 +89,34 @@ type embedderBindingCache struct {
 
 var activeBinding embedderBindingCache
 
-// SetActiveEmbedderBinding records the binding the engine should use. Called by
-// the activation path once a new binding's table is filled and its count
-// matches, and by boot once the row has been read.
+var bindingReader struct {
+	sync.RWMutex
+	read func(context.Context) (EmbedderBinding, error)
+}
+
+// The application installs a durable reader on every replica. No activation
+// depends on another process's cache or on receiving an invalidation event.
+func SetEmbedderBindingReader(read func(context.Context) (EmbedderBinding, error)) {
+	bindingReader.Lock()
+	defer bindingReader.Unlock()
+	bindingReader.read = read
+}
+
+func CurrentEmbedderBinding(ctx context.Context) (EmbedderBinding, error) {
+	bindingReader.RLock()
+	read := bindingReader.read
+	bindingReader.RUnlock()
+	if read != nil {
+		return read(ctx)
+	}
+	if binding, ok := ActiveEmbedderBinding(); ok {
+		return binding, nil
+	}
+	return EmbedderBinding{}, ErrNoEmbedderBound
+}
+
+// SetActiveEmbedderBinding supplies an in-process fixture binding. Production
+// installs a durable reader through SetEmbedderBindingReader on every replica.
 func SetActiveEmbedderBinding(b EmbedderBinding) {
 	activeBinding.mu.Lock()
 	defer activeBinding.mu.Unlock()
@@ -202,10 +224,10 @@ func BindingFor(providerRef string, declaredDimensions int) (EmbedderBinding, er
 // those carried its own `defaultProvider = "embedding3Small"` constant, which
 // is five copies of one decision that could drift, and did not drift only
 // because nobody had ever changed it.
-func ResolveEmbedderProvider(_ context.Context) (string, error) {
-	b, ok := ActiveEmbedderBinding()
-	if !ok {
-		return "", ErrNoEmbedderBound
+func ResolveEmbedderProvider(ctx context.Context) (string, error) {
+	b, err := CurrentEmbedderBinding(ctx)
+	if err != nil {
+		return "", err
 	}
 	return b.ProviderRef, nil
 }

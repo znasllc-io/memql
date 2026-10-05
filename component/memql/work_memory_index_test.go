@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 type memoryIndexTestIntegration struct{ handler builtinExecutorHandler }
@@ -34,11 +35,29 @@ func TestConversationSemanticEvidenceAcrossReplicasAndSourceChanges(t *testing.T
 	conversation := askTestConversation(t, a, ctx)
 	turn := AskTurn{ID: "format", Prompt: "For reports, I prefer concise bullet points.", Answer: "Understood.", State: "done", StartedAt: time.Now().UTC()}
 	require.NoError(t, a.askSave(ctx, conversation, "Preference", askTranscript{Turns: []AskTurn{turn}}))
+	binding, bindErr := a.ReadEmbedderBinding(ctx)
+	if bindErr != nil {
+		for _, write := range []struct {
+			name string
+			args map[string]any
+		}{
+			{"platform.recordEmbedderBindingPlan", map[string]any{"bindingId": "active", "providerRef": "memory-index-test", "dimensions": 1536}},
+			{"platform.activateEmbedderBinding", map[string]any{"bindingId": "active", "activatedAt": time.Now().UTC().Format(time.RFC3339Nano)}},
+		} {
+			call, _ := parser.RenderCall(write.name, write.args)
+			_, err := a.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
+			require.NoError(t, err)
+		}
+		binding, bindErr = a.ReadEmbedderBinding(ctx)
+	}
+	require.NoError(t, bindErr)
+	table, err := EnsureEmbeddingVectorTable(ctx, a.database().DB, binding.ProviderRef, binding.Dimensions)
+	require.NoError(t, err)
 	var embedded atomic.Int32
 	store := memoryIndexTestIntegration{handler: func(c context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 		embedded.Add(1)
-		vector := "[1," + strings.Repeat("0,", 1534) + "0]"
-		_, err := a.database().DB.ExecContext(c, `INSERT INTO node_vectors(id,concept,vector_field,embedding) VALUES($1,$2,'content',$3::vector) ON CONFLICT(id,vector_field) DO NOTHING`, args["nodeId"], conversationEvidenceConcept, vector)
+		vector := "[1," + strings.Repeat("0,", binding.Dimensions-2) + "0]"
+		_, err := a.database().DB.ExecContext(c, `INSERT INTO `+table+`(id,concept,vector_field,embedding) VALUES($1,$2,'content',$3::vector) ON CONFLICT(id,vector_field) DO NOTHING`, args["nodeId"], conversationEvidenceConcept, vector)
 		return nil, err
 	}}
 	require.NoError(t, a.integrations.Register(store))

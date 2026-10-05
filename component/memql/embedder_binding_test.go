@@ -18,10 +18,8 @@ import (
 // and a live cluster are for.
 
 func TestVectorTableIsNamedForItsWidth(t *testing.T) {
-	// ONE TABLE PER WIDTH is the whole design, so the name has to carry the
-	// width and nothing else. A name derived from the binding id or the model
-	// would give two bindings of the same width two tables, which is a corpus
-	// split in half for no reason anybody could see.
+	// This is the legacy DDL naming primitive. Runtime spaces additionally
+	// include provider identity; equal dimensions do not imply equal geometry.
 	for dims, want := range map[int]string{
 		768:  "node_vectors_768",
 		1024: "node_vectors_1024",

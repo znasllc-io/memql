@@ -116,7 +116,15 @@ func (e *MemQLEngine) indexConversationEvidence(ctx context.Context, row map[str
 		}
 	}
 	idsJSON, _ := json.Marshal(nodeIDs)
-	vectors, err := e.database().DB.QueryContext(ctx, `SELECT id FROM node_vectors WHERE vector_field='content' AND id IN (SELECT jsonb_array_elements_text($1::jsonb))`, string(idsJSON))
+	binding, err := e.ReadEmbedderBinding(ctx)
+	if err != nil {
+		return 0, true, err
+	}
+	table, err := EmbeddingVectorTable(binding.ProviderRef, binding.Dimensions)
+	if err != nil {
+		return 0, true, err
+	}
+	vectors, err := e.database().DB.QueryContext(ctx, `SELECT id FROM `+table+` WHERE vector_field='content' AND id IN (SELECT jsonb_array_elements_text($1::jsonb))`, string(idsJSON))
 	if err != nil {
 		return 0, true, err
 	}

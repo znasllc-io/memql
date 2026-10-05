@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/memql"
 	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -1823,7 +1824,7 @@ func (i *Integration) purgeChunksForSource(ctx context.Context, domainId, source
 	// picks up every chunk id matching the (domain, sourceRef) pair
 	// regardless of version/text hash.
 	vecSQL := `
-		DELETE FROM node_vectors
+		DELETE FROM %s
 		WHERE id IN (
 		    SELECT id FROM "MemoryNodes"
 		    WHERE concept = 'v1:knowledge:documentChunk'
@@ -1831,8 +1832,14 @@ func (i *Integration) purgeChunksForSource(ctx context.Context, domainId, source
 		      AND (payload->>'sourceRef') = $2
 		)
 	`
-	if _, err := i.db().ExecContext(ctx, vecSQL, domainId, sourceRef); err != nil {
-		return fmt.Errorf("delete node_vectors: %w", err)
+	tables, err := memql.EmbeddingVectorTables(ctx, i.db())
+	if err != nil {
+		return err
+	}
+	for _, table := range tables {
+		if _, err := i.db().ExecContext(ctx, fmt.Sprintf(vecSQL, table), domainId, sourceRef); err != nil {
+			return fmt.Errorf("delete vectors: %w", err)
+		}
 	}
 	chunkSQL := `
 		DELETE FROM "MemoryNodes"

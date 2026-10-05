@@ -239,7 +239,14 @@ func (i *Integration) recallHandler(ctx context.Context, args map[string]any, ta
 	embedElapsed := time.Since(embedStart)
 	vecLiteral := vectorLiteral(vec)
 
-	rows, err := i.dbGetter().QueryContext(ctx, recallSQL, recallSQLArgs(p, vecLiteral)...)
+	if err := memql.ValidateEmbeddingVector(ctx, p.provider, provider.Dimensions(), vec); err != nil {
+		return nil, err
+	}
+	table, err := memql.EmbeddingVectorTable(p.provider, len(vec))
+	if err != nil {
+		return nil, err
+	}
+	rows, err := i.dbGetter().QueryContext(ctx, strings.ReplaceAll(recallSQL, "JOIN node_vectors nv", "JOIN "+table+" nv"), recallSQLArgs(p, vecLiteral)...)
 	if err != nil {
 		return nil, fmt.Errorf("harnessRecall.recall: query: %w", err)
 	}

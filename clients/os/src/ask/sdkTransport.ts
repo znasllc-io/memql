@@ -51,6 +51,21 @@ export class SdkAskTransport implements AskTransport {
     }
   };
 
+  openWork = async (runId: string) => {
+    const dispatcher = this.dispatcher();
+    if (!dispatcher) throw new Error("Not connected to the cluster.");
+    const result = await new QueryClient(dispatcher).askWorkConversation({ runId });
+    const row = result.rows()[0];
+    if (!row) throw new Error("This work's conversation is unavailable.");
+    return flatten(row) as unknown as ConversationSummary;
+  };
+
+  answerQuestion = async (approvalId: string, answer: Record<string, unknown>) => {
+    const dispatcher = this.dispatcher();
+    if (!dispatcher) throw new Error("Not connected to the cluster.");
+    await new QueryClient(dispatcher).decideApproval({ approvalId, decision: "answered", answer });
+  };
+
   startVoice = (options: AskVoiceOptions, signal: AbortSignal) => {
     const dispatcher = this.dispatcher();
     if (!dispatcher) return Promise.reject(new Error("Not connected to the cluster."));
@@ -69,12 +84,17 @@ export class SdkAskTransport implements AskTransport {
         const handle = this.stream(dispatcher, [{ role: "user", content: prompt }], { signal: abort.signal, conversationId: options.conversationId, requestId: options.turnId, pageContext: context ?? "", provider: options.routing?.source ?? "", level: options.routing?.level ?? "" });
         let settled = false;
         let answer = "";
+        let backgroundAccepted = false;
         const result = handle.result.then(value => { settled = true; return value; }, error => { settled = true; throw error; });
         const consume = async () => {
           for await (const chunk of handle.deltas) {
             if (abort.signal.aborted) return;
             if (chunk.textDelta) { answer += chunk.textDelta; on.delta(chunk.textDelta); }
-            if (chunk.metadata?.ask) on.activity?.(chunk.metadata.ask as AskActivity);
+            if (chunk.metadata?.ask) {
+              const activity = chunk.metadata.ask as AskActivity;
+              if (activity.kind === "run" && (activity.phase === "queued" || activity.phase === "waiting")) backgroundAccepted = true;
+              on.activity?.(activity);
+            }
           }
           if (!abort.signal.aborted && !settled) throw new Error("The reply stream ended before completion. Try again.");
         };
@@ -87,7 +107,7 @@ export class SdkAskTransport implements AskTransport {
             if (answer) on.delta(answer);
           }
         }
-        if (!answer.trim()) throw new Error("MemQL finished without an answer.");
+        if (!answer.trim() && !backgroundAccepted) throw new Error("MemQL finished without an answer.");
         on.done();
       } catch (error) {
         if (abort.signal.aborted) return;

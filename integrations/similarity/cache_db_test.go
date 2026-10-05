@@ -14,11 +14,14 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-type cachedQueryProvider struct{ calls atomic.Int32 }
+type cachedQueryProvider struct {
+	calls      atomic.Int32
+	dimensions int
+}
 
 func (p *cachedQueryProvider) Embed(context.Context, string) ([]float32, error) {
 	p.calls.Add(1)
-	v := make([]float32, 1536)
+	v := make([]float32, p.Dimensions())
 	v[0] = 1
 	return v, nil
 }
@@ -29,7 +32,12 @@ func (p *cachedQueryProvider) EmbedBatch(ctx context.Context, texts []string) ([
 	}
 	return out, nil
 }
-func (*cachedQueryProvider) Dimensions() int { return 1536 }
+func (p *cachedQueryProvider) Dimensions() int {
+	if p.dimensions > 0 {
+		return p.dimensions
+	}
+	return 1536
+}
 
 func TestSimilarityQueryReusesSharedEmbeddingUntilExpiryOrBindingChange(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -48,6 +56,8 @@ func TestSimilarityQueryReusesSharedEmbeddingUntilExpiryOrBindingChange(t *testi
 	t.Cleanup(func() {
 		_, _ = db.ExecContext(context.Background(), `DELETE FROM embedding_cache WHERE provider=$1`, providerName)
 	})
+	_, tableErr := memql.EnsureEmbeddingVectorTable(ctx, db, providerName, 1536)
+	require.NoError(t, tableErr)
 	p := &cachedQueryProvider{}
 	makeReplica := func() *Integration {
 		i := New(nil)
@@ -70,6 +80,11 @@ func TestSimilarityQueryReusesSharedEmbeddingUntilExpiryOrBindingChange(t *testi
 	require.Equal(t, int32(2), p.calls.Load(), "an expired vector is recomputed")
 	memql.SetActiveEmbedderBinding(memql.EmbedderBinding{ProviderRef: providerName, Dimensions: 768})
 	_, err = a.similarToHandler(ctx, args, 0)
+	require.ErrorContains(t, err, "expected 768", "runtime width drift must not create another active space")
+	p.dimensions = 768
+	_, tableErr = memql.EnsureEmbeddingVectorTable(ctx, db, providerName, 768)
+	require.NoError(t, tableErr)
+	_, err = a.similarToHandler(ctx, args, 0)
 	require.NoError(t, err)
-	require.Equal(t, int32(3), p.calls.Load(), "a binding change invalidates the vector before TTL expiry")
+	require.Equal(t, int32(4), p.calls.Load(), "a binding change invalidates the vector before TTL expiry")
 }

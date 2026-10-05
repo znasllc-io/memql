@@ -397,6 +397,17 @@ query approval workQuestionsForOwnerRun {
  shape workApprovalFull
 }
 
+/// Latest durable tool exchange checkpoint for this owner's step. Separate
+/// receipts cannot overwrite concurrent run cancellation or human decisions.
+@actor
+query observation workContinuationForOwnerRun {
+ args { runId string! stepKey string! }
+ filter row => row.runId == args.runId && row.stepKey == args.stepKey && row.ownerUserId == actor.userId && row.?data.continuation == true
+ sort "row.createdAt", "desc"
+ paginate 1
+ shape workObservationFull
+}
+
 /// Read only this run's own computer-use decisions, including previous grants.
 @actor
 @unbounded("scope decisions of one owned work run")

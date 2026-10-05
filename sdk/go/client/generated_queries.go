@@ -12686,6 +12686,23 @@ func WorkComputerScopesForOwnerRunBuild(args WorkComputerScopesForOwnerRunArgs) 
 	return b.String()
 }
 
+// WorkContinuationForOwnerRun -- Latest durable tool exchange checkpoint for this owner's step. Separate receipts cannot overwrite concurrent run cancellation or human decisions.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workContinuationForOwnerRun"] in generated_concepts.go).
+type WorkContinuationForOwnerRunArgs struct {
+}
+
+// WorkContinuationForOwnerRun calls the engine query workContinuationForOwnerRun.
+func (qc *QueryClient) WorkContinuationForOwnerRun(ctx context.Context, args WorkContinuationForOwnerRunArgs) (*Result, error) {
+	call := WorkContinuationForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workContinuationForOwnerRun", call)
+}
+
+func WorkContinuationForOwnerRunBuild(args WorkContinuationForOwnerRunArgs) string {
+	_ = args
+	return "query workContinuationForOwnerRun()"
+}
+
 // WorkDescriptionGuidance -- The DESCRIPTION GUIDANCE a goal shape has accumulated (epic memql#5414, design D23): the caller's own dislikes whose run served this goal signature, newest first, each carrying the axes and the reason the person gave. It is read only when a MODEL is about to be used for that goal again -- an agent turn of a live run, compile's triage and design calls, the app a learned procedure hands the goal back to -- and never by a replay, a fork's shared prefix or a construct-served goal, because a replay reads rows and text is not a row it can act on. Owned: guidance mined from somebody else's dislikes would steer a person's goal by another person's taste. Bounded at 20, the most recent, because the reader keeps five.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workDescriptionGuidance"] in generated_concepts.go).

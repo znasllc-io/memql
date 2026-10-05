@@ -58,6 +58,13 @@ export function useAskActivity() {
   return useSyncExternalStore(session?.subscribe ?? noSubscription, session ? () => session.getSnapshot().activity : noActivity);
 }
 
+/** Nexus can route a human question to its conversation without requiring an
+ * Ask provider in isolated app fixtures. Permission approvals stay in Nexus. */
+export function useOpenAskWork() {
+  const ask = useContext(Ctx);
+  return ask ? (runId: string) => { ask.openAsk(); void ask.conversation.openWork(runId); } : null;
+}
+
 export function AskProvider({
   transport,
   voice = null,
