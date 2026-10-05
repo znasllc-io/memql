@@ -96,6 +96,23 @@ registry/marketplace permission, native signing, public webhook reachability,
 cloud storage behavior or production recovery. Those remain named rehearsal
 steps. Time-window milestones #5506–#5509 stay open until observed.
 
+## Delivery privacy progress
+
+Inbound and outbound concepts now declare the cluster-operator row tier.
+Named reads, generic row admission and subscriptions reject ordinary users;
+internal call origin alone does not grant a read. Package webhook and campaign
+feedback handlers use an internal-only, bounded operator lookup. Datasync
+retains its operator identity, email-rule staging retains author provenance,
+and the outbound drain now uses the shared deployment actor on all auth
+surfaces. Real Postgres tests cover those consumers and pipeline notification
+receipts, including an operator client being unable to forge a server's sent
+receipt. Package, campaign and email-rule suites pass with the test database.
+
+Issues #5802 and #5804 remain open until review/merge and installation-level
+verification, including external product-bundle audit surfaces. Direct client
+outbox staging now requires operator authority; tree-loaded automations retain
+their server-side staging path.
+
 ## DSL and runtime gaps found during implementation
 
 | Capability | Evidence | Decision and verification |

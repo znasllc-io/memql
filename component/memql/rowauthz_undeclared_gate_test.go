@@ -73,39 +73,6 @@ import (
 // visibly different at a glance -- a new one has to name its own issue.
 const undeclaredGrandfatherReason = "memql#3173 seed -- grandfathered as a population, not individually triaged"
 
-// undeclared3461ByIdReason covers the by-id read memql#3461 added so the
-// campaign feedback parser can fetch the staged webhook body an automation
-// hands it.
-//
-// Deliberately NOT carrying the grandfather marker: it was added after the
-// seed and names its own issue, which is the distinction that marker exists
-// to make visible.
-//
-// Why it is listed rather than paid off. Declaring a tier on
-// v1:platform:inboundRequest is a decision about the INBOUND DELIVERY
-// feature (memql#2957) -- it changes the result set of the two reads above
-// and of every product automation draining them -- and making it as a side
-// effect of a campaigns task would be exactly the kind of quiet scope change
-// this gate is here to surface. The read itself is strictly narrower than
-// the listed `inboundRequestsByStatus`, which returns pages of the same rows
-// under the same absent tier: this one returns at most one, by an id the
-// caller already holds.
-const undeclared3461ByIdReason = "memql#3461 -- by-id read of a staged webhook; the tier decision belongs to inbound delivery (memql#2957), and this is strictly narrower than the listed inboundRequestsByStatus"
-
-// undeclared5804OutboundByIdReason covers the by-id read memql#5480 added so
-// the pipelines notify stage can learn whether a delivery it staged was sent.
-//
-// It is the outbound twin of undeclared3461ByIdReason and is listed for the
-// same two reasons. Declaring a tier on v1:platform:outboundRequest changes
-// what the outbound worker's drain scan and every product auditing delivery
-// state can see, so it is a decision about outbound delivery, filed as
-// memql#5804, and not a side effect of the pipelines epic. And the read is
-// strictly narrower than the listed `outboundRequestsByStatus`, which pages
-// through the same rows under the same absent tier: this one returns at most
-// one row, by an id the caller staged. It is also @serverOnly, so it adds no
-// client-reachable read at all.
-const undeclared5804OutboundByIdReason = "memql#5804 -- by-id read of a staged outbound delivery for the pipelines notify stage; @serverOnly, and strictly narrower than the listed outboundRequestsByStatus"
-
 // undeclared3178SelfScopedReason covers the two constructs memql#3178
 // introduced while splitting the per-user credential lists off a
 // caller-supplied id.
@@ -953,18 +920,9 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"globalVariables": {"v1:platform:globalVariable", undeclaredGrandfatherReason},
 	"userDefaults":    {"v1:platform:globalVariable", undeclaredGrandfatherReason},
 
-	// v1:platform:inboundRequest
-	"inboundRequestByDedupeKey": {"v1:platform:inboundRequest", undeclaredGrandfatherReason},
-	"inboundRequestById":        {"v1:platform:inboundRequest", undeclared3461ByIdReason},
-	"inboundRequestsByStatus":   {"v1:platform:inboundRequest", undeclaredGrandfatherReason},
-
 	// v1:platform:missingCapability
 	"missingCapabilitiesByStatus":    {"v1:platform:missingCapability", undeclaredGrandfatherReason},
 	"missingCapabilityByKindAndName": {"v1:platform:missingCapability", undeclaredGrandfatherReason},
-
-	// v1:platform:outboundRequest
-	"outboundRequestById":      {"v1:platform:outboundRequest", undeclared5804OutboundByIdReason},
-	"outboundRequestsByStatus": {"v1:platform:outboundRequest", undeclaredGrandfatherReason},
 
 	// v1:rbac:capability
 	"activeCapabilities":          {"v1:rbac:capability", undeclaredGrandfatherReason},

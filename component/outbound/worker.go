@@ -33,10 +33,6 @@ const (
 	// can re-claim and recover the row.
 	deliveryClaimName = "outboundDelivery"
 
-	// systemOutboundActor stamps engine roundtrips from this worker
-	// (planner systemActorContext precedent).
-	systemOutboundActor = "system:outbound"
-
 	// lastErrorCap bounds the persisted lastError (observability
 	// errorMessage precedent).
 	lastErrorCap = 4096
@@ -679,11 +675,5 @@ func parseTimeOrZero(s string) time.Time {
 // identity: a row tier added to globalSecret that shut this actor out would
 // otherwise fail every secret target at run time, with nothing red before.
 func SystemActorContext(ctx context.Context) context.Context {
-	return auth.ContextWithToken(ctx, &auth.TokenInfo{
-		Subject: systemOutboundActor,
-		Claims: map[string]any{
-			"sub":  systemOutboundActor,
-			"role": "system",
-		},
-	})
+	return auth.ContextWithSystemActor(ctx, "outbound")
 }

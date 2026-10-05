@@ -259,8 +259,14 @@ its `source` names, so an automation on a different source never sees a
 connector and vice versa.
 
 The row also carries `contentType`, `dedupeKey`, `signatureVerified`,
-`verifiedBy` and `receivedAt`. Query staged rows with `inboundRequestsByStatus(status:
-"received")`, or look one up with `inboundRequestByDedupeKey`.
+`verifiedBy` and `receivedAt`. Cluster operators can query staged rows with
+`inboundRequestsByStatus(status: "received")` or `inboundRequestByDedupeKey`.
+The concept declares `@rowAuthz(clusterOwner)`: raw bodies, named reads,
+generic browsing and graph subscriptions are private to operators. Internal
+call origin alone does not grant read access. Tree-loaded event automations
+can consume the verified event they subscribe to; the built-in package,
+feedback and connector handlers use a bounded operator lookup for the staged
+row and retain their normal authority for downstream work.
 
 ## Redelivery
 

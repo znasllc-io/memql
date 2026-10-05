@@ -36,17 +36,16 @@ func (e *originEngine) Execute(ctx context.Context, query string) (*memql.Execut
 	return &memql.ExecuteResult{}, nil
 }
 
-// TestEveryWriteIsStampedAndEveryReadIsNot is the whole authorization shape of
-// this package in one assertion.
+// TestEveryWriteIsStampedAndEveryReadIsNot checks the default origin rule
+// and the explicitly bounded exceptions.
 //
 // The WRITES must be stamped: they reach @serverOnly mutations, and
 // OriginClient is the zero value, so an unstamped write is refused with only a
 // WARN -- a deploy that hangs with nothing in its timeline.
 //
-// The READS must NOT be: both concepts declare a composite owner tier, and an
-// unstamped read is how row admission stays the tier's decision rather than
-// this package's. A stamped read would not error -- it would quietly widen
-// what the pipeline can see, which is the failure nobody notices.
+// Owned-row reads retain the caller. The explicit exceptions below admit
+// server-only constructs; the private inbound delivery lookup additionally
+// uses deployment authority, only after refusing client origin.
 func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	e := &originEngine{}
 	s := &store{engine: e}
@@ -58,7 +57,7 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	_, _ = s.siteById(ctx, "s")
 	_, _ = s.packagesByRepoUrl(ctx, "u")
 	_, _ = s.packagesTrackingRepos(ctx)
-	_, _ = s.inboundRequestById(ctx, "i")
+	_, _ = s.inboundRequestById(auth.ContextWithInternalOrigin(ctx), "i")
 	_, _, _ = s.artifactBytes(ctx, "a", nil)
 
 	_ = s.advance(ctx, "d", StatusBuilding)
@@ -93,7 +92,7 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	// issues at the gate, so the guard decides it for the caller.
 	_ = s.disableDeployables(ctx, "p", []string{"web"})
 
-	reads := []string{"packageById", "packageDeploymentById", "sitesForPackage", "siteById", "packagesByRepoUrl", "packagesTrackingRepos", "inboundRequestById", "libraryArtifactById"}
+	reads := []string{"packageById", "packageDeploymentById", "sitesForPackage", "siteById", "packagesByRepoUrl", "packagesTrackingRepos", "libraryArtifactById"}
 	writes := []string{"advancePackageDeployment", "recordPackageDeployedVersion", "recordPackageName",
 		"recordPackageUpstreamVersion", "recordSitePackageOrigin", "setPackageStatus", "setSiteStatus",
 		"recordPackageDeploymentReport", "createSourceCredential", "touchSourceCredential",
@@ -117,7 +116,7 @@ func TestEveryWriteIsStampedAndEveryReadIsNot(t *testing.T) {
 	// internal-origin bypass, so the actor still decides the rows. It reads
 	// the PACKAGE OWNER's own row, under the owner's borrowed identity, which
 	// is the one row the auto-deploy feed is already acting for.
-	stampedReads := []string{"sourceCredentialSealedById", "githubAppGrantForCaller", "userByIdSystem"}
+	stampedReads := []string{"inboundRequestById", "sourceCredentialSealedById", "githubAppGrantForCaller", "userByIdSystem"}
 	// THE CALLER-ACTOR WRITES. revokeSourceCredential is an ordinary owned
 	// mutation the write guard decides for the caller; stamping it internal
 	// would hand the guard its first escape and let anyone revoke anything.

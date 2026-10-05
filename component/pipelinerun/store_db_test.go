@@ -640,8 +640,9 @@ func TestTheChannelsAndTheOutboxOverRealRows(t *testing.T) {
 	}
 	// And the email row the notify stage staged is the server's too: a client
 	// marking it sent -- which the stage would report as delivered -- is
-	// refused, and the row stays as the worker left it.
-	if _, err := eng.Execute(signedIn(owner), fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "sent")`,
+	// refused even for a cluster operator, and the row stays as the worker left it.
+	operatorClient := auth.ContextWithAccess(signedIn(owner), &auth.AccessContext{UserId: owner, Role: auth.RoleOwner})
+	if _, err := eng.Execute(operatorClient, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "sent")`,
 		langparser.QuoteString(plainRow.RequestID))); err == nil || !strings.Contains(err.Error(), "`status`") {
 		t.Errorf("a client stamped the notify stage's email row: %v", err)
 	}
@@ -723,8 +724,8 @@ func TestEveryPipelinesBuiltinResolvesToACapability(t *testing.T) {
 	if registerErr != nil {
 		t.Fatalf("register: %v", registerErr)
 	}
-	// The control: the engine has loaded the eight builtins (epic 2's six, plus
-	// the connect preview and the installations read of epic memql#5479), so
+	// The control: the engine has loaded the nine builtins (epic 2's six, plus
+	// connect preview, installations and the read-only runner status), so
 	// the audit below is about them rather than about an empty registry.
 	executors := 0
 	for _, fn := range eng.Functions().Snapshot() {
@@ -732,8 +733,8 @@ func TestEveryPipelinesBuiltinResolvesToACapability(t *testing.T) {
 			executors++
 		}
 	}
-	if executors != 8 {
-		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 8", executors)
+	if executors != 9 {
+		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 9", executors)
 	}
 	if err := eng.AuditIntegrationExecutors(); err != nil {
 		t.Fatalf("the shipped DSL names a pipelines capability this integration does not offer: %v", err)

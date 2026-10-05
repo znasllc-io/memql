@@ -21,7 +21,14 @@ onto the row, so delivery state is ordinary graph state.
 
 ## Staging a delivery (product DSL)
 
-Call the platform mutation from any automation or logic body:
+Call the platform mutation from a tree-loaded automation or logic body:
+
+Delivery rows declare `@rowAuthz(clusterOwner)`. Cluster operators can audit
+their bodies, recipients and targets; ordinary users cannot read the outbox
+through named queries, generic browsing or graph subscriptions. Server-side
+staging retains the caller's provenance without granting them read access.
+The drain worker uses the deployment's operator identity. A direct client
+staging call requires operator authority.
 
 ```
 mutation stageOutboundRequest(

@@ -71,7 +71,7 @@ func outboundRowCount(t *testing.T, db *bun.DB, reqId string) int {
 // property is the channel and not the rank.
 func TestStageOutboundRequestToSecretStagesTheDescriptor(t *testing.T) {
 	eng, db, ctx := sharedReadMergeEngine(t)
-	internal := auth.ContextWithInternalOrigin(ctx)
+	internal := auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(ctx, "outbound-test"))
 	reqId := "out5480-" + uniqueSuffix("secret-descriptor")
 
 	canonicalId := stageSecretRow(t, eng, ctx, reqId)

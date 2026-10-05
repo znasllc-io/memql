@@ -142,6 +142,7 @@ concept missingCapability {
 /// from this row), and stamps the status transitions back, so delivery state is ordinary graph
 /// state products can query and react to. See docs/internal/design/outbound-delivery-adr.md.
 @displayCard(primary="target", secondary="subject", tertiary="medium", status="status")
+@rowAuthz(clusterOwner)
 concept outboundRequest {
   medium        enum("email", "webhook")! @description("Delivery transport. 'email' delivers via the engine email integration (Graph/SMTP/log per deployment). 'webhook' POSTs the payload as JSON to the target URL.")
   target        string! @description("Where to deliver: a recipient email address for medium='email', an absolute URL for medium='webhook'. Must match the deployment's per-medium allowlist or the row fails fast.")
@@ -169,6 +170,7 @@ concept outboundRequest {
 /// env/globalSecret and only the verdict is recorded. See
 /// docs/internal/design/inbound-delivery-adr.md.
 @displayCard(primary="source", secondary="medium", tertiary="dedupeKey", status="status")
+@rowAuthz(clusterOwner)
 concept inboundRequest {
   source        string! @description("Which allowlisted sender this arrived from -- the {source} path segment, matched against MEMQL_INBOUND_SOURCE_ALLOWLIST. Products filter their automation on it. Never caller-chosen beyond the allowlist: an unlisted source is refused before a row exists.")
   medium        enum("webhook", "mailbox")! @description("How it arrived. 'webhook' is a third party POSTing to /inbound/{source}. 'mailbox' is the Graph NDR reader (memql#4824) staging a delivery-status report it read out of our OWN sending mailbox -- which is why those rows are stamped signatureVerified even though nobody signed anything: provenance IS the verification there, and the field is what gates campaignIngestFeedback. The enum was written with one value and the note that a second inbound transport should not need a concept change; this is that second transport, and it did.")

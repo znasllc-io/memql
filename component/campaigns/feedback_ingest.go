@@ -90,7 +90,7 @@ func (w *Worker) handleIngestFeedback(ctx context.Context, args map[string]any, 
 		return nil, fmt.Errorf("campaigns.ingestFeedback: inboundRequestId is required")
 	}
 
-	req, found, err := w.store.InboundRequestByID(ctx, requestID)
+	req, found, err := w.store.InboundRequestByID(w.systemActorContext(ctx), requestID)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.ingestFeedback: %w", err)
 	}
