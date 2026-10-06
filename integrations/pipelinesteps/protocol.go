@@ -10,9 +10,10 @@ import (
 // The runner's own wire: what the agent node forwards to a workbench replica
 // over NodeService, as JSON, and what comes back.
 //
-// The four forward action NAMES are integrations/workbench's
+// The forward action NAMES are integrations/workbench's
 // (PipelineStepAction "pipelineStep", PipelineStatusAction "pipelineStatus",
-// PipelineAckAction "pipelineAck", PipelineCancelAction "pipelineCancel"). The
+// PipelineAckAction "pipelineAck", PipelineCancelAction "pipelineCancel",
+// PipelineReadinessAction "pipelineReadiness"). The
 // transport owns its vocabulary, and integrations/workbench cannot import this
 // package, so a second spelling here would be a literal that drifts silently.
 //
@@ -26,6 +27,10 @@ import (
 // answers it with a pl.StepResult, whose LogTail is one string of at most the
 // last 40 lines and whose Notes carry the note-class codes.
 type StepRun struct {
+	RecoverOnly bool     `json:"recoverOnly,omitempty"`
+	Needs       []string `json:"needs,omitempty"`
+	Execution   string   `json:"execution"`
+	Platform    string   `json:"platform,omitempty"`
 	// RunID is the v1:pipelines:run id, bare: the subject log lines bind to.
 	RunID string `json:"runId"`
 	// WorkRunID is the v1:work:run id, bare: what Library files record as
@@ -167,7 +172,7 @@ type StatusReply struct {
 	JobCreatedAt string `json:"jobCreatedAt,omitempty"`
 }
 
-// AckRequest tells the runner the agent holds the outcome, so the Job and its
+// AckRequest tells the runner the agent has durably journaled the outcome, so the Job and its
 // Secret can go now rather than at the TTL.
 type AckRequest struct {
 	JobName string `json:"jobName"`

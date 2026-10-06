@@ -140,7 +140,8 @@ func TestARunIsDrivenOverRealRows(t *testing.T) {
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	driver := func(node string) *Integration {
 		integ := New(Deps{
-			Store: store, GitHub: gh, Gate: gate, NodeID: node, Logger: quiet,
+			EngineRevision: func() string { return "db-test-engine-revision" },
+			Store:          store, GitHub: gh, Gate: gate, NodeID: node, Logger: quiet,
 			OSOrigin: func() string { return "https://os.example.test" },
 			Journal: workjournal.New(workjournal.ExecutorFunc(func(ctx context.Context, q string) (any, error) {
 				return eng.Execute(ctx, q)

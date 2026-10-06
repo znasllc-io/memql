@@ -1,0 +1,5 @@
+@journalRequired
+@trigger(event="graph.node.created.*.v1:work:run")
+automation journalFeedback {
+  return 1
+}

@@ -152,6 +152,7 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		DisplayCard:   parsed.displayCard,
 		Composable:    parsed.composable,
 		RowAuthz:      parsed.rowAuthz,
+		ServerWritten: parsed.serverWritten,
 		Origin:        parsed.origin,
 		MirroredTo:    parsed.mirroredTo,
 	}, nil
@@ -445,8 +446,9 @@ type parsedConcept struct {
 	// only true once the attribute loop has finished. A SECOND @origin is
 	// refused by the annotation registry's repeat rule (memql#5359), the
 	// same rule that holds @rowAuthz to one declaration.
-	origin     string
-	mirroredTo []string
+	serverWritten bool
+	origin        string
+	mirroredTo    []string
 }
 
 // parsedProperty mirrors the legacy internal type so the JSON-Schema
@@ -1135,6 +1137,8 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		return nil
 	}
 	switch attr.Name {
+	case "serverWritten":
+		c.serverWritten = true
 	case "description":
 		c.description = attrString(attr)
 	case "type":

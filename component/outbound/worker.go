@@ -2,9 +2,11 @@ package outbound
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,10 +33,6 @@ const (
 	// can re-claim and recover the row.
 	deliveryClaimName = "outboundDelivery"
 
-	// systemOutboundActor stamps engine roundtrips from this worker
-	// (planner systemActorContext precedent).
-	systemOutboundActor = "system:outbound"
-
 	// lastErrorCap bounds the persisted lastError (observability
 	// errorMessage precedent).
 	lastErrorCap = 4096
@@ -44,6 +42,14 @@ const (
 	backoffBase   = 30 * time.Second
 	backoffFactor = 4
 	backoffCap    = time.Hour
+
+	// SecretNamePattern is the form a secret target's NAME must take
+	// (memql#5480). The engine's resolver interpolates the name into its
+	// lookup query, so the worker refuses any other name before it resolves
+	// anything. stageOutboundRequestToSecret's targetSecret arg carries the
+	// same @pattern, and TestOutboundSecretNamePatternMatchesTheDSL at the
+	// repository root holds the two together.
+	SecretNamePattern = `^[A-Z][A-Z0-9_]{0,63}$`
 )
 
 // Engine is the narrow engine surface the worker needs. Returns any
@@ -75,6 +81,14 @@ type ExecutionClaimer interface {
 // orphaned by a dead claimant is re-winnable so the row is never wedged
 // (memql#2548).
 type Worker struct {
+	// Secrets resolves a v1:platform:globalSecret by NAME to its plaintext
+	// value (memql#5480). A webhook row whose URL is a credential -- a
+	// Discord webhook carries its token in the path -- names the secret in
+	// targetSecret instead of carrying the URL, and the worker reads the
+	// value here at send time. Set by app wiring after NewWorker; nil on a
+	// node that wired none, where such a row fails naming its secret.
+	Secrets func(ctx context.Context, name string) (string, error)
+
 	engine     Engine
 	claimer    ExecutionClaimer
 	bus        *events.Bus
@@ -93,6 +107,7 @@ type Worker struct {
 	readyCh     chan struct{}
 	doneCh      chan struct{}
 	mu          sync.Mutex
+	scanCursors map[string]string // bounded scans advance past rows this node cannot deliver
 }
 
 // NewWorker constructs the drain worker. transports maps medium ->
@@ -214,9 +229,13 @@ func (w *Worker) loop(ctx context.Context) {
 // drainOnce scans pending + due retrying rows and processes each. The
 // synchronously testable unit (cron-leader test precedent).
 func (w *Worker) drainOnce(ctx context.Context) {
-	sysCtx := systemActorContext(ctx)
+	sysCtx := SystemActorContext(ctx)
 	for _, status := range []string{"pending", "retrying"} {
-		res, err := w.engine.Execute(sysCtx, fmt.Sprintf(`query outboundRequestsByStatus(status: %s)`, langparser.QuoteString(status)))
+		w.mu.Lock()
+		cursor := w.scanCursors[status]
+		w.mu.Unlock()
+		pageCtx := memql.ContextWithCursor(memql.ContextWithFreshRead(sysCtx), cursor)
+		res, err := w.engine.Execute(pageCtx, fmt.Sprintf(`query outboundRequestsByStatus(status: %s)`, langparser.QuoteString(status)))
 		if err != nil {
 			w.logger.Debug("outbound worker: scan failed (engine likely not ready)", "status", status, "error", err)
 			return
@@ -224,6 +243,22 @@ func (w *Worker) drainOnce(ctx context.Context) {
 		for _, row := range memql.MaterializeRows(res) {
 			w.processRow(sysCtx, row, status)
 		}
+		// One page per status per poll bounds work. Skipped rows (another
+		// medium, a future retry, a peer's live claim) must not starve later
+		// rows. Exhaustion starts a new pass, which revisits due retries.
+		next := ""
+		if result, ok := res.(*memql.ExecuteResult); ok && result.GetMeta() != nil {
+			next = result.GetMeta().Cursor
+		}
+		if next == cursor {
+			next = ""
+		}
+		w.mu.Lock()
+		if w.scanCursors == nil {
+			w.scanCursors = make(map[string]string)
+		}
+		w.scanCursors[status] = next
+		w.mu.Unlock()
 	}
 }
 
@@ -267,19 +302,36 @@ func (w *Worker) processRow(ctx context.Context, row map[string]any, scanStatus 
 			return
 		}
 	}
-	transport, policyErr := w.admit(req)
-	if policyErr != nil {
-		w.stampFailed(ctx, req, policyErr)
+	transport, delivery, admitErr := w.admit(ctx, req)
+	if admitErr != nil {
+		if isRetryLater(admitErr) {
+			// Nothing was sent, but the attempt is spent: the row takes the
+			// delivery backoff and counts against MaxAttempts, so a failure
+			// that never clears still ends the row (ADR 4.1).
+			w.recordFailure(ctx, req, admitErr, now)
+			return
+		}
+		w.stampFailed(ctx, req, admitErr)
 		return
 	}
 	w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "sending")`, langparser.QuoteString(req.ID)))
-	err := transport.Deliver(ctx, req)
+	// delivery goes to the transport and nowhere else: for a secret target
+	// (memql#5480) it is the one value holding the resolved URL. Every stamp
+	// and log line in this function reads req, whose Target is the
+	// descriptor secret:<NAME>.
+	err := transport.Deliver(ctx, delivery)
 	if err == nil {
 		w.stamp(ctx, fmt.Sprintf(`mutation updateOutboundRequestStatus(requestId: %s, status: "sent", lastError: "", sentAt: %s)`,
 			langparser.QuoteString(req.ID), langparser.QuoteString(now.Format(time.RFC3339))))
 		w.logger.Info("outbound worker: delivered", "id", req.ID, "medium", req.Medium, "attempt", req.Attempts+1)
 		return
 	}
+	w.recordFailure(ctx, req, err, now)
+}
+
+// recordFailure stamps a failed attempt: failed when err is permanent or the
+// attempts are spent, retrying on the bounded backoff otherwise (ADR 4.1).
+func (w *Worker) recordFailure(ctx context.Context, req Request, err error, now time.Time) {
 	attempts := req.Attempts + 1
 	if IsPermanent(err) || attempts >= w.cfg.MaxAttempts {
 		// lastError is rendered with langparser.QuoteString, NOT %q
@@ -333,34 +385,115 @@ func (w *Worker) mediumEnabledHere(medium string) bool {
 // admit applies the deploy-layer policy (ADR 4.3): known medium with a
 // wired transport, allowlisted target, bounded payload. A policy miss
 // is a permanent failure -- loud, never a silent backlog.
-func (w *Worker) admit(req Request) (Transport, error) {
+//
+// It also returns the request the transport is to deliver. That is req
+// itself, except for a secret target (memql#5480), where it is a copy whose
+// Target is the URL the named secret holds. The caller keeps req for every
+// stamp and log line, so the row, its audit and its errors carry the
+// descriptor secret:<NAME> and never the URL.
+func (w *Worker) admit(ctx context.Context, req Request) (Transport, Request, error) {
 	transport, ok := w.transports[req.Medium]
 	if !ok || transport == nil {
-		return nil, fmt.Errorf("medium %q has no transport wired", req.Medium)
+		return nil, req, fmt.Errorf("medium %q has no transport wired", req.Medium)
 	}
 	if len(req.Payload) > w.cfg.MaxPayloadBytes {
-		return nil, fmt.Errorf("payload %d bytes exceeds cap %d", len(req.Payload), w.cfg.MaxPayloadBytes)
+		return nil, req, fmt.Errorf("payload %d bytes exceeds cap %d", len(req.Payload), w.cfg.MaxPayloadBytes)
+	}
+	if req.TargetSecret != "" && !secretNameRe.MatchString(req.TargetSecret) {
+		// First, so that every later message naming the secret names one
+		// that passed. The name is not repeated: it failed the one rule that
+		// makes it safe to put in the resolver's query, and the row already
+		// shows it to anyone who needs to look.
+		return nil, req, fmt.Errorf("webhook: target secret refused: its name does not match %s", SecretNamePattern)
+	}
+	if req.TargetSecret != "" && req.Medium != "webhook" {
+		// Refused before the secret is read. Its value is a webhook URL, and
+		// nothing another medium could do with it would be a delivery.
+		return nil, req, fmt.Errorf("target secret %s names a webhook URL, but the row's medium is %q", req.TargetSecret, req.Medium)
 	}
 	switch req.Medium {
 	case "email":
 		if len(w.cfg.EmailAllowlist) == 0 {
-			return nil, fmt.Errorf("medium disabled by deployment config (MEMQL_OUTBOUND_EMAIL_ALLOWLIST empty)")
+			return nil, req, fmt.Errorf("medium disabled by deployment config (MEMQL_OUTBOUND_EMAIL_ALLOWLIST empty)")
 		}
 		if !emailAllowed(req.Target, w.cfg.EmailAllowlist) {
-			return nil, fmt.Errorf("target %q not in email allowlist", req.Target)
+			return nil, req, fmt.Errorf("target %q not in email allowlist", req.Target)
 		}
 	case "webhook":
 		if len(w.cfg.WebhookAllowlist) == 0 {
-			return nil, fmt.Errorf("medium disabled by deployment config (MEMQL_OUTBOUND_WEBHOOK_ALLOWLIST empty)")
+			return nil, req, fmt.Errorf("medium disabled by deployment config (MEMQL_OUTBOUND_WEBHOOK_ALLOWLIST empty)")
+		}
+		if req.TargetSecret != "" {
+			delivery, err := w.resolveSecretTarget(ctx, req)
+			if err != nil {
+				return nil, req, err
+			}
+			return transport, delivery, nil
 		}
 		if !webhookAllowed(req.Target, w.cfg.WebhookAllowlist) {
-			return nil, fmt.Errorf("target %q not in webhook allowlist", req.Target)
+			return nil, req, fmt.Errorf("target %q not in webhook allowlist", req.Target)
 		}
 	default:
-		return nil, fmt.Errorf("unknown medium %q", req.Medium)
+		return nil, req, fmt.Errorf("unknown medium %q", req.Medium)
 	}
-	return transport, nil
+	return transport, req, nil
 }
+
+// resolveSecretTarget reads the URL a secret target names (memql#5480) and
+// returns the copy of req the transport delivers. Every refusal names the
+// secret and never the value, because whatever this returns is stamped into
+// lastError and logged, and the value is a credential. That is also why the
+// allowlist refusal does not quote its target the way a plain row's does.
+//
+// A secret that does not resolve fails the row rather than scheduling a
+// retry. A secret nobody stored, one that cannot be decrypted, an empty one
+// and a node with no resolver all wait on an operator, not on the backoff,
+// and the stager learns of it now instead of after
+// MEMQL_OUTBOUND_MAX_ATTEMPTS. The resolver's misses and decrypt failures are
+// told apart by the engine's predicates, never by their text. Any other
+// lookup error -- a timeout, a dropped connection, an engine still booting --
+// may pass on its own, and is retried like a refused connection (ADR 4.1).
+func (w *Worker) resolveSecretTarget(ctx context.Context, req Request) (Request, error) {
+	if w.Secrets == nil {
+		return req, fmt.Errorf("webhook: target secret %s did not resolve: no secret resolver is wired on this node", req.TargetSecret)
+	}
+	value, err := w.Secrets(ctx, req.TargetSecret)
+	if err != nil {
+		if memql.IsVariableNotFound(err) || memql.IsSecretUndecryptable(err) {
+			return req, fmt.Errorf("webhook: target secret %s did not resolve: %w", req.TargetSecret, err)
+		}
+		return req, retryLater(fmt.Errorf("webhook: target secret %s could not be read: %w", req.TargetSecret, err))
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return req, fmt.Errorf("webhook: target secret %s did not resolve: its value is empty", req.TargetSecret)
+	}
+	if !webhookAllowed(value, w.cfg.WebhookAllowlist) {
+		return req, errors.New("webhook: target not in allowlist")
+	}
+	delivery := req
+	delivery.Target = value
+	return delivery, nil
+}
+
+// retryLaterError marks a failure admit met before anything was sent that may
+// pass on its own: a secret target whose lookup failed rather than missed
+// (memql#5480). processRow gives it the delivery backoff instead of stamping
+// it failed.
+type retryLaterError struct{ err error }
+
+func (e *retryLaterError) Error() string { return e.err.Error() }
+func (e *retryLaterError) Unwrap() error { return e.err }
+
+func retryLater(err error) error { return &retryLaterError{err: err} }
+
+func isRetryLater(err error) bool {
+	var r *retryLaterError
+	return errors.As(err, &r)
+}
+
+// secretNameRe compiles SecretNamePattern once.
+var secretNameRe = regexp.MustCompile(SecretNamePattern)
 
 func (w *Worker) stampFailed(ctx context.Context, req Request, policyErr error) {
 	// lastError via QuoteString (memql#3035). A policy refusal names the
@@ -370,8 +503,17 @@ func (w *Worker) stampFailed(ctx context.Context, req Request, policyErr error) 
 	w.logger.Warn("outbound worker: row refused by policy", "id", req.ID, "medium", req.Medium, "error", policyErr)
 }
 
+// stamp writes one delivery-state transition, and is the only place the worker
+// stamps internal origin (memql#5480). A row naming a secret target is
+// server-written end to end -- the engine refuses any write to it without
+// internal origin, because the pipelines notify stage reports a delivery when
+// its row reads `sent` -- so the worker's own transitions must carry it. The
+// stamp is INLINE on this one Execute, where the trust dies: the drain scan
+// and the secret's lookup keep the plain system actor, and the statement is
+// always updateOutboundRequestStatus, composed by this file with every string
+// argument passed through QuoteString.
 func (w *Worker) stamp(ctx context.Context, mutation string) {
-	if _, err := w.engine.Execute(ctx, mutation); err != nil {
+	if _, err := w.engine.Execute(auth.ContextWithInternalOrigin(ctx), mutation); err != nil {
 		w.logger.Warn("outbound worker: status stamp failed", "error", err)
 	}
 }
@@ -397,13 +539,14 @@ func backoffFor(attempt int) time.Duration {
 
 func requestFromRow(row map[string]any) Request {
 	return Request{
-		ID:        getString(row, "id"),
-		Medium:    getString(row, "medium"),
-		Target:    getString(row, "target"),
-		Subject:   getString(row, "subject"),
-		Payload:   getString(row, "body"),
-		DedupeKey: getString(row, "dedupeKey"),
-		Attempts:  getInt(row, "attempts"),
+		ID:           getString(row, "id"),
+		Medium:       getString(row, "medium"),
+		Target:       getString(row, "target"),
+		Subject:      getString(row, "subject"),
+		Payload:      getString(row, "body"),
+		TargetSecret: getString(row, "targetSecret"),
+		DedupeKey:    getString(row, "dedupeKey"),
+		Attempts:     getInt(row, "attempts"),
 	}
 }
 
@@ -542,14 +685,16 @@ func parseTimeOrZero(s string) time.Time {
 	return time.Time{}
 }
 
-// systemActorContext stamps engine roundtrips from the worker with a
-// system identity (planner precedent).
-func systemActorContext(ctx context.Context) context.Context {
-	return auth.ContextWithToken(ctx, &auth.TokenInfo{
-		Subject: systemOutboundActor,
-		Claims: map[string]any{
-			"sub":  systemOutboundActor,
-			"role": "system",
-		},
-	})
+// SystemActorContext stamps engine roundtrips from the worker with a
+// system identity (planner precedent): every drain scan, every status stamp
+// and every secret target's lookup runs under it. It carries no internal
+// origin; stamp adds that inline to each status stamp, and nothing else gets
+// it.
+//
+// Exported for app's database test (memql#5480), which reads a sealed
+// globalSecret through the engine's real resolver under exactly this
+// identity: a row tier added to globalSecret that shut this actor out would
+// otherwise fail every secret target at run time, with nothing red before.
+func SystemActorContext(ctx context.Context) context.Context {
+	return auth.ContextWithSystemActor(ctx, "outbound")
 }

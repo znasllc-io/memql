@@ -25,6 +25,7 @@ import {
   type SubStep,
 } from "./pipelinesReadiness";
 import "./pipelines.css";
+import { PipelineRunners } from "./PipelineRunners";
 
 // Settings -> Pipelines (epic memql#5479, design record D15).
 //
@@ -245,13 +246,11 @@ function computeStop(step: SubStep, fleet: FleetReading): Stop {
     return {
       ...base,
       state: "done",
-      sentence: "This cluster can run steps.",
-      body:
-        fleet.state === "absent" ? undefined : (
-          <div className="os-pipelines-stop">
-            <FleetLine fleet={fleet} />
-          </div>
-        ),
+      sentence: "The step dispatcher is installed.",
+      body: <div className="os-pipelines-stop">
+        <PipelineRunners />
+        {fleet.state === "absent" ? null : <FleetLine fleet={fleet} />}
+      </div>,
     };
   }
   if (step.reading === "notKnown") {

@@ -1,5 +1,5 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -54,7 +54,12 @@ function rowFor(title: string): HTMLElement {
 describe("the Runs tab", () => {
   beforeEach(() => {
     h.connection = null;
+    // Keep the fixture's recent runs inside the reader's current day. Real
+    // timers still drive the live feed and testing-library's async waits.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 9, 5, 12));
   });
+  afterEach(() => vi.useRealTimers());
 
   it("lists every run newest first under its day, one line each", async () => {
     mount(fakeConnection(seed()));
@@ -89,6 +94,15 @@ describe("the Runs tab", () => {
     // The chip says what was asked, and removing it takes the question back.
     await click(screen.getByRole("button", { name: /Failed/ }));
     expect(await screen.findByText("Fix shard balance")).toBeTruthy();
+  });
+
+  it("groups recent runs under Yesterday just after the reader's midnight", async () => {
+    vi.setSystemTime(new Date(2026, 9, 6, 0, 10));
+    mount(fakeConnection(seed()));
+    await screen.findByText("Show the cart");
+    const days = [...document.querySelectorAll(".pipeline-runs-day-label")].map((el) => el.textContent);
+    expect(days[0]).toBe("Yesterday");
+    expect(days).not.toContain("Today");
   });
 
   it("rings a run when it has an answer, and not when it arrives or moves", async () => {

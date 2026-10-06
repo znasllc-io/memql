@@ -17,15 +17,12 @@ package automations
 // caller did not supply. CallerSuppliedPayload rides on the run row for
 // exactly that reason.
 //
-// THE RETRYABLE RULE IS THE IDEMPOTENCY RULE'S A1 FORM (spec section D):
-// a completed step is served from the journal and never re-run; a step with
-// no external effect (a query, logic or builtin call, a for, a parallel, a
-// sub-automation) is re-run; a `mutation` call, a publish or an action at the
-// resume point needs AllowSideEffects (stepRetryable), because the journal
-// cannot yet tell whether its far side already holds a receipt. The body
-// resumes by running again over its recorded values (resume_statements.go).
-// Epic A2 wires the receipts and narrows this to "retried when
-// idempotent by key".
+// Automatic recovery requires a proven read or computation, inspecting the
+// registered callee and nested statement bodies. Unknown calls and effects
+// require reconciliation or explicit AllowSideEffects authorization. An
+// attempt-scoped idempotency key changes on resume and does not prove that a
+// prior attempt's effect is absent. Completed effects and skipped decisions
+// in the prefix are preserved (resume_statements.go).
 //
 // THE RESUMED RUN KEEPS ITS RUN ID. A resume is the same work continuing,
 // not a new execution that happens to share a prefix -- so the rows it
@@ -60,13 +57,16 @@ var (
 	ErrAutomationChanged = errors.New("automation definition changed since the run started")
 	// ErrNonRetryableStep is returned when the resume point has an external
 	// effect and AllowSideEffects was not set.
-	ErrNonRetryableStep = errors.New("step is not safely retryable (a mutation call, a publish or an action)")
+	ErrNonRetryableStep = errors.New("step has an effect or no proven replay-safe classification")
 	// ErrResumeArgsContract is returned when the run's stored variables do
 	// not satisfy the automation's args contract. It is decided before any
 	// step runs and a second attempt binds the same variables to the same
 	// contract, so the dispatcher fails the run with it (memql#5664) rather
 	// than leaving it at `running` for the abandoned sweep to misname.
 	ErrResumeArgsContract = errors.New("resume args contract violation")
+	// ErrResumeResultMissing means a completed producer's bound value was
+	// not retained. Repeating its effect is not a way to reconstruct evidence.
+	ErrResumeResultMissing = errors.New("completed step result is unavailable for resume")
 )
 
 // RunJournal is what resume needs from the rows: the run's envelope and
@@ -155,9 +155,9 @@ type ResumeOptions struct {
 	// FromStep overrides the resume point (defaults to the failed step).
 	FromStep string
 
-	// AllowSideEffects permits retrying a mutation call, a publish or an
-	// action. Without this flag, resuming from a non-retryable step returns
-	// an error.
+	// AllowSideEffects explicitly permits repeating effects or unclassified
+	// operations. It is not deduplication and must not be set by automatic
+	// recovery merely because an operation lost its receipt.
 	AllowSideEffects bool
 
 	// Rerun serves a re-run request (epic memql#5414, task memql#5415): the
@@ -175,14 +175,14 @@ type ResumeOptions struct {
 	Overrides map[string]*common.StepOverride
 }
 
-// IsStepRetryable reports whether a step type can be re-run with no
-// external effect.
+// IsStepRetryable reports the types whose semantics alone prove they have no
+// effect. Functions and composers additionally need stepRetryable's body walk.
 func IsStepRetryable(stepType StepType) bool {
 	switch stepType {
-	case StepTypeEvent, StepTypeAction:
-		return false
+	case StepTypeExpression, StepTypeReturn:
+		return true
 	}
-	return true
+	return false
 }
 
 // LoadRunJournal reads one run and its steps, under the journal's own
@@ -291,7 +291,9 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 		case "done":
 			m := &MinimalStepResult{StepId: key, Status: "completed"}
 			if r, ok := row["result"].(map[string]any); ok {
-				_ = mapStructFromPayload(r, m)
+				if err := mapStructFromPayload(r, m); err != nil {
+					return nil, fmt.Errorf("%w: %w: step %q has a malformed receipt: %v", ErrRunJournalInvalid, ErrResumeResultMissing, key, err)
+				}
 				m.StepId = key
 			}
 			j.Steps[key] = m
@@ -476,10 +478,50 @@ func (e *Executor) ResumeFrom(
 		return nil, fmt.Errorf("%w: the resume point %q is before the targeted step %q", ErrRerunStepInvalid, resumeStepId, rerun.StepKey)
 	}
 
-	// Check if resume step is retryable
-	if !stepRetryable(resumeStep) && !opts.AllowSideEffects {
+	// A registered capability may prove a durable continuation instead of
+	// repeating its effect. This exception applies to this suspended step only.
+	checkpoint := false
+	if !opts.AllowSideEffects && !e.stepRetryable(resumeStep) && rerun == nil &&
+		journal.StepStates[resumeStepId].Status == "waiting" && journal.HumanResumeId != "" &&
+		resumeStep.Type == StepTypeFunction && resumeStep.Function != nil && e.engine != nil &&
+		opts.Overrides[resumeStepId].Empty() {
+		var err error
+		ctx, checkpoint, err = e.engine.PrepareCheckpointResume(ctx, resumeStep.Function.Name, memql.CheckpointResumeRequest{
+			RunID: journal.RunId, StepKey: resumeStepId, ApprovalID: journal.HumanResumeId,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("%w: step %q continuation: %v", ErrNonRetryableStep, resumeStepId, err)
+		}
+	}
+	if !e.stepRetryable(resumeStep) && !opts.AllowSideEffects && !checkpoint {
 		return nil, fmt.Errorf("%w: step %q is type %s, set AllowSideEffects to retry",
 			ErrNonRetryableStep, resumeStepId, resumeStep.Type)
+	}
+	// Admission must finish before reopening or publishing anything. A
+	// completed prefix is evidence to preserve, never permission to repeat.
+	resumed, err := resumedStatements(journal, automation, resumeIndex, rerun)
+	if err != nil {
+		return nil, err
+	}
+	if !opts.AllowSideEffects {
+		for i, step := range automation.Steps {
+			if step == nil {
+				continue
+			}
+			if checkpoint && step.ID == resumeStepId {
+				continue
+			}
+			if i < resumeIndex {
+				if _, done := resumed.done[step.ID]; done || resumed.continued[step.ID] {
+					continue
+				}
+			} else if state := journal.StepStates[step.ID]; state.Status == "" || state.Status == "queued" || state.Status == "skipped" {
+				continue // no prior effect to repeat
+			}
+			if !e.stepRetryable(step) {
+				return nil, fmt.Errorf("%w: step %q would execute again without a reusable saved result", ErrNonRetryableStep, step.ID)
+			}
+		}
 	}
 
 	// Inject system actor for automation execution
@@ -625,7 +667,17 @@ func (e *Executor) ResumeFrom(
 	if journalSkipsAutomation(automation) {
 		writer = nil
 	}
+	ctx, writer, stopJournal, journalErr := e.requireRunJournal(ctx, automation, writer)
+	if journalErr != nil {
+		exec.Fail(journalErr)
+		return exec, journalErr
+	}
+	defer stopJournal()
 	writer.reopenRun(ctx, exec)
+	if err := requiredJournalError(ctx); err != nil {
+		exec.Fail(err)
+		return exec, err
+	}
 	ctx = withRunJournal(ctx, exec.ID, writer)
 
 	// Set up step context.
@@ -646,7 +698,7 @@ func (e *Executor) ResumeFrom(
 		ChainTrackingEnabled: e.chainTrackingEnabled,
 	}
 
-	return e.runStatementAutomation(ctx, automation, exec, nil, writer, stepCtx, chainHead, resumedStatements(journal, automation, resumeIndex, rerun))
+	return e.runStatementAutomation(ctx, automation, exec, nil, writer, stepCtx, chainHead, resumed)
 }
 
 // minimalToStepResult converts a MinimalStepResult back to a full StepResult,
@@ -657,11 +709,13 @@ func minimalToStepResult(min *MinimalStepResult) *StepResult {
 	}
 
 	result := &StepResult{
-		StepId:    min.StepId,
-		Status:    min.Status,
-		Result:    min.Result,
-		Error:     min.Error,
-		ContentId: min.ContentId,
+		StepId:        min.StepId,
+		Status:        min.Status,
+		Result:        min.Result,
+		Error:         min.Error,
+		ContentId:     min.ContentId,
+		Bound:         min.Value,
+		BoundRecorded: min.ValueRecorded,
 	}
 
 	// Copy metadata
@@ -713,6 +767,7 @@ func ToMinimalStepResults(steps map[string]*StepResult) map[string]*MinimalStepR
 			}
 		}
 		minResult.Value = result.Bound
+		minResult.ValueRecorded = result.BoundRecorded
 
 		// Extract key metadata for evaluator
 		if result.Metadata != nil {

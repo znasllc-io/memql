@@ -39,7 +39,9 @@ shape missingCapability missingCapabilityFull {
 // ---- shapes/v1/platform/outboundRequestFull.memql ----
 
 /// Full outbound-request projection (memql#2521). Backs the worker's drain scan and any
-/// operator/product surface auditing delivery state.
+/// operator/product surface auditing delivery state. targetSecret is here because the drain scan is
+/// how the worker learns a row names its URL by secret (memql#5480); a row whose scan dropped it
+/// would be delivered to the descriptor secret:<NAME> as if that were the URL, and fail.
 @row
 shape outboundRequest outboundRequestFull {
   row.id
@@ -54,6 +56,7 @@ shape outboundRequest outboundRequestFull {
   sentAt
   dedupeKey
   requestedBy
+  targetSecret
   row.createdAt
 }
 

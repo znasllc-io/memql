@@ -5778,7 +5778,7 @@ QueryClient.prototype.ordersInWindow = function (this: QueryClient, args: Orders
   return this.executeNamed("ordersInWindow", buildOrdersInWindow(args), opts);
 };
 
-/** Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker drains 'pending' and 'retrying' through this; operators and products use it to audit delivery state. Bounded first page: the worker drains batches per poll, so a burst larger than one page simply takes extra polls. */
+/** Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker drains 'pending' and 'retrying' through this; operators and products use it to audit delivery state. The worker advances one bounded page per status per poll and starts again at exhaustion, so rows awaiting another medium or a future retry do not hide later ready work. */
 // Bound concept: v1:platform:outboundRequest (machine-readable: BoundConcepts["outboundRequestsByStatus"] in generated_concepts.ts).
 export interface OutboundRequestsByStatusArgs {
   status: string;
@@ -6335,6 +6335,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.pendingUserInvitations = function (this: QueryClient, args: PendingUserInvitationsArgs = {} as PendingUserInvitationsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("pendingUserInvitations", buildPendingUserInvitations(args), opts);
+};
+
+/** The caller's channel of one name -- what a notify stage resolves its `channel:` through. A name is unique among a person's channels (the channel builtin checks it before it writes), so this answers at most one row; the sort and page of one say so. The driver that reads it has no person on the line and asks under the pipeline owner's borrowed authority, so the filter is the owner conjunct and nothing wider: it finds the owner's own channel, never another person's of the same name. */
+// Bound concept: v1:pipelines:channel (machine-readable: BoundConcepts["pipelineChannelForOwnerByName"] in generated_concepts.ts).
+export interface PipelineChannelForOwnerByNameArgs {
+  name: string;
+}
+
+export function buildPipelineChannelForOwnerByName(args: PipelineChannelForOwnerByNameArgs): string {
+  const parts: string[] = [];
+  parts.push("name: " + renderMemQLValue(args.name));
+  return "query pipelineChannelForOwnerByName(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelineChannelForOwnerByName(args: PipelineChannelForOwnerByNameArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelineChannelForOwnerByName = function (this: QueryClient, args: PipelineChannelForOwnerByNameArgs = {} as PipelineChannelForOwnerByNameArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelineChannelForOwnerByName", buildPipelineChannelForOwnerByName(args), opts);
 };
 
 /** The caller's notification channels, by name. */

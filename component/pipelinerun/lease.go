@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/core/logger"
 )
 
@@ -21,8 +22,11 @@ import (
 // memory -- because the replica that opened a run, the replicas that hear its
 // events and the replica that recovers it are different processes.
 //
-// THE THREE AUTHORITIES, from strongest to cheapest:
+// THE FOUR AUTHORITIES, from strongest to cheapest:
 //
+//   - A row-version fence in the mutation transaction: claims and receipts
+//     compare their witness on the same connection that writes. Losing the
+//     separate coordination session cannot let an old writer commit.
 //   - The gate plus a fresh read (underLease): the claim, the heartbeat and
 //     every write to the run row are a read-modify-write under RunGateKey, so
 //     a claim and a renewal, or two claims, can never both decide from one
@@ -30,13 +34,11 @@ import (
 //     gate, nothing nested, no call to GitHub or the runner inside -- because
 //     the production gate holds a connection of a small direct pool and gives
 //     up acquiring after five seconds (githubconnect.WithGate, driverGate).
-//     For the same reason nothing hot takes it: a stage's sixteen steps
-//     writing their receipts at once would time each other out.
-//   - A fresh read with no gate (stillHolds): before a step's intent or
-//     receipt, and before a progress write to GitHub. Another replica can
-//     claim only a lease stale for 120 seconds, and this one renews every 30,
-//     so the gap between that read and the write is not a window anybody can
-//     use.
+//     Every journal write takes this gate too, serialized before acquisition
+//     on this replica. The claim token changes even for the same node name.
+//   - A fresh read with no gate (stillHolds): before an external call. It
+//     refuses if ownership cannot be proved, but is not destination fencing;
+//     external effects need their own idempotency/reconciliation contract.
 //   - Memory (lease.isLost): once any of the above has seen another holder,
 //     nothing of this drive writes again.
 //
@@ -257,12 +259,14 @@ func (i *Integration) claim(ctx context.Context, d Deps, runID string) (Run, boo
 		if !claimable(*r, d.NodeID, now) {
 			return nil
 		}
-		if err := d.Store.UpdateRun(gctx, r.OwnerUserID, r.ID, RunPatch{
-			DriverNodeID: ptr(d.NodeID), DriverHeartbeatAt: ptr(now),
+		claimID := id.NewShortId()
+		wctx := memql.ContextWithRowVersionFence(gctx, RunConcept, r.ID, r.CreatedAt)
+		if err := d.Store.UpdateRun(wctx, r.OwnerUserID, r.ID, RunPatch{
+			DriverNodeID: ptr(d.NodeID), DriverLeaseID: ptr(claimID), DriverHeartbeatAt: ptr(now),
 		}); err != nil {
 			return err
 		}
-		r.DriverNodeID, r.DriverHeartbeatAt = d.NodeID, now
+		r.DriverNodeID, r.DriverLeaseID, r.DriverHeartbeatAt = d.NodeID, claimID, now
 		claimed, ok = *r, true
 		return nil
 	})
@@ -282,7 +286,7 @@ func (dr *runDriver) underLease(ctx context.Context, fn func(gctx context.Contex
 		if err != nil {
 			return err
 		}
-		if r == nil || r.DriverNodeID != dr.d.NodeID {
+		if !dr.owns(r) {
 			dr.loseLease(r)
 			return errLeaseLost
 		}
@@ -292,24 +296,42 @@ func (dr *runDriver) underLease(ctx context.Context, fn func(gctx context.Contex
 		if dr.lease.isLost() {
 			return errLeaseLost
 		}
-		return fn(gctx, *r)
+		return fn(memql.ContextWithRowVersionFence(gctx, RunConcept, r.ID, r.CreatedAt), *r)
 	})
 }
 
-// stillHolds is the cheap fence before a write that does not take the gate:
-// a fresh read of the run, and false -- with the lease lost from then on --
-// when it is no longer this node's. A read that FAILS proves nothing about the
-// lease, so it answers true and leaves the verdict to the heartbeat; the write
-// it guards most likely fails the same way.
+// owns compares a claim, not just a node: restarted containers keep their
+// pod name. Legacy rows become writable only after a claim mints a token.
+func (dr *runDriver) owns(r *Run) bool {
+	return r != nil && dr.claimID != "" && r.DriverNodeID == dr.d.NodeID && r.DriverLeaseID == dr.claimID
+}
+
+// guardJournal puts each individual receipt, intent and heartbeat under the
+// same gate as a claim. No external call or heartbeat shutdown holds the gate.
+func (dr *runDriver) guardJournal() {
+	dr.d.Journal = dr.d.Journal.WithWriteGuard(func(ctx context.Context, write func(context.Context) error) error {
+		err := dr.underLease(ctx, func(gctx context.Context, _ Run) error { return write(gctx) })
+		if errors.Is(err, memql.ErrRowVersionChanged) {
+			dr.loseLease(nil)
+			return errLeaseLost
+		}
+		return err
+	})
+}
+
+// stillHolds is a fresh ownership check before an external call. It refuses
+// on an unreadable lease. This is not destination fencing: a process may pause
+// after this read, so external effects still require destination reconciliation.
+// Journal writes use underLease instead, keeping the read and write together.
 func (dr *runDriver) stillHolds(ctx context.Context) bool {
 	if dr.lease.isLost() {
 		return false
 	}
 	r, err := dr.d.Store.RunByID(memql.ContextWithFreshRead(ctx), dr.runID)
 	if err != nil {
-		return true
+		return false
 	}
-	if r == nil || r.DriverNodeID != dr.d.NodeID {
+	if !dr.owns(r) {
 		dr.loseLease(r)
 		return false
 	}

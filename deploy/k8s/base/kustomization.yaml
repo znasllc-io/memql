@@ -80,6 +80,7 @@ resources:
   - agent.yaml
   - planner.yaml
   - workbench.yaml
+  - workbench-serviceaccount.yaml
   # Site edge -- serves every hosted site (the portal is site #1) behind the
   # `*.<domain>` and apex Ingress rules (memql#3700 / memql#3714).
   - edge.yaml

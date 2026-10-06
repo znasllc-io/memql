@@ -200,7 +200,7 @@ func (i *Integration) claimAndDrive(runID string) {
 		return // finished, or another replica's
 	}
 	dr := &runDriver{
-		i: i, d: d, lease: l, runID: runID, run: run,
+		i: i, d: d, lease: l, runID: runID, run: run, claimID: run.DriverLeaseID,
 		log: d.Logger.With("component", "pipelinerun", logger.Subject(RunConcept, runID), "node", d.NodeID),
 	}
 	switch dr.drive(ctx) {
@@ -226,11 +226,12 @@ const (
 
 // runDriver is one drive of one run, on the replica holding its lease.
 type runDriver struct {
-	i     *Integration
-	d     Deps
-	lease *lease
-	runID string
-	log   *slog.Logger
+	i       *Integration
+	d       Deps
+	lease   *lease
+	runID   string
+	claimID string // immutable for this drive; a node name is not process ownership
+	log     *slog.Logger
 
 	// run is the row as this drive last wrote or read it. Only the drive's
 	// own goroutine touches it; a step's goroutine reads facts instead.
@@ -240,8 +241,9 @@ type runDriver struct {
 	token        string
 	installation int64
 
-	workRun atomic.Pointer[workjournal.Run]
-	facts   requestFacts
+	workRun       atomic.Pointer[workjournal.Run]
+	journalFailed atomic.Bool
+	facts         requestFacts
 
 	stages []stageTracks
 	tracks []*stepTrack
@@ -284,6 +286,9 @@ func refusedWith(r *pipelines.Refusal) verdict {
 // the run over mid-conclusion -- and a cancel stops the runner's in-flight
 // work at once.
 func (dr *runDriver) drive(ctx context.Context) driveOutcome {
+	ctx, stopJournal := context.WithCancel(ctx)
+	defer stopJournal()
+	dr.guardJournal()
 	dr.execCtx, dr.cancelExec = context.WithCancel(context.WithoutCancel(ctx))
 	if dr.run.CancelRequested {
 		dr.lease.cancel()
@@ -316,6 +321,9 @@ func (dr *runDriver) drive(ctx context.Context) driveOutcome {
 	stopBeat()
 	beating.Wait()
 	close(watched)
+	if dr.journalFailed.Load() {
+		return driveAborted
+	}
 	if dr.lease.isLost() {
 		return driveLost
 	}
@@ -477,6 +485,11 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 			}
 			dr.workRun.Store(w)
 			dr.setFacts()
+			for _, track := range dr.tracks {
+				if track.finished() && track.step.Kind == pipelines.StepCommand {
+					dr.acknowledgeReceipt(ctx, pipelines.CurrentExecutor(), dr.request(track, nil))
+				}
+			}
 			return nil, true
 		}
 		// A work run with no step rows never queued its steps: opening it
@@ -585,6 +598,10 @@ func (dr *runDriver) carryFromOriginal(ctx context.Context) bool {
 // since (the timing table learned between the attempts) runs again: a pass
 // over other packages is not a pass of these. A failed, cancelled or never
 // reached step runs, and a step the plan skips keeps the plan's reason.
+//
+// A NOTIFY STEP IS NEVER CARRIED. What it delivered announced the attempt it
+// ran in; this attempt has an outcome of its own -- most often, that the
+// pipeline recovered -- and a carried notification would leave it unsaid.
 func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
 	byKey := make(map[string]WorkStep, len(prior))
 	for _, row := range prior {
@@ -594,12 +611,15 @@ func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
 	}
 	for _, t := range tracks {
 		row, ok := byKey[t.step.Key]
-		if !ok || t.step.Skip != nil {
+		if !ok || t.step.Skip != nil || t.step.Kind == pipelines.StepNotify {
 			continue
 		}
 		passed := row.Status == WorkStepDone
 		carried := row.Status == WorkStepSkipped && row.Skip != nil && row.Skip.Code == pipelines.CodePassedEarlier
 		if !passed && !carried {
+			continue
+		}
+		if t.definition == "" || row.DefinitionFingerprint != t.definition {
 			continue
 		}
 		if !slices.Equal(row.Packages, t.step.Packages) {
@@ -624,6 +644,7 @@ func (dr *runDriver) decls() []workjournal.StepDecl {
 	out := make([]workjournal.StepDecl, 0, len(dr.tracks))
 	for _, t := range dr.tracks {
 		call := map[string]any{"construct": "pipeline", "name": t.step.Name, "stage": t.step.Stage}
+		call["definitionFingerprint"] = t.definition
 		if len(t.step.Packages) > 0 {
 			call["packages"] = slices.Clone(t.step.Packages)
 		}
@@ -653,29 +674,15 @@ func (dr *runDriver) resume(rows []WorkStep) string {
 	stored := make(map[string]WorkStep, len(rows))
 	for _, row := range rows {
 		if row.Key != "" {
+			if _, duplicate := stored[row.Key]; duplicate {
+				return "the journal contains duplicate step " + row.Key
+			}
 			stored[row.Key] = row
 		}
 	}
 	planned := make(map[string]bool, len(dr.tracks))
 	for _, t := range dr.tracks {
 		planned[t.step.Key] = true
-		row, ok := stored[t.step.Key]
-		if !ok {
-			continue
-		}
-		t.attempt = max(row.Attempt, 1)
-		t.sent = row.Status == WorkStepRunning
-		if len(row.Packages) > 0 {
-			t.step.Packages = slices.Clone(row.Packages)
-		}
-		t.step.Skip = nil
-		if row.Skip != nil {
-			skip := *row.Skip
-			t.step.Skip = &skip
-		}
-		if row.Finished() {
-			t.set(stateFromRow(t.snapshot(), row))
-		}
 	}
 	var missing []string
 	for key := range stored {
@@ -683,11 +690,32 @@ func (dr *runDriver) resume(rows []WorkStep) string {
 			missing = append(missing, key)
 		}
 	}
-	if len(missing) == 0 {
-		return ""
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Sprintf("the plan read again at %s no longer holds %s", shortSHA(dr.run.SHA), strings.Join(missing, ", "))
 	}
-	sort.Strings(missing)
-	return fmt.Sprintf("the plan read again at %s no longer holds %s", shortSHA(dr.run.SHA), strings.Join(missing, ", "))
+	for index, t := range dr.tracks {
+		row, ok := stored[t.step.Key]
+		if !ok {
+			return "the journal has no definition for step " + t.step.Key
+		}
+		t.attempt = max(row.Attempt, 1)
+		t.sent = row.Status == WorkStepRunning
+		t.step.Packages = slices.Clone(row.Packages)
+		t.step.Skip = nil
+		if row.Skip != nil {
+			skip := *row.Skip
+			t.step.Skip = &skip
+		}
+		t.definition = dr.definitionOf(t.step)
+		if row.Seq != index || t.definition == "" || row.DefinitionFingerprint != t.definition {
+			return "the execution definition or order changed for step " + t.step.Key
+		}
+		if row.Finished() {
+			t.set(stateFromRow(t.snapshot(), row))
+		}
+	}
+	return ""
 }
 
 // diverged ends a resumed run whose plan, read again, is not the plan its
@@ -722,10 +750,11 @@ func (dr *runDriver) adoptRows(rows []WorkStep) {
 			stage, _, _ = strings.Cut(row.Key, ".")
 		}
 		t := &stepTrack{
-			step:    pipelines.Step{Key: row.Key, Stage: stage, Name: name, Kind: pipelines.StepCommand},
-			attempt: max(row.Attempt, 1),
-			sent:    row.Status == WorkStepRunning,
-			state:   StepState{Key: row.Key, Stage: stage, Name: name, Status: StepPending},
+			step:       pipelines.Step{Key: row.Key, Stage: stage, Name: name, Kind: pipelines.StepCommand},
+			definition: row.DefinitionFingerprint,
+			attempt:    max(row.Attempt, 1),
+			sent:       row.Status == WorkStepRunning,
+			state:      StepState{Key: row.Key, Stage: stage, Name: name, Status: StepPending},
 		}
 		if row.Finished() {
 			t.set(stateFromRow(t.snapshot(), row))
@@ -792,13 +821,16 @@ func (dr *runDriver) reopenFromRows(rows []WorkStep) bool {
 	return true
 }
 
-// stateFromRow is a step's state as its row's receipt says it ended.
+// stateFromRow is a step's state as its row's receipt says it ended -- its
+// artifacts too, so a notify stage of a resumed run lists the files of steps
+// its predecessor ran.
 func stateFromRow(s StepState, row WorkStep) StepState {
 	s.Code, s.DurationMs = row.ErrorCode, row.DurationMs
 	s.Message = row.ErrorMessage
 	if s.Message == "" {
 		s.Message = row.Reason
 	}
+	s.ArtifactFileIDs = slices.Clone(row.ArtifactFileIDs)
 	switch row.Status {
 	case WorkStepDone:
 		s.Status = StepSucceeded
@@ -824,8 +856,9 @@ type stageTracks struct {
 
 // stepTrack is one compiled step as this drive follows it.
 type stepTrack struct {
-	step    pipelines.Step
-	attempt int
+	step       pipelines.Step
+	attempt    int
+	definition string
 	// sent: the rows say running with no receipt -- a previous driver handed
 	// it to the runner, which may still be at it. Re-sent with the same
 	// attempt when the run goes on; when the run ends instead, the runner is
@@ -867,7 +900,8 @@ func (dr *runDriver) buildTracks(plan pipelines.Plan) {
 		for _, step := range stage.Steps {
 			t := &stepTrack{
 				step: step, attempt: 1,
-				state: StepState{Key: step.Key, Stage: step.Stage, Name: step.Name, Status: StepPending},
+				definition: dr.definitionOf(step),
+				state:      StepState{Key: step.Key, Stage: step.Stage, Name: step.Name, Status: StepPending},
 			}
 			st.tracks = append(st.tracks, t)
 			dr.tracks = append(dr.tracks, t)
@@ -878,9 +912,12 @@ func (dr *runDriver) buildTracks(plan pipelines.Plan) {
 
 // execute runs the stages strictly in the order written (decision 2): a
 // stage's steps at once, at most maxConcurrentSteps in flight; the first
-// stage that fails blocks every later stage's steps (pipeline_stage_blocked).
-// A cancel stops it between stages and inside one; a lost lease stops it
-// with nothing more written.
+// stage that fails blocks every later stage's steps (pipeline_stage_blocked)
+// -- except a notify stage's, which runs: announcing the failure is what it
+// is for (D16). The block keeps naming the stage that failed first. A cancel
+// stops it between stages and inside one, a notify stage's included: one the
+// cancel reaches before it hands its notification over sends nothing. A lost
+// lease stops it with nothing more written.
 func (dr *runDriver) execute(ctx context.Context) {
 	blockedBy := ""
 	for i, st := range dr.stages {
@@ -890,7 +927,7 @@ func (dr *runDriver) execute(ctx context.Context) {
 		if dr.lease.isCancelled() {
 			break
 		}
-		if blockedBy != "" {
+		if blockedBy != "" && !announces(st) {
 			for _, t := range st.tracks {
 				if !t.finished() {
 					dr.settle(ctx, t, skipReceipt(pipelines.CodeStageBlocked, "Not run: stage "+blockedBy+" failed."))
@@ -905,7 +942,7 @@ func (dr *runDriver) execute(ctx context.Context) {
 		if dr.lease.isCancelled() {
 			break
 		}
-		if stageFailed(st) {
+		if blockedBy == "" && stageFailed(st) {
 			blockedBy = st.name
 		}
 		if i < len(dr.stages)-1 {
@@ -957,6 +994,20 @@ func stageFailed(st stageTracks) bool {
 	return false
 }
 
+// announces reports a notify stage: one whose every step is a notify step,
+// which runs after an earlier stage failed rather than being blocked by it.
+func announces(st stageTracks) bool {
+	if len(st.tracks) == 0 {
+		return false
+	}
+	for _, t := range st.tracks {
+		if t.step.Kind != pipelines.StepNotify {
+			return false
+		}
+	}
+	return true
+}
+
 // runStep takes one step from pending to its receipt.
 func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 	if dr.lease.isLost() || dr.lease.isCancelled() {
@@ -968,8 +1019,9 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 		dr.settle(ctx, t, skipReceipt(step.Skip.Code, step.Skip.Reason))
 		return
 	case step.Kind == pipelines.StepNotify:
-		dr.settle(ctx, t, skipReceipt(pipelines.CodeNotifyUnavailable, fmt.Sprintf(
-			"Nothing was sent to channel %s: notify stages deliver once channels arrive (epic memql#5480).", step.Channel)))
+		// The driver delivers a notification itself, over the outbound path
+		// (notify.go): a notify step is never the step runner's.
+		dr.runNotify(ctx, t)
 		return
 	}
 
@@ -977,7 +1029,12 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 	if !dr.stillHolds(ctx) {
 		return
 	}
-	t.handle = dr.work().Step(ctx, step.Key)
+	var journalErr error
+	t.handle, journalErr = dr.work().Step(ctx, step.Key)
+	if journalErr != nil {
+		dr.journalUnavailable(step.Key, journalErr)
+		return
+	}
 	running := t.snapshot()
 	running.Status = StepRunning
 	t.set(running)
@@ -1003,7 +1060,8 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 	}
 
 	ceiling := pipelines.ParseRunCeiling(os.Getenv(pipelines.EnvRunCeiling))
-	end := dr.execStep(exec, dr.request(t, secrets), dr.stepDeadline(ceiling))
+	req := dr.request(t, secrets)
+	end := dr.execStep(exec, req, dr.stepDeadline(ceiling))
 	switch end.kind {
 	case endLost:
 		return
@@ -1017,24 +1075,57 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 		dr.settle(ctx, t, failReceipt(pipelines.CodeExecutorError,
 			"The runner could not report how the step ended: "+dr.mask(end.err.Error())))
 	default:
-		dr.settle(ctx, t, dr.receiptFor(end.result, end.elapsed))
+		if dr.settle(ctx, t, dr.receiptFor(end.result, end.elapsed)) {
+			dr.acknowledgeReceipt(ctx, exec, req)
+		}
+	}
+}
+
+func (dr *runDriver) acknowledgeReceipt(ctx context.Context, exec pipelines.Executor, req pipelines.StepRequest) {
+	if acknowledger, ok := exec.(pipelines.ReceiptAcknowledger); ok {
+		// Cleanup needs identity, not credentials. No resolved secret survives
+		// into a background acknowledgement or a recovered driver's cleanup.
+		req.Secrets = nil
+		acknowledger.AcknowledgeReceipt(ctx, req)
 	}
 }
 
 // settle writes a step's receipt -- its intent first, for a step that ends
 // without having run, so every declared step reads as begun and ended -- and
-// records it in memory. On a lost lease it writes nothing.
-func (dr *runDriver) settle(ctx context.Context, t *stepTrack, rec receipt) {
+// records it in memory, the artifacts it names included: a notify stage later
+// in the run lists them. On a lost lease it writes nothing.
+func (dr *runDriver) settle(ctx context.Context, t *stepTrack, rec receipt) bool {
 	if !dr.stillHolds(ctx) {
-		return
+		return false
 	}
 	if t.handle == nil {
-		t.handle = dr.work().Step(ctx, t.step.Key)
+		var err error
+		t.handle, err = dr.work().Step(ctx, t.step.Key)
+		if err != nil {
+			dr.journalUnavailable(t.step.Key, err)
+			return false
+		}
 	}
-	t.handle.Finish(ctx, rec.journal())
+	if err := t.handle.Finish(ctx, rec.journal()); err != nil {
+		dr.journalUnavailable(t.step.Key, err)
+		return false
+	}
 	s := t.snapshot()
 	s.Status, s.Code, s.Message, s.DurationMs, s.LogTail = rec.report, rec.code, rec.message, rec.durationMs, rec.logTail
+	s.ArtifactFileIDs = slices.Clone(rec.artifactFileIDs)
 	t.set(s)
+	return true
+}
+
+// A missing intent or receipt is not permission to continue. Leave the run
+// unfinished for recovery, stop renewing this drive, and publish no verdict.
+func (dr *runDriver) journalUnavailable(step string, err error) {
+	if driveStopped(err) {
+		return
+	}
+	dr.d.Logger.Error("pipelines: journal write failed; stopping this drive for recovery", "runId", dr.runID, "step", step, "error", dr.mask(err.Error()))
+	dr.journalFailed.Store(true)
+	dr.lease.lose()
 }
 
 // endKind is how waiting on a step ended.
@@ -1144,6 +1235,14 @@ type requestFacts struct {
 	event                               pipelines.Event
 	installation                        int64
 	compute                             pipelines.Compute
+	domain                              string
+
+	// What a notification says of the run besides (notify.go): its commit's
+	// or pull request's title, the branch, the pull request, and when the run
+	// was queued and started.
+	title, branch     string
+	pullRequest       int
+	queuedAt, started time.Time
 }
 
 func (dr *runDriver) setFacts() {
@@ -1168,6 +1267,9 @@ func (dr *runDriver) setFacts() {
 		},
 		sha: dr.run.SHA, version: version, mode: dr.run.Mode, event: dr.run.Event,
 		installation: dr.installation, compute: dr.p.Compute,
+		domain: dr.d.Domain(),
+		title:  dr.run.Title, branch: dr.run.HeadBranch, pullRequest: dr.run.PullRequest,
+		queuedAt: dr.run.QueuedAt, started: started,
 	}
 }
 
@@ -1176,6 +1278,7 @@ func (dr *runDriver) setFacts() {
 func (dr *runDriver) request(t *stepTrack, secrets map[string]string) pipelines.StepRequest {
 	f := dr.facts
 	return pipelines.StepRequest{
+		RecoverOnly:    t.sent,
 		RunID:          f.runID,
 		WorkRunID:      f.workRunID,
 		StepKey:        t.step.Key,
@@ -1189,6 +1292,7 @@ func (dr *runDriver) request(t *stepTrack, secrets map[string]string) pipelines.
 		Mode:           f.mode,
 		Event:          f.event,
 		Version:        f.version,
+		Domain:         f.domain,
 		InstallationID: f.installation,
 		Compute:        f.compute,
 		Step:           t.step,
@@ -1388,11 +1492,10 @@ func (dr *runDriver) verdictOfSteps() verdict {
 // run row completed -- in that order, so a replica that stops half-way leaves
 // the run unfinished, to be recovered and concluded again, rather than a work
 // run open that no sweep closes (a pipeline's run is its runner's own). Only
-// the row's write is under the gate, as one fresh read and one write: the
-// work run's close and the calls to GitHub come before it, outside, behind
-// the fresh-read fence every unguarded write of a drive takes, while the
-// heartbeat keeps the lease (drive). A successful FULL run then teaches the
-// pipeline its packages' timings. It answers whether the run is concluded.
+// individual run and journal writes are under the gate, each with a fresh
+// ownership check. GitHub calls remain outside it and require destination
+// reconciliation if ownership changes while a request is in flight. A
+// successful FULL run then teaches the pipeline its packages' timings. It answers whether the run is concluded.
 func (dr *runDriver) conclude(ctx context.Context, v verdict) bool {
 	if !dr.stillHolds(ctx) {
 		return false
@@ -1439,13 +1542,18 @@ func (dr *runDriver) conclude(ctx context.Context, v verdict) bool {
 	if !dr.stillHolds(ctx) {
 		return false
 	}
+	var journalErr error
 	switch v.conclusion {
 	case ConclusionSuccess:
-		dr.work().Succeeded(ctx, map[string]any{"conclusion": v.conclusion, "stages": stageList(stages)})
+		journalErr = dr.work().Succeeded(ctx, map[string]any{"conclusion": v.conclusion, "stages": stageList(stages)})
 	case ConclusionCancelled:
-		dr.work().Cancelled(ctx, v.workCode, v.workMessage)
+		journalErr = dr.work().Cancelled(ctx, v.workCode, v.workMessage)
 	default:
-		dr.work().Failed(ctx, v.workCode, v.workMessage)
+		journalErr = dr.work().Failed(ctx, v.workCode, v.workMessage)
+	}
+	if journalErr != nil {
+		dr.journalUnavailable("", journalErr)
+		return false
 	}
 	var written *CheckRunWrite
 	if dr.havePipeline {
@@ -1605,6 +1713,7 @@ func applyRunPatch(r *Run, p RunPatch) {
 	set(&r.WorkRunID, p.WorkRunID)
 	set(&r.WorkGoalID, p.WorkGoalID)
 	set(&r.DriverNodeID, p.DriverNodeID)
+	set(&r.DriverLeaseID, p.DriverLeaseID)
 	set(&r.CancelledBy, p.CancelledBy)
 	if p.CheckRunID != nil {
 		r.CheckRunID = *p.CheckRunID

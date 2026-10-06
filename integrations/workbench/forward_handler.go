@@ -35,7 +35,7 @@ type ForwardHandler struct {
 
 	mu       sync.Mutex
 	inflight map[string]*inflightCall
-	// pipelines answers the four pipeline actions. Nil until the app wires a
+	// pipelines answers the pipeline actions. Nil until the app wires a
 	// runner, and on a node that cannot run steps; every pipeline action then
 	// answers ErrCodePipelinesNotConfigured having run nothing.
 	pipelines PipelineRunner
@@ -56,16 +56,21 @@ const (
 	// PipelineStepAction runs, or adopts, the step's Job to completion and
 	// answers with its outcome. LONG: it lasts as long as the Job, so it runs
 	// on its own goroutine and never on the stream's receive loop.
-	PipelineStepAction = "pipelineStep"
+	// The version is part of the action: an older replica must reject the
+	// request, not silently discard execution/recovery fields it cannot enforce.
+	PipelineStepAction = "pipelineStepV2"
 	// PipelineStatusAction asks after a step's Job: running, finished (with
 	// the outcome), absent or stale. Quick -- the runner bounds it at ten
 	// seconds -- and still answered off the receive loop, as are the next two.
 	PipelineStatusAction = "pipelineStatus"
-	// PipelineAckAction tells the runner its outcome was received, so the Job
+	// PipelineAckAction tells the runner its outcome was durably journaled, so the Job
 	// and its Secret can be deleted. Quick.
-	PipelineAckAction = "pipelineAck"
+	PipelineAckAction = "pipelineReceiptAck"
 	// PipelineCancelAction deletes every Job of a run. Quick.
 	PipelineCancelAction = "pipelineCancel"
+	// PipelineReadinessAction reads this replica's runner and last isolation
+	// verdict. It starts no work and creates no Kubernetes objects.
+	PipelineReadinessAction = "pipelineReadiness"
 )
 
 // ErrCodePipelinesNotConfigured is the error_code every pipeline action
@@ -86,9 +91,10 @@ type PipelineRunner interface {
 	Status(ctx context.Context, argsJSON []byte) (replyJSON []byte, errorCode string)
 	Ack(ctx context.Context, argsJSON []byte) (errorCode string)
 	CancelRun(ctx context.Context, argsJSON []byte) (replyJSON []byte, errorCode string)
+	Readiness(ctx context.Context) (replyJSON []byte, errorCode string)
 }
 
-// SetPipelineRunner installs the runner behind the four pipeline actions. Left
+// SetPipelineRunner installs the runner behind the pipeline actions. Left
 // nil, every one of them answers ErrCodePipelinesNotConfigured. Safe to call
 // while the stream is serving, since the wiring can land after it.
 func (h *ForwardHandler) SetPipelineRunner(p PipelineRunner) {
@@ -289,13 +295,13 @@ func (h *ForwardHandler) handleForwardedBuild(ctx context.Context, req *nodev1.W
 
 func isPipelineAction(action string) bool {
 	switch action {
-	case PipelineStepAction, PipelineStatusAction, PipelineAckAction, PipelineCancelAction:
+	case PipelineStepAction, PipelineStatusAction, PipelineAckAction, PipelineCancelAction, PipelineReadinessAction:
 		return true
 	}
 	return false
 }
 
-// handleForwardedPipeline answers the four pipeline actions.
+// handleForwardedPipeline answers the pipeline actions.
 //
 // THE CLASS GATE is the build entry's, for the build entry's reason: the only
 // caller of these entries is the engine's own pipeline executor, which forwards
@@ -306,7 +312,7 @@ func isPipelineAction(action string) bool {
 // what a refused caller learns is the refusal, not this node's configuration.
 //
 // Each starts on a goroutine of its own and this returns: pipelineStep for
-// as long as its Job lasts, the other three for at most the runner's bound on
+// as long as its Job lasts, the other actions for at most the runner's bound on
 // them.
 func (h *ForwardHandler) handleForwardedPipeline(ctx context.Context, req *nodev1.WorkbenchForwardRequest, send func(*nodev1.NodeServerMessage) error) {
 	requestId := req.GetRequestId()
@@ -350,7 +356,7 @@ func (h *ForwardHandler) handleForwardedPipeline(ctx context.Context, req *nodev
 //
 // TRACKED BEFORE IT STARTS, here on the receive loop, as a step is, so a cancel
 // read next finds it. It keeps the stream's cancellation, unlike a step: a
-// stream that ends leaves nobody to answer, and all three are reads or
+// stream that ends leaves nobody to answer, and these are reads or
 // idempotent deletes the agent asks for again.
 func (h *ForwardHandler) startPipelineQuick(ctx context.Context, runner PipelineRunner, req *nodev1.WorkbenchForwardRequest, send func(*nodev1.NodeServerMessage) error) {
 	requestId, action, args := req.GetRequestId(), req.GetAction(), req.GetArgsJson()
@@ -359,6 +365,8 @@ func (h *ForwardHandler) startPipelineQuick(ctx context.Context, runner Pipeline
 		var reply []byte
 		var code string
 		switch action {
+		case PipelineReadinessAction:
+			reply, code = runner.Readiness(cctx)
 		case PipelineStatusAction:
 			reply, code = runner.Status(cctx, args)
 		case PipelineAckAction:

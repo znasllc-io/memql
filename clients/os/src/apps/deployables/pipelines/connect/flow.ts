@@ -192,7 +192,11 @@ export function readFromWords(p: Pick<PipelinePreview, "sha" | "defaultBranch">)
 /** Every step that names a need, as "os-checks needs docker", in plan order. */
 export function needersOf(p: Pick<PipelinePreview, "stages">): string[] {
   return p.stages.flatMap((stage) =>
-    stage.steps.filter((step) => step.needs.length > 0).map((step) => `${step.name} needs ${andList(step.needs)}`),
+    stage.steps
+      .filter((step) => step.requiresFleet || step.needs.length > 0)
+      .map((step) => step.needs.length > 0
+        ? `${step.name} needs ${andList(step.needs)}`
+        : `${step.name} runs on your fleet${step.platform ? ` (${step.platform})` : ""}`),
   );
 }
 
@@ -205,15 +209,14 @@ export function needersOf(p: Pick<PipelinePreview, "stages">): string[] {
  * and then taken back -- so the sentence says what keeps every step here.
  */
 export function fleetReason(needers: readonly string[]): string {
-  const one = needers.length === 1;
-  return `Only your machines offer what ${one ? "this step needs" : "these steps need"}: ${needers.join("; ")}. ` +
-    `To keep every step in this cluster, remove the ${one ? "need from the step" : "needs from the steps"}.`;
+  return `These steps use your fleet: ${needers.join("; ")}. ` +
+    "To keep every step in this cluster, use cluster containers without host requirements.";
 }
 
 /** What to do when steps need a machine and none of the viewer's allows pipelines. */
-export function needsRemedy(needers: readonly string[]): string {
-  return "None of your machines allows pipelines. Allow pipelines in a machine's policy.yaml (pipelines.allow), " +
-    `or remove the ${needers.length === 1 ? "need from the step" : "needs from the steps"}.`;
+export function needsRemedy(_needers: readonly string[]): string {
+  return "No compatible worker allows pipelines. Update Cockpit and allow pipeline work in its policy.yaml, " +
+    "or change these steps to use cluster containers without host requirements.";
 }
 
 /** The two answers Compute can take, in the person's words. */
@@ -264,7 +267,7 @@ export function waitWords(ms: number): string {
  * machines count and why only the reported label does.
  */
 export function fleetAvailable(
-  machines: readonly Pick<MachineRow, "ownerUserId" | "revokedAt" | "reportedLabels">[],
+  machines: readonly Pick<MachineRow, "ownerUserId" | "revokedAt" | "reportedLabels" | "pipelineContract">[],
   ownerUserId: string,
 ): boolean {
   return machinesAllowingPipelines(machines, ownerUserId) > 0;

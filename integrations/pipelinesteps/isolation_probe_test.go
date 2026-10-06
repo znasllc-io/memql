@@ -31,10 +31,10 @@ func TestBuildIsolationProbe(t *testing.T) {
 	job := BuildIsolationProbe(cfg, name)
 	doc := wire(t, job)
 
-	t.Run("one Indexed Job of two pods, so it takes one slot under the ceiling (R43)", func(t *testing.T) {
+	t.Run("one Indexed Job of three pods, so it takes one slot under the ceiling (R43)", func(t *testing.T) {
 		wantField(t, doc, "Indexed", "spec", "completionMode")
-		wantField(t, doc, 2.0, "spec", "completions")
-		wantField(t, doc, 2.0, "spec", "parallelism")
+		wantField(t, doc, 3.0, "spec", "completions")
+		wantField(t, doc, 3.0, "spec", "parallelism")
 		// Index 1 (the connector) ends failed with its verdict; with a
 		// per-index limit of zero that ends neither index 0 (the listener)
 		// nor the Job before the runner has read it.
@@ -441,6 +441,21 @@ func TestIsolationProbeConnectorReadsTheThreeRoundsTogether(t *testing.T) {
 			code: probeExitConnected, said: []string{"refused, refused, refused", "listener 127.0.0.1:"},
 		},
 		{
+			name: "positive control reaches DNS and the listener every round",
+			dns:  func(t *testing.T) int { return isoAccepting(t).port() }, listener: func(t *testing.T) int { return isoAccepting(t).port() },
+			env: map[string]string{"JOB_COMPLETION_INDEX": "2"}, code: probeExitControlPassed,
+		},
+		{
+			name: "positive control cannot reach the listener",
+			dns:  func(t *testing.T) int { return isoAccepting(t).port() }, listener: isoRefusing,
+			env: map[string]string{"JOB_COMPLETION_INDEX": "2"}, code: probeExitControlFailed,
+		},
+		{
+			name: "positive control reaches the listener but not DNS",
+			dns:  isoRefusing, listener: func(t *testing.T) int { return isoAccepting(t).port() },
+			env: map[string]string{"JOB_COMPLETION_INDEX": "2"}, code: probeExitControlFailed,
+		},
+		{
 			name: "DNS failed every attempt: inconclusive",
 			dns:  isoRefusing, listener: isoRefusing,
 			code: probeExitDNS, said: []string{"dns 127.0.0.1:"},
@@ -491,8 +506,8 @@ func TestIsolationProbeConnectorReadsTheThreeRoundsTogether(t *testing.T) {
 		{
 			name: "a part for no index: inconclusive",
 			dns:  func(t *testing.T) int { return isoAccepting(t).port() }, listener: isoRefusing,
-			env:  map[string]string{"JOB_COMPLETION_INDEX": "2"},
-			code: probeExitNoPart, said: []string{"completion index 2"},
+			env:  map[string]string{"JOB_COMPLETION_INDEX": "3"},
+			code: probeExitNoPart, said: []string{"completion index 3"},
 		},
 		{
 			name: "no completion index at all: inconclusive",

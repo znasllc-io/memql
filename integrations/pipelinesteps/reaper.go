@@ -16,8 +16,8 @@ import (
 // all collect it. One that never came to be owned has nothing to collect it --
 // its Run went between creating the Secret and creating the Job, or before it
 // could give the Job ownership, and a cancel missed it. The reaper deletes
-// such a Secret once nothing can want it any more: older than the run's
-// ceiling, by when every step of its run has ended (a step still queued for a
+// such a Secret once nothing can want it any more: past its stamped run
+// deadline, by when every step of its run has ended (a step still queued for a
 // slot when its run reaches its ceiling is never started, ruling R31b), and
 // the Job TTL past it, within which an outcome may still be read. A Secret
 // whose Job exists is never deleted, owned or not.
@@ -62,7 +62,7 @@ func (r *Runner) maybeReap() {
 // reap deletes the orphaned step Secrets it finds, within the sweep's bounds,
 // and answers how many.
 func (r *Runner) reap() (deleted int) {
-	cutoff := r.now().Add(-(r.cfg.RunCeiling + r.cfg.JobTTL))
+	now := r.now()
 	cont := ""
 	for page := 0; page < reapMaxPages && deleted < reapMaxDeletes; page++ {
 		ctx, cancel := context.WithTimeout(context.Background(), quickCallTimeout)
@@ -76,7 +76,7 @@ func (r *Runner) reap() (deleted int) {
 			if deleted >= reapMaxDeletes {
 				break
 			}
-			if jobName, ok := orphanedSecret(meta, cutoff); ok && r.reapSecret(meta.Name, jobName) {
+			if jobName, ok := orphanedSecret(meta, now, r.cfg.RunCeiling, r.cfg.JobTTL); ok && r.reapSecret(meta.Name, jobName) {
 				deleted++
 			}
 		}
@@ -91,10 +91,18 @@ func (r *Runner) reap() (deleted int) {
 // orphanedSecret says a step Secret is old enough to reap and has no owner,
 // and names the Job it was made for. A Secret whose name is not a step Job's
 // is not one the reaper judges.
-func orphanedSecret(meta ObjectMeta, cutoff time.Time) (jobName string, ok bool) {
+func orphanedSecret(meta ObjectMeta, now time.Time, fallbackCeiling, ttl time.Duration) (jobName string, ok bool) {
 	jobName, named := strings.CutSuffix(meta.Name, SecretName(""))
-	return jobName, named && isStepJobName(jobName) && len(meta.OwnerReferences) == 0 &&
-		!meta.CreationTimestamp.IsZero() && meta.CreationTimestamp.Before(cutoff)
+	if !named || !isStepJobName(jobName) || len(meta.OwnerReferences) != 0 || meta.CreationTimestamp.IsZero() {
+		return jobName, false
+	}
+	// Old or malformed metadata has a bounded fallback. A valid stamped run
+	// deadline is authoritative even when another replica sweeps the Secret.
+	expires := meta.CreationTimestamp.Add(fallbackCeiling + ttl)
+	if deadline, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(meta.Annotations[AnnotRunDeadline])); err == nil {
+		expires = deadline.Add(ttl)
+	}
+	return jobName, expires.Before(now)
 }
 
 // reapSecret deletes an orphaned Secret once its Job is known to be gone.

@@ -307,7 +307,7 @@ func TestJournal_DB_RowsWrittenAndResumed(t *testing.T) {
 	}
 
 	// Resume re-runs only b, on the same run id.
-	resumed, err := e.ResumeFrom(context.Background(), journal, auto, &ResumeOptions{})
+	resumed, err := e.ResumeFrom(context.Background(), journal, auto, &ResumeOptions{AllowSideEffects: true})
 	if err != nil {
 		t.Fatalf("ResumeFrom: %v", err)
 	}

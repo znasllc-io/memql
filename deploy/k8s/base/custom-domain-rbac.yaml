@@ -24,13 +24,10 @@
 # down. That is the complete set of API calls this feature can make. Two kinds,
 # one namespace, no wildcard verb, no wildcard resource, and no ClusterRole.
 #
-# THE SUBJECT IS memql-engine, the ServiceAccount every engine Deployment
-# already runs as, rather than a new one. The sweep fires from the automations
-# cron leader, which is elected across the mesh rather than pinned to a node
-# type, so the grant has to reach whichever replica wins -- and a new
-# ServiceAccount would mean either binding it to every Deployment (the same
-# blast radius, spelled twice) or pinning the sweep to one node type, which is
-# a topology decision made to satisfy a Role.
+# The subjects are the shared engine and dedicated workbench identities.
+# The automation cron leader can run on either; both retain this namespace-
+# scoped grant. Pipeline Job/Secret access remains a separate workbench-only
+# Role in memql-pipelines.
 #
 # WHY THE ENGINE REACHES THE API AT ALL, when the design specifies a capability
 # script. The engine runtime image is gcr.io/distroless/base-debian12: no bash,
@@ -98,4 +95,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: memql-engine
+    namespace: memql
+  - kind: ServiceAccount
+    name: memql-engine-workbench
     namespace: memql

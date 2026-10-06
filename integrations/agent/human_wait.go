@@ -105,13 +105,20 @@ func (r *Replier) saveWorkProgress(ctx context.Context, messages []common.ChatMe
 	return writer.SaveWorkContinuation(ctx, closePendingCalls(messages))
 }
 func (r *Replier) restoreAfterQuestion(ctx context.Context, messages []common.ChatMessage) ([]common.ChatMessage, error) {
+	run, _ := common.RunFromContext(ctx)
 	if !isOwnedWorkExecution(ctx) {
+		if run.Continuation != nil {
+			return nil, fmt.Errorf("the required continuation lost its owned execution context")
+		}
 		return messages, nil
 	}
 	if reader, ok := r.engine.(interface {
 		RestoreWorkContinuation(context.Context, []common.ChatMessage) ([]common.ChatMessage, error)
 	}); ok {
 		return reader.RestoreWorkContinuation(ctx, messages)
+	}
+	if run.Continuation != nil {
+		return nil, fmt.Errorf("the required continuation reader is unavailable")
 	}
 	return messages, nil
 }

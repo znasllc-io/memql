@@ -3858,6 +3858,7 @@
         "conclusion",
         "deliveryId",
         "driverHeartbeatAt",
+        "driverLeaseId",
         "driverNodeId",
         "durationMs",
         "event",
@@ -4470,9 +4471,11 @@
         "nextAttemptAt",
         "requestedBy",
         "sentAt",
+        "serverStaged",
         "status",
         "subject",
-        "target"
+        "target",
+        "targetSecret"
       ],
       "required": [
         "body",

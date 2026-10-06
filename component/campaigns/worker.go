@@ -980,8 +980,8 @@ func (w *Worker) stopJob(systemCtx context.Context, job SendJob, status, reason 
 // worse -- a bypass is available to every caller that can reach it,
 // whereas an identity is only as powerful as the queries it is used for.
 // Every use of this context in this package is a named construct over
-// v1:campaigns:sendJob or v1:campaigns:suppression; nothing here reads a
-// recipient under it.
+// operational campaign state or a verified inbound delivery; nothing here
+// reads a recipient under it.
 func (w *Worker) systemActorContext(ctx context.Context) context.Context {
 	claims := map[string]any{"sub": systemCampaignsActor, "role": "owner"}
 	ctx = auth.ContextWithClaims(ctx, claims)

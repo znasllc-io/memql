@@ -315,6 +315,7 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	// because the work spine's compiled templates are called rather than
 	// triggered.
 	output["template"] = attributeFlagPresent(def.Attributes, "template") || attributeFlagPresent(automation.Attributes, "template")
+	output["journalRequired"] = attributeFlagPresent(def.Attributes, "journalRequired") || attributeFlagPresent(automation.Attributes, "journalRequired")
 
 	return &AutomationOutput{
 		Name:        def.Name,

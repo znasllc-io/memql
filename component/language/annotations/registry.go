@@ -297,6 +297,7 @@ var placementTable = concat(
 	[]Placement{
 		{Receiver: Automation, Name: "actor", Forms: FormFlag, Example: "@actor", Doc: docActorOnFunction},
 		{Receiver: Automation, Name: "filter", Forms: FormExpression, Example: `@filter(row => row.status == "open")`},
+		{Receiver: Automation, Name: "journalRequired", Forms: FormFlag, Example: "@journalRequired"},
 		{Receiver: Automation, Name: "loop", Forms: FormKeywords, Keys: loopKeys, Example: `@loop(maxDepth=4, until=row => row.status == "done")`},
 		{Receiver: Automation, Name: "mcp", Forms: FormFlag, Example: "@mcp"},
 		{Receiver: Automation, Name: "mode", Forms: FormKeywords, Keys: modeKeys, Example: `@mode(queued, max=10)`},
@@ -398,6 +399,7 @@ var placementTable = concat(
 		{Receiver: Concept, Name: "mirroredTo", Forms: FormString | FormStrings, Example: `@mirroredTo("shopify")`},
 		{Receiver: Concept, Name: "origin", Forms: FormString, Example: `@origin("memql")`},
 		{Receiver: Concept, Name: "rowAuthz", Forms: FormKeywords, Keys: rowAuthzKeys, Example: `@rowAuthz(owner="ownerUserId", clusterOwner)`},
+		{Receiver: Concept, Name: "serverWritten", Forms: FormFlag, Example: "@serverWritten"},
 		{Receiver: Concept, Name: "type", Forms: FormString, Example: `@type("collection")`, Doc: "The concept's row kind: \"object\" (the default), \"collection\" or \"reference\"."},
 		{Receiver: Concept, Name: "version", Forms: FormString, Example: `@version("1.0.0")`, Doc: docVersionConcept},
 	},
@@ -477,6 +479,7 @@ func concat(groups ...[]Placement) []Placement {
 // own Placement.Doc; every other placement shows this one (enforced by
 // TestEveryPlacementHasADoc).
 var Docs = map[string]string{
+	"journalRequired": "Require confirmed work-journal writes before an automation starts work, advances beyond a step or reports completion. A failed write stops the run even inside retry or on error continue. Preview runs remain sandboxed. This does not guarantee exactly-once external effects; reconcile uncertain effects before resuming.",
 	// Lifecycle / shared.
 	"disabled":             "Disable this definition.",
 	"description":          "Human-readable description of this definition. PREFER the /// doc-comment form (#2601): a /// block immediately above the declaration IS the description and wins over this annotation; @description remains the valid compatibility fallback -- the tree gate rejects the redundant long form (including a bare @description shadowed by a /// block). Aim for ~500 characters (editorial target).",
@@ -558,8 +561,9 @@ var Docs = map[string]string{
 	// import -- the quoted canonical-ID form this doc used to show was retired
 	// by memql#1067, so the editor was teaching an author the one spelling the
 	// conformance gate rejects (memql#3661).
-	"relationship": "Foreign-key relationship metadata. Format: @relationship(type=\"parent\", field=\"x\", target=concept, direction=\"outgoing\"), plus an optional as=\"domainVerb\" label.",
-	"rowAuthz":     docRowAuthz,
+	"relationship":  "Foreign-key relationship metadata. Format: @relationship(type=\"parent\", field=\"x\", target=concept, direction=\"outgoing\"), plus an optional as=\"domainVerb\" label.",
+	"rowAuthz":      docRowAuthz,
+	"serverWritten": "Requires internal call origin for every write to this concept, including raw inserts and updates through named mutations. Does not grant read access or bypass row authorization. Use for service-authored evidence and configuration whose public capability validates a request before writing.",
 	// Data origins (epic memql#4378). Two declarations, three derived
 	// states, no fourth.
 	"origin":     "Declares WHERE CHANGES TO THIS CONCEPT ARE MADE -- the system that owns the data. @origin(\"memql\") (the default when the annotation is absent) means MemQL originates it; @origin(\"<connector>\") names an external system, which makes the concept a MIRROR. A mirror is READ-ONLY BY CONSTRUCTION: component/memql refuses every write to it -- mutation, tool handler, raw insert or staged write -- that does not come from the connector the origin names, so what the badge says is what a reader may assume. The name must be a registered connector or the engine REFUSES BOOT naming the concept: a mirror nobody fills is a lie. Pairs with @mirroredTo to derive dataState (mirror | origin | native), which the registry, both SDKs and client data-origin displays read. See docs/public/concepts/data-origins.md.",

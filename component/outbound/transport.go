@@ -17,13 +17,19 @@ import (
 // Request is the delivery-relevant projection of an outboundRequest row
 // handed to a Transport.
 type Request struct {
-	ID        string
-	Medium    string
-	Target    string
-	Subject   string
-	Payload   string
-	DedupeKey string
-	Attempts  int
+	ID      string
+	Medium  string
+	Target  string
+	Subject string
+	Payload string
+	// TargetSecret is the v1:platform:globalSecret NAME whose value is the
+	// webhook URL (memql#5480). When it is set, the row's Target holds only
+	// the descriptor secret:<NAME>; the worker resolves the value and hands
+	// the transport a copy whose Target is the URL, so the URL exists in
+	// memory for one attempt and never in the row, a log line or an error.
+	TargetSecret string
+	DedupeKey    string
+	Attempts     int
 }
 
 // PermanentError marks a delivery failure that must not be retried
@@ -115,17 +121,27 @@ type WebhookTransport struct {
 }
 
 // NewWebhookTransport constructs the webhook transport with the
-// deploy-configured request timeout and allowlist.
+// deploy-configured request timeout and allowlist. Its client follows no
+// redirect, and Deliver enforces that on whatever client it is handed.
 func NewWebhookTransport() *WebhookTransport {
 	cfg := LoadConfig()
 	return &WebhookTransport{
-		Client:    &http.Client{Timeout: cfg.HTTPTimeout},
+		Client:    &http.Client{Timeout: cfg.HTTPTimeout, CheckRedirect: refuseRedirect},
 		Allowlist: cfg.WebhookAllowlist,
 	}
 }
 
+// refuseRedirect is the webhook client's redirect policy: follow none
+// (memql#5480). The allowlist judged the URL a row targets and nothing a
+// response points at, and on a redirect net/http sends the request on to the
+// new host with the full original URL as its Referer -- for a secret target,
+// the token. ErrUseLastResponse hands the 3xx itself back to Deliver, whose
+// status switch makes it a permanent failure.
+func refuseRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
 // Deliver POSTs the payload. 2xx is success; 408/429/5xx and transport
-// errors are retryable; every other status is permanent.
+// errors are retryable; every other status, a redirect included, is
+// permanent.
 func (t *WebhookTransport) Deliver(ctx context.Context, req Request) error {
 	if t == nil || t.Client == nil {
 		return errors.New("webhook transport: client not wired")
@@ -151,16 +167,22 @@ func (t *WebhookTransport) Deliver(ctx context.Context, req Request) error {
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, dest.String(), strings.NewReader(req.Payload))
 	if err != nil {
-		return Permanent(fmt.Errorf("webhook: build request: %w", err))
+		// Redacted like the client error below: a URL that fails to parse
+		// comes back quoted inside the *url.Error.
+		return Permanent(fmt.Errorf("webhook: build request: %w", redactURLError(err)))
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-Memql-Outbound-Id", req.ID)
 	if req.DedupeKey != "" {
 		httpReq.Header.Set("X-Memql-Dedupe-Key", req.DedupeKey)
 	}
-	resp, err := t.Client.Do(httpReq)
+	// A copy, so that no redirect is followed whatever client this transport
+	// was built with: the policy is the transport's, not its constructor's.
+	client := *t.Client
+	client.CheckRedirect = refuseRedirect
+	resp, err := client.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("webhook: %w", err)
+		return fmt.Errorf("webhook: %w", redactURLError(err))
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
@@ -174,4 +196,21 @@ func (t *WebhookTransport) Deliver(ctx context.Context, req Request) error {
 	default:
 		return Permanent(fmt.Errorf("webhook: status %d", resp.StatusCode))
 	}
+}
+
+// redactURLError drops the request URL net/http embeds in *url.Error: a
+// webhook URL can carry its credential in the path (Discord's token), and
+// this error is stamped into lastError and logged.
+//
+// The operation and the cause are kept, so lastError still says what went
+// wrong ("Post: dial tcp ...: connection refused"). Only the URL goes, and
+// for every row rather than only a secret target's: the transport cannot
+// tell which of its URLs is a credential, and a plain row's lastError
+// already names its target in the row beside it.
+func redactURLError(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return fmt.Errorf("%s: %w", ue.Op, ue.Err)
+	}
+	return err
 }

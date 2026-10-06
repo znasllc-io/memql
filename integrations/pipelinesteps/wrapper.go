@@ -61,7 +61,7 @@ if [ -n "${MEMQL_STEP_ARTIFACTS:-}" ]; then
   printf '\n%s begin\n' "$MEMQL_ARTIFACT_MARKER"
   # Word-split on purpose: the list is validated server-side (no spaces, no metacharacters,
   # no glob that can reach . or ..) and globs are allowed to expand.
-  tar -czf - -- $MEMQL_STEP_ARTIFACTS 2>/dev/null | base64
+  COPYFILE_DISABLE=1 tar -czf - -- $MEMQL_STEP_ARTIFACTS 2>/dev/null | base64
   echo "$MEMQL_ARTIFACT_MARKER end"
 fi
 exit $rc`

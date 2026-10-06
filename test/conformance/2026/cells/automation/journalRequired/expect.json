@@ -1,0 +1,7 @@
+{
+  "cases": [
+    {"file": "written-bare.memql", "verdict": "load_ok"},
+    {"file": "with-true.memql", "verdict": "refuse_parse", "code": "annotation_form", "message": "@journalRequired on an automation takes no arguments"},
+    {"file": "on-work-rows.memql", "verdict": "refuse_load", "message": "@journalRequired cannot be used on a before-write hook or an automation triggered by work-journal rows"}
+  ]
+}

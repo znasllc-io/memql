@@ -102,7 +102,9 @@ const EditionStatus = "frozen"
 // It moved to 0.6.1 with the agent-role axis (memql#5438): GrammarVersion
 // moved, 0.5.1 and 0.6.0 had shipped, so the grammar needed a release of its
 // own.
-const EditorRelease = "0.6.1"
+// Bounded parallel iteration changes the grammar again; its companion editor
+// release is prepared with the engine, and publication is a separate action.
+const EditorRelease = "0.6.3"
 
 // FrontEnd is how one edition's source reaches the core parser.
 type FrontEnd struct {

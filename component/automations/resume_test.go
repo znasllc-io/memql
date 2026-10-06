@@ -92,16 +92,18 @@ func TestRunJournalFromRows_StripsTheCanonicalPrefix(t *testing.T) {
 }
 
 func TestResumeRetryableRule(t *testing.T) {
-	call := func(kind string) *Step {
-		return &Step{ID: "s", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "f", Kind: kind}}
+	e := NewExecutor(ExecutorOptions{})
+	for _, kind := range []string{"query", "mutation", "logic", "builtin"} {
+		if e.stepRetryable(&Step{ID: "s", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "unknown", Kind: kind}}) {
+			t.Fatalf("unregistered %s was classified from the author's spelling", kind)
+		}
 	}
-	if !stepRetryable(call("query")) || stepRetryable(call("mutation")) {
-		t.Fatal("a query call retries freely; a mutation call needs AllowSideEffects")
+	for _, kind := range []StepType{StepTypeEvent, StepTypeAction, StepTypeAutomation, StepTypeForEach, StepTypeParallel, StepTypeBlock, "future"} {
+		if e.stepRetryable(&Step{ID: "s", Type: kind}) {
+			t.Fatalf("unclassified %s was admitted", kind)
+		}
 	}
-	if stepRetryable(&Step{ID: "s", Type: StepTypeEvent}) || stepRetryable(&Step{ID: "s", Type: StepTypeAction}) {
-		t.Fatal("a publish and an action have external effects too")
-	}
-	if !stepRetryable(call("logic")) || !stepRetryable(call("builtin")) || !stepRetryable(&Step{ID: "s", Type: StepTypeForEach}) {
-		t.Fatal("a logic or builtin call, a for and the other composers are re-run")
+	if !e.stepRetryable(&Step{ID: "s", Type: StepTypeExpression}) {
+		t.Fatal("in-process expression refused")
 	}
 }

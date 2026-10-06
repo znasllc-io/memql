@@ -2758,6 +2758,25 @@ QueryClient.prototype.pipelinesRerun = function (this: QueryClient, args: Pipeli
   return this.executeNamed("pipelinesRerun", buildPipelinesRerun(args), opts);
 };
 
+/** Read pipeline configuration and each workbench's last runner isolation verdict. This read never starts a build or an isolation probe. Restricted to cluster operators. */
+export interface PipelinesStatusArgs {
+}
+
+export function buildPipelinesStatus(args: PipelinesStatusArgs): string {
+  void args;
+  return "builtin pipelinesStatus()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesStatus(args?: PipelinesStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesStatus = function (this: QueryClient, args: PipelinesStatusArgs = {} as PipelinesStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesStatus", buildPipelinesStatus(args), opts);
+};
+
 /** List every AI provider this NODE has registered: its vendor and model, whether this node can call it, which tier of the resolution chain supplied its credential (federation | globalSecret | globalVariable | env | unresolved), and -- when it cannot be called -- why not. Produced from the live provider registry, never persisted, and carrying no credential or fingerprint of one. Per-node on purpose: two replicas genuinely can disagree, and that disagreement is the most useful thing this read surfaces. Owner-only. */
 export interface ProviderAuthStatusArgs {
 }

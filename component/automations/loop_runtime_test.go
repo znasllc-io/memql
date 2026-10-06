@@ -295,7 +295,7 @@ func TestResumeKeepsTheRunsPlaceInItsChain(t *testing.T) {
 	defer e.Close()
 	auto := causeProbeAutomation("resumeProbe")
 	journal := &RunJournal{RunId: "run-resumed", AutomationName: auto.Name, FailedStep: "a", TriggerEvent: trigger}
-	if _, err := e.ResumeFrom(context.Background(), journal, auto, &ResumeOptions{}); err != nil {
+	if _, err := e.ResumeFrom(context.Background(), journal, auto, &ResumeOptions{AllowSideEffects: true}); err != nil {
 		t.Fatalf("ResumeFrom: %v", err)
 	}
 	if len(probe.causes) != 1 {
@@ -313,7 +313,7 @@ func TestResumeKeepsTheRunsPlaceInItsChain(t *testing.T) {
 	probe.causes = nil
 	rootTrigger := jsonRoundTrip(t, map[string]any{"topic": "graph.node.updated.v1:probe:ticket", "kind": events.KindNodeUpdated.String(), "payload": map[string]any{"id": "t1"}})
 	root := &RunJournal{RunId: "run-root", AutomationName: auto.Name, FailedStep: "a", TriggerEvent: rootTrigger}
-	if _, err := e.ResumeFrom(context.Background(), root, auto, &ResumeOptions{}); err != nil {
+	if _, err := e.ResumeFrom(context.Background(), root, auto, &ResumeOptions{AllowSideEffects: true}); err != nil {
 		t.Fatalf("ResumeFrom: %v", err)
 	}
 	if len(probe.causes) != 1 || probe.causes[0].Depth != 1 {

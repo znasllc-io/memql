@@ -171,3 +171,55 @@ func TestFleetCatalogGraphReaderEnforcesOwnerAndSharedBoundaries(t *testing.T) {
 		}
 	}
 }
+
+func TestRepositoryScopeSurvivesThePersistedCatalogRead(t *testing.T) {
+	ctx := context.Background()
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
+	t.Cleanup(func() { _ = db.Close() })
+	if err := db.PingContext(ctx); err != nil {
+		dbtest.Unreachable(t, "repository scopes", dbtest.DSN(), err)
+		return
+	}
+	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
+		t.Fatal(err)
+	}
+	engine, err := memql.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	if err := engine.Init(memorynodes.DefaultRegistry()); err != nil {
+		t.Fatal(err)
+	}
+	prefix := fmt.Sprintf("repo-scope-%d", time.Now().UnixNano())
+	owner := "v1:identity:user:" + prefix
+	id := "v1:worker:registration:" + prefix
+	t.Cleanup(func() {
+		_, _ = db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("concept = ?", "v1:worker:registration").Where("id = ?", id).Exec(ctx)
+	})
+	descriptor := &worker.CapabilityDescriptor{Platform: "linux", Architecture: "arm64", ActionContracts: worker.ActionContracts{"workerHost.pipeline_step": 2}, DisplayServer: "none", SchemaVersion: 1, RepositoryScopes: worker.RepositoryScopes{"workerHost.pipeline_step": {"o/a"}}}
+	payload, err := json.Marshal(map[string]any{"name": prefix, "ownerUserId": owner, "capabilities": []string{"HEADLESS"}, "labels": map[string]string{"pipelines": "allowed"}, "capabilityDescriptor": descriptor.AsMap(), "lastSeenAt": time.Now().UTC().Format(time.RFC3339Nano), "connectedNodeId": "other-agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := memorynodes.MemoryNode{ID: id, CreatedAt: time.Now().UTC(), CreatedBy: owner, Concept: "v1:worker:registration", Type: memorynodes.NodeTypeObject, Schema: json.RawMessage(`{}`), Payload: payload, Metadata: json.RawMessage(`{}`), Provenance: json.RawMessage(`{}`)}
+	if _, err := db.NewInsert().Model(&row).Exec(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// This independent reader has no worker stream or originating node state.
+	store := &fleetcatalog.EngineStore{Engine: engine}
+	candidates, err := store.WorkersForOwner(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("got %d candidates", len(candidates))
+	}
+	if candidates[0].NativePlatform != "linux/arm64" || !candidates[0].ActionContracts.Supports("workerHost.pipeline_step", 2) {
+		t.Fatalf("stored runtime metadata did not cross replicas: %+v", candidates[0])
+	}
+	scopes := candidates[0].RepositoryScopes
+	if !scopes.Accepts("workerHost.pipeline_step", "O/A.git") || scopes.Accepts("workerHost.pipeline_step", "o/b") {
+		t.Fatalf("persisted repository policy changed: %v", scopes)
+	}
+}

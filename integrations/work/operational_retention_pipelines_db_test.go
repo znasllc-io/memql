@@ -1134,7 +1134,13 @@ func TestRetentionRetiresAPipelineGoalOnceNoRunOfItRemains(t *testing.T) {
 		return run
 	}
 	finish := func(run *workjournal.Run) {
-		run.Step(ctx, "checks.vet").Done(ctx, map[string]any{"exitCode": 0})
+		step, err := run.Step(ctx, "checks.vet")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := step.Done(ctx, map[string]any{"exitCode": 0}); err != nil {
+			t.Fatal(err)
+		}
 		run.Succeeded(ctx, map[string]any{"conclusion": "success"})
 	}
 	// A goal run twice -- a re-run is a second run of the same goal -- both finished.

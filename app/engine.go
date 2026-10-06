@@ -195,6 +195,12 @@ func (a *App) engineAndBus() {
 		},
 		a.Logger,
 	)
+	// memql#5480: a webhook row may name the globalSecret holding its URL
+	// instead of carrying the URL, because a Discord webhook's token is in
+	// its path. The worker reads the value at send time through the same
+	// system-secret resolver the plug-in context hands integrations, and it
+	// lives in memory for one attempt.
+	outboundWorker.Secrets = a.engine.ResolveSystemSecret
 	a.Dependencies = append(a.Dependencies, outboundWorker)
 
 	// memql#3348: the campaign sending engine. Drains

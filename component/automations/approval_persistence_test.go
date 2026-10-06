@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
@@ -188,22 +189,64 @@ func TestHumanQuestionSuspendsStepWithoutRetryContinueOrFailure(t *testing.T) {
 	}
 }
 
+type pausedFixture struct{ engine *memql.MemQLEngine }
+
+func (p *pausedFixture) IntegrationName() string { return "pausedFixture" }
+func (p *pausedFixture) Capabilities() []memql.IntegrationCapability {
+	return []memql.IntegrationCapability{{Name: "continue", Handler: func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error) { return nil, nil }}}
+}
+func (p *pausedFixture) PrepareCheckpointResume(ctx context.Context, capability string, request memql.CheckpointResumeRequest) (context.Context, bool, error) {
+	if capability != "continue" {
+		return ctx, false, nil
+	}
+	prepared, err := p.engine.PrepareWorkContinuation(ctx, request)
+	return prepared, err == nil, err
+}
+
 func TestJournalDB_HumanPauseResumesOnAnotherExecutorWithoutRepeatingEffects(t *testing.T) {
 	engine := sharedJournalEngine(t)
-	auto := &Automation{Name: fmt.Sprintf("humanPause%d", time.Now().UnixNano()), Steps: []*Step{
+	// The fixture implements the same checkpoint contract as runAgentTurn,
+	// while every ownership, approval and checkpoint read uses the real engine.
+	if err := engine.RegisterIntegration(&pausedFixture{engine: engine}); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.Functions().Upsert(&memql.Function{Name: "resumeFixture", Type: memql.FunctionTypeBuiltin, FunctionKind: "builtin", Executor: "integration.pausedFixture.continue"}); err != nil {
+		t.Fatal(err)
+	}
+	key := fmt.Sprintf("humanPause%d", time.Now().UnixNano())
+	runID, goalID, owner, approvalID := key+"run", key+"goal", key+"owner", key+"approval"
+	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), owner), common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner, Mode: common.RunModeLive})
+	journalWriter := newWorkJournal(engine, nil)
+	write := func(name string, args map[string]any) {
+		t.Helper()
+		if err := journalWriter.write(ctx, name, args); err != nil {
+			t.Fatal(err)
+		}
+	}
+	auto := &Automation{Name: key, Steps: []*Step{
 		{ID: "effect", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "function"}},
-		{ID: "question", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "function"}, RetryCount: 3, OnError: ErrorStrategyContinue},
+		{ID: "question", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "resumeFixture", Kind: "builtin"}, RetryCount: 3, OnError: ErrorStrategyContinue},
 	}}
+	write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Continue after an answer", "origin": "user"})
+	execution := NewExecution(auto.Name, "test")
+	execution.ID = runID
+	args := journalWriter.openRunArgs(auto, execution, nil, events.Cause{})
+	args["goalId"] = goalID
+	write("createWorkRun", args)
+	messages := []common.ChatMessage{{Role: "user", Content: "Continue this work"}, {Role: "assistant", ToolCalls: []common.ToolCall{{ID: "done", Name: "effect", Arguments: "{}"}}}, {Role: "tool", ToolCallId: "done", Name: "effect", Content: "confirmed effect"}}
 	first := NewExecutor(ExecutorOptions{Engine: engine, StepRegistry: modeRegistryFunc(func(ctx context.Context, step *Step, sc *StepContext) (*StepResult, error) {
 		if step.ID == "question" {
-			// The feedback capability commits this before returning HumanWait.
-			newWorkJournal(engine, nil).call(ctx, "updateWorkRun", map[string]any{"runId": sc.Execution.ID, "status": "waiting"})
-			return nil, &work.HumanWait{ApprovalID: "q"}
+			if err := engine.SaveWorkContinuation(ctx, messages); err != nil {
+				return nil, err
+			}
+			write("createWorkApproval", map[string]any{"approvalId": approvalID, "runId": runID, "stepKey": "question", "kind": "feedback", "artifactHash": "question", "question": "Continue?", "requestedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+			write("updateWorkRun", map[string]any{"runId": runID, "status": "waiting"})
+			return nil, &work.HumanWait{ApprovalID: approvalID}
 		}
 		return &StepResult{StepId: step.ID, Status: "success", Result: "effect receipt", CompletedAt: time.Now()}, nil
 	})})
 	defer first.Close()
-	run, err := first.Execute(context.Background(), auto, "test")
+	run, err := first.ExecuteAdopted(ctx, auto, RunAdoption{RunId: runID})
 	if !isHumanWait(err) {
 		t.Fatalf("expected pause: %v", err)
 	}
@@ -212,16 +255,29 @@ func TestJournalDB_HumanPauseResumesOnAnotherExecutorWithoutRepeatingEffects(t *
 		t.Fatalf("pause did not survive persistence: %+v %v", journal, err)
 	}
 	secondCalls := 0
-	second := NewExecutor(ExecutorOptions{Engine: engine, StepRegistry: modeRegistryFunc(func(_ context.Context, step *Step, _ *StepContext) (*StepResult, error) {
+	second := NewExecutor(ExecutorOptions{Engine: engine, StepRegistry: modeRegistryFunc(func(ctx context.Context, step *Step, _ *StepContext) (*StepResult, error) {
 		secondCalls++
 		if step.ID != "question" {
 			t.Fatal("another executor repeated a completed effect")
 		}
+		restored, err := engine.RestoreWorkContinuation(ctx, nil)
+		if err != nil || len(restored) != len(messages) || restored[2].Content != "confirmed effect" {
+			t.Fatalf("checkpoint was not restored: %+v %v", restored, err)
+		}
 		return &StepResult{StepId: step.ID, Status: "success", Result: "recorded answer", CompletedAt: time.Now()}, nil
 	})})
 	defer second.Close()
-	resumed, err := second.ResumeFrom(context.Background(), journal, auto, &ResumeOptions{})
+	if _, err := second.ResumeFrom(ctx, journal, auto, &ResumeOptions{}); !errors.Is(err, ErrNonRetryableStep) || secondCalls != 0 {
+		t.Fatalf("unanswered question resumed: %v", err)
+	}
+	write("decideWorkApproval", map[string]any{"approvalId": approvalID, "decision": "answered", "decidedBy": owner, "decidedAt": time.Now().UTC().Format(time.RFC3339Nano), "answer": map[string]any{"text": "Continue"}})
+	write("updateWorkRun", map[string]any{"runId": runID, "status": "running", "humanResumeId": approvalID})
+	journal, err = LoadRunJournal(context.Background(), engine, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := second.ResumeFrom(ctx, journal, auto, &ResumeOptions{})
 	if err != nil || resumed.ID != run.ID || resumed.Status != "completed" || secondCalls != 1 {
-		t.Fatalf("resume skipped the waiting step or made a new run: %+v %v", resumed, err)
+		t.Fatalf("resume skipped the waiting step or made a new run: %v %v", resumed, err)
 	}
 }

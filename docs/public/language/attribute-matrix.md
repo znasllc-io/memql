@@ -34,6 +34,7 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@disabled`](#disabled) | flag | flag | flag | flag |
 | [`@eventField`](#eventfield) |  |  | strings |  |
 | [`@filter`](#filter) |  |  |  | expression |
+| [`@journalRequired`](#journalrequired) |  |  |  | flag |
 | [`@loop`](#loop) |  |  |  | keywords |
 | [`@mcp`](#mcp) | flag | flag |  | flag |
 | [`@mergeFields`](#mergefields) |  | strings |  |  |
@@ -65,6 +66,7 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@row`](#row) |  | flag |  |  |
 | [`@rowAuthz`](#rowauthz) | keywords |  |  |  |
 | [`@scope`](#scope) |  |  |  | string |
+| [`@serverWritten`](#serverwritten) | flag |  |  |  |
 | [`@templateFile`](#templatefile) |  |  |  | string |
 | [`@type`](#type) | string |  |  |  |
 | [`@version`](#version) | string |  |  | string |
@@ -200,6 +202,7 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 | [`@description`](#description) | one string | `@description("On a new ticket, notify its owner.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
 | [`@filter`](#filter) | an expression | `@filter(row => row.status == "open")` |
+| [`@journalRequired`](#journalrequired) | no arguments | `@journalRequired` |
 | [`@loop`](#loop) | keyword arguments | `@loop(maxDepth=4, until=row => row.status == "done")` |
 | [`@mcp`](#mcp) | no arguments | `@mcp` |
 | [`@mode`](#mode) | keyword arguments | `@mode(queued, max=10)` |
@@ -219,6 +222,7 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 | [`@origin`](#origin) | one string | `@origin("memql")` |
 | [`@relationship`](#relationship) | keyword arguments, repeatable, in the body | `@relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")` |
 | [`@rowAuthz`](#rowauthz) | keyword arguments | `@rowAuthz(owner="ownerUserId", clusterOwner)` |
+| [`@serverWritten`](#serverwritten) | no arguments | `@serverWritten` |
 | [`@type`](#type) | one string | `@type("collection")` |
 | [`@version`](#version) | one string | `@version("1.0.0")` |
 
@@ -722,6 +726,14 @@ Tool handler configuration. Format: @handler(type="query", query="...") / @handl
 
 On a concept field: server-only (memql#2035) -- never projected by a shape's default projection and never accepted from a mutation's caller args; emitted as x-internal. (On a construct, @internal is retired, #2708.)
 
+### @journalRequired
+
+| On | Written as | Example |
+|---|---|---|
+| [automation](#automation) | no arguments | `@journalRequired` |
+
+Require confirmed work-journal writes before an automation starts work, advances beyond a step or reports completion. A failed write stops the run even inside retry or on error continue. Preview runs remain sandboxed. This does not guarantee exactly-once external effects; reconcile uncertain effects before resuming.
+
 ### @level
 
 | On | Written as | Example |
@@ -1120,6 +1132,14 @@ Bars the construct from client-originated calls while leaving server-side Go fre
 | [concept field](#concept-field) | no arguments | `@serverSet` |
 
 The field is stamped server-side (createdAt, createdBy, status, ...): never accepted from a mutation's caller args, but projected like any other field. Emitted as x-serverSet (memql#2035).
+
+### @serverWritten
+
+| On | Written as | Example |
+|---|---|---|
+| [concept](#concept) | no arguments | `@serverWritten` |
+
+Requires internal call origin for every write to this concept, including raw inserts and updates through named mutations. Does not grant read access or bypass row authorization. Use for service-authored evidence and configuration whose public capability validates a request before writing.
 
 ### @shopperFormExtension
 

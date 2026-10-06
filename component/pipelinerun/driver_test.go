@@ -59,7 +59,9 @@ type driveHarness struct {
 	logs    *lockedBuffer
 	logger  *slog.Logger
 	secrets map[string]string
-	p       Pipeline
+	// asked is every name the secret resolver was asked for.
+	asked *namesAsked
+	p     Pipeline
 }
 
 // newDriveHarness is an agent node ("agent-a") that drives runs of the shop's
@@ -69,7 +71,7 @@ func newDriveHarness(t *testing.T, manifest string) *driveHarness {
 	h := newHarness(t)
 	dh := &driveHarness{
 		harness: h, work: newFakeWork(), exec: &fakeExecutor{entered: make(chan string, 64)}, logs: &lockedBuffer{},
-		secrets: map[string]string{"SHOP_TOKEN": shopSecret},
+		secrets: map[string]string{"SHOP_TOKEN": shopSecret}, asked: &namesAsked{},
 	}
 	dh.logger = slog.New(slog.NewTextHandler(dh.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	h.store.work = dh.work
@@ -90,9 +92,11 @@ func (dh *driveHarness) configureDriver(integ *Integration, node string) {
 	journal := workjournal.New(dh.work, dh.logger, node)
 	integ.Configure(func(d *Deps) {
 		d.NodeID = node
+		d.EngineRevision = func() string { return "test-engine-revision" }
 		d.Logger = dh.logger
 		d.Journal = journal
 		d.Secrets = func(_ context.Context, name string) (string, error) {
+			dh.asked.add(name)
 			if v, ok := dh.secrets[name]; ok {
 				return v, nil
 			}
@@ -102,6 +106,11 @@ func (dh *driveHarness) configureDriver(integ *Integration, node string) {
 		// A final check-run write retried at the production pace would make
 		// every test that fails one wait ten seconds.
 		d.publishBackoff = []time.Duration{time.Millisecond, time.Millisecond}
+		// A notification's delivery polled at the production pace -- two
+		// seconds, then longer -- would make every notify test wait seconds
+		// for each read, and a delivery that never comes twenty minutes.
+		d.notifyPoll = time.Millisecond
+		d.notifyTimeout = 10 * time.Second
 	})
 	integ.EnableDriver()
 }
@@ -174,7 +183,7 @@ func waitDrives(t *testing.T, integ *Integration) {
 // the payload flattened at the top and whole under "payload".
 func graphEvent(base string, r Run) events.Event {
 	payload := map[string]any{
-		"status": r.Status, "driverNodeId": r.DriverNodeID, "cancelRequested": r.CancelRequested,
+		"status": r.Status, "driverNodeId": r.DriverNodeID, "driverLeaseId": r.DriverLeaseID, "cancelRequested": r.CancelRequested,
 		"runKey": r.RunKey, "pipelineId": r.PipelineID,
 	}
 	flat := map[string]any{"id": "v1:pipelines:run:" + r.ID, "concept": RunConcept, "payload": payload}
@@ -403,6 +412,58 @@ func TestTheDriverRunsAPipelineEndToEnd(t *testing.T) {
 	}
 }
 
+// A step is told its cluster's front-door domain on its request, from the port
+// the node was configured with, so every step of a run carries the one value
+// and a step exports it as MEMQL_DOMAIN (verify-rollout reaches the cluster's
+// api.<domain>, identity.<domain> and os.<domain> through it).
+func TestEveryStepRequestCarriesTheClustersDomain(t *testing.T) {
+	dh := newDriveHarness(t, driveManifest)
+	dh.integ.Configure(func(d *Deps) { d.Domain = func() string { return "example.test" } })
+	deliver(t, dh.integ, dh.openRun(t, prOpening()))
+
+	sent := dh.exec.sent()
+	if len(sent) != 3 {
+		t.Fatalf("the runner was handed %v; want all three steps", dh.exec.sentKeys())
+	}
+	for _, req := range sent {
+		if req.Domain != "example.test" {
+			t.Errorf("%s: Domain = %q, want example.test", req.StepKey, req.Domain)
+		}
+		if got := req.Environment()["MEMQL_DOMAIN"]; got != "example.test" {
+			t.Errorf("%s: MEMQL_DOMAIN = %q, want example.test", req.StepKey, got)
+		}
+	}
+}
+
+// A cluster with no domain configured -- no port at all, or one that answers
+// "" -- sends none: a step must see MEMQL_DOMAIN unset, not an empty domain it
+// would build "https://api." from.
+func TestAClusterWithNoDomainSendsStepsNone(t *testing.T) {
+	for name, port := range map[string]func() string{
+		"no port":          nil,
+		"a port answering": func() string { return "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			dh := newDriveHarness(t, driveManifest)
+			dh.integ.Configure(func(d *Deps) { d.Domain = port })
+			deliver(t, dh.integ, dh.openRun(t, prOpening()))
+
+			sent := dh.exec.sent()
+			if len(sent) != 3 {
+				t.Fatalf("the runner was handed %v; want all three steps", dh.exec.sentKeys())
+			}
+			for _, req := range sent {
+				if req.Domain != "" {
+					t.Errorf("%s: Domain = %q, want none", req.StepKey, req.Domain)
+				}
+				if _, ok := req.Environment()["MEMQL_DOMAIN"]; ok {
+					t.Errorf("%s: exported MEMQL_DOMAIN with no domain configured", req.StepKey)
+				}
+			}
+		})
+	}
+}
+
 // An affected run reads what changed and the Go graph at its commit: a
 // packages step is handed the packages the change reaches, a step gated on a
 // bucket the change missed is skipped, and the slice each step was given is
@@ -461,31 +522,6 @@ pipeline:
 	}
 	if got, _ := dh.store.run(run.ID); got.Conclusion != ConclusionSuccess {
 		t.Errorf("run = %s", got.Conclusion)
-	}
-}
-
-// A notify stage is skipped until channels deliver (epic memql#5480), and a
-// skip fails nothing.
-func TestANotifyStageIsSkippedUntilChannelsArrive(t *testing.T) {
-	dh := newDriveHarness(t, driveManifest+`    - name: notify
-      on: [push]
-      channel: team-chat
-`)
-	run := dh.openRun(t, pushOpening())
-	deliver(t, dh.integ, run)
-
-	notify := dh.work.receiptsOf("notify.notify")
-	if len(notify) != 1 || argString(notify[0].Args, "status") != WorkStepSkipped ||
-		argString(notify[0].Args, "errorCode") != pipelines.CodeNotifyUnavailable ||
-		!strings.Contains(argString(notify[0].Args, "errorMessage"), "team-chat") {
-		t.Errorf("notify is skipped pipeline_notify_unavailable: %+v", notify)
-	}
-	got, _ := dh.store.run(run.ID)
-	if got.Conclusion != ConclusionSuccess || len(got.Stages) != 3 || got.Stages[2].Status != StageSkipped {
-		t.Errorf("run = %s stages %+v", got.Conclusion, got.Stages)
-	}
-	if slices.Contains(dh.exec.sentKeys(), "notify.notify") {
-		t.Errorf("a notify step is never handed to the step runner")
 	}
 }
 
@@ -1384,7 +1420,7 @@ func TestARecoveredRunRefusedOnResumeClosesItsPredecessorsWork(t *testing.T) {
 // and is a skip exactly when its row says the plan skipped it, whatever a
 // compare read now says.
 func TestResumeCarriesOutThePlanTheRowsRecord(t *testing.T) {
-	dr := &runDriver{run: Run{SHA: shaA}}
+	dr := &runDriver{run: Run{SHA: shaA}, d: Deps{EngineRevision: func() string { return "test-engine-revision" }}}
 	notAffected := &pipelines.Skip{Code: pipelines.CodeNotAffected, Reason: "No change under bucket os."}
 	dr.buildTracks(pipelines.Plan{Stages: []pipelines.PlanStage{{
 		Name: "tests",
@@ -1399,17 +1435,27 @@ func TestResumeCarriesOutThePlanTheRowsRecord(t *testing.T) {
 			{Key: "tests.docs", Stage: "tests", Name: "docs"},
 		},
 	}}})
-	why := dr.resume([]WorkStep{
+	rows := []WorkStep{
 		{Key: "tests.go#1", Status: WorkStepDone, Attempt: 1, Packages: []string{"a", "b"}, DurationMs: 9},
 		{Key: "tests.go#2", Status: WorkStepRunning, Attempt: 1, Packages: []string{"c"}},
 		{Key: "tests.os", Status: WorkStepRunning, Attempt: 1},
 		{Key: "tests.web", Status: WorkStepPending, Attempt: 1},
 		{Key: "tests.docs", Status: WorkStepPending, Attempt: 1, Skip: &pipelines.Skip{Code: pipelines.CodeNotAffected, Reason: "No change under bucket docs."}},
-	})
+	}
+	for i := range rows {
+		step := dr.tracks[i].step
+		step.Packages = slices.Clone(rows[i].Packages)
+		rows[i].Seq = i
+		rows[i].DefinitionFingerprint = dr.definitionOf(step)
+	}
+	why := dr.resume(rows)
 	if why != "" {
 		t.Fatalf("the rows and the plan agree: %s", why)
 	}
 	one, two, os, web, docs := dr.tracks[0], dr.tracks[1], dr.tracks[2], dr.tracks[3], dr.tracks[4]
+	if !dr.request(two, nil).RecoverOnly || !dr.request(os, nil).RecoverOnly || dr.request(web, nil).RecoverOnly {
+		t.Fatal("the driver lost the distinction between an uncertain intent and work never begun")
+	}
 	if !one.finished() || one.snapshot().Status != StepSucceeded || one.snapshot().DurationMs != 9 {
 		t.Errorf("a receipt is kept: %+v", one.snapshot())
 	}
@@ -1828,14 +1874,17 @@ func TestARerunOfFailedStepsRunsOnlyWhatDidNotPass(t *testing.T) {
 // step is carried when the attempt it re-runs PASSED it with the same package
 // slice, or carried it already (keeping the attempt it first passed in); a
 // failed step, a shard whose slice moved since, and a step the plan already
-// skips are left to the plan.
+// skips are left to the plan. A notify step is never carried: what it
+// delivered announced the attempt it ran in, and this one is another.
 func TestCarryPassedCarriesOnlyIdenticalPasses(t *testing.T) {
 	track := func(key string, packages ...string) *stepTrack {
-		return &stepTrack{step: pipelines.Step{Key: key, Packages: packages}}
+		return &stepTrack{step: pipelines.Step{Key: key, Packages: packages}, definition: "same-definition"}
 	}
 	vet, shardSame, shardMoved, db, carried := track("checks.vet"), track("tests.go#1", "a", "b"), track("tests.go#2", "c"), track("tests.db"), track("tests.lint")
 	planned := track("tests.os")
 	planned.step.Skip = &pipelines.Skip{Code: pipelines.CodeNotAffected, Reason: "No change under bucket os."}
+	notify := track("notify.notify")
+	notify.step.Kind = pipelines.StepNotify
 	prior := []WorkStep{
 		{Key: "checks.vet", Status: WorkStepDone},
 		{Key: "tests.go#1", Status: WorkStepDone, Packages: []string{"a", "b"}},
@@ -1843,8 +1892,15 @@ func TestCarryPassedCarriesOnlyIdenticalPasses(t *testing.T) {
 		{Key: "tests.db", Status: WorkStepFailed},
 		{Key: "tests.lint", Status: WorkStepSkipped, Skip: &pipelines.Skip{Code: pipelines.CodePassedEarlier, Reason: "Passed in attempt 1."}},
 		{Key: "tests.os", Status: WorkStepDone},
+		{Key: "notify.notify", Status: WorkStepDone},
 	}
-	carryPassed([]*stepTrack{vet, shardSame, shardMoved, db, carried, planned}, prior, 2)
+	for i := range prior {
+		prior[i].DefinitionFingerprint = "same-definition"
+	}
+	carryPassed([]*stepTrack{vet, shardSame, shardMoved, db, carried, planned, notify}, prior, 2)
+	if notify.step.Skip != nil {
+		t.Errorf("a notify step that delivered is sent again, announcing this attempt: %+v", notify.step.Skip)
+	}
 
 	for _, c := range []struct {
 		name   string

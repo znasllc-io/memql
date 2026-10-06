@@ -5830,7 +5830,7 @@ func OrdersInWindowBuild(args OrdersInWindowArgs) string {
 	return b.String()
 }
 
-// OutboundRequestsByStatus -- Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker drains 'pending' and 'retrying' through this; operators and products use it to audit delivery state. Bounded first page: the worker drains batches per poll, so a burst larger than one page simply takes extra polls.
+// OutboundRequestsByStatus -- Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker drains 'pending' and 'retrying' through this; operators and products use it to audit delivery state. The worker advances one bounded page per status per poll and starts again at exhaustion, so rows awaiting another medium or a future retry do not hide later ready work.
 //
 // Bound concept: v1:platform:outboundRequest (machine-readable: BoundConcepts["outboundRequestsByStatus"] in generated_concepts.go).
 type OutboundRequestsByStatusArgs struct {
@@ -6354,6 +6354,28 @@ func (qc *QueryClient) PendingUserInvitations(ctx context.Context, args PendingU
 func PendingUserInvitationsBuild(args PendingUserInvitationsArgs) string {
 	_ = args
 	return "query pendingUserInvitations()"
+}
+
+// PipelineChannelForOwnerByName -- The caller's channel of one name -- what a notify stage resolves its `channel:` through. A name is unique among a person's channels (the channel builtin checks it before it writes), so this answers at most one row; the sort and page of one say so. The driver that reads it has no person on the line and asks under the pipeline owner's borrowed authority, so the filter is the owner conjunct and nothing wider: it finds the owner's own channel, never another person's of the same name.
+//
+// Bound concept: v1:pipelines:channel (machine-readable: BoundConcepts["pipelineChannelForOwnerByName"] in generated_concepts.go).
+type PipelineChannelForOwnerByNameArgs struct {
+	Name string
+}
+
+// PipelineChannelForOwnerByName calls the engine query pipelineChannelForOwnerByName.
+func (qc *QueryClient) PipelineChannelForOwnerByName(ctx context.Context, args PipelineChannelForOwnerByNameArgs) (*Result, error) {
+	call := PipelineChannelForOwnerByNameBuild(args)
+	return qc.executeNamed(ctx, "pipelineChannelForOwnerByName", call)
+}
+
+func PipelineChannelForOwnerByNameBuild(args PipelineChannelForOwnerByNameArgs) string {
+	var b strings.Builder
+	b.WriteString("query pipelineChannelForOwnerByName(")
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	b.WriteString(")")
+	return b.String()
 }
 
 // PipelineChannelsForOwner -- The caller's notification channels, by name.

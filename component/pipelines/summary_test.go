@@ -98,8 +98,8 @@ func TestCheckOutputOfAPassedRun(t *testing.T) {
 			{Key: "tests.go-tests#2", Stage: "tests", Status: "succeeded", DurationMs: 245_000},
 			{Key: "tests.os-checks", Stage: "tests", Status: "succeeded", DurationMs: 180_000},
 			{Key: "release.notes", Stage: "release", Status: "succeeded", DurationMs: 45_000},
-			{Key: "notify.notify", Stage: "notify", Status: "skipped", Code: CodeNotifyUnavailable,
-				Message: "Notifications are not available yet."},
+			{Key: "docs.publish", Stage: "docs", Status: "skipped", Code: CodePassedEarlier,
+				Message: "Passed in attempt 1."},
 		},
 	}
 	title, summary, text := CheckOutput(r)
@@ -110,8 +110,9 @@ func TestCheckOutputOfAPassedRun(t *testing.T) {
 		"| checks | Passed | 1 passed | 1m 02s |\n" +
 		"| tests | Passed | 3 passed | 4m 11s |\n" +
 		"| release | Passed | 1 passed | 45s |\n" +
-		"| notify | Skipped: Notifications are not available yet. | 1 skipped | - |\n"
-	// Three stages ran, in 1m 02s + 4m 11s + 45s.
+		"| docs | Skipped: Passed in attempt 1. | 1 skipped | - |\n"
+	// Three stages ran, in 1m 02s + 4m 11s + 45s; a stage skipped whole is in
+	// the table and not in the count.
 	assertOutput(t, title, summary, text, "Passed: 3 stages in 5m 58s", wantSummary, "")
 }
 

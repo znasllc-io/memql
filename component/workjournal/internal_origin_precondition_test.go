@@ -98,7 +98,10 @@ func TestReopenRefusesWithoutItsOwnerAndWritesNothing(t *testing.T) {
 				t.Fatal("Reopen returned a usable run")
 			}
 			run.Heartbeat(context.Background())
-			step := run.Step(context.Background(), "extract")
+			step, err := run.Step(context.Background(), "extract")
+			if err == nil || step != nil {
+				t.Fatal("missing journal must refuse an intent")
+			}
 			step.Finish(context.Background(), Receipt{Status: "done"})
 			step.Cancelled(context.Background(), "why")
 			run.Cancelled(context.Background(), "code", "message")
@@ -126,16 +129,16 @@ func TestEveryRunnerWriteCarriesInternalOriginAndTheOwnersActor(t *testing.T) {
 		t.Fatalf("Begin: %v", err)
 	}
 	run.Heartbeat(context.Background())
-	run.Step(context.Background(), "extract").Finish(context.Background(), Receipt{
+	mustJournalStep(t, run, context.Background(), "extract").Finish(context.Background(), Receipt{
 		Status: "done", DurationMs: 10, Binding: map[string]any{"surface": "cluster"},
 		LogFileID: "v1:library:file:log", ArtifactFileIDs: []string{"v1:library:file:a"},
 	})
-	run.Step(context.Background(), "summarize").Cancelled(context.Background(), "stopped")
+	mustJournalStep(t, run, context.Background(), "summarize").Cancelled(context.Background(), "stopped")
 	run.Cancelled(context.Background(), "pipeline_cancelled", "stopped")
 
 	reopened := j.Reopen("user-1", run.GoalID(), run.RunID(), w.Steps, time.Now())
 	reopened.Heartbeat(context.Background())
-	reopened.Step(context.Background(), "extract").Finish(context.Background(), Receipt{Status: "failed", Code: "x", Message: "y"})
+	mustJournalStep(t, reopened, context.Background(), "extract").Finish(context.Background(), Receipt{Status: "failed", Code: "x", Message: "y"})
 	reopened.Failed(context.Background(), "x", "y")
 
 	pending := 0
@@ -168,9 +171,9 @@ func TestEveryWriteCarriesInternalOriginAndTheOwnersActor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	step := run.Step(context.Background(), "extract")
+	step := mustJournalStep(t, run, context.Background(), "extract")
 	step.Done(context.Background(), map[string]any{"characters": 10})
-	second := run.Step(context.Background(), "summarize")
+	second := mustJournalStep(t, run, context.Background(), "summarize")
 	second.Failed(context.Background(), "provider_down", "no summariser")
 	run.Succeeded(context.Background(), map[string]any{"chunks": 3})
 
@@ -187,9 +190,9 @@ func TestEveryWriteCarriesInternalOriginAndTheOwnersActor(t *testing.T) {
 	}
 }
 
-// The journal is a RECORD of work, not the work. A pass that did its job must
-// not be reported as failed because a step row did not land.
-func TestAFailedJournalWriteIsLoggedRatherThanReturned(t *testing.T) {
+// Execution drivers need a durable intent before work and a durable receipt
+// before claiming success. Observability-only callers may still ignore errors.
+func TestAFailedJournalWriteIsReturnedToTheDriver(t *testing.T) {
 	engine := &countingEngine{}
 	j := New(engine, nil, "node-1")
 	run, err := j.Begin(context.Background(), work())
@@ -198,11 +201,15 @@ func TestAFailedJournalWriteIsLoggedRatherThanReturned(t *testing.T) {
 	}
 
 	engine.fail = true
-	// None of these returns anything, which is the point: they cannot fail
-	// the caller. The assertion is that they still ATTEMPTED the write.
+	// A caller must be able to stop before a side effect when its intent
+	// did not land, and must never mistake a failed close for a receipt.
 	before := len(engine.calls)
-	run.Step(context.Background(), "extract").Done(context.Background(), nil)
-	run.Succeeded(context.Background(), nil)
+	if step, err := run.Step(context.Background(), "extract"); step != nil || err == nil {
+		t.Fatal("failed intent was reported as recorded")
+	}
+	if err := run.Succeeded(context.Background(), nil); err == nil {
+		t.Fatal("failed close was reported as recorded")
+	}
 	if len(engine.calls) <= before {
 		t.Fatal("a failing engine silenced the journal instead of being logged")
 	}
@@ -219,7 +226,10 @@ func TestANilJournalIsSafeAllTheWayDown(t *testing.T) {
 	if run.RunID() != "" || run.GoalID() != "" {
 		t.Fatal("a nil run named ids")
 	}
-	step := run.Step(context.Background(), "extract")
+	step, stepErr := run.Step(context.Background(), "extract")
+	if stepErr == nil || step != nil {
+		t.Fatal("missing journal must refuse an intent")
+	}
 	step.Done(context.Background(), nil)
 	step.Failed(context.Background(), "x", "y")
 	step.Skipped(context.Background(), "z")
@@ -273,8 +283,8 @@ func TestAStepThatReachesAPromptIsRecordedAsReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	run.Step(context.Background(), "extract")
-	run.Step(context.Background(), "summarize")
+	mustJournalStep(t, run, context.Background(), "extract")
+	mustJournalStep(t, run, context.Background(), "summarize")
 
 	var extract, summarize string
 	for _, q := range engine.calls {
@@ -303,7 +313,7 @@ func TestABlankArgumentIsNotSent(t *testing.T) {
 	engine := &countingEngine{}
 	j := New(engine, nil, "node-1")
 	run, _ := j.Begin(context.Background(), work())
-	run.Step(context.Background(), "extract").Done(context.Background(), nil)
+	mustJournalStep(t, run, context.Background(), "extract").Done(context.Background(), nil)
 
 	for _, q := range engine.calls {
 		if strings.Contains(q, `: ""`) {

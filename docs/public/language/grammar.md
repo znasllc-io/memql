@@ -17,10 +17,10 @@ It exists to be given to a model -- as grammar-in-prompt, or as the grammar a co
 
 Two things are deliberately absent. The internal query form -- the string an SDK sends to `Execute` -- has its own grammar; a reader given both would have no way to tell which one their file is written in. And which annotation is legal on which construct, in which argument form, is the [attribute matrix](attribute-matrix.md), not a syntax rule. What each name MEANS is the [vocabulary](vocabulary.md).
 
-Edition `2026`, grammar version `2026.09-dsl-v1-followups-9f344ecf`.
+Edition `2026`, grammar version `2026.10-bounded-iteration-ba9d35a7`.
 
 ```ebnf
-(* MemQL authoring grammar. Edition 2026, grammar version 2026.09-dsl-v1-followups-9f344ecf.
+(* MemQL authoring grammar. Edition 2026, grammar version 2026.10-bounded-iteration-ba9d35a7.
    GENERATED from the parser, the annotation registry and the function
    catalog -- do not edit. Run `make docs-grammar` to refresh it.
 
@@ -118,7 +118,7 @@ Edition `2026`, grammar version `2026.09-dsl-v1-followups-9f344ecf`.
 <trailing-clause>     ::= "retry" "(" <number> ")" | "wait" ( "any" | "all" )
                         | "on" "surface" "(" <string> ")" | "on" "error" ( "continue" | "stop" )
 <if-statement>        ::= "if" <expression> "{" <statement>* "}" { "else" "if" <expression> "{" <statement>* "}" } [ "else" "{" <statement>* "}" ]
-<for-statement>       ::= "for" <name> "in" <expression> [ "if" <expression> ] "{" <statement>* "}" [ <trailing-clause> ]
+<for-statement>       ::= "for" <name> "in" <expression> [ "if" <expression> ] [ "parallel" "(" <number> ")" ] "{" <statement>* "}" [ <trailing-clause> ]
 <switch-statement>    ::= "switch" <expression> "{" { "case" <literal> { "," <literal> } "{" <statement>* "}" } [ "default" "{" <statement>* "}" ] "}"
 <parallel-statement>  ::= "parallel" "{" { "branch" <name> "{" <statement>* "}" } "}" [ "wait" "any" ] [ <trailing-clause> ]
 <publish-statement>   ::= "publish" <string> "{" <map-entry> { "," <map-entry> } "}"
@@ -129,13 +129,14 @@ Edition `2026`, grammar version `2026.09-dsl-v1-followups-9f344ecf`.
    form each takes there is the attribute matrix, not a syntax rule. *)
 <action-annotation>   ::= ( "@description" | "@disabled" ) [ <annotation-args> ]
 <automation-annotation> ::= ( "@actor" | "@description" | "@disabled" | "@filter"
-                        | "@loop" | "@mcp" | "@mode" | "@template" | "@trigger" ) [ <annotation-args> ]
+                        | "@journalRequired" | "@loop" | "@mcp" | "@mode"
+                        | "@template" | "@trigger" ) [ <annotation-args> ]
 <builtin-annotation>  ::= ( "@alias" | "@args" | "@description" | "@disabled"
                         | "@executor" | "@requiresCapability" | "@sdk" ) [ <annotation-args> ]
 <capability-annotation> ::= ( "@description" | "@disabled" | "@sideEffect" ) [ <annotation-args> ]
 <concept-annotation>  ::= ( "@composable" | "@description" | "@displayCard"
-                        | "@mirroredTo" | "@origin" | "@rowAuthz" | "@type"
-                        | "@version" ) [ <annotation-args> ]
+                        | "@mirroredTo" | "@origin" | "@rowAuthz" | "@serverWritten"
+                        | "@type" | "@version" ) [ <annotation-args> ]
 <logic-annotation>    ::= ( "@actor" | "@description" | "@disabled" | "@eventField"
                         | "@requiresCapability" | "@requiresRank" ) [ <annotation-args> ]
 <mutation-annotation> ::= ( "@actor" | "@addToSet" | "@appendFields" | "@createOnly"

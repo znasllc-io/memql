@@ -336,7 +336,7 @@ import (
 //
 // Before-write field statements and trigger timing coexist with the retirement
 // of error(). error("message") remains live; no statement has an onError context.
-const GrammarVersion = "2026.09-dsl-v1-followups-9f344ecf"
+const GrammarVersion = "2026.10-bounded-iteration-ba9d35a7"
 
 // GrammarFingerprint is a drift detector over the author-facing keyword
 // surface: when the invocation-kind keyword set changes, the pinned test

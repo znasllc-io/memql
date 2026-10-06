@@ -159,7 +159,7 @@ func TestLoopDepth_DB_AResumedRunKeepsItsDepth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRunJournal: %v", err)
 	}
-	if _, err := e.ResumeFrom(context.Background(), journal, auto, &ResumeOptions{}); err != nil {
+	if _, err := e.ResumeFrom(context.Background(), journal, auto, &ResumeOptions{AllowSideEffects: true}); err != nil {
 		t.Fatalf("ResumeFrom: %v", err)
 	}
 	if len(reg.causes["b"]) != 2 {

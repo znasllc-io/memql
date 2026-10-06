@@ -336,9 +336,10 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 		// its declared order -- a missing row and a skipped one look
 		// identical to a reader, and only one of them is true.
 		skipped := "this file type is stored and downloadable, and there is no text in it to read"
-		run.Step(ctx, "extract").Skipped(ctx, skipped)
-		run.Step(ctx, "summarize").Skipped(ctx, skipped)
-		run.Step(ctx, "index").Skipped(ctx, skipped)
+		for _, key := range []string{"extract", "summarize", "index"} {
+			step, _ := run.Step(ctx, key)
+			step.Skipped(ctx, skipped)
+		}
 		outcome["readable"] = false
 		outcome["chunks"] = 0
 		return nil
@@ -348,7 +349,9 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 		return fmt.Errorf("library.analyzeFile: mark analyzing: %w", err)
 	}
 
-	extractStep := run.Step(ctx, "extract")
+	// Library's journal is an observability record. It does not own the
+	// analysis transaction, so a journal failure does not fail that work.
+	extractStep, _ := run.Step(ctx, "extract")
 	text, extractErr := i.extractor.Extract(ctx, params.MimeType, data)
 	if extractErr != nil {
 		extractStep.Failed(ctx, "extract_failed", extractErr.Error())
@@ -374,7 +377,7 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 	// because no provider answered and one that is absent because the
 	// document had nothing to say are the same empty string on the file row,
 	// and only the step can tell them apart.
-	summarizeStep := run.Step(ctx, "summarize")
+	summarizeStep, _ := run.Step(ctx, "summarize")
 	summary := i.summarize(ctx, params.Name, text)
 	summarizeStep.Done(ctx, map[string]any{"summarized": summary != "", "characters": len(summary)})
 
@@ -384,7 +387,7 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 	// respect to this pass -- so when the caller has not already resolved
 	// it, wait, bounded, rather than doing a single read that races on a
 	// fast upload.
-	indexStep := run.Step(ctx, "index")
+	indexStep, _ := run.Step(ctx, "index")
 	artifactId := strings.TrimSpace(params.ArtifactId)
 	if artifactId == "" {
 		resolved, ok := i.awaitArtifactId(ctx, fileId)

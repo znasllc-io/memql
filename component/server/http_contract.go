@@ -53,6 +53,13 @@ type (
 	GetHealthz200JSONResponse struct {
 		Status string `json:"status"`
 		NodeId string `json:"nodeId,omitempty"`
+		// Version is the release this binary was cut from (buildinfo.Version):
+		// what verify-rollout compares from outside, through the front door, to
+		// say a deployment is the release it claims (epic memql#5480). Public
+		// like the rest of this body; the repository and its tags are public.
+		Version string `json:"version,omitempty"`
+		// Commit is the short revision it was built from, "" when unknown.
+		Commit string `json:"commit,omitempty"`
 		// ActiveStreams: open MemqlService.Stream sessions on this pod.
 		// Always serialized (including 0) so the blue/green cutover (#616)
 		// can poll it to know when an OLD-color pod has drained.
@@ -65,6 +72,11 @@ type (
 	GetHealthz503JSONResponse struct {
 		Status string `json:"status"`
 		NodeId string `json:"nodeId,omitempty"`
+		// Version and Commit: see GetHealthz200JSONResponse. A draining or
+		// degraded node still says which release it runs; a rollout is judged
+		// while nodes come and go.
+		Version string `json:"version,omitempty"`
+		Commit  string `json:"commit,omitempty"`
 		// ActiveStreams: see GetHealthz200JSONResponse. A draining OLD-color
 		// pod reports 503 here while activeStreams winds down toward 0 (#616).
 		ActiveStreams int64                    `json:"activeStreams"`

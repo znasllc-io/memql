@@ -2,9 +2,18 @@ import * as vscode from "vscode";
 import { escapeHTML } from "./markdown.js";
 import { readTemplate } from "./templates.js";
 
+interface PreviewState {
+  panel: vscode.WebviewPanel;
+  ready: number;
+  sent?: boolean;
+  version?: number;
+  error?: string;
+}
+
 export class TemplateEditor implements vscode.CustomTextEditorProvider {
   private active?: { document: vscode.TextDocument; panel: vscode.WebviewPanel };
   private readonly rendered = new Map<string, { version: number; subject: string }>();
+  private readonly previewState = new Map<string, PreviewState>();
   constructor(private readonly context: vscode.ExtensionContext, private readonly publish?: (document: vscode.TextDocument) => Promise<void>) {}
   async whenRendered(uri: vscode.Uri, version?: number): Promise<string> {
     const end = Date.now() + 15000;
@@ -13,7 +22,12 @@ export class TemplateEditor implements vscode.CustomTextEditorProvider {
       if (value && (version === undefined || value.version === version)) return value.subject;
       await new Promise(resolve => setTimeout(resolve, 40));
     }
-    throw new Error("Email preview did not render this revision.");
+    const state = this.previewState.get(uri.toString());
+    throw new Error(`Email preview did not render this revision (${JSON.stringify({
+      expectedVersion: version, receivedVersion: this.rendered.get(uri.toString())?.version,
+      ready: state?.ready, sent: state?.sent, sentVersion: state?.version,
+      visible: state?.panel.visible, active: state?.panel.active, error: state?.error,
+    })}).`);
   }
   async show(mode: "source" | "preview" | "split", uri?: vscode.Uri): Promise<void> {
     const target = uri ?? vscode.window.activeTextEditor?.document.uri ?? this.active?.document.uri;
@@ -33,20 +47,28 @@ export class TemplateEditor implements vscode.CustomTextEditorProvider {
   }
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
     this.active = { document, panel };
+    const state: PreviewState = { panel, ready: 0 };
+    this.previewState.set(document.uri.toString(), state);
     const root = vscode.Uri.joinPath(this.context.extensionUri, "out");
     panel.webview.options = { enableScripts: true, localResourceRoots: [root] };
     const script = panel.webview.asWebviewUri(vscode.Uri.joinPath(root, "templateView.js"));
     const nonce = globalThis.crypto.randomUUID().replace(/-/g, "");
     const render = async () => {
-      try { await panel.webview.postMessage({ type: "document", template: readTemplate(document.getText()), version: document.version }); }
-      catch (error) { await panel.webview.postMessage({ type: "error", message: (error as Error).message }); }
+      try {
+        state.version = document.version;
+        state.sent = await panel.webview.postMessage({ type: "document", template: readTemplate(document.getText()), version: document.version });
+      }
+      catch (error) {
+        state.error = (error as Error).message;
+        await panel.webview.postMessage({ type: "error", message: state.error });
+      }
     };
     const subscriptions = [
       panel.onDidChangeViewState(() => { if (panel.active) this.active = { document, panel }; }),
       vscode.workspace.onDidChangeTextDocument(event => { if (event.document === document) void render(); }),
       panel.webview.onDidReceiveMessage(async message => {
         try {
-          if (message?.type === "ready") await render();
+          if (message?.type === "ready") { state.ready++; await render(); }
           else if (message?.type === "source" || message?.type === "split") await this.show(message.type, document.uri);
           else if (message?.type === "publish") await this.publish?.(document);
           else if (message?.type === "examples") await vscode.commands.executeCommand("memql.productivity.templateFromExamples");
@@ -57,6 +79,7 @@ export class TemplateEditor implements vscode.CustomTextEditorProvider {
     panel.onDidDispose(() => {
       for (const subscription of subscriptions) subscription.dispose();
       this.rendered.delete(document.uri.toString());
+      if (this.previewState.get(document.uri.toString()) === state) this.previewState.delete(document.uri.toString());
       if (this.active?.panel === panel) this.active = undefined;
     });
     panel.webview.html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; frame-src 'self'; form-action 'none'; base-uri 'none'"><title>${escapeHTML(document.fileName)}</title><style>

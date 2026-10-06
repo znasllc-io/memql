@@ -62,6 +62,9 @@ const (
 	AnnotStepKey = "memql.io/step-key"
 	AnnotWorkRun = "memql.io/work-run"
 	AnnotOwner   = "memql.io/owner-user"
+	// AnnotRunDeadline keeps queued-step secrets until the agent's run deadline,
+	// independently of the sweeping workbench's configured ceiling.
+	AnnotRunDeadline = "memql.io/run-deadline"
 	// AnnotRunner is "<nodeId> <RFC3339 heartbeat>": which replica holds the
 	// Job, and when it last said so.
 	AnnotRunner = "memql.io/runner"

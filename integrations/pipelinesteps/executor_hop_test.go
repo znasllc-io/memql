@@ -98,6 +98,8 @@ type hopMesh struct {
 	replicas []*hopReplica
 	inflight map[string]chan *nodev1.WorkbenchForwardResponse
 	sends    []hopSend
+	// statusNode makes unpinned status reads choose a different replica.
+	statusNode string
 }
 
 // newHopMesh is the named replicas, each a real ForwardHandler over the
@@ -121,15 +123,25 @@ func hopHandler(runner workbench.PipelineRunner) *workbench.ForwardHandler {
 func (m *hopMesh) SelfNodeId() string   { return exAgent }
 func (m *hopMesh) SelfNodeType() string { return "agent" }
 
-func (m *hopMesh) Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin string) (*nodev1.WorkbenchForwardResponse, string, error) {
-	return m.forward(ctx, req, pin, "", 0)
+func (m *hopMesh) WorkbenchNodeIDs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var ids []string
+	for _, replica := range m.replicas {
+		ids = append(ids, replica.id)
+	}
+	return ids
 }
 
-func (m *hopMesh) ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, every time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
+func (m *hopMesh) Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin string) (*nodev1.WorkbenchForwardResponse, string, error) {
+	return m.forward(ctx, req, pin, "", 0, nil)
+}
+
+func (m *hopMesh) ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, every time.Duration, onSelected func(string)) (*nodev1.WorkbenchForwardResponse, string, error) {
 	if every <= 0 {
 		every = 5 * time.Millisecond
 	}
-	return m.forward(ctx, req, pin, exclude, every)
+	return m.forward(ctx, req, pin, exclude, every, onSelected)
 }
 
 // pickLocked is the router's choice: the pinned replica while it is one this
@@ -158,9 +170,13 @@ func (m *hopMesh) pickLocked(pin, exclude string) *hopReplica {
 	return excluded
 }
 
-func (m *hopMesh) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, watch time.Duration) (*nodev1.WorkbenchForwardResponse, string, error) {
+func (m *hopMesh) forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pin, exclude string, watch time.Duration, onSelected func(string)) (*nodev1.WorkbenchForwardResponse, string, error) {
 	m.mu.Lock()
-	r := m.pickLocked(pin, exclude)
+	choice := pin
+	if choice == "" && req.GetAction() == workbench.PipelineStatusAction {
+		choice = m.statusNode
+	}
+	r := m.pickLocked(choice, exclude)
 	if r == nil {
 		m.mu.Unlock()
 		return nil, "", workbench.ErrNoWorkbenchPeer
@@ -178,6 +194,9 @@ func (m *hopMesh) forward(ctx context.Context, req *nodev1.WorkbenchForwardReque
 		r.dropNextStep, alive = false, false
 	}
 	m.mu.Unlock()
+	if onSelected != nil {
+		onSelected(r.id)
+	}
 	defer func() {
 		m.mu.Lock()
 		delete(m.inflight, req.RequestId)
@@ -497,6 +516,10 @@ func (r *hopRunner) RunStep(ctx context.Context, args []byte) []byte {
 	}
 }
 
+func (r *hopRunner) Readiness(context.Context) ([]byte, string) {
+	return nil, "readiness_unavailable"
+}
+
 // own holds the Job: heartbeats it while this replica lives, and finishes it
 // when its pod does.
 func (r *hopRunner) own(ctx context.Context, name string, run StepRun) []byte {
@@ -672,7 +695,7 @@ func TestExecuteReattachesWhenTheWorkbenchIsLost(t *testing.T) {
 	req := exRequest()
 	job := JobName(req.RunID, req.StepKey, req.Attempt)
 
-	done := executeAsync(e, context.Background(), req)
+	done := executeAndCommitAsync(e, context.Background(), req)
 	awaitCond(t, func() bool { return cluster.holder(job) == "workbench-a" },
 		"workbench-a never created the step's Job")
 
@@ -716,7 +739,7 @@ func TestExecuteHopRecoversALostReplyThroughTheStatus(t *testing.T) {
 	req := exRequest()
 	job := JobName(req.RunID, req.StepKey, req.Attempt)
 
-	done := executeAsync(e, context.Background(), req)
+	done := executeAndCommitAsync(e, context.Background(), req)
 	awaitCond(t, func() bool { return cluster.holder(job) == "workbench-a" }, "the step never started")
 	mesh.flap("workbench-a")
 	cluster.release(job)
@@ -745,8 +768,8 @@ func TestCancelHopDeletesTheRunsJobsOnEveryReplica(t *testing.T) {
 	first := exRequest()
 	second := exRequest()
 	second.StepKey, second.Step.Key = "tests.go-tests#3", "tests.go-tests#3"
-	r1 := executeAsync(e, context.Background(), first)
-	r2 := executeAsync(e, context.Background(), second)
+	r1 := executeAndCommitAsync(e, context.Background(), first)
+	r2 := executeAndCommitAsync(e, context.Background(), second)
 	firstJob := JobName(first.RunID, first.StepKey, first.Attempt)
 	secondJob := JobName(second.RunID, second.StepKey, second.Attempt)
 	awaitCond(t, func() bool { return cluster.holder(firstJob) != "" && cluster.holder(secondJob) != "" },
@@ -787,7 +810,7 @@ func TestExecuteHopForwardsAwayFromTheReplicaThatWentQuiet(t *testing.T) {
 	req := exRequest()
 	job := JobName(req.RunID, req.StepKey, req.Attempt)
 
-	done := executeAsync(e, context.Background(), req)
+	done := executeAndCommitAsync(e, context.Background(), req)
 	awaitCond(t, func() bool { return cluster.holder(job) == "workbench-a" }, "workbench-a never created the step's Job")
 	cluster.stall("workbench-a")
 	// The patience since the forward has run out: the next stale reading --
@@ -823,7 +846,7 @@ func TestExecuteHopReforwardsAStepWhoseRequestNeverArrived(t *testing.T) {
 	job := JobName(req.RunID, req.StepKey, req.Attempt)
 	mesh.dropNextStepTo("workbench-a")
 
-	done := executeAsync(e, context.Background(), req)
+	done := executeAndCommitAsync(e, context.Background(), req)
 	awaitCond(t, func() bool { return len(mesh.sent(workbench.PipelineStatusAction)) >= 3 },
 		"the lost step's status was never read")
 	if created := cluster.jobsCreated(); len(created) != 0 {

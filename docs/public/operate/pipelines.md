@@ -145,10 +145,11 @@ Afterwards:
   over as skipped `pipeline_passed_earlier` (*Passed in attempt 1.*), and
   everything else runs. A shard whose slice moved since -- the timing table
   learned between the attempts -- runs again, because a pass over other
-  packages is not a pass of these. A run with no failed or cancelled step (one
-  that passed, or one refused before any step) is refused
-  `pipeline_nothing_to_rerun`. GitHub's own re-request stays a whole re-run:
-  one check run reports the whole run.
+  packages is not a pass of these. A notify stage is never carried: it
+  announces the new attempt, which has an outcome of its own. A run with no
+  failed or cancelled step (one that passed, or one refused before any step) is
+  refused `pipeline_nothing_to_rerun`. GitHub's own re-request stays a whole
+  re-run: one check run reports the whole run.
 - **Cancel** with `builtin pipelinesCancel(runId: "<run id>")` (`execute` on
   `app:deployables/cancel`). It flags the run; the agent driving it cancels
   what is executing at its next heartbeat and concludes the run cancelled. A
@@ -259,7 +260,6 @@ pipeline:
         - name: os-checks
           run: make os-typecheck os-test os-build
           when: { bucket: os }
-          needs: { docker: true }
     - name: deploy
       on: [push]
       steps:
@@ -271,8 +271,7 @@ pipeline:
       channel: znas-instance
 ```
 
-Connected with `compute: cluster_and_fleet` (the `os-checks` step needs
-`docker`) and `secretNames: [VERIFY_TOKEN]`, it runs `checks` and then `tests`
+Connected with `secretNames: [VERIFY_TOKEN]`, it runs `checks` and then `tests`
 on every run, and `deploy` and `notify` only on a push to the default branch.
 `dbGated` is what `only: db-gated` reads, and the block is refused without it;
 the sidecar's `env` and `ready` are what a Postgres image needs to start and to
@@ -306,7 +305,8 @@ refusal's scope, so it never holds a dot, a slash or a hash.
 
 | Key | Value | Default | Refused when |
 |---|---|---|---|
-| `image` | The toolchain image every command step runs in. Pin it by digest | none | -- |
+| `platform` | Default container platform (`linux/amd64` or `linux/arm64`); a step may override it | either Linux architecture on the cluster | Unknown OS/architecture: `pipeline_step_invalid` |
+| `image` | The toolchain image container steps run in. Pin it by digest | none | -- |
 | `services` | Named sidecars a step may ask for, each with `image` (required), `env` (plain `NAME: value` configuration, never a secret) and `ready` (a shell probe the runner waits on before the step's command starts) | none | A name that breaks the rule, a service with no image, or an `env` name that is not upper-case letters, digits and underscores starting with a letter or underscore: `pipeline_step_invalid`, scoped `services` or `services/<name>` |
 | `caches` | Caches the runner mounts for every step, such as `go` and `npm` | none | -- |
 | `select` | How steps choose what to run. Required once a step names `packages` | none | [Below](#select) |
@@ -340,12 +340,15 @@ mounts is the runner's ([Caches](pipelines-substrate.md#caches)): it knows
 | Key | Value | Default | Refused when |
 |---|---|---|---|
 | `name` | The step's name, unique in its stage | required | Missing, breaking the rule, or used twice in the stage: `pipeline_step_invalid` |
-| `run` | A shell command, run in the image's working copy of the commit -- the same contract as a deployable's `build.command`. There is no step language | required | Blank: `pipeline_step_invalid` |
+| `execution` | `container` or `native`; native uses the host toolchain and ignores the pipeline image | `container` | Native steps with services or shared caches: `pipeline_step_invalid` |
+| `placement` | `cluster` or `fleet`, independently of execution | fleet for native execution or host needs, otherwise cluster | Native execution on the cluster, unknown placement, or fleet without consent |
+| `platform` | Step OS/architecture; overrides the pipeline platform | pipeline platform | Fleet requires an explicit platform; containers require Linux |
+| `run` | A shell command, run in a fresh working copy of the commit -- the same contract as a deployable's `build.command`. There is no step language | required | Blank: `pipeline_step_invalid` |
 | `packages` | `affected` or `all`: select Go packages into `MEMQL_PACKAGES` | none: the step selects no packages | Another value: `pipeline_step_invalid`. No `select.go`: `pipeline_select_missing` |
 | `only` | `db-gated` or `not-db-gated`: keep the selected packages under a `select.dbGated` tree, or the rest | none | Another value, or set without `packages`: `pipeline_step_invalid`. No `select.dbGated`: `pipeline_select_invalid` |
 | `shards` | Split the packages over up to this many steps, at most 8. 0 and 1 mean one step | one step | Below 0 or above 8, or above 1 without `packages`: `pipeline_step_invalid` |
 | `when` | `{ bucket: <name> }`: skip the step on a pull request that touches nothing in the bucket | always runs | A bucket `select.buckets` does not declare: `pipeline_bucket_unknown` |
-| `needs` | `{ <need>: true }`, the need one of `display`, `docker`, `gpu`, `macos_tooling`, `user_files`: the step needs a fleet machine that offers it. A need set `false` is the same as none | runs on the cluster | A need outside the set: `pipeline_need_unknown`. Any need on a pipeline whose compute is `cluster`: `pipeline_fleet_not_consented` |
+| `needs` | `{ <need>: true }`, the need one of `display`, `docker`, `gpu`, `macos_tooling`, `user_files`: a native step needs a fleet machine that offers it. Host needs cannot pass through a container boundary; use `placement: fleet` to request an ordinary Docker container on a worker. A need set `false` is the same as none | runs on the cluster | A need outside the set: `pipeline_need_unknown`. Any need on a pipeline whose compute is `cluster`: `pipeline_fleet_not_consented` |
 | `services` | Declared services the step runs beside | none | A name `services` does not declare: `pipeline_service_unknown` |
 | `timeout` | A duration such as `20m` or `1h30m`, from 1 minute to 2 hours. A step still running at its timeout is stopped and fails `pipeline_step_timeout` | `20m` | Not a duration, under `1m` or over `2h`: `pipeline_step_invalid` |
 | `artifacts` | Paths the runner saves as Library files owned by the pipeline's owner ([Artifacts](pipelines-substrate.md#artifacts)) | none | -- |
@@ -396,6 +399,7 @@ Every runner exports the same environment to a step's command:
 | `MEMQL_VERSION` | The release's tag on a release, the commit otherwise |
 | `MEMQL_PACKAGES` | The step's Go import paths, separated by spaces. Empty for a step that selects none |
 | `MEMQL_SHARD` | `<i>/<k>` on a shard, absent otherwise |
+| `MEMQL_DOMAIN` | The cluster's front-door domain, through which a step reaches `api.<domain>`, `identity.<domain>` and `os.<domain>` from outside, as any client does. Absent when the cluster has none configured |
 
 Each allowed secret is added under its own name. The platform's names win over
 a secret of the same name, which the manifest refuses anyway.
@@ -451,13 +455,36 @@ Stages run one at a time, in the order written, and the steps of a stage run at
 once. Every step waits for every step of the stage before it, whatever `needs`
 says. The first stage that fails stops the run: every later step is skipped
 `pipeline_stage_blocked`, and the check run's table says *Not run: an earlier
-stage failed*.
+stage failed* -- except a notify stage's, which runs, because announcing the
+failure is what it is for ([Notify stages](#notify-stages)).
 
 `on` names events, modes or both. `on: [push]` runs on the default branch's
 pushes only; `on: [full]` on the merge queue, pushes and releases;
 `on: [pull_request, merge_group]` before a change lands. A stage whose `on`
 leaves a run out is absent from that run's plan: it is not a skipped stage, and
 the check run does not list it.
+
+### Notify stages
+
+A notify stage announces the run on the channel it names. The agent driving the
+run hands the message to the cluster's outbound worker -- one delivery for a
+Discord channel, one per recipient for an email channel -- and the step reports
+what the delivery's row reports: delivered, failed, or not there yet when its
+time ran out. Write the notify stage last:
+
+- **It runs after an earlier stage failed**, to say so; every other stage
+  after a failure is *Not run*.
+- **A notify stage that fails fails the run**, and blocks every stage written
+  after it, as any failed stage does.
+- **A cancel before the hand-over sends nothing.** A cancel after it cannot
+  recall a staged notification: the step is cancelled and says the
+  notification may still arrive.
+
+The rows the stage stages are the server's: staged by server code and marked
+so, they take no write from a client -- no status stamp, no requeue, no
+re-stage elsewhere -- so the delivery a step reports is the one the outbound
+worker made. The rows are still readable by any signed-in reader
+(memql#5804), so a message carries nothing the run page does not.
 
 ### When a step is skipped
 
@@ -689,7 +716,7 @@ Mode full · Push to the default branch · Commit 3f9c2ab
 | checks | Passed                           | 1 passed           | 52s    |
 | tests  | Failed                           | 8 passed, 1 failed | 7m 40s |
 | deploy | Not run: an earlier stage failed | 1 not run          | -      |
-| notify | Not run: an earlier stage failed | 1 not run          | -      |
+| notify | Passed                           | 1 passed           | 3s     |
 ```
 
 A stage reads *Passed*, *Failed*, *Cancelled*, *Running*, *Waiting*, *Not run*,
@@ -716,6 +743,14 @@ records `written` once it lands. The republished report carries the stage table
 and each failed step's message and code, but not the log excerpt, which only
 the agent that drove the run held.
 
+**A journal outage stops advancement.** The driver requires a stored intent
+before starting a command or staging a notification, a stored receipt before
+advancing, and a stored terminal work record before publishing a successful
+check. A failed write leaves the pipeline unfinished and stops that drive.
+Recovery retries with bounded backoff after storage returns. This prevents a
+missing record from being reported as success; it does not make an external
+side effect safe to repeat without reconciliation.
+
 ## Readiness
 
 Pipelines is an optional item in the cluster's
@@ -724,14 +759,25 @@ there for the three things a pipeline's checks need: a GitHub App whose
 installations hold checks write, a connected repository, and a runner to
 execute steps. A repository counts as connected once a pipeline is.
 
-Today the item reports configured once all three hold: this cluster has a
-GitHub App, at least one pipeline is connected and active -- whoever owns it --
-and a runner is registered on the agent node reporting it. Until then it says
-which are missing. Every agent node registers a runner, so that fact cannot
-tell whether a workbench replica can run steps, or whether the cluster passes
-the substrate's isolation proof
-([Known limitations](pipelines-substrate.md#known-limitations)). Nor can the
-item see whether an installation accepted checks write, which is a fact per
+The setup item records configuration: a GitHub App, an active pipeline and an
+agent dispatcher. The integration status report calls execution configured
+only when those are present and every known workbench reports a
+runner with a current isolation proof. The agent reads each replica through
+the authenticated mesh. Each report names the replica, namespace, isolation
+state, check time and expiry. Missing runners, unanswered requests, failed or
+inconclusive proofs, and expired proofs do not count as ready. A substituted
+reply from another replica cannot vouch for the one that disappeared.
+
+Settings → Pipelines → Compute separates the installed dispatcher from each
+workbench's observed readiness. Refresh reads the last isolation results; it
+does not launch a probe. Missing reports, failed reads and expired observations
+never display as ready. The same operator-only report is available through
+`builtin pipelinesStatus()` and the generated SDK method.
+
+Reading readiness starts no build or probe. Before the first step proves
+isolation, the report explicitly says `not_proven`; the runner proves it
+before starting work. Configured GitHub credentials alone do not establish
+whether an installation accepted checks write, which is a fact per
 installation: a run that could not write its check run says so itself
 ([The check run](#the-check-run)).
 Nothing needs the item, so the first-run wizard does not walk it, and an owner
@@ -766,7 +812,7 @@ thing waits for a later epic:
 
 | Not yet | Arrives with | Until then |
 |---|---|---|
-| Channels and notify delivery | epic memql#5480 | A notify stage's step is skipped `pipeline_notify_unavailable`, which fails nothing |
+| Channels a person can create (the channel builtins, and Deployables > Settings > Channels) | epic memql#5480 | A notify stage delivers over the outbound path to a channel of its pipeline's owner; while none exists, it fails `pipeline_channel_missing`, and so does the run |
 
 **Do not make `MemQL / <name>` a required check until a run has passed on this
 cluster.** A cluster has to be ready for steps before any runs: on one that does
@@ -802,10 +848,15 @@ says where: `<stage>/<step>`, a stage, or a path into the block.
 | `pipeline_nothing_to_rerun` | refusal | Re-run failed only: the run has no failed or cancelled step to run again | Re-run it whole |
 | `pipeline_runner_unavailable` | failure | No runner could take the step: the cluster is not set up to run steps, or the part that would run it was unreachable | Set the cluster up as [Where a step runs](pipelines-substrate.md#where-a-step-runs) says, then re-run. Nothing in the repository is wrong |
 | `pipeline_executor_error` | failure | The runner could not report how the step ended | Re-run; if it repeats, look at the runner |
-| `pipeline_secret_missing` | failure | An allowed secret has no value on this cluster | Store a value under that name, then re-run |
+| `pipeline_secret_missing` | failure | An allowed secret has no value on this cluster; or a Discord channel's secret has none | Store a value under that name, then re-run |
+| `pipeline_channel_missing` | failure | No channel of the name the notify stage gives belongs to the pipeline's owner | Create it, or correct the name, then re-run |
+| `pipeline_channel_archived` | failure | The notify stage's channel is archived, and delivers nothing | Name an active channel, then re-run |
+| `pipeline_channel_not_allowed` | failure | The channel does not accept deliveries from this pipeline | Allow the pipeline on the channel, then re-run |
+| `pipeline_channel_invalid` | failure | The channel cannot deliver as it is set up: a Discord secret name outside `^[A-Z][A-Z0-9_]{0,63}$` or in `MEMQL_`, a secret that holds no Discord webhook URL, or a recipient that is not a bare email address | Correct the channel, then re-run |
+| `pipeline_notify_failed` | failure | The outbound worker gave the delivery up, or it could not be handed over | Read the worker's error the sentence quotes, then re-run |
+| `pipeline_notify_undelivered` | failure | The delivery had not arrived when the step's time ran out; the sentence says where it stood | Wait for a delivery still being retried, or re-run, which sends another |
 | `pipeline_stage_blocked` | skip | An earlier stage failed | Fix that stage |
 | `pipeline_not_affected` | skip | The change touched nothing the step covers | Nothing |
-| `pipeline_notify_unavailable` | skip | Notify delivery arrives with epic memql#5480 | Nothing |
 | `pipeline_passed_earlier` | skip | A failed-only re-run carried the step over: the attempt it re-ran passed it with the same packages | Nothing |
 | `pipeline_check_permission_missing` | note | GitHub answered 403 to a check-run write; the run went ahead | Accept the app's wider permissions on GitHub |
 

@@ -1229,6 +1229,13 @@ sort(
   `WHERE (createdAt, id) <keyset> (?, ?)` predicate and continues from the
   encoded position. The first page is bounded by a plain SQL `LIMIT`.
 
+A full bounded page reports `hasMore: true` because it cannot prove
+exhaustion. Payload-field ordering currently has no keyset continuation: a
+full page in that order has no cursor. A consumer requiring the complete set
+must refuse that incomplete traversal or use a query ordered by the row's
+`createdAt`/`id`, with a fixed `asOf` when a stable snapshot is required. The
+absence of a cursor alone is not proof that every row was returned.
+
 **Default-cap backstop (memql#1965).** A query that arrives with NO
 explicit window — neither `paginate` nor `sort` — is treated as an
 unmarked list read and capped at `MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP`
@@ -1712,7 +1719,7 @@ Rules:
 5. Stored identifiers always take the form `<concept>:<id>`; providing a bare `id` argument automatically applies the prefix.
 6. The `id` argument must be a string literal or omitted — helper calls like `id=uuid()` are syntax errors. Pre-generate IDs and pass them as strings.
 7. **The declared owner field is server-stamped.** When the target concept declares `@rowAuthz(owner="<field>")`, the engine sets `<field>` to the calling actor's user id, *overwriting* whatever the payload supplied. A raw `insert()` short-circuits the planner and never renders a mutation template, so the `accept { }` / `stamp { }` blocks that would otherwise set it never run — without this the raw surface could create a row owned by somebody else, and `@rowAuthz(owner=...)` would be an assertion the write path does not keep (memql#3059 / #3175). Two callers are exempt and write the owner they supply: the cluster owner, and trusted server-side Go stamping internal origin for that one write. A call carrying no resolved caller identity is refused rather than stamped with an empty owner. Named mutations are unaffected — their own `stamp { }` block is the author's stated answer.
-8. **`@serverOnly` does not reach `insert()`.** The annotation gates the named mutation; the raw literal never names one. A concept whose rows must be written only by server-side Go is guarded by concept instead: `v1:identity:githubConnectState`, the single-use state row behind GitHub Connect and GitHub App setup, refuses every write that does not carry internal origin, from any caller, the cluster owner included (memql#5623).
+8. **`@serverOnly` does not reach `insert()`.** The annotation gates the named mutation; the raw literal never names one. Use `@serverWritten` on a concept to require internal call origin for every engine write, including raw `insert()` and `update()` and named mutations. This does not change who may read the rows (`@rowAuthz`) and does not bypass row authorization. The pipeline, run and channel concepts use this declaration to prevent clients from forging run evidence or changing validated configuration. A concept whose rows must be written only by server-side Go is guarded by concept instead: `v1:identity:githubConnectState`, the single-use state row behind GitHub Connect and GitHub App setup, refuses every write that does not carry internal origin, from any caller, the cluster owner included (memql#5623).
 
 ### Content-Addressed IDs
 
@@ -2214,11 +2221,26 @@ logic submittedRequestStatus {
 | bind | `name := <call>` or `name := <expression>` | `name` holds the value from the next statement on |
 | call | `<kind> <name>(<named arguments>)` | the kind is one of `query`, `mutation`, `logic`, `builtin`, `automation`, `action` |
 | if | `if <cond> { } else if <cond> { } else { }` | `else` goes on the line of the closing brace |
-| for | `for <x> in <expression> [if <cond>] { }` | the author names the loop variable |
+| for | `for <x> in <expression> [if <cond>] [parallel(N)] { }` | the author names the loop variable; optional bounded parallel iterations |
 | switch | `switch <expression> { case <literal>[, <literal>] { } default { } }` | labels are literals, each used once |
 | parallel | `parallel { branch <label> { } ... } [wait any]` | waits for every branch unless `wait any` is written |
 | publish | `publish "<topic>" { <field>: <value>, ... }` | automations only; the payload is a map literal |
 | return | `return [<expression or call>]` | ends the body, and in an automation the run |
+
+Use `parallel(N)` on a `for` when independent items may run concurrently.
+`N` is a literal integer from 2 through 64; omit it for sequential execution.
+The source is evaluated once, each item has its own scope, and its journal key
+retains its original source index even when a filter skips an earlier item.
+The limit bounds this loop, not total cluster or worker capacity. Completion
+order is unspecified. A parallel iteration cannot `return` from the enclosing
+body; a called logic can still return its own value.
+
+A failed iteration cancels its siblings and the loop waits for active children
+to finish before advancing. `on error continue` lets other items run after an
+ordinary error. Cancellation, a human wait or a required-journal failure still
+stops advancement. Cancellation cannot undo an external effect; recovery uses
+the same definition, receipt and replay checks as sequential work. Parallel
+iteration does not make an unfinished effect safe to retry.
 
 One statement per line. An expression continues onto the next line when the line ends inside an open bracket or on an operator, or when the next line begins with one.
 
@@ -2295,6 +2317,53 @@ A bare name is a statement's name, a loop variable, a lambda parameter or a rese
 ### What runs
 
 A body compiles at load to a list of steps in the order written; nothing is reordered. Each call is one step: journaled on the run, previewed by a dry run, retried by `retry(n)` and by a resume. An `if` or a `switch` flattens into the steps of its branches, each carrying its branch's condition, so a switch compares with typed equality (`1 == "1"` is false). A logic called inside a run journals its statements as steps of that run.
+
+An automation may declare `@journalRequired` when work must stop if its record
+cannot be confirmed. This requires a persisted run before starting, a step
+intent before its call, a receipt before advancing, and a terminal write before
+reporting completion. Failed heartbeats cancel in-flight calls cooperatively.
+The requirement follows nested logic and child automations; `retry(n)` and
+`on error continue` cannot bypass a journal failure. Without this annotation,
+journaling remains best effort. Sandboxed previews still write no journal.
+Before-write hooks and automations reacting to work-journal rows cannot use it.
+
+This is a recording guarantee, not exactly-once execution. An external effect
+can succeed before its receipt fails. Recovery must reconcile that uncertain
+effect before retrying it; a process cannot be resumed at an arbitrary machine
+instruction. The journal retains the last confirmed state and the executor
+returns a `required work journal unavailable` error.
+
+Resume compares the recorded automation definition with the current one,
+including call arguments, nested bodies, input contracts and execution policy.
+A changed definition is refused. Runs carrying the older, incomplete
+definition fingerprint are also refused; prepare a new run after reconciling
+any external effects. The definition fingerprint does not pin the code of
+called integrations or other constructs; workflows that require reproducible
+recovery must also pin their engine and DSL bundle versions.
+
+Automatic resume inspects registered functions and nested logic, loop and
+parallel bodies. Proven reads and computations may repeat; mutations,
+publication, sub-automations and unclassified operations require reconciliation
+or an explicit rerun. A builtin's name or the word `query` at its call site
+does not prove safety. The work dispatcher records `resume_effect_uncertain`
+when it cannot safely repeat an unfinished operation.
+
+A capability may instead implement `CheckpointResumePreparer`: it verifies a
+persisted suspension and binds execution to the exact saved checkpoint. This
+does not mark the capability read-only or permit ordinary retries. The agent
+turn capability uses it for an answered human question, checking the owner,
+run, step, decision and content-addressed tool transcript before continuing.
+Missing or changed evidence refuses continuation. The proof applies only to
+that waiting step; wrappers and other effects receive no implicit exception.
+
+Completed prefix steps keep their saved values, and skipped conditions remain
+skipped. A saved `nil` is distinguished from a value omitted from the journal.
+A missing bound result from a completed effect refuses recovery with
+`resume_result_missing`; it is not recreated by repeating the effect. Oversized
+query results can be read again under the same replay checks, without replacing
+the original receipt. Such reads observe current state, not a historical
+snapshot. Unclassified query forms and run-private calls conservatively require
+explicit recovery authorization.
 
 A dry-run preview executes a builtin only when its executor is classified as a metadata read or a computation without side effects. Unclassified executors, including integration builtins, stop the preview with a refusal. This also applies to builtins called from a query or nested logic; a stopped preview does not claim successful execution.
 

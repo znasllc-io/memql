@@ -75,12 +75,14 @@ func fresh() time.Time    { return fleetNow().Add(-time.Second) }
 
 func machine(id string, opts ...func(*Candidate)) Candidate {
 	c := Candidate{
-		RegistrationId:  id,
-		Name:            id,
-		Capabilities:    []string{workerservice.CapabilityHeadless},
-		ConnectedNodeId: "agent-test",
-		LastSeenAt:      fresh(),
-		Labels:          map[string]string{},
+		ActionContracts:  workerservice.ActionContracts{"workerHost.pipeline_step": PipelineStepContract},
+		RepositoryScopes: workerservice.RepositoryScopes{"workerHost.pipeline_step": {}},
+		RegistrationId:   id,
+		Name:             id,
+		Capabilities:     []string{workerservice.CapabilityHeadless},
+		ConnectedNodeId:  "agent-test",
+		LastSeenAt:       fresh(),
+		Labels:           map[string]string{},
 	}
 	for _, o := range opts {
 		o(&c)

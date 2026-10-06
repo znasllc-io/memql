@@ -307,6 +307,9 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 	if err := prepareLoopAndMode(&automation); err != nil {
 		return nil, err
 	}
+	if err := prepareJournalContract(&automation); err != nil {
+		return nil, err
+	}
 
 	// The trigger filter's and the preconditions' names: the body's were
 	// compiler.CheckBody's (args_resolution.go). Both the tree loader and the
@@ -801,6 +804,9 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 	}
 
 	if err := prepareLoopAndMode(&automation); err != nil {
+		return nil, err
+	}
+	if err := prepareJournalContract(&automation); err != nil {
 		return nil, err
 	}
 	automation.Reads = computeReads(&automation, newFunctionSource(l.functions, l.registry))

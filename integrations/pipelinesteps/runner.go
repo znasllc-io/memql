@@ -310,7 +310,7 @@ func (r *Runner) Status(ctx context.Context, req StatusRequest) StatusReply {
 	return StatusReply{State: StateStale, Runner: node, JobCreatedAt: created}
 }
 
-// Ack deletes a step's Job and Secret once the agent holds the outcome; what
+// Ack deletes a step's Job and Secret once the agent has durably journaled the outcome; what
 // is already gone is acked.
 func (r *Runner) Ack(ctx context.Context, req AckRequest) error {
 	if !isStepJobName(req.JobName) {
@@ -522,6 +522,9 @@ func (s *step) execute() pl.StepResult {
 				// Deleted between two reads of this Run: a cancel elsewhere.
 				return s.vanished(nil)
 			case !found:
+				if s.run.RecoverOnly {
+					return s.failed(pl.CodeExecutionUncertain, "The previous attempt's Job and result are missing. It may already have executed; no replacement Job was created. Reconcile that attempt before authorizing new work.")
+				}
 				res, j, done := s.create()
 				if done {
 					return res

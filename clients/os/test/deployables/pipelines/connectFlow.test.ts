@@ -223,6 +223,18 @@ describe("the stops", () => {
 });
 
 describe("Compute's answers", () => {
+  it("requires fleet consent for native execution or explicit fleet placement without host needs", () => {
+    for (const execution of ["native", "container"]) {
+      const p = plain({ stages: [{ name: "build", on: [], channel: "", steps: [stepRow("build", {
+        execution, platform: "linux/arm64", requiresFleet: true,
+      })] }] });
+      expect(computeOf(facts({ fleet: { known: true, available: true } }), p)).toMatchObject({
+        options: ["cluster_and_fleet"], answered: false,
+      });
+      expect(computeOf(facts(), p).options).toEqual([]);
+      expect(needersOf(p)).toEqual(["build runs on your fleet (linux/arm64)"]);
+    }
+  });
   it("offers only what can work, and preselects without answering", () => {
     // Needs and a fleet: the fleet alone, checked, waiting for the person.
     expect(computeOf(facts({ fleet: { known: true, available: true } }), preview())).toMatchObject({
@@ -361,6 +373,7 @@ describe("the fleet", () => {
       ownerUserId: "v1:identity:user:u-me",
       name: "studio-mac",
       labels: { pipelines: "allowed" },
+      capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 2 } },
       operatorLabels: {},
       lastSeenAt: "2026-10-04T11:59:50Z",
       ...over,
@@ -371,6 +384,15 @@ describe("the fleet", () => {
     expect(fleetAvailable([machine()], "u-me")).toBe(true);
     // Either spelling of the owner is the owner.
     expect(fleetAvailable([machine({ ownerUserId: "u-me" })], "v1:identity:user:u-me")).toBe(true);
+  });
+
+  it("does not treat labels or unknown action versions as an execution contract", () => {
+    for (const version of [undefined, 0, 1, 3, "2", 2.5]) {
+      expect(fleetAvailable([machine({
+        capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": version } },
+        operatorLabels: { "workerHost.pipeline_step": "2" },
+      })], "u-me")).toBe(false);
+    }
   });
 
   it("is not offered by a revoked machine, another label, an operator's label or somebody else's machine", () => {
@@ -408,9 +430,9 @@ describe("words", () => {
   it("names every step that needs a machine, and the way out", () => {
     expect(needersOf(preview())).toEqual(["os-checks needs docker"]);
     expect(needsRemedy(["os-checks needs docker"])).toBe(
-      "None of your machines allows pipelines. Allow pipelines in a machine's policy.yaml (pipelines.allow), or remove the need from the step.",
+      "No compatible worker allows pipelines. Update Cockpit and allow pipeline work in its policy.yaml, or change these steps to use cluster containers without host requirements.",
     );
-    expect(fleetReason(["os-checks needs docker"])).toContain("remove the need from the step");
+    expect(fleetReason(["os-checks needs docker"])).toContain("cluster containers without host requirements");
   });
 
   it("says what each delivery does, and what polling cannot see", () => {

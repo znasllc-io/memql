@@ -25,8 +25,9 @@ type Engine interface {
 
 // store is the pipeline's graph access.
 //
-// EVERY WRITE HERE RUNS UNDER STAMPED INTERNAL ORIGIN, and every read does not.
-// That split is the whole authorization shape:
+// Writes stamp internal origin at the bounded call site; owned-row reads
+// retain the caller. The webhook-delivery lookup below is a separate,
+// internal-only operator read.
 //
 //   - The @serverOnly pipeline mutations are unreachable from the wire and are
 //     stamped internal here, in this package, which is what the
@@ -40,8 +41,7 @@ type Engine interface {
 //     pipeline reading its own package row under no actor would conclude the
 //     package does not exist.
 //
-// Two exceptions, both in the source-credentials section at the bottom and
-// both stated there rather than here: sourceCredentialSealedById is a STAMPED
+// Further exceptions are stated at their call sites: sourceCredentialSealedById is a STAMPED
 // READ (the query is @serverOnly because it returns ciphertext, and the stamp
 // admits the construct without widening the rows -- the actor still decides
 // those), and revokeSourceCredential is an UNSTAMPED WRITE (an ordinary owned
@@ -125,10 +125,14 @@ func (s *store) packagesTrackingRepos(ctx context.Context) ([]map[string]any, er
 // inboundRequestById is the staged delivery the webhook feed acts on, read by
 // the id the automation hands it: the source, the body and the receiver's
 // signatureVerified come from this row and from nowhere else (feeds.go).
-// Unstamped like every read here -- v1:platform:inboundRequest declares no row
-// tier, so the automation's own actor reads it.
+// Only the internal webhook handler reaches this fixed lookup. It reads the
+// operator-only delivery as the deployment, then uses the original caller
+// for package matching and updates; no payload is returned to a client.
 func (s *store) inboundRequestById(ctx context.Context, id string) (map[string]any, error) {
-	return s.queryOne(ctx, fmt.Sprintf("query inboundRequestById(requestId: %s)", langparser.QuoteString(id)))
+	if !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, errWebhookFeedClientOrigin
+	}
+	return s.queryOne(auth.ContextWithSystemActor(ctx, "packages-webhook"), fmt.Sprintf("query inboundRequestById(requestId: %s)", langparser.QuoteString(id)))
 }
 
 // lastSucceededDeployment is the newest run of this package that actually

@@ -99,6 +99,11 @@ func TestNoUnguardedDirectToStoreConceptCreate(t *testing.T) {
 	// Keyed by file rather than by directory: component/memql is large, and
 	// "somewhere in component/memql" is not a claim worth making.
 	allowed := map[string]string{
+		// This database regression writes inside the already-open fenced write
+		// transaction, then kills THAT connection before commit. Re-entering the
+		// executor would open another connection and would not test rollback of
+		// the transaction being killed. Only fixture-owned to-do rows are used.
+		"component/memql/row_version_fence_db_test.go": "transaction rollback regression using a test-owned row inside runInWriteTx",
 		// THE guarded write path. This is the call every mutation funnels
 		// into, after executeWrite has run the validators above.
 		"component/memql/executor_mutation.go": "the mutation executor -- the one guarded write path",

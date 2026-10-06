@@ -78,7 +78,8 @@ func NeedsSelector(spec *Spec) bool {
 // `on` excludes the run is absent from the plan, not skipped. Each planned
 // stage compiles, in order:
 //
-//   - a notify stage to one notify step, "<stage>.notify";
+//   - a notify stage to one notify step, "<stage>.notify", which carries the
+//     stage's links;
 //   - every other step to one step "<stage>.<step>", or, split by the timing
 //     table into k > 1 shards, to k steps "<stage>.<step>#<i>";
 //   - every step depends on every step of the stage planned before it, so
@@ -122,7 +123,7 @@ func Compile(spec *Spec, in CompileInput) (Plan, *Refusal) {
 		if stage.Channel != "" {
 			planned.Steps = []Step{{
 				Key: StepKey(stage.Name, "notify"), Stage: stage.Name, Name: "notify", Kind: StepNotify,
-				Channel: stage.Channel, TimeoutSeconds: int(DefaultStepTimeout / time.Second),
+				Channel: stage.Channel, Links: compiledLinks(stage.Links), TimeoutSeconds: int(DefaultStepTimeout / time.Second),
 				DependsOn: compiledCopy(previous),
 			}}
 		} else {
@@ -182,6 +183,9 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 
 	step := Step{
 		Key: StepKey(stage, declared.Name), Stage: stage, Name: declared.Name, Kind: StepCommand, Run: declared.Run,
+		Execution:      ExecutionOf(declared.Execution),
+		Placement:      PlacementOf(declared),
+		Platform:       PlatformOf(c.spec, declared),
 		Image:          c.spec.Image,
 		Services:       c.servicesFor(declared.Services),
 		Caches:         compiledCopy(c.spec.Caches),
@@ -190,6 +194,10 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 		Artifacts:      compiledCopy(declared.Artifacts),
 		Secrets:        compiledCopy(declared.Secrets),
 		DependsOn:      compiledCopy(dependsOn),
+	}
+
+	if step.Execution == ExecutionNative {
+		step.Image = ""
 	}
 
 	if declared.When != nil && c.bucketUntouched(declared.When.Bucket) {
@@ -351,6 +359,14 @@ func compiledCopy(s []string) []string {
 	return slices.Clone(s)
 }
 
+// compiledLinks copies a stage's links for a plan, nil when it has none.
+func compiledLinks(links []Link) []Link {
+	if len(links) == 0 {
+		return nil
+	}
+	return slices.Clone(links)
+}
+
 // cloneCompiledStep copies a step so that no slice or map is shared with the
 // step it came from: each shard of a step is a value of its own.
 func cloneCompiledStep(s Step) Step {
@@ -368,6 +384,7 @@ func cloneCompiledStep(s Step) Step {
 	s.Secrets = slices.Clone(s.Secrets)
 	s.Packages = slices.Clone(s.Packages)
 	s.DependsOn = slices.Clone(s.DependsOn)
+	s.Links = slices.Clone(s.Links)
 	if s.Skip != nil {
 		skip := *s.Skip
 		s.Skip = &skip
@@ -409,13 +426,13 @@ func stepNeeds(declared StepSpec) []string {
 // stepConsent refuses a step whose needs the owner has not consented to send
 // to the fleet, or whose secrets the owner has not allowed.
 func stepConsent(scope string, declared StepSpec, compute Compute, allowedSecrets []string) *Refusal {
-	if needs := stepNeeds(declared); len(needs) > 0 && compute != ComputeClusterAndFleet {
+	if PlacementOf(declared) == PlacementFleet && compute != ComputeClusterAndFleet {
 		if compute == "" {
 			compute = ComputeCluster
 		}
 		return Refuse(CodeFleetNotConsented, scope,
-			"The step needs %s, which sends it to a fleet machine, and this pipeline's compute is %s: the owner has not consented to the fleet (compute: %s).",
-			strings.Join(needs, ", "), compute, ComputeClusterAndFleet)
+			"The step requests fleet placement, and this pipeline's compute is %s: the owner has not consented to the fleet (compute: %s).",
+			compute, ComputeClusterAndFleet)
 	}
 	var notAllowed []string
 	for _, name := range declared.Secrets {

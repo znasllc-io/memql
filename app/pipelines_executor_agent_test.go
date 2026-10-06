@@ -40,10 +40,16 @@ func TestTheAgentNodeRegistersThePipelinesExecutor(t *testing.T) {
 		RunStartedAt: time.Now().UTC().Format(time.RFC3339),
 		Repository:   pipelines.Repository{Owner: "acme", Name: "widget"},
 		Compute:      pipelines.ComputeClusterAndFleet,
-		Step:         pipelines.Step{Key: "tests.unit", Kind: pipelines.StepCommand, Run: "go test ./...", Image: "toolchain:1"},
+		Step:         pipelines.Step{Key: "tests.unit", Kind: pipelines.StepCommand, Run: "go test ./...", Image: "toolchain:1", Execution: pipelines.ExecutionContainer},
 	}
 	for _, needs := range [][]string{nil, {"docker"}} {
 		step.Step.Needs = needs
+		if len(needs) > 0 {
+			step.Step.Execution = pipelines.ExecutionNative
+			step.Step.Placement = pipelines.PlacementFleet
+			step.Step.Platform = "linux/amd64"
+			step.Step.Image = ""
+		}
 		res, err := exec.Execute(context.Background(), step)
 		if err != nil {
 			t.Fatalf("needs %v: Execute: %v", needs, err)

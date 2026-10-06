@@ -2,6 +2,7 @@ package pipelinerun
 
 import (
 	"context"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -39,15 +40,23 @@ type recordingEngine struct {
 	mu      sync.Mutex
 	calls   []recordedCall
 	answers map[string]any // construct name -> OutputPayload
+	// byCall answers one exact rendered call, ahead of answers: how a test hands
+	// two calls to one construct two different rows (one present, one absent).
+	byCall map[string]any
 }
 
-func newRecordingEngine() *recordingEngine { return &recordingEngine{answers: map[string]any{}} }
+func newRecordingEngine() *recordingEngine {
+	return &recordingEngine{answers: map[string]any{}, byCall: map[string]any{}}
+}
 
 func (e *recordingEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
 	ac, _ := auth.AccessFromContext(ctx)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.calls = append(e.calls, recordedCall{query: query, origin: auth.OriginFromContext(ctx), actor: ac, fresh: memql.FreshReadFromContext(ctx)})
+	if answer, ok := e.byCall[query]; ok {
+		return memql.NewResultWithOutput(answer), nil
+	}
 	if answer, ok := e.answers[constructOf(query)]; ok {
 		return memql.NewResultWithOutput(answer), nil
 	}
@@ -86,6 +95,10 @@ func everyStoreCall(s Store, value string) []struct {
 		RefusalScope: value, CheckRunID: 30431907812, CheckRunState: value,
 		Notes: []Note{{Code: value, Message: value}}, QueuedAt: now, FinishedAt: now, DurationMs: 1234,
 	}
+	ch := Channel{
+		ID: value, OwnerUserID: value, AccountID: value, Name: value, Kind: value, SecretRef: value,
+		Recipients: []string{value, "ops@example.test"},
+	}
 	heads := map[string]string{"branch:" + value: value, "pr:12": value}
 	// An exponent spelling, and a NaN no JSON can carry: the NaN is dropped
 	// rather than refusing the whole write.
@@ -115,6 +128,11 @@ func everyStoreCall(s Store, value string) []struct {
 		{"RunsUnfinishedForPullRequest", func() error { _, err := s.RunsUnfinishedForPullRequest(ctx, value, 42); return err }},
 		{"RunsFinalCheckRunUnavailable", func() error { _, err := s.RunsFinalCheckRunUnavailable(ctx, now); return err }},
 		{"RunByID", func() error { _, err := s.RunByID(ctx, value); return err }},
+		{"ChannelsForOwner", func() error { _, err := s.ChannelsForOwner(ctx); return err }},
+		{"ChannelForOwnerByName", func() error { _, err := s.ChannelForOwnerByName(ctx, value, value); return err }},
+		{"PreviousRuns", func() error { _, err := s.PreviousRuns(ctx, value, pipelines.Event(value)); return err }},
+		{"OutboundStatuses", func() error { _, err := s.OutboundStatuses(ctx, []string{value, "second"}); return err }},
+		{"LibraryFileNames", func() error { _, err := s.LibraryFileNames(ctx, value, []string{value, "second"}); return err }},
 		{"CreatePipeline", func() error { return s.CreatePipeline(ctx, p) }},
 		{"UpdatePipeline (every field)", func() error {
 			return s.UpdatePipeline(ctx, value, value, PipelinePatch{
@@ -139,6 +157,28 @@ func everyStoreCall(s Store, value string) []struct {
 		{"UpdateRun (clearing)", func() error {
 			return s.UpdateRun(ctx, value, value, RunPatch{
 				Conclusion: ptr(""), CheckRunID: ptr(int64(0)), Notes: ptr([]Note{}), CancelRequested: ptr(false),
+			})
+		}},
+		{"CreateChannel (every field)", func() error { return s.CreateChannel(ctx, ch) }},
+		{"CreateChannel (a Discord channel)", func() error {
+			return s.CreateChannel(ctx, Channel{ID: value, OwnerUserID: value, Name: value, Kind: "discord", SecretRef: value})
+		}},
+		{"UpdateChannel (every field)", func() error {
+			return s.UpdateChannel(ctx, value, value, ChannelPatch{
+				Name: ptr(value), Kind: ptr(value), SecretRef: ptr(value), Status: ptr(value), Recipients: ptr([]string{value}),
+			})
+		}},
+		{"UpdateChannel (clearing)", func() error {
+			return s.UpdateChannel(ctx, value, value, ChannelPatch{SecretRef: ptr(""), Recipients: ptr([]string(nil))})
+		}},
+		{"StageNotification (to a secret)", func() error {
+			return s.StageNotification(ctx, NotificationRequest{
+				RequestID: value, Medium: "webhook", TargetSecret: value, Subject: value, Body: value, DedupeKey: value, RequestedBy: value,
+			})
+		}},
+		{"StageNotification (a plain row)", func() error {
+			return s.StageNotification(ctx, NotificationRequest{
+				RequestID: value, Medium: "email", Target: value, Subject: value, Body: value, DedupeKey: value, RequestedBy: value,
 			})
 		}},
 	}
@@ -171,15 +211,17 @@ func TestEveryRenderedCallParses(t *testing.T) {
 }
 
 // TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares reads dsl/pipelines
-// (and Deployables' packageById, and the work spine's workStepsForRun) and
-// holds every rendered call to it: the construct exists, of the kind the call
-// says, and every argument the call passes is one the construct's args block
+// (and Deployables' packageById, the work spine's workStepsForRun, the outbound
+// seam's staging and by-id read, and the Library's libraryFileById) and holds
+// every rendered call to it: the construct exists, of the kind the call says,
+// and every argument the call passes is one the construct's args block
 // declares.
 func TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares(t *testing.T) {
 	declared := map[string]dslConstruct{}
 	for _, file := range []string{
 		"../../dsl/pipelines/queries.memql", "../../dsl/pipelines/mutations.memql",
-		"../../dsl/platform/queries.memql", "../../dsl/work/queries.memql",
+		"../../dsl/platform/queries.memql", "../../dsl/platform/mutations.memql",
+		"../../dsl/work/queries.memql", "../../dsl/library/queries.memql",
 	} {
 		for name, c := range readDSLConstructs(t, file) {
 			declared[name] = c
@@ -200,7 +242,7 @@ func TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares(t *testing.T) {
 		seen[name] = true
 		d, ok := declared[name]
 		if !ok {
-			t.Errorf("%s %s: no such construct in dsl/pipelines or dsl/platform", kind, name)
+			t.Errorf("%s %s: no such construct in the DSL files this test reads", kind, name)
 			continue
 		}
 		if d.kind != kind {
@@ -227,6 +269,8 @@ func TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares(t *testing.T) {
 		qPipelineRunByCheckRun, qPipelineRunsUnfinished, qPipelineRunsUnfinishedForPullRequest, qPipelineRunsCheckRunLost,
 		qPipelineRunByID, qPipelinesActive, qWorkStepsForRun,
 		mCreatePipeline, mUpdatePipeline, mCreatePipelineRun, mUpdatePipelineRun, qPackageByID, qInboundRequestByID,
+		qPipelineChannelsForOwner, qPipelineChannelForOwnerByName, qPipelineRunsForPipelineEvent, mCreatePipelineChannel, mUpdatePipelineChannel,
+		mStageServerOutboundRequest, mStageOutboundRequestToSecret, qOutboundRequestByID, qLibraryFileByID,
 	} {
 		if !seen[want] {
 			t.Errorf("%s is named in store_dsl.go and no Store method calls it", want)
@@ -254,7 +298,7 @@ func TestEachCallRunsUnderItsAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := engine.recorded()
-	if len(calls) != 3 {
+	if len(calls) != 4 {
 		t.Fatalf("calls = %d", len(calls))
 	}
 
@@ -271,7 +315,11 @@ func TestEachCallRunsUnderItsAuthority(t *testing.T) {
 		t.Errorf("a server-only read is the pipelines system actor (a synthetic cluster owner), not the caller: %+v", system.actor)
 	}
 
-	write := calls[2]
+	witness := calls[2]
+	if !witness.fresh || !witness.origin.IsInternal() || witness.actor == nil || !witness.actor.IsClusterOwner() || !strings.HasPrefix(witness.query, "query "+qPipelineRunByID+"(") {
+		t.Errorf("the fencing witness needs a fresh internal operator read: %+v", witness)
+	}
+	write := calls[3]
 	if !write.origin.IsInternal() || write.actor == nil || write.actor.UserId != "v1:identity:user:"+ownerID || write.actor.Synthetic {
 		t.Errorf("a write runs as the owner, stamped internal: origin %v actor %+v", write.origin, write.actor)
 	}
@@ -282,7 +330,7 @@ func TestEachCallRunsUnderItsAuthority(t *testing.T) {
 	if err := store.UpdatePipeline(caller, "  ", "p1", PipelinePatch{Status: ptr(PipelineActive)}); err == nil {
 		t.Errorf("an update with no owner must not be written")
 	}
-	if n := len(engine.recorded()); n != 3 {
+	if n := len(engine.recorded()); n != 4 {
 		t.Errorf("a refused write reached the engine: %d calls", n)
 	}
 
@@ -348,6 +396,7 @@ func TestTheRenderedCallsSayWhatTheRowsAre(t *testing.T) {
 	calls := engine.recorded()
 	// RenderCall's form: arguments in sorted order, values JSON-encoded.
 	want := []string{
+		`query pipelineRunById(runId: "r1")`,
 		`mutation createPipelineRun(attempt: 1, checkRunState: "refused", event: "pull_request", mode: "affected", notes: [{"code":"pipeline_check_permission_missing","message":"m"}], pipelineId: "p1", queuedAt: "2026-10-03T12:00:00Z", repository: "acme/shop", runId: "r1", runKey: "acme/shop@` + shaA + `:affected:pull_request", sha: "` + shaA + `", status: "queued", trigger: "webhook")`,
 		`query pipelineRunsForOwner()`,
 		`query pipelineRunByCheckRun(checkRunId: "42", repository: "acme/shop")`,
@@ -457,7 +506,7 @@ func TestWorkStepsAreReadBackForAResume(t *testing.T) {
 		"durationMs":   float64(1200),
 		"errorCode":    pipelines.CodeStageBlocked,
 		"errorMessage": "Not run: stage checks failed.",
-		"call":         map[string]any{"construct": "pipeline", "name": "go", "stage": "tests", "packages": []any{"acme.test/a", "acme.test/b"}},
+		"call":         map[string]any{"construct": "pipeline", "name": "go", "stage": "tests", "definitionFingerprint": "definition-proof", "packages": []any{"acme.test/a", "acme.test/b"}},
 		"result":       map[string]any{"reason": "Not run: stage checks failed."},
 	}}
 	steps, err := NewDSLStore(engine).WorkSteps(context.Background(), "v1:work:run:w1")
@@ -470,7 +519,7 @@ func TestWorkStepsAreReadBackForAResume(t *testing.T) {
 		Stage: "tests", Name: "go", Packages: []string{"acme.test/a", "acme.test/b"}, Reason: "Not run: stage checks failed.",
 	}
 	got := steps[0]
-	if got.Key != want.Key || got.Seq != want.Seq || got.Status != want.Status || got.Attempt != want.Attempt ||
+	if got.DefinitionFingerprint != "definition-proof" || got.Key != want.Key || got.Seq != want.Seq || got.Status != want.Status || got.Attempt != want.Attempt ||
 		got.DurationMs != want.DurationMs || got.ErrorCode != want.ErrorCode || got.ErrorMessage != want.ErrorMessage ||
 		got.Stage != want.Stage || got.Name != want.Name || got.Reason != want.Reason || !slices.Equal(got.Packages, want.Packages) {
 		t.Errorf("step = %+v, want %+v", got, want)
@@ -519,6 +568,487 @@ func TestAStagedDeliveryIsReadBackAsStaged(t *testing.T) {
 	}
 	if none, err := NewDSLStore(engine).InboundDelivery(context.Background(), " "); err != nil || none != nil || len(engine.recorded()) != 2 {
 		t.Errorf("no delivery id is no read: %v %v", none, err)
+	}
+}
+
+// refusedChannelAndOutboundCalls are calls no Store may act on, each for its own
+// reason: a read or a write on a person's behalf names the person, and a
+// notification names where it goes and what it says. The DSL store refuses them
+// BEFORE it renders anything, and the fake store refuses them the same way, so
+// a test that runs over the fake is not more forgiving than production.
+func refusedChannelAndOutboundCalls(s Store) []struct {
+	name string
+	run  func() error
+} {
+	ctx := context.Background()
+	return []struct {
+		name string
+		run  func() error
+	}{
+		{"a channel read for nobody", func() error { _, err := s.ChannelForOwnerByName(ctx, "  ", "releases"); return err }},
+		{"a channel read for nobody, with nothing to find", func() error { _, err := s.ChannelForOwnerByName(ctx, "", ""); return err }},
+		{"Library names for nobody", func() error { _, err := s.LibraryFileNames(ctx, "", []string{"f1"}); return err }},
+		{"Library names for nobody, none asked", func() error { _, err := s.LibraryFileNames(ctx, "", nil); return err }},
+		{"a channel written for nobody", func() error {
+			return s.CreateChannel(ctx, Channel{ID: "c1", Name: "releases", Kind: "email", Recipients: []string{"a@example.test"}})
+		}},
+		{"a channel with no id", func() error {
+			return s.CreateChannel(ctx, Channel{ID: "  ", OwnerUserID: "v1:identity:user:u1", Name: "releases", Kind: "email", Recipients: []string{"a@example.test"}})
+		}},
+		{"a channel updated for nobody", func() error {
+			return s.UpdateChannel(ctx, " ", "c1", ChannelPatch{Status: ptr("archived")})
+		}},
+		{"a secret notification that is not a webhook", func() error {
+			return s.StageNotification(ctx, NotificationRequest{RequestID: "pn1", Medium: "email", TargetSecret: "DISCORD_RELEASES", Body: "x"})
+		}},
+		{"a secret notification naming no medium", func() error {
+			return s.StageNotification(ctx, NotificationRequest{RequestID: "pn1", TargetSecret: "DISCORD_RELEASES", Body: "x"})
+		}},
+		{"a secret notification that also names a target", func() error {
+			return s.StageNotification(ctx, NotificationRequest{
+				RequestID: "pn1", Medium: "webhook", TargetSecret: "DISCORD_RELEASES", Target: "https://example.test/hook", Body: "x",
+			})
+		}},
+		{"a notification with no request id", func() error {
+			return s.StageNotification(ctx, NotificationRequest{Medium: "webhook", TargetSecret: "DISCORD_RELEASES", Body: "x"})
+		}},
+		{"a notification saying nothing", func() error {
+			return s.StageNotification(ctx, NotificationRequest{RequestID: "pn1", Medium: "webhook", TargetSecret: "DISCORD_RELEASES", Body: "  "})
+		}},
+		{"a plain notification naming no target", func() error {
+			return s.StageNotification(ctx, NotificationRequest{RequestID: "pn2", Medium: "email", Body: "x"})
+		}},
+		{"a plain notification naming no medium", func() error {
+			return s.StageNotification(ctx, NotificationRequest{RequestID: "pn2", Target: "a@example.test", Body: "x"})
+		}},
+	}
+}
+
+// TestTheChannelAndOutboundCallsRunUnderTheirAuthority is the authorization
+// shape of what the notify stage reads and writes. A person's channels are read
+// under the caller. A channel by name and a Library file are read under their
+// OWNER's borrowed authority -- not the caller's, and unstamped, because the
+// owner conjunct of the construct decides the rows and the borrowed actor
+// reads exactly what that person could. The previous runs, the staging and the
+// delivery status are the pipelines system actor's, stamped internal: no person
+// owns an outbound row or speaks for a driver. The channel's writes are the
+// owner's, stamped. And a call that names nobody, or a notification that
+// cannot be sent as written, is refused before anything is executed.
+func TestTheChannelAndOutboundCallsRunUnderTheirAuthority(t *testing.T) {
+	engine := newRecordingEngine()
+	store := NewDSLStore(engine)
+	caller := personCtx(otherID)
+	owner := "v1:identity:user:" + ownerID
+
+	one := func(name string, run func() error) recordedCall {
+		t.Helper()
+		before := len(engine.recorded())
+		if err := run(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		calls := engine.recorded()[before:]
+		if len(calls) != 1 {
+			t.Fatalf("%s made %d calls, want exactly 1: %v", name, len(calls), calls)
+		}
+		return calls[0]
+	}
+	asSystem := func(c recordedCall) bool {
+		return c.origin.IsInternal() && c.actor != nil && c.actor.UserId == "system:pipelines" && c.actor.IsClusterOwner() && c.actor.Synthetic
+	}
+	asOwner := func(c recordedCall, stamped bool) bool {
+		return c.origin.IsInternal() == stamped && c.actor != nil && c.actor.UserId == owner && !c.actor.Synthetic
+	}
+
+	if c := one("ChannelsForOwner", func() error { _, err := store.ChannelsForOwner(caller); return err }); c.origin.IsInternal() ||
+		c.actor == nil || c.actor.UserId != otherID {
+		t.Errorf("a person's own channels are read under the caller, unstamped: %+v origin %v", c.actor, c.origin)
+	}
+	if c := one("ChannelForOwnerByName", func() error { _, err := store.ChannelForOwnerByName(caller, owner, "releases"); return err }); !asOwner(c, false) {
+		t.Errorf("a channel by name is read under its OWNER's borrowed authority, not the caller's, and unstamped: %+v origin %v", c.actor, c.origin)
+	}
+	if c := one("LibraryFileNames", func() error { _, err := store.LibraryFileNames(caller, owner, []string{"f1"}); return err }); !asOwner(c, false) {
+		t.Errorf("a Library file is read under its owner's borrowed authority, unstamped: %+v origin %v", c.actor, c.origin)
+	}
+	if c := one("PreviousRuns", func() error { _, err := store.PreviousRuns(caller, "p1", pipelines.EventPush); return err }); !asSystem(c) {
+		t.Errorf("the previous runs are a server-only read, as the system actor: %+v origin %v", c.actor, c.origin)
+	}
+	// A delivery's state is moved by the outbound worker on whichever replica
+	// claimed the row, so the status read is FRESH by itself: no caller has to
+	// remember, and one that did not ask still gets the database's answer.
+	if c := one("OutboundStatuses", func() error { _, err := store.OutboundStatuses(caller, []string{"pn1"}); return err }); !asSystem(c) || !c.fresh {
+		t.Errorf("a delivery's status is a server-only read, as the system actor, and always fresh: %+v origin %v fresh %v", c.actor, c.origin, c.fresh)
+	}
+	// The other reads a driver decides on are fresh when the CALLER marks them,
+	// and the store hands the mark on rather than dropping it -- and adds none.
+	for name, read := range map[string]func(context.Context) error{
+		"ChannelForOwnerByName": func(ctx context.Context) error {
+			_, err := store.ChannelForOwnerByName(ctx, owner, "releases")
+			return err
+		},
+		"PreviousRuns": func(ctx context.Context) error {
+			_, err := store.PreviousRuns(ctx, "p1", pipelines.EventPush)
+			return err
+		},
+	} {
+		if c := one(name, func() error { return read(caller) }); c.fresh {
+			t.Errorf("%s is fresh only when its caller says so: the store marked a plain call", name)
+		}
+		if c := one(name+" (fresh)", func() error { return read(memql.ContextWithFreshRead(caller)) }); !c.fresh {
+			t.Errorf("%s dropped its caller's fresh mark", name)
+		}
+	}
+	for _, n := range []NotificationRequest{
+		{RequestID: "pn1", Medium: "webhook", TargetSecret: "DISCORD_RELEASES", Body: "{}"},
+		{RequestID: "pn2", Medium: "email", Target: "a@example.test", Body: "text"},
+	} {
+		if c := one("StageNotification "+n.RequestID, func() error { return store.StageNotification(caller, n) }); !asSystem(c) {
+			t.Errorf("staging is a write as the system actor with internal origin, because the row has no owner to borrow: %+v origin %v", c.actor, c.origin)
+		}
+	}
+	if c := one("CreateChannel", func() error {
+		return store.CreateChannel(caller, Channel{ID: "c1", OwnerUserID: owner, Name: "releases", Kind: "discord", SecretRef: "DISCORD_RELEASES"})
+	}); !asOwner(c, true) {
+		t.Errorf("a channel is written as its owner, stamped: %+v origin %v", c.actor, c.origin)
+	}
+	if c := one("UpdateChannel", func() error {
+		return store.UpdateChannel(caller, owner, "c1", ChannelPatch{Status: ptr("archived")})
+	}); !asOwner(c, true) {
+		t.Errorf("a channel is changed as its owner, stamped: %+v origin %v", c.actor, c.origin)
+	}
+
+	before := len(engine.recorded())
+	for _, c := range refusedChannelAndOutboundCalls(store) {
+		if err := c.run(); err == nil {
+			t.Errorf("%s was not refused", c.name)
+		}
+	}
+	if n := len(engine.recorded()) - before; n != 0 {
+		t.Errorf("a refused call reached the engine: %d calls", n)
+	}
+	// A name nobody typed asks nothing: there is no channel to find.
+	if none, err := store.ChannelForOwnerByName(caller, owner, "  "); err != nil || none != nil || len(engine.recorded()) != before {
+		t.Errorf("no name is no read: %v %v", none, err)
+	}
+	if auth.OriginFromContext(caller).IsInternal() {
+		t.Errorf("the stamp never escapes its call: the caller's context came back stamped")
+	}
+}
+
+// TestTheFakeStoreRefusesWhatTheDSLStoreRefuses keeps the fake the notify
+// stage's tests run over exactly as strict as production about who a call is
+// for and what a notification says.
+func TestTheFakeStoreRefusesWhatTheDSLStoreRefuses(t *testing.T) {
+	for name, store := range map[string]Store{"dsl": NewDSLStore(newRecordingEngine()), "fake": newMemStore()} {
+		for _, c := range refusedChannelAndOutboundCalls(store) {
+			if err := c.run(); err == nil {
+				t.Errorf("the %s store did not refuse %s", name, c.name)
+			}
+		}
+		if none, err := store.ChannelForOwnerByName(context.Background(), "v1:identity:user:"+ownerID, " "); err != nil || none != nil {
+			t.Errorf("the %s store: no name is no channel, and no error: %v %v", name, none, err)
+		}
+	}
+}
+
+// failingEngine answers every call with an error: an engine that cannot reach
+// its storage.
+type failingEngine struct{ err error }
+
+func (e failingEngine) Execute(context.Context, string) (*memql.ExecuteResult, error) {
+	return nil, e.err
+}
+
+// A read that fails is an error. The notify stage concludes from a delivery's
+// row alone, and a failure it could mistake for a row that is not there -- or,
+// worse, for one that is `sent` -- is a notification reported delivered that
+// never was.
+func TestAFailedReadIsAnErrorNeverAnAbsentRow(t *testing.T) {
+	down := errors.New("storage is down")
+	store := NewDSLStore(failingEngine{err: down})
+	ctx := context.Background()
+
+	if got, err := store.OutboundStatuses(ctx, []string{"pn1", "pn2"}); !errors.Is(err, down) || got != nil {
+		t.Errorf("OutboundStatuses: %+v %v", got, err)
+	}
+	if got, err := store.ChannelForOwnerByName(ctx, "v1:identity:user:u1", "releases"); !errors.Is(err, down) || got != nil {
+		t.Errorf("ChannelForOwnerByName: %+v %v", got, err)
+	}
+	if got, err := store.LibraryFileNames(ctx, "v1:identity:user:u1", []string{"f1"}); !errors.Is(err, down) || got != nil {
+		t.Errorf("LibraryFileNames: %+v %v", got, err)
+	}
+	if got, err := store.PreviousRuns(ctx, "p1", pipelines.EventPush); !errors.Is(err, down) || got != nil {
+		t.Errorf("PreviousRuns: %+v %v", got, err)
+	}
+	if err := store.StageNotification(ctx, NotificationRequest{RequestID: "pn1", Medium: "email", Target: "a@example.test", Body: "x"}); !errors.Is(err, down) {
+		t.Errorf("StageNotification: %v", err)
+	}
+}
+
+// A blank key asks nothing. A pipeline or an event that is not there is not a
+// question, so PreviousRuns answers nothing without asking the engine; and a
+// blank id in a status poll is an empty entry in its place -- the notify stage
+// reads the answer by position -- with no read made for it, and the real ids
+// beside it read as usual.
+func TestABlankKeyAsksNothing(t *testing.T) {
+	ctx := context.Background()
+	engine := newRecordingEngine()
+	for name, store := range map[string]Store{"dsl": NewDSLStore(engine), "fake": newMemStore()} {
+		before := len(engine.recorded())
+		for _, c := range []struct {
+			pipeline string
+			event    pipelines.Event
+		}{{"", pipelines.EventPush}, {"  ", pipelines.EventPush}, {"p1", ""}, {"p1", "  "}, {"", ""}} {
+			if got, err := store.PreviousRuns(ctx, c.pipeline, c.event); err != nil || got != nil {
+				t.Errorf("the %s store: PreviousRuns(%q, %q) = %+v, %v; want nothing", name, c.pipeline, c.event, got, err)
+			}
+		}
+		if n := len(engine.recorded()) - before; n != 0 {
+			t.Errorf("the %s store: a blank pipeline or event reached the engine: %d calls", name, n)
+		}
+
+		got, err := store.OutboundStatuses(ctx, []string{"", "  ", "pn1"})
+		if err != nil || len(got) != 3 {
+			t.Fatalf("the %s store: OutboundStatuses: %+v %v", name, got, err)
+		}
+		if got[0] != (OutboundStatus{}) || got[1] != (OutboundStatus{}) || got[2].ID != "pn1" {
+			t.Errorf("the %s store: a blank id is an empty entry in its place, the real id beside it: %+v", name, got)
+		}
+		if name == "dsl" {
+			calls := engine.recorded()[before:]
+			if len(calls) != 1 || calls[0].query != `query outboundRequestById(requestId: "pn1")` {
+				t.Errorf("a blank id asks nothing, and the real one is read once: %v", calls)
+			}
+		}
+	}
+}
+
+// The fake the notify stage's tests run over keeps the rules the DSL keeps:
+// a channel is created `active` whatever the value says, its by-name read is the
+// OWNER's whoever the context carries (and the newest of two rows sharing a name
+// answers), an update names the fields it changes, and an outbound row is
+// pending when staged, moved only by the worker, and -- @createOnly -- still
+// where the worker left it after a second stage at its id.
+func TestTheFakeStoreKeepsTheChannelAndOutboxRules(t *testing.T) {
+	s := newMemStore()
+	ctx := context.Background()
+	const owner = "v1:identity:user:" + ownerID
+	ok := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ok(s.CreateChannel(ctx, Channel{ID: "c1", OwnerUserID: owner, Name: "releases", Kind: "discord", SecretRef: "DISCORD_RELEASES", Status: "archived"}))
+	ok(s.CreateChannel(ctx, Channel{ID: "c2", OwnerUserID: owner, Name: "ops", Kind: "email", Recipients: []string{"a@example.test"}}))
+	ok(s.CreateChannel(ctx, Channel{ID: "c3", OwnerUserID: owner, Name: "releases", Kind: "discord", SecretRef: "DISCORD_OTHER"}))
+	if c, _ := s.channel("c1"); c.Status != "active" {
+		t.Errorf("a channel is created active, whatever the value says: %q", c.Status)
+	}
+	if got, err := s.ChannelForOwnerByName(ctx, owner, "releases"); err != nil || got == nil || got.ID != "c3" {
+		t.Errorf("the owner's channel is read with nobody on the context, the newest of two sharing a name: %+v %v", got, err)
+	}
+	if got, _ := s.ChannelForOwnerByName(ctx, "user-bob", "releases"); got != nil {
+		t.Errorf("another owner's borrowed read finds nobody else's channel: %+v", got)
+	}
+	if mine, _ := s.ChannelsForOwner(personCtx(ownerID)); len(mine) != 3 || mine[0].Name != "ops" {
+		t.Errorf("the caller's own channels, by name: %+v", mine)
+	}
+	if theirs, _ := s.ChannelsForOwner(personCtx(otherID)); len(theirs) != 0 {
+		t.Errorf("a stranger lists none: %+v", theirs)
+	}
+	ok(s.UpdateChannel(ctx, owner, "c2", ChannelPatch{Status: ptr("archived")}))
+	ok(s.UpdateChannel(ctx, owner, "c2", ChannelPatch{Recipients: ptr([]string{})}))
+	if c, _ := s.channel("c2"); c.Status != "archived" || c.Name != "ops" || c.Kind != "email" || len(c.Recipients) != 0 {
+		t.Errorf("an update changes what it names and an empty list clears: %+v", c)
+	}
+	// Production does not check the owner of an update (see the port), so the
+	// fake must not either: a test that passed on the fake's refusal would hide a
+	// caller that never made the owner-scoped read.
+	ok(s.UpdateChannel(ctx, "user-bob", "c2", ChannelPatch{Status: ptr("active")}))
+	if c, _ := s.channel("c2"); c.Status != "active" {
+		t.Errorf("the owner an update names is attribution, as in production: %+v", c)
+	}
+	if err := s.UpdateChannel(ctx, owner, "c-nothing", ChannelPatch{Status: ptr("active")}); err == nil {
+		t.Errorf("a channel that is not there is an error, as in production")
+	}
+
+	n := NotificationRequest{RequestID: "v1:platform:outboundRequest:pn1", Medium: "webhook", TargetSecret: "DISCORD_RELEASES", Body: "first"}
+	ok(s.StageNotification(ctx, n))
+	if got, _ := s.OutboundStatuses(ctx, []string{"pn1", "pn9"}); len(got) != 2 || got[0].ID != "pn1" || got[0].Status != "pending" || got[1].Status != "" {
+		t.Errorf("a staged row is pending and an unstaged one has no status: %+v", got)
+	}
+	s.setOutbound("pn1", "sent", 1, "")
+	n.Body = "second"
+	ok(s.StageNotification(ctx, n))
+	rows := s.outboundRows()
+	if len(rows) != 1 || rows[0].State.Status != "sent" || rows[0].Request.Body != "second" || !rows[0].State.SentAt.Equal(testNow) {
+		t.Errorf("@createOnly: a second stage refreshes the body and leaves the delivery state: %+v", rows)
+	}
+	if staged := s.stagedNotifications(); len(staged) != 2 {
+		t.Errorf("both stage calls are on record: %+v", staged)
+	}
+
+	s.addFile(owner, "v1:library:file:f1", "tests.log")
+	if names, _ := s.LibraryFileNames(ctx, owner, []string{"f1", "f2"}); len(names) != 1 || names["f1"] != "tests.log" {
+		t.Errorf("an owner's file is named, under either spelling of its id: %v", names)
+	}
+	if names, _ := s.LibraryFileNames(ctx, "user-bob", []string{"f1"}); len(names) != 0 {
+		t.Errorf("another owner's file is not there to read: %v", names)
+	}
+}
+
+// The calls themselves, as the engine receives them: the construct, the
+// arguments in RenderCall's sorted order, each bare id bare, an empty optional
+// field left out of a create (the row is new, so absent is the truth) and an
+// empty list SENT by an update (it is how a read-merge write clears one).
+func TestTheChannelAndOutboundCallsSayWhatTheRowsAre(t *testing.T) {
+	engine := newRecordingEngine()
+	store := NewDSLStore(engine)
+	ctx := context.Background()
+	const owner = "v1:identity:user:u1"
+	ok := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ok(store.CreateChannel(ctx, Channel{
+		ID: "v1:pipelines:channel:c1", OwnerUserID: owner, AccountID: "v1:accounts:account:a1", Name: "ops", Kind: "email",
+		Recipients: []string{"a@example.test", "b@example.test"},
+	}))
+	ok(store.CreateChannel(ctx, Channel{ID: "c2", OwnerUserID: owner, Name: "releases", Kind: "discord", SecretRef: "DISCORD_RELEASES"}))
+	ok(store.UpdateChannel(ctx, owner, "v1:pipelines:channel:c1", ChannelPatch{Status: ptr("archived"), Recipients: ptr([]string{})}))
+	ok(store.UpdateChannel(ctx, owner, "c2", ChannelPatch{Name: ptr("deploys"), SecretRef: ptr("DISCORD_DEPLOYS")}))
+	_, err := store.ChannelsForOwner(ctx)
+	ok(err)
+	_, err = store.ChannelForOwnerByName(ctx, owner, " releases ")
+	ok(err)
+	_, err = store.PreviousRuns(ctx, "v1:pipelines:pipeline:p1", pipelines.EventRelease)
+	ok(err)
+	ok(store.StageNotification(ctx, NotificationRequest{
+		RequestID: "v1:platform:outboundRequest:pn1", Medium: "webhook", TargetSecret: "DISCORD_RELEASES", Body: `{"username":"MemQL"}`,
+		DedupeKey: "pn1", RequestedBy: "pipelines:notify:r1",
+	}))
+	ok(store.StageNotification(ctx, NotificationRequest{
+		RequestID: "pn2", Medium: "email", Target: "a@example.test", Subject: "memql - Release v1 passed", Body: "text",
+	}))
+	_, err = store.OutboundStatuses(ctx, []string{"v1:platform:outboundRequest:pn1", "pn2"})
+	ok(err)
+	_, err = store.LibraryFileNames(ctx, owner, []string{"v1:library:file:f1", "f1", " f2 "})
+	ok(err)
+
+	want := []string{
+		`mutation createPipelineChannel(accountId: "a1", channelId: "c1", kind: "email", name: "ops", recipients: ["a@example.test","b@example.test"])`,
+		`mutation createPipelineChannel(channelId: "c2", kind: "discord", name: "releases", secretRef: "DISCORD_RELEASES")`,
+		`mutation updatePipelineChannel(channelId: "c1", recipients: [], status: "archived")`,
+		`mutation updatePipelineChannel(channelId: "c2", name: "deploys", secretRef: "DISCORD_DEPLOYS")`,
+		`query pipelineChannelsForOwner()`,
+		`query pipelineChannelForOwnerByName(name: "releases")`,
+		`query pipelineRunsForPipelineEvent(event: "release", pipelineId: "p1")`,
+		`mutation stageOutboundRequestToSecret(body: "{\"username\":\"MemQL\"}", dedupeKey: "pn1", requestId: "pn1", requestedBy: "pipelines:notify:r1", targetSecret: "DISCORD_RELEASES")`,
+		`mutation stageServerOutboundRequest(body: "text", medium: "email", requestId: "pn2", subject: "memql - Release v1 passed", target: "a@example.test")`,
+		`query outboundRequestById(requestId: "pn1")`,
+		`query outboundRequestById(requestId: "pn2")`,
+		// One read per FILE, however its id is spelled.
+		`query libraryFileById(fileId: "f1")`,
+		`query libraryFileById(fileId: "f2")`,
+	}
+	calls := engine.recorded()
+	if len(calls) != len(want) {
+		t.Fatalf("calls = %d, want %d:\n%v", len(calls), len(want), calls)
+	}
+	for i, w := range want {
+		if calls[i].query != w {
+			t.Errorf("call %d:\n got %s\nwant %s", i, calls[i].query, w)
+		}
+	}
+}
+
+// What comes back is read the way every other row is: ids bare, the owner as
+// stored (it is what authority is borrowed under), the recipients trimmed, a
+// delivery's status exactly as the worker left it, and a row that is not there
+// an ANSWER -- an outbound status with no status -- rather than an error.
+func TestChannelAndOutboundRowsAreReadBack(t *testing.T) {
+	engine := newRecordingEngine()
+	engine.answers[qPipelineChannelForOwnerByName] = []any{map[string]any{
+		"id": "v1:pipelines:channel:c1", "ownerUserId": "v1:identity:user:u1", "accountId": "v1:accounts:account:a1",
+		"name": "ops", "kind": "email", "secretRef": "", "status": "active",
+		"recipients": []any{" a@example.test ", "b@example.test", ""},
+	}}
+	engine.answers[qPipelineChannelsForOwner] = []any{
+		map[string]any{"id": "v1:pipelines:channel:c2", "ownerUserId": "v1:identity:user:u1", "name": "releases", "kind": "discord", "secretRef": "DISCORD_RELEASES", "status": "archived"},
+		map[string]any{"payload": map[string]any{"ownerUserId": "v1:identity:user:u1", "name": "ops", "kind": "email", "status": "active"}, "id": "v1:pipelines:channel:c1"},
+	}
+	engine.answers[qPipelineRunsForPipelineEvent] = []any{
+		map[string]any{"id": "v1:pipelines:run:r2", "pipelineId": "v1:pipelines:pipeline:p1", "event": "push", "status": "completed", "conclusion": "failure", "queuedAt": "2026-10-03T12:05:00Z"},
+		map[string]any{"id": "v1:pipelines:run:r1", "pipelineId": "v1:pipelines:pipeline:p1", "event": "push", "status": "completed", "conclusion": "success", "queuedAt": "2026-10-03T12:00:00Z"},
+	}
+	engine.byCall[`query outboundRequestById(requestId: "pn1")`] = []any{map[string]any{
+		"id": "v1:platform:outboundRequest:pn1", "status": "sent", "attempts": float64(1), "sentAt": "2026-10-03T12:00:05Z",
+	}}
+	engine.byCall[`query outboundRequestById(requestId: "pn2")`] = []any{map[string]any{
+		"id": "v1:platform:outboundRequest:pn2", "status": "retrying", "attempts": float64(3), "lastError": "webhook: status 502",
+	}}
+	engine.byCall[`query libraryFileById(fileId: "f1")`] = []any{map[string]any{"id": "v1:library:file:f1", "name": "tests.log"}}
+	engine.byCall[`query libraryFileById(fileId: "f2")`] = []any{map[string]any{"id": "v1:library:file:f2", "name": "tests.xml"}}
+	store := NewDSLStore(engine)
+	ctx := context.Background()
+
+	ch, err := store.ChannelForOwnerByName(ctx, "v1:identity:user:u1", "ops")
+	if err != nil || ch == nil {
+		t.Fatalf("ChannelForOwnerByName: %+v %v", ch, err)
+	}
+	if ch.ID != "c1" || ch.AccountID != "a1" || ch.OwnerUserID != "v1:identity:user:u1" || ch.Name != "ops" || ch.Kind != "email" ||
+		ch.Status != "active" || ch.SecretRef != "" || !slices.Equal(ch.Recipients, []string{"a@example.test", "b@example.test"}) {
+		t.Errorf("channel = %+v", ch)
+	}
+	list, err := store.ChannelsForOwner(ctx)
+	if err != nil || len(list) != 2 || list[0].ID != "c2" || list[0].SecretRef != "DISCORD_RELEASES" || list[0].Status != "archived" ||
+		list[1].ID != "c1" || list[1].Name != "ops" || list[1].OwnerUserID != "v1:identity:user:u1" {
+		t.Errorf("channels = %+v %v", list, err)
+	}
+	engine.answers[qPipelineChannelForOwnerByName] = []any{}
+	if none, err := store.ChannelForOwnerByName(ctx, "v1:identity:user:u1", "nobody-has-this"); err != nil || none != nil {
+		t.Errorf("a name nothing carries reads nothing: %+v %v", none, err)
+	}
+
+	runs, err := store.PreviousRuns(ctx, "p1", pipelines.EventPush)
+	if err != nil || len(runs) != 2 || runs[0].ID != "r2" || runs[0].Conclusion != ConclusionFailure || runs[0].PipelineID != "p1" ||
+		runs[1].ID != "r1" || runs[1].Event != pipelines.EventPush || runs[1].QueuedAt.IsZero() {
+		t.Errorf("previous runs, as the server hands them (newest first): %+v %v", runs, err)
+	}
+
+	got, err := store.OutboundStatuses(ctx, []string{"v1:platform:outboundRequest:pn1", "pn2", "pn3"})
+	if err != nil || len(got) != 3 {
+		t.Fatalf("OutboundStatuses: %+v %v", got, err)
+	}
+	if got[0].ID != "pn1" || got[0].Status != "sent" || got[0].Attempts != 1 || !got[0].SentAt.Equal(time.Date(2026, 10, 3, 12, 0, 5, 0, time.UTC)) || got[0].LastError != "" {
+		t.Errorf("a delivered row: %+v", got[0])
+	}
+	if got[1].ID != "pn2" || got[1].Status != "retrying" || got[1].Attempts != 3 || got[1].LastError != "webhook: status 502" || !got[1].SentAt.IsZero() {
+		t.Errorf("a row still being retried keeps what the worker left on it: %+v", got[1])
+	}
+	if got[2].ID != "pn3" || got[2].Status != "" || got[2].Attempts != 0 {
+		t.Errorf("a row nothing staged is an entry with no status, one entry per id asked, in order: %+v", got[2])
+	}
+
+	names, err := store.LibraryFileNames(ctx, "v1:identity:user:u1", []string{"v1:library:file:f1", " f2 ", "f1", " ", "f3"})
+	if err != nil {
+		t.Fatalf("LibraryFileNames: %v", err)
+	}
+	if len(names) != 3 || names["v1:library:file:f1"] != "tests.log" || names["f1"] != "tests.log" || names["f2"] != "tests.xml" {
+		t.Errorf("names are keyed by each id as the caller spelled it, trimmed, and a file the owner cannot read is simply absent: %v", names)
+	}
+	if _, padded := names[" f2 "]; padded {
+		t.Errorf("a key is trimmed: %v", names)
+	}
+	// One read per call above: two by name, the list, the previous runs, three
+	// statuses, and the three FILES (f1 once, however it was spelled; the blank
+	// asks nothing).
+	if n := len(engine.recorded()); n != 10 {
+		t.Errorf("calls = %d, want 10", n)
 	}
 }
 

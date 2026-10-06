@@ -150,15 +150,33 @@ query missingCapability missingCapabilityByKindAndName {
 
 /// Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker
 /// drains 'pending' and 'retrying' through this; operators and products use it to audit delivery
-/// state. Bounded first page: the worker drains batches per poll, so a burst larger than one page
-/// simply takes extra polls.
+/// state. The worker advances one bounded page per status per poll and starts again at exhaustion,
+/// so rows awaiting another medium or a future retry do not hide later ready work.
+@actor
 query outboundRequest outboundRequestsByStatus {
   args {
     status  string!
   }
-  filter  row => row.status == args.status
+  filter  row => actor.isClusterOwner == true && row.status == args.status
   sort     "row.createdAt", "asc"
   paginate 50
+  shape   outboundRequestFull
+}
+
+// ---- queries/v1/platform/outboundRequestById.memql ----
+
+/// One outbound request by its id (memql#5480): how the pipelines notify stage learns whether the
+/// delivery it staged was sent. This server-only receipt read and the concept's operator tier
+/// protect delivery bodies and targets (memql#5804). Scoping by actor.userId cannot serve the
+/// cross-owner drain: transport rows are deployment records, not personal inbox entries. The
+/// worker reads as the deployment actor.
+@serverOnly
+@actor
+query outboundRequest outboundRequestById {
+  args {
+    requestId  string!
+  }
+  filter  row => actor.isClusterOwner == true && row.id == args.requestId
   shape   outboundRequestFull
 }
 
@@ -167,11 +185,12 @@ query outboundRequest outboundRequestsByStatus {
 /// Inbound requests in a given handling status, oldest first (memql#2957). Products drain
 /// 'received' through this when they prefer a sweep to the node.created automation; operators use
 /// it to audit what arrived. Bounded first page, same as the outbound counterpart.
+@actor
 query inboundRequest inboundRequestsByStatus {
   args {
     status  string!
   }
-  filter  row => row.status == args.status
+  filter  row => actor.isClusterOwner == true && row.status == args.status
   sort     "row.createdAt", "asc"
   paginate 50
   shape   inboundRequestFull
@@ -184,11 +203,12 @@ query inboundRequest inboundRequestsByStatus {
 /// bit (memql#3461 -- the campaign feedback ingestion reads all three before it will act on a
 /// payload). A by-id read returns at most one row, so it is not a list and declares no pagination.
 @unbounded("one inbound request by row id -- bounded to a single row")
+@actor
 query inboundRequest inboundRequestById {
   args {
     requestId  string!
   }
-  filter  row => row.id == args.requestId
+  filter  row => actor.isClusterOwner == true && row.id == args.requestId
   shape   inboundRequestFull
 }
 
@@ -197,12 +217,13 @@ query inboundRequest inboundRequestById {
 /// Idempotency lookup the inbound receiver runs before staging (memql#2957): at-least-once
 /// redelivery of the same event must collapse onto the existing row rather than stage a duplicate.
 @unbounded("inbound request by the sender's dedupe key -- bounded to a single row")
+@actor
 query inboundRequest inboundRequestByDedupeKey {
   args {
     source     string!
     dedupeKey  string!
   }
-  filter  row => row.source == args.source && row.dedupeKey == args.dedupeKey
+  filter  row => actor.isClusterOwner == true && row.source == args.source && row.dedupeKey == args.dedupeKey
   shape   inboundRequestFull
 }
 

@@ -231,6 +231,20 @@ func TestAResumeRefusedOnItsArgsFailsTheRun(t *testing.T) {
 	}
 }
 
+func TestAnUncertainEffectHasItsOwnRecoveryFailure(t *testing.T) {
+	err := fmt.Errorf("step send: %w", automations.ErrNonRetryableStep)
+	if code := workResumeRefusal(nil, err); code != workResumeEffectUncertain {
+		t.Fatalf("uncertain effect reported as %q; it must not be mistaken for an abandoned node", code)
+	}
+	if code := workResumeRefusal(&automations.AutomationExecution{}, err); code != "" {
+		t.Fatalf("overwrote an execution's own outcome with %q", code)
+	}
+	missing := fmt.Errorf("%w: %w", automations.ErrRunJournalInvalid, automations.ErrResumeResultMissing)
+	if code := workResumeRefusal(nil, missing); code != workResumeResultMissing {
+		t.Fatalf("missing result reported as %q", code)
+	}
+}
+
 func TestARerunWithAnUnknownReasonIsRefusedAtDispatch(t *testing.T) {
 	auto := rerunDispatchTemplate(t)
 	j := finishedDispatchJournal(&automations.RerunSpec{RequestId: "req-1", Reason: "rewind", StepKey: "b"})

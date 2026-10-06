@@ -1228,10 +1228,13 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// emptied) still continues from the last row the database returned, so a
 	// caller paging through a refined query never skips the rows that follow.
 	if limit > 0 && len(page) >= limit {
+		// A full bounded page cannot prove exhaustion, even when its sort
+		// cannot produce a cursor. Callers requiring a complete traversal
+		// must refuse that boundary instead of accepting a truncated set.
+		result.SetHasMore(true)
 		if eligible, _ := keysetEligibleSort(sorter); eligible && (keysetActive || plan.After != nil || len(plan.Sort) > 0 || plan.Limit != nil) {
 			if next, encErr := encodeCursor(page[len(page)-1], sorter.signatureValue()); encErr == nil {
 				result.SetCursor(next)
-				result.SetHasMore(true)
 			}
 		}
 	}
@@ -2151,6 +2154,12 @@ func (e *MemQLEngine) effectiveWindow(limitPtr *int, defaultLimit int) int {
 
 	if limit > e.config.MaxWindow {
 		limit = e.config.MaxWindow
+	}
+	// The evaluator already clamps to MaxResults. Cursor emission and cache
+	// identity must use that SAME window; otherwise a clamped full page looks
+	// short and silently claims exhaustion (memql#5836).
+	if e.config.MaxResults > 0 && limit > e.config.MaxResults {
+		limit = e.config.MaxResults
 	}
 
 	if limit < 0 {

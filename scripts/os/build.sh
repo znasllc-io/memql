@@ -36,7 +36,8 @@
 #   scripts/os/build.sh install     # deps + install the OS shell's own deps
 #   scripts/os/build.sh typecheck   # install + tsc -b
 #   scripts/os/build.sh test        # install + vitest run
-#   scripts/os/build.sh build       # install + tsc -b + vite build -> dist/
+#   scripts/os/build.sh build       # install + tsc -b + vite build -> dist/,
+#                                   # plus dist/memql-bundle.json (its sha256s)
 #   scripts/os/build.sh clean       # remove dist + the build caches
 #
 # Idempotent: every command is safe to re-run.
@@ -116,10 +117,19 @@ function run_test() {
     ( cd "${OS_DIR}" && npm test )
 }
 
+# run_build builds the bundle, then writes memql-bundle.json beside it: the
+# sha256 of every file in dist/ (bundle-manifest.mjs). The edge image carries
+# it at /app/os/memql-bundle.json, which is what verify-rollout (epic
+# memql#5480) compares with the bytes the public front door serves. It is
+# written HERE, as the last step of the build, so the image stage, `make
+# os-build` and the OS lane all produce it the one way; a build that cannot
+# write it fails rather than shipping a bundle nothing can be checked against.
 function run_build() {
     run_install
     info "Building the OS bundle..."
     ( cd "${OS_DIR}" && npm run build )
+    info "Writing the bundle manifest (memql-bundle.json)..."
+    node "${SCRIPT_DIR}/bundle-manifest.mjs" "${OS_DIR}/dist"
     info "Bundle written to clients/os/dist."
 }
 

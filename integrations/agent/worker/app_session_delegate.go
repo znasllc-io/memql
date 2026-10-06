@@ -185,7 +185,9 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 
 	var childStep *workjournal.Step
 	if child != nil {
-		childStep = child.Step(ctx, appSessionStepKey)
+		// This child is an observability record of a parent-owned execution;
+		// its journal is best effort. The parent's step remains authoritative.
+		childStep, _ = child.Step(ctx, appSessionStepKey)
 	}
 
 	res, runErr := d.exec.runAdmitted(ctx, planner.ExecutorRequest{

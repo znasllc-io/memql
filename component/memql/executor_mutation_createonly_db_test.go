@@ -31,6 +31,8 @@ import (
 
 func TestCreateOnly_ReStageDoesNotResetWorkerOwnedStatus(t *testing.T) {
 	eng, db, ctx := sharedReadMergeEngine(t)
+	// This is a product automation, so staging uses its trusted server origin.
+	ctx = auth.ContextWithInternalOrigin(ctx)
 
 	const conceptName = "v1:platform:outboundRequest"
 	reqId := "co63-" + uniqueSuffix("restage")

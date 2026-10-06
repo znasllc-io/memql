@@ -38,7 +38,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: memql
 # NO RoleBinding, deliberately, and none should ever be added here. This
-# account's whole purpose is to be an IDENTITY Anthropic can verify -- the
+# account is an IDENTITY Anthropic can verify -- the
 # federation rule matches on the subject `system:serviceaccount:memql:memql-engine`
 # and nothing else. It needs no Kubernetes API privilege to serve that purpose,
 # and a grant attached to it would be inherited by every engine node at once.
