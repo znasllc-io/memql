@@ -1,6 +1,9 @@
 package pipelines
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const (
 	ExecutionContainer = "container"
@@ -60,6 +63,9 @@ func CheckExecutionNeeds(execution string, needs []string) error {
 // runs a container step in its image; it cannot reinterpret it as native work.
 func validateStepRuntime(spec *Spec, step StepSpec, scope string) *Refusal {
 	execution, platform := ExecutionOf(step.Execution), PlatformOf(spec, step)
+	if step.Image != "" && (execution == ExecutionNative || strings.ContainsFunc(step.Image, isSpaceOrControl)) {
+		return Refuse(CodeStepInvalid, scope, "A step image must be a container image reference without whitespace; native steps cannot name an image.")
+	}
 	placement := PlacementOf(step)
 	if placement != PlacementCluster && placement != PlacementFleet {
 		return Refuse(CodeStepInvalid, scope, "placement must be cluster or fleet.")

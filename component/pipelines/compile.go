@@ -1,6 +1,7 @@
 package pipelines
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"path"
@@ -186,7 +187,7 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 		Execution:      ExecutionOf(declared.Execution),
 		Placement:      PlacementOf(declared),
 		Platform:       PlatformOf(c.spec, declared),
-		Image:          c.spec.Image,
+		Image:          cmp.Or(declared.Image, c.spec.Image),
 		Services:       c.servicesFor(declared.Services),
 		Caches:         compiledCopy(cachesFor(c.spec, declared)),
 		Needs:          needs,
