@@ -485,11 +485,12 @@ pipeline:
             python3 scripts/ci/codeql-scan.py --language=go --ram=3072 --output-dir=.memql-security/codeql-go
         - name: codeql-javascript
           placement: cluster
+          memoryMiB: 6144
           timeout: 45m
           artifacts: [.memql-security/codeql-javascript]
           run: |
             set -eu
-            python3 scripts/ci/codeql-scan.py --language=javascript-typescript --ram=3072 --output-dir=.memql-security/codeql-javascript
+            python3 scripts/ci/codeql-scan.py --language=javascript-typescript --ram=5120 --threads=1 --output-dir=.memql-security/codeql-javascript
         - name: codeql-python
           placement: cluster
           timeout: 45m
