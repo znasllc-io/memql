@@ -1,0 +1,77 @@
+{
+  "automation": "cluster/automations.memql publishEngineRelease",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "bump": "major",
+            "expectedRepository": "s-expectedRepository",
+            "expectedSha": "s-expectedSha",
+            "expectedVersion": "s-expectedVersion",
+            "notes": "s-notes"
+          },
+          "topic": "automation.invocation.publishEngineRelease"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "major",
+              "dryRun": false,
+              "expectedRepository": "s-expectedRepository",
+              "expectedSha": "s-expectedSha",
+              "expectedVersion": "s-expectedVersion",
+              "notes": "s-notes"
+            },
+            "kind": "builtin",
+            "name": "releaseCut"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "bump": "major",
+            "expectedRepository": "s-expectedRepository",
+            "expectedSha": "s-expectedSha",
+            "expectedVersion": "s-expectedVersion",
+            "notes": "s-notes"
+          },
+          "topic": "automation.invocation.publishEngineRelease"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "major",
+              "dryRun": false,
+              "expectedRepository": "s-expectedRepository",
+              "expectedSha": "s-expectedSha",
+              "expectedVersion": "s-expectedVersion",
+              "notes": "s-notes"
+            },
+            "kind": "builtin",
+            "name": "releaseCut"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}
