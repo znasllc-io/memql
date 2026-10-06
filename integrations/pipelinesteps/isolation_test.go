@@ -76,10 +76,12 @@ func isoPod(index int, ip string, listener, main ContainerStatus) *Pod {
 		ready = "True"
 	}
 	return &Pod{
+		Spec: PodSpec{SchedulingGates: []PodSchedulingGate{{Name: probeRoleGate}}},
 		Metadata: ObjectMeta{
 			Name:              fmt.Sprintf("%s-%d-x7kk6", isoName(), index),
 			UID:               "uid-pod-" + i,
-			Labels:            map[string]string{"job-name": isoName(), "batch.kubernetes.io/job-completion-index": i},
+			ResourceVersion:   "1",
+			Labels:            map[string]string{"job-name": isoName(), completionIndexKey: i, LabelManagedBy: ManagedBy, LabelProbe: ProbeIsolation},
 			Annotations:       map[string]string{"batch.kubernetes.io/job-completion-index": i},
 			CreationTimestamp: rtT0,
 		},
@@ -1167,9 +1169,21 @@ func TestAdoptionNeverWaitsOnTheProof(t *testing.T) {
 // What the proof leaves behind: nothing
 // ---------------------------------------------------------------------------
 
+func TestIsolationProbeRefusesToReuseUnconfirmedCleanup(t *testing.T) {
+	h := newIsoHarness(t, isoScript(probeExitIsolated, isoSaid[probeExitIsolated]))
+	h.c.with(func(c *rtCluster) { c.podsAnswer = &rtUnavailable })
+	verdict, decided := h.r.probeIsolation(context.Background())
+	if !decided || !verdict.Inconclusive || verdict.Isolated || !strings.Contains(verdict.Detail, "cleanup remains unconfirmed") {
+		t.Fatalf("unreadable cleanup was trusted: %+v, decided=%v", verdict, decided)
+	}
+	if len(h.c.requestsFor(http.MethodPost, kubeJobs)) != 0 {
+		t.Fatal("created another probe before confirming the previous pods were gone")
+	}
+}
+
 // TestIsolationProofDeletesItsProbeJobs: whatever the verdict, and when every
 // step waiting on it gave up, the proof deletes its Job and its Secret --
-// background propagation, which the fake insists on -- before it answers.
+// foreground propagation, which the fake insists on -- before it answers.
 func TestIsolationProofDeletesItsProbeJobs(t *testing.T) {
 	neverEnds := isoScript(probeExitIsolated, "")
 	neverEnds.states = neverEnds.states[:3]
@@ -1300,4 +1314,18 @@ func TestRunnerIsolationDefaults(t *testing.T) {
 	if v := NewRunner(cfg, nil, nil, nil, nil).Isolation(); v != (IsolationVerdict{}) {
 		t.Errorf("a new Runner's verdict = %+v, want none", v)
 	}
+}
+
+func TestIsolationCannotArmWithoutVerifiedPolicyRoles(t *testing.T) {
+	h := newIsoHarness(t, isoScript(probeExitIsolated, isoSaid[probeExitIsolated]))
+	h.r.probeUpWait = 300 * time.Millisecond
+	h.c.with(func(c *rtCluster) {
+		answer := kubeStatus(403, "Forbidden", "pod patch refused")
+		c.podPatchAnswer = &answer
+	})
+	isoWantRefused(t, h, h.run(t, isoStep(h, rtRun().StepKey)))
+	if createsOf(h.c, kubeSecrets, isoTarget()) != 0 {
+		t.Fatal("armed the probe without its network-policy roles")
+	}
+	isoLeftNothing(t, h)
 }

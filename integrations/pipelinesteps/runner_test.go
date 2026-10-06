@@ -307,6 +307,11 @@ type rtCluster struct {
 	holdJobDeletes map[string]chan struct{}
 	// podsAnswer, when set, answers every list of pods instead.
 	podsAnswer *kubeAnswer
+	// Probe role patches persist across scripted status transitions, by UID.
+	observedPods   map[string]Pod
+	probeRoles     map[string]ObjectMeta
+	podPatchAnswer *kubeAnswer
+	policyAnswer   *kubeAnswer
 	// loseSecretCreates makes that many Secret creates, and answers each
 	// 503, as a reply lost on its way back.
 	loseSecretCreates int
@@ -321,6 +326,7 @@ func newRTCluster(t *testing.T, clock *rtClock) *rtCluster {
 		t: t, clock: clock,
 		jobs: map[string]*rtJob{}, secrets: map[string]Secret{}, scripts: map[string]*rtScript{},
 		changed: make(chan struct{}), closing: make(chan struct{}),
+		observedPods: map[string]Pod{}, probeRoles: map[string]ObjectMeta{},
 	}
 	srv := httptest.NewServer(http.HandlerFunc(c.serve))
 	t.Cleanup(srv.Close)
@@ -378,6 +384,15 @@ func (c *rtCluster) serve(w http.ResponseWriter, r *http.Request) {
 
 	p, q := r.URL.Path, r.URL.Query()
 	switch {
+	case p == "/apis/networking.k8s.io/v1/namespaces/steps-ns/networkpolicies" && r.Method == http.MethodGet:
+		c.mu.Lock()
+		answer := c.policyAnswer
+		c.mu.Unlock()
+		if answer != nil {
+			rtAnswer(w, *answer)
+			return
+		}
+		rtJSON(w, 200, map[string]any{"items": []any{map[string]any{"metadata": map[string]any{"name": "memql-pipelines-isolate"}, "spec": map[string]any{"podSelector": map[string]any{}, "policyTypes": []string{"Egress"}, "egress": []any{map[string]any{"to": []any{map[string]any{"ipBlock": map[string]any{"cidr": "0.0.0.0/0", "except": isolationProtectedCIDRs}}}}}}}}})
 	case p == kubeJobs && r.Method == http.MethodPost:
 		c.createJob(w, body)
 	case p == kubeJobs && r.Method == http.MethodDelete:
@@ -412,6 +427,8 @@ func (c *rtCluster) serve(w http.ResponseWriter, r *http.Request) {
 		default:
 			c.unexpected(w, r)
 		}
+	case strings.HasPrefix(p, kubePods+"/") && r.Method == http.MethodPatch:
+		c.patchPod(w, strings.TrimPrefix(p, kubePods+"/"), body)
 	case p == kubePods && r.Method == http.MethodGet:
 		c.listPods(w, q.Get("labelSelector"))
 	case strings.HasPrefix(p, kubePods+"/") && strings.HasSuffix(p, "/log") && r.Method == http.MethodGet:
@@ -592,14 +609,14 @@ func (c *rtCluster) patchJob(w http.ResponseWriter, name string, body []byte) {
 	rtJSON(w, 200, c.viewLocked(j))
 }
 
-func (c *rtCluster) wantBackground(q map[string][]string, what string) {
-	if got := q["propagationPolicy"]; len(got) != 1 || got[0] != "Background" {
-		c.t.Errorf("%s deleted with propagationPolicy %q, want Background: the API's default orphans a Job's pods", what, got)
+func (c *rtCluster) wantPropagation(q map[string][]string, what, policy string) {
+	if got := q["propagationPolicy"]; len(got) != 1 || got[0] != policy {
+		c.t.Errorf("%s deleted with propagationPolicy %q, want %s", what, got, policy)
 	}
 }
 
 func (c *rtCluster) deleteJob(w http.ResponseWriter, name string, q map[string][]string, body []byte) {
-	c.wantBackground(q, "job "+name)
+	c.wantPropagation(q, "job "+name, "Foreground")
 	c.mu.Lock()
 	hold := c.holdJobDeletes[name]
 	c.mu.Unlock()
@@ -760,7 +777,7 @@ func (c *rtCluster) patchSecret(w http.ResponseWriter, name string, body []byte)
 }
 
 func (c *rtCluster) deleteSecret(w http.ResponseWriter, name string, q map[string][]string, body []byte) {
-	c.wantBackground(q, "secret "+name)
+	c.wantPropagation(q, "secret "+name, "Background")
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, ok := c.secrets[name]; !ok {
@@ -848,7 +865,42 @@ func (c *rtCluster) listPods(w http.ResponseWriter, selector string) {
 			c.bumpLocked()
 		}
 	}
+	for i := range items {
+		p := &items[i]
+		if meta, ok := c.probeRoles[p.Metadata.UID]; ok {
+			p.Spec.SchedulingGates = nil
+			p.Metadata.ResourceVersion = meta.ResourceVersion
+			p.Metadata.Labels[LabelProbeRole] = meta.Labels[LabelProbeRole]
+		}
+		c.observedPods[p.Metadata.Name] = *p
+	}
 	rtJSON(w, 200, PodList{Items: items})
+}
+
+func (c *rtCluster) patchPod(w http.ResponseWriter, name string, body []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.podPatchAnswer != nil {
+		rtAnswer(w, *c.podPatchAnswer)
+		return
+	}
+	var patch struct {
+		Metadata ObjectMeta `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &patch); err != nil {
+		c.t.Fatal(err)
+	}
+	pod, ok := c.observedPods[name]
+	if !ok || patch.Metadata.UID != pod.Metadata.UID || patch.Metadata.ResourceVersion != pod.Metadata.ResourceVersion {
+		rtAnswer(w, kubeStatus(409, "Conflict", "pod incarnation changed"))
+		return
+	}
+	if len(patch.Metadata.Labels) != 1 || patch.Metadata.Labels[LabelProbeRole] != probeRole(&pod) {
+		c.t.Errorf("unexpected pod patch: %s", body)
+	}
+	patch.Metadata.ResourceVersion = pod.Metadata.ResourceVersion + "1"
+	c.probeRoles[pod.Metadata.UID] = patch.Metadata
+	rtJSON(w, 200, map[string]any{})
 }
 
 // rtOwnedBy is a pod as the Job controller labels it: its Job's uid on the
@@ -1486,10 +1538,10 @@ func TestRunnerRunsAStepToSuccessAndArchivesItsLog(t *testing.T) {
 	// the version the create answered.
 	reqs := h.c.requests()
 	var first []string
-	for _, r := range reqs[:min(5, len(reqs))] {
+	for _, r := range reqs[:min(6, len(reqs))] {
 		first = append(first, r.Method+" "+r.Path)
 	}
-	wantFirst := []string{"GET " + rtJobPath, "POST " + kubeSecrets, "POST " + kubeJobs, "PATCH " + kubeSecrets + "/" + testSecretName, "PATCH " + rtJobPath}
+	wantFirst := []string{"GET " + rtJobPath, "GET /apis/networking.k8s.io/v1/namespaces/steps-ns/networkpolicies", "POST " + kubeSecrets, "POST " + kubeJobs, "PATCH " + kubeSecrets + "/" + testSecretName, "PATCH " + rtJobPath}
 	if !reflect.DeepEqual(first, wantFirst) {
 		t.Errorf("first requests:\n  got  %q\n  want %q", first, wantFirst)
 	}
@@ -1515,7 +1567,7 @@ func TestRunnerRunsAStepToSuccessAndArchivesItsLog(t *testing.T) {
 			ResourceVersion string `json:"resourceVersion"`
 		} `json:"metadata"`
 	}
-	if err := json.Unmarshal([]byte(reqs[4].Body), &firstClaim); err != nil || firstClaim.Metadata.ResourceVersion != "2" {
+	if err := json.Unmarshal([]byte(reqs[5].Body), &firstClaim); err != nil || firstClaim.Metadata.ResourceVersion != "2" {
 		t.Errorf("the first claim was conditioned on %q (%v), want the version the create answered, 2", firstClaim.Metadata.ResourceVersion, err)
 	}
 	patches := h.c.appliedPatches()
@@ -3644,8 +3696,8 @@ func TestRunnerCloneTokenFailureCreatesNothing(t *testing.T) {
 	if !strings.Contains(res.Failure.Message, "installation 42 is suspended") {
 		t.Errorf("failure %q does not say why the token could not be minted", res.Failure.Message)
 	}
-	if got := h.c.summary(); got != "GET "+rtJobPath {
-		t.Errorf("requests:\n  %s\nwant only the read that found no Job", got)
+	if got := h.c.summary(); got != "GET "+rtJobPath+"\n  GET /apis/networking.k8s.io/v1/namespaces/steps-ns/networkpolicies" {
+		t.Errorf("requests:\n  %s\nwant only the Job and policy reads", got)
 	}
 	if len(h.lib.stored()) != 0 {
 		t.Error("a step that never ran stored a file")
@@ -4143,8 +4195,8 @@ func TestCancelRunStopsThisReplicasRunsAndDeletesTheRun(t *testing.T) {
 	if !h.c.hasJob(otherJob) || !h.c.hasSecret(SecretName(otherJob)) {
 		t.Error("cancelling one run deleted another run's Job or Secret")
 	}
-	selector := "labelSelector=memql.io%2Fpipelines-run%3Drun-7f3a&propagationPolicy=Background"
-	for _, path := range []string{kubeJobs, kubeSecrets} {
+	for path, policy := range map[string]string{kubeJobs: "Foreground", kubeSecrets: "Background"} {
+		selector := "labelSelector=memql.io%2Fpipelines-run%3Drun-7f3a&propagationPolicy=" + policy
 		found := false
 		for _, r := range h.c.requestsFor(http.MethodDelete, path) {
 			found = found || r.Query == selector

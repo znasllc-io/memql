@@ -107,11 +107,14 @@ type PodTemplateSpec struct {
 
 // PodSpec is the step's pod.
 type PodSpec struct {
-	NodeSelector                 map[string]string `json:"nodeSelector,omitempty"`
-	RestartPolicy                string            `json:"restartPolicy,omitempty"`
-	ServiceAccountName           string            `json:"serviceAccountName,omitempty"`
-	AutomountServiceAccountToken *bool             `json:"automountServiceAccountToken,omitempty"`
-	EnableServiceLinks           *bool             `json:"enableServiceLinks,omitempty"`
+	NodeName                     string              `json:"nodeName,omitempty"`
+	SchedulingGates              []PodSchedulingGate `json:"schedulingGates,omitempty"`
+	NodeSelector                 map[string]string   `json:"nodeSelector,omitempty"`
+	Tolerations                  []Toleration        `json:"tolerations,omitempty"`
+	RestartPolicy                string              `json:"restartPolicy,omitempty"`
+	ServiceAccountName           string              `json:"serviceAccountName,omitempty"`
+	AutomountServiceAccountToken *bool               `json:"automountServiceAccountToken,omitempty"`
+	EnableServiceLinks           *bool               `json:"enableServiceLinks,omitempty"`
 	// TerminationGracePeriodSeconds is a pointer because 0 means "kill at
 	// once", while absent is the API's 30 seconds.
 	TerminationGracePeriodSeconds *int64              `json:"terminationGracePeriodSeconds,omitempty"`
@@ -119,6 +122,18 @@ type PodSpec struct {
 	InitContainers                []Container         `json:"initContainers,omitempty"`
 	Containers                    []Container         `json:"containers"`
 	Volumes                       []Volume            `json:"volumes,omitempty"`
+}
+
+type PodSchedulingGate struct {
+	Name string `json:"name"`
+}
+
+// Toleration admits a pod to an explicitly selected operator build pool.
+type Toleration struct {
+	Key      string `json:"key"`
+	Operator string `json:"operator"`
+	Value    string `json:"value"`
+	Effect   string `json:"effect"`
 }
 
 // PodSecurityContext is the pod-wide security context.
@@ -270,6 +285,7 @@ type Secret struct {
 // Pod is what the runner reads to classify a step: its phase and the state of
 // each container.
 type Pod struct {
+	Spec     PodSpec    `json:"spec,omitempty"`
 	Metadata ObjectMeta `json:"metadata"`
 	Status   PodStatus  `json:"status"`
 }

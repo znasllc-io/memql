@@ -166,6 +166,17 @@ func isolationRefusal(v IsolationVerdict) string {
 // step stops waiting (its error), and a proof no step waits on any more is
 // stopped.
 func (r *Runner) proveIsolation(ctx context.Context) (IsolationVerdict, error) {
+	if err := ctx.Err(); err != nil {
+		return IsolationVerdict{}, err
+	}
+	// Inspect CIDR grants even when the live pod verdict is cached: policy
+	// drift must not inherit a previous proof of a different enforcement path.
+	if err := r.kube.CheckIsolationCIDRs(ctx); err != nil {
+		if ctx.Err() != nil {
+			return IsolationVerdict{}, ctx.Err()
+		}
+		return IsolationVerdict{Inconclusive: true, Detail: err.Error(), At: r.now()}, nil
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return IsolationVerdict{}, err
@@ -253,9 +264,15 @@ type probeListener struct {
 }
 
 // probeIsolation runs the probe once, and answers its verdict; decided is
-// false when no step waited on it any more before there was one. The probe's
-// Job and Secret are gone when it returns, whatever happened.
-func (r *Runner) probeIsolation(ctx context.Context) (IsolationVerdict, bool) {
+// false when no step waited on it any more before there was one. Cleanup is
+// confirmed before a successful verdict is returned.
+func (r *Runner) probeIsolation(ctx context.Context) (verdict IsolationVerdict, decided bool) {
+	if err := r.cfg.ValidatePlacement(); err != nil {
+		return IsolationVerdict{Inconclusive: true, Detail: err.Error(), At: r.now()}, true
+	}
+	if err := r.kube.CheckIsolationCIDRs(ctx); err != nil {
+		return IsolationVerdict{Inconclusive: true, Detail: err.Error(), At: r.now()}, true
+	}
 	name := IsolationProbeName(r.cfg.NodeID)
 	p := &prober{
 		r: r, ctx: ctx, name: name, target: IsolationTargetName(name),
@@ -263,8 +280,21 @@ func (r *Runner) probeIsolation(ctx context.Context) (IsolationVerdict, bool) {
 	}
 	// Whatever this replica's last probe left goes first: a probe Secret of
 	// its would start the new connector at once, at another pod's address.
-	p.remove()
-	defer p.remove()
+	if err := p.remove(); err != nil {
+		return IsolationVerdict{Inconclusive: true, Detail: err.Error(), At: r.now()}, true
+	}
+	defer func() {
+		if err := p.remove(); err != nil {
+			p.log.Warn("pipelines: isolation probe cleanup remains unconfirmed", "error", err)
+			if decided {
+				detail := err.Error()
+				if !verdict.Isolated && verdict.Detail != "" {
+					detail = verdict.Detail + "; " + detail
+				}
+				verdict = IsolationVerdict{Inconclusive: true, Detail: detail, At: r.now()}
+			}
+		}
+	}()
 
 	var (
 		job      Job
@@ -326,7 +356,9 @@ func (p *prober) create() (Job, error) {
 			if leftovers++; leftovers >= apiAttempts {
 				return Job{}, probeFailure(fmt.Sprintf("an earlier probe Job, %s, was still there after %d deletes", p.name, leftovers))
 			}
-			p.remove()
+			if err := p.remove(); err != nil {
+				return Job{}, probeFailure(err.Error())
+			}
 			if !sleepCtx(p.ctx, p.r.cfg.PollInterval) {
 				return Job{}, errProbeStopped
 			}
@@ -375,10 +407,52 @@ func (p *prober) up(job Job) (probeListener, error) {
 			continue
 		}
 		zero, one, two := probePods(pods, job)
+		// Network policies select our role label: Cilium deliberately excludes
+		// the Job's completion-index label from endpoint identities. Read the
+		// labels back before arming, including after a lost patch response.
+		rolesReady := true
+		for _, pod := range []*Pod{zero, one, two} {
+			if pod == nil || probeRole(pod) == "" {
+				rolesReady = false
+				continue
+			}
+			if pod.Metadata.Labels[LabelProbeRole] != probeRole(pod) || probeSchedulingHeld(pod) {
+				rolesReady = false
+				if err := p.r.kube.SetProbeRole(ctx, job, *pod); err != nil {
+					p.warn("labeling the isolation probe's pod", err)
+				}
+			}
+		}
+		if !rolesReady {
+			seen = "waiting for the probe pods' verified network-policy roles"
+			continue
+		}
 		if l, ok := listening(zero); ok && probeContainerRuns(one, true, ContainerProbeListener) && probeContainerRuns(two, true, ContainerProbeListener) {
 			return l, nil
 		}
 		seen = "index 0: " + describeProbePod(zero) + "; index 1: " + describeProbePod(one) + "; index 2: " + describeProbePod(two)
+	}
+}
+
+// probeRole rejects a disagreement between the controller's annotation and
+// label instead of assigning a network exception to an ambiguous index.
+func probeRole(pod *Pod) string {
+	if pod == nil {
+		return ""
+	}
+	annotation, label := pod.Metadata.Annotations[completionIndexKey], pod.Metadata.Labels[completionIndexKey]
+	if annotation != "" && label != "" && annotation != label {
+		return ""
+	}
+	switch cmp.Or(annotation, label) {
+	case "0":
+		return "listener"
+	case "1":
+		return "restricted"
+	case "2":
+		return "control"
+	default:
+		return ""
 	}
 }
 
@@ -543,17 +617,36 @@ func (p *prober) kubeletAnswers(pod *Pod) (bool, string, error) {
 	return false, "the listener's kubelet could not be reached through the API server, so its node may be lost: " + apiMessage(err), nil
 }
 
-// remove deletes the probe Job -- background propagation, so its pods go
-// with it -- and its Secret, under a context of its own, so a proof stopped
-// by its waiters still cleans up after itself. What is gone is deleted.
-func (p *prober) remove() {
+// remove confirms foreground deletion of the probe and its pods before the
+// same name or quota slot can be reused. Its independent context also gives
+// an abandoned proof a bounded opportunity to clean up.
+func (p *prober) remove() error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(p.ctx), quickCallTimeout)
 	defer cancel()
-	if err := p.r.kube.DeleteJob(ctx, p.name); err != nil {
-		p.log.Warn("pipelines: the isolation probe's Job could not be deleted; its deadline and TTL end it", "error", err)
+	jobErr := p.r.kube.DeleteJob(ctx, p.name)
+	secretErr := p.r.kube.DeleteSecret(ctx, p.target)
+	if err := errors.Join(jobErr, secretErr); err != nil {
+		return fmt.Errorf("isolation probe cleanup remains unconfirmed: %w", err)
 	}
-	if err := p.r.kube.DeleteSecret(ctx, p.target); err != nil {
-		p.log.Warn("pipelines: the isolation probe's Secret could not be deleted; it goes with its Job", "error", err)
+	for {
+		_, jobErr := p.r.kube.GetJob(ctx, p.name)
+		_, secretErr := p.r.kube.SecretMetadata(ctx, p.target)
+		pods, podErr := p.r.kube.JobPods(ctx, p.name)
+		if deploycontrol.IsNotFound(jobErr) && deploycontrol.IsNotFound(secretErr) && podErr == nil && len(pods) == 0 {
+			return nil
+		}
+		if jobErr != nil && !deploycontrol.IsNotFound(jobErr) {
+			return fmt.Errorf("isolation probe cleanup remains unconfirmed: Job could not be read: %w", jobErr)
+		}
+		if secretErr != nil && !deploycontrol.IsNotFound(secretErr) {
+			return fmt.Errorf("isolation probe cleanup remains unconfirmed: Secret could not be read: %w", secretErr)
+		}
+		if podErr != nil {
+			return fmt.Errorf("isolation probe cleanup remains unconfirmed: pods could not be read: %w", podErr)
+		}
+		if !sleepCtx(ctx, p.r.cfg.PollInterval) {
+			return fmt.Errorf("isolation probe cleanup remains unconfirmed: %w", ctx.Err())
+		}
 	}
 }
 

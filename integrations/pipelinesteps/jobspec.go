@@ -222,7 +222,8 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 			Template: PodTemplateSpec{
 				Metadata: ObjectMeta{Labels: objectLabels(run)},
 				Spec: PodSpec{
-					NodeSelector:                  stepNodeSelector(run.Platform),
+					NodeSelector:                  cfg.nodeSelector(run.Platform),
+					Tolerations:                   cfg.tolerations(),
 					RestartPolicy:                 "Never",
 					ServiceAccountName:            cfg.StepServiceAccount,
 					AutomountServiceAccountToken:  ptr(false),
@@ -246,6 +247,9 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 	scope := run.StepKey
 	refuse := func(format string, args ...any) (int32, *pl.Refusal) {
 		return 0, pl.Refuse(pl.CodeJobRejected, scope, format, args...)
+	}
+	if err := cfg.ValidatePlacement(); err != nil {
+		return refuse("%s", err)
 	}
 
 	if err := pl.CheckExecutionNeeds(run.Execution, run.Needs); err != nil {
@@ -732,19 +736,10 @@ func jobOwner(job Job) OwnerReference {
 // had its socket open throughout, so a SYN that reached it would have been
 // accepted, never reset.
 //
-// The settle is there because a policy engine programs a new pod's rules a
-// moment after the pod starts: k3s's within two seconds (measured). A policy
-// that programs slower than the settle can only push the verdict toward "not
-// isolated" or "inconclusive" -- the safe directions -- never toward a false
-// pass. A rule not yet in place lets more through, never less: it can turn an
-// attempt that would have failed into one that connects -- a listener
-// attempt that connects is "not isolated" -- but it cannot make an attempt
-// fail. A pass rests on every listener attempt failing, which only rules in
-// place bring about; and a network not yet working for the new pod fails its
-// DNS attempts too, which is "inconclusive". (A DNS-blocking rule not yet in
-// place lets a DNS attempt through that it would refuse later: that takes away
-// a reason for "inconclusive", but never makes a pass, which still needs every
-// listener attempt stopped by a rule already in place.)
+// The settle allows the policy engine to program a new pod. Probe pods start
+// behind a scheduling gate: the runner assigns each role before releasing it,
+// so Cilium sees the final identity at endpoint creation. The delay is not
+// evidence of isolation; every negative and positive control must still pass.
 
 const (
 	// probePort is the port every probe pod's listener accepts on.
@@ -907,6 +902,9 @@ func BuildIsolationProbe(cfg Config, name string) Job {
 			Template: PodTemplateSpec{
 				Metadata: ObjectMeta{Labels: probeLabels()},
 				Spec: PodSpec{
+					SchedulingGates:               []PodSchedulingGate{{Name: probeRoleGate}},
+					NodeSelector:                  cfg.nodeSelector(""),
+					Tolerations:                   cfg.tolerations(),
 					RestartPolicy:                 "Never",
 					ServiceAccountName:            cfg.StepServiceAccount,
 					AutomountServiceAccountToken:  ptr(false),

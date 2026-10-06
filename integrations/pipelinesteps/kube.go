@@ -28,9 +28,8 @@ import (
 //     collection -- a GET would list every Job, a DELETE delete every Job or
 //     Secret in the namespace -- so a method that acts on one object refuses
 //     it before a request is made.
-//   - A delete never orphans. Every delete asks for background propagation:
-//     the API's default for a batch/v1 Job is to ORPHAN its pods, which would
-//     leave the step running with its Job gone.
+//   - A delete never orphans. Jobs use foreground propagation so terminating
+//     pods retain their Job's capacity slot. Secrets use background deletion.
 //   - Gone is done. Deleting what is already absent succeeds: a retry, a
 //     second replica and the Job's TTL all delete the same objects.
 //   - A Secret's values never leave this file, but for two: the clone token
@@ -261,13 +260,14 @@ func (k *Kube) AnnotateJob(ctx context.Context, name string, annots map[string]s
 	return decodeJob(out, name)
 }
 
-// DeleteJob deletes the step's Job, and with it (background propagation) its
-// pod and, once OwnSecret has run, its Secret. An absent Job is deleted.
+// DeleteJob requests foreground deletion: the Job retains its quota slot
+// until its dependent pods are gone. Acceptance is not confirmed cleanup;
+// callers that acknowledge a receipt also verify absence. An absent Job is deleted.
 func (k *Kube) DeleteJob(ctx context.Context, name string) error {
 	if err := named("job", name); err != nil {
 		return err
 	}
-	return k.delete(ctx, k.jobsPath(name))
+	return k.delete(ctx, k.jobsPath(name), "Foreground")
 }
 
 // DeleteSecret deletes the step's Secret. An absent Secret is deleted.
@@ -275,18 +275,18 @@ func (k *Kube) DeleteSecret(ctx context.Context, name string) error {
 	if err := named("secret", name); err != nil {
 		return err
 	}
-	return k.delete(ctx, k.corePath("secrets", name))
+	return k.delete(ctx, k.corePath("secrets", name), "Background")
 }
 
 // DeleteObservedSecret removes only the metadata revision the reaper judged.
 // A replacement or a concurrent OwnSecret must survive a stale list result.
 // The API enforces both preconditions atomically; a second GET would race.
 func (k *Kube) DeleteObservedSecret(ctx context.Context, meta ObjectMeta) error {
-	return k.deleteObserved(ctx, k.corePath("secrets", meta.Name), meta)
+	return k.deleteObserved(ctx, k.corePath("secrets", meta.Name), meta, "Background")
 }
 
 func (k *Kube) DeleteObservedJob(ctx context.Context, meta ObjectMeta) error {
-	return k.deleteObserved(ctx, k.jobsPath(meta.Name), meta)
+	return k.deleteObserved(ctx, k.jobsPath(meta.Name), meta, "Foreground")
 }
 
 func (k *Kube) SecretMetadata(ctx context.Context, name string) (ObjectMeta, error) {
@@ -306,7 +306,7 @@ func (k *Kube) SecretMetadata(ctx context.Context, name string) (ObjectMeta, err
 	return obj.Metadata, nil
 }
 
-func (k *Kube) deleteObserved(ctx context.Context, path string, meta ObjectMeta) error {
+func (k *Kube) deleteObserved(ctx context.Context, path string, meta ObjectMeta, propagation string) error {
 	if err := named("object", meta.Name); err != nil {
 		return err
 	}
@@ -314,13 +314,13 @@ func (k *Kube) deleteObserved(ctx context.Context, path string, meta ObjectMeta)
 		return errors.New("pipelinesteps: cannot delete an observed object without its UID and resourceVersion")
 	}
 	body, err := json.Marshal(map[string]any{
-		"apiVersion": "v1", "kind": "DeleteOptions", "propagationPolicy": "Background",
+		"apiVersion": "v1", "kind": "DeleteOptions", "propagationPolicy": propagation,
 		"preconditions": map[string]string{"uid": meta.UID, "resourceVersion": meta.ResourceVersion},
 	})
 	if err != nil {
 		return err
 	}
-	q := url.Values{"propagationPolicy": {"Background"}}
+	q := url.Values{"propagationPolicy": {propagation}}
 	_, err = k.api.Do(ctx, http.MethodDelete, path+"?"+q.Encode(), "application/json", body)
 	if deploycontrol.IsNotFound(err) {
 		return nil
@@ -328,8 +328,8 @@ func (k *Kube) deleteObserved(ctx context.Context, path string, meta ObjectMeta)
 	return err
 }
 
-func (k *Kube) delete(ctx context.Context, path string) error {
-	q := url.Values{"propagationPolicy": {"Background"}}
+func (k *Kube) delete(ctx context.Context, path, propagation string) error {
+	q := url.Values{"propagationPolicy": {propagation}}
 	// The answer is the deleted object -- for a Secret, its values -- or a
 	// Status: dropped unread either way.
 	if _, err := k.api.Do(ctx, http.MethodDelete, path+"?"+q.Encode(), "", nil); err != nil && !deploycontrol.IsNotFound(err) {
@@ -353,11 +353,11 @@ func (k *Kube) DeleteRun(ctx context.Context, runID string) (int, error) {
 	}
 	q := url.Values{
 		"labelSelector":     {LabelRun + "=" + RunLabelValue(runID)},
-		"propagationPolicy": {"Background"},
-	}.Encode()
+		"propagationPolicy": {"Foreground"},
+	}
 
 	matched := 0
-	out, jobsErr := k.api.Do(ctx, http.MethodDelete, k.jobsPath("")+"?"+q, "", nil)
+	out, jobsErr := k.api.Do(ctx, http.MethodDelete, k.jobsPath("")+"?"+q.Encode(), "", nil)
 	if jobsErr == nil {
 		var deleted struct {
 			Items []json.RawMessage `json:"items"`
@@ -367,7 +367,8 @@ func (k *Kube) DeleteRun(ctx context.Context, runID string) (int, error) {
 		}
 		matched = len(deleted.Items)
 	}
-	_, secretsErr := k.api.Do(ctx, http.MethodDelete, k.corePath("secrets", "")+"?"+q, "", nil)
+	q.Set("propagationPolicy", "Background")
+	_, secretsErr := k.api.Do(ctx, http.MethodDelete, k.corePath("secrets", "")+"?"+q.Encode(), "", nil)
 	return matched, errors.Join(jobsErr, secretsErr)
 }
 
@@ -437,6 +438,47 @@ func (k *Kube) JobPod(ctx context.Context, jobName string) (*Pod, error) {
 		newest = newerPod(newest, &pods[i+1])
 	}
 	return newest, nil
+}
+
+// SetProbeRole gives a probe pod its network-policy role. Only the observed
+// incarnation can be patched; a replacement or concurrent change conflicts.
+// Assign the role and release only our scheduling gate in the same write,
+// before the CNI can create an endpoint with an incomplete identity.
+// The role derives from the Job controller's index, never from a caller's label.
+func (k *Kube) SetProbeRole(ctx context.Context, job Job, pod Pod) error {
+	if err := named("pod", pod.Metadata.Name); err != nil {
+		return err
+	}
+	role := probeRole(&pod)
+	if !podOfJob(&pod, job) || role == "" || pod.Metadata.UID == "" || pod.Metadata.ResourceVersion == "" ||
+		pod.Metadata.Labels[LabelManagedBy] != ManagedBy || pod.Metadata.Labels[LabelProbe] != ProbeIsolation ||
+		!probeSchedulingHeld(&pod) || pod.Spec.NodeName != "" {
+		return fmt.Errorf("pipelinesteps: refusing to label an unverified isolation probe pod %s", pod.Metadata.Name)
+	}
+	gates := []PodSchedulingGate{}
+	for _, gate := range pod.Spec.SchedulingGates {
+		if gate.Name != probeRoleGate {
+			gates = append(gates, gate)
+		}
+	}
+	patch, err := json.Marshal(map[string]any{"spec": map[string]any{"schedulingGates": gates}, "metadata": map[string]any{
+		"uid": pod.Metadata.UID, "resourceVersion": pod.Metadata.ResourceVersion,
+		"labels": map[string]string{LabelProbeRole: role},
+	}})
+	if err != nil {
+		return err
+	}
+	_, err = k.api.Do(ctx, http.MethodPatch, k.corePath("pods", pod.Metadata.Name), contentMergePatch, patch)
+	return err
+}
+
+func probeSchedulingHeld(pod *Pod) bool {
+	for _, gate := range pod.Spec.SchedulingGates {
+		if gate.Name == probeRoleGate {
+			return true
+		}
+	}
+	return false
 }
 
 // newerPod is the newer of two pods by creation, the greater name on a tie;

@@ -71,6 +71,9 @@ pipeline:
         # A need no cluster Job can meet: the executor sends the step to the
         # owner's machines, and the owner has none.
         - name: display
+          execution: native
+          platform: darwin/arm64
+          caches: []
           needs: { display: true }
           timeout: 10m
           run: echo "this step needs a display, which no Job in the cluster offers"

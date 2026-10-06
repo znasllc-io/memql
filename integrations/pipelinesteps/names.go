@@ -98,8 +98,12 @@ const ManagedBy = "memql-workbench"
 // ProbeIsolation. They carry no run label, so nothing that selects a run's
 // objects -- a cancel's deletecollection -- reaches them.
 const (
-	LabelProbe     = "memql.io/probe"
+	LabelProbe = "memql.io/probe"
+	// LabelProbeRole is an identity-relevant label on Cilium as well as K3s.
+	// Job completion-index labels are ignored by Cilium's default identity filter.
+	LabelProbeRole = "memql.io/probe-role"
 	ProbeIsolation = "isolation"
+	probeRoleGate  = "memql.io/probe-role"
 )
 
 // The containers of an isolation probe pod (jobspec.go): the listener, a

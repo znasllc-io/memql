@@ -75,6 +75,74 @@ Issue #5844 retains the earlier two-week Cockpit evaluation; reconcile that
 record when the subsequent capacity/networking plan is approved, and preserve
 the independent CI/release observation gates in #5506 through #5509.
 
+### Local Cilium and certificate regression evidence (October 6)
+
+A disposable two-node K3s v1.35.7+k3s1 cluster with Cilium 1.20.2 revealed that
+Cilium excludes Job completion-index labels from endpoint identities. The probe
+now starts behind a scheduling gate, assigns a verified role with UID/version
+guards, and releases its own gate in the same patch. Increasing a sleep had
+remained unreliable; it is not the implementation. The live proof retains its
+three positive and negative rounds and refuses inconclusive results.
+
+The same rehearsal found that a pod-only proof does not validate Cilium CIDR
+exclusions. Workbench now audits all additive NetworkPolicy IP grants, including
+before using a cached pod proof, and refuses missing protected ranges or an
+absent namespace-wide egress policy. The audit does not replace live enforcement
+or provider-specific endpoint tests. Final targeted local runs passed the shipped
+policy, missing egress, missing IP exclusions and missing listener cases on both
+K3s's policy engine and Cilium. Race and overlay gates passed. These are local
+Runner tests with disposable resources, not the installed Workbench release cycle.
+
+The database-required full workspace run exposed macOS LibreSSL certificate
+failures in both installer and k3d checks. PR #5867 shares a portable SAN parser
+and exact DNS matching; full installer/k3d suites and affected OpenSSL 3 cases
+pass. The full combined workspace run remains outstanding after integration.
+
+### Complete CI ownership and coverage parity (owner clarification, October 6)
+
+The final delivery path must have **no GitHub Actions dependency**. MemQL owns
+triggers, selection, checks, build execution, evidence, approvals, publication,
+updates, recovery and retention. Preserve useful free GitHub repository services
+such as dependency alerts, secret scanning and push protection where the
+repository is eligible. CodeQL's default setup still runs Actions: use analysis
+under MemQL with SARIF upload instead, subject to the repository's license and
+feature eligibility. Do not silently enable paid security products for private
+repositories. Keep working Actions lanes until their replacements have real
+coverage and the existing retirement gates are satisfied.
+
+The October 6 inventory found these gaps; definitions are not execution proof:
+
+| Coverage | MemQL definition / remaining work |
+| --- | --- |
+| Engine build/vet, environment and DSL validation, generated contracts | Core `go-checks` exists; add the five tagged build/vet variants and cluster-E2E compilation. |
+| Unit and database suites | Four ordinary shards and five database shards exist; add all seven node-tag test variants. Database-required execution must fail on a missing database. |
+| Fuzz, conformance, differential, proving | Definitions exist; reproduce triggers, pinned tool versions, seeds and artifacts. Microbenchmarks are not capacity tests. |
+| Module and shell boundaries | Port standalone `GOWORK=off` build/vet/tidy checks and Bash 3.2 compatibility. |
+| OS, SDK, Viewkit and editors | Initial OS/TypeScript definitions exist; port OS Docker-stage validation and VS Code/productivity extension packaging and Linux/macOS desktop/web host matrices. Native work remains explicit and consented. |
+| Secrets and vulnerabilities | Port Gitleaks including full-history scheduled scans, all-module govulncheck, CodeQL analysis/upload, SBOM generation and Scorecard. These security lanes are absent from the current package. |
+| Additional delivery security | Add dependency/container vulnerability checks and verified provenance/signatures with explicit blocking policy. These extend coverage; they were not existing dedicated workflow lanes. |
+| Build and release | Replace seven engine-image builds, database/toolchain images, fixture mirrors, SDK/editor/docs publication and the legacy tag-triggered release cascade. |
+| Companion repositories | Port Cockpit, project-template and instance checks and release paths independently; their current package declarations do not provide equivalent CI. |
+| GitHub integration | Preserve exact-SHA status reporting, PR/merge-group/manual/push/scheduled semantics, cancellations and failure evidence; change required checks only after equivalent checks actually report. |
+
+For each legacy lane record its inputs, triggers, platforms, tools, expected
+failure behavior, retained reports, new owner and actual replacement run. No
+unchecked item may become green merely because its job is missing or skipped.
+A disabled future suite is reported as **planned**, never passed.
+
+Future suite placeholders, intentionally outside this delivery implementation:
+
+- **Load/capacity:** versioned workloads, concurrent users/request rates, warmup
+  and measurement windows, latency percentiles, errors and sustainable throughput.
+- **Stress/soak and resilience:** saturation, long-running resource growth,
+  recovery after dependency/node disruption and explicit abort limits.
+- **Resource and cost baselines:** CPU/memory/storage/network per workload and
+  per active user, with recorded hardware, pricing date and estimation bounds.
+
+These will consume the same pinned-candidate execution and artifact contracts.
+They have no fabricated baselines or pass thresholds and are not required checks
+until implemented and calibrated. Keep their activation explicit.
+
 ### Cluster update requirements (owner clarification, October 6)
 
 Owners and developers must discover and trigger installation updates from
@@ -394,6 +462,43 @@ namespace and verified four actual CNI cases: normal rules pass; missing
 egress fails; a missing IP exception list fails; missing listener ingress is
 inconclusive. No running engine Deployment was replaced. This addresses the
 ingress-masking failure in #5810; cloud and multi-node rollout remain unverified.
+
+### Dedicated local build capacity (October 6)
+
+The runner accepts an operator-selected `MEMQL_PIPELINES_NODE_POOL`, with an
+exact label and `NoSchedule` toleration shared by step Jobs and isolation
+probes. Repository configuration cannot add tolerations or choose arbitrary
+node selectors. The local overlay permits one Job across all Workbench replicas.
+Invalid placement refuses before creating external resources.
+
+A live test on local ARM64 K3s v1.32.13 checked out exact main commit
+`e65551c7d763afff66c77eb2f45c766b7fe43beb`, ran `SELECT 1` against the repository's
+pinned PostgreSQL sidecar, verified both captured artifacts, and recovered the
+same persisted outcome through a second Runner without another Job or Library
+write. It verified placement on the tainted build node, rejection of a second
+Job under quota, and absence of Job, pods and Secret after acknowledgement.
+The first passing run took 133 seconds with images warmed. Two earlier cold
+runs timed out while pulling the database image; they are failed attempts,
+not release qualification. Library storage in this test is an in-memory
+fixture, and both Runners are test-process instances, not installed mesh pods.
+
+Those failures exposed a capacity leak: background Job deletion released the
+quota slot while the pod could remain terminating. Jobs now use foreground
+deletion, and the isolation probe confirms cleanup before reusing its name or
+returning a successful verdict. A real Kubernetes test holds a pod with a test
+finalizer: the original code loses the Job, while the fix retains the slot,
+rejects a successor, and admits it after confirmed cleanup. The test releases
+only its own finalizer. Disposable namespace deletion is also confirmed.
+
+Four live network-policy cases pass on the selected build pool: allowed DNS
+and positive control with restricted egress; refusal with egress removed;
+refusal with private-address exceptions removed; and an inconclusive verdict
+when listener ingress is missing. This exercises the existing K3s policy
+engine, not Cilium. Race, runner-wiring, overlay, environment-registry and
+focused documentation gates pass. No installed engine has been replaced,
+the source pipeline remains disconnected, and no release has been published.
+The installed Workbench cycle, private OCI access, rootless image builds,
+Cilium rehearsal and update/rollback proof remain unfinished.
 
 ## Delivery privacy progress
 

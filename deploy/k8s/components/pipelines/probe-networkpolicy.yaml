@@ -1,6 +1,8 @@
 # Only the diagnostic listener admits ingress. Both connectors match exactly
 # the same ingress rule. Only index 2 receives an egress exception: if index 1
 # connects, isolation failed; if index 2 cannot connect, the proof is inconclusive.
+# The runner assigns roles from verified Job-owned indices before arming the
+# connectors. Cilium ignores the native completion-index identity label.
 # Ordinary steps carry no memql.io/probe label and gain no access here.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -13,7 +15,7 @@ spec:
   podSelector:
     matchLabels:
       memql.io/probe: isolation
-      batch.kubernetes.io/job-completion-index: "0"
+      memql.io/probe-role: listener
   policyTypes: [Ingress]
   ingress:
     - from:
@@ -34,13 +36,13 @@ spec:
   podSelector:
     matchLabels:
       memql.io/probe: isolation
-      batch.kubernetes.io/job-completion-index: "2"
+      memql.io/probe-role: control
   policyTypes: [Egress]
   egress:
     - to:
         - podSelector:
             matchLabels:
               memql.io/probe: isolation
-              batch.kubernetes.io/job-completion-index: "0"
+              memql.io/probe-role: listener
       ports:
         - {protocol: TCP, port: 8080}

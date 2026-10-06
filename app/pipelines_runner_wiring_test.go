@@ -78,6 +78,7 @@ func TestTheWorkbenchRunsPipelineStepsOnlyWhenConfigured(t *testing.T) {
 	for _, tc := range []struct {
 		what       string
 		cloneImage string
+		nodePool   string
 		inCluster  bool
 		apiErr     error
 		want       bool
@@ -87,6 +88,8 @@ func TestTheWorkbenchRunsPipelineStepsOnlyWhenConfigured(t *testing.T) {
 		says  []string
 	}{
 		{what: "configured", cloneImage: "clone:1", inCluster: true, want: true},
+		{what: "configured build pool", cloneImage: "clone:1", nodePool: "builds", inCluster: true, want: true},
+		{what: "invalid build pool", cloneImage: "clone:1", nodePool: "*", inCluster: true, level: "INFO", says: []string{"MEMQL_PIPELINES_NODE_POOL"}},
 		{what: "no clone image", inCluster: true, level: "INFO", says: []string{"MEMQL_PIPELINES_CLONE_IMAGE"}},
 		{what: "no in-cluster API", cloneImage: "clone:1", level: "INFO", says: []string{"in-cluster Kubernetes API"}},
 		{what: "neither", level: "INFO", says: []string{"MEMQL_PIPELINES_CLONE_IMAGE", "in-cluster Kubernetes API"}},
@@ -98,6 +101,7 @@ func TestTheWorkbenchRunsPipelineStepsOnlyWhenConfigured(t *testing.T) {
 			a := &App{Logger: slog.New(slog.NewTextHandler(&logs, nil))}
 			cfg := pipelinesWiringConfig()
 			cfg.CloneImage = tc.cloneImage
+			cfg.NodePool = tc.nodePool
 			apiBuilt, blobResolved := 0, 0
 			runner := a.workbenchPipelineRunner(cfg, tc.inCluster,
 				func() (*deploycontrol.ClusterAPI, error) {

@@ -73,7 +73,7 @@ can run.
 | Cache access mode | `ReadWriteOnce` | `ReadWriteMany` | `ReadWriteMany` |
 | Cache size | 20Gi | 100Gi | 50Gi |
 | Cache marked `binds-on-first-use` | yes | no | no |
-| Steps at once | 4 | 2 | 1 |
+| Steps at once | 1 | 2 | 1 |
 | Container limit | 2 CPU / 4Gi | 2 CPU / 4Gi | 2 CPU / 4Gi |
 | Container request | 250m / 512Mi | 250m / 512Mi | 250m / 512Mi |
 | Container disk limit / request (`ephemeral-storage`) | 20Gi / 1Gi | 8Gi / 1Gi | 8Gi / 1Gi |
@@ -127,6 +127,23 @@ can run.
   compute quota is enforced when the Job's pod is created, after the Job
   exists, so a step it refused would wait inside its own
   `activeDeadlineSeconds` and time out having never run.
+  Job deletion uses foreground propagation: a terminating pod keeps its Job
+  present and its quota slot occupied until garbage collection finishes.
+  Receipt acknowledgement and isolation-probe cleanup verify absence.
+- **Dedicated build placement** is an operator setting on the workbench:
+  `MEMQL_PIPELINES_NODE_POOL=builds` selects nodes labeled
+  `memql.io/pipeline-pool=builds` and tolerates exactly the matching
+  `NoSchedule` taint. Both step Jobs and their isolation probes use that pool;
+  a step's declared Linux architecture remains required. Invalid pool names
+  refuse execution. An absent pool node leaves work waiting, with no fallback
+  onto serving nodes. Configure every workbench replica alike. Before enabling
+  the setting, provide the labeled, tainted nodes and verify cache placement:
+  an already-bound local-path cache stays on its original node. Preserve its
+  data or explicitly provision a replacement; changing a selector does not
+  move a volume. The unset setting retains unconstrained Linux placement.
+  The local overlay permits one Job at a time. All k3d nodes share the Docker
+  VM's resources; adding nodes does not add physical capacity. This setting
+  neither provisions a node pool nor proves every node's network enforcement.
 - **The limits are a `LimitRange` default**, so the runner sets no resources on
   a step and this is the one place a step's size is decided. It covers every
   container in the pod — the clone init container and each service sidecar as

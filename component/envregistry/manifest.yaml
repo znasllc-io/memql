@@ -2758,6 +2758,12 @@ variables:
     optional: true
     description: "The image every pipeline step's clone init container runs, pinned by digest and providing git, base64 and tr; unset means this workbench node cannot run pipeline steps and refuses them rather than guessing which image to hand a repository token to."
 
+  - name: MEMQL_PIPELINES_NODE_POOL
+    component: pipelines
+    scope: node
+    optional: true
+    description: "Operator build pool for step Jobs and isolation probes: select nodes labeled memql.io/pipeline-pool=<value> and tolerate exactly that value's NoSchedule taint. A lowercase DNS label, at most 63 characters; invalid values refuse execution. Unset preserves Linux placement without a pool constraint. No matching node means waiting for capacity, never fallback to serving nodes."
+
   - name: MEMQL_PIPELINES_RUN_MAX_MINUTES
     component: pipelines
     scope: node
