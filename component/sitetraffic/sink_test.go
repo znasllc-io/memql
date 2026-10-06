@@ -87,6 +87,13 @@ func TestSinkWritesWhatItWasGiven(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("the sink did not flush")
 	}
+	// The collector signals before insert returns; accounting happens after
+	// that return. Join the drain before reading its final statistics.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.Stop(ctx); err != nil {
+		t.Fatalf("the sink did not finish accounting for its flush: %v", err)
+	}
 
 	rows := c.snapshot()
 	if len(rows) != 3 {
