@@ -222,7 +222,8 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 			Template: PodTemplateSpec{
 				Metadata: ObjectMeta{Labels: objectLabels(run)},
 				Spec: PodSpec{
-					NodeSelector:                  stepNodeSelector(run.Platform),
+					NodeSelector:                  cfg.nodeSelector(run.Platform),
+					Tolerations:                   cfg.tolerations(),
 					RestartPolicy:                 "Never",
 					ServiceAccountName:            cfg.StepServiceAccount,
 					AutomountServiceAccountToken:  ptr(false),
@@ -246,6 +247,9 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 	scope := run.StepKey
 	refuse := func(format string, args ...any) (int32, *pl.Refusal) {
 		return 0, pl.Refuse(pl.CodeJobRejected, scope, format, args...)
+	}
+	if err := cfg.ValidatePlacement(); err != nil {
+		return refuse("%s", err)
 	}
 
 	if err := pl.CheckExecutionNeeds(run.Execution, run.Needs); err != nil {
@@ -907,6 +911,8 @@ func BuildIsolationProbe(cfg Config, name string) Job {
 			Template: PodTemplateSpec{
 				Metadata: ObjectMeta{Labels: probeLabels()},
 				Spec: PodSpec{
+					NodeSelector:                  cfg.nodeSelector(""),
+					Tolerations:                   cfg.tolerations(),
 					RestartPolicy:                 "Never",
 					ServiceAccountName:            cfg.StepServiceAccount,
 					AutomountServiceAccountToken:  ptr(false),

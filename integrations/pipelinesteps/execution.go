@@ -1,6 +1,36 @@
 package pipelinesteps
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
+
+// The operator labels and taints build nodes with the same key/value. A
+// repository never chooses node labels or broad tolerations. This one exact
+// NoSchedule toleration cannot admit steps to unrelated reserved pools.
+const pipelinePoolLabel = "memql.io/pipeline-pool"
+
+func (c Config) ValidatePlacement() error {
+	if c.NodePool != "" && (len(c.NodePool) > 63 || !dnsLabelShape.MatchString(c.NodePool)) {
+		return fmt.Errorf("%s must be a lowercase DNS label of at most 63 characters", envNodePool)
+	}
+	return nil
+}
+
+func (c Config) nodeSelector(platform string) map[string]string {
+	labels := stepNodeSelector(platform)
+	if c.NodePool != "" {
+		labels[pipelinePoolLabel] = c.NodePool
+	}
+	return labels
+}
+
+func (c Config) tolerations() []Toleration {
+	if c.NodePool == "" {
+		return nil
+	}
+	return []Toleration{{Key: pipelinePoolLabel, Operator: "Equal", Value: c.NodePool, Effect: "NoSchedule"}}
+}
 
 // An unspecified container architecture may use either Linux architecture;
 // an explicit target must survive into Kubernetes scheduling, just as it does

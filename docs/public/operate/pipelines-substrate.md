@@ -262,11 +262,27 @@ multiplies with its services.
 
 | Overlay value | `local` | `cloud` | `cloud-entry` |
 |---|---|---|---|
-| Steps at once | 4 | 2 | 1 |
+| Steps at once | 1 | 2 | 1 |
 | Each container's request | 250m CPU, 512Mi, 1Gi of disk | 250m CPU, 512Mi, 1Gi of disk | 250m CPU, 512Mi, 1Gi of disk |
 | Each container's limit | 2 CPU, 4Gi, 20Gi of disk | 2 CPU, 4Gi, 8Gi of disk | 2 CPU, 4Gi, 8Gi of disk |
 | The workspace's size limit | 20Gi | 8Gi | 8Gi |
 | Cache claim | 20Gi, `ReadWriteOnce`, the cluster's default class | 100Gi, `ReadWriteMany`, `azureblob-nfs-premium` | 50Gi, `ReadWriteMany`, `azureblob-nfs-premium` |
+
+Set `MEMQL_PIPELINES_NODE_POOL` on every workbench replica to reserve a build
+pool. For a value of `builds`, label the chosen nodes
+`memql.io/pipeline-pool=builds` and taint them with
+`memql.io/pipeline-pool=builds:NoSchedule`. Step Jobs and isolation probes both
+select that pool and tolerate exactly that taint. The step's Linux architecture
+constraint still applies. A missing matching node leaves work waiting; it does
+not send the build to serving nodes. A malformed pool value refuses execution.
+The unset setting preserves Linux placement without a pool constraint.
+
+Provision the nodes before enabling this setting. An existing local-path cache
+remains bound to its original node; changing placement does not migrate it.
+All local k3d nodes share one Docker VM's CPU, memory and disk. The local
+one-Job ceiling applies across Workbench replicas; additional virtual nodes
+do not increase physical capacity. An isolation probe on a selected pool does
+not establish enforcement on every node in that pool.
 
 **Disk** is ephemeral storage. A container's own files outside any volume, and
 its logs, count against its limit; every emptyDir counts against the sum of the
@@ -872,13 +888,14 @@ Registered in `scripts/secrets/manifest.yaml` under the `pipelines` component.
 |---|---|---|---|
 | `MEMQL_PIPELINES_NAMESPACE` | `memql-pipelines` | workbench | The namespace the runner creates step Jobs and their Secrets in. It must be the one the pipelines component grants the engine's identity Jobs in, `memql-pipelines`: any other value makes every create a 403, and every step fails `pipeline_runner_unavailable`. The component's `memql-pipelines` ConfigMap sets it |
 | `MEMQL_PIPELINES_CLONE_IMAGE` | none | workbench | The image `clone` and `cache-prep` run, which needs `git`, `base64` and `tr`. Pin it by digest: it is handed the repository token. Unset, the node cannot run steps, and every step sent to it fails `pipeline_runner_unavailable`. The ConfigMap pins `docker.io/library/buildpack-deps:bookworm-scm` by its multi-arch index digest |
+| `MEMQL_PIPELINES_NODE_POOL` | none | workbench | Select nodes labeled `memql.io/pipeline-pool=<value>` and tolerate only the matching `NoSchedule` taint, for both steps and isolation probes. A lowercase DNS label of at most 63 characters; malformed values refuse execution. Unset means Linux placement without a pool constraint. |
 | `MEMQL_PIPELINES_RUN_MAX_MINUTES` | `120` | agent, workbench | A run's wall-clock ceiling, clamped to 5..1440. It bounds how long a step may wait for a slot, and a step's Job is given no more than what is left of it; past it the step fails `pipeline_run_ceiling`. The agent's value sets each run's deadline, stamped on its Job and Secret. Orphan cleanup waits until that deadline plus the Job TTL, regardless of the sweeping workbench's ceiling. The workbench value is only a retention fallback for legacy or malformed Secret metadata |
 | `MEMQL_PIPELINES_LOG_STORE_MAX_LINES` | `2000` | workbench (a cluster step), agent (a fleet step) | How many lines of one step reach the log store, clamped to 100..100000, before one `pipeline_log_capped` line. The Library's log keeps every line |
 | `MEMQL_PIPELINES_ARTIFACT_MAX_BYTES` | `67108864` (64 MiB) | workbench (a cluster step), agent (a fleet step) | The cap on one step's decoded artifact archive, clamped to 1 MiB..256 MiB. Past it nothing is stored, and the step fails `pipeline_artifact_too_large` |
 | `MEMQL_PIPELINES_WORKSPACE_LIMIT` | `20Gi` | workbench | The size limit of every step's `/workspace`, a whole number of `Ki`, `Mi`, `Gi` or `Ti`; anything else is the default. It must equal the LimitRange's default ephemeral-storage limit ([Steps at once, and their size](#steps-at-once-and-their-size)), and the component's ConfigMap sets it so in every overlay |
 | `MEMQL_PIPELINES_RUN_RETENTION_DAYS` | `30` | the nightly retention sweep | Days after a finished run's latest version before its records are archived and deleted ([Retention](#retention)) |
 
-The first six are read when a node starts. A value that is not a positive whole
+The execution settings are read when a node starts. A numeric cap that is not a positive whole
 number falls back to its default -- never to a bound, and never to no limit --
 and a value past a bound is clamped to it; a workspace limit that is not a
 whole number of `Ki`, `Mi`, `Gi` or `Ti` is its default. The agent and the

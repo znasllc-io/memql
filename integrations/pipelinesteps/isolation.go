@@ -256,6 +256,9 @@ type probeListener struct {
 // false when no step waited on it any more before there was one. The probe's
 // Job and Secret are gone when it returns, whatever happened.
 func (r *Runner) probeIsolation(ctx context.Context) (IsolationVerdict, bool) {
+	if err := r.cfg.ValidatePlacement(); err != nil {
+		return IsolationVerdict{Inconclusive: true, Detail: err.Error(), At: r.now()}, true
+	}
 	name := IsolationProbeName(r.cfg.NodeID)
 	p := &prober{
 		r: r, ctx: ctx, name: name, target: IsolationTargetName(name),

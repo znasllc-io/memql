@@ -209,6 +209,9 @@ func (a *App) workbenchPipelineRunner(
 	blobStore func() (server.FileUploader, string),
 ) workbench.PipelineRunner {
 	var missing []string
+	if err := cfg.ValidatePlacement(); err != nil {
+		missing = append(missing, err.Error())
+	}
 	if strings.TrimSpace(cfg.CloneImage) == "" {
 		missing = append(missing, "MEMQL_PIPELINES_CLONE_IMAGE (the image a step's clone runs, which has no default)")
 	}

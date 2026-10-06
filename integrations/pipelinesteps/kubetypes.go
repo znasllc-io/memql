@@ -108,6 +108,7 @@ type PodTemplateSpec struct {
 // PodSpec is the step's pod.
 type PodSpec struct {
 	NodeSelector                 map[string]string `json:"nodeSelector,omitempty"`
+	Tolerations                  []Toleration      `json:"tolerations,omitempty"`
 	RestartPolicy                string            `json:"restartPolicy,omitempty"`
 	ServiceAccountName           string            `json:"serviceAccountName,omitempty"`
 	AutomountServiceAccountToken *bool             `json:"automountServiceAccountToken,omitempty"`
@@ -119,6 +120,14 @@ type PodSpec struct {
 	InitContainers                []Container         `json:"initContainers,omitempty"`
 	Containers                    []Container         `json:"containers"`
 	Volumes                       []Volume            `json:"volumes,omitempty"`
+}
+
+// Toleration admits a pod to an explicitly selected operator build pool.
+type Toleration struct {
+	Key      string `json:"key"`
+	Operator string `json:"operator"`
+	Value    string `json:"value"`
+	Effect   string `json:"effect"`
 }
 
 // PodSecurityContext is the pod-wide security context.

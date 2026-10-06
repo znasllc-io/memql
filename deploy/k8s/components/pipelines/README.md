@@ -127,6 +127,20 @@ can run.
   compute quota is enforced when the Job's pod is created, after the Job
   exists, so a step it refused would wait inside its own
   `activeDeadlineSeconds` and time out having never run.
+- **Dedicated build placement** is an operator setting on the workbench:
+  `MEMQL_PIPELINES_NODE_POOL=builds` selects nodes labeled
+  `memql.io/pipeline-pool=builds` and tolerates exactly the matching
+  `NoSchedule` taint. Both step Jobs and their isolation probes use that pool;
+  a step's declared Linux architecture remains required. Invalid pool names
+  refuse execution. An absent pool node leaves work waiting, with no fallback
+  onto serving nodes. Configure every workbench replica alike. Before enabling
+  the setting, provide the labeled, tainted nodes and verify cache placement:
+  an already-bound local-path cache stays on its original node. Preserve its
+  data or explicitly provision a replacement; changing a selector does not
+  move a volume. The unset setting retains unconstrained Linux placement.
+  The local overlay permits one Job at a time. All k3d nodes share the Docker
+  VM's resources; adding nodes does not add physical capacity. This setting
+  neither provisions a node pool nor proves every node's network enforcement.
 - **The limits are a `LimitRange` default**, so the runner sets no resources on
   a step and this is the one place a step's size is decided. It covers every
   container in the pod — the clone init container and each service sidecar as

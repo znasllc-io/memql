@@ -14,6 +14,9 @@ import (
 // Readiness reports this runner's last isolation proof without creating
 // anything. A cached pass is useful only within the same TTL the run gate uses.
 func (r *Runner) Readiness() pl.RunnerReadiness {
+	if err := r.cfg.ValidatePlacement(); err != nil {
+		return pl.RunnerReadiness{NodeID: r.cfg.NodeID, Namespace: r.cfg.Namespace, Isolation: "not_proven", Detail: err.Error()}
+	}
 	v := r.Isolation()
 	report := pl.RunnerReadiness{NodeID: r.cfg.NodeID, Namespace: r.cfg.Namespace,
 		Available: true, Isolation: "not_proven", Detail: "Isolation has not been proven on this replica. The first step must prove it before starting."}

@@ -19,6 +19,9 @@ type Config struct {
 	// (MEMQL_PIPELINES_NAMESPACE, default memql-pipelines). It must be the
 	// namespace whose Role grants the engine identity Jobs.
 	Namespace string
+	// NodePool selects an operator-owned, tainted build pool. Empty preserves
+	// unconstrained Linux placement; invalid nonempty values refuse execution.
+	NodePool string
 	// CloneImage runs the clone init container (MEMQL_PIPELINES_CLONE_IMAGE).
 	// There is no default: an image nobody chose would be a guess about what
 	// may run with a repository token, so an empty value means this node
@@ -77,6 +80,7 @@ type Config struct {
 // resolves every read to its key.
 const (
 	envNamespace        = "MEMQL_PIPELINES_NAMESPACE"
+	envNodePool         = "MEMQL_PIPELINES_NODE_POOL"
 	envCloneImage       = "MEMQL_PIPELINES_CLONE_IMAGE"
 	envLogStoreMaxLines = "MEMQL_PIPELINES_LOG_STORE_MAX_LINES"
 	envArtifactMaxBytes = "MEMQL_PIPELINES_ARTIFACT_MAX_BYTES"
@@ -113,6 +117,7 @@ func ConfigFromEnv(getenv func(string) string) Config {
 	}
 	return Config{
 		Namespace:          namespace,
+		NodePool:           text(envNodePool),
 		CloneImage:         text(envCloneImage),
 		CacheClaim:         cacheClaim,
 		StepServiceAccount: stepServiceAccount,

@@ -8,10 +8,9 @@
 # the step pods that mount it to its node). The one thing local adds is the
 # binds-on-first-use mark, at the bottom.
 #
-# THE CEILING AND THE LIMITS are stated although they equal the component's
-# defaults, because they are this overlay's decision and an inherited number is
-# one nobody decided: a laptop also runs the whole mesh and the database, so it
-# is asked for at most four steps at once, each container reserving 250m /
+# THE CEILING AND THE LIMITS are this overlay's decision: a laptop also runs
+# the whole mesh and the database, so it is asked for at most one step at a
+# time, across all workbench replicas, each container reserving 250m /
 # 512Mi / 1 GiB of disk and capped at two CPUs / 4 GiB / 20 GiB of disk -- the
 # disk limit restated as the workspace's, in the ConfigMap after the limits.
 apiVersion: v1
@@ -21,7 +20,7 @@ metadata:
   namespace: memql-pipelines
 spec:
   hard:
-    count/jobs.batch: "4"
+    count/jobs.batch: "1"
 ---
 # `limits` is replaced whole, not merged, so the item is restated in full.
 apiVersion: v1
