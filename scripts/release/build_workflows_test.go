@@ -9,10 +9,13 @@ package release
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func engineBuildWorkflow(t *testing.T) string {
@@ -134,4 +137,105 @@ func TestEngineBuildWorkflowInvariants(t *testing.T) {
 	if strings.Contains(wf, `target: ""`) {
 		t.Error("an engine-image matrix entry leaves `target` empty; it must name its runtime stage")
 	}
+}
+
+// Execute the workflow's real guard against a repository whose main has moved
+// beyond the release, rather than testing a second implementation of the rule.
+func TestEngineBuildUsesExactReleaseSource(t *testing.T) {
+	var wf struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Name string            `yaml:"name"`
+				Run  string            `yaml:"run"`
+				With map[string]string `yaml:"with"`
+				Env  map[string]string `yaml:"env"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal([]byte(engineBuildWorkflow(t)), &wf); err != nil {
+		t.Fatal(err)
+	}
+	var inputs, verify string
+	checkoutIndex, verifyIndex, loginIndex := -1, -1, -1
+	for n, step := range wf.Jobs["build"].Steps {
+		switch step.Name {
+		case "Check release inputs":
+			inputs = step.Run
+		case "Checkout":
+			checkoutIndex = n
+			if step.With["ref"] != "${{ inputs.source_sha }}" {
+				t.Fatal("checkout must use the exact release SHA")
+			}
+		case "Verify release source":
+			verify, verifyIndex = step.Run, n
+		case "Azure login (OIDC)":
+			loginIndex = n
+		}
+	}
+	if inputs == "" || verify == "" || checkoutIndex < 0 || verifyIndex <= checkoutIndex || loginIndex <= verifyIndex {
+		t.Fatal("release validation must precede registry authentication")
+	}
+	bridge := dispatchOnReleaseWorkflow(t)
+	for _, want := range []string{"SOURCE_SHA: ${{ github.sha }}", `-f source_sha="$SOURCE_SHA"`, "--ref main"} {
+		if !strings.Contains(bridge, want) {
+			t.Fatalf("release bridge must forward the event source: missing %s", want)
+		}
+	}
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.test", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.test")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repo, "VERSION"), []byte("1.2.3\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "VERSION")
+	git("commit", "-m", "release")
+	release := git("rev-parse", "HEAD")
+	git("tag", "v1.2.3")
+	git("tag", "-a", "v1.2.4", "-m", "wrong version")
+	git("commit", "--allow-empty", "-m", "main advanced")
+	later := git("rev-parse", "HEAD")
+	git("tag", "v1.2.5")
+	git("remote", "add", "origin", repo)
+	run := func(script, head, ref, version, sha string, ok bool) {
+		t.Helper()
+		git("checkout", "--detach", head)
+		output := filepath.Join(t.TempDir(), "output")
+		cmd := exec.Command("bash", "-euo", "pipefail", "-c", script)
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(), "WORKFLOW_REF="+ref, "VERSION="+version, "SOURCE_SHA="+sha, "GITHUB_OUTPUT="+output)
+		out, err := cmd.CombinedOutput()
+		if (err == nil) != ok {
+			t.Fatalf("guard(%s,%s,%s) success=%v want %v: %s", ref, version, sha, err == nil, ok, out)
+		}
+		stamp, _ := os.ReadFile(output)
+		if !ok && len(stamp) != 0 {
+			t.Fatalf("refusal exported a build stamp: %s", stamp)
+		}
+		if ok && script == verify && string(stamp) != "sha="+release+"\n" {
+			t.Fatalf("wrong source stamp: %s", stamp)
+		}
+	}
+	run(inputs, release, "refs/heads/main", "1.2.3", release, true)
+	run(inputs, release, "refs/heads/feature", "1.2.3", release, false)
+	run(inputs, release, "refs/heads/main", "v1.2.3", release, false)
+	run(inputs, release, "refs/heads/main", "1.2.3", "main", false)
+	run(inputs, release, "refs/heads/main", "1.2.3;echo unsafe", release, false)
+	run(verify, release, "refs/heads/main", "1.2.3", release, true)
+	run(verify, later, "refs/heads/main", "1.2.3", release, false)   // moving main is never the release checkout
+	run(verify, later, "refs/heads/main", "1.2.3", later, false)     // tag differs from candidate
+	run(verify, release, "refs/heads/main", "1.2.4", release, false) // VERSION differs, including an annotated tag
+	run(verify, release, "refs/heads/main", "9.9.9", release, false) // missing tag
+	git("tag", "-d", "v1.2.3")
+	git("tag", "-a", "v1.2.3", release, "-m", "annotated release")
+	run(verify, release, "refs/heads/main", "1.2.3", release, true)
 }

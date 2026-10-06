@@ -39,6 +39,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
+          SOURCE_SHA: ${{ github.sha }}
         run: |
           # TWO CONVENTIONS, ONE RELEASE (memql#4061). Git tags carry the `v`
           # -- clone-stack.sh checks out exactly `v0.19.0` -- and image tags do
@@ -53,5 +54,5 @@ jobs:
           VERSION="${TAG#v}"
           echo "Dispatching build-engine-images for version ${VERSION} (release tag ${TAG})"
           gh workflow run build-engine-images.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            -f version="$VERSION"
+            --repo "$GITHUB_REPOSITORY" --ref main \
+            -f version="$VERSION" -f source_sha="$SOURCE_SHA"

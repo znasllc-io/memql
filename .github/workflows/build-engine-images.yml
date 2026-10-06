@@ -33,6 +33,10 @@ on:
         description: "Release version, used as the image tag (e.g. 0.9.61)."
         required: true
         type: string
+      source_sha:
+        description: "Exact commit named by the published release tag."
+        required: true
+        type: string
       allow_overwrite:
         description: "Re-push an existing tag (release tags are normally immutable)."
         required: false
@@ -62,6 +66,10 @@ env:
   # One build, two tags: the image is identical, so there is no second thing to
   # keep in step and no way for the two registries to disagree.
   GHCR_LOGIN_SERVER: ghcr.io/znasllc-io
+
+concurrency:
+  group: build-engine-images-${{ inputs.version }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -131,8 +139,40 @@ jobs:
             target: runtime
             spa: spa-build
     steps:
+      - name: Check release inputs
+        env:
+          WORKFLOW_REF: ${{ github.ref }}
+          VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          function main() {
+            [[ "$WORKFLOW_REF" == refs/heads/main ]] || { echo "::error::dispatch the release build on main" >&2; exit 1; }
+            [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "::error::version must be bare X.Y.Z" >&2; exit 1; }
+            [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::source_sha must be the full release commit" >&2; exit 1; }
+          }
+          main
+
+      # OIDC belongs to the workflow's main ref; source belongs to the release
+      # event. Advancing main after a cut cannot change what is built.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+
+      - name: Verify release source
+        id: source
+        env:
+          VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          function main() {
+            git fetch --no-tags origin "refs/tags/v${VERSION}:refs/tags/v${VERSION}"
+            [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]] || { echo "::error::checkout does not match source_sha" >&2; exit 1; }
+            [[ "$(git rev-parse "refs/tags/v${VERSION}^{commit}")" == "$SOURCE_SHA" ]] || { echo "::error::release tag does not match source_sha" >&2; exit 1; }
+            [[ "$(cat VERSION)" == "$VERSION" ]] || { echo "::error::VERSION does not match the release" >&2; exit 1; }
+            printf 'sha=%s\n' "$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          }
+          main
 
       - name: Azure login (OIDC)
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
@@ -207,23 +247,12 @@ jobs:
           # derived from a checked-in file that had been stale since v0.16.1,
           # so no installed cluster could say which release it was running.
           #
-          # MEMQL_COMMIT is github.sha, and that is deliberately the commit this
-          # run COMPILED rather than the commit the release tag points at
-          # (memql#4486). The checkout above takes no `ref:`, so it checks out
-          # github.sha; on a workflow_dispatch that is the default branch's head
-          # at dispatch time, which can legitimately have moved past the tag by
-          # the time the release bridge fires.
-          #
-          # Stamping the tag's commit instead would name source that was not
-          # built. The whole point of carrying a revision is that it settles
-          # which code is executing, so it has to be the code that went through
-          # the compiler -- and when it differs from the tag, that difference is
-          # a fact an operator needs rather than one to paper over.
+          # The stamp is the verified release checkout, not main at dispatch.
           build-args: |
             BUILD_TAGS=${{ matrix.node }}
             SPA_DIST_STAGE=${{ matrix.spa }}
             MEMQL_RELEASE=${{ inputs.version }}
-            MEMQL_COMMIT=${{ github.sha }}
+            MEMQL_COMMIT=${{ steps.source.outputs.sha }}
           tags: |
             ${{ env.ACR_LOGIN_SERVER }}/memql-${{ matrix.node }}:${{ inputs.version }}
             ${{ env.GHCR_LOGIN_SERVER }}/memql-${{ matrix.node }}:${{ inputs.version }}

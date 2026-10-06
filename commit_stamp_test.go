@@ -177,7 +177,7 @@ func TestBothLocalBuildPathsPassASourceDirectory(t *testing.T) {
 // and not the revision, which is the same half-answer in the other direction.
 func TestTheReleaseBuildSuppliesTheCommit(t *testing.T) {
 	for path, want := range map[string]string{
-		".github/workflows/build-engine-images.yml": commitBuildArg + "=${{ github.sha }}",
+		".github/workflows/build-engine-images.yml": commitBuildArg + "=${{ steps.source.outputs.sha }}",
 		"scripts/release/release.sh":                `--build-arg "` + commitBuildArg + `=${FULL_SHA}"`,
 	} {
 		t.Run(path, func(t *testing.T) {
