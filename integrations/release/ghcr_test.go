@@ -13,6 +13,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/node"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -156,10 +157,64 @@ func dispatchedRow(version string) map[string]any {
 // allPresent builds the map for a version whose whole image set exists.
 func allPresent(tag string) map[string]bool {
 	out := map[string]bool{}
-	for _, nodeType := range checkedNodeImages {
-		out[fmt.Sprintf("acme/widget-%s:%s", nodeType, tag)] = true
+	for _, role := range node.Roles() {
+		out[fmt.Sprintf("acme/widget-%s:%s", role.Type, tag)] = true
 	}
 	return out
+}
+
+func TestStatusRequiresEveryEngineImage(t *testing.T) {
+	// The release matrix can partially succeed. In particular, the edge's
+	// additional SPA build may fail after identity, bff and agent publish.
+	for _, role := range node.Roles() {
+		t.Run(string(role.Type), func(t *testing.T) {
+			present := allPresent("1.2.3")
+			missingRepository := fmt.Sprintf("acme/widget-%s", role.Type)
+			delete(present, missingRepository+":1.2.3")
+			reg := newFakeRegistry(t, present)
+			i, engine := statusIntegration(t, reg, dispatchedRow("v1.2.3"))
+
+			out, err := i.Status(ownerCtx(), "v1.2.3")
+			if err != nil || out.CheckError != "" {
+				t.Fatalf("missing image is an absence, not a check error: %+v, %v", out, err)
+			}
+			if out.Status != "dispatched" || len(engine.writes()) != 0 {
+				t.Fatalf("partial release was promoted without %s: %+v, writes=%v", role.Type, out, engine.writes())
+			}
+			if len(out.Images) != len(node.Roles()) {
+				t.Fatalf("checked %d images, want every engine role: %+v", len(out.Images), out.Images)
+			}
+			found := false
+			for _, image := range out.Images {
+				if !image.Present {
+					if image.Repository != missingRepository {
+						t.Fatalf("reported the wrong missing image: %+v", image)
+					}
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("missing image was not identified: %s", missingRepository)
+			}
+		})
+	}
+}
+
+func TestStatusCorrectsAnEarlierPartialReleaseClaim(t *testing.T) {
+	present := allPresent("1.2.3")
+	delete(present, "acme/widget-edge:1.2.3")
+	reg := newFakeRegistry(t, present)
+	row := dispatchedRow("v1.2.3")
+	row["status"] = "images_available"
+	i, engine := statusIntegration(t, reg, row)
+
+	out, err := i.Status(ownerCtx(), "v1.2.3")
+	if err != nil || out.CheckError != "" || out.Status != "dispatched" {
+		t.Fatalf("missing edge image retained the earlier availability claim: %+v, %v", out, err)
+	}
+	if writes := engine.writes(); len(writes) != 1 || !strings.Contains(writes[0], `status: "dispatched"`) {
+		t.Fatalf("the stored availability claim was not corrected: %v", writes)
+	}
 }
 
 func TestStatusPresentMovesTheRowToImagesAvailable(t *testing.T) {
@@ -192,7 +247,7 @@ func TestStatusAbsentLeavesTheRowDispatchedWithAnAge(t *testing.T) {
 	// One image missing is enough: a partial matrix is not a deployable
 	// version.
 	present := allPresent("1.2.3")
-	delete(present, fmt.Sprintf("acme/widget-%s:1.2.3", checkedNodeImages[len(checkedNodeImages)-1]))
+	delete(present, "acme/widget-agent:1.2.3")
 	reg := newFakeRegistry(t, present)
 	i, engine := statusIntegration(t, reg, dispatchedRow("v1.2.3"))
 
