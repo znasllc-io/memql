@@ -625,6 +625,10 @@ const COPY: Record<string, RefusalCopy> = {
     title: "The runner could not run this step",
     next: "Re-run the step. If it fails the same way, ask an operator to look at the runner.",
   },
+  pipeline_execution_uncertain: {
+    title: "The previous step’s outcome is unknown",
+    next: "Check whether it completed before starting another attempt.",
+  },
   pipeline_secret_missing: {
     title: "A secret this step uses has no value on this cluster",
     next: "The pipeline's owner can store a value under that name, then re-run the step.",

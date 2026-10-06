@@ -491,6 +491,7 @@ const (
 	// The run.
 	CodePipelineRunnerUnavailable      = "pipeline_runner_unavailable"
 	CodePipelineExecutorError          = "pipeline_executor_error"
+	CodePipelineExecutionUncertain     = "pipeline_execution_uncertain"
 	CodePipelineSecretMissing          = "pipeline_secret_missing"
 	CodePipelineDisconnected           = "pipeline_disconnected"
 	CodePipelineCheckPermissionMissing = "pipeline_check_permission_missing"

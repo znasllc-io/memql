@@ -386,3 +386,33 @@ Main was integrated at b4be5df2b, preserving both human-question suspension and
 required-journal failure propagation. The combined automation suite passes.
 The merge conflict had prevented new pull-request CI runs; checks resumed
 at 603edce54. The branch remains a draft and no production change is approved.
+
+## Checkpointed human continuation and CI integration
+
+Merging newer Ask work exposed a real interaction: a paused agent turn has an
+external effect classification, so the conservative replay guard correctly
+refused to restart it. Registered integration capabilities can now implement a
+generic checkpoint preparation contract. It is separate from read-only replay
+and applies only to the particular waiting step with a persisted human decision.
+The agent-turn integration verifies an owner-scoped answered approval and a
+content-addressed checkpoint for that exact run and step. Restoration rechecks
+the proof and refuses missing, changed or empty checkpoints rather than falling
+back to a fresh turn. Other steps do not inherit the continuation requirement.
+Unclassified effects, arbitrary wrappers and other agent capabilities still
+cannot retry automatically.
+
+A real database test pauses one executor, records an answer, and resumes on a
+second executor without repeating the earlier effect. Separate engine instances
+verify owner isolation, unanswered/missing proof, wrong step/decision, changed
+checkpoint and cancellation. The combined database-backed automation, pipeline,
+workbench and agent suites pass; focused race tests cover the contract boundary.
+This is a continuation protocol, not a claim that model-generated tool choices
+provide exactly-once external effects.
+
+CI found four integration omissions: the cluster test adapter lacked readiness,
+the delivery-consumer database regression was outside the database lane, an
+agent-wiring fixture omitted explicit execution mode, and the new uncertain
+outcome lacked OS copy. These are repaired. The consumer test lives in the
+existing provisioned `test/pipelinehop` suite; no database coverage exemption
+was added. The integrations module also promotes its used YAML dependency to
+a direct requirement. Full branch and local workspace verification remain open.

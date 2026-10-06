@@ -277,6 +277,7 @@ func (c *cluster) boot(t *testing.T, id, typ, dsn string) *replica {
 		t.Fatalf("%s: the %q plug-in did not materialize (is component/pipelinerun linked into this binary?)", id, pipelinerun.IntegrationName)
 	}
 	integ.Configure(func(d *pipelinerun.Deps) {
+		d.EngineRevision = func() string { return "pipeline-hop-test-engine" }
 		d.GitHub = c.github.as(id)
 		d.Gate = c.gate
 		d.NodeID = id
