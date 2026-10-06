@@ -267,6 +267,7 @@ type rtCluster struct {
 	// createJobAnswers answer the first Job creates, one each, before
 	// anything else does.
 	createJobAnswers []kubeAnswer
+	loseJobCreates   int // store the Job, then lose its create response
 	// jobGetFailures answer the first GETs of a Job, one each.
 	jobGetFailures []kubeAnswer
 	reqs           []rtReq
@@ -298,7 +299,8 @@ type rtCluster struct {
 	blockTails bool
 	// onSecretCreate runs, with c.mu held, on every Secret create before it
 	// is answered.
-	onSecretCreate func(c *rtCluster, s Secret)
+	onSecretCreate  func(c *rtCluster, s Secret)
+	onSecretPatched func(c *rtCluster, s Secret)
 	// createSecretAnswers answer the first Secret creates, one each, before
 	// anything else does.
 	createSecretAnswers []kubeAnswer
@@ -315,6 +317,7 @@ type rtCluster struct {
 	// loseSecretCreates makes that many Secret creates, and answers each
 	// 503, as a reply lost on its way back.
 	loseSecretCreates int
+	loseSecretPatches int // persist a patch, then lose its response
 	// tailAnswer, when set, answers every tail of a container's log
 	// instead: the API server's word for a kubelet it cannot reach.
 	tailAnswer *kubeAnswer
@@ -515,7 +518,12 @@ func (c *rtCluster) createJob(w http.ResponseWriter, body []byte) {
 	c.mostJobs = max(c.mostJobs, len(c.jobs))
 	c.made = append(c.made, c.viewLocked(j))
 	c.bumpLocked()
-	rtJSON(w, 201, c.viewLocked(j))
+	if c.loseJobCreates > 0 {
+		c.loseJobCreates--
+		rtAnswer(w, rtUnavailable)
+	} else {
+		rtJSON(w, 201, c.viewLocked(j))
+	}
 	// The Job controller writes the new Job's status at once (measured on
 	// k3s v1.32: the creator's first claim, conditioned on the version the
 	// create answered, is refused 409). A status write is a new version.
@@ -743,7 +751,10 @@ func (c *rtCluster) getSecret(w http.ResponseWriter, name string) {
 func (c *rtCluster) patchSecret(w http.ResponseWriter, name string, body []byte) {
 	var patch struct {
 		Metadata struct {
-			OwnerReferences []OwnerReference `json:"ownerReferences"`
+			OwnerReferences []OwnerReference  `json:"ownerReferences"`
+			UID             string            `json:"uid"`
+			ResourceVersion string            `json:"resourceVersion"`
+			Annotations     map[string]string `json:"annotations"`
 		} `json:"metadata"`
 		Data map[string][]byte `json:"data"`
 	}
@@ -760,6 +771,21 @@ func (c *rtCluster) patchSecret(w http.ResponseWriter, name string, body []byte)
 	if patch.Metadata.OwnerReferences != nil {
 		s.Metadata.OwnerReferences = patch.Metadata.OwnerReferences
 	}
+	if (patch.Metadata.UID != "" && patch.Metadata.UID != s.Metadata.UID) ||
+		(patch.Metadata.ResourceVersion != "" && patch.Metadata.ResourceVersion != s.Metadata.ResourceVersion) {
+		rtAnswer(w, kubeStatus(409, "Conflict", "Secret revision changed"))
+		return
+	}
+	if patch.Metadata.Annotations != nil {
+		annotations := make(map[string]string, len(s.Metadata.Annotations)+len(patch.Metadata.Annotations))
+		for key, value := range s.Metadata.Annotations {
+			annotations[key] = value
+		}
+		for key, value := range patch.Metadata.Annotations {
+			annotations[key] = value
+		}
+		s.Metadata.Annotations = annotations
+	}
 	if len(patch.Data) > 0 {
 		data := make(map[string][]byte, len(s.Data)+len(patch.Data))
 		for k, v := range s.Data {
@@ -773,6 +799,14 @@ func (c *rtCluster) patchSecret(w http.ResponseWriter, name string, body []byte)
 	c.rv++
 	s.Metadata.ResourceVersion = strconv.Itoa(c.rv)
 	c.secrets[name] = s
+	if c.onSecretPatched != nil {
+		c.onSecretPatched(c, s)
+	}
+	if c.loseSecretPatches > 0 {
+		c.loseSecretPatches--
+		rtAnswer(w, rtUnavailable)
+		return
+	}
 	rtJSON(w, 200, s)
 }
 
@@ -1538,10 +1572,10 @@ func TestRunnerRunsAStepToSuccessAndArchivesItsLog(t *testing.T) {
 	// the version the create answered.
 	reqs := h.c.requests()
 	var first []string
-	for _, r := range reqs[:min(6, len(reqs))] {
+	for _, r := range reqs[:min(8, len(reqs))] {
 		first = append(first, r.Method+" "+r.Path)
 	}
-	wantFirst := []string{"GET " + rtJobPath, "GET /apis/networking.k8s.io/v1/namespaces/steps-ns/networkpolicies", "POST " + kubeSecrets, "POST " + kubeJobs, "PATCH " + kubeSecrets + "/" + testSecretName, "PATCH " + rtJobPath}
+	wantFirst := []string{"GET " + rtJobPath, "GET /apis/networking.k8s.io/v1/namespaces/steps-ns/networkpolicies", "POST " + kubeSecrets, "GET " + kubeSecrets + "/" + testSecretName, "PATCH " + kubeSecrets + "/" + testSecretName, "POST " + kubeJobs, "PATCH " + kubeSecrets + "/" + testSecretName, "PATCH " + rtJobPath}
 	if !reflect.DeepEqual(first, wantFirst) {
 		t.Errorf("first requests:\n  got  %q\n  want %q", first, wantFirst)
 	}
@@ -1557,8 +1591,8 @@ func TestRunnerRunsAStepToSuccessAndArchivesItsLog(t *testing.T) {
 		t.Errorf("the Secret's owners = %+v, want the Job, so collecting the Job collects the token", secret.Metadata.OwnerReferences)
 	}
 
-	// The create answered version 2, and the Job controller's status write
-	// made it 3 at once, as a real API server's does: the creator's first
+	// The create answered version 3, and the Job controller's status write
+	// made it 4 at once, as a real API server's does: the creator's first
 	// claim is refused, and the one on the version it read again holds -- with
 	// no word of a re-attach, since nobody held the Job before (the store
 	// check above).
@@ -1567,15 +1601,15 @@ func TestRunnerRunsAStepToSuccessAndArchivesItsLog(t *testing.T) {
 			ResourceVersion string `json:"resourceVersion"`
 		} `json:"metadata"`
 	}
-	if err := json.Unmarshal([]byte(reqs[5].Body), &firstClaim); err != nil || firstClaim.Metadata.ResourceVersion != "2" {
-		t.Errorf("the first claim was conditioned on %q (%v), want the version the create answered, 2", firstClaim.Metadata.ResourceVersion, err)
+	if err := json.Unmarshal([]byte(reqs[7].Body), &firstClaim); err != nil || firstClaim.Metadata.ResourceVersion != "3" {
+		t.Errorf("the first claim was conditioned on %q (%v), want the version the create answered, 3", firstClaim.Metadata.ResourceVersion, err)
 	}
 	patches := h.c.appliedPatches()
 	if len(patches) == 0 {
 		t.Fatal("the runner never patched its Job")
 	}
-	if claim, _ := patches[0].get(AnnotRunner); claim != rtStamp(rtNode, rtT0) || patches[0].rv != "3" {
-		t.Errorf("first applied patch = runner %q on version %q, want the claim %q conditioned on the version read again, 3", claim, patches[0].rv, rtStamp(rtNode, rtT0))
+	if claim, _ := patches[0].get(AnnotRunner); claim != rtStamp(rtNode, rtT0) || patches[0].rv != "4" {
+		t.Errorf("first applied patch = runner %q on version %q, want the claim %q conditioned on the version read again, 4", claim, patches[0].rv, rtStamp(rtNode, rtT0))
 	}
 	for _, p := range patches {
 		if _, ok := p.get(AnnotRunner); ok && p.rv == "" {
@@ -3984,12 +4018,13 @@ func TestRunnerKeepsAskingForAJobItHasSeen(t *testing.T) {
 // TestRunnerCountsFailuresThatMayPassFromTheLastAnswer (fix round 1, minor 6):
 // a quota refusal is the API server answering, so the failures that may pass
 // are counted from it -- a step waiting out the ceiling is not failed for
-// 503s spread over its whole wait.
+// explicit throttling refusals spread over its whole wait. A 5xx on a create
+// is ambiguous and is deliberately not safe to retry after a missing Job.
 func TestRunnerCountsFailuresThatMayPassFromTheLastAnswer(t *testing.T) {
 	h := newRunnerHarness(t)
 	var answers []kubeAnswer
 	for i := 0; i < 2*apiAttempts; i++ {
-		answers = append(answers, rtUnavailable, rtQuotaRefusal(testJobName))
+		answers = append(answers, kubeStatus(429, "TooManyRequests", "request throttled before admission"), rtQuotaRefusal(testJobName))
 	}
 	h.c.with(func(c *rtCluster) { c.createJobAnswers = answers })
 	h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "done")))

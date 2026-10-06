@@ -758,6 +758,29 @@ func TestExecuteHopQueuedStepKeepsItsRouteAndRecoversADeadQueue(t *testing.T) {
 					t.Fatalf("queued status missed its actual forward route: %+v", sent)
 				}
 			}
+			if loss != "none" {
+				// Lose the process at a known queued boundary, after the API
+				// stored its quota refusal. Loss during the creating phase is
+				// intentionally uncertain and has separate negative tests.
+				queuedLoss := make(chan struct{})
+				prior := w.process("workbench-a")
+				w.h.c.with(func(c *rtCluster) {
+					c.onSecretPatched = func(c *rtCluster, secret Secret) {
+						if secret.Metadata.Name != SecretName(job) || secret.Metadata.Annotations[annotCreation] != creationQueued {
+							return
+						}
+						c.onSecretPatched = nil
+						w.mesh.flap("workbench-a")
+						prior.die()
+						close(queuedLoss)
+					}
+				})
+				select {
+				case <-queuedLoss:
+				case <-time.After(5 * time.Second):
+					t.Fatal("queue did not reach the persisted refusal boundary")
+				}
+			}
 			switch loss {
 			case "restart":
 				w.restart("workbench-a")

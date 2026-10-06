@@ -58,7 +58,9 @@ const (
 	// on its own goroutine and never on the stream's receive loop.
 	// The version is part of the action: an older replica must reject the
 	// request, not silently discard execution/recovery fields it cannot enforce.
-	PipelineStepAction = "pipelineStepV2"
+	// V3 requires the durable pre-create claim. V2 runners can create a Job
+	// without that claim, so they cannot share a recoverable queued attempt.
+	PipelineStepAction = "pipelineStepV3"
 	// PipelineStatusAction asks after a step's Job: running, finished (with
 	// the outcome), absent or stale. Quick -- the runner bounds it at ten
 	// seconds -- and still answered off the receive loop, as are the next two.

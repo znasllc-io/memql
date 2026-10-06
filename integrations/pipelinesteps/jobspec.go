@@ -161,6 +161,9 @@ func BuildSecret(cfg Config, run StepRun, jobName, cloneToken string) Secret {
 	if len(data) == 0 {
 		data = nil
 	}
+	annotations := objectAnnotations(run)
+	annotations[annotCreation] = creationQueued
+	annotations[annotCreationDefinition] = creationDefinition(run)
 	return Secret{
 		APIVersion: "v1",
 		Kind:       "Secret",
@@ -168,7 +171,7 @@ func BuildSecret(cfg Config, run StepRun, jobName, cloneToken string) Secret {
 			Name:        SecretName(jobName),
 			Namespace:   cfg.Namespace,
 			Labels:      objectLabels(run),
-			Annotations: objectAnnotations(run),
+			Annotations: annotations,
 		},
 		Type: secretType,
 		Data: data,

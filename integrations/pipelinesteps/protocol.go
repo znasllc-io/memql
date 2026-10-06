@@ -11,9 +11,8 @@ import (
 // over NodeService, as JSON, and what comes back.
 //
 // The forward action NAMES are integrations/workbench's
-// (PipelineStepAction "pipelineStep", PipelineStatusAction "pipelineStatus",
-// PipelineAckAction "pipelineAck", PipelineCancelAction "pipelineCancel",
-// PipelineReadinessAction "pipelineReadiness"). The
+// (PipelineStepAction, PipelineStatusAction, PipelineAckAction,
+// PipelineCancelAction and PipelineReadinessAction). The
 // transport owns its vocabulary, and integrations/workbench cannot import this
 // package, so a second spelling here would be a literal that drifts silently.
 //
