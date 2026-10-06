@@ -1167,9 +1167,21 @@ func TestAdoptionNeverWaitsOnTheProof(t *testing.T) {
 // What the proof leaves behind: nothing
 // ---------------------------------------------------------------------------
 
+func TestIsolationProbeRefusesToReuseUnconfirmedCleanup(t *testing.T) {
+	h := newIsoHarness(t, isoScript(probeExitIsolated, isoSaid[probeExitIsolated]))
+	h.c.with(func(c *rtCluster) { c.podsAnswer = &rtUnavailable })
+	verdict, decided := h.r.probeIsolation(context.Background())
+	if !decided || !verdict.Inconclusive || verdict.Isolated || !strings.Contains(verdict.Detail, "cleanup remains unconfirmed") {
+		t.Fatalf("unreadable cleanup was trusted: %+v, decided=%v", verdict, decided)
+	}
+	if len(h.c.requestsFor(http.MethodPost, kubeJobs)) != 0 {
+		t.Fatal("created another probe before confirming the previous pods were gone")
+	}
+}
+
 // TestIsolationProofDeletesItsProbeJobs: whatever the verdict, and when every
 // step waiting on it gave up, the proof deletes its Job and its Secret --
-// background propagation, which the fake insists on -- before it answers.
+// foreground propagation, which the fake insists on -- before it answers.
 func TestIsolationProofDeletesItsProbeJobs(t *testing.T) {
 	neverEnds := isoScript(probeExitIsolated, "")
 	neverEnds.states = neverEnds.states[:3]

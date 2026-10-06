@@ -592,14 +592,14 @@ func (c *rtCluster) patchJob(w http.ResponseWriter, name string, body []byte) {
 	rtJSON(w, 200, c.viewLocked(j))
 }
 
-func (c *rtCluster) wantBackground(q map[string][]string, what string) {
-	if got := q["propagationPolicy"]; len(got) != 1 || got[0] != "Background" {
-		c.t.Errorf("%s deleted with propagationPolicy %q, want Background: the API's default orphans a Job's pods", what, got)
+func (c *rtCluster) wantPropagation(q map[string][]string, what, policy string) {
+	if got := q["propagationPolicy"]; len(got) != 1 || got[0] != policy {
+		c.t.Errorf("%s deleted with propagationPolicy %q, want %s", what, got, policy)
 	}
 }
 
 func (c *rtCluster) deleteJob(w http.ResponseWriter, name string, q map[string][]string, body []byte) {
-	c.wantBackground(q, "job "+name)
+	c.wantPropagation(q, "job "+name, "Foreground")
 	c.mu.Lock()
 	hold := c.holdJobDeletes[name]
 	c.mu.Unlock()
@@ -760,7 +760,7 @@ func (c *rtCluster) patchSecret(w http.ResponseWriter, name string, body []byte)
 }
 
 func (c *rtCluster) deleteSecret(w http.ResponseWriter, name string, q map[string][]string, body []byte) {
-	c.wantBackground(q, "secret "+name)
+	c.wantPropagation(q, "secret "+name, "Background")
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, ok := c.secrets[name]; !ok {
@@ -4143,8 +4143,8 @@ func TestCancelRunStopsThisReplicasRunsAndDeletesTheRun(t *testing.T) {
 	if !h.c.hasJob(otherJob) || !h.c.hasSecret(SecretName(otherJob)) {
 		t.Error("cancelling one run deleted another run's Job or Secret")
 	}
-	selector := "labelSelector=memql.io%2Fpipelines-run%3Drun-7f3a&propagationPolicy=Background"
-	for _, path := range []string{kubeJobs, kubeSecrets} {
+	for path, policy := range map[string]string{kubeJobs: "Foreground", kubeSecrets: "Background"} {
+		selector := "labelSelector=memql.io%2Fpipelines-run%3Drun-7f3a&propagationPolicy=" + policy
 		found := false
 		for _, r := range h.c.requestsFor(http.MethodDelete, path) {
 			found = found || r.Query == selector

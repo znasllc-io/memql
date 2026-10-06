@@ -10,6 +10,7 @@ import (
 // NoSchedule toleration cannot admit steps to unrelated reserved pools.
 const pipelinePoolLabel = "memql.io/pipeline-pool"
 
+// ValidatePlacement refuses malformed operator placement before any effects.
 func (c Config) ValidatePlacement() error {
 	if c.NodePool != "" && (len(c.NodePool) > 63 || !dnsLabelShape.MatchString(c.NodePool)) {
 		return fmt.Errorf("%s must be a lowercase DNS label of at most 63 characters", envNodePool)

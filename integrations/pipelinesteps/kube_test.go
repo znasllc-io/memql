@@ -448,11 +448,9 @@ func TestOwnSecretRefusesAJobWithoutAUID(t *testing.T) {
 	fake.wantRequests(t)
 }
 
-// TestDeleteJobIsBackgroundAndAbsentIsSuccess: the API's default for a Job is
-// to ORPHAN its pods, which would leave the step running after its Job is
-// gone, so every delete asks for background propagation. Deleting what is
-// already gone is the outcome wanted.
-func TestDeleteJobIsBackgroundAndAbsentIsSuccess(t *testing.T) {
+// Foreground deletion keeps a terminating Job in object-count quota while
+// its dependent pods are still present. Repeated deletion is harmless.
+func TestDeleteJobRetainsQuotaUntilPodsAreGone(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		answer  kubeAnswer
@@ -467,7 +465,7 @@ func TestDeleteJobIsBackgroundAndAbsentIsSuccess(t *testing.T) {
 			if err := kube.DeleteJob(context.Background(), kubeJobName); (err != nil) != c.wantErr {
 				t.Errorf("DeleteJob err = %v, want error %v", err, c.wantErr)
 			}
-			fake.wantRequests(t, "DELETE "+kubeJobs+"/"+kubeJobName+"?propagationPolicy=Background")
+			fake.wantRequests(t, "DELETE "+kubeJobs+"/"+kubeJobName+"?propagationPolicy=Foreground")
 		})
 	}
 }
@@ -511,7 +509,7 @@ func TestDeleteRunSelectsByRunLabel(t *testing.T) {
 		t.Errorf("DeleteRun matched %d Jobs, want 2", n)
 	}
 	fake.wantRequests(t,
-		"DELETE "+kubeJobs+"?labelSelector=memql.io%2Fpipelines-run%3Drun-7f3a&propagationPolicy=Background",
+		"DELETE "+kubeJobs+"?labelSelector=memql.io%2Fpipelines-run%3Drun-7f3a&propagationPolicy=Foreground",
 		"DELETE "+kubeSecrets+"?labelSelector=memql.io%2Fpipelines-run%3Drun-7f3a&propagationPolicy=Background",
 	)
 }
@@ -529,7 +527,7 @@ func TestDeleteRunSelectsACanonicalRunByItsLabelValue(t *testing.T) {
 		t.Fatalf("DeleteRun = %d, %v; want 0, nil", n, err)
 	}
 	fake.wantRequests(t,
-		"DELETE "+kubeJobs+"?labelSelector=memql.io%2Fpipelines-run%3Dr-a52dd336cd341cefd8e6ab57&propagationPolicy=Background",
+		"DELETE "+kubeJobs+"?labelSelector=memql.io%2Fpipelines-run%3Dr-a52dd336cd341cefd8e6ab57&propagationPolicy=Foreground",
 		"DELETE "+kubeSecrets+"?labelSelector=memql.io%2Fpipelines-run%3Dr-a52dd336cd341cefd8e6ab57&propagationPolicy=Background",
 	)
 }

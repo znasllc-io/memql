@@ -253,9 +253,9 @@ type probeListener struct {
 }
 
 // probeIsolation runs the probe once, and answers its verdict; decided is
-// false when no step waited on it any more before there was one. The probe's
-// Job and Secret are gone when it returns, whatever happened.
-func (r *Runner) probeIsolation(ctx context.Context) (IsolationVerdict, bool) {
+// false when no step waited on it any more before there was one. Cleanup is
+// confirmed before a successful verdict is returned.
+func (r *Runner) probeIsolation(ctx context.Context) (verdict IsolationVerdict, decided bool) {
 	if err := r.cfg.ValidatePlacement(); err != nil {
 		return IsolationVerdict{Inconclusive: true, Detail: err.Error(), At: r.now()}, true
 	}
@@ -266,8 +266,21 @@ func (r *Runner) probeIsolation(ctx context.Context) (IsolationVerdict, bool) {
 	}
 	// Whatever this replica's last probe left goes first: a probe Secret of
 	// its would start the new connector at once, at another pod's address.
-	p.remove()
-	defer p.remove()
+	if err := p.remove(); err != nil {
+		return IsolationVerdict{Inconclusive: true, Detail: err.Error(), At: r.now()}, true
+	}
+	defer func() {
+		if err := p.remove(); err != nil {
+			p.log.Warn("pipelines: isolation probe cleanup remains unconfirmed", "error", err)
+			if decided {
+				detail := err.Error()
+				if !verdict.Isolated && verdict.Detail != "" {
+					detail = verdict.Detail + "; " + detail
+				}
+				verdict = IsolationVerdict{Inconclusive: true, Detail: detail, At: r.now()}
+			}
+		}
+	}()
 
 	var (
 		job      Job
@@ -329,7 +342,9 @@ func (p *prober) create() (Job, error) {
 			if leftovers++; leftovers >= apiAttempts {
 				return Job{}, probeFailure(fmt.Sprintf("an earlier probe Job, %s, was still there after %d deletes", p.name, leftovers))
 			}
-			p.remove()
+			if err := p.remove(); err != nil {
+				return Job{}, probeFailure(err.Error())
+			}
 			if !sleepCtx(p.ctx, p.r.cfg.PollInterval) {
 				return Job{}, errProbeStopped
 			}
@@ -546,17 +561,36 @@ func (p *prober) kubeletAnswers(pod *Pod) (bool, string, error) {
 	return false, "the listener's kubelet could not be reached through the API server, so its node may be lost: " + apiMessage(err), nil
 }
 
-// remove deletes the probe Job -- background propagation, so its pods go
-// with it -- and its Secret, under a context of its own, so a proof stopped
-// by its waiters still cleans up after itself. What is gone is deleted.
-func (p *prober) remove() {
+// remove confirms foreground deletion of the probe and its pods before the
+// same name or quota slot can be reused. Its independent context also gives
+// an abandoned proof a bounded opportunity to clean up.
+func (p *prober) remove() error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(p.ctx), quickCallTimeout)
 	defer cancel()
-	if err := p.r.kube.DeleteJob(ctx, p.name); err != nil {
-		p.log.Warn("pipelines: the isolation probe's Job could not be deleted; its deadline and TTL end it", "error", err)
+	jobErr := p.r.kube.DeleteJob(ctx, p.name)
+	secretErr := p.r.kube.DeleteSecret(ctx, p.target)
+	if err := errors.Join(jobErr, secretErr); err != nil {
+		return fmt.Errorf("isolation probe cleanup remains unconfirmed: %w", err)
 	}
-	if err := p.r.kube.DeleteSecret(ctx, p.target); err != nil {
-		p.log.Warn("pipelines: the isolation probe's Secret could not be deleted; it goes with its Job", "error", err)
+	for {
+		_, jobErr := p.r.kube.GetJob(ctx, p.name)
+		_, secretErr := p.r.kube.SecretMetadata(ctx, p.target)
+		pods, podErr := p.r.kube.JobPods(ctx, p.name)
+		if deploycontrol.IsNotFound(jobErr) && deploycontrol.IsNotFound(secretErr) && podErr == nil && len(pods) == 0 {
+			return nil
+		}
+		if jobErr != nil && !deploycontrol.IsNotFound(jobErr) {
+			return fmt.Errorf("isolation probe cleanup remains unconfirmed: Job could not be read: %w", jobErr)
+		}
+		if secretErr != nil && !deploycontrol.IsNotFound(secretErr) {
+			return fmt.Errorf("isolation probe cleanup remains unconfirmed: Secret could not be read: %w", secretErr)
+		}
+		if podErr != nil {
+			return fmt.Errorf("isolation probe cleanup remains unconfirmed: pods could not be read: %w", podErr)
+		}
+		if !sleepCtx(ctx, p.r.cfg.PollInterval) {
+			return fmt.Errorf("isolation probe cleanup remains unconfirmed: %w", ctx.Err())
+		}
 	}
 }
 

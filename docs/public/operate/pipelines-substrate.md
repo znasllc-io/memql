@@ -251,6 +251,9 @@ acknowledges it. Returning an execution result does not delete the evidence.
 The agent sends that acknowledgement up to 5 times within a 30-second budget,
 waiting twice as long before each send. The runner confirms the Job, Secret and
 pods are absent; an accepted delete with a terminating pod is not enough.
+Jobs are deleted with foreground propagation, retaining their quota slots
+until dependent pods are gone. Isolation probes confirm their own cleanup
+before returning a successful verdict or reusing the same probe name.
 Unconfirmed cleanup leaves the run unfinished for recovery. A replacement
 driver retries cleanup from the committed receipt without executing the command
 again. The Job's 30-minute TTL remains a fallback, not evidence of deletion.

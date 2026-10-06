@@ -73,7 +73,7 @@ can run.
 | Cache access mode | `ReadWriteOnce` | `ReadWriteMany` | `ReadWriteMany` |
 | Cache size | 20Gi | 100Gi | 50Gi |
 | Cache marked `binds-on-first-use` | yes | no | no |
-| Steps at once | 4 | 2 | 1 |
+| Steps at once | 1 | 2 | 1 |
 | Container limit | 2 CPU / 4Gi | 2 CPU / 4Gi | 2 CPU / 4Gi |
 | Container request | 250m / 512Mi | 250m / 512Mi | 250m / 512Mi |
 | Container disk limit / request (`ephemeral-storage`) | 20Gi / 1Gi | 8Gi / 1Gi | 8Gi / 1Gi |
@@ -127,6 +127,9 @@ can run.
   compute quota is enforced when the Job's pod is created, after the Job
   exists, so a step it refused would wait inside its own
   `activeDeadlineSeconds` and time out having never run.
+  Job deletion uses foreground propagation: a terminating pod keeps its Job
+  present and its quota slot occupied until garbage collection finishes.
+  Receipt acknowledgement and isolation-probe cleanup verify absence.
 - **Dedicated build placement** is an operator setting on the workbench:
   `MEMQL_PIPELINES_NODE_POOL=builds` selects nodes labeled
   `memql.io/pipeline-pool=builds` and tolerates exactly the matching

@@ -50,6 +50,7 @@ func TestIsolationProofAgainstLocalNetworkPolicy(t *testing.T) {
 	}
 	cfg := ConfigFromEnv(func(key string) string { return config.Data[key] })
 	cfg.Namespace, cfg.NodeID, cfg.PollInterval = ns, ns, 250*time.Millisecond
+	cfg.NodePool = os.Getenv("MEMQL_PIPELINES_TEST_NODE_POOL")
 	prove := func(t *testing.T, wantIsolated, wantInconclusive bool) {
 		t.Helper()
 		r := NewRunner(cfg, kube, nil, nil, nil)
@@ -115,7 +116,7 @@ func localPipelineControls(t *testing.T) (context.Context, string, string, func(
 	t.Cleanup(func() {
 		cleanup, stop := context.WithTimeout(context.Background(), 30*time.Second)
 		defer stop()
-		out, err := exec.CommandContext(cleanup, "kubectl", "--context", cluster, "delete", "namespace", ns, "--wait=false").CombinedOutput()
+		out, err := exec.CommandContext(cleanup, "kubectl", "--context", cluster, "delete", "namespace", ns, "--wait=true", "--timeout=25s").CombinedOutput()
 		if err != nil {
 			t.Errorf("clean up %s: %v: %s", ns, err, out)
 		}

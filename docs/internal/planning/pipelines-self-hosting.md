@@ -395,6 +395,43 @@ egress fails; a missing IP exception list fails; missing listener ingress is
 inconclusive. No running engine Deployment was replaced. This addresses the
 ingress-masking failure in #5810; cloud and multi-node rollout remain unverified.
 
+### Dedicated local build capacity (October 6)
+
+The runner accepts an operator-selected `MEMQL_PIPELINES_NODE_POOL`, with an
+exact label and `NoSchedule` toleration shared by step Jobs and isolation
+probes. Repository configuration cannot add tolerations or choose arbitrary
+node selectors. The local overlay permits one Job across all Workbench replicas.
+Invalid placement refuses before creating external resources.
+
+A live test on local ARM64 K3s v1.32.13 checked out exact main commit
+`e65551c7d763afff66c77eb2f45c766b7fe43beb`, ran `SELECT 1` against the repository's
+pinned PostgreSQL sidecar, verified both captured artifacts, and recovered the
+same persisted outcome through a second Runner without another Job or Library
+write. It verified placement on the tainted build node, rejection of a second
+Job under quota, and absence of Job, pods and Secret after acknowledgement.
+The first passing run took 133 seconds with images warmed. Two earlier cold
+runs timed out while pulling the database image; they are failed attempts,
+not release qualification. Library storage in this test is an in-memory
+fixture, and both Runners are test-process instances, not installed mesh pods.
+
+Those failures exposed a capacity leak: background Job deletion released the
+quota slot while the pod could remain terminating. Jobs now use foreground
+deletion, and the isolation probe confirms cleanup before reusing its name or
+returning a successful verdict. A real Kubernetes test holds a pod with a test
+finalizer: the original code loses the Job, while the fix retains the slot,
+rejects a successor, and admits it after confirmed cleanup. The test releases
+only its own finalizer. Disposable namespace deletion is also confirmed.
+
+Four live network-policy cases pass on the selected build pool: allowed DNS
+and positive control with restricted egress; refusal with egress removed;
+refusal with private-address exceptions removed; and an inconclusive verdict
+when listener ingress is missing. This exercises the existing K3s policy
+engine, not Cilium. Race, runner-wiring, overlay, environment-registry and
+focused documentation gates pass. No installed engine has been replaced,
+the source pipeline remains disconnected, and no release has been published.
+The installed Workbench cycle, private OCI access, rootless image builds,
+Cilium rehearsal and update/rollback proof remain unfinished.
+
 ## Delivery privacy progress
 
 Inbound and outbound concepts now declare the cluster-operator row tier.
