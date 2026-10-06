@@ -212,9 +212,8 @@ func engineImportGraph(t *testing.T) (*pipelines.Graph, map[string]bool) {
 // decides, the change list a pull request's compare answers, the import graph
 // selected with Affected whenever a step selects packages, and Compile.
 //
-// Compute is cluster, the default a pipeline row carries. The engine's pipeline
-// consents to no fleet machine, so a step that named a need would refuse the
-// whole run here exactly as it would there.
+// The Cockpit trial requires the owner's explicit fleet consent. The separate
+// consent guard below proves a cluster-only connection refuses this manifest.
 func compileEngineOpening(spec *pipelines.Spec, graph *pipelines.Graph, event pipelines.Event, changed []string) (pipelines.Plan, *pipelines.Refusal) {
 	if refusal := pipelines.Validate(spec); refusal != nil {
 		return pipelines.Plan{}, refusal
@@ -223,7 +222,7 @@ func compileEngineOpening(spec *pipelines.Spec, graph *pipelines.Graph, event pi
 	if !ok {
 		return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeEventUnknown, "", "no mode is decided for event %q", event)
 	}
-	in := pipelines.CompileInput{Mode: mode, Event: event, Compute: pipelines.ComputeCluster}
+	in := pipelines.CompileInput{Mode: mode, Event: event, Compute: pipelines.ComputeClusterAndFleet}
 	if mode == pipelines.ModeAffected {
 		in.Changed, in.ChangedKnown = changed, true
 	}
@@ -246,7 +245,7 @@ func compileEngineOpening(spec *pipelines.Spec, graph *pipelines.Graph, event pi
 
 // Every event that opens a run compiles with no refusal, into its stages in the
 // order written (the gates stage for a pull request only), every step in the
-// toolchain image on the cluster, the db step beside its Postgres; and each
+// toolchain image on the fleet, the db step beside its Postgres; and each
 // opening runs, skips and leaves out what the manifest says it does.
 func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 	spec := engineManifest(t).Pipeline
@@ -334,8 +333,11 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 					t.Errorf("step %s is a %s step in %q; every step is a command in the toolchain image %q",
 						step.Key, step.Kind, step.Image, spec.Image)
 				}
+				if step.Placement != pipelines.PlacementFleet || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/arm64" {
+					t.Errorf("step %s must use a native Linux ARM64 fleet container: %+v", step.Key, step)
+				}
 				if len(step.Needs) > 0 {
-					t.Errorf("step %s names needs %v, which send it to a fleet machine; the engine's pipeline runs on the cluster alone", step.Key, step.Needs)
+					t.Errorf("container step %s asks for host needs %v", step.Key, step.Needs)
 				}
 			}
 
@@ -635,4 +637,16 @@ func engineSetMinus(a, b []string) []string {
 		}
 	}
 	return out
+}
+
+// No implicit host consent or accidental cluster capacity during the trial.
+func TestEngineManifestRequiresExplicitFleetConsent(t *testing.T) {
+	spec := engineManifest(t).Pipeline
+	refusal := pipelines.Consent(spec, pipelines.ComputeCluster, nil)
+	if refusal == nil || refusal.Code != pipelines.CodeFleetNotConsented {
+		t.Fatalf("cluster-only connection must refuse the fleet manifest: %v", refusal)
+	}
+	if refusal := pipelines.Consent(spec, pipelines.ComputeClusterAndFleet, nil); refusal != nil {
+		t.Fatalf("explicit fleet consent refused: %v", refusal)
+	}
 }
