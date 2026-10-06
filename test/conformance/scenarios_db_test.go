@@ -223,33 +223,21 @@ func loadScenarioSuites(t *testing.T) map[string]scenarioSuite {
 	return out
 }
 
-// scenarioFixtures is the engine and the shipped automations both scenario
-// tests read, built once for this file: each costs a boot of the whole tree.
+// scenarioFixtures belongs to the calling test. Reusing a fixture across top-
+// level tests would retain the first test's database after its cleanup closed it.
 func scenarioFixtures(t *testing.T) (*Env, map[string]*automations.Automation) {
 	t.Helper()
-	scenarioFixturesOnce.Do(func() {
-		scenarioEnv = newEnv(t)
-		scenarioAutos = shippedAutomations(t)
-	})
-	if scenarioEnv == nil || scenarioAutos == nil {
-		t.Fatal("the scenario fixtures failed to build (see the first test that asked for them)")
-	}
-	return scenarioEnv, scenarioAutos
+	env := newEnv(t)
+	return env, shippedAutomations(t, env)
 }
 
-var (
-	scenarioFixturesOnce sync.Once
-	scenarioEnv          *Env
-	scenarioAutos        map[string]*automations.Automation
-)
-
 // shippedAutomations is every automation the embedded tree loads, by name.
-func shippedAutomations(t *testing.T) map[string]*automations.Automation {
+func shippedAutomations(t *testing.T, env *Env) map[string]*automations.Automation {
 	t.Helper()
 	loaded, err := automations.NewLoader(automations.LoaderOptions{
 		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Registry:  scenarioEnv.Registry,
-		Functions: scenarioEnv.Eng.Functions(),
+		Registry:  env.Registry,
+		Functions: env.Eng.Functions(),
 	}).LoadFromUnifiedTree()
 	if err != nil {
 		t.Fatalf("load the shipped automations: %v", err)
