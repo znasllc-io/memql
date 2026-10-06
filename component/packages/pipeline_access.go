@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/znasllc-io/memql/component/packages/githubapp"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 )
 
 // pipeline_access.go -- what pipelines borrow from Deployables (epic

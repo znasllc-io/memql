@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/packages/githubapp"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 )
 
 // github_test.go -- the production GitHub port and the filtered tree.

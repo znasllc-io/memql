@@ -3,9 +3,9 @@ package release
 import (
 	"context"
 
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/identity/githubconnect"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/component/packages/githubapp"
 )
 
 // plugin.go -- registration.

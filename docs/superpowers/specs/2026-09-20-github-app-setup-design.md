@@ -8,7 +8,7 @@
   exchange, resolution of the app's six values), `component/identity/` and
   `component/identity/http|web/` (the state's purpose, the two routes, the six
   rows), `integrations/identity/` and `dsl/identity/` (three capabilities),
-  `component/packages/githubapp/` (a client whose app can arrive after boot),
+  `component/identity/githubapp/` (a client whose app can arrive after boot),
   `component/inbound/` and `app/` (a webhook source the cluster registered for
   itself), `clients/os/` (the Repository step, Settings > Sources, the Set up
   group), the operator guide and the CLAUDE.md HTTP exceptions table.

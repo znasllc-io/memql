@@ -14,8 +14,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/component/pipelinerun"
 	"github.com/znasllc-io/memql/component/pipelines"
 )
@@ -207,7 +207,9 @@ func (h githubAt) Configured() bool { return true }
 
 // Installations answers none: no hop reads the app's installations, which
 // only the Settings item asks for, on the node that answers the builtin.
-func (h githubAt) Installations(context.Context) ([]githubapp.AppInstallation, error) { return nil, nil }
+func (h githubAt) Installations(context.Context) ([]githubapp.AppInstallation, error) {
+	return nil, nil
+}
 
 func (h githubAt) InstallationToken(_ context.Context, credentialID, ownerUserID, repository string) (string, int64, error) {
 	g := h.g

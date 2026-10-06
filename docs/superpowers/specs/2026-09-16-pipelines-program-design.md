@@ -26,7 +26,7 @@
   already half-provides. MemQL building MemQL is the same feature with the
   owner as the customer -- dogfooding with no special path.
 - **Repositories:** `memql` (`.github/workflows`, `scripts/ci`, `dsl/pipelines`,
-  `component/pipelines`, `component/inbound`, `component/packages/githubapp`,
+  `component/pipelines`, `component/inbound`, `component/identity/githubapp`,
   `integrations/workbench`, `component/work`, `deploy/k8s`, `clients/os`);
   `memql-znas` (the Python deployment-notifications observer retires);
   `memql-project` (its design's placeholder is replaced); `memql-cockpit`
@@ -90,7 +90,7 @@ reverse import graph.
   deny-by-default source allowlist with per-source HMAC, and the verifier
   already handles GitHub's `X-Hub-Signature-256`. A delivery lands as a
   `v1:platform:inboundRequest` row an automation can trigger on.
-- **GitHub Connect** (`component/packages/githubapp`): a GitHub App
+- **GitHub Connect** (`component/identity/githubapp`): a GitHub App
   installation is stored as a `sourceCredential` grant. An installation is
   both a credential and an event subscription, and it can write check runs.
 - **The workbench** (`integrations/workbench`): clones a GitHub source and runs

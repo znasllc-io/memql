@@ -128,9 +128,9 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/deploycontrol"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/component/packages"
-	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/component/pipelinerun"
 	pl "github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/core/id"

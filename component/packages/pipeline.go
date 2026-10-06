@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/edge"
-	"github.com/znasllc-io/memql/component/packages/githubapp"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/core/logger"
 )
 
