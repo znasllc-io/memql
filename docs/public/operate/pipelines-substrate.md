@@ -739,7 +739,9 @@ the run's steps:
 - A workbench replica is asked to delete every Job and Secret carrying the run's
   label, which reaches the Jobs other replicas hold. The request is tried up to
   five times; if no replica confirms it, the Jobs end at their deadline and go
-  at their TTL.
+  at their TTL. The driver keeps the run unfinished on a cancellation error,
+  retaining its durable cancel request for another agent to retry. It does not
+  report a completed cancellation to GitHub while that error remains.
 
 A cancelled step reports `pipeline_step_cancelled`, and what it had printed is
 still archived to the Library (a cluster step's archive ends with a line saying

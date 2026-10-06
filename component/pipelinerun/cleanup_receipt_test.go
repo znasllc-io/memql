@@ -5,7 +5,48 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/component/events"
 )
+
+func TestCancellationFailureRemainsUnfinishedUntilAnotherDriverConfirms(t *testing.T) {
+	dh := newDriveHarness(t, driveManifest)
+	dh.exec.cancelError = errors.New("runner cleanup unavailable")
+	release := make(chan struct{})
+	defer close(release)
+	blockTests(dh, release)
+	run := dh.openRun(t, prOpening())
+	dh.integ.HandleRunEvent(graphEvent(events.TopicGraphNodeCreated, run))
+	dh.awaitEntered(t, "checks.vet", "tests.unit", "tests.lint")
+	if err := dh.integ.RequestCancel(context.Background(), run.ID, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	waitDrives(t, dh.integ)
+	got, _ := dh.store.run(run.ID)
+	if !got.CancelRequested || got.Status == StatusCompleted || got.Conclusion != "" {
+		t.Fatalf("unconfirmed cancellation reported complete: %+v", got)
+	}
+	if final := dh.lastUpdate(t).Run; final.Status == "completed" {
+		t.Fatalf("GitHub was told cancellation completed: %+v", final)
+	}
+	sent := len(dh.exec.sentKeys())
+	dh.exec.mu.Lock()
+	dh.exec.cancelError = nil
+	dh.exec.mu.Unlock()
+	peer := dh.peer("agent-b")
+	peer.Configure(func(d *Deps) { d.Now = func() time.Time { return testNow.Add(leaseStaleAfter + time.Second) } })
+	if err := peer.RecoverRuns(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitDrives(t, peer)
+	got, _ = dh.store.run(run.ID)
+	if got.Status != StatusCompleted || got.Conclusion != ConclusionCancelled || got.DriverNodeID != "agent-b" {
+		t.Fatalf("replacement did not finish cancellation: %+v", got)
+	}
+	if len(dh.exec.sentKeys()) != sent || len(dh.exec.cancelled()) != 2 {
+		t.Fatalf("recovery reran work instead of retrying cancellation: steps=%v cancels=%v", dh.exec.sentKeys(), dh.exec.cancelled())
+	}
+}
 
 func TestCleanupFailureLeavesReceiptForAnotherDriverWithoutRepeatingWork(t *testing.T) {
 	dh := newDriveHarness(t, driveManifest)

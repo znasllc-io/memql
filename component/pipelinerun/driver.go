@@ -333,17 +333,25 @@ func (dr *runDriver) drive(ctx context.Context) driveOutcome {
 }
 
 // cancelRunner tells the executor to stop every step of the run it still has
-// in flight. Safe with nothing running, and with no executor at all.
-func (dr *runDriver) cancelRunner() {
+// in flight. A failure leaves the durable cancel request unfinished so another
+// driver can retry it; a logged warning is not a confirmed cancellation.
+func (dr *runDriver) cancelRunner() bool {
 	exec := pipelines.CurrentExecutor()
+	var err error
 	if exec == nil {
-		return
+		err = errors.New("no executor is available to confirm cancellation")
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), executorCancelTimeout)
+		err = exec.Cancel(ctx, dr.runID)
+		cancel()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), executorCancelTimeout)
-	defer cancel()
-	if err := exec.Cancel(ctx, dr.runID); err != nil {
+	if err != nil {
 		dr.log.Warn("pipelines: the runner did not confirm the run's cancel", "error", dr.mask(err.Error()))
+		dr.cleanupFailed.Store(true)
+		dr.lease.lose()
+		return false
 	}
+	return true
 }
 
 // steer drives the run up to its verdict. ok is false when the drive must
@@ -1543,7 +1551,9 @@ func (dr *runDriver) conclude(ctx context.Context, v verdict) bool {
 		return false
 	}
 	if v.conclusion == ConclusionCancelled || dr.abandonedInFlight {
-		dr.cancelRunner()
+		if !dr.cancelRunner() {
+			return false
+		}
 	}
 
 	now := dr.d.now()

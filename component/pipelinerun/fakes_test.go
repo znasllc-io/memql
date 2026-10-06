@@ -1553,6 +1553,7 @@ type fakeExecutor struct {
 	acks          []pipelines.StepRequest
 	onAcknowledge func(pipelines.StepRequest)
 	ackError      error
+	cancelError   error
 	mu            sync.Mutex
 	requests      []pipelines.StepRequest
 	cancels       []string
@@ -1596,7 +1597,7 @@ func (e *fakeExecutor) Cancel(_ context.Context, runID string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.cancels = append(e.cancels, runID)
-	return nil
+	return e.cancelError
 }
 
 func (e *fakeExecutor) sent() []pipelines.StepRequest {
