@@ -67,6 +67,9 @@ pipeline:
       # reach is up. ci.yml's lanes wait on the same TCP check before their
       # first query.
       ready: pg_isready -h localhost -U memql
+  # Cockpit caps each build container at 2 GiB. Go steps below serialize
+  # package compilation and collect earlier; the generated AI SDK packages
+  # otherwise exceed that cap when compiled together on a cold cache.
   caches: [go, npm]
   select:
     go: import-graph
@@ -146,6 +149,7 @@ pipeline:
           timeout: 30m
           run: |
             set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
             go build github.com/znasllc-io/memql/...
             go vet github.com/znasllc-io/memql/...
@@ -162,6 +166,7 @@ pipeline:
           placement: fleet
           run: |
             set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=300s ./scripts/ci/ ./scripts/dev/
     - name: tests
@@ -179,6 +184,7 @@ pipeline:
           timeout: 30m
           run: |
             set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=600s $MEMQL_PACKAGES
         # ci.yml db-tests: the db-gated packages the change reaches, over five
@@ -197,6 +203,7 @@ pipeline:
           timeout: 40m
           run: |
             set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
             PGPASSWORD=memql_dev psql -h localhost -U memql -d memql -v ON_ERROR_STOP=1 <<'SQL'
             CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
@@ -214,6 +221,7 @@ pipeline:
           placement: fleet
           run: |
             set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             go test ./component/language/parser -run '^FuzzLexer$' -fuzz '^FuzzLexer$' -fuzztime=40s
             go test ./component/language/parser -run '^FuzzParseV1Expression$' -fuzz '^FuzzParseV1Expression$' -fuzztime=40s
             go test ./component/memql -run '^FuzzLower$' -fuzz '^FuzzLower$' -fuzztime=40s
@@ -247,5 +255,6 @@ pipeline:
           when: { bucket: gates }
           run: |
             set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
