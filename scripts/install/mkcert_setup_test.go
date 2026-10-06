@@ -625,13 +625,18 @@ func TestMkcertReportsWhetherCoverageWasActuallyChecked(t *testing.T) {
 // touch machine state this suite must not.
 func writeCertWithNames(t *testing.T, certPath, keyPath string, names ...string) {
 	t.Helper()
+	writeCertWithSubject(t, certPath, keyPath, names[0], names...)
+}
+
+func writeCertWithSubject(t *testing.T, certPath, keyPath, commonName string, names ...string) {
+	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
 	tmpl := x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: names[0]},
+		Subject:      pkix.Name{CommonName: commonName},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(24 * time.Hour),
 		DNSNames:     names,
@@ -1005,5 +1010,29 @@ func TestMkcertDoesNotStampWhenCreationFails(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(e.caroot, caMarker)); err == nil {
 		t.Errorf("a failed run claimed a CA it never finished creating")
+	}
+}
+
+// DNS coverage is an exact SAN entry, not a prefix or subject-name match.
+func TestMkcertRejectsHostnameLookalikes(t *testing.T) {
+	if _, err := exec.LookPath("openssl"); err != nil {
+		t.Skip("openssl unavailable")
+	}
+	for _, tc := range []struct {
+		name, subject string
+		names         []string
+	}{
+		{"SAN suffix", "unrelated.example", []string{"*.memql.localhost.invalid", "memql.localhost.invalid"}},
+		{"subject is not a SAN", "DNS:memql.localhost", []string{"unrelated.example"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newMkcertEnv(t)
+			e.seedCA(t)
+			writeCertWithSubject(t, e.certFile(), e.keyFile(), tc.subject, tc.names...)
+			env, code, out := e.run(t, "--hostnames=memql.localhost")
+			if code != 0 || !env.OK || !mkcertBool(t, env, "reissued") {
+				t.Fatalf("lookalike certificate reused: exit=%d %s", code, out)
+			}
+		})
 	}
 }

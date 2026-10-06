@@ -329,7 +329,7 @@ function verify_front_door_tls() {
     # name being checked. Splitting on IFS with read does no globbing.
     IFS=',' read -ra want_hosts <<<"$wanted"
     for host in "${want_hosts[@]}"; do
-        if ! printf '%s' "$sans" | grep -Fq "DNS:${host}"; then
+        if ! localtls_has_dns_name "$sans" "$host"; then
             missing+="${host} "
         fi
     done
@@ -399,15 +399,13 @@ function front_door_hostnames() {
 # the value as one unwrapped line.
 function front_door_secret_sans() {
     command -v openssl &>/dev/null || return 0
-    local b64 pem sans
+    local b64 pem
     b64="$(kubectl get secret "${MEMQL_LOCAL_TLS_SECRET}" -n "${NAMESPACE}" \
              -o 'jsonpath={.data.tls\.crt}' 2>/dev/null)" || return 0
     [[ -n "$b64" ]] || return 0
     pem="$(printf '%s' "$b64" | openssl base64 -d -A 2>/dev/null)" || return 0
     [[ -n "$pem" ]] || return 0
-    sans="$(printf '%s' "$pem" | openssl x509 -noout -ext subjectAltName 2>/dev/null || true)"
-    [[ -n "$sans" ]] || return 0
-    printf '%s' "$sans" | tr '\n' ' ' | tr -s ' '
+    printf '%s' "$pem" | localtls_sans_oneline
 }
 
 function wait_for_healthy() {

@@ -394,12 +394,9 @@ function ensure_ca_trusted() {
 # line, or empty when they cannot be read. Empty means "cannot tell", never
 # "carries nothing".
 function cert_sans_oneline() {
-    local cert="$1" sans
+    local cert="$1"
     [[ -f "$cert" ]] || return 0
-    command -v openssl &>/dev/null || return 0
-    sans="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null || true)"
-    [[ -n "$sans" ]] || return 0
-    printf '%s' "$sans" | tr '\n' ' ' | tr -s ' '
+    localtls_sans_oneline < "$cert"
 }
 
 # cert_coverage <cert-path> -- THREE states, printed:
@@ -427,7 +424,7 @@ function cert_coverage() {
         return 0
     fi
     for host in "${HOSTNAMES[@]}"; do
-        if ! printf '%s' "$sans" | grep -Fq "DNS:${host}"; then
+        if ! localtls_has_dns_name "$sans" "$host"; then
             printf 'missing'
             return 0
         fi
