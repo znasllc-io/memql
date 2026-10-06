@@ -21,7 +21,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -48,13 +47,10 @@ type installResult struct {
 // on the runner can leak into a preExisting assertion.
 func installPATH(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	// `uname` joined the set with memql#4295: install-binary.sh composes a
-	// PLATFORM-QUALIFIED pin key, so it has to know what platform this is.
-	// Without it every run refuses with "unsupported platform unknown/unknown",
-	// which is the correct behaviour and a useless test fixture.
-	// `sed` is used by the pinned-tool lister to strip a platform suffix.
-	linkReal(t, dir, "bash", "dirname", "tr", "sed", "uname", "mktemp", "mkdir", "chmod",
+	// These cases exercise download/verify/place using inert fixture bytes.
+	// The target platform is part of the fixture, independent of the test host.
+	dir := stubPATH(t, "Linux", "x86_64")
+	linkReal(t, dir, "sed", "mktemp", "mkdir", "chmod",
 		"mv", "rm", "cp", "wc", "sha256sum")
 	return dir
 }
@@ -434,26 +430,37 @@ func TestMissingPinsManifestIsPrerequisite(t *testing.T) {
 // TestDefaultPinsIsTheCommittedManifest -- with no --pins, the script reads the
 // manifest committed next to it, so the digests in force are the reviewed ones.
 func TestDefaultPinsIsTheCommittedManifest(t *testing.T) {
-	home := t.TempDir()
-	dest := filepath.Join(t.TempDir(), "bin")
-
-	env, out, code := runInstall(t, installPATH(t), home, "--tool=k3d", "--dest="+dest, "--dry-run")
-	if code != 0 {
-		t.Fatalf("dry run against the committed pins exited %d\noutput:\n%s", code, out)
-	}
-	r := decodeInstall(t, env)
-	// The committed manifest is platform-qualified, so the key this run should
-	// have resolved is the one for the platform the test is running on --
-	// which is the whole contract install-binary.sh gained in memql#4295.
 	pins := parsePins(t, pinsPath(t))
-	suffix := runnerPinSuffix(t)
-	if r.SHA256 != pins["K3D_"+suffix+"_SHA256"] {
-		t.Errorf("default run used sha256 %q, want the committed %q for %s",
-			r.SHA256, pins["K3D_"+suffix+"_SHA256"], suffix)
+	for _, suffix := range pinnedPlatforms {
+		t.Run(suffix, func(t *testing.T) {
+			kernel, machine, _ := strings.Cut(strings.ToLower(suffix), "_")
+			pathDir := stubPATH(t, kernel, machine)
+			linkReal(t, pathDir, "sed", "sha256sum")
+			dest := filepath.Join(t.TempDir(), "bin")
+			env, out, code := runInstall(t, pathDir, t.TempDir(), "--tool=k3d", "--dest="+dest, "--dry-run")
+			if code != 0 {
+				t.Fatalf("dry run against the committed pins exited %d\noutput:\n%s", code, out)
+			}
+			r := decodeInstall(t, env)
+			if r.SHA256 != pins["K3D_"+suffix+"_SHA256"] || r.URL != pins["K3D_"+suffix+"_URL"] {
+				t.Errorf("default run resolved %q %q, want the committed pin for %s", r.URL, r.SHA256, suffix)
+			}
+		})
 	}
-	if r.URL != pins["K3D_"+suffix+"_URL"] {
-		t.Errorf("default run used url %q, want the committed %q for %s",
-			r.URL, pins["K3D_"+suffix+"_URL"], suffix)
+}
+
+// A Linux ARM64 test host does not make Linux ARM64 an installer target.
+// Admission remains pinned to the platforms whose release digests we verified.
+func TestUnpinnedInstallerPlatformIsRefused(t *testing.T) {
+	pathDir := stubPATH(t, "Linux", "aarch64")
+	linkReal(t, pathDir, "sed")
+	dest := filepath.Join(t.TempDir(), "bin")
+	env, out, code := runInstall(t, pathDir, t.TempDir(), "--tool=k3d", "--dest="+dest, "--dry-run")
+	if code != 3 || env.OK || env.Changed || env.Error == nil || env.Error.Code != 3 || !strings.Contains(out, "unsupported platform linux/arm64") {
+		t.Fatalf("unsupported target should refuse without writes; exit %d, output:\n%s", code, out)
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("unsupported target created destination: %v", err)
 	}
 }
 
@@ -501,26 +508,4 @@ func mustInstall(t *testing.T, pathDir, home string, args ...string) capEnvelope
 		t.Fatalf("install exited %d, want 0\noutput:\n%s", code, out)
 	}
 	return env
-}
-
-// runnerPinSuffix is the tool-pins.env key fragment for the platform these
-// tests are running on -- the Go spelling of what scripts/lib/platform.sh
-// computes from uname (memql#4295).
-//
-// runtime.GOARCH rather than parsing `uname -m`, because Go already normalises
-// what the shell has to normalise by hand: GOARCH is `arm64` on an Apple
-// Silicon Mac and `amd64` on x86_64, which is exactly the spelling the pin keys
-// use. That the two agree is not assumed here -- detect_test.go asserts the
-// shell's normalisation directly, on both `arm64` and `aarch64` inputs.
-func runnerPinSuffix(t *testing.T) string {
-	t.Helper()
-	suffix := strings.ToUpper(runtime.GOOS + "_" + runtime.GOARCH)
-	for _, p := range pinnedPlatforms {
-		if p == suffix {
-			return suffix
-		}
-	}
-	t.Skipf("this runner is %s/%s, which the installer does not target; "+
-		"the committed pins carry %v", runtime.GOOS, runtime.GOARCH, pinnedPlatforms)
-	return ""
 }
