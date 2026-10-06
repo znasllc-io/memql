@@ -229,6 +229,12 @@ provides a manual DSL entry point carrying the three reviewed values. It has
 no event or schedule trigger. Instances configure credentials and repository;
 the orchestration stays in the engine's core DSL.
 
+Manual automation runs preserve the current caller's resolved role, including
+a badge's role ceiling and expiry, on both the receiving node and a selected
+remote node. Running an automation requires owner or admin; `releaseCut` still
+requires owner. Supplying event payload fields cannot grant either role.
+The template permits omitted notes, just like the builtin.
+
 The engine refuses a non-owner in Go before any network request is made.
 
 The arguments:

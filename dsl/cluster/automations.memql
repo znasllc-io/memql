@@ -214,7 +214,7 @@ automation publishEngineRelease {
     expectedRepository: args.expectedRepository,
     expectedSha: args.expectedSha,
     expectedVersion: args.expectedVersion,
-    notes: args.notes ?? "",
+    notes: args.notes,
     dryRun: false
   )
 }

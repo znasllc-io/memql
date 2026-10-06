@@ -3278,6 +3278,15 @@ from a list literal — `{ v: [args.a, args.b, "c"] }` with only `b`
 supplied renders `{"v":["B","c"]}`, not a `null` hole (memql#3627). An
 explicit `nil` the author wrote is kept in both.
 
+**Keep an optional builtin argument absent when the callee supplies its
+default.** A function step passing `notes: args.notes` omits that argument
+when it is absent. Passing `notes: args.notes ?? ""` instead manufactures an
+empty string, which builtin string-argument validation rejects before the
+integration runs. This broke the manual engine-release automation when notes
+were omitted. Its runtime regression test executes the shipped automation's
+publication step through the real argument resolver and engine parser, with
+only the external release effect replaced.
+
 In a filter or a spec body `??` is legal only on values that do not read
 the row: `row.stage == (args.stage ?? "active")` computes the fallback
 before the query
