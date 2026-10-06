@@ -66,6 +66,9 @@ type StageSpec struct {
 // the same contract as a deployable's build.command. There is no step
 // language.
 type StepSpec struct {
+	// MemoryMiB requests a bounded memory reservation for the cluster command.
+	// Zero uses the operator's namespace default; services retain their defaults.
+	MemoryMiB int `yaml:"memoryMiB,omitempty" json:"memoryMiB,omitempty"`
 	// Image overrides the pipeline's container image for this step only.
 	Image string `yaml:"image,omitempty" json:"image,omitempty"`
 	// Placement selects cluster or fleet; omitted follows native execution or host needs.

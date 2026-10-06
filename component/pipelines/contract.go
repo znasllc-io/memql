@@ -100,6 +100,7 @@ type Skip struct {
 
 // Step is one compiled step: one v1:work:step row and one Execute call.
 type Step struct {
+	MemoryMiB int    `json:"memoryMiB,omitempty"`
 	Placement string `json:"placement,omitempty"`
 	Execution string `json:"execution,omitempty"`
 	Platform  string `json:"platform,omitempty"`

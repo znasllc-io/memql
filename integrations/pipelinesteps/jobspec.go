@@ -248,6 +248,16 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 	refuse := func(format string, args ...any) (int32, *pl.Refusal) {
 		return 0, pl.Refuse(pl.CodeJobRejected, scope, format, args...)
 	}
+	if err := pl.CheckMemoryMiB(run.MemoryMiB, false); err != nil {
+		return refuse("%s", err)
+	}
+	maximum := cfg.StepMemoryMaxMiB
+	if maximum == 0 {
+		maximum = defaultStepMemoryMaxMiB
+	}
+	if run.MemoryMiB > maximum {
+		return refuse("memoryMiB %d exceeds this cluster's command limit of %d MiB", run.MemoryMiB, maximum)
+	}
 	if err := cfg.ValidatePlacement(); err != nil {
 		return refuse("%s", err)
 	}
@@ -574,6 +584,7 @@ func stepContainer(run StepRun, jobName, secretName string, caches []string) Con
 	return Container{
 		Name:            ContainerStep,
 		Image:           run.Image,
+		Resources:       stepMemoryResources(run.MemoryMiB),
 		Command:         []string{"/bin/sh", "-c", stepWrapper},
 		WorkingDir:      workspacePath,
 		Env:             env,
@@ -981,3 +992,13 @@ func sortedKeys[V any](m map[string]V) []string {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// An explicit reservation sets both request and limit: scheduling must account
+// for the memory the command may consume. All other limits remain operator values.
+func stepMemoryResources(memory int) *Resources {
+	if memory == 0 {
+		return nil
+	}
+	value := strconv.Itoa(memory) + "Mi"
+	return &Resources{Requests: map[string]string{"memory": value}, Limits: map[string]string{"memory": value}}
+}

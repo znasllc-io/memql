@@ -27,8 +27,8 @@ spec:
   hard:
     count/jobs.batch: "4"
 ---
-# THE LIMITS are a LimitRange default, so the runner sets no resources on a step
-# container and this is the one place a step's size is decided. It applies to
+# THE LIMITS are namespace defaults. A step may explicitly reserve command
+# memory, bounded by MEMQL_PIPELINES_STEP_MEMORY_MAX_MIB. These defaults apply to
 # every container in the pod -- the clone init container and each service
 # sidecar as well as the step -- and fills only what a container leaves unset.
 # A default request above its default limit is refused by the API server, so

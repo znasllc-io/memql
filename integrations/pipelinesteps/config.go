@@ -15,6 +15,8 @@ import (
 // pipelines component's ConfigMap supplies the namespace and the clone image
 // to the workbench node.
 type Config struct {
+	// StepMemoryMaxMiB bounds a manifest's explicit command memory reservation.
+	StepMemoryMaxMiB int
 	// Namespace is where step Jobs and their Secrets live
 	// (MEMQL_PIPELINES_NAMESPACE, default memql-pipelines). It must be the
 	// namespace whose Role grants the engine identity Jobs.
@@ -79,6 +81,7 @@ type Config struct {
 // The environment this package reads. Named once, so the env-registry scan
 // resolves every read to its key.
 const (
+	envStepMemoryMax    = "MEMQL_PIPELINES_STEP_MEMORY_MAX_MIB"
 	envNamespace        = "MEMQL_PIPELINES_NAMESPACE"
 	envNodePool         = "MEMQL_PIPELINES_NODE_POOL"
 	envCloneImage       = "MEMQL_PIPELINES_CLONE_IMAGE"
@@ -89,10 +92,11 @@ const (
 )
 
 const (
-	defaultNamespace   = "memql-pipelines"
-	cacheClaim         = "memql-pipelines-cache"
-	stepServiceAccount = "memql-pipelines-step"
-	mebibyte           = 1 << 20
+	defaultStepMemoryMaxMiB = 8192
+	defaultNamespace        = "memql-pipelines"
+	cacheClaim              = "memql-pipelines-cache"
+	stepServiceAccount      = "memql-pipelines-step"
+	mebibyte                = 1 << 20
 	// workspaceLimit is the component's default ephemeral-storage limit,
 	// which every overlay restates beside its LimitRange.
 	workspaceLimit = "20Gi"
@@ -116,6 +120,7 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		namespace = defaultNamespace
 	}
 	return Config{
+		StepMemoryMaxMiB:   whole(envStepMemoryMax, defaultStepMemoryMaxMiB, 128, 1048576),
 		Namespace:          namespace,
 		NodePool:           text(envNodePool),
 		CloneImage:         text(envCloneImage),
