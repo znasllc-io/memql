@@ -133,6 +133,27 @@ func TestLookupRoutingReadsDurableClassificationOnExecutingReplica(t *testing.T)
 			}
 		})
 	}
+	for _, tc := range []struct {
+		name, agentRole, harnessRole string
+		want                         airoute.Level
+		reads                        int
+	}{
+		{"seeded specialist serving Ask", "specialist", "assistant", airoute.LevelFast, 1},
+		{"specialist delegation", "specialist", "specialist", airoute.LevelStrong, 0},
+		{"operator", "operator", "assistant", airoute.LevelStrong, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{}}, prompts: registry, classification: map[string]any{"workload": "lookup"}}
+			msg := &memqlv1.AgentGenerateTurnMsg{AgentId: "planner", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "planner", Role: tc.agentRole}, Hints: map[string]string{HarnessRoleHintKey: tc.harnessRole}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "Check current records"}}}
+			prepared, err := newTestReplier(engine).prepareTurn(ctx, msg, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if prepared.routerReq.Level != tc.want || engine.classificationReads != tc.reads {
+				t.Fatalf("level=%s reads=%d", prepared.routerReq.Level, engine.classificationReads)
+			}
+		})
+	}
 	engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{}}, prompts: registry, classification: map[string]any{"workload": "lookup"}}
 	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "lookup-run", GoalId: "goal", OwnerUserId: owner, Override: &common.StepOverride{Level: "reasoning", Model: "app:claude-code:opus"}})
 	prepared, err := newTestReplier(engine).prepareTurn(ctx, msg, time.Now())

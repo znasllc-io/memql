@@ -314,7 +314,9 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 		promptName = "workAgentReply"
 	}
 	level := airoute.LevelStrong
-	if role == "assistant" || role == "" {
+	// The current harness role is independent of the stored agent role: Ask
+	// may execute an assistant turn through the seeded specialist agent.
+	if harnessRole == RoleAssistant && role != "operator" {
 		var err error
 		level, err = r.workRoutingLevel(ctx)
 		if err != nil {
