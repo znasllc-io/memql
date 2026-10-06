@@ -65,13 +65,13 @@ answers, which is what `releaseCutStatus` is for -- see section 6.
 
 ---
 
-## 2. Before a cut works: two values to seed
+## 2. Configure the repository and release access
 
 The engine is product-agnostic and carries **no repository default**. An
 installation that cuts releases says which repository it cuts, and supplies a
-credential. Until both are seeded, a cut refuses with
-`release_repo_unconfigured` or `credential_unavailable`, naming the variable to
-seed and never a value.
+credential. Release access can use the cluster’s GitHub App or an explicit
+release token. Missing repository configuration or access refuses the call with
+`release_repo_unconfigured` or `credential_unavailable`.
 
 ### `MEMQL_RELEASE_REPO` -- a global variable
 
@@ -81,10 +81,27 @@ The repository, in `owner/name` form. Not a URL, no `.git` suffix:
 acme/widget
 ```
 
-### `MEMQL_GITHUB_RELEASE_TOKEN` -- a global secret
+### Use the cluster’s GitHub App
+
+Install the configured App on the release repository and approve **Contents:
+read and write**. With no explicit `MEMQL_GITHUB_RELEASE_TOKEN`, each owner call
+mints a fresh installation token restricted to that repository and that one
+permission. The token is held only for the call; it is never stored in a row or
+sent to a worker. App configuration follows the same environment/cluster-row
+resolution as the GitHub connection, so a registration change takes effect
+without restarting the engine.
+
+This path does not request Pull requests permission. The optional extension
+pin-bump therefore remains a follow-up note if GitHub refuses it. Owner access
+and exact-candidate checks still apply; App installation alone authorizes no
+release call.
+
+### `MEMQL_GITHUB_RELEASE_TOKEN` -- an optional global secret
 
 A **fine-grained personal access token** (or a GitHub App installation token)
-scoped to that one repository:
+scoped to that one repository. When configured, this credential takes
+precedence over the App; a refused explicit credential does not fall back to
+another identity:
 
 | Permission | Level | Needed for |
 |---|---|---|
@@ -273,7 +290,7 @@ The check is on demand. There is no poller and no schedule.
 | `release_candidate_required` | a publication call omitted part of the reviewed candidate; nothing was created | review a dry run and supply its repository, commit and tagged version |
 | `release_candidate_changed` | the current plan differs from the reviewed candidate; nothing was created | review a fresh dry run before publishing |
 | `release_repo_unconfigured` | no repository configured, or GitHub cannot see it | seed `MEMQL_RELEASE_REPO`; check the token's repository access |
-| `credential_unavailable` | no token, or GitHub rejected it (401/403) | seed or re-mint `MEMQL_GITHUB_RELEASE_TOKEN` with Contents: read/write |
+| `credential_unavailable` | no release access, or GitHub rejected it | approve the App’s Contents: read/write access on the release repository, or configure `MEMQL_GITHUB_RELEASE_TOKEN` |
 | `github_unreachable` | transport failure or a 5xx. **Nothing was created** | retry; check GitHub's status |
 | `ref_exists` | the computed tag already exists | someone else cut it, or it was cut by hand. Run the dry run again and cut if you still need to |
 | `already_released_at_head` | `main`'s head already carries a release tag | land a change first. Cutting again would publish a second version of identical code |

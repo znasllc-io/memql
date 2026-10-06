@@ -1,7 +1,11 @@
 package release
 
 import (
+	"context"
+
+	"github.com/znasllc-io/memql/component/identity/githubconnect"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/packages/githubapp"
 )
 
 // plugin.go -- registration.
@@ -19,10 +23,22 @@ import (
 // the scanning binary imports) and its pattern reads a string literal.
 func init() {
 	memql.RegisterPlugin("release", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
+		app := &githubconnect.Resolver{Rows: githubconnect.RowReader{
+			Variable: pctx.ResolveSystemVariable,
+			Secret:   pctx.ResolveSystemSecret,
+		}}
 		return NewIntegration(pctx.Logger, pctx.Engine, resolver{
 			systemSecret:   pctx.ResolveSystemSecret,
 			systemVariable: pctx.ResolveSystemVariable,
 			env:            osEnv,
+			appToken: func(ctx context.Context, repo repoRef) (string, error) {
+				cfg, _ := app.Current(ctx)
+				client := githubapp.New(githubapp.Config{
+					AppId: cfg.AppID, Slug: cfg.AppSlug, ClientId: cfg.ClientID,
+					ClientSecret: cfg.ClientSecret, PrivateKeyB64: cfg.PrivateKeyB64,
+				})
+				return mintReleaseToken(ctx, client, repo)
+			},
 		}), nil
 	})
 }

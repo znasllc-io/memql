@@ -58,6 +58,9 @@ type resolver struct {
 	// a test never has to mutate the process environment, which makes
 	// parallel tests flaky in a way that looks like a resolver bug.
 	env func(name string) string
+	// appToken mints a fresh credential for the configured release repository.
+	// An explicitly configured release token takes precedence.
+	appToken func(context.Context, repoRef) (string, error)
 }
 
 // resolve walks globalSecret -> globalVariable -> env and returns the first
@@ -156,6 +159,17 @@ func (r resolver) loadSettings(ctx context.Context) (settings, error) {
 			RepoVariableName)
 	}
 	token := r.resolve(ctx, SecretName)
+	if token == "" && r.appToken != nil {
+		var err error
+		token, err = r.appToken(ctx, repo)
+		if err != nil {
+			// Credential-provider errors must not expose configuration or a
+			// bearer returned by a failed upstream call.
+			return settings{}, refuse(CodeCredentialUnavailable,
+				"the cluster's GitHub App could not obtain release access to %s. Install the App on that repository and approve Contents: read/write, or configure %s as a global secret.", repo, SecretName)
+		}
+		token = strings.TrimSpace(token)
+	}
 	if token == "" {
 		return settings{}, refuse(CodeCredentialUnavailable,
 			"no GitHub credential is available. Seed %s as a global secret with a fine-grained token holding Contents: read/write on %s.",
