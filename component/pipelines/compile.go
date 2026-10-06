@@ -184,18 +184,19 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 
 	step := Step{
 		Key: StepKey(stage, declared.Name), Stage: stage, Name: declared.Name, Kind: StepCommand, Run: declared.Run,
-		MemoryMiB:      declared.MemoryMiB,
-		Execution:      ExecutionOf(declared.Execution),
-		Placement:      PlacementOf(declared),
-		Platform:       PlatformOf(c.spec, declared),
-		Image:          cmp.Or(declared.Image, c.spec.Image),
-		Services:       c.servicesFor(declared.Services),
-		Caches:         compiledCopy(cachesFor(c.spec, declared)),
-		Needs:          needs,
-		TimeoutSeconds: stepTimeoutSeconds(declared.Timeout),
-		Artifacts:      compiledCopy(declared.Artifacts),
-		Secrets:        compiledCopy(declared.Secrets),
-		DependsOn:      compiledCopy(dependsOn),
+		MemoryMiB:       declared.MemoryMiB,
+		Execution:       ExecutionOf(declared.Execution),
+		Placement:       PlacementOf(declared),
+		Platform:        PlatformOf(c.spec, declared),
+		Image:           cmp.Or(declared.Image, c.spec.Image),
+		Services:        c.servicesFor(declared.Services),
+		Caches:          compiledCopy(cachesFor(c.spec, declared)),
+		Needs:           needs,
+		TimeoutSeconds:  stepTimeoutSeconds(declared.Timeout),
+		Artifacts:       compiledCopy(declared.Artifacts),
+		Secrets:         compiledCopy(declared.Secrets),
+		ImagePullSecret: declared.ImagePullSecret,
+		DependsOn:       compiledCopy(dependsOn),
 	}
 
 	if step.Execution == ExecutionNative {
@@ -437,7 +438,7 @@ func stepConsent(scope string, declared StepSpec, compute Compute, allowedSecret
 			compute, ComputeClusterAndFleet)
 	}
 	var notAllowed []string
-	for _, name := range declared.Secrets {
+	for _, name := range declared.SecretNames() {
 		if !slices.Contains(allowedSecrets, name) && !slices.Contains(notAllowed, name) {
 			notAllowed = append(notAllowed, name)
 		}

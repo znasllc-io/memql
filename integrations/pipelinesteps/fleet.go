@@ -135,6 +135,9 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 	if run.MemoryMiB != 0 || req.Step.MemoryMiB != 0 {
 		return refusedResult(pl.CodeStepInvalid, "memoryMiB requires cluster container execution."), nil
 	}
+	if run.ImagePullSecret != "" || req.Step.ImagePullSecret != "" {
+		return refusedResult(pl.CodeStepInvalid, "Image pull credentials require cluster execution."), nil
+	}
 	if f == nil || f.dispatch == nil {
 		return failedResult(pl.CodeRunnerUnavailable,
 			"This agent node has no dispatcher to reach the owner's machines with. Nothing ran."), nil

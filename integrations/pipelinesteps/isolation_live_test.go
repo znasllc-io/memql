@@ -114,9 +114,12 @@ func localPipelineControls(t *testing.T) (context.Context, string, string, func(
 	ns := fmt.Sprintf("memql-probe-test-%d", time.Now().UnixNano())
 	kubectl(nil, "create", "namespace", ns)
 	t.Cleanup(func() {
-		cleanup, stop := context.WithTimeout(context.Background(), 30*time.Second)
+		// Namespace garbage collection is asynchronous and shares the local
+		// control plane with builds. Keep a bound, but allow its reconciliation
+		// interval after per-Job cleanup has already confirmed absence.
+		cleanup, stop := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer stop()
-		out, err := exec.CommandContext(cleanup, "kubectl", "--context", cluster, "delete", "namespace", ns, "--wait=true", "--timeout=25s").CombinedOutput()
+		out, err := exec.CommandContext(cleanup, "kubectl", "--context", cluster, "delete", "namespace", ns, "--wait=true", "--timeout=110s").CombinedOutput()
 		if err != nil {
 			t.Errorf("clean up %s: %v: %s", ns, err, out)
 		}

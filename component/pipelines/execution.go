@@ -70,6 +70,14 @@ func validateStepRuntime(spec *Spec, step StepSpec, scope string) *Refusal {
 	if err := CheckMemoryMiB(step.MemoryMiB, placement == PlacementFleet); err != nil {
 		return Refuse(CodeStepInvalid, scope, "%s", err)
 	}
+	if step.ImagePullSecret != "" && (placement != PlacementCluster || execution != ExecutionContainer) {
+		return Refuse(CodeStepInvalid, scope, "imagePullSecret requires a cluster container step.")
+	}
+	for _, name := range step.Secrets {
+		if name == step.ImagePullSecret {
+			return Refuse(CodeSecretInvalid, scope, "An image pull credential cannot also be a command environment secret.")
+		}
+	}
 	if placement != PlacementCluster && placement != PlacementFleet {
 		return Refuse(CodeStepInvalid, scope, "placement must be cluster or fleet.")
 	}

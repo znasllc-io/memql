@@ -50,12 +50,15 @@ type StepRun struct {
 	// under; 0 is an anonymous clone of a public repository.
 	InstallationID int64  `json:"installationId,omitempty"`
 	Image          string `json:"image"`
-	Command        string `json:"command"`
+	// ImagePullSecret names an entry in Secrets reserved for kubelet image pulls.
+	ImagePullSecret string `json:"imagePullSecret,omitempty"`
+	Command         string `json:"command"`
 	// Env is StepRequest.Environment() minus the secrets: the contract every
 	// runner exports, as plain values.
 	Env map[string]string `json:"env"`
-	// Secrets are the resolved values, by env name. They reach the step only
-	// through the step's Secret and are never logged.
+	// Secrets are resolved values by global-secret name. ImagePullSecret is
+	// reserved for kubelet; the remaining entries become command environment
+	// variables through the owned Secret. Values are never logged.
 	Secrets  map[string]string     `json:"secrets,omitempty"`
 	Services map[string]pl.Service `json:"services,omitempty"`
 	// Caches name the caches to mount; the known ones are go and npm.

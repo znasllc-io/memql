@@ -105,6 +105,9 @@ type StepSpec struct {
 	// Secrets are globalSecret NAMES the step's environment receives,
 	// resolved only when the pipeline's owner allowed them.
 	Secrets []string `yaml:"secrets,omitempty" json:"secrets,omitempty"`
+	// ImagePullSecret names an owner-allowed Docker config JSON secret. Only
+	// the cluster image puller receives it; it is never a command environment.
+	ImagePullSecret string `yaml:"imagePullSecret,omitempty" json:"imagePullSecret,omitempty"`
 }
 
 // When gates a step on a path bucket.

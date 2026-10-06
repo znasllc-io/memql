@@ -365,7 +365,7 @@ func validateStep(spec *Spec, stage string, j int, step StepSpec, seen map[strin
 		}
 	}
 
-	for _, name := range step.Secrets {
+	for _, name := range step.SecretNames() {
 		if !secretNameRe.MatchString(name) {
 			return Refuse(CodeSecretInvalid, scope,
 				"Secret name %q is not a secret name: use upper-case letters, digits and underscores, starting with a letter, at most 128 characters.",

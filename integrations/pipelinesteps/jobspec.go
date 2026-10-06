@@ -135,6 +135,7 @@ var (
 // container) and each resolved secret (key = its env name, referenced by the
 // step container one secretKeyRef at a time). It is created before the Job
 // and owned by it once the Job exists, so collecting the Job collects it.
+// An image pull credential uses .dockerconfigjson, referenced by kubelet only.
 //
 // Build the Job FIRST: BuildJob is where a run is refused, and a refused run
 // must leave nothing in the namespace. BuildSecret itself cannot refuse, so it
@@ -144,13 +145,18 @@ var (
 func BuildSecret(cfg Config, run StepRun, jobName, cloneToken string) Secret {
 	data := make(map[string][]byte, len(run.Secrets)+1)
 	for name, value := range run.Secrets {
-		if name == gitTokenKey {
+		if name == gitTokenKey || name == run.ImagePullSecret {
 			continue
 		}
 		data[name] = []byte(value)
 	}
 	if cloneToken != "" {
 		data[gitTokenKey] = []byte(cloneToken)
+	}
+	secretType := "Opaque"
+	if run.ImagePullSecret != "" {
+		data[".dockerconfigjson"] = []byte(run.Secrets[run.ImagePullSecret])
+		secretType = "kubernetes.io/dockerconfigjson"
 	}
 	if len(data) == 0 {
 		data = nil
@@ -164,7 +170,7 @@ func BuildSecret(cfg Config, run StepRun, jobName, cloneToken string) Secret {
 			Labels:      objectLabels(run),
 			Annotations: objectAnnotations(run),
 		},
-		Type: "Opaque",
+		Type: secretType,
 		Data: data,
 	}
 }
@@ -184,6 +190,10 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 		return Job{}, refusal
 	}
 	secretName := SecretName(jobName)
+	var pulls []LocalObjectReference
+	if run.ImagePullSecret != "" {
+		pulls = []LocalObjectReference{{Name: secretName}}
+	}
 	caches := declaredCaches(run.Caches)
 
 	var initContainers []Container
@@ -222,6 +232,7 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 			Template: PodTemplateSpec{
 				Metadata: ObjectMeta{Labels: objectLabels(run)},
 				Spec: PodSpec{
+					ImagePullSecrets:              pulls,
 					NodeSelector:                  cfg.nodeSelector(run.Platform),
 					Tolerations:                   cfg.tolerations(),
 					RestartPolicy:                 "Never",
@@ -344,6 +355,11 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 			return refuse("secret %q is named in the platform's %s namespace", name, platformPrefix)
 		case taken[name]:
 			return refuse("secret %q collides with a variable the platform sets for the step", name)
+		}
+	}
+	if run.ImagePullSecret != "" {
+		if _, err := checkImagePull(run); err != nil {
+			return refuse("%s", err)
 		}
 	}
 	return int32(ttl), nil
@@ -532,6 +548,7 @@ func serviceContainers(services map[string]pl.Service) []Container {
 		c := Container{
 			Name:                     ServicePrefix + name,
 			Image:                    svc.Image,
+			ImagePullPolicy:          "Always",
 			RestartPolicy:            ptr("Always"),
 			SecurityContext:          imageContext(),
 			TerminationMessagePolicy: failureFromLogs,
@@ -573,7 +590,9 @@ func stepContainer(run StepRun, jobName, secretName string, caches []string) Con
 		env = append(env, plainVar(stepCachesVar, strings.Join(caches, " ")))
 	}
 	for _, name := range sortedKeys(run.Secrets) {
-		env = append(env, secretVar(name, secretName, name, false))
+		if name != run.ImagePullSecret {
+			env = append(env, secretVar(name, secretName, name, false))
+		}
 	}
 
 	mounts := []VolumeMount{{Name: workspaceVolume, MountPath: workspacePath}}
@@ -585,6 +604,7 @@ func stepContainer(run StepRun, jobName, secretName string, caches []string) Con
 		Name:            ContainerStep,
 		Image:           run.Image,
 		Resources:       stepMemoryResources(run.MemoryMiB),
+		ImagePullPolicy: "Always",
 		Command:         []string{"/bin/sh", "-c", stepWrapper},
 		WorkingDir:      workspacePath,
 		Env:             env,

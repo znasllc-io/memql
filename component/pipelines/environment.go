@@ -36,6 +36,9 @@ func (r StepRequest) Environment() map[string]string {
 		env["MEMQL_DOMAIN"] = r.Domain
 	}
 	for name, value := range r.Secrets {
+		if name == r.Step.ImagePullSecret {
+			continue
+		}
 		if _, reserved := env[name]; reserved {
 			continue
 		}

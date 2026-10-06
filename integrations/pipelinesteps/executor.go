@@ -217,6 +217,9 @@ func refuseStep(req pl.StepRequest) (pl.StepResult, bool) {
 	if err := pl.CheckMemoryMiB(req.Step.MemoryMiB, req.Step.RequiresFleet()); err != nil {
 		return refusedResult(pl.CodeStepInvalid, err.Error()), true
 	}
+	if req.Step.ImagePullSecret != "" && req.Step.RequiresFleet() {
+		return refusedResult(pl.CodeStepInvalid, "Image pull credentials require cluster execution."), true
+	}
 	if req.Step.Kind != pl.StepCommand {
 		return refusedResult(pl.CodeExecutorError, fmt.Sprintf(
 			"The executor runs command steps, and %q is a %q step, which the driver delivers itself. Nothing ran.",

@@ -356,6 +356,7 @@ mounts is the runner's ([Caches](pipelines-substrate.md#caches)): it knows
 | `timeout` | A duration such as `20m` or `1h30m`, from 1 minute to 2 hours. A step still running at its timeout is stopped and fails `pipeline_step_timeout` | `20m` | Not a duration, under `1m` or over `2h`: `pipeline_step_invalid` |
 | `artifacts` | Paths the runner saves as Library files owned by the pipeline's owner ([Artifacts](pipelines-substrate.md#artifacts)) | none | -- |
 | `secrets` | Names of secrets the step's environment receives, each under its own name ([Secrets](#secrets)) | none | A name that is not upper-case letters, digits and underscores starting with a letter (at most 128 characters), or that begins `MEMQL_`: `pipeline_secret_invalid`. A name the pipeline does not allow: `pipeline_secret_not_allowed` |
+| `imagePullSecret` | Name of an owner-allowed Docker config JSON secret for the step and service images; cluster container steps only | none | The same name/consent rules as `secrets`; declaring it as an environment secret or using fleet/native execution is refused |
 
 Two keys share the word `needs`: a stage's names earlier stages, a step's names
 what the machine running it must offer.
@@ -623,6 +624,33 @@ bytes or more replaced with `***`.
 change its own pipeline, so a branch pushed to the repository can add a step
 that reads an allowed secret. A fork cannot: its run is refused before anything
 resolves.
+
+### Private container images
+
+A cluster container step can set `imagePullSecret: REGISTRY_AUTH`, where
+`REGISTRY_AUTH` is both a stored global secret and a name in the pipeline
+owner's `secretNames` allowlist. Its value is a Docker config JSON object:
+
+```json
+{"auths":{"registry.example.com":{"username":"reader","password":"<read-only registry credential>"}}}
+```
+
+Use an exact registry host, including its port when present. Each host must
+match the step image or a declared service image. Inline `auth` containing
+base64-encoded `username:password` is also accepted. Credential helpers,
+wildcards, URL paths and token-provider configuration are refused. The value
+is limited to 64 KiB and eight registries. Fleet and native steps do not
+support this field.
+
+The runner gives kubelet a per-attempt `kubernetes.io/dockerconfigjson`
+Secret. Commands, sidecars and clone containers receive no mount or environment
+variable containing that registry credential. It is cleaned with the owned Job
+and guarded by the same receipt/acknowledgment rules. A manifest cannot refer
+to an existing Kubernetes Secret or broaden the step service account.
+Step and service images request a registry pull on every start, including
+when image layers are cached. Use read-only pull credentials: any collaborator
+who may edit this pipeline's manifest may also request its allowed global
+secrets explicitly as environment secrets in a different step.
 
 ## Compute
 
