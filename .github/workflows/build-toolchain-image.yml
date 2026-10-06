@@ -38,8 +38,9 @@ name: build-toolchain-image
 # not a failed pull -- it is every pipeline step failing. Building twice costs
 # nothing: the push re-exports the layers the smoke test validated.
 #
-# linux/amd64 only, as every image workflow here builds; the Dockerfile itself
-# also carries the arm64 protoc checksum for a local build on arm64.
+# Each dispatch builds one platform on a native GitHub runner. Use a distinct
+# immutable version for each platform; the resulting digest is pinned by the
+# pipeline that declares that platform. No emulator is used for the smoke test.
 #
 # scripts/ci/toolchain_image_workflow_test.go holds the trigger, the main-only
 # refusal, the job-scoped write, the pinned actions, the push target, the
@@ -53,6 +54,14 @@ on:
         description: "Image tag, e.g. 1.0.0. Tags are immutable: a rebuild takes a new one."
         required: true
         type: string
+      platform:
+        description: "Native Linux platform for this toolchain digest."
+        required: true
+        default: linux/amd64
+        type: choice
+        options:
+          - linux/amd64
+          - linux/arm64
       allow_overwrite:
         description: "Re-push an existing tag (tags are normally immutable)."
         required: false
@@ -78,7 +87,7 @@ concurrency:
 jobs:
   build:
     name: build memql-toolchain
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     # Bounded so a hang cannot hold a runner, and a registry-write token, for
     # GitHub's 360-minute default. The build is two image pulls, one apt
     # transaction and a protoc download; 30 is generous headroom.
@@ -94,6 +103,7 @@ jobs:
         env:
           REF: ${{ github.ref }}
           VERSION: ${{ inputs.version }}
+          PLATFORM: ${{ inputs.platform }}
         run: |
           if [[ "$REF" != "refs/heads/main" ]]; then
             echo "::error::the toolchain image is built from main only; this run is on ${REF}. Dispatch it from main." >&2
@@ -103,6 +113,10 @@ jobs:
             echo "::error::'${VERSION}' is not a valid image tag (letters, digits, '_', '.', '-'; at most 128)." >&2
             exit 1
           fi
+          case "$PLATFORM:$(uname -m)" in
+            linux/amd64:x86_64|linux/arm64:aarch64) ;;
+            *) echo "::error::the requested platform must match this native runner" >&2; exit 1 ;;
+          esac
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -117,11 +131,8 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      # inspect succeeding means the tag exists: refuse. It failing is the
-      # expected answer for a new tag, but an auth or network error fails it
-      # too and would let a re-push through, so the notice says only that it
-      # failed and shows what it said on one line (a line break could start a
-      # workflow command). Never `continue-on-error`: the exit is the guard.
+      # Only an explicit missing manifest proves a new tag. Authentication,
+      # transport and registry failures must not permit an overwrite.
       - name: Immutability guard
         if: ${{ !inputs.allow_overwrite }}
         env:
@@ -131,7 +142,10 @@ jobs:
             echo "::error::${IMAGE}:${VERSION} already exists -- tags are immutable. Bump version or re-run with allow_overwrite=true." >&2
             exit 1
           fi
-          echo "::notice::imagetools inspect found no ${IMAGE}:${VERSION}, which is what a new tag answers -- and what an auth or network failure answers too. It said: $(printf '%s' "$out" | tr '\r\n' '  ')"
+          case "$out" in
+            *": not found"*|*"manifest unknown"*) ;;
+            *) echo "::error::cannot establish that ${IMAGE}:${VERSION} is unused; refusing to publish" >&2; exit 1 ;;
+          esac
 
       # Built and LOADED, not pushed. The push happens below, only after the
       # smoke test passes.
@@ -142,11 +156,11 @@ jobs:
           file: ./deploy/toolchain-image/Dockerfile
           push: false
           load: true
-          platforms: linux/amd64
+          platforms: ${{ inputs.platform }}
           provenance: false
           tags: ${{ env.CANDIDATE }}
-          cache-from: type=gha,scope=memql-toolchain
-          cache-to: type=gha,mode=max,scope=memql-toolchain
+          cache-from: type=gha,scope=memql-toolchain-${{ inputs.platform }}
+          cache-to: type=gha,mode=max,scope=memql-toolchain-${{ inputs.platform }}
 
       # Reads the Go and protoc versions to expect from go.work and
       # scripts/dev/proto-gen.sh in this checkout, and Node's major from the
@@ -165,19 +179,20 @@ jobs:
           context: ./deploy/toolchain-image
           file: ./deploy/toolchain-image/Dockerfile
           push: true
-          platforms: linux/amd64
+          platforms: ${{ inputs.platform }}
           provenance: false
           tags: ${{ env.IMAGE }}:${{ inputs.version }}
           labels: |
             org.opencontainers.image.source=https://github.com/znasllc-io/memql
             org.opencontainers.image.version=${{ inputs.version }}
-          cache-from: type=gha,scope=memql-toolchain
-          cache-to: type=gha,mode=max,scope=memql-toolchain
+          cache-from: type=gha,scope=memql-toolchain-${{ inputs.platform }}
+          cache-to: type=gha,mode=max,scope=memql-toolchain-${{ inputs.platform }}
 
       - name: Digest summary
         env:
           VERSION: ${{ inputs.version }}
           DIGEST: ${{ steps.push.outputs.digest }}
+          PLATFORM: ${{ inputs.platform }}
         run: |
           # An empty or malformed digest would print a pin that pulls nothing.
           if [[ ! "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
@@ -186,6 +201,8 @@ jobs:
           fi
           {
             echo "### ${IMAGE}:${VERSION}"
+            echo ""
+            echo "Native platform: ${PLATFORM}"
             echo ""
             echo "Pin this digest in memql-package.yaml (\`pipeline.image\`):"
             echo '```'
