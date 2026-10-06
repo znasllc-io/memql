@@ -5,6 +5,7 @@ package pipelinesteps
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -144,6 +145,9 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 	}
 	if run.Execution == pl.ExecutionNative && run.Image != "" {
 		return refusedResult(pl.CodeStepInvalid, "Native execution cannot carry a container image."), nil
+	}
+	if len(run.Caches) > 0 && run.OwnerUserID == "" {
+		return refusedResult(pl.CodeStepInvalid, "Cached execution requires the pipeline owner's identity."), nil
 	}
 	token, refusal, ok := f.cloneToken(ctx, run)
 	if !ok {
@@ -328,6 +332,11 @@ func fleetArgs(run StepRun, token string) map[string]any {
 	}
 	if len(run.Caches) > 0 {
 		args["caches"] = run.Caches
+		// The worker also binds this scope to its local cluster enrollment,
+		// clone host, platform and image. A pull request must never write the
+		// cache later consumed by a trusted push/release of the same repo.
+		scope := sha256.Sum256([]byte(stepCacheDir(run)))
+		args["cacheScope"] = fmt.Sprintf("%x", scope)
 	}
 	return args
 }

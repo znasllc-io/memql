@@ -12,11 +12,11 @@ import (
 )
 
 func TestPipelineContractsCannotBeInventedByLabels(t *testing.T) {
-	for _, version := range []int{0, 1, 3} {
+	for _, version := range []int{0, 1, 2, 4} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			candidate := machine("ci-box", withLabels(pipelineLabels()))
 			candidate.ActionContracts = workerservice.ActionContracts{"workerHost.pipeline_step": version}
-			candidate.Labels["workerHost.pipeline_step"] = "2"
+			candidate.Labels["workerHost.pipeline_step"] = "3"
 			fleet := newPipelineFleet(t, candidate)
 			result, err := fleet.d.Dispatch(asPipelineExecutor(), pipelineRequest())
 			if err != nil || result.OK || !result.RefusedBeforeStart || fleet.total() != 0 {
@@ -27,7 +27,7 @@ func TestPipelineContractsCannotBeInventedByLabels(t *testing.T) {
 }
 
 func TestPipelineReceivingReplicaRechecksBinaryContract(t *testing.T) {
-	for _, version := range []int{0, 1, 3} {
+	for _, version := range []int{0, 1, 2, 4} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			h := pipelineHop(t, func(context.Context, *memqlv1.ToolDispatch, func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
 				t.Fatal("stale database metadata authorized an incompatible live connection")
@@ -53,7 +53,7 @@ func TestNativePlatformUsesBuildMetadataAndLiveConnection(t *testing.T) {
 	if len(plan.Candidates) != 1 || plan.Candidates[0].RegistrationId != "matching" {
 		t.Fatalf("platform selection: %+v", plan)
 	}
-	w := &workerservice.Worker{Labels: pipelineLabels(), CapabilityDescriptor: &workerservice.CapabilityDescriptor{Platform: "darwin", Architecture: "amd64", ActionContracts: workerservice.ActionContracts{"workerHost.pipeline_step": 2}}}
+	w := &workerservice.Worker{Labels: pipelineLabels(), CapabilityDescriptor: &workerservice.CapabilityDescriptor{Platform: "darwin", Architecture: "amd64", ActionContracts: workerservice.ActionContracts{"workerHost.pipeline_step": PipelineStepContract}}}
 	args := map[string]any{"execution": "native", "platform": "darwin/arm64"}
 	if machineAllowsPipelines(w, args) {
 		t.Fatal("stale host architecture admitted")
@@ -68,7 +68,7 @@ func TestNativePlatformUsesBuildMetadataAndLiveConnection(t *testing.T) {
 	}
 }
 
-func TestOnlyConfirmedV2RefusalsAllowAnotherMachine(t *testing.T) {
+func TestOnlyConfirmedContractRefusalsAllowAnotherMachine(t *testing.T) {
 	for _, code := range []string{"pipeline_capacity_busy", "pipeline_capacity_unavailable", "pipeline_runtime_unavailable", "denied_by_policy"} {
 		result := Result{ErrorCode: code}
 		if !pipelineRefusedBeforeStart(PurposePipeline, result, nil) {
@@ -85,7 +85,7 @@ func TestOnlyConfirmedV2RefusalsAllowAnotherMachine(t *testing.T) {
 	}
 }
 
-func TestV2PreStartProofSurvivesTheReplicaHop(t *testing.T) {
+func TestContractPreStartProofSurvivesTheReplicaHop(t *testing.T) {
 	for _, tc := range []struct {
 		code    string
 		reroute bool

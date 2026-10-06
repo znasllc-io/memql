@@ -496,7 +496,7 @@ because there is none. Three other things must hold instead.
    capability descriptor. The router requires an explicit scope accepting the
    requested repository before dispatch. Missing scope metadata is unknown
    consent: upgrade and reconnect older workers before using them for builds.
-   It must also report `workerHost.pipeline_step` action contract **2**. An older,
+   It must also report `workerHost.pipeline_step` action contract **3**. An older,
    missing or unknown contract refuses before dispatch; operator labels cannot
    override it. Native OS/architecture comes from the binary descriptor and is
    rechecked on the receiving replica.
@@ -536,7 +536,7 @@ A refusal before start ran nothing, and a machine whose stream another agent
 replica holds is reached over a forward under the owner's authority -- skipped,
 never failed, when it cannot be. With no machine that offers the need, allows
 pipelines and is online, the step is refused `pipeline_no_machine_for_need`, and
-nothing ran. Under contract 2, policy rejection, busy build capacity and an unavailable
+nothing ran. Under contract 3, policy rejection, busy build capacity and an unavailable
 runtime are confirmed pre-execution refusals and permit another candidate.
 Timeouts, disconnects, uncertain cleanup and interrupted prior attempts do not: a
 command might already have performed an external effect. Each dispatch is recorded like an agent's call, as a
@@ -553,11 +553,25 @@ architecture emulation is refused. Native execution also probes Docker when
 
 The current worker admits one pipeline command per OS user across all its
 cluster connections. A durable attempt record outlives process death. A new
-worker reconciles an orphan container only against the same Docker daemon;
+worker reconciles the recorded containers and network only against the same Docker daemon;
 unknown daemon identity, uncertain cleanup and interrupted native execution
 remain blocked for reconciliation. This reservation does not reserve agent
-work or another OS user's capacity. Fleet sidecars and shared caches are not
-yet implemented and are refused rather than omitted.
+work or another OS user's capacity.
+
+Container steps support up to four digest-pinned services on the declared
+platform. Services share `localhost` with the command on a per-attempt bridge,
+publish no host ports and receive neither the checkout nor the step's secrets.
+Declared readiness probes must succeed before the command starts. Every
+container and network name is recorded before creation so cancellation or a
+replacement worker can remove the entire attempt without sweeping other work.
+
+Declared Go/npm caches persist on the worker. The engine supplies an opaque
+owner/repository/event-trust scope; Cockpit also separates local cluster
+enrollments, repository hosts, architectures, images and runtime users. Pull
+request writes never enter the trusted push/release cache. Cockpit retains up
+to 10 GiB between builds, evicting oldest cache directories; this is not a hard
+disk quota while a command runs. Native steps cannot declare services or these
+managed caches. Upgrade the engine and Cockpit together for contract 3.
 
 **What the machine does with the step** -- the clone (the cluster Job's own
 clone script, over `https` only), the command in the machine's own environment,
