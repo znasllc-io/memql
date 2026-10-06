@@ -46,6 +46,12 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 	// -- specifically to remove the unguarded coupling a duplicated hash
 	// expression created, so the entry is gone rather than kept.)
 	allow := map[string]string{
+		// Release artifact digests are standard SHA-256 over the exact blob
+		// bytes, independently verifiable with sha256sum and OCI tooling.
+		// core/id's content address is a different algorithm/representation.
+		"azureblob/verified_stream.go":              "verifies externally supplied standard SHA-256 digests of immutable artifact bytes, never MemQL row identifiers",
+		"azureblob/verified_stream_test.go":         "independently computes standard SHA-256 artifact fixtures for the streaming storage protocol",
+		"azureblob/verified_stream_azurite_test.go": "checks real stored artifact bytes against standard SHA-256 digests, including an OCI archive",
 		"email/acs.go":      "Azure Communication Services requires SHA-256 content digests and HMAC-SHA256 request authentication; these are wire signatures, not row IDs",
 		"email/acs_test.go": "Independently verifies ACS's required SHA-256 content hash and HMAC wire signature against the outgoing request",
 		// Retention archives are recoverable outside MemQL. Their filenames are
