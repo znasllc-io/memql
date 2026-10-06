@@ -7,3 +7,36 @@ automation materializeFile {
   }
   compose := builtin composeExecute(compositionId: args.compositionId)
 }
+
+/// Compose, render and file inside the current work run. Completed delivery
+/// receipts and saved render recipes are recovered without generating a new draft.
+@template
+automation composeMaterializeWorkflow {
+  recovered := builtin composeRecoverOutput()
+  if recovered { return }
+  builtin composeReadTemplate()
+  input := builtin composeWorkflowFacts()
+  if input.savedRecipe {
+    builtin composeRestoreDraft()
+  } else if input.hasComposer {
+    builtin composeGenerateDraft()
+  } else {
+    builtin composeRequireDraft()
+  }
+  draft := builtin composeWorkflowFacts()
+  if draft.outputKind == "" && (draft.format == "csv" || draft.format == "json") && !draft.hasRows {
+    builtin composeUseSourceRows()
+  }
+  builtin composeRenderOutput()
+  if input.needsSource && !input.sourceComplete { builtin composeFileSource() }
+  builtin composeFileOutput()
+  builtin composeCompleteOutput()
+  if input.hasRecipeId { builtin composeRecordRecipeUse() }
+}
+
+/// Default output naming for a saved recipe.
+@template
+automation composeRecipeOutputName {
+ args { requestedName string! recipeName string! date string! }
+ return args.requestedName == "" ? args.recipeName + " " + args.date : args.requestedName
+}

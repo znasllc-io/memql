@@ -1163,12 +1163,14 @@ type AutomationDef struct {
 	// DocComment carries the joined /// doc-comment block attached
 	// immediately above this declaration (memql#2633, capture-only;
 	// description sourcing flips in #2634).
-	DocComment  string
-	Attributes  []*Attribute // @name Python-style attributes
-	Name        string
-	Description string
-	Schedule    string // cron expression, from @trigger(schedule=...)
-	Trigger     *TriggerDef
+	DocComment    string
+	Attributes    []*Attribute // @name Python-style attributes
+	Name          string
+	Description   string
+	Schedule      string // cron expression, from @trigger(schedule=...)
+	ScheduleNode  string // elected node type, from @trigger(node=...)
+	ScheduleLease string // stable lease scope, from @trigger(lease=...)
+	Trigger       *TriggerDef
 
 	// Body is the statement body (body.go), which the statement parser reads
 	// for a logic and an automation alike (epic memql#5370).

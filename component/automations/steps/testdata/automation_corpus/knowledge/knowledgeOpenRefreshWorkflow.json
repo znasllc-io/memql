@@ -1,0 +1,83 @@
+{
+  "automation": "knowledge/automations.memql knowledgeOpenRefreshWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "domainId": "s-domainId",
+            "name": "s-name",
+            "owner": "s-owner"
+          },
+          "topic": "automation.invocation.knowledgeOpenRefreshWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "automation": "trainSpecialist",
+              "input": {
+                "domainId": "s-domainId",
+                "mode": "refresh",
+                "specialistId": "",
+                "topic": "s-name"
+              },
+              "owner": "s-owner",
+              "requestedVia": "api",
+              "statement": "Refresh knowledge domain \"s-name\" (cadence backstop)",
+              "triggeredBy": "refresh.cadence"
+            },
+            "kind": "builtin",
+            "name": "knowledgeDispatchRefresh"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "domainId": "s-domainId",
+            "name": "s-name",
+            "owner": "s-owner"
+          },
+          "topic": "automation.invocation.knowledgeOpenRefreshWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "automation": "trainSpecialist",
+              "input": {
+                "domainId": "s-domainId",
+                "mode": "refresh",
+                "specialistId": "",
+                "topic": "s-name"
+              },
+              "owner": "s-owner",
+              "requestedVia": "api",
+              "statement": "Refresh knowledge domain \"s-name\" (cadence backstop)",
+              "triggeredBy": "refresh.cadence"
+            },
+            "kind": "builtin",
+            "name": "knowledgeDispatchRefresh"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

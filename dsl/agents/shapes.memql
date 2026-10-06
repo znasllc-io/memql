@@ -50,6 +50,7 @@ shape agent agentFull {
   kind
   capabilities
   providerConfig
+  lineage
   groupIds
   active
   deleted

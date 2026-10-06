@@ -246,8 +246,9 @@ type runDriver struct {
 	cleanupFailed atomic.Bool
 	facts         requestFacts
 
-	stages []stageTracks
-	tracks []*stepTrack
+	workflow *workflowProgram
+	stages   []stageTracks
+	tracks   []*stepTrack
 	// abandonedInFlight: this drive ends steps a previous driver handed to
 	// the runner without re-sending them, so the runner must be told to stop
 	// them (reopenFromRows, conclude). The drive's goroutine only.
@@ -425,6 +426,12 @@ func (dr *runDriver) steer(ctx context.Context) (verdict, bool) {
 	case refusal != nil:
 		return refusedWith(refusal), true
 	}
+
+	// Resolve and pin the workflow before the first step intent.
+	if err := dr.prepareWorkflow(plan.Workflow); err != nil {
+		return refusedWith(pipelines.Refuse(pipelines.CodeStageInvalid, "workflow", "%s", err)), true
+	}
+
 	if len(plan.Stages) == 0 {
 		// No stage applies to this run: a success with nothing to run, and
 		// no work goal for nothing.
@@ -441,9 +448,12 @@ func (dr *runDriver) steer(ctx context.Context) (verdict, bool) {
 	}
 	dr.publish(ctx)
 
-	dr.execute(ctx)
+	workflowErr := dr.execute(ctx)
 	if dr.lease.isLost() {
 		return verdict{}, false
+	}
+	if workflowErr != nil && !dr.lease.isCancelled() {
+		return verdict{conclusion: ConclusionFailure, workCode: pipelines.CodeExecutorError, workMessage: "Pipeline workflow failed: " + dr.mask(workflowErr.Error())}, true
 	}
 	return dr.verdictOfSteps(), true
 }
@@ -919,104 +929,6 @@ func (dr *runDriver) buildTracks(plan pipelines.Plan) {
 		}
 		dr.stages = append(dr.stages, st)
 	}
-}
-
-// execute runs the stages strictly in the order written (decision 2): a
-// stage's steps at once, at most maxConcurrentSteps in flight; the first
-// stage that fails blocks every later stage's steps (pipeline_stage_blocked)
-// -- except a notify stage's, which runs: announcing the failure is what it
-// is for (D16). The block keeps naming the stage that failed first. A cancel
-// stops it between stages and inside one, a notify stage's included: one the
-// cancel reaches before it hands its notification over sends nothing. A lost
-// lease stops it with nothing more written.
-func (dr *runDriver) execute(ctx context.Context) {
-	blockedBy := ""
-	for i, st := range dr.stages {
-		if dr.lease.isLost() {
-			return
-		}
-		if dr.lease.isCancelled() {
-			break
-		}
-		if blockedBy != "" && !announces(st) {
-			for _, t := range st.tracks {
-				if !t.finished() {
-					dr.settle(ctx, t, skipReceipt(pipelines.CodeStageBlocked, "Not run: stage "+blockedBy+" failed."))
-				}
-			}
-			continue
-		}
-		dr.runStage(ctx, st)
-		if dr.lease.isLost() {
-			return
-		}
-		if dr.lease.isCancelled() {
-			break
-		}
-		if blockedBy == "" && stageFailed(st) {
-			blockedBy = st.name
-		}
-		if i < len(dr.stages)-1 {
-			dr.progress(ctx)
-		}
-	}
-	if dr.lease.isCancelled() {
-		for _, t := range dr.tracks {
-			if !t.finished() {
-				dr.settle(ctx, t, cancelReceipt())
-			}
-		}
-	}
-}
-
-// runStage runs one stage's unfinished steps at once and returns when every
-// one has ended or the drive has stopped.
-func (dr *runDriver) runStage(ctx context.Context, st stageTracks) {
-	slots := make(chan struct{}, maxConcurrentSteps)
-	var wg sync.WaitGroup
-	for _, t := range st.tracks {
-		if t.finished() {
-			continue
-		}
-		wg.Add(1)
-		go func(t *stepTrack) {
-			defer wg.Done()
-			select {
-			case slots <- struct{}{}:
-			case <-dr.lease.stop:
-				return // stopped before it started: the cancel path settles it
-			}
-			defer func() { <-slots }()
-			dr.runStep(ctx, t)
-		}(t)
-	}
-	wg.Wait()
-}
-
-// stageFailed reports a stage that did not pass: a step failed, was refused,
-// or was cancelled by its runner (the run itself was not).
-func stageFailed(st stageTracks) bool {
-	for _, t := range st.tracks {
-		switch t.snapshot().Status {
-		case StepFailed, StepRefused, StepCancelled:
-			return true
-		}
-	}
-	return false
-}
-
-// announces reports a notify stage: one whose every step is a notify step,
-// which runs after an earlier stage failed rather than being blocked by it.
-func announces(st stageTracks) bool {
-	if len(st.tracks) == 0 {
-		return false
-	}
-	for _, t := range st.tracks {
-		if t.step.Kind != pipelines.StepNotify {
-			return false
-		}
-	}
-	return true
 }
 
 // runStep takes one step from pending to its receipt.

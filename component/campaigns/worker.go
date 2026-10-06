@@ -363,33 +363,9 @@ func (w *Worker) WarnOnUnrotatableUnsubscribeSecret(ctx context.Context) {
 // drives the loop synchronously (the outbound worker's precedent) rather
 // than racing a ticker.
 func (w *Worker) DrainOnce(ctx context.Context) {
-	systemCtx := w.systemActorContext(ctx)
-	// Schedules first, so a campaign that comes due is promoted and drained
-	// in the SAME pass rather than waiting a further poll interval to start
-	// (memql#3459).
-	w.promoteDueSeries(ctx, systemCtx)
-	w.drainNewsletterWelcomes(ctx, systemCtx)
-	w.promoteDueSchedules(ctx, systemCtx)
-	// The ramp reads the evidence and sets the pace BEFORE any batch, so a
-	// step change takes effect on this pass rather than the next
-	// (memql#3462). It self-limits to warmupEvalInterval internally.
-	w.applyWarmup(systemCtx, w.nowUTC())
-	jobs, err := w.store.DrainableJobs(systemCtx)
-	if err != nil {
-		w.logger.Debug("campaigns worker: scan failed (engine likely not ready)", "error", err)
-		return
+	if err := w.drainWorkflow(ctx); err != nil {
+		w.logger.Warn("campaign workflow failed", "error", err)
 	}
-	for _, job := range jobs {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		w.processJob(ctx, systemCtx, job)
-	}
-	// After the pass, so one write covers everything the pass observed
-	// rather than one per message.
-	w.flushReputation(systemCtx)
 }
 
 func (w *Worker) processJob(ctx context.Context, systemCtx context.Context, job SendJob) {

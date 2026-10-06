@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -74,17 +75,31 @@ func (i *Integration) ReconcileAccountDomains(ctx context.Context) (AccountDomai
 	if err != nil {
 		return out, err
 	}
+	selected := map[string]accountRow{}
+	ids := []string{}
 	for _, row := range rows {
-		out.Checked++
-		if err := i.stepAccountDomain(ctx, row, &out); err != nil {
-			out.Failed++
-			if i.logger != nil {
-				i.logger.Warn("account domain reconciliation step failed",
-					"account", row.ID, "domain", row.Domain, "error", err)
-			}
-		}
+		selected[row.ID] = row
+		ids = append(ids, row.ID)
 	}
-	return out, nil
+	_, err = workflowhost.Run(ctx, "accountDomainReconcileWorkflow", map[string]any{"ids": ids}, workflowhost.Options{Logger: i.logger, Operations: map[string]workflowhost.Operation{
+		"customDomainReconcileAccount": func(ctx context.Context, a map[string]any) (any, error) {
+			id, _ := a["accountId"].(string)
+			row, ok := selected[id]
+			if !ok {
+				return nil, fmt.Errorf("account outside reconciliation snapshot")
+			}
+			out.Checked++
+			err := i.stepAccountDomain(ctx, row, &out)
+			if err != nil {
+				out.Failed++
+				if i.logger != nil {
+					i.logger.Warn("account domain reconciliation step failed", "account", row.ID, "error", err)
+				}
+			}
+			return nil, err
+		},
+	}})
+	return out, err
 }
 
 // stepAccountDomain advances ONE account by at most one state.

@@ -12,19 +12,25 @@ MemQL has **exactly three** extension words -- component / integration / pack;
 intake "plugin" means pack. See
 [Component vs integration vs pack](../docs/public/concepts/component-integration-pack.md).
 
-Integrations are **protocol adapters**. They bridge external services (OpenAI voice, LiveKit, avatar vendors, etc.) into the MemQL ecosystem using Go code for protocol-level concerns that cannot be expressed in the MemQL DSL.
+Integrations supply bounded operations. **Workflow choices and composition live
+in `.memql`**, including internal capabilities registered through this API.
+Read [Engine, integration and workflow boundaries](../docs/public/build/integration-boundary.md)
+before adding or expanding a capability. The rule applies to `component/` and
+`app/` too; moving a workflow between Go directories does not satisfy it.
 
-### What Integrations DO (Go code)
-- Handle external protocols (WebSocket, gRPC, HTTP webhooks, binary audio)
-- Emit events into the system when external things happen
-- Expose **capabilities** -- typed functions callable from the MemQL DSL
-- Manage real-time state (streaming, presence, caching)
+Go owns protocol handling, typed codecs, resource lifecycles, mandatory
+identity/row/approval gates, durable receipts and cross-replica coordination.
+DSL owns ordering, selection, prompt/tool recipes, optional failure handling,
+notification content and policy thresholds. Multiple requests may fulfill one
+bounded effect. A native model/tool loop may enforce a selected contract and
+budget; choosing its task, prompt and tool set belongs in DSL.
 
-### What Integrations DO NOT DO (belongs in MemQL DSL)
-- Query orchestration (fetching data, assembling context)
-- AI invocation (calling prompts, tool-calling loops)
-- Business logic (deciding who responds, building conversation history)
-- Data mutations (inserting records, updating nodes)
+For an already-authorized native scope, use the ordinary automation interpreter
+through `component/automations/workflowhost` with restricted call-local
+operations. Keep the native entry gate and each operation's invariants. Never
+pass an approval boolean or a serialized scope token as a substitute for them.
+Show composition and failures in tests, including another host without local
+state. Do not wrap a whole new Go workflow in a one-line DSL action.
 
 ### A capability that reads rows DIRECTLY must gate them itself
 
@@ -89,7 +95,9 @@ Integrations should receive `IntegrationEngineAccess` (narrow interface) instead
 - `RegisterIntegration()` -- capability registration
 - Tool definitions and execution (for tool-calling streams)
 
-It explicitly does NOT provide `Execute()`, `InvokeAI()`, or `RenderPrompt()` -- those belong in MemQL automations and functions.
+It also provides `Execute()`, `InvokeAI()` and `RenderPrompt()` for bounded
+operations and protocol runtimes. Their availability does not authorize hidden
+workflow composition; choose queries, prompts and their order in DSL.
 
 It provides **no provider lookup** (epic memql#5127): `ChatStreamProvider`,
 `ChatStreamProviderByName` and `ChatStreamWithToolsProviderByName` were removed

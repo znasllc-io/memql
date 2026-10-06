@@ -1,0 +1,51 @@
+{
+  "automation": "accounts/automations.memql accountGroupPresentation",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "accountId": "s-accountId",
+            "name": "s-name"
+          },
+          "topic": "automation.invocation.accountGroupPresentation"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "description": "Everyone who works on s-name.",
+            "name": "s-name"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "accountId": "s-accountId",
+            "name": "s-name"
+          },
+          "topic": "automation.invocation.accountGroupPresentation"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "description": "Everyone who works on s-name.",
+            "name": "s-name"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

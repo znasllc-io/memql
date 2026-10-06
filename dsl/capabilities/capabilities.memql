@@ -132,3 +132,14 @@ capability shell.exec {
     cmd string!
   }
 }
+
+/// Execute one already-authorized, compiled pipeline step under the current run lease. Receipts
+/// prevent repeating completed work; uncertain work is reconciled by the runner.
+@sideEffect("exec")
+capability integration.pipelines.executeStep {
+  args { stepKey string! }
+}
+
+/// Update the current pipeline run's existing GitHub check from its recorded step results.
+@sideEffect("write")
+capability integration.pipelines.reportProgress { }

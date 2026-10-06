@@ -76,13 +76,17 @@ func (w *Worker) promoteDueSchedules(ctx context.Context, systemCtx context.Cont
 		w.logger.Debug("campaigns worker: scheduled-job scan failed (engine likely not ready)", "error", err)
 		return
 	}
+	selected := map[string]SendJob{}
+	ids := []string{}
 	for _, job := range jobs {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		w.promoteSchedule(ctx, systemCtx, job)
+		selected[job.ID] = job
+		ids = append(ids, job.ID)
+	}
+	if err := campaignPage(ctx, ids, func(ctx context.Context, id string) error {
+		w.promoteSchedule(ctx, systemCtx, selected[id])
+		return nil
+	}); err != nil {
+		w.logger.Warn("campaign scheduled page workflow failed", "error", err)
 	}
 }
 

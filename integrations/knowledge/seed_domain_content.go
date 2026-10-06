@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
@@ -109,18 +110,6 @@ type seedChunk struct {
 // against the new prompt.
 const defaultRecipeVersion = "v2"
 
-// disclaimerChunkText is prepended (as a chunk at index 0) to every
-// Tier-B domain's seeded content. Tells the agent to caveat its
-// answers; tells the user the generated content is not professional
-// advice.
-const disclaimerChunkText = `**General information only -- not professional advice.** Content in this domain is generated for educational reference. For specific decisions involving health, legal, financial, or safety matters, consult a licensed professional. The agent should: (1) frame answers as general information, not personal advice; (2) name what kind of professional could help with the specific situation; (3) decline to give actionable specifics where they could cause harm if applied without expert oversight.`
-
-// tierCPlaceholderText is the single chunk Tier-C domains get instead
-// of LLM-generated content. Tells the user the domain doesn't
-// auto-seed and points at the upload path. Lets the domain still
-// exist + be selectable; the agent just has nothing retrievable.
-const tierCPlaceholderText = `**This domain doesn't auto-seed content.** Specialist domains in this tier (clinical medicine, surgical technique, securities advice, legal practice, etc.) carry too much downstream risk for LLM-generated baseline content. Upload your own authoritative materials -- textbooks, professional society guidelines, peer-reviewed articles -- via the Knowledge panel's document-attach flow. Until then, an agent assigned this domain answers from its general LLM pretraining alone.`
-
 // seedDomainContentHandler runs the seeder for a single domain. Looks
 // up the domain (so it knows the name + tier), branches on tier, and
 // either generates + stores chunks (A/B) or writes the Tier-C
@@ -173,48 +162,30 @@ func (i *Integration) seedAllDomainContentHandler(ctx context.Context, args map[
 	tierFilter, _ := args["tierFilter"].(string)
 	domainIdPrefix, _ := args["domainIdPrefix"].(string)
 
-	startedAt := time.Now()
-	totalDomains := 0
-	totalChunks := 0
-	skipped := 0
-	failed := 0
-
+	domains := map[string]StandardDomain{}
+	facts := []any{}
 	for _, d := range allSeedDomains() {
-		tier := effectiveTier(d)
-		if tierFilter != "" && tier != strings.ToUpper(strings.TrimSpace(tierFilter)) {
-			skipped++
-			continue
-		}
-		if domainIdPrefix != "" && !strings.HasPrefix(d.ID, domainIdPrefix) {
-			skipped++
-			continue
-		}
-		// Stamp tier on the local copy so runSeederForDomain doesn't
-		// have to re-resolve via effectiveTier.
-		d.Tier = tier
-
-		written, err := i.runSeederForDomain(ctx, d, recipeVersion)
-		if err != nil {
-			i.Logger.Warn("knowledge.seedAllDomainContent: domain failed",
-				"domainId", d.ID, "tier", tier, "err", err)
-			failed++
-			continue
-		}
-		totalDomains++
-		totalChunks += written
+		d.Tier = effectiveTier(d)
+		domains[d.ID] = d
+		facts = append(facts, map[string]any{"id": d.ID, "tier": d.Tier})
 	}
-
-	i.Logger.Info("knowledge.seedAllDomainContent: complete",
-		"recipeVersion", recipeVersion,
-		"tierFilter", tierFilter,
-		"domainIdPrefix", domainIdPrefix,
-		"domainsSeeded", totalDomains,
-		"chunksWritten", totalChunks,
-		"skipped", skipped,
-		"failed", failed,
-		"elapsedMs", time.Since(startedAt).Milliseconds(),
-	)
-	return nil, nil
+	totalDomains, totalChunks := 0, 0
+	_, err := workflowhost.Run(ctx, "knowledgeSeedAllWorkflow", map[string]any{"domains": facts, "tierFilter": strings.ToUpper(strings.TrimSpace(tierFilter)), "domainIdPrefix": domainIdPrefix}, workflowhost.Options{Logger: i.Logger, Operations: map[string]workflowhost.Operation{
+		"knowledgeSeedSelectedDomain": func(ctx context.Context, a map[string]any) (any, error) {
+			d, ok := domains[stringArg(a, "domainId")]
+			if !ok {
+				return nil, fmt.Errorf("domain is outside the seed catalog")
+			}
+			written, err := i.runSeederForDomain(ctx, d, recipeVersion)
+			if err == nil {
+				totalDomains++
+				totalChunks += written
+			}
+			return nil, err
+		},
+	}})
+	i.Logger.Info("knowledge.seedAllDomainContent: complete", "recipeVersion", recipeVersion, "domainsSeeded", totalDomains, "chunksWritten", totalChunks, "error", err)
+	return nil, err
 }
 
 // runSeederForDomain is the per-domain pipeline body. Branches on tier:
@@ -239,40 +210,17 @@ func (i *Integration) runSeederForDomain(ctx context.Context, d StandardDomain, 
 		tier = effectiveTier(d)
 	}
 
-	var (
-		written int
-		err     error
-	)
-	switch strings.ToUpper(tier) {
-	case "C":
-		// Tier C: prefer Wikipedia content when an article mapping
-		// exists for this domain id (see tierCWikipediaArticles in
-		// seed.go); fall back to the placeholder chunk when no
-		// mapping is configured.
-		if articles := wikipediaArticlesFor(d.ID); len(articles) > 0 {
-			written, err = i.writeTierCWikipediaChunks(ctx, d, articles, recipeVersion)
-		} else {
-			written, err = i.writeTierCPlaceholder(ctx, d, recipeVersion)
-		}
-	case "B":
-		written, err = i.writeTierABChunks(ctx, d, "B", recipeVersion)
-	default:
-		// "A" or anything else falls through here.
-		written, err = i.writeTierABChunks(ctx, d, "A", recipeVersion)
-	}
-
+	scope := &seedScope{i: i, domain: d, recipe: recipeVersion}
+	result, err := workflowhost.Run(ctx, "knowledgeSeedDomainWorkflow", map[string]any{
+		"domainId": d.ID, "domainName": d.Name, "domainDescription": d.Description, "category": coalesceCategory(d.Category),
+		"tier": strings.ToUpper(tier), "broadSurvey": d.BroadSurvey, "articles": wikipediaArticlesFor(d.ID),
+	}, workflowhost.Options{Logger: i.Logger, Operations: scope.operations()})
 	if err != nil {
-		return written, err
+		return scope.written, err
 	}
+	_ = result
+	return scope.written, nil
 
-	// Stamp freshness on success. Best-effort -- if the mark fails we
-	// log but don't roll back the chunks (they're written either way;
-	// freshness is observability, not correctness).
-	if stampErr := i.stampDomainSeeded(ctx, d.ID, recipeVersion); stampErr != nil {
-		i.Logger.Warn("knowledge.runSeederForDomain: stampDomainSeeded failed",
-			"domainId", d.ID, "err", stampErr)
-	}
-	return written, nil
 }
 
 // stampDomainSeeded calls markKnowledgeDomainSeeded to
@@ -293,126 +241,6 @@ func (i *Integration) stampDomainSeeded(ctx context.Context, domainId, recipeVer
 
 // writeTierABChunks runs the generation prompt + writes chunks for
 // Tier-A and Tier-B domains. Prepends the disclaimer chunk for B.
-func (i *Integration) writeTierABChunks(ctx context.Context, d StandardDomain, tier string, recipeVersion string) (int, error) {
-	// Render + invoke the prompt. cacheSeconds isn't meaningful here
-	// (each domain is a unique input) so we don't pass it; the AI
-	// runtime's default kicks in.
-	//
-	// BroadSurvey domains (multi-millennium history, world civs, etc.)
-	// get a 60-chunk target + a flag that flips the prompt into
-	// named-anchor coverage mode. Narrow domains keep the 30 default
-	// from agentReply.tmpl's existing instructions.
-	targetCount := 30
-	if d.BroadSurvey {
-		targetCount = 60
-	}
-	data := map[string]any{
-		"domainId":          d.ID,
-		"domainName":        d.Name,
-		"domainDescription": d.Description,
-		"category":          coalesceCategory(d.Category),
-		"targetCount":       targetCount,
-		"tier":              tier,
-		"broadSurvey":       d.BroadSurvey,
-	}
-	raw, err := i.engine.InvokeAIStructured(
-		ctx,
-		"seedDomainContent",
-		data,
-		"seedDomainContent",
-		json.RawMessage(seedDomainContentSchemaJSON),
-		true,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("seedDomainContent AI call: %w", err)
-	}
-	var payload seedChunkPayload
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return 0, fmt.Errorf("seedDomainContent JSON parse: %w", err)
-	}
-
-	// Provider for embedding the chunk text.
-	// The cluster's embedder BINDING, not a package const (epic memql#5137,
-	// D6). A seeder writes vectors the recall path will later compare against,
-	// so seeding with a different embedder than the one bound produces a corpus
-	// that returns confident wrong neighbours -- never an error.
-	boundEmbedder, err := memql.ResolveEmbedderProvider(ctx)
-	if err != nil {
-		return 0, err
-	}
-	provider, err := i.embeddingProvider(ctx, boundEmbedder)
-	if err != nil {
-		return 0, fmt.Errorf("resolve embedding provider %q: %w", boundEmbedder, err)
-	}
-
-	written := 0
-	chunkIndex := 0
-
-	// Tier-B: prepend the disclaimer chunk at index 0 so it always
-	// retrieves with high similarity to safety-relevant queries.
-	if tier == "B" {
-		if err := i.storeSeedChunk(ctx, d, recipeVersion, chunkIndex, seedChunk{
-			Kind:     "principle",
-			Title:    "Disclaimer: general information only",
-			Body:     disclaimerChunkText,
-			KeyTerms: []string{"disclaimer", "professional advice", "safety", "consult"},
-		}, "seed-disclaimer", "llmSeeded", boundEmbedder, provider); err != nil {
-			i.Logger.Warn("seedDomainContent: disclaimer write failed",
-				"domainId", d.ID, "err", err)
-		} else {
-			written++
-		}
-		chunkIndex++
-	}
-
-	for _, c := range payload.Chunks {
-		c.Title = strings.TrimSpace(c.Title)
-		c.Body = strings.TrimSpace(c.Body)
-		if c.Title == "" || c.Body == "" {
-			continue
-		}
-		if err := i.storeSeedChunk(ctx, d, recipeVersion, chunkIndex, c, "llm-generated", "llmSeeded", boundEmbedder, provider); err != nil {
-			i.Logger.Warn("seedDomainContent: chunk write failed",
-				"domainId", d.ID, "title", c.Title, "err", err)
-			chunkIndex++
-			continue
-		}
-		written++
-		chunkIndex++
-	}
-	return written, nil
-}
-
-// writeTierCPlaceholder writes the single "this domain doesn't
-// auto-seed" placeholder chunk. Lets Tier-C domains still exist as
-// selectable in the UI without shipping LLM-generated content for
-// high-stakes specialist topics.
-func (i *Integration) writeTierCPlaceholder(ctx context.Context, d StandardDomain, recipeVersion string) (int, error) {
-	// The cluster's embedder BINDING, not a package const (epic memql#5137,
-	// D6). A seeder writes vectors the recall path will later compare against,
-	// so seeding with a different embedder than the one bound produces a corpus
-	// that returns confident wrong neighbours -- never an error.
-	boundEmbedder, err := memql.ResolveEmbedderProvider(ctx)
-	if err != nil {
-		return 0, err
-	}
-	provider, err := i.embeddingProvider(ctx, boundEmbedder)
-	if err != nil {
-		return 0, fmt.Errorf("resolve embedding provider %q: %w", boundEmbedder, err)
-	}
-
-	chunk := seedChunk{
-		Kind:     "principle",
-		Title:    fmt.Sprintf("Tier-C placeholder for %s", d.Name),
-		Body:     tierCPlaceholderText,
-		KeyTerms: []string{"placeholder", "specialist", "upload", "authoritative"},
-	}
-	if err := i.storeSeedChunk(ctx, d, recipeVersion, 0, chunk, "tier-c-placeholder", "llmSeeded", boundEmbedder, provider); err != nil {
-		return 0, err
-	}
-	return 1, nil
-}
-
 // storeSeedChunk persists one chunk: idempotent id, embed, write the
 // chunk row + node_vectors row. Carries seedSource / seedTier /
 // recipeVersion / kind / title / keyTerms in payload metadata so we
@@ -523,4 +351,94 @@ func (i *Integration) lookupSeededDomain(_ context.Context, domainId string) (St
 		}
 	}
 	return StandardDomain{}, fmt.Errorf("domain %q is not in the shipped catalog (user-created domains use the `ingest` capability instead)", domainId)
+}
+
+// seedScope binds a recipe to one domain. Index assignment and receipts stay
+// with the writer; content selection, prompts, iteration and continuation are DSL.
+type seedScope struct {
+	i                  *Integration
+	domain             StandardDomain
+	recipe             string
+	nextIndex, written int
+	providerName       string
+	provider           memql.EmbeddingAIProvider
+}
+
+func (s *seedScope) operations() map[string]workflowhost.Operation {
+	return map[string]workflowhost.Operation{
+		"knowledgeGenerateSeedChunks": func(ctx context.Context, a map[string]any) (any, error) {
+			data, _ := a["data"].(map[string]any)
+			schemaName := stringArg(a, "schema")
+			var schema string
+			switch schemaName {
+			case "seedDomainContent":
+				schema = seedDomainContentSchemaJSON
+			case "seedDomainBridge":
+				schema = bridgeChunkSchemaJSON
+			default:
+				return nil, fmt.Errorf("unknown seed response contract %q", schemaName)
+			}
+			raw, err := s.i.engine.InvokeAIStructured(ctx, stringArg(a, "prompt"), data, schemaName, json.RawMessage(schema), true)
+			if err != nil {
+				return nil, err
+			}
+			var payload seedChunkPayload
+			if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+				return nil, fmt.Errorf("seed response: %w", err)
+			}
+			out := []any{}
+			for idx, c := range payload.Chunks {
+				out = append(out, map[string]any{"index": idx, "kind": c.Kind, "title": strings.TrimSpace(c.Title), "body": strings.TrimSpace(c.Body), "keyTerms": c.KeyTerms})
+			}
+			return out, nil
+		},
+		"knowledgeResolveSeedEmbedder": func(ctx context.Context, _ map[string]any) (any, error) { return nil, s.resolveEmbedder(ctx) },
+		"knowledgeStoreSeedChunk":      s.store,
+		"knowledgeStampSeed": func(ctx context.Context, _ map[string]any) (any, error) {
+			return nil, s.i.stampDomainSeeded(ctx, s.domain.ID, s.recipe)
+		},
+		"knowledgeFetchSeedArticle": func(ctx context.Context, a map[string]any) (any, error) {
+			title, body, url, err := fetchWikipediaArticle(ctx, stringArg(a, "article"))
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"title": title, "body": body, "url": url}, nil
+		},
+		"knowledgeSplitSeedText": func(_ context.Context, a map[string]any) (any, error) {
+			return Chunk(stringArg(a, "text"), defaultChunkSize, defaultOverlap), nil
+		},
+	}
+}
+
+func (s *seedScope) store(ctx context.Context, a map[string]any) (any, error) {
+	if s.provider == nil {
+		return nil, fmt.Errorf("seed embedder must be resolved before storing a chunk")
+	}
+	index := s.nextIndex
+	if _, explicit := a["index"]; explicit {
+		index = intArg(a, "index", index)
+	}
+	s.nextIndex++
+	err := s.i.storeSeedChunk(ctx, s.domain, s.recipe, index, seedChunk{Kind: stringArg(a, "kind"), Title: stringArg(a, "title"), Body: stringArg(a, "body"), KeyTerms: toStringSlice(a["keyTerms"])}, stringArg(a, "seedSource"), stringArg(a, "source"), s.providerName, s.provider)
+	if err != nil {
+		s.i.Logger.Warn("knowledge: seed chunk write failed", "domainId", s.domain.ID, "index", index, "error", err)
+		return nil, err
+	}
+	s.written++
+	return nil, nil
+}
+
+func (s *seedScope) resolveEmbedder(ctx context.Context) error {
+	if s.provider == nil {
+		bound, err := memql.ResolveEmbedderProvider(ctx)
+		if err != nil {
+			return err
+		}
+		provider, err := s.i.embeddingProvider(ctx, bound)
+		if err != nil {
+			return err
+		}
+		s.providerName, s.provider = bound, provider
+	}
+	return nil
 }

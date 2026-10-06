@@ -39,8 +39,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -168,57 +168,24 @@ func (i *Integration) EnsureBridgeForAgent(
 	}
 	combinationKey := CombinationKeyFor(domainIds)
 
-	// Existence check via the knowledgeBridge concept.
-	exists, err := i.bridgeExists(ctx, bridgeId)
-	if err != nil {
-		i.Logger.Warn("knowledge.EnsureBridgeForAgent: existence check failed; assuming missing",
-			"bridgeId", bridgeId, "err", err)
-		exists = false
+	scope := &seedScope{i: i, domain: StandardDomain{ID: bridgeId, Name: "Bridge: " + combinationKey, Tier: "A"}, recipe: bridgeRecipeVersion}
+	operations := scope.operations()
+	operations["knowledgeBridgeExists"] = func(ctx context.Context, _ map[string]any) (any, error) { return i.bridgeExists(ctx, bridgeId) }
+	operations["knowledgeBridgeInputs"] = func(ctx context.Context, _ map[string]any) (any, error) {
+		domains, label := i.resolveBridgeInputs(ctx, roleSlug, domainIds)
+		return map[string]any{"domains": domains, "roleLabel": label}, nil
 	}
-	if exists {
-		i.Logger.Debug("knowledge.bridge: cache hit",
-			"bridgeId", bridgeId, "combinationKey", combinationKey)
-		return bridgeId, nil
+	operations["knowledgeStampBridge"] = func(ctx context.Context, _ map[string]any) (any, error) {
+		query := fmt.Sprintf(`mutation mutationCreateKnowledgeBridge(bridgeId: %s, roleSlug: %s, domainIds: %s, combinationKey: %s, chunkCount: %d, recipeVersion: %s, generatedAt: %s)`, quoteString(bridgeId), quoteString(roleSlug), jsonArrayFromCleanedIds(domainIds), quoteString(combinationKey), scope.written, quoteString(bridgeRecipeVersion), quoteString(time.Now().UTC().Format(time.RFC3339)))
+		_, err := i.engine.Execute(ctx, query)
+		return nil, err
 	}
-
-	// Resolve the input domains' name + description for the prompt.
-	domainEntries, roleLabel := i.resolveBridgeInputs(ctx, roleSlug, domainIds)
-	if len(domainEntries) < 2 {
-		// Couldn't resolve enough metadata to do a meaningful
-		// bridge -- drop. (Likely a user-created domain that's
-		// missing description; bridges only make sense for fully-
-		// defined domain combinations.)
-		return "", nil
-	}
-
-	written, err := i.generateBridgeContent(ctx, bridgeId, roleSlug, roleLabel, domainEntries, combinationKey)
+	result, err := workflowhost.Run(ctx, "knowledgeBridgeWorkflow", map[string]any{"bridgeId": bridgeId, "roleSlug": roleSlug}, workflowhost.Options{Logger: i.Logger, Operations: operations})
 	if err != nil {
 		return "", err
 	}
-
-	// Stamp the bridge metadata row.
-	createQuery := fmt.Sprintf(
-		`mutation mutationCreateKnowledgeBridge(bridgeId: %s, roleSlug: %s, domainIds: %s, combinationKey: %s, chunkCount: %d, recipeVersion: %s, generatedAt: %s)`,
-		quoteString(bridgeId),
-		quoteString(roleSlug),
-		jsonArrayFromCleanedIds(domainIds),
-		quoteString(combinationKey),
-		written,
-		quoteString(bridgeRecipeVersion),
-		quoteString(time.Now().UTC().Format(time.RFC3339)),
-	)
-	if _, err := i.engine.Execute(ctx, createQuery); err != nil {
-		i.Logger.Warn("knowledge.bridge: createBridgeRow failed",
-			"bridgeId", bridgeId, "err", err)
-	}
-
-	i.Logger.Info("knowledge.bridge: generated",
-		"bridgeId", bridgeId,
-		"roleSlug", roleSlug,
-		"combinationKey", combinationKey,
-		"chunksWritten", written,
-	)
-	return bridgeId, nil
+	value, _ := result.(string)
+	return value, nil
 }
 
 // bridgeExists returns true if a knowledgeBridge row with the
@@ -315,81 +282,6 @@ func humanRoleLabel(slug string) string {
 		parts[i] = strings.ToUpper(p[:1]) + p[1:]
 	}
 	return strings.Join(parts, " ")
-}
-
-// generateBridgeContent runs the seedDomainBridge prompt + writes
-// the chunks under the bridge id. Returns the number of chunks
-// written (0 is a valid outcome -- the prompt may decline to
-// generate when domains have no real intersection, e.g.
-// {quantum-mechanics, restaurant-dining}).
-func (i *Integration) generateBridgeContent(
-	ctx context.Context,
-	bridgeId string,
-	roleSlug string,
-	roleLabel string,
-	domainEntries []map[string]any,
-	combinationKey string,
-) (int, error) {
-	data := map[string]any{
-		"roleSlug":    roleSlug,
-		"roleLabel":   roleLabel,
-		"domains":     domainEntries,
-		"targetCount": 10,
-	}
-	raw, err := i.engine.InvokeAIStructured(
-		ctx,
-		"seedDomainBridge",
-		data,
-		"seedDomainBridge",
-		json.RawMessage(bridgeChunkSchemaJSON),
-		true,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("seedDomainBridge AI call: %w", err)
-	}
-	var payload seedChunkPayload
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return 0, fmt.Errorf("seedDomainBridge JSON parse: %w", err)
-	}
-
-	// The cluster's embedder BINDING, not a package const (epic memql#5137,
-	// D6). A seeder writes vectors the recall path will later compare against,
-	// so seeding with a different embedder than the one bound produces a corpus
-	// that returns confident wrong neighbours -- never an error.
-	boundEmbedder, err := memql.ResolveEmbedderProvider(ctx)
-	if err != nil {
-		return 0, err
-	}
-	provider, err := i.embeddingProvider(ctx, boundEmbedder)
-	if err != nil {
-		return 0, fmt.Errorf("resolve embedding provider %q: %w", boundEmbedder, err)
-	}
-
-	// Build a synthetic StandardDomain for the storeSeedChunk path so
-	// the chunk rows carry a sensible name + tier. We tier bridges as
-	// "A" because the source LLM call already ran with the same
-	// tier-A safety posture as per-domain content.
-	bridgeAsDomain := StandardDomain{
-		ID:   bridgeId,
-		Name: fmt.Sprintf("Bridge: %s", combinationKey),
-		Tier: "A",
-	}
-
-	written := 0
-	for idx, c := range payload.Chunks {
-		c.Title = strings.TrimSpace(c.Title)
-		c.Body = strings.TrimSpace(c.Body)
-		if c.Title == "" || c.Body == "" {
-			continue
-		}
-		if err := i.storeSeedChunk(ctx, bridgeAsDomain, bridgeRecipeVersion, idx, c, "llm-bridge", "crossDomainBridge", boundEmbedder, provider); err != nil {
-			i.Logger.Warn("knowledge.bridge: chunk write failed",
-				"bridgeId", bridgeId, "chunkIndex", idx, "err", err)
-			continue
-		}
-		written++
-	}
-	return written, nil
 }
 
 // ensureKnowledgeBridgeHandler is the DSL-callable wrapper around

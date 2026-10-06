@@ -1,0 +1,45 @@
+{
+  "automation": "pipelines/automations.memql pipelineNotificationOutcome",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "failed": true,
+            "previousFailed": true
+          },
+          "topic": "automation.invocation.pipelineNotificationOutcome"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": "failed",
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "failed": true,
+            "previousFailed": true
+          },
+          "topic": "automation.invocation.pipelineNotificationOutcome"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": "failed",
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

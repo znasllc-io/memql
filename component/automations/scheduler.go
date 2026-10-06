@@ -420,7 +420,7 @@ func catalogTrigger(a *Automation) *sense.RunnableTrigger {
 	if a == nil {
 		return nil
 	}
-	tr := &sense.RunnableTrigger{Schedule: a.Schedule}
+	tr := &sense.RunnableTrigger{Schedule: a.Schedule, Node: a.ScheduleNode, Lease: a.ScheduleLease}
 	if a.Trigger != nil && a.Trigger.Event != "" {
 		if kind, concept, ok := ast.SplitTriggerTopic(a.Trigger.Event); ok {
 			tr.Event, tr.Concept = kind, concept

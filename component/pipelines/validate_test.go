@@ -438,3 +438,20 @@ func TestValidateDoesNotChangeTheSpec(t *testing.T) {
 		t.Errorf("Validate rewrote select.dbGated to %q", got)
 	}
 }
+
+func TestWorkflowNamesAreInstalledIdentifiers(t *testing.T) {
+	for _, name := range []string{"", "runPipelineStages", "custom_checks2"} {
+		spec := validateBase()
+		spec.Workflow = name
+		if r := Validate(spec); r != nil {
+			t.Fatalf("%q: %v", name, r)
+		}
+	}
+	for _, name := range []string{"../workflow", "https://example.test/a", "1workflow", "workflow()", strings.Repeat("x", 129)} {
+		spec := validateBase()
+		spec.Workflow = name
+		if r := Validate(spec); r == nil || r.Scope != "workflow" {
+			t.Fatalf("accepted %q: %v", name, r)
+		}
+	}
+}

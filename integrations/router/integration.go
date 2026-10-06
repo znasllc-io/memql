@@ -75,7 +75,7 @@ func New(
 func (i *Integration) IntegrationName() string { return "router" }
 
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
-	return []memql.IntegrationCapability{
+	return append(evidenceScopeCapabilities(), []memql.IntegrationCapability{
 		{
 			Name:        "setApiKey",
 			Description: "Encrypt a plaintext vendor API key and persist it as a v1:router:apikey row. Returns the inserted row id.",
@@ -106,7 +106,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Retire a runtime-authored routing rule. A shipped rule is refused: the shipped set is re-read from the embedded tree on every boot, so one you want out of the way is out-ranked with a higher precedence rather than removed.",
 			Handler:     i.handleRetireRoutingRule,
 		},
-	}
+	}...)
 }
 
 // secretNameForVendor maps a router vendor identifier to the

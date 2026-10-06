@@ -92,3 +92,51 @@ builtin composeResolveSources {
 builtin composeExecute {
   compositionId string!
 }
+
+/// Bounded operation in the current owner and composition run.
+@executor("integration.compose.composeRecoverOutput")
+builtin composeRecoverOutput { }
+
+/// Bounded operation in the current owner and composition run.
+@executor("integration.compose.composeReadTemplate")
+builtin composeReadTemplate { }
+
+/// Bounded operation in the current owner and composition run.
+@executor("integration.compose.composeWorkflowFacts")
+builtin composeWorkflowFacts { }
+
+/// Bounded operation in the current owner and composition run.
+@executor("integration.compose.composeRestoreDraft")
+builtin composeRestoreDraft { }
+
+/// Bounded operation in the current owner and composition run.
+@executor("integration.compose.composeGenerateDraft")
+builtin composeGenerateDraft { }
+
+/// Bounded operation in the current owner and composition run.
+@executor("integration.compose.composeRequireDraft")
+builtin composeRequireDraft { }
+
+/// Bounded operation in the current owner and composition run.
+@executor("integration.compose.composeUseSourceRows")
+builtin composeUseSourceRows { }
+
+/// Bounded operation in the current owner and composition run.
+@executor("integration.compose.composeRenderOutput")
+builtin composeRenderOutput { }
+
+/// Bounded operation in the current owner and composition run.
+@executor("integration.compose.composeFileSource")
+builtin composeFileSource { }
+
+/// Bounded operation in the current owner and composition run.
+@executor("integration.compose.composeFileOutput")
+builtin composeFileOutput { }
+
+/// Bounded operation in the current owner and composition run.
+@executor("integration.compose.composeCompleteOutput")
+builtin composeCompleteOutput { }
+
+/// Bounded operation in the current owner and composition run.
+@executor("integration.compose.composeRecordRecipeUse")
+builtin composeRecordRecipeUse { }

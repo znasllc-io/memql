@@ -32,6 +32,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -78,7 +79,7 @@ func (i *Integration) IntegrationName() string { return "release" }
 
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
-	return []memql.IntegrationCapability{
+	return append([]memql.IntegrationCapability{
 		{
 			Name: "releaseCut",
 			Description: "Cut a new release: compute the next version from the repository's vX.Y.Z tags, " +
@@ -106,7 +107,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"version": "string (required) -- v1.2.3 or 1.2.3.",
 			},
 		},
-	}
+	}, workflowhost.ScopedCapabilities((&cutScope{}).operations())...)
 }
 
 // handleCut adapts the DSL argument map to Cut.

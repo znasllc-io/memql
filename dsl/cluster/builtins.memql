@@ -44,3 +44,41 @@ builtin releaseCut {
 builtin releaseCutStatus {
   version  string!  @description("The version to check, in either tag form (v1.2.3) or bare form (1.2.3).")
 }
+
+/// Scoped release operation; available only inside an owner-authorized release cut.
+@executor("integration.release.releaseReadSnapshot")
+builtin releaseReadSnapshot { }
+
+/// Scoped release operation; available only inside an owner-authorized release cut.
+@executor("integration.release.releaseCheckVersion")
+builtin releaseCheckVersion { }
+
+/// Scoped release operation; available only inside an owner-authorized release cut.
+@executor("integration.release.releaseMarkDryRun")
+builtin releaseMarkDryRun { }
+
+/// Scoped release operation; available only inside an owner-authorized release cut.
+@executor("integration.release.releaseCreateTag")
+builtin releaseCreateTag { }
+
+/// Scoped release operation; available only inside an owner-authorized release cut.
+@executor("integration.release.releasePublishTag")
+builtin releasePublishTag { }
+
+/// Scoped release operation; available only inside an owner-authorized release cut.
+@executor("integration.release.releaseOpenExtensionPin")
+builtin releaseOpenExtensionPin { }
+
+/// Scoped release operation; available only inside an owner-authorized release cut.
+@executor("integration.release.releaseRecordCut")
+builtin releaseRecordCut { }
+
+/// Select and calculate a version from the already-read release snapshot.
+@executor("integration.release.releaseSelectCandidate")
+@args(profile="object")
+builtin releaseSelectCandidate { previousTag string! }
+
+/// Return a typed candidate refusal without performing an external effect.
+@executor("integration.release.releaseRejectCandidate")
+@args(profile="object")
+builtin releaseRejectCandidate { code string! }

@@ -1,0 +1,43 @@
+{
+  "automation": "knowledge/automations.memql knowledgeTrainingContext",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "mode": "s-mode"
+          },
+          "topic": "automation.invocation.knowledgeTrainingContext"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": [],
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "mode": "s-mode"
+          },
+          "topic": "automation.invocation.knowledgeTrainingContext"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": [],
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

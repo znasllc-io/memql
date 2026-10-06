@@ -37,22 +37,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
-
-// trainerToolNames is the explicit tool set handed to the Trainer Agent's
-// bounded tool loop. Passing them by name means the filtered tool loop
-// includes exactly these regardless of the standing @requiresAgentRole gate. Order
-// is irrelevant.
-var trainerToolNames = []string{
-	"webSearch",
-	"fetchUrl",
-	"writeKnowledgeChunk",
-	"markChunkSuperseded",
-	"embedChunk",
-}
 
 // maxExistingCorpusChunks caps how many existing chunks the Trainer is handed
 // in mode='refresh'. It reads summaries to decide what is stale; a full dump
@@ -110,50 +99,36 @@ func (i *Integration) handleTrainSpecialist(ctx context.Context, args map[string
 		mode = "initial"
 	}
 
-	// Refresh mode hands the Trainer the existing corpus so it can decide what
-	// to supersede. Initial mode skips it.
-	existingCorpus := []map[string]any{}
-	if mode == "refresh" {
-		if c := i.loadExistingCorpus(ctx, domainId); c != nil {
-			existingCorpus = c
-		}
-	}
-
-	i.Logger.Info("trainSpecialist: invoking the Trainer Agent",
-		"component", "knowledge.train", "domainId", domainId, "mode", mode,
-		"topic", topic, "specialistId", specialistId, "existingChunks", len(existingCorpus))
-
-	// `request` carries what the Plan row used to. The prompt reads
-	// `.plan.input.*`, so the shape is preserved rather than the prompt
-	// rewritten -- a reworded prompt is a different training run, and this
-	// change is about WHERE the work is driven from, not what it produces.
-	request := map[string]any{
-		"input": map[string]any{
-			"domainId":     domainId,
-			"specialistId": specialistId,
-			"topic":        topic,
-			"mode":         mode,
+	result, err := workflowhost.Run(ctx, "knowledgeTrainWorkflow", map[string]any{
+		"domainId": domainId, "specialistId": specialistId, "topic": topic, "mode": mode, "partitionId": stringArg(args, "partition"),
+	}, workflowhost.Options{Logger: i.Logger, Operations: map[string]workflowhost.Operation{
+		"knowledgeTrainingSpecialist": func(ctx context.Context, _ map[string]any) (any, error) {
+			return i.loadSpecialist(ctx, specialistId), nil
 		},
-	}
-
-	summary, err := te.InvokeAIChatWithFilteredTools(ctx, "trainerAgent", map[string]any{
-		"plan":             request,
-		"targetSpecialist": i.loadSpecialist(ctx, specialistId),
-		"existingCorpus":   existingCorpus,
-		"partition":        stringArg(args, "partition"),
-		"now":              time.Now().UTC().Format(time.RFC3339),
-	}, trainerToolNames)
+		"knowledgeTrainingCorpus": func(ctx context.Context, _ map[string]any) (any, error) {
+			rows := i.loadExistingCorpus(ctx, domainId)
+			if rows == nil {
+				rows = []map[string]any{}
+			}
+			return rows, nil
+		},
+		"knowledgeTrainingTurn": func(ctx context.Context, a map[string]any) (any, error) {
+			data, _ := a["data"].(map[string]any)
+			out, err := te.InvokeAIChatWithFilteredTools(ctx, stringArg(a, "prompt"), data, toStringSlice(a["tools"]))
+			if err != nil {
+				return nil, fmt.Errorf("trainSpecialist: trainerAgent tool loop: %w", err)
+			}
+			return out, nil
+		},
+		"knowledgeTrainingReset": func(ctx context.Context, _ map[string]any) (any, error) {
+			i.resetStaleAfterRefresh(ctx, domainId)
+			return nil, nil
+		},
+	}})
 	if err != nil {
-		return nil, fmt.Errorf("trainSpecialist: trainerAgent tool loop: %w", err)
+		return nil, err
 	}
-
-	// Refresh bookkeeping: zero the stale-signal count and stamp lastSeededAt
-	// so the cadence backstop and the stale-signal path both reset.
-	// Best-effort -- the corpus is already written, and a failed reset only
-	// means the next refresh fires sooner than necessary.
-	if mode == "refresh" {
-		i.resetStaleAfterRefresh(ctx, domainId)
-	}
+	summary, _ := result.(string)
 
 	payload, err := json.Marshal(map[string]any{
 		"domainId":     domainId,

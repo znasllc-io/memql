@@ -1,0 +1,105 @@
+{
+  "automation": "knowledge/automations.memql knowledgeEmbedDomainWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "chunks": [
+              "a"
+            ],
+            "documentId": "s-documentId",
+            "documents": [
+              "a"
+            ],
+            "domainId": "s-domainId"
+          },
+          "topic": "automation.invocation.knowledgeEmbedDomainWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "knowledgeEmbedSelectedChunk"
+          },
+          {
+            "args": {
+              "documentId": "a"
+            },
+            "kind": "builtin",
+            "name": "knowledgeRollupSelectedDocument"
+          },
+          {
+            "kind": "builtin",
+            "name": "knowledgeEmbeddingReceipts"
+          }
+        ],
+        "result": {
+          "output": {
+            "already": 0,
+            "documentId": "s-documentId",
+            "documentsRolledUp": 0,
+            "domainId": "s-domainId",
+            "embedded": 0,
+            "failed": 0,
+            "total": 1
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "chunks": [
+              "a"
+            ],
+            "documentId": "s-documentId",
+            "documents": [
+              "a"
+            ],
+            "domainId": "s-domainId"
+          },
+          "topic": "automation.invocation.knowledgeEmbedDomainWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "knowledgeEmbedSelectedChunk"
+          },
+          {
+            "args": {
+              "documentId": "a"
+            },
+            "kind": "builtin",
+            "name": "knowledgeRollupSelectedDocument"
+          },
+          {
+            "kind": "builtin",
+            "name": "knowledgeEmbeddingReceipts"
+          }
+        ],
+        "result": {
+          "output": {
+            "already": 0,
+            "documentId": "s-documentId",
+            "documentsRolledUp": 0,
+            "domainId": "s-domainId",
+            "embedded": 0,
+            "failed": 0,
+            "total": 1
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

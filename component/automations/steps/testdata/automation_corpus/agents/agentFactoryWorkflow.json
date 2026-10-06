@@ -1,0 +1,73 @@
+{
+  "automation": "agents/automations.memql agentFactoryWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.agentFactoryWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "agentFactoryReadAgents"
+          },
+          {
+            "kind": "builtin",
+            "name": "agentFactoryReadRoles"
+          },
+          {
+            "kind": "builtin",
+            "name": "agentFactoryReadSkills"
+          },
+          {
+            "kind": "automation",
+            "name": "agentFactoryDecide"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.agentFactoryWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "agentFactoryReadAgents"
+          },
+          {
+            "kind": "builtin",
+            "name": "agentFactoryReadRoles"
+          },
+          {
+            "kind": "builtin",
+            "name": "agentFactoryReadSkills"
+          },
+          {
+            "kind": "automation",
+            "name": "agentFactoryDecide"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

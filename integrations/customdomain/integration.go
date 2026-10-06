@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
@@ -78,7 +79,7 @@ func (i *Integration) IntegrationName() string { return "customDomain" }
 
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
-	return []memql.IntegrationCapability{
+	return append([]memql.IntegrationCapability{
 		{
 			Name:        "dnsGuidance",
 			Description: "Read the configured routing hostname and current IPv4/IPv6 targets for an accessible custom-domain binding.",
@@ -126,7 +127,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Handler:    i.handleReconcileFrontDoors,
 			ArgsSchema: map[string]string{},
 		},
-	}
+	}, workflowhost.ScopedCapabilities(map[string]workflowhost.Operation{"customDomainReconcileBinding": nil, "customDomainReconcileAccount": nil, "customDomainSyncReservations": nil, "customDomainReadDoors": nil, "customDomainReconcileDoor": nil, "customDomainRequireReservations": nil})...)
 }
 
 // handleReconcileFrontDoors runs one account front-door pass.

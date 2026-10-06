@@ -1,0 +1,171 @@
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerPursueResponsibilities")
+builtin plannerPursueResponsibilities {
+
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerResponsibilityOwners")
+builtin plannerResponsibilityOwners {
+
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerProcessOwner")
+@args(profile="object")
+builtin plannerProcessOwner {
+ owner string!
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerProcessResponsibility")
+@args(profile="object")
+builtin plannerProcessResponsibility {
+ id string!
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerConverge")
+builtin plannerConverge {
+
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerHasLiveGoal")
+builtin plannerHasLiveGoal {
+
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerClaimResponsibility")
+@args(profile="object")
+builtin plannerClaimResponsibility {
+ purpose string!
+ minutes number!
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerResolveAssistant")
+builtin plannerResolveAssistant {
+
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerResolveSpecialist")
+builtin plannerResolveSpecialist {
+
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerAssignResponsibility")
+@args(profile="object")
+builtin plannerAssignResponsibility {
+ kind string!
+ agentId string!
+ roleSlug string!
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerAppendDirective")
+@args(profile="object")
+builtin plannerAppendDirective {
+ agentId string!
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerRecordEvaluation")
+@args(profile="object")
+builtin plannerRecordEvaluation {
+ result string!
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerTryHonor")
+@args(profile="object")
+builtin plannerTryHonor {
+ agentId string!
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerOpenResponsibilityGoal")
+@args(profile="object")
+builtin plannerOpenResponsibilityGoal {
+ statement string!
+ input object!
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerWorkflowRefusal")
+@args(profile="object")
+builtin plannerWorkflowRefusal {
+ message string!
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerClaimConvergence")
+@args(profile="object")
+builtin plannerClaimConvergence {
+ minutes number!
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerSpaceGoals")
+builtin plannerSpaceGoals {
+
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerRecentMemory")
+@args(profile="object")
+builtin plannerRecentMemory {
+ text string!
+ k int!
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerConvergenceTurn")
+@args(profile="object")
+builtin plannerConvergenceTurn {
+ prompt string!
+ data object!
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerDispatchConvergence")
+@args(profile="object")
+builtin plannerDispatchConvergence {
+ id string!
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerClaimAction")
+@args(profile="object")
+builtin plannerClaimAction {
+ key string!
+ minutes number!
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerConvergenceGoal")
+builtin plannerConvergenceGoal {
+
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerConvergenceNudge")
+@args(profile="object")
+builtin plannerConvergenceNudge {
+ result string!
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerLogNudge")
+builtin plannerLogNudge {
+
+}
+
+/// Bounded operation within an authorized planner workflow.
+@executor("integration.planner.plannerConvergenceSpecialist")
+builtin plannerConvergenceSpecialist {
+
+}

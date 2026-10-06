@@ -74,3 +74,11 @@ query knowledgeDomain knowledgeDomainsAll {
   shape  knowledgeDomainFull
   sort   "name", "asc"
 }
+
+/// Domains that explicitly opted into scheduled refresh. Due-date policy is evaluated in the refresh workflow.
+@serverOnly
+@unbounded("explicitly enabled knowledge refresh candidates")
+query knowledgeDomain queryDueRefreshDomains {
+ filter row => row.active != false && row.refreshCadenceDays > 0
+ shape knowledgeDomainFull
+}

@@ -42,7 +42,7 @@ func rowsEnvelope(rows ...map[string]any) any {
 // --- C1: due-check ---------------------------------------------------------
 
 func TestReactiveLoop_RecurringDue_NeverEvaluatedFires(t *testing.T) {
-	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r := newTestReactiveLoop(&fakeEngine{}, testLogger())
 	now := time.Date(2026, 6, 1, 9, 5, 0, 0, time.UTC) // Monday 09:05
 	row := map[string]any{
 		"id":              "v1:planner:responsibility:r1",
@@ -56,7 +56,7 @@ func TestReactiveLoop_RecurringDue_NeverEvaluatedFires(t *testing.T) {
 }
 
 func TestReactiveLoop_RecurringNotDue_AlreadyEvaluated(t *testing.T) {
-	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r := newTestReactiveLoop(&fakeEngine{}, testLogger())
 	now := time.Date(2026, 6, 1, 9, 5, 0, 0, time.UTC) // Monday 09:05
 	row := map[string]any{
 		"id":       "v1:planner:responsibility:r1",
@@ -71,7 +71,7 @@ func TestReactiveLoop_RecurringNotDue_AlreadyEvaluated(t *testing.T) {
 }
 
 func TestReactiveLoop_RecurringBadCron_NotDue(t *testing.T) {
-	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r := newTestReactiveLoop(&fakeEngine{}, testLogger())
 	row := map[string]any{
 		"id":       "r1",
 		"trigger":  "recurring",
@@ -83,7 +83,7 @@ func TestReactiveLoop_RecurringBadCron_NotDue(t *testing.T) {
 }
 
 func TestReactiveLoop_StandingNeverDueOnHeartbeat(t *testing.T) {
-	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r := newTestReactiveLoop(&fakeEngine{}, testLogger())
 	row := map[string]any{"id": "r1", "trigger": "standing"}
 	if r.isDue("standing", row, time.Now().UTC()) {
 		t.Fatalf("standing rows are always-on context, never due on the heartbeat")
@@ -132,7 +132,7 @@ func (f *fakeGoals) OpenDirectGoal(_ context.Context, g workintegration.DirectGo
 
 func TestReactiveLoop_HasLiveGoal(t *testing.T) {
 	g := &fakeGoals{live: true}
-	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r := newTestReactiveLoop(&fakeEngine{}, testLogger())
 	r.SetWorkGoals(g)
 	if !r.hasLiveGoal(context.Background(), "u1", "r1") {
 		t.Fatalf("a live goal for the responsibility must count as live")
@@ -143,7 +143,7 @@ func TestReactiveLoop_HasLiveGoal(t *testing.T) {
 }
 
 func TestReactiveLoop_NoLiveGoal(t *testing.T) {
-	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r := newTestReactiveLoop(&fakeEngine{}, testLogger())
 	r.SetWorkGoals(&fakeGoals{live: false})
 	if r.hasLiveGoal(context.Background(), "u1", "r1") {
 		t.Fatalf("no live goal exists")
@@ -155,7 +155,7 @@ func TestReactiveLoop_NoLiveGoal(t *testing.T) {
 // responsibility forever on a transient read error, while failing toward
 // spawning risks one duplicate the respawn guard then suppresses.
 func TestReactiveLoop_ALiveGoalReadErrorFailsTowardSpawning(t *testing.T) {
-	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r := newTestReactiveLoop(&fakeEngine{}, testLogger())
 	r.SetWorkGoals(&fakeGoals{liveErr: errors.New("database unreachable")})
 	if r.hasLiveGoal(context.Background(), "u1", "r1") {
 		t.Fatalf("a read error must answer 'no live goal' so the responsibility is not wedged")
@@ -166,7 +166,7 @@ func TestReactiveLoop_ALiveGoalReadErrorFailsTowardSpawning(t *testing.T) {
 // attempted rather than answering "a goal already exists" from the dedup read
 // -- which would be a silent stop with a wrong reason.
 func TestReactiveLoop_WithNoWorkSpineTheSpawnSaysSo(t *testing.T) {
-	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r := newTestReactiveLoop(&fakeEngine{}, testLogger())
 	if r.hasLiveGoal(context.Background(), "u1", "r1") {
 		t.Fatalf("with no spine there are no goals to be live")
 	}
@@ -185,7 +185,7 @@ func TestReactiveLoop_WithNoWorkSpineTheSpawnSaysSo(t *testing.T) {
 // by plansForResponsibility.
 func TestReactiveLoop_TheGoalCarriesTheResponsibilityAndTheOwner(t *testing.T) {
 	g := &fakeGoals{}
-	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r := newTestReactiveLoop(&fakeEngine{}, testLogger())
 	r.SetWorkGoals(g)
 	if _, err := r.openResponsibilityGoal(context.Background(), "u1", map[string]any{
 		"id": "r1", "statement": "summarize last week", "trigger": "recurring", "successCriteria": "one paragraph",
@@ -215,7 +215,7 @@ func TestReactiveLoop_TheGoalCarriesTheResponsibilityAndTheOwner(t *testing.T) {
 // loop would log and drop.
 func TestReactiveLoop_ABlankStatementGetsASyntheticOne(t *testing.T) {
 	g := &fakeGoals{}
-	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r := newTestReactiveLoop(&fakeEngine{}, testLogger())
 	r.SetWorkGoals(g)
 	if _, err := r.openResponsibilityGoal(context.Background(), "u1", map[string]any{"id": "r1"}, ""); err != nil {
 		t.Fatalf("openResponsibilityGoal: %v", err)
@@ -236,7 +236,7 @@ func TestReactiveLoop_RouteAssistant_ResolvesGA(t *testing.T) {
 			return nil, nil
 		},
 	}
-	r := NewReactiveLoop(eng, testLogger())
+	r := newTestReactiveLoop(eng, testLogger())
 	row := map[string]any{
 		"id":         "r1",
 		"targetKind": "assistant",
@@ -265,7 +265,7 @@ func TestReactiveLoop_RouteUnassigned_RunsFactory(t *testing.T) {
 			return nil, nil
 		},
 	}
-	r := NewReactiveLoop(eng, testLogger())
+	r := newTestReactiveLoop(eng, testLogger())
 	row := map[string]any{
 		"id":         "r1",
 		"targetKind": "unassigned",
@@ -290,7 +290,7 @@ func TestReactiveLoop_RouteUnassigned_RunsFactory(t *testing.T) {
 
 func TestReactiveLoop_RouteSpecialistAlreadyBound_Idempotent(t *testing.T) {
 	eng := &fakeEngine{}
-	r := NewReactiveLoop(eng, testLogger())
+	r := newTestReactiveLoop(eng, testLogger())
 	row := map[string]any{
 		"id":              "r1",
 		"targetKind":      "specialist",
@@ -315,7 +315,7 @@ func TestReactiveLoop_RouteSpecialistAlreadyBound_Idempotent(t *testing.T) {
 
 func TestReactiveLoop_HonorRecurring_OpensAGoal(t *testing.T) {
 	g := &fakeGoals{}
-	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r := newTestReactiveLoop(&fakeEngine{}, testLogger())
 	r.SetWorkGoals(g)
 	row := map[string]any{
 		"id":        "v1:planner:responsibility:r1",
@@ -345,7 +345,7 @@ func TestReactiveLoop_HonorRecurring_OpensAGoal(t *testing.T) {
 // the responsibility, and "opened goal " with nothing after it is what a
 // person would read.
 func TestReactiveLoop_HonorRecurring_WithNoSpineIsAnError(t *testing.T) {
-	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r := newTestReactiveLoop(&fakeEngine{}, testLogger())
 	row := map[string]any{"id": "r1", "trigger": "recurring", "statement": "x"}
 	if _, err := r.honorResponsibility(ownerActorContext(context.Background(), "u1"), "u1", row, "a1"); err == nil {
 		t.Fatal("a recurring row honored with no work spine reported success")
@@ -357,14 +357,15 @@ func TestReactiveLoop_HonorStanding_InjectsContextNoGoal(t *testing.T) {
 		execResponder: func(q string) (any, error) {
 			if strings.Contains(q, "agentById") {
 				return rowsEnvelope(map[string]any{
-					"id":      "v1:agents:agent:spec1",
-					"lineage": map[string]any{"extensionGoals": []any{"existing goal"}},
+					"id":        "v1:agents:agent:spec1",
+					"createdAt": "2026-10-01T00:00:00Z",
+					"lineage":   map[string]any{"extensionGoals": []any{"existing goal"}},
 				}), nil
 			}
 			return nil, nil
 		},
 	}
-	r := NewReactiveLoop(eng, testLogger())
+	r := newTestReactiveLoop(eng, testLogger())
 	row := map[string]any{
 		"id":        "v1:planner:responsibility:r1",
 		"trigger":   "standing",
@@ -400,14 +401,15 @@ func TestReactiveLoop_StandingInject_Idempotent(t *testing.T) {
 		execResponder: func(q string) (any, error) {
 			if strings.Contains(q, "agentById") {
 				return rowsEnvelope(map[string]any{
-					"id":      "v1:agents:agent:spec1",
-					"lineage": map[string]any{"extensionGoals": []any{"comment every private function"}},
+					"id":        "v1:agents:agent:spec1",
+					"createdAt": "2026-10-01T00:00:00Z",
+					"lineage":   map[string]any{"extensionGoals": []any{"comment every private function"}},
 				}), nil
 			}
 			return nil, nil
 		},
 	}
-	r := NewReactiveLoop(eng, testLogger())
+	r := newTestReactiveLoop(eng, testLogger())
 	row := map[string]any{
 		"id":        "r1",
 		"trigger":   "standing",
@@ -425,14 +427,15 @@ func TestReactiveLoop_ProcessStanding_InjectsNoPlanNoDueCheck(t *testing.T) {
 		execResponder: func(q string) (any, error) {
 			if strings.Contains(q, "agentById") {
 				return rowsEnvelope(map[string]any{
-					"id":      "v1:agents:agent:spec1",
-					"lineage": map[string]any{"extensionGoals": []any{}},
+					"id":        "v1:agents:agent:spec1",
+					"createdAt": "2026-10-01T00:00:00Z",
+					"lineage":   map[string]any{"extensionGoals": []any{}},
 				}), nil
 			}
 			return nil, nil
 		},
 	}
-	r := NewReactiveLoop(eng, testLogger())
+	r := newTestReactiveLoop(eng, testLogger())
 	row := map[string]any{
 		"id":              "v1:planner:responsibility:r1",
 		"trigger":         "standing",
@@ -494,7 +497,7 @@ func TestReactiveLoop_ConvergenceLowConfidenceDropped(t *testing.T) {
 	// "createPlan" is zero whatever happens and the test would pass having
 	// checked nothing.
 	g := &fakeGoals{}
-	r := NewReactiveLoop(&fakeEngine{}, testLogger())
+	r := newTestReactiveLoop(&fakeEngine{}, testLogger())
 	r.SetWorkGoals(g)
 	r.dispatchConvergenceAction(ownerActorContext(context.Background(), "u1"), "u1",
 		convergenceAction{Kind: "createPlan", Statement: "x", Confidence: 0.4},
@@ -514,7 +517,7 @@ func TestReactiveLoop_ConvergenceDedup(t *testing.T) {
 		},
 	}
 	g := &fakeGoals{}
-	r := NewReactiveLoop(eng, testLogger())
+	r := newTestReactiveLoop(eng, testLogger())
 	r.SetWorkGoals(g)
 	now := time.Now().UTC()
 	act := convergenceAction{Kind: "createPlan", ResponsibilityId: "r1", Statement: "x", Confidence: 0.9}
@@ -534,7 +537,7 @@ func TestReactiveLoop_ConvergenceDedup(t *testing.T) {
 // responsibility row carries them.
 func TestAssign_OnlyWritesRoutingFields(t *testing.T) {
 	eng := &fakeEngine{}
-	r := NewReactiveLoop(eng, testLogger())
+	r := newTestReactiveLoop(eng, testLogger())
 	r.assign(
 		ownerActorContext(context.Background(), "u1"),
 		"v1:planner:responsibility:r1", "specialist", "v1:agents:agent:spec1", "marketing",
@@ -564,7 +567,7 @@ func TestAssign_OnlyWritesRoutingFields(t *testing.T) {
 // will inherit the previous row's assignedAgentId instead.
 func TestAssign_RoleOnly_OmitsAssignedAgentId(t *testing.T) {
 	eng := &fakeEngine{}
-	r := NewReactiveLoop(eng, testLogger())
+	r := newTestReactiveLoop(eng, testLogger())
 	// role-only: empty agentId, non-empty roleSlug
 	r.assign(
 		ownerActorContext(context.Background(), "u1"),
@@ -592,5 +595,41 @@ func TestLatestOccurrenceBefore_Daily(t *testing.T) {
 	want := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
 	if !got.Equal(want) {
 		t.Fatalf("latest occurrence: got %v want %v", got, want)
+	}
+}
+
+func newTestReactiveLoop(engine Engine, logger plannerLogger) *ReactiveLoop {
+	r := NewReactiveLoop(engine, logger)
+	r.writeGate = func(context.Context, string) (func(), error) { return func() {}, nil }
+	r.claims = &fakeWorkflowClaims{now: time.Now(), until: map[string]time.Time{}}
+	return r
+}
+
+func TestResponsibilityConvergenceClaimSurvivesReplicaChange(t *testing.T) {
+	engine := &fakeEngine{execResponder: func(q string) (any, error) {
+		if strings.Contains(q, "assistantAgentForUser") {
+			return rowsEnvelope(map[string]any{"id": "a1"}), nil
+		}
+		return nil, nil
+	}}
+	first := newTestReactiveLoop(engine, testLogger())
+	second := newTestReactiveLoop(engine, testLogger())
+	second.claims = first.claims
+	goals := &fakeGoals{}
+	first.SetWorkGoals(goals)
+	second.SetWorkGoals(goals)
+	act := convergenceAction{Kind: "createPlan", ResponsibilityId: "r1", Statement: "check reports", Confidence: 0.9}
+	ctx := ownerActorContext(context.Background(), "owner")
+	for _, r := range []*ReactiveLoop{first, second} {
+		if err := r.dispatch(ctx, "owner", act, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(goals.opened) != 1 {
+		t.Fatalf("replica change repeated goal: %d", len(goals.opened))
+	}
+	second.claims = nil
+	if err := second.dispatch(ctx, "owner", act, time.Now()); err == nil {
+		t.Fatal("missing shared claims must refuse")
 	}
 }

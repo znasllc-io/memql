@@ -6,46 +6,13 @@ import (
 	"testing"
 )
 
-// The event-to-mode table (decision 3 of the pipelines-seam plan; design
-// record D5, plus `release` from the documentation program's D15). A pull
-// request runs what it affects; everything that lands, or ships, runs the
-// whole suite once.
-func TestModeForIsTheEventTable(t *testing.T) {
-	cases := []struct {
-		event Event
-		mode  Mode
-		ok    bool
-	}{
-		{EventPullRequest, ModeAffected, true},
-		{EventMergeGroup, ModeFull, true},
-		{EventPush, ModeFull, true},
-		{EventRelease, ModeFull, true},
-		// A re-requested check run is not an event of its own: it re-runs the
-		// original run's event, so the table has no row for it.
-		{"check_run", "", false},
-		{"check_suite", "", false},
-		{"pull_request_review", "", false},
-		{"", "", false},
-	}
-	for _, c := range cases {
-		mode, ok := ModeFor(c.event)
-		if mode != c.mode || ok != c.ok {
-			t.Errorf("ModeFor(%q) = (%q, %v), want (%q, %v)", c.event, mode, ok, c.mode, c.ok)
-		}
-	}
-}
-
 func TestEventsIsTheTableSorted(t *testing.T) {
 	want := []Event{EventMergeGroup, EventPullRequest, EventPush, EventRelease}
 	got := Events()
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Events() = %v, want %v", got, want)
 	}
-	for _, e := range got {
-		if _, ok := ModeFor(e); !ok {
-			t.Errorf("Events() lists %q, which has no mode", e)
-		}
-	}
+
 	// The caller owns what it gets back.
 	got[0] = "mutated"
 	if Events()[0] != EventMergeGroup {
@@ -84,29 +51,6 @@ func TestRunKeyIsOneKeyForOneHead(t *testing.T) {
 	}
 	if d := RunKey("acme-corp/storefront", sha, ModeFull, EventPullRequest); d == a {
 		t.Errorf("RunKey ignores the mode: %q", d)
-	}
-}
-
-func TestVersionIsTheTagForAReleaseAndTheSHAOtherwise(t *testing.T) {
-	const sha = "a944ae33e9bcd7b2f5d1e5d74dcd8acc6a0ae9df"
-	cases := []struct {
-		event Event
-		tag   string
-		want  string
-	}{
-		{EventRelease, "v1.4.0", "v1.4.0"},
-		{EventPush, "", sha},
-		{EventMergeGroup, "", sha},
-		{EventPullRequest, "", sha},
-		// A tag on a non-release event is not a version: the event decides.
-		{EventPush, "v1.4.0", sha},
-		// A release whose tag has not resolved still names the commit.
-		{EventRelease, "", sha},
-	}
-	for _, c := range cases {
-		if got := Version(c.event, sha, c.tag); got != c.want {
-			t.Errorf("Version(%q, sha, %q) = %q, want %q", c.event, c.tag, got, c.want)
-		}
 	}
 }
 

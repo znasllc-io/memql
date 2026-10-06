@@ -101,6 +101,9 @@ concept documentChunk {
 @displayCard(primary="name", secondary="category", tertiary="description", status="active")
 @rowAuthz(public, requiresIdentity)
 concept knowledgeDomain {
+ refreshCadenceDays int @description("Optional refresh cadence in days; absent or nonpositive disables the scheduled refresh.")
+ lastSeededAt datetime @description("Last successful corpus refresh.")
+ staleSignalCount int @description("Observed stale-content signals since the last refresh.")
   name                 string!  @description("The domain's human name, e.g. 'Residential real estate'. What the Training app renders on a card instead of the raw id, once rows carry it.")
   description          string   @description("What the domain covers, in a sentence. Written by the catalog seeder from the standard-domain registration.")
   category             string   @description("Catalog grouping the domain belongs to, e.g. 'personal' / 'business'. Free text rather than an enum: the catalog is product-extensible through RegisterSeedDomain, and a closed set here would refuse a pack's own category at load.")

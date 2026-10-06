@@ -724,7 +724,7 @@ func TestEveryPipelinesBuiltinResolvesToACapability(t *testing.T) {
 	if registerErr != nil {
 		t.Fatalf("register: %v", registerErr)
 	}
-	// The control: the engine has loaded the nine builtins (epic 2's six, plus
+	// The control: the engine has loaded the workflow and lifecycle builtins (epic 2's six, plus
 	// connect preview, installations and the read-only runner status), so
 	// the audit below is about them rather than about an empty registry.
 	executors := 0
@@ -733,8 +733,8 @@ func TestEveryPipelinesBuiltinResolvesToACapability(t *testing.T) {
 			executors++
 		}
 	}
-	if executors != 9 {
-		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 9", executors)
+	if executors != 11 {
+		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 11", executors)
 	}
 	if err := eng.AuditIntegrationExecutors(); err != nil {
 		t.Fatalf("the shipped DSL names a pipelines capability this integration does not offer: %v", err)

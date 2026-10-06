@@ -1,0 +1,105 @@
+{
+  "automation": "knowledge/automations.memql knowledgeSeedDomainWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "articles": [
+              "a"
+            ],
+            "broadSurvey": true,
+            "category": "s-category",
+            "domainDescription": "s-domainDescription",
+            "domainId": "s-domainId",
+            "domainName": "s-domainName",
+            "tier": "s-tier"
+          },
+          "topic": "automation.invocation.knowledgeSeedDomainWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "data": {
+                "broadSurvey": true,
+                "category": "s-category",
+                "domainDescription": "s-domainDescription",
+                "domainId": "s-domainId",
+                "domainName": "s-domainName",
+                "targetCount": 60,
+                "tier": "A"
+              },
+              "prompt": "seedDomainContent",
+              "schema": "seedDomainContent"
+            },
+            "kind": "builtin",
+            "name": "knowledgeGenerateSeedChunks"
+          },
+          {
+            "kind": "builtin",
+            "name": "knowledgeResolveSeedEmbedder"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "articles": [
+              "a"
+            ],
+            "broadSurvey": true,
+            "category": "s-category",
+            "domainDescription": "s-domainDescription",
+            "domainId": "s-domainId",
+            "domainName": "s-domainName",
+            "tier": "s-tier"
+          },
+          "topic": "automation.invocation.knowledgeSeedDomainWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "data": {
+                "broadSurvey": true,
+                "category": "s-category",
+                "domainDescription": "s-domainDescription",
+                "domainId": "s-domainId",
+                "domainName": "s-domainName",
+                "targetCount": 60,
+                "tier": "A"
+              },
+              "prompt": "seedDomainContent",
+              "schema": "seedDomainContent"
+            },
+            "kind": "builtin",
+            "name": "knowledgeGenerateSeedChunks"
+          },
+          {
+            "kind": "builtin",
+            "name": "knowledgeResolveSeedEmbedder"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    }
+  }
+}

@@ -45,6 +45,10 @@ func (i *Integration) IntegrationName() string { return IntegrationName }
 // declares -- the readiness evaluator reads it directly by its executor name.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "workflowFacts", Description: "Read the current claimed workflow's step receipts.", Handler: workflowCapability("workflowFacts")},
+		{Name: "skipStep", Description: "Record a skipped step in the current claimed workflow's journal.", Handler: workflowCapability("skipStep")},
+		{Name: "executeStep", Description: "Execute one compiled step of the current claimed workflow.", Handler: workflowCapability("executeStep")},
+		{Name: "reportProgress", Description: "Publish the current claimed workflow's check progress.", Handler: workflowCapability("reportProgress")},
 		{
 			Name:        "trigger",
 			Description: "Open the pipeline runs a staged GitHub delivery asks for (design record D4-D6). The shipped automation's alone: a call without internal origin is refused before anything is read. Reads the staged v1:platform:inboundRequest row -- a github row the receiver verified, or nothing opens -- classifies its signed body's shape, then for every active pipeline of the repository whose installation matches, opens one run keyed on (repository, SHA, mode, event) with a queued check run -- a fork's pull request refused with a failing one, a re-requested check run or suite as the next attempt of the original. A redelivery or a poll for the same head opens nothing.",

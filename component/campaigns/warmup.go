@@ -2,7 +2,9 @@ package campaigns
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"strings"
 	"time"
 )
@@ -218,76 +220,65 @@ func (w *Worker) setWarmupRate(d warmupDecision) {
 // provable without one.
 func (w *Worker) evaluateWarmup(state WarmupState, reputation map[string]DomainReputation, now time.Time) warmupDecision {
 	steps := w.cfg.WarmupSteps
+	if len(steps) == 0 {
+		return warmupDecision{Decision: "held", Reason: "No warmup rates are configured."}
+	}
 	step := state.Step
 	if step < 0 || step >= len(steps) {
 		step = 0
 	}
-
-	// First evaluation on this identity: start at the bottom and say so.
-	if state.StepEnteredAt.IsZero() {
-		return warmupDecision{
-			Step: step, RatePerMinute: steps[step], Decision: "started",
-			Reason: fmt.Sprintf("warming started at step %d of %d (%d/min); advancing needs %d accepted messages and %s at this step with bounce and complaint rates inside their thresholds",
-				step+1, len(steps), steps[step], w.cfg.WarmupMinVolumePerStep, w.cfg.WarmupMinHoursPerStep),
-			StepEnteredAt: now, AcceptedInStep: 0,
-		}
-	}
-
-	total := reputation[""]
-	acceptedInStep := total.Accepted - state.AcceptedAtStepStart
-	if acceptedInStep < 0 {
-		// The rolling window aged past the step's start. Not an error and
-		// not a reason to advance: it means the step's own evidence is no
-		// longer measurable, so the volume condition simply is not met.
-		acceptedInStep = 0
-	}
-
-	if domain, why := w.worstDomain(reputation); why != "" {
-		reduced := step
-		decision := "held"
-		if step > 0 {
-			reduced = step - 1
-			decision = "reduced"
-		}
-		return warmupDecision{
-			Step: reduced, RatePerMinute: steps[reduced], Decision: decision,
-			Reason:        fmt.Sprintf("%s at %s; holding at a rate that is already producing this is not neutral", why, domain),
-			StepEnteredAt: now, AcceptedInStep: 0,
-		}
-	}
-
+	accepted := max(reputation[""].Accepted-state.AcceptedAtStepStart, 0)
 	held := now.Sub(state.StepEnteredAt)
-	switch {
-	case step >= len(steps)-1:
-		return warmupDecision{
-			Step: step, RatePerMinute: steps[step], Decision: "held",
-			Reason:        fmt.Sprintf("at the final step (%d/min); the ramp is finished and only ever reduces from here", steps[step]),
-			StepEnteredAt: state.StepEnteredAt, AcceptedInStep: acceptedInStep,
-		}
-	case held < w.cfg.WarmupMinHoursPerStep:
-		return warmupDecision{
-			Step: step, RatePerMinute: steps[step], Decision: "held",
-			Reason: fmt.Sprintf("step %d has run for %s of the %s minimum; providers judge over time, and a step they have not seen yet proves nothing",
-				step+1, held.Round(time.Minute), w.cfg.WarmupMinHoursPerStep),
-			StepEnteredAt: state.StepEnteredAt, AcceptedInStep: acceptedInStep,
-		}
-	case acceptedInStep < w.cfg.WarmupMinVolumePerStep:
-		return warmupDecision{
-			Step: step, RatePerMinute: steps[step], Decision: "held",
-			Reason: fmt.Sprintf("step %d has sent %d of the %d messages needed to judge it; a clean rate over too little volume is an empty numerator, not evidence",
-				step+1, acceptedInStep, w.cfg.WarmupMinVolumePerStep),
-			StepEnteredAt: state.StepEnteredAt, AcceptedInStep: acceptedInStep,
+	args := w.warmupFacts(reputation)
+	for k, v := range map[string]any{"step": step, "stepLabel": fmt.Sprint(step + 1), "stepCount": fmt.Sprint(len(steps)), "finalStep": len(steps) - 1, "rateLabel": fmt.Sprint(steps[step]),
+		"started": !state.StepEnteredAt.IsZero(), "accepted": accepted, "acceptedLabel": fmt.Sprint(accepted), "minVolume": w.cfg.WarmupMinVolumePerStep, "minVolumeLabel": fmt.Sprint(w.cfg.WarmupMinVolumePerStep),
+		"heldHours": held.Hours(), "minHours": w.cfg.WarmupMinHoursPerStep.Hours(), "minDurationLabel": w.cfg.WarmupMinHoursPerStep.String(), "heldMinutesLabel": held.Round(time.Minute).String(), "heldHoursLabel": held.Round(time.Hour).String()} {
+		args[k] = v
+	}
+	value, err := workflowhost.Run(context.Background(), "campaignWarmupDecision", args, workflowhost.Options{})
+	var choice struct {
+		Step     int
+		Decision string
+		Reason   string
+		Reset    bool
+	}
+	if err == nil {
+		encoded, e := json.Marshal(value)
+		err = e
+		if err == nil {
+			err = json.Unmarshal(encoded, &choice)
 		}
 	}
+	if err != nil || choice.Step < 0 || choice.Step >= len(steps) {
+		if w.logger != nil {
+			w.logger.Error("campaign warmup workflow failed; holding the lowest rate", "error", err)
+		}
+		return warmupDecision{Step: 0, RatePerMinute: steps[0], Decision: "held", Reason: "Warmup policy could not be evaluated; holding the lowest rate.", StepEnteredAt: state.StepEnteredAt, AcceptedInStep: accepted}
+	}
+	out := warmupDecision{Step: choice.Step, RatePerMinute: steps[choice.Step], Decision: choice.Decision, Reason: choice.Reason, StepEnteredAt: state.StepEnteredAt, AcceptedInStep: accepted}
+	if choice.Reset {
+		out.StepEnteredAt = now
+		out.AcceptedInStep = 0
+	}
+	return out
+}
 
-	advanced := step + 1
-	return warmupDecision{
-		Step: advanced, RatePerMinute: steps[advanced], Decision: "advanced",
-		Reason: fmt.Sprintf("step %d sent %d messages over %s with every measurable domain inside its bounce (%.2f%%) and complaint (%.3f%%) thresholds",
-			step+1, acceptedInStep, held.Round(time.Hour),
-			w.cfg.WarmupMaxHardBounceRate*100, w.cfg.WarmupMaxComplaintRate*100),
-		StepEnteredAt: now, AcceptedInStep: 0,
+func (w *Worker) warmupFacts(reputation map[string]DomainReputation) map[string]any {
+	names := []string{}
+	for name := range reputation {
+		if name != "" {
+			names = append(names, name)
+		}
 	}
+	sortStrings(names)
+	domains := []any{}
+	for _, name := range names {
+		d := reputation[name]
+		domains = append(domains, map[string]any{"name": name, "accepted": d.Accepted, "acceptedLabel": fmt.Sprint(d.Accepted), "complaintsLabel": fmt.Sprint(d.Complaint), "bouncesLabel": fmt.Sprint(d.HardBounce),
+			"complaintRate": d.ComplaintRate(), "bounceRate": d.HardBounceRate(), "complaintLabel": fmt.Sprintf("%.3f", d.ComplaintRate()*100), "bounceLabel": fmt.Sprintf("%.2f", d.HardBounceRate()*100)})
+	}
+	return map[string]any{"domains": domains, "minDomainVolume": w.cfg.WarmupMinDomainVolume, "maxComplaintRate": w.cfg.WarmupMaxComplaintRate, "maxBounceRate": w.cfg.WarmupMaxHardBounceRate,
+		"maxComplaintLabel": fmt.Sprintf("%.3f", w.cfg.WarmupMaxComplaintRate*100), "maxBounceLabel": fmt.Sprintf("%.2f", w.cfg.WarmupMaxHardBounceRate*100)}
 }
 
 // worstDomain returns the first domain over a threshold, and why.
@@ -297,28 +288,14 @@ func (w *Worker) evaluateWarmup(state WarmupState, reputation map[string]DomainR
 // as 33% and pins the ramp permanently. The stated cost is that a genuinely
 // bad small domain is invisible here until it grows.
 func (w *Worker) worstDomain(reputation map[string]DomainReputation) (string, string) {
-	names := make([]string, 0, len(reputation))
-	for name := range reputation {
-		if name != "" {
-			names = append(names, name)
-		}
+	value, err := workflowhost.Run(context.Background(), "campaignWarmupWorstDomain", w.warmupFacts(reputation), workflowhost.Options{})
+	if err != nil {
+		return "", "Warmup policy could not be evaluated"
 	}
-	sortStrings(names)
-	for _, name := range names {
-		d := reputation[name]
-		if d.Accepted < w.cfg.WarmupMinDomainVolume {
-			continue
-		}
-		if rate := d.ComplaintRate(); rate > w.cfg.WarmupMaxComplaintRate {
-			return name, fmt.Sprintf("complaint rate %.3f%% is over the %.3f%% threshold (%d of %d)",
-				rate*100, w.cfg.WarmupMaxComplaintRate*100, d.Complaint, d.Accepted)
-		}
-		if rate := d.HardBounceRate(); rate > w.cfg.WarmupMaxHardBounceRate {
-			return name, fmt.Sprintf("hard bounce rate %.2f%% is over the %.2f%% threshold (%d of %d)",
-				rate*100, w.cfg.WarmupMaxHardBounceRate*100, d.HardBounce, d.Accepted)
-		}
-	}
-	return "", ""
+	result, _ := value.(map[string]any)
+	name, _ := result["domain"].(string)
+	reason, _ := result["reason"].(string)
+	return name, reason
 }
 
 func sortStrings(v []string) {

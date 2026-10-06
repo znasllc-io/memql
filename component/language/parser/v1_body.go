@@ -211,6 +211,22 @@ func checkV1TriggerAttributes(attrs []*Attribute, toks []Token) error {
 		case AttrSchedule:
 			return bodyRetired(tok, codeTriggerScheduleRetired, "`@schedule(cron=...)`", "write `@trigger(schedule=...)`")
 		case AttrTrigger:
+			if nodeValue, nodeSet := a.Args["node"]; nodeSet {
+				node, valid := nodeValue.(string)
+				schedule, _ := a.Args["schedule"].(string)
+				_, event := a.Args["event"]
+				_, before := a.Args["before"]
+				if valid && (strings.TrimSpace(node) == "" || schedule == "" || event || before) {
+					return bodyRefuse(tok, "trigger_node_placement", "node requires a schedule-only trigger and a non-empty node type")
+				}
+			}
+			if leaseValue, leaseSet := a.Args["lease"]; leaseSet {
+				lease, valid := leaseValue.(string)
+				_, nodeSet := a.Args["node"]
+				if valid && (!nodeSet || strings.TrimSpace(lease) == "") {
+					return bodyRefuse(tok, "trigger_node_placement", "lease requires node and a non-empty scope")
+				}
+			}
 			if value, ok := a.Args["before"]; ok {
 				before, valid := value.(string)
 				if !valid {

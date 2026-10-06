@@ -3039,6 +3039,8 @@ func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Att
 			// Event and schedule triggers share the one AutomationDef.
 			if v := getAttrArgString(attr, "schedule"); v != "" {
 				d.Schedule = v
+				d.ScheduleNode = getAttrArgString(attr, "node")
+				d.ScheduleLease = getAttrArgString(attr, "lease")
 			}
 		case AttrFilter:
 			// @filter(...) as standalone annotation — sets trigger filter

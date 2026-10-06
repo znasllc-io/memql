@@ -33,6 +33,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
@@ -89,7 +90,7 @@ func (i *Integration) IntegrationName() string { return "knowledge" }
 // write-side pipeline -- chunker + embed + idempotent chunk-row
 // write -- and the one-shot seed helper.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
-	return []memql.IntegrationCapability{
+	return append([]memql.IntegrationCapability{
 		{
 			Name:        "ingest",
 			Description: "Split a document into chunks, embed each, and persist chunk rows linked to a knowledge domain.",
@@ -217,7 +218,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"partition":    "string (optional) - carried into the prompt.",
 			},
 		},
-	}
+	}, knowledgeWorkflowCapabilities()...)
 }
 
 // chunkDefaults -- tuned for GPT-class context budgets. 1800 chars is
@@ -341,37 +342,48 @@ func (i *Integration) ingestHandler(ctx context.Context, args map[string]any, _ 
 		return nil, fmt.Errorf("knowledge.ingest: resolve provider %q: %w", providerName, err)
 	}
 
+	items := make([]any, 0, len(chunks))
+	for seq, text := range chunks {
+		items = append(items, map[string]any{"seq": seq, "text": text})
+	}
 	stored := 0
-	for seq, chunkText := range chunks {
-		chunkId := chunkIdFor(domainId, sourceRef, seq, chunkText)
+	_, err = workflowhost.Run(ctx, "knowledgeIngestWorkflow", map[string]any{"chunks": items}, workflowhost.Options{Logger: i.Logger, Operations: map[string]workflowhost.Operation{
+		"knowledgeWriteIndexedChunk": func(ctx context.Context, a map[string]any) (any, error) {
+			seq := intArg(a, "seq", 0)
+			chunkText := stringArg(a, "text")
+			chunkId := chunkIdFor(domainId, sourceRef, seq, chunkText)
+			// Embed FIRST so a provider outage (no API key, rate limit, etc.)
+			// leaves no orphan chunk row behind. The idempotent chunk id
+			// means a later retry of the same source+seq+text writes the
+			// row and vector together.
+			vec, err := provider.Embed(ctx, chunkText)
+			if err != nil {
+				return nil, fmt.Errorf("knowledge.ingest: embed chunk %d: %w", seq, err)
+			}
 
-		// Embed FIRST so a provider outage (no API key, rate limit, etc.)
-		// leaves no orphan chunk row behind. The idempotent chunk id
-		// means a later retry of the same source+seq+text writes the
-		// row and vector together.
-		vec, err := provider.Embed(ctx, chunkText)
-		if err != nil {
-			return nil, fmt.Errorf("knowledge.ingest: embed chunk %d: %w", seq, err)
-		}
+			insertQuery := fmt.Sprintf(
+				`mutation createDocumentChunk(chunkId: %s, domainId: %s, text: %s, source: %s, sourceRef: %s, seq: %d, tokenCount: %d)`,
+				quoteString(chunkId),
+				quoteString(domainId),
+				quoteString(chunkText),
+				quoteString(source),
+				quoteString(sourceRef),
+				seq,
+				approxTokens(chunkText),
+			)
+			if _, err := i.engine.Execute(ctx, insertQuery); err != nil {
+				return nil, fmt.Errorf("knowledge.ingest: insert chunk %d: %w", seq, err)
+			}
 
-		insertQuery := fmt.Sprintf(
-			`mutation createDocumentChunk(chunkId: %s, domainId: %s, text: %s, source: %s, sourceRef: %s, seq: %d, tokenCount: %d)`,
-			quoteString(chunkId),
-			quoteString(domainId),
-			quoteString(chunkText),
-			quoteString(source),
-			quoteString(sourceRef),
-			seq,
-			approxTokens(chunkText),
-		)
-		if _, err := i.engine.Execute(ctx, insertQuery); err != nil {
-			return nil, fmt.Errorf("knowledge.ingest: insert chunk %d: %w", seq, err)
-		}
-
-		if err := i.storeVector(ctx, providerName, chunkId, "v1:knowledge:documentChunk", vec); err != nil {
-			return nil, fmt.Errorf("knowledge.ingest: persist vector chunk %d: %w", seq, err)
-		}
-		stored++
+			if err := i.storeVector(ctx, providerName, chunkId, "v1:knowledge:documentChunk", vec); err != nil {
+				return nil, fmt.Errorf("knowledge.ingest: persist vector chunk %d: %w", seq, err)
+			}
+			stored++
+			return nil, nil
+		},
+	}})
+	if err != nil {
+		return nil, err
 	}
 
 	i.Logger.Info("knowledge.ingest: completed",

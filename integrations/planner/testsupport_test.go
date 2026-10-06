@@ -135,19 +135,49 @@ func TestRefreshCron_DomainIsDue(t *testing.T) {
 	}
 }
 
+// Two controller instances share a durable-claim seam, rather than a local timestamp map.
 func TestRefreshCron_RespawnGuard(t *testing.T) {
+	claims := &fakeWorkflowClaims{now: time.Now(), until: map[string]time.Time{}}
+	goals := &fakeWorkGoals{}
+	row := map[string]any{"id": "d1", "name": "D", "refreshCadenceDays": 90}
+	for range 2 {
+		c := NewRefreshCron(&fakeEngine{}, nil)
+		c.claims = claims
+		c.SetWorkGoals(goals)
+		if err := c.refreshCandidate(context.Background(), row, false, claims.now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(goals.opened()) != 1 {
+		t.Fatal("replica duplicated refresh")
+	}
+	claims.now = claims.now.Add(6*time.Hour + time.Minute)
 	c := NewRefreshCron(&fakeEngine{}, nil)
-	now := time.Now().UTC()
-	if !c.shouldSpawn("d1", now) {
-		t.Fatal("first spawn should be allowed")
+	c.claims = claims
+	c.SetWorkGoals(goals)
+	if err := c.refreshCandidate(context.Background(), row, false, claims.now); err != nil {
+		t.Fatal(err)
 	}
-	c.markSpawned("d1", now)
-	if c.shouldSpawn("d1", now.Add(time.Hour)) {
-		t.Error("spawn within guard window should be suppressed")
+	if len(goals.opened()) != 2 {
+		t.Fatal("expired DSL cooldown did not reopen")
 	}
-	if !c.shouldSpawn("d1", now.Add(refreshRespawnGuard+time.Minute)) {
-		t.Error("spawn after guard window should be allowed")
+}
+
+type fakeWorkflowClaims struct {
+	mu    sync.Mutex
+	now   time.Time
+	until map[string]time.Time
+}
+
+func (c *fakeWorkflowClaims) ClaimWithTTL(_ context.Context, name, key string, ttl time.Duration) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key = name + ":" + key
+	if c.now.Before(c.until[key]) {
+		return false
 	}
+	c.until[key] = c.now.Add(ttl)
+	return true
 }
 
 // fakeWorkGoals records the goals a caller opened, and satisfies the
@@ -212,7 +242,7 @@ func TestRefreshCron_OpensARefreshGoal(t *testing.T) {
 	if !strings.Contains(g.Input["domainId"].(string), "physics_qm") {
 		t.Errorf("domainId = %v", g.Input["domainId"])
 	}
-	if g.OwnerUserId != refreshSystemRequester {
+	if g.OwnerUserId != "system" {
 		t.Errorf("owner = %q, want the system sentinel for an unowned domain", g.OwnerUserId)
 	}
 }
@@ -237,6 +267,7 @@ func TestRefreshCron_RefusesWithNoGoalSurface(t *testing.T) {
 // exactly one refresh.
 func TestRefreshCron_StaleSignalThreshold(t *testing.T) {
 	c := NewRefreshCron(&fakeEngine{}, nil)
+	c.claims = &fakeWorkflowClaims{now: time.Now(), until: map[string]time.Time{}}
 	goals := &fakeWorkGoals{}
 	c.SetWorkGoals(goals)
 
@@ -255,7 +286,7 @@ func TestRefreshCron_StaleSignalThreshold(t *testing.T) {
 	at := events.Event{Payload: map[string]any{
 		"id": "default:v1:knowledge:knowledgeDomain:physics_qm",
 		"payload": map[string]any{
-			"staleSignalCount": float64(staleSignalRefreshThreshold),
+			"staleSignalCount": float64(3),
 			"name":             "Quantum Mechanics",
 		},
 	}}

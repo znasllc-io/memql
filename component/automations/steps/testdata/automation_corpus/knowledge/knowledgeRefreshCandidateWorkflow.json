@@ -1,0 +1,87 @@
+{
+  "automation": "knowledge/automations.memql knowledgeRefreshCandidateWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "ageDays": 3,
+            "cadence": 3,
+            "staleEvent": true,
+            "staleSignalCount": 3,
+            "validSeedTime": true
+          },
+          "topic": "automation.invocation.knowledgeRefreshCandidateWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "ageDays": 3,
+              "cadence": 3,
+              "staleSignalCount": 3,
+              "validSeedTime": true
+            },
+            "kind": "automation",
+            "name": "knowledgeRefreshDue"
+          },
+          {
+            "args": {
+              "hours": 6
+            },
+            "kind": "builtin",
+            "name": "knowledgeClaimRefresh"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "ageDays": 3,
+            "cadence": 3,
+            "staleEvent": true,
+            "staleSignalCount": 3,
+            "validSeedTime": true
+          },
+          "topic": "automation.invocation.knowledgeRefreshCandidateWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "ageDays": 3,
+              "cadence": 3,
+              "staleSignalCount": 3,
+              "validSeedTime": true
+            },
+            "kind": "automation",
+            "name": "knowledgeRefreshDue"
+          },
+          {
+            "args": {
+              "hours": 6
+            },
+            "kind": "builtin",
+            "name": "knowledgeClaimRefresh"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

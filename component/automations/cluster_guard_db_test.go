@@ -102,7 +102,7 @@ func TestClusterGuard_DBClaimWithTTLRewinsStaleClaim(t *testing.T) {
 
 	// Age the claim past the lease (the claimant died, never stamped).
 	_, err := db.DB.ExecContext(ctx,
-		`UPDATE automation_execution_claims SET claimed_at = now() - interval '10 minutes'
+		`UPDATE automation_execution_claims SET claimed_at = now() - interval '10 minutes', expires_at = now() - interval '5 minutes'
 		 WHERE automation_name = $1 AND dedup_key = $2`, automation, key)
 	require.NoError(t, err)
 
@@ -180,4 +180,24 @@ func TestClusterGuard_DBPrune(t *testing.T) {
 		`SELECT count(*) FROM automation_execution_claims WHERE automation_name = $1`,
 		automation).Scan(&remaining))
 	assert.Equal(t, 0, remaining, "stale claim rows must be pruned")
+}
+
+// Long workflow cooldowns must survive the generic one-hour cleanup and a replica handoff.
+func TestClusterGuardPrunePreservesLongWorkflowClaim(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	name := fmt.Sprintf("workflow-cooldown-%d", time.Now().UnixNano())
+	t.Cleanup(func() { _, _ = db.DB.Exec(`DELETE FROM automation_execution_claims WHERE automation_name=$1`, name) })
+	first := NewClusterExecutionGuard(func() *bun.DB { return db }, nil)
+	second := NewClusterExecutionGuard(func() *bun.DB { return db }, nil)
+	require.True(t, first.StrictClaimer().ClaimWithTTL(context.Background(), name, "domain", 6*time.Hour))
+	_, err := db.DB.Exec(`UPDATE automation_execution_claims SET claimed_at=now()-interval '2 hours' WHERE automation_name=$1`, name)
+	require.NoError(t, err)
+	second.prune(context.Background())
+	require.False(t, second.StrictClaimer().ClaimWithTTL(context.Background(), name, "domain", 6*time.Hour))
+	require.False(t, second.StrictClaimer().ClaimWithTTL(context.Background(), name, "domain", time.Minute), "a replica with a shorter cooldown cannot steal a live claim")
+	_, err = db.DB.Exec(`UPDATE automation_execution_claims SET claimed_at=now()-interval '7 hours',expires_at=now()-interval '1 hour' WHERE automation_name=$1`, name)
+	require.NoError(t, err)
+	second.prune(context.Background())
+	require.True(t, second.StrictClaimer().ClaimWithTTL(context.Background(), name, "domain", 6*time.Hour))
 }

@@ -3,6 +3,8 @@ package pipelines
 import (
 	"fmt"
 	"strings"
+	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -690,3 +692,11 @@ func containsString(list []string, s string) bool {
 	}
 	return false
 }
+
+// FormatDuration renders a duration for pipeline receipts and notifications.
+func FormatDuration(d time.Duration) string { return formatDuration(d.Milliseconds()) }
+
+// ShortCommit is a sanitized seven-character commit label.
+func ShortCommit(sha string) string { return cutBytes(strings.Join(strings.Fields(sha), " "), 7) }
+
+func isSpaceOrControl(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }

@@ -32,15 +32,30 @@ func (e *MemQLEngine) policyDescribeBuiltin(ctx context.Context, args map[string
 	if len(sentence) == 0 || len(sentence) > 12000 {
 		return nil, fmt.Errorf("describe a policy in 1 to 12000 characters")
 	}
-	catalog, err := e.policies.Catalog(ctx)
-	if err != nil {
-		return nil, err
-	}
-	encoded, err := json.Marshal(catalog)
-	if err != nil {
-		return nil, err
-	}
-	result, err := e.InvokeAIStructured(ctx, "composeRoutingPolicy", map[string]any{"sentence": sentence, "catalog": string(encoded)}, "routing_policy_proposal", policyProposalSchema, true)
+	var catalog []PolicyRecord
+	var result string
+	catalogRead := false
+	_, err := e.runScopedWorkflow(ctx, "routingPolicyProposalWorkflow", map[string]any{"sentence": sentence}, map[string]WorkflowOperation{
+		"routingProposalCatalog": func(ctx context.Context, _ map[string]any) (any, error) {
+			var err error
+			catalog, err = e.policies.Catalog(ctx)
+			catalogRead = err == nil
+			if err != nil {
+				return nil, err
+			}
+			encoded, err := json.Marshal(catalog)
+			return map[string]any{"encoded": string(encoded)}, err
+		},
+		"routingGeneratePolicyProposal": func(ctx context.Context, args map[string]any) (any, error) {
+			if !catalogRead {
+				return nil, fmt.Errorf("policy catalog must be read before proposing")
+			}
+			data, _ := args["data"].(map[string]any)
+			var err error
+			result, err = e.InvokeAIStructured(ctx, stringArg(args, "prompt"), data, "routing_policy_proposal", policyProposalSchema, true)
+			return nil, err
+		},
+	})
 	if err != nil {
 		return nil, err
 	}

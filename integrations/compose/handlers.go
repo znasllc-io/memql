@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	pure "github.com/znasllc-io/memql/component/compose"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
@@ -56,10 +57,11 @@ func (i *Integration) handleRunRecipe(ctx context.Context, args map[string]any, 
 		return nil, fmt.Errorf("compose: this recipe needs a brief or reference sources")
 	}
 
-	name := strings.TrimSpace(stringOf(args["name"]))
-	if name == "" {
-		name = fmt.Sprintf("%s %s", stringOf(row["name"]), i.clock().UTC().Format("2006-01-02"))
+	value, err := workflowhost.Run(ctx, "composeRecipeOutputName", map[string]any{"requestedName": strings.TrimSpace(stringOf(args["name"])), "recipeName": stringOf(row["name"]), "date": i.clock().UTC().Format("2006-01-02")}, workflowhost.Options{})
+	if err != nil {
+		return nil, err
 	}
+	name, _ := value.(string)
 
 	out, err := i.materialize(ctx, ac.UserId, ac.PrimaryEmail, materializeArgs{
 		Name:       name,

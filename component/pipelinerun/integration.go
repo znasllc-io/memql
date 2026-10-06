@@ -34,6 +34,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/component/workjournal"
 )
@@ -41,9 +42,11 @@ import (
 // Deps are the integration's ports. New takes them, and Configure sets the
 // ones only app/ can build after every plug-in has materialized.
 type Deps struct {
-	Store  Store
-	GitHub GitHub
-	Gate   Gate
+	// LoadWorkflow resolves installed definitions. Nil uses the boot-time DSL tree.
+	LoadWorkflow func(string) (*automations.Automation, error)
+	Store        Store
+	GitHub       GitHub
+	Gate         Gate
 	// RunnerReadiness reads remote workbench evidence on front-door nodes too.
 	// Reporting does not register a step executor or make this node a driver.
 	RunnerReadiness pipelines.ReadinessReporter

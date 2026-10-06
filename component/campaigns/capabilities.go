@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
@@ -46,7 +47,11 @@ func (w *Worker) IntegrationName() string { return "campaigns" }
 
 // Capabilities returns the DSL-callable operations.
 func (w *Worker) Capabilities() []memql.IntegrationCapability {
-	return []memql.IntegrationCapability{
+	ops := map[string]workflowhost.Operation{}
+	for _, name := range campaignWorkflowCapabilities() {
+		ops[name] = nil
+	}
+	return append([]memql.IntegrationCapability{
 		{Name: "configureTestAudience", Description: "Configure the organization testing audience.", Handler: w.handleConfigureTestAudience},
 		{Name: "testAudienceSend", Description: "Queue a test through the normal campaign worker.", Handler: w.handleTestAudienceSend},
 		{Name: "sendingReadiness", Description: "Check the selected organization's sender and unsubscribe setup without sending mail.", Handler: w.handleSendingReadiness},
@@ -156,7 +161,7 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 				"emailRuleId":      "string (optional) - the rule this send came from; also names the audience to resolve the recipient in",
 			},
 		},
-	}
+	}, workflowhost.ScopedCapabilities(ops)...)
 }
 
 func (w *Worker) handleStartSend(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

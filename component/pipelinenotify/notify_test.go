@@ -1,9 +1,10 @@
-package pipelines
+package pipelinenotify
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/pipelines"
 	"reflect"
 	"strings"
 	"testing"
@@ -164,7 +165,7 @@ func assertWithinDiscordLimits(t *testing.T, e wireEmbed) {
 // promised "Coming soon in MemQL OS.".
 func releasePassed() Notification {
 	return Notification{
-		Pipeline: "memql", Event: EventRelease, Version: "v0.21.7", SHA: goldenMerged, Branch: "main",
+		Pipeline: "memql", Event: pipelines.EventRelease, Version: "v0.21.7", SHA: goldenMerged, Branch: "main",
 		Title: "Add the notify stage", Outcome: NotifyPassed, Stages: 4, DurationMs: 358_000,
 		OSOrigin: "https://os.example.test", RunPageURL: "https://os.example.test/?pipelineRun=run1",
 		At: time.Date(2026, time.September, 9, 16, 13, 12, 0, time.UTC),
@@ -208,7 +209,7 @@ func TestDiscordMessageOfAPassedRelease(t *testing.T) {
 // \_, which Discord draws as the underscores they are.
 func TestDiscordMessageOfAFailedPush(t *testing.T) {
 	n := releasePassed()
-	n.Event, n.Outcome, n.Title = EventPush, NotifyFailed, "Fix the cart badge"
+	n.Event, n.Outcome, n.Title = pipelines.EventPush, NotifyFailed, "Fix the cart badge"
 	n.Version = goldenMerged
 	n.FailedStep, n.FailedCode, n.FailedMessage = "tests/go-tests#2", "pipeline_step_timeout", "The step ran past its 20m timeout."
 
@@ -248,13 +249,13 @@ func TestDiscordMessageForEveryOutcomeOfEveryEvent(t *testing.T) {
 		{"release", func(n *Notification) {}, "Release v0.21.7",
 			"deploy/verify-rollout", "deploy", "rollout_version_mismatch", "bff-2 reports v0.21.6, not v0.21.7.",
 			`rollout\_version\_mismatch`},
-		{"push", func(n *Notification) { n.Event = EventPush }, "Push to main",
+		{"push", func(n *Notification) { n.Event = pipelines.EventPush }, "Push to main",
 			"tests.go-tests#2", "tests", "pipeline_step_timeout", "The step ran past its 20m timeout.",
 			`pipeline\_step\_timeout`},
-		{"pull request", func(n *Notification) { n.Event, n.PullRequest = EventPullRequest, 42 }, "Pull request #42",
+		{"pull request", func(n *Notification) { n.Event, n.PullRequest = pipelines.EventPullRequest, 42 }, "Pull request #42",
 			"checks/build-vet", "checks", "pipeline_step_failed", "The command exited with status 1.",
 			`pipeline\_step\_failed`},
-		{"merge queue", func(n *Notification) { n.Event = EventMergeGroup }, "Merge queue a944ae3",
+		{"merge queue", func(n *Notification) { n.Event = pipelines.EventMergeGroup }, "Merge queue a944ae3",
 			"tests.db-tests#1", "tests", "pipeline_service_failed", "The postgres service did not become ready.",
 			`pipeline\_service\_failed`},
 	}
@@ -303,8 +304,8 @@ func TestDiscordMessageForEveryOutcomeOfEveryEvent(t *testing.T) {
 				if subject != e.Title {
 					t.Errorf("email subject = %q, want the Discord title %q", subject, e.Title)
 				}
-				if want := "memql · " + Headline(n); e.Title != want {
-					t.Errorf("title = %q, want the pipeline and Headline(): %q", e.Title, want)
+				if want := "memql · " + headlineForTest(t, n); e.Title != want {
+					t.Errorf("title = %q, want the pipeline and headlineForTest(t, ): %q", e.Title, want)
 				}
 			})
 		}
@@ -317,46 +318,46 @@ func TestHeadlineNamesTheRunByItsEventAndTheOutcomeByItsWords(t *testing.T) {
 		n    Notification
 		want string
 	}{
-		{"a release", Notification{Event: EventRelease, Version: "v0.21.7", Outcome: NotifyPassed}, "Release v0.21.7 passed"},
-		{"a release that is only a commit", Notification{Event: EventRelease, Version: goldenMerged, Outcome: NotifyPassed}, "Release a944ae3 passed"},
-		{"a release with no version", Notification{Event: EventRelease, SHA: goldenMerged, Outcome: NotifyPassed}, "Release a944ae3 passed"},
-		{"a push", Notification{Event: EventPush, Branch: "main", SHA: goldenMerged, Outcome: NotifyPassed}, "Push to main passed"},
-		{"a push with no branch", Notification{Event: EventPush, SHA: goldenMerged, Outcome: NotifyPassed}, "Push a944ae3 passed"},
-		{"a push with neither", Notification{Event: EventPush, Outcome: NotifyPassed}, "Push passed"},
-		{"a pull request", Notification{Event: EventPullRequest, PullRequest: 42, Outcome: NotifyPassed}, "Pull request #42 passed"},
-		{"a pull request with no number", Notification{Event: EventPullRequest, Outcome: NotifyPassed}, "Pull request passed"},
-		{"the merge queue", Notification{Event: EventMergeGroup, SHA: goldenMerged, Outcome: NotifyPassed}, "Merge queue a944ae3 passed"},
+		{"a release", Notification{Event: pipelines.EventRelease, Version: "v0.21.7", Outcome: NotifyPassed}, "Release v0.21.7 passed"},
+		{"a release that is only a commit", Notification{Event: pipelines.EventRelease, Version: goldenMerged, Outcome: NotifyPassed}, "Release a944ae3 passed"},
+		{"a release with no version", Notification{Event: pipelines.EventRelease, SHA: goldenMerged, Outcome: NotifyPassed}, "Release a944ae3 passed"},
+		{"a push", Notification{Event: pipelines.EventPush, Branch: "main", SHA: goldenMerged, Outcome: NotifyPassed}, "Push to main passed"},
+		{"a push with no branch", Notification{Event: pipelines.EventPush, SHA: goldenMerged, Outcome: NotifyPassed}, "Push a944ae3 passed"},
+		{"a push with neither", Notification{Event: pipelines.EventPush, Outcome: NotifyPassed}, "Push passed"},
+		{"a pull request", Notification{Event: pipelines.EventPullRequest, PullRequest: 42, Outcome: NotifyPassed}, "Pull request #42 passed"},
+		{"a pull request with no number", Notification{Event: pipelines.EventPullRequest, Outcome: NotifyPassed}, "Pull request passed"},
+		{"the merge queue", Notification{Event: pipelines.EventMergeGroup, SHA: goldenMerged, Outcome: NotifyPassed}, "Merge queue a944ae3 passed"},
 		{"an event nobody named", Notification{Event: "deployment", SHA: goldenMerged, Outcome: NotifyPassed}, "Run a944ae3 passed"},
 
-		{"failed at the stage of the step", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "deploy/verify-rollout"},
+		{"failed at the stage of the step", Notification{Event: pipelines.EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "deploy/verify-rollout"},
 			"Push to main failed at deploy"},
-		{"failed at a stage named alone", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "deploy"},
+		{"failed at a stage named alone", Notification{Event: pipelines.EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "deploy"},
 			"Push to main failed at deploy"},
 		// A step's key is "stage.step" (StepKey), where a scope is "stage/step":
 		// neither separator is in a stage's name, so the first of them ends it.
-		{"failed at the stage of a step key", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "tests.go-tests#2"},
+		{"failed at the stage of a step key", Notification{Event: pipelines.EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "tests.go-tests#2"},
 			"Push to main failed at tests"},
-		{"failed at the stage of another step key", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "deploy.verify-rollout"},
+		{"failed at the stage of another step key", Notification{Event: pipelines.EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "deploy.verify-rollout"},
 			"Push to main failed at deploy"},
-		{"a slash before a dot", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "tests/go.tests"},
+		{"a slash before a dot", Notification{Event: pipelines.EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "tests/go.tests"},
 			"Push to main failed at tests"},
-		{"a dot before a slash", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "tests.go/tests"},
+		{"a dot before a slash", Notification{Event: pipelines.EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "tests.go/tests"},
 			"Push to main failed at tests"},
-		{"a stage with a trailing separator", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "deploy."},
+		{"a stage with a trailing separator", Notification{Event: pipelines.EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "deploy."},
 			"Push to main failed at deploy"},
-		{"a step with no stage in front of it", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: ".verify-rollout"},
+		{"a step with no stage in front of it", Notification{Event: pipelines.EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: ".verify-rollout"},
 			"Push to main failed"},
-		{"a step key broken across lines", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "te\nsts.go-tests"},
+		{"a step key broken across lines", Notification{Event: pipelines.EventPush, Branch: "main", Outcome: NotifyFailed, FailedStep: "te\nsts.go-tests"},
 			"Push to main failed at te sts"},
-		{"failed with no step to name", Notification{Event: EventPush, Branch: "main", Outcome: NotifyFailed}, "Push to main failed"},
-		{"recovered", Notification{Event: EventPush, Branch: "main", Outcome: NotifyRecovered}, "Push to main recovered"},
+		{"failed with no step to name", Notification{Event: pipelines.EventPush, Branch: "main", Outcome: NotifyFailed}, "Push to main failed"},
+		{"recovered", Notification{Event: pipelines.EventPush, Branch: "main", Outcome: NotifyRecovered}, "Push to main recovered"},
 		// An outcome this package does not know is never a pass: it says
 		// nothing, and both composers refuse it (below).
-		{"an outcome nobody named", Notification{Event: EventPush, Branch: "main", Outcome: "unknown"}, "Push to main"},
+		{"an outcome nobody named", Notification{Event: pipelines.EventPush, Branch: "main", Outcome: "unknown"}, "Push to main"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := Headline(tc.n); got != tc.want {
+			if got := headlineForTest(t, tc.n); got != tc.want {
 				t.Errorf("Headline = %q, want %q", got, tc.want)
 			}
 		})
@@ -430,17 +431,17 @@ func TestDiscordMessageAndEmailMessageAgreeWithValid(t *testing.T) {
 // one table and not to those would be sent as a message that says nothing of
 // the run -- the default of a switch deciding what an unknown value means.
 func TestDiscordEveryValidOutcomeIsSpokenFor(t *testing.T) {
-	if len(outcomeColors) != 3 {
-		t.Fatalf("outcomeColors has %d outcomes; a new one needs words in headline and outcomeLine, and a case here", len(outcomeColors))
+	if len([]NotifyOutcome{NotifyPassed, NotifyFailed, NotifyRecovered}) != 3 {
+		t.Fatalf("outcomeColors has %d outcomes; a new one needs words in headline and outcomeLine, and a case here", len([]NotifyOutcome{NotifyPassed, NotifyFailed, NotifyRecovered}))
 	}
-	for outcome := range outcomeColors {
+	for outcome := range map[NotifyOutcome]bool{NotifyPassed: true, NotifyFailed: true, NotifyRecovered: true} {
 		n := releasePassed()
 		n.Outcome = outcome
 		n.FailedStep, n.FailedCode = "tests/go-tests", "pipeline_step_failed"
-		if head := Headline(n); head == runSubject(n, asWritten) {
+		if head := headlineForTest(t, n); head == copyForTest(t, n).Subject {
 			t.Errorf("outcome %q has no verdict in its headline: %q", outcome, head)
 		}
-		if lines := descriptionLines(n, asWritten); len(lines) != 2 {
+		if lines := copyForTest(t, n).Lines; len(lines) != 2 {
 			t.Errorf("outcome %q has no line of its own under the title: %q", outcome, lines)
 		}
 	}
@@ -492,7 +493,7 @@ func TestDiscordMessageEscapesEveryTextAPersonSupplied(t *testing.T) {
 
 	n := releasePassed()
 	n.Pipeline = "my_repo"
-	n.Event, n.Branch = EventPush, hostile
+	n.Event, n.Branch = pipelines.EventPush, hostile
 	n.Version = "v1_beta*"
 	n.Outcome = NotifyFailed
 	n.FailedStep, n.FailedCode, n.FailedMessage = hostileStep, hostileCode, hostile+"\n# heading\n> quote"
@@ -858,7 +859,7 @@ func hostileNotification() Notification {
 	n.Pipeline, n.Title, n.Branch, n.Version, n.FailedMessage = huge, huge, huge, huge, huge
 	n.FailedStep = strings.Repeat("stage", 2_000) + "/step"
 	n.FailedCode = strings.Repeat("code_", 2_000)
-	n.Event = EventPush
+	n.Event = pipelines.EventPush
 	for range 30 {
 		n.Links = append(n.Links, Link{Label: huge, URL: "https://memql.io/" + strings.Repeat("a_(b)", 400)})
 		n.Artifacts = append(n.Artifacts, Link{Label: huge, URL: "https://os.example.test/?libraryFile=" + strings.Repeat("f", 600)})
@@ -959,7 +960,7 @@ func TestDiscordMessageNeverCutsInsideAnEscape(t *testing.T) {
 	for prefix := 1; prefix <= 4; prefix++ {
 		for length := 125; length <= 140; length++ {
 			n := releasePassed()
-			n.Event = EventPush
+			n.Event = pipelines.EventPush
 			n.Pipeline = strings.Repeat("p", prefix)
 			n.Branch = strings.Repeat("[", length)
 			e, _ := composeDiscord(t, n)
@@ -1205,7 +1206,7 @@ func TestEmailMessageOfAPassedRelease(t *testing.T) {
 
 func TestEmailMessageOfAFailedRunOnAClusterWithNoOSDomain(t *testing.T) {
 	n := releasePassed()
-	n.Event, n.Outcome, n.Title = EventPush, NotifyFailed, "Fix the cart badge"
+	n.Event, n.Outcome, n.Title = pipelines.EventPush, NotifyFailed, "Fix the cart badge"
 	n.Version = goldenMerged
 	n.OSOrigin, n.RunPageURL = "", ""
 	n.FailedStep, n.FailedCode, n.FailedMessage = "tests/go-tests#2", "pipeline_step_timeout", "The step ran past its 20m timeout."
@@ -1246,7 +1247,7 @@ func TestEmailMessageListsFiveArtifactsAndCountsTheRest(t *testing.T) {
 // made into two header lines.
 func TestEmailMessageIsPlainTextOnOneSubjectLine(t *testing.T) {
 	n := releasePassed()
-	n.Event, n.Branch = EventPush, "feature_x\r\nBcc: someone@example.test"
+	n.Event, n.Branch = pipelines.EventPush, "feature_x\r\nBcc: someone@example.test"
 	n.Title = "[click](https://evil.test) @everyone **x**"
 	n.Outcome = NotifyFailed
 	// The step and its code are text a manifest and a runner wrote: they may
@@ -1298,7 +1299,7 @@ func TestEmailMessageHoldsItsSubjectToOneLineOfSaneLength(t *testing.T) {
 // escaping, which is every branch a person reads.
 func TestEmailSubjectEqualsTheDiscordTitleExceptWhereMarkdownNeededEscaping(t *testing.T) {
 	n := releasePassed()
-	n.Event, n.Branch = EventPush, "release_candidate"
+	n.Event, n.Branch = pipelines.EventPush, "release_candidate"
 	e, _ := composeDiscord(t, n)
 	subject, _ := composeEmail(t, n)
 	if e.Title != `memql · Push to release\_candidate passed` || subject != "memql · Push to release_candidate passed" {
@@ -1316,8 +1317,23 @@ func TestFormatDurationIsTheChecksOwnFormat(t *testing.T) {
 		20 * time.Minute: "20m 00s",
 		time.Hour + 2*time.Minute + 5*time.Second: "1h 02m 05s",
 	} {
-		if got := FormatDuration(d); got != want {
-			t.Errorf("FormatDuration(%v) = %q, want %q", d, got, want)
+		if got := pipelines.FormatDuration(d); got != want {
+			t.Errorf("pipelines.FormatDuration(%v) = %q, want %q", d, got, want)
 		}
 	}
 }
+
+func copyForTest(t *testing.T, n Notification) messageCopy {
+	t.Helper()
+	c, err := notificationCopy(n, asWritten)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+func headlineForTest(t *testing.T, n Notification) string {
+	t.Helper()
+	return copyForTest(t, n).Headline
+}
+
+const goldenMerged = "a944ae33e9bcd7b2f5d1e5d74dcd8acc6a0ae9df"

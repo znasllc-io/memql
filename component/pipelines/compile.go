@@ -30,9 +30,10 @@ type CompileInput struct {
 // Plan is a compiled pipeline: the stages one run executes, in order. It
 // becomes one work goal with one v1:work:step per Step (D7).
 type Plan struct {
-	Mode   Mode        `json:"mode"`
-	Event  Event       `json:"event"`
-	Stages []PlanStage `json:"stages"`
+	Workflow string      `json:"workflow,omitempty"`
+	Mode     Mode        `json:"mode"`
+	Event    Event       `json:"event"`
+	Stages   []PlanStage `json:"stages"`
 }
 
 // PlanStage is one stage the run executes.
@@ -114,7 +115,7 @@ func Compile(spec *Spec, in CompileInput) (Plan, *Refusal) {
 		}
 	}
 
-	plan := Plan{Mode: in.Mode, Event: in.Event}
+	plan := Plan{Workflow: spec.Workflow, Mode: in.Mode, Event: in.Event}
 	var previous []string // the keys of the stage planned before this one
 	for _, stage := range spec.Stages {
 		if !stagePlanned(stage, in) {

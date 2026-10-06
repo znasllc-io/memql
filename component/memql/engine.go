@@ -148,7 +148,8 @@ type MemQLEngine struct {
 	// "function dispatcher does not support multi-step" error path so
 	// stripped-down binaries that don't load automations still get an
 	// actionable failure mode.
-	logicRunner LogicRunner
+	logicRunner    LogicRunner
+	scopedWorkflow ScopedWorkflowRunner
 	// promotedAuthored records the (kind:name) of constructs promoted into the
 	// shared registries via PromoteAuthoredConstruct, so re-promotion replaces
 	// the prior promotion while a name a SEALED core construct owns is still

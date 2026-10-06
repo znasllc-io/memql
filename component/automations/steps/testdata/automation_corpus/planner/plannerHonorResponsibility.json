@@ -1,0 +1,61 @@
+{
+  "automation": "planner/automations.memql plannerHonorResponsibility",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "s-agentId",
+            "row": {}
+          },
+          "topic": "automation.invocation.plannerHonorResponsibility"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "message": "unknown trigger "
+            },
+            "kind": "builtin",
+            "name": "plannerWorkflowRefusal"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "s-agentId",
+            "row": {}
+          },
+          "topic": "automation.invocation.plannerHonorResponsibility"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "message": "unknown trigger "
+            },
+            "kind": "builtin",
+            "name": "plannerWorkflowRefusal"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

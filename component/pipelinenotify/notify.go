@@ -1,9 +1,10 @@
-package pipelines
+package pipelinenotify
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/component/pipelines"
 	"net/url"
 	"slices"
 	"strconv"
@@ -42,16 +43,10 @@ const (
 // failed or recovered. Both composers refuse any other, and a caller that would
 // rather know first can ask.
 func (o NotifyOutcome) Valid() bool {
-	_, ok := outcomeColors[o]
-	return ok
+	return o == NotifyPassed || o == NotifyFailed || o == NotifyRecovered
 }
 
-// Link is a labelled URL in a notification: one a manifest's notify stage
-// declares (Docs), or one of the run's Library files.
-type Link struct {
-	Label string `json:"label" yaml:"label"`
-	URL   string `json:"url" yaml:"url"`
-}
+type Link = pipelines.Link
 
 // Notification is everything a message says. Every string is already masked by
 // the caller (MaskSecrets), so a composer renders what it is given.
@@ -67,7 +62,7 @@ type Link struct {
 // which Discord draws as the code it is.
 type Notification struct {
 	Pipeline    string // the pipeline's name: "memql"
-	Event       Event
+	Event       pipelines.Event
 	Version     string // MEMQL_VERSION: the tag for a release, the SHA otherwise
 	SHA         string
 	Branch      string
@@ -99,13 +94,6 @@ const (
 )
 
 const (
-	notifyUsername = "MemQL Pipelines"
-
-	// Green for a run that passed, which is the green the observer used, and
-	// red for one that did not.
-	colorPassed = 3066993  // 0x2ECC71
-	colorFailed = 15158332 // 0xE74C3C
-
 	// maxFailedMessageRunes is how much of a failure's own words the message
 	// carries: enough to say what happened. When the message is a stretch of
 	// output rather than a sentence, the run page holds all of it.
@@ -143,10 +131,14 @@ func DiscordMessage(n Notification) ([]byte, error) {
 	if err := checkOutcome(n.Outcome); err != nil {
 		return nil, err
 	}
+	copy, err := notificationCopy(n, escapeDiscord)
+	if err != nil {
+		return nil, err
+	}
 	payload := discordPayload{
-		Username:        notifyUsername,
+		Username:        copy.Username,
 		AllowedMentions: discordMentions{Parse: []string{}},
-		Embeds:          []discordEmbed{newEmbedPlan(n, outcomeColors[n.Outcome]).embed()},
+		Embeds:          []discordEmbed{newEmbedPlan(n, copy).embed()},
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -171,10 +163,14 @@ func EmailMessage(n Notification) (subject, body string, err error) {
 	if err = checkOutcome(n.Outcome); err != nil {
 		return "", "", err
 	}
-	subject = fitRunes(notifyTitle(n, asWritten), discordTitleMax)
+	copy, err := notificationCopy(n, asWritten)
+	if err != nil {
+		return "", "", err
+	}
+	subject = fitRunes(copy.Title, discordTitleMax)
 
 	var b strings.Builder
-	for _, line := range descriptionLines(n, asWritten) {
+	for _, line := range copy.Lines {
 		b.WriteString(line + "\n")
 	}
 	if b.Len() > 0 {
@@ -193,7 +189,6 @@ func EmailMessage(n Notification) (subject, body string, err error) {
 // It has no error to return, so an outcome it does not know leaves the verdict
 // off rather than refusing: it says nothing of the run, and never that it
 // passed.
-func Headline(n Notification) string { return headline(n, asWritten) }
 
 type discordPayload struct {
 	Username        string          `json:"username"`
@@ -233,11 +228,6 @@ func (e discordEmbed) size() int {
 // outcomeColors is every outcome a notification announces, with the color of
 // the embed that announces it. It is the one place that says which there are:
 // Valid asks it, and so does the Discord color, so the two cannot disagree.
-var outcomeColors = map[NotifyOutcome]int{
-	NotifyPassed:    colorPassed,
-	NotifyFailed:    colorFailed,
-	NotifyRecovered: colorPassed,
-}
 
 // checkOutcome is how both composers refuse an outcome they do not know, in
 // the same words.
@@ -262,11 +252,11 @@ type embedPlan struct {
 	maxShown              int            // how many artifact lines the field can hold: -1 for no field
 }
 
-func newEmbedPlan(n Notification, color int) embedPlan {
+func newEmbedPlan(n Notification, copy messageCopy) embedPlan {
 	p := embedPlan{
-		title:     fitRunes(notifyTitle(n, escapeDiscord), discordTitleMax),
-		color:     color,
-		lines:     descriptionLines(n, escapeDiscord),
+		title:     fitRunes(copy.Title, discordTitleMax),
+		color:     copy.Color,
+		lines:     copy.Lines,
 		artifacts: discordArtifactLines(n.Artifacts),
 	}
 	// Every line begins with text a person or a runner wrote: the first with the
@@ -464,31 +454,6 @@ func fitLines(lines []string, limit int) string {
 
 // notifyTitle is "<pipeline> · <headline>": the Discord title and the email
 // subject. The dot is U+00B7, as in the observer's.
-func notifyTitle(n Notification, esc escaper) string {
-	head := headline(n, esc)
-	if name := esc.line(n.Pipeline); name != "" {
-		return name + " · " + head
-	}
-	return head
-}
-
-func headline(n Notification, esc escaper) string {
-	subject := runSubject(n, esc)
-	switch n.Outcome {
-	case NotifyPassed:
-		return subject + " passed"
-	case NotifyRecovered:
-		return subject + " recovered"
-	case NotifyFailed:
-		if stage := stageOfStep(oneLineText(n.FailedStep)); stage != "" {
-			return subject + " failed at " + esc(stage)
-		}
-		return subject + " failed"
-	}
-	// An outcome this package does not know says nothing about the run: never
-	// "passed" by default.
-	return subject
-}
 
 // stageOfStep is the stage a failed step is in. A step is named "stage/step"
 // where a refusal's scope is, and "stage.step" where a step's key is (StepKey):
@@ -501,42 +466,6 @@ func stageOfStep(step string) string {
 	return step
 }
 
-// runSubject names the run by what opened it.
-func runSubject(n Notification, esc escaper) string {
-	sha := esc.line(shortSHA(n.SHA))
-	switch n.Event {
-	case EventRelease:
-		return words("Release", esc(versionText(n)))
-	case EventPush:
-		if branch := esc.line(n.Branch); branch != "" {
-			return "Push to " + branch
-		}
-		return words("Push", sha)
-	case EventPullRequest:
-		if n.PullRequest > 0 {
-			return "Pull request #" + strconv.Itoa(n.PullRequest)
-		}
-		return "Pull request"
-	case EventMergeGroup:
-		return words("Merge queue", sha)
-	}
-	return words("Run", sha)
-}
-
-// words joins the parts that are not empty with a space.
-func words(parts ...string) string {
-	kept := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if part != "" {
-			kept = append(kept, part)
-		}
-	}
-	return strings.Join(kept, " ")
-}
-
-// shortSHA is a commit as a person reads one: its first seven characters.
-func shortSHA(sha string) string { return cutBytes(oneLineText(sha), 7) }
-
 // versionText is the version as a person reads it. A release's is its tag and
 // is kept whole; every other run's MEMQL_VERSION is its commit, shown as the
 // first seven characters, as is a run with no version at all.
@@ -544,9 +473,9 @@ func versionText(n Notification) string {
 	version := oneLineText(n.Version)
 	switch {
 	case version == "":
-		return shortSHA(n.SHA)
+		return pipelines.ShortCommit(n.SHA)
 	case version == oneLineText(n.SHA), isFullHash(version):
-		return shortSHA(version)
+		return pipelines.ShortCommit(version)
 	}
 	return version
 }
@@ -567,75 +496,16 @@ func isFullHash(s string) bool {
 
 // descriptionLines are the two lines under the title: the commit, then what
 // happened to the run. The email carries the same two.
-func descriptionLines(n Notification, esc escaper) []string {
-	var lines []string
-	if commit := commitLine(n, esc); commit != "" {
-		lines = append(lines, commit)
-	}
-	if outcome := outcomeLine(n, esc); outcome != "" {
-		lines = append(lines, outcome)
-	}
-	return lines
-}
 
 // commitLine is the commit's own title and its first seven characters.
-func commitLine(n Notification, esc escaper) string {
-	title, sha := esc.line(n.Title), esc.line(shortSHA(n.SHA))
-	switch {
-	case title != "" && sha != "":
-		return title + " (" + sha + ")"
-	case title != "":
-		return title
-	case sha != "":
-		return "(" + sha + ")"
-	}
-	return ""
-}
-
-func outcomeLine(n Notification, esc escaper) string {
-	switch n.Outcome {
-	case NotifyPassed:
-		return passedLine(n)
-	case NotifyRecovered:
-		return "Passed after the previous run failed. " + passedLine(n)
-	case NotifyFailed:
-		return failedLine(n, esc)
-	}
-	return ""
-}
 
 // passedLine counts the stages that ran and says how long they took. A count
 // or a time nobody has is left out, not guessed.
-func passedLine(n Notification) string {
-	line := "All stages passed"
-	if n.Stages > 0 {
-		line = "All " + count(n.Stages, "stage", "stages") + " passed"
-	}
-	if n.DurationMs > 0 {
-		line += " in " + formatDuration(n.DurationMs)
-	}
-	return line + "."
-}
 
 // failedLine names the step that failed, its code and what the runner said.
 // All three are text something outside this package wrote, so all three are
 // escaped. The message is cut to maxFailedMessageRunes before it is, so the cut
 // is of the words as written and an escape is never split.
-func failedLine(n Notification, esc escaper) string {
-	who := "The run"
-	if step := esc.line(n.FailedStep); step != "" {
-		who = step
-	}
-	line := who + " failed"
-	if code := esc.line(n.FailedCode); code != "" {
-		line += ": " + code
-	}
-	line += "."
-	if message := fitRunes(oneLineText(n.FailedMessage), maxFailedMessageRunes); message != "" {
-		line += " " + esc(message)
-	}
-	return line
-}
 
 // osAddress is the cluster's MemQL OS as a link target, and false when the
 // cluster has no OS domain: the address is derived from the domain by the
@@ -797,8 +667,3 @@ func plainFacts(n Notification) []string {
 	}
 	return facts
 }
-
-// FormatDuration is a time as every pipeline text writes one -- 45s, 1m 02s,
-// 1h 02m 05s -- for a sentence the driver composes beside a message, such as
-// how long a notify stage waited for its delivery.
-func FormatDuration(d time.Duration) string { return formatDuration(d.Milliseconds()) }

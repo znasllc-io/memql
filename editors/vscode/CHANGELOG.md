@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.4
+
+- Recognizes installed schedule placement with `node` and `lease` in MemQL
+  edition 2026. The bundled language server and generated grammar carry
+  `2026.10-workflow-placement-df34b1a1`.
+
 ## 0.6.3
 
 - Recognizes bounded parallel iteration, `for item in items parallel(16) { ... }`,

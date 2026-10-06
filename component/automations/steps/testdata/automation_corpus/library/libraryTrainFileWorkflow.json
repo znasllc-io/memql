@@ -1,0 +1,73 @@
+{
+  "automation": "library/automations.memql libraryTrainFileWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.libraryTrainFileWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "libraryReadTrainingText"
+          },
+          {
+            "kind": "builtin",
+            "name": "libraryIngestTrainingText"
+          },
+          {
+            "kind": "builtin",
+            "name": "libraryRecordTrainingDomain"
+          },
+          {
+            "kind": "builtin",
+            "name": "libraryAuditTraining"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.libraryTrainFileWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "libraryReadTrainingText"
+          },
+          {
+            "kind": "builtin",
+            "name": "libraryIngestTrainingText"
+          },
+          {
+            "kind": "builtin",
+            "name": "libraryRecordTrainingDomain"
+          },
+          {
+            "kind": "builtin",
+            "name": "libraryAuditTraining"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

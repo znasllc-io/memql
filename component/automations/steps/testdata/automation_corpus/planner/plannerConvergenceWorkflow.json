@@ -1,0 +1,147 @@
+{
+  "automation": "planner/automations.memql plannerConvergenceWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "observedAt": "s-observedAt",
+            "owner": "s-owner",
+            "responsibilities": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.plannerConvergenceWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "minutes": 60
+            },
+            "kind": "builtin",
+            "name": "plannerClaimConvergence"
+          },
+          {
+            "kind": "builtin",
+            "name": "plannerSpaceGoals"
+          },
+          {
+            "args": {
+              "k": 8,
+              "text": "active goals and standing responsibilities I am pursuing"
+            },
+            "kind": "builtin",
+            "name": "plannerRecentMemory"
+          },
+          {
+            "args": {
+              "data": {
+                "now": "s-observedAt",
+                "recentMemory": {
+                  "args": {
+                    "k": 8,
+                    "text": "active goals and standing responsibilities I am pursuing"
+                  },
+                  "builtin": "plannerRecentMemory"
+                },
+                "responsibilities": [
+                  "a"
+                ],
+                "spaceGoals": {
+                  "args": {},
+                  "builtin": "plannerSpaceGoals"
+                },
+                "user": {
+                  "userId": "s-owner"
+                }
+              },
+              "prompt": "reactiveConductor"
+            },
+            "kind": "builtin",
+            "name": "plannerConvergenceTurn"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "observedAt": "s-observedAt",
+            "owner": "s-owner",
+            "responsibilities": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.plannerConvergenceWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "minutes": 60
+            },
+            "kind": "builtin",
+            "name": "plannerClaimConvergence"
+          },
+          {
+            "kind": "builtin",
+            "name": "plannerSpaceGoals"
+          },
+          {
+            "args": {
+              "k": 8,
+              "text": "active goals and standing responsibilities I am pursuing"
+            },
+            "kind": "builtin",
+            "name": "plannerRecentMemory"
+          },
+          {
+            "args": {
+              "data": {
+                "now": "s-observedAt",
+                "recentMemory": {
+                  "args": {
+                    "k": 8,
+                    "text": "active goals and standing responsibilities I am pursuing"
+                  },
+                  "builtin": "plannerRecentMemory"
+                },
+                "responsibilities": [
+                  "a"
+                ],
+                "spaceGoals": {
+                  "args": {},
+                  "builtin": "plannerSpaceGoals"
+                },
+                "user": {
+                  "userId": "s-owner"
+                }
+              },
+              "prompt": "reactiveConductor"
+            },
+            "kind": "builtin",
+            "name": "plannerConvergenceTurn"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    }
+  }
+}

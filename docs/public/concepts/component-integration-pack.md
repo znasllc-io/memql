@@ -11,6 +11,9 @@ owner: znas
 
 MemQL has **exactly three** extension words. Do not invent a fourth.
 
+For the executable boundary between them and DSL workflows, read
+[Engine, integration and workflow boundaries](../build/integration-boundary.md).
+
 | Word | Means | Lives |
 |---|---|---|
 | **component** | Engine internals — DSL lexer/AST, HTTP/gRPC servers, bus, identity, env registry | `component/` |

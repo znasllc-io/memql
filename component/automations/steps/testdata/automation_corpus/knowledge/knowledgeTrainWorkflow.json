@@ -1,0 +1,203 @@
+{
+  "automation": "knowledge/automations.memql knowledgeTrainWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "domainId": "s-domainId",
+            "mode": "s-mode",
+            "partitionId": "s-partitionId",
+            "specialistId": "s-specialistId",
+            "topic": "s-topic"
+          },
+          "topic": "automation.invocation.knowledgeTrainWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "mode": "s-mode"
+            },
+            "kind": "automation",
+            "name": "knowledgeTrainingContext"
+          },
+          {
+            "kind": "builtin",
+            "name": "knowledgeTrainingSpecialist"
+          },
+          {
+            "args": {
+              "data": {
+                "existingCorpus": {
+                  "automation": "knowledgeTrainingContext"
+                },
+                "now": "<ts>",
+                "partition": "s-partitionId",
+                "plan": {
+                  "input": {
+                    "domainId": "s-domainId",
+                    "mode": "s-mode",
+                    "specialistId": "s-specialistId",
+                    "topic": "s-topic"
+                  }
+                },
+                "targetSpecialist": {
+                  "args": {},
+                  "builtin": "knowledgeTrainingSpecialist"
+                }
+              },
+              "prompt": "trainerAgent",
+              "tools": [
+                "webSearch",
+                "fetchUrl",
+                "writeKnowledgeChunk",
+                "markChunkSuperseded",
+                "embedChunk"
+              ]
+            },
+            "kind": "builtin",
+            "name": "knowledgeTrainingTurn"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "data": {
+                "existingCorpus": {
+                  "automation": "knowledgeTrainingContext"
+                },
+                "now": "<ts>",
+                "partition": "s-partitionId",
+                "plan": {
+                  "input": {
+                    "domainId": "s-domainId",
+                    "mode": "s-mode",
+                    "specialistId": "s-specialistId",
+                    "topic": "s-topic"
+                  }
+                },
+                "targetSpecialist": {
+                  "args": {},
+                  "builtin": "knowledgeTrainingSpecialist"
+                }
+              },
+              "prompt": "trainerAgent",
+              "tools": [
+                "webSearch",
+                "fetchUrl",
+                "writeKnowledgeChunk",
+                "markChunkSuperseded",
+                "embedChunk"
+              ]
+            },
+            "builtin": "knowledgeTrainingTurn"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "domainId": "s-domainId",
+            "mode": "s-mode",
+            "partitionId": "s-partitionId",
+            "specialistId": "s-specialistId",
+            "topic": "s-topic"
+          },
+          "topic": "automation.invocation.knowledgeTrainWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "mode": "s-mode"
+            },
+            "kind": "automation",
+            "name": "knowledgeTrainingContext"
+          },
+          {
+            "kind": "builtin",
+            "name": "knowledgeTrainingSpecialist"
+          },
+          {
+            "args": {
+              "data": {
+                "existingCorpus": {
+                  "automation": "knowledgeTrainingContext"
+                },
+                "now": "<ts>",
+                "partition": "s-partitionId",
+                "plan": {
+                  "input": {
+                    "domainId": "s-domainId",
+                    "mode": "s-mode",
+                    "specialistId": "s-specialistId",
+                    "topic": "s-topic"
+                  }
+                },
+                "targetSpecialist": {
+                  "args": {},
+                  "builtin": "knowledgeTrainingSpecialist"
+                }
+              },
+              "prompt": "trainerAgent",
+              "tools": [
+                "webSearch",
+                "fetchUrl",
+                "writeKnowledgeChunk",
+                "markChunkSuperseded",
+                "embedChunk"
+              ]
+            },
+            "kind": "builtin",
+            "name": "knowledgeTrainingTurn"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "data": {
+                "existingCorpus": {
+                  "automation": "knowledgeTrainingContext"
+                },
+                "now": "<ts>",
+                "partition": "s-partitionId",
+                "plan": {
+                  "input": {
+                    "domainId": "s-domainId",
+                    "mode": "s-mode",
+                    "specialistId": "s-specialistId",
+                    "topic": "s-topic"
+                  }
+                },
+                "targetSpecialist": {
+                  "args": {},
+                  "builtin": "knowledgeTrainingSpecialist"
+                }
+              },
+              "prompt": "trainerAgent",
+              "tools": [
+                "webSearch",
+                "fetchUrl",
+                "writeKnowledgeChunk",
+                "markChunkSuperseded",
+                "embedChunk"
+              ]
+            },
+            "builtin": "knowledgeTrainingTurn"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

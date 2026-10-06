@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"io/fs"
 	"maps"
 	"net/url"
@@ -218,7 +220,7 @@ func compileEngineOpening(spec *pipelines.Spec, graph *pipelines.Graph, event pi
 	if refusal := pipelines.Validate(spec); refusal != nil {
 		return pipelines.Plan{}, refusal
 	}
-	mode, ok := pipelines.ModeFor(event)
+	mode, ok := manifestEventMode(event)
 	if !ok {
 		return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeEventUnknown, "", "no mode is decided for event %q", event)
 	}
@@ -381,7 +383,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 				}
 			}
 
-			if mode, _ := pipelines.ModeFor(o.event); mode == pipelines.ModeFull {
+			if mode, _ := manifestEventMode(o.event); mode == pipelines.ModeFull {
 				checkEngineTestsPartitionEveryPackage(t, spec, graph, byName)
 			}
 		})
@@ -668,4 +670,10 @@ func expectedEngineStepImage(spec *pipelines.Spec, name string) string {
 		return declared.Image
 	}
 	return spec.Image
+}
+
+func manifestEventMode(event pipelines.Event) (pipelines.Mode, bool) {
+	value, err := workflowhost.Run(context.Background(), "pipelineModeForEvent", map[string]any{"event": string(event)}, workflowhost.Options{})
+	mode, _ := value.(string)
+	return pipelines.Mode(mode), err == nil && mode != ""
 }

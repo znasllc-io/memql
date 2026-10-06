@@ -1,0 +1,133 @@
+{
+  "automation": "library/automations.memql libraryAnalyzeFile",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "mimeType": "s-mimeType",
+            "name": "s-name"
+          },
+          "topic": "automation.invocation.libraryAnalyzeFile"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "libraryAnalysisInput"
+          },
+          {
+            "args": {
+              "embeddingStatus": "complete",
+              "status": "ready"
+            },
+            "kind": "builtin",
+            "name": "libraryAnalysisStatus"
+          },
+          {
+            "kind": "builtin",
+            "name": "libraryAnalysisRestamp"
+          },
+          {
+            "args": {
+              "key": "extract",
+              "reason": "this file type is stored and downloadable, and there is no text in it to read"
+            },
+            "kind": "builtin",
+            "name": "libraryAnalysisSkip"
+          },
+          {
+            "args": {
+              "key": "summarize",
+              "reason": "this file type is stored and downloadable, and there is no text in it to read"
+            },
+            "kind": "builtin",
+            "name": "libraryAnalysisSkip"
+          },
+          {
+            "args": {
+              "key": "index",
+              "reason": "this file type is stored and downloadable, and there is no text in it to read"
+            },
+            "kind": "builtin",
+            "name": "libraryAnalysisSkip"
+          }
+        ],
+        "result": {
+          "output": {
+            "chunks": 0,
+            "readable": false
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "mimeType": "s-mimeType",
+            "name": "s-name"
+          },
+          "topic": "automation.invocation.libraryAnalyzeFile"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "libraryAnalysisInput"
+          },
+          {
+            "args": {
+              "embeddingStatus": "complete",
+              "status": "ready"
+            },
+            "kind": "builtin",
+            "name": "libraryAnalysisStatus"
+          },
+          {
+            "kind": "builtin",
+            "name": "libraryAnalysisRestamp"
+          },
+          {
+            "args": {
+              "key": "extract",
+              "reason": "this file type is stored and downloadable, and there is no text in it to read"
+            },
+            "kind": "builtin",
+            "name": "libraryAnalysisSkip"
+          },
+          {
+            "args": {
+              "key": "summarize",
+              "reason": "this file type is stored and downloadable, and there is no text in it to read"
+            },
+            "kind": "builtin",
+            "name": "libraryAnalysisSkip"
+          },
+          {
+            "args": {
+              "key": "index",
+              "reason": "this file type is stored and downloadable, and there is no text in it to read"
+            },
+            "kind": "builtin",
+            "name": "libraryAnalysisSkip"
+          }
+        ],
+        "result": {
+          "output": {
+            "chunks": 0,
+            "readable": false
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

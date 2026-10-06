@@ -14,6 +14,9 @@ package pipelines
 // is deliberate: a typo in a pipeline must fail that pipeline's run with a
 // typed refusal (D9), not refuse every deploy of the source it sits in.
 type Spec struct {
+	// Workflow selects an installed MemQL automation over the compiled steps.
+	// Empty selects the sealed core workflow; the manifest never supplies code.
+	Workflow string `yaml:"workflow,omitempty" json:"workflow,omitempty"`
 	// Platform optionally pins container OS/architecture across the pipeline.
 	Platform string `yaml:"platform,omitempty" json:"platform,omitempty"`
 	// Image is the toolchain image every command step runs in, by digest.
@@ -125,3 +128,10 @@ const (
 	OnlyDBGated    = "db-gated"
 	OnlyNotDBGated = "not-db-gated"
 )
+
+// Link is a labelled URL in a notification: one a manifest's notify stage
+// declares (Docs), or one of the run's Library files.
+type Link struct {
+	Label string `json:"label" yaml:"label"`
+	URL   string `json:"url" yaml:"url"`
+}

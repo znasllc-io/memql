@@ -206,7 +206,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // private semantic evidence without depending on an open Ask viewer.
 // 80 -> 81 with publishEngineRelease, the owner-invoked template that publishes
 // only the exact repository, commit and version reviewed in a dry run (#5853).
-const shippedAutomationCount = 81
+// 81 -> 82: the shipped, callable pipeline orchestration workflow.
+// Scoped recipes and declarative catalogs are included in the same strict boot.
+const shippedAutomationCount = 131
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

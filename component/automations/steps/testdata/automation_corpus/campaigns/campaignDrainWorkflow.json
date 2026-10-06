@@ -1,0 +1,83 @@
+{
+  "automation": "campaigns/automations.memql campaignDrainWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.campaignDrainWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "campaignPromoteSeries"
+          },
+          {
+            "kind": "builtin",
+            "name": "campaignDrainWelcomes"
+          },
+          {
+            "kind": "builtin",
+            "name": "campaignPromoteSchedules"
+          },
+          {
+            "kind": "builtin",
+            "name": "campaignApplyWarmup"
+          },
+          {
+            "kind": "builtin",
+            "name": "campaignDrainableJobs"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.campaignDrainWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "campaignPromoteSeries"
+          },
+          {
+            "kind": "builtin",
+            "name": "campaignDrainWelcomes"
+          },
+          {
+            "kind": "builtin",
+            "name": "campaignPromoteSchedules"
+          },
+          {
+            "kind": "builtin",
+            "name": "campaignApplyWarmup"
+          },
+          {
+            "kind": "builtin",
+            "name": "campaignDrainableJobs"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    }
+  }
+}

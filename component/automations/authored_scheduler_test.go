@@ -15,6 +15,7 @@ package automations_test
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -328,5 +329,20 @@ automation broken {
 	}
 	if s.ActiveCount() != 0 {
 		t.Errorf("a failed Activate must not leave a live entry, got %d", s.ActiveCount())
+	}
+}
+
+func TestAuthoredSchedulerRefusesInstallationPlacement(t *testing.T) {
+	loadConceptsForAuthored(t)
+	s := newAuthoredSchedulerForTest(t, events.NewBus(), (&runRecorder{}).run)
+	defer s.Stop()
+	src := `@trigger(schedule="* * * * * *", node="planner", lease="shared")
+ automation ownerSchedule { return true }`
+	err := s.Activate(authoredAutomationConstruct("user-a", "ownerSchedule", src))
+	if err == nil || !strings.Contains(err.Error(), "owner-scoped scheduling") {
+		t.Fatalf("placement refusal: %v", err)
+	}
+	if s.ActiveCount() != 0 {
+		t.Fatal("refused placement activated")
 	}
 }

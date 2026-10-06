@@ -12,9 +12,9 @@ import (
 // streaming, MemQL function execution, AI prompt invocation, and prompt
 // rendering.
 //
-// AI invocation (InvokeAI) is exposed here because an integration drives model
-// calls from Go with context it assembles itself, and expressing that in the
-// DSL would mean building a query string every turn.
+// These methods implement bounded effects and protocol runtimes. Their
+// availability is not permission to compose product workflows in Go: recipes,
+// prompt/tool selection and operation ordering belong in installed DSL.
 //
 // It is ALSO the seam the DSL's own `ai` builtin calls
 // (integrations/agents/ai.go), so this is one call with two front doors. The

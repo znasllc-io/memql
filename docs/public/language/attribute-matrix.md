@@ -1192,6 +1192,8 @@ On an automation: this is a work-spine TEMPLATE, invoked by a v1:work:run that n
 
 | Key | Type | Meaning |
 |---|---|---|
+| `node` | string | Run this scheduled automation only on an elected replica of this node type. Requires schedule=. |
+| `lease` | string | Stable cluster lease scope for a placed schedule. Requires node=; defaults to schedule:&lt;automation-name>. |
 | `before` | string | Adjust the incoming row before create, update, or write; requires concept. |
 | `event` | string | Event pattern, e.g. "node.created" (with concept=) or a raw topic such as "system.startup". |
 | `concept` | string | Concept id the triggering event targets; required by the structured node.* event kinds. |

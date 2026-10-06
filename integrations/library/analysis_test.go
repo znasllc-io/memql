@@ -762,24 +762,6 @@ func TestKnownExtractableMIMEMatchesTheProcessor(t *testing.T) {
 	}
 }
 
-// TestEmbeddingStatusFor pins the three states the field promises.
-func TestEmbeddingStatusFor(t *testing.T) {
-	cases := []struct {
-		chunks, embedded int
-		want             string
-	}{
-		{0, 0, "none"},
-		{3, 0, "none"},
-		{3, 1, "partial"},
-		{3, 3, "complete"},
-	}
-	for _, c := range cases {
-		if got := embeddingStatusFor(c.chunks, c.embedded); got != c.want {
-			t.Errorf("embeddingStatusFor(%d, %d) = %q, want %q", c.chunks, c.embedded, got, c.want)
-		}
-	}
-}
-
 // ownerContext is the access context a real request carries.
 func ownerContext(userId string) context.Context {
 	return auth.ContextWithUserActor(context.Background(), userId)

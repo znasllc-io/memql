@@ -664,3 +664,30 @@ builtin packageCampaigns {
 @executor("bindEmbedder")
 @args(profile="object")
 builtin bindEmbedder { provider string! }
+
+/// Reconcile one binding from the authorized sweep snapshot. DNS ownership and TLS readiness remain mandatory.
+@executor("integration.customDomain.customDomainReconcileBinding")
+@args(profile="object")
+builtin customDomainReconcileBinding { bindingId string! }
+
+/// Bounded operation inside an authorized domain reconciliation scope.
+@executor("integration.customDomain.customDomainReconcileAccount")
+@args(profile="object")
+builtin customDomainReconcileAccount { accountId string! }
+
+/// Bounded operation inside an authorized domain reconciliation scope.
+@executor("integration.customDomain.customDomainSyncReservations")
+builtin customDomainSyncReservations {  }
+
+/// Bounded operation inside an authorized domain reconciliation scope.
+@executor("integration.customDomain.customDomainReadDoors")
+builtin customDomainReadDoors {  }
+
+/// Bounded operation inside an authorized domain reconciliation scope.
+@executor("integration.customDomain.customDomainReconcileDoor")
+@args(profile="object")
+builtin customDomainReconcileDoor { doorId string! }
+
+/// Bounded operation inside an authorized domain reconciliation scope.
+@executor("integration.customDomain.customDomainRequireReservations")
+builtin customDomainRequireReservations {  }

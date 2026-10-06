@@ -990,3 +990,17 @@ builtin routingPolicyDescribe {
 builtin routingRuleDescribe {
   sentence string!
 }
+
+/// Read the catalog within an authorized routing proposal call.
+@executor("routingProposalCatalog")
+builtin routingProposalCatalog { }
+
+/// Generate one policy draft in the calling proposal scope.
+@executor("routingGeneratePolicyProposal")
+@args(profile="object")
+builtin routingGeneratePolicyProposal { prompt string! data object! }
+
+/// Generate one rule draft in the calling proposal scope.
+@executor("routingGenerateRuleProposal")
+@args(profile="object")
+builtin routingGenerateRuleProposal { prompt string! data object! }

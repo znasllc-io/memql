@@ -2560,6 +2560,9 @@ tool findUsersForDevelopers {
 
 ## Automations
 
+See [workflow boundaries and schedule placement](../build/integration-boundary.md)
+for composing bounded native operations and selecting an installation node.
+
 Automations are event- or schedule-triggered workflows declared in `dsl/<namespace>/automations.memql`, written in the [body language](#bodies). That file is the only one the automation loader reads, and an automation declared anywhere else is refused at load (`construct_misplaced`; see [The DSL Tree](#the-dsl-tree)):
 
 <!-- corpus: 2026/examples/memql/automations/event-trigger.memql -->
@@ -2583,6 +2586,7 @@ needs no import; one in another domain comes in through a file-top
 | Custom topic | `@trigger(event="library.artifact.indexed")` | When the named application event is published |
 | Lifecycle | `@trigger(event="system.startup")` / `@trigger(event="system.shutdown")` | At engine start/stop |
 | Schedule | `@trigger(schedule="0 0 2 * * *")` | On a 6-field cron schedule (seconds first) |
+| Placed schedule | `@trigger(schedule="0 * * * * *", node="agent", lease="poll")` | Installed bundles only: run on the selected role behind its shared lease |
 
 The fields of the triggering event's payload are bound into the automation's `args` block, validated against it before the run starts: declare each field the body reads and read it as `args.<field>`. `event` is the event itself (`event.topic`, `event.kind`), and it is what an automation forwards when a logic wants the whole event: `logic l(event: event)`.
 

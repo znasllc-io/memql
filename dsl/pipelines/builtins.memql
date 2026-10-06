@@ -30,6 +30,20 @@
 // item's (`read app:settings/pipelines`): it asks GitHub about the cluster's
 // own app, which is an owner's question, not a source's.
 
+/// Read only this claimed run's compiled step states. Unavailable outside a pipeline workflow.
+@executor("integration.pipelines.workflowFacts")
+builtin pipelineWorkflowFacts { }
+
+/// Record a skipped step in the current run's required journal. This native
+/// runtime operation cannot write another run or manufacture a successful receipt.
+@executor("integration.pipelines.skipStep")
+@args(profile="object")
+builtin pipelineSkipStep {
+  stepKey string!
+  code string!
+  reason string!
+}
+
 @executor("integration.pipelines.trigger")
 @args(profile="object")
 @description("Open the pipeline runs a staged GitHub delivery asks for (design record D4-D6). Only the shipped automation reaches it: a call without internal origin is refused before anything is read. Reads the v1:platform:inboundRequest row by its id -- a row on the github source that the inbound receiver signature-verified, or nothing opens -- classifies the event from the SIGNED body's shape -- the X-GitHub-Event header is a cross-check only -- and, for every active pipeline of the delivery's repository whose installation matches, opens one run keyed on (repository, SHA, mode, event): a pull request opened, synchronized or reopened runs affected, a merge group, a push to the default branch and a published release run full, and a re-requested check run or suite re-runs the original's mode and event as a new attempt. A fork's pull request is REFUSED with a failing check run, never queued. A redelivery, or a poll that saw the same head, opens nothing: the run key is the dedup. A delivery matching no pipeline is a no-op, because most of a cluster's webhooks are about something else.")

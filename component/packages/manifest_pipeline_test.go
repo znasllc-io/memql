@@ -337,3 +337,25 @@ func TestANotifyStageCarriesItsLinks(t *testing.T) {
 		t.Fatalf("the mistakes must arrive as written, for the compile to refuse by name: %+v", links)
 	}
 }
+
+func TestPipelineWorkflowSurvivesManifestTransport(t *testing.T) {
+	raw := strings.Replace(pipelineManifest, "pipeline:\n", "pipeline:\n  workflow: organizationChecks\n", 1)
+	m, err := ParseManifest([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Pipeline.Workflow != "organizationChecks" {
+		t.Fatalf("workflow lost: %+v", m.Pipeline)
+	}
+	encoded, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Manifest
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Pipeline.Workflow != m.Pipeline.Workflow {
+		t.Fatal("workflow lost through JSON")
+	}
+}

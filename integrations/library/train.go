@@ -44,6 +44,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/id"
@@ -138,45 +139,53 @@ func (i *Integration) handleTrainFile(ctx context.Context, args map[string]any, 
 	}
 	artifactId := stringField(artifact, "id")
 
-	chunks, err := i.fileChunks(ctx, fileId)
-	if err != nil {
-		return nil, fmt.Errorf("library.trainFile: read chunks of file %q: %w", fileId, err)
-	}
-	text := joinChunkTexts(chunks)
-	if strings.TrimSpace(text) == "" {
-		return nil, fmt.Errorf("library.trainFile: file %q has no extracted text to train on (status %q) -- only files the analysis pass could read can be trained",
-			fileId, stringField(file, "status"))
-	}
-
+	var text string
+	var merged []string
+	var changed bool
 	sourceRef := artifactSourceRef(artifactId)
-	if err := i.ingestIntoDomain(ctx, domainId, sourceRef, text); err != nil {
-		return nil, fmt.Errorf("library.trainFile: %w", err)
+	ingested := false
+	_, err = workflowhost.Run(ctx, "libraryTrainFileWorkflow", nil, workflowhost.Options{Logger: i.logger, Operations: map[string]workflowhost.Operation{
+		"libraryReadTrainingText": func(ctx context.Context, _ map[string]any) (any, error) {
+			chunks, err := i.fileChunks(ctx, fileId)
+			if err != nil {
+				return nil, fmt.Errorf("library.trainFile: read chunks of file %q: %w", fileId, err)
+			}
+			text = joinChunkTexts(chunks)
+			if strings.TrimSpace(text) == "" {
+				return nil, fmt.Errorf("library.trainFile: file %q has no extracted text to train on (status %q) -- only files the analysis pass could read can be trained", fileId, stringField(file, "status"))
+			}
+			return nil, nil
+		},
+		"libraryIngestTrainingText": func(ctx context.Context, _ map[string]any) (any, error) {
+			if text == "" {
+				return nil, fmt.Errorf("training requires the authorized file's extracted text")
+			}
+			err := i.ingestIntoDomain(ctx, domainId, sourceRef, text)
+			ingested = err == nil
+			return nil, err
+		},
+		"libraryRecordTrainingDomain": func(ctx context.Context, _ map[string]any) (any, error) {
+			if !ingested {
+				return nil, fmt.Errorf("cannot record training before ingestion succeeds")
+			}
+			merged, changed = mergeDomainAdd(stringSliceField(file, "trainedIntoDomainIds"), domainId)
+			if changed {
+				return nil, i.appendTrainedDomain(ctx, fileId, merged)
+			}
+			return nil, nil
+		},
+		"libraryAuditTraining": func(ctx context.Context, _ map[string]any) (any, error) {
+			if !ingested {
+				return nil, fmt.Errorf("cannot audit training before ingestion succeeds")
+			}
+			i.auditTrain(ctx, access, actorUserId, fileId, artifactId, domainId, len(text))
+			return nil, nil
+		},
+	}})
+	if err != nil {
+		return nil, err
 	}
-
-	// Read-then-merge, the label-builtin shape: appendLibraryFileTrainedDomain
-	// takes the FULL list because MemQL has no array append, so the merge
-	// has to happen here. Idempotent -- training into the same domain
-	// twice re-ingests (the knowledge chunk ids are content-derived, so
-	// that versions rather than duplicates) and writes no new domain id.
-	current := stringSliceField(file, "trainedIntoDomainIds")
-	merged, changed := mergeDomainAdd(current, domainId)
-	if changed {
-		if err := i.appendTrainedDomain(ctx, fileId, merged); err != nil {
-			return nil, fmt.Errorf("library.trainFile: record the domain on the file: %w", err)
-		}
-	}
-
-	i.auditTrain(ctx, access, actorUserId, fileId, artifactId, domainId, len(text))
-
-	return wrapTrainResult(trainResult{
-		FileId:               fileId,
-		ArtifactId:           artifactId,
-		DomainId:             domainId,
-		SourceRef:            sourceRef,
-		Characters:           len(text),
-		AlreadyTrained:       !changed,
-		TrainedIntoDomainIds: merged,
-	})
+	return wrapTrainResult(trainResult{FileId: fileId, ArtifactId: artifactId, DomainId: domainId, SourceRef: sourceRef, Characters: len(text), AlreadyTrained: !changed, TrainedIntoDomainIds: merged})
 }
 
 // assertMayWriteDomain applies the gate described in the file header:

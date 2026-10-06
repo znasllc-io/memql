@@ -1,0 +1,63 @@
+{
+  "automation": "campaigns/automations.memql campaignSelectedPageWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "ids": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.campaignSelectedPageWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "id": "a"
+            },
+            "kind": "builtin",
+            "name": "campaignProcessSelected"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "ids": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.campaignSelectedPageWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "id": "a"
+            },
+            "kind": "builtin",
+            "name": "campaignProcessSelected"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

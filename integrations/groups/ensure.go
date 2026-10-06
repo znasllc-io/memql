@@ -16,8 +16,10 @@ package groups
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -69,6 +71,15 @@ func (i *Integration) handleGroupEnsureForAccount(ctx context.Context, args map[
 		})
 	}
 
+	presentation, err := workflowhost.Run(ctx, "accountGroupPresentation", map[string]any{"accountId": accountID, "name": strings.TrimSpace(rowString(account, "name"))}, workflowhost.Options{})
+	if err != nil {
+		return nil, err
+	}
+	labels, ok := presentation.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("account group presentation must return labels")
+	}
+	groupName, description := asString(labels["name"]), asString(labels["description"])
 	groupID := AccountGroupID(accountID)
 	existing, err := i.store.GroupByID(ctx, groupID)
 	if err != nil {
@@ -81,7 +92,7 @@ func (i *Integration) handleGroupEnsureForAccount(ctx context.Context, args map[
 		name := strings.TrimSpace(rowString(account, "name"))
 		if name != "" && existing.Name != name && existing.Kind == KindAccount && existing.AccountID == accountID {
 			existing.Name = name
-			existing.Description = "Everyone who works on " + name + "."
+			existing.Description = description
 			if err := i.store.WriteGroup(ctx, *existing); err != nil {
 				return nil, err
 			}
@@ -91,18 +102,10 @@ func (i *Integration) handleGroupEnsureForAccount(ctx context.Context, args map[
 		})
 	}
 
-	name := strings.TrimSpace(rowString(account, "name"))
-	if name == "" {
-		// An account with no name is a row mid-configuration -- the self
-		// account's own seed lands before the first-run card names it. The
-		// group still has to exist, so it says what it is rather than
-		// carrying an empty name a picker would render as a blank line.
-		name = "Account " + accountID
-	}
 	g := Group{
 		ID:          groupID,
-		Name:        name,
-		Description: "Everyone who works on " + name + ".",
+		Name:        groupName,
+		Description: description,
 		Kind:        KindAccount,
 		AccountID:   accountID,
 		Status:      StatusActive,

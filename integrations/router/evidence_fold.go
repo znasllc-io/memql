@@ -39,91 +39,13 @@ import (
 // EvidenceFoldResultConcept is the canonical id of the fold's answer.
 const EvidenceFoldResultConcept = "v1:platform:evidenceFoldResult"
 
-// approvalTTL is how long a proposal waits for a person.
-//
-// FOURTEEN DAYS: long enough that a fortnight away does not silently discard a
-// demotion somebody should see, short enough that a proposal about a week's
-// evidence does not still be open when the evidence is a month old.
-const approvalTTL = 14 * 24 * time.Hour
-
-// handleEvidenceFold serves the `routingEvidenceFold` capability.
+// handleEvidenceFold delegates policy to the installed recipe under the caller's authority.
 func (i *Integration) handleEvidenceFold(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	now := time.Now().UTC()
-	until := now
-	since := now.AddDate(0, 0, -7)
-	week := isoWeek(since)
-
-	rows, err := i.readCallsInWindow(ctx, since, until)
+	result, err := i.evidenceWorkflow(ctx, time.Now().UTC())
 	if err != nil {
-		return nil, fmt.Errorf("routingEvidenceFold: read the week's calls: %w", err)
+		return nil, fmt.Errorf("routingEvidenceFold: %w", err)
 	}
-
-	windows, withoutLevel := foldWindows(rows, week)
-	routerlib.SortWindows(windows)
-
-	// The LOUD half. Both counts go on the row and in the log, so "the fold
-	// found nothing" and "the fold could not tell what level anything was
-	// serving" are different sentences a person can read apart.
-	if i.logger != nil {
-		i.logger.Info("routingEvidenceFold: folded the week's calls",
-			"week", week,
-			"calls", len(rows),
-			"windows", len(windows),
-			"calls_without_a_level", withoutLevel,
-		)
-	}
-
-	written, proposed := 0, 0
-	for _, w := range windows {
-		proposal, ok, err := routerlib.ProposeExclusion(w, i.renderRule)
-		if err != nil {
-			// A rule that could not be rendered is a proposal that could not be
-			// made, and it must be loud: the alternative is a fold that quietly
-			// stops proposing and looks exactly like a fleet where every model
-			// behaves.
-			return nil, fmt.Errorf("routingEvidenceFold: %w", err)
-		}
-
-		approvalId := ""
-		ruleHash := ""
-		outcome := "none"
-		if ok {
-			// ALREADY DECIDED? A week's evidence proposes once. Re-proposing
-			// what somebody declined is the nag the recorded decline exists to
-			// prevent, and re-proposing what they approved would ask them to
-			// arm a rule that is already armed.
-			prior, err := i.priorEvidence(ctx, w)
-			if err != nil {
-				return nil, fmt.Errorf("routingEvidenceFold: read this week's prior evidence: %w", err)
-			}
-			switch prior {
-			case "declined", "demotion", "promotion":
-				outcome = prior
-			default:
-				approvalId, err = i.openRoutingReview(ctx, w, proposal, now)
-				if err != nil {
-					return nil, fmt.Errorf("routingEvidenceFold: open the review: %w", err)
-				}
-				ruleHash = proposal.Hash
-				outcome = proposal.Direction
-				proposed++
-			}
-		}
-
-		if err := i.writeEvidence(ctx, w, outcome, approvalId, ruleHash, now); err != nil {
-			return nil, fmt.Errorf("routingEvidenceFold: write the evidence row: %w", err)
-		}
-		written++
-	}
-
-	return singleFoldRow(map[string]any{
-		"week":               week,
-		"calls":              len(rows),
-		"callsWithoutALevel": withoutLevel,
-		"evidenceWritten":    written,
-		"proposalsOpened":    proposed,
-		"foldedAt":           now.Format(time.RFC3339),
-	}), nil
+	return singleFoldRow(result), nil
 }
 
 // foldWindows groups call rows into per (model, level) windows.
@@ -131,7 +53,7 @@ func (i *Integration) handleEvidenceFold(ctx context.Context, args map[string]an
 // A call with no model or no level is EXCLUDED and COUNTED, never bucketed
 // under an empty key: an empty-string level would collide every level's
 // evidence into one row and then propose a demotion against it.
-func foldWindows(rows []map[string]any, week string) ([]routerlib.Window, int) {
+func foldWindows(rows []map[string]any, week string, categories []string) ([]routerlib.Window, int) {
 	byKey := map[string]*routerlib.Window{}
 	withoutLevel := 0
 	for _, row := range rows {
@@ -151,7 +73,7 @@ func foldWindows(rows []map[string]any, week string) ([]routerlib.Window, int) {
 			byKey[key] = w
 		}
 		w.Calls++
-		if isStructuredFailure(row) {
+		if isStructuredFailure(row, categories) {
 			w.StructuredFailures++
 		}
 	}
@@ -168,16 +90,17 @@ func foldWindows(rows []map[string]any, week string) ([]routerlib.Window, int) {
 // facts about the network and the account rather than about the model, and
 // counting them would demote a model for an outage. Only an outcome of `error`
 // whose category names the contract counts.
-func isStructuredFailure(row map[string]any) bool {
+func isStructuredFailure(row map[string]any, categories []string) bool {
 	if stringOf(row["outcome"]) != "error" {
 		return false
 	}
-	switch strings.TrimSpace(stringOf(row["errorCategory"])) {
-	case "structured", "schema", "validation", "contract":
-		return true
-	default:
-		return false
+	category := strings.TrimSpace(stringOf(row["errorCategory"]))
+	for _, c := range categories {
+		if category == c {
+			return true
+		}
 	}
+	return false
 }
 
 // renderRule is the one renderer, injected into the pure layer.
@@ -231,7 +154,7 @@ func (i *Integration) priorEvidence(ctx context.Context, w routerlib.Window) (st
 	return "", nil
 }
 
-func (i *Integration) openRoutingReview(ctx context.Context, w routerlib.Window, p routerlib.Proposal, now time.Time) (string, error) {
+func (i *Integration) openRoutingReview(ctx context.Context, w routerlib.Window, p routerlib.Proposal, now time.Time, approvalTTL time.Duration) (string, error) {
 	approval := work.RoutingReviewApproval(work.RoutingProposal{
 		ModelId:            p.ModelId,
 		Level:              p.Level,

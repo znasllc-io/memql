@@ -214,7 +214,7 @@ func diffOneItem(kind string, o, n Item) []Finding {
 				kind, o.Name, strings.Join(gone, ", ")),
 		}}
 	}
-	if o.Form != n.Form {
+	if o.Form != n.Form && !(kind == "annotation" && keywordFormWidens(o.Form, n.Form)) {
 		return []Finding{{
 			Category: CategoryMeaning,
 			Name:     o.Name,
@@ -226,6 +226,28 @@ func diffOneItem(kind string, o, n Item) []Finding {
 		}}
 	}
 	return nil
+}
+
+// keywordFormWidens recognizes extra accepted keyword names without hiding a
+// removed key, changed type, receiver-specific contract, or positional-form
+// change. Keyword presence constraints live in the parser and still need
+// compatibility tests; this compares the accepted keys recorded by Capture.
+func keywordFormWidens(old, now string) bool {
+	const marker = "keyword arguments("
+	split := func(form string) (string, []string, bool) {
+		if strings.Count(form, marker) != 1 {
+			return "", nil, false
+		}
+		prefix, rest, _ := strings.Cut(form, marker)
+		keys, suffix, ok := strings.Cut(rest, ")")
+		if !ok || strings.ContainsAny(keys, "()") {
+			return "", nil, false
+		}
+		return prefix + marker + ")" + suffix, strings.Split(keys, ", "), true
+	}
+	oldForm, oldKeys, oldOK := split(old)
+	newForm, newKeys, newOK := split(now)
+	return oldOK && newOK && oldForm == newForm && len(missing(oldKeys, newKeys)) == 0
 }
 
 // diffShapes classifies the wire half: a shape's projected keys are the names a

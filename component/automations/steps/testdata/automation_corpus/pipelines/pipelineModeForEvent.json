@@ -1,0 +1,43 @@
+{
+  "automation": "pipelines/automations.memql pipelineModeForEvent",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "event": "s-event"
+          },
+          "topic": "automation.invocation.pipelineModeForEvent"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": "",
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "event": "s-event"
+          },
+          "topic": "automation.invocation.pipelineModeForEvent"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": "",
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

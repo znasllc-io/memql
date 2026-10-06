@@ -57,6 +57,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/workjournal"
@@ -288,165 +289,18 @@ func (i *Integration) AnalyzeFile(ctx context.Context, params AnalyzeFileParams)
 		run.Succeeded(ctx, outcome)
 	}()
 
-	// --- the chunked case: fetch what the handler never held (memql#4782) ---
-	//
-	// One stream serves both needs: the hash is fed by a TeeReader while
-	// extraction's bytes accumulate under a bound, so the blob is read ONCE
-	// whether or not the type is readable. A hash the upload route already
-	// computed is never re-measured, and an opaque type with a known hash
-	// never opens the stream at all.
-	// blobBacked marks the CHUNKED shape (memql#4782): the caller held no
-	// bytes and says where the committed blob lives. Legacy callers that
-	// pass neither Data nor BlobUrl keep the original behaviour -- the
-	// extractor decides, and its failure carries the reason.
-	blobBacked := len(params.Data) == 0 && strings.TrimSpace(params.BlobUrl) != ""
-	data := params.Data
-	measuredHash := ""
-	if blobBacked && (params.Sha256 == "" || i.canExtract(params.MimeType)) {
-		if i.blobFetcher != nil {
-			fetched, hash := i.fetchAndHash(ctx, params.BlobUrl, i.canExtract(params.MimeType))
-			data = fetched
-			if params.Sha256 == "" {
-				measuredHash = hash
-			}
-		} else if params.Sha256 == "" {
-			i.log().Warn("library: no blob fetcher wired; a chunked file keeps an absent sha256",
-				"fileId", fileId)
-		}
+	scope := &analysisScope{i: i, params: params, fileID: fileId, run: run}
+	result, err := workflowhost.Run(ctx, AnalysisTemplate, map[string]any{
+		"name": params.Name, "mimeType": params.MimeType,
+	}, workflowhost.Options{Logger: i.log(), Operations: scope.operations()})
+	if err != nil {
+		return err
 	}
-
-	// An unreadable type is a terminal SUCCESS with no chunks (design
-	// 3.4). Checked before the `analyzing` transition so an opaque upload
-	// never flickers through a status that promises work nobody is doing.
-	// The same path serves a blob-backed READABLE type whose bytes could
-	// not be fetched or were too large to hold: the file is stored and
-	// downloadable either way, and `ready` with no chunks is the honest
-	// summary of that.
-	if !i.canExtract(params.MimeType) || (blobBacked && len(data) == 0) {
-		if err := i.setFileStatus(ctx, fileId, fileStatusUpdate{
-			status:          "ready",
-			embeddingStatus: "complete",
-			sha256:          measuredHash,
-		}); err != nil {
-			return fmt.Errorf("library.analyzeFile: mark opaque file ready: %w", err)
-		}
-		i.restampArtifact(ctx, fileId)
-		// SKIPPED, not omitted. A step the template declares and this run did
-		// not need is written as skipped so the run's steps still add up to
-		// its declared order -- a missing row and a skipped one look
-		// identical to a reader, and only one of them is true.
-		skipped := "this file type is stored and downloadable, and there is no text in it to read"
-		for _, key := range []string{"extract", "summarize", "index"} {
-			step, _ := run.Step(ctx, key)
-			step.Skipped(ctx, skipped)
-		}
-		outcome["readable"] = false
-		outcome["chunks"] = 0
-		return nil
+	if m, ok := result.(map[string]any); ok {
+		outcome = m
 	}
-
-	if err := i.setFileStatus(ctx, fileId, fileStatusUpdate{status: "analyzing", sha256: measuredHash}); err != nil {
-		return fmt.Errorf("library.analyzeFile: mark analyzing: %w", err)
-	}
-
-	// Library's journal is an observability record. It does not own the
-	// analysis transaction, so a journal failure does not fail that work.
-	extractStep, _ := run.Step(ctx, "extract")
-	text, extractErr := i.extractor.Extract(ctx, params.MimeType, data)
-	if extractErr != nil {
-		extractStep.Failed(ctx, "extract_failed", extractErr.Error())
-		return i.failFile(ctx, fileId, fmt.Sprintf(
-			"could not read the contents of this %s file: %v", params.MimeType, extractErr))
-	}
-	if strings.TrimSpace(text) == "" {
-		extractStep.Failed(ctx, "no_text", "the file yielded no text")
-		// A type we CAN read that yielded nothing is the
-		// password-protected-PDF / image-only-scan case design 3.1 names
-		// as the model failure ("could not extract text from a
-		// password-protected PDF"). Reporting it as `ready` would tell the
-		// owner their file is searchable when it is not.
-		return i.failFile(ctx, fileId,
-			"no text could be extracted from this file -- it may be image-only, empty or password-protected")
-	}
-	extractStep.Done(ctx, map[string]any{"characters": len(text)})
-
-	// Best-effort, never fatal: a summariser outage must not cost the
-	// owner their chunks. An empty summary is simply not written.
-	//
-	// The step records which of those happened. A summary that is absent
-	// because no provider answered and one that is absent because the
-	// document had nothing to say are the same empty string on the file row,
-	// and only the step can tell them apart.
-	summarizeStep, _ := run.Step(ctx, "summarize")
-	summary := i.summarize(ctx, params.Name, text)
-	summarizeStep.Done(ctx, map[string]any{"summarized": summary != "", "characters": len(summary)})
-
-	// The chunk rows carry artifactId so a similarity hit folds straight
-	// up to the Library row. That id comes from the promotion the
-	// indexFileOnCreate automation runs, which is ASYNCHRONOUS with
-	// respect to this pass -- so when the caller has not already resolved
-	// it, wait, bounded, rather than doing a single read that races on a
-	// fast upload.
-	indexStep, _ := run.Step(ctx, "index")
-	artifactId := strings.TrimSpace(params.ArtifactId)
-	if artifactId == "" {
-		resolved, ok := i.awaitArtifactId(ctx, fileId)
-		if !ok {
-			indexStep.Failed(ctx, "artifact_not_indexed", "the Library index row did not appear in time")
-			return i.failFile(ctx, fileId,
-				"this file was stored but has not appeared in the Library index yet, so it could not be indexed for search")
-		}
-		artifactId = resolved
-	}
-
-	chunks := knowledge.Chunk(text, analysisChunkSize, analysisChunkOverlap)
-	embedded := 0
-	for seq, chunkText := range chunks {
-		chunkId := chunkIdFor(fileId, seq, chunkText)
-		nodeId, err := i.writeChunk(ctx, chunkWrite{
-			chunkId:    chunkId,
-			fileId:     fileId,
-			artifactId: artifactId,
-			seq:        seq,
-			text:       chunkText,
-		})
-		if err != nil {
-			indexStep.Failed(ctx, "chunk_write_failed", fmt.Sprintf("chunk %d of %d failed to save", seq+1, len(chunks)))
-			return i.failFile(ctx, fileId, fmt.Sprintf(
-				"this file could not be indexed for search (chunk %d of %d failed to save)", seq+1, len(chunks)))
-		}
-		if err := i.embedChunk(ctx, nodeId, chunkText); err != nil {
-			// A failed embed is PARTIAL, not failed: the chunk row is
-			// durable and a later re-embed backfills it. The file is still
-			// readable and downloadable; only "search by meaning" is
-			// incomplete, and embeddingStatus is the field that says so.
-			i.log().Warn("library: chunk embed failed; file will be partially searchable",
-				"fileId", fileId, "chunkId", chunkId, "seq", seq, "error", err)
-			continue
-		}
-		embedded++
-	}
-
-	indexStep.Done(ctx, map[string]any{"chunks": len(chunks), "embedded": embedded})
-
-	if err := i.setFileStatus(ctx, fileId, fileStatusUpdate{
-		status:          "ready",
-		summary:         summary,
-		embeddingStatus: embeddingStatusFor(len(chunks), embedded),
-	}); err != nil {
-		return fmt.Errorf("library.analyzeFile: mark ready: %w", err)
-	}
-	i.restampArtifact(ctx, fileId)
-	outcome["readable"] = true
-	outcome["chunks"] = len(chunks)
-	outcome["embedded"] = embedded
-	outcome["summarized"] = summary != ""
-	outcome["artifactId"] = artifactId
-
-	i.log().Info("library: file analysis complete",
-		"fileId", fileId, "artifactId", artifactId,
-		"chunks", len(chunks), "embedded", embedded, "summarized", summary != "")
 	return nil
+
 }
 
 // AnalysisTemplate is the run's `automationName` -- the deterministic
@@ -571,31 +425,16 @@ func normalizeMIME(mimeType string) string {
 	return mimeType
 }
 
-// embeddingStatusFor maps (chunks written, chunks embedded) onto the
-// concept's enum. `none` covers the no-chunks case; `complete` needs
-// every chunk vectorised, because the field is read as "can search by
-// meaning answer for this whole file".
-func embeddingStatusFor(chunks, embedded int) string {
-	switch {
-	case chunks == 0 || embedded == 0:
-		return "none"
-	case embedded >= chunks:
-		return "complete"
-	default:
-		return "partial"
-	}
-}
-
 // summarize runs the shipped docSummary prompt over the extracted text.
 // Best-effort by contract: every failure returns "" and the caller simply
 // does not write the field. Never fatal -- an outage at the chat provider
 // must not cost the owner a searchable file.
-func (i *Integration) summarize(ctx context.Context, title, text string) string {
+func (i *Integration) summarize(ctx context.Context, prompt, title, text string) string {
 	content := text
 	if len(content) > summaryInputLimit {
 		content = content[:summaryInputLimit]
 	}
-	raw, err := i.engine.InvokeAI(ctx, "docSummary", map[string]any{
+	raw, err := i.engine.InvokeAI(ctx, prompt, map[string]any{
 		"title":   title,
 		"content": content,
 	})
@@ -949,4 +788,137 @@ func approxTokens(text string) int {
 		return 0
 	}
 	return len([]rune(text)) / 4
+}
+
+// analysisScope holds upload bytes and journal handles, which are runtime state
+// rather than DSL values. Every operation is bounded to this owner's file.
+type analysisScope struct {
+	i            *Integration
+	params       AnalyzeFileParams
+	fileID       string
+	run          *workjournal.Run
+	data         []byte
+	measuredHash string
+	index        *workjournal.Step
+	indexStarted bool
+	results      []any
+}
+
+func (s *analysisScope) operations() map[string]workflowhost.Operation {
+	return map[string]workflowhost.Operation{
+		"libraryAnalysisInput":  s.input,
+		"libraryAnalysisStatus": s.status,
+		"libraryAnalysisRestamp": func(ctx context.Context, _ map[string]any) (any, error) {
+			s.i.restampArtifact(ctx, s.fileID)
+			return nil, nil
+		},
+		"libraryAnalysisSkip": func(ctx context.Context, args map[string]any) (any, error) {
+			step, _ := s.run.Step(ctx, analysisString(args, "key"))
+			step.Skipped(ctx, analysisString(args, "reason"))
+			return nil, nil
+		},
+		"libraryAnalysisExtract": s.extract,
+		"libraryAnalysisFail": func(ctx context.Context, args map[string]any) (any, error) {
+			return nil, s.i.failFile(ctx, s.fileID, analysisString(args, "reason"))
+		},
+		"libraryAnalysisSummary": func(ctx context.Context, args map[string]any) (any, error) {
+			step, _ := s.run.Step(ctx, "summarize")
+			summary := s.i.summarize(ctx, analysisString(args, "prompt"), s.params.Name, analysisString(args, "text"))
+			step.Done(ctx, map[string]any{"summarized": summary != "", "characters": len(summary)})
+			return summary, nil
+		},
+		"libraryAnalysisArtifact": func(ctx context.Context, _ map[string]any) (any, error) {
+			s.index, _ = s.run.Step(ctx, "index")
+			s.indexStarted = true
+			artifact := strings.TrimSpace(s.params.ArtifactId)
+			if artifact == "" {
+				artifact, _ = s.i.awaitArtifactId(ctx, s.fileID)
+			}
+			if artifact == "" {
+				s.index.Failed(ctx, "artifact_not_indexed", "the Library index row did not appear in time")
+			}
+			return artifact, nil
+		},
+		"libraryAnalysisChunks": func(_ context.Context, args map[string]any) (any, error) {
+			chunks := knowledge.Chunk(analysisString(args, "text"), analysisChunkSize, analysisChunkOverlap)
+			out := make([]any, 0, len(chunks))
+			for seq, text := range chunks {
+				out = append(out, map[string]any{"seq": seq, "text": text, "id": chunkIdFor(s.fileID, seq, text)})
+			}
+			return out, nil
+		},
+		"libraryAnalysisWriteChunk": s.writeChunk,
+		"libraryAnalysisEmbed": func(ctx context.Context, args map[string]any) (any, error) {
+			err := s.i.embedChunk(ctx, analysisString(args, "nodeId"), analysisString(args, "text"))
+			if err != nil {
+				s.i.log().Warn("library: chunk embed failed; file will be partially searchable", "fileId", s.fileID, "error", err)
+			}
+			s.results = append(s.results, map[string]any{"embedded": err == nil})
+			return err == nil, nil
+		},
+		"libraryAnalysisResults": func(context.Context, map[string]any) (any, error) { return s.results, nil },
+		"libraryAnalysisIndexDone": func(ctx context.Context, args map[string]any) (any, error) {
+			if !s.indexStarted {
+				return nil, fmt.Errorf("library: index was not opened")
+			}
+			s.index.Done(ctx, args)
+			return nil, nil
+		},
+	}
+}
+
+func analysisString(args map[string]any, key string) string { v, _ := args[key].(string); return v }
+
+func (s *analysisScope) input(ctx context.Context, _ map[string]any) (any, error) {
+	p := s.params
+	blobBacked := len(p.Data) == 0 && strings.TrimSpace(p.BlobUrl) != ""
+	s.data = p.Data
+	if blobBacked && (p.Sha256 == "" || s.i.canExtract(p.MimeType)) {
+		if s.i.blobFetcher != nil {
+			fetched, hash := s.i.fetchAndHash(ctx, p.BlobUrl, s.i.canExtract(p.MimeType))
+			s.data = fetched
+			if p.Sha256 == "" {
+				s.measuredHash = hash
+			}
+		} else if p.Sha256 == "" {
+			s.i.log().Warn("library: no blob fetcher wired; a chunked file keeps an absent sha256", "fileId", s.fileID)
+		}
+	}
+	return map[string]any{"readable": s.i.canExtract(p.MimeType) && (!blobBacked || len(s.data) > 0)}, nil
+}
+
+func (s *analysisScope) status(ctx context.Context, args map[string]any) (any, error) {
+	return nil, s.i.setFileStatus(ctx, s.fileID, fileStatusUpdate{
+		status: analysisString(args, "status"), embeddingStatus: analysisString(args, "embeddingStatus"),
+		summary: analysisString(args, "summary"), sha256: s.measuredHash,
+	})
+}
+
+func (s *analysisScope) extract(ctx context.Context, _ map[string]any) (any, error) {
+	step, _ := s.run.Step(ctx, "extract")
+	text, err := s.i.extractor.Extract(ctx, s.params.MimeType, s.data)
+	if err != nil {
+		step.Failed(ctx, "extract_failed", err.Error())
+		return map[string]any{"text": "", "error": err.Error(), "empty": false}, nil
+	}
+	empty := strings.TrimSpace(text) == ""
+	if empty {
+		step.Failed(ctx, "no_text", "the file yielded no text")
+	} else {
+		step.Done(ctx, map[string]any{"characters": len(text)})
+	}
+	return map[string]any{"text": text, "error": "", "empty": empty}, nil
+}
+
+func (s *analysisScope) writeChunk(ctx context.Context, args map[string]any) (any, error) {
+	seq, _ := intArg(args["seq"])
+	total, _ := intArg(args["total"])
+	node, err := s.i.writeChunk(ctx, chunkWrite{chunkId: analysisString(args, "chunkId"), fileId: s.fileID, artifactId: analysisString(args, "artifactId"), seq: seq, text: analysisString(args, "text")})
+	if err != nil {
+		if s.index != nil {
+			s.index.Failed(ctx, "chunk_write_failed", fmt.Sprintf("chunk %d of %d failed to save", seq+1, total))
+		}
+		return map[string]any{"nodeId": "", "error": fmt.Sprintf("this file could not be indexed for search (chunk %d of %d failed to save)", seq+1, total)}, nil
+	}
+	return map[string]any{"nodeId": node, "error": ""}, nil
 }

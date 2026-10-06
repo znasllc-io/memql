@@ -7,6 +7,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/automations"
 	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/bus"
 	"github.com/znasllc-io/memql/component/campaigns"
 	"github.com/znasllc-io/memql/component/datasync"
@@ -292,6 +293,10 @@ func (a *App) engineAndBus() {
 	)
 	a.Dependencies = append(a.Dependencies, drainWorker)
 
+	scheduleGate, err := a.scheduledAutomationGate(cronLeader.IsLeader, loadedAutomations)
+	if err != nil {
+		a.fatal("invalid automation schedule placement", "error", err)
+	}
 	a.automationScheduler, err = automations.NewScheduler(automations.SchedulerOptions{
 		Logger:       nil,
 		Loader:       a.automationLoader,
@@ -299,7 +304,7 @@ func (a *App) engineAndBus() {
 		EventBus:     a.eventBus,
 		StepRegistry: a.stepRegistry,
 		LeaderGate:   cronLeader.IsLeader,
-		ScheduleGate: a.scheduledAutomationGate(cronLeader.IsLeader),
+		ScheduleGate: scheduleGate,
 		ClusterGuard: clusterGuard,
 	})
 	if err != nil {
@@ -315,6 +320,9 @@ func (a *App) engineAndBus() {
 	// When this binary doesn't include the automations package
 	// the engine keeps its "no LogicRunner wired" error path and
 	// single-step Logic dispatch continues to work unchanged.
+	a.engine.SetScopedWorkflowRunner(func(ctx context.Context, name string, args map[string]any, operations map[string]memql.WorkflowOperation) (any, error) {
+		return workflowhost.Run(ctx, name, args, workflowhost.Options{Logger: a.Logger, AmbientEngine: a.engine, Operations: operations})
+	})
 	a.engine.SetLogicRunner(automations.NewLogicRunner(a.engine, a.stepRegistry, a.Logger))
 	automations.InstallBeforeWriteHooks(a.engine, loadedAutomations, a.stepRegistry, a.Logger)
 

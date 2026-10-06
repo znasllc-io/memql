@@ -1,0 +1,45 @@
+{
+  "automation": "planner/automations.memql plannerResponsibilityDue",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "recurringDue": true,
+            "trigger": "s-trigger"
+          },
+          "topic": "automation.invocation.plannerResponsibilityDue"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": false,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "recurringDue": true,
+            "trigger": "s-trigger"
+          },
+          "topic": "automation.invocation.plannerResponsibilityDue"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": false,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}
