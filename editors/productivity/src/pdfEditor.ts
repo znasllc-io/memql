@@ -25,12 +25,18 @@ export class PDFEditor implements vscode.CustomEditorProvider<PDFDocument> {
   private readonly opened = new Set<string>();
   hasOpen(uri: vscode.Uri): boolean { return this.opened.has(uri.toString()); }
   private readonly rendered = new Set<string>();
+  private readonly previewState = new Map<string, { panel: vscode.WebviewPanel; ready: number; sent?: boolean; error?: string }>();
   private readonly waiting = new Map<string, (() => void)[]>();
   whenRendered(uri: vscode.Uri): Promise<void> {
     const key = uri.toString();
     if (this.rendered.has(key)) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("PDF renderer did not produce a page.")), 20000);
+      const timer = setTimeout(() => {
+        const state = this.previewState.get(key);
+        reject(new Error(`PDF renderer did not produce a page (${JSON.stringify({
+          ready: state?.ready, sent: state?.sent, visible: state?.panel.visible, error: state?.error,
+        })}).`));
+      }, 20000);
       this.waiting.set(key, [...(this.waiting.get(key) ?? []), () => { clearTimeout(timer); resolve(); }]);
     });
   }
@@ -54,7 +60,13 @@ export class PDFEditor implements vscode.CustomEditorProvider<PDFDocument> {
   }
   async resolveCustomEditor(document: PDFDocument, panel: vscode.WebviewPanel): Promise<void> {
     document.panels.add(panel);
-    panel.onDidDispose(() => document.panels.delete(panel));
+    const state: { panel: vscode.WebviewPanel; ready: number; sent?: boolean; error?: string } = { panel, ready: 0 };
+    const key = document.uri.toString();
+    this.previewState.set(key, state);
+    panel.onDidDispose(() => {
+      document.panels.delete(panel);
+      if (this.previewState.get(key) === state) this.previewState.delete(key);
+    });
     const media = vscode.Uri.joinPath(this.context.extensionUri, "out");
     panel.webview.options = { enableScripts: true, localResourceRoots: [media] };
     const script = panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "pdfView.js"));
@@ -66,7 +78,12 @@ export class PDFEditor implements vscode.CustomEditorProvider<PDFDocument> {
         const key = document.uri.toString(); this.rendered.add(key);
         for (const done of this.waiting.get(key) ?? []) done(); this.waiting.delete(key); return;
       }
-      if (message?.type === "ready") { document.update(document.bytes); return; }
+      if (message?.type === "renderError" && typeof message.message === "string") { state.error = message.message; return; }
+      if (message?.type === "ready") {
+        state.ready++;
+        state.sent = await panel.webview.postMessage({ type: "document", bytes: Array.from(document.bytes) });
+        return;
+      }
       if (message?.type !== "edit" || !message.change || !["rotate", "text"].includes(message.change.kind)) return;
       try {
         // Edits are serialized against the exact in-memory revision too.

@@ -23,7 +23,12 @@ async function render() {
   pageLabel.textContent = `${page + 1} / ${pdf.numPages}`;
   rendering = selected.render({ canvas, canvasContext: canvas.getContext("2d")!, viewport });
   try { await rendering.promise; if (current === revision) vscode.postMessage({ type: "rendered", width: canvas.width, height: canvas.height }); }
-  catch (e) { if ((e as Error)?.name !== "RenderingCancelledException") error.textContent = "This page could not be rendered."; }
+  catch (e) {
+    if ((e as Error)?.name !== "RenderingCancelledException") {
+      error.textContent = "This page could not be rendered.";
+      vscode.postMessage({ type: "renderError", message: e instanceof Error ? e.message : String(e) });
+    }
+  }
 }
 window.addEventListener("message", async event => {
   if (event.data?.type !== "document" || !Array.isArray(event.data.bytes)) return;
@@ -41,7 +46,11 @@ window.addEventListener("message", async event => {
     page = Math.min(page, pdf.numPages - 1);
     error.textContent = "";
     await render();
-  } catch { if (currentDocument !== documentRevision) return; error.textContent = "This PDF could not be opened. It may be encrypted or damaged."; }
+  } catch (e) {
+    if (currentDocument !== documentRevision) return;
+    error.textContent = "This PDF could not be opened. It may be encrypted or damaged.";
+    vscode.postMessage({ type: "renderError", message: e instanceof Error ? e.message : String(e) });
+  }
 });
 document.getElementById("previous")!.onclick = () => { if (page > 0) { page--; void render(); } };
 document.getElementById("next")!.onclick = () => { if (pdf && page < pdf.numPages - 1) { page++; void render(); } };

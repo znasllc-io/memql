@@ -2245,6 +2245,14 @@ jobs:
       - name: macOS desktop host
         if: runner.os == 'macOS' && matrix.host == 'desktop'
         run: node editors/productivity/test/runner.cjs --desktop
+      - name: preserve failed editor host diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: productivity-host-logs-${{ matrix.os }}-${{ matrix.host }}-${{ matrix.version }}
+          path: editors/productivity/dist-test/host-logs
+          if-no-files-found: ignore
+          retention-days: 7
       - name: package Productivity Tools with desktop and web entry points
         if: matrix.host == 'web' && runner.os == 'Linux'
         run: npm --prefix editors/productivity run package
