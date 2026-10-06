@@ -203,6 +203,9 @@ func decisionsFor(t *testing.T, env *Env, since, promptName string, n int) []map
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	var persisted []memoryNodes.MemoryNode
+	dbErr := env.DB.NewSelect().Model(&persisted).Where("concept = ? AND payload ->> 'promptName' = ?", "v1:router:call", promptName).Scan(context.Background())
+	t.Logf("persisted ledger rows=%d (read error=%v), listed rows=%d", len(persisted), dbErr, len(mine))
 	t.Fatalf("the decision list has %d row(s) for %s, want %d", len(mine), promptName, n)
 	return nil
 }

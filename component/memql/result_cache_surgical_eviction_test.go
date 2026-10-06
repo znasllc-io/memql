@@ -151,9 +151,8 @@ func TestResultCacheRefusesToStoreUnnamedDependencies(t *testing.T) {
 	}
 	t.Cleanup(cache.close)
 
-	// recordDependencies is what populates the index; with no concepts the
-	// key would be cached but unreachable from it. engine.go's set site is
-	// what refuses that, and this pins the reason it must keep refusing.
+	// A result without dependencies cannot be invalidated. Both the engine
+	// and the cache refuse it, including buffered admission.
 	cache.set("unnamed", bundleForConcepts(), time.Minute, nil)
 	time.Sleep(50 * time.Millisecond)
 
@@ -161,6 +160,9 @@ func TestResultCacheRefusesToStoreUnnamedDependencies(t *testing.T) {
 	indexed := len(cache.depIndex)
 	cache.depMu.Unlock()
 
+	if _, ok := cache.get("unnamed"); ok {
+		t.Fatal("a result without dependencies was cached")
+	}
 	if indexed != 0 {
 		t.Fatalf("dependency index has %d concepts for a result with no named dependencies", indexed)
 	}
