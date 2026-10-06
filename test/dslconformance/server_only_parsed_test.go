@@ -173,6 +173,10 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// Webhook resolution has no signed-in user. The connector's internal
+		// cluster-owner actor walks the installation directory at one snapshot;
+		// per-user scoping would silently discard other configured stores.
+		{Path: "shopify/overlay/queries.memql", Name: "storesForConnector"}: true,
 		// Capture belongs to the installation's restricted test inbox, not
 		// actor.userId: identity mail can precede a recipient account. Only
 		// the capture service writes encrypted bodies; the public read capability

@@ -451,3 +451,31 @@ outcome lacked OS copy. These are repaired. The consumer test lives in the
 existing provisioned `test/pipelinehop` suite; no database coverage exemption
 was added. The integrations module also promotes its used YAML dependency to
 a direct requirement. Full branch and local workspace verification remain open.
+
+## Integration evidence and template dependency (2026-10-05)
+
+The complete database-required workspace run at `cc30648c7` finished. Automation,
+pipeline driver, step runner, work journal, Shopify, inbound-hop and pipeline-hop
+suites passed. The run was **not green**: it identified companion editor grammar
+metadata, two expected diagnostic strings, and the connector query's explicit
+internal authorization declaration. Focused runs of every failing gate pass after
+those corrections; the complete Shopify and inbound-hop suites also pass again.
+VS Code 0.6.3 is prepared for the bounded-loop grammar and has not been published.
+The intermittent editor preview timeout is still being investigated; host failures
+now retain their logs and report webview delivery state.
+
+Template draft `memql-project#67` prefixes starter constructs, uses namespace-safe
+imports, and checks two stamped projects both separately and together through the
+real engine loader. The combined 14-file tree passes against this branch, and
+restoring the bare names makes it fail. Released engine v0.24.0 still fails the
+hyphenated combined case: it needs the generic shape namespace-pin fix already
+present here in `74a70903f`. The template must not merge ahead of a compatible
+engine release; its failing compatibility check remains intact.
+
+The shared capability metadata checker discovers four template scripts and fifteen
+instance scripts. Seven failure controls pass, including a real `promote.sh` copy
+modified to emit a second JSON document. Instance draft `memql-znas#175` carries the
+same checker. These checks exercise metadata, not external deployment effects.
+The earlier unconditional site auto-deploy suggestion in `memql-znas#164` has been
+superseded by the owner's exact-candidate approval requirement; change detection,
+site/docs build evidence and served-version verification remain outstanding.

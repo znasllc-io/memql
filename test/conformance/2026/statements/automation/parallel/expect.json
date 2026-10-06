@@ -9,7 +9,7 @@
       "file": "return-in-a-parallel-branch.memql",
       "verdict": "refuse_load",
       "code": "body_return_in_parallel",
-      "message": "a parallel branch cannot return: bind a name and return after the parallel"
+      "message": "parallel work cannot return from its enclosing body: return after the parallel or use a sequential loop"
     }
   ]
 }
