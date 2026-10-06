@@ -175,7 +175,7 @@ const (
 	// which pulls the images and every step of which clones the repository.
 	substrateRunBudget = 20 * time.Minute
 	// substrateCleanupPatience is how long the acked steps' Jobs, Secrets and
-	// pods may take to go: background propagation, and a pod's grace period.
+	// pods may take to go: foreground propagation, and a pod's grace period.
 	substrateCleanupPatience = 3 * time.Minute
 )
 
@@ -198,6 +198,7 @@ func TestPipelinesSubstrate(t *testing.T) {
 	t.Run("report-mapping", testSubstrateReportMapping)
 	t.Run("normalization", testSubstrateNormalization)
 	t.Run("manifest", func(t *testing.T) { compileSubstratePlan(t) })
+	t.Run("receipt-cleanup", testSubstrateReceiptCleanup)
 
 	cluster := connectSubstrateCluster(t)
 
@@ -230,6 +231,11 @@ func TestPipelinesSubstrate(t *testing.T) {
 	watch := watchRunObjects(ctx, cluster, namespace, selector)
 	run.drive(ctx, executor, configFor(substrateAgent).RunCeiling)
 	seen := watch.stop()
+	for _, s := range run.steps {
+		if s.cleanupErr != nil {
+			t.Errorf("%s receipt cleanup failed: %v", s.step.Key, s.cleanupErr)
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		t.Fatalf("the run did not end within %s (%v); its steps as they stood:\n%s", substrateRunBudget, err, run.summary())
 	}
@@ -1080,10 +1086,11 @@ type substrateStep struct {
 	sent    bool
 	blocked string
 	// answered: the executor answered, with result or err.
-	answered bool
-	result   pl.StepResult
-	err      error
-	elapsed  time.Duration
+	answered   bool
+	result     pl.StepResult
+	err        error
+	cleanupErr error
+	elapsed    time.Duration
 }
 
 // substrateRun is one run of the compiled plan.
@@ -1180,10 +1187,25 @@ func (r *substrateRun) drive(ctx context.Context, exec pl.Executor, ceiling time
 				began := time.Now()
 				res, err := exec.Execute(stepCtx, req)
 				s.result, s.err, s.elapsed, s.answered = res, err, time.Since(began), true
+				// This harness records its receipt in memory; the real driver
+				// commits it to the work journal before making the same call.
+				// Waiting until the run ends retains completed Jobs' quota slots
+				// and deadlocks subsequent stages at a one-Job ceiling.
+				if err == nil {
+					if acknowledger, ok := exec.(pl.ReceiptAcknowledger); ok {
+						req.Secrets = nil
+						cleanupCtx, cleanupCancel := context.WithTimeout(stepCtx, substrateCleanupPatience)
+						s.cleanupErr = acknowledger.AcknowledgeReceipt(cleanupCtx, req)
+						cleanupCancel()
+					}
+				}
 			}(s, r.request(s.step))
 		}
 		wg.Wait()
 		for _, s := range stage {
+			if s.cleanupErr != nil {
+				blockedBy = s.step.Stage
+			}
 			switch s.report(nil).Status {
 			case pipelinerun.StepFailed, pipelinerun.StepRefused, pipelinerun.StepCancelled:
 				blockedBy = s.step.Stage
@@ -1191,6 +1213,70 @@ func (r *substrateRun) drive(ctx context.Context, exec pl.Executor, ceiling time
 		}
 	}
 	r.finished = time.Now()
+}
+
+// A one-slot executor catches a missing acknowledgement without waiting for a
+// live-cluster timeout. It also checks that a receipt exists before cleanup,
+// and that cleanup failure prevents the harness from proceeding to a new stage.
+func testSubstrateReceiptCleanup(t *testing.T) {
+	for _, failCleanup := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cleanup-fails=%t", failCleanup), func(t *testing.T) {
+			r := &substrateRun{secrets: map[string]string{substrateSecret: "test-password"}}
+			for _, name := range []string{"first", "second", "third"} {
+				s := &substrateStep{step: pl.Step{Key: name + ".step", Stage: name, Name: "step", Secrets: []string{substrateSecret}}}
+				r.steps = append(r.steps, s)
+				r.stages = append(r.stages, []*substrateStep{s})
+			}
+			exec := &substrateReceiptExecutor{t: t, run: r, failCleanup: failCleanup}
+			r.drive(context.Background(), exec, time.Minute)
+			want := 3
+			if failCleanup {
+				want = 1
+				if r.steps[0].cleanupErr == nil || r.steps[1].blocked != "first" || r.steps[2].blocked != "first" {
+					t.Fatal("cleanup failure did not stop later stages")
+				}
+			}
+			if exec.executed != want || exec.acknowledged != want {
+				t.Fatalf("executed %d, acknowledged %d; want %d each", exec.executed, exec.acknowledged, want)
+			}
+		})
+	}
+}
+
+type substrateReceiptExecutor struct {
+	t                      *testing.T
+	run                    *substrateRun
+	failCleanup            bool
+	occupied               string
+	executed, acknowledged int
+}
+
+func (e *substrateReceiptExecutor) Execute(_ context.Context, req pl.StepRequest) (pl.StepResult, error) {
+	if e.occupied != "" {
+		return pl.StepResult{}, fmt.Errorf("completed step %s still owns the only capacity slot", e.occupied)
+	}
+	e.executed++
+	e.occupied = req.StepKey
+	return pl.StepResult{Status: pl.OutcomeSucceeded}, nil
+}
+
+func (e *substrateReceiptExecutor) Cancel(context.Context, string) error { return nil }
+
+func (e *substrateReceiptExecutor) AcknowledgeReceipt(_ context.Context, req pl.StepRequest) error {
+	e.acknowledged++
+	if len(req.Secrets) != 0 {
+		e.t.Error("cleanup carries resolved credentials")
+	}
+	for _, s := range e.run.steps {
+		if s.step.Key == req.StepKey && (!s.answered || s.result.Status != pl.OutcomeSucceeded) {
+			e.t.Error("cleanup preceded the recorded result")
+		}
+	}
+	if e.failCleanup {
+		return fmt.Errorf("test cleanup unavailable")
+	}
+	e.occupied = ""
+	return nil
 }
 
 // report is one step as the driver reports it to the check run: receiptFor's
