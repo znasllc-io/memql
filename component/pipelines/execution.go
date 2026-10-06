@@ -25,6 +25,14 @@ func PlatformOf(spec *Spec, step StepSpec) string {
 	return spec.Platform
 }
 
+// cachesFor resolves an explicit step override, including an empty list.
+func cachesFor(spec *Spec, step StepSpec) []string {
+	if step.Caches != nil {
+		return *step.Caches
+	}
+	return spec.Caches
+}
+
 // PlacementOf resolves explicit placement or the host execution requirement.
 func PlacementOf(step StepSpec) string {
 	if step.Placement != "" {
@@ -65,7 +73,7 @@ func validateStepRuntime(spec *Spec, step StepSpec, scope string) *Refusal {
 	if err := CheckExecution(execution, platform, placement == PlacementFleet); err != nil {
 		return Refuse(CodeStepInvalid, scope, "%s", err)
 	}
-	if execution == ExecutionNative && (len(step.Services) > 0 || len(spec.Caches) > 0) {
+	if execution == ExecutionNative && (len(step.Services) > 0 || len(cachesFor(spec, step)) > 0) {
 		return Refuse(CodeStepInvalid, scope, "Native steps do not support container services or declared shared caches.")
 	}
 	return nil

@@ -20,7 +20,7 @@ type Spec struct {
 	Image string `yaml:"image,omitempty" json:"image,omitempty"`
 	// Services are the sidecars a step may name, by name.
 	Services map[string]Service `yaml:"services,omitempty" json:"services,omitempty"`
-	// Caches names the caches the runner mounts for every step (go, npm).
+	// Caches names the default caches a step inherits (go, npm).
 	Caches []string    `yaml:"caches,omitempty" json:"caches,omitempty"`
 	Select *Select     `yaml:"select,omitempty" json:"select,omitempty"`
 	Stages []StageSpec `yaml:"stages" json:"stages"`
@@ -90,6 +90,10 @@ type StepSpec struct {
 	Needs map[string]bool `yaml:"needs,omitempty" json:"needs,omitempty"`
 	// Services name entries of the pipeline's services this step needs.
 	Services []string `yaml:"services,omitempty" json:"services,omitempty"`
+	// Caches overrides the pipeline defaults. An explicit empty list disables
+	// them, allowing native build steps beside cached container test steps.
+	// A pointer preserves that empty override through JSON/YAML round trips.
+	Caches *[]string `yaml:"caches,omitempty" json:"caches,omitempty"`
 	// Timeout is a Go duration ("20m"); empty means DefaultStepTimeout.
 	Timeout   string   `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	Artifacts []string `yaml:"artifacts,omitempty" json:"artifacts,omitempty"`

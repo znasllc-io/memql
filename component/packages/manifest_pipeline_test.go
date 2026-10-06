@@ -4,7 +4,71 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/pipelines"
+	"gopkg.in/yaml.v3"
 )
+
+func TestPipelineStepCacheOverridesSurviveManifestTransport(t *testing.T) {
+	raw := []byte(`formatVersion: 1
+name: cache-contract
+pipeline:
+  platform: linux/arm64
+  image: toolchain@sha256:test
+  caches: [go, npm]
+  stages:
+    - name: build
+      steps:
+        - name: inherited
+          run: go test
+        - name: selected
+          caches: [npm]
+          run: npm test
+        - name: native
+          execution: native
+          platform: darwin/arm64
+          caches: []
+          run: make images
+`)
+	parsed, err := ParseManifest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, transport := range []string{"json", "yaml"} {
+		t.Run(transport, func(t *testing.T) {
+			var decoded Manifest
+			if transport == "json" {
+				wire, err := json.Marshal(parsed)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(wire, &decoded); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				wire, err := yaml.Marshal(parsed)
+				if err != nil {
+					t.Fatal(err)
+				}
+				roundTrip, err := ParseManifest(wire)
+				if err != nil {
+					t.Fatal(err)
+				}
+				decoded = *roundTrip
+			}
+			plan, refusal := pipelines.Compile(decoded.Pipeline, pipelines.CompileInput{
+				Mode: pipelines.ModeFull, Event: pipelines.EventPush, Compute: pipelines.ComputeClusterAndFleet,
+			})
+			if refusal != nil {
+				t.Fatal(refusal)
+			}
+			steps := plan.Steps()
+			if len(steps) != 3 || strings.Join(steps[0].Caches, ",") != "go,npm" || strings.Join(steps[1].Caches, ",") != "npm" || len(steps[2].Caches) != 0 {
+				t.Fatalf("cache inheritance changed across %s: %+v", transport, steps)
+			}
+		})
+	}
+}
 
 // manifest_pipeline_test.go -- the pipeline: block of memql-package.yaml (epic
 // memql#5477, design record D3 and D7-D9).
