@@ -452,7 +452,7 @@ existing provisioned `test/pipelinehop` suite; no database coverage exemption
 was added. The integrations module also promotes its used YAML dependency to
 a direct requirement. Full branch and local workspace verification remain open.
 
-## Integration evidence and template dependency (2026-10-05)
+## Integration evidence and merge preparation (2026-10-05)
 
 The complete database-required workspace run at `cc30648c7` finished. Automation,
 pipeline driver, step runner, work journal, Shopify, inbound-hop and pipeline-hop
@@ -464,18 +464,30 @@ VS Code 0.6.3 is prepared for the bounded-loop grammar and has not been publishe
 The intermittent editor preview timeout is still being investigated; host failures
 now retain their logs and report webview delivery state.
 
-Template draft `memql-project#67` prefixes starter constructs, uses namespace-safe
+Template `memql-project#67` prefixes starter constructs, uses namespace-safe
 imports, and checks two stamped projects both separately and together through the
 real engine loader. The combined 14-file tree passes against this branch, and
-restoring the bare names makes it fail. Released engine v0.24.0 still fails the
-hyphenated combined case: it needs the generic shape namespace-pin fix already
-present here in `74a70903f`. The template must not merge ahead of a compatible
-engine release; its failing compatibility check remains intact.
+restoring the bare names makes it fail. Released engine v0.24.0 initially failed
+the hyphenated combined case because its shape resolver ignored namespace pins.
+The final starter uses its identifier-safe namespace as its directory name
+(`demo-app` gets `dsl/demo_app/`), so the combined test also passes on v0.24.0
+without waiting for an engine release or removing the compatibility check.
+Existing client paths and pins are not migrated. The generic engine fix in
+`74a70903f` remains necessary for other deliberately pinned or nested domains.
 
 The shared capability metadata checker discovers four template scripts and fifteen
 instance scripts. Seven failure controls pass, including a real `promote.sh` copy
-modified to emit a second JSON document. Instance draft `memql-znas#175` carries the
+modified to emit a second JSON document. Merged instance `memql-znas#175` carries the
 same checker. These checks exercise metadata, not external deployment effects.
 The earlier unconditional site auto-deploy suggestion in `memql-znas#164` has been
 superseded by the owner's exact-candidate approval requirement; change detection,
 site/docs build evidence and served-version verification remain outstanding.
+
+The owner requested merging this completed increment and running the merged
+code locally. This does not complete the unchecked program above or authorize
+public publication or production deployment. Main through the Ask UI changes in
+`memql#5838` is included. A CI migration-lock fixture timed out during table
+initialization instead of its intended long-running migration; the injected
+deadline now applies only to that migration. The three database lock regressions
+pass ten repeated runs. Final PR checks and local rollout still need their own
+recorded results; earlier green runs are not a claim about the final commit.
