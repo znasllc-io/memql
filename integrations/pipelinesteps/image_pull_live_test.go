@@ -2,6 +2,7 @@ package pipelinesteps
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/deploycontrol"
 	pl "github.com/znasllc-io/memql/component/pipelines"
 	"gopkg.in/yaml.v3"
 )
@@ -85,12 +87,32 @@ printf 'private image ran without exposing pull credentials\n' > result.txt`,
 	files := len(library.stored())
 	cfg.NodeID = "private-pull-b"
 	second := NewRunner(cfg, kube, nil, library, anonymousPlacementClone{})
+	ack := func(name string) {
+		t.Helper()
+		ackCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		for {
+			err := second.Ack(ackCtx, AckRequest{JobName: name})
+			if err == nil {
+				return
+			}
+			// Garbage collection can update the Secret after the guarded read.
+			// Like the executor's acknowledgment retry, start a fresh read; never
+			// weaken the UID/resourceVersion deletion preconditions.
+			if !deploycontrol.IsConflict(err) {
+				t.Fatal(err)
+			}
+			select {
+			case <-ackCtx.Done():
+				t.Fatalf("cleanup conflicts did not settle: %v", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}
 	if recovered := second.Run(ctx, run); !reflect.DeepEqual(recovered, result) || len(library.stored()) != files {
 		t.Fatal("another runner repeated completed private-image work")
 	}
-	if err := second.Ack(ctx, AckRequest{JobName: name}); err != nil {
-		t.Fatal(err)
-	}
+	ack(name)
 	for _, missing := range []bool{false, true} {
 		run.Attempt++
 		run.TimeoutSeconds = 120
@@ -121,9 +143,7 @@ printf 'private image ran without exposing pull credentials\n' > result.txt`,
 		if denied.Status == pl.OutcomeSucceeded || denied.Failure == nil || denied.Failure.Code != pl.CodeImagePullFailed {
 			t.Fatalf("cached image accepted missing=%v, or failed for another reason: %+v; failure=%+v", missing, denied, denied.Failure)
 		}
-		if err := second.Ack(ctx, AckRequest{JobName: name}); err != nil {
-			t.Fatal(err)
-		}
+		ack(name)
 		if absent, err := second.receiptResourcesAbsent(ctx, name); err != nil || !absent {
 			t.Fatalf("credential resources remain: %v", err)
 		}
