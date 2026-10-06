@@ -90,6 +90,7 @@ type Fleet struct {
 	// libraryTimeout bounds the Library writes of one step: the runner's
 	// libraryPhaseTimeout.
 	libraryTimeout time.Duration
+	capacityRetry  time.Duration
 }
 
 var _ FleetRouter = (*Fleet)(nil)
@@ -111,6 +112,7 @@ func NewFleet(cfg Config, d FleetDispatcher, library LibraryStore, tokens TokenM
 		now:            time.Now,
 		openCapture:    NewCapture,
 		libraryTimeout: libraryPhaseTimeout,
+		capacityRetry:  5 * time.Second,
 	}
 }
 
@@ -181,12 +183,15 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 	lines := &fleetLines{capture: capture, pending: map[string][]byte{}}
 
 	started := f.now()
-	result, err := f.dispatchStep(ctx, req, run, token, lines.chunk)
+	result, stopped, err := f.dispatchWhenCapacityAvailable(ctx, req, &run, token, capture, lines.chunk)
 	finished := f.now()
 	// The machine's last partial lines are output; a chunk that arrives after
 	// this -- the dispatcher stopped waiting on a timeout or a cancel -- is
 	// dropped rather than racing the archive.
 	lines.close()
+	if stopped != nil {
+		return *stopped, nil
+	}
 	if err != nil {
 		return failedResult(pl.CodeRunnerUnavailable,
 			cutBytes(mask("The agent's dispatcher could not take the step: "+err.Error()), failureMaxBytes)), nil
