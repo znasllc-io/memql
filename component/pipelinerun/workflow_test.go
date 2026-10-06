@@ -6,7 +6,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/znasllc-io/memql/component/actions"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/pipelines"
 )
@@ -257,5 +259,57 @@ func TestPipelineWorkflowCannotReturnEarlyAndPass(t *testing.T) {
 	got, _ := dh.store.run(run.ID)
 	if got.Conclusion != ConclusionFailure || len(dh.exec.sentKeys()) != 0 {
 		t.Fatalf("unfinished workflow passed: %+v", got)
+	}
+}
+
+func TestPipelineWorkflowCannotSkipEveryRequiredStepAndPass(t *testing.T) {
+	a := workflowSource(t, `@template
+automation fabricatedPassingWorkflow {
+ args { stages []any! }
+ for stage in args.stages {
+  for item in stage.steps {
+   builtin pipelineSkipStep(stepKey: item.key, code: "pipeline_stage_blocked", reason: "fabricated")
+  }
+ }
+}`)
+	dh := newDriveHarness(t, manifestWorkflow(driveManifest, a.Name))
+	dh.integ.Configure(func(d *Deps) { d.LoadWorkflow = workflowLoader(a) })
+	run := dh.openRun(t, prOpening())
+	deliver(t, dh.integ, run)
+	got, _ := dh.store.run(run.ID)
+	if got.Conclusion != ConclusionFailure || len(dh.exec.sentKeys()) != 0 {
+		t.Fatalf("fabricated skips produced a passing check: %+v", got)
+	}
+}
+
+func TestPipelineWorkflowFreezesResolvedActionDefinitions(t *testing.T) {
+	name := fmt.Sprintf("boundaryFrozenAction%d", time.Now().UnixNano())
+	initial := &actions.Action{Name: name, Version: 1, Enabled: true,
+		Capability: "integration.pipelines.executeStep", Kind: "primitive",
+		Params:   []actions.Param{{Name: "stepKey", Type: "string", Required: true}},
+		CallArgs: []actions.CallArg{{Key: "stepKey", ArgPath: "stepKey"}}}
+	if err := actions.Default().Register(initial); err != nil {
+		t.Fatal(err)
+	}
+	a := workflowSource(t, fmt.Sprintf(`@template automation frozenActionWorkflow {
+ args { stages []any! }
+ action %s(stepKey: "checks.vet")
+}`, name))
+	dr := &runDriver{d: Deps{LoadWorkflow: workflowLoader(a)}}
+	if err := dr.prepareWorkflow(a.Name); err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := dr.workflowIdentity()
+	if err := actions.Default().Register(&actions.Action{Name: name, Version: 2, Enabled: true,
+		Capability: "integration.pipelines.reportProgress"}); err != nil {
+		t.Fatal(err)
+	}
+	initial.Capability = "integration.pipelines.reportProgress"
+	initial.Params[0].Name = "changed"
+	initial.CallArgs[0].ArgPath = "changed"
+	frozen, ok := dr.workflow.actions[name].LookupLatest(name)
+	if !ok || frozen.Version != 1 || frozen.Capability != "integration.pipelines.executeStep" ||
+		frozen.Params[0].Name != "stepKey" || frozen.CallArgs[0].ArgPath != "stepKey" || dr.workflowIdentity() != fingerprint {
+		t.Fatalf("prepared workflow changed under its recorded identity: %+v", frozen)
 	}
 }

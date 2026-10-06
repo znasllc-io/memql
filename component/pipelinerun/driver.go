@@ -1425,6 +1425,12 @@ func (dr *runDriver) verdictOfSteps() verdict {
 		switch s.Status {
 		case StepFailed, StepRefused, StepCancelled:
 			return verdict{conclusion: ConclusionFailure, workCode: s.Code, workMessage: "Failed at " + s.Stage + ": " + s.Key}
+		case StepSkipped:
+			if s.Code == pipelines.CodeStageBlocked {
+				// DSL can block work, but an unexecuted required step is not
+				// evidence of success, even if no other step recorded failure.
+				return verdict{conclusion: ConclusionFailure, workCode: s.Code, workMessage: "Required step " + s.Key + " was blocked."}
+			}
 		case StepPending, StepRunning:
 			// A step that never ended never passed.
 			return verdict{conclusion: ConclusionFailure, workMessage: "Step " + s.Key + " never reported how it ended."}

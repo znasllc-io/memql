@@ -83,7 +83,7 @@ func TestStrictClusterClaimDBAllowsOneReplica(t *testing.T) {
 	if got := claimRace(); got != 0 {
 		t.Fatalf("fresh lease admitted %d duplicate executions", got)
 	}
-	if _, err := db.DB.ExecContext(context.Background(), `UPDATE automation_execution_claims SET claimed_at = now() - interval '2 minutes' WHERE automation_name = $1`, name); err != nil {
+	if _, err := db.DB.ExecContext(context.Background(), `UPDATE automation_execution_claims SET claimed_at = now() - interval '2 minutes', expires_at = now() - interval '1 minute' WHERE automation_name = $1`, name); err != nil {
 		t.Fatal(err)
 	}
 	if got := claimRace(); got != 1 {

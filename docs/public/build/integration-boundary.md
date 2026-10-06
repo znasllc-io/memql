@@ -80,7 +80,9 @@ This host does not promise recovery for every recipe. Each native operation
 retains its existing journal and reconciliation contract. Pipeline recovery
 pins the installed workflow and child/action definitions, reconstructs control
 flow from immutable inputs and receipts, and refuses changed definitions.
-Unfinished compiled steps cannot produce a successful check result.
+Unfinished compiled steps and required steps skipped as blocked cannot produce
+a successful check result. Each action reference executes the exact definition
+captured for that run, even if the global action registry later gains a version.
 
 ## Schedule placement
 

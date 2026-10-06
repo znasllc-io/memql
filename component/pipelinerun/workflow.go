@@ -27,7 +27,7 @@ const defaultPipelineWorkflow = "runPipelineStages"
 type workflowProgram struct {
 	root        string
 	definitions map[string]*automations.Automation
-	actions     *actions.Registry
+	actions     map[string]*actions.Registry
 	fingerprint string
 }
 
@@ -67,7 +67,7 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 	if err := actions.DefaultLoadError(); err != nil {
 		return err
 	}
-	p := &workflowProgram{root: name, definitions: map[string]*automations.Automation{}, actions: reg}
+	p := &workflowProgram{root: name, definitions: map[string]*automations.Automation{}, actions: map[string]*actions.Registry{}}
 	identities := map[string]any{}
 	visiting := map[string]bool{}
 	var visit func(string) error
@@ -97,7 +97,22 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 				if a == nil || (a.Capability != "integration.pipelines.executeStep" && a.Capability != "integration.pipelines.reportProgress") {
 					return fmt.Errorf("pipeline action %q is outside its run-scoped contract", step.Action.Ref)
 				}
-				identities["action:"+step.Action.Ref] = a
+				// Floating references resolve once for this run. Retaining the
+				// live registry would execute a later version under the old hash.
+				if p.actions[step.Action.Ref] == nil {
+					copy := *a
+					copy.Params = append([]actions.Param(nil), a.Params...)
+					copy.CallArgs = append([]actions.CallArg(nil), a.CallArgs...)
+					for i := range copy.CallArgs {
+						copy.CallArgs[i].Literal = cloneWorkflowLiteral(copy.CallArgs[i].Literal)
+					}
+					selected := actions.NewRegistry()
+					if err := selected.Register(&copy); err != nil {
+						return err
+					}
+					p.actions[step.Action.Ref] = selected
+					identities["action:"+step.Action.Ref] = &copy
+				}
 			case automations.StepTypeAutomation:
 				if step.Automation == nil || step.Automation.Async {
 					return fmt.Errorf("pipeline child workflows must be synchronous")
@@ -173,6 +188,26 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 	return nil
 }
 
+func cloneWorkflowLiteral(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(value))
+		for key, item := range value {
+			out[key] = cloneWorkflowLiteral(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(value))
+		for i, item := range value {
+			out[i] = cloneWorkflowLiteral(item)
+		}
+		return out
+	default:
+		// Authored literal leaves are scalar values.
+		return value
+	}
+}
+
 type pipelineWorkflowHost struct {
 	dr         *runDriver
 	slots      chan struct{}
@@ -221,7 +256,7 @@ func newPipelineWorkflowHost(dr *runDriver) *pipelineWorkflowHost {
 	}
 	h.registry = steps.NewRegistry()
 	h.registry.Register(automations.StepTypeFunction, h)
-	h.registry.Register(automations.StepTypeAction, &steps.ActionExecutor{Registry: dr.workflow.actions, Dispatcher: h})
+	h.registry.Register(automations.StepTypeAction, h)
 	return h
 }
 
@@ -239,6 +274,16 @@ func (h *pipelineWorkflowHost) TriggerAutomationWithArgs(ctx context.Context, na
 }
 
 func (h *pipelineWorkflowHost) Execute(ctx context.Context, step *automations.Step, sc *automations.StepContext) (*automations.StepResult, error) {
+	if step.Type == automations.StepTypeAction && step.Action != nil {
+		selected := h.dr.workflow.actions[step.Action.Ref]
+		if selected == nil {
+			return nil, fmt.Errorf("pipeline action %q was not pinned before execution", step.Action.Ref)
+		}
+		// Each reference has its own frozen selection: an explicitly pinned
+		// version elsewhere cannot change a floating reference's resolution.
+		executor := &steps.ActionExecutor{Registry: selected, Dispatcher: h}
+		return executor.Execute(ctx, step, sc)
+	}
 	started := time.Now()
 	if step.Function == nil {
 		return nil, fmt.Errorf("pipeline runtime function is missing")
