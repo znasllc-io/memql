@@ -349,8 +349,9 @@ func (w *runnerHop) kill(p *hopProcess) {
 func (w *runnerHop) restart(node string) {
 	w.t.Helper()
 	gone, fresh := w.process(node), w.start(node)
+	gone.die()
 	w.mesh.bounce(node, hopHandler(hopRunnerAdapter{fresh.runner}))
-	w.kill(gone)
+	gone.endRuns(w.t, w.executed())
 	w.mu.Lock()
 	w.procs[node] = fresh
 	w.mu.Unlock()
@@ -506,8 +507,14 @@ func TestExecuteHopRealRunnersAdoptAStepAwayFromTheReplicaThatWentSilent(t *test
 			w.clock.advance(time.Minute)
 		}, "workbench-a"},
 		{"its pod dies, and the peer table sees it DEGRADED", func(w *runnerHop, step *hopStep) {
+			// Cut the dead process's effects before notifying its peers.
+			// Losing the forward first cancels a still-live runner, which
+			// may legitimately begin deleting its Job before kill runs.
+			// That models graceful cancellation, not the pod-death case.
+			gone := w.process("workbench-a")
+			gone.die()
 			w.mesh.lose("workbench-a")
-			w.kill(w.process("workbench-a"))
+			gone.endRuns(w.t, w.executed())
 			step.printing.Store(true)
 			// workbench-b waits out workbench-a's claim. The executor's
 			// clock stands still: the loss itself forwarded the step again.
