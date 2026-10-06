@@ -31,11 +31,12 @@ import (
 // resolveSecrets resolves the values of a step's secrets under the pipeline
 // owner's borrowed actor (D8), or answers the failure that fails the step.
 func (dr *runDriver) resolveSecrets(ctx context.Context, step pipelines.Step) (map[string]string, *pipelines.Failure) {
-	if len(step.Secrets) == 0 {
+	names := step.SecretNames()
+	if len(names) == 0 {
 		return nil, nil
 	}
-	values := make(map[string]string, len(step.Secrets))
-	for _, name := range step.Secrets {
+	values := make(map[string]string, len(names))
+	for _, name := range names {
 		switch {
 		case strings.HasPrefix(name, reservedSecretPrefix):
 			return nil, &pipelines.Failure{Code: pipelines.CodeSecretInvalid, Message: fmt.Sprintf(

@@ -121,7 +121,8 @@ type Step struct {
 	TimeoutSeconds int      `json:"timeoutSeconds"`
 	Artifacts      []string `json:"artifacts,omitempty"`
 	// Secrets are globalSecret NAMES. A value never appears on a Step.
-	Secrets []string `json:"secrets,omitempty"`
+	Secrets         []string `json:"secrets,omitempty"`
+	ImagePullSecret string   `json:"imagePullSecret,omitempty"`
 	// Packages is the step's package slice, as Go import paths, rendered to
 	// MEMQL_PACKAGES. Nil for a step that selects no packages.
 	Packages []string `json:"packages,omitempty"`
@@ -175,7 +176,7 @@ type StepRequest struct {
 	InstallationID int64   `json:"installationId"`
 	Compute        Compute `json:"compute"`
 	Step           Step    `json:"step"`
-	// Secrets are the resolved values of Step.Secrets, by name, resolved
+	// Secrets are the resolved values of Step.SecretNames(), by name, resolved
 	// under the owner's allowlist on the driver's side. They are never
 	// journaled: a step row records only the names.
 	Secrets map[string]string `json:"secrets,omitempty"`

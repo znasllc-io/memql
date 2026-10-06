@@ -31,29 +31,30 @@ func stepRunFor(req pl.StepRequest, timeoutSeconds int, deadlineCode string) Ste
 		}
 	}
 	return StepRun{
-		MemoryMiB:      req.Step.MemoryMiB,
-		RecoverOnly:    req.RecoverOnly,
-		Execution:      req.Step.Execution,
-		Needs:          slices.Clone(req.Step.Needs),
-		Platform:       req.Step.Platform,
-		RunID:          req.RunID,
-		WorkRunID:      req.WorkRunID,
-		StepKey:        req.StepKey,
-		Attempt:        max(req.Attempt, 1),
-		OwnerUserID:    req.OwnerUserID,
-		Repository:     req.Repository,
-		SHA:            req.SHA,
-		InstallationID: req.InstallationID,
-		Image:          req.Step.Image,
-		Command:        req.Step.Run,
-		Env:            env,
-		Secrets:        secrets,
-		Services:       services,
-		Caches:         slices.Clone(req.Step.Caches),
-		Artifacts:      slices.Clone(req.Step.Artifacts),
-		TimeoutSeconds: timeoutSeconds,
-		DeadlineCode:   deadlineCode,
-		GoTimings:      wantsGoTimings(req.Step),
+		MemoryMiB:       req.Step.MemoryMiB,
+		RecoverOnly:     req.RecoverOnly,
+		Execution:       req.Step.Execution,
+		Needs:           slices.Clone(req.Step.Needs),
+		Platform:        req.Step.Platform,
+		RunID:           req.RunID,
+		WorkRunID:       req.WorkRunID,
+		StepKey:         req.StepKey,
+		Attempt:         max(req.Attempt, 1),
+		OwnerUserID:     req.OwnerUserID,
+		Repository:      req.Repository,
+		SHA:             req.SHA,
+		InstallationID:  req.InstallationID,
+		Image:           req.Step.Image,
+		ImagePullSecret: req.Step.ImagePullSecret,
+		Command:         req.Step.Run,
+		Env:             env,
+		Secrets:         secrets,
+		Services:        services,
+		Caches:          slices.Clone(req.Step.Caches),
+		Artifacts:       slices.Clone(req.Step.Artifacts),
+		TimeoutSeconds:  timeoutSeconds,
+		DeadlineCode:    deadlineCode,
+		GoTimings:       wantsGoTimings(req.Step),
 	}
 }
 
@@ -64,8 +65,9 @@ func stepRunFor(req pl.StepRequest, timeoutSeconds int, deadlineCode string) Ste
 //
 // A secret named like a contract variable is not carried at all. Environment()
 // keeps the platform's value for such a name (the compiler refuses one first),
-// so the union of the two maps is exactly what Environment() renders, and no
-// runner is handed a secret that could win where the platform's value must.
+// so no runner is handed a secret that could win where the platform's value
+// must. ImagePullSecret remains in Secrets for kubelet and redaction, but is
+// omitted by Environment() and by the step container's environment builder.
 func splitEnvironment(req pl.StepRequest) (env, secrets map[string]string) {
 	contract := req
 	contract.Secrets = nil
@@ -121,6 +123,10 @@ func secretValues(run StepRun, tokens ...string) []string {
 		if token != "" {
 			out = append(out, token)
 		}
+	}
+	if run.ImagePullSecret != "" {
+		_, values, _ := imagePullConfig(run.Secrets[run.ImagePullSecret])
+		out = append(out, values...)
 	}
 	sort.Strings(out)
 	return out

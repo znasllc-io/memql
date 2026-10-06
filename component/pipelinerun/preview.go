@@ -147,7 +147,7 @@ func (i *Integration) Preview(ctx context.Context, packageID string) (PreviewRes
 			step := PreviewStep{
 				Execution: pipelines.ExecutionOf(sp.Execution), Platform: pipelines.PlatformOf(spec, sp), RequiresFleet: pipelines.PlacementOf(sp) == pipelines.PlacementFleet,
 				Name: sp.Name, Packages: sp.Packages, Only: sp.Only, Shards: sp.Shards,
-				Secrets: append([]string(nil), sp.Secrets...), Services: append([]string(nil), sp.Services...),
+				Secrets: sp.SecretNames(), Services: append([]string(nil), sp.Services...),
 			}
 			if sp.When != nil {
 				step.Bucket = sp.When.Bucket
@@ -159,7 +159,7 @@ func (i *Integration) Preview(ctx context.Context, packageID string) (PreviewRes
 				}
 			}
 			sort.Strings(step.Needs)
-			for _, name := range sp.Secrets {
+			for _, name := range sp.SecretNames() {
 				secrets[name] = true
 			}
 			stage.Steps = append(stage.Steps, step)
