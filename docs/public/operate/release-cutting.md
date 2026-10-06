@@ -151,8 +151,9 @@ plan before cutting for real:
 builtin releaseCut(bump: "patch", dryRun: true)
 ```
 
-It computes the plan -- the next version and the base sha -- and **creates
-nothing, publishes nothing, writes nothing**. It exercises the real credential
+It computes the plan -- the next version and the base sha -- without creating
+a tag, release or audit row. The App path mints a short-lived access token for
+these repository reads. It exercises the real credential
 against the real API, so it is a genuine test of the setup rather than a
 simulation of one.
 
