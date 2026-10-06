@@ -67,9 +67,10 @@ pipeline:
       # reach is up. ci.yml's lanes wait on the same TCP check before their
       # first query.
       ready: pg_isready -h localhost -U memql
-  # Cockpit caps each build container at 2 GiB. Go steps below serialize
-  # package compilation and collect earlier; the generated AI SDK packages
-  # otherwise exceed that cap when compiled together on a cold cache.
+  # Configure Cockpit's pipelines.container_memory_mib to at least 4096 for
+  # this full suite: the Sense stress case and architecture extraction exceed
+  # its 2048 MiB default. Go steps also serialize compilation and collect
+  # earlier to keep cold-cache compiler pressure bounded.
   caches: [go, npm]
   select:
     go: import-graph
