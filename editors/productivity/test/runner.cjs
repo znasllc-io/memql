@@ -25,7 +25,12 @@ async function main() {
       }
       await runTests({ version, vscodeExecutablePath: executable, extensionDevelopmentPath: [core, root], extensionTestsPath: suite,
         extensionTestsEnv: { MEMQL_EDITOR_TEST_STATE_DIR: fixture },
-        launchArgs: [fixture, "--disable-workspace-trust", "--disable-gpu", "--no-sandbox", "--skip-welcome", "--skip-release-notes", "--user-data-dir", path.join(fixture,"user-data"), "--extensions-dir", path.join(fixture,"extensions")] });
+        // Desktop CI may leave the test window occluded or without focus.
+        // Match browser automation's foreground scheduling for these isolated
+        // test profiles; keep every render assertion and deadline unchanged.
+        launchArgs: [fixture, "--disable-workspace-trust", "--disable-gpu", "--no-sandbox", "--skip-welcome", "--skip-release-notes",
+          "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", "--disable-background-timer-throttling",
+          "--user-data-dir", path.join(fixture,"user-data"), "--extensions-dir", path.join(fixture,"extensions")] });
     } else {
       const { runTests } = require(path.join(core, "node_modules/@vscode/test-web"));
       await runTests({ quality: "stable", browserType: "chromium", headless: true, extensionDevelopmentPath: root,
