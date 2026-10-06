@@ -1,7 +1,9 @@
 package envregistry
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -53,7 +55,7 @@ func ApplyLocalOverride(repoRoot string) (overridden []string, err error) {
 	path := filepath.Join(repoRoot, LocalEnvFilename)
 	entries, err := ParseEnvFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("envregistry: local override: %w", err)
