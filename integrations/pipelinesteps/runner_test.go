@@ -362,7 +362,14 @@ func rtNotStarted(container, pod string) kubeAnswer {
 }
 
 func (c *rtCluster) serve(w http.ResponseWriter, r *http.Request) {
-	body, _ := io.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		// A step abandoning the isolation proof can cancel a create while
+		// its body is still arriving. The API never admitted that request;
+		// do not parse its partial JSON or count it as a malformed Job.
+		http.Error(w, "request body interrupted", http.StatusBadRequest)
+		return
+	}
 	c.mu.Lock()
 	c.reqs = append(c.reqs, rtReq{kubeReq: kubeReq{
 		Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery, ContentType: r.Header.Get("Content-Type"), Body: string(body),
