@@ -707,7 +707,7 @@ function wait_for_rollouts() {
             info "Waiting for ${deployment}..."
             kubectl rollout status deployment/"${deployment}" \
                 -n "${NAMESPACE}" \
-                --timeout=120s >&2 || warn "${deployment} rollout did not complete in 120s -- check 'kubectl get pods -n ${NAMESPACE}'"
+                --timeout=120s >&2 || cap_fail 5 "${deployment} did not finish rolling out; inspect it with kubectl get pods -n ${NAMESPACE}"
         fi
     done
 }
@@ -1205,7 +1205,11 @@ function main() {
     fi
 
     section "Done"
-    info "Cluster '${CLUSTER_NAME}' is running the latest local build."
+    if [ -n "${wait_flag}" ]; then
+        info "Images imported. Rollout readiness was not checked (--no-wait)."
+    else
+        info "Local image update complete for cluster '${CLUSTER_NAME}'."
+    fi
     info "Pod status: kubectl get pods -n ${NAMESPACE}"
 
     cap_result_set     cluster     "$CLUSTER_NAME"
