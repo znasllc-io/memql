@@ -438,7 +438,12 @@ type step struct {
 	tokenRead     bool
 	claimFailures int
 	// ownedSecret: this Run made the Job its Secret's owner.
-	ownedSecret bool
+	ownedSecret      bool
+	secretPrepared   bool
+	creationSent     string
+	creationAttempts int
+	creationUnknown  bool
+	quotaNoted       bool
 	// claimSent is the claim this Run last sent: the Job carrying exactly it
 	// is this Run's own claim, whatever answer was lost. claimAdopts says
 	// that claim was sent over another Run's, and claimCursor is the log
@@ -517,12 +522,40 @@ func (s *step) execute() pl.StepResult {
 				// Deleted between two reads of this Run: a cancel elsewhere.
 				return s.vanished(nil)
 			case !found:
+				if s.creationUnknown {
+					return s.failed(pl.CodeExecutionUncertain, "The API did not confirm Job creation and no Job can be found. No replacement was sent; reconcile the attempt before authorizing new work.")
+				}
 				if s.run.RecoverOnly {
-					return s.failed(pl.CodeExecutionUncertain, "The previous attempt's Job and result are missing. It may already have executed; no replacement Job was created. Reconcile that attempt before authorizing new work.")
+					meta, err := s.creationMetadata()
+					if err != nil {
+						if !errors.Is(err, errCreationUncertain) {
+							return s.failed(pl.CodeRunnerUnavailable, "the queued attempt could not be read: "+apiMessage(err))
+						}
+						if next, found, err := s.getJob(); err == nil && found {
+							job, seen, current = next, true, true
+							continue
+						}
+						return s.failed(pl.CodeExecutionUncertain, "The previous attempt's Job and result are missing, and there is no durable queued record. It may already have executed; no replacement Job was created. Reconcile that attempt before authorizing new work.")
+					}
+					if state := meta.Annotations[annotCreation]; state != creationQueued && state != s.creationSent {
+						if s.creationFresh(state) {
+							if !s.sleep(s.r.cfg.PollInterval) {
+								return s.abandon(nil)
+							}
+							continue
+						}
+						return s.failed(pl.CodeExecutionUncertain, "Job creation started but its outcome is unknown. No replacement Job was created; reconcile the original attempt.")
+					}
 				}
 				res, j, done := s.create()
 				if done {
 					return res
+				}
+				if j.Metadata.UID == "" {
+					if !s.sleep(s.r.cfg.PollInterval) {
+						return s.abandon(nil)
+					}
+					continue
 				}
 				job, seen, current = j, true, true
 				continue
@@ -619,38 +652,44 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 		return res, Job{}, true
 	}
 
-	token, err := s.mintToken()
-	switch {
-	case err != nil && s.ctx.Err() != nil:
-		return s.abandon(nil), Job{}, true
-	case err != nil:
-		// Nothing exists yet, and without a token nothing should.
-		return s.failed(pl.CodeCloneFailed, "the clone token could not be minted: "+err.Error()), Job{}, true
-	}
-	s.token, s.tokenAt = token, s.r.now()
-	s.maskToken(token)
-	if err := s.ensureCapture(); err != nil {
-		return s.failed(pl.CodeRunnerUnavailable, "this workbench node cannot open the step's log archive: "+err.Error()), Job{}, true
-	}
-
-	secret := BuildSecret(s.r.cfg, s.run, s.jobName, token)
-	var existed bool
-	if err := s.retryAPI(func() (err error) {
-		existed, err = s.r.kube.CreateSecret(s.ctx, secret)
-		return err
-	}); err != nil {
-		if s.ctx.Err() != nil {
+	if !s.secretPrepared {
+		token, err := s.mintToken()
+		switch {
+		case err != nil && s.ctx.Err() != nil:
 			return s.abandon(nil), Job{}, true
+		case err != nil:
+			// Nothing exists yet, and without a token nothing should.
+			return s.failed(pl.CodeCloneFailed, "the clone token could not be minted: "+err.Error()), Job{}, true
 		}
-		code, why := createFailure("Secret", err)
-		return s.failed(code, why), Job{}, true
+		s.token, s.tokenAt = token, s.r.now()
+		s.maskToken(token)
+		if err := s.ensureCapture(); err != nil {
+			return s.failed(pl.CodeRunnerUnavailable, "this workbench node cannot open the step's log archive: "+err.Error()), Job{}, true
+		}
+
+		secret := BuildSecret(s.r.cfg, s.run, s.jobName, token)
+		var existed bool
+		if !s.run.RecoverOnly {
+			if err := s.retryAPI(func() (err error) {
+				existed, err = s.r.kube.CreateSecret(s.ctx, secret)
+				return err
+			}); err != nil {
+				if s.ctx.Err() != nil {
+					return s.abandon(nil), Job{}, true
+				}
+				code, why := createFailure("Secret", err)
+				return s.failed(code, why), Job{}, true
+			}
+		} else {
+			existed = true // recovery can only use the observed queued Secret
+		}
+		// A Secret an earlier Run of the step left holds that Run's token, of
+		// any age: freshenToken writes this Run's over it.
+		s.tokenWritten = !existed
+		s.secretPrepared = true
 	}
-	// A Secret an earlier Run of the step left holds that Run's token, of
-	// any age: freshenToken writes this Run's over it.
-	s.tokenWritten = !existed
 
 	own := time.Duration(s.run.TimeoutSeconds) * time.Second
-	waiting, attempts := false, 0
 	for {
 		left := runDeadline.Sub(s.r.now())
 		if left < time.Second {
@@ -665,6 +704,29 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 		// when that is less (deadlineCode names which).
 		spec.Spec.ActiveDeadlineSeconds = ptr(int64(min(own, left) / time.Second))
 		s.freshenToken()
+		claimed, claimErr := s.claimCreation()
+		if claimErr != nil {
+			if s.ctx.Err() != nil {
+				return s.abandon(nil), Job{}, true
+			}
+			if errors.Is(claimErr, errCreationUncertain) {
+				if next, found, err := s.getJob(); err == nil && found {
+					return pl.StepResult{}, next, false
+				}
+			}
+			if transient(claimErr) && s.creationAttempts+1 < apiAttempts {
+				s.creationAttempts++
+				return pl.StepResult{}, Job{}, false
+			}
+			code := pl.CodeRunnerUnavailable
+			if errors.Is(claimErr, errCreationUncertain) {
+				code = pl.CodeExecutionUncertain
+			}
+			return s.failed(code, "the step's Job creation could not be claimed: "+apiMessage(claimErr)), Job{}, true
+		}
+		if !claimed {
+			return pl.StepResult{}, Job{}, false
+		}
 		j, made, err := s.r.kube.CreateJob(s.ctx, spec)
 		switch {
 		case err == nil:
@@ -676,24 +738,43 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 		case s.ctx.Err() != nil:
 			return s.abandon(nil), Job{}, true
 		case deploycontrol.IsForbiddenQuota(err):
+			if err := s.releaseRejectedCreation(); err != nil {
+				if s.ctx.Err() != nil {
+					return s.abandon(nil), Job{}, true
+				}
+				return s.failed(pl.CodeRunnerUnavailable, "the rejected Job's queued state could not be recorded: "+apiMessage(err)), Job{}, true
+			}
 			// The ceiling is full (Review Focus 4): wait for a slot, as long
 			// as the step is wanted and its run's ceiling allows, and say so
 			// once. The API server answered, so the failures that may pass
 			// start counting again.
-			attempts = 0
-			if !waiting {
-				waiting = true
+			s.creationAttempts = 0
+			if !s.quotaNoted {
+				s.quotaNoted = true
 				s.capture.Notice("memql: waiting for a free slot under the pipelines ceiling")
 				s.log.Info("pipelines: waiting for a free slot under the pipelines ceiling")
 			}
 			if !s.sleep(quotaWaitPolls * s.r.cfg.PollInterval) {
 				return s.abandon(nil), Job{}, true
 			}
-		case transient(err) && attempts+1 < apiAttempts:
-			attempts++
+		case throttledJobCreate(err) && s.creationAttempts+1 < apiAttempts:
+			if err := s.releaseRejectedCreation(); err != nil {
+				if s.ctx.Err() != nil {
+					return s.abandon(nil), Job{}, true
+				}
+				return s.failed(pl.CodeRunnerUnavailable, "the throttled Job's queued state could not be recorded: "+apiMessage(err)), Job{}, true
+			}
+			s.creationAttempts++
 			if !s.sleep(s.r.cfg.PollInterval) {
 				return s.abandon(nil), Job{}, true
 			}
+			return pl.StepResult{}, Job{}, false // reconcile before another POST
+		case !rejectedJobCreate(err):
+			// A transport failure, 5xx or unreadable response may follow a
+			// successful create. Read the Job, but never turn its absence
+			// into permission to repeat a potentially completed command.
+			s.creationUnknown = true
+			return pl.StepResult{}, Job{}, false
 		default:
 			// The Job will not come, so the token must not outlive it.
 			s.deleteSecret()

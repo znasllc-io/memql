@@ -263,6 +263,17 @@ side effects. Nexus redesign is outside this work.
 
 ## Evidence boundaries
 
+Workbench queued recovery uses a durable pre-create record on the attempt's
+Secret. The record binds the execution definition and credential names, never
+credential values. Before every Job create, a runner claims it with a unique
+nonce and Kubernetes UID/resource-version preconditions. Only an explicit quota
+or throttle rejection returns it to queued. A new runner may resume queued work;
+an absent Job after an ambiguous create remains uncertain and is never reposted.
+Lost metadata replies are reconciled by reading their recorded state. The V3
+step action rejects older runners during mixed-version updates; attempts without
+this record retain conservative recovery. This does not resolve every late
+cancel-versus-create race or prove installed end-to-end recovery by itself.
+
 Local integration tests may replace GitHub delivery and public publication
 endpoints with explicit fixtures, while exercising the real engine, database,
 worker and isolated local rollout. They do not prove cloud identity federation,
