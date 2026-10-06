@@ -77,12 +77,12 @@ in the chain.** A chain that starts at a vendor is a decision somebody made
 rather than a fallback, and refusing it there would break every deliberately-paid
 policy. See [Layer 4b](#layer-4b--the-ceiling-gates-the-federation-hop-memql5096).
 
-Conversational lookups use the `fast` routing level, selected from the owned
-run’s persisted classification on the executing replica. Other work keeps its
-existing level; explicit step overrides and routing rules still apply. Capability
-discovery includes complete small argument contracts, avoiding another model
-call just to ask how to invoke a returned query. Large contracts remain available
-by exact name so discovery cannot fill the model’s context.
+Capability discovery includes complete small argument contracts, avoiding
+another model call just to ask how to invoke a returned query. Large contracts
+remain available by exact name so discovery cannot fill the model’s context.
+A lookup classification does not automatically lower the execution reasoning
+level: choosing tools and interpreting evidence still require a capable model.
+Routing policies and explicit step overrides continue to decide that route.
 
 A non-quick classifier response with missing or oversized acknowledgment prose
 gets at most one `workAcknowledgement` call at `fast`, bounded to 15 seconds and

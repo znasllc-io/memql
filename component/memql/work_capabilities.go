@@ -184,7 +184,7 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 		catalog = append(catalog, map[string]any{"concept": concept, "reads": reads, "readCount": count})
 	}
 	sort.Slice(catalog, func(i, j int) bool { return catalog[i]["concept"].(string) < catalog[j]["concept"].(string) })
-	raw, _ := json.Marshal(map[string]any{"capabilities": matches, "concepts": catalog, "total": total, "truncated": total > len(matches), "note": "Read contracts describe available data, not proof that rows exist. Returned arguments are complete and ready to use; an empty list means no arguments. Only when argumentsOmitted is true, search that qualified name exactly for its full contract. Use recallMemory for prior conversations and preferences. Empty semantic results do not prove absence."})
+	raw, _ := json.Marshal(map[string]any{"capabilities": matches, "concepts": catalog, "matchedCapabilityCount": total, "truncated": total > len(matches), "note": "Counts here describe capability definitions, never stored records. Read contracts describe available data, not proof that rows exist. Returned arguments are complete and ready to use; an empty list means no arguments. Only when argumentsOmitted is true, search that qualified name exactly for its full contract. Use recallMemory for prior conversations and preferences. Empty semantic results do not prove absence."})
 	return []memorynodes.MemoryNode{{ID: "capabilities", Payload: raw}}, nil
 }
 

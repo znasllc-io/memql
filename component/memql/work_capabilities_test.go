@@ -33,9 +33,12 @@ func TestCapabilityShortlistIncludesUsableContractsWithoutUnboundedContext(t *te
 		nodes, err := e.workCapabilitiesBuiltin(ctx, map[string]any{"search": search}, 0)
 		require.NoError(t, err)
 		var result struct {
-			Capabilities []map[string]any `json:"capabilities"`
+			Capabilities           []map[string]any `json:"capabilities"`
+			MatchedCapabilityCount int              `json:"matchedCapabilityCount"`
 		}
 		require.NoError(t, json.Unmarshal(nodes[0].Payload, &result))
+		require.GreaterOrEqual(t, result.MatchedCapabilityCount, len(result.Capabilities))
+		require.NotContains(t, string(nodes[0].Payload), `"total":`)
 		return result.Capabilities
 	}
 	shortlist := discover("records")
