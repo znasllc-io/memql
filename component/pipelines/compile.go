@@ -137,7 +137,8 @@ func Compile(spec *Spec, in CompileInput) (Plan, *Refusal) {
 			}
 		}
 		previous = make([]string, 0, len(planned.Steps))
-		for _, step := range planned.Steps {
+		for i, step := range planned.Steps {
+			planned.Steps[i].RunAfterFailure = stage.RunAfterFailure
 			previous = append(previous, step.Key)
 		}
 		plan.Stages = append(plan.Stages, planned)

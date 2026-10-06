@@ -256,6 +256,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 	}
 
 	fullStages := []string{manifestStageChecks, manifestStageTests}
+	analysisStages := append(slices.Clone(fullStages), "analysis")
 	pullRequestStages := []string{manifestStageChecks, manifestStageTests, manifestStageGates}
 	every := []string{manifestStepGoChecks, manifestStepPathRouting,
 		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks,
@@ -275,11 +276,11 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		// A full run tests every package in go-tests, the gate packages among
 		// them, so the gates stage is absent, as ci.yml runs that step only on a
 		// pull request.
-		{name: "a push to the default branch", event: pipelines.EventPush, stages: fullStages,
+		{name: "a push to the default branch", event: pipelines.EventPush, stages: analysisStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
 		{name: "a merge group", event: pipelines.EventMergeGroup, stages: fullStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
-		{name: "a release", event: pipelines.EventRelease, stages: fullStages,
+		{name: "a release", event: pipelines.EventRelease, stages: analysisStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
 		// The compiler of this very manifest: Go source only, and the db-gated
 		// driver (component/pipelinerun) imports it, so the change reaches both
@@ -333,6 +334,9 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			byName := map[string][]pipelines.Step{}
 			for _, step := range plan.Steps() {
 				byName[step.Name] = append(byName[step.Name], step)
+				if step.RunAfterFailure != (step.Stage == "analysis") {
+					t.Errorf("failure policy was lost or leaked to another stage: %+v", step)
+				}
 				if step.Kind != pipelines.StepCommand || step.Image != expectedEngineStepImage(spec, step.Name) {
 					t.Errorf("step %s is a %s step in %q; every step is a command in the toolchain image %q",
 						step.Key, step.Kind, step.Image, spec.Image)
@@ -668,4 +672,19 @@ func expectedEngineStepImage(spec *pipelines.Spec, name string) string {
 		return declared.Image
 	}
 	return spec.Image
+}
+
+func TestEngineSecurityAnalysisKeepsLanguagesAndInventories(t *testing.T) {
+	spec := engineManifest(t).Pipeline
+	for name, command := range map[string]string{
+		"codeql-go":         "--language=go",
+		"codeql-javascript": "--language=javascript-typescript",
+		"codeql-python":     "--language=python",
+		"sbom":              "scripts/ci/sbom.py",
+	} {
+		step, ok := engineDeclaredStep(spec, name)
+		if !ok || !strings.Contains(step.Run, command) || len(step.Artifacts) == 0 {
+			t.Fatalf("%s lost its analysis or retained reports: %+v", name, step)
+		}
+	}
 }

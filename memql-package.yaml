@@ -10,7 +10,7 @@
 # The command parity gates compare the retained GitHub lanes with this package.
 # Working legacy workflows remain until equivalent local and production evidence
 # and retirement gates are satisfied. Remaining gaps include image builds,
-# installed-cluster lifecycle tests, editor host matrices, CodeQL/SARIF, release
+# installed-cluster lifecycle tests, editor host matrices, SARIF publication, release
 # publication and scheduled scans. No missing lane is considered passed.
 formatVersion: 1
 name: memql
@@ -21,8 +21,8 @@ pipeline:
   # as uid 1000. Pinned by the digest build-toolchain-image.yml's run on main
   # printed for version 1.1.0-arm64 (run 37416894805); a rebuild takes a new version
   # and a new pin, and the manifest's test fails on any reference that is not a
-  # digest of this repository. Fleet containers pull images with no registry
-  # credential, so this package and the Postgres one must be public.
+  # digest of this repository. These rehearsal images are public; private
+  # image access must use the Workbench registry credential contract.
   image: ghcr.io/znasllc-io/memql-toolchain@sha256:7a457e4d96d2e7f03032a686a65d5447c3b6a78987c19d5622bdbfdc917e11fc
   services:
     # TimescaleDB + pgvector: the mirror ci.yml's db-tests lane runs, at the same
@@ -468,3 +468,42 @@ pipeline:
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+
+    # Analysis records findings independently of build/test success. It runs on
+    # main pushes and release qualification, including their re-runs. The
+    # scheduler owns periodic full runs; a skipped scan is never a clean scan.
+    - name: analysis
+      on: [push, release]
+      runAfterFailure: true
+      steps:
+        - name: codeql-go
+          placement: cluster
+          timeout: 60m
+          artifacts: [.memql-security/codeql-go]
+          run: |
+            set -eu
+            python3 scripts/ci/codeql-scan.py --language=go --ram=3072 --output-dir=.memql-security/codeql-go
+        - name: codeql-javascript
+          placement: cluster
+          timeout: 45m
+          artifacts: [.memql-security/codeql-javascript]
+          run: |
+            set -eu
+            python3 scripts/ci/codeql-scan.py --language=javascript-typescript --ram=3072 --output-dir=.memql-security/codeql-javascript
+        - name: codeql-python
+          placement: cluster
+          timeout: 45m
+          artifacts: [.memql-security/codeql-python]
+          run: |
+            set -eu
+            python3 scripts/ci/codeql-scan.py --language=python --ram=3072 --output-dir=.memql-security/codeql-python
+        - name: sbom
+          placement: cluster
+          timeout: 60m
+          artifacts: [.memql-security/sbom]
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
+            go install github.com/anchore/syft/cmd/syft@v1.54.1
+            python3 scripts/ci/sbom.py --output-dir=.memql-security/sbom

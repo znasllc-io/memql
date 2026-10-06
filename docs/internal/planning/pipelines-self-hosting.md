@@ -114,12 +114,13 @@ The October 6 inventory found these gaps; definitions are not execution proof:
 
 | Coverage | MemQL definition / remaining work |
 | --- | --- |
-| Engine build/vet, environment and DSL validation, generated contracts | Core `go-checks` exists; add the five tagged build/vet variants and cluster-E2E compilation. |
-| Unit and database suites | Four ordinary shards and five database shards exist; add all seven node-tag test variants. Database-required execution must fail on a missing database. |
+| Engine build/vet, environment and DSL validation, generated contracts | Core checks, five tagged build/vet variants and both cluster-E2E compilation variants are declared in the package (PR #5869). Installed Workbench execution remains to be proved. |
+| Unit and database suites | Four ordinary shards, five database shards and all seven node-tag test variants are declared. Database-required execution must fail on a missing database. |
 | Fuzz, conformance, differential, proving | Definitions exist; reproduce triggers, pinned tool versions, seeds and artifacts. Microbenchmarks are not capacity tests. |
-| Module and shell boundaries | Port standalone `GOWORK=off` build/vet/tidy checks and Bash 3.2 compatibility. |
+| Module and shell boundaries | Standalone module build/vet/tidy and Bash 3.2 lanes are declared. Local tool runs covered all 53 tracked modules and the capability scripts. |
 | OS, SDK, Viewkit and editors | Initial OS/TypeScript definitions exist; port OS Docker-stage validation and VS Code/productivity extension packaging and Linux/macOS desktop/web host matrices. Native work remains explicit and consented. |
-| Secrets and vulnerabilities | Port Gitleaks including full-history scheduled scans, all-module govulncheck, CodeQL analysis/upload, SBOM generation and Scorecard. These security lanes are absent from the current package. |
+| Secrets and vulnerabilities | Gitleaks, workspace govulncheck and all-lockfile npm audits are declared and passed local tool runs. Standalone three-language CodeQL and complete Go/npm SBOM lanes are being added. SARIF publication, Scorecard and periodic scheduling remain open. |
+| Code Quality | The enabled GitHub product uses Actions and has license/AI-credit charges. Inventory and replace its deterministic Go, JavaScript/TypeScript and Python rules. Its AI findings are enabled on push; proprietary AI findings/autofixes are not replaced by the CodeQL security suite. Do not describe that suite as complete Code Quality parity. |
 | Additional delivery security | Add dependency/container vulnerability checks and verified provenance/signatures with explicit blocking policy. These extend coverage; they were not existing dedicated workflow lanes. |
 | Build and release | Replace seven engine-image builds, database/toolchain images, fixture mirrors, SDK/editor/docs publication and the legacy tag-triggered release cascade. |
 | Companion repositories | Port Cockpit, project-template and instance checks and release paths independently; their current package declarations do not provide equivalent CI. |

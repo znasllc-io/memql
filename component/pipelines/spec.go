@@ -46,7 +46,10 @@ type Select struct {
 // StageSpec is one stage. Stages run one after another in the order written;
 // the steps inside a stage run at once (D7).
 type StageSpec struct {
-	Name string `yaml:"name" json:"name"`
+	// RunAfterFailure still runs this stage when an earlier stage failed. It
+	// does not erase failures or bypass cancellation, authorization or leases.
+	RunAfterFailure bool   `yaml:"runAfterFailure,omitempty" json:"runAfterFailure,omitempty"`
+	Name            string `yaml:"name" json:"name"`
 	// Needs names earlier stages this one depends on.
 	Needs []string `yaml:"needs,omitempty" json:"needs,omitempty"`
 	// On restricts the stage to events (pull_request, merge_group, push,

@@ -100,10 +100,13 @@ type Skip struct {
 
 // Step is one compiled step: one v1:work:step row and one Execute call.
 type Step struct {
-	MemoryMiB int    `json:"memoryMiB,omitempty"`
-	Placement string `json:"placement,omitempty"`
-	Execution string `json:"execution,omitempty"`
-	Platform  string `json:"platform,omitempty"`
+	MemoryMiB int `json:"memoryMiB,omitempty"`
+	// RunAfterFailure is inherited from the stage and bound into the durable
+	// execution fingerprint, so recovery cannot change failure behavior.
+	RunAfterFailure bool   `json:"runAfterFailure,omitempty"`
+	Placement       string `json:"placement,omitempty"`
+	Execution       string `json:"execution,omitempty"`
+	Platform        string `json:"platform,omitempty"`
 	// Key is the v1:work:step key, StepKey(stage, step): "stage.step", or
 	// "stage.step#i" for the i-th shard.
 	Key   string   `json:"key"`

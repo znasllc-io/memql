@@ -924,8 +924,8 @@ func (dr *runDriver) buildTracks(plan pipelines.Plan) {
 // execute runs the stages strictly in the order written (decision 2): a
 // stage's steps at once, at most maxConcurrentSteps in flight; the first
 // stage that fails blocks every later stage's steps (pipeline_stage_blocked)
-// -- except a notify stage's, which runs: announcing the failure is what it
-// is for (D16). The block keeps naming the stage that failed first. A cancel
+// -- except notify stages and stages declaring runAfterFailure. The block
+// keeps naming the stage that failed first. A cancel
 // stops it between stages and inside one, a notify stage's included: one the
 // cancel reaches before it hands its notification over sends nothing. A lost
 // lease stops it with nothing more written.
@@ -938,7 +938,7 @@ func (dr *runDriver) execute(ctx context.Context) {
 		if dr.lease.isCancelled() {
 			break
 		}
-		if blockedBy != "" && !announces(st) {
+		if blockedBy != "" && !continuesAfterFailure(st) {
 			for _, t := range st.tracks {
 				if !t.finished() {
 					dr.settle(ctx, t, skipReceipt(pipelines.CodeStageBlocked, "Not run: stage "+blockedBy+" failed."))
@@ -1005,14 +1005,14 @@ func stageFailed(st stageTracks) bool {
 	return false
 }
 
-// announces reports a notify stage: one whose every step is a notify step,
-// which runs after an earlier stage failed rather than being blocked by it.
-func announces(st stageTracks) bool {
+// continuesAfterFailure requires every step to carry the stage declaration
+// (or be a notification). These steps still observe cancellation and leases.
+func continuesAfterFailure(st stageTracks) bool {
 	if len(st.tracks) == 0 {
 		return false
 	}
 	for _, t := range st.tracks {
-		if t.step.Kind != pipelines.StepNotify {
+		if t.step.Kind != pipelines.StepNotify && !t.step.RunAfterFailure {
 			return false
 		}
 	}
