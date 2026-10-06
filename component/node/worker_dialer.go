@@ -344,6 +344,25 @@ func (wd *WorkerDialer) SetDialTypes(types ...NodeType) {
 	wd.dialTypes = append([]NodeType(nil), types...)
 }
 
+// IncludeDialTypes adds routes to a shared, narrowed dialer without dropping
+// its existing routes. An unrestricted dialer already includes every type.
+// Like SetDialTypes, call this during wiring, before Start.
+func (wd *WorkerDialer) IncludeDialTypes(types ...NodeType) {
+	if wd == nil {
+		return
+	}
+	wd.mu.Lock()
+	defer wd.mu.Unlock()
+	if len(wd.dialTypes) == 0 {
+		return
+	}
+	for _, typ := range types {
+		if !slices.Contains(wd.dialTypes, typ) {
+			wd.dialTypes = append(wd.dialTypes, typ)
+		}
+	}
+}
+
 // allowDialType reports whether this dialer is configured to dial the
 // given worker type. Callers hold no locks.
 func (wd *WorkerDialer) allowDialType(t NodeType) bool {

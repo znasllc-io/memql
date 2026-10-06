@@ -34,6 +34,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/component/workjournal"
 )
 
@@ -43,6 +44,9 @@ type Deps struct {
 	Store  Store
 	GitHub GitHub
 	Gate   Gate
+	// RunnerReadiness reads remote workbench evidence on front-door nodes too.
+	// Reporting does not register a step executor or make this node a driver.
+	RunnerReadiness pipelines.ReadinessReporter
 	// Secrets resolves a globalSecret value for the driver (Task 10b).
 	Secrets Secrets
 	// Journal writes a pipeline run's v1:work goal, run and steps (Task 10b).

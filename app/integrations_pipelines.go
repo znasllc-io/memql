@@ -10,6 +10,7 @@ import (
 	"github.com/znasllc-io/memql/component/identity/githubconnect"
 	"github.com/znasllc-io/memql/component/pipelinerun"
 	"github.com/znasllc-io/memql/component/workjournal"
+	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 )
 
 // integrations_pipelines.go hands the pipelines plug-in (epic memql#5477) the
@@ -81,6 +82,16 @@ func (a *App) wirePipelines() {
 			)
 		}
 	})
+}
+
+// The OS asks the BFF for readiness, while only agents register a step
+// executor. Reuse the authenticated workbench route for this read without
+// enabling pipeline execution on the front door.
+func (a *App) wirePipelinesReadiness(forwarder pipelinesteps.Forwarder) {
+	if integ := a.lookupPipelinesIntegration(); integ != nil {
+		reporter := pipelinesteps.NewExecutor(pipelinesteps.ConfigFromEnv(nil), forwarder, nil, a.Logger)
+		integ.Configure(func(d *pipelinerun.Deps) { d.RunnerReadiness = reporter })
+	}
 }
 
 // pipelinesOSOrigin is MemQL OS's origin for this cluster, the base of a check

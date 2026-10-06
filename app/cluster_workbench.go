@@ -93,10 +93,11 @@ func (a *App) wireWorkbenchForwarding(
 		// loops racing over one connection set and two identically-named
 		// event-bus subscriptions behind them.
 		//
-		// The agent has no dialer at this point (wireWorkerForwarding builds
-		// its own, later), so it still gets one here, narrowed to workbench
-		// peers as before.
+		// Fleet forwarding runs first on agents and narrows their dialer to
+		// sibling agents. Add workbenches to that set; reusing only its response
+		// sink leaves every workbench undialed and eventually reaped as gossip.
 		if existing := a.existingWorkerDialer(); existing != nil {
+			existing.IncludeDialTypes(node.NodeTypeWorkbench)
 			existing.SetWorkbenchForwardResponseSink(forwarder)
 		} else if dialer := node.NewWorkerDialer(
 			nodeIdentity,
@@ -112,6 +113,7 @@ func (a *App) wireWorkbenchForwarding(
 		}
 		if integ != nil {
 			integ.SetForwardRouter(forwarder)
+			a.wirePipelinesReadiness(forwarder)
 			a.Logger.Info("workbench forwarding: agent will dispatch to remote workbench peers")
 		} else {
 			a.Logger.Error("workbench forwarding: MEMQL_WORKBENCH_REMOTE is set but the workbench " +
