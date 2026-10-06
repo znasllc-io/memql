@@ -218,7 +218,7 @@ secrets:
     scope: global
     kind: integration
     optional: true
-    description: "Fine-grained GitHub token the owner-only release-cut button uses to tag main and publish the GitHub Release that starts the image-build cascade. Wants Contents: read/write on the ONE repository named by MEMQL_RELEASE_REPO, and nothing else -- Pull requests: read/write is needed only for the optional VS Code pin-bump follow-on, whose failure is recorded as a note and never fails a cut. Absent means the release interface renders a setup step instead of a button; every refusal about it names THIS VARIABLE and never the value. Bound the blast radius further with a GitHub tag-protection rule for v*. See docs/public/operate/release-cutting.md."
+    description: "Fine-grained GitHub token the owner-only release-cut button uses to tag main and publish the GitHub Release that starts the image-build cascade. Wants Contents: read/write on the ONE repository named by MEMQL_RELEASE_REPO, and nothing else -- Pull requests: read/write is needed only for the optional VS Code pin-bump follow-on, whose failure is recorded as a note and never fails a cut. Optional when the configured GitHub App has Contents: read/write on the release repository: each owner call then mints a short-lived token narrowed to that repository. An explicit token takes precedence. Credential values are never returned. Bound the blast radius further with a GitHub tag-protection rule for v*. See docs/public/operate/release-cutting.md."
 
 variables:
 
