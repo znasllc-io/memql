@@ -4,36 +4,14 @@
 # This repository is a source like any other: a pipeline and no apps (design
 # record D12). A run reads this file at its own commit; the seam
 # (component/pipelines, component/pipelinerun) compiles the pipeline: block into
-# steps. During the Cockpit evaluation (#5844), every step runs in a native
-# Linux ARM64 container on the owner's fleet, with isolated caches and services.
+# steps. Portable steps use isolated Workbench Jobs; native host work is declared
+# explicitly in separate steps. Local ARM64 pins do not prove amd64 releases.
 #
-# WHAT IT RUNS IS WHAT CI RUNS. Each step is a lane of .github/workflows/ci.yml,
-# or a step of one, with that lane's commands as they stood when copied, and the
-# comment on each step names it: the Go checks and gates, the Go tests, the
-# db-gated tests and the OS shell's checks. The other lanes stay ci.yml's:
-#
-#   - os-checks' image build, bash32-smoke and the VS Code and productivity host
-#     lanes cannot run here: they need Docker or a display.
-#   - The node-tag, cluster-e2e and per-module passes stay ci.yml's: their tag
-#     and module lists live there, held by its own gates, and a copy here would
-#     be held by nothing.
-#   - The VS Code extension packaging lane is not carried here yet.
-# The SDK, view kit, MCP conformance and proving lanes run here as well. Their
-# command parity is checked in memql_pipeline_portable_coverage_test.go. Database lanes
-# require a reachable Postgres; a skipped database case is not delivery proof.
-#
-# EXPLICIT FLEET PLACEMENT. Connect with compute: cluster_and_fleet and enable
-# pipelines for this repository in Cockpit's local policy. No cluster Job is
-# used during the evaluation, and container commands receive no host tools.
-#
-# WHAT HOLDS IT TO CI.YML. memql_package_manifest_test.go compiles this file the
-# way a run does -- for a push, a merge group, a release and pull requests -- and
-# holds its selection and service copies to their originals: select.dbGated to
-# scripts/ci/db-gated-packages.sh, the gate-inputs packages to ci.yml's
-# GATE_PACKAGES, and the postgres service to ci.yml's db-tests service. The
-# portable coverage test also holds SDK/view-kit commands, the MCP test command
-# and proving's failure/evidence checks. The other commands, bucket globs,
-# shard counts and fuzz targets remain hand copies that need review together.
+# The command parity gates compare the retained GitHub lanes with this package.
+# Working legacy workflows remain until equivalent local and production evidence
+# and retirement gates are satisfied. Remaining gaps include image builds,
+# installed-cluster lifecycle tests, editor host matrices, CodeQL/SARIF, release
+# publication and scheduled scans. No missing lane is considered passed.
 formatVersion: 1
 name: memql
 pipeline:
@@ -65,9 +43,8 @@ pipeline:
       # reach is up. ci.yml's lanes wait on the same TCP check before their
       # first query.
       ready: pg_isready -h localhost -U memql
-  # Configure Cockpit's pipelines.container_memory_mib to at least 4096 for
-  # this full suite: the Sense stress case and architecture extraction exceed
-  # its 2048 MiB default. Go steps also serialize compilation and collect
+  # Reserve at least 4096 MiB for a substantial Workbench step: the Sense
+  # stress case and architecture extraction exceed smaller limits. Go steps also serialize compilation and collect
   # earlier to keep cold-cache compiler pressure bounded.
   caches: [go, npm]
   select:
@@ -144,7 +121,7 @@ pipeline:
         # names no base commit, so memqlbreaking-base.sh compares against the
         # committed baseline, and says so.
         - name: go-checks
-          placement: fleet
+          placement: cluster
           timeout: 30m
           run: |
             set -eu
@@ -162,12 +139,129 @@ pipeline:
         # ci.yml path-routing: the path-routing and CI-configuration guards, on
         # every change.
         - name: path-routing
-          placement: fleet
+          placement: cluster
           run: |
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
             go test -count=1 -timeout=300s ./scripts/ci/ ./scripts/dev/
+        - name: build-identity
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go build -tags identity github.com/znasllc-io/memql/...
+            go vet -tags identity github.com/znasllc-io/memql/...
+        - name: build-mcp
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go build -tags mcp github.com/znasllc-io/memql/...
+            go vet -tags mcp github.com/znasllc-io/memql/...
+        - name: build-agent
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go build -tags agent github.com/znasllc-io/memql/...
+            go vet -tags agent github.com/znasllc-io/memql/...
+        - name: build-planner
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go build -tags planner github.com/znasllc-io/memql/...
+            go vet -tags planner github.com/znasllc-io/memql/...
+        - name: build-workbench
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go build -tags workbench github.com/znasllc-io/memql/...
+            go vet -tags workbench github.com/znasllc-io/memql/...
+        - name: build-clustere2e
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            export GOWORK=off
+            go vet -tags clustere2e ./test/clustere2e/
+            go test -tags clustere2e -c -o /dev/null ./test/clustere2e/
+            go vet -tags clustere2e,agent ./test/clustere2e/
+            go test -tags clustere2e,agent -c -o /dev/null ./test/clustere2e/
+        - name: module-boundaries
+          placement: cluster
+          timeout: 60m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            bash scripts/ci/module-integrity.sh
+        - name: bash32-smoke
+          placement: cluster
+          timeout: 10m
+          image: docker.io/library/bash@sha256:3a13e5da38baa575985778cd09ce8ac736d4b4dafc91a430e71271f6e5311b89
+          caches: []
+          run: |
+            set -eu
+            bash ./scripts/ci/bash32-smoke.sh
+        # Blocking scans: reports survive failures as ordinary step artifacts.
+        # Full-history scans fetch only this candidate's ancestry plus tags.
+        - name: secret-scan
+          placement: cluster
+          timeout: 30m
+          artifacts: [.memql-security/gitleaks]
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            mkdir -p .memql-security/gitleaks
+            go install github.com/zricethezav/gitleaks/v8@v8.30.1
+            if [ "$MEMQL_EVENT" = pull_request ]; then
+              gitleaks dir . --no-banner --redact=100 --report-format=json --report-path=.memql-security/gitleaks/findings.json
+            else
+              if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+                git fetch --unshallow --tags "https://github.com/${MEMQL_REPOSITORY}.git" "$MEMQL_SHA"
+              else
+                git fetch --tags "https://github.com/${MEMQL_REPOSITORY}.git" "$MEMQL_SHA"
+              fi
+              test "$(git rev-parse HEAD)" = "$MEMQL_SHA"
+              gitleaks git . --no-banner --redact=100 --log-opts="HEAD --tags" --report-format=json --report-path=.memql-security/gitleaks/findings.json
+            fi
+        - name: go-vulnerabilities
+          placement: cluster
+          timeout: 30m
+          artifacts: [.memql-security/go]
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            mkdir -p .memql-security/go
+            go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+            govulncheck -version > .memql-security/go/scanner.txt
+            status=0
+            govulncheck github.com/znasllc-io/memql/... > .memql-security/go/findings.txt 2> .memql-security/go/errors.txt || status=$?
+            cat .memql-security/go/findings.txt .memql-security/go/errors.txt
+            test "$status" -eq 0
+        - name: npm-vulnerabilities
+          placement: cluster
+          timeout: 30m
+          artifacts: [.memql-security/npm]
+          run: |
+            set -eu
+            python3 scripts/ci/npm-audit.py --report-dir=.memql-security/npm
     - name: tests
       steps:
         # ci.yml go-tests: every package outside the db-gated trees that the
@@ -176,7 +270,7 @@ pipeline:
         # package: a step cannot give that package a flag of its own, and its
         # gates read `git ls-files`, a set no test cache sees.
         - name: go-tests
-          placement: fleet
+          placement: cluster
           packages: affected
           only: not-db-gated
           shards: 4
@@ -194,7 +288,7 @@ pipeline:
         # here runs under them; MEMQL_REQUIRE_DB=1 makes a database the tests
         # cannot reach a failure, not a step of skips.
         - name: db-tests
-          placement: fleet
+          placement: cluster
           packages: affected
           only: db-gated
           shards: 5
@@ -217,7 +311,7 @@ pipeline:
         # holds no test behind it. None of the three packages imports
         # component/identity/web, so it needs no stylesheet.
         - name: fuzz
-          placement: fleet
+          placement: cluster
           run: |
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
@@ -230,7 +324,7 @@ pipeline:
         # a step's pod has no Docker daemon. The install is retried as that lane
         # retries it; the checks are not.
         - name: os-checks
-          placement: fleet
+          placement: cluster
           artifacts: [clients/os/dist]
           when: { bucket: os }
           run: |
@@ -240,21 +334,21 @@ pipeline:
             make os-test
             make os-build
         - name: sdk-ts-typecheck
-          placement: fleet
+          placement: cluster
           run: |
             set -eu
             scripts/ci/retry.sh -- make sdk-ts-install
             make sdk-ts-typecheck
             make sdk-ts-test
         - name: viewkit-checks
-          placement: fleet
+          placement: cluster
           run: |
             set -eu
             scripts/ci/retry.sh -- make viewkit-install
             make viewkit-typecheck
             make viewkit-test
         - name: mcp-conformance
-          placement: fleet
+          placement: cluster
           services: [postgres]
           timeout: 30m
           run: |
@@ -272,7 +366,7 @@ pipeline:
             export MEMQL_DIFFERENTIAL_REQUIRED=1
             go test -count=1 -timeout=600s -v ./test/conformance/...
         - name: proving
-          placement: fleet
+          placement: cluster
           services: [postgres]
           timeout: 30m
           artifacts: [.memql-proving]
@@ -293,13 +387,69 @@ pipeline:
             test "$(wc -l < .memql-proving/spec.json)" -eq 1
             jq -e '.capability == "bench.run" and (.params | length) > 0' .memql-proving/spec.json > /dev/null
             status=0
-            go run ./cmd/memql-bench --do=gate --runner=cockpit-linux-arm64 > .memql-proving/envelope.json 2> .memql-proving/gate.txt || status=$?
+            go run ./cmd/memql-bench --do=gate --runner=workbench-linux-arm64 > .memql-proving/envelope.json 2> .memql-proving/gate.txt || status=$?
             cat .memql-proving/gate.txt
             test "$(wc -l < .memql-proving/envelope.json)" -eq 1
             jq -e '.ok == true' .memql-proving/envelope.json > /dev/null
             test "$status" -eq 0
             go run ./cmd/memql-bench --do=scorecard --check > .memql-proving/scorecard.json
             jq -e '.ok == true' .memql-proving/scorecard.json > /dev/null
+        - name: test-agent
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -tags agent -timeout=300s ./app/ ./integrations/agent/ ./integrations/agent/worker/ ./integrations/pipelinesteps/ ./component/node/
+        - name: test-bff
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -tags bff -timeout=300s ./app/ ./component/server/ ./component/node/
+        - name: test-edge
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -tags edge -timeout=300s ./app/ ./component/server/ ./component/node/
+        - name: test-identity
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -tags identity -timeout=300s ./app/ ./component/node/
+        - name: test-mcp
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -tags mcp -timeout=300s ./app/ ./component/mcp/ ./component/node/
+        - name: test-planner
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -tags planner -timeout=300s ./app/ ./component/node/
+        - name: test-workbench
+          placement: cluster
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            go test -tags workbench -timeout=300s ./app/ ./component/node/
     # ci.yml go-checks' gate-inputs step, which ci.yml runs on a pull request
     # only: a full run tests every package in go-tests, these among them, so
     # this stage is planned for a pull request alone. The step runs when the
@@ -311,7 +461,7 @@ pipeline:
       on: [pull_request]
       steps:
         - name: gate-inputs
-          placement: fleet
+          placement: cluster
           when: { bucket: gates }
           run: |
             set -eu

@@ -333,12 +333,12 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			byName := map[string][]pipelines.Step{}
 			for _, step := range plan.Steps() {
 				byName[step.Name] = append(byName[step.Name], step)
-				if step.Kind != pipelines.StepCommand || step.Image != spec.Image {
+				if step.Kind != pipelines.StepCommand || step.Image != expectedEngineStepImage(spec, step.Name) {
 					t.Errorf("step %s is a %s step in %q; every step is a command in the toolchain image %q",
 						step.Key, step.Kind, step.Image, spec.Image)
 				}
-				if step.Placement != pipelines.PlacementFleet || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/arm64" {
-					t.Errorf("step %s must use a native Linux ARM64 fleet container: %+v", step.Key, step)
+				if step.Placement != pipelines.PlacementCluster || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/arm64" {
+					t.Errorf("step %s must use a Linux ARM64 Workbench container: %+v", step.Key, step)
 				}
 				if len(step.Needs) > 0 {
 					t.Errorf("container step %s asks for host needs %v", step.Key, step.Needs)
@@ -646,14 +646,26 @@ func engineSetMinus(a, b []string) []string {
 	return out
 }
 
-// No implicit host consent or accidental cluster capacity during the trial.
-func TestEngineManifestRequiresExplicitFleetConsent(t *testing.T) {
+// Portable checks must work with Cockpit disconnected and without host consent.
+func TestEngineManifestRunsWithoutFleetConsent(t *testing.T) {
 	spec := engineManifest(t).Pipeline
 	refusal := pipelines.Consent(spec, pipelines.ComputeCluster, nil)
-	if refusal == nil || refusal.Code != pipelines.CodeFleetNotConsented {
-		t.Fatalf("cluster-only connection must refuse the fleet manifest: %v", refusal)
+	if refusal != nil {
+		t.Fatalf("portable checks require native host permission: %v", refusal)
 	}
-	if refusal := pipelines.Consent(spec, pipelines.ComputeClusterAndFleet, nil); refusal != nil {
-		t.Fatalf("explicit fleet consent refused: %v", refusal)
+	for _, stage := range spec.Stages {
+		for _, step := range stage.Steps {
+			if pipelines.PlacementOf(step) != pipelines.PlacementCluster {
+				t.Errorf("portable check %s requires a host", step.Name)
+			}
+		}
 	}
+}
+
+func expectedEngineStepImage(spec *pipelines.Spec, name string) string {
+	declared, _ := engineDeclaredStep(spec, name)
+	if declared.Image != "" {
+		return declared.Image
+	}
+	return spec.Image
 }

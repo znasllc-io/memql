@@ -1,6 +1,7 @@
 package pipelines
 
 import (
+	"encoding/json"
 	"slices"
 	"testing"
 )
@@ -102,5 +103,40 @@ func TestRuntimeContractRefusesAmbiguity(t *testing.T) {
 		if refusal := Validate(spec); refusal == nil {
 			t.Fatal("native step accepted unimplemented container state")
 		}
+	}
+}
+
+// Distinct toolchains are useful outside CI too: a data import and its report
+// can use different containers without splitting the workflow into pipelines.
+func TestStepImageOverrideSurvivesPlanRoundTrip(t *testing.T) {
+	spec := &Spec{Image: "default:one", Stages: []StageSpec{{Name: "process", Steps: []StepSpec{
+		{Name: "import", Run: "import-data"},
+		{Name: "report", Run: "render-report", Image: "report:two"},
+	}}}}
+	plan, refusal := Compile(spec, CompileInput{Mode: ModeFull, Event: EventPush, Compute: ComputeCluster})
+	if refusal != nil {
+		t.Fatal(refusal)
+	}
+	data, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored Plan
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatal(err)
+	}
+	steps := restored.Steps()
+	if steps[0].Image != "default:one" || steps[1].Image != "report:two" || steps[1].RequiresFleet() {
+		t.Fatalf("step image/placement lost across replicas: %+v", steps)
+	}
+	for _, image := range []string{" ", "image\nname"} {
+		spec.Stages[0].Steps[1].Image = image
+		if Validate(spec) == nil {
+			t.Errorf("accepted invalid image %q", image)
+		}
+	}
+	spec.Stages[0].Steps[1] = StepSpec{Name: "native", Run: "report", Execution: ExecutionNative, Platform: "darwin/arm64", Image: "report:two"}
+	if Validate(spec) == nil {
+		t.Fatal("native step silently ignored its explicit image")
 	}
 }

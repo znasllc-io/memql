@@ -66,6 +66,8 @@ type StageSpec struct {
 // the same contract as a deployable's build.command. There is no step
 // language.
 type StepSpec struct {
+	// Image overrides the pipeline's container image for this step only.
+	Image string `yaml:"image,omitempty" json:"image,omitempty"`
 	// Placement selects cluster or fleet; omitted follows native execution or host needs.
 	Placement string `yaml:"placement,omitempty" json:"placement,omitempty"`
 	// Execution defaults to container. Native explicitly requests a host toolchain.
