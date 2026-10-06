@@ -78,7 +78,11 @@ rather than a fallback, and refusing it there would break every deliberately-pai
 policy. See [Layer 4b](#layer-4b--the-ceiling-gates-the-federation-hop-memql5096).
 
 Capability discovery includes complete small argument contracts, avoiding
-another model call just to ask how to invoke a returned query. Large contracts
+another model call just to ask how to invoke a returned query. For an owned
+lookup, the executing replica reads its durable classification and supplies a
+bounded authorized shortlist before inference, avoiding a model call for initial
+discovery. This supplies contracts only: current records still require execution,
+and unavailable or oversized discovery leaves the ordinary tool available. Large contracts
 remain available by exact name so discovery cannot fill the model’s context.
 A lookup classification does not automatically lower the execution reasoning
 level: choosing tools and interpreting evidence still require a capable model.

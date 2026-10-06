@@ -21,11 +21,15 @@ type workPromptEngine struct {
 	registryEngine
 	prompts *memql.PromptRegistry
 	viewer  map[string]any
+	execute func(context.Context, string) (any, error)
 }
 
-func (e *workPromptEngine) Execute(_ context.Context, query string) (any, error) {
+func (e *workPromptEngine) Execute(ctx context.Context, query string) (any, error) {
 	if query == "builtin work.workViewerContext()" && e.viewer != nil {
 		return []map[string]any{e.viewer}, nil
+	}
+	if e.execute != nil {
+		return e.execute(ctx, query)
 	}
 	return nil, nil
 }
