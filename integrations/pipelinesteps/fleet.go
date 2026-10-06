@@ -5,7 +5,6 @@ package pipelinesteps
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -23,6 +22,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	pl "github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/core/id"
 	worker "github.com/znasllc-io/memql/integrations/agent/worker"
 )
 
@@ -335,8 +335,7 @@ func fleetArgs(run StepRun, token string) map[string]any {
 		// The worker also binds this scope to its local cluster enrollment,
 		// clone host, platform and image. A pull request must never write the
 		// cache later consumed by a trusted push/release of the same repo.
-		scope := sha256.Sum256([]byte(stepCacheDir(run)))
-		args["cacheScope"] = fmt.Sprintf("%x", scope)
+		args["cacheScope"] = string(id.NewUntracked().FromString(stepCacheDir(run)))
 	}
 	return args
 }
