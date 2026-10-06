@@ -17,25 +17,23 @@
 #   - The node-tag, cluster-e2e and per-module passes stay ci.yml's: their tag
 #     and module lists live there, held by its own gates, and a copy here would
 #     be held by nothing.
-#   - Not carried here yet, though each could run here: the TypeScript SDK and
-#     view-kit lanes (Node, npm), the VS Code extension lane (only the host
-#     lanes above need a display), and the MCP conformance and proving lanes
-#     (beside the postgres sidecar). Until MCP conformance is carried,
-#     test/conformance runs in go-tests with no database, so its database
-#     checks run only in ci.yml's mcp-conformance lane.
+#   - The VS Code extension packaging lane is not carried here yet.
+# The SDK, view kit, MCP conformance and proving lanes run here as well. Their
+# command parity is checked in memql_pipeline_portable_coverage_test.go. Database lanes
+# require a reachable Postgres; a skipped database case is not delivery proof.
 #
 # EXPLICIT FLEET PLACEMENT. Connect with compute: cluster_and_fleet and enable
 # pipelines for this repository in Cockpit's local policy. No cluster Job is
 # used during the evaluation, and container commands receive no host tools.
 #
 # WHAT HOLDS IT TO CI.YML. memql_package_manifest_test.go compiles this file the
-# way a run does -- for a push, a merge group and three pull requests -- and
-# holds three of its copies to their originals: select.dbGated to
+# way a run does -- for a push, a merge group, a release and pull requests -- and
+# holds its selection and service copies to their originals: select.dbGated to
 # scripts/ci/db-gated-packages.sh, the gate-inputs packages to ci.yml's
-# GATE_PACKAGES, and the postgres service to ci.yml's db-tests service. Nothing
-# holds the rest: the step commands, the bucket globs, the shard counts, the
-# fuzz targets and the extension list are hand copies of ci.yml, and a change
-# there has to be made here too.
+# GATE_PACKAGES, and the postgres service to ci.yml's db-tests service. The
+# portable coverage test also holds SDK/view-kit commands, the MCP test command
+# and proving's failure/evidence checks. The other commands, bucket globs,
+# shard counts and fuzz targets remain hand copies that need review together.
 formatVersion: 1
 name: memql
 pipeline:
@@ -241,6 +239,66 @@ pipeline:
             make os-typecheck
             make os-test
             make os-build
+        - name: sdk-ts-typecheck
+          placement: fleet
+          run: |
+            set -eu
+            scripts/ci/retry.sh -- make sdk-ts-install
+            make sdk-ts-typecheck
+            make sdk-ts-test
+        - name: viewkit-checks
+          placement: fleet
+          run: |
+            set -eu
+            scripts/ci/retry.sh -- make viewkit-install
+            make viewkit-typecheck
+            make viewkit-test
+        - name: mcp-conformance
+          placement: fleet
+          services: [postgres]
+          timeout: 30m
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            PGPASSWORD=memql_dev psql -h localhost -U memql -d memql -v ON_ERROR_STOP=1 <<'SQL'
+            CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+            CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+            CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+            CREATE EXTENSION IF NOT EXISTS vector;
+            SQL
+            export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
+            export MEMQL_REQUIRE_DB=1
+            go test -count=1 -timeout=600s -v ./test/conformance/...
+        - name: proving
+          placement: fleet
+          services: [postgres]
+          timeout: 30m
+          artifacts: [.memql-proving]
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            bash scripts/identity/build-css.sh
+            PGPASSWORD=memql_dev psql -h localhost -U memql -d memql -v ON_ERROR_STOP=1 <<'SQL'
+            CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+            CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+            CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+            CREATE EXTENSION IF NOT EXISTS vector;
+            SQL
+            export MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable'
+            export MEMQL_REQUIRE_DB=1
+            mkdir -p .memql-proving
+            go run ./cmd/memql-bench --print-spec > .memql-proving/spec.json
+            test "$(wc -l < .memql-proving/spec.json)" -eq 1
+            jq -e '.capability == "bench.run" and (.params | length) > 0' .memql-proving/spec.json > /dev/null
+            status=0
+            go run ./cmd/memql-bench --do=gate --runner=cockpit-linux-arm64 > .memql-proving/envelope.json 2> .memql-proving/gate.txt || status=$?
+            cat .memql-proving/gate.txt
+            test "$(wc -l < .memql-proving/envelope.json)" -eq 1
+            jq -e '.ok == true' .memql-proving/envelope.json > /dev/null
+            test "$status" -eq 0
+            go run ./cmd/memql-bench --do=scorecard --check > .memql-proving/scorecard.json
+            jq -e '.ok == true' .memql-proving/scorecard.json > /dev/null
     # ci.yml go-checks' gate-inputs step, which ci.yml runs on a pull request
     # only: a full run tests every package in go-tests, these among them, so
     # this stage is planned for a pull request alone. The step runs when the

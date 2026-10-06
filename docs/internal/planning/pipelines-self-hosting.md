@@ -17,6 +17,51 @@ measured. Do not add Azure capacity for this work.
 
 ## Boundaries
 
+### Cluster update requirements (owner clarification, October 6)
+
+Owners and developers must discover and trigger installation updates from
+**Cluster > Updates** in MemQL OS. Local and cloud installations use the same
+workflow, authorization and GitOps reconciliation contract; provider-specific
+values describe placement, never a second user workflow. Show installed and
+available versions independently for engine, Cockpit and editor extensions.
+Unchanged components retain their versions. A coordinated release record binds
+the selected commits, compatible versions, verified artifact digests and tests.
+
+The review names the exact target and candidate, disruption assessment and
+rollback point. The final action starts a durable operation outside the pods
+being replaced. Its states include preparing, deploying, verifying, cleaning up,
+complete, failed and recovery required; a lost connection is not completion.
+Runtime update attention uses the shared OS attention service and remains
+distinct from feature-discovery attention. The owner-only public-release gate
+is separate from the owner/developer installation-update permission.
+
+Existing rolling replacements are a starting point, not proof of uninterrupted
+use. Measure website requests, authenticated requests, active streams and
+subscriptions throughout real local and production rolls. New replicas must be
+ready before taking traffic; old replicas drain. Verify mixed-version operation
+and database migration compatibility before a rolling update is offered. A
+single-replica database restart needs an explicit maintenance assessment. No
+second Azure cluster, extra node pool or Cilium work is authorized by this plan.
+
+Cleanup is part of every attempt, including cancellation, failure, worker loss,
+controller replacement and interrupted rollback. Persist each temporary resource's
+ownership and identity before creating it; reconcile uncertain deletion against
+the correct target before releasing capacity. Cleanup has durable progress and
+bounded retry, and unfinished cleanup prevents a completed deployment verdict.
+Never infer ownership from age alone. Preserve the active installation, client
+assets, persistent volumes, secrets and a defined rollback artifact set. Verify
+temporary pods/Jobs/Secrets, containers, networks, anonymous volumes, build
+workspaces, caches/builders and any explicitly created cloud resources against a
+before/after inventory. Do not delete shared or unrecognized Azure resources.
+
+The existing deploy-control `Deploy` RPC only transitions a record and rejects
+`docker-local`; it cannot serve as the update button's effect. The current
+deployment DSL also contains retained historical orchestration. Complete the
+runner and GitOps path before exposing a deploy action; do not report an async
+record write as a successful update.
+
+### Existing implementation boundaries
+
 - Ship the default CI/CD workflow as sealed core DSL. Clients configure it,
   call its public constructs, or compose separately named workflows. The
   template must not copy the core workflow into each client repository.
