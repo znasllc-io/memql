@@ -188,7 +188,7 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 		Platform:       PlatformOf(c.spec, declared),
 		Image:          c.spec.Image,
 		Services:       c.servicesFor(declared.Services),
-		Caches:         compiledCopy(c.spec.Caches),
+		Caches:         compiledCopy(cachesFor(c.spec, declared)),
 		Needs:          needs,
 		TimeoutSeconds: stepTimeoutSeconds(declared.Timeout),
 		Artifacts:      compiledCopy(declared.Artifacts),
