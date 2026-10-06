@@ -408,7 +408,7 @@ func (c *rtCluster) serve(w http.ResponseWriter, r *http.Request) {
 		case http.MethodPatch:
 			c.patchSecret(w, name, body)
 		case http.MethodDelete:
-			c.deleteSecret(w, name, q)
+			c.deleteSecret(w, name, q, body)
 		default:
 			c.unexpected(w, r)
 		}
@@ -745,13 +745,28 @@ func (c *rtCluster) patchSecret(w http.ResponseWriter, name string, body []byte)
 	rtJSON(w, 200, s)
 }
 
-func (c *rtCluster) deleteSecret(w http.ResponseWriter, name string, q map[string][]string) {
+func (c *rtCluster) deleteSecret(w http.ResponseWriter, name string, q map[string][]string, body []byte) {
 	c.wantBackground(q, "secret "+name)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, ok := c.secrets[name]; !ok {
 		rtAnswer(w, kubeStatus(404, "NotFound", fmt.Sprintf(`secrets %q not found`, name)))
 		return
+	}
+	if len(body) > 0 {
+		var opts struct {
+			Preconditions struct{ UID, ResourceVersion string }
+		}
+		if err := json.Unmarshal(body, &opts); err != nil {
+			c.t.Error(err)
+			rtAnswer(w, kubeStatus(400, "BadRequest", "invalid delete options"))
+			return
+		}
+		meta := c.secrets[name].Metadata
+		if opts.Preconditions.UID != meta.UID || opts.Preconditions.ResourceVersion != meta.ResourceVersion {
+			rtAnswer(w, kubeStatus(409, "Conflict", "delete preconditions changed"))
+			return
+		}
 	}
 	delete(c.secrets, name)
 	rtJSON(w, 200, map[string]any{"kind": "Status", "status": "Success"})
@@ -1049,7 +1064,14 @@ func (c *rtCluster) putJob(job Job, s *rtScript) {
 }
 
 func (c *rtCluster) putSecret(s Secret) {
-	c.with(func(c *rtCluster) { c.secrets[s.Metadata.Name] = s })
+	c.with(func(c *rtCluster) {
+		c.rv++
+		s.Metadata.ResourceVersion = strconv.Itoa(c.rv)
+		if s.Metadata.UID == "" {
+			s.Metadata.UID = "uid-" + s.Metadata.Name
+		}
+		c.secrets[s.Metadata.Name] = s
+	})
 }
 
 func (c *rtCluster) requests() []rtReq {
@@ -1279,7 +1301,6 @@ func (h *rtHarness) logs() *rtLogs {
 func (h *rtHarness) newRunner(cfg Config) *Runner {
 	r := NewRunner(cfg, h.c.kube, func() LineSink { return h.sink }, h.lib, h.tokens)
 	r.now = h.clock.Now
-	r.reapEvery = 0 // the orphan sweep is its own tests' (TestRunnerReapsOrphanedSecrets)
 	r.tempDir = h.dir
 	r.openCapture = func(o CaptureOptions) (*Capture, error) {
 		return newCapture(o, h.clock.Now, newCaptureBucket(1<<20, h.clock.Now()))
@@ -3437,7 +3458,7 @@ func TestRunnerReapsOrphanedSecrets(t *testing.T) {
 		h.c.putSecret(secret(jobName(5), old, unlabelled))
 		h.c.putSecret(secret(jobName(6), old, renamed))
 
-		if n := h.r.reap(); n != 1 {
+		if n, _, _ := h.r.reap(context.Background()); n != 1 {
 			t.Errorf("the sweep deleted %d Secrets, want the one orphan", n)
 		}
 		if h.c.hasSecret(SecretName(jobName(1))) {
@@ -3457,7 +3478,7 @@ func TestRunnerReapsOrphanedSecrets(t *testing.T) {
 			h.c.putSecret(secret(jobName(i), old))
 		}
 
-		if n := h.r.reap(); n != 50 {
+		if n, _, _ := h.r.reap(context.Background()); n != 50 {
 			t.Errorf("the sweep deleted %d Secrets, want its bound, 50", n)
 		}
 		left := 0
@@ -3469,7 +3490,7 @@ func TestRunnerReapsOrphanedSecrets(t *testing.T) {
 		if left != orphans-50 {
 			t.Errorf("%d orphans left, want %d for the next sweeps", left, orphans-50)
 		}
-		if n := h.r.reap(); n != 50 {
+		if n, _, _ := h.r.reap(context.Background()); n != 50 {
 			t.Errorf("the next sweep deleted %d, want 50 more", n)
 		}
 	})
@@ -3482,7 +3503,7 @@ func TestRunnerReapsOrphanedSecrets(t *testing.T) {
 		beyond := jobName(1001)
 		h.c.putSecret(secret(beyond, old))
 
-		if n := h.r.reap(); n != 0 {
+		if n, _, _ := h.r.reap(context.Background()); n != 0 {
 			t.Errorf("the sweep deleted %d Secrets, want none: the orphan is past its last page", n)
 		}
 		if n := len(h.c.requestsFor(http.MethodGet, kubeSecrets)); n != 10 {
@@ -3491,43 +3512,11 @@ func TestRunnerReapsOrphanedSecrets(t *testing.T) {
 		if !h.c.hasSecret(SecretName(beyond)) {
 			t.Error("the orphan past the sweep's last page was reached")
 		}
-	})
-
-	t.Run("a sweep rides on Run, at most once per interval on a replica", func(t *testing.T) {
-		h := newRunnerHarness(t)
-		h.c.putSecret(secret(jobName(1), old))
-		h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "ok")))
-		reaped := make(chan int, 4)
-		h.r.reapEvery, h.r.onReaped = reapInterval, func(n int) { reaped <- n }
-		swept := func() int {
-			t.Helper()
-			select {
-			case n := <-reaped:
-				return n
-			case <-time.After(10 * time.Second):
-				t.Fatal("no sweep ended")
-			}
-			return 0
-		}
-		lists := func() int { return len(h.c.requestsFor(http.MethodGet, kubeSecrets)) }
-
-		h.run(t, rtRun())
-		if n := swept(); n != 1 || h.c.hasSecret(SecretName(jobName(1))) {
-			t.Fatalf("the first Run's sweep deleted %d, want the orphan", n)
-		}
-		h.run(t, rtRun())
-		h.clock.Advance(reapInterval - time.Second)
-		h.run(t, rtRun())
-		if n := lists(); n != 1 {
-			t.Errorf("%d sweeps within the interval, want one", n)
-		}
-		h.clock.Advance(time.Second)
-		h.run(t, rtRun())
-		swept()
-		if n := lists(); n != 2 {
-			t.Errorf("%d sweeps once the interval had passed, want a second", n)
+		if n, more, err := h.r.reap(context.Background()); n != 1 || more || err != nil || h.c.hasSecret(SecretName(beyond)) {
+			t.Fatalf("continuation starved the later orphan: deleted=%d more=%v err=%v", n, more, err)
 		}
 	})
+
 }
 
 func TestOrphanSweepKeepsQueuedSecretUntilItsOwnRunDeadline(t *testing.T) {
@@ -3542,15 +3531,15 @@ func TestOrphanSweepKeepsQueuedSecretUntilItsOwnRunDeadline(t *testing.T) {
 		t.Fatal("the queued step's Secret lost the agent's run deadline")
 	}
 	h.c.putSecret(secret)
-	if n := h.r.reap(); n != 0 || !h.c.hasSecret(secret.Metadata.Name) {
+	if n, _, _ := h.r.reap(context.Background()); n != 0 || !h.c.hasSecret(secret.Metadata.Name) {
 		t.Fatal("another replica's shorter ceiling collected a still-queued Secret")
 	}
 	h.clock.Advance(deadline.Sub(rtT0) + h.cfg.JobTTL)
-	if n := h.r.reap(); n != 0 {
+	if n, _, _ := h.r.reap(context.Background()); n != 0 {
 		t.Fatal("the sweep deleted the Secret before the full retention interval elapsed")
 	}
 	h.clock.Advance(time.Nanosecond)
-	if n := h.r.reap(); n != 1 || h.c.hasSecret(secret.Metadata.Name) {
+	if n, _, _ := h.r.reap(context.Background()); n != 1 || h.c.hasSecret(secret.Metadata.Name) {
 		t.Fatal("the expired orphan was kept after its run deadline plus TTL")
 	}
 }
@@ -3563,7 +3552,7 @@ func TestOrphanSweepMalformedDeadlineHasBoundedFallback(t *testing.T) {
 	secret.Metadata.CreationTimestamp = rtT0.Add(-h.cfg.RunCeiling - h.cfg.JobTTL - time.Minute)
 	secret.Metadata.Annotations[AnnotRunDeadline] = "not a timestamp"
 	h.c.putSecret(secret)
-	if n := h.r.reap(); n != 1 {
+	if n, _, _ := h.r.reap(context.Background()); n != 1 {
 		t.Fatal("malformed deadline kept an orphan's credentials indefinitely")
 	}
 }

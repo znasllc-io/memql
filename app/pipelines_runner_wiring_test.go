@@ -113,6 +113,9 @@ func TestTheWorkbenchRunsPipelineStepsOnlyWhenConfigured(t *testing.T) {
 				})
 
 			if !tc.want {
+				if len(a.Dependencies) != 0 {
+					t.Fatal("unconfigured runner registered maintenance")
+				}
 				// The interface itself, not what it holds: a typed nil here
 				// would be called by the handler rather than refused.
 				if runner != nil {
@@ -142,6 +145,9 @@ func TestTheWorkbenchRunsPipelineStepsOnlyWhenConfigured(t *testing.T) {
 			}
 			if _, ok := runner.(*pipelinesRunnerAdapter); !ok {
 				t.Fatalf("the configured node got %T, want the runner behind its adapter", runner)
+			}
+			if len(a.Dependencies) != 1 || a.Dependencies[0].ComponentName() != "pipelines.maintenance" {
+				t.Fatal("configured runner lacks lifecycle-owned idle cleanup")
 			}
 			if apiBuilt != 1 || blobResolved != 1 {
 				t.Errorf("the configured node built %d API clients and %d blob clients, want one of each", apiBuilt, blobResolved)

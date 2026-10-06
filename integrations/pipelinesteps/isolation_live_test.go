@@ -37,36 +37,7 @@ func TestIsolationProofAgainstLocalNetworkPolicy(t *testing.T) {
 	apply("networkpolicy.yaml")
 	apply("probe-networkpolicy.yaml")
 
-	// The proxy uses kubectl's local credentials without copying a token or
-	// client key into the test. It binds an ephemeral loopback port only.
-	proxy := exec.CommandContext(ctx, "kubectl", "--context", cluster, "proxy", "--address=127.0.0.1", "--port=0")
-	stdout, err := proxy.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := proxy.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = proxy.Process.Kill(); _ = proxy.Wait() }()
-	address := make(chan string, 1)
-	go func() {
-		s := bufio.NewScanner(stdout)
-		if s.Scan() {
-			address <- strings.TrimPrefix(s.Text(), "Starting to serve on ")
-		} else {
-			address <- ""
-		}
-	}()
-	var base string
-	select {
-	case addr := <-address:
-		if !strings.HasPrefix(addr, "127.0.0.1:") {
-			t.Fatalf("proxy did not report a loopback address: %q", addr)
-		}
-		base = "http://" + addr
-	case <-time.After(15 * time.Second):
-		t.Fatal("local kubectl proxy did not start")
-	}
+	kube := localPipelineKube(t, ctx, cluster, ns)
 	data, err := os.ReadFile(filepath.Join(root, "config.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +50,6 @@ func TestIsolationProofAgainstLocalNetworkPolicy(t *testing.T) {
 	}
 	cfg := ConfigFromEnv(func(key string) string { return config.Data[key] })
 	cfg.Namespace, cfg.NodeID, cfg.PollInterval = ns, ns, 250*time.Millisecond
-	kube := NewKube(deploycontrol.NewClusterAPIWith(base, "", &http.Client{Timeout: 20 * time.Second}), ns)
 	prove := func(t *testing.T, wantIsolated, wantInconclusive bool) {
 		t.Helper()
 		r := NewRunner(cfg, kube, nil, nil, nil)
@@ -151,4 +121,39 @@ func localPipelineControls(t *testing.T) (context.Context, string, string, func(
 		}
 	})
 	return ctx, cluster, ns, kubectl
+}
+
+func localPipelineKube(t *testing.T, ctx context.Context, cluster, ns string) *Kube {
+	t.Helper()
+	// The proxy uses kubectl's local credentials without copying a token or
+	// client key into the test. It binds an ephemeral loopback port only.
+	proxy := exec.CommandContext(ctx, "kubectl", "--context", cluster, "proxy", "--address=127.0.0.1", "--port=0")
+	stdout, err := proxy.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := proxy.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = proxy.Process.Kill(); _ = proxy.Wait() })
+	address := make(chan string, 1)
+	go func() {
+		s := bufio.NewScanner(stdout)
+		if s.Scan() {
+			address <- strings.TrimPrefix(s.Text(), "Starting to serve on ")
+		} else {
+			address <- ""
+		}
+	}()
+	var base string
+	select {
+	case addr := <-address:
+		if !strings.HasPrefix(addr, "127.0.0.1:") {
+			t.Fatalf("proxy did not report a loopback address: %q", addr)
+		}
+		base = "http://" + addr
+	case <-time.After(15 * time.Second):
+		t.Fatal("local kubectl proxy did not start")
+	}
+	return NewKube(deploycontrol.NewClusterAPIWith(base, "", &http.Client{Timeout: 20 * time.Second}), ns)
 }

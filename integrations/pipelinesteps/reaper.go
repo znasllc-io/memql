@@ -2,6 +2,8 @@ package pipelinesteps
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"strings"
 	"time"
 
@@ -22,10 +24,10 @@ import (
 // the Job TTL past it, within which an outcome may still be read. A Secret
 // whose Job exists is never deleted, owned or not.
 //
-// Each replica sweeps at most once every reapInterval, piggybacked on Run --
-// any replica's sweep reaps every replica's orphans -- and a sweep is bounded:
-// at most reapMaxPages pages of reapPageSize Secrets read, at most
-// reapMaxDeletes deleted. What it leaves, the next sweep reaches.
+// A lifecycle-owned maintenance loop sweeps without waiting for a build. Each
+// batch reads at most reapMaxPages pages and deletes at most reapMaxDeletes
+// Secrets. Its continuation and unfinished page survive the batch, so later
+// objects are not starved by the first thousand retained Secrets.
 
 const (
 	// reapInterval is how often one replica sweeps.
@@ -37,55 +39,49 @@ const (
 	reapMaxDeletes = 50
 )
 
-// maybeReap starts a sweep in the background unless one ran on this replica
-// within reapEvery, or is running.
-func (r *Runner) maybeReap() {
-	r.mu.Lock()
-	if r.reapEvery <= 0 || r.reaping || (!r.lastReap.IsZero() && r.now().Sub(r.lastReap) < r.reapEvery) {
-		r.mu.Unlock()
-		return
-	}
-	r.reaping, r.lastReap = true, r.now()
-	r.mu.Unlock()
-	go func() {
-		deleted := r.reap()
-		r.mu.Lock()
-		r.reaping = false
-		done := r.onReaped
-		r.mu.Unlock()
-		if done != nil {
-			done(deleted)
-		}
-	}()
-}
-
-// reap deletes the orphaned step Secrets it finds, within the sweep's bounds,
-// and answers how many.
-func (r *Runner) reap() (deleted int) {
+// reap handles one bounded batch. more asks maintenance to continue promptly:
+// Kubernetes list continuations expire, so they must not wait the full sweep
+// interval. A 410 discards the expired snapshot and starts a fresh scan.
+func (r *Runner) reap(ctx context.Context) (deleted int, more bool, err error) {
+	r.reapMu.Lock()
+	defer r.reapMu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	now := r.now()
-	cont := ""
-	for page := 0; page < reapMaxPages && deleted < reapMaxDeletes; page++ {
-		ctx, cancel := context.WithTimeout(context.Background(), quickCallTimeout)
-		secrets, next, err := r.kube.ManagedSecrets(ctx, reapPageSize, cont)
-		cancel()
-		if err != nil {
-			r.log.Warn("pipelines: the step Secrets could not be listed for the orphan sweep", "error", err)
-			return deleted
-		}
-		for _, meta := range secrets {
-			if deleted >= reapMaxDeletes {
-				break
+	pages := 0
+	for {
+		for len(r.reapPending) > 0 {
+			if ctx.Err() != nil || deleted >= reapMaxDeletes {
+				return deleted, true, nil
 			}
-			if jobName, ok := orphanedSecret(meta, now, r.cfg.RunCeiling, r.cfg.JobTTL); ok && r.reapSecret(meta.Name, jobName) {
+			meta := r.reapPending[0]
+			r.reapPending = r.reapPending[1:]
+			if jobName, ok := orphanedSecret(meta, now, r.cfg.RunCeiling, r.cfg.JobTTL); ok && r.reapSecret(ctx, meta, jobName) {
 				deleted++
 			}
+			if len(r.reapPending) == 0 && r.reapCursor == "" {
+				return deleted, false, nil
+			}
 		}
-		if next == "" {
-			break
+		if ctx.Err() != nil || pages >= reapMaxPages || deleted >= reapMaxDeletes {
+			return deleted, r.reapCursor != "", nil
 		}
-		cont = next
+		call, done := context.WithTimeout(ctx, quickCallTimeout)
+		secrets, next, err := r.kube.ManagedSecrets(call, reapPageSize, r.reapCursor)
+		done()
+		if err != nil {
+			var status *deploycontrol.StatusError
+			if errors.As(err, &status) && status.Code == http.StatusGone {
+				r.reapCursor = ""
+			}
+			return deleted, true, err
+		}
+		pages++
+		r.reapPending, r.reapCursor = secrets, next
+		if len(secrets) == 0 && next == "" {
+			return deleted, false, nil
+		}
 	}
-	return deleted
 }
 
 // orphanedSecret says a step Secret is old enough to reap and has no owner,
@@ -106,8 +102,9 @@ func orphanedSecret(meta ObjectMeta, now time.Time, fallbackCeiling, ttl time.Du
 }
 
 // reapSecret deletes an orphaned Secret once its Job is known to be gone.
-func (r *Runner) reapSecret(secretName, jobName string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), quickCallTimeout)
+func (r *Runner) reapSecret(parent context.Context, meta ObjectMeta, jobName string) bool {
+	secretName := meta.Name
+	ctx, cancel := context.WithTimeout(parent, quickCallTimeout)
 	defer cancel()
 	switch _, err := r.kube.GetJob(ctx, jobName); {
 	case err == nil:
@@ -116,7 +113,7 @@ func (r *Runner) reapSecret(secretName, jobName string) bool {
 		r.log.Warn("pipelines: an orphaned step Secret's Job could not be read, so the Secret is kept", "secret", secretName, "error", err)
 		return false
 	}
-	if err := r.kube.DeleteSecret(ctx, secretName); err != nil {
+	if err := r.kube.DeleteObservedSecret(ctx, meta); err != nil {
 		r.log.Warn("pipelines: an orphaned step Secret could not be deleted", "secret", secretName, "error", err)
 		return false
 	}
