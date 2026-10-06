@@ -47,9 +47,10 @@ import (
 // the names are this replica's and the same every time; create the probe Job,
 // waiting for a slot as a step does; wait (probeUpWait) for index 0's listener
 // to be ready -- which it can be before anything else exists, since it
-// depends on nothing -- and for both connectors' sidecars to run; create the probe Secret,
-// naming index 0's address and the Job's uid and owned by the Job, which
-// starts both connectors; wait (probeEndWait) for both connectors to end;
+// depends on nothing; create the probe Secret naming its address and Job uid;
+// wait for the listener's whole pod to be Ready, then release the connectors'
+// scheduling gates. This prevents a connector completing while the listener's
+// holder is still waiting for the Secret. Wait (probeEndWait) for both connectors to end;
 // read the pods again (R42) and ask the listener's kubelet once (R42b); and
 // judge by the restricted and positive-control exit codes and by whether the listener it tried is
 // still ready, the incarnation that was ready before the Secret existed, in a
@@ -313,6 +314,9 @@ func (r *Runner) probeIsolation(ctx context.Context) (verdict IsolationVerdict, 
 		err = p.arm(job, listener.ip)
 	}
 	if err == nil {
+		err = p.startConnectors(job, listener)
+	}
+	if err == nil {
 		end, control, err = p.end(job)
 	}
 	if err == nil {
@@ -384,9 +388,8 @@ func (p *prober) create() (Job, error) {
 	}
 }
 
-// up waits for the probe's pods: index 0's listener ready, with its pod's
-// address, and index 1's listener running -- its image is on its node, so its
-// connector starts as soon as the Secret exists.
+// up releases only index 0 and waits for its listener and address. The
+// connectors stay gated until the listener's holder is ready.
 func (p *prober) up(job Job) (probeListener, error) {
 	ctx, cancel := context.WithTimeout(p.ctx, p.r.probeUpWait)
 	defer cancel()
@@ -410,8 +413,58 @@ func (p *prober) up(job Job) (probeListener, error) {
 		// Network policies select our role label: Cilium deliberately excludes
 		// the Job's completion-index label from endpoint identities. Read the
 		// labels back before arming, including after a lost patch response.
+		if zero == nil || probeRole(zero) != "listener" {
+			seen = "waiting for the probe listener's identity"
+			continue
+		}
+		if zero.Metadata.Labels[LabelProbeRole] != "listener" || probeSchedulingHeld(zero) {
+			if err := p.r.kube.SetProbeRole(ctx, job, *zero); err != nil {
+				p.warn("labeling the isolation probe's listener", err)
+			}
+			seen = "waiting for the probe listener's verified network-policy role"
+			continue
+		}
+		if l, ok := listening(zero); ok {
+			return l, nil
+		}
+		seen = "index 0: " + describeProbePod(zero) + "; index 1: " + describeProbePod(one) + "; index 2: " + describeProbePod(two)
+	}
+}
+
+// The holder and connectors reference the same Secret. Kubernetes may retry
+// their missing-Secret lookups at different times. Keep the connectors gated
+// until the holder has started and the listener's full pod is Ready; a ready
+// sidecar alone is insufficient. Role labels still precede CNI endpoint creation.
+func (p *prober) startConnectors(job Job, listener probeListener) error {
+	ctx, cancel := context.WithTimeout(p.ctx, p.r.probeUpWait)
+	defer cancel()
+	released := false
+	for first := true; ; first = false {
+		if !first && !sleepCtx(ctx, p.r.cfg.PollInterval) {
+			if p.ctx.Err() != nil {
+				return errProbeStopped
+			}
+			return probeFailure("the listener pod and gated connectors did not become ready before the probe deadline")
+		}
+		pods, err := p.r.kube.JobPods(ctx, p.name)
+		if err != nil {
+			continue
+		}
+		zero, one, two := probePods(pods, job)
+		current, listeningNow := listening(zero)
+		if !listeningNow || current.uid != listener.uid || current.pod != listener.pod || current.ip != listener.ip ||
+			current.restarts != listener.restarts || !current.startedAt.Equal(listener.startedAt) ||
+			!zero.Metadata.DeletionTimestamp.IsZero() || disruption(zero) != nil {
+			return probeFailure("the listener changed before the connectors started")
+		}
+		if !podReady(zero) || !probeContainerRuns(zero, false, ContainerProbeConnector) {
+			if released {
+				return probeFailure("the listener pod stopped being ready while the connectors started")
+			}
+			continue
+		}
 		rolesReady := true
-		for _, pod := range []*Pod{zero, one, two} {
+		for _, pod := range []*Pod{one, two} {
 			if pod == nil || probeRole(pod) == "" {
 				rolesReady = false
 				continue
@@ -419,18 +472,14 @@ func (p *prober) up(job Job) (probeListener, error) {
 			if pod.Metadata.Labels[LabelProbeRole] != probeRole(pod) || probeSchedulingHeld(pod) {
 				rolesReady = false
 				if err := p.r.kube.SetProbeRole(ctx, job, *pod); err != nil {
-					p.warn("labeling the isolation probe's pod", err)
+					p.warn("releasing the isolation probe's connector", err)
 				}
 			}
 		}
-		if !rolesReady {
-			seen = "waiting for the probe pods' verified network-policy roles"
-			continue
+		released = true
+		if rolesReady && probeContainerRuns(one, true, ContainerProbeListener) && probeContainerRuns(two, true, ContainerProbeListener) {
+			return nil
 		}
-		if l, ok := listening(zero); ok && probeContainerRuns(one, true, ContainerProbeListener) && probeContainerRuns(two, true, ContainerProbeListener) {
-			return l, nil
-		}
-		seen = "index 0: " + describeProbePod(zero) + "; index 1: " + describeProbePod(one) + "; index 2: " + describeProbePod(two)
 	}
 }
 
@@ -456,7 +505,8 @@ func probeRole(pod *Pod) string {
 	}
 }
 
-// arm creates the probe Secret, which the connectors wait for: it starts them.
+// arm creates the probe Secret, starting the listener's holder. The connectors
+// reference it too, but remain gated until startConnectors observes readiness.
 func (p *prober) arm(job Job, listenerIP string) error {
 	secret, err := BuildIsolationTarget(p.r.cfg, job, listenerIP)
 	if err != nil {

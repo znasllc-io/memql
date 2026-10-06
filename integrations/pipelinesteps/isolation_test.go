@@ -104,7 +104,13 @@ func isoScript(exit int32, said string) *rtScript {
 			pods:  []*Pod{isoPod(0, isoListenerIP, up, isoWaiting()), isoPod(1, isoOtherIP, up, isoWaiting()), isoPod(2, "10.42.1.4", up, isoWaiting())},
 			until: func(c *rtCluster) bool { _, ok := c.secrets[isoTarget()]; return ok },
 		},
-		{pods: []*Pod{isoPod(0, isoListenerIP, up, isoHolding), isoPod(1, isoOtherIP, up, isoRunning), isoPod(2, "10.42.1.4", up, isoRunning)}},
+		{
+			pods: []*Pod{isoPod(0, isoListenerIP, up, isoHolding), isoPod(1, isoOtherIP, up, isoRunning), isoPod(2, "10.42.1.4", up, isoRunning)},
+			until: func(c *rtCluster) bool {
+				return c.probeRoles["uid-pod-1"].Labels[LabelProbeRole] == "restricted" &&
+					c.probeRoles["uid-pod-2"].Labels[LabelProbeRole] == "control"
+			},
+		},
 		{pods: []*Pod{isoPod(0, isoListenerIP, up, isoHolding), isoPod(1, isoOtherIP, up, isoEnded(exit, said)), isoPod(2, "10.42.1.4", up, isoEnded(probeExitControlPassed, "positive control connected every round"))}},
 	}, tails: map[string]string{ContainerProbeListener: ""}} // the listener prints nothing
 }
@@ -130,6 +136,19 @@ func isoRereadFails(answer kubeAnswer) *rtScript {
 	s := isoScript(probeExitIsolated, isoSaid[probeExitIsolated]).then(isoMarked(func(*Pod) {}),
 		isoPod(1, isoOtherIP, isoListener(false, 0), isoEnded(probeExitIsolated, isoSaid[probeExitIsolated])))
 	s.states[3].until = func(c *rtCluster) bool { c.podsAnswer = &answer; return true }
+	return s
+}
+
+func isoConnectorReadFails() *rtScript {
+	s := isoScript(probeExitIsolated, isoSaid[probeExitIsolated])
+	released := s.states[2].until
+	s.states[2].until = func(c *rtCluster) bool {
+		if !released(c) {
+			return false
+		}
+		c.podsAnswer = &rtUnavailable
+		return true
+	}
 	return s
 }
 
@@ -654,16 +673,9 @@ func TestIsolationProofInconclusiveIsNotAPass(t *testing.T) {
 				h.r.probeUpWait = 300 * time.Millisecond
 				h.c.with(func(c *rtCluster) { c.podsAnswer = &rtUnavailable })
 			}, said: "pods could not be read"},
-		{name: "the connector's pod could not be read while it ran", script: isoScript(probeExitIsolated, isoSaid[probeExitIsolated]),
+		{name: "the connector's pod could not be read while it ran", script: isoConnectorReadFails(),
 			setup: func(h *rtHarness) {
 				h.r.probeEndWait = 300 * time.Millisecond
-				h.c.with(func(c *rtCluster) {
-					c.onSecretCreate = func(c *rtCluster, s Secret) {
-						if s.Metadata.Name == isoTarget() {
-							c.podsAnswer = &rtUnavailable
-						}
-					}
-				})
 			}, said: "pod could not be read"},
 		{name: "the pods could not be read again: forbidden", script: isoRereadFails(kubeStatus(403, "Forbidden", `pods is forbidden: User "system:serviceaccount:memql:memql-engine" cannot list resource "pods"`)),
 			setup: func(h *rtHarness) { h.r.probeEndWait = 2 * time.Second }, said: "read again"},
@@ -955,11 +967,74 @@ func TestIsolationProofKeepsItsOwnSecretWhoseAnswerWasLost(t *testing.T) {
 	isoLeftNothing(t, h)
 }
 
+func TestIsolationConnectorsWaitForTheWholeListenerPod(t *testing.T) {
+	s := isoScript(probeExitIsolated, isoSaid[probeExitIsolated])
+	heldReads := 0
+	holderWaiting := rtState{
+		pods: []*Pod{
+			isoPod(0, isoListenerIP, isoListener(true, 0), isoWaiting()),
+			isoPod(1, "", isoStarting, isoWaiting()),
+			isoPod(2, "", isoStarting, isoWaiting()),
+		},
+		until: func(c *rtCluster) bool {
+			heldReads++
+			for _, uid := range []string{"uid-pod-1", "uid-pod-2"} {
+				if _, released := c.probeRoles[uid]; released {
+					t.Errorf("connector %s released while listener holder still waits", uid)
+				}
+			}
+			return heldReads >= 5
+		},
+	}
+	s.states = append(append(s.states[:2:2], holderWaiting), s.states[2:]...)
+	h := newIsoHarness(t, s)
+	h.r.probeUpWait = time.Second
+	if res := h.run(t, isoStep(h, rtRun().StepKey)); res.Status != pl.OutcomeSucceeded {
+		t.Fatalf("result = %+v (%+v), want the step run after holder readiness", res, res.Failure)
+	}
+	if heldReads < 5 {
+		t.Fatalf("holder delay was not exercised: %d reads", heldReads)
+	}
+	isoLeftNothing(t, h)
+}
+
+func TestIsolationRefusesAListenerLostBeforeConnectorRelease(t *testing.T) {
+	for _, changed := range []string{"restarted", "deleting", "disrupted", "address changed"} {
+		t.Run(changed, func(t *testing.T) {
+			s := isoScript(probeExitIsolated, isoSaid[probeExitIsolated])
+			p := s.states[2].pods[0]
+			switch changed {
+			case "restarted":
+				p.Status.InitContainerStatuses[0] = isoListener(true, 1)
+			case "deleting":
+				p.Metadata.DeletionTimestamp = rtAt(2500)
+			case "disrupted":
+				p.Status.Conditions = append(p.Status.Conditions, PodCondition{Type: "DisruptionTarget", Status: "True"})
+			case "address changed":
+				p.Status.PodIP = "10.42.9.9"
+			}
+			h := newIsoHarness(t, s)
+			h.r.probeUpWait = 100 * time.Millisecond
+			res := h.run(t, isoStep(h, rtRun().StepKey))
+			if res.Status == pl.OutcomeSucceeded || !h.r.Isolation().Inconclusive {
+				t.Fatalf("result = %+v, isolation = %+v; want inconclusive refusal", res, h.r.Isolation())
+			}
+			h.c.with(func(c *rtCluster) {
+				for _, uid := range []string{"uid-pod-1", "uid-pod-2"} {
+					if _, released := c.probeRoles[uid]; released {
+						t.Errorf("connector %s released after listener changed", uid)
+					}
+				}
+			})
+			isoLeftNothing(t, h)
+		})
+	}
+}
+
 // TestIsolationProofArmsOnlyOnceTheListenerIsReady: the probe Secret starts
-// the connectors, so it is made only once index 0's pod has an address and its
+// the holder, so it is made only once index 0's pod has an address and its
 // listener runs and is ready -- the listener of THIS probe Job, the newest of
-// its index -- and index 1's listener runs. The connector waits for the
-// Secret, so it cannot try before the listener listens.
+// its index. The connectors remain scheduling-gated until the holder is ready.
 func TestIsolationProofArmsOnlyOnceTheListenerIsReady(t *testing.T) {
 	up := isoListener(true, 0)
 	notReady := isoListener(false, 0)
@@ -973,9 +1048,6 @@ func TestIsolationProofArmsOnlyOnceTheListenerIsReady(t *testing.T) {
 	}{
 		{"index 0's listener runs, not ready yet", []rtState{
 			{pods: []*Pod{isoPod(0, isoListenerIP, notReady, isoWaiting()), isoPod(1, isoOtherIP, up, isoWaiting())}, reads: 2},
-		}},
-		{"index 1's listener has not started", []rtState{
-			{pods: []*Pod{isoPod(0, isoListenerIP, up, isoWaiting()), isoPod(1, "", isoStarting, isoWaiting())}, reads: 2},
 		}},
 		{"index 0 has no address yet", []rtState{
 			{pods: []*Pod{isoPod(0, "", up, isoWaiting()), isoPod(1, isoOtherIP, up, isoWaiting())}, reads: 2},
@@ -999,7 +1071,7 @@ func TestIsolationProofArmsOnlyOnceTheListenerIsReady(t *testing.T) {
 				t.Fatalf("result = %+v, want the step run", res)
 			}
 			if *madeIn < len(c.first) || string(made.Data[probeTargetKey]) != isoListenerIP {
-				t.Errorf("the probe Secret was made in state %d naming %q; want it once both were up (state %d), naming %s",
+				t.Errorf("the probe Secret was made in state %d naming %q; want it once the listener was up (state %d), naming %s",
 					*madeIn, made.Data[probeTargetKey], len(c.first), isoListenerIP)
 			}
 		})

@@ -64,11 +64,20 @@ func TestIsolationProofAgainstLocalNetworkPolicy(t *testing.T) {
 	if t.Failed() {
 		return
 	}
+	// Keep a structurally valid baseline but add a pod-identity exception.
+	// The active connection test, not the CIDR audit, must catch this leak.
+	kubectl([]byte(`{"apiVersion":"networking.k8s.io/v1","kind":"NetworkPolicy","metadata":{"name":"probe-negative-allow"},"spec":{"podSelector":{"matchLabels":{"memql.io/probe-role":"restricted"}},"policyTypes":["Egress"],"egress":[{"to":[{"podSelector":{"matchLabels":{"memql.io/probe-role":"listener"}}}],"ports":[{"protocol":"TCP","port":8080}]}]}}`), "-n", ns, "apply", "-f", "-")
+	t.Run("an additive pod grant is caught by the live connection test", func(t *testing.T) { prove(t, false, false) })
+	if t.Failed() {
+		return
+	}
+	kubectl(nil, "-n", ns, "delete", "networkpolicy", "probe-negative-allow")
 
 	// The regression: keep ingress denial, remove only the restricted
-	// connector's egress isolation. The old two-pod proof falsely passed.
+	// connector's egress isolation. The structural audit must refuse this
+	// before the active probe. The old two-pod proof falsely passed.
 	kubectl(nil, "-n", ns, "patch", "networkpolicy", "memql-pipelines-isolate", "--type=json", "-p", `[{"op":"replace","path":"/spec/policyTypes","value":["Ingress"]},{"op":"remove","path":"/spec/egress"}]`)
-	t.Run("missing egress cannot hide behind ingress denial", func(t *testing.T) { prove(t, false, false) })
+	t.Run("missing egress cannot hide behind ingress denial", func(t *testing.T) { prove(t, false, true) })
 	if t.Failed() {
 		return
 	}
