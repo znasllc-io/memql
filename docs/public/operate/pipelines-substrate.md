@@ -538,6 +538,12 @@ never failed, when it cannot be. With no machine that offers the need, allows
 pipelines and is online, the step is refused `pipeline_no_machine_for_need`, and
 nothing ran. Under contract 3, policy rejection, busy build capacity and an unavailable
 runtime are confirmed pre-execution refusals and permit another candidate.
+When the dispatcher confirms that shared build capacity was busy before any
+execution, the fleet runner waits and routes again under the run's wall-clock
+ceiling. Every attempt rechecks consent and routing. Waiting does not consume
+the command's own timeout, but the run ceiling still limits its remaining
+execution time. A long wait refreshes the repository clone token and keeps
+both the old and new token masked. Cancellation ends the wait promptly.
 Timeouts, disconnects, uncertain cleanup and interrupted prior attempts do not: a
 command might already have performed an external effect. Each dispatch is recorded like an agent's call, as a
 `v1:worker:invocation` of `workerHost.pipeline_step` naming no agent, filed under
