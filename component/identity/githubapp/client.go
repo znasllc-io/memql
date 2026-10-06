@@ -325,11 +325,17 @@ func (c *Client) do(ctx context.Context, method, endpoint, bearer string, body [
 	if c == nil {
 		return nil, ErrNotConfigured
 	}
+	return c.doWithHTTP(ctx, c.http, method, endpoint, bearer, body, out, limit)
+}
+
+// doWithHTTP permits a protocol to refuse redirects without mutating the
+// shared client's transport settings or copying its credential/cache mutex.
+func (c *Client) doWithHTTP(ctx context.Context, client *http.Client, method, endpoint, bearer string, body []byte, out any, limit int64) (*http.Response, error) {
 	req, err := c.newRequest(ctx, method, c.apiBase+endpoint, bearer, body)
 	if err != nil {
 		return nil, err
 	}
-	resp, derr := c.http.Do(req)
+	resp, derr := client.Do(req)
 	if derr != nil {
 		return nil, derr
 	}
