@@ -44,7 +44,15 @@ about to tag -- and refuses unless the file reads the version it computed.
    (#2519) fires on the published Release and re-dispatches
    `build-engine-images.yml` with the **bare** version -- it strips the leading
    `v`, because git tags carry it and image tags do not (memql#4061). That
-   workflow builds every node type as a product-agnostic image.
+   workflow builds every node type as a product-agnostic image. The bridge also
+   forwards the release event's exact commit as `source_sha`. The build checks
+   out that commit and verifies its tag and `VERSION` before registry login;
+   advancing `main` after publication cannot change the release's source.
+
+For a manual image-build dispatch, select `main` for the workflow and supply
+both the bare `version` and the full 40-character `source_sha` named by
+`v<version>`. The workflow stays on `main` for Azure OIDC; its source checkout
+and the commit stamped into every binary are the verified release commit.
 
 MemQL does step 1 and 2. CI does step 3. The platform records what it did on a
 `v1:cluster:releaseCut` row and writes a `release_cut` audit event beside it.
