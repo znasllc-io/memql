@@ -395,7 +395,7 @@ func (w *scopeWalk) statement(s ast.BodyStatement, sc *bodyScope, path []onceSte
 		w.scopeLines[loop] = self.line
 		w.bind(t.Var, spanOr(t.VarSpan, t.Span), self.stmt, loop, path, anc)
 		read(t.Filter, loop, path)
-		w.statements(t.Body, loop, path, anc, inParallel)
+		w.statements(t.Body, loop, path, anc, inParallel || t.Concurrency > 1)
 	case *ast.SwitchStatement:
 		read(t.Subject, sc, path)
 		chain := w.newChain("switch")
@@ -425,7 +425,7 @@ func (w *scopeWalk) statement(s ast.BodyStatement, sc *bodyScope, path []onceSte
 		if inParallel {
 			sp := t.Span
 			w.problem(codeBodyReturnInParallel, sp.Line, sp.Col,
-				"a parallel branch cannot return: bind a name and return after the parallel")
+				"parallel work cannot return from its enclosing body: return after the parallel or use a sequential loop")
 		}
 		readCall(t.Call)
 		read(t.Value, sc, path)

@@ -128,7 +128,7 @@ func (r *StoreRegistry) Stores(ctx context.Context) ([]Store, error) {
 		return nil, nil
 	}
 	r.mu.RLock()
-	fresh := r.cached != nil && r.now().Sub(r.cachedAt) < r.ttl
+	fresh := !memql.FreshReadFromContext(ctx) && r.cached != nil && r.now().Sub(r.cachedAt) < r.ttl
 	if fresh {
 		out := sortedStores(r.cached)
 		r.mu.RUnlock()
@@ -151,17 +151,20 @@ func (r *StoreRegistry) Invalidate() {
 }
 
 func (r *StoreRegistry) refresh(ctx context.Context) ([]Store, error) {
-	res, err := r.engine.Execute(operatorContext(ctx), "stores()")
-	if err != nil {
-		return nil, fmt.Errorf("shopify: list stores: %w", err)
-	}
 	next := map[string]Store{}
-	for _, row := range memql.MaterializeRows(res) {
-		s, ok := storeFromRow(row)
-		if !ok {
-			continue
+	query := renderCall("storesForConnector", map[string]any{"asOf": r.now().UTC().Format(time.RFC3339Nano)})
+	err := memql.WalkQueryPages(operatorContext(ctx), r.engine.Execute, query, 10000, func(res *memql.ExecuteResult) error {
+		for _, row := range memql.MaterializeRows(res) {
+			s, ok := storeFromRow(row)
+			if ok {
+				next[s.ID] = s
+			}
 		}
-		next[s.ID] = s
+		return nil
+	})
+	if err != nil {
+		// Never publish a partial directory as the complete set of stores.
+		return nil, fmt.Errorf("shopify: list stores: %w", err)
 	}
 	r.mu.Lock()
 	r.cached = next

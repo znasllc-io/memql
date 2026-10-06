@@ -98,6 +98,19 @@ steps. Time-window milestones #5506–#5509 stay open until observed.
 
 ## Generic recovery gaps found during dogfooding
 
+Independent build shards exposed a general language gap: `for` only executed
+sequentially, and `parallel` required a statically written branch per item.
+`for item in items parallel(16)` now supplies bounded dynamic iteration to
+logic and automations. The same form serves document batches and ingestion
+tasks. It uses at most the declared number of workers, isolates item scopes,
+preserves source indices in execution keys, and joins active children before
+the parent finishes. The bound is per loop; cluster and machine capacity
+remain the runner's responsibility. Returns inside a parallel iteration are
+refused. Ordinary continued errors, fatal journal errors, human waits and
+cancellation have separate tests. Nested sequences now honor cancellation
+before beginning another statement. This adds no CI-specific construct and
+does not yet provide nested recovery or automation ownership fencing.
+
 Recovery now classifies the registered operation and nested logic, loop and
 parallel bodies. Known reads and computations may repeat; unknown callees,
 external effects and sub-automations require explicit authorization. Query
@@ -122,6 +135,19 @@ writes disguised as query calls, unknown executors, preserved prefix effects,
 missing values and a nil receipt surviving JSON. The real-database automation
 suite passed, including recovery on a separate executor after receipt failure.
 
+The full database-required sweep exposed a second incomplete-read boundary:
+Shopify's connector used its UI query, sorted by domain and capped at 100,
+as a complete directory. A later store became an unknown webhook source.
+Payload-sorted full pages also reported `hasMore: false` despite not proving
+exhaustion. The engine now signals a possibly incomplete full page even when
+that ordering has no continuation cursor, so the shared page walker refuses
+it. The connector uses a separate sealed query in cursor order at one fixed
+snapshot and publishes its cache only after traversal succeeds. Its local
+cache now honors explicit fresh-read contexts. This is a query-contract fix,
+not CI policy. The real uninstall/reinstall and two-engine inbound tests
+exercise the consumer boundary; the engine test checks an untraversable full
+page against a genuinely exhausted short page.
+
 The Go-driven journal checks all initial writes: goal, run, first heartbeat
 and step order, each pending step, and goal activation. Failure at each boundary
 refuses admission before a heartbeat loop or command starts.
@@ -133,6 +159,15 @@ Destination reconciliation must establish whether an uncertain publication
 landed before it can safely repeat. Definition fingerprints still need
 engine/bundle pins for transitive callees. No production release may rely on
 automatic effect replay until these boundaries are demonstrated.
+
+Self-upgrade must also cross a controller replacement. Persist the approved
+candidate and deployment intent before changing the serving engine. ArgoCD
+applies the pinned desired state independently; short reconciliation runs on
+the replacement observe the same candidate, health evidence and publication
+receipts. Do not weaken execution-definition checks to resume an old workflow
+under a different engine binary. The first pipeline-capable engine still
+requires a controlled bootstrap through the existing delivery path. This
+handoff, health failure and rollback remain required end-to-end tests.
 
 ## Transactional ownership progress
 

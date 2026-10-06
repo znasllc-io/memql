@@ -521,6 +521,16 @@ automation probe {
   first := query activeThings(status: "active")
   mutation touchThing(id: steps.first.result)
 }`},
+	{"automation: bounded parallel iteration", true, `automation probe {
+  for item in [1, 2] parallel(2) {
+    builtin consume(value: item)
+  }
+}`},
+	{"automation: parallel iteration requires a non-default bound", false, `automation probe {
+  for item in [1, 2] parallel(1) {
+    builtin consume(value: item)
+  }
+}`},
 	{"automation: forEach (body_foreach_retired)", false, `automation probe {
   args {
     items []object!

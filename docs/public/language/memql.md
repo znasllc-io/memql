@@ -1229,6 +1229,13 @@ sort(
   `WHERE (createdAt, id) <keyset> (?, ?)` predicate and continues from the
   encoded position. The first page is bounded by a plain SQL `LIMIT`.
 
+A full bounded page reports `hasMore: true` because it cannot prove
+exhaustion. Payload-field ordering currently has no keyset continuation: a
+full page in that order has no cursor. A consumer requiring the complete set
+must refuse that incomplete traversal or use a query ordered by the row's
+`createdAt`/`id`, with a fixed `asOf` when a stable snapshot is required. The
+absence of a cursor alone is not proof that every row was returned.
+
 **Default-cap backstop (memql#1965).** A query that arrives with NO
 explicit window — neither `paginate` nor `sort` — is treated as an
 unmarked list read and capped at `MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP`
@@ -2214,11 +2221,26 @@ logic submittedRequestStatus {
 | bind | `name := <call>` or `name := <expression>` | `name` holds the value from the next statement on |
 | call | `<kind> <name>(<named arguments>)` | the kind is one of `query`, `mutation`, `logic`, `builtin`, `automation`, `action` |
 | if | `if <cond> { } else if <cond> { } else { }` | `else` goes on the line of the closing brace |
-| for | `for <x> in <expression> [if <cond>] { }` | the author names the loop variable |
+| for | `for <x> in <expression> [if <cond>] [parallel(N)] { }` | the author names the loop variable; optional bounded parallel iterations |
 | switch | `switch <expression> { case <literal>[, <literal>] { } default { } }` | labels are literals, each used once |
 | parallel | `parallel { branch <label> { } ... } [wait any]` | waits for every branch unless `wait any` is written |
 | publish | `publish "<topic>" { <field>: <value>, ... }` | automations only; the payload is a map literal |
 | return | `return [<expression or call>]` | ends the body, and in an automation the run |
+
+Use `parallel(N)` on a `for` when independent items may run concurrently.
+`N` is a literal integer from 2 through 64; omit it for sequential execution.
+The source is evaluated once, each item has its own scope, and its journal key
+retains its original source index even when a filter skips an earlier item.
+The limit bounds this loop, not total cluster or worker capacity. Completion
+order is unspecified. A parallel iteration cannot `return` from the enclosing
+body; a called logic can still return its own value.
+
+A failed iteration cancels its siblings and the loop waits for active children
+to finish before advancing. `on error continue` lets other items run after an
+ordinary error. Cancellation, a human wait or a required-journal failure still
+stops advancement. Cancellation cannot undo an external effect; recovery uses
+the same definition, receipt and replay checks as sequential work. Parallel
+iteration does not make an unfinished effect safe to retry.
 
 One statement per line. An expression continues onto the next line when the line ends inside an open bracket or on an operator, or when the next line begins with one.
 

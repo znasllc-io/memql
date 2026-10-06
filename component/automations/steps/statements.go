@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/work"
 )
 
@@ -70,6 +71,9 @@ func forEachStatements(ctx context.Context, step *automations.Step, stepCtx *Con
 	if cfg == nil || step.Exprs == nil || step.Exprs.Source == nil {
 		return finish(fmt.Errorf("a statement `for` needs its source"))
 	}
+	if cfg.Concurrency < 0 || cfg.Concurrency > ast.MaxForConcurrency {
+		return finish(fmt.Errorf("parallel loop limit must be between 0 and %d", ast.MaxForConcurrency))
+	}
 	source, err := v1Value(ctx, stepCtx.Evaluator, step.Exprs.Source)
 	if err != nil {
 		return finish(fmt.Errorf("failed to evaluate source: %w", err))
@@ -77,6 +81,9 @@ func forEachStatements(ctx context.Context, step *automations.Step, stepCtx *Con
 	items, err := automations.ToSlice(source)
 	if err != nil {
 		return finish(fmt.Errorf("source is not iterable: %w", err))
+	}
+	if cfg.Concurrency > 1 {
+		return parallelForStatements(ctx, step, stepCtx, items, result, finish)
 	}
 	processed, failed := 0, 0
 	var lastErr error
@@ -96,7 +103,7 @@ func forEachStatements(ctx context.Context, step *automations.Step, stepCtx *Con
 		// are its own.
 		returned, value, rerr := automations.RunStatementBody(ctx, step.ID+"/"+strconv.Itoa(i), cfg.Do, stepCtx, iter)
 		if rerr != nil {
-			if isHumanWait(rerr) {
+			if isHumanWait(rerr) || errors.Is(rerr, automations.ErrJournalRequired) || ctx.Err() != nil {
 				return finish(rerr)
 			}
 			failed++

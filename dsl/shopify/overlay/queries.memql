@@ -55,6 +55,19 @@ query store stores {
   shape     storeFull
 }
 
+/// Complete connector directory at one snapshot. Display ordering stays in
+/// stores; the connector walks this stable, cursor-capable order instead.
+@serverOnly
+query store storesForConnector {
+  args {
+    asOf datetime!
+  }
+  sort      "row.createdAt", "asc"
+  asOf      args.asOf ?? latest
+  paginate  100
+  shape     storeFull
+}
+
 /// The development stores attached to one live store.
 ///
 /// A storefront shows the store it is bound to and the development store it

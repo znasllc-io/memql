@@ -232,6 +232,11 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 		if err := requiredJournalError(ctx); err != nil {
 			return seqOutcome{}, err
 		}
+		// Nested lists share cancellation with their owning run. They must
+		// not begin another effect after a sibling failed or the owner stopped.
+		if err := ctx.Err(); err != nil {
+			return seqOutcome{}, err
+		}
 		if step == nil {
 			continue
 		}

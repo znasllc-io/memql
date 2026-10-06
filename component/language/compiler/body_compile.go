@@ -286,6 +286,9 @@ func compileStatement(s ast.BodyStatement) map[string]any {
 		if t.Filter != nil {
 			fe["filter"] = ast.FormatExpr(t.Filter)
 		}
+		if t.Concurrency > 1 {
+			fe["concurrency"] = t.Concurrency
+		}
 		step := map[string]any{"type": "forEach", "forEach": fe}
 		addOnError(step, t.Mods)
 		return step

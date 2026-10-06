@@ -860,6 +860,7 @@ statements/automation/fieldWrite/adjust.memql
 statements/automation/fieldWrite/outside.memql
 statements/automation/for/for-over-a-call.memql
 statements/automation/for/for.memql
+statements/automation/for/parallel.memql
 statements/automation/if/if-on-a-call.memql
 statements/automation/if/if.memql
 statements/automation/onError/on-error-continue.memql

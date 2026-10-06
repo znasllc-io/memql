@@ -15,7 +15,7 @@ Every named thing in the MemQL language -- construct, annotation, keyword, opera
 
 It is the companion to the [grammar](grammar.md): the grammar says what may be written, this says what each written thing does. Together they are what a model is given before it is asked to write MemQL.
 
-Edition `2026`, grammar version `2026.09-dsl-v1-followups-9f344ecf`.
+Edition `2026`, grammar version `2026.10-bounded-iteration-ba9d35a7`.
 
 | Section | Entries |
 |---|---:|
@@ -156,7 +156,7 @@ The reserved words that are not constructs: the statements of a body, the clause
 | `default` | `default` | The switch branch that runs when no case matches. |
 | `else` | `else` | Alternative branch of an if statement, on the closing brace's line: `} else {`. |
 | `filter` | `"filter" <lambda>` | Query clause: `filter row => <predicate>`, the boolean predicate over the row, pushed down to SQL. A line clause -- it takes the rest of its line and the lines after it that open with an operator; no block. |
-| `for` | `"for" <name> "in" <expression> [ "if" <expression> ] "{" <statement>* "}" [ <trailing-clause> ]` | Loop statement: `for item in <source> [if <cond>] { ... }` -- the loop variable and every name bound in the body exist in each iteration only. A return inside ends the body the loop is in. Trailing clause: `on error continue`. |
+| `for` | `"for" <name> "in" <expression> [ "if" <expression> ] [ "parallel" "(" <number> ")" ] "{" <statement>* "}" [ <trailing-clause> ]` | Loop statement: `for item in <source> [if <cond>] [parallel(N)] { ... }` -- the loop variable and every name bound in the body exist in each iteration only. The optional parallel limit is a literal 2..64; its iterations cannot return. Without it, a return ends the enclosing body. Trailing clause: `on error continue`. |
 | `if` | `"if" <expression> "{" <statement>* "}" { "else" "if" <expression> "{" <statement>* "}" } [ "else" "{" <statement>* "}" ]` | Conditional statement: `if <cond> { ... } else if <cond> { ... } else { ... }`. A name bound in a branch is readable after the chain -- absent if the branch that binds it did not run -- and the branches of one chain may bind the same name. For a conditional VALUE write the expression `p ? a : b`. |
 | `in` | `in` | Membership test: `args.tag in row.tags`, or `row.kind in ["a", "b"]`. The single membership operator (`has` and the `.contains(v)` collection method are retired). |
 | `insert` | `"insert" "{" ( <write-entry> [ "," ] )* "}"` | Mutation block: the row to create. Exactly one insert OR update per mutation. |

@@ -56,6 +56,11 @@ func (f *fakeEngine) Execute(_ context.Context, q string) (*memql.ExecuteResult,
 	f.mu.Lock()
 	f.executed = append(f.executed, q)
 	name := callName(q)
+	if name == "storesForConnector" {
+		// The fixture describes stores once; the production connector uses
+		// a cursor-capable read while the UI retains its display ordering.
+		name = "stores"
+	}
 	err := f.fail[name]
 	rows := f.rows[name]
 	cursor := f.cursors[name]
