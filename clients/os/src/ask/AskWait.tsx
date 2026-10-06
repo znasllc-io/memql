@@ -25,7 +25,7 @@ export function AskWait({ activity, startedAt, hasText, label: activeLabel }: { 
   const step = steps[index];
   const call = step?.event;
   const wait = expectedWait(now, new Date(step?.startedAt ?? startedAt).valueOf(), Math.max(1000, call?.expectedMs ?? 60000));
-  const label = call?.kind === "action" && call.phase === "running" ? "Working in your workspace" : hasText ? "Replying" : wait.overdue ? "Still working" : activeLabel ?? "Thinking";
+  const label = activeLabel ?? (call?.kind === "action" && call.phase === "running" ? "Working in your workspace" : hasText ? "Replying" : wait.overdue ? "Still working" : "Thinking");
   const timer = wait.overdue ? `+${wait.overrun}s` : `${wait.remaining}s`;
   return <div className="os-ask-wait" aria-label={label} title={call ? `${call.estimateSource ?? "Estimate"} · ${call.model || call.provider || "Selected model"}` : "Waiting for the selected inference route"}>
     <span className="os-ask-countdown" style={{ "--ask-remaining": wait.fraction } as CSSProperties} aria-hidden><span /></span>

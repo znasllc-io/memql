@@ -34,6 +34,8 @@ type AskTurn struct {
 	Workload         string       `json:"workload,omitempty"`
 	Background       bool         `json:"background,omitempty"`
 	Acknowledgement  string       `json:"acknowledgement,omitempty"`
+	AcknowledgedAt   *time.Time   `json:"acknowledgedAt,omitempty"`
+	WorkStatus       string       `json:"workStatus,omitempty"`
 	WorkTitle        string       `json:"workTitle,omitempty"`
 	Question         *AskQuestion `json:"question,omitempty"`
 	AnswerOnly       bool         `json:"answerOnly,omitempty"`
@@ -266,12 +268,17 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 		turn.State, turn.EndedAt, turn.Error = "queued", nil, ""
 		turn.Background = true
 		turn.WorkTitle, turn.Workload = pending.Title, pending.Workload
+		turn.WorkStatus, turn.AcknowledgedAt = pending.Status, pending.AcknowledgedAt
 		if pending.Waiting {
 			turn.State = "waiting"
 		}
 		turn.Answer = pending.Acknowledgement
 		turn.Acknowledgement = turn.Answer
-		if err = emit(WorkEvent{ID: "work:" + turn.RunID, Kind: "run", Phase: turn.State, Name: turn.WorkTitle, Arguments: map[string]any{"goalId": turn.GoalID, "runId": turn.RunID, "workload": turn.Workload, "workTitle": turn.WorkTitle}}); err != nil {
+		phase := "running"
+		if pending.Waiting {
+			phase = "waiting"
+		}
+		if err = emit(WorkEvent{ID: "work:" + turn.RunID, Kind: "run", Phase: phase, Name: turn.WorkTitle, Arguments: map[string]any{"goalId": turn.GoalID, "runId": turn.RunID, "workload": turn.Workload, "workTitle": turn.WorkTitle, "background": true, "workStatus": turn.WorkStatus, "acknowledgedAt": turn.AcknowledgedAt}}); err != nil {
 			return "", err
 		}
 		if onText != nil && answer == "" {

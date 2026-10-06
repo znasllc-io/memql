@@ -149,6 +149,63 @@ func TestConversationRecallKeepsSpeakerAndOwner(t *testing.T) {
 	require.Contains(t, string(nodes[0].Payload), `"role":"user"`)
 	require.NotContains(t, string(nodes[0].Payload), "PrivateOther")
 }
+
+func TestLateAcknowledgementAndRunStatusSurviveReplicaChanges(t *testing.T) {
+	a, _, _ := readMergeTestEngine(t)
+	b, _, _ := readMergeTestEngine(t)
+	previous := auth.InstalledCapabilityCatalog()
+	auth.SetCapabilityCatalog(nil)
+	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
+	ctx := askTestActor()
+	conversation := askTestConversation(t, a, ctx)
+	runID := "v1:work:run:" + id.NewShortId()
+	started := time.Now().UTC().Add(-30 * time.Second)
+	write := func(e *MemQLEngine, name string, args map[string]any) {
+		t.Helper()
+		call, err := parser.RenderCall(name, args)
+		require.NoError(t, err)
+		_, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
+		require.NoError(t, err)
+	}
+	write(a, "createWorkRun", map[string]any{"runId": runID, "goalId": "goal", "automationName": "background", "templateFingerprint": "test", "triggeredBy": "manual", "status": "compiling", "mode": "live", "startedAt": started.Format(time.RFC3339Nano)})
+	require.NoError(t, a.askSave(ctx, conversation, "Late classification", askTranscript{Turns: []AskTurn{{ID: "turn", RunID: runID, Prompt: "Check available records", StartedAt: started, State: "queued", Background: true}}}))
+	read := func(e *MemQLEngine) AskTurn {
+		t.Helper()
+		nodes, err := e.askConversationSnapshotBuiltin(ctx, map[string]any{"conversationId": conversation}, 0)
+		require.NoError(t, err)
+		var result struct {
+			Transcript askTranscript `json:"transcript"`
+		}
+		require.NoError(t, json.Unmarshal(nodes[0].Payload, &result))
+		return result.Transcript.Turns[0]
+	}
+	before := read(b)
+	require.Equal(t, "compiling", before.WorkStatus)
+	require.Empty(t, before.Acknowledgement)
+	require.Nil(t, before.AcknowledgedAt)
+	ackAt := time.Now().UTC()
+	write(b, "updateWorkRun", map[string]any{"runId": runID, "status": "running", "classification": map[string]any{"workload": "lookup", "workTitle": "Check records", "acknowledgement": "I’ll check the available records.", "acknowledgedAt": ackAt.Format(time.RFC3339Nano)}})
+	running := read(a)
+	require.Equal(t, "running", running.WorkStatus)
+	require.Equal(t, "I’ll check the available records.", running.Answer)
+	require.NotNil(t, running.AcknowledgedAt)
+	require.WithinDuration(t, ackAt, *running.AcknowledgedAt, time.Microsecond)
+	require.Nil(t, running.EndedAt)
+	write(a, "updateWorkRun", map[string]any{"runId": runID, "status": "waiting", "waitingOn": map[string]any{"kind": "feedback", "subject": "question"}})
+	waiting := read(b)
+	require.Equal(t, "waiting", waiting.State)
+	require.Equal(t, "waiting", waiting.WorkStatus)
+	require.Equal(t, running.Acknowledgement, waiting.Acknowledgement)
+	require.Equal(t, running.AcknowledgedAt, waiting.AcknowledgedAt)
+	ended := ackAt.Add(time.Second)
+	write(b, "updateWorkRun", map[string]any{"runId": runID, "status": "succeeded", "outcome": map[string]any{"returned": "Checked records"}, "finishedAt": ended.Format(time.RFC3339Nano)})
+	completed := read(a)
+	require.Equal(t, "done", completed.State)
+	require.Equal(t, "succeeded", completed.WorkStatus)
+	require.Equal(t, running.AcknowledgedAt, completed.AcknowledgedAt)
+	require.NotNil(t, completed.EndedAt)
+	require.WithinDuration(t, ended, *completed.EndedAt, time.Microsecond)
+}
 func TestMemoryExcerptPreservesUnicodeMatchOffsets(t *testing.T) {
 	original := strings.Repeat("İ", 3000) + "Jose" + strings.Repeat("Ⱥ", 3000)
 	excerpt := memoryExcerpt(original, "jose")

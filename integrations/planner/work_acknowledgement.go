@@ -3,14 +3,48 @@ package planner
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/airoute"
 )
 
 type acknowledgementCandidateKey struct{}
 type classificationViewerKey struct{}
+
+func validAcknowledgement(text string) bool {
+	return strings.TrimSpace(text) != "" && len([]rune(text)) <= 280
+}
+
+func (l *PlannerAgentLoop) repairAcknowledgement(ctx context.Context, req CompileRequest, conversation any, out *CompileOutcome) string {
+	data := map[string]any{"goal": truncate(req.Statement, maxGoalChars), "workload": out.Workload, "workTitle": out.WorkTitle}
+	if conversation != nil {
+		if preview, err := conversationPreview(conversation); err == nil {
+			data["conversation"] = preview
+		}
+	}
+	bounded, cancel := context.WithTimeout(airoute.WithCallPurpose(ctx, "Acknowledging request", 1), 15*time.Second)
+	defer cancel()
+	response, err := l.engine.InvokeAI(systemActorContext(bounded), "workAcknowledgement", data)
+	if err == nil || !memql.IsProviderUnavailable(err) {
+		out.ModelCalls++
+	}
+	if err == nil {
+		text := strings.TrimSpace(parseSectionableDecision(response).Acknowledgement)
+		if validAcknowledgement(text) {
+			return text
+		}
+		err = fmt.Errorf("model returned an empty or oversized acknowledgment")
+	}
+	// Useful work may proceed after this bounded presentation failure. Ask
+	// renders the real task status, never an empty assistant message or canned
+	// prose, and the failed model call remains in the execution record.
+	l.warnCompile("work compile: acknowledgment unavailable after one repair", req, err)
+	return ""
+}
 
 func (l *PlannerAgentLoop) cacheAcknowledgement(ctx context.Context, owner, run, action string) []map[string]any {
 	// Reuse is optional and bounded. A missing embedding provider or a cold

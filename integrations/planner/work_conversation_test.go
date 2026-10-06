@@ -83,7 +83,7 @@ func TestClassificationFailureCannotEnterAuthoring(t *testing.T) {
 
 func TestComplexConversationTaskDoesNotAuthorizeAutomation(t *testing.T) {
 	for _, sections := range []bool{false, true} {
-		eng := &countingCompileEngine{triage: map[string]any{"intent": "task", "complexity": "complex", "requiresFile": false, "sectionable": sections, "sections": []map[string]any{{"label": "unsafe", "effects": []string{"external"}}}}}
+		eng := &countingCompileEngine{triage: map[string]any{"intent": "task", "complexity": "complex", "requiresFile": false, "acknowledgement": "I’ll research the vendors we discussed.", "sectionable": sections, "sections": []map[string]any{{"label": "unsafe", "effects": []string{"external"}}}}}
 		out, err := (&PlannerAgentLoop{engine: eng}).CompileGoalForRun(context.Background(), conversationReq("yes", "Should I research the vendors?"), nil, realSandbox{})
 		if err != nil {
 			t.Fatal(err)

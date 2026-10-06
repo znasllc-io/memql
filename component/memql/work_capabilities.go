@@ -29,7 +29,7 @@ func (e *MemQLEngine) workCapabilityAllowed(ctx context.Context, fn *Function) b
 		return false
 	}
 	for _, field := range workCapabilityFields(fn) {
-		if field.Secret {
+		if workCapabilitySecret(field) {
 			return false
 		}
 	}
@@ -43,6 +43,21 @@ func (e *MemQLEngine) workCapabilityAllowed(ctx context.Context, fn *Function) b
 		}
 	}
 	return true
+}
+
+func workCapabilitySecret(field *FunctionArgsField) bool {
+	if field == nil {
+		return false
+	}
+	if field.Secret || workCapabilitySecret(field.Items) {
+		return true
+	}
+	for _, nested := range field.Nested {
+		if workCapabilitySecret(nested) {
+			return true
+		}
+	}
+	return false
 }
 
 func workCapabilityApp(fn *Function) string {
@@ -121,7 +136,9 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 		scores[name] = score
 		fields := []map[string]any{}
 		for _, field := range workCapabilityFields(fn) {
-			fields = append(fields, map[string]any{"name": field.Name, "type": field.Type, "optional": field.Optional, "description": field.Description, "enum": field.Enum})
+			contract := jsonSchemaForArgsField(field)
+			contract["name"], contract["optional"] = field.Name, field.Optional
+			fields = append(fields, contract)
 		}
 		description := fn.Description
 		if description == "" {
@@ -134,18 +151,26 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 		if scores[a] != scores[b] {
 			return scores[a] > scores[b]
 		}
+		if (matches[i]["kind"] == "query") != (matches[j]["kind"] == "query") {
+			return matches[i]["kind"] == "query"
+		}
 		return a < b
 	})
 	total := len(matches)
 	// Discovery is a shortlist, not the entire tool registry in each model
-	// turn. Large catalogs previously filled the local model's context before
-	// it had executed a single read. An exact-name lookup retains the contract.
+	// turn. Include complete small argument contracts so a useful discovery
+	// can be executed immediately. Large contracts still need an exact lookup;
+	// never silently omit required fields or enum alternatives to make one fit.
 	if len(matches) > 6 {
 		matches = matches[:6]
 	}
 	for _, match := range matches {
 		if !strings.EqualFold(search, fmt.Sprint(match["name"])) {
-			delete(match, "arguments")
+			contract, _ := json.Marshal(match["arguments"])
+			if len(contract) > 2048 {
+				delete(match, "arguments")
+				match["argumentsOmitted"] = true
+			}
 			match["description"] = boundedMemoryText(fmt.Sprint(match["description"]), 500)
 		}
 	}
@@ -159,7 +184,7 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 		catalog = append(catalog, map[string]any{"concept": concept, "reads": reads, "readCount": count})
 	}
 	sort.Slice(catalog, func(i, j int) bool { return catalog[i]["concept"].(string) < catalog[j]["concept"].(string) })
-	raw, _ := json.Marshal(map[string]any{"capabilities": matches, "concepts": catalog, "total": total, "truncated": total > len(matches), "note": "Read contracts describe available data, not proof that rows exist. Search a returned qualified name exactly to inspect its arguments. Use recallMemory for prior conversations and preferences. Empty semantic results do not prove absence."})
+	raw, _ := json.Marshal(map[string]any{"capabilities": matches, "concepts": catalog, "total": total, "truncated": total > len(matches), "note": "Read contracts describe available data, not proof that rows exist. Returned arguments are complete and ready to use; an empty list means no arguments. Only when argumentsOmitted is true, search that qualified name exactly for its full contract. Use recallMemory for prior conversations and preferences. Empty semantic results do not prove absence."})
 	return []memorynodes.MemoryNode{{ID: "capabilities", Payload: raw}}, nil
 }
 

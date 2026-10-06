@@ -77,6 +77,19 @@ in the chain.** A chain that starts at a vendor is a decision somebody made
 rather than a fallback, and refusing it there would break every deliberately-paid
 policy. See [Layer 4b](#layer-4b--the-ceiling-gates-the-federation-hop-memql5096).
 
+Conversational lookups use the `fast` routing level, selected from the owned
+run’s persisted classification on the executing replica. Other work keeps its
+existing level; explicit step overrides and routing rules still apply. Capability
+discovery includes complete small argument contracts, avoiding another model
+call just to ask how to invoke a returned query. Large contracts remain available
+by exact name so discovery cannot fill the model’s context.
+
+A non-quick classifier response with missing or oversized acknowledgment prose
+gets at most one `workAcknowledgement` call at `fast`, bounded to 15 seconds and
+the run’s remaining call ceiling. Valid acknowledgments and quick replies add
+no call. Failure leaves the work visible through its real task status rather
+than manufacturing a reply or retrying indefinitely.
+
 **One call was added, and it is bounded by construction.** The work spine's
 failure path now runs the deterministic symptom table first and reaches the
 `classifySymptom` prompt -- at level `fast`, the cheapest tier -- **only when the

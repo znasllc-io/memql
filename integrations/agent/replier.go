@@ -313,11 +313,19 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	if isOwnedWorkExecution(ctx) {
 		promptName = "workAgentReply"
 	}
+	level := airoute.LevelStrong
+	if role == "assistant" || role == "" {
+		var err error
+		level, err = r.workRoutingLevel(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 	routerReq := router.ResolveRequest{
 		RequestId:        msg.RequestId,
 		AgentId:          msg.AgentId,
 		PromptName:       promptName,
-		Level:            airoute.LevelStrong,
+		Level:            level,
 		Modality:         airoute.ModalityStreamingTools,
 		Needs:            airoute.Needs{Tools: true},
 		Role:             role,

@@ -58,3 +58,13 @@ prompt goalComplexityTriage {
   guidance  []object          @description("DESCRIPTION GUIDANCE (epic memql#5414, design D23): what the goal's owner disliked about earlier answers to this same goal shape -- [{axes, reason}], newest first, at most five. Present only when a model is genuinely being used for the goal again; empty on a goal nobody disliked.")
   inputKeys []string          @description("The names of the inputs the goal supplies (epic memql#5414, design D24). A section that reads a goal input names it EXACTLY as here, because a section's catalog signature is its purpose plus its input names: a section that respells one would miss the automation that already does its work.")
 }
+
+/// One bounded repair of missing acknowledgment prose, never a second classification.
+@level("fast")
+@templateFile("prompts/workAcknowledgement.tmpl")
+prompt workAcknowledgement {
+  goal string!
+  workload string!
+  workTitle string!
+  conversation string
+}

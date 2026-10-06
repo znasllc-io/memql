@@ -19,11 +19,17 @@ import (
 type workPromptEngine struct {
 	savedContinuation []common.ChatMessage
 	registryEngine
-	prompts *memql.PromptRegistry
-	viewer  map[string]any
+	prompts             *memql.PromptRegistry
+	viewer              map[string]any
+	classification      map[string]any
+	classificationReads int
 }
 
 func (e *workPromptEngine) Execute(_ context.Context, query string) (any, error) {
+	if strings.HasPrefix(query, "query work.workRunForOwner(") {
+		e.classificationReads++
+		return []map[string]any{{"classification": e.classification}}, nil
+	}
 	if query == "builtin work.workViewerContext()" && e.viewer != nil {
 		return []map[string]any{e.viewer}, nil
 	}
@@ -84,6 +90,9 @@ func TestOwnedWorkTurnUsesShippedPrompt(t *testing.T) {
 			t.Errorf("work prompt omitted %q", expected)
 		}
 	}
+	if strings.Contains(prepared.messages[0].Content, "A plain answer is appropriate") || !strings.Contains(prepared.messages[0].Content, `respondToUser({"status":"complete"`) {
+		t.Fatal("work prompt must consistently require its completion tool")
+	}
 	if strings.Index(prepared.messages[0].Content, "Current viewer context") < strings.Index(prepared.messages[0].Content, "Execution instructions:") {
 		t.Fatal("variable viewer facts should follow the stable instructions")
 	}
@@ -93,6 +102,45 @@ func TestOwnedWorkTurnUsesShippedPrompt(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("actual work turn has no file tool")
+	}
+}
+
+func TestLookupRoutingReadsDurableClassificationOnExecutingReplica(t *testing.T) {
+	registry := memql.NewPromptRegistry()
+	if _, err := memql.LoadUnifiedPrompts(nil, registry, template.New("partials")); err != nil {
+		t.Fatal(err)
+	}
+	owner := "v1:identity:user:lookup-owner"
+	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), owner), common.RunContext{RunId: "lookup-run", GoalId: "goal", OwnerUserId: owner})
+	msg := &memqlv1.AgentGenerateTurnMsg{Hints: map[string]string{"workload": "lookup"}, AgentId: "assistant", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "assistant", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "Check current records"}}}
+	for _, workload := range []string{"lookup", "research", "project", "", "quick"} {
+		t.Run(workload, func(t *testing.T) {
+			// This fresh executor has none of the classifier's process state.
+			engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{}}, prompts: registry, classification: map[string]any{"workload": workload}}
+			prepared, err := newTestReplier(engine).prepareTurn(ctx, msg, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := airoute.LevelStrong
+			if workload == "lookup" {
+				want = airoute.LevelFast
+			}
+			if prepared.routerReq.Level != want || engine.classificationReads != 1 {
+				t.Fatalf("level=%s reads=%d", prepared.routerReq.Level, engine.classificationReads)
+			}
+			if prepared.routerReq.ExplicitProvider != "" {
+				t.Fatal("lookup pinned a provider")
+			}
+		})
+	}
+	engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{}}, prompts: registry, classification: map[string]any{"workload": "lookup"}}
+	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "lookup-run", GoalId: "goal", OwnerUserId: owner, Override: &common.StepOverride{Level: "reasoning", Model: "app:claude-code:opus"}})
+	prepared, err := newTestReplier(engine).prepareTurn(ctx, msg, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.routerReq.Level != airoute.LevelReasoning || prepared.routerReq.ExplicitProvider != "app:claude-code:opus" {
+		t.Fatalf("ignored step override: %+v", prepared.routerReq)
 	}
 }
 

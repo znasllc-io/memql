@@ -49,6 +49,8 @@ var levels = map[string]bool{"fast": true, "strong": true, "reasoning": true, "e
 var promptLevels = map[string]string{
 	// Named in D3.
 	"goalComplexityTriage": "fast",
+	// One bounded repair of acknowledgment wording; never reclassifies work.
+	"workAcknowledgement":  "fast",
 	"responsibilityIntake": "fast",
 	"classifySymptom":      "fast",
 	"docSummary":           "fast",

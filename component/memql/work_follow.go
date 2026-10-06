@@ -37,8 +37,9 @@ const followBackground = "background"
 const followSnapshot = "snapshot"
 
 type workPending struct {
-	Waiting                          bool
-	Title, Workload, Acknowledgement string
+	Waiting                                  bool
+	Title, Workload, Acknowledgement, Status string
+	AcknowledgedAt                           *time.Time
 }
 
 func (p *workPending) Error() string {
@@ -62,6 +63,15 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 			return answer, fmt.Errorf("work run is unavailable")
 		}
 		run := runs[0]
+		outcome, _ := run["classification"].(map[string]any)
+		workload, _ := outcome["workload"].(string)
+		title, _ := outcome["workTitle"].(string)
+		ack, _ := outcome["acknowledgement"].(string)
+		status, _ := run["status"].(string)
+		pending := &workPending{Title: title, Workload: workload, Acknowledgement: ack, Status: status}
+		if at, valid := askTimestamp(outcome["acknowledgedAt"]); valid && ack != "" {
+			pending.AcknowledgedAt = &at
+		}
 		observations, err := read(ctx, "workObservationsForOwnerRun", runID)
 		if err != nil {
 			return answer, err
@@ -134,7 +144,8 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 						return answer, err
 					}
 				}
-				return answer, &workPending{Waiting: true}
+				pending.Waiting = true
+				return answer, pending
 			}
 		case "failed", "abandoned", "cancelled":
 			message, _ := run["errorMessage"].(string)
@@ -153,14 +164,10 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 			return answer, fmt.Errorf("%s", message)
 		}
 		mode, _ := ctx.Value(workFollowModeKey{}).(string)
-		outcome, _ := run["classification"].(map[string]any)
-		workload, _ := outcome["workload"].(string)
-		title, _ := outcome["workTitle"].(string)
-		ack, _ := outcome["acknowledgement"].(string)
 		started, hasStart := askTimestamp(run["startedAt"])
 		queuedClassification := run["status"] == "compiling" && hasStart && time.Since(started) >= 15*time.Second
 		if mode == followSnapshot || (mode == followBackground && ((workload != "" && workload != "quick") || queuedClassification)) {
-			return answer, &workPending{Title: title, Workload: workload, Acknowledgement: ack}
+			return answer, pending
 		}
 		timer := time.NewTimer(interval)
 		select {
