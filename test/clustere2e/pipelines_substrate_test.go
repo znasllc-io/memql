@@ -34,7 +34,7 @@ package clustere2e
 //     integrations/workbench ForwardHandler, joined by an in-process forward
 //     transport (substrateMesh, the shape of integrations/pipelinesteps'
 //     executor_hop_test.go). The Runners talk to the API server AS THE ENGINE:
-//     with a token for memql/memql-engine, what `kubectl create token` asks
+//     with a token for memql/memql-engine-workbench, what `kubectl create token` asks
 //     for, so every Job, Secret, pod and log goes through the DEPLOYED Role,
 //     RoleBinding, quota, LimitRange, cache claim and NetworkPolicy of
 //     deploy/k8s/components/pipelines; the namespace and the clone image are
@@ -71,7 +71,7 @@ package clustere2e
 //	k3d kubeconfig get pipelines-e2e > /tmp/pipelines-e2e.kubeconfig
 //	# apply what the test needs from `kubectl kustomize deploy/k8s/overlays/local`:
 //	# the memql and memql-pipelines namespaces, every object in memql-pipelines,
-//	# memql/memql-engine and the memql/memql-pipelines ConfigMap
+//	# memql/memql-engine-workbench and the memql/memql-pipelines ConfigMap
 //	MEMQL_E2E_KUBECONFIG=/tmp/pipelines-e2e.kubeconfig MEMQL_E2E_KUBECONTEXT=k3d-pipelines-e2e \
 //	  GOWORK=off go test -tags clustere2e,agent -count=1 -timeout=30m -run TestPipelinesSubstrate ./test/clustere2e/
 //
@@ -197,6 +197,7 @@ func TestPipelinesSubstrate(t *testing.T) {
 	// cluster, so they run -- and can fail -- before the skip below.
 	t.Run("report-mapping", testSubstrateReportMapping)
 	t.Run("normalization", testSubstrateNormalization)
+	t.Run("manifest", func(t *testing.T) { compileSubstratePlan(t) })
 
 	cluster := connectSubstrateCluster(t)
 
