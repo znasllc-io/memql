@@ -706,6 +706,9 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 		s.freshenToken()
 		claimed, claimErr := s.claimCreation()
 		if claimErr != nil {
+			if s.ctx.Err() != nil {
+				return s.abandon(nil), Job{}, true
+			}
 			if errors.Is(claimErr, errCreationUncertain) {
 				if next, found, err := s.getJob(); err == nil && found {
 					return pl.StepResult{}, next, false
@@ -736,6 +739,9 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 			return s.abandon(nil), Job{}, true
 		case deploycontrol.IsForbiddenQuota(err):
 			if err := s.releaseRejectedCreation(); err != nil {
+				if s.ctx.Err() != nil {
+					return s.abandon(nil), Job{}, true
+				}
 				return s.failed(pl.CodeRunnerUnavailable, "the rejected Job's queued state could not be recorded: "+apiMessage(err)), Job{}, true
 			}
 			// The ceiling is full (Review Focus 4): wait for a slot, as long
@@ -753,6 +759,9 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 			}
 		case throttledJobCreate(err) && s.creationAttempts+1 < apiAttempts:
 			if err := s.releaseRejectedCreation(); err != nil {
+				if s.ctx.Err() != nil {
+					return s.abandon(nil), Job{}, true
+				}
 				return s.failed(pl.CodeRunnerUnavailable, "the throttled Job's queued state could not be recorded: "+apiMessage(err)), Job{}, true
 			}
 			s.creationAttempts++

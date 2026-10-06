@@ -180,3 +180,32 @@ func TestCreationMetadataLostResponsesAreReconciled(t *testing.T) {
 		t.Fatalf("queued proof missing after lost reply: %v", err)
 	}
 }
+
+func TestCancellationDuringCreationMetadataKeepsCancellationAndCleanup(t *testing.T) {
+	for _, phase := range []string{"claim", "quota requeue", "throttle requeue"} {
+		t.Run(phase, func(t *testing.T) {
+			h := newRunnerHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			h.c.with(func(c *rtCluster) {
+				if phase == "throttle requeue" {
+					c.createJobAnswers = []kubeAnswer{kubeStatus(429, "TooManyRequests", "throttled")}
+				} else {
+					c.quotaRefusals = 100
+				}
+				c.onSecretPatched = func(c *rtCluster, secret Secret) {
+					state := secret.Metadata.Annotations[annotCreation]
+					if (phase == "claim" && strings.HasPrefix(state, "creating ")) || (phase != "claim" && state == creationQueued) {
+						cancel()
+					}
+				}
+			})
+			result := h.await(t, h.start(ctx, rtRun()))
+			rtWantCode(t, result, pl.OutcomeCancelled, pl.CodeStepCancelled)
+			if h.c.hasSecret(testSecretName) || h.c.hasJob(testJobName) {
+				t.Fatal("cancelled creation retained a credential or Job")
+			}
+			h.leftNoArchive(t)
+		})
+	}
+}
