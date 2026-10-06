@@ -143,6 +143,25 @@ These will consume the same pinned-candidate execution and artifact contracts.
 They have no fabricated baselines or pass thresholds and are not required checks
 until implemented and calibrated. Keep their activation explicit.
 
+### Security report ingestion primitive
+
+The GitHub App client now has bounded SARIF upload and processing-status
+primitives. They submit exact report bytes with a pinned commit/ref, return a
+content digest and accepted upload id, and distinguish pending, complete and
+failed ingestion. Redirects are refused. Ambiguous POST responses never trigger
+an automatic second upload. Framing and size checks do not substitute for
+successful scanner execution or artifact/source verification.
+
+The adapter is tested against an in-process GitHub fixture, including real
+standalone CodeQL report bytes. It is not yet a live GitHub upload or a wired
+pipeline publication stage. The caller must journal upload intent/receipt,
+bind the report to its execution evidence, reconcile uncertain submission,
+and retain/report ingestion failures. The GitHub App's code-scanning alerts
+permission must be explicitly configured; this change grants no permission and
+puts no upload credential into a build Job. See GitHub's
+[external CI guide](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/use-with-existing-ci-system)
+and [SARIF API](https://docs.github.com/en/rest/code-scanning/code-scanning#upload-an-analysis-as-sarif-data).
+
 ### Cluster update requirements (owner clarification, October 6)
 
 Owners and developers must discover and trigger installation updates from
