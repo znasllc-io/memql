@@ -44,7 +44,7 @@ db	component/identity/web	0.27
 db	packs/anchor	0.21
 db	component/sitehealth	0.21
 db	component/database/dbtest	0.17
-db	component/packages/githubapp	0.14
+db	component/identity/githubapp	0.14
 db	component/identity/workertoken	0.06
 db	component/identity/adminops	0.04
 db	component/identity/pat	0.04

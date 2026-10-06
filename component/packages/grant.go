@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/znasllc-io/memql/component/packages/githubapp"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 )
 
 // grant.go -- the bearer a request actually carries under a GitHub App grant,

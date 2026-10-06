@@ -10,9 +10,9 @@ import (
 
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/node"
-	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/component/pipelinerun"
 	"github.com/znasllc-io/memql/component/pipelines"
 )

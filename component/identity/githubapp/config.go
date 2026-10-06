@@ -39,9 +39,9 @@ import (
 // place it can be logged.
 //
 // One const and one envValue call per variable, so a grep for the name finds
-// exactly one read site. That is the same rule component/packages' own
-// envValue records, applied inside this package rather than by importing the
-// parent, which would be an import cycle.
+// exactly one read site. This client lives in the identity module so both
+// package delivery and release integrations can use it without importing the
+// root application module.
 const (
 	EnvAppId         = "MEMQL_GITHUB_APP_ID"
 	EnvSlug          = "MEMQL_GITHUB_APP_SLUG"

@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
-	"github.com/znasllc-io/memql/component/packages/githubapp"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
 

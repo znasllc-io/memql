@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/core/logger"
 )

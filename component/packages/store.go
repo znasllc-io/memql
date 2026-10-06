@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/core/num"
 )
 

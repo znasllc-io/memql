@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/znasllc-io/memql/component/packages/githubapp"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 )
 

@@ -14,8 +14,8 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/deploycontrol"
 	"github.com/znasllc-io/memql/component/edge"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/znasllc-io/memql/component/packages/githubapp"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 )
 
 // TestPipelinesCloneTokenIsNarrowedToTheRepository: the token a step clones

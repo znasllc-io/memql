@@ -169,8 +169,9 @@ func (i *Integration) Cut(ctx context.Context, req CutRequest) (Outcome, error) 
 		// value of this path is that it exercises the credential, the
 		// repository name and the arithmetic against the real API
 		// without producing a release -- which is what makes it the
-		// runbook's first step after seeding a token. It makes only
-		// READS, so it proves the token can read the repository and
+		// runbook's first step after configuring release access. It only
+		// READS repository state (App authentication may mint a token),
+		// so it proves the token can read the repository and
 		// nothing about whether it may create the tag or the Release:
 		// those refusals (credential_unavailable on a 403, ref_exists,
 		// tag_created_release_failed) exist only past this return.

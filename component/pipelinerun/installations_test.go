@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/packages/githubapp"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 )
 
 // installations_test.go -- the permissions-changed prompt's read (epic

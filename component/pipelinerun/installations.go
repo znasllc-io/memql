@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/identity/githubconnect"
-	"github.com/znasllc-io/memql/component/packages/githubapp"
 )
 
 // installations.go -- the permissions-changed prompt (epic memql#5479, D15:

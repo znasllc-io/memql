@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
-	"github.com/znasllc-io/memql/component/packages/githubapp"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/component/workjournal"
 )

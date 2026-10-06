@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/znasllc-io/memql/component/packages/githubapp"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 )
 
 // SourceSnapshot is one fetched package source, expanded and validated.

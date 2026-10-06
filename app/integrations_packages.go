@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/identity/githubconnect"
 	"github.com/znasllc-io/memql/component/packages"
-	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/integrations/workbench"
 )
 

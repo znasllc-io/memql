@@ -17,7 +17,7 @@ import (
 	// `flag`, so nothing of a test binary comes with it.
 	"testing/fstest"
 
-	"github.com/znasllc-io/memql/component/packages/githubapp"
+	"github.com/znasllc-io/memql/component/identity/githubapp"
 )
 
 // PackagesAccess is what the production GitHub port borrows from Deployables:
