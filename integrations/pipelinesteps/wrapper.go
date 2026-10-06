@@ -68,6 +68,8 @@ exit $rc`
 
 // cloneScript is the clone init container's entrypoint: a shallow fetch of
 // exactly one commit, by its id, into /workspace, world-writable (see above).
+// Network failures retry the identical fetch at most three times within the
+// existing Job deadline. No checkout or build command is retried.
 //
 // The token, when there is one, goes to GitHub as the password of user
 // x-access-token in an http.extraheader for this one command, so it is never
@@ -79,12 +81,26 @@ const cloneScript = `umask 0000
 set -eu
 cd /workspace
 git init -q .
-if [ -n "${GIT_TOKEN:-}" ]; then
-  auth="$(printf 'x-access-token:%s' "$GIT_TOKEN" | base64 | tr -d '\n')"
-  git -c "http.extraheader=AUTHORIZATION: basic ${auth}" fetch -q --depth=1 "$CLONE_URL" "$SHA"
-else
-  git fetch -q --depth=1 "$CLONE_URL" "$SHA"
-fi
+fetch_pinned_commit() {
+  if [ -n "${GIT_TOKEN:-}" ]; then
+    auth="$(printf 'x-access-token:%s' "$GIT_TOKEN" | base64 | tr -d '\n')"
+    git -c "http.extraheader=AUTHORIZATION: basic ${auth}" fetch -q --depth=1 "$CLONE_URL" "$SHA"
+  else
+    git fetch -q --depth=1 "$CLONE_URL" "$SHA"
+  fi
+}
+for attempt in 1 2 3; do
+  if fetch_pinned_commit; then
+    break
+  else
+    status=$?
+  fi
+  if [ "$attempt" -eq 3 ]; then
+    exit "$status"
+  fi
+  echo "memql: pinned commit fetch failed; retrying ($attempt/3)" >&2
+  sleep 2
+done
 git checkout -q FETCH_HEAD
 echo "memql: checked out $SHA"`
 
