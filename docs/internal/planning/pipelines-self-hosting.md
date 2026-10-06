@@ -738,3 +738,22 @@ initialization instead of its intended long-running migration; the injected
 deadline now applies only to that migration. The three database lock regressions
 pass ten repeated runs. Final PR checks and local rollout still need their own
 recorded results; earlier green runs are not a claim about the final commit.
+
+### Durable retirement of pipeline attempts (October 6)
+
+The local rehearsal exposed a queued Job starting after its run was reported
+failed. Receipt cleanup and run cancellation now write separate, credential-free
+stop markers before collecting execution resources. Creators check those markers
+on both sides of their metadata compare-and-swap. An absent Job with an unresolved
+create claim leaves cleanup pending; it is not evidence that a late API request
+cannot still arrive. Run cancellation inventories owned objects and uses guarded
+deletes instead of erasing creation claims with collection deletion.
+
+Markers survive Job garbage collection. Resolved markers expire after the maximum
+supported run lifetime plus resource retention; unresolved creation evidence stays
+for reconciliation. The cross-node protocol is Step V4, receipt Ack V3 and Cancel
+V2, so an older replica cannot claim these guarantees. Local Kubernetes testing
+exercised late admission, confirmed resource absence, and delayed original
+envelopes after both attempt and run retirement. Recovery and cancellation passed
+repeated race tests. Installation into the combined engine and the complete
+release/update rehearsal remain required; this is not production qualification.

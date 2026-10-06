@@ -398,6 +398,8 @@ func (c *rtCluster) serve(w http.ResponseWriter, r *http.Request) {
 		rtJSON(w, 200, map[string]any{"items": []any{map[string]any{"metadata": map[string]any{"name": "memql-pipelines-isolate"}, "spec": map[string]any{"podSelector": map[string]any{}, "policyTypes": []string{"Egress"}, "egress": []any{map[string]any{"to": []any{map[string]any{"ipBlock": map[string]any{"cidr": "0.0.0.0/0", "except": isolationProtectedCIDRs}}}}}}}}})
 	case p == kubeJobs && r.Method == http.MethodPost:
 		c.createJob(w, body)
+	case p == kubeJobs && r.Method == http.MethodGet:
+		c.listJobMetadata(w, r)
 	case p == kubeJobs && r.Method == http.MethodDelete:
 		c.deleteCollection(w, q.Get("labelSelector"), true)
 	case strings.HasPrefix(p, kubeJobs+"/"):
@@ -439,6 +441,22 @@ func (c *rtCluster) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		c.unexpected(w, r)
 	}
+}
+
+func (c *rtCluster) listJobMetadata(w http.ResponseWriter, r *http.Request) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key, value, ok := strings.Cut(r.URL.Query().Get("labelSelector"), "=")
+	if !ok {
+		c.t.Error("Jobs listed without a label selector")
+	}
+	items := []map[string]any{}
+	for _, job := range c.jobs {
+		if job.job.Metadata.Labels[key] == value {
+			items = append(items, map[string]any{"metadata": job.job.Metadata})
+		}
+	}
+	rtJSON(w, 200, map[string]any{"items": items})
 }
 
 func (c *rtCluster) unexpected(w http.ResponseWriter, r *http.Request) {
@@ -1571,13 +1589,17 @@ func TestRunnerRunsAStepToSuccessAndArchivesItsLog(t *testing.T) {
 	// Job that references it, the owner once the Job has a uid, the claim on
 	// the version the create answered.
 	reqs := h.c.requests()
-	var first []string
-	for _, r := range reqs[:min(8, len(reqs))] {
-		first = append(first, r.Method+" "+r.Path)
+	// Reads may grow as additional safety gates are introduced. The mutation
+	// order still requires credentials, then the creation CAS, then one Job.
+	var mutations []string
+	for _, request := range reqs {
+		if request.Method != http.MethodGet {
+			mutations = append(mutations, request.Method+" "+request.Path)
+		}
 	}
-	wantFirst := []string{"GET " + rtJobPath, "GET /apis/networking.k8s.io/v1/namespaces/steps-ns/networkpolicies", "POST " + kubeSecrets, "GET " + kubeSecrets + "/" + testSecretName, "PATCH " + kubeSecrets + "/" + testSecretName, "POST " + kubeJobs, "PATCH " + kubeSecrets + "/" + testSecretName, "PATCH " + rtJobPath}
-	if !reflect.DeepEqual(first, wantFirst) {
-		t.Errorf("first requests:\n  got  %q\n  want %q", first, wantFirst)
+	wantMutations := []string{"POST " + kubeSecrets, "PATCH " + kubeSecrets + "/" + testSecretName, "POST " + kubeJobs}
+	if len(mutations) < len(wantMutations) || !reflect.DeepEqual(mutations[:len(wantMutations)], wantMutations) {
+		t.Fatalf("unsafe creation effect order: %v", mutations)
 	}
 	if got := h.tokens.called(); !reflect.DeepEqual(got, []string{"42 acme/widget"}) {
 		t.Errorf("clone tokens minted for %q, want one for installation 42, acme/widget", got)
@@ -1601,7 +1623,7 @@ func TestRunnerRunsAStepToSuccessAndArchivesItsLog(t *testing.T) {
 			ResourceVersion string `json:"resourceVersion"`
 		} `json:"metadata"`
 	}
-	if err := json.Unmarshal([]byte(reqs[7].Body), &firstClaim); err != nil || firstClaim.Metadata.ResourceVersion != "3" {
+	if err := json.Unmarshal([]byte(h.c.requestsFor(http.MethodPatch, rtJobPath)[0].Body), &firstClaim); err != nil || firstClaim.Metadata.ResourceVersion != "3" {
 		t.Errorf("the first claim was conditioned on %q (%v), want the version the create answered, 3", firstClaim.Metadata.ResourceVersion, err)
 	}
 	patches := h.c.appliedPatches()
@@ -3357,9 +3379,21 @@ func TestRunnerWaitsOutAnExceededQuota(t *testing.T) {
 		h.c.with(func(c *rtCluster) { c.quotaRefusals = 1 << 30 })
 		h.c.script(testJobName, rtRunningScript(testJobName))
 		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		// Cancel after admission's rejection is durably queued, not while
+		// the second POST still has an unknown outcome on its caller's wire.
+		requeued := 0
+		h.c.with(func(c *rtCluster) {
+			c.onSecretPatched = func(_ *rtCluster, secret Secret) {
+				if secret.Metadata.Annotations[annotCreation] == creationQueued {
+					requeued++
+					if requeued == 2 {
+						cancel()
+					}
+				}
+			}
+		})
 		done := h.start(ctx, rtRun())
-		rtWaitUntil(t, "two refused creates", func() bool { return len(h.c.requestsFor(http.MethodPost, kubeJobs)) >= 2 })
-		cancel()
 
 		res := h.await(t, done)
 
@@ -3730,8 +3764,10 @@ func TestRunnerCloneTokenFailureCreatesNothing(t *testing.T) {
 	if !strings.Contains(res.Failure.Message, "installation 42 is suspended") {
 		t.Errorf("failure %q does not say why the token could not be minted", res.Failure.Message)
 	}
-	if got := h.c.summary(); got != "GET "+rtJobPath+"\n  GET /apis/networking.k8s.io/v1/namespaces/steps-ns/networkpolicies" {
-		t.Errorf("requests:\n  %s\nwant only the Job and policy reads", got)
+	for _, request := range h.c.requests() {
+		if request.Method != http.MethodGet {
+			t.Fatalf("token failure mutated Kubernetes: %s %s", request.Method, request.Path)
+		}
 	}
 	if len(h.lib.stored()) != 0 {
 		t.Error("a step that never ran stored a file")
@@ -4230,14 +4266,12 @@ func TestCancelRunStopsThisReplicasRunsAndDeletesTheRun(t *testing.T) {
 	if !h.c.hasJob(otherJob) || !h.c.hasSecret(SecretName(otherJob)) {
 		t.Error("cancelling one run deleted another run's Job or Secret")
 	}
-	for path, policy := range map[string]string{kubeJobs: "Foreground", kubeSecrets: "Background"} {
-		selector := "labelSelector=memql.io%2Fpipelines-run%3Drun-7f3a&propagationPolicy=" + policy
-		found := false
-		for _, r := range h.c.requestsFor(http.MethodDelete, path) {
-			found = found || r.Query == selector
-		}
-		if !found {
-			t.Errorf("no DELETE %s?%s: the run's objects are selected by its label, wherever they were created", path, selector)
+	if !h.c.hasSecret(runRetirementName(a.RunID)) {
+		t.Fatal("run cancellation left no durable stop marker")
+	}
+	for _, request := range h.c.requests() {
+		if request.Method == http.MethodDelete && (request.Path == kubeJobs || request.Path == kubeSecrets) {
+			t.Fatal("run cancellation erased creation evidence with a collection delete")
 		}
 	}
 	select {
