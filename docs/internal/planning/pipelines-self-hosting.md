@@ -143,6 +143,23 @@ These will consume the same pinned-candidate execution and artifact contracts.
 They have no fabricated baselines or pass thresholds and are not required checks
 until implemented and calibrated. Keep their activation explicit.
 
+### Large artifact storage primitive
+
+`azureblob.CreateVerifiedStream` stages bounded chunks, checks the complete
+source's declared size and SHA-256, and commits with a create-only condition.
+Adoption reads and hashes the stored bytes under an ETag condition; a lost
+commit response is never a successful upload on its own. Different concurrent
+attempts use distinct block ids. Receipts retain the verified ETag, digest and
+size and strip signed URL credentials. This does not enable a storage-account
+immutability policy: later consumers still verify the pinned content.
+
+Local Azurite tests cover a 128 MiB stream, reconciliation by a replacement
+caller, overwrite refusal, an empty stream and the real rootless-builder OCI
+archive. The Workbench transport still uses its existing small-artifact path;
+builder-to-store streaming, durable artifact ownership, retention and release
+publication remain to be wired. Uncommitted blocks have provider-managed
+expiration, and committed objects need explicit ownership-guarded cleanup.
+
 ### Cluster update requirements (owner clarification, October 6)
 
 Owners and developers must discover and trigger installation updates from
