@@ -13,9 +13,67 @@ This plan supersedes conflicting implementation choices in the October 4
 delivery plan. The owner authorized implementation and local testing on
 October 5, 2026. Public publication and production deployment require a later
 approval of the exact candidate. Do not retire working CI before parity is
-measured. Do not add Azure capacity for this work.
+measured. The October 6 direction below replaces the Cockpit-first execution
+strategy. Additional Azure capacity and production networking changes remain
+unapproved; the cost research is a proposal, not provisioning authority.
 
 ## Boundaries
+
+### Workbench execution and local parity (owner clarification, October 6)
+
+Portable CI and image builds belong on the cluster's Workbench-managed
+Kubernetes Jobs, both locally and in Azure. MemQL owns the pipeline, versioning,
+approval and release decisions. Use the same DSL definitions, execution and
+artifact contracts, authorization, GitOps reconciliation, health checks and
+cleanup in both installations. Architecture, registry endpoints, storage
+classes, placement and resource sizes are configuration values. The local
+installation must actually build and update itself, not merely simulate a
+deployment receipt. Local success does not establish production success.
+
+Local execution is an on-demand development and release-rehearsal capability.
+Azure provides the independently available shared CI and production release
+capacity. Declare trigger and publication ownership so connecting both
+installations does not duplicate every run or allow competing publishers.
+Neither execution path may silently fall back to another host or architecture.
+
+Start local execution with one substantial job at a time. Exercise at least
+two serving Kubernetes nodes and a dedicated build node for cross-node
+placement, recovery and rollout tests. All local nodes share one Docker VM:
+their aggregate reservations must fit its actual CPU, memory and disk, rather
+than each node treating that shared capacity as independently available.
+Measure duration, memory, disk/cache growth and interference with serving
+workloads before increasing concurrency. Preserve the existing local database
+and installation when changing its topology or networking.
+
+Rehearse Cilium with compatible, pinned K3s/Cilium versions locally before
+proposing the production migration. Prove allowed access and denied access;
+the presence of a NetworkPolicy is not proof of enforcement. Local ARM64
+builds prove that platform's artifacts; the Azure release requires native
+amd64 evidence. Real Azure identity, registry/storage permissions, node
+autoscaling and node/disk deletion remain cloud checks. A laptop's virtual
+nodes cannot prove independent physical-host availability.
+
+Cockpit remains an optional execution capability for explicitly declared native
+host requirements, including macOS packaging/signing. Retain its pipeline-step
+consent, exact-commit checkout, native execution, output/artifact contracts,
+capacity and cleanup. Keep general worker cancellation, policy and child-process
+fixes and Mac build-script cleanup regardless of routing. Move normal portable
+CI off Cockpit before evaluating whether its container-services/cache backend
+still needs to be supported; do not remove shared native-runner safety code.
+Prove ordinary cluster builds with Cockpit disconnected. Enabling a native
+step still requires both pipeline permission and the machine owner's consent.
+
+The proposed Azure starting point is one dedicated, tainted Linux amd64 user
+pool, scaling between zero and one build node, with bounded concurrency and
+cache/artifact retention. A production proposal must include current regional
+costs, quota/availability, existing-node headroom, migration impact and recovery.
+Use deletion of idle nodes and temporary disks rather than assuming a stopped
+VM has no storage cost. Basic network-policy enforcement does not require the
+optional paid Advanced Container Networking Services bundle. The existing
+single database replica makes node reimaging a maintenance decision.
+Issue #5844 retains the earlier two-week Cockpit evaluation; reconcile that
+record when the subsequent capacity/networking plan is approved, and preserve
+the independent CI/release observation gates in #5506 through #5509.
 
 ### Cluster update requirements (owner clarification, October 6)
 
@@ -40,8 +98,9 @@ use. Measure website requests, authenticated requests, active streams and
 subscriptions throughout real local and production rolls. New replicas must be
 ready before taking traffic; old replicas drain. Verify mixed-version operation
 and database migration compatibility before a rolling update is offered. A
-single-replica database restart needs an explicit maintenance assessment. No
-second Azure cluster, extra node pool or Cilium work is authorized by this plan.
+single-replica database restart needs an explicit maintenance assessment. This
+plan does not authorize adding Azure resources or changing production
+networking; local preparation and verification precede that approval.
 
 Cleanup is part of every attempt, including cancellation, failure, worker loss,
 controller replacement and interrupted rollback. Persist each temporary resource's
@@ -76,9 +135,9 @@ record write as a successful update.
   inputs invalidate it. One approval covers public publication and deployment.
 - Keep client values in the instance repository. The template supplies generic
   consumption conventions and upgrade tests.
-- Use existing cluster and opted-in Cockpit compute. Portable builds use an
-  explicit container contract on either surface; native builds require the
-  appropriate host. Preserve repository consent and reserve capacity across
+- Use Workbench-managed cluster Jobs for normal portable builds, with an
+  explicit container contract. Native host requirements may use opted-in
+  Cockpit machines. Preserve repository consent and reserve capacity across
   replicas and across the clusters a worker serves. Queue bounded work when
   suitable capacity is busy. Never infer Docker health from an old label.
 
@@ -106,7 +165,9 @@ record write as a successful update.
 - [ ] Update template and instance consumption/configuration, docs and diagrams;
   reconcile already-resolved issues with merged evidence.
 - [ ] Test real local cluster execution, multi-replica ownership and recovery,
-  Cockpit native/container execution, candidate approval and local rollout.
+  Cockpit native execution, candidate approval and local rollout. Verify the
+  portable cycle with Cockpit disconnected; retain regression coverage for any
+  still-supported Cockpit container execution.
 - [ ] Review the rendered OS in Chrome with desktop/narrow and light/dark
   states. Label fixtures and simulated external services explicitly.
 - [ ] Present a working local demonstration and remaining production-only
