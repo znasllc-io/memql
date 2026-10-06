@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/component/node"
 )
 
 // ghcr.go -- "do the images for this version exist yet", asked of the registry.
@@ -40,21 +42,6 @@ import (
 // inline, for the same reason the GitHub base URL is: the tests point it at a
 // fake, and CI never talks to a real registry.
 const registryHost = "https://ghcr.io"
-
-// checkedNodeImages is the representative set a version is judged on.
-//
-// REPRESENTATIVE RATHER THAN EXHAUSTIVE, and the choice is deliberate. Nine
-// node types ship from one workflow over one matrix, so a run that produced
-// these three produced the rest; checking all nine would triple the round
-// trips to raise confidence that the matrix did not partially succeed, which
-// is not the failure mode this check exists to catch (that one is "the run
-// failed", and it fails the whole matrix).
-//
-// The three are chosen to span the build's variety rather than to be the first
-// three alphabetically: identity is the auth node, bff is the default build
-// with no tag, and agent carries the heaviest dependency set. A matrix that
-// broke for one build shape and not another shows up here.
-var checkedNodeImages = []string{"identity", "bff", "agent"}
 
 // imageRepository composes the GHCR repository path for one node type.
 //
@@ -110,12 +97,15 @@ type CheckResult struct {
 // report every release as unbuilt.
 func (r *RegistryChecker) Check(ctx context.Context, repo repoRef, v version) CheckResult {
 	out := CheckResult{AllPresent: true}
-	for _, nodeType := range checkedNodeImages {
-		repository := imageRepository(repo, nodeType)
+	// A build matrix can publish only part of a release. Require every role,
+	// including the edge's SPA and the workbench's separate runtime target.
+	// Roles is also held to the build files and release matrix by their gates.
+	for _, role := range node.Roles() {
+		repository := imageRepository(repo, string(role.Type))
 		present, err := r.manifestExists(ctx, repository, v.bare())
 		if err != nil {
 			// One failed check invalidates the whole answer. Not
-			// "the other two were present, so probably yes" --
+			// "the other images were present, so probably yes" --
 			// that is the guess this design refuses to make.
 			return CheckResult{Images: out.Images, Err: err}
 		}

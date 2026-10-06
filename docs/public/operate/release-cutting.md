@@ -265,13 +265,13 @@ builtin releaseCutStatus(version: "v0.19.10")
 
 (`releaseCutStatus({ version })` on the TS `QueryClient`, `ReleaseCutStatus` in
 `sdk/go/client`). It asks the container registry for the manifests of a
-representative node-image set at the bare version, and gives one of three
+complete engine node-image set at the bare version, and gives one of three
 answers:
 
 | Answer | What it means |
 |---|---|
 | Every image is published | the row moves to `images_available` |
-| Still building, cut *N* minutes ago | the row stays `dispatched`; the missing images are named |
+| Still building, cut *N* minutes ago | the row is `dispatched`; the missing images are named, and an earlier availability claim is corrected |
 | The check could not tell | the registry errored; **the status is unchanged and nothing is guessed** |
 
 The third answer is the point of the design. A workflow can fail *after* the
@@ -281,6 +281,12 @@ as "not built" would call a good release broken; reporting it as "built" would
 call a failed build deployable.
 
 The check is on demand. There is no poller and no schedule.
+
+Every engine role must be present, including edge and workbench: other images
+can publish even when either of those builds fails. This checks manifest
+availability in the public registry. Before deployment, verify the exact
+digests, source revision and target architecture in the registry the instance
+actually pulls from.
 
 ---
 

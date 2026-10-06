@@ -110,10 +110,16 @@ func (i *Integration) Status(ctx context.Context, rawVersion string) (StatusOutc
 	}
 
 	if !result.AllPresent {
-		// Still dispatched. No write either -- the row already says
-		// dispatched, and writing the same value back would append a
-		// history entry that records nothing.
 		out.Status = "dispatched"
+		// Correct an earlier availability claim if a manifest disappeared
+		// or the former representative check overlooked a missing image.
+		// An already-dispatched row needs no duplicate history entry.
+		if previousStatus == "images_available" {
+			if err := i.store.UpdateStatus(ctx, v.tag(), "dispatched", ""); err != nil {
+				i.logger.Error("release: missing images verified and the row did not move",
+					"component", "integrations.release", "version", v.tag(), "error", err)
+			}
+		}
 		return out, nil
 	}
 
