@@ -24,7 +24,7 @@ func TestClassificationKeepsRecentContextWithoutMutatingTheCapturedHistory(t *te
 func TestConversationalWorkloadPreservesFastPathAndResearchBeforeFile(t *testing.T) {
 	for _, tier := range []string{"quick", "lookup", "research", "project"} {
 		t.Run(tier, func(t *testing.T) {
-			eng := &countingCompileEngine{triage: map[string]any{"complexity": "trivial", "intent": "reply", "requiresFile": false, "workload": tier, "workTitle": "Recall name"}}
+			eng := &countingCompileEngine{triage: map[string]any{"complexity": "trivial", "intent": "reply", "requiresFile": false, "workload": tier, "workTitle": "Recall name", "acknowledgement": "I’ll check the name you shared."}}
 			req := compileReq()
 			req.Input = map[string]any{"conversation": map[string]any{"messages": []any{}}}
 			out, err := (&PlannerAgentLoop{engine: eng}).CompileGoalForRun(context.Background(), req, nil, realSandbox{})

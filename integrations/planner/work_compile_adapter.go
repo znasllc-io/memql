@@ -141,6 +141,9 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 		"automationName": out.AutomationName,
 		"classification": map[string]any{"workload": out.Workload, "workTitle": out.WorkTitle, "acknowledgement": out.Acknowledgement},
 	}
+	if out.Acknowledgement != "" {
+		args["classification"].(map[string]any)["acknowledgedAt"] = time.Now().UTC().Format(time.RFC3339Nano)
+	}
 	if out.TemplateVersion != "" {
 		args["templateVersion"] = out.TemplateVersion
 	}

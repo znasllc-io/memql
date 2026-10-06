@@ -261,6 +261,11 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 		harnessRole = ResolveHarnessRole(msg.Hints[HarnessRoleHintKey])
 	}
 	toolNames = ScopeToolsForRole(harnessRole, toolNames)
+	if harnessRole == RoleAssistant {
+		if contracts := r.workLookupContracts(ctx); contracts != "" {
+			data["lookupContracts"] = contracts
+		}
+	}
 
 	// Deliverable-surface scoping (memql#950). A produceArtifact executor turn
 	// delivers ONLY by writing the file to its workbench (promoted to the

@@ -60,3 +60,36 @@ it("does not invent a delivery time for absent prose or missing and invalid rece
   }
   expect(conversationFeed([{ ...task, acknowledgement: "" }]).map(item => item.responseAt)).toEqual([undefined, endedAt]);
 });
+
+it("uses the saved acknowledgment time when classification finishes after the stream detached", async () => {
+ const lateAt = "2026-10-05T10:00:30.000Z";
+ let stored: AskTurn[] = [{...task, state:"queued", answer:"", acknowledgement:"", endedAt:undefined, workStatus:"compiling"}];
+ const transport = {ask:()=>({cancel(){}}), conversations:{create:async()=>({id:"chat",title:"Chat"}),list:async()=>[],read:async()=>stored}};
+ const session = new ConversationSession(transport);
+ await session.select("chat");
+ const open = vi.fn();
+ const view = render(<AskSurface transport={transport} conversation={session} availability={READY_ASK} variant="sheet" onOpenWork={open} />);
+ expect(timestamps()).toEqual([startedAt]);
+ expect(screen.getByRole("log").querySelectorAll(".os-ask-avatar-memql")).toHaveLength(0);
+ stored = [{...task, state:"queued", answer:task.acknowledgement!, acknowledgedAt:lateAt, endedAt:undefined, workStatus:"running"}];
+ await act(async()=>session.reload(false));
+ expect(timestamps()).toEqual([startedAt, lateAt]);
+ expect(screen.getByRole("button", {name:/View work:/})).toBeTruthy();
+ expect(screen.queryByText("Queued work")).toBeNull();
+ stored = [{...task, acknowledgedAt:lateAt}];
+ await act(async()=>session.reload(false));
+ expect(timestamps()).toEqual([startedAt,lateAt,endedAt]);
+ view.unmount(); session.dispose();
+});
+
+it("keeps old work accessible on its result without a blank assistant entry", async () => {
+ const transport = {ask:()=>({cancel(){}}),conversations:{create:async()=>({id:"chat",title:"Chat"}),list:async()=>[],read:async()=>[{...task,acknowledgement:""}]}};
+ const session = new ConversationSession(transport); await session.select("chat");
+ const open = vi.fn();
+ const view = render(<AskSurface transport={transport} conversation={session} availability={READY_ASK} variant="sheet" onOpenWork={open} />);
+ expect(screen.getByRole("log").querySelectorAll(".os-ask-avatar-memql")).toHaveLength(1);
+ expect(timestamps()).toEqual([startedAt,endedAt]);
+ fireEvent.click(screen.getByRole("button",{name:/View work:/}));
+ expect(open).toHaveBeenCalledWith("run","chat");
+ view.unmount(); session.dispose();
+});

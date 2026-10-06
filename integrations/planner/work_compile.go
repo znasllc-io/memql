@@ -236,9 +236,8 @@ func (l *PlannerAgentLoop) CompileGoalForRun(ctx context.Context, req CompileReq
 	}
 	in.Complexity = string(complexity)
 	out.Workload, out.WorkTitle = sectionable.Workload, strings.TrimSpace(sectionable.WorkTitle)
-	// Missing or malformed model prose leaves a truthful task status, never a canned reply.
 	ack := strings.TrimSpace(sectionable.Acknowledgement)
-	if len([]rune(ack)) <= 280 {
+	if validAcknowledgement(ack) {
 		out.Acknowledgement = ack
 	}
 	switch out.Workload {
@@ -255,6 +254,11 @@ func (l *PlannerAgentLoop) CompileGoalForRun(ctx context.Context, req CompileReq
 	}
 	if len([]rune(out.WorkTitle)) > 80 {
 		out.WorkTitle = string([]rune(out.WorkTitle)[:80])
+	}
+	if conversational && out.Workload != "quick" && out.Acknowledgement == "" && (req.MaxModelCalls == 0 || out.ModelCalls < req.MaxModelCalls) {
+		// Repair prose once, without reclassifying or replaying any work. The
+		// provider guard and this run's call ceiling still apply to this call.
+		out.Acknowledgement = l.repairAcknowledgement(ctx, req, conversation, &out)
 	}
 	in.Sectionable = sectionable.Sectionable
 	// A difficult reply is still a reply. Only an explicit automation intent

@@ -1898,6 +1898,12 @@ runs. A card opens its run; no new task is submitted by navigation or polling.
 at its completion time with the original request's title. Polling must preserve
 a newer local stream and reject stale reads after conversation selection changes.
 Ask always uses automatic per-step routing; no preference is kept per conversation.
+Background acknowledgments carry a persisted `acknowledgedAt`, independently of
+the final result's `endedAt`. The queue reads the durable `workStatus`; accepting
+background work does not mean it is still queued. If acknowledgment generation
+is unavailable, show the task card without an empty assistant message and retain
+the work link on its eventual result. A late classification must reconstruct
+the same acknowledgment and timestamp after reconnecting to another replica.
 Human questions and scoped computer approvals use the existing Nexus inbox and
 footer actions. Journal polling is bounded to a visible active run, since model
 calls and observations are deliberately not broadcast collections.

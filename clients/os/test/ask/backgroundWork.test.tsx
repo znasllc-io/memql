@@ -72,15 +72,36 @@ it("resumes observation after a Strict Mode effect cleanup and a lost stream", a
 it("keeps a link and orders the result when classification queued without prose", () => {
  const task = turn("a", {background:true, acknowledgement:"", answer:"Research result", state:"done", endedAt:"2026-10-05T10:03:00Z"});
  const feed = conversationFeed([task]);
- expect(feed).toHaveLength(2); expect(feed[0]?.turn.answer).toBe("");
+ expect(feed).toHaveLength(2); expect(feed[0]?.showAssistant).toBe(false); expect(feed[1]?.showAssistant).toBe(true);
  expect(feed[0]?.workState).toBe("done"); expect(feed[1]?.turn.answer).toBe("Research result");
 });
 
 it("opens the acknowledgment receipt from its whole target and reflects real state", () => {
  const onOpen = vi.fn(); const view = render(<AskWorkLink title="Find prior report preferences" state="queued" onOpen={onOpen} />);
- fireEvent.click(screen.getByRole("button", {name:/Queued work: Find prior report preferences/})); expect(onOpen).toHaveBeenCalledOnce();
+ fireEvent.click(screen.getByRole("button", {name:/View work: Find prior report preferences/})); expect(onOpen).toHaveBeenCalledOnce();
  view.rerender(<AskWorkLink title="Find prior report preferences" state="waiting" onOpen={onOpen} />);
  expect(screen.getByText("Needs your input")).toBeTruthy();
  view.rerender(<AskWorkLink title="Find prior report preferences" state="done" onOpen={onOpen} />);
  expect(screen.getByText("View work")).toBeTruthy(); expect(screen.queryByText("Queued work")).toBeNull();
+});
+
+it("shows the durable run phase rather than calling every background request working", () => {
+ const view = render(<AskWorkQueue turns={[turn("a", {workStatus:"compiling"})]} />);
+ expect(screen.getByLabelText("Preparing")).toBeTruthy();
+ view.rerender(<AskWorkQueue turns={[turn("a", {workStatus:"running"})]} />);
+ expect(screen.getByLabelText("Working")).toBeTruthy(); expect(screen.queryByLabelText("Queued")).toBeNull();
+ view.rerender(<AskWorkQueue turns={[turn("a", {workStatus:"waiting"})]} />);
+ expect(screen.getByLabelText("Recovering")).toBeTruthy();
+});
+
+it("accepts a running background receipt without losing run identity on later events", async () => {
+ let callbacks!: AskCallbacks;
+ const session = new ConversationSession({ask:(_p,_c,on)=>{callbacks=on;return {cancel(){}};}});
+ session.send("Check current records", null);
+ callbacks.activity?.({id:"r",kind:"run",phase:"running",at:"2026-10-05T10:00:00Z",arguments:{runId:"r",goalId:"g",background:true,workStatus:"running",acknowledgedAt:"2026-10-05T10:00:01Z"}});
+ callbacks.activity?.({id:"r",kind:"run",phase:"running",at:"2026-10-05T10:00:00Z"});
+ callbacks.delta("I’ll check those records."); callbacks.done();
+ expect(session.getSnapshot().busy).toBe(false);
+ expect(session.getSnapshot().turns[0]).toMatchObject({runId:"r",goalId:"g",background:true,workStatus:"running",acknowledgedAt:"2026-10-05T10:00:01Z",acknowledgement:"I’ll check those records.",state:"queued"});
+ session.dispose();
 });

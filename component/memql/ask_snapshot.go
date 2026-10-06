@@ -86,6 +86,7 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 			return fmt.Errorf("conversation work is unavailable")
 		}
 		run := runs[0]
+		turn.WorkStatus, _ = run["status"].(string)
 		waiting, _ := run["waitingOn"].(map[string]any)
 		questions, err := e.workRows(ctx, "workQuestionsForOwnerRun", turn.RunID)
 		if err != nil {
@@ -105,8 +106,15 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 		// The journal is authoritative even for a saved completed turn: an
 		// earlier observer may have persisted drafts from a superseded attempt.
 		outcome, _ := run["classification"].(map[string]any)
-		if ack, _ := outcome["acknowledgement"].(string); ack != "" && (turn.State == "queued" || turn.State == "waiting" || turn.Acknowledgement != "") {
+		workload, _ := outcome["workload"].(string)
+		if workload != "" && workload != "quick" {
+			turn.Background = true
+		}
+		if ack, _ := outcome["acknowledgement"].(string); ack != "" && turn.Background {
 			turn.Acknowledgement = ack
+			if at, valid := askTimestamp(outcome["acknowledgedAt"]); valid {
+				turn.AcknowledgedAt = &at
+			}
 		}
 		if title, _ := outcome["workTitle"].(string); title != "" {
 			turn.WorkTitle = title

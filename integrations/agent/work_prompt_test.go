@@ -21,11 +21,15 @@ type workPromptEngine struct {
 	registryEngine
 	prompts *memql.PromptRegistry
 	viewer  map[string]any
+	execute func(context.Context, string) (any, error)
 }
 
-func (e *workPromptEngine) Execute(_ context.Context, query string) (any, error) {
+func (e *workPromptEngine) Execute(ctx context.Context, query string) (any, error) {
 	if query == "builtin work.workViewerContext()" && e.viewer != nil {
 		return []map[string]any{e.viewer}, nil
+	}
+	if e.execute != nil {
+		return e.execute(ctx, query)
 	}
 	return nil, nil
 }
@@ -84,6 +88,9 @@ func TestOwnedWorkTurnUsesShippedPrompt(t *testing.T) {
 			t.Errorf("work prompt omitted %q", expected)
 		}
 	}
+	if strings.Contains(prepared.messages[0].Content, "A plain answer is appropriate") || !strings.Contains(prepared.messages[0].Content, `respondToUser({"status":"complete"`) {
+		t.Fatal("work prompt must consistently require its completion tool")
+	}
 	if strings.Index(prepared.messages[0].Content, "Current viewer context") < strings.Index(prepared.messages[0].Content, "Execution instructions:") {
 		t.Fatal("variable viewer facts should follow the stable instructions")
 	}
@@ -93,6 +100,24 @@ func TestOwnedWorkTurnUsesShippedPrompt(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("actual work turn has no file tool")
+	}
+}
+
+func TestLookupClassificationDoesNotDowngradeExecutionReasoning(t *testing.T) {
+	registry := memql.NewPromptRegistry()
+	if _, err := memql.LoadUnifiedPrompts(nil, registry, template.New("partials")); err != nil {
+		t.Fatal(err)
+	}
+	owner := "v1:identity:user:lookup-owner"
+	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), owner), common.RunContext{RunId: "lookup-run", GoalId: "goal", OwnerUserId: owner})
+	engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{}}, prompts: registry}
+	msg := &memqlv1.AgentGenerateTurnMsg{AgentId: "planner", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "planner", Role: "specialist"}, Hints: map[string]string{HarnessRoleHintKey: "assistant", "workload": "lookup"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "Check current records"}}}
+	prepared, err := newTestReplier(engine).prepareTurn(ctx, msg, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.routerReq.Level != airoute.LevelStrong || prepared.routerReq.ExplicitProvider != "" {
+		t.Fatalf("lookup must retain policy-selected reasoning: %+v", prepared.routerReq)
 	}
 }
 

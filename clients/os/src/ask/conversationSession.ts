@@ -24,6 +24,8 @@ export interface AskTurn {
   goalId?: string;
   runId?: string;
   acknowledgement?: string;
+  acknowledgedAt?: string;
+  workStatus?: string;
   background?: boolean;
   workTitle?: string;
   workload?: string;
@@ -237,9 +239,9 @@ export class ConversationSession {
     } else if (event.type === "activity" && event.activity) {
       const activity = event.activity;
       if (!existing) this.pendingVoiceActivity.set(id, [...(this.pendingVoiceActivity.get(id) ?? []), activity]);
-      this.patch({ turns: this.state.turns.map(turn => turn.id === id ? { ...turn, activity: [...turn.activity, activity], ...runIdentity(activity) } : turn), ...(activity.kind === "action" && activity.navigate ? { activity } : {}) });
+      this.patch({ turns: this.state.turns.map(turn => turn.id === id ? { ...turn, activity: [...turn.activity, activity], ...runIdentity(activity), ...backgroundReceipt(activity) } : turn), ...(activity.kind === "action" && activity.navigate ? { activity } : {}) });
     } else if (event.type === "done") {
-      this.patch({ busy: this.voiceTurnId === id ? false : this.state.busy, turns: this.state.turns.map(turn => turn.id === id ? { ...turn, state: turn.error ? "error" : "done", endedAt: new Date().toISOString() } : turn) });
+      this.patch({ busy: this.voiceTurnId === id ? false : this.state.busy, turns: this.state.turns.map(turn => turn.id === id ? { ...turn, state: turn.error ? "error" : isBackgroundTurn(turn) ? turn.state : "done", ...(isBackgroundTurn(turn) ? { acknowledgement: turn.answer } : { endedAt: new Date().toISOString() }) } : turn) });
       void this.reload();
     } else if (event.type === "error") {
       this.patch({ error: event.error ?? "Voice turn failed", turns: this.state.turns.map(turn => turn.id === id ? { ...turn, state: "error", error: event.error } : turn) });
@@ -283,7 +285,7 @@ export class ConversationSession {
           delta: text => patchTurn({ answer: turn.answer + text }),
           activity: event => {
             if (epoch !== this.epoch) return;
-            patchTurn({ activity: [...turn.activity, event], ...runIdentity(event), ...(event.kind === "run" && (event.phase === "queued" || event.phase === "waiting") ? { state: event.phase, background: true, workTitle: typeof event.arguments?.workTitle === "string" ? event.arguments.workTitle : undefined, workload: typeof event.arguments?.workload === "string" ? event.arguments.workload : undefined } : {}) });
+            patchTurn({ activity: [...turn.activity, event], ...runIdentity(event), ...backgroundReceipt(event) });
             if (event.kind === "action" && event.navigate) this.patch({ activity: event });
             if (event.kind === "run" && this.stopRequested) void this.cancelCurrentGoal();
           },
@@ -303,5 +305,14 @@ export function isBackgroundTurn(turn: AskTurn) { return Boolean(turn.runId) && 
 
 function runIdentity(event: AskActivity): Partial<AskTurn> {
   if (event.kind !== "run") return {};
-  return { goalId: typeof event.arguments?.goalId === "string" ? event.arguments.goalId : undefined, runId: typeof event.arguments?.runId === "string" ? event.arguments.runId : undefined };
+  return { ...(typeof event.arguments?.goalId === "string" ? { goalId: event.arguments.goalId } : {}), ...(typeof event.arguments?.runId === "string" ? { runId: event.arguments.runId } : {}) };
+}
+
+function backgroundReceipt(event: AskActivity): Partial<AskTurn> {
+  if (event.kind !== "run" || !(event.arguments?.background === true || event.phase === "queued" || event.phase === "waiting")) return {};
+  const fields: Partial<AskTurn> = { state: event.phase === "waiting" ? "waiting" : "queued", background: true };
+  for (const key of ["workTitle", "workload", "workStatus", "acknowledgedAt"] as const) {
+    if (typeof event.arguments?.[key] === "string") fields[key] = event.arguments[key];
+  }
+  return fields;
 }
