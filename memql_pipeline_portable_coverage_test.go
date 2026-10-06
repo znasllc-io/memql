@@ -40,6 +40,9 @@ func TestEnginePortableLanesKeepHostedCommands(t *testing.T) {
 	if hosted == "" || !slices.Contains(portableCommands(conformance.Run), hosted) {
 		t.Fatalf("conformance does not run its real database suite: %q", hosted)
 	}
+	if value, found := engineStepExports(conformance.Run, "MEMQL_DIFFERENTIAL_REQUIRED"); !found || value != workflow.Jobs["conformance"].Env["MEMQL_DIFFERENTIAL_REQUIRED"] || value != "1" {
+		t.Error("conformance can report a language differential as a passing warning")
+	}
 	for _, name := range []string{"mcp-conformance", "proving"} {
 		step, ok := engineDeclaredStep(spec, name)
 		if !ok || !slices.Contains(step.Services, "postgres") {
@@ -48,7 +51,11 @@ func TestEnginePortableLanesKeepHostedCommands(t *testing.T) {
 		if value, found := engineStepExports(step.Run, "MEMQL_REQUIRE_DB"); !found || value != "1" {
 			t.Errorf("%s can silently skip database cases", name)
 		}
-		if value, found := engineStepExports(step.Run, "MEMQL_DATABASE_DSN"); !found || value != "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable" {
+		hostedJob := name
+		if name == "mcp-conformance" {
+			hostedJob = "conformance"
+		}
+		if value, found := engineStepExports(step.Run, "MEMQL_DATABASE_DSN"); !found || value == "" || value != workflow.Jobs[hostedJob].Env["MEMQL_DATABASE_DSN"] {
 			t.Errorf("%s does not reach its isolated database", name)
 		}
 		for _, extension := range []string{"timescaledb CASCADE", `"uuid-ossp"`, `"pgcrypto"`, "vector"} {

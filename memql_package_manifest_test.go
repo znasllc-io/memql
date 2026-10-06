@@ -608,6 +608,7 @@ func TestEngineStepExportsSeesOnlyWhatGoTestReceives(t *testing.T) {
 // copies: the db-tests lane's service and the plan step's environment.
 type manifestCIWorkflow struct {
 	Jobs map[string]struct {
+		Env      map[string]string `yaml:"env"`
 		Services map[string]struct {
 			Image string            `yaml:"image"`
 			Env   map[string]string `yaml:"env"`
