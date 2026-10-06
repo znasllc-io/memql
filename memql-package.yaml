@@ -478,7 +478,7 @@ pipeline:
       steps:
         - name: codeql-go
           placement: cluster
-          timeout: 60m
+          timeout: 90m
           artifacts: [.memql-security/codeql-go]
           run: |
             set -eu
