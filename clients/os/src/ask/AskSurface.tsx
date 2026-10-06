@@ -313,9 +313,9 @@ export function AskSurface({
         <div className="os-ask-log" ref={logRef} role="log" aria-label="Conversation" aria-live="polite" onScroll={() => { const el = logRef.current; if (el) { conversationScroll.current = el.scrollTop; nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 72; } }}>
           {state.loading ? <ContentSkeleton kind="conversation" label="Opening conversation" /> : null}
           {exchanges.length === 0 && !state.loading ? <div className="os-ask-empty"><strong>What would you like to do?</strong><p>Ask a question, explore your workspace, or let MemQL help you get something done.</p></div> : null}
-          {conversationFeed(exchanges).map(({ turn, completion, key, workState }) => <div key={key} className="os-ask-exchange" data-state={turn.state}>
+          {conversationFeed(exchanges).map(({ turn, completion, key, workState, responseAt }) => <div key={key} className="os-ask-exchange" data-state={turn.state}>
             {!completion ? <div className="os-ask-message"><AccountAvatar className="os-ask-avatar" /><div><div className="os-ask-byline"><strong>You</strong><time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div><p>{turn.prompt}</p></div></div> : null}
-            {!turn.answerOnly ? <div className="os-ask-message"><span className="os-avatar os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span><div><div className="os-ask-byline"><strong>MemQL</strong>{turn.state === "done" && turn.endedAt ? <time dateTime={turn.endedAt}>{messageTime(turn.endedAt)}</time> : null}</div>
+            {!turn.answerOnly ? <div className="os-ask-message"><span className="os-avatar os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span><div><div className="os-ask-byline"><strong>MemQL</strong>{responseAt ? <time dateTime={responseAt} title={new Date(responseAt).toLocaleString()}>{messageTime(responseAt)}</time> : null}</div>
               {completion ? <p className="os-ask-result-context">{turn.workTitle || turn.prompt}</p> : null}
               {turn.answer ? <AskMessage text={turn.answer} /> : null}
               {turn.question && !completion ? <AskQuestion key={turn.question.id} question={turn.question} onAnswer={answer => conversation.answerQuestion(turn.question!, answer)} /> : null}
