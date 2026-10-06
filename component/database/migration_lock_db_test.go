@@ -82,11 +82,16 @@ func TestMigrationLockBlocksAnotherReplicaAndAllowsRetry(t *testing.T) {
 }
 
 func TestMigrationReadTimeoutRetainsLockWhileBackendRuns(t *testing.T) {
-	db, admin, schema := migrationLockDB(t, 100*time.Millisecond)
+	// Initialization and lock acquisition must finish before the injected
+	// timeout. A connection-wide 100ms timeout can fail CREATE TABLE on a
+	// loaded runner, never reaching the orphaned migration this test covers.
+	db, admin, schema := migrationLockDB(t, 5*time.Second)
 	migrations := migrate.NewMigrations()
 	calls := 0
 	migrations.Add(migrate.Migration{Name: "20260925000000", Up: func(ctx context.Context, m *migrate.Migrator, _ *migrate.Migration) error {
 		calls++
+		ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
 		_, err := m.DB().ExecContext(ctx, "SELECT pg_sleep(3)")
 		return err
 	}})
@@ -94,6 +99,9 @@ func TestMigrationReadTimeoutRetainsLockWhileBackendRuns(t *testing.T) {
 	runner.runMigrations(context.Background(), db)
 	if runner.MigrationError() == nil {
 		t.Fatal("expected client timeout")
+	}
+	if calls != 1 {
+		t.Fatalf("did not reach the timed-out migration: calls=%d err=%v", calls, runner.MigrationError())
 	}
 	var active int
 	if err := admin.NewRaw("SELECT count(*) FROM pg_stat_activity WHERE application_name = ? AND state = 'active' AND query LIKE 'SELECT pg_sleep%'", schema).Scan(context.Background(), &active); err != nil {

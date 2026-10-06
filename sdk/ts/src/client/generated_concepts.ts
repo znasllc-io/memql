@@ -681,6 +681,7 @@ export const BoundConcepts = {
   paymentTermsOutstanding: "v1:shopify:order",
   pendingAccessRequests: "v1:identity:accessRequest",
   pendingUserInvitations: "v1:identity:invitation",
+  pipelineChannelForOwnerByName: "v1:pipelines:channel",
   pipelineChannelsForOwner: "v1:pipelines:channel",
   pipelineForOwner: "v1:pipelines:pipeline",
   pipelineForPackage: "v1:pipelines:pipeline",

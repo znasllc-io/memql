@@ -14,6 +14,8 @@ package pipelines
 // is deliberate: a typo in a pipeline must fail that pipeline's run with a
 // typed refusal (D9), not refuse every deploy of the source it sits in.
 type Spec struct {
+	// Platform optionally pins container OS/architecture across the pipeline.
+	Platform string `yaml:"platform,omitempty" json:"platform,omitempty"`
 	// Image is the toolchain image every command step runs in, by digest.
 	Image string `yaml:"image,omitempty" json:"image,omitempty"`
 	// Services are the sidecars a step may name, by name.
@@ -52,16 +54,26 @@ type StageSpec struct {
 	On []string `yaml:"on,omitempty" json:"on,omitempty"`
 	// Channel makes this a notify stage: it names a v1:pipelines:channel and
 	// carries no steps (D16).
-	Channel string     `yaml:"channel,omitempty" json:"channel,omitempty"`
-	Steps   []StepSpec `yaml:"steps,omitempty" json:"steps,omitempty"`
+	Channel string `yaml:"channel,omitempty" json:"channel,omitempty"`
+	// Links are the notify stage's own links, shown in its message beside the
+	// run page: the docs a release's announcement points to. Only a notify
+	// stage carries them.
+	Links []Link     `yaml:"links,omitempty" json:"links,omitempty"`
+	Steps []StepSpec `yaml:"steps,omitempty" json:"steps,omitempty"`
 }
 
 // StepSpec is one step: a shell command in the image's working copy, with
 // the same contract as a deployable's build.command. There is no step
 // language.
 type StepSpec struct {
-	Name string `yaml:"name" json:"name"`
-	Run  string `yaml:"run,omitempty" json:"run,omitempty"`
+	// Placement selects cluster or fleet; omitted follows native execution or host needs.
+	Placement string `yaml:"placement,omitempty" json:"placement,omitempty"`
+	// Execution defaults to container. Native explicitly requests a host toolchain.
+	Execution string `yaml:"execution,omitempty" json:"execution,omitempty"`
+	// Platform overrides the pipeline platform; fleet steps must name one.
+	Platform string `yaml:"platform,omitempty" json:"platform,omitempty"`
+	Name     string `yaml:"name" json:"name"`
+	Run      string `yaml:"run,omitempty" json:"run,omitempty"`
 	// Packages selects Go packages into MEMQL_PACKAGES: PackagesAffected or
 	// PackagesAll. Empty means the step selects none.
 	Packages string `yaml:"packages,omitempty" json:"packages,omitempty"`

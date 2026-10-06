@@ -26,7 +26,7 @@ import (
 // was sent" means nothing unless the same stream is shown to carry one.
 
 // pipelineActions is the four actions, in one place for the table tests.
-var pipelineActions = []string{PipelineStepAction, PipelineStatusAction, PipelineAckAction, PipelineCancelAction}
+var pipelineActions = []string{PipelineStepAction, PipelineStatusAction, PipelineAckAction, PipelineCancelAction, PipelineReadinessAction}
 
 // The outcomes the fake runner answers a step with: released by the test, or
 // ended by its context -- the two ways a real step ends.
@@ -57,6 +57,11 @@ type fakePipelineRunner struct {
 	// statusEntered is told each Status that began.
 	statusHold    chan struct{}
 	statusEntered chan struct{}
+}
+
+func (f *fakePipelineRunner) Readiness(context.Context) ([]byte, string) {
+	f.record(PipelineReadinessAction, nil)
+	return []byte(`{"available":true,"isolation":"not_proven"}`), ""
 }
 
 // fakeStep is one RunStep in progress: the context the handler ran it under,
@@ -321,6 +326,21 @@ func TestPipelineStepDoesNotBlockTheReceiveLoop(t *testing.T) {
 	}
 }
 
+func TestLegacyPipelineActionsCannotBypassRecoveryOrReceiptContracts(t *testing.T) {
+	runner := newFakePipelineRunner(t)
+	h := pipelineHandler(runner)
+	for _, action := range []string{"pipelineStep", "pipelineAck"} {
+		out := newReplyLog()
+		h.HandleForwardedRequest(context.Background(), pipelineForward("legacy-"+action, action, `{}`, systemAuthority(t)), out.send)
+		if response := out.next(t, action); response.GetErrorCode() == "" {
+			t.Fatalf("legacy action accepted: %s", action)
+		}
+	}
+	if len(runner.called()) != 0 {
+		t.Fatal("legacy action reached the pipeline runner")
+	}
+}
+
 // TestPipelineActionsNeedSystemAuthority is the class gate -- the build
 // entry's rule, applied to the four pipeline entries for the build entry's
 // reason. Only this cluster's own engine can mint a SYSTEM-class assertion, and
@@ -347,10 +367,11 @@ func TestPipelineActionsNeedSystemAuthority(t *testing.T) {
 		{"no assertion at all", func(*testing.T) *nodev1.ForwardedAuthority { return nil }},
 	}
 	wantPayload := map[string]string{
-		PipelineStepAction:   fakeStepSucceeded,
-		PipelineStatusAction: `{"state":"running"}`,
-		PipelineAckAction:    "",
-		PipelineCancelAction: `{"jobsDeleted":2}`,
+		PipelineReadinessAction: `{"available":true,"isolation":"not_proven"}`,
+		PipelineStepAction:      fakeStepSucceeded,
+		PipelineStatusAction:    `{"state":"running"}`,
+		PipelineAckAction:       "",
+		PipelineCancelAction:    `{"jobsDeleted":2}`,
 	}
 
 	for _, action := range pipelineActions {
@@ -386,7 +407,11 @@ func TestPipelineActionsNeedSystemAuthority(t *testing.T) {
 			if got := string(resp.GetPayloadJson()); got != wantPayload[action] {
 				t.Errorf("payload = %q, want the runner's JSON %q", got, wantPayload[action])
 			}
-			if calls := runner.called(); len(calls) != 1 || calls[0] != action+` {"runId":"r1"}` {
+			wantCall := action + ` {"runId":"r1"}`
+			if action == PipelineReadinessAction {
+				wantCall = action + " "
+			}
+			if calls := runner.called(); len(calls) != 1 || calls[0] != wantCall {
 				t.Errorf("runner calls = %q, want exactly one %s with the forwarded args", calls, action)
 			}
 		})
@@ -795,4 +820,39 @@ func TestAHungStatusDoesNotHoldTheReceiveLoop(t *testing.T) {
 	}
 	awaitCondition(t, func() bool { return trackedRequests(hop.handler) == 0 },
 		"a status or an ack is still tracked after it was answered")
+}
+
+func TestForwardWatchedReportsActualRouteBeforeCompletion(t *testing.T) {
+	hop := newPipelineHop(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	selected := make(chan string, 1)
+	ended := make(chan watchedOutcome, 1)
+	req := pipelineForward("route", PipelineStepAction, `{"stepKey":"route"}`, systemAuthority(t))
+	go func() {
+		resp, nodeID, err := hop.router.ForwardWatchedExcluding(ctx, req, "gone-replica", "", time.Millisecond,
+			func(nodeID string) { selected <- nodeID })
+		ended <- watchedOutcome{resp, nodeID, err}
+	}()
+	select {
+	case nodeID := <-selected:
+		if nodeID != hopWorkbenchId {
+			t.Fatalf("selected %q, want actual fallback %q", nodeID, hopWorkbenchId)
+		}
+	case <-ctx.Done():
+		t.Fatal("route was withheld until completion")
+	}
+	running := hop.runner.awaitStep(t, "step on the reported route")
+	defer running.finish()
+	select {
+	case <-ended:
+		t.Fatal("the step completed before its test allowed it")
+	default:
+	}
+	cancel()
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("forward did not end")
+	}
 }

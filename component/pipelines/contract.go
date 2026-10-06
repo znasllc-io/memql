@@ -100,6 +100,9 @@ type Skip struct {
 
 // Step is one compiled step: one v1:work:step row and one Execute call.
 type Step struct {
+	Placement string `json:"placement,omitempty"`
+	Execution string `json:"execution,omitempty"`
+	Platform  string `json:"platform,omitempty"`
 	// Key is the v1:work:step key, StepKey(stage, step): "stage.step", or
 	// "stage.step#i" for the i-th shard.
 	Key   string   `json:"key"`
@@ -124,6 +127,9 @@ type Step struct {
 	Shard    ShardRef `json:"shard"`
 	// Channel names the v1:pipelines:channel a notify step delivers to.
 	Channel string `json:"channel,omitempty"`
+	// Links are the notify stage's own links (a Docs link), rendered into its
+	// message beside the run page. A command step carries none.
+	Links []Link `json:"links,omitempty"`
 	// DependsOn are the keys of the steps this one waits for: the steps of
 	// the stage before it.
 	DependsOn []string `json:"dependsOn,omitempty"`
@@ -134,6 +140,9 @@ type Step struct {
 // StepRequest is what the driver hands an Executor for one step. It crosses
 // NodeService as JSON, so it carries plain data only.
 type StepRequest struct {
+	// RecoverOnly means a previous driver recorded an intent without a receipt.
+	// The executor may adopt existing work, but cannot start a replacement effect.
+	RecoverOnly bool `json:"recoverOnly,omitempty"`
 	// RunID is the v1:pipelines:run id (bare): what log lines bind to.
 	RunID string `json:"runId"`
 	// WorkRunID is the v1:work:run id (bare): what Library files bind to.
@@ -148,17 +157,23 @@ type StepRequest struct {
 	RunAttempt int `json:"runAttempt"`
 	// RunStartedAt is RFC3339: a step's deadline is the lesser of its own
 	// timeout and the run's ceiling, measured from here.
-	RunStartedAt   string     `json:"runStartedAt"`
-	PipelineID     string     `json:"pipelineId"`
-	OwnerUserID    string     `json:"ownerUserId"`
-	Repository     Repository `json:"repository"`
-	SHA            string     `json:"sha"`
-	Mode           Mode       `json:"mode"`
-	Event          Event      `json:"event"`
-	Version        string     `json:"version"`
-	InstallationID int64      `json:"installationId"`
-	Compute        Compute    `json:"compute"`
-	Step           Step       `json:"step"`
+	RunStartedAt string     `json:"runStartedAt"`
+	PipelineID   string     `json:"pipelineId"`
+	OwnerUserID  string     `json:"ownerUserId"`
+	Repository   Repository `json:"repository"`
+	SHA          string     `json:"sha"`
+	Mode         Mode       `json:"mode"`
+	Event        Event      `json:"event"`
+	Version      string     `json:"version"`
+	// Domain is the front-door domain of the cluster running the pipeline
+	// (its MEMQL_DOMAIN), "" when none is configured. A step reads it as
+	// MEMQL_DOMAIN to reach this cluster's public hosts -- verify-rollout's
+	// api.<domain>, identity.<domain> and os.<domain> -- from outside, the
+	// way any client does; a step reaches nothing inside the cluster.
+	Domain         string  `json:"domain,omitempty"`
+	InstallationID int64   `json:"installationId"`
+	Compute        Compute `json:"compute"`
+	Step           Step    `json:"step"`
 	// Secrets are the resolved values of Step.Secrets, by name, resolved
 	// under the owner's allowlist on the driver's side. They are never
 	// journaled: a step row records only the names.

@@ -91,7 +91,7 @@ function machineRow(over: Record<string, unknown> = {}): Row {
   } as Row;
 }
 
-const ALLOWED = machineRow({ labels: { pipelines: "allowed" } });
+const ALLOWED = machineRow({ labels: { pipelines: "allowed" }, capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 2 } } });
 
 /**
  * The Deployables fake, answering the machines read too.
@@ -354,7 +354,7 @@ describe("Connect pipeline", () => {
 
     expect(await screen.findByText("os-checks needs docker.")).toBeTruthy();
     expect(
-      screen.getByText("None of your machines allows pipelines. Allow pipelines in a machine's policy.yaml (pipelines.allow), or remove the need from the step."),
+      screen.getByText("No compatible worker allows pipelines. Update Cockpit and allow pipeline work in its policy.yaml, or change these steps to use cluster containers without host requirements."),
     ).toBeTruthy();
     expect(railAnswer("Compute")).toBe("None of your machines allows pipelines");
     expect(floorWord()).toBe("A step needs one of your machines");
@@ -371,7 +371,7 @@ describe("Connect pipeline", () => {
     // one option left is still not chosen for the person: running steps on
     // their machines is consent, so it waits, unchecked, for their click.
     expect(chosen()).toBe("");
-    expect(screen.getByText(/Only your machines offer what this step needs: os-checks needs docker\./)).toBeTruthy();
+    expect(screen.getByText(/These steps use your fleet: os-checks needs docker\./)).toBeTruthy();
     expect(floorWord()).toBe("Choose where steps run");
   });
 

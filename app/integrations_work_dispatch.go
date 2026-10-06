@@ -226,17 +226,13 @@ func (d *workRunDispatcher) Dispatch(ctx context.Context, req workspine.Dispatch
 	// id -- which is what keeps a resume from repeating effects that already
 	// happened.
 	//
-	// AllowSideEffects is TRUE, and this is the honest reading rather than a
-	// convenience. The resume point is a step at `running` with no receipt:
-	// the node died mid-step, so whether its effect landed is exactly what
-	// nobody knows. Refusing would strand every run that died inside a
-	// mutation -- which is most of them -- so the run continues and the
-	// step's own idempotency key (runId:key:attempt) is what stops a
-	// duplicate effect. Where a step has no idempotent form, a repeat is
-	// possible and is the accepted cost of resuming at all.
+	// An unfinished effect is uncertain, not permission to repeat it. The
+	// attempt number changes on resume, so an attempt-scoped idempotency key
+	// does not deduplicate against the prior attempt. Automatic recovery uses
+	// the executor's conservative classification; a person's explicit rerun
+	// is served separately above.
 	exec, execErr := executor.ResumeFrom(ctx, journal, auto, &automations.ResumeOptions{
-		AllowSideEffects: true,
-		Overrides:        workReplayOverrides(journal, source),
+		Overrides: workReplayOverrides(journal, source),
 	})
 	if code := workResumeRefusal(exec, execErr); code != "" {
 		d.failRun(ctx, req, code, execErr.Error())

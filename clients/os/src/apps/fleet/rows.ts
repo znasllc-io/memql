@@ -61,6 +61,8 @@ export interface MachineRow {
   displayName: string;
   identityId: string;
   capabilities: string[];
+  /** Binary-reported pipeline semantics; zero means not reported. */
+  pipelineContract: number;
   os: string;
   arch: string;
   hostname: string;
@@ -348,6 +350,7 @@ export function machineFromRow(raw: Row): MachineRow {
     displayName: rowString(row, "displayName"),
     identityId: rowString(row, "identityId"),
     capabilities: stringList(row, "capabilities"),
+    pipelineContract: pipelineContractFrom(descriptor),
     os,
     arch,
     hostname: nestedString(platformInfo, "hostname"),
@@ -1135,4 +1138,11 @@ export function sessionsNewestFirst(rows: readonly AppSessionRow[]): AppSessionR
   return [...rows].sort(
     (a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id),
   );
+}
+
+function pipelineContractFrom(descriptor: Record<string, unknown> | null): number {
+  const contracts = descriptor?.["actionContracts"];
+  if (contracts === null || typeof contracts !== "object" || Array.isArray(contracts)) return 0;
+  const version = (contracts as Record<string, unknown>)["workerHost.pipeline_step"];
+  return typeof version === "number" && Number.isInteger(version) && version > 0 && version <= 65535 ? version : 0;
 }

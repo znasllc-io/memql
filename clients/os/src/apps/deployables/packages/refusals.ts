@@ -625,6 +625,10 @@ const COPY: Record<string, RefusalCopy> = {
     title: "The runner could not run this step",
     next: "Re-run the step. If it fails the same way, ask an operator to look at the runner.",
   },
+  pipeline_execution_uncertain: {
+    title: "The previous step’s outcome is unknown",
+    next: "Check whether it completed before starting another attempt.",
+  },
   pipeline_secret_missing: {
     title: "A secret this step uses has no value on this cluster",
     next: "The pipeline's owner can store a value under that name, then re-run the step.",
@@ -667,10 +671,6 @@ const COPY: Record<string, RefusalCopy> = {
     // no affected Go packages.
     title: "Skipped because the change touched nothing this step covers",
     next: "Nothing to do. It runs when a change touches what it covers.",
-  },
-  pipeline_notify_unavailable: {
-    title: "Skipped because this cluster cannot send notifications yet",
-    next: "Nothing failed, and the rest of the run is unaffected.",
   },
   pipeline_passed_earlier: {
     // Re-run failed (epic memql#5479): the attempt this one re-runs passed
@@ -750,6 +750,42 @@ const COPY: Record<string, RefusalCopy> = {
     // A NOTE: nothing was lost, only the live view stopped.
     title: "The live log stopped at its line limit",
     next: "Open the full log, which is in the Library.",
+  },
+
+  // The notify stage (epic memql#5480): a run announced on a channel. Each
+  // fails the notify step, and so the run. The server's sentence names the
+  // channel, and for a delivery what the outbound worker said, masked.
+  pipeline_channel_missing: {
+    title: "The notify stage names a channel that does not exist",
+    next: "Create the channel in Deployables > Settings > Channels, or correct its name in memql-package.yaml, then re-run.",
+  },
+  pipeline_channel_archived: {
+    // A DECISION, NOT A FAULT: somebody archived the channel.
+    title: "The channel this notify stage names is archived",
+    next: "Name an active channel in memql-package.yaml, or set one up in Deployables > Settings > Channels, then re-run.",
+  },
+  pipeline_channel_not_allowed: {
+    // A CONSENT, NOT A FAULT: a channel says which pipelines it accepts.
+    title: "This channel does not accept deliveries from this pipeline",
+    next: "Allow the pipeline on the channel in Deployables > Settings > Channels, then re-run.",
+  },
+  pipeline_channel_invalid: {
+    // Two repairs in two places: the channel's own settings (a secret name, a
+    // recipient), or the VALUE stored in the globalSecret it names, which must
+    // be a Discord webhook URL. The server's sentence says which, and never
+    // repeats a value.
+    title: "The channel cannot deliver as it is set up",
+    next: "The message says what is wrong. Correct the channel in Deployables > Settings > Channels; or, when the secret's value is not a Discord webhook URL, store the webhook's URL in that globalSecret. Then re-run.",
+  },
+  pipeline_notify_failed: {
+    title: "The notification was not delivered",
+    next: "The message says why. Check the channel's webhook or addresses and the cluster's outbound allowlist, then re-run.",
+  },
+  pipeline_notify_undelivered: {
+    // NOT "failed": the step stopped waiting, and its sentence says where the
+    // delivery stood. One still being retried can arrive later.
+    title: "The notification had not arrived when the step stopped waiting",
+    next: "The message says where its delivery stood. One still being retried can arrive later; re-running sends another.",
   },
   pipeline_timings_unreadable: {
     // A NOTE: the step's outcome stands; only the timing table missed a sample.
@@ -850,12 +886,11 @@ const NOT_A_FAULT: ReadonlySet<string> = new Set([
   "shopify_app_not_saved",
   // Pipelines'. Every SKIP and every NOTE, by class (component/pipelines/
   // refusal.go): a step not run because nothing it covers changed, because an
-  // earlier stage failed or because nothing can notify yet; a check GitHub
-  // refused, an artifact path that matched nothing, a live log at its limit,
-  // timings that could not be read, a recorded result cut to fit.
+  // earlier stage failed or because an earlier attempt passed it; a check
+  // GitHub refused, an artifact path that matched nothing, a live log at its
+  // limit, timings that could not be read, a recorded result cut to fit.
   "pipeline_not_affected",
   "pipeline_stage_blocked",
-  "pipeline_notify_unavailable",
   "pipeline_passed_earlier",
   "pipeline_check_permission_missing",
   "pipeline_artifact_missing",
@@ -864,9 +899,11 @@ const NOT_A_FAULT: ReadonlySet<string> = new Set([
   "pipeline_outcome_trimmed",
   // And the ones whose cause is somebody's DECISION rather than a fault: a
   // fork's policy, a secret or the fleet the owner has not allowed, computer
-  // use switched off, a pipeline disconnected, a step cancelled. A manifest
-  // that does not compile, and anything that broke where a step executes,
-  // stay faults: each has a repair, and the repair is the point.
+  // use switched off, a pipeline disconnected, a step cancelled, a channel
+  // archived or not accepting this pipeline. A manifest that does not
+  // compile, anything that broke where a step executes, and a notification
+  // that did not go, stay faults: each has a repair, and the repair is the
+  // point.
   "pipeline_fork_refused",
   "pipeline_secret_not_allowed",
   "pipeline_fleet_not_consented",
@@ -875,6 +912,8 @@ const NOT_A_FAULT: ReadonlySet<string> = new Set([
   "pipeline_already_connected",
   "pipeline_nothing_to_rerun",
   "pipeline_step_cancelled",
+  "pipeline_channel_archived",
+  "pipeline_channel_not_allowed",
 ]);
 
 /**

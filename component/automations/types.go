@@ -133,6 +133,10 @@ type Automation struct {
 	// a trigger, so the two classes cannot blur into one.
 	Template bool `json:"template,omitempty"`
 
+	// JournalRequired stops execution when an intent, receipt or run write
+	// cannot be confirmed. It does not promise exactly-once external effects.
+	JournalRequired bool `json:"journalRequired,omitempty"`
+
 	// Loop is @loop(maxDepth=N, until=row => P): this automation closes a
 	// deliberate cycle the load would otherwise refuse, and bounds it (D18,
 	// epic memql#5380). Nil when the annotation is absent.
@@ -292,33 +296,18 @@ func (a *Automation) DefinitionFingerprint(engine *id.Engine) string {
 		return ""
 	}
 
-	// Extract step IDs for quick comparison
-	stepIds := make([]string, len(a.Steps))
-	for i, step := range a.Steps {
-		stepIds[i] = step.ID
-	}
-
-	// Build a deterministic representation of the automation structure
-	def := map[string]any{
-		"name":    a.Name,
-		"stepIds": stepIds,
-	}
-
-	// Include step type and key configuration for each step
-	stepDefs := make([]map[string]any, len(a.Steps))
-	for i, step := range a.Steps {
-		stepDef := map[string]any{
-			"id":   step.ID,
-			"type": string(step.Type),
-		}
-		if step.Condition != "" {
-			stepDef["condition"] = step.Condition
-		}
-		stepDefs[i] = stepDef
-	}
-	def["steps"] = stepDefs
-
-	return string(engine.MustFromMap(def))
+	// Fingerprint the complete authored definition, including arguments,
+	// nested bodies, input contracts and retry/journal policies. A projection
+	// of just names and step kinds lets a changed effect reuse old results.
+	// JSON tags omit compiled caches and source provenance; descriptions are
+	// prose rather than execution. This version deliberately refuses older
+	// incomplete fingerprints instead of guessing whether their body changed.
+	definition := *a
+	definition.Description = ""
+	return string(engine.MustFromMap(map[string]any{
+		"schema":     "automation-definition-v2",
+		"definition": &definition,
+	}))
 }
 
 // Precondition is a first-class deterministic check attached to an
@@ -643,6 +632,8 @@ type StepResult struct {
 	// nothing, and for a query's rows past maxJournaledRows (resume re-reads
 	// those).
 	Bound any `json:"-"`
+	// BoundRecorded distinguishes a saved nil from a value omitted for size.
+	BoundRecorded bool `json:"-"`
 }
 
 // AutomationExecution represents a complete automation run.
@@ -847,5 +838,6 @@ type MinimalStepResult struct {
 	ContentId string         `json:"contentId,omitempty"`
 	// Value is StepResult.Bound: the value a statement bound its name to,
 	// which a resumed statement body rebinds the name to.
-	Value any `json:"value,omitempty"`
+	Value         any  `json:"value,omitempty"`
+	ValueRecorded bool `json:"valueRecorded,omitempty"`
 }

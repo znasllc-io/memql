@@ -6,12 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // memql#2521 -- the outbound-delivery worker. Products stage
@@ -32,12 +36,14 @@ type fakeEngine struct {
 	pending  []map[string]any
 	retrying []map[string]any
 	calls    []string
+	origins  []auth.CallOrigin // the call origin each of calls arrived with
 }
 
-func (e *fakeEngine) Execute(_ context.Context, q string) (any, error) {
+func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.calls = append(e.calls, q)
+	e.origins = append(e.origins, auth.OriginFromContext(ctx))
 	switch {
 	case strings.Contains(q, `outboundRequestsByStatus(status: "pending")`):
 		return rowsEnvelope(e.pending), nil
@@ -639,5 +645,536 @@ func TestClaimTTLConfigDefaultsAndOverrides(t *testing.T) {
 	t.Setenv("MEMQL_OUTBOUND_CLAIM_TTL_SECONDS", "45")
 	if got := LoadConfig().ClaimTTL; got != 45*time.Second {
 		t.Fatalf("overridden ClaimTTL = %v, want 45s", got)
+	}
+}
+
+// --- secret targets (memql#5480) -----------------------------------------------
+//
+// A Discord webhook carries its token in its URL's path, so for such a target
+// the URL IS the credential. A row names the v1:platform:globalSecret holding
+// it (targetSecret) and carries only the descriptor secret:<NAME> in target;
+// the worker resolves the value at send time and holds it in memory for one
+// attempt. Nothing it stamps and nothing it logs may carry it, which is why
+// every test below reads the log as well as the stamps.
+
+const (
+	discordWebhookPrefix = "https://discord.com/api/webhooks/"
+	discordSecretName    = "DISCORD_X"
+)
+
+// discordToken is the token half of a stand-in webhook URL. Distinctive, so an
+// absence assertion cannot pass by accident (a token spelled "tok" is also a
+// substring of "token"), and assembled rather than written out because the
+// repository's secret scanner reads test files too.
+var discordToken = "Zq" + strings.Repeat("x7", 30)
+
+// secretRow is a pending webhook row as stageOutboundRequestToSecret stages it.
+func secretRow(id string) map[string]any {
+	row := pendingRow(id)
+	row["target"] = "secret:" + discordSecretName
+	row["targetSecret"] = discordSecretName
+	row["body"] = `{"content":"run 42 passed"}`
+	return row
+}
+
+// fakeSecrets stands in for the globalSecret resolver: it answers one value or
+// one error and records every name it was asked for.
+type fakeSecrets struct {
+	mu      sync.Mutex
+	value   string
+	err     error
+	asked   []string
+	origins []auth.CallOrigin // the call origin each lookup arrived with
+}
+
+func (s *fakeSecrets) Resolve(ctx context.Context, name string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.asked = append(s.asked, name)
+	s.origins = append(s.origins, auth.OriginFromContext(ctx))
+	return s.value, s.err
+}
+
+func (s *fakeSecrets) names() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.asked...)
+}
+
+// newSecretTargetWorker wires a worker whose webhook allowlist admits Discord's
+// webhook prefix only, and whose logger records every level into the returned
+// buffer. secrets nil leaves the resolver unwired, as on a node nothing set it on.
+func newSecretTargetWorker(eng *fakeEngine, transport Transport, secrets *fakeSecrets) (*Worker, *bytes.Buffer) {
+	logs := &bytes.Buffer{}
+	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	w := NewWorker(eng, nil, nil, map[string]Transport{"webhook": transport, "email": transport}, logger)
+	w.cfg = Config{
+		Enabled:          true,
+		Poll:             time.Second,
+		MaxAttempts:      3,
+		EmailAllowlist:   []string{"example.com"},
+		WebhookAllowlist: []string{discordWebhookPrefix},
+		MaxPayloadBytes:  1024,
+		HTTPTimeout:      time.Second,
+		ClaimTTL:         5 * time.Minute,
+	}
+	if secrets != nil {
+		w.Secrets = secrets.Resolve
+	}
+	return w, logs
+}
+
+// webhookStandIn answers for a webhook host the test does not own. Its client
+// dials the httptest TLS server whatever host a URL names and verifies the
+// server as example.com, a name httptest's certificate carries, so the real
+// transport builds and sends the real request for the real URL and the bytes
+// land here. Nothing leaves the machine.
+func webhookStandIn(t *testing.T, handler http.HandlerFunc) *http.Client {
+	t.Helper()
+	srv := httptest.NewTLSServer(handler)
+	t.Cleanup(srv.Close)
+	base, ok := srv.Client().Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("httptest's client transport is %T, want *http.Transport", srv.Client().Transport)
+	}
+	tr := base.Clone()
+	addr := srv.Listener.Addr().String()
+	tr.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, addr)
+	}
+	tr.TLSClientConfig.ServerName = "example.com"
+	return &http.Client{Transport: tr, Timeout: 5 * time.Second}
+}
+
+// refusingClient dials a loopback port nothing listens on, whatever host a URL
+// names: a real connection refusal from inside net/http, arriving wrapped in
+// the *url.Error that names the request URL, exactly as a production dial
+// failure does.
+func refusingClient(t *testing.T) *http.Client {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr := ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	return &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, network, addr)
+			},
+		},
+	}
+}
+
+// assertNoWebhookURL fails when text carries the resolved URL, its token, or
+// the path that holds the token.
+func assertNoWebhookURL(t *testing.T, where, text, resolved string) {
+	t.Helper()
+	for _, leak := range []string{resolved, discordToken, "/api/webhooks/"} {
+		if strings.Contains(text, leak) {
+			t.Errorf("%s carries %q, which is the webhook URL the secret holds or a piece of it. "+
+				"That URL is a credential: it must reach the transport and nothing else.\n%s", where, leak, text)
+		}
+	}
+}
+
+// TestSecretTargetDeliversToTheResolvedURL: a row naming a globalSecret is
+// POSTed to the URL the secret holds, through the allowlist and the transport
+// every webhook row goes through, and the URL is in nothing the worker writes.
+func TestSecretTargetDeliversToTheResolvedURL(t *testing.T) {
+	const resolved = "https://discord.com/api/webhooks/1/tok"
+	var mu sync.Mutex
+	var gotMethod, gotHost, gotPath, gotBody string
+	client := webhookStandIn(t, func(rw http.ResponseWriter, r *http.Request) {
+		buf := new(bytes.Buffer)
+		_, _ = buf.ReadFrom(r.Body)
+		mu.Lock()
+		gotMethod, gotHost, gotPath, gotBody = r.Method, r.Host, r.URL.Path, buf.String()
+		mu.Unlock()
+		rw.WriteHeader(http.StatusNoContent)
+	})
+	eng := &fakeEngine{pending: []map[string]any{secretRow("v1:platform:outboundRequest:s1")}}
+	secrets := &fakeSecrets{value: resolved}
+	w, logs := newSecretTargetWorker(eng, &WebhookTransport{Client: client, Allowlist: []string{discordWebhookPrefix}}, secrets)
+
+	w.drainOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if gotMethod != http.MethodPost || gotHost != "discord.com" || gotPath != "/api/webhooks/1/tok" {
+		t.Fatalf("the POST must go to the resolved URL; the stand-in saw %s %s%s (stamps: %v)", gotMethod, gotHost, gotPath, eng.stamped())
+	}
+	if gotBody != `{"content":"run 42 passed"}` {
+		t.Fatalf("the row's body must POST verbatim, got %q", gotBody)
+	}
+	if names := secrets.names(); len(names) != 1 || names[0] != discordSecretName {
+		t.Fatalf("the worker must resolve exactly the secret the row names, once; asked for %v", names)
+	}
+	stamps := eng.stamped()
+	if len(stamps) != 2 || !strings.Contains(stamps[0], `status: "sending"`) || !strings.Contains(stamps[1], `status: "sent"`) {
+		t.Fatalf("a delivered secret target stamps sending then sent, got %v", stamps)
+	}
+	for _, s := range stamps {
+		if strings.Contains(s, "webhooks/1/tok") || strings.Contains(s, "discord.com") {
+			t.Errorf("a stamp carries the resolved URL: %s", s)
+		}
+	}
+	if strings.Contains(logs.String(), "webhooks/1/tok") {
+		t.Errorf("the log carries the resolved URL:\n%s", logs.String())
+	}
+}
+
+// TestSecretTargetThatDoesNotResolveFailsNamingTheSecret: a secret nobody
+// stored, one that cannot be decrypted, an empty one, and a node with no
+// resolver are not transient conditions the backoff can wait out: each waits
+// on an operator. The row fails once, and its lastError names the secret,
+// which is what the operator fixes. The two resolver errors are recognised by
+// the engine's own predicates, never by their text.
+func TestSecretTargetThatDoesNotResolveFailsNamingTheSecret(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		secrets *fakeSecrets // nil: no resolver is wired on this node
+	}{
+		{"nobody stored the secret", &fakeSecrets{err: fmt.Errorf("secret %q: %w", "DISCORD_X", memql.ErrVariableNotFound)}},
+		{"the secret cannot be decrypted", &fakeSecrets{err: fmt.Errorf("secret %q: %w", "DISCORD_X", memql.ErrSecretUndecryptable)}},
+		{"the secret is empty", &fakeSecrets{value: ""}},
+		{"the secret is blank", &fakeSecrets{value: " \n"}},
+		{"no resolver is wired", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := &fakeEngine{pending: []map[string]any{secretRow("v1:platform:outboundRequest:s1")}}
+			tr := &fakeTransport{}
+			w, _ := newSecretTargetWorker(eng, tr, tc.secrets)
+
+			w.drainOnce(context.Background())
+
+			if tr.count() != 0 {
+				t.Fatal("a secret that did not resolve must never reach the transport")
+			}
+			stamps := eng.stamped()
+			if len(stamps) != 1 || !strings.Contains(stamps[0], `status: "failed"`) {
+				t.Fatalf("an unresolvable secret is a permanent failure, stamped once as failed; got %v", stamps)
+			}
+			lastError := stringArg(t, stamps[0], "lastError")
+			if !strings.Contains(lastError, "webhook: target secret DISCORD_X did not resolve") {
+				t.Fatalf("lastError must name the secret that did not resolve, got %q", lastError)
+			}
+			if strings.Contains(lastError, "https://") {
+				t.Fatalf("lastError must carry no URL, got %q", lastError)
+			}
+		})
+	}
+}
+
+// TestSecretTargetOutsideTheAllowlistFailsWithoutNamingIt: the allowlist judges
+// the resolved URL, and its refusal says so without quoting it. A plain row's
+// refusal quotes its target; that quote here would publish the credential.
+func TestSecretTargetOutsideTheAllowlistFailsWithoutNamingIt(t *testing.T) {
+	resolved := "https://evil.example.net/api/webhooks/1/" + discordToken
+	eng := &fakeEngine{pending: []map[string]any{secretRow("v1:platform:outboundRequest:s1")}}
+	tr := &fakeTransport{}
+	w, logs := newSecretTargetWorker(eng, tr, &fakeSecrets{value: resolved})
+
+	w.drainOnce(context.Background())
+
+	if tr.count() != 0 {
+		t.Fatal("a resolved URL outside the allowlist must never reach the transport")
+	}
+	stamps := eng.stamped()
+	if len(stamps) != 1 || !strings.Contains(stamps[0], `status: "failed"`) {
+		t.Fatalf("an allowlist miss is a permanent failure, stamped once as failed; got %v", stamps)
+	}
+	if got := stringArg(t, stamps[0], "lastError"); got != "webhook: target not in allowlist" {
+		t.Fatalf("lastError = %q, want %q", got, "webhook: target not in allowlist")
+	}
+	assertNoWebhookURL(t, "the log", logs.String(), resolved)
+}
+
+// TestSecretTargetDialFailureKeepsTheURLOutOfLastError: net/http wraps a
+// transport failure in a *url.Error whose message embeds the request URL.
+// Stamped as it arrives, a refused connection would write the token into
+// lastError and the log. The cause has to survive, or lastError stops
+// explaining anything.
+func TestSecretTargetDialFailureKeepsTheURLOutOfLastError(t *testing.T) {
+	resolved := discordWebhookPrefix + "123/" + discordToken
+	eng := &fakeEngine{pending: []map[string]any{secretRow("v1:platform:outboundRequest:s1")}}
+	transport := &WebhookTransport{Client: refusingClient(t), Allowlist: []string{discordWebhookPrefix}}
+	w, logs := newSecretTargetWorker(eng, transport, &fakeSecrets{value: resolved})
+
+	w.drainOnce(context.Background())
+
+	stamps := eng.stamped()
+	if len(stamps) == 0 {
+		t.Fatal("the worker stamped nothing")
+	}
+	last := stamps[len(stamps)-1]
+	if !strings.Contains(last, `status: "retrying"`) {
+		t.Fatalf("a refused connection is retryable, got %q", last)
+	}
+	lastError := stringArg(t, last, "lastError")
+	assertNoWebhookURL(t, "lastError", lastError, resolved)
+	if !strings.Contains(lastError, "connection refused") {
+		t.Fatalf("the redaction must keep the cause, got %q", lastError)
+	}
+	assertNoWebhookURL(t, "the log", logs.String(), resolved)
+}
+
+// TestSecretTargetThatCannotBeBuiltKeepsTheURLOutOfLastError: the second place
+// net/http hands back the URL. A control byte in the query makes building the
+// request fail with a parse *url.Error, and that error is stamped too.
+func TestSecretTargetThatCannotBeBuiltKeepsTheURLOutOfLastError(t *testing.T) {
+	resolved := discordWebhookPrefix + "123/" + discordToken + "?wait=true\x7f"
+	eng := &fakeEngine{pending: []map[string]any{secretRow("v1:platform:outboundRequest:s1")}}
+	transport := &WebhookTransport{Client: refusingClient(t), Allowlist: []string{discordWebhookPrefix}}
+	w, logs := newSecretTargetWorker(eng, transport, &fakeSecrets{value: resolved})
+
+	w.drainOnce(context.Background())
+
+	stamps := eng.stamped()
+	if len(stamps) == 0 {
+		t.Fatal("the worker stamped nothing")
+	}
+	last := stamps[len(stamps)-1]
+	if !strings.Contains(last, `status: "failed"`) {
+		t.Fatalf("a request that cannot be built is a permanent failure, got %q", last)
+	}
+	lastError := stringArg(t, last, "lastError")
+	assertNoWebhookURL(t, "lastError", lastError, resolved)
+	if !strings.Contains(lastError, "invalid control character") {
+		t.Fatalf("the redaction must keep the cause, got %q", lastError)
+	}
+	assertNoWebhookURL(t, "the log", logs.String(), resolved)
+}
+
+// TestSecretTargetOnAnEmailRowFailsWithoutResolving: a secret target names a
+// webhook URL, so a row pairing one with medium "email" is malformed. It fails
+// loudly, and the secret is never read for it.
+func TestSecretTargetOnAnEmailRowFailsWithoutResolving(t *testing.T) {
+	row := secretRow("v1:platform:outboundRequest:s1")
+	row["medium"] = "email"
+	row["target"] = "ops@example.com"
+	eng := &fakeEngine{pending: []map[string]any{row}}
+	tr := &fakeTransport{}
+	secrets := &fakeSecrets{value: discordWebhookPrefix + "123/" + discordToken}
+	w, _ := newSecretTargetWorker(eng, tr, secrets)
+
+	w.drainOnce(context.Background())
+
+	if tr.count() != 0 {
+		t.Fatal("an email row carrying a secret target must never reach a transport")
+	}
+	if names := secrets.names(); len(names) != 0 {
+		t.Fatalf("the secret must not be read for a row that cannot use it; asked for %v", names)
+	}
+	stamps := eng.stamped()
+	if len(stamps) != 1 || !strings.Contains(stamps[0], `status: "failed"`) {
+		t.Fatalf("a secret target on an email row is a permanent failure, stamped once as failed; got %v", stamps)
+	}
+	if lastError := stringArg(t, stamps[0], "lastError"); !strings.Contains(lastError, discordSecretName) {
+		t.Fatalf("lastError must name the secret the row carries, got %q", lastError)
+	}
+}
+
+// TestPlainWebhookRowNeverConsultsTheSecretResolver: a row with no targetSecret
+// is delivered to its own target exactly as before the field existed, and the
+// resolver is not asked anything.
+func TestPlainWebhookRowNeverConsultsTheSecretResolver(t *testing.T) {
+	eng := &fakeEngine{pending: []map[string]any{pendingRow("v1:platform:outboundRequest:r1")}}
+	tr := &fakeTransport{}
+	secrets := &fakeSecrets{value: discordWebhookPrefix + "123/" + discordToken}
+	w := newTestWorker(eng, tr, nil)
+	w.Secrets = secrets.Resolve
+
+	w.drainOnce(context.Background())
+
+	if names := secrets.names(); len(names) != 0 {
+		t.Fatalf("a plain row must not consult the secret resolver; asked for %v", names)
+	}
+	if tr.count() != 1 || tr.delivered[0].Target != "https://hooks.internal.example/notify" {
+		t.Fatalf("a plain row must deliver to its own target, got %+v", tr.delivered)
+	}
+}
+
+// TestSecretTargetLookupFailureIsRetried: a lookup that failed rather than
+// missed -- a timeout, a dropped connection, an engine still booting -- may
+// pass on its own, so the row takes the delivery backoff the way a refused
+// connection does (ADR 4.1): retrying, the attempt counted, nothing sent, and
+// failed once the attempts run out. Its lastError names the secret and keeps
+// the cause.
+func TestSecretTargetLookupFailureIsRetried(t *testing.T) {
+	cause := errors.New(`failed to query secret "DISCORD_X": read tcp 10.0.0.7:5432: i/o timeout`)
+	eng := &fakeEngine{pending: []map[string]any{secretRow("v1:platform:outboundRequest:s1")}}
+	tr := &fakeTransport{}
+	w, _ := newSecretTargetWorker(eng, tr, &fakeSecrets{err: cause})
+
+	w.drainOnce(context.Background())
+
+	if tr.count() != 0 {
+		t.Fatal("a secret that could not be read must never reach the transport")
+	}
+	stamps := eng.stamped()
+	if len(stamps) != 1 || !strings.Contains(stamps[0], `status: "retrying"`) ||
+		!strings.Contains(stamps[0], "attempts: 1") || !strings.Contains(stamps[0], "nextAttemptAt:") {
+		t.Fatalf("a failed lookup is retried: one retrying stamp, the attempt counted, a due time; got %v", stamps)
+	}
+	lastError := stringArg(t, stamps[0], "lastError")
+	if !strings.Contains(lastError, "webhook: target secret DISCORD_X could not be read") || !strings.Contains(lastError, "i/o timeout") {
+		t.Fatalf("lastError must name the secret and keep the cause, got %q", lastError)
+	}
+
+	row := secretRow("v1:platform:outboundRequest:s2")
+	row["status"] = "retrying"
+	row["attempts"] = 2 // MaxAttempts is 3, so this attempt is the last
+	row["nextAttemptAt"] = time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	eng = &fakeEngine{retrying: []map[string]any{row}}
+	w, _ = newSecretTargetWorker(eng, tr, &fakeSecrets{err: cause})
+
+	w.drainOnce(context.Background())
+
+	if stamps := eng.stamped(); len(stamps) != 1 || !strings.Contains(stamps[0], `status: "failed"`) || !strings.Contains(stamps[0], "attempts: 3") {
+		t.Fatalf("a lookup still failing on the last attempt fails the row, got %v", stamps)
+	}
+}
+
+// TestSecretTargetRedirectIsNotFollowed: the allowlist judged the secret's URL
+// and nothing a response points at, and following a 3xx would send the request
+// on to a host nobody listed, with the full secret URL -- token and all -- as
+// its Referer. The 3xx is a permanent failure, and the redirect's target hears
+// nothing.
+func TestSecretTargetRedirectIsNotFollowed(t *testing.T) {
+	resolved := discordWebhookPrefix + "123/" + discordToken
+	var mu sync.Mutex
+	var seen []string
+	client := webhookStandIn(t, func(rw http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Method+" "+r.Host+r.URL.Path)
+		mu.Unlock()
+		if r.URL.Path == "/landing" {
+			rw.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.Redirect(rw, r, "https://example.com/landing", http.StatusFound)
+	})
+	eng := &fakeEngine{pending: []map[string]any{secretRow("v1:platform:outboundRequest:s1")}}
+	w, logs := newSecretTargetWorker(eng, &WebhookTransport{Client: client, Allowlist: []string{discordWebhookPrefix}}, &fakeSecrets{value: resolved})
+
+	w.drainOnce(context.Background())
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 1 || seen[0] != "POST discord.com/api/webhooks/123/"+discordToken {
+		t.Fatalf("only the secret's own URL may be asked, once; the stand-in saw %d request(s)", len(seen))
+	}
+	stamps := eng.stamped()
+	last := stamps[len(stamps)-1]
+	if !strings.Contains(last, `status: "failed"`) {
+		t.Fatalf("a redirect is a permanent failure, got %q", last)
+	}
+	if got := stringArg(t, last, "lastError"); got != "webhook: status 302" {
+		t.Fatalf("lastError = %q, want %q", got, "webhook: status 302")
+	}
+	assertNoWebhookURL(t, "the log", logs.String(), resolved)
+}
+
+// TestSecretTargetNameOutsideThePatternIsRefused: the engine's resolver
+// interpolates the name into its lookup, so a name outside SecretNamePattern
+// is refused before anything is resolved. The refusal names the rule and not
+// the name: a name that failed the rule that makes it safe to put in a query
+// is not repeated anywhere.
+func TestSecretTargetNameOutsideThePatternIsRefused(t *testing.T) {
+	for _, name := range []string{"discord_x", `X" || payload.name != "`, "9DISCORD", "D" + strings.Repeat("X", 64)} {
+		t.Run(name, func(t *testing.T) {
+			row := secretRow("v1:platform:outboundRequest:s1")
+			row["targetSecret"] = name
+			row["target"] = "secret:" + name
+			eng := &fakeEngine{pending: []map[string]any{row}}
+			tr := &fakeTransport{}
+			secrets := &fakeSecrets{value: discordWebhookPrefix + "123/" + discordToken}
+			w, logs := newSecretTargetWorker(eng, tr, secrets)
+
+			w.drainOnce(context.Background())
+
+			if tr.count() != 0 {
+				t.Fatal("a row whose secret name breaks the rule must never reach the transport")
+			}
+			if asked := secrets.names(); len(asked) != 0 {
+				t.Fatalf("the resolver was asked for a name outside the rule: %d lookup(s)", len(asked))
+			}
+			stamps := eng.stamped()
+			if len(stamps) != 1 || !strings.Contains(stamps[0], `status: "failed"`) {
+				t.Fatalf("a name outside the rule is a permanent failure, stamped once as failed; got %v", stamps)
+			}
+			want := "webhook: target secret refused: its name does not match " + SecretNamePattern
+			if got := stringArg(t, stamps[0], "lastError"); got != want {
+				t.Fatalf("lastError = %q, want %q", got, want)
+			}
+			if strings.Contains(logs.String(), name) {
+				t.Fatalf("the log repeats the refused name:\n%s", logs.String())
+			}
+		})
+	}
+}
+
+// TestOnlyTheWorkersStatusStampsCarryInternalOrigin: a secret row's delivery
+// state is server-written end to end (memql#5480) -- the engine refuses any
+// write to such a row without internal origin, because the notify stage
+// reports a delivery when its row reads `sent`. So the worker stamps every
+// status transition with internal origin, INLINE on that one Execute, where
+// the trust dies. The drain scan and the secret's lookup keep the plain system
+// actor: neither opens a @serverOnly gate, and a context carrying internal
+// origin onward would widen what everything downstream of it may do
+// (memql#2879). Walked through every way a row leaves the worker: delivered,
+// retried after a send, retried after a lookup, and refused by policy.
+func TestOnlyTheWorkersStatusStampsCarryInternalOrigin(t *testing.T) {
+	resolved := discordWebhookPrefix + "123/" + discordToken
+	for _, tc := range []struct {
+		name      string
+		secrets   *fakeSecrets
+		transport *fakeTransport
+		want      string // the last status stamped
+	}{
+		{"delivered", &fakeSecrets{value: resolved}, &fakeTransport{}, "sent"},
+		{"retried after a send", &fakeSecrets{value: resolved}, &fakeTransport{err: errors.New("connect timeout")}, "retrying"},
+		{"retried after a lookup", &fakeSecrets{err: errors.New("i/o timeout")}, &fakeTransport{}, "retrying"},
+		{"refused by policy", &fakeSecrets{err: memql.ErrVariableNotFound}, &fakeTransport{}, "failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := &fakeEngine{pending: []map[string]any{secretRow("v1:platform:outboundRequest:s1")}}
+			w, _ := newSecretTargetWorker(eng, tc.transport, tc.secrets)
+
+			w.drainOnce(context.Background())
+
+			eng.mu.Lock()
+			defer eng.mu.Unlock()
+			lastStamp := ""
+			for i, call := range eng.calls {
+				internal := eng.origins[i].IsInternal()
+				switch {
+				case strings.HasPrefix(call, "mutation updateOutboundRequestStatus("):
+					lastStamp = call
+					if !internal {
+						t.Errorf("a status stamp went out without internal origin, so the engine refuses it on a secret row: %s", call)
+					}
+				case internal:
+					t.Errorf("internal origin reached a call that is not a status stamp: %s", call)
+				}
+			}
+			if !strings.Contains(lastStamp, `status: "`+tc.want+`"`) {
+				t.Fatalf("expected the walk to end stamped %s, got %v", tc.want, eng.calls)
+			}
+			tc.secrets.mu.Lock()
+			defer tc.secrets.mu.Unlock()
+			for _, o := range tc.secrets.origins {
+				if o.IsInternal() {
+					t.Error("the secret's lookup ran with internal origin; it needs none")
+				}
+			}
+		})
 	}
 }

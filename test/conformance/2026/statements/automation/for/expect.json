@@ -10,6 +10,11 @@
       "verdict": "refuse_parse",
       "code": "body_call_in_expression",
       "message": "a construct call is a statement of its own: bind it, `<n> := query things(...)`, and read <n> here"
+    },
+    {
+      "file": "parallel.memql",
+      "verdict": "load_ok",
+      "note": "bounded independent iterations retain per-item scope and stable source indices"
     }
   ]
 }

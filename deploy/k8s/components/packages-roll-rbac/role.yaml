@@ -56,3 +56,6 @@ subjects:
   - kind: ServiceAccount
     name: memql-engine
     namespace: memql
+  - kind: ServiceAccount
+    name: memql-engine-workbench
+    namespace: memql

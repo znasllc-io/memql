@@ -151,12 +151,13 @@ func newPipelineFleet(t *testing.T, cands ...Candidate) *pipelineFleet {
 		cands[i].ConnectedNodeId = "agent-1"
 		id := cands[i].RegistrationId
 		w := &workerservice.Worker{
-			RegistrationId: id,
-			OwnerUserId:    pipelineOwner,
-			Name:           id,
-			Capabilities:   []string{workerservice.CapabilityHeadless},
-			Concurrency:    map[string]uint32{workerservice.CapabilityHeadless: 4},
-			Labels:         maps.Clone(cands[i].Labels),
+			CapabilityDescriptor: &workerservice.CapabilityDescriptor{ActionContracts: workerservice.ActionContracts{"workerHost.pipeline_step": PipelineStepContract}},
+			RegistrationId:       id,
+			OwnerUserId:          pipelineOwner,
+			Name:                 id,
+			Capabilities:         []string{workerservice.CapabilityHeadless},
+			Concurrency:          map[string]uint32{workerservice.CapabilityHeadless: 4},
+			Labels:               maps.Clone(cands[i].Labels),
 		}
 		w.SetDispatchFunc(func(_ context.Context, d *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
 			f.dispatched[id] = append(f.dispatched[id], d)
@@ -463,7 +464,8 @@ func TestPipelineStepOutputStreamsFromAMachineHeldHere(t *testing.T) {
 	// happens to be connected to the replica running it.
 	reg := workerservice.NewRegistry(testLogger(), fleetNow)
 	w := &workerservice.Worker{
-		RegistrationId: "ci-box", OwnerUserId: pipelineOwner, Name: "ci-box",
+		CapabilityDescriptor: &workerservice.CapabilityDescriptor{ActionContracts: workerservice.ActionContracts{"workerHost.pipeline_step": PipelineStepContract}},
+		RegistrationId:       "ci-box", OwnerUserId: pipelineOwner, Name: "ci-box",
 		Capabilities: []string{workerservice.CapabilityHeadless},
 		Concurrency:  map[string]uint32{workerservice.CapabilityHeadless: 2},
 		Labels:       pipelineLabels(),
@@ -510,6 +512,7 @@ func pipelineHop(t *testing.T, fn workerservice.DispatchFunc) *hop {
 	h := newHop(t, fn, func(c *Candidate) { c.Labels = pipelineLabels() })
 	// Before any dispatch runs, so no reader is racing the write.
 	h.registry.WorkerById("laptop").Labels = pipelineLabels()
+	h.registry.WorkerById("laptop").CapabilityDescriptor = &workerservice.CapabilityDescriptor{ActionContracts: workerservice.ActionContracts{"workerHost.pipeline_step": PipelineStepContract}}
 	return h
 }
 
@@ -540,7 +543,8 @@ func siblingThenLocal(t *testing.T) (*hop, *Dispatcher, *int) {
 	localReg := workerservice.NewRegistry(testLogger(), fleetNow)
 	ran := 0
 	w := &workerservice.Worker{
-		RegistrationId: "desktop", OwnerUserId: h.owner, Name: "desktop",
+		CapabilityDescriptor: &workerservice.CapabilityDescriptor{ActionContracts: workerservice.ActionContracts{"workerHost.pipeline_step": PipelineStepContract}},
+		RegistrationId:       "desktop", OwnerUserId: h.owner, Name: "desktop",
 		Capabilities: []string{workerservice.CapabilityHeadless},
 		Concurrency:  map[string]uint32{workerservice.CapabilityHeadless: 2},
 		Labels:       pipelineLabels(),
@@ -984,6 +988,7 @@ func TestTheDispatchingReplicaRereadsTheMachinesPipelinesConsent(t *testing.T) {
 	h.link.wg.Wait()
 	// THE POSITIVE CONTROL: the label live again, the same envelope runs.
 	h.registry.WorkerById("laptop").Labels = pipelineLabels()
+	h.registry.WorkerById("laptop").CapabilityDescriptor = &workerservice.CapabilityDescriptor{ActionContracts: workerservice.ActionContracts{"workerHost.pipeline_step": PipelineStepContract}}
 	if got := receive(t, h, forwardedStep(t, h, PurposePipeline, "")); !got.GetOk() || len(*ran) != 2 {
 		t.Fatalf("response = %+v dispatched = %d, want the step run", got, len(*ran))
 	}
@@ -1142,5 +1147,50 @@ func TestBuildSafetyDescriptor_PipelineStepIsTheCommandItRuns(t *testing.T) {
 	}
 	if rendered := fmt.Sprintf("%+v", got); strings.Contains(rendered, pipelineCloneToken) || strings.Contains(rendered, pipelineSecretValue) {
 		t.Fatalf("a credential reached the descriptor: %s", rendered)
+	}
+}
+
+func TestPipelineRepositoryScopeSelectsBeforeTheCrossReplicaHop(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		fallback, known bool
+	}{
+		{"another machine accepts it", true, true},
+		{"only a restricted machine", false, true},
+		{"old advertisement is unknown", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := 0
+			h := pipelineHop(t, func(_ context.Context, d *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
+				called++
+				return okResult(d.GetCallId()), nil
+			})
+			restricted := machine("restricted", withLabels(pipelineLabels()))
+			restricted.ConnectedNodeId = nodeA
+			restricted.RepositoryScopes = nil
+			if tc.known {
+				restricted.RepositoryScopes = workerservice.RepositoryScopes{"workerHost.pipeline_step": {"o/a"}}
+			}
+			if tc.fallback {
+				h.store.machines = append([]Candidate{restricted}, h.store.machines...)
+			} else {
+				h.store.machines = []Candidate{restricted}
+			}
+			req := ownersPipelineRequest(h)
+			req.Args["repository"] = "o/b"
+			req.Args["cloneUrl"] = "https://github.com/o/b.git"
+			res, err := h.dispatch.Dispatch(asPipelineAcrossTheMesh(t, h), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := h.store.lastInvocation(t)
+			if tc.fallback {
+				if !res.OK || called != 1 || res.NodeId != nodeB || row.Routing["attempts"] != 1 {
+					t.Fatalf("eligible remote machine was not the first dispatch: %+v, calls=%d, routing=%v", res, called, row.Routing)
+				}
+			} else if res.OK || !res.RefusedBeforeStart || called != 0 || !strings.Contains(res.ErrorMessage, "o/b") || !strings.Contains(res.ErrorMessage, "repository policy") {
+				t.Fatalf("expected a repository-specific refusal without dispatch: %+v; calls=%d", res, called)
+			}
+		})
 	}
 }

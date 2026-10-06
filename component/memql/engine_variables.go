@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"google.golang.org/protobuf/types/known/structpb"
@@ -119,7 +120,7 @@ func (e *MemQLEngine) readSecret(ctx context.Context, conceptName, name string) 
 	ct := ctField.GetStringValue()
 	plaintext, err := secret.Decrypt(ct)
 	if err != nil {
-		return "", fmt.Errorf("secret %q: %w", name, err)
+		return "", undecryptableSecret(name, err)
 	}
 	return plaintext, nil
 }
@@ -156,9 +157,32 @@ func (e *MemQLEngine) readNamedRowFields(ctx context.Context, conceptName, name,
 	return fields, nil
 }
 
+// ErrVariableNotFound is what every resolver miss matches with errors.Is: no
+// row of the named variable or secret exists. Exported, with
+// IsVariableNotFound, so a caller can tell "nobody stored it", which waits on
+// an operator, from a lookup that failed and may pass on its own -- the
+// outbound worker fails a secret target on the first and retries it on the
+// second (memql#5480).
+var ErrVariableNotFound = errors.New("variable not found")
+
+// ErrSecretUndecryptable is what a secret matches when its row was found and
+// its value could not be decrypted: MEMQL_MASTER_KEY unset or malformed, a
+// malformed ciphertext, or a key that does not open it. Each waits on an
+// operator, like a miss.
+var ErrSecretUndecryptable = errors.New("secret cannot be decrypted")
+
+// IsVariableNotFound reports whether err is a resolver miss: no row of the
+// named variable or secret.
+func IsVariableNotFound(err error) bool { return errors.Is(err, ErrVariableNotFound) }
+
+// IsSecretUndecryptable reports whether err is a secret whose row was found
+// and whose value could not be decrypted.
+func IsSecretUndecryptable(err error) bool { return errors.Is(err, ErrSecretUndecryptable) }
+
 // notFoundVariableError marks a lookup miss so ResolveVariable /
 // ResolveSecret can distinguish a "try global next" case from a real
-// error. Internal -- not exported.
+// error. The type stays unexported; callers outside the package match it
+// with IsVariableNotFound.
 type notFoundVariableError struct {
 	name string
 	kind string
@@ -168,10 +192,25 @@ func (e *notFoundVariableError) Error() string {
 	return fmt.Sprintf("%s %q not found", e.kind, e.name)
 }
 
-func isNotFoundVariable(err error) bool {
-	if err == nil {
-		return false
-	}
-	_, ok := err.(*notFoundVariableError)
-	return ok
+func (e *notFoundVariableError) Is(target error) bool { return target == ErrVariableNotFound }
+
+func isNotFoundVariable(err error) bool { return IsVariableNotFound(err) }
+
+// undecryptableSecretError is a secret found and not decrypted. Its message
+// is the one readSecret has always returned, so an operator reads no change.
+type undecryptableSecretError struct {
+	name string
+	err  error
 }
+
+func undecryptableSecret(name string, err error) error {
+	return &undecryptableSecretError{name: name, err: err}
+}
+
+func (e *undecryptableSecretError) Error() string {
+	return fmt.Sprintf("secret %q: %v", e.name, e.err)
+}
+
+func (e *undecryptableSecretError) Unwrap() error { return e.err }
+
+func (e *undecryptableSecretError) Is(target error) bool { return target == ErrSecretUndecryptable }

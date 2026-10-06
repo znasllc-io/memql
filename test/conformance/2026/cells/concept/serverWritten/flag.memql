@@ -1,0 +1,4 @@
+@serverWritten
+concept receipt {
+  value string
+}

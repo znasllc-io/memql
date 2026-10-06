@@ -225,7 +225,7 @@ func TestIsolationProbeNamesArePerReplica(t *testing.T) {
 	}
 	// Ownerless and a year old, it is still not a step's Secret to sweep.
 	old := ObjectMeta{Name: target, CreationTimestamp: time.Now().Add(-365 * 24 * time.Hour)}
-	if _, ok := orphanedSecret(old, time.Now()); ok {
+	if _, ok := orphanedSecret(old, time.Now(), 0, 0); ok {
 		t.Errorf("the orphan sweep judges %q as a step's Secret", target)
 	}
 }

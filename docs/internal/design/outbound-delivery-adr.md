@@ -255,7 +255,120 @@ startup delay are env config resolved at construction; tests call
   latency-sensitive and it predates this worker); converging it onto the
   outbox is possible later but out of scope.
 
-## 7. References
+## 7. Secret targets (memql#5480)
+
+Added after this ADR shipped, for the pipelines notify stage, which
+announces runs on Discord.
+
+**Why.** A Discord webhook URL carries its token in its path, so the URL
+itself is a credential. Section 4.3's first invariant (no secrets in rows)
+rules out putting it in `target`, and anything that holds the URL can post
+to the channel.
+
+**The descriptor.** Such a row names the `v1:platform:globalSecret` whose
+value is the URL, in `targetSecret`, and `target` holds only the descriptor
+`secret:<NAME>`. The row, its audit and every error therefore name the
+secret and never the URL. `outboundRequestById` (`@serverOnly`) is how the
+notify stage learns that its delivery was sent.
+
+**Who may write one.** A secret row is server-written end to end. Whoever
+writes its content chooses what is posted to a channel a cluster owner
+configured. Whoever writes its delivery state decides what the pipelines
+notify stage reports, because the stage says "delivered" when the row it
+staged reads `sent`. The second reason holds for the stage's EMAIL rows as
+much, whose targets are plain addresses: whoever stamps one `sent` fakes the
+delivery, and whoever re-stages one at its id sends it elsewhere. So a row
+server code stages is PROTECTED -- one naming a secret, or one marked
+`serverStaged` -- and only server-side Go writes it:
+
+- the notify stage stages the row, through `stageOutboundRequestToSecret`
+  (a Discord webhook) or `stageServerOutboundRequest` (an email), both
+  `@serverOnly` and both stamping `serverStaged: true`;
+- the outbound worker stamps each status transition.
+
+Both run under internal origin, and the worker stamps it inline on each
+status stamp alone. Its drain scan and its secret lookup run without it.
+`@serverOnly` on the stages bars only the named calls. A raw `insert()` never
+consults it, and the concept declares no row tier, so the engine holds the
+line itself. `validateProtectedOutboundWrite`
+(`component/memql/outbound_protected_row_write_guard.go`) sits at the
+post-read-merge seam every write path shares. Without internal origin it
+refuses:
+
+- any write that sets, changes or clears `targetSecret` or `serverStaged`,
+  so no client can mint a protected row or unmark one;
+- every write to a row whose stored or final version is protected: its
+  content, its delivery state, even an unchanged rewrite.
+
+An operator's requeue of a failed protected row through
+`updateOutboundRequestStatus` is refused with the rest. The remedy is to
+re-run the pipeline's notify step, which stages a fresh delivery.
+
+The client-reachable `stageOutboundRequest` also stamps `targetSecret` empty
+on every write. The guard already refuses a client's re-stage onto a secret
+row's id; the stamp covers the callers the guard admits, which run with
+internal origin, such as a product automation's step. Their re-stage leaves
+an ordinary row whose target, the descriptor, no allowlist admits.
+
+**The resolver.** `Worker.Secrets` resolves a secret's name to its value.
+App wiring sets it to `MemQLEngine.ResolveSystemSecret`, the same resolver
+the plug-in context hands integrations, and the worker calls it under
+`outbound.SystemActorContext`. app's
+`TestOutboundSecretTargetsResolveUnderTheWorkersActor` reads a sealed secret
+that way against a real database, so a row tier on `globalSecret` that shut
+the actor out turns that test red. `admit` runs the resolver after the claim,
+like the rest of the target policy:
+
+- A name outside `^[A-Z][A-Z0-9_]{0,63}$` fails the row before anything
+  else, because the resolver interpolates the name into its lookup query.
+  The mutation's `@pattern` refuses the same names at staging; the worker
+  re-checks because a row can reach it without meeting that arg. The refusal
+  names the rule, not the name.
+- `targetSecret` on a medium other than `webhook` fails the row before the
+  secret is read.
+- A secret nobody stored, one that does not decrypt, an empty value, or no
+  resolver at all fails the row permanently, with
+  `webhook: target secret <NAME> did not resolve`. Each of these waits on an
+  operator. The engine's `IsVariableNotFound` and `IsSecretUndecryptable`
+  identify them; the error's text is never read.
+- Any other lookup error is retried on the delivery backoff and counts
+  against `MEMQL_OUTBOUND_MAX_ATTEMPTS`, like a refused connection (4.1).
+  That covers a timeout, a dropped connection and an engine still booting.
+  `lastError` reads `webhook: target secret <NAME> could not be read: <cause>`.
+- The resolved URL must pass the same `MEMQL_OUTBOUND_WEBHOOK_ALLOWLIST` as
+  any webhook target. A Discord channel needs `https://discord.com/api/webhooks/`
+  listed. A miss reads `webhook: target not in allowlist`, without quoting the
+  target the way a plain row's refusal does.
+
+The URL then exists only in the copy of the request handed to the transport.
+Every stamp and log line reads the row, whose target is the descriptor.
+
+**No redirects.** The webhook transport follows none, whatever client it is
+built with. The allowlist judged the URL a row targets, not whatever a
+response points at. On a redirect, `net/http` would also send the request on
+with the full original URL as its `Referer`, which for a secret target
+includes the token. A 3xx is a permanent failure (`webhook: status 302`).
+
+**The redaction.** `net/http` wraps a failed request in `*url.Error`, whose
+message embeds the request URL. That covers both a client failure (a refused
+dial, a timeout) and a URL that will not parse when the request is built.
+`redactURLError` keeps the operation and the cause and drops the URL
+(`webhook: Post: dial tcp ...: connection refused`). It applies to every
+webhook row, because the transport cannot tell which of its URLs is a
+credential.
+
+**What it does not close.** `v1:platform:outboundRequest` declares no row
+tier (memql#5804). READS stay open: any signed-in caller can still read
+every row through `outboundRequestsByStatus` -- a protected row's body and
+target included (for a secret row the secret's name, never its URL; for an
+email the recipient's address). WRITES to a protected row do not stay open:
+no client stamps, requeues or re-stages one. A row a product or a client
+staged through `stageOutboundRequest` is not the guard's at all: any
+signed-in caller can still stage, re-stage, stamp and requeue it as before,
+and anyone waiting on one reads a status a stranger could have written. Both
+close when the concept declares a tier.
+
+## 8. References
 
 - memql#2521 (capability ask), memql#1259 / mesh-delivery-substrate-adr.md
   (delivery-contract vocabulary)

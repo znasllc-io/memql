@@ -341,6 +341,15 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 	}
 
 	plan, err := d.router.Plan(ctx, req.OwnerUserId, gate.requiredCapability, req.RequireLabels, req.PreferLabels)
+	if err == nil && req.Purpose == PurposePipeline {
+		repository, _ := req.Args["repository"].(string)
+		plan.RequireRepository(req.Tool+"."+req.Action, repository)
+		plan.RequireActionContract(req.Tool+"."+req.Action, PipelineStepContract)
+		if req.Args["execution"] == "native" {
+			platform, _ := req.Args["platform"].(string)
+			plan.RequireNativePlatform(platform)
+		}
+	}
 	record := plan.Record()
 	record.ReroutedFrom = req.ReroutedFrom
 	if err != nil {
@@ -498,12 +507,12 @@ func (d *Dispatcher) attemptLocal(
 	// The machine's own consent, re-read here because this replica is the one
 	// dispatching (machineAllowsPipelines, RULING R20) -- the same check the
 	// forward's receiver makes when a sibling dispatches instead.
-	if req.Purpose == PurposePipeline && !machineAllowsPipelines(w) {
+	if req.Purpose == PurposePipeline && !machineAllowsPipelines(w, req.Args) {
 		return Result{
 			OK:        false,
 			ErrorCode: codePipelinesNotAllowed,
 			ErrorMessage: "machine " + cand.Label() + " does not advertise " + PipelinesLabel + "=" + PipelinesAllowed +
-				" on its connection here: its own policy does not allow pipeline steps",
+				" with pipeline action contract 2 and the requested native platform on its connection here",
 		}, ForwardRefusedBeforeStart
 	}
 
@@ -535,7 +544,11 @@ func (d *Dispatcher) attemptLocal(
 		}
 	}
 	res, err := w.DispatchWithStream(dispatchCtx, envelope, onChunk)
-	return translateResult(envelope.GetCallId(), res, err), ForwardCompleted
+	out := translateResult(envelope.GetCallId(), res, err)
+	if pipelineRefusedBeforeStart(req.Purpose, out, err) {
+		return out, ForwardRefusedBeforeStart
+	}
+	return out, ForwardCompleted
 }
 
 func (d *Dispatcher) attemptRemote(

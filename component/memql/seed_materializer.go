@@ -979,38 +979,28 @@ func seedNames(defs []*SeedDefinition) []string {
 // produces a "no actor found in context" failure even for read paths
 // that touch global concepts.
 //
-// # Why usersForSeedSweep and not activeUsers (memql#3217)
-//
-// This read is a SWEEP SET, not a UI page. activeUsers is
-// `sort row.createdAt desc` + `paginate 50`, which is right for a list
-// and wrong here twice over:
-//
-//   - It is bounded at 50, and it sorts NEWEST FIRST -- so the users it
-//     drops are exactly the ones the sweep exists for. A newly created
-//     user already gets its perUser seeds from the
-//     graph.node.created.v1:identity:user subscription; the sweep is
-//     what backfills users who predate a seed.
-//   - The engine fills a page from `target*2` PHYSICAL version rows and
-//     dedupes to logical rows afterwards. v1:identity:user churns
-//     constantly (lastSeenAt, revocationEpoch, preferences), so a paged
-//     read returns a short page that looks exhausted. Same failure
-//     memql#3209 hit on allAgents.
-//
-// "Unpaged" is still not "unbounded": @unbounded rewrites to
-// paginate 1000000, effectiveWindow clamps that to MaxWindow (5000), and
-// evaluateExpression clamps again to MaxResults (default 500). Past 500
-// active users this truncates, and silently. Revisit it there rather
-// than assuming the sweep is complete.
+// usersForSeedSweep returns bounded pages. Walk them at one fixed asOf
+// instant so concurrent logins cannot move an older user behind our cursor.
+// The engine collapses physical versions before pagination; @unbounded is
+// still a bounded request and is never evidence of a complete set (#5836).
 func (m *SeedMaterializer) listUserIds(ctx context.Context) ([]string, error) {
-	// #2883: usersForSeedSweep is @serverOnly. systemActorContext supplies the
-	// actor the executor needs; the origin stamp is the separate question of
-	// which CHANNEL the call arrived on, and seed materialization is
-	// server-side Go.
-	result, err := m.engine.Execute(auth.ContextWithInternalOrigin(systemActorContext(ctx)), `query usersForSeedSweep()`)
+	ctx = auth.ContextWithInternalOrigin(systemActorContext(ctx))
+	query := fmt.Sprintf(`query usersForSeedSweep(asOf: "%s")`, time.Now().UTC().Format(time.RFC3339Nano))
+	var ids []string
+	seen := map[string]bool{}
+	err := WalkQueryPages(ctx, m.engine.Execute, query, 10000, func(result *ExecuteResult) error {
+		for _, id := range extractRowIds(result) {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("usersForSeedSweep: %w", err)
 	}
-	return extractRowIds(result), nil
+	return ids, nil
 }
 
 // -----------------------------------------------------------------

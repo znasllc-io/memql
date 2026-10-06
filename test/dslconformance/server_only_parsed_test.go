@@ -173,6 +173,10 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// Webhook resolution has no signed-in user. The connector's internal
+		// cluster-owner actor walks the installation directory at one snapshot;
+		// per-user scoping would silently discard other configured stores.
+		{Path: "shopify/overlay/queries.memql", Name: "storesForConnector"}: true,
 		// Capture belongs to the installation's restricted test inbox, not
 		// actor.userId: identity mail can precede a recipient account. Only
 		// the capture service writes encrypted bodies; the public read capability
@@ -550,6 +554,33 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// and product automations draining a source, whose tree-loaded step
 		// context carries internal origin; none of them is a client.
 		{Path: "platform/mutations.memql", Name: "updateInboundRequestStatus"}: true,
+		// memql#5480. A webhook delivery whose URL is a credential (a Discord
+		// webhook's token is in its path) names the globalSecret holding it,
+		// and the outbound worker POSTs the row's body to whatever that secret
+		// resolves to. A client that could stage one could aim a body of its
+		// choosing at any URL a cluster owner stored. actor.userId scoping
+		// would not help: the row has no owner, and an owner stamp would not
+		// change which secret it names. The writer is the pipelines notify
+		// stage, after it has checked the person's right to the channel naming
+		// the secret. This bars the named call only; a raw insert() never
+		// consults @serverOnly, and component/memql's
+		// outbound_protected_row_write_guard.go refuses the same row arriving
+		// that way.
+		{Path: "platform/mutations.memql", Name: "stageOutboundRequestToSecret"}: true,
+		// Its twin for a delivery to a plain target -- the notify stage's
+		// email: it stamps the row serverStaged, and the write guard then
+		// refuses every write to it without internal origin, so no client can
+		// fake the delivery the stage reports or retarget it. A client able to
+		// call it could mint rows nobody but the server may write. actor.userId
+		// scoping would not help: the row has no owner, and the property is who
+		// staged it, not who asks.
+		{Path: "platform/mutations.memql", Name: "stageServerOutboundRequest"}: true,
+		// Its by-id read, which is how the notify stage learns the delivery
+		// went. v1:platform:outboundRequest declares no tier (memql#5804), so a
+		// client-reachable by-id read would hand any caller any delivery's
+		// body, and there is no owner on the row for an actor.userId filter to
+		// compare against. Server-side Go is the only reader.
+		{Path: "platform/queries.memql", Name: "outboundRequestById"}: true,
 		// epic memql#4805. The custom-domain create, plus the six writes its
 		// reconciliation sweep makes on an operator's behalf.
 		//
@@ -1589,6 +1620,23 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "pipelines/mutations.memql", Name: "updatePipeline"}:                     true,
 		{Path: "pipelines/mutations.memql", Name: "createPipelineRun"}:                  true,
 		{Path: "pipelines/mutations.memql", Name: "updatePipelineRun"}:                  true,
+
+		// epic memql#5480, pipelines delivery. THE CHANNEL'S TWO WRITES carry a
+		// credential's REFERENCE: a channel names the globalSecret the notify
+		// stage will resolve and POST to, and is unique by name per owner. Both
+		// checks -- the secret's name outside the platform's MEMQL_ namespace,
+		// the channel's name unused among the owner's -- are made by the channel
+		// builtin in component/pipelinerun before it writes, under the owner's
+		// borrowed authority. Caller-scoping would admit exactly the call the
+		// checks exist to refuse, the owner naming a secret nobody checked, and
+		// a client-reachable write would skip them. THE ONE READ is the notify
+		// stage's look at the runs before the one it drives: its reader is the
+		// agent replica driving a run, which holds no person's request, and the
+		// driver's run reads in this namespace are system reads, so this one is
+		// too.
+		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineEvent"}: true,
+		{Path: "pipelines/mutations.memql", Name: "createPipelineChannel"}:      true,
+		{Path: "pipelines/mutations.memql", Name: "updatePipelineChannel"}:      true,
 	}
 	for k := range want {
 		if !set[k] {

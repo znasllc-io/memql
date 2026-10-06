@@ -722,6 +722,13 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	}
 	meta.conceptName = conceptMeta.Name
 
+	// A concept can reserve its writes for validated server capabilities.
+	// Check before reading the stored row, covering raw and named writes alike;
+	// this is independent of the caller's role and the concept's read tier.
+	if conceptMeta.ServerWritten && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("%s: @serverWritten requires internal origin; use the concept's authorized capability", conceptMeta.Name)
+	}
+
 	// RETIRED CONCEPT: registered, readable, CLOSED TO NEW WRITES (memql#3756).
 	// A promoted concept demoted while rows already existed under it keeps its
 	// registry entry precisely so those rows stay readable -- which means the
@@ -875,6 +882,13 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	var organizationPrior map[string]any
 
 	id := strings.TrimSpace(mutation.ID)
+	if len(rowVersionFences(ctx)) > 0 && id != "" {
+		var err error
+		ctx, err = e.fenceWriteTarget(ctx, conceptMeta.Name, id)
+		if err != nil {
+			return nil, meta, err
+		}
+	}
 	if id != "" {
 		priorPayload, existed, err := e.loadPriorPayload(ctx, conceptMeta, id)
 		if err != nil {
@@ -1060,6 +1074,19 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// own write. See construct_ladder_write_guard.go.
 	if conceptMeta.Name == memorynodes.ConceptAuthoringConstruct {
 		if err := validateConstructLadderServerOnly(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+	}
+	// PROTECTED OUTBOUND ROWS -- secret targets and server-staged deliveries --
+	// are server-written only (memql#5480), at the same seam for the ladder's
+	// reasons: the rule is about a CHANGE, so it needs the stored row and the
+	// final one -- after the read-merge, which carries a row's targetSecret
+	// and serverStaged through a write that never names them, so a judge of
+	// the delta alone would pass a foreign body under someone else's secret,
+	// or a client's stamp on a delivery the server reports. See
+	// outbound_protected_row_write_guard.go.
+	if conceptMeta.Name == conceptPlatformOutboundRequest {
+		if err := validateProtectedOutboundWrite(ctx, organizationPrior, payload); err != nil {
 			return nil, meta, err
 		}
 	}
@@ -1563,6 +1590,10 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		createParams.Clock = func() time.Time { return ts }
 	}
 
+	// A fenced mutation stays newer than its target's observed version even
+	// when the replacement process's clock is behind its predecessor's.
+	fenceWriteClock(ctx, conceptMeta.Name, id, &createParams)
+
 	// THE OUTBOX APPEND (epic memql#4378, D5). A concept whose dataState
 	// is `origin` is one MemQL owns and external systems mirror, so every
 	// write to it has to reach those systems -- and the record of that
@@ -1571,11 +1602,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// nothing will ever propagate. See outbox_append.go for both failure
 	// directions and why only a transaction closes them.
 	//
-	// The transaction is opened ONLY for such a concept. Every other
-	// write -- which is every concept in the tree an author has not
-	// declared -- takes the single-statement path below unchanged.
+	// Row-version fences also use this transaction, so losing a separate
+	// coordination connection cannot permit a stale writer to commit.
+	// Other writes retain the single-statement path below.
 	var result memorynodes.Node
-	if targets := outboxTargetsFor(conceptMeta.Name); len(targets) > 0 {
+	if targets := outboxTargetsFor(conceptMeta.Name); len(targets) > 0 || len(rowVersionFences(ctx)) > 0 {
 		retire := outboxPayloadRetires(payload)
 		txErr := e.runInWriteTx(ctx, func(txStore memorynodes.Store) error {
 			created, createErr := conceptMeta.Create(ctx, txStore, createParams)
@@ -1612,7 +1643,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		// the engine today; the observability rollups are the other family,
 		// and they are documented as TTL-only rather than fixed here
 		// because nothing in their loop is a MemQL write at all.
-		e.InvalidateCacheForConcept(OutboxEntryConcept)
+		if len(targets) > 0 {
+			e.InvalidateCacheForConcept(OutboxEntryConcept)
+		}
 	} else {
 		store := newBunStore(e.database())
 		created, createErr := conceptMeta.Create(ctx, store, createParams)

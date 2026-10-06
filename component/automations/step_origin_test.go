@@ -530,7 +530,7 @@ func TestResumeDoesNotLaunderClientOriginBackToInternal(t *testing.T) {
 		},
 	}
 
-	if _, err := e.ResumeFrom(context.Background(), cp, auto, &ResumeOptions{FromStep: "s1"}); err != nil {
+	if _, err := e.ResumeFrom(context.Background(), cp, auto, &ResumeOptions{FromStep: "s1", AllowSideEffects: true}); err != nil {
 		t.Fatalf("ResumeFrom: %v", err)
 	}
 	if !reg.called {
@@ -569,7 +569,7 @@ func TestResumeStillGrantsInternalOriginToAServerOriginatedRun(t *testing.T) {
 		Steps:                 map[string]*MinimalStepResult{},
 	}
 
-	if _, err := e.ResumeFrom(context.Background(), cp, auto, &ResumeOptions{FromStep: "s1"}); err != nil {
+	if _, err := e.ResumeFrom(context.Background(), cp, auto, &ResumeOptions{FromStep: "s1", AllowSideEffects: true}); err != nil {
 		t.Fatalf("ResumeFrom: %v", err)
 	}
 	if !reg.called {

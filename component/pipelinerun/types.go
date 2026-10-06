@@ -1,6 +1,8 @@
 package pipelinerun
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -102,6 +104,9 @@ const (
 // package only reads them.
 type WorkStep struct {
 	Key string
+	// DefinitionFingerprint binds the complete execution definition recorded
+	// before admission. Older receipts without it cannot authorize recovery.
+	DefinitionFingerprint string
 	// Seq is the step's place in the plan the work run was opened with.
 	Seq          int
 	Status       string
@@ -122,6 +127,10 @@ type WorkStep struct {
 	Skip *pipelines.Skip
 	// Reason is a skipped or cancelled step's reason (result.reason).
 	Reason string
+	// ArtifactFileIDs are the Library files the step's receipt names as its
+	// artifacts, as the driver wrote them (already masked): what a resumed
+	// run's notification lists for a step its predecessor ran.
+	ArtifactFileIDs []string
 }
 
 // Finished reports whether the row carries the step's receipt.
@@ -219,6 +228,7 @@ type Run struct {
 	WorkRunID         string
 	WorkGoalID        string
 	DriverNodeID      string
+	DriverLeaseID     string
 	DriverHeartbeatAt time.Time
 	CancelRequested   bool
 	CancelledBy       string
@@ -282,6 +292,10 @@ type StepState struct {
 	Code       string
 	Message    string
 	LogTail    string
+	// ArtifactFileIDs are the Library files the step's receipt names as its
+	// artifacts (masked, as the receipt is): what a notify stage later in
+	// the run lists in its message.
+	ArtifactFileIDs []string
 }
 
 // Report is the step as the check run reports it.
@@ -354,6 +368,7 @@ type RunPatch struct {
 	WorkRunID         *string
 	WorkGoalID        *string
 	DriverNodeID      *string
+	DriverLeaseID     *string
 	DriverHeartbeatAt *time.Time
 	CancelRequested   *bool
 	CancelledBy       *string
@@ -362,6 +377,122 @@ type RunPatch struct {
 	FinishedAt        *time.Time
 	DurationMs        *int64
 }
+
+// Channel is one v1:pipelines:channel row as this package reads it: where a
+// notify stage delivers (D16). Ids are bare, OwnerUserID is as stored -- see
+// Pipeline.
+//
+// A channel carries a REFERENCE to what it needs, never the value: SecretRef
+// is the NAME of the globalSecret holding a Discord webhook's URL, and the URL
+// is resolved at send time by the outbound worker.
+type Channel struct {
+	ID          string
+	OwnerUserID string
+	AccountID   string
+	// Name is what a manifest's notify stage says; unique among one owner's
+	// channels, which the channel builtin checks before it writes.
+	Name string
+	// Kind is `discord` or `email`.
+	Kind string
+	// SecretRef is a Discord channel's globalSecret name. Empty for email.
+	SecretRef string
+	// Status is `active`, or `archived`: kept for the runs that name it, and
+	// delivering nothing.
+	Status string
+	// Recipients are an email channel's addresses. Empty for Discord.
+	Recipients []string
+}
+
+// ChannelPatch is a read-merge write to a channel, on PipelinePatch's rule: nil
+// is not written and keeps its value, non-nil is written as given -- an empty
+// Recipients clears the list.
+type ChannelPatch struct {
+	Name       *string
+	Kind       *string
+	SecretRef  *string
+	Status     *string
+	Recipients *[]string
+}
+
+// OutboundStatus is the delivery state of one v1:platform:outboundRequest, as
+// the outbound worker leaves it: what the notify stage polls to learn whether a
+// notification it staged went. Status is the row's own word -- pending,
+// sending, sent, retrying or failed -- and EMPTY when no such row exists, which
+// is an answer rather than an error: the row is the only proof of a delivery,
+// so absent is never read as sent.
+type OutboundStatus struct {
+	ID        string
+	Status    string
+	LastError string
+	Attempts  int
+	// SentAt is when the transport accepted the delivery; zero until it did.
+	SentAt time.Time
+}
+
+// NotificationRequest is one outbound row the notify stage stages: a Discord
+// webhook post or one email. A webhook to a channel's Discord URL names the
+// globalSecret holding it (TargetSecret) and carries no Target of its own, the
+// URL being a credential that must never sit on a row; every other row names
+// its Target, an address, and a Medium.
+type NotificationRequest struct {
+	// RequestID is the row's id, chosen by the caller, and it must be
+	// UNGUESSABLE: a row keeps its delivery state at its id (@createOnly), and a
+	// client can pre-stage a plain row at a guessable id and leave it `sent`, so
+	// the stage the server makes there later inherits it. A caller uses a random
+	// id, one per row, never one derived from what it is about to say.
+	RequestID string
+	// Medium is `webhook` or `email`.
+	Medium string
+	// Target is where a plain row goes, an email address for the notify stage.
+	// A row naming TargetSecret carries none, and staging both is refused: its
+	// target is the descriptor the mutation stamps from the secret's name, and a
+	// Target beside it would be dropped without a word.
+	Target string
+	// TargetSecret is the globalSecret NAME whose value is a webhook's URL. A
+	// row naming one is a webhook, and Medium must say so.
+	TargetSecret string
+	Subject      string
+	Body         string
+	// DedupeKey is passed to the receiver as an idempotency key.
+	DedupeKey string
+	// RequestedBy is provenance: which run staged the row.
+	RequestedBy string
+}
+
+// validate refuses a notification that cannot be sent as written, before any
+// engine is asked. The DSL declares the arguments; these are the rules it
+// cannot: a webhook to a secret is a webhook and nothing else and names no
+// target beside the secret, and a plain row says where it goes.
+func (n NotificationRequest) validate() error {
+	if bareID(n.RequestID) == "" {
+		return errors.New("pipelines: a notification needs a request id")
+	}
+	if strings.TrimSpace(n.Body) == "" {
+		return errors.New("pipelines: a notification needs something to say")
+	}
+	medium := strings.TrimSpace(n.Medium)
+	if strings.TrimSpace(n.TargetSecret) != "" {
+		if medium != secretTargetMedium {
+			return fmt.Errorf("pipelines: a notification to a secret is a webhook, not %q: only a webhook's URL is a secret", n.Medium)
+		}
+		if strings.TrimSpace(n.Target) != "" {
+			return errors.New("pipelines: a notification names the secret holding its URL or a target, not both: the row's target is the descriptor stamped from the secret's name")
+		}
+		return nil
+	}
+	if medium == "" {
+		return errors.New("pipelines: a notification needs a medium")
+	}
+	if strings.TrimSpace(n.Target) == "" {
+		return errors.New("pipelines: a notification needs somewhere to go: a target, or the secret holding it")
+	}
+	return nil
+}
+
+// secretTargetMedium is the one outbound medium a row naming a globalSecret can
+// have: stageOutboundRequestToSecret stamps it, so a caller asking for another
+// is asking for something the row cannot be.
+const secretTargetMedium = "webhook"
 
 // ptr is a pointer to v, for a patch field.
 func ptr[T any](v T) *T { return &v }

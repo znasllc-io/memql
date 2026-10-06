@@ -67,14 +67,17 @@ type PreviewStage struct {
 // PreviewStep is one manifest step as the rail shows it: its shape, never its
 // command.
 type PreviewStep struct {
-	Name     string
-	Packages string
-	Only     string
-	Shards   int
-	Bucket   string
-	Needs    []string
-	Secrets  []string
-	Services []string
+	Execution     string
+	Platform      string
+	RequiresFleet bool
+	Name          string
+	Packages      string
+	Only          string
+	Shards        int
+	Bucket        string
+	Needs         []string
+	Secrets       []string
+	Services      []string
 }
 
 // PreviewRefusal is a typed refusal, as data.
@@ -142,6 +145,7 @@ func (i *Integration) Preview(ctx context.Context, packageID string) (PreviewRes
 		stage := PreviewStage{Name: st.Name, On: append([]string(nil), st.On...), Channel: st.Channel}
 		for _, sp := range st.Steps {
 			step := PreviewStep{
+				Execution: pipelines.ExecutionOf(sp.Execution), Platform: pipelines.PlatformOf(spec, sp), RequiresFleet: pipelines.PlacementOf(sp) == pipelines.PlacementFleet,
 				Name: sp.Name, Packages: sp.Packages, Only: sp.Only, Shards: sp.Shards,
 				Secrets: append([]string(nil), sp.Secrets...), Services: append([]string(nil), sp.Services...),
 			}
@@ -196,6 +200,7 @@ func (r PreviewResult) payload() map[string]any {
 		steps := make([]any, 0, len(st.Steps))
 		for _, sp := range st.Steps {
 			steps = append(steps, map[string]any{
+				"execution": sp.Execution, "platform": sp.Platform, "requiresFleet": sp.RequiresFleet,
 				"name": sp.Name, "packages": sp.Packages, "only": sp.Only, "shards": sp.Shards, "bucket": sp.Bucket,
 				"needs": nonNil(sp.Needs), "secrets": nonNil(sp.Secrets), "services": nonNil(sp.Services),
 			})

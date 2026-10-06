@@ -511,7 +511,13 @@ func (r *scenarioRig) dryRun(t *testing.T, sc scenarioCase) {
 		ev := v.event(f.Event)
 		req.TriggerEvent = &memql.DryRunTriggerEvent{Topic: ev.Topic, Kind: ev.Kind.String(), Payload: ev.Payload}
 	}
-	start := time.Now()
+	// createdAt is authored data: earlier scenarios can leave future-dated
+	// versions. Comparing it with the wall clock counts those old rows as
+	// new writes. Measure stored versions across the sandbox call instead.
+	versionsBefore, err := r.env.DB.NewSelect().Model((*memoryNodes.MemoryNode)(nil)).Count(context.Background())
+	if err != nil {
+		t.Fatalf("count stored versions before the dry run: %v", err)
+	}
 	report, err := memql.RunBundleDryRun(context.Background(), r.env.Eng, req)
 	if err != nil {
 		t.Fatalf("dryRun %s: %v", f.Automation, err)
@@ -526,13 +532,12 @@ func (r *scenarioRig) dryRun(t *testing.T, sc scenarioCase) {
 	if after := v.snapshot(); !reflect.DeepEqual(before, after) {
 		t.Errorf("dryRun %s changed a seeded row:\nbefore %v\nafter  %v", f.Automation, before, after)
 	}
-	written, err := r.env.DB.NewSelect().Model((*memoryNodes.MemoryNode)(nil)).
-		Where(`"createdAt" >= ?`, start).Count(context.Background())
+	versionsAfter, err := r.env.DB.NewSelect().Model((*memoryNodes.MemoryNode)(nil)).Count(context.Background())
 	if err != nil {
 		t.Fatalf("count the rows written since the dry run began: %v", err)
 	}
-	if written != 0 {
-		t.Errorf("dryRun %s: %d rows were written while it ran, and a dry run writes none", f.Automation, written)
+	if versionsAfter != versionsBefore {
+		t.Errorf("dryRun %s: stored versions changed from %d to %d; a dry run writes none", f.Automation, versionsBefore, versionsAfter)
 	}
 }
 

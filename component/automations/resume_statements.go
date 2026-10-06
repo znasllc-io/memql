@@ -7,15 +7,17 @@ package automations
 // names rehydrated from the journal, rather than by jumping into the middle of
 // its list: a name is bound by the statement that computed it, and the
 // statements before the resume point bound theirs in the run being resumed.
-// Each statement before the resume point is one of three things:
+// Each statement before the resume point keeps its recorded disposition:
 //
 //   - done: it binds the value its receipt recorded (MinimalStepResult.Value)
 //     and does not run. A query whose rows were too many to record is read
 //     again instead -- it is a read;
 //   - failed under `on error continue`: it was continued past, so it stays
 //     so, and its name stays absent;
-//   - anything else (skipped by its condition, never reached): it runs as it
-//     would have, a condition being decided again over the rehydrated names.
+//   - skipped: its condition is not reconsidered;
+//   - missing evidence: a missing bound value from a completed effect
+//     refuses recovery. An unrecorded query may be read again only under
+//     resume's replay admission, without replacing its original receipt.
 //
 // The statement at the resume point runs on its next attempt, and every one
 // after it as it would have. A row under a nested key -- a logic's statement,
@@ -23,15 +25,12 @@ package automations
 // (runJournalFromRows drops it): resume re-runs the calling statement, never
 // into it.
 //
-// A RE-RUN SERVES ITS PREFIX STRICTER (epic memql#5414). The steps before the
-// resume point are the head's versions, and none of them runs again: a step
-// its condition skipped stays skipped rather than being decided afresh, and a
-// read too large to record is read again WITHOUT a row, so the version the
-// head names stays the version the run shows. Every step from the resume point
+// A RE-RUN (epic memql#5414) serves the prefix's head versions with the same
+// preservation rules. Every step from the resume point
 // on -- and any step that does run -- runs one past the highest version it
 // recorded (rerunBases).
 
-import "strings"
+import "fmt"
 
 // statementResumePoint is the first statement of the body's own list that did
 // not finish and was not continued past: failed, or running with no receipt (a
@@ -85,10 +84,9 @@ func statementResumePoint(j *RunJournal, automation *Automation) string {
 // resumedStatements is what the body knows from its journal when it resumes
 // at automation.Steps[at] (see the file comment). rerun is the request a
 // re-run serves, nil for an ordinary resume.
-func resumedStatements(j *RunJournal, automation *Automation, at int, rerun *RerunSpec) *resumedList {
-	r := &resumedList{done: map[string]*MinimalStepResult{}, continued: map[string]bool{}}
+func resumedStatements(j *RunJournal, automation *Automation, at int, rerun *RerunSpec) (*resumedList, error) {
+	r := &resumedList{done: map[string]*MinimalStepResult{}, continued: map[string]bool{}, reread: map[string]bool{}}
 	if rerun != nil {
-		r.reread = map[string]bool{}
 		r.bases = rerunBases(j, automation, rerun, at)
 	}
 	for i, step := range automation.Steps {
@@ -102,38 +100,25 @@ func resumedStatements(j *RunJournal, automation *Automation, at int, rerun *Rer
 		switch state := j.StepStates[step.ID]; {
 		case state.Status == "done":
 			m := j.Steps[step.ID]
-			unrecorded := m == nil || (m.Value == nil && step.Binds != "")
-			if unrecorded && isQueryStatement(step) {
-				if rerun != nil {
-					r.reread[step.ID] = true
-				}
+			unrecorded := m == nil || (m.Value == nil && !m.ValueRecorded && step.Binds != "")
+			if unrecorded && step.Binds != "" && isQueryStatement(step) {
+				r.reread[step.ID] = true
 				continue // read again
 			}
+			if unrecorded && step.Binds != "" {
+				return nil, fmt.Errorf("%w: %w: step %q, binding %q", ErrRunJournalInvalid, ErrResumeResultMissing, step.ID, step.Binds)
+			}
 			if m == nil {
-				if rerun == nil {
-					continue // run again, as a resume always has
-				}
-				// A re-run never runs a finished prefix step again: one
+				// Recovery never runs a finished prefix step again: one
 				// that recorded no result binds nothing.
 				m = &MinimalStepResult{StepId: step.ID, Status: "completed"}
 			}
 			r.done[step.ID] = m
 		case state.Status == "failed" && step.OnError == ErrorStrategyContinue:
 			r.continued[step.ID] = true
-		case state.Status == "skipped" && rerun != nil:
+		case state.Status == "skipped":
 			r.continued[step.ID] = true
 		}
 	}
-	return r
-}
-
-// stepRetryable reports whether the resume point may run again without
-// AllowSideEffects: IsStepRetryable's rule, and a mutation call, which is a
-// function step but a write.
-func stepRetryable(step *Step) bool {
-	if !IsStepRetryable(step.Type) {
-		return false
-	}
-	return !(step.Type == StepTypeFunction && step.Function != nil &&
-		strings.EqualFold(step.Function.Kind, "mutation"))
+	return r, nil
 }

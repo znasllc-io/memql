@@ -23,6 +23,7 @@ import (
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/num"
@@ -373,7 +374,7 @@ func (s *Store) TemplateByID(ctx context.Context, templateID string) (map[string
 // that a new admin was added is not marketing, and an unsubscribe from a
 // newsletter must not be able to silence it.
 func (s *Store) StageOutbound(ctx context.Context, requestID, target, subject, body, dedupeKey, requestedBy string) error {
-	return s.exec(ctx, call("mutation", "stageOutboundRequest",
+	return s.exec(auth.ContextWithInternalOrigin(ctx), call("mutation", "stageOutboundRequest",
 		arg{"requestId", requestID},
 		arg{"medium", "email"},
 		arg{"target", target},

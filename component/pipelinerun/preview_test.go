@@ -38,6 +38,8 @@ pipeline:
         - name: os-checks
           run: make os-test
           when: { bucket: os }
+          execution: native
+          platform: linux/amd64
           needs: { docker: true }
     - name: deploy
       on: [push]
@@ -95,6 +97,26 @@ func TestAPreviewReadsTheManifestAndWritesNothing(t *testing.T) {
 	}
 	if n := len(h.store.pipelineCreates); n != 0 {
 		t.Errorf("a preview writes nothing: %d pipeline writes", n)
+	}
+}
+
+func TestPreviewCarriesFleetPlacementWithoutHostNeeds(t *testing.T) {
+	for _, execution := range []string{"native", "container"} {
+		manifest := "formatVersion: 1\nname: shop\npipeline:\n  platform: linux/arm64\n  stages:\n    - name: build\n      steps:\n        - name: build\n          execution: " + execution + "\n          placement: fleet\n          run: make\n"
+		h := connectHarness(t, manifest)
+		res, err := h.integ.Preview(personCtx(ownerID), packageID)
+		if err != nil || res.Refusal != nil {
+			t.Fatalf("preview: %+v %v", res, err)
+		}
+		step := res.Stages[0].Steps[0]
+		if !step.RequiresFleet || step.Execution != execution || step.Platform != "linux/arm64" || len(step.Needs) != 0 {
+			t.Fatalf("preview lost placement: %+v", step)
+		}
+		stages := res.payload()["stages"].([]any)
+		wire := stages[0].(map[string]any)["steps"].([]any)[0].(map[string]any)
+		if wire["requiresFleet"] != true || wire["execution"] != execution || wire["platform"] != "linux/arm64" {
+			t.Fatalf("wire lost execution: %v", wire)
+		}
 	}
 }
 

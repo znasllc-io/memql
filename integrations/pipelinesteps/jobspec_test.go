@@ -52,6 +52,8 @@ func testConfig() Config {
 
 func testRun() StepRun {
 	return StepRun{
+		Execution:   pl.ExecutionContainer,
+		Platform:    "linux/amd64",
 		RunID:       "run-7f3a",
 		WorkRunID:   "work-91c2",
 		StepKey:     "tests/go-tests#2",

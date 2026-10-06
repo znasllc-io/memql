@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.3
+
+- Recognizes bounded parallel iteration, `for item in items parallel(16) { ... }`,
+  in MemQL edition 2026. The bundled language server and generated grammar carry
+  `2026.10-bounded-iteration-ba9d35a7`.
+
 ## 0.6.2
 
 A new interface for everything around your `.memql` files: clusters, signing

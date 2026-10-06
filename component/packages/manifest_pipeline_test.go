@@ -208,3 +208,68 @@ func TestAManifestWithoutAPipelineCarriesNone(t *testing.T) {
 		t.Fatalf("a declared block must travel with the manifest: %s", raw)
 	}
 }
+
+// A notify stage's links (epic memql#5480) are read by the same strict decoder
+// as every other key of the block: the valid form arrives typed, which is the
+// reachable positive for the refusals below it, and a misspelled key inside a
+// link is refused as any unknown key is.
+func TestANotifyStageCarriesItsLinks(t *testing.T) {
+	const notifyStage = "      channel: znas-instance\n"
+	src := strings.Replace(pipelineManifest, notifyStage, notifyStage+
+		"      links:\n"+
+		"        - label: Docs\n"+
+		"          url: https://memql.io/docs/\n"+
+		"        - label: Changelog\n"+
+		"          url: https://memql.io/changelog\n", 1)
+	if src == pipelineManifest {
+		t.Fatalf("the edit matched nothing, so this test would read the manifest without links")
+	}
+	m, err := ParseManifest([]byte(src))
+	if err != nil {
+		t.Fatalf("a notify stage with links must parse: %v", err)
+	}
+	notify := m.Pipeline.Stages[3]
+	if notify.Channel != "znas-instance" || len(notify.Steps) != 0 || len(notify.Links) != 2 ||
+		notify.Links[0].Label != "Docs" || notify.Links[0].URL != "https://memql.io/docs/" ||
+		notify.Links[1].Label != "Changelog" || notify.Links[1].URL != "https://memql.io/changelog" {
+		t.Fatalf("the notify stage lost its links: %+v", notify)
+	}
+	raw, _ := json.Marshal(m)
+	if !strings.Contains(string(raw), `"links":[{"label":"Docs","url":"https://memql.io/docs/"}`) {
+		t.Fatalf("the links must travel with the manifest under the names the block is written in: %s", raw)
+	}
+
+	// Each case is the valid manifest with one key changed.
+	for name, edit := range map[string][3]string{
+		"a misspelled label": {"- label: Docs", "- lable: Docs", "lable"},
+		"a misspelled url":   {"url: https://memql.io/docs/", "link: https://memql.io/docs/", "link"},
+		"a misspelled key":   {"      links:\n", "      linkz:\n", "linkz"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := strings.Replace(src, edit[0], edit[1], 1)
+			if bad == src {
+				t.Fatalf("the edit %q matched nothing, so this case would test the valid manifest", edit[0])
+			}
+			_, err := ParseManifest([]byte(bad))
+			if got := RefusalCode(err); got != CodeManifestInvalid {
+				t.Fatalf("want %s, got %q (%v)", CodeManifestInvalid, got, err)
+			}
+			if !strings.Contains(err.Error(), "field "+edit[2]+" not found") {
+				t.Fatalf("the refusal must name the unknown key %q: %v", edit[2], err)
+			}
+		})
+	}
+
+	// What a link MEANS is the pipeline's question, asked when a run compiles:
+	// a link with no label, or at an address that is not https, still parses,
+	// and the run it belongs to is the one that fails.
+	meaningless := strings.Replace(src, "label: Docs", `label: ""`, 1)
+	meaningless = strings.Replace(meaningless, "url: https://memql.io/changelog", "url: http://memql.io/changelog", 1)
+	m, err = ParseManifest([]byte(meaningless))
+	if err != nil {
+		t.Fatalf("a semantic mistake in a link must not refuse the manifest: %v", err)
+	}
+	if links := m.Pipeline.Stages[3].Links; links[0].Label != "" || links[1].URL != "http://memql.io/changelog" {
+		t.Fatalf("the mistakes must arrive as written, for the compile to refuse by name: %+v", links)
+	}
+}

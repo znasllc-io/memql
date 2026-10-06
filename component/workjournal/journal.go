@@ -44,11 +44,11 @@
 // what tells integrations/work that the run is not its to dispatch, sweep or
 // re-run.
 //
-// NIL-SAFE THROUGHOUT. Every method tolerates a nil receiver and returns a
-// nil-safe handle, so a caller wires the journal if it has one and calls it
-// unconditionally either way. A pass whose journal is absent behaves exactly
-// as it did before the journal existed -- which is what lets this be added
-// to a working path without a branch at every call site.
+// Writes return errors so an execution driver can require durable evidence.
+// Step refuses to return a handle when its intent did not land. Receipt and
+// close errors must be checked before advancing or publishing success.
+// Nil receivers remain safe for optional observability callers; they are not
+// proof that a write happened. A driver must require a journal at admission.
 package workjournal
 
 import (
@@ -137,7 +137,8 @@ type Journal struct {
 	now    func() time.Time
 	nodeID string
 	// beat overrides HeartbeatInterval so a test can watch several beats.
-	beat time.Duration
+	beat  time.Duration
+	guard WriteGuard
 }
 
 // New builds a journal. A nil engine yields a journal whose methods are all
@@ -150,6 +151,36 @@ func New(engine Executor, logger *slog.Logger, nodeID string) *Journal {
 		logger = slog.Default()
 	}
 	return &Journal{engine: engine, logger: logger, now: time.Now, nodeID: nodeID, beat: HeartbeatInterval}
+}
+
+// WriteGuard validates the caller's ownership and executes one journal write
+// within the same critical section. It must call write synchronously at most
+// once, propagate its error, and never hold a lock across an external effect.
+// The caller chooses the ownership record; the journal owns no lease policy.
+type WriteGuard func(ctx context.Context, write func(context.Context) error) error
+
+// WithWriteGuard returns an independent journal whose writes, including its
+// background heartbeat, pass through guard. The shared journal is unchanged.
+// Install the guard before Begin or Reopen; existing handles retain their
+// original journal. Guards compose so a second guard cannot remove the first.
+func (j *Journal) WithWriteGuard(guard WriteGuard) *Journal {
+	if j == nil {
+		return nil
+	}
+	next := *j
+	if guard == nil {
+		return &next
+	}
+	previous := j.guard
+	next.guard = func(ctx context.Context, write func(context.Context) error) error {
+		return guard(ctx, func(gctx context.Context) error {
+			if previous != nil {
+				return previous(gctx, write)
+			}
+			return write(gctx)
+		})
+	}
+	return &next
 }
 
 // Work describes the pass being opened.
@@ -287,6 +318,10 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 	if template == "" {
 		return nil, fmt.Errorf("workjournal: template is required")
 	}
+	definition, err := DefinitionFingerprint(template, w.Steps)
+	if err != nil {
+		return nil, err
+	}
 
 	started := j.now().UTC()
 	runKey := strings.TrimSpace(w.RunKey)
@@ -304,7 +339,7 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 		arg("requestedVia", firstNonEmpty(w.RequestedVia, "api")),
 		objectArg("input", w.Input),
 	)
-	if _, err := j.engine.Execute(auth.ContextWithInternalOrigin(ctx), goalCall); err != nil {
+	if err := j.exec(ctx, goalCall); err != nil {
 		return nil, fmt.Errorf("workjournal: open goal: %w", err)
 	}
 
@@ -319,7 +354,7 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 		arg("runId", runID),
 		arg("goalId", goalID),
 		arg("automationName", template),
-		arg("templateFingerprint", fingerprint(template, w.Steps)),
+		arg("templateFingerprint", definition),
 		objectArg("input", w.Input),
 		// DRIVER-OWNED: this package writes and closes the run, and the
 		// dispatcher must never adopt it. A runner that names its own trigger
@@ -334,7 +369,7 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 		arg("parentRunId", w.ParentRunID),
 		objectArg("variables", w.Variables),
 	)
-	if _, err := j.engine.Execute(auth.ContextWithInternalOrigin(ctx), runCall); err != nil {
+	if err := j.exec(ctx, runCall); err != nil {
 		return nil, fmt.Errorf("workjournal: open run: %w", err)
 	}
 	// The first heartbeat rides this write: `createWorkRun` takes no
@@ -344,20 +379,26 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 	if len(order) > 0 {
 		opened = append(opened, stringListArg("stepOrder", order))
 	}
-	j.exec(ctx, call("mutation updateWorkRun", opened...))
+	if err := j.exec(ctx, call("mutation updateWorkRun", opened...)); err != nil {
+		return nil, fmt.Errorf("workjournal: record initial heartbeat and step order: %w", err)
+	}
 	run := &Run{
 		j: j, goalID: goalID, runID: runID, owner: owner, order: w.Steps, started: started,
 		stop: make(chan struct{}), done: make(chan struct{}),
 	}
 	if w.QueueSteps {
-		run.queue(ctx)
+		if err := run.queue(ctx); err != nil {
+			return nil, err
+		}
 	}
 	// The goal is now being worked. `createWorkGoal` stamps `open` and has
 	// no status argument, so this is the only thing that can say so.
-	j.exec(ctx, call("mutation updateWorkGoal",
+	if err := j.exec(ctx, call("mutation updateWorkGoal",
 		arg("goalId", goalID),
 		arg("status", "active"),
-	))
+	)); err != nil {
+		return nil, fmt.Errorf("workjournal: activate goal: %w", err)
+	}
 	go run.heartbeat(ctx)
 	return run, nil
 }
@@ -434,7 +475,7 @@ func workIDs(template, goalKey, runKey string) (goalID, runID string) {
 // is a new version of this row rather than a second row beside it. A pending
 // step has not started, so it carries no startedAt. A key declared twice is
 // queued once: both declarations name one row.
-func (r *Run) queue(ctx context.Context) {
+func (r *Run) queue(ctx context.Context) error {
 	ctx = auth.ContextWithUserActor(ctx, r.owner)
 	queued := map[string]bool{}
 	for _, s := range r.order {
@@ -443,7 +484,7 @@ func (r *Run) queue(ctx context.Context) {
 		}
 		queued[s.Key] = true
 		seq, decl := r.decl(s.Key)
-		r.j.exec(ctx, call("mutation createWorkStep",
+		if err := r.j.exec(ctx, call("mutation createWorkStep",
 			arg("stepId", deriveID("step", r.runID, s.Key)),
 			arg("runId", r.runID),
 			arg("key", s.Key),
@@ -455,8 +496,11 @@ func (r *Run) queue(ctx context.Context) {
 			arg("status", "pending"),
 			intArg("attempt", 1),
 			arg("idempotencyKey", r.runID+":"+s.Key+":1"),
-		))
+		)); err != nil {
+			return fmt.Errorf("workjournal: queue step %s: %w", s.Key, err)
+		}
 	}
+	return nil
 }
 
 // Reopen returns a handle on a run this journal -- or another replica's --
@@ -477,7 +521,7 @@ func (r *Run) queue(ctx context.Context) {
 // owner there is no handle, and a row is never written under a blank actor.
 // With no goal or no run there is nothing to address. Each answers nil, which
 // every method tolerates, and the refusal is logged rather than returned --
-// the run's work goes on without a journal, as it would with none wired.
+// an execution driver must refuse the nil handle before starting work.
 //
 // started is when the run STARTED, read off its row, not when this replica
 // picked it up: the close reports the run's wall clock, which a takeover does
@@ -534,14 +578,14 @@ type Step struct {
 // "function" written over an "exec" would be a lie on every version after.
 // A declaration naming none of the three writes the intent exactly as every
 // pass before pipelines did.
-func (r *Run) Step(ctx context.Context, key string) *Step {
+func (r *Run) Step(ctx context.Context, key string) (*Step, error) {
 	if r == nil || r.j == nil {
-		return nil
+		return nil, fmt.Errorf("workjournal: cannot record a step without a journal")
 	}
 	seq, decl := r.decl(key)
 	started := r.j.now().UTC()
 	stepID := deriveID("step", r.runID, key)
-	r.j.exec(auth.ContextWithUserActor(ctx, r.owner), call("mutation createWorkStep",
+	err := r.j.exec(auth.ContextWithUserActor(ctx, r.owner), call("mutation createWorkStep",
 		arg("stepId", stepID),
 		arg("runId", r.runID),
 		arg("key", key),
@@ -555,33 +599,36 @@ func (r *Run) Step(ctx context.Context, key string) *Step {
 		arg("idempotencyKey", r.runID+":"+key+":1"),
 		arg("startedAt", started.Format(time.RFC3339)),
 	))
-	return &Step{run: r, id: stepID, key: key, started: started}
+	if err != nil {
+		return nil, err
+	}
+	return &Step{run: r, id: stepID, key: key, started: started}, nil
 }
 
 // Done writes the receipt.
-func (s *Step) Done(ctx context.Context, result map[string]any) {
-	s.finish(ctx, Receipt{Status: stepDone, Result: result})
+func (s *Step) Done(ctx context.Context, result map[string]any) error {
+	return s.finish(ctx, Receipt{Status: stepDone, Result: result})
 }
 
 // Failed writes the receipt for a stage that did not finish.
-func (s *Step) Failed(ctx context.Context, code, message string) {
-	s.finish(ctx, Receipt{Status: stepFailed, Code: code, Message: message})
+func (s *Step) Failed(ctx context.Context, code, message string) error {
+	return s.finish(ctx, Receipt{Status: stepFailed, Code: code, Message: message})
 }
 
 // Skipped records a stage the template declares and this run did not need.
 // It is written rather than omitted so the run's steps still add up to its
 // declared order -- a missing row and a skipped one look identical to a
 // reader, and only one of them is true.
-func (s *Step) Skipped(ctx context.Context, why string) {
-	s.finish(ctx, Receipt{Status: stepSkipped, Result: map[string]any{"reason": why}})
+func (s *Step) Skipped(ctx context.Context, why string) error {
+	return s.finish(ctx, Receipt{Status: stepSkipped, Result: map[string]any{"reason": why}})
 }
 
 // Cancelled records a step stopped before it finished: its run was cancelled
 // by a person, or superseded by a newer push to the same pull request (design
 // record D11). Written for the reason Skipped is: a step the run declared and
 // never closed reads as one still running.
-func (s *Step) Cancelled(ctx context.Context, why string) {
-	s.finish(ctx, Receipt{Status: stepCancelled, Result: map[string]any{"reason": why}})
+func (s *Step) Cancelled(ctx context.Context, why string) error {
+	return s.finish(ctx, Receipt{Status: stepCancelled, Result: map[string]any{"reason": why}})
 }
 
 // The step concept's terminal statuses: how a step ENDED, which is all a
@@ -626,30 +673,30 @@ type Receipt struct {
 // logFileId and artifactFileIds are updateWorkStep arguments the pipelines
 // epic adds (dsl/work, epic memql#5477); each is written only when the
 // receipt names one, so a receipt without them is unchanged by the epic.
-func (s *Step) Finish(ctx context.Context, r Receipt) {
+func (s *Step) Finish(ctx context.Context, r Receipt) error {
 	if s == nil || s.run == nil || s.run.j == nil {
-		return
+		return nil
 	}
 	switch r.Status {
 	case stepDone, stepFailed, stepSkipped, stepCancelled:
 	default:
 		s.run.j.logger.Warn("workjournal: a step receipt named a status that is not one a step ends in; nothing was written",
 			"status", r.Status, "step", s.key, "run", s.run.runID)
-		return
+		return fmt.Errorf("workjournal: invalid step receipt status %q", r.Status)
 	}
-	s.finish(ctx, r)
+	return s.finish(ctx, r)
 }
 
-func (s *Step) finish(ctx context.Context, r Receipt) {
+func (s *Step) finish(ctx context.Context, r Receipt) error {
 	if s == nil || s.run == nil || s.run.j == nil {
-		return
+		return nil
 	}
 	finished := s.run.j.now().UTC()
 	durationMs := r.DurationMs
 	if durationMs <= 0 {
 		durationMs = finished.Sub(s.started).Milliseconds()
 	}
-	s.run.j.exec(auth.ContextWithUserActor(ctx, s.run.owner), call("mutation updateWorkStep",
+	return s.run.j.exec(auth.ContextWithUserActor(ctx, s.run.owner), call("mutation updateWorkStep",
 		arg("stepId", s.id),
 		arg("status", r.Status),
 		objectArg("result", r.Result),
@@ -680,25 +727,25 @@ func (r *Run) Heartbeat(ctx context.Context) {
 }
 
 // Succeeded closes the run.
-func (r *Run) Succeeded(ctx context.Context, outcome map[string]any) {
-	r.close(ctx, "succeeded", outcome, "", "")
+func (r *Run) Succeeded(ctx context.Context, outcome map[string]any) error {
+	return r.close(ctx, "succeeded", outcome, "", "")
 }
 
 // Failed closes the run with the reason.
-func (r *Run) Failed(ctx context.Context, code, message string) {
-	r.close(ctx, "failed", nil, code, message)
+func (r *Run) Failed(ctx context.Context, code, message string) error {
+	return r.close(ctx, "failed", nil, code, message)
 }
 
 // Cancelled closes a run stopped before it finished -- by a person, or by a
 // newer push to the same pull request (design record D11) -- with the reason.
 // Its goal closes with it, as with every other close.
-func (r *Run) Cancelled(ctx context.Context, code, message string) {
-	r.close(ctx, "cancelled", nil, code, message)
+func (r *Run) Cancelled(ctx context.Context, code, message string) error {
+	return r.close(ctx, "cancelled", nil, code, message)
 }
 
-func (r *Run) close(ctx context.Context, status string, outcome map[string]any, code, message string) {
+func (r *Run) close(ctx context.Context, status string, outcome map[string]any, code, message string) error {
 	if r == nil || r.j == nil {
-		return
+		return nil
 	}
 	// Before the close is written, so no beat can land after it: a heartbeat
 	// on a finished run is harmless to the sweep, but it is a lie in the
@@ -720,7 +767,7 @@ func (r *Run) close(ctx context.Context, status string, outcome map[string]any, 
 	if !r.started.IsZero() {
 		spent = map[string]any{"wallClockMs": finished.Sub(r.started).Milliseconds()}
 	}
-	r.j.exec(auth.ContextWithUserActor(ctx, r.owner), call("mutation updateWorkRun",
+	err := r.j.exec(auth.ContextWithUserActor(ctx, r.owner), call("mutation updateWorkRun",
 		arg("runId", r.runID),
 		arg("status", status),
 		objectArg("outcome", outcome),
@@ -729,6 +776,9 @@ func (r *Run) close(ctx context.Context, status string, outcome map[string]any, 
 		arg("finishedAt", finished.Format(time.RFC3339)),
 		objectArg("spent", spent),
 	))
+	if err != nil {
+		return err
+	}
 	// The goal closes with its run. A goal whose only run is over is not
 	// still "active", and leaving it that way would make every finished
 	// analysis read as work in progress.
@@ -736,7 +786,7 @@ func (r *Run) close(ctx context.Context, status string, outcome map[string]any, 
 	if status == "cancelled" {
 		reason = "the run was cancelled"
 	}
-	r.j.exec(auth.ContextWithUserActor(ctx, r.owner), call("mutation updateWorkGoal",
+	return r.j.exec(auth.ContextWithUserActor(ctx, r.owner), call("mutation updateWorkGoal",
 		arg("goalId", r.goalID),
 		arg("status", "closed"),
 		arg("closedAt", finished.Format(time.RFC3339)),
@@ -755,21 +805,33 @@ func (r *Run) decl(key string) (int, StepDecl) {
 	return len(r.order), StepDecl{Key: key}
 }
 
-// exec runs a write and LOGS a failure rather than returning it.
+// exec runs a write, logs a failure and returns it to the caller.
 //
 // That is deliberate and it is the one judgment in this package worth
 // arguing with. The journal is a RECORD of work, not the work: a pass that
 // extracted, chunked and embedded a file successfully must not be reported
-// as failed because a step row did not land. So a write that fails is loud
-// in the log and invisible to the caller -- except at Begin, where a failure
-// means there is no run at all and the caller gets it.
-func (j *Journal) exec(ctx context.Context, q string) {
+// as failed because a step row did not land. Such callers may explicitly
+// ignore the returned error. Execution drivers must check it: an intent or
+// receipt that did not land cannot authorize work or claim success.
+func (j *Journal) exec(ctx context.Context, q string) error {
 	if j == nil || j.engine == nil {
-		return
+		return fmt.Errorf("workjournal: no journal writer is configured")
 	}
-	if _, err := j.engine.Execute(auth.ContextWithInternalOrigin(ctx), q); err != nil {
+	write := func(wctx context.Context) error {
+		_, err := j.engine.Execute(auth.ContextWithInternalOrigin(wctx), q)
+		return err
+	}
+	var err error
+	if j.guard != nil {
+		err = j.guard(ctx, write)
+	} else {
+		err = write(ctx)
+	}
+	if err != nil {
 		j.logger.Warn("workjournal: a journal write did not land", "error", err, "call", firstWord(q))
+		return err
 	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -848,16 +910,25 @@ func deriveID(kind, scope, key string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
-// fingerprint is what changes when the template changes. It covers the step
-// KEYS and KINDS, so re-ordering the stages or making a deterministic stage
-// reasoning is visible on every run written afterwards.
-func fingerprint(template string, steps []StepDecl) string {
-	h := sha256.New()
-	h.Write([]byte(template))
-	for _, s := range steps {
-		h.Write([]byte("\x00" + s.Key + "\x00" + s.Kind))
+// DefinitionFingerprint binds the complete declared work, including call
+// identity, dependencies and ordering. Call must contain definition data only,
+// never resolved credentials. JSON sorts object keys and refuses unsupported
+// values; a failure must not become a shared empty fingerprint.
+func DefinitionFingerprint(template string, steps []StepDecl) (string, error) {
+	normalized := make([]StepDecl, len(steps))
+	for n, step := range steps {
+		step.Kind, step.StepType = step.kind(), step.stepType()
+		normalized[n] = step
 	}
-	return hex.EncodeToString(h.Sum(nil))[:32]
+	data, err := json.Marshal(struct {
+		Template string
+		Steps    []StepDecl
+	}{strings.TrimSpace(template), normalized})
+	if err != nil {
+		return "", fmt.Errorf("workjournal: encode definition: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	return "work-definition-v2:" + hex.EncodeToString(sum[:]), nil
 }
 
 func firstNonEmpty(vals ...string) string {
@@ -911,9 +982,6 @@ func (j *Journal) StampBinding(ctx context.Context, ownerUserID, stepID string, 
 	if owner == "" {
 		return fmt.Errorf("workjournal: a binding needs the step owner's id to be written under")
 	}
-	_, err := j.engine.Execute(
-		auth.ContextWithInternalOrigin(auth.ContextWithUserActor(ctx, owner)),
-		call("mutation updateWorkStep", arg("stepId", stepID), objectArg("binding", binding)),
-	)
-	return err
+	return j.exec(auth.ContextWithUserActor(ctx, owner),
+		call("mutation updateWorkStep", arg("stepId", stepID), objectArg("binding", binding)))
 }

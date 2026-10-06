@@ -39,6 +39,10 @@ type pipelinesFakeStepRunner struct {
 	cancelErr error
 }
 
+func (f *pipelinesFakeStepRunner) Readiness() pl.RunnerReadiness {
+	return pl.RunnerReadiness{NodeID: "workbench-test", Available: true, Isolation: "not_proven"}
+}
+
 var _ pipelineStepRunner = (*pipelinesFakeStepRunner)(nil)
 
 func (f *pipelinesFakeStepRunner) Run(ctx context.Context, run pipelinesteps.StepRun) pl.StepResult {

@@ -1,0 +1,6 @@
+{
+  "cases": [
+    {"file": "flag.memql", "verdict": "load_ok"},
+    {"file": "with-a-value.memql", "verdict": "refuse_load", "code": "annotation_form", "message": "@serverWritten on a concept takes no arguments"}
+  ]
+}

@@ -171,22 +171,27 @@ which is in `integrations/pipelinesteps/kube.go`:
 | `pods/log` | get | the step's output, followed while it runs, and the tails of the clone, the services and the probe |
 | `secrets` | create, get, list, patch, delete, deletecollection | one Secret per Job: the clone token and the step's resolved secrets; listed (by label, metadata alone) by the sweep that deletes a Secret no Job ever came to own |
 
-It is bound to **`memql-engine`**, the ServiceAccount every engine Deployment
-runs as, not to a workbench-only account: the workbench also makes model calls,
-and both vendors' workload identity federation trusts `memql-engine` by name.
-That is the precedent [`custom-domain-rbac.yaml`](../../base/custom-domain-rbac.yaml)
-set. The namespace confines the grant: it holds only in `memql-pipelines`,
-where the mesh runs nothing. There is no ClusterRole, and no ClusterRoleBinding
-anywhere in an overlay's render reaches `memql-engine`.
+It is bound only to **`memql-engine-workbench`**, the workbench's dedicated
+ServiceAccount. Edge, BFF, agent, planner, MCP and identity do not receive the
+pipeline Job or Secret grant. The Role remains namespace-scoped; neither
+engine identity receives a ClusterRoleBinding. Custom-domain and package-roll
+Roles explicitly retain both engine identities for those existing operations.
 
-**The binary does not confine it, and that is an accepted risk.** Only the
-workbench contains the runner, but every engine pod holds a `memql-engine`
-token, including the edge and mcp, which face the internet. A compromised
-engine pod can create a Job in `memql-pipelines` and read the Secrets of the
-steps in flight there: their clone tokens and resolved secrets. A
-workbench-only account (with its own federation trust), or a
-ValidatingAdmissionPolicy that admits only the runner's Jobs, narrows it
-(memql#5811).
+The workbench keeps the same projected vendor token volumes and configuration
+IDs. Its new subject matches the documented Anthropic engine prefix. OpenAI's
+existing mapping needs the explicit two-subject allowlist before rollout;
+follow the [federation cutover](../../../../docs/public/operate/auth/openai-federation.md#the-cutover).
+Any operator-managed Azure trust naming the old subject must also be reviewed
+before activation. Vendor trust is separate from Kubernetes RBAC.
+
+A local opt-in test creates fresh identities and the shipped runner Role in a
+disposable namespace. The API server admits Job creation and Secret reads only
+for the workbench, refusing the shared engine, identity and step accounts:
+
+```bash
+MEMQL_PIPELINES_ISOLATION_TEST_CONTEXT=k3d-memql \
+  go test ./integrations/pipelinesteps -run '^TestPipelineRunnerGrantIsWorkbenchOnlyOnLocalCluster$' -count=1 -v
+```
 
 ## The step
 
@@ -218,12 +223,14 @@ namespace isolated before it creates a step, refuses every step there
 
 **So the workbench proves it before it starts a step.** Before the first step
 it creates -- and again once a pass is an hour old -- each workbench replica
-runs a probe here: one Indexed Job (`memql.io/probe=isolation`) whose pods each
-listen on a port, one of which tries to reach the other while it reaches the
-cluster's DNS, which the policy allows. Reaching DNS but not a listener that
-provably held its port throughout is a pass (the operator page says what
-holding takes, and what the proof does not exercise). Reaching the listener
-refuses every step `pipeline_isolation_unenforced`,
+runs a probe here: one Indexed Job (`memql.io/probe=isolation`) with three
+pods. Index 0 listens, index 1 tests the egress restriction, and index 2 is a
+positive control with a narrow egress exception. Both connectors match the
+same listener ingress rule. A pass requires DNS and the positive control to
+answer every time, the restricted connector to fail every time, and the same
+listener to remain ready throughout. Thus ingress denial cannot hide missing
+egress protection. The probe exceptions grant ordinary steps no access.
+Reaching the listener from index 1 refuses every step `pipeline_isolation_unenforced`,
 naming the fix: a network policy engine. A probe that cannot decide (DNS
 unreachable, the listener gone) refuses every step too, until a later proof
 passes; its refusal says what it saw and, should it persist, where to look:

@@ -55,6 +55,25 @@ query store stores {
   shape     storeFull
 }
 
+/// Complete connector directory at one snapshot. Display ordering stays in
+/// stores; the connector walks this stable, cursor-capable order instead.
+/// The connector resolves incoming deliveries before a user is known, so
+/// actor.userId cannot scope this installation-wide directory. Only the
+/// connector's internal cluster-owner actor reads it; operator-facing reads
+/// continue to use the rank-aware queries above.
+@serverOnly
+@actor
+query store storesForConnector {
+  args {
+    asOf datetime!
+  }
+  filter    row => actor.isClusterOwner == true
+  sort      "row.createdAt", "asc"
+  asOf      args.asOf ?? latest
+  paginate  100
+  shape     storeFull
+}
+
 /// The development stores attached to one live store.
 ///
 /// A storefront shows the store it is bound to and the development store it

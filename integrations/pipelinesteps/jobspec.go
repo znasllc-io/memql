@@ -222,6 +222,7 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 			Template: PodTemplateSpec{
 				Metadata: ObjectMeta{Labels: objectLabels(run)},
 				Spec: PodSpec{
+					NodeSelector:                  stepNodeSelector(run.Platform),
 					RestartPolicy:                 "Never",
 					ServiceAccountName:            cfg.StepServiceAccount,
 					AutomountServiceAccountToken:  ptr(false),
@@ -245,6 +246,16 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 	scope := run.StepKey
 	refuse := func(format string, args ...any) (int32, *pl.Refusal) {
 		return 0, pl.Refuse(pl.CodeJobRejected, scope, format, args...)
+	}
+
+	if err := pl.CheckExecutionNeeds(run.Execution, run.Needs); err != nil {
+		return 0, pl.Refuse(pl.CodeStepInvalid, run.StepKey, "%s", err)
+	}
+	if run.Execution != pl.ExecutionContainer {
+		return refuse("Kubernetes Jobs require container execution")
+	}
+	if err := pl.CheckExecution(run.Execution, run.Platform, false); err != nil {
+		return refuse("%s", err)
 	}
 
 	if strings.TrimSpace(cfg.CloneImage) == "" {
@@ -579,11 +590,15 @@ func objectLabels(run StepRun) map[string]string {
 // objectAnnotations carry what a label cannot hold (a step key has a slash
 // and a #) and what nobody selects on.
 func objectAnnotations(run StepRun) map[string]string {
-	return map[string]string{
+	annotations := map[string]string{
 		AnnotStepKey: run.StepKey,
 		AnnotWorkRun: run.WorkRunID,
 		AnnotOwner:   run.OwnerUserID,
 	}
+	if deadline, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(run.RunDeadline)); err == nil {
+		annotations[AnnotRunDeadline] = deadline.UTC().Format(time.RFC3339Nano)
+	}
+	return annotations
 }
 
 // declaredCaches is the set of declared caches, sorted, so the same
@@ -653,10 +668,10 @@ func jobOwner(job Job) OwnerReference {
 // ---------------------------------------------------------------------------
 //
 // The proof that memql-pipelines is isolated (isolation.go) is ONE Indexed Job
-// of two pods, so it takes one slot under the ceiling and waits for one as a
+// of three pods, so it takes one slot under the ceiling and waits for one as a
 // step does (R43):
 //
-//	init  listener   cfg.CloneImage as a native sidecar, in both pods: accepts
+//	init  listener   cfg.CloneImage as a native sidecar, in all pods: accepts
 //	                 and closes connections on port 8080. Its readiness probe
 //	                 is the kubelet's own TCP connection, which no
 //	                 NetworkPolicy governs (measured, k3s v1.35), so ready
@@ -677,7 +692,12 @@ func jobOwner(job Job) OwnerReference {
 // and no run label, so no cancel of a run reaches them. Their containers keep
 // no capability at all (probeContext).
 //
-// The connector's exit code is its verdict, which the runner reads together
+// Index 2 must reach the same listener on every round (exit 27); any failed
+// control round exits 28. Without 27 the restricted connector cannot prove
+// isolation, even with a held listener. Both connectors share its ingress
+// allowance; only index 2 has an egress exception.
+//
+// The restricted connector's exit code is its verdict, which the runner reads together
 // with its own re-read of the listener (ruling R42). After a settle of five
 // seconds it makes three rounds, a second apart, each of a TCP connection to
 // the cluster's DNS -- the reachable positive: the policy lets every pod reach
@@ -737,6 +757,8 @@ const (
 	probeExitNoNameserver  = 24
 	probeExitForeignTarget = 25
 	probeExitNoPart        = 26
+	probeExitControlPassed = 27
+	probeExitControlFailed = 28
 	// The probe Secret's keys, and the connector's variables: the two that
 	// read them, and its own Job's uid from its pod's label.
 	probeTargetKey  = "target"
@@ -765,14 +787,15 @@ const probeListenerScript = `exec perl -MIO::Socket::IP -e '$SIG{TERM} = sub { e
 
 // probeConnectorScript is each probe pod's main container, under bash, whose
 // /dev/tcp makes the connections. Index 0's holds its pod up; index 1's is the
-// connector, whose exit code is the table above. The five assignments at its
+// restricted connector; index 2 must reach the same listener on every round
+// through its narrow egress exception. The five assignments at its
 // head are its tunables, each on a line of its own; the tests point them at
 // local endpoints (TestIsolationProbeConnectorReadsTheThreeRoundsTogether). An
 // attempt is classified by timeout's 124 and by bash's own sentence for a
 // refusal; whatever else ends one is neither. The line it prints last is the
 // one the runner quotes, from the container's termination message.
 const probeConnectorScript = `case "${JOB_COMPLETION_INDEX:-}" in
-1) ;;
+1|2) ;;
 0)
   trap 'exit 0' TERM
   while :; do sleep 1; done ;;
@@ -807,12 +830,13 @@ attempt() {
   esac
 }
 sleep "$settle"
-dns="" listener="" connected=0 dns_failed=0 unclear=0
+dns="" listener="" connected=0 dns_failed=0 unclear=0 control_failed=0
 for round in 1 2 3; do
   if [ "$round" != 1 ]; then sleep 1; fi
   d=$(attempt "$ns" "$dns_port")
   l=$(attempt "$MEMQL_PROBE_TARGET" "$listener_port")
   if [ "$d" != connected ]; then dns_failed=1; fi
+  if [ "$l" != connected ]; then control_failed=1; fi
   case "$l" in
   connected) connected=1 ;;
   refused | "timed out") ;;
@@ -822,6 +846,10 @@ for round in 1 2 3; do
   listener="$listener${listener:+, }$l"
 done
 echo "memql: isolation probe: dns $ns:$dns_port $dns; listener $MEMQL_PROBE_TARGET:$listener_port $listener"
+if [ "$JOB_COMPLETION_INDEX" = 2 ]; then
+  if [ "$control_failed" = 0 ] && [ "$dns_failed" = 0 ]; then exit 27; fi
+  exit 28
+fi
 if [ "$connected" = 1 ]; then exit 21; fi
 if [ "$dns_failed" = 1 ]; then exit 22; fi
 if [ "$unclear" = 1 ]; then exit 23; fi
@@ -864,14 +892,15 @@ func BuildIsolationProbe(cfg Config, name string) Job {
 		Kind:       "Job",
 		Metadata:   ObjectMeta{Name: name, Namespace: cfg.Namespace, Labels: probeLabels()},
 		Spec: JobSpec{
-			// Two pods, one per index, at once. A per-index limit of zero
+			// Three pods: listener, restricted connector and positive control.
+			// A per-index limit of zero
 			// retries nothing, and the connector failing -- every verdict is
 			// a non-zero exit -- ends neither the listener nor the Job; a
 			// Job-wide backoffLimit of 0 would end both. Left unset, it
 			// defaults to unlimited when a per-index limit is set.
 			CompletionMode:          "Indexed",
-			Completions:             ptr(int32(2)),
-			Parallelism:             ptr(int32(2)),
+			Completions:             ptr(int32(3)),
+			Parallelism:             ptr(int32(3)),
 			BackoffLimitPerIndex:    ptr(int32(0)),
 			ActiveDeadlineSeconds:   ptr(int64(probeJobDeadline / time.Second)),
 			TTLSecondsAfterFinished: ptr(int32(probeJobTTL / time.Second)),

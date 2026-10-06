@@ -41,7 +41,7 @@ import (
 // replica exists; status, ack and cancel are plain forwards. SelfNodeId and
 // SelfNodeType stamp the assertion's origin.
 type Forwarder interface {
-	ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId, excludeNodeId string, interval time.Duration) (*nodev1.WorkbenchForwardResponse, string, error)
+	ForwardWatchedExcluding(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId, excludeNodeId string, interval time.Duration, onSelected func(string)) (*nodev1.WorkbenchForwardResponse, string, error)
 	Forward(ctx context.Context, req *nodev1.WorkbenchForwardRequest, pinnedNodeId string) (*nodev1.WorkbenchForwardResponse, string, error)
 	SelfNodeId() string
 	SelfNodeType() string
@@ -194,7 +194,10 @@ func (e *Executor) Execute(ctx context.Context, req pl.StepRequest) (pl.StepResu
 	stepCtx, release := e.track(ctx, req.RunID)
 	defer release()
 
-	if len(req.Step.Needs) > 0 {
+	if req.Step.RequiresFleet() && req.RecoverOnly {
+		return failedResult(pl.CodeExecutionUncertain, "A previous driver may have started this fleet command, and no durable result was recorded. Reconcile its outcome before authorizing new work; no replacement command was sent."), nil
+	}
+	if req.Step.RequiresFleet() {
 		if e.fleet == nil {
 			return failedResult(pl.CodeRunnerUnavailable, fmt.Sprintf(
 				"The step needs %s, which only one of the owner's machines can meet, and this agent node has no "+
@@ -216,6 +219,9 @@ func refuseStep(req pl.StepRequest) (pl.StepResult, bool) {
 			"The executor runs command steps, and %q is a %q step, which the driver delivers itself. Nothing ran.",
 			req.StepKey, req.Step.Kind)), true
 	}
+	if err := pl.CheckExecution(req.Step.Execution, req.Step.Platform, req.Step.RequiresFleet()); err != nil {
+		return refusedResult(pl.CodeStepInvalid, err.Error()), true
+	}
 	for _, need := range req.Step.Needs {
 		if !pl.IsNeed(need) {
 			return refusedResult(pl.CodeNeedUnknown, fmt.Sprintf(
@@ -223,7 +229,10 @@ func refuseStep(req pl.StepRequest) (pl.StepResult, bool) {
 				need, strings.Join(pl.Needs(), ", "))), true
 		}
 	}
-	if len(req.Step.Needs) > 0 && req.Compute != pl.ComputeClusterAndFleet {
+	if err := pl.CheckExecutionNeeds(req.Step.Execution, req.Step.Needs); err != nil {
+		return refusedResult(pl.CodeStepInvalid, err.Error()), true
+	}
+	if req.Step.RequiresFleet() && req.Compute != pl.ComputeClusterAndFleet {
 		return refusedResult(pl.CodeFleetNotConsented, fmt.Sprintf(
 			"The step needs %s, which only one of the owner's machines can meet, and the pipeline does not declare "+
 				"compute: %s. Nothing was sent to a machine.", strings.Join(req.Step.Needs, ", "), pl.ComputeClusterAndFleet)), true

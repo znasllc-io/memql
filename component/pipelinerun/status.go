@@ -22,7 +22,7 @@ import (
 // configure the module, a touched setting makes it partial, and anything
 // else leaves it unconfigured.
 //
-// WHAT IT CHECKS, none of it a network call:
+// WHAT IT CHECKS (remote reports use the authenticated NodeService stream):
 //
 //   - the GitHub App: this cluster has one (from githubconnect's resolution,
 //     which the packages client reads at each call);
@@ -30,9 +30,9 @@ import (
 //     (pipelinesActive, a server-only read of one row: the question is about
 //     the cluster, and the person-facing read would answer for whichever
 //     owner asked -- under the evaluation actor, nobody);
-//   - the runner: this node has a step executor registered
-//     (pipelines.CurrentExecutor) -- the substrate's, epic memql#5478. The
-//     module is hosted on agent nodes, which is where one registers.
+//   - each known workbench's runner and its last isolation verdict. A local
+//     executor registration alone says nothing about the remote substrate.
+//     Reports are read-only: no probe or build is started by reading status.
 //
 // WHAT IT DOES NOT CHECK, stated rather than implied: whether the app holds
 // `checks: write`. That is a fact per INSTALLATION, and the evidence is on the
@@ -48,14 +48,14 @@ const (
 	statusSourceUnset = "unset"
 )
 
-func (i *Integration) handleStatus(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+func (i *Integration) handleStatus(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if err := statusAuthorized(ctx); err != nil {
 		return nil, err
 	}
 	report := i.Status(ctx)
 	raw, err := json.Marshal(map[string]any{
 		"checkedAt":    time.Now().UTC().Format(time.RFC3339),
-		"probed":       boolArg(args, "probe"),
+		"probed":       false,
 		"integrations": []StatusReport{report},
 	})
 	if err != nil {
@@ -72,11 +72,12 @@ func (i *Integration) handleStatus(ctx context.Context, args map[string]any, _ i
 
 // StatusReport is the pipelines entry of the integration-status envelope.
 type StatusReport struct {
-	Name        string          `json:"name"`
-	State       string          `json:"state"`
-	Detail      string          `json:"detail"`
-	Settings    []StatusSetting `json:"settings"`
-	Credentials []StatusSetting `json:"credentials"`
+	Name        string                      `json:"name"`
+	State       string                      `json:"state"`
+	Detail      string                      `json:"detail"`
+	Settings    []StatusSetting             `json:"settings"`
+	Credentials []StatusSetting             `json:"credentials"`
+	Runners     []pipelines.RunnerReadiness `json:"runners"`
 }
 
 // StatusSetting is one setting or credential slot: its name, where it stands,
@@ -88,13 +89,17 @@ type StatusSetting struct {
 	Purpose string `json:"purpose"`
 }
 
-// Status reports this node's pipelines setup: configured when the cluster has
-// a GitHub App, a repository is connected and this node has a runner; what is
-// missing, in words, otherwise.
+// Status separates configuration from observed execution health. In particular,
+// an isolation proof that has never run or expired is not a ready runner.
 func (i *Integration) Status(ctx context.Context) StatusReport {
 	d := i.snapshot()
 	app := d.GitHub != nil && d.GitHub.Configured()
-	runner := pipelines.CurrentExecutor() != nil
+	executor := pipelines.CurrentExecutor()
+	runner := executor != nil
+	runners := []pipelines.RunnerReadiness{}
+	if reporter, ok := executor.(pipelines.ReadinessReporter); ok {
+		runners = append(runners, reporter.Readiness(ctx)...)
+	}
 	connected := false
 	if d.Store != nil {
 		active, err := d.Store.PipelinesActive(ctx)
@@ -120,13 +125,26 @@ func (i *Integration) Status(ctx context.Context) StatusReport {
 		Settings: []StatusSetting{
 			setting("githubApp", app, "The GitHub App pipelines read repositories and report check runs through."),
 			setting("repository", connected, "A repository connected: at least one source's pipeline, active, whose checks this cluster runs."),
-			setting("runner", runner, "The step runner registered on this node, which executes a pipeline's steps."),
+			setting("runner", runner, "The step dispatcher registered on this agent; remote runner health is reported separately."),
 		},
 		Credentials: []StatusSetting{},
+		Runners:     runners,
 	}
 	if app && connected && runner {
+		ready := len(runners) > 0
+		for _, r := range runners {
+			ready = ready && r.Available && r.Isolation == "passed"
+		}
+		if !ready {
+			report.State = "unhealthy"
+			report.Detail = "Pipeline configuration is present, but execution readiness is not proven on every known workbench. Review the runner reports; reading readiness does not start an isolation probe."
+			if len(runners) == 0 {
+				report.Detail = "Pipeline configuration is present, but no workbench runner has reported readiness. Check workbench availability and its startup configuration."
+			}
+			return report
+		}
 		report.State = "configured"
-		report.Detail = "This cluster has a GitHub App and a connected repository, and this node can run steps. Check runs need the app's checks: write permission on each installation; a run that could not write one says so."
+		report.Detail = "This cluster has a GitHub App and a connected repository. Every known workbench reports a runner with a current isolation proof. Check runs also need the app's checks: write permission on each installation."
 		return report
 	}
 	var missing []string

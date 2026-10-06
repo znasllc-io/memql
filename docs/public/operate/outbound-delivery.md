@@ -21,7 +21,14 @@ onto the row, so delivery state is ordinary graph state.
 
 ## Staging a delivery (product DSL)
 
-Call the platform mutation from any automation or logic body:
+Call the platform mutation from a tree-loaded automation or logic body:
+
+Delivery rows declare `@rowAuthz(clusterOwner)`. Cluster operators can audit
+their bodies, recipients and targets; ordinary users cannot read the outbox
+through named queries, generic browsing or graph subscriptions. Server-side
+staging retains the caller's provenance without granting them read access.
+The drain worker uses the deployment's operator identity. A direct client
+staging call requires operator authority.
 
 ```
 mutation stageOutboundRequest(
@@ -125,4 +132,8 @@ their medium.
   jittered) up to `MEMQL_OUTBOUND_MAX_ATTEMPTS`; other 4xx and policy
   refusals fail permanently. Operators can requeue a failed row by
   setting `status` back to `"pending"` via
-  `updateOutboundRequestStatus`.
+  `updateOutboundRequestStatus` -- except a row server code staged
+  (`serverStaged`, as a pipeline's notification is) or one naming a secret
+  target (`targetSecret`): its delivery state is the server's alone, so the
+  requeue is refused. Re-run the pipeline's notify step instead, which
+  stages a fresh delivery.

@@ -19,6 +19,11 @@ import (
 // resumeProbe runs ResumeFrom over a built journal.
 func resumeProbe(t *testing.T, src string, j *RunJournal, opts *ResumeOptions) (*stmtProbe, *journalRecorder, *AutomationExecution, error) {
 	t.Helper()
+	// These callees are implemented by stmtProbe, not registered DSL. This
+	// fixture explicitly permits repeating them; admission has separate tests.
+	if opts == nil {
+		opts = &ResumeOptions{AllowSideEffects: true}
+	}
 	a := statementAutomation(t, src)
 	j.RunId, j.AutomationName = "r1", a.Name
 	probe := newStmtProbe()
@@ -220,7 +225,7 @@ automation reads {
 	probe := newStmtProbe()
 	probe.answers["items"] = rowsResult(map[string]any{"id": "v1:x:item:1", "payload": map[string]any{}}, map[string]any{"id": "v1:x:item:2", "payload": map[string]any{}})
 	e := NewExecutor(ExecutorOptions{StepRegistry: probe})
-	if exec, err := e.ResumeFrom(context.Background(), j, a, nil); err != nil {
+	if exec, err := e.ResumeFrom(context.Background(), j, a, &ResumeOptions{AllowSideEffects: true}); err != nil {
 		t.Fatalf("resume: %v (%s)", err, exec.Error)
 	}
 	if got := probe.callees(); !reflect.DeepEqual(got, []string{"items", "consume"}) {
@@ -244,7 +249,7 @@ automation writes {
 			StepStates: states("a", StepState{Status: "done", Attempt: 1}, "save", StepState{Status: "failed", Attempt: 1}),
 		}
 	}
-	if _, _, _, err := resumeProbe(t, src, journal(), nil); !errors.Is(err, ErrNonRetryableStep) {
+	if _, _, _, err := resumeProbe(t, src, journal(), &ResumeOptions{}); !errors.Is(err, ErrNonRetryableStep) {
 		t.Fatalf("resume at a mutation statement: %v, want ErrNonRetryableStep", err)
 	}
 	probe, _, exec, err := resumeProbe(t, src, journal(), &ResumeOptions{AllowSideEffects: true})

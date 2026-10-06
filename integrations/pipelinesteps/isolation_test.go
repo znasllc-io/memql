@@ -17,7 +17,7 @@ import (
 // isolation_test.go -- the runner proves memql-pipelines is isolated before it
 // creates a step (Task 6b, rulings R12, R42-R44), against runner_test.go's
 // fake API server. The fake plays the probe's Indexed Job as a script of its
-// two pods: they start; their listeners come up while each connector waits
+// three pods: they start; their listeners come up while each connector waits
 // for the probe Secret; once the Secret exists the connector runs, and ends
 // with the exit code a test chose; and, when a test says so, the pods as the
 // runner's re-read finds them after that.
@@ -97,13 +97,13 @@ func isoPod(index int, ip string, listener, main ContainerStatus) *Pod {
 func isoScript(exit int32, said string) *rtScript {
 	up := isoListener(true, 0)
 	return &rtScript{states: []rtState{
-		{pods: []*Pod{isoPod(0, "", isoStarting, isoWaiting()), isoPod(1, "", isoStarting, isoWaiting())}},
+		{pods: []*Pod{isoPod(0, "", isoStarting, isoWaiting()), isoPod(1, "", isoStarting, isoWaiting()), isoPod(2, "", isoStarting, isoWaiting())}},
 		{
-			pods:  []*Pod{isoPod(0, isoListenerIP, up, isoWaiting()), isoPod(1, isoOtherIP, up, isoWaiting())},
+			pods:  []*Pod{isoPod(0, isoListenerIP, up, isoWaiting()), isoPod(1, isoOtherIP, up, isoWaiting()), isoPod(2, "10.42.1.4", up, isoWaiting())},
 			until: func(c *rtCluster) bool { _, ok := c.secrets[isoTarget()]; return ok },
 		},
-		{pods: []*Pod{isoPod(0, isoListenerIP, up, isoHolding), isoPod(1, isoOtherIP, up, isoRunning)}},
-		{pods: []*Pod{isoPod(0, isoListenerIP, up, isoHolding), isoPod(1, isoOtherIP, up, isoEnded(exit, said))}},
+		{pods: []*Pod{isoPod(0, isoListenerIP, up, isoHolding), isoPod(1, isoOtherIP, up, isoRunning), isoPod(2, "10.42.1.4", up, isoRunning)}},
+		{pods: []*Pod{isoPod(0, isoListenerIP, up, isoHolding), isoPod(1, isoOtherIP, up, isoEnded(exit, said)), isoPod(2, "10.42.1.4", up, isoEnded(probeExitControlPassed, "positive control connected every round"))}},
 	}, tails: map[string]string{ContainerProbeListener: ""}} // the listener prints nothing
 }
 
@@ -362,6 +362,23 @@ func TestIsolationProofPassesWhenTheListenerIsUnreachableAndDNSAnswers(t *testin
 			stepFirst, probeGone, h.c.summary())
 	}
 	isoLeftNothing(t, h)
+}
+
+func TestIsolationProofRequiresThePositiveControl(t *testing.T) {
+	for _, exit := range []int32{probeExitControlFailed, probeExitForeignTarget, 0, 137} {
+		t.Run(fmt.Sprint(exit), func(t *testing.T) {
+			script := isoScript(probeExitIsolated, isoSaid[probeExitIsolated])
+			script.states[3].pods[2] = isoPod(2, "10.42.1.4", isoListener(true, 0), isoEnded(exit, "control failed"))
+			h := newIsoHarness(t, script)
+			result := h.run(t, isoStep(h, rtRun().StepKey))
+			if result.Status == pl.OutcomeSucceeded || h.r.Isolation().Isolated || !h.r.Isolation().Inconclusive {
+				t.Fatalf("failed positive control admitted a step: %+v; %+v", result, h.r.Isolation())
+			}
+			if n := createsOf(h.c, kubeJobs, JobName(rtRun().RunID, rtRun().StepKey, rtRun().Attempt)); n != 0 {
+				t.Fatalf("created %d step Jobs before proving the control path", n)
+			}
+		})
+	}
 }
 
 // TestIsolationProofRefusesStepsWhenTheConnectorConnects: a probe pod reached
@@ -716,7 +733,7 @@ func TestIsolationOutcomeReadsTheTable(t *testing.T) {
 		{137, true, false, true},
 	} {
 		t.Run(fmt.Sprintf("exit %d, listener held %v", c.exit, c.held), func(t *testing.T) {
-			isolated, inconclusive, detail := isolationOutcome(ContainerStateTerminated{ExitCode: c.exit, Message: "memql: isolation probe: said\n"}, c.held, "the listener was not ready")
+			isolated, inconclusive, detail := isolationOutcome(ContainerStateTerminated{ExitCode: c.exit, Message: "memql: isolation probe: said\n"}, ContainerStateTerminated{ExitCode: probeExitControlPassed}, c.held, "the listener was not ready")
 			if isolated != c.isolated || inconclusive != c.inconclusive || detail == "" {
 				t.Errorf("= isolated %v, inconclusive %v, %q; want %v, %v and a sentence", isolated, inconclusive, detail, c.isolated, c.inconclusive)
 			}

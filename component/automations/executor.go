@@ -756,6 +756,12 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	// The head the journal writes at every receipt (epic memql#5414). A new
 	// run's starts empty; an adopted run's starts at whatever its row already
 	// names, which for a run with no steps is nothing either.
+	ctx, journal, stopJournal, journalErr := e.requireRunJournal(ctx, automation, journal)
+	if journalErr != nil {
+		exec.Fail(journalErr)
+		return exec, journalErr
+	}
+	defer stopJournal()
 	var initialHead work.Head
 	if adopt != nil && adopt.Journal != nil {
 		initialHead = resumeHead(adopt.Journal)
@@ -768,6 +774,10 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		journal.adoptRun(ctx, automation, exec)
 	} else {
 		journal.openRun(ctx, automation, exec, triggeringEvent, parentCause)
+	}
+	if err := requiredJournalError(ctx); err != nil {
+		exec.Fail(err)
+		return exec, err
 	}
 	// A logic a step calls journals its statements where this run's rows go
 	// (logic_statements.go) -- nowhere, when the run is not journaled.
@@ -971,6 +981,9 @@ func (e *Executor) withRunContext(ctx context.Context, stepCtx *StepContext, ste
 	if run, ok := common.RunFromContext(ctx); ok {
 		if memql.BareShortId(run.RunId) == memql.BareShortId(exec.ID) {
 			run.StepKey = key
+			if run.Continuation != nil && run.Continuation.StepKey != key {
+				run.Continuation = nil
+			}
 			applyStepOverride(&run, exec, key)
 			return common.ContextWithRun(ctx, run)
 		}

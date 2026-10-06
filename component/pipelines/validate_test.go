@@ -1,6 +1,7 @@
 package pipelines
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -40,8 +41,9 @@ func d7ExampleSpec() *Spec {
 					Packages: PackagesAffected, Only: OnlyDBGated, Services: []string{"postgres"}, Shards: 4,
 				},
 				{
-					Name: "os-checks", Run: "make os-typecheck os-test os-build",
-					When: &When{Bucket: "os"}, Needs: map[string]bool{NeedDocker: true},
+					Platform: "linux/amd64",
+					Name:     "os-checks", Run: "make os-typecheck os-test os-build",
+					When: &When{Bucket: "os"}, Placement: PlacementFleet,
 				},
 			}},
 			{Name: "deploy", On: []string{"push"}, Steps: []StepSpec{
@@ -112,6 +114,19 @@ func TestValidate(t *testing.T) {
 		{"a notify stage that needs an earlier stage", fromValidateBase(func(s *Spec) {
 			s.Stages[2].Needs = []string{"tests"}
 		}), "", ""},
+		{"a notify stage with a link", fromValidateBase(func(s *Spec) {
+			s.Stages[2].Links = []Link{{Label: "Docs", URL: "https://memql.io/docs/"}}
+		}), "", ""},
+		{"a notify stage with five links", fromValidateBase(func(s *Spec) { s.Stages[2].Links = linksOf(5) }), "", ""},
+		{"a link label of 40 characters, which is not 40 bytes", fromValidateBase(func(s *Spec) {
+			s.Stages[2].Links = []Link{{Label: strings.Repeat("\u00e9", 40), URL: "https://memql.io/docs/"}}
+		}), "", ""},
+		{"a link URL of exactly 512 bytes", fromValidateBase(func(s *Spec) {
+			s.Stages[2].Links = []Link{{Label: "Docs", URL: "https://memql.io/" + strings.Repeat("a", 512-len("https://memql.io/"))}}
+		}), "", ""},
+		{"a link URL with a port, a query and a fragment", fromValidateBase(func(s *Spec) {
+			s.Stages[2].Links = []Link{{Label: "Docs", URL: "https://memql.io:8443/docs/?v=1#top"}}
+		}), "", ""},
 		{"a db-gated tree written ./x/", fromValidateBase(func(s *Spec) {
 			s.Select.DBGated = []string{"./component/memql/"}
 		}), "", ""},
@@ -144,6 +159,29 @@ func TestValidate(t *testing.T) {
 		}), CodeStageInvalid, "notify"},
 		{"neither a channel nor steps", fromValidateBase(func(s *Spec) { s.Stages[2].Channel = "" }), CodeStageInvalid, "notify"},
 		{"a channel name that is not a name", fromValidateBase(func(s *Spec) { s.Stages[2].Channel = "Team Room" }), CodeStageInvalid, "notify"},
+		{"links on a stage with steps", fromValidateBase(func(s *Spec) {
+			s.Stages[0].Links = []Link{{Label: "Docs", URL: "https://memql.io/docs/"}}
+		}), CodeStageInvalid, "checks"},
+		{"six links", fromValidateBase(func(s *Spec) { s.Stages[2].Links = linksOf(6) }), CodeStageInvalid, "notify"},
+		{"a link with no label", fromValidateBase(func(s *Spec) {
+			s.Stages[2].Links = []Link{{Label: "Docs", URL: "https://memql.io/docs/"}, {Label: "", URL: "https://memql.io/changelog"}}
+		}), CodeStageInvalid, "notify"},
+		{"a link whose label is only spaces", fromValidateBase(func(s *Spec) {
+			s.Stages[2].Links = []Link{{Label: " \t ", URL: "https://memql.io/docs/"}}
+		}), CodeStageInvalid, "notify"},
+		{"a link label of 41 characters", fromValidateBase(func(s *Spec) {
+			s.Stages[2].Links = []Link{{Label: strings.Repeat("\u00e9", 41), URL: "https://memql.io/docs/"}}
+		}), CodeStageInvalid, "notify"},
+		{"a link URL that is http", linkURL("http://memql.io/docs/"), CodeStageInvalid, "notify"},
+		{"a link URL that is relative", linkURL("/docs/"), CodeStageInvalid, "notify"},
+		{"a link URL with no scheme", linkURL("memql.io/docs/"), CodeStageInvalid, "notify"},
+		{"a link URL with another scheme", linkURL("mailto:team@memql.io"), CodeStageInvalid, "notify"},
+		{"a link URL with no host", linkURL("https:///docs/"), CodeStageInvalid, "notify"},
+		{"a link URL with a space in it", linkURL("https://memql.io/the docs/"), CodeStageInvalid, "notify"},
+		{"a link URL that is not a URL", linkURL("https://memql.io:notaport/"), CodeStageInvalid, "notify"},
+		{"a link URL with a user name and password", linkURL("https://user:hunter2@memql.io/docs/"), CodeStageInvalid, "notify"},
+		{"a link URL that carries only a user name", linkURL("https://user@memql.io/docs/"), CodeStageInvalid, "notify"},
+		{"a link URL of 513 bytes", linkURL("https://memql.io/" + strings.Repeat("a", 513-len("https://memql.io/"))), CodeStageInvalid, "notify"},
 		{"on names an unknown event", fromValidateBase(func(s *Spec) { s.Stages[2].On = []string{"pushed"} }), CodeEventUnknown, "notify"},
 		{"on names a rerequest", fromValidateBase(func(s *Spec) { s.Stages[2].On = []string{"check_run"} }), CodeEventUnknown, "notify"},
 
@@ -237,6 +275,21 @@ func TestValidate(t *testing.T) {
 		"a channel and steps":                        "both a channel and steps",
 		"neither a channel nor steps":                "neither steps nor a channel",
 		"a channel name that is not a name":          `names channel "Team Room"`,
+		"links on a stage with steps":                "only a notify stage carries them",
+		"six links":                                  "lists 6 links; a notify stage carries at most 5",
+		"a link with no label":                       "Link 2 of stage",
+		"a link whose label is only spaces":          "has no label",
+		"a link label of 41 characters":              "a label of 41 characters",
+		"a link URL that is http":                    "not an absolute https URL",
+		"a link URL that is relative":                "not an absolute https URL",
+		"a link URL with no scheme":                  "not an absolute https URL",
+		"a link URL with another scheme":             "not an absolute https URL",
+		"a link URL with no host":                    "not an absolute https URL",
+		"a link URL with a space in it":              "not an absolute https URL",
+		"a link URL that is not a URL":               "not an absolute https URL",
+		"a link URL with a user name and password":   "carries a user name or password",
+		"a link URL that carries only a user name":   "carries a user name or password",
+		"a link URL of 513 bytes":                    "is 513 bytes; a URL is at most 512",
 		"a step without a name":                      "has no name",
 		"a step name with a space":                   "is not a name",
 		"two steps with one name in a stage":         "two steps named",
@@ -301,6 +354,44 @@ func TestValidate(t *testing.T) {
 	for name := range details {
 		if !used[name] {
 			t.Errorf("details names %q, which is no refusing row: the check it carries never ran", name)
+		}
+	}
+}
+
+// linksOf is n links that each validate.
+func linksOf(n int) []Link {
+	var out []Link
+	for i := 1; i <= n; i++ {
+		out = append(out, Link{Label: fmt.Sprintf("Link %d", i), URL: fmt.Sprintf("https://memql.io/docs/%d", i)})
+	}
+	return out
+}
+
+// linkURL is the base spec whose notify stage carries one link with this URL.
+func linkURL(raw string) func() *Spec {
+	return fromValidateBase(func(s *Spec) { s.Stages[2].Links = []Link{{Label: "Docs", URL: raw}} })
+}
+
+// A refusal is printed in the check run, where everyone who can see the
+// repository's checks reads it. A URL that carries a credential is refused
+// for carrying it, and must not be repeated there; the same goes for any
+// other URL, which is named by its link's label and nothing else.
+func TestValidateNeverEchoesALinksURL(t *testing.T) {
+	for _, raw := range []string{
+		"https://user:hunter2@memql.io/docs/",
+		"https://memql.io/docs/?token=hunter2 and more",
+		"ftp://hunter2.example.test/docs/",
+		"https://" + strings.Repeat("hunter2", 100) + ".test/",
+	} {
+		r := Validate(linkURL(raw)())
+		if r == nil {
+			t.Fatalf("Validate accepted %q", raw)
+		}
+		if strings.Contains(r.Detail, "hunter2") || strings.Contains(r.Detail, "memql.io/docs") {
+			t.Errorf("the refusal for %.40q repeats the URL: %s", raw, r.Detail)
+		}
+		if !strings.Contains(r.Detail, `"Docs"`) {
+			t.Errorf("the refusal for %.40q does not name the link by its label: %s", raw, r.Detail)
 		}
 	}
 }

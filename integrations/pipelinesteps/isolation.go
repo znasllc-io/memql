@@ -47,11 +47,11 @@ import (
 // the names are this replica's and the same every time; create the probe Job,
 // waiting for a slot as a step does; wait (probeUpWait) for index 0's listener
 // to be ready -- which it can be before anything else exists, since it
-// depends on nothing -- and for index 1's to run; create the probe Secret,
+// depends on nothing -- and for both connectors' sidecars to run; create the probe Secret,
 // naming index 0's address and the Job's uid and owned by the Job, which
-// starts both connectors; wait (probeEndWait) for index 1's connector to end;
+// starts both connectors; wait (probeEndWait) for both connectors to end;
 // read the pods again (R42) and ask the listener's kubelet once (R42b); and
-// judge by the connector's exit code and by whether the listener it tried is
+// judge by the restricted and positive-control exit codes and by whether the listener it tried is
 // still ready, the incarnation that was ready before the Secret existed, in a
 // pod still standing on a node that still answers. The probe's Job and Secret
 // are deleted before anyone is answered, so under a ceiling of one the slot is
@@ -61,7 +61,8 @@ import (
 type IsolationVerdict struct {
 	// Isolated: a probe pod reached the cluster's DNS on every attempt and
 	// another probe pod's listener, which stayed ready, on none. Only this
-	// lets a step be created.
+	// lets a step be created, and only when the positive control reached that
+	// same listener on every round.
 	Isolated bool
 	// Inconclusive: the proof could not decide -- the probe could not run,
 	// DNS did not answer, the listener did not hold -- which is never a pass.
@@ -269,6 +270,7 @@ func (r *Runner) probeIsolation(ctx context.Context) (IsolationVerdict, bool) {
 		job      Job
 		listener probeListener
 		end      ContainerStateTerminated
+		control  ContainerStateTerminated
 		held     bool
 		why      string
 		err      error
@@ -281,7 +283,7 @@ func (r *Runner) probeIsolation(ctx context.Context) (IsolationVerdict, bool) {
 		err = p.arm(job, listener.ip)
 	}
 	if err == nil {
-		end, err = p.end(job)
+		end, control, err = p.end(job)
 	}
 	if err == nil {
 		held, why, err = p.held(job, listener)
@@ -292,7 +294,7 @@ func (r *Runner) probeIsolation(ctx context.Context) (IsolationVerdict, bool) {
 	case err != nil:
 		return IsolationVerdict{Inconclusive: true, Detail: err.Error(), At: r.now()}, true
 	}
-	isolated, inconclusive, detail := isolationOutcome(end, held, why)
+	isolated, inconclusive, detail := isolationOutcome(end, control, held, why)
 	return IsolationVerdict{Isolated: isolated, Inconclusive: inconclusive, Detail: detail, At: r.now()}, true
 }
 
@@ -372,11 +374,11 @@ func (p *prober) up(job Job) (probeListener, error) {
 			}
 			continue
 		}
-		zero, one := probePods(pods, job)
-		if l, ok := listening(zero); ok && probeContainerRuns(one, true, ContainerProbeListener) {
+		zero, one, two := probePods(pods, job)
+		if l, ok := listening(zero); ok && probeContainerRuns(one, true, ContainerProbeListener) && probeContainerRuns(two, true, ContainerProbeListener) {
 			return l, nil
 		}
-		seen = "index 0: " + describeProbePod(zero) + "; index 1: " + describeProbePod(one)
+		seen = "index 0: " + describeProbePod(zero) + "; index 1: " + describeProbePod(one) + "; index 2: " + describeProbePod(two)
 	}
 }
 
@@ -422,16 +424,16 @@ func (p *prober) arm(job Job, listenerIP string) error {
 }
 
 // end waits for index 1's connector to end, and answers how.
-func (p *prober) end(job Job) (ContainerStateTerminated, error) {
+func (p *prober) end(job Job) (ContainerStateTerminated, ContainerStateTerminated, error) {
 	ctx, cancel := context.WithTimeout(p.ctx, p.r.probeEndWait)
 	defer cancel()
 	seen := "it had not started"
 	for first := true; ; first = false {
 		if !first && !sleepCtx(ctx, p.r.cfg.PollInterval) {
 			if p.ctx.Err() != nil {
-				return ContainerStateTerminated{}, errProbeStopped
+				return ContainerStateTerminated{}, ContainerStateTerminated{}, errProbeStopped
 			}
-			return ContainerStateTerminated{}, probeFailure(fmt.Sprintf("the probe's connector did not finish within %v: %s", p.r.probeEndWait, seen))
+			return ContainerStateTerminated{}, ContainerStateTerminated{}, probeFailure(fmt.Sprintf("the probe's connector did not finish within %v: %s", p.r.probeEndWait, seen))
 		}
 		pods, err := p.r.kube.JobPods(ctx, p.name)
 		if err != nil {
@@ -441,11 +443,13 @@ func (p *prober) end(job Job) (ContainerStateTerminated, error) {
 			}
 			continue
 		}
-		_, one := probePods(pods, job)
-		if c := podContainer(one, false, ContainerProbeConnector); c != nil && c.State.Terminated != nil {
-			return *c.State.Terminated, nil
+		_, one, two := probePods(pods, job)
+		c := podContainer(one, false, ContainerProbeConnector)
+		control := podContainer(two, false, ContainerProbeConnector)
+		if c != nil && c.State.Terminated != nil && control != nil && control.State.Terminated != nil {
+			return *c.State.Terminated, *control.State.Terminated, nil
 		}
-		seen = describeConnector(one)
+		seen = "restricted: " + describeConnector(one) + "; positive control: " + describeConnector(two)
 	}
 }
 
@@ -485,7 +489,7 @@ func (p *prober) held(job Job, was probeListener) (bool, string, error) {
 	case err != nil:
 		return false, "", probeFailure("the probe's pods could not be read again once the connector had ended: " + apiMessage(err))
 	}
-	zero, _ := probePods(pods, job)
+	zero, _, _ := probePods(pods, job)
 	l := podContainer(zero, true, ContainerProbeListener)
 	switch {
 	case zero == nil:
@@ -580,7 +584,7 @@ func (p *prober) warn(what string, err error) {
 // each, and only the Job's own (podOfJob): a pod of an earlier probe Job of
 // the same name, deleted and not yet collected, carries the same job-name
 // label.
-func probePods(pods []Pod, job Job) (zero, one *Pod) {
+func probePods(pods []Pod, job Job) (zero, one, two *Pod) {
 	for i := range pods {
 		pod := &pods[i]
 		if !podOfJob(pod, job) {
@@ -591,9 +595,11 @@ func probePods(pods []Pod, job Job) (zero, one *Pod) {
 			zero = newerPod(zero, pod)
 		case "1":
 			one = newerPod(one, pod)
+		case "2":
+			two = newerPod(two, pod)
 		}
 	}
-	return zero, one
+	return zero, one, two
 }
 
 // listening is index 0's listener, when its pod has an address and a uid --
@@ -659,13 +665,16 @@ func describeConnector(pod *Pod) string {
 // isolationOutcome is the R42 table (jobspec.go): the connector's exit code,
 // read with whether index 0's listener held -- still ready, the incarnation
 // first seen ready, once the connector had ended; why says how it did not.
-func isolationOutcome(end ContainerStateTerminated, held bool, why string) (isolated, inconclusive bool, detail string) {
+func isolationOutcome(end, control ContainerStateTerminated, held bool, why string) (isolated, inconclusive bool, detail string) {
 	said := probeSaid(end)
 	switch end.ExitCode {
 	case probeExitIsolated:
+		if control.ExitCode != probeExitControlPassed {
+			return false, true, "the positive control did not reach the same listener on every attempt; ingress or connectivity may explain the restricted connector's failure (" + probeSaid(control) + ")"
+		}
 		if held {
 			return true, false, "a probe pod in memql-pipelines could not reach another probe pod's listener on any attempt, " +
-				"while it reached the cluster's DNS on every one and the listener stayed ready (" + said + ")"
+				"while DNS and a positive control to the same listener answered every time, and the listener stayed ready (" + said + ")"
 		}
 		return false, true, "the connector could not reach the listener, but " + why +
 			" once the connector had finished, so its attempts prove nothing (" + said + ")"

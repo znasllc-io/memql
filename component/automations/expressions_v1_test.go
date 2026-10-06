@@ -405,7 +405,7 @@ func TestV1DataModel_Resume(t *testing.T) {
 		TriggerEvent: map[string]any{"topic": "probe.fired", "kind": "message", "payload": map[string]any{"x": "hello"}},
 	}
 	ctx := auth.ContextWithUserActor(context.Background(), "user-7")
-	exec, err := NewExecutor(ExecutorOptions{StepRegistry: probe}).ResumeFrom(ctx, journal, a, &ResumeOptions{})
+	exec, err := NewExecutor(ExecutorOptions{StepRegistry: probe}).ResumeFrom(ctx, journal, a, &ResumeOptions{AllowSideEffects: true})
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}

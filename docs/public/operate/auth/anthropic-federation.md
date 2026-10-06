@@ -266,10 +266,13 @@ Boot-time refusals are a different class and never reach Anthropic:
 
 ---
 
-## One node is not on the engine service account
+## Separate Kubernetes identities
 
-Every engine Deployment runs as `memql-engine` except **identity**, which runs
-as `memql-deploy` -- the account holding the deploy console's Rollout and
+The workbench uses `memql-engine-workbench`, which matches the documented
+`system:serviceaccount:memql:memql-engine` subject prefix. Verify that match in
+the installed federation rule before rollout; do not broaden it to every
+service account in the namespace. Other inference nodes use `memql-engine`.
+**Identity** runs as `memql-deploy` -- the account holding the deploy console's Rollout and
 Application grants (memql#4257). Moving identity onto `memql-engine` would
 either strip that RBAC or put it on the account every engine node runs as,
 handing the whole mesh a privilege one node needs.

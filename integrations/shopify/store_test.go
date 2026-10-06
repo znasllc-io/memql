@@ -228,18 +228,18 @@ func TestStoreRegistryCachesAndInvalidates(t *testing.T) {
 	if _, err := h.conn.stores.Stores(ctx); err != nil {
 		t.Fatal(err)
 	}
-	before := len(h.engine.callsTo("stores"))
+	before := len(h.engine.callsTo("storesForConnector"))
 	if _, err := h.conn.stores.Stores(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(h.engine.callsTo("stores")); got != before {
+	if got := len(h.engine.callsTo("storesForConnector")); got != before {
 		t.Errorf("the cache did not hold: %d -> %d reads", before, got)
 	}
 	h.conn.stores.Invalidate()
 	if _, err := h.conn.stores.Stores(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(h.engine.callsTo("stores")); got == before {
+	if got := len(h.engine.callsTo("storesForConnector")); got == before {
 		t.Error("Invalidate did not force a re-read, so an operator's edit would wait out the TTL")
 	}
 }

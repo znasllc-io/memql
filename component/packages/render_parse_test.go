@@ -2,6 +2,7 @@ package packages
 
 import (
 	"context"
+	"github.com/znasllc-io/memql/component/auth"
 	"io"
 	"log/slog"
 	"strings"
@@ -84,7 +85,7 @@ func captureStore(t *testing.T) []string {
 	_, _ = s.siteById(ctx, "v1:platform:site:ghi")
 	_, _ = s.packagesByRepoUrl(ctx, "https://github.com/acme/widget")
 	_, _ = s.packagesTrackingRepos(ctx)
-	_, _ = s.inboundRequestById(ctx, "v1:platform:inboundRequest:pqr")
+	_, _ = s.inboundRequestById(auth.ContextWithInternalOrigin(ctx), "v1:platform:inboundRequest:pqr")
 	_, _, _ = s.artifactBytes(ctx, "v1:library:artifact:mno", func(context.Context, string) ([]byte, error) { return nil, nil })
 
 	// Writes.

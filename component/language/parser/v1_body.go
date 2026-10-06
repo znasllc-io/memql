@@ -839,6 +839,23 @@ func (p *Parser) parseV1For(kind, construct string) (ast.BodyStatement, error) {
 			return nil, err
 		}
 	}
+	concurrency := 0
+	if p.current.Literal == "parallel" {
+		clause := p.v1Take()
+		if !p.check(TokenParenOpen) {
+			return nil, p.v1Expected("`(` after parallel in a for loop")
+		}
+		p.v1Take()
+		value := p.v1Take()
+		concurrency, err = strconv.Atoi(value.Literal)
+		if value.Type != TokenNumber || err != nil || concurrency < 2 || concurrency > ast.MaxForConcurrency {
+			return nil, v1Errorf(clause, "parallel in a for loop needs a literal integer from 2 to %d; omit it for sequential work", ast.MaxForConcurrency)
+		}
+		if !p.check(TokenParenClose) {
+			return nil, p.v1Expected("`)` after the for loop's parallel limit")
+		}
+		p.v1Take()
+	}
 	body, err := p.parseV1Block(kind, construct, "for")
 	if err != nil {
 		return nil, err
@@ -849,7 +866,7 @@ func (p *Parser) parseV1For(kind, construct string) (ast.BodyStatement, error) {
 	}
 	return &ast.ForStatement{
 		Var: varTok.Literal, VarSpan: v1TokenSpan(varTok), Source: src, Filter: filter,
-		Body: body, Mods: mods, Span: p.spanFrom(forTok),
+		Body: body, Concurrency: concurrency, Mods: mods, Span: p.spanFrom(forTok),
 	}, nil
 }
 

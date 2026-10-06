@@ -195,6 +195,11 @@ func (a hopRunnerAdapter) RunStep(ctx context.Context, args []byte) []byte {
 	return mustMarshal(a.r.Run(ctx, run))
 }
 
+func (a hopRunnerAdapter) Readiness(context.Context) ([]byte, string) {
+	raw, _ := json.Marshal(a.r.Readiness())
+	return raw, ""
+}
+
 func (a hopRunnerAdapter) Status(ctx context.Context, args []byte) ([]byte, string) {
 	var req StatusRequest
 	if err := json.Unmarshal(args, &req); err != nil {
@@ -317,7 +322,7 @@ func (w *runnerHop) execute(req pl.StepRequest) <-chan pl.StepResult {
 	w.mu.Lock()
 	w.steps = append(w.steps, hopStepRef{run: req.RunID, job: JobName(req.RunID, req.StepKey, req.Attempt)})
 	w.mu.Unlock()
-	return executeAsync(w.e, w.ctx, req)
+	return executeAndCommitAsync(w.e, w.ctx, req)
 }
 
 func (w *runnerHop) executed() []hopStepRef {
@@ -394,6 +399,45 @@ func (w *runnerHop) ackedAway(t *testing.T, job string) {
 	jobs, secrets := w.h.c.requestsFor(http.MethodDelete, kubeJobs+"/"+job), w.h.c.requestsFor(http.MethodDelete, kubeSecrets+"/"+secret)
 	if len(jobs) != 1 || len(secrets) != 1 {
 		t.Errorf("the Job was deleted %d time(s) and its Secret %d, want once each", len(jobs), len(secrets))
+	}
+}
+
+// A returned result is not a committed work-journal receipt. A fresh agent
+// executor must still be able to recover the same result across the mesh.
+func TestFinishedJobSurvivesUntilTheDriverCommitsItsReceipt(t *testing.T) {
+	w := newRunnerHop(t)
+	req := hopRequest()
+	job := JobName(req.RunID, req.StepKey, req.Attempt)
+	w.h.c.script(job, rtFinishingScript(job, 0, captureKubeLine(rtAt(1100), "completed once")))
+	first, err := w.e.Execute(w.ctx, req)
+	if err != nil || first.Status != pl.OutcomeSucceeded {
+		t.Fatalf("first result: %+v %v", first, err)
+	}
+	if !w.h.c.hasJob(job) || !w.h.c.hasSecret(SecretName(job)) || len(w.mesh.sent(workbench.PipelineAckAction)) != 0 {
+		t.Fatal("result evidence was deleted before its durable receipt")
+	}
+	replacement := newTestExecutor(w.mesh, nil)
+	withClock(replacement).set(w.clock.now())
+	req.RecoverOnly = true
+	second, err := replacement.Execute(w.ctx, req)
+	if err != nil || !reflect.DeepEqual(first, second) {
+		t.Fatalf("recovered result: %+v %v; first: %+v", second, err, first)
+	}
+	if len(w.h.c.requestsFor(http.MethodPost, kubeJobs)) != 1 || len(w.h.lib.stored()) != 1 {
+		t.Fatal("agent replacement repeated execution or artifact publication")
+	}
+	replacement.AcknowledgeReceipt(w.ctx, req)
+	w.ackedAway(t, job)
+}
+
+func TestRecoveryWithNoJobNeverStartsAReplacement(t *testing.T) {
+	h := newRunnerHarness(t)
+	run := testRun()
+	run.RecoverOnly = true
+	res := h.r.Run(context.Background(), run)
+	wantFailure(t, res, pl.OutcomeFailed, pl.CodeExecutionUncertain)
+	if len(h.c.requestsFor(http.MethodPost, kubeJobs)) != 0 || len(h.c.requestsFor(http.MethodPost, kubeSecrets)) != 0 || len(h.tokens.called()) != 0 || len(h.lib.stored()) != 0 {
+		t.Fatal("an uncertain recovery created resources, credentials or artifacts")
 	}
 }
 
@@ -676,4 +720,66 @@ func TestExecuteHopAStageWiderThanTheCeilingRunsEveryStep(t *testing.T) {
 		})
 	}
 	w.h.leftNoArchive(t)
+}
+
+// The queue is local to a runner until Kubernetes admits the Job. A status
+// answered on the other replica cannot attest to it. Exercise both real
+// runners and the real forwarded handler, including a dead queue's Secret.
+func TestExecuteHopQueuedStepKeepsItsRouteAndRecoversADeadQueue(t *testing.T) {
+	for _, loss := range []string{"none", "restart", "peer-lost"} {
+		t.Run(loss, func(t *testing.T) {
+			w := newRunnerHop(t)
+			w.clock.set(rtT0)
+			w.mesh.statusNode = "workbench-b"
+			req := hopRequest()
+			req.RunStartedAt = rtT0.Format(time.RFC3339)
+			job := JobName(req.RunID, req.StepKey, req.Attempt)
+			w.h.c.with(func(c *rtCluster) { c.quotaJobs = map[string]bool{job: true} })
+			w.h.c.script(job, rtFinishingScript(job, 0, captureKubeLine(rtAt(1100), "ok")))
+			done := w.execute(req)
+			rtWaitUntil(t, "the first real runner queued with its Secret", func() bool {
+				var hasSecret bool
+				w.h.c.with(func(c *rtCluster) { _, hasSecret = c.secrets[SecretName(job)] })
+				return hasSecret && len(w.h.c.requestsFor(http.MethodPost, kubeJobs)) > 0
+			})
+			if reply := w.process("workbench-b").runner.Status(w.ctx, StatusRequest{JobName: job}); reply.State != StateAbsent {
+				t.Fatalf("the other replica knows the queue unexpectedly: %+v", reply)
+			}
+			before := len(w.mesh.sent(workbench.PipelineStatusAction))
+			w.clock.advance(30 * time.Minute) // beyond every absent-forward patience
+			rtWaitUntil(t, "status polls after the queue outlasted patience", func() bool {
+				return len(w.mesh.sent(workbench.PipelineStatusAction)) >= before+3
+			})
+			if sent := w.mesh.sent(workbench.PipelineStepAction); len(sent) != 1 {
+				t.Fatalf("a live queue was forwarded %d times: %+v", len(sent), sent)
+			}
+			for _, sent := range w.mesh.sent(workbench.PipelineStatusAction) {
+				if sent.node != "workbench-a" || sent.pinned != "workbench-a" {
+					t.Fatalf("queued status missed its actual forward route: %+v", sent)
+				}
+			}
+			switch loss {
+			case "restart":
+				w.restart("workbench-a")
+			case "peer-lost":
+				w.mesh.lose("workbench-a")
+				w.kill(w.process("workbench-a"))
+			}
+			if loss != "none" {
+				rtWaitUntil(t, "replacement for the dead queued request", func() bool {
+					return len(w.mesh.sent(workbench.PipelineStepAction)) >= 2
+				})
+			}
+			w.h.c.with(func(c *rtCluster) { delete(c.quotaJobs, job) })
+			res := awaitHop(t, done, "queued step after a slot becomes available")
+			if res.Status != pl.OutcomeSucceeded || res.Failure != nil {
+				t.Fatalf("queued step failed: %+v; failure %+v", res, res.Failure)
+			}
+			var made int
+			w.h.c.with(func(c *rtCluster) { made = len(c.made) })
+			if made != 1 {
+				t.Fatalf("created %d Jobs for one queued step", made)
+			}
+		})
+	}
 }

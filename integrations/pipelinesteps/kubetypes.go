@@ -64,7 +64,7 @@ type Job struct {
 // pointer because its zero is meaningful: backoffLimit 0 never retries,
 // ttlSecondsAfterFinished 0 deletes the Job the moment it ends.
 //
-// The isolation probe (isolation.go) is the one Indexed Job: two pods of one
+// The isolation probe (isolation.go) is the one Indexed Job: three pods of one
 // Job, one per completion index. BackoffLimitPerIndex 0 means no index is ever
 // retried and one that fails does not end the others -- the probe's connector
 // ends failed while its listener has to keep running -- and it is a pointer
@@ -107,10 +107,11 @@ type PodTemplateSpec struct {
 
 // PodSpec is the step's pod.
 type PodSpec struct {
-	RestartPolicy                string `json:"restartPolicy,omitempty"`
-	ServiceAccountName           string `json:"serviceAccountName,omitempty"`
-	AutomountServiceAccountToken *bool  `json:"automountServiceAccountToken,omitempty"`
-	EnableServiceLinks           *bool  `json:"enableServiceLinks,omitempty"`
+	NodeSelector                 map[string]string `json:"nodeSelector,omitempty"`
+	RestartPolicy                string            `json:"restartPolicy,omitempty"`
+	ServiceAccountName           string            `json:"serviceAccountName,omitempty"`
+	AutomountServiceAccountToken *bool             `json:"automountServiceAccountToken,omitempty"`
+	EnableServiceLinks           *bool             `json:"enableServiceLinks,omitempty"`
 	// TerminationGracePeriodSeconds is a pointer because 0 means "kill at
 	// once", while absent is the API's 30 seconds.
 	TerminationGracePeriodSeconds *int64              `json:"terminationGracePeriodSeconds,omitempty"`

@@ -55,14 +55,16 @@ const (
 
 // The objects the component must render, by kind and name, in memql-pipelines.
 var wantPipelinesObjects = map[string]string{
-	"ServiceAccount/memql-pipelines-step":         pipelinesNamespace,
-	"Role/memql-pipelines-runner":                 pipelinesNamespace,
-	"RoleBinding/memql-pipelines-runner":          pipelinesNamespace,
-	"PersistentVolumeClaim/memql-pipelines-cache": pipelinesNamespace,
-	"ResourceQuota/memql-pipelines-ceiling":       pipelinesNamespace,
-	"LimitRange/memql-pipelines-limits":           pipelinesNamespace,
-	"NetworkPolicy/memql-pipelines-isolate":       pipelinesNamespace,
-	"ConfigMap/memql-pipelines":                   cloudNamespace, // the workbench's env
+	"ServiceAccount/memql-pipelines-step":          pipelinesNamespace,
+	"Role/memql-pipelines-runner":                  pipelinesNamespace,
+	"RoleBinding/memql-pipelines-runner":           pipelinesNamespace,
+	"PersistentVolumeClaim/memql-pipelines-cache":  pipelinesNamespace,
+	"ResourceQuota/memql-pipelines-ceiling":        pipelinesNamespace,
+	"LimitRange/memql-pipelines-limits":            pipelinesNamespace,
+	"NetworkPolicy/memql-pipelines-isolate":        pipelinesNamespace,
+	"NetworkPolicy/memql-pipelines-probe-listener": pipelinesNamespace,
+	"NetworkPolicy/memql-pipelines-probe-control":  pipelinesNamespace,
+	"ConfigMap/memql-pipelines":                    cloudNamespace, // the workbench's env
 }
 
 // pipelinesOverlays are the instance overlays that compose the component.
@@ -416,7 +418,7 @@ func TestPipelinesRoleGrantsJobsThereAndNothingElse(t *testing.T) {
 			for grant := range got {
 				if !want[grant] {
 					t.Errorf("the runner Role grants %q, which is not in the runner's table. Every grant here is a "+
-						"privilege of the memql-engine identity every mesh node runs as; a call the runner never "+
+						"privilege of the workbench identity; a call the runner never "+
 						"makes is privilege issued for nothing.", grant)
 				}
 			}
@@ -451,9 +453,9 @@ const engineAccount = "memql-engine"
 func reachesTheEngine(s rbacSubject) bool {
 	switch s.Kind {
 	case "ServiceAccount":
-		return s.Name == engineAccount
+		return s.Name == engineAccount || s.Name == workbenchServiceAccount
 	case "User":
-		return s.Name == "system:serviceaccount:"+cloudNamespace+":"+engineAccount
+		return s.Name == "system:serviceaccount:"+cloudNamespace+":"+engineAccount || s.Name == "system:serviceaccount:"+cloudNamespace+":"+workbenchServiceAccount
 	case "Group":
 		switch s.Name {
 		case "system:serviceaccounts", "system:serviceaccounts:" + cloudNamespace, "system:authenticated":
@@ -469,13 +471,13 @@ func reachesTheEngine(s rbacSubject) bool {
 // ClusterRoleBinding of the engine identity under any other name would hand
 // every engine node -- the workbench, whose token creates the step Jobs,
 // among them -- whatever its ClusterRole holds, in every namespace. So no
-// ClusterRoleBinding in any overlay's render may reach memql-engine at all.
+// ClusterRoleBinding in any overlay's render may reach either engine identity.
 func TestNoClusterRoleBindingReachesTheEngineIdentity(t *testing.T) {
 	for _, overlay := range pipelinesOverlays {
 		t.Run(overlay, func(t *testing.T) {
 			objs := renderedObjects(t, overlay)
 
-			// The reachable positive: the runner's RoleBinding names the engine,
+			// The reachable positive: the runner's RoleBinding names the workbench,
 			// and the matcher finds it there, so a clean result below is about
 			// the cluster-wide bindings and not a matcher that matches nothing.
 			var runner rbacBinding
@@ -507,12 +509,8 @@ func TestNoClusterRoleBindingReachesTheEngineIdentity(t *testing.T) {
 // TestPipelinesRoleBindsTheEngineIdentityOnly asserts the binding names the
 // identity the workbench actually runs as, and nobody else.
 //
-// It is the shared memql-engine ServiceAccount rather than a workbench-only
-// one: the workbench also makes model calls through workload identity
-// federation, whose trust names memql-engine, so a dedicated account would cut
-// it off from both vendors. The custom-domain Role binds the same account for
-// the same reason (deploy/k8s/base/custom-domain-rbac.yaml).
-func TestPipelinesRoleBindsTheEngineIdentityOnly(t *testing.T) {
+// Only the workbench may use the subject holding build Job and Secret grants.
+func TestPipelinesRoleBindsTheWorkbenchIdentityOnly(t *testing.T) {
 	for _, overlay := range pipelinesOverlays {
 		t.Run(overlay, func(t *testing.T) {
 			objs := renderedObjects(t, overlay)
@@ -524,9 +522,21 @@ func TestPipelinesRoleBindsTheEngineIdentityOnly(t *testing.T) {
 				t.Errorf("the binding's roleRef is %s %s/%s, want rbac.authorization.k8s.io Role/memql-pipelines-runner",
 					r.APIGroup, r.Kind, r.Name)
 			}
-			want := rbacSubject{Kind: "ServiceAccount", Name: "memql-engine", Namespace: cloudNamespace}
+			want := rbacSubject{Kind: "ServiceAccount", Name: workbenchServiceAccount, Namespace: cloudNamespace}
 			if len(binding.Subjects) != 1 || binding.Subjects[0] != want {
 				t.Errorf("the binding's subjects are %+v, want exactly [%+v]", binding.Subjects, want)
+			}
+
+			theOne(t, objs, "ServiceAccount", workbenchServiceAccount)
+			for _, obj := range objs {
+				if obj.Kind != "Deployment" || obj.Name == "workbench" {
+					continue
+				}
+				var other pipelinesWorkload
+				obj.decode(t, &other)
+				if other.Spec.Template.Spec.ServiceAccountName == workbenchServiceAccount {
+					t.Errorf("Deployment/%s inherits the workbench's pipeline grant", obj.Name)
+				}
 			}
 
 			// The subject is only right if it is who the workbench IS.
@@ -607,6 +617,83 @@ type networkPolicySpec struct {
 			EndPort  *int   `yaml:"endPort"`
 		} `yaml:"ports"`
 	} `yaml:"egress"`
+}
+
+// The positive control must gain exactly one exception. Giving that exception
+// to the restricted connector, or admitting ordinary steps to the listener,
+// would either invalidate the measurement or widen the execution sandbox.
+func TestPipelinesProbeExceptionsExcludeStepsAndTheRestrictedConnector(t *testing.T) {
+	type selector struct {
+		MatchLabels      map[string]string `yaml:"matchLabels"`
+		MatchExpressions []any             `yaml:"matchExpressions"`
+	}
+	type peer struct {
+		PodSelector       *selector      `yaml:"podSelector"`
+		NamespaceSelector map[string]any `yaml:"namespaceSelector"`
+		IPBlock           map[string]any `yaml:"ipBlock"`
+	}
+	type rule struct {
+		From  []peer `yaml:"from"`
+		To    []peer `yaml:"to"`
+		Ports []struct {
+			Protocol string `yaml:"protocol"`
+			Port     int    `yaml:"port"`
+			EndPort  *int   `yaml:"endPort"`
+		} `yaml:"ports"`
+	}
+	wantSelector := func(t *testing.T, s *selector, index string) {
+		t.Helper()
+		count := 1
+		if index != "" {
+			count++
+		}
+		if s == nil || len(s.MatchLabels) != count || len(s.MatchExpressions) != 0 || s.MatchLabels["memql.io/probe"] != "isolation" || s.MatchLabels["batch.kubernetes.io/job-completion-index"] != index {
+			t.Fatalf("probe selector leaks or loses index %q: %+v", index, s)
+		}
+	}
+	for _, overlay := range pipelinesOverlays {
+		t.Run(overlay, func(t *testing.T) {
+			objs := renderedObjects(t, overlay)
+			for _, control := range []bool{false, true} {
+				name, direction, selected, allowed := "memql-pipelines-probe-listener", "Ingress", "0", ""
+				if control {
+					name, direction, selected, allowed = "memql-pipelines-probe-control", "Egress", "2", "0"
+				}
+				var np struct {
+					Spec struct {
+						PodSelector selector `yaml:"podSelector"`
+						PolicyTypes []string `yaml:"policyTypes"`
+						Ingress     []rule   `yaml:"ingress"`
+						Egress      []rule   `yaml:"egress"`
+					} `yaml:"spec"`
+				}
+				theOne(t, objs, "NetworkPolicy", name).decode(t, &np)
+				wantSelector(t, &np.Spec.PodSelector, selected)
+				if !slices.Equal(np.Spec.PolicyTypes, []string{direction}) {
+					t.Fatalf("%s changes more than %s", name, direction)
+				}
+				rules, other := np.Spec.Ingress, np.Spec.Egress
+				if control {
+					rules, other = np.Spec.Egress, np.Spec.Ingress
+				}
+				if len(rules) != 1 || len(other) != 0 {
+					t.Fatalf("%s has an unbounded rule set", name)
+				}
+				r := rules[0]
+				peers, wrong := r.From, r.To
+				if control {
+					peers, wrong = r.To, r.From
+				}
+				if len(peers) != 1 || len(wrong) != 0 || peers[0].NamespaceSelector != nil || peers[0].IPBlock != nil {
+					t.Fatalf("%s widens the peer scope", name)
+				}
+				wantSelector(t, peers[0].PodSelector, allowed)
+				if len(r.Ports) != 1 || r.Ports[0].Protocol != "TCP" || r.Ports[0].Port != 8080 || r.Ports[0].EndPort != nil {
+					t.Fatalf("%s widens the listener port", name)
+				}
+			}
+		})
+	}
 }
 
 // TestPipelinesNetworkPolicyIsolatesTheNamespace pins what a step can reach:

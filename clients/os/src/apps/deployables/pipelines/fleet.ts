@@ -24,14 +24,14 @@ import { isRevoked, type MachineRow } from "../../fleet/rows";
 export const PIPELINES_LABEL = "pipelines";
 export const PIPELINES_ALLOWED = "allowed";
 
-/** Whether a machine would take a pipeline step: not revoked, and its REPORTED labels say so. */
-export function allowsPipelines(machine: Pick<MachineRow, "revokedAt" | "reportedLabels">): boolean {
-  return !isRevoked(machine) && machine.reportedLabels[PIPELINES_LABEL] === PIPELINES_ALLOWED;
+/** Whether a machine implements the required contract and consents through its own reported policy. */
+export function allowsPipelines(machine: Pick<MachineRow, "revokedAt" | "reportedLabels" | "pipelineContract">): boolean {
+  return !isRevoked(machine) && machine.pipelineContract === 2 && machine.reportedLabels[PIPELINES_LABEL] === PIPELINES_ALLOWED;
 }
 
 /** How many of `ownerUserId`'s own machines allow pipelines. */
 export function machinesAllowingPipelines(
-  machines: readonly Pick<MachineRow, "ownerUserId" | "revokedAt" | "reportedLabels">[],
+  machines: readonly Pick<MachineRow, "ownerUserId" | "revokedAt" | "reportedLabels" | "pipelineContract">[],
   ownerUserId: string,
 ): number {
   return machines.filter((m) => ownsMachine(m, ownerUserId) && allowsPipelines(m)).length;

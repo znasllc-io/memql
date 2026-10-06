@@ -142,6 +142,16 @@ const MAX_ENVELOPE_DEPTH = 4;
  * silently turn into `undefined`.
  */
 export function readIntegrationsReport(rows: readonly Row[]): IntegrationsReport | null {
+  const envelope = findIntegrationEnvelope(rows);
+  return envelope === null ? null : {
+    checkedAt: str(envelope, "checkedAt"),
+    probed: bool(envelope, "probed"),
+    integrations: objects(envelope, "integrations").map(cardOf),
+  };
+}
+
+/** Shared envelope reader for configuration and runner readiness reports. */
+export function findIntegrationEnvelope(rows: readonly Row[]): Record<string, unknown> | null {
   for (const row of rows) {
     const found = find(row, 0);
     if (found) return found;
@@ -149,7 +159,7 @@ export function readIntegrationsReport(rows: readonly Row[]): IntegrationsReport
   return null;
 }
 
-function find(value: unknown, depth: number): IntegrationsReport | null {
+function find(value: unknown, depth: number): Record<string, unknown> | null {
   if (depth > MAX_ENVELOPE_DEPTH || value === null || typeof value !== "object") return null;
   if (Array.isArray(value)) {
     for (const entry of value) {
@@ -162,13 +172,7 @@ function find(value: unknown, depth: number): IntegrationsReport | null {
   const bag = value as Record<string, unknown>;
   const integrations = bag["integrations"];
   if (Array.isArray(integrations)) {
-    return {
-      checkedAt: str(bag, "checkedAt"),
-      probed: bool(bag, "probed"),
-      integrations: integrations
-        .filter((e): e is Record<string, unknown> => !!e && typeof e === "object")
-        .map(cardOf),
-    };
+    return bag;
   }
 
   for (const nested of Object.values(bag)) {

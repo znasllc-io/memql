@@ -34,6 +34,7 @@ resources:
   - cache.yaml
   - ceiling.yaml
   - networkpolicy.yaml
+  - probe-networkpolicy.yaml
   - config.yaml
 patches:
   # The workbench is the one binary that contains the runner, so it is the one

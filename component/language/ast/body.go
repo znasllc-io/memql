@@ -83,7 +83,10 @@ type IfStatement struct {
 	Span     Span
 }
 
-// ForStatement is `for <var> in <source> [if <filter>] { }`. The author names
+// MaxForConcurrency bounds the workers one authored loop may start.
+const MaxForConcurrency = 64
+
+// ForStatement is `for <var> in <source> [if <filter>] [parallel(N)] { }`. The author names
 // the loop variable; it exists only inside the body.
 type ForStatement struct {
 	Var     string
@@ -91,7 +94,9 @@ type ForStatement struct {
 	Source  ExpressionNode
 	// Filter is the `if` condition; nil when none is written.
 	Filter ExpressionNode
-	Body   []BodyStatement
+	// Concurrency is zero for a sequential loop, or 2..MaxForConcurrency.
+	Concurrency int
+	Body        []BodyStatement
 	// Mods carries OnError only.
 	Mods StatementMods
 	Span Span

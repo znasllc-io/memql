@@ -1,0 +1,6 @@
+/// Require confirmed records for this requested workflow.
+@template
+@journalRequired
+automation recordedRequest {
+  return 1
+}

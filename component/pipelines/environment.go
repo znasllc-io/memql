@@ -12,6 +12,11 @@ import (
 // The platform's own names win over a secret of the same name. The compiler
 // already refuses a secret named MEMQL_*, so this is the second wall, not the
 // first.
+//
+// MEMQL_SHARD and MEMQL_DOMAIN are conditional: the first is exported only for
+// a sharded step, the second only when the cluster has a front-door domain
+// configured. Each is left unset rather than empty, because an empty
+// MEMQL_DOMAIN would read as a configured domain that is the empty string.
 func (r StepRequest) Environment() map[string]string {
 	env := map[string]string{
 		"MEMQL_RUN_ID":      r.RunID,
@@ -26,6 +31,9 @@ func (r StepRequest) Environment() map[string]string {
 	}
 	if r.Step.Shard.Count > 0 {
 		env["MEMQL_SHARD"] = strconv.Itoa(r.Step.Shard.Index) + "/" + strconv.Itoa(r.Step.Shard.Count)
+	}
+	if r.Domain != "" {
+		env["MEMQL_DOMAIN"] = r.Domain
 	}
 	for name, value := range r.Secrets {
 		if _, reserved := env[name]; reserved {

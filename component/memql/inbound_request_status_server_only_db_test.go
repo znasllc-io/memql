@@ -11,8 +11,7 @@ import (
 // TestUpdateInboundRequestStatusRefusesAClient is the refusal the memql#5707
 // follow-up bought, on a real engine over a real Postgres.
 //
-// v1:platform:inboundRequest declares no @rowAuthz, so before
-// updateInboundRequestStatus carried @serverOnly any authenticated caller
+// Before the operator tier and @serverOnly protection, any authenticated caller
 // could stamp any staged delivery: mark a privacy request `processed` that no
 // connector worked, or `failed` one it did, and the operator's queue would say
 // so. A client is refused now -- a cluster owner included, because the

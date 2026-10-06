@@ -1,0 +1,46 @@
+# Only the diagnostic listener admits ingress. Both connectors match exactly
+# the same ingress rule. Only index 2 receives an egress exception: if index 1
+# connects, isolation failed; if index 2 cannot connect, the proof is inconclusive.
+# Ordinary steps carry no memql.io/probe label and gain no access here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: memql-pipelines-probe-listener
+  namespace: memql-pipelines
+  labels:
+    app.kubernetes.io/part-of: memql
+spec:
+  podSelector:
+    matchLabels:
+      memql.io/probe: isolation
+      batch.kubernetes.io/job-completion-index: "0"
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              memql.io/probe: isolation
+      ports:
+        - {protocol: TCP, port: 8080}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: memql-pipelines-probe-control
+  namespace: memql-pipelines
+  labels:
+    app.kubernetes.io/part-of: memql
+spec:
+  podSelector:
+    matchLabels:
+      memql.io/probe: isolation
+      batch.kubernetes.io/job-completion-index: "2"
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              memql.io/probe: isolation
+              batch.kubernetes.io/job-completion-index: "0"
+      ports:
+        - {protocol: TCP, port: 8080}

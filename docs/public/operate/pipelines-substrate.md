@@ -34,13 +34,13 @@ before the first one.
 The agent node driving a run hands each command step to the substrate's
 executor (`integrations/pipelinesteps`), which decides where it runs:
 
-- **On the cluster**, for a step that names no need: a Kubernetes Job in the
+- **On the cluster**, for a container step placed on the cluster: a Kubernetes Job in the
   `memql-pipelines` namespace. The agent forwards the step over the node mesh
   to a workbench replica, whose runner creates the Job, watches it, captures its
   output, files its log and artifacts and records its outcome. Every name the
   runner uses is derived from the run, the step and the attempt, so whichever
   replica is asked next finds the same Job.
-- **On one of the owner's own machines**, for a step that names a need --
+- **On one of the owner's own machines**, for `placement: fleet`, native execution, or a step that names a host need --
   `display`, `docker`, `gpu`, `macos_tooling` or `user_files`, which no step pod
   offers -- and only on a pipeline connected with `compute: cluster_and_fleet`
   ([Compute](pipelines.md#compute)). The agent dispatches the step to a machine
@@ -54,7 +54,7 @@ reaches the executor.
 | Node | What it does for a step |
 |---|---|
 | agent | Drives the run (the seam's driver) and holds the executor: refuses what it must not route, computes the step's effective timeout, forwards a cluster step and watches for the answer, dispatches a fleet step and files that step's log and artifacts |
-| workbench | Holds the runner, the only MemQL process that creates, watches and deletes a step's Job and Secret -- through the API server, as the engine's identity `memql-engine`, whose Role reaches nothing outside `memql-pipelines` |
+| workbench | Holds the runner, the only MemQL process that creates, watches and deletes a step's Job and Secret -- through the API server, as the dedicated identity `memql-engine-workbench`, whose Role reaches nothing outside `memql-pipelines` |
 | the step's pod | Not a MemQL node. It holds no cluster credential |
 
 **What each node needs.** An agent node needs a route to a workbench replica
@@ -246,7 +246,9 @@ running step, and the API server counts it atomically across every workbench
 replica. A step that finds the quota full waits, says so once in its log
 (`memql: waiting for a free slot under the pipelines ceiling`), and tries again
 every 10 seconds until a slot frees or its run reaches its ceiling. A finished
-Job counts until the agent's acknowledgement deletes it. The agent sends that
+Job counts until the agent has durably committed its work-step receipt and
+acknowledges it. Returning an execution result does not delete the evidence.
+The agent sends that
 acknowledgement up to 5 times, waiting twice as long before each send, and if
 every send is lost, the Job's TTL deletes it 30 minutes after it finished.
 
@@ -318,6 +320,18 @@ A network policy is enforced by the cluster's network policy engine, not by the
 object, which is why [the isolation proof](#the-isolation-proof) runs before any
 step does.
 
+### Workbench identity cutover
+
+Only `memql-engine-workbench` holds the pipeline runner Role. The other engine
+accounts cannot create pipeline Jobs or read step Secrets. Before switching a
+cloud workbench to this account, prepare the exact new subject in its external
+trusts: [OpenAI mapping](auth/openai-federation.md#the-cutover),
+[Anthropic prefix](auth/anthropic-federation.md#separate-kubernetes-identities),
+and any instance-specific Azure federation. Keep the existing engine subject
+for the other nodes. Verify both subjects, then roll out and verify the new
+workbench before allowing builds. Local RBAC verification does not establish
+that a cloud provider has accepted its token.
+
 ### Reading a step on the cluster
 
 Each Job and its Secret carry:
@@ -330,6 +344,7 @@ Each Job and its Secret carry:
 | annotation | `memql.io/step-key` | the step's key, `<stage>.<step>`, with `#<i>` for a shard |
 | annotation | `memql.io/work-run` | the `v1:work:run` id |
 | annotation | `memql.io/owner-user` | the pipeline's owner |
+| annotation | `memql.io/run-deadline` | the agent's absolute run deadline in UTC; authoritative for orphan-Secret retention |
 
 The Job's name is `mp-` and 24 hex, derived from the run, the step and the
 attempt; its Secret is the same name with `-env`. The runner's own annotations
@@ -347,7 +362,10 @@ kubectl logs -n memql-pipelines job/<job name> -c step --follow
 A Job lasts only until the agent holds its outcome. A Secret no Job came to own
 -- its runner went before the Job it made owned it -- is deleted by any
 replica's orphan sweep (at most every 10 minutes on a replica, as steps run)
-once its Job is gone and it is older than the run ceiling plus the Job TTL.
+once its Job is gone and the stamped run deadline plus the Job TTL has passed.
+A different workbench ceiling cannot shorten that retention. Legacy Secrets
+without a valid deadline use their creation time plus the sweeping workbench's
+run ceiling and Job TTL as a bounded fallback.
 
 ---
 
@@ -358,16 +376,19 @@ Before the first step it creates, each workbench replica proves that
 another pod -- and it creates no step until the proof passes.
 
 - **The probe** is one Indexed Job in the namespace: index 0 listens, index 1
-  connects. It takes one slot of the ceiling, so it waits for room as a step
+  tests the egress restriction, and index 2 is a positive control. The listener
+  admits both connectors through the same ingress rule; only index 2 has a
+  narrow egress exception to that listener on TCP 8080. Ordinary steps carry
+  no probe label and gain no exception. It takes one slot of the ceiling, so it waits for room as a step
   does, bounded by the creating step's run's ceiling.
 - **After a 5-second settle** -- a new pod's egress can be open for its first
   second or two while the policy engine programs it -- the connector makes three
   attempts one second apart, each at the cluster's DNS, which the policy allows,
   and at the listener.
-- **The verdict.** Connected on any attempt: not isolated. Isolated takes all
-  three of these:
+- **The verdict.** Connected on any attempt: not isolated. Isolated requires all of these:
   - every listener attempt was refused or timed out;
   - DNS answered every attempt;
+  - the positive control reached the same listener on every attempt;
   - the listener held throughout.
 
   The listener has held when, read again once the connector has ended, all of
@@ -400,10 +421,26 @@ nothing new, and never waits on the proof.
 It refuses rather than warns because a step is a repository's code: on a cluster
 that does not enforce the policy, it could reach the cloud's instance-metadata
 endpoint (on AKS, a source of tokens for the node's identity), the mesh's
-in-cluster `/metrics` and the database's Service. The proof tests one pod
-reaching another inside the namespace, which the ingress rule alone can refuse;
-it does not exercise the egress rule's exceptions ([Known
-limitations](#known-limitations)).
+in-cluster `/metrics` and the database's Service. The positive control proves that listener ingress is open to the restricted
+connector as well. Missing egress protection or a missing IP exception list
+therefore fails the probe instead of being hidden by ingress denial. A missing
+control path is inconclusive and refuses execution.
+
+This is a representative egress check, not a scan of every cluster address or
+cloud endpoint. Operators must keep all pod, service, node and metadata ranges
+inside the denied ranges when configuring a different cluster network. The
+probe uses Indexed Job pod labels (Kubernetes 1.28 or later); see the
+[Kubernetes Job contract](https://kubernetes.io/docs/concepts/workloads/controllers/job/)
+and [additive network policies](https://kubernetes.io/docs/concepts/services-networking/network-policies/).
+
+The opt-in local regression creates and removes its own namespace, without
+replacing the installed engine. It checks the shipped rules, missing egress,
+a missing `except` list and a missing listener ingress exception:
+
+```bash
+MEMQL_PIPELINES_ISOLATION_TEST_CONTEXT=k3d-memql \
+  go test ./integrations/pipelinesteps -run '^TestIsolationProofAgainstLocalNetworkPolicy$' -count=1 -v
+```
 
 **On AKS as `azure-provision.sh` creates it, every step is refused.** The script
 passes no `--network-policy`, so the cluster runs no network policy engine: the
@@ -425,7 +462,7 @@ local cluster (k3s) enforces network policy as installed, so its proof passes.
 
 ## The fleet
 
-A step that names a need runs on one of the pipeline owner's own machines. The
+A fleet step runs on one of the pipeline owner's opted-in machines. The
 agent dispatches it through its worker dispatcher as `workerHost.pipeline_step`
 under the pipeline purpose: no agent is named, and the gates that ask about an
 agent -- per-task approval, standing scope, the classifier -- are not asked,
@@ -454,6 +491,20 @@ because there is none. Three other things must hold instead.
    | `repos` | When it lists any, only these repositories' steps run there. An empty list accepts any |
    | `workspace_root` | Where each step's checkout is made, and removed again |
    | `max_timeout_sec` | The longest a step may run there, whatever its own timeout |
+
+   Cockpit also reports an action-specific `repositoryScopes` entry in its
+   capability descriptor. The router requires an explicit scope accepting the
+   requested repository before dispatch. Missing scope metadata is unknown
+   consent: upgrade and reconnect older workers before using them for builds.
+   It must also report `workerHost.pipeline_step` action contract **2**. An older,
+   missing or unknown contract refuses before dispatch; operator labels cannot
+   override it. Native OS/architecture comes from the binary descriptor and is
+   rechecked on the receiving replica.
+   An empty advertised list accepts every repository; a nonempty list matches
+   exact names, ignoring case, surrounding whitespace and a `.git` suffix.
+   A repository-only policy change triggers re-registration. The worker still
+   checks its current policy on arrival, so stale advertisements cannot grant
+   execution after a withdrawal.
 
    **An operator label cannot allow a machine.** The router matches a machine's
    reported and operator labels together, but the replica about to dispatch
@@ -485,12 +536,28 @@ A refusal before start ran nothing, and a machine whose stream another agent
 replica holds is reached over a forward under the owner's authority -- skipped,
 never failed, when it cannot be. With no machine that offers the need, allows
 pipelines and is online, the step is refused `pipeline_no_machine_for_need`, and
-nothing ran. A machine whose own policy refuses the step once it arrives (its
-`repos` does not list the repository, say) fails it
-`pipeline_no_machine_for_need` with the machine's sentence: a refusal on the
-machine is not re-picked (memql#5812). Each dispatch is recorded like an agent's call, as a
+nothing ran. Under contract 2, policy rejection, busy build capacity and an unavailable
+runtime are confirmed pre-execution refusals and permit another candidate.
+Timeouts, disconnects, uncertain cleanup and interrupted prior attempts do not: a
+command might already have performed an external effect. Each dispatch is recorded like an agent's call, as a
 `v1:worker:invocation` of `workerHost.pipeline_step` naming no agent, filed under
 the work run and the step.
+
+**Execution is explicit.** `execution: container` uses the exact digest-pinned
+Linux image with the declared architecture, even on a Mac. It cannot inherit
+host Docker, GPU, display or file access through a `needs` label. Use native
+execution for host tools. A container on the fleet uses `placement: fleet`,
+without host needs. Docker must answer a live daemon identity/platform probe;
+architecture emulation is refused. Native execution also probes Docker when
+`needs: { docker: true }` is declared. Labels alone do not prove daemon health.
+
+The current worker admits one pipeline command per OS user across all its
+cluster connections. A durable attempt record outlives process death. A new
+worker reconciles an orphan container only against the same Docker daemon;
+unknown daemon identity, uncertain cleanup and interrupted native execution
+remain blocked for reconciliation. This reservation does not reserve agent
+work or another OS user's capacity. Fleet sidecars and shared caches are not
+yet implemented and are refused rather than omitted.
 
 **What the machine does with the step** -- the clone (the cluster Job's own
 clone script, over `https` only), the command in the machine's own environment,
@@ -608,6 +675,26 @@ A step's `artifacts:` are paths or globs relative to the working copy.
 
 ## Lifecycle
 
+### Recovering an interrupted driver
+
+A replacement driver preserves completed journal receipts and acknowledges
+retained resources idempotently. An unfinished intent is sent as `recoverOnly`:
+a cluster runner may adopt an existing Job or its stored outcome, but a missing
+Job is `pipeline_execution_uncertain`, without creating a replacement or minting
+a clone token. Fleet execution currently has no durable remote receipt lookup;
+an interrupted fleet intent is also uncertain and is not dispatched again.
+Inspect the original attempt before authorizing new work.
+
+The workbench action is `pipelineStepV2` and its receipt acknowledgement is
+`pipelineReceiptAck`. Older replicas reject these actions instead of ignoring
+new execution or recovery fields. Upgrade the coordinated engine set and drain
+old drivers before enabling the new protocol.
+
+Retention is bounded. Durable external-attempt identity, late-delivery
+reconciliation, and deduplicating artifacts if interruption happens before the
+runner records its final outcome remain required for complete recovery. A
+missing receipt is never proof that the external work did not run.
+
 ### Cancel
 
 `pipelinesCancel`, or **Cancel** on the run's page, flags the run
@@ -668,8 +755,10 @@ Nothing about a running step lives in one process only:
   agent forwards the step again, to any replica, and that replica finds the Job
   by its name and adopts it once the old claim is 45 seconds unstamped
   ([When a workbench replica is lost](#when-a-workbench-replica-is-lost)).
-- **Beside the watch, the agent reads the step's status every 30 seconds**, from
-  any replica: they all read the same Job. A finished step's outcome is taken
+- **Beside the watch, the agent reads the step's status every 30 seconds**,
+  preferring the replica selected for the active forward. That replica can
+  report a queued step before its Job exists. An unavailable replica falls
+  back to another, and every replica reads the same Job once it exists. A finished step's outcome is taken
   from the Job, even when the reply to the forward was lost. A holder gone quiet
   while the mesh still counts it healthy is forwarded away from once the live
   forward is 3 minutes old -- an adopting replica may be proving isolation
@@ -747,7 +836,7 @@ Registered in `scripts/secrets/manifest.yaml` under the `pipelines` component.
 |---|---|---|---|
 | `MEMQL_PIPELINES_NAMESPACE` | `memql-pipelines` | workbench | The namespace the runner creates step Jobs and their Secrets in. It must be the one the pipelines component grants the engine's identity Jobs in, `memql-pipelines`: any other value makes every create a 403, and every step fails `pipeline_runner_unavailable`. The component's `memql-pipelines` ConfigMap sets it |
 | `MEMQL_PIPELINES_CLONE_IMAGE` | none | workbench | The image `clone` and `cache-prep` run, which needs `git`, `base64` and `tr`. Pin it by digest: it is handed the repository token. Unset, the node cannot run steps, and every step sent to it fails `pipeline_runner_unavailable`. The ConfigMap pins `docker.io/library/buildpack-deps:bookworm-scm` by its multi-arch index digest |
-| `MEMQL_PIPELINES_RUN_MAX_MINUTES` | `120` | agent, workbench | A run's wall-clock ceiling, clamped to 5..1440. It bounds how long a step may wait for a slot, and a step's Job is given no more than what is left of it; past it the step fails `pipeline_run_ceiling`. The agent's value sets each run's deadline. The workbench's value times only its orphan-Secret sweep, which waits this long plus the Job TTL, so a workbench value smaller than the agent's can sweep the Secret of a step still waiting (memql#5823) |
+| `MEMQL_PIPELINES_RUN_MAX_MINUTES` | `120` | agent, workbench | A run's wall-clock ceiling, clamped to 5..1440. It bounds how long a step may wait for a slot, and a step's Job is given no more than what is left of it; past it the step fails `pipeline_run_ceiling`. The agent's value sets each run's deadline, stamped on its Job and Secret. Orphan cleanup waits until that deadline plus the Job TTL, regardless of the sweeping workbench's ceiling. The workbench value is only a retention fallback for legacy or malformed Secret metadata |
 | `MEMQL_PIPELINES_LOG_STORE_MAX_LINES` | `2000` | workbench (a cluster step), agent (a fleet step) | How many lines of one step reach the log store, clamped to 100..100000, before one `pipeline_log_capped` line. The Library's log keeps every line |
 | `MEMQL_PIPELINES_ARTIFACT_MAX_BYTES` | `67108864` (64 MiB) | workbench (a cluster step), agent (a fleet step) | The cap on one step's decoded artifact archive, clamped to 1 MiB..256 MiB. Past it nothing is stored, and the step fails `pipeline_artifact_too_large` |
 | `MEMQL_PIPELINES_WORKSPACE_LIMIT` | `20Gi` | workbench | The size limit of every step's `/workspace`, a whole number of `Ki`, `Mi`, `Gi` or `Ti`; anything else is the default. It must equal the LimitRange's default ephemeral-storage limit ([Steps at once, and their size](#steps-at-once-and-their-size)), and the component's ConfigMap sets it so in every overlay |
@@ -783,6 +872,7 @@ run's page and, for a failed step, the check run, with its sentence.
 | `pipeline_job_rejected` | failure | The step could not be made into a safe Job (an artifact path that could leave the working copy, a secret named like a variable the platform sets, an unknown cache, a clone URL that is not plain `https`, no image or command); the cluster refused its Job or Secret; a container could not be created; or the step's cache directory could not be prepared, a cache volume that would not mount within 10 minutes included | The message says which. Fix the manifest when it names the step; for the cache, the pod's events name the mount error |
 | `pipeline_job_unschedulable` | failure | The step's pod could not be scheduled within 10 minutes: no node had room, or the cache claim it mounts is Pending (a storage class that does not exist; on AKS, no Blob CSI driver) | Give the steps room -- a dedicated node pool, or lower requests or ceiling in the overlay -- or turn the Blob CSI driver on (`azure-provision.sh` does) |
 | `pipeline_step_disk_exceeded` | failure | The kubelet stopped the step for the disk its pod wrote: its working copy past the workspace's size limit, or the pod's or one container's files past the namespace's ephemeral-storage limit. The working copy, what the containers write anywhere in their own filesystems and their logs all count; a declared cache does not. The message quotes the kubelet's sentence | Write less, or declare a cache for what a tool keeps between runs (Go's build cache otherwise lands in the image's home directory); an operator raises the overlay's limit |
+| `pipeline_execution_uncertain` | failure | A prior intent has no recoverable Job or fleet receipt; no replacement effect is started | Reconcile the original attempt before authorizing new work |
 | `pipeline_node_lost` | failure | The cluster stopped the step's pod (a drain, a preemption, an eviction) before its command ended; the pod or Job failed with nothing saying why; the Job was deleted while another replica held it; no workbench replica reported the step within its deadline and the 4 minutes 30 seconds past it; or a fleet machine's connection ended before it reported | Re-run the step |
 | `pipeline_step_cancelled` | failure | The step was cancelled: its run was cancelled or superseded, or the drive running it ended | Re-run when ready |
 | `pipeline_no_machine_for_need` | failure | No machine of the owner's that offers the need, allows pipeline steps and is online could take the step, and nothing ran; or the machine's own pipelines policy refused it | Turn on a machine that has the need and allows pipelines in its `policy.yaml` (listing the repository, when `repos` lists any), or drop the need |
@@ -936,7 +1026,7 @@ Each of these is understood, and accepted for this release.
   `install-cluster-e2e.yml`'s `pipelines` leg installs the cluster from source
   and runs `TestPipelinesSubstrate` (`test/clustere2e`): the real executor, its
   fleet half and two workbench runners in the test process, talking to the
-  cluster's real API server as `memql-engine`, under the deployed Role, quota,
+  cluster's real API server as `memql-engine-workbench`, under the deployed Role, quota,
   limits, cache claim, network policy and ConfigMap, cloning a public repository
   anonymously at a pinned commit. GitHub there is a test server whose check runs
   are held to recorded fixtures, and the fleet's dispatcher is a stand-in with no
@@ -957,25 +1047,6 @@ Each of these is understood, and accepted for this release.
   The old replica may take the step's outcome and have its Job deleted before the
   new driver hands the same attempt over again, which then finds no Job and
   starts a fresh one. The answer is the second run's; the cost is a runner.
-- **The engine's grant reaches every engine pod.** The runner's Role is bound
-  to `memql-engine`, the ServiceAccount every engine Deployment runs as,
-  because the workbench's model calls federate as that account. Only the
-  workbench contains the runner, but a binary is not a boundary. Any engine pod
-  holds a `memql-engine` token, the edge and mcp among them, which face the
-  internet. A compromised one can create a Job in `memql-pipelines` and read
-  the Secrets of the steps in flight there: their clone tokens and resolved
-  secrets. This is an accepted risk for this release. A workbench-only account,
-  or an admission policy that admits only the runner's Jobs, narrows it
-  (memql#5811).
-- **The isolation proof tests pod to pod, not the egress exceptions.** The
-  proof's negative is that the connector cannot reach the listener. The
-  namespace's ingress deny-all satisfies that as fully as the connector's
-  egress rules do, so the proof never exercises the egress rule's `except`
-  list, which keeps a step off the instance-metadata endpoints, WireServer and
-  the mesh. Two kinds of cluster pass the proof while a step can still reach
-  the mesh: one whose policy engine enforces ingress but mishandles egress, and
-  one whose pod or service range lies outside RFC 1918 (100.64.0.0/10, say)
-  (memql#5810).
 - **The cloud cache on Azure Blob NFS is unmeasured.** Two things are untested
   (memql#5813):
   - cache-prep, which runs as root with every capability dropped, creates the
@@ -985,25 +1056,14 @@ Each of these is understood, and accepted for this release.
     root that another user owns and keeps closed to others.)
   - Blob NFS has no NLM locking, while concurrent steps of one repository and
     trust on two nodes share one Go build and module cache.
-- **A narrowed machine attracts other repositories' steps.** Routing reads a
-  machine's `pipelines=allowed`, not its `repos` list. So a machine narrowed to
-  some repositories is picked for others too, and refuses them when they arrive
-  ([The fleet](#the-fleet); memql#5812).
-- **A fleet step inherits the worker's shell limits.** The first time a Cockpit
-  runs a `workerHost.exec` call, it applies the shell policy's `max_*` limits to
-  its own process. Every process it starts after that inherits them until it
-  restarts, a pipeline step included (znasllc-io/memql-cockpit#484).
 - **A multi-line secret's short lines are not masked one by one.** Masking
   covers each secret whole, trimmed, and each of its lines, trimmed. Like the
   check run's masking, it drops any form shorter than 4 bytes. So a secret
   printed one short line at a time is masked only where its longer lines appear.
-- **A queued step can wait on more than one replica.** While a step waits for
-  a slot, any workbench replica may answer its status. One that does not hold
-  it answers that it has no such step, and after its patience (3, 6, 12, then
-  24 minutes) the agent sends the step again. One step can then wait on
-  several replicas at once. They converge on one Job, because the second create
-  finds the first's, but each mints a clone token and retries its create every
-  10 seconds (memql#5821).
+- **A partition can leave an old queued request alive.** Status reads prefer
+  the active forward's replica, avoiding duplicate waits during ordinary quota
+  pressure. A replacement after a lost route can still overlap a surviving old
+  request; deterministic Job naming makes them converge on one Job (#5821).
 - **A cancel can miss a step still waiting for a slot.** A cancel deletes every
   Job the run has and stops every step its agent has in flight. A step still
   waiting for a slot on a workbench replica, forwarded by an agent replica that
@@ -1024,3 +1084,14 @@ Each of these is understood, and accepted for this release.
   retention
 - [Workbench](workbench-runbook.md) -- the workbench node, which also holds the
   pipelines runner
+
+### Recovery keeps the original execution definition
+
+A pipeline records a digest of each complete compiled step and its immutable
+run inputs before execution. Recovery restores the recorded package selection,
+then verifies the command, image, services, placement, dependencies, step order,
+source commit, driver engine revision and cluster domain. A changed definition,
+missing proof or unknown/dirty engine revision stops recovery. Finished receipts
+are preserved; an explicit new attempt can run a newly reviewed definition.
+A failed-only rerun reuses earlier success only when that definition matches.
+This does not yet pin the transitive definitions of arbitrary DSL automations.
