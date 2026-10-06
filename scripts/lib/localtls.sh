@@ -79,3 +79,31 @@ MEMQL_LOCAL_TLS_HOSTNAMES="$(localtls_hostnames_for "$MEMQL_LOCAL_DOMAIN")"
 # domain in a secret every install creates. The name is a fact about the front
 # door, not about whose domain it happens to serve.
 MEMQL_LOCAL_TLS_SECRET="memql-front-door-tls"
+
+# Parse a PEM certificate on stdin using the OpenSSL/LibreSSL common surface.
+# Empty means unverified; callers retain their explicit unknown-state behavior.
+function localtls_sans_oneline() {
+    local sans text
+    command -v openssl &>/dev/null || return 0
+    # -text works on macOS LibreSSL as well as OpenSSL. LibreSSL has no
+    # x509 -ext option. Extract only this extension, not DNS-like subject or
+    # other extension text; stop when indentation returns to its header level.
+    text="$(openssl x509 -noout -text 2>/dev/null)" || return 0
+    sans="$(printf '%s\n' "$text" | awk '
+        /^[[:space:]]*X509v3 Subject Alternative Name:/ {
+            match($0, /[^[:space:]]/); indent = RSTART; inside = 1; next
+        }
+        inside && /[^[:space:]]/ {
+            match($0, /[^[:space:]]/)
+            if (RSTART <= indent) exit
+            print
+        }
+    ')"
+    [[ -n "$sans" ]] || return 0
+    printf '%s' "$sans" | tr '\n' ' ' | tr -s ' '
+}
+
+# A DNS SAN is a complete comma-delimited entry, never a hostname prefix.
+function localtls_has_dns_name() {
+    printf '%s\n' "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -Fxq "DNS:$2"
+}

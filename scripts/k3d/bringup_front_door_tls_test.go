@@ -238,3 +238,12 @@ func TestBringupFrontDoorTLSCheckFailsWhenTheSecretIsMissing(t *testing.T) {
 		t.Errorf("detail should distinguish a missing secret from a wrong-domain one, got %q", res.detail)
 	}
 }
+
+func TestBringupFrontDoorTLSRejectsHostnamePrefixes(t *testing.T) {
+	requireOpenSSL(t)
+	res := runVerifyFrontDoorTLS(t, "present",
+		frontDoorSecretCertB64(t, "*.memql.localhost.invalid", "memql.localhost.invalid"), "")
+	if res.value != "false" || !strings.Contains(res.detail, "does not cover") {
+		t.Fatalf("accepted hostname prefixes: %+v", res)
+	}
+}
