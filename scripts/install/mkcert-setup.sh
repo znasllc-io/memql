@@ -394,10 +394,23 @@ function ensure_ca_trusted() {
 # line, or empty when they cannot be read. Empty means "cannot tell", never
 # "carries nothing".
 function cert_sans_oneline() {
-    local cert="$1" sans
+    local cert="$1" sans text
     [[ -f "$cert" ]] || return 0
     command -v openssl &>/dev/null || return 0
-    sans="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null || true)"
+    # -text works on macOS LibreSSL as well as OpenSSL. LibreSSL has no
+    # x509 -ext option. Extract only this extension, not DNS-like subject or
+    # other extension text; stop when indentation returns to its header level.
+    text="$(openssl x509 -in "$cert" -noout -text 2>/dev/null)" || return 0
+    sans="$(printf '%s\n' "$text" | awk '
+        /^[[:space:]]*X509v3 Subject Alternative Name:/ {
+            match($0, /[^[:space:]]/); indent = RSTART; inside = 1; next
+        }
+        inside && /[^[:space:]]/ {
+            match($0, /[^[:space:]]/)
+            if (RSTART <= indent) exit
+            print
+        }
+    ')"
     [[ -n "$sans" ]] || return 0
     printf '%s' "$sans" | tr '\n' ' ' | tr -s ' '
 }
@@ -427,7 +440,7 @@ function cert_coverage() {
         return 0
     fi
     for host in "${HOSTNAMES[@]}"; do
-        if ! printf '%s' "$sans" | grep -Fq "DNS:${host}"; then
+        if ! printf '%s\n' "$sans" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -Fxq "DNS:${host}"; then
             printf 'missing'
             return 0
         fi
