@@ -2953,6 +2953,12 @@ export interface ReleaseCutArgs {
   /** Which part of the newest existing version to increment. major and minor zero the parts below them. */
   // Enum: major | minor | patch
   bump: string;
+  /** Required when publishing: the repository from the reviewed dry-run result. A changed repository refuses before any write. */
+  expectedRepository?: string;
+  /** Required when publishing: the full baseSha from the reviewed dry-run result. A changed main head refuses before any write. */
+  expectedSha?: string;
+  /** Required when publishing: the version from the reviewed dry-run result, including its leading v. A changed next version refuses before any write. */
+  expectedVersion?: string;
   /** Optional prose prepended to the Release body. GitHub's generated release notes are appended either way, so leaving this empty still produces a populated Release. */
   notes?: string;
   /** Also open a pull request bumping the VS Code extension's DEFAULT_STACK_TAG to the new tag. A PR that cannot be opened is recorded as a note on the release row and never fails the cut, which has already published by then. */
@@ -2964,6 +2970,9 @@ export interface ReleaseCutArgs {
 export function buildReleaseCut(args: ReleaseCutArgs): string {
   const parts: string[] = [];
   parts.push("bump: " + renderMemQLValue(args.bump));
+  if (args.expectedRepository !== undefined) parts.push("expectedRepository: " + renderMemQLValue(args.expectedRepository));
+  if (args.expectedSha !== undefined) parts.push("expectedSha: " + renderMemQLValue(args.expectedSha));
+  if (args.expectedVersion !== undefined) parts.push("expectedVersion: " + renderMemQLValue(args.expectedVersion));
   if (args.notes !== undefined) parts.push("notes: " + renderMemQLValue(args.notes));
   if (args.bumpExtensionPin !== undefined) parts.push("bumpExtensionPin: " + renderMemQLValue(args.bumpExtensionPin));
   if (args.dryRun !== undefined) parts.push("dryRun: " + renderMemQLValue(args.dryRun));

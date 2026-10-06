@@ -33,7 +33,9 @@ Three things happen, in this order, and the order is load-bearing. Before any
 of them, the cut reads `VERSION` at `main`'s head -- the exact commit it is
 about to tag -- and refuses unless the file reads the version it computed.
 
-1. **The tag is created** at the current head of `main`. GitHub's ref-create is
+1. **The tag is created** at the reviewed head of `main`. Publication requires
+   the repository, commit and version from a reviewed dry run, and refuses
+   if the current plan differs. GitHub's ref-create is
    atomic, which makes this the concurrency gate for the whole feature: two
    owners cutting at the same moment produce one tag and one `ref_exists`
    refusal. There is no lock anywhere because none is needed.
@@ -175,9 +177,10 @@ pushes, so the value arrives the way every other change does:
    form whose warning it is the first to carry; that test says so when it
    applies.
 2. Merge it.
-3. Cut at once, with the bump that reaches that version. A change merged in
-   between moves `main`'s head, and the cut tags the new head -- which still
-   carries the right `VERSION`, but is not the commit you reviewed.
+3. Run the dry run with the bump that reaches that version. Review its
+   `repository`, `baseSha` and `version`, then carry those exact values into
+   the publication call. A change to `main` after review refuses publication
+   instead of tagging an unreviewed commit.
 
 A cut whose computed version differs from `VERSION` is refused with
 `version_file_stale` before anything is created, and so is its dry run. The
@@ -192,12 +195,23 @@ retired in epic memql#4984, and neither MemQL OS nor the VS Code extension
 replaced it. A cut is the `releaseCut` builtin, called by an owner:
 
 ```
-builtin releaseCut(bump: "patch", notes: "Why this cut", bumpExtensionPin: true)
+builtin releaseCut(
+  bump: "patch",
+  expectedRepository: "acme/widget",
+  expectedSha: "<baseSha from the reviewed dry run>",
+  expectedVersion: "v0.24.1",
+  notes: "Why this cut",
+  bumpExtensionPin: true
+)
 ```
 
-or from an SDK: `releaseCut({ bump: "patch" })` on the TS `QueryClient`,
-`ReleaseCut` in `sdk/go/client`. The engine refuses a non-owner in Go before any
-network request is made.
+The TS `QueryClient.releaseCut` and Go `client.ReleaseCut` accept the same
+arguments. The embedded `cluster.publishEngineRelease` automation template
+provides a manual DSL entry point carrying the three reviewed values. It has
+no event or schedule trigger. Instances configure credentials and repository;
+the orchestration stays in the engine's core DSL.
+
+The engine refuses a non-owner in Go before any network request is made.
 
 The arguments:
 
@@ -211,6 +225,11 @@ The arguments:
   the generated list of changes.
 - **`bumpExtensionPin`** -- also open the pin-bump pull request (section 8).
 - **`dryRun`** -- compute the plan and create nothing (section 4).
+- **`expectedRepository`, `expectedSha`, `expectedVersion`** -- required when
+  publishing. Copy `repository`, `baseSha` and the tagged `version` from the
+  reviewed dry run. Omission refuses with `release_candidate_required`; a
+  changed candidate refuses with `release_candidate_changed`. Values travel
+  with the call, so review and publication may reach different replicas.
 
 The call asks for no confirmation, and a release is not undoable from here:
 reversing one means deleting the tag and the Release on GitHub by hand. Run the
@@ -251,6 +270,8 @@ The check is on demand. There is no poller and no schedule.
 
 | Code | What happened | What to do |
 |---|---|---|
+| `release_candidate_required` | a publication call omitted part of the reviewed candidate; nothing was created | review a dry run and supply its repository, commit and tagged version |
+| `release_candidate_changed` | the current plan differs from the reviewed candidate; nothing was created | review a fresh dry run before publishing |
 | `release_repo_unconfigured` | no repository configured, or GitHub cannot see it | seed `MEMQL_RELEASE_REPO`; check the token's repository access |
 | `credential_unavailable` | no token, or GitHub rejected it (401/403) | seed or re-mint `MEMQL_GITHUB_RELEASE_TOKEN` with Contents: read/write |
 | `github_unreachable` | transport failure or a 5xx. **Nothing was created** | retry; check GitHub's status |

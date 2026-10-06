@@ -3839,6 +3839,12 @@ type ReleaseCutArgs struct {
 	// Which part of the newest existing version to increment. major and minor zero the parts below them.
 	// Enum: major | minor | patch
 	Bump string
+	// Required when publishing: the repository from the reviewed dry-run result. A changed repository refuses before any write.
+	ExpectedRepository string
+	// Required when publishing: the full baseSha from the reviewed dry-run result. A changed main head refuses before any write.
+	ExpectedSha string
+	// Required when publishing: the version from the reviewed dry-run result, including its leading v. A changed next version refuses before any write.
+	ExpectedVersion string
 	// Optional prose prepended to the Release body. GitHub's generated release notes are appended either way, so leaving this empty still produces a populated Release.
 	Notes string
 	// Also open a pull request bumping the VS Code extension's DEFAULT_STACK_TAG to the new tag. A PR that cannot be opened is recorded as a note on the release row and never fails the cut, which has already published by then.
@@ -3860,6 +3866,27 @@ func ReleaseCutBuild(args ReleaseCutArgs) string {
 	b.WriteString("builtin releaseCut(")
 	b.WriteString("bump: ")
 	b.WriteString(quoteMemQL(args.Bump))
+	if args.ExpectedRepository != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRepository: ")
+		b.WriteString(quoteMemQL(args.ExpectedRepository))
+	}
+	if args.ExpectedSha != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedSha: ")
+		b.WriteString(quoteMemQL(args.ExpectedSha))
+	}
+	if args.ExpectedVersion != "" {
+		if b.Len() > 19 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedVersion: ")
+		b.WriteString(quoteMemQL(args.ExpectedVersion))
+	}
 	if args.Notes != "" {
 		if b.Len() > 19 {
 			b.WriteString(", ")

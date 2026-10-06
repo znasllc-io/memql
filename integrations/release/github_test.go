@@ -296,6 +296,15 @@ func ownerIntegration(t *testing.T, f *fakeGitHub) (*Integration, *recordingEngi
 	return i, engine
 }
 
+// The fixture's prepared VERSION and head are the candidate approved by the
+// caller. Dry-run and refusal cases keep exercising the same production path.
+func approvedCutRequest(f *fakeGitHub, req CutRequest) CutRequest {
+	req.ExpectedRepository = "acme/widget"
+	req.ExpectedSha = f.headSha
+	req.ExpectedVersion = "v" + strings.TrimSpace(strings.SplitN(f.files[versionFilePath], "\n", 2)[0])
+	return req
+}
+
 func ownerCtx() context.Context { return actorContext(auth.RoleOwner) }
 
 // ---------------------------------------------------------------------------
@@ -328,7 +337,7 @@ func TestCutComputesTheNextVersionFromTheNEWESTTag(t *testing.T) {
 		t.Run(tc.bump, func(t *testing.T) {
 			f := newFakeGitHub(t, tags, "headsha1234567").withVersionFile(strings.TrimPrefix(tc.want, "v") + "\n")
 			i, _ := ownerIntegration(t, f)
-			out, err := i.Cut(ownerCtx(), CutRequest{Bump: tc.bump})
+			out, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: tc.bump}))
 			if err != nil {
 				t.Fatalf("cut: %v", err)
 			}
@@ -353,7 +362,7 @@ func TestCutWalksEveryPageOfTags(t *testing.T) {
 	}
 	f := newFakeGitHub(t, tags, "headsha").withVersionFile("0.149.1\n")
 	i, _ := ownerIntegration(t, f)
-	out, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
+	out, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"}))
 	if err != nil {
 		t.Fatalf("cut: %v", err)
 	}
@@ -365,7 +374,7 @@ func TestCutWalksEveryPageOfTags(t *testing.T) {
 func TestCutTagsMainsHeadAndRecordsIt(t *testing.T) {
 	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "oldsha"}}, "abcdef1234567890").withVersionFile("1.0.1\n")
 	i, engine := ownerIntegration(t, f)
-	out, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
+	out, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"}))
 	if err != nil {
 		t.Fatalf("cut: %v", err)
 	}
@@ -394,7 +403,7 @@ func TestCutOrdersTagBeforeRelease(t *testing.T) {
 	// race the tag closes.
 	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "head").withVersionFile("1.1.0\n")
 	i, _ := ownerIntegration(t, f)
-	if _, err := i.Cut(ownerCtx(), CutRequest{Bump: "minor"}); err != nil {
+	if _, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "minor"})); err != nil {
 		t.Fatalf("cut: %v", err)
 	}
 	if len(f.createdRefs) != 1 || f.createdRefs[0] != "v1.1.0" {
@@ -421,7 +430,7 @@ func TestCutRefusesWhenTheNextTagAlreadyExists(t *testing.T) {
 	// reach ref_exists the fake must refuse the create instead.
 	f.tagStatus = http.StatusUnprocessableEntity
 	i, _ := ownerIntegration(t, f)
-	_, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
+	_, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"}))
 	if got := RefusalCode(err); got != CodeRefExists {
 		t.Fatalf("refusal = %q, want %q (error: %v)", got, CodeRefExists, err)
 	}
@@ -432,7 +441,7 @@ func TestCutRefusesWhenMainsHeadIsAlreadyReleased(t *testing.T) {
 	// of identical code.
 	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "head"}}, "head")
 	i, engine := ownerIntegration(t, f)
-	_, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
+	_, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"}))
 	if got := RefusalCode(err); got != CodeAlreadyReleasedAtHead {
 		t.Fatalf("refusal = %q, want %q (error: %v)", got, CodeAlreadyReleasedAtHead, err)
 	}
@@ -483,7 +492,7 @@ func TestCutRefusesWhenGitHubIs5xx(t *testing.T) {
 	f := newFakeGitHub(t, nil, "head")
 	f.server.Close()
 	i, _ := ownerIntegration(t, f)
-	_, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
+	_, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"}))
 	if got := RefusalCode(err); got != CodeGithubUnreachable {
 		t.Fatalf("refusal = %q, want %q (error: %v)", got, CodeGithubUnreachable, err)
 	}
@@ -494,7 +503,7 @@ func TestCutRefusesARepositoryWithNoReleaseTags(t *testing.T) {
 	// repository is a version somebody chooses.
 	f := newFakeGitHub(t, []tagRef{{Name: "nightly", Sha: "x"}, {Name: "v1.0-beta", Sha: "y"}}, "head")
 	i, _ := ownerIntegration(t, f)
-	_, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
+	_, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"}))
 	if got := RefusalCode(err); got != CodeNoReleaseTags {
 		t.Fatalf("refusal = %q, want %q (error: %v)", got, CodeNoReleaseTags, err)
 	}
@@ -509,7 +518,7 @@ func TestCutRefusesAnInvalidBump(t *testing.T) {
 	// A network call must not happen for an argument error either --
 	// validation is before the config resolve for the same reason the
 	// owner wall is.
-	_, err := i.Cut(ownerCtx(), CutRequest{Bump: "PATCH"})
+	_, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "PATCH"}))
 	if got := RefusalCode(err); got != CodeInvalidBump {
 		t.Fatalf("refusal = %q, want %q (error: %v)", got, CodeInvalidBump, err)
 	}
@@ -527,7 +536,7 @@ func TestCutReportsTheHalfDoneStateAndRecordsIt(t *testing.T) {
 	f.releaseStatus = http.StatusUnprocessableEntity
 	i, engine := ownerIntegration(t, f)
 
-	_, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
+	_, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"}))
 	if got := RefusalCode(err); got != CodeTagCreatedReleaseFailed {
 		t.Fatalf("refusal = %q, want %q (error: %v)", got, CodeTagCreatedReleaseFailed, err)
 	}
@@ -596,7 +605,7 @@ func TestDryRunComputesThePlanAndCreatesNothing(t *testing.T) {
 func TestCutWritesUnderInternalOrigin(t *testing.T) {
 	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "head").withVersionFile("1.0.1\n")
 	i, engine := ownerIntegration(t, f)
-	if _, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"}); err != nil {
+	if _, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"})); err != nil {
 		t.Fatalf("cut: %v", err)
 	}
 	if len(engine.origins) == 0 {
@@ -613,7 +622,7 @@ func TestCutWritesUnderInternalOrigin(t *testing.T) {
 func TestCutWritesTheAuditEventBesideTheRow(t *testing.T) {
 	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "head").withVersionFile("1.0.1\n")
 	i, engine := ownerIntegration(t, f)
-	if _, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"}); err != nil {
+	if _, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"})); err != nil {
 		t.Fatalf("cut: %v", err)
 	}
 	audits := engine.callsNamed("createAuditEvent")
@@ -645,7 +654,7 @@ func TestBookkeepingFailureDoesNotFailAPublishedCut(t *testing.T) {
 	i, _ := ownerIntegration(t, f)
 	i.store = NewStore(&failingEngine{})
 
-	out, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
+	out, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"}))
 	if err != nil {
 		t.Fatalf("a published cut was reported as failed because its row did not land: %v", err)
 	}

@@ -30,7 +30,7 @@ func TestCutRefusesAStaleVersionFile(t *testing.T) {
 	f := newFakeGitHub(t, []tagRef{{Name: "v0.17.1", Sha: "old"}}, "headsha1234567").withVersionFile("0.17.1\n")
 	i, engine := ownerIntegration(t, f)
 
-	_, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
+	_, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"}))
 	if got := RefusalCode(err); got != CodeVersionFileStale {
 		t.Fatalf("refusal = %q, want %q (error: %v)", got, CodeVersionFileStale, err)
 	}
@@ -81,7 +81,7 @@ func TestStaleVersionRefusalNamesTheRemedyThatFits(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "head").withVersionFile(tc.content)
 			i, engine := ownerIntegration(t, f)
-			_, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
+			_, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"}))
 			if got := RefusalCode(err); got != CodeVersionFileStale {
 				t.Fatalf("refusal = %q, want %q (error: %v)", got, CodeVersionFileStale, err)
 			}
@@ -108,7 +108,7 @@ func TestDryRunRefusesAStaleVersionFile(t *testing.T) {
 	f := newFakeGitHub(t, []tagRef{{Name: "v3.1.4", Sha: "old"}}, "deadbeefcafe").withVersionFile("3.1.4\n")
 	i, engine := ownerIntegration(t, f)
 
-	out, err := i.Cut(ownerCtx(), CutRequest{Bump: "minor", DryRun: true})
+	out, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "minor", DryRun: true}))
 	if got := RefusalCode(err); got != CodeVersionFileStale {
 		t.Fatalf("a dry run with a stale VERSION returned %+v, %v; want the %q refusal", out, err, CodeVersionFileStale)
 	}
@@ -122,7 +122,7 @@ func TestCutRefusesAMissingVersionFile(t *testing.T) {
 	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "head")
 	i, engine := ownerIntegration(t, f)
 
-	_, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
+	_, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"}))
 	if got := RefusalCode(err); got != CodeVersionFileStale {
 		t.Fatalf("refusal = %q, want %q -- a missing file is not a missing repository (error: %v)",
 			got, CodeVersionFileStale, err)
@@ -140,7 +140,7 @@ func TestCutReadsVersionAtTheShaItTags(t *testing.T) {
 	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "abcdef1234567890").withVersionFile("1.0.1\n")
 	i, _ := ownerIntegration(t, f)
 
-	if _, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"}); err != nil {
+	if _, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"})); err != nil {
 		t.Fatalf("cut: %v", err)
 	}
 	if len(f.fileReads) != 1 || f.fileReads[0] != "VERSION@abcdef1234567890" {
@@ -181,7 +181,7 @@ func TestVersionFileComparison(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "head").withVersionFile(tc.content)
 			i, engine := ownerIntegration(t, f)
-			_, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
+			_, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"}))
 			if tc.ok {
 				if err != nil {
 					t.Fatalf("VERSION %q should cut v1.0.1: %v", tc.content, err)

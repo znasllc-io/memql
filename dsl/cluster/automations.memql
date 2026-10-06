@@ -192,3 +192,29 @@ automation pruneStaleClusterNodes {
     )
   }
 }
+
+// Manual entry only. This core template is embedded with the engine; an
+// instance configures release credentials and repository, never a replacement
+// definition. The builtin enforces the owner role before reading credentials.
+
+/// Publish the exact repository, commit and version an owner reviewed with releaseCut(dryRun: true).
+/// No trigger or schedule publishes releases. Changed candidates refuse before a tag is created.
+@template
+automation publishEngineRelease {
+  args {
+    bump enum("major", "minor", "patch")!
+    expectedRepository string!
+    expectedSha string!
+    expectedVersion string!
+    notes string
+  }
+
+  published := builtin releaseCut(
+    bump: args.bump,
+    expectedRepository: args.expectedRepository,
+    expectedSha: args.expectedSha,
+    expectedVersion: args.expectedVersion,
+    notes: args.notes ?? "",
+    dryRun: false
+  )
+}

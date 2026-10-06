@@ -169,7 +169,7 @@ func TestPinBumpFailureNeverFailsTheCut(t *testing.T) {
 			f.pinFailAt = failAt
 			i, engine := ownerIntegration(t, f)
 
-			out, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch", BumpExtensionPin: true})
+			out, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch", BumpExtensionPin: true}))
 			if err != nil {
 				t.Fatalf("a published cut was reported as failed because the follow-on PR could not open: %v", err)
 			}
@@ -242,7 +242,7 @@ func TestPinBumpIsNotAttemptedUnlessAsked(t *testing.T) {
 	// that touched a second repository state nobody asked it to.
 	f := pinFake(t, realStackPin(t))
 	i, _ := ownerIntegration(t, f)
-	out, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
+	out, err := i.Cut(ownerCtx(), approvedCutRequest(f, CutRequest{Bump: "patch"}))
 	if err != nil {
 		t.Fatalf("cut: %v", err)
 	}
