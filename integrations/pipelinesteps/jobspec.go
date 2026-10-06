@@ -801,7 +801,7 @@ const (
 	// probeJobDeadline is the probe Job's whole life, past the runner's
 	// bounds on its pods coming up and its connector ending, so a probe whose
 	// runner went ends on its own.
-	probeJobDeadline = probeUpTimeout + probeEndTimeout + 30*time.Second
+	probeJobDeadline = 2*probeUpTimeout + probeEndTimeout + 30*time.Second
 )
 
 // probeListenerScript is each probe pod's listener: perl, which git depends
