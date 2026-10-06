@@ -300,14 +300,15 @@ func TestFleetStepRoutesByNeedLabelsAndPipelinesLabel(t *testing.T) {
 
 // TestFleetStepWithNoMachineIsTyped: every way of nothing having run because
 // no machine could take the step reads as pipeline_no_machine_for_need, a
-// refusal -- never as the step's command failing.
+// refusal -- never as the step's command failing. Confirmed connection loss
+// before dispatch now waits and is covered by fleet_capacity_test.go.
 func TestFleetStepWithNoMachineIsTyped(t *testing.T) {
 	// THE DISPATCHER'S VERDICT DECIDES, not the code. These are this
 	// replica's own refusals and the ones a sibling replica answers with --
 	// which travel through verbatim, so no list of codes here could keep up
 	// with them -- each carried with RefusedBeforeStart.
 	for _, code := range []string{
-		"no_worker_available", "worker_busy", "worker_unreachable", "pipelines_not_allowed", "worker_disconnected",
+		"no_worker_available", "worker_busy", "pipelines_not_allowed",
 		"owner_mismatch", "registration_refused", "forwarded_authority_refused", "decode_args",
 		"denied_pipeline_purpose", "a_code_this_engine_has_never_seen",
 	} {

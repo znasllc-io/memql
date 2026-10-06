@@ -208,3 +208,86 @@ func TestFleetQueuedTokenRefreshIsMaskedAndTimeoutShrinksAtCeiling(t *testing.T)
 		t.Fatalf("token mints=%d", len(tokens.asked))
 	}
 }
+
+func TestFleetWaitsThroughReconnectAndRechecksConsent(t *testing.T) {
+	for _, mode := range []string{"reconnect", "policy-withdrawn", "cancel", "ceiling", "missing-ceiling", "uncertain"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			calls, executions := 0, 0
+			now := exNow
+			d := &fakeDispatcher{answer: func(_ context.Context, req worker.Request) (worker.Result, error) {
+				calls++
+				if calls == 1 {
+					return worker.Result{ErrorCode: "pipeline_capacity_busy", RefusedBeforeStart: true}, nil
+				}
+				if calls == 2 {
+					if mode == "cancel" {
+						cancel()
+					}
+					if mode == "ceiling" {
+						now = now.Add(time.Hour)
+					}
+					return worker.Result{ErrorCode: "no_worker_available", RefusedBeforeStart: mode != "uncertain", WaitForConnection: true}, nil
+				}
+				if mode == "policy-withdrawn" {
+					return worker.Result{ErrorCode: "no_worker_available", RefusedBeforeStart: true}, nil
+				}
+				executions++
+				if req.Args["timeoutSec"] != 900 {
+					t.Fatal("queue consumed command timeout")
+				}
+				return worker.Result{OK: true, OutputJSON: `{"exitCode":0,"durationMs":10}`}, nil
+			}}
+			f, _, _, _ := newTestFleet(t, d)
+			f.now = func() time.Time { return now }
+			f.capacityRetry = time.Millisecond
+			req := fleetReq()
+			run := fleetRun(req)
+			if mode != "missing-ceiling" {
+				run.RunDeadline = exNow.Add(time.Hour).Format(time.RFC3339)
+			}
+			res, err := f.RunStep(ctx, req, run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "reconnect" {
+				if calls != 3 || executions != 1 || res.Status != pl.OutcomeSucceeded {
+					t.Fatalf("result=%+v calls=%d executions=%d", res, calls, executions)
+				}
+			} else if executions != 0 || res.Status == pl.OutcomeSucceeded || calls > 3 {
+				t.Fatalf("unexpected execution: result=%+v calls=%d executions=%d", res, calls, executions)
+			}
+			if mode == "cancel" && res.Status != pl.OutcomeCancelled {
+				t.Fatalf("cancel: %+v", res)
+			}
+			if mode == "ceiling" && (res.Failure == nil || res.Failure.Code != pl.CodeRunCeiling) {
+				t.Fatalf("ceiling: %+v", res)
+			}
+		})
+	}
+}
+
+func TestFleetWaitsForPreDispatchConnectionLossOnly(t *testing.T) {
+	for _, code := range []string{"worker_disconnected", "worker_unreachable"} {
+		t.Run(code, func(t *testing.T) {
+			calls := 0
+			d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+				calls++
+				if calls == 1 {
+					return worker.Result{ErrorCode: code, RefusedBeforeStart: true}, nil
+				}
+				return worker.Result{OK: true, OutputJSON: `{"exitCode":0}`}, nil
+			}}
+			f, _, _, _ := newTestFleet(t, d)
+			f.capacityRetry = time.Millisecond
+			req := fleetReq()
+			run := fleetRun(req)
+			run.RunDeadline = exNow.Add(time.Hour).Format(time.RFC3339)
+			res, err := f.RunStep(context.Background(), req, run)
+			if err != nil || calls != 2 || res.Status != pl.OutcomeSucceeded {
+				t.Fatalf("result=%+v calls=%d err=%v", res, calls, err)
+			}
+		})
+	}
+}
