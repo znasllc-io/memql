@@ -75,10 +75,13 @@ type Outcome struct {
 
 // CutRequest is one call's arguments.
 type CutRequest struct {
-	Bump             string
-	Notes            string
-	BumpExtensionPin bool
-	DryRun           bool
+	Bump               string
+	Notes              string
+	BumpExtensionPin   bool
+	DryRun             bool
+	ExpectedRepository string
+	ExpectedSha        string
+	ExpectedVersion    string
 }
 
 // requireOwner is THE GATE. Exported-shaped as a method so the test can drive
@@ -174,6 +177,19 @@ func (i *Integration) Cut(ctx context.Context, req CutRequest) (Outcome, error) 
 		out.DryRun = true
 		out.Status = "dry_run"
 		return out, nil
+	}
+
+	// A public cut is a decision about the reviewed plan, never whatever main
+	// happens to name when a later call reaches another replica. The caller
+	// carries all three values from the dry-run result; no process-local plan
+	// or session cache is involved.
+	if req.ExpectedRepository == "" || req.ExpectedSha == "" || req.ExpectedVersion == "" {
+		return Outcome{}, refuse(CodeCandidateRequired,
+			"publishing requires expectedRepository, expectedSha and expectedVersion from a reviewed dry run; no tag or Release was created.")
+	}
+	if req.ExpectedRepository != out.Repository || req.ExpectedSha != out.BaseSha || req.ExpectedVersion != out.Version {
+		return Outcome{}, refuse(CodeCandidateChanged,
+			"the release candidate changed: the current plan is %s %s at %s. Review a new dry run before publishing; no tag or Release was created.", out.Repository, out.Version, out.BaseSha)
 	}
 
 	if err := i.github.CreateTagRef(ctx, cfg.token, cfg.repo, next.tag(), headSha); err != nil {

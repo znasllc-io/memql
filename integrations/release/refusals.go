@@ -54,6 +54,9 @@ func (r *Refusal) Error() string {
 // Go, the row's `error` field, and the portal card -- and a literal repeated at
 // each is a rename waiting to go half-applied.
 const (
+	CodeCandidateRequired = "release_candidate_required"
+	CodeCandidateChanged  = "release_candidate_changed"
+
 	// CodeReleaseRepoUnconfigured -- MEMQL_RELEASE_REPO names no repository.
 	// The engine carries NO compiled-in default on purpose: it is
 	// product-agnostic and must not ship an organization's name as a

@@ -204,7 +204,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // measured by the strict loader on this tree.
 // 78 -> 80: conversation source updates and completed background runs index
 // private semantic evidence without depending on an open Ask viewer.
-const shippedAutomationCount = 80
+// 80 -> 81 with publishEngineRelease, the owner-invoked template that publishes
+// only the exact repository, commit and version reviewed in a dry run (#5853).
+const shippedAutomationCount = 81
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):
