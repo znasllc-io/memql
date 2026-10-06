@@ -67,6 +67,9 @@ func validateStepRuntime(spec *Spec, step StepSpec, scope string) *Refusal {
 		return Refuse(CodeStepInvalid, scope, "A step image must be a container image reference without whitespace; native steps cannot name an image.")
 	}
 	placement := PlacementOf(step)
+	if err := CheckMemoryMiB(step.MemoryMiB, placement == PlacementFleet); err != nil {
+		return Refuse(CodeStepInvalid, scope, "%s", err)
+	}
 	if placement != PlacementCluster && placement != PlacementFleet {
 		return Refuse(CodeStepInvalid, scope, "placement must be cluster or fleet.")
 	}
@@ -100,5 +103,20 @@ func CheckExecution(execution, platform string, fleet bool) error {
 		return fmt.Errorf("A fleet step must declare its OS/architecture in platform.")
 	}
 
+	return nil
+}
+
+// CheckMemoryMiB checks the portable shape. The runner separately applies
+// its operator-owned maximum before creating any Kubernetes resource.
+func CheckMemoryMiB(memory int, fleet bool) error {
+	if memory == 0 {
+		return nil
+	}
+	if memory < 128 || memory > 1048576 {
+		return fmt.Errorf("memoryMiB must be zero or a whole number from 128 through 1048576.")
+	}
+	if fleet {
+		return fmt.Errorf("memoryMiB requires cluster container execution.")
+	}
 	return nil
 }

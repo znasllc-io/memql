@@ -12,7 +12,7 @@ import (
 )
 
 func TestRecoveryRequiresTheSameExecutionDefinition(t *testing.T) {
-	for _, change := range []string{"command", "image", "engine", "domain", "unknown engine", "dirty engine"} {
+	for _, change := range []string{"command", "image", "memory reservation", "engine", "domain", "unknown engine", "dirty engine"} {
 		t.Run(change, func(t *testing.T) {
 			dh := newDriveHarness(t, driveManifest)
 			release := make(chan struct{})
@@ -27,6 +27,8 @@ func TestRecoveryRequiresTheSameExecutionDefinition(t *testing.T) {
 				dh.setTree(shaA, strings.Replace(driveManifest, "run: go test ./...", "run: echo changed", 1))
 			case "image":
 				dh.setTree(shaA, strings.Replace(driveManifest, "sha256:abc", "sha256:def", 1))
+			case "memory reservation":
+				dh.setTree(shaA, strings.Replace(driveManifest, "run: go test ./...", "run: go test ./...\n          memoryMiB: 6144", 1))
 			case "domain":
 				other.Configure(func(d *Deps) { d.Domain = func() string { return "different.example" } })
 			default:

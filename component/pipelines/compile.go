@@ -184,6 +184,7 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 
 	step := Step{
 		Key: StepKey(stage, declared.Name), Stage: stage, Name: declared.Name, Kind: StepCommand, Run: declared.Run,
+		MemoryMiB:      declared.MemoryMiB,
 		Execution:      ExecutionOf(declared.Execution),
 		Placement:      PlacementOf(declared),
 		Platform:       PlatformOf(c.spec, declared),

@@ -23,6 +23,7 @@ func TestConfigFromEnvDefaultsAndClamps(t *testing.T) {
 	t.Run("an empty environment is the defaults", func(t *testing.T) {
 		got := ConfigFromEnv(envOf(map[string]string{"MEMQL_NODE_ID": "workbench-1"}))
 		want := Config{
+			StepMemoryMaxMiB:   8192,
 			Namespace:          "memql-pipelines",
 			CloneImage:         "",
 			CacheClaim:         "memql-pipelines-cache",

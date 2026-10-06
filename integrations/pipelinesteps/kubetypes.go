@@ -169,8 +169,8 @@ type Container struct {
 }
 
 // Resources are a container's requests and limits, as quantities. Only the
-// isolation probe sets them: a step's containers take the LimitRange's
-// defaults, which would ask a hundred times what a probe pod uses.
+// isolation probe and explicit command memory reservations set them. Other
+// resources take the operator's namespace LimitRange defaults.
 type Resources struct {
 	Requests map[string]string `json:"requests,omitempty"`
 	Limits   map[string]string `json:"limits,omitempty"`
