@@ -113,6 +113,7 @@ func (a *App) wireWorkbenchForwarding(
 		}
 		if integ != nil {
 			integ.SetForwardRouter(forwarder)
+			a.wirePipelinesReadiness(forwarder)
 			a.Logger.Info("workbench forwarding: agent will dispatch to remote workbench peers")
 		} else {
 			a.Logger.Error("workbench forwarding: MEMQL_WORKBENCH_REMOTE is set but the workbench " +

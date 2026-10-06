@@ -97,7 +97,11 @@ func (i *Integration) Status(ctx context.Context) StatusReport {
 	executor := pipelines.CurrentExecutor()
 	runner := executor != nil
 	runners := []pipelines.RunnerReadiness{}
-	if reporter, ok := executor.(pipelines.ReadinessReporter); ok {
+	reporter := d.RunnerReadiness
+	if reporter == nil {
+		reporter, _ = executor.(pipelines.ReadinessReporter)
+	}
+	if reporter != nil {
 		runners = append(runners, reporter.Readiness(ctx)...)
 	}
 	connected := false

@@ -2,12 +2,15 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/znasllc-io/memql/component/node"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
+	"github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/integrations/workbench"
 	"google.golang.org/grpc"
 )
 
@@ -29,8 +32,18 @@ func (p *workbenchDialPeer) Stream(stream nodev1.NodeService_StreamServer) error
 		return err
 	}
 	for {
-		if _, err := stream.Recv(); err != nil {
+		msg, err := stream.Recv()
+		if err != nil {
 			return err
+		}
+		if req := msg.GetWorkbenchForwardRequest(); req != nil && req.GetAction() == workbench.PipelineReadinessAction {
+			payload, _ := json.Marshal(pipelines.RunnerReadiness{NodeID: p.id, Available: true, Isolation: "not_proven"})
+			if err := stream.Send(&nodev1.NodeServerMessage{CorrelateTo: req.RequestId, Payload: &nodev1.NodeServerMessage_WorkbenchForwardResponse{
+				WorkbenchForwardResponse: &nodev1.WorkbenchForwardResponse{RequestId: req.RequestId, PayloadJson: payload},
+			}}); err != nil {
+				return err
+			}
+			continue
 		}
 		if err := stream.Send(&nodev1.NodeServerMessage{Payload: &nodev1.NodeServerMessage_Heartbeat{
 			Heartbeat: &nodev1.NodeHeartbeat{Health: nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY},
@@ -42,6 +55,8 @@ func (p *workbenchDialPeer) Stream(stream nodev1.NodeService_StreamServer) error
 
 func TestWorkbenchWiringPreservesSharedDialerRoutesAcrossTheHop(t *testing.T) {
 	t.Setenv("MEMQL_WORKBENCH_REMOTE", "1")
+	previous := pipelines.RegisterExecutor(nil)
+	t.Cleanup(func() { pipelines.RegisterExecutor(previous) })
 	for _, restricted := range []bool{true, false} {
 		name := "bff-unrestricted"
 		if restricted {
@@ -76,7 +91,7 @@ func TestWorkbenchWiringPreservesSharedDialerRoutesAcrossTheHop(t *testing.T) {
 			if restricted {
 				dialer.SetDialTypes(node.NodeTypeAgent)
 			}
-			a := &App{Logger: dialerLogger()}
+			a := pipelineWiringApp(t)
 			a.Dependencies = append(a.Dependencies, dialer)
 			a.wireWorkbenchForwarding(identity, peers, nil, nil)
 			if countDialers(a) != 1 || a.existingWorkerDialer() != dialer {
@@ -113,6 +128,18 @@ func TestWorkbenchWiringPreservesSharedDialerRoutesAcrossTheHop(t *testing.T) {
 				} else if stableSince.IsZero() {
 					stableSince = time.Now()
 				} else if time.Since(stableSince) > 150*time.Millisecond {
+					report := a.lookupPipelinesIntegration().Status(context.Background())
+					if len(report.Runners) != 2 || report.Runners[0].NodeID != "workbench-a" || report.Runners[1].NodeID != "workbench-b" {
+						t.Fatalf("front-door status lost remote runners: %+v", report.Runners)
+					}
+					for _, runner := range report.Runners {
+						if !runner.Available || runner.Isolation != "not_proven" {
+							t.Fatalf("wrong remote evidence: %+v", runner)
+						}
+					}
+					if pipelines.CurrentExecutor() != nil {
+						t.Fatal("reading readiness installed a step executor on the front door")
+					}
 					return // Both replicas survive multiple gossip-expiry periods.
 				}
 				time.Sleep(10 * time.Millisecond)
