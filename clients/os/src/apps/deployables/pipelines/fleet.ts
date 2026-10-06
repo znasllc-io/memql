@@ -24,9 +24,13 @@ import { isRevoked, type MachineRow } from "../../fleet/rows";
 export const PIPELINES_LABEL = "pipelines";
 export const PIPELINES_ALLOWED = "allowed";
 
+// Exact protocol generation, shared with the engine router. Contract 3 adds
+// services and isolated caches; older workers cannot execute the declared step.
+export const PIPELINE_STEP_CONTRACT = 3;
+
 /** Whether a machine implements the required contract and consents through its own reported policy. */
 export function allowsPipelines(machine: Pick<MachineRow, "revokedAt" | "reportedLabels" | "pipelineContract">): boolean {
-  return !isRevoked(machine) && machine.pipelineContract === 2 && machine.reportedLabels[PIPELINES_LABEL] === PIPELINES_ALLOWED;
+  return !isRevoked(machine) && machine.pipelineContract === PIPELINE_STEP_CONTRACT && machine.reportedLabels[PIPELINES_LABEL] === PIPELINES_ALLOWED;
 }
 
 /** How many of `ownerUserId`'s own machines allow pipelines. */
