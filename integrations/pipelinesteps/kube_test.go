@@ -1035,3 +1035,80 @@ func kubeCallLog(kube *Kube, call string) error {
 	}
 	panic(fmt.Sprintf("unknown log call %q", call))
 }
+
+func TestSetProbeRoleGuardsTheObservedPod(t *testing.T) {
+	for _, index := range []int{0, 1, 2} {
+		t.Run(strconv.Itoa(index), func(t *testing.T) {
+			pod := rtOwnedBy(*isoPod(index, "", isoStarting, isoWaiting()), "job-uid")
+			job := Job{Metadata: ObjectMeta{UID: "job-uid"}}
+			k, f := newKubeFake(t, map[string]kubeAnswer{"PATCH " + kubePods + "/" + pod.Metadata.Name: {code: 200, body: `{}`}})
+			if err := k.SetProbeRole(t.Context(), job, pod); err != nil {
+				t.Fatal(err)
+			}
+			f.wantRequests(t, "PATCH "+kubePods+"/"+pod.Metadata.Name)
+			req := f.requests()[0]
+			var got map[string]any
+			if err := json.Unmarshal([]byte(req.Body), &got); err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]any{"spec": map[string]any{"schedulingGates": []any{}}, "metadata": map[string]any{"uid": pod.Metadata.UID, "resourceVersion": pod.Metadata.ResourceVersion, "labels": map[string]any{LabelProbeRole: []string{"listener", "restricted", "control"}[index]}}}
+			if req.ContentType != contentMergePatch || !reflect.DeepEqual(got, want) {
+				t.Fatalf("unsafe patch: %+v", req)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name   string
+		change func(*Pod)
+	}{
+		{"already scheduled", func(p *Pod) { p.Spec.NodeName = "node-1" }},
+		{"gate removed", func(p *Pod) { p.Spec.SchedulingGates = nil }},
+		{"no uid", func(p *Pod) { p.Metadata.UID = "" }},
+		{"no version", func(p *Pod) { p.Metadata.ResourceVersion = "" }},
+		{"different job", func(p *Pod) { p.Metadata.Labels[controllerUIDLabel] = "successor" }},
+		{"ordinary step", func(p *Pod) { delete(p.Metadata.Labels, LabelProbe) }},
+		{"unmanaged", func(p *Pod) { delete(p.Metadata.Labels, LabelManagedBy) }},
+		{"unknown index", func(p *Pod) {
+			p.Metadata.Labels[completionIndexKey] = "3"
+			p.Metadata.Annotations[completionIndexKey] = "3"
+		}},
+		{"contradictory index", func(p *Pod) { p.Metadata.Labels[completionIndexKey] = "2" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := rtOwnedBy(*isoPod(0, "", isoStarting, isoWaiting()), "job-uid")
+			tc.change(&pod)
+			k, f := newKubeFake(t, nil)
+			if err := k.SetProbeRole(t.Context(), Job{Metadata: ObjectMeta{UID: "job-uid"}}, pod); err == nil {
+				t.Fatal("accepted unverified pod")
+			}
+			if len(f.requests()) != 0 {
+				t.Fatal("unverified pod reached API")
+			}
+		})
+	}
+	t.Run("stale observation stays a conflict", func(t *testing.T) {
+		pod := rtOwnedBy(*isoPod(0, "", isoStarting, isoWaiting()), "job-uid")
+		k, _ := newKubeFake(t, map[string]kubeAnswer{"PATCH " + kubePods + "/" + pod.Metadata.Name: kubeStatus(409, "Conflict", "pod changed")})
+		if err := k.SetProbeRole(t.Context(), Job{Metadata: ObjectMeta{UID: "job-uid"}}, pod); !deploycontrol.IsConflict(err) {
+			t.Fatalf("conflict lost: %v", err)
+		}
+	})
+}
+
+func TestProbeRoleReleasePreservesOtherSchedulingGates(t *testing.T) {
+	pod := rtOwnedBy(*isoPod(0, "", isoStarting, isoWaiting()), "job-uid")
+	pod.Spec.SchedulingGates = append(pod.Spec.SchedulingGates, PodSchedulingGate{Name: "operator.example/hold"})
+	k, f := newKubeFake(t, map[string]kubeAnswer{"PATCH " + kubePods + "/" + pod.Metadata.Name: {code: 200, body: `{}`}})
+	if err := k.SetProbeRole(t.Context(), Job{Metadata: ObjectMeta{UID: "job-uid"}}, pod); err != nil {
+		t.Fatal(err)
+	}
+	var patch struct {
+		Spec struct{ SchedulingGates []PodSchedulingGate }
+	}
+	if err := json.Unmarshal([]byte(f.requests()[0].Body), &patch); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(patch.Spec.SchedulingGates, []PodSchedulingGate{{Name: "operator.example/hold"}}) {
+		t.Fatalf("removed another controller's gate: %+v", patch)
+	}
+}

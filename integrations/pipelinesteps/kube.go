@@ -440,6 +440,47 @@ func (k *Kube) JobPod(ctx context.Context, jobName string) (*Pod, error) {
 	return newest, nil
 }
 
+// SetProbeRole gives a probe pod its network-policy role. Only the observed
+// incarnation can be patched; a replacement or concurrent change conflicts.
+// Assign the role and release only our scheduling gate in the same write,
+// before the CNI can create an endpoint with an incomplete identity.
+// The role derives from the Job controller's index, never from a caller's label.
+func (k *Kube) SetProbeRole(ctx context.Context, job Job, pod Pod) error {
+	if err := named("pod", pod.Metadata.Name); err != nil {
+		return err
+	}
+	role := probeRole(&pod)
+	if !podOfJob(&pod, job) || role == "" || pod.Metadata.UID == "" || pod.Metadata.ResourceVersion == "" ||
+		pod.Metadata.Labels[LabelManagedBy] != ManagedBy || pod.Metadata.Labels[LabelProbe] != ProbeIsolation ||
+		!probeSchedulingHeld(&pod) || pod.Spec.NodeName != "" {
+		return fmt.Errorf("pipelinesteps: refusing to label an unverified isolation probe pod %s", pod.Metadata.Name)
+	}
+	gates := []PodSchedulingGate{}
+	for _, gate := range pod.Spec.SchedulingGates {
+		if gate.Name != probeRoleGate {
+			gates = append(gates, gate)
+		}
+	}
+	patch, err := json.Marshal(map[string]any{"spec": map[string]any{"schedulingGates": gates}, "metadata": map[string]any{
+		"uid": pod.Metadata.UID, "resourceVersion": pod.Metadata.ResourceVersion,
+		"labels": map[string]string{LabelProbeRole: role},
+	}})
+	if err != nil {
+		return err
+	}
+	_, err = k.api.Do(ctx, http.MethodPatch, k.corePath("pods", pod.Metadata.Name), contentMergePatch, patch)
+	return err
+}
+
+func probeSchedulingHeld(pod *Pod) bool {
+	for _, gate := range pod.Spec.SchedulingGates {
+		if gate.Name == probeRoleGate {
+			return true
+		}
+	}
+	return false
+}
+
 // newerPod is the newer of two pods by creation, the greater name on a tie;
 // a nil one is the other.
 func newerPod(a, b *Pod) *Pod {

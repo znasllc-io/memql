@@ -409,11 +409,15 @@ another pod -- and it creates no step until the proof passes.
 - **The probe** is one Indexed Job in the namespace: index 0 listens, index 1
   tests the egress restriction, and index 2 is a positive control. The listener
   admits both connectors through the same ingress rule; only index 2 has a
-  narrow egress exception to that listener on TCP 8080. Ordinary steps carry
+  narrow egress exception to that listener on TCP 8080. Workbench assigns each
+  pod a `memql.io/probe-role` label from its verified Job ownership and index,
+  using UID/version guards. The same write releases its scheduling gate, so
+  the CNI sees the final role at endpoint creation. Workbench reads the role
+  back before arming the connectors.
+  Ordinary steps carry
   no probe label and gain no exception. It takes one slot of the ceiling, so it waits for room as a step
   does, bounded by the creating step's run's ceiling.
-- **After a 5-second settle** -- a new pod's egress can be open for its first
-  second or two while the policy engine programs it -- the connector makes three
+- **After a 5-second settle** for initial policy programming, the connector makes three
   attempts one second apart, each at the cluster's DNS, which the policy allows,
   and at the listener.
 - **The verdict.** Connected on any attempt: not isolated. Isolated requires all of these:
@@ -437,6 +441,15 @@ another pod -- and it creates no step until the proof passes.
   connection that reached it. Anything else is inconclusive, and inconclusive
   is never a pass.
 
+A successful pod proof cannot establish CIDR exclusions on Cilium: its IP-block
+rules treat pod identities separately. Before each create, including when the
+pod proof is cached, Workbench reads all additive NetworkPolicies in the step
+namespace and refuses IP grants reaching RFC1918, link-local or Azure WireServer
+ranges. Missing or unreadable policies, incomplete inventories and unsupported
+IP grants refuse execution. This read requires namespace-scoped
+`networkpolicies/list`; it grants no write access. Operator-specific network
+ranges and provider endpoints still require their own deployment verification.
+
 A pass is trusted for an hour on that replica; its next create after the hour
 proves again. A proof that did not pass is not kept: the step that asked for it
 is refused `pipeline_isolation_unenforced` -- no Secret and no Job are created,
@@ -454,13 +467,15 @@ that does not enforce the policy, it could reach the cloud's instance-metadata
 endpoint (on AKS, a source of tokens for the node's identity), the mesh's
 in-cluster `/metrics` and the database's Service. The positive control proves that listener ingress is open to the restricted
 connector as well. Missing egress protection or a missing IP exception list
-therefore fails the probe instead of being hidden by ingress denial. A missing
+therefore refuses execution instead of being hidden by ingress denial. A missing
 control path is inconclusive and refuses execution.
 
 This is a representative egress check, not a scan of every cluster address or
 cloud endpoint. Operators must keep all pod, service, node and metadata ranges
 inside the denied ranges when configuring a different cluster network. The
-probe uses Indexed Job pod labels (Kubernetes 1.28 or later); see the
+probe uses Indexed Job annotations to derive its own network-policy role labels.
+Cilium excludes the native completion-index label from endpoint identities, so
+policies must not select that label. See the
 [Kubernetes Job contract](https://kubernetes.io/docs/concepts/workloads/controllers/job/)
 and [additive network policies](https://kubernetes.io/docs/concepts/services-networking/network-policies/).
 

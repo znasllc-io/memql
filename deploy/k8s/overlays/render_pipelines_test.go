@@ -156,8 +156,9 @@ var pipelinesSizing = map[string]struct {
 //	                             step ended, its outcome
 //	           delete            DeleteJob: the ack, the probe's own cleanup
 //	           deletecollection  DeleteRun: a cancelled run's Jobs, by label
-//	pods       list              JobPods: a Job's pods, by the job-name label --
+//	pods       list, patch       JobPods / guarded probe-role scheduling release
 //	                             never one pod by name, and never a watch
+//	networkpolicies list         additive CIDR grant audit before a cached proof
 //	pods/log   get               FollowLog (follow=true is a get) and TailLog
 //	secrets    create            CreateSecret: a step's Secret, the probe's
 //	           get               SecretCloneToken, ProbeTarget
@@ -170,10 +171,11 @@ var pipelinesSizing = map[string]struct {
 // No list or watch of Jobs and no get or watch of a pod: the runner polls the
 // one Job it holds by name, and finds its pods by label.
 var wantRunnerGrants = map[string][]string{
-	"batch/jobs": {"create", "get", "patch", "delete", "deletecollection"},
-	"/pods":      {"list"},
-	"/pods/log":  {"get"},
-	"/secrets":   {"create", "get", "list", "patch", "delete", "deletecollection"},
+	"batch/jobs":                        {"create", "get", "patch", "delete", "deletecollection"},
+	"networking.k8s.io/networkpolicies": {"list"},
+	"/pods":                             {"list", "patch"},
+	"/pods/log":                         {"get"},
+	"/secrets":                          {"create", "get", "list", "patch", "delete", "deletecollection"},
 }
 
 // renderedObject is one document of a rendered overlay: its identity, plus the
@@ -647,7 +649,7 @@ func TestPipelinesProbeExceptionsExcludeStepsAndTheRestrictedConnector(t *testin
 		if index != "" {
 			count++
 		}
-		if s == nil || len(s.MatchLabels) != count || len(s.MatchExpressions) != 0 || s.MatchLabels["memql.io/probe"] != "isolation" || s.MatchLabels["batch.kubernetes.io/job-completion-index"] != index {
+		if s == nil || len(s.MatchLabels) != count || len(s.MatchExpressions) != 0 || s.MatchLabels["memql.io/probe"] != "isolation" || s.MatchLabels["memql.io/probe-role"] != index {
 			t.Fatalf("probe selector leaks or loses index %q: %+v", index, s)
 		}
 	}
@@ -655,9 +657,9 @@ func TestPipelinesProbeExceptionsExcludeStepsAndTheRestrictedConnector(t *testin
 		t.Run(overlay, func(t *testing.T) {
 			objs := renderedObjects(t, overlay)
 			for _, control := range []bool{false, true} {
-				name, direction, selected, allowed := "memql-pipelines-probe-listener", "Ingress", "0", ""
+				name, direction, selected, allowed := "memql-pipelines-probe-listener", "Ingress", "listener", ""
 				if control {
-					name, direction, selected, allowed = "memql-pipelines-probe-control", "Egress", "2", "0"
+					name, direction, selected, allowed = "memql-pipelines-probe-control", "Egress", "control", "listener"
 				}
 				var np struct {
 					Spec struct {

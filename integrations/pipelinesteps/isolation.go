@@ -166,6 +166,17 @@ func isolationRefusal(v IsolationVerdict) string {
 // step stops waiting (its error), and a proof no step waits on any more is
 // stopped.
 func (r *Runner) proveIsolation(ctx context.Context) (IsolationVerdict, error) {
+	if err := ctx.Err(); err != nil {
+		return IsolationVerdict{}, err
+	}
+	// Inspect CIDR grants even when the live pod verdict is cached: policy
+	// drift must not inherit a previous proof of a different enforcement path.
+	if err := r.kube.CheckIsolationCIDRs(ctx); err != nil {
+		if ctx.Err() != nil {
+			return IsolationVerdict{}, ctx.Err()
+		}
+		return IsolationVerdict{Inconclusive: true, Detail: err.Error(), At: r.now()}, nil
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return IsolationVerdict{}, err
@@ -257,6 +268,9 @@ type probeListener struct {
 // confirmed before a successful verdict is returned.
 func (r *Runner) probeIsolation(ctx context.Context) (verdict IsolationVerdict, decided bool) {
 	if err := r.cfg.ValidatePlacement(); err != nil {
+		return IsolationVerdict{Inconclusive: true, Detail: err.Error(), At: r.now()}, true
+	}
+	if err := r.kube.CheckIsolationCIDRs(ctx); err != nil {
 		return IsolationVerdict{Inconclusive: true, Detail: err.Error(), At: r.now()}, true
 	}
 	name := IsolationProbeName(r.cfg.NodeID)
@@ -393,10 +407,52 @@ func (p *prober) up(job Job) (probeListener, error) {
 			continue
 		}
 		zero, one, two := probePods(pods, job)
+		// Network policies select our role label: Cilium deliberately excludes
+		// the Job's completion-index label from endpoint identities. Read the
+		// labels back before arming, including after a lost patch response.
+		rolesReady := true
+		for _, pod := range []*Pod{zero, one, two} {
+			if pod == nil || probeRole(pod) == "" {
+				rolesReady = false
+				continue
+			}
+			if pod.Metadata.Labels[LabelProbeRole] != probeRole(pod) || probeSchedulingHeld(pod) {
+				rolesReady = false
+				if err := p.r.kube.SetProbeRole(ctx, job, *pod); err != nil {
+					p.warn("labeling the isolation probe's pod", err)
+				}
+			}
+		}
+		if !rolesReady {
+			seen = "waiting for the probe pods' verified network-policy roles"
+			continue
+		}
 		if l, ok := listening(zero); ok && probeContainerRuns(one, true, ContainerProbeListener) && probeContainerRuns(two, true, ContainerProbeListener) {
 			return l, nil
 		}
 		seen = "index 0: " + describeProbePod(zero) + "; index 1: " + describeProbePod(one) + "; index 2: " + describeProbePod(two)
+	}
+}
+
+// probeRole rejects a disagreement between the controller's annotation and
+// label instead of assigning a network exception to an ambiguous index.
+func probeRole(pod *Pod) string {
+	if pod == nil {
+		return ""
+	}
+	annotation, label := pod.Metadata.Annotations[completionIndexKey], pod.Metadata.Labels[completionIndexKey]
+	if annotation != "" && label != "" && annotation != label {
+		return ""
+	}
+	switch cmp.Or(annotation, label) {
+	case "0":
+		return "listener"
+	case "1":
+		return "restricted"
+	case "2":
+		return "control"
+	default:
+		return ""
 	}
 }
 

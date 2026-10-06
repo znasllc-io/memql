@@ -76,10 +76,12 @@ func isoPod(index int, ip string, listener, main ContainerStatus) *Pod {
 		ready = "True"
 	}
 	return &Pod{
+		Spec: PodSpec{SchedulingGates: []PodSchedulingGate{{Name: probeRoleGate}}},
 		Metadata: ObjectMeta{
 			Name:              fmt.Sprintf("%s-%d-x7kk6", isoName(), index),
 			UID:               "uid-pod-" + i,
-			Labels:            map[string]string{"job-name": isoName(), "batch.kubernetes.io/job-completion-index": i},
+			ResourceVersion:   "1",
+			Labels:            map[string]string{"job-name": isoName(), completionIndexKey: i, LabelManagedBy: ManagedBy, LabelProbe: ProbeIsolation},
 			Annotations:       map[string]string{"batch.kubernetes.io/job-completion-index": i},
 			CreationTimestamp: rtT0,
 		},
@@ -1312,4 +1314,18 @@ func TestRunnerIsolationDefaults(t *testing.T) {
 	if v := NewRunner(cfg, nil, nil, nil, nil).Isolation(); v != (IsolationVerdict{}) {
 		t.Errorf("a new Runner's verdict = %+v, want none", v)
 	}
+}
+
+func TestIsolationCannotArmWithoutVerifiedPolicyRoles(t *testing.T) {
+	h := newIsoHarness(t, isoScript(probeExitIsolated, isoSaid[probeExitIsolated]))
+	h.r.probeUpWait = 300 * time.Millisecond
+	h.c.with(func(c *rtCluster) {
+		answer := kubeStatus(403, "Forbidden", "pod patch refused")
+		c.podPatchAnswer = &answer
+	})
+	isoWantRefused(t, h, h.run(t, isoStep(h, rtRun().StepKey)))
+	if createsOf(h.c, kubeSecrets, isoTarget()) != 0 {
+		t.Fatal("armed the probe without its network-policy roles")
+	}
+	isoLeftNothing(t, h)
 }

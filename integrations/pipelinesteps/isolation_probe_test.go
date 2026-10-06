@@ -69,6 +69,11 @@ func TestBuildIsolationProbe(t *testing.T) {
 	})
 
 	pod := job.Spec.Template.Spec
+	t.Run("roles are assigned before scheduling", func(t *testing.T) {
+		if !reflect.DeepEqual(pod.SchedulingGates, []PodSchedulingGate{{Name: probeRoleGate}}) {
+			t.Fatalf("probe can start before its policy role is assigned: %+v", pod.SchedulingGates)
+		}
+	})
 	t.Run("no credential of any kind: the step identity, no token, no Service links", func(t *testing.T) {
 		if pod.ServiceAccountName != cfg.StepServiceAccount {
 			t.Errorf("serviceAccountName = %q, want the step identity %q", pod.ServiceAccountName, cfg.StepServiceAccount)

@@ -74,7 +74,7 @@ func TestIsolationProofAgainstLocalNetworkPolicy(t *testing.T) {
 	}
 	apply("networkpolicy.yaml")
 	kubectl(nil, "-n", ns, "patch", "networkpolicy", "memql-pipelines-isolate", "--type=json", "-p", `[{"op":"remove","path":"/spec/egress/1/to/0/ipBlock/except"}]`)
-	t.Run("missing IP exceptions cannot hide behind ingress denial", func(t *testing.T) { prove(t, false, false) })
+	t.Run("missing IP exceptions refuse even when the CNI excludes pod identities from CIDR grants", func(t *testing.T) { prove(t, false, true) })
 	if t.Failed() {
 		return
 	}

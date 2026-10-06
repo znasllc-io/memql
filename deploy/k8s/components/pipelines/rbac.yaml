@@ -14,11 +14,16 @@
 #               nor watches); patched with the runner's heartbeat and the step's
 #               outcome; deleted once the agent acknowledged the result; a
 #               cancelled run's Jobs swept with one deletecollection by label.
-#   pods        list
+#   pods        list, patch
 #               the Job's pods, found by the job-name label: their phase and
 #               container states classify a failure (an image that cannot be
 #               pulled, a clone that failed) and the probe's listener. Never one
-#               pod by name, and never a watch.
+#               pod by name, and never a watch. A guarded patch assigns
+#               each verified probe pod its network-policy role, guarded by
+#               uid and resourceVersion, and removes its scheduling gate in the
+#               same write. Ordinary steps are never patched.
+#   networking.k8s.io/networkpolicies  list
+#               audit additive IP grants before trusting a pod isolation proof.
 #   pods/log    get
 #               the step's output, followed while it runs (a followed log is a
 #               get), and the tails of the clone, the services and the probe.
@@ -51,12 +56,15 @@ metadata:
     app.kubernetes.io/part-of: memql
     app.kubernetes.io/name: pipelines-runner
 rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["list"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["create", "get", "patch", "delete", "deletecollection"]
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["list"]
+    verbs: ["list", "patch"]
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]

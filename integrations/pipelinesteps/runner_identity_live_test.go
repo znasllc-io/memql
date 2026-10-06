@@ -24,12 +24,15 @@ func TestPipelineRunnerGrantIsWorkbenchOnlyOnLocalCluster(t *testing.T) {
 	manifest = regexp.MustCompile(`(?m)^(\s*namespace: )memql$`).ReplaceAll(manifest, []byte("${1}"+ns))
 	kubectl(manifest, "apply", "-f", "-")
 	for _, sa := range []string{"memql-engine", "memql-engine-workbench", "memql-pipelines-step", "memql-deploy"} {
-		for _, action := range [][2]string{{"create", "jobs.batch"}, {"get", "secrets"}} {
+		for _, action := range [][2]string{{"create", "jobs.batch"}, {"get", "secrets"}, {"patch", "pods"}, {"list", "networkpolicies.networking.k8s.io"}} {
 			// SelfSubjectAccessReview returns a normal JSON response for both
 			// decisions, so a refused request is distinct from a kubectl error.
 			group, resource := "", action[1]
-			if resource == "jobs.batch" {
+			switch resource {
+			case "jobs.batch":
 				group, resource = "batch", "jobs"
+			case "networkpolicies.networking.k8s.io":
+				group, resource = "networking.k8s.io", "networkpolicies"
 			}
 			body := []byte(`{"apiVersion":"authorization.k8s.io/v1","kind":"SelfSubjectAccessReview","spec":{"resourceAttributes":{"namespace":"` + ns + `","verb":"` + action[0] + `","group":"` + group + `","resource":"` + resource + `"}}}`)
 			answer := kubectl(body, "--as=system:serviceaccount:"+ns+":"+sa, "create", "--validate=false", "-f", "-", "-o", "jsonpath={.status.allowed}")
