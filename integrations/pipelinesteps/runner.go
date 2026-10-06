@@ -174,13 +174,11 @@ type Runner struct {
 	// node's id, so the id alone cannot say whose a claim stamped by this
 	// replica is (review finding 3); this can.
 	claims map[string]*step
-	// The orphan-Secret sweep (reaper.go): reapEvery is reapInterval, zero
-	// for none; lastReap is when this replica last began one, reaping says
-	// one is running, and onReaped, when set, is told how many it deleted.
-	reapEvery time.Duration
-	lastReap  time.Time
-	reaping   bool
-	onReaped  func(deleted int)
+	// Maintenance retains its scan position between bounded batches so a
+	// full first page cannot starve later orphans. Never shared across replicas.
+	reapMu      sync.Mutex
+	reapCursor  string
+	reapPending []ObjectMeta
 	// statusTrouble is what Status last logged of the API errors it met.
 	statusTrouble apiTrouble
 
@@ -233,7 +231,6 @@ func NewRunner(cfg Config, kube *Kube, sink func() LineSink, library LibraryStor
 		tailsTimeout:     tailsTimeout,
 		inflight:         map[*inflight]struct{}{},
 		claims:           map[string]*step{},
-		reapEvery:        reapInterval,
 		statusTrouble:    apiTrouble{},
 		probeUpWait:      probeUpTimeout,
 		probeEndWait:     probeEndTimeout,
@@ -249,8 +246,6 @@ func (r *Runner) Run(ctx context.Context, run StepRun) pl.StepResult {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer r.track(run.RunID, jobName, cancel)()
-	r.maybeReap()
-
 	s := &step{
 		r: r, run: run, jobName: jobName, ctx: ctx, trouble: apiTrouble{},
 		// The ids, never the StepRun: its secrets would print.

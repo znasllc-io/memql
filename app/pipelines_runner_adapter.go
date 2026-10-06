@@ -231,6 +231,7 @@ func (a *App) workbenchPipelineRunner(
 	uploader, bucket := blobStore()
 	runner := pipelinesteps.NewRunner(cfg, pipelinesteps.NewKube(api, cfg.Namespace), currentPipelinesLineSink,
 		a.pipelinesLibraryStoreFor(uploader, bucket), a.pipelinesTokenMinterFor())
+	a.Dependencies = append(a.Dependencies, pipelinesteps.NewMaintenance(runner))
 	a.Logger.Info("pipelines: this workbench node runs pipeline steps as Kubernetes Jobs",
 		"component", "pipelinesteps", "namespace", cfg.Namespace, "nodeId", cfg.NodeID,
 		"objectStorage", uploader != nil && strings.TrimSpace(bucket) != "")

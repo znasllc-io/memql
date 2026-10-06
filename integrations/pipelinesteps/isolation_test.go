@@ -1271,7 +1271,7 @@ func TestTheReaperNeverJudgesTheProbeSecret(t *testing.T) {
 	ownerless.Metadata.OwnerReferences = nil
 	h.c.putSecret(ownerless)
 
-	if n := h.r.reap(); n != 0 {
+	if n, _, _ := h.r.reap(context.Background()); n != 0 {
 		t.Errorf("the sweep deleted %d Secrets, want none", n)
 	}
 	if !h.c.hasSecret(s.Metadata.Name) || !h.c.hasSecret(ownerless.Metadata.Name) {

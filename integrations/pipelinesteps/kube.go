@@ -278,6 +278,31 @@ func (k *Kube) DeleteSecret(ctx context.Context, name string) error {
 	return k.delete(ctx, k.corePath("secrets", name))
 }
 
+// DeleteObservedSecret removes only the metadata revision the reaper judged.
+// A replacement or a concurrent OwnSecret must survive a stale list result.
+// The API enforces both preconditions atomically; a second GET would race.
+func (k *Kube) DeleteObservedSecret(ctx context.Context, meta ObjectMeta) error {
+	if err := named("secret", meta.Name); err != nil {
+		return err
+	}
+	if meta.UID == "" || meta.ResourceVersion == "" {
+		return errors.New("pipelinesteps: cannot delete an observed Secret without its UID and resourceVersion")
+	}
+	body, err := json.Marshal(map[string]any{
+		"apiVersion": "v1", "kind": "DeleteOptions", "propagationPolicy": "Background",
+		"preconditions": map[string]string{"uid": meta.UID, "resourceVersion": meta.ResourceVersion},
+	})
+	if err != nil {
+		return err
+	}
+	q := url.Values{"propagationPolicy": {"Background"}}
+	_, err = k.api.Do(ctx, http.MethodDelete, k.corePath("secrets", meta.Name)+"?"+q.Encode(), "application/json", body)
+	if deploycontrol.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
 func (k *Kube) delete(ctx context.Context, path string) error {
 	q := url.Values{"propagationPolicy": {"Background"}}
 	// The answer is the deleted object -- for a Secret, its values -- or a

@@ -361,11 +361,20 @@ kubectl logs -n memql-pipelines job/<job name> -c step --follow
 
 A Job lasts only until the agent holds its outcome. A Secret no Job came to own
 -- its runner went before the Job it made owned it -- is deleted by any
-replica's orphan sweep (at most every 10 minutes on a replica, as steps run)
+replica's orphan sweep (at startup and every 10 minutes, even with no builds)
 once its Job is gone and the stamped run deadline plus the Job TTL has passed.
 A different workbench ceiling cannot shorten that retention. Legacy Secrets
 without a valid deadline use their creation time plus the sweeping workbench's
 run ceiling and Job TTL as a bounded fallback.
+
+Each cleanup batch has time, page and deletion limits. It retains an unfinished
+page and pagination position, continuing promptly until the scan is complete;
+an expired API snapshot starts a fresh scan. Shutdown cancels in-flight API
+calls. Deletion includes the observed Secret's UID and resource version, so a
+replacement or newly assigned owner invalidates a stale cleanup decision.
+Uncertain API responses retain resources for a later pass. This maintenance
+only runs where the Kubernetes pipeline runner is configured and creates no
+build capacity.
 
 ---
 
