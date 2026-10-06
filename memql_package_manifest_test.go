@@ -258,8 +258,10 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 	fullStages := []string{manifestStageChecks, manifestStageTests}
 	pullRequestStages := []string{manifestStageChecks, manifestStageTests, manifestStageGates}
 	every := []string{manifestStepGoChecks, manifestStepPathRouting,
-		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks}
-	always := []string{manifestStepGoChecks, manifestStepPathRouting, manifestStepFuzz}
+		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks,
+		"sdk-ts-typecheck", "viewkit-checks", "mcp-conformance", "proving"}
+	always := []string{manifestStepGoChecks, manifestStepPathRouting, manifestStepFuzz,
+		"sdk-ts-typecheck", "viewkit-checks", "mcp-conformance", "proving"}
 	openings := []struct {
 		name    string
 		event   pipelines.Event
@@ -276,6 +278,8 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		{name: "a push to the default branch", event: pipelines.EventPush, stages: fullStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
 		{name: "a merge group", event: pipelines.EventMergeGroup, stages: fullStages,
+			runs: every, absent: []string{manifestStepGateInputs}},
+		{name: "a release", event: pipelines.EventRelease, stages: fullStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
 		// The compiler of this very manifest: Go source only, and the db-gated
 		// driver (component/pipelinerun) imports it, so the change reaches both
@@ -604,13 +608,16 @@ func TestEngineStepExportsSeesOnlyWhatGoTestReceives(t *testing.T) {
 // copies: the db-tests lane's service and the plan step's environment.
 type manifestCIWorkflow struct {
 	Jobs map[string]struct {
+		Env      map[string]string `yaml:"env"`
 		Services map[string]struct {
 			Image string            `yaml:"image"`
 			Env   map[string]string `yaml:"env"`
 		} `yaml:"services"`
 		Steps []struct {
-			ID  string            `yaml:"id"`
-			Env map[string]string `yaml:"env"`
+			ID   string            `yaml:"id"`
+			Name string            `yaml:"name"`
+			Run  string            `yaml:"run"`
+			Env  map[string]string `yaml:"env"`
 		} `yaml:"steps"`
 	} `yaml:"jobs"`
 }
