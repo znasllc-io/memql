@@ -1552,6 +1552,7 @@ func (w *fakeWork) receiptsOf(key string) []journalCall {
 type fakeExecutor struct {
 	acks          []pipelines.StepRequest
 	onAcknowledge func(pipelines.StepRequest)
+	ackError      error
 	mu            sync.Mutex
 	requests      []pipelines.StepRequest
 	cancels       []string
@@ -1574,14 +1575,16 @@ func (e *fakeExecutor) Execute(ctx context.Context, req pipelines.StepRequest) (
 	return answer(ctx, req)
 }
 
-func (e *fakeExecutor) AcknowledgeReceipt(_ context.Context, req pipelines.StepRequest) {
+func (e *fakeExecutor) AcknowledgeReceipt(_ context.Context, req pipelines.StepRequest) error {
 	e.mu.Lock()
 	e.acks = append(e.acks, req)
 	fn := e.onAcknowledge
+	err := e.ackError
 	e.mu.Unlock()
 	if fn != nil {
 		fn(req)
 	}
+	return err
 }
 func (e *fakeExecutor) acknowledged() []pipelines.StepRequest {
 	e.mu.Lock()

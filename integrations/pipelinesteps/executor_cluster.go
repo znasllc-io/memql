@@ -435,36 +435,19 @@ func (e *Executor) status(ctx context.Context, run StepRun, job, pinnedNode stri
 	return reply, servedBy, true
 }
 
-// ack tells a replica the agent holds the step's outcome, so the Job and its
-// Secret are deleted now rather than at their TTL. It outlives the step's
-// context -- it is sent as the step returns -- on a goroutine of its own.
-//
-// It is sent again until a replica confirms it, waiting twice as long before
-// each send (from noPeerWait), at most ackAttempts times, the way the
-// run-wide delete is retried (deleteRunJobs): a finished Job counts against
-// the pipelines ceiling's quota until it is deleted, so an ack lost to a
-// stream that dropped mid-answer would hold a slot that a queued step waits
-// for (final review, M1). Deleting is idempotent, so a repeat that finds the
-// two gone is confirmed. An ack still lost after the last send costs that
-// slot, and the Secret holding the clone token and the step's secrets, until
-// the Job's TTL collects both (Config.JobTTL after the Job finished).
-func (e *Executor) ack(ctx context.Context, run StepRun, job string) {
+// ack confirms deletion after the durable receipt. The caller waits for a
+// bounded series of attempts; a failure leaves the run open for another driver
+// to reconcile without executing the recorded command again.
+func (e *Executor) ack(ctx context.Context, run StepRun, job string) error {
 	args, err := json.Marshal(AckRequest{JobName: job})
 	if err != nil {
-		return
+		return err
 	}
-	ctx = context.WithoutCancel(ctx)
-	go func() {
-		attempts, err := e.sendAck(ctx, run, args)
-		if err != nil {
-			e.logger.Warn("pipelines: a step's outcome was not acked; its Job and Secret hold their slot of the ceiling until their TTL",
-				slog.String("runId", run.RunID), slog.String("stepKey", run.StepKey), slog.String("jobName", job),
-				slog.Int("attempts", attempts), slog.String("error", err.Error()))
-		}
-		if e.onAcked != nil {
-			e.onAcked(job, attempts, err)
-		}
-	}()
+	attempts, err := e.sendAck(ctx, run, args)
+	if e.onAcked != nil {
+		e.onAcked(job, attempts, err)
+	}
+	return err
 }
 
 // sendAck sends one step's ack until a replica confirms it or ackAttempts
@@ -473,6 +456,9 @@ func (e *Executor) ack(ctx context.Context, run StepRun, job string) {
 func (e *Executor) sendAck(ctx context.Context, run StepRun, args []byte) (int, error) {
 	wait := e.noPeerWait
 	for attempt := 1; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return attempt - 1, err
+		}
 		req, err := e.request(workbench.PipelineAckAction, run.RunID, run.StepKey, args, 0)
 		if err != nil {
 			return attempt, err
@@ -489,7 +475,13 @@ func (e *Executor) sendAck(ctx context.Context, run StepRun, args []byte) (int, 
 		if attempt == ackAttempts {
 			return attempt, err
 		}
-		time.Sleep(wait)
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return attempt, ctx.Err()
+		case <-timer.C:
+		}
 		wait *= 2
 	}
 }

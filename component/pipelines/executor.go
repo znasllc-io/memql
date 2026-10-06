@@ -27,9 +27,11 @@ type Executor interface {
 // ReceiptAcknowledger releases an executor's recoverable result/resources after
 // the caller has durably committed the step receipt. Returning from Execute is
 // not that proof. Calls are idempotent and may be repeated by a replacement
-// driver reading a committed receipt. Cleanup failure must not repeat the work.
+// driver reading a committed receipt. Nil confirms cleanup, including resource
+// absence; an accepted asynchronous delete is not confirmation. Failure must
+// leave the run recoverable without repeating the work.
 type ReceiptAcknowledger interface {
-	AcknowledgeReceipt(ctx context.Context, req StepRequest)
+	AcknowledgeReceipt(ctx context.Context, req StepRequest) error
 }
 
 var (

@@ -292,6 +292,12 @@ func (e *ClusterAPI) ListMetadata(ctx context.Context, path string) ([]byte, err
 	return e.doAccepting(ctx, http.MethodGet, path, metadataListAccept, "", nil)
 }
 
+// GetMetadata reads one named object's identity without requesting its data.
+// Like ListMetadata, it refuses servers that cannot provide metadata alone.
+func (e *ClusterAPI) GetMetadata(ctx context.Context, path string) ([]byte, error) {
+	return e.doAccepting(ctx, http.MethodGet, path, "application/json;as=PartialObjectMetadata;g=meta.k8s.io;v=v1", "", nil)
+}
+
 // net_JoinHostPort brackets an IPv6 literal. Spelled out rather than importing
 // net for one call, and named to read as what it is.
 func net_JoinHostPort(host, port string) string {

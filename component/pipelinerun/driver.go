@@ -243,6 +243,7 @@ type runDriver struct {
 
 	workRun       atomic.Pointer[workjournal.Run]
 	journalFailed atomic.Bool
+	cleanupFailed atomic.Bool
 	facts         requestFacts
 
 	stages []stageTracks
@@ -321,7 +322,7 @@ func (dr *runDriver) drive(ctx context.Context) driveOutcome {
 	stopBeat()
 	beating.Wait()
 	close(watched)
-	if dr.journalFailed.Load() {
+	if dr.journalFailed.Load() || dr.cleanupFailed.Load() {
 		return driveAborted
 	}
 	if dr.lease.isLost() {
@@ -487,7 +488,9 @@ func (dr *runDriver) openWork(ctx context.Context, plan pipelines.Plan) (*verdic
 			dr.setFacts()
 			for _, track := range dr.tracks {
 				if track.finished() && track.step.Kind == pipelines.StepCommand {
-					dr.acknowledgeReceipt(ctx, pipelines.CurrentExecutor(), dr.request(track, nil))
+					if !dr.acknowledgeReceipt(ctx, pipelines.CurrentExecutor(), dr.request(track, nil)) {
+						return nil, false
+					}
 				}
 			}
 			return nil, true
@@ -1081,13 +1084,35 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 	}
 }
 
-func (dr *runDriver) acknowledgeReceipt(ctx context.Context, exec pipelines.Executor, req pipelines.StepRequest) {
+func (dr *runDriver) acknowledgeReceipt(ctx context.Context, exec pipelines.Executor, req pipelines.StepRequest) bool {
+	if !dr.stillHolds(ctx) {
+		// A transient ownership-read failure must not let runStep continue to
+		// a successful verdict without having attempted cleanup.
+		if !dr.lease.isLost() {
+			dr.cleanupFailed.Store(true)
+			dr.lease.lose()
+		}
+		return false
+	}
+	var err error
+	if exec == nil {
+		err = errors.New("no executor is available to confirm cleanup")
+	}
 	if acknowledger, ok := exec.(pipelines.ReceiptAcknowledger); ok {
 		// Cleanup needs identity, not credentials. No resolved secret survives
-		// into a background acknowledgement or a recovered driver's cleanup.
+		// into an acknowledgement or a recovered driver's cleanup.
 		req.Secrets = nil
-		acknowledger.AcknowledgeReceipt(ctx, req)
+		cleanupCtx, cancel := context.WithTimeout(ctx, executorCancelTimeout)
+		err = acknowledger.AcknowledgeReceipt(cleanupCtx, req)
+		cancel()
 	}
+	if err != nil {
+		dr.log.Warn("pipelines: resource cleanup remains unconfirmed; keeping the run unfinished for recovery", "step", req.StepKey, "error", dr.mask(err.Error()))
+		dr.cleanupFailed.Store(true)
+		dr.lease.lose()
+		return false
+	}
+	return true
 }
 
 // settle writes a step's receipt -- its intent first, for a step that ends
