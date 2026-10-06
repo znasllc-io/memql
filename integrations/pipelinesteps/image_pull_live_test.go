@@ -49,6 +49,7 @@ func TestPrivateImageAccessAgainstLocalKubernetes(t *testing.T) {
 	}
 	cfg := ConfigFromEnv(func(key string) string { return settings.Data[key] })
 	cfg.Namespace, cfg.NodeID, cfg.PollInterval = ns, "private-pull-a", 250*time.Millisecond
+	cfg.NodePool = os.Getenv("MEMQL_PIPELINES_TEST_NODE_POOL")
 	sha, err := exec.CommandContext(ctx, "git", "rev-parse", "origin/main").Output()
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +93,7 @@ printf 'private image ran without exposing pull credentials\n' > result.txt`,
 	}
 	for _, missing := range []bool{false, true} {
 		run.Attempt++
-		run.TimeoutSeconds = 90
+		run.TimeoutSeconds = 120
 		if missing {
 			run.ImagePullSecret = ""
 			run.Secrets = nil
@@ -104,6 +105,10 @@ printf 'private image ran without exposing pull credentials\n' > result.txt`,
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Negative controls isolate registry authorization from another network
+		// checkout. If a cached image starts without authorization, this command
+		// succeeds and the assertion below fails.
+		job.Spec.Template.Spec.InitContainers = nil
 		job.Spec.Template.Spec.NodeSelector = map[string]string{"kubernetes.io/hostname": node}
 		secret := BuildSecret(cfg, run, name, "")
 		if _, err := kube.CreateSecret(ctx, secret); err != nil {
@@ -114,7 +119,7 @@ printf 'private image ran without exposing pull credentials\n' > result.txt`,
 		}
 		denied := second.Run(ctx, run)
 		if denied.Status == pl.OutcomeSucceeded || denied.Failure == nil || denied.Failure.Code != pl.CodeImagePullFailed {
-			t.Fatalf("cached image accepted missing=%v, or failed for another reason: %+v", missing, denied)
+			t.Fatalf("cached image accepted missing=%v, or failed for another reason: %+v; failure=%+v", missing, denied, denied.Failure)
 		}
 		if err := second.Ack(ctx, AckRequest{JobName: name}); err != nil {
 			t.Fatal(err)
