@@ -110,8 +110,8 @@ typical CI image running as root would fail.
 The Job is created with `backoffLimit: 0` -- Kubernetes never retries a step --
 with what is left of the step's time as its `activeDeadlineSeconds`
 ([Time](#time)), and with a `ttlSecondsAfterFinished` of 30 minutes as a
-backstop: the agent has the Job and its Secret deleted as soon as it holds the
-step's outcome.
+backstop: the agent requests deletion after durably journaling the step's
+outcome, then confirms its Job, Secret and pods are absent.
 
 ### The checkout
 
@@ -248,9 +248,12 @@ replica. A step that finds the quota full waits, says so once in its log
 every 10 seconds until a slot frees or its run reaches its ceiling. A finished
 Job counts until the agent has durably committed its work-step receipt and
 acknowledges it. Returning an execution result does not delete the evidence.
-The agent sends that
-acknowledgement up to 5 times, waiting twice as long before each send, and if
-every send is lost, the Job's TTL deletes it 30 minutes after it finished.
+The agent sends that acknowledgement up to 5 times within a 30-second budget,
+waiting twice as long before each send. The runner confirms the Job, Secret and
+pods are absent; an accepted delete with a terminating pod is not enough.
+Unconfirmed cleanup leaves the run unfinished for recovery. A replacement
+driver retries cleanup from the committed receipt without executing the command
+again. The Job's 30-minute TTL remains a fallback, not evidence of deletion.
 
 The LimitRange is the one place a step's size is decided: the runner sets no
 resources, and every container of the pod -- `cache-prep`, `clone` and each
@@ -715,9 +718,9 @@ an interrupted fleet intent is also uncertain and is not dispatched again.
 Inspect the original attempt before authorizing new work.
 
 The workbench action is `pipelineStepV2` and its receipt acknowledgement is
-`pipelineReceiptAck`. Older replicas reject these actions instead of ignoring
-new execution or recovery fields. Upgrade the coordinated engine set and drain
-old drivers before enabling the new protocol.
+`pipelineReceiptAckV2`. Older replicas reject these actions instead of ignoring
+new execution, recovery or cleanup guarantees. Upgrade the coordinated engine
+set and drain old drivers before enabling the new protocol.
 
 Retention is bounded. Durable external-attempt identity, late-delivery
 reconciliation, and deduplicating artifacts if interruption happens before the

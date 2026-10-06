@@ -65,7 +65,7 @@ const (
 	PipelineStatusAction = "pipelineStatus"
 	// PipelineAckAction tells the runner its outcome was durably journaled, so the Job
 	// and its Secret can be deleted. Quick.
-	PipelineAckAction = "pipelineReceiptAck"
+	PipelineAckAction = "pipelineReceiptAckV2"
 	// PipelineCancelAction deletes every Job of a run. Quick.
 	PipelineCancelAction = "pipelineCancel"
 	// PipelineReadinessAction reads this replica's runner and last isolation

@@ -305,15 +305,15 @@ func (r *Runner) Status(ctx context.Context, req StatusRequest) StatusReply {
 	return StatusReply{State: StateStale, Runner: node, JobCreatedAt: created}
 }
 
-// Ack deletes a step's Job and Secret once the agent has durably journaled the outcome; what
-// is already gone is acked.
+// Ack deletes a step's resources after its durable receipt and confirms they
+// are absent. A successful DELETE alone can leave terminating pods or finalizers.
 func (r *Runner) Ack(ctx context.Context, req AckRequest) error {
 	if !isStepJobName(req.JobName) {
 		return fmt.Errorf("pipelinesteps: %q is not the name of a step's Job, so nothing was deleted", req.JobName)
 	}
 	ctx, cancel := context.WithTimeout(ctx, quickCallTimeout)
 	defer cancel()
-	return errors.Join(r.kube.DeleteJob(ctx, req.JobName), r.kube.DeleteSecret(ctx, SecretName(req.JobName)))
+	return r.cleanupReceipt(ctx, req.JobName)
 }
 
 // CancelRun deletes every Job and Secret of a run, wherever they were created,

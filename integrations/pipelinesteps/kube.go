@@ -282,11 +282,36 @@ func (k *Kube) DeleteSecret(ctx context.Context, name string) error {
 // A replacement or a concurrent OwnSecret must survive a stale list result.
 // The API enforces both preconditions atomically; a second GET would race.
 func (k *Kube) DeleteObservedSecret(ctx context.Context, meta ObjectMeta) error {
-	if err := named("secret", meta.Name); err != nil {
+	return k.deleteObserved(ctx, k.corePath("secrets", meta.Name), meta)
+}
+
+func (k *Kube) DeleteObservedJob(ctx context.Context, meta ObjectMeta) error {
+	return k.deleteObserved(ctx, k.jobsPath(meta.Name), meta)
+}
+
+func (k *Kube) SecretMetadata(ctx context.Context, name string) (ObjectMeta, error) {
+	if err := named("secret", name); err != nil {
+		return ObjectMeta{}, err
+	}
+	out, err := k.api.GetMetadata(ctx, k.corePath("secrets", name))
+	if err != nil {
+		return ObjectMeta{}, err
+	}
+	var obj struct {
+		Metadata ObjectMeta `json:"metadata"`
+	}
+	if err := json.Unmarshal(out, &obj); err != nil {
+		return ObjectMeta{}, fmt.Errorf("pipelinesteps: reading Secret metadata: %w", err)
+	}
+	return obj.Metadata, nil
+}
+
+func (k *Kube) deleteObserved(ctx context.Context, path string, meta ObjectMeta) error {
+	if err := named("object", meta.Name); err != nil {
 		return err
 	}
 	if meta.UID == "" || meta.ResourceVersion == "" {
-		return errors.New("pipelinesteps: cannot delete an observed Secret without its UID and resourceVersion")
+		return errors.New("pipelinesteps: cannot delete an observed object without its UID and resourceVersion")
 	}
 	body, err := json.Marshal(map[string]any{
 		"apiVersion": "v1", "kind": "DeleteOptions", "propagationPolicy": "Background",
@@ -296,7 +321,7 @@ func (k *Kube) DeleteObservedSecret(ctx context.Context, meta ObjectMeta) error 
 		return err
 	}
 	q := url.Values{"propagationPolicy": {"Background"}}
-	_, err = k.api.Do(ctx, http.MethodDelete, k.corePath("secrets", meta.Name)+"?"+q.Encode(), "application/json", body)
+	_, err = k.api.Do(ctx, http.MethodDelete, path+"?"+q.Encode(), "application/json", body)
 	if deploycontrol.IsNotFound(err) {
 		return nil
 	}

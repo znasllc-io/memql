@@ -390,7 +390,7 @@ func (c *rtCluster) serve(w http.ResponseWriter, r *http.Request) {
 		case http.MethodPatch:
 			c.patchJob(w, name, body)
 		case http.MethodDelete:
-			c.deleteJob(w, name, q)
+			c.deleteJob(w, name, q, body)
 		default:
 			c.unexpected(w, r)
 		}
@@ -598,7 +598,7 @@ func (c *rtCluster) wantBackground(q map[string][]string, what string) {
 	}
 }
 
-func (c *rtCluster) deleteJob(w http.ResponseWriter, name string, q map[string][]string) {
+func (c *rtCluster) deleteJob(w http.ResponseWriter, name string, q map[string][]string, body []byte) {
 	c.wantBackground(q, "job "+name)
 	c.mu.Lock()
 	hold := c.holdJobDeletes[name]
@@ -614,6 +614,19 @@ func (c *rtCluster) deleteJob(w http.ResponseWriter, name string, q map[string][
 	if c.jobs[name] == nil {
 		rtAnswer(w, kubeStatus(404, "NotFound", fmt.Sprintf(`jobs.batch %q not found`, name)))
 		return
+	}
+	if len(body) > 0 {
+		var opts struct {
+			Preconditions struct{ UID, ResourceVersion string }
+		}
+		if err := json.Unmarshal(body, &opts); err != nil {
+			c.t.Fatal(err)
+		}
+		meta := c.jobs[name].job.Metadata
+		if opts.Preconditions.UID != meta.UID || opts.Preconditions.ResourceVersion != meta.ResourceVersion {
+			rtAnswer(w, kubeStatus(409, "Conflict", "delete preconditions changed"))
+			return
+		}
 	}
 	c.deleteJobLocked(name)
 	rtJSON(w, 200, map[string]any{"kind": "Status", "status": "Success"})
@@ -640,6 +653,7 @@ func (c *rtCluster) createSecret(w http.ResponseWriter, body []byte) {
 		return
 	}
 	c.rv++
+	s.Metadata.UID = fmt.Sprintf("secret-uid-%d", c.rv)
 	s.Metadata.ResourceVersion = strconv.Itoa(c.rv)
 	s.Metadata.CreationTimestamp = c.clock.Now()
 	c.secrets[s.Metadata.Name] = s
