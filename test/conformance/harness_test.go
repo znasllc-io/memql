@@ -73,7 +73,7 @@ type Env struct {
 	HasDB    bool
 }
 
-// newEnv builds the rig once per suite run. The DSL load + engine Init is
+// newEnv builds an isolated rig for each test. The DSL load + engine Init is
 // DB-free; the Postgres connect/migrate is best-effort and sets HasDB.
 func newEnv(t *testing.T) *Env {
 	t.Helper()
@@ -151,6 +151,13 @@ func tryDB(t *testing.T) (*bun.DB, bool) {
 	if err != nil {
 		t.Fatalf("conformance: NewMemoryNodesDatabase: %v", err)
 	}
+	// Register before starting so failed readiness/schema checks also release
+	// the monitor and its pools. Later row cleanups run first (LIFO).
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		mnd.ClosePool(ctx)
+	})
 	mnd.Start(context.Background())
 	select {
 	case <-mnd.Ready():

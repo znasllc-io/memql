@@ -1141,6 +1141,7 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	}
 
 	var cacheKey string
+	var cacheEpoch uint64
 	// NOT cached when the query refines (memql#5366). The refine lambda reads
 	// bindings the plan signature does not carry -- the call's arguments,
 	// the actor, the clock -- and its answer changes with them while plan.Root
@@ -1193,6 +1194,7 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 			return cached, nil
 		}
 		metrics.ResultCacheQueryRead(plan.SourceFunction, false)
+		cacheEpoch = e.cache.snapshot()
 	}
 
 	page, err := e.evaluateExpression(ctx, plan.Root, effectiveTimestamp, limit, sorter)
@@ -1273,7 +1275,7 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 			denylisted := anyConceptCacheDenylisted(deps)
 			explicitHint := len(plan.CacheHints) > 0
 			if len(deps) > 0 && (explicitHint || !denylisted) {
-				e.cache.set(cacheKey, result, ttl, deps)
+				e.cache.setAt(cacheKey, result, ttl, deps, cacheEpoch)
 			}
 		}
 	}

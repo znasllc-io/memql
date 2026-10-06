@@ -33,10 +33,22 @@ type resultCache struct {
 
 	// depIndex maps a concept id (e.g. "v1:cognition:utterance") to
 	// the set of cache keys whose cached result depends on that
-	// concept. Guarded by depMu, separate from mu so an eviction
-	// sweep doesn't hold the Ristretto get/set hot-path lock.
+	// concept. depMu also guards invalidation epochs. Code taking both locks
+	// takes mu first; snapshot needs only depMu and never touches Ristretto.
 	depMu    sync.Mutex
 	depIndex map[string]map[string]struct{}
+
+	// A query captures epoch before reading storage. An invalidation advances
+	// it even when no dependent key has been admitted yet. This fences late
+	// fills from in-flight reads and buffered Ristretto writes alike.
+	epoch         uint64
+	invalidatedAt map[string]uint64
+}
+
+type resultCacheEntry struct {
+	result   *ExecuteResult
+	epoch    uint64
+	concepts []string
 }
 
 // ResultCacheStats exposes a snapshot of Ristretto's internal
@@ -71,8 +83,9 @@ func newResultCache(size int64) (*resultCache, error) {
 	}
 
 	return &resultCache{
-		cache:    rc,
-		depIndex: make(map[string]map[string]struct{}),
+		cache:         rc,
+		depIndex:      make(map[string]map[string]struct{}),
+		invalidatedAt: make(map[string]uint64),
 	}, nil
 }
 
@@ -89,50 +102,65 @@ func (c *resultCache) get(key string) (*ExecuteResult, bool) {
 		return nil, false
 	}
 
-	tree, ok := value.(*ExecuteResult)
-	if !ok || tree == nil {
+	entry, ok := value.(*resultCacheEntry)
+	if !ok || entry == nil {
 		return nil, false
 	}
-
-	return cloneExecuteResult(tree), true
+	c.depMu.Lock()
+	valid := c.validAt(entry.epoch, entry.concepts)
+	c.depMu.Unlock()
+	if !valid {
+		return nil, false
+	}
+	return cloneExecuteResult(entry.result), true
 }
 
-// set stores the result under key for ttl and records the concepts
-// the cached plan reads so a later write to any of them can evict
-// this key. concepts is the dependency set the engine resolves from
-// the plan (its bound/filter concept) and the returned bundle's rows;
-// an empty concepts slice still caches the row but leaves it
-// invalidation-blind, so the engine only caches when it can name at
-// least one dependency concept.
+// snapshot is taken BEFORE querying storage, never when its result arrives.
+func (c *resultCache) snapshot() uint64 {
+	c.depMu.Lock()
+	defer c.depMu.Unlock()
+	return c.epoch
+}
+
+// set is for already-current synthetic values (including test seeds). Engine
+// queries must use setAt with the snapshot captured before their storage read.
 func (c *resultCache) set(key string, tree *ExecuteResult, ttl time.Duration, concepts []string) {
-	if c == nil || c.cache == nil || tree == nil || ttl <= 0 {
+	if c == nil {
 		return
 	}
+	c.setAt(key, tree, ttl, concepts, c.snapshot())
+}
 
+// validAt requires depMu. Only writes to the result's dependencies disqualify
+// a fill; unrelated writes preserve both admitted entries and in-flight reads.
+func (c *resultCache) validAt(epoch uint64, concepts []string) bool {
+	for _, concept := range concepts {
+		if c.invalidatedAt[concept] > epoch {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *resultCache) setAt(key string, tree *ExecuteResult, ttl time.Duration, concepts []string, epoch uint64) {
+	if c == nil || c.cache == nil || tree == nil || ttl <= 0 || len(concepts) == 0 {
+		return
+	}
 	copy := cloneExecuteResult(tree)
 	if copy == nil {
 		return
 	}
 
 	c.mu.Lock()
-	c.cache.SetWithTTL(key, copy, 1, ttl)
-	c.mu.Unlock()
-
-	c.recordDependencies(key, concepts)
-}
-
-// recordDependencies adds key to the dependency set of every concept
-// it reads. Cheap map inserts under depMu; no Ristretto contact.
-func (c *resultCache) recordDependencies(key string, concepts []string) {
-	if c == nil || len(concepts) == 0 {
-		return
-	}
-
+	defer c.mu.Unlock()
 	c.depMu.Lock()
 	defer c.depMu.Unlock()
-
-	if c.depIndex == nil {
-		c.depIndex = make(map[string]map[string]struct{})
+	if !c.validAt(epoch, concepts) {
+		return
+	}
+	entry := &resultCacheEntry{result: copy, epoch: epoch, concepts: append([]string(nil), concepts...)}
+	if !c.cache.SetWithTTL(key, entry, 1, ttl) {
+		return
 	}
 	for _, concept := range concepts {
 		if concept == "" {
@@ -151,7 +179,7 @@ func (c *resultCache) recordDependencies(key string, concepts []string) {
 // concept and returns the number of keys evicted. Index-keyed: it
 // touches only the keys recorded for that concept, never the whole
 // cache. Safe to call on every node holding a cache; a no-op when no
-// cached plan reads the concept. Called from the engine's graph-write
+// cached plan reads the concept (but still fences in-flight reads). Called from the engine's graph-write
 // event subscriber, which fires on every replica (local writes and
 // mesh-forwarded remote writes both republish onto the local bus).
 func (c *resultCache) evictConcept(concept string) int {
@@ -159,7 +187,11 @@ func (c *resultCache) evictConcept(concept string) int {
 		return 0
 	}
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.depMu.Lock()
+	c.epoch++
+	c.invalidatedAt[concept] = c.epoch
 	keys := c.depIndex[concept]
 	delete(c.depIndex, concept)
 	c.depMu.Unlock()
@@ -168,11 +200,9 @@ func (c *resultCache) evictConcept(concept string) int {
 		return 0
 	}
 
-	c.mu.Lock()
 	for key := range keys {
 		c.cache.Del(key)
 	}
-	c.mu.Unlock()
 
 	return len(keys)
 }
