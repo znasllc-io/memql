@@ -500,6 +500,31 @@ the source pipeline remains disconnected, and no release has been published.
 The installed Workbench cycle, private OCI access, rootless image builds,
 Cilium rehearsal and update/rollback proof remain unfinished.
 
+### OCI integrity primitive
+
+`scripts/ci/verify-oci.py` verifies a self-contained image archive and emits a
+machine-readable integrity result. It snapshots the input into a bounded
+temporary file, checks SHA-256 blob names and descriptor sizes, validates the
+requested platform and optional candidate digest, and streams each layer's
+uncompressed DiffID. It extracts no files and fetches no external descriptors.
+The default limits are 2 GiB for the archive and 8 GiB across unpacked layers;
+the temporary snapshot requires up to the archive limit in scratch space.
+
+The supported delivery profile is one Linux amd64 or baseline arm64 image,
+ordinary USTAR transport, SHA-256 descriptors, and plain or gzip layers.
+Multi-image indexes, auxiliary artifacts, specialized CPU variants, zstd,
+external descriptors and TAR extensions are explicitly refused. Regression
+cases cover corruption, duplicate names/JSON fields, traversal, links, FIFO
+inputs, truncation, decompression limits and candidate mismatch. A real
+rootless BuildKit ARM64 archive also passes the verifier.
+
+This verifies content integrity, not filesystem semantics, execution safety,
+source provenance, vulnerability clearance or publication approval. Builder
+integration, durable artifact storage, publication and release evidence remain
+unfinished. A publisher must consume the same immutable archive identified by
+the returned digest; verifying one path and later publishing changed bytes
+does not satisfy that contract.
+
 ## Delivery privacy progress
 
 Inbound and outbound concepts now declare the cluster-operator row tier.
