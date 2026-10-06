@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -120,6 +121,17 @@ func (s *streamSession) handleRunAutomation(envelope *memqlv1.MemqlClientMessage
 		return sink.refuse(automations.RunCodePermissionDenied,
 			"running an automation requires a cluster owner or admin")
 	}
+	// Bind the CURRENT session grant, including a rotated badge's ceiling
+	// and expiry. The stream-open context does not hold ensureAccess's result.
+	principal, err := s.forwardedPrincipal()
+	if err != nil {
+		return sink.refuse(automations.RunCodePermissionDenied, "automation caller authority is unavailable")
+	}
+	access, err := auth.VerifyForwardedAuthority(principal.Authority, time.Now())
+	if err != nil || !isOwnerOrAdmin(access) {
+		return sink.refuse(automations.RunCodePermissionDenied, "running an automation requires a current cluster owner or admin grant")
+	}
+	ctx := auth.BindForwardedContext(s.stream.Context(), principal.Claims, access, principal.Authority)
 
 	runner := s.service.automationRunner
 	if runner == nil {
@@ -142,7 +154,7 @@ func (s *streamSession) handleRunAutomation(envelope *memqlv1.MemqlClientMessage
 	// The relay bounds the wall-clock cost itself (default 60s, hard cap
 	// 300s) and refuses rather than queues when too many runs are already in
 	// flight on this node, so a run cannot park the session indefinitely.
-	runner.Run(s.stream.Context(), req, sink)
+	runner.Run(ctx, req, sink)
 	return sink.sendErr
 }
 

@@ -47,6 +47,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/node"
@@ -148,8 +149,11 @@ type runnerStub struct {
 	registry map[string]*automations.Automation
 	steps    []*automations.StepResult
 
-	mu   sync.Mutex
-	runs int
+	mu        sync.Mutex
+	runs      int
+	access    *auth.AccessContext
+	authority auth.ForwardedAuthority
+	origin    auth.CallOrigin
 }
 
 func (r *runnerStub) LookupAutomation(name string) *automations.Automation { return r.registry[name] }
@@ -159,6 +163,9 @@ func (r *runnerStub) TriggerAutomationWithClientEvent(
 ) (*automations.AutomationExecution, error) {
 	r.mu.Lock()
 	r.runs++
+	r.access, _ = auth.AccessFromContext(ctx)
+	r.authority, _ = auth.ForwardedAuthorityFromContext(ctx)
+	r.origin = auth.OriginFromContext(ctx)
 	r.mu.Unlock()
 
 	for _, s := range r.steps {
@@ -275,7 +282,14 @@ func TestAutomationRunCrossesNodes(t *testing.T) {
 	})
 
 	sink := &collectSink{}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	access := &auth.AccessContext{UserId: "v1:identity:user:release-owner", Role: auth.RoleOwner}
+	now := time.Now().UTC()
+	authority, err := auth.ForwardedAuthorityForUser(access, auth.ForwardedClassBadge, auth.RoleOwner, now.Add(time.Minute), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caller := auth.BindForwardedContext(context.Background(), authority.Principal().Claims, access, authority)
+	ctx, cancel := context.WithTimeout(caller, 30*time.Second)
 	defer cancel()
 
 	mesh.a.Run(ctx, automations.RunRequest{
@@ -333,6 +347,12 @@ func TestAutomationRunCrossesNodes(t *testing.T) {
 
 	if mesh.bRunner.runCount() != 1 {
 		t.Fatalf("the automation must have executed exactly once on node B, got %d", mesh.bRunner.runCount())
+	}
+	mesh.bRunner.mu.Lock()
+	gotAccess, gotAuthority, gotOrigin := mesh.bRunner.access, mesh.bRunner.authority, mesh.bRunner.origin
+	mesh.bRunner.mu.Unlock()
+	if gotAccess == nil || gotAccess.UserId != access.UserId || gotAccess.Role != auth.RoleOwner || gotAuthority != authority || gotOrigin != auth.OriginClient {
+		t.Fatalf("cross-node run lost or broadened caller authority: access=%+v authority=%+v origin=%v", gotAccess, gotAuthority, gotOrigin)
 	}
 	if got := mesh.link.count(automations.TopicRunRequest); got != 1 {
 		t.Errorf("want exactly one request forward, got %d", got)

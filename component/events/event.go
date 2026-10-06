@@ -131,6 +131,13 @@ const (
 	// routing rule forwards it everywhere with zero side effects (no
 	// automations).
 	KindProvidersReload
+
+	// These transport kinds are emitted only by the Go automation RunRelay.
+	// DSL publish/event steps cannot select them. Receivers require the kind
+	// as well as the topic before trusting a mesh peer's authority assertion;
+	// arbitrary application events may carry the same topic and payload.
+	KindAutomationRunRequest
+	KindAutomationRunTrace
 )
 
 // String returns a human-readable name for the event kind.
@@ -198,6 +205,10 @@ func (k Kind) String() string {
 		return "precondition_missed"
 	case KindProvidersReload:
 		return "providers_reload"
+	case KindAutomationRunRequest:
+		return "automation_run_request"
+	case KindAutomationRunTrace:
+		return "automation_run_trace"
 	case KindAuthoringPromote:
 		return "authoring_promote"
 	case KindAuthoringDemote:

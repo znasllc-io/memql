@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -517,6 +518,13 @@ func (r *RunRelay) runRemote(ctx context.Context, runId, name string, req RunReq
 			fmt.Sprintf("this node has no event bus, so it cannot relay a run to node type %q", req.TargetNodeType))
 		return
 	}
+	authority, ok := auth.ForwardedAuthorityFromContext(ctx)
+	access, err := verifyRunAuthority(authority)
+	caller, hasCaller := auth.AccessFromContext(ctx)
+	if !ok || err != nil || !hasCaller || caller == nil || caller.UserId != access.UserId || caller.Role != access.Role {
+		r.refuse(sink, runId, RunCodePermissionDenied, "relaying an automation requires the caller's current owner or admin authority")
+		return
+	}
 
 	frames := make(chan runFrame, 64)
 	r.waitersMu.Lock()
@@ -535,6 +543,7 @@ func (r *RunRelay) runRemote(ctx context.Context, runId, name string, req RunReq
 		Concept:           req.Concept,
 		Topic:             req.Topic,
 		IncludeStepOutput: req.IncludeStepOutput,
+		Authority:         authority,
 	})
 	if err != nil {
 		r.refuse(sink, runId, RunCodeInvalidArgument,
@@ -549,7 +558,7 @@ func (r *RunRelay) runRemote(ctx context.Context, runId, name string, req RunReq
 	// is how a forward silently fails to encode and the event never leaves.
 	r.bus.Publish(events.Event{
 		Topic:     TopicRunRequest,
-		Kind:      events.KindUnspecified,
+		Kind:      events.KindAutomationRunRequest,
 		Timestamp: time.Now().UTC(),
 		Payload: map[string]any{
 			"runId":      runId,
@@ -718,11 +727,16 @@ func (b *frameReorderBuffer) flushRemaining() {
 
 // onRunRequest is the EXECUTING side: a peer relayed a run to this node type.
 func (r *RunRelay) onRunRequest(evt events.Event) {
+	// Application publish steps cannot mint this transport kind. The mesh
+	// stamps OriginNodeId after authenticating the peer, outside its payload.
+	if evt.Kind != events.KindAutomationRunRequest || !evt.IsRemote() {
+		return
+	}
 	runId, _ := evt.Payload["runId"].(string)
 	origin, _ := evt.Payload["origin"].(string)
 	targetType, _ := evt.Payload["targetType"].(string)
 	raw, _ := evt.Payload["request"].(string)
-	if runId == "" || raw == "" {
+	if runId == "" || raw == "" || origin != evt.OriginNodeId {
 		return
 	}
 	// Not for this node type, or this node is the one that asked (it would
@@ -734,6 +748,9 @@ func (r *RunRelay) onRunRequest(evt events.Event) {
 	var req relayedRequest
 	if err := json.Unmarshal([]byte(raw), &req); err != nil {
 		r.logger.Warn("automation run relay: undecodable request", "runId", runId, "error", err)
+		return
+	}
+	if req.RunId != runId {
 		return
 	}
 
@@ -759,12 +776,18 @@ func (r *RunRelay) onRunRequest(evt events.Event) {
 func (r *RunRelay) executeRelayed(runId, origin string, req relayedRequest) {
 	ctx, cancel := context.WithTimeout(context.Background(), r.maxTimeout)
 	defer cancel()
+	sink := &publishingSink{relay: r, runId: runId, origin: origin}
+	access, err := verifyRunAuthority(req.Authority)
+	if err != nil {
+		r.refuseHere(sink, runId, RunCodePermissionDenied, "relayed automation caller authority is invalid: "+err.Error())
+		return
+	}
+	ctx = auth.BindForwardedContext(ctx, req.Authority.Principal().Claims, access, req.Authority)
 
 	r.logger.Info("automation run claimed from the mesh",
 		"runId", runId, "automation", req.Automation, "origin", origin,
 		"nodeId", r.nodeId, "nodeType", r.nodeType)
 
-	sink := &publishingSink{relay: r, runId: runId, origin: origin}
 	r.runLocal(ctx, runId, req.Automation, RunRequest{
 		Automation:        req.Automation,
 		Payload:           req.Payload,
@@ -778,6 +801,9 @@ func (r *RunRelay) executeRelayed(runId, origin string, req relayedRequest) {
 // relayed. Frames for unknown run ids are dropped -- they belong to another
 // node's run, since the trace topic broadcasts.
 func (r *RunRelay) onRunTrace(evt events.Event) {
+	if evt.Kind != events.KindAutomationRunTrace || !evt.IsRemote() {
+		return
+	}
 	runId, _ := evt.Payload["runId"].(string)
 	origin, _ := evt.Payload["origin"].(string)
 	raw, _ := evt.Payload["frame"].(string)
@@ -855,12 +881,26 @@ func (r *RunRelay) emitRefusal(sink RunSink, runId string, code int32, message s
 
 // relayedRequest is the JSON body of a TopicRunRequest event.
 type relayedRequest struct {
-	RunId             string         `json:"runId"`
-	Automation        string         `json:"automation"`
-	Payload           map[string]any `json:"payload,omitempty"`
-	Concept           string         `json:"concept,omitempty"`
-	Topic             string         `json:"topic,omitempty"`
-	IncludeStepOutput bool           `json:"includeStepOutput,omitempty"`
+	RunId             string                  `json:"runId"`
+	Automation        string                  `json:"automation"`
+	Payload           map[string]any          `json:"payload,omitempty"`
+	Concept           string                  `json:"concept,omitempty"`
+	Topic             string                  `json:"topic,omitempty"`
+	IncludeStepOutput bool                    `json:"includeStepOutput,omitempty"`
+	Authority         auth.ForwardedAuthority `json:"authority"`
+}
+
+// Verify on both sides of the hop. In particular, a badge can expire while
+// its request is in transit and must not be restored as an unrestricted user.
+func verifyRunAuthority(authority auth.ForwardedAuthority) (*auth.AccessContext, error) {
+	access, err := auth.VerifyForwardedAuthority(authority, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if access.Role != auth.RoleOwner && access.Role != auth.RoleAdmin {
+		return nil, fmt.Errorf("running an automation requires a cluster owner or admin")
+	}
+	return access, nil
 }
 
 // runFrame is the JSON body of a TopicRunTrace event: exactly one of the
@@ -929,7 +969,7 @@ func (p *publishingSink) publish(frame runFrame) {
 	}
 	p.relay.bus.Publish(events.Event{
 		Topic:     TopicRunTrace,
-		Kind:      events.KindUnspecified,
+		Kind:      events.KindAutomationRunTrace,
 		Timestamp: time.Now().UTC(),
 		Payload: map[string]any{
 			"runId":  p.runId,

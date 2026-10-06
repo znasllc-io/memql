@@ -31,13 +31,15 @@ import (
 type runnerProbe struct {
 	got    automations.RunRequest
 	called bool
+	ctx    context.Context
 }
 
 func (p *runnerProbe) NodeId() string   { return "bff-1" }
 func (p *runnerProbe) NodeType() string { return "bff" }
 
-func (p *runnerProbe) Run(_ context.Context, req automations.RunRequest, sink automations.RunSink) {
+func (p *runnerProbe) Run(ctx context.Context, req automations.RunRequest, sink automations.RunSink) {
 	p.called = true
+	p.ctx = ctx
 	p.got = req
 	sink.Accepted(automations.RunAccepted{
 		RunId:                 "run-1",
@@ -57,6 +59,53 @@ func (p *runnerProbe) Run(_ context.Context, req automations.RunRequest, sink au
 		RunId: "run-1", Status: "completed", DurationMs: 11, StepCount: 1,
 		ExecutedOnNodeId: "cognition-1", ExecutedOnNodeType: "cognition",
 	})
+}
+
+func TestHandleRunAutomationBindsCurrentAuthority(t *testing.T) {
+	for _, role := range []auth.Role{auth.RoleOwner, auth.RoleAdmin} {
+		t.Run(string(role), func(t *testing.T) {
+			probe := &runnerProbe{}
+			s, _ := newRunAutomationSession(t, role, probe)
+			// A current badge must survive even if stream-open claims have none.
+			s.badgeStamped = true
+			s.credentialClass = auth.ForwardedClassBadge
+			s.credentialCeiling = string(role)
+			s.badgeExpiresAt = time.Now().Add(time.Minute)
+			msg := &memqlv1.RunAutomationMsg{Automation: "publishEngineRelease"}
+			require.NoError(t, s.handleRunAutomation(runAutomationEnvelope(msg), msg))
+			require.True(t, probe.called)
+			access, ok := auth.AccessFromContext(probe.ctx)
+			require.True(t, ok, "resolved owner must reach the executor")
+			require.Equal(t, s.access.UserId, access.UserId)
+			require.Equal(t, role, access.Role)
+			authority, ok := auth.ForwardedAuthorityFromContext(probe.ctx)
+			require.True(t, ok)
+			require.Equal(t, auth.ForwardedClassBadge, authority.CredentialClass)
+			require.Equal(t, role, authority.RoleCeiling)
+			require.Equal(t, s.badgeExpiresAt, authority.ExpiresAt)
+			require.Equal(t, auth.OriginClient, auth.OriginFromContext(probe.ctx))
+		})
+	}
+}
+
+func TestHandleRunAutomationRefusesExpiredOrUnclampedGrant(t *testing.T) {
+	for _, expired := range []bool{false, true} {
+		probe := &runnerProbe{}
+		s, cs := newRunAutomationSession(t, auth.RoleOwner, probe)
+		s.badgeStamped = true
+		s.credentialClass = auth.ForwardedClassBadge
+		s.credentialCeiling = string(auth.RoleReader)
+		s.badgeExpiresAt = time.Now().Add(time.Minute)
+		if expired {
+			s.credentialCeiling = string(auth.RoleOwner)
+			s.badgeExpiresAt = time.Now().Add(-time.Second)
+		}
+		msg := &memqlv1.RunAutomationMsg{Automation: "publishEngineRelease"}
+		require.NoError(t, s.handleRunAutomation(runAutomationEnvelope(msg), msg))
+		require.False(t, probe.called)
+		frames := runFrames(t, cs)
+		require.EqualValues(t, automations.RunCodePermissionDenied, frames[len(frames)-1].GetComplete().GetErrorCode())
+	}
 }
 
 func newRunAutomationSession(t *testing.T, role auth.Role, runner AutomationRunner) (*streamSession, *captureStream) {
