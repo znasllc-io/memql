@@ -191,7 +191,22 @@ func TestWorkDiscoveryFindsNavigationByAppArgument(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Contains(t, string(rows[0].Payload), `"name":"work.workNavigate"`)
-	require.NotContains(t, string(rows[0].Payload), `"arguments"`)
+	var discovery struct {
+		Capabilities []struct {
+			Name      string
+			Arguments []struct{ Name string }
+		}
+	}
+	require.NoError(t, json.Unmarshal(rows[0].Payload, &discovery))
+	var navigationArguments []string
+	for _, capability := range discovery.Capabilities {
+		if capability.Name == "work.workNavigate" {
+			for _, argument := range capability.Arguments {
+				navigationArguments = append(navigationArguments, argument.Name)
+			}
+		}
+	}
+	require.Equal(t, []string{"app", "section", "record"}, navigationArguments, "the initial shortlist must support direct execution without rediscovery")
 	rows, err = e.workCapabilitiesBuiltin(asCaller("owner"), map[string]any{"search": "work.workNavigate"}, 0)
 	require.NoError(t, err)
 	require.Contains(t, string(rows[0].Payload), `"name":"record"`)
