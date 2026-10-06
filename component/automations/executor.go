@@ -981,6 +981,9 @@ func (e *Executor) withRunContext(ctx context.Context, stepCtx *StepContext, ste
 	if run, ok := common.RunFromContext(ctx); ok {
 		if memql.BareShortId(run.RunId) == memql.BareShortId(exec.ID) {
 			run.StepKey = key
+			if run.Continuation != nil && run.Continuation.StepKey != key {
+				run.Continuation = nil
+			}
 			applyStepOverride(&run, exec, key)
 			return common.ContextWithRun(ctx, run)
 		}

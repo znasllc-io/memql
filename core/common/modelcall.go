@@ -53,6 +53,9 @@ const (
 // never served from a journal, and that is not a gap -- a journal entry only
 // means anything relative to a run that can be replayed.
 type RunContext struct {
+	// Continuation requires one specific saved checkpoint when resuming a
+	// suspended step. It applies only to StepKey and grants no authority.
+	Continuation *StepContinuation
 	// RunId is v1:work:run.id. Empty means there is no run, whatever else is
 	// set.
 	RunId string
@@ -102,6 +105,12 @@ type RunContext struct {
 	// this context, never carried in memory from the node that took the
 	// request. The zero value routes by the rules.
 	Routing RouteChoice
+}
+
+type StepContinuation struct {
+	StepKey       string
+	ObservationID string
+	ApprovalID    string
 }
 
 // StepOverride is a person's change to one version of one step (epic

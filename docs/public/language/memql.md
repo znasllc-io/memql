@@ -2326,6 +2326,14 @@ or an explicit rerun. A builtin's name or the word `query` at its call site
 does not prove safety. The work dispatcher records `resume_effect_uncertain`
 when it cannot safely repeat an unfinished operation.
 
+A capability may instead implement `CheckpointResumePreparer`: it verifies a
+persisted suspension and binds execution to the exact saved checkpoint. This
+does not mark the capability read-only or permit ordinary retries. The agent
+turn capability uses it for an answered human question, checking the owner,
+run, step, decision and content-addressed tool transcript before continuing.
+Missing or changed evidence refuses continuation. The proof applies only to
+that waiting step; wrappers and other effects receive no implicit exception.
+
 Completed prefix steps keep their saved values, and skipped conditions remain
 skipped. A saved `nil` is distinguished from a value omitted from the journal.
 A missing bound result from a completed effect refuses recovery with

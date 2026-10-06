@@ -478,8 +478,22 @@ func (e *Executor) ResumeFrom(
 		return nil, fmt.Errorf("%w: the resume point %q is before the targeted step %q", ErrRerunStepInvalid, resumeStepId, rerun.StepKey)
 	}
 
-	// Check if resume step is retryable
-	if !e.stepRetryable(resumeStep) && !opts.AllowSideEffects {
+	// A registered capability may prove a durable continuation instead of
+	// repeating its effect. This exception applies to this suspended step only.
+	checkpoint := false
+	if !opts.AllowSideEffects && !e.stepRetryable(resumeStep) && rerun == nil &&
+		journal.StepStates[resumeStepId].Status == "waiting" && journal.HumanResumeId != "" &&
+		resumeStep.Type == StepTypeFunction && resumeStep.Function != nil && e.engine != nil &&
+		opts.Overrides[resumeStepId].Empty() {
+		var err error
+		ctx, checkpoint, err = e.engine.PrepareCheckpointResume(ctx, resumeStep.Function.Name, memql.CheckpointResumeRequest{
+			RunID: journal.RunId, StepKey: resumeStepId, ApprovalID: journal.HumanResumeId,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("%w: step %q continuation: %v", ErrNonRetryableStep, resumeStepId, err)
+		}
+	}
+	if !e.stepRetryable(resumeStep) && !opts.AllowSideEffects && !checkpoint {
 		return nil, fmt.Errorf("%w: step %q is type %s, set AllowSideEffects to retry",
 			ErrNonRetryableStep, resumeStepId, resumeStep.Type)
 	}
@@ -492,6 +506,9 @@ func (e *Executor) ResumeFrom(
 	if !opts.AllowSideEffects {
 		for i, step := range automation.Steps {
 			if step == nil {
+				continue
+			}
+			if checkpoint && step.ID == resumeStepId {
 				continue
 			}
 			if i < resumeIndex {
