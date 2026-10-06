@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -26,6 +27,7 @@ import {
 } from "../../../src/apps/deployables/pipelines/connect/flow";
 import { machineFromRow } from "../../../src/apps/fleet/rows";
 import { SHA_A } from "./fixtures";
+import { PIPELINE_STEP_CONTRACT } from "../../../src/apps/deployables/pipelines/fleet";
 
 // THE CONNECT RAIL'S READING, on values (issue memql#5502). Every claim here is
 // about a function in connect/flow.ts; connectPage.test.tsx asserts what a
@@ -367,13 +369,20 @@ describe("a person's own choice of stop", () => {
 });
 
 describe("the fleet", () => {
+  it("offers the same execution contract that the engine router accepts", () => {
+    const engine = readFileSync("../../integrations/agent/worker/pipeline_purpose.go", "utf8");
+    const required = engine.match(/PipelineStepContract\s*=\s*(\d+)/);
+    expect(required, "engine contract declaration must be readable").not.toBeNull();
+    expect(PIPELINE_STEP_CONTRACT).toBe(Number(required![1]));
+  });
+
   function machine(over: Record<string, unknown> = {}) {
     return machineFromRow({
       id: "v1:worker:registration:m1",
       ownerUserId: "v1:identity:user:u-me",
       name: "studio-mac",
       labels: { pipelines: "allowed" },
-      capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 2 } },
+      capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": 3 } },
       operatorLabels: {},
       lastSeenAt: "2026-10-04T11:59:50Z",
       ...over,
@@ -387,10 +396,10 @@ describe("the fleet", () => {
   });
 
   it("does not treat labels or unknown action versions as an execution contract", () => {
-    for (const version of [undefined, 0, 1, 3, "2", 2.5]) {
+    for (const version of [undefined, 0, 1, 2, 4, "3", 3.5]) {
       expect(fleetAvailable([machine({
         capabilityDescriptor: { actionContracts: { "workerHost.pipeline_step": version } },
-        operatorLabels: { "workerHost.pipeline_step": "2" },
+        operatorLabels: { "workerHost.pipeline_step": "3" },
       })], "u-me")).toBe(false);
     }
   });
