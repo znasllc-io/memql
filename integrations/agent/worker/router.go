@@ -232,9 +232,13 @@ func NewRouter(store FleetStore, logger *slog.Logger, clock func() time.Time) *R
 type RoutePlan struct {
 	Policy     Policy
 	Candidates []Candidate
-	Require    map[string]string
-	Prefer     map[string]string
-	Rejected   map[string]string
+	// OfflineCandidates satisfy capability and label requirements but have no
+	// stream. They are never dispatched; pipeline admission may wait for their
+	// connection after applying the same repository, contract and platform gates.
+	OfflineCandidates []Candidate
+	Require           map[string]string
+	Prefer            map[string]string
+	Rejected          map[string]string
 	// Total is how many machines the owner has registered at all, before any
 	// filtering. It separates "you have no machines" from "none of your four
 	// matched", which are different problems with different fixes.
@@ -320,6 +324,7 @@ func (r *Router) Plan(
 	}
 
 	kept := make([]Candidate, 0, len(all))
+	var offline []Candidate
 	rejected := map[string]string{}
 	for _, c := range all {
 		switch {
@@ -330,6 +335,9 @@ func (r *Router) Plan(
 			// lastSeenAt without connectedNodeId is exactly the false-ready
 			// shape StreamHeld exists to refuse.
 			rejected[c.RegistrationId] = "offline"
+			if c.SupportsCapability(capability) && satisfiesLabels(c.Labels, merged) {
+				offline = append(offline, c)
+			}
 		case !c.SupportsCapability(capability):
 			rejected[c.RegistrationId] = "missing capability " + capability
 		case !satisfiesLabels(c.Labels, merged):
@@ -342,12 +350,13 @@ func (r *Router) Plan(
 	orderCandidates(kept, policy, preferred, capability)
 
 	return RoutePlan{
-		Policy:     policy,
-		Candidates: kept,
-		Require:    merged,
-		Prefer:     preferred,
-		Rejected:   rejected,
-		Total:      len(all),
+		Policy:            policy,
+		Candidates:        kept,
+		OfflineCandidates: offline,
+		Require:           merged,
+		Prefer:            preferred,
+		Rejected:          rejected,
+		Total:             len(all),
 	}, nil
 }
 
@@ -531,51 +540,54 @@ func LabelsFromArgs(v any) map[string]string {
 // RequireRepository narrows a plan using the machine-reported action scope.
 // Missing metadata is unknown consent, and cannot be repaired by labels.
 func (p *RoutePlan) RequireRepository(action, repository string) {
-	kept := make([]Candidate, 0, len(p.Candidates))
-	if p.Rejected == nil {
-		p.Rejected = map[string]string{}
-	}
-	for _, candidate := range p.Candidates {
+	p.filterCandidates(func(candidate Candidate) string {
 		if candidate.RepositoryScopes.Accepts(action, repository) {
-			kept = append(kept, candidate)
-		} else {
-			p.Rejected[candidate.RegistrationId] = fmt.Sprintf("%s's reported repository policy does not accept %s for %s", candidate.Label(), repository, action)
+			return ""
 		}
-	}
-	p.Candidates = kept
+		return fmt.Sprintf("%s's reported repository policy does not accept %s for %s", candidate.Label(), repository, action)
+	})
 }
 
 // RequireActionContract excludes older implementations that might silently
 // ignore newer request fields. Operator labels cannot override this metadata.
 func (p *RoutePlan) RequireActionContract(action string, version int) {
-	kept := make([]Candidate, 0, len(p.Candidates))
-	if p.Rejected == nil {
-		p.Rejected = map[string]string{}
-	}
-	for _, candidate := range p.Candidates {
+	p.filterCandidates(func(candidate Candidate) string {
 		if candidate.ActionContracts.Supports(action, version) {
-			kept = append(kept, candidate)
-		} else {
-			p.Rejected[candidate.RegistrationId] = fmt.Sprintf("%s has not reported %s contract %d", candidate.Label(), action, version)
+			return ""
 		}
-	}
-	p.Candidates = kept
+		return fmt.Sprintf("%s has not reported %s contract %d", candidate.Label(), action, version)
+	})
 }
 
 // RequireNativePlatform uses build metadata, never an operator's placement label.
 // Containers use the Docker daemon's live platform check instead: a Mac may
 // serve Linux containers, and the daemon may differ from the worker host.
 func (p *RoutePlan) RequireNativePlatform(platform string) {
-	kept := make([]Candidate, 0, len(p.Candidates))
+	p.filterCandidates(func(candidate Candidate) string {
+		if platform != "" && candidate.NativePlatform == platform {
+			return ""
+		}
+		return fmt.Sprintf("%s has not reported native platform %s", candidate.Label(), platform)
+	})
+}
+
+// A disconnected worker cannot keep a pipeline waiting after consent or its
+// binary contract is withdrawn. Apply every narrowing to both sets.
+func (p *RoutePlan) filterCandidates(reason func(Candidate) string) {
 	if p.Rejected == nil {
 		p.Rejected = map[string]string{}
 	}
-	for _, candidate := range p.Candidates {
-		if platform != "" && candidate.NativePlatform == platform {
-			kept = append(kept, candidate)
-		} else {
-			p.Rejected[candidate.RegistrationId] = fmt.Sprintf("%s has not reported native platform %s", candidate.Label(), platform)
+	filter := func(candidates []Candidate) []Candidate {
+		kept := make([]Candidate, 0, len(candidates))
+		for _, candidate := range candidates {
+			if why := reason(candidate); why != "" {
+				p.Rejected[candidate.RegistrationId] = why
+			} else {
+				kept = append(kept, candidate)
+			}
 		}
+		return kept
 	}
-	p.Candidates = kept
+	p.Candidates = filter(p.Candidates)
+	p.OfflineCandidates = filter(p.OfflineCandidates)
 }

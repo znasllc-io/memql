@@ -133,6 +133,11 @@ type Result struct {
 	// included, whatever code it carries: the same code from a sibling is
 	// that replica's word about a machine it holds.
 	RefusedByGate bool
+
+	// WaitForConnection is the router's own evidence that an otherwise
+	// eligible pipeline worker has no stream. It is never read from a worker
+	// response. A caller still requires RefusedBeforeStart and a finite ceiling.
+	WaitForConnection bool
 }
 
 // Request carries the inputs of one dispatch: from the agent tool loop, or --
@@ -369,6 +374,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 			ErrorCode:          "no_worker_available",
 			ErrorMessage:       noCandidateMessage(plan, gate.requiredCapability),
 			RefusedBeforeStart: true,
+			WaitForConnection:  req.Purpose == PurposePipeline && len(plan.OfflineCandidates) > 0,
 		}
 		d.recordInvocation(ctx, req, "", startedAt, d.clock(), res, "no_worker_available", record)
 		return res, nil

@@ -12,9 +12,10 @@ import (
 )
 
 // Capacity is admission, not an execution retry. Only a dispatcher's confirmed
-// busy-before-start result may wait and re-route. A transport error, absent
-// worker, policy withdrawal or uncertain execution returns immediately. Each
-// re-route repeats current routing, consent and receiving-replica checks.
+// busy-before-start result or an eligible worker awaiting connection may wait
+// and re-route. A transport error, policy withdrawal or uncertain execution
+// returns immediately. Each re-route repeats current routing, consent and
+// receiving-replica checks.
 func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRequest, run *StepRun, token string, capture *Capture, chunk func(*nodev1.WorkerForwardStream)) (worker.Result, *pl.StepResult, error) {
 	deadline, deadlineErr := time.Parse(time.RFC3339Nano, run.RunDeadline)
 	ownTimeout := run.TimeoutSeconds
@@ -52,11 +53,11 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 			capture.AddSecrets(secretValues(*run, token)...)
 		}
 		result, err := f.dispatchStep(ctx, req, *run, token, chunk)
-		if err != nil || result.OK || !result.RefusedBeforeStart || result.RefusedByGate || result.ErrorCode != "pipeline_capacity_busy" {
+		if err != nil || result.OK || !result.RefusedBeforeStart || result.RefusedByGate || !fleetMayWait(result) {
 			return result, nil, err
 		}
 		if deadlineErr != nil {
-			res := failedResult(pl.CodeExecutorError, "Fleet capacity is busy and the run has no readable ceiling; no unbounded wait or replacement command was started.")
+			res := failedResult(pl.CodeExecutorError, "Fleet capacity is unavailable and the run has no readable ceiling; no unbounded wait or replacement command was started.")
 			return worker.Result{}, &res, nil
 		}
 		if !queued {
@@ -81,5 +82,19 @@ func (f *Fleet) dispatchWhenCapacityAvailable(ctx context.Context, req pl.StepRe
 		if delay < maxDelay {
 			delay = min(2*delay, maxDelay)
 		}
+	}
+}
+
+// The dispatcher proves both eligibility and that nothing started. A missing
+// candidate alone is not enough: it may mean revoked consent or a mismatched
+// contract. A lost reply after dispatch must never replay the command.
+func fleetMayWait(result worker.Result) bool {
+	switch result.ErrorCode {
+	case "pipeline_capacity_busy", "worker_disconnected", "worker_unreachable":
+		return true
+	case "no_worker_available":
+		return result.WaitForConnection
+	default:
+		return false
 	}
 }

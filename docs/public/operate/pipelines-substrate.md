@@ -546,18 +546,20 @@ with one difference: a pipeline step always moves on to the next matching
 machine when one refuses before starting, whatever the policy's `fallback` says.
 A refusal before start ran nothing, and a machine whose stream another agent
 replica holds is reached over a forward under the owner's authority -- skipped,
-never failed, when it cannot be. With no machine that offers the need, allows
-pipelines and is online, the step is refused `pipeline_no_machine_for_need`, and
-nothing ran. Under contract 3, policy rejection, busy build capacity and an unavailable
+never failed, when it cannot be. With no machine that offers the need and allows pipelines, the step is
+refused `pipeline_no_machine_for_need`, and nothing ran. An otherwise eligible
+worker that is offline can keep admission waiting for its connection; revoked
+workers, withdrawn repository consent and incompatible contracts cannot. Under contract 3, policy rejection, busy build capacity and an unavailable
 runtime are confirmed pre-execution refusals and permit another candidate.
-When the dispatcher confirms that shared build capacity was busy before any
-execution, the fleet runner waits and routes again under the run's wall-clock
-ceiling. Every attempt rechecks consent and routing. Waiting does not consume
+When the dispatcher confirms that shared build capacity was busy, an eligible
+worker is offline, or its connection disappeared before dispatch, the fleet
+runner waits and routes again under the run's wall-clock ceiling. Every attempt rechecks consent and routing. Waiting does not consume
 the command's own timeout, but the run ceiling still limits its remaining
 execution time. A long wait refreshes the repository clone token and keeps
 both the old and new token masked. Cancellation ends the wait promptly.
-Timeouts, disconnects, uncertain cleanup and interrupted prior attempts do not: a
-command might already have performed an external effect. Each dispatch is recorded like an agent's call, as a
+Timeouts, disconnects after dispatch, uncertain cleanup and interrupted prior
+attempts do not permit another dispatch: a command might already have performed
+an external effect. Each dispatch is recorded like an agent's call, as a
 `v1:worker:invocation` of `workerHost.pipeline_step` naming no agent, filed under
 the work run and the step.
 
