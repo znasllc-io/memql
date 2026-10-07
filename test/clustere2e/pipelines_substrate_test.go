@@ -202,6 +202,7 @@ func TestPipelinesSubstrate(t *testing.T) {
 	t.Run("normalization", testSubstrateNormalization)
 	t.Run("manifest", func(t *testing.T) { compileSubstratePlan(t) })
 	t.Run("receipt-cleanup", testSubstrateReceiptCleanup)
+	t.Run("library-stream", TestSubstrateRecordingLibraryStream)
 
 	cluster := connectSubstrateCluster(t)
 
@@ -528,6 +529,7 @@ func TestPipelinesSubstrate(t *testing.T) {
 				substrateCleanupPatience, left, namespace, selector)
 		}
 	})
+	t.Run("cancellation-grant", TestPipelineRunCancellationGrant)
 }
 
 // assertIsolationProof is where the runner's isolation proof (ruling R12) is
@@ -561,6 +563,58 @@ func assertIsolationProof(t *testing.T, run *substrateRun) {
 // privilege to gain; the step is the pod's one container. The kubelet starts
 // the step only once that probe passes, which is what the one-shot psql relies
 // on.
+// Cancel through the deployed Workbench identity, rather than the operator's
+// cluster-admin client. An empty run still needs the bounded Job inventory to
+// confirm cleanup; a durable stop marker alone is not a successful cancellation.
+func TestPipelineRunCancellationGrant(t *testing.T) {
+	cluster := connectSubstrateCluster(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	configFor := deployedRunnerConfig(ctx, t, cluster)
+	cfg := configFor("cancel-first")
+	engine := engineClusterAPI(ctx, t, cluster, cfg.Namespace)
+	runID := "cancel-e2e-" + id.NewShortId()
+	// This fixture has no dispatchers or pending creates. Remove only its own
+	// metadata-identified marker after both native calls return, with UID/RV
+	// preconditions. Never sweep another run's retained stop records.
+	t.Cleanup(func() {
+		cleanupCtx, done := context.WithTimeout(context.Background(), 30*time.Second)
+		defer done()
+		path := "api/v1/namespaces/" + cfg.Namespace + "/secrets"
+		query := "?labelSelector=" + url.QueryEscape(pipelinesteps.LabelManagedBy+"="+pipelinesteps.ManagedBy)
+		body, status, err := cluster.call(cleanupCtx, http.MethodGet, path+query, "application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1", nil)
+		if err != nil || status != http.StatusOK {
+			t.Errorf("reading test cancellation marker metadata: HTTP %d, %v", status, err)
+			return
+		}
+		var list struct {
+			Items []struct{ Metadata pipelinesteps.ObjectMeta } `json:"items"`
+		}
+		if err := json.Unmarshal(body, &list); err != nil {
+			t.Error(err)
+			return
+		}
+		for _, item := range list.Items {
+			m := item.Metadata
+			if m.Annotations["memql.io/retired-run"] != runID || m.UID == "" || m.ResourceVersion == "" || len(m.OwnerReferences) != 0 {
+				continue
+			}
+			options, _ := json.Marshal(map[string]any{"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": map[string]string{"uid": m.UID, "resourceVersion": m.ResourceVersion}})
+			_, status, err = cluster.call(cleanupCtx, http.MethodDelete, path+"/"+m.Name, "", options)
+			if err != nil || (status != http.StatusOK && status != http.StatusAccepted) {
+				t.Errorf("removing test cancellation marker: HTTP %d, %v", status, err)
+			}
+		}
+	})
+	for _, node := range []string{"cancel-first", "cancel-recovery"} {
+		runner := pipelinesteps.NewRunner(configFor(node), pipelinesteps.NewKube(engine, cfg.Namespace), nil, nil, nil)
+		count, err := runner.CancelRun(ctx, pipelinesteps.CancelRequest{RunID: runID})
+		if err != nil || count != 0 {
+			t.Fatalf("%s cannot confirm cancellation under the Workbench Role: count %d, %v", node, count, err)
+		}
+	}
+}
+
 func assertNativeSidecar(t *testing.T, job pipelinesteps.Job, sidecar, ready string) {
 	t.Helper()
 	pod := job.Spec.Template.Spec
@@ -587,8 +641,12 @@ func assertNativeSidecar(t *testing.T, job pipelinesteps.Job, sidecar, ready str
 	if sc := c.SecurityContext; sc == nil || sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
 		t.Errorf("%s may gain privileges (%+v); a service runs with allowPrivilegeEscalation false", sidecar, sc)
 	}
-	if len(pod.Containers) != 1 || pod.Containers[0].Name != pipelinesteps.ContainerStep {
-		t.Errorf("the pod's containers are %+v; want the step alone", pod.Containers)
+	var containers []string
+	for _, container := range pod.Containers {
+		containers = append(containers, container.Name)
+	}
+	if !slices.Equal(containers, []string{pipelinesteps.ContainerStep, pipelinesteps.ContainerArtifacts}) {
+		t.Errorf("the pod's containers are %v; want the step and its artifact collector", containers)
 	}
 }
 

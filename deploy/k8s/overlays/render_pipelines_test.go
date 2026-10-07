@@ -152,6 +152,7 @@ var pipelinesSizing = map[string]struct {
 //	           get               GetJob: a step's status, adopting a Job, the
 //	                             sweep asking whether a Secret's Job exists, and
 //	                             CreateJob's read-back when the Job was there
+//	           list              runResourceNames: bounded cancellation inventory
 //	           patch             AnnotateJob: the heartbeat, a claim, how the
 //	                             step ended, its outcome
 //	           delete            DeleteJob: the ack, the probe's own cleanup
@@ -168,14 +169,16 @@ var pipelinesSizing = map[string]struct {
 //	           delete            DeleteSecret
 //	           deletecollection  DeleteRun: a cancelled run's Secrets
 //
-// No list or watch of Jobs and no get or watch of a pod: the runner polls the
-// one Job it holds by name, and finds its pods by label.
+// No watch of Jobs and no get or watch of a pod: ordinary progress polls one
+// Job by name; cancellation inventories only its run's metadata by label.
+// pods/exec needs GET for its WebSocket handshake and CREATE for Kubernetes
+// 1.35's additional upgrade authorization, both confined to this namespace.
 var wantRunnerGrants = map[string][]string{
-	"batch/jobs":                        {"create", "get", "patch", "delete", "deletecollection"},
+	"batch/jobs":                        {"create", "get", "list", "patch", "delete", "deletecollection"},
 	"networking.k8s.io/networkpolicies": {"list"},
 	"/pods":                             {"list", "patch"},
 	"/pods/log":                         {"get"},
-	"/pods/exec":                        {"get"},
+	"/pods/exec":                        {"get", "create"},
 	"/secrets":                          {"create", "get", "list", "patch", "delete", "deletecollection"},
 }
 
