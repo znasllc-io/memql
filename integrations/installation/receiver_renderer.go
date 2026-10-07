@@ -329,6 +329,30 @@ var receiverRendererEnvironment = map[string]bool{
 	"HELM_CACHE_HOME": true, "HELM_CONFIG_HOME": true, "HELM_DATA_HOME": true,
 }
 
+// A Deployment-wide timeout override also reaches copyutil. It does not
+// configure /bin/cp; recognize only the same literal as the main container,
+// rather than allowing executable-affecting environment or indirect sources.
+func receiverCopyInitEnvironment(init, container map[string]any) bool {
+	if init["env"] == nil {
+		return true
+	}
+	values, ok := init["env"].([]any)
+	if !ok || len(values) != 1 {
+		return false
+	}
+	item, ok := values[0].(map[string]any)
+	if !ok || len(item) != 2 || resourceText(item, "name") != "ARGOCD_EXEC_TIMEOUT" || resourceText(item, "value") == "" {
+		return false
+	}
+	main, _ := container["env"].([]any)
+	for _, value := range main {
+		if sameJSON(value, item) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *receiverReads) rendererInputs(ctx context.Context, namespace string, pod, container map[string]any, cfg receiverRenderer) error {
 	args, _ := receiverStringList(container["args"])
 	command, _ := receiverStringList(container["command"])
@@ -347,7 +371,7 @@ func (r *receiverReads) rendererInputs(ctx context.Context, namespace string, po
 		for _, raw := range values {
 			init, _ := raw.(map[string]any)
 			command, _ := receiverStringList(init["command"])
-			if resourceText(init, "image") != cfg.Image || !sameJSON(command, []string{"/bin/cp", "-n", "/usr/local/bin/argocd", "/var/run/argocd/argocd-cmp-server"}) || init["args"] != nil || init["env"] != nil || init["envFrom"] != nil {
+			if resourceText(init, "image") != cfg.Image || !sameJSON(command, []string{"/bin/cp", "-n", "/usr/local/bin/argocd", "/var/run/argocd/argocd-cmp-server"}) || init["args"] != nil || !receiverCopyInitEnvironment(init, container) || init["envFrom"] != nil {
 				return errors.New("installation renderer init container requires qualification")
 			}
 		}

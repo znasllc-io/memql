@@ -625,7 +625,9 @@ verification result. Custom binary mounts, sidecars, commands, Kustomize
 versions and unsupported transports require their own qualified profile.
 Mutable image tags do not satisfy this contract. Renderer environment names
 are qualified explicitly; inline passwords and telemetry credentials refuse
-in favor of versioned references.
+in favor of versioned references. The fixed copy-helper init command may inherit
+the main container's literal `ARGOCD_EXEC_TIMEOUT`; other init environment,
+indirect values and changed commands remain unqualified.
 
 The native connection verifies the renderer's certificate chain and service
 DNS identity and additionally pins the exact leaf from its named Secret. It
@@ -678,3 +680,24 @@ selects the receiving ConfigMap; absence disables preparation. Constructing this
 adapter does not register a capability, provide a fleet fallback or authorize a
 revision write. The revision recipe's separate immutable execution binding must
 be connected before public activation.
+
+### Installed renderer qualification
+
+The October 7 local renderer bootstrap created its named TLS Secret, pinned the
+existing Argo platform image in its normal and copy-helper containers, and added
+one ingress policy permitting only MemQL BFF/agent pods on TCP 8081. The renderer
+became ready, all three existing Argo Applications stayed Healthy/Synced, and
+the 26 captured serving Deployment, engine Pod and database objects retained
+their identities and specifications. The Application baseline, receiver
+configuration, preparation RBAC and protected-resource annotations were held.
+
+`TestReceivingRendererThroughInstalledArgo` then read 12 actual renderer inputs
+through an explicitly selected authenticated Kubernetes connection, checked
+Deployment/ReplicaSet/Pod ownership and image identity, verified the live TLS
+leaf against the named Secret, and reobserved the complete read set. It passed
+with the race detector in 2.715 seconds. Its operator-authenticated loopback
+forward is a diagnostic transport; this result does not qualify serving-node
+RBAC, network-policy reachability, a candidate publication or an engine update.
+The opt-in test requires `MEMQL_INSTALLATION_RENDERER_TEST_KUBECONFIG`,
+`MEMQL_INSTALLATION_RENDERER_TEST_ADDRESS` and the reviewed platform digest in
+`MEMQL_INSTALLATION_RENDERER_TEST_IMAGE`. It only reads the installed renderer.
