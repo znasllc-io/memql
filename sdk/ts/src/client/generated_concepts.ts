@@ -1097,6 +1097,7 @@ export const BoundConcepts = {
   workRunsForOwner: "v1:work:run",
   workRunsForOwnerGoalSignature: "v1:work:run",
   workSignedRunsForOwner: "v1:work:run",
+  workStepForOwnerRun: "v1:work:step",
   workStepsForOwnerRun: "v1:work:step",
   workViewerMemberships: "v1:identity:groupMembership",
   workViewerOrganization: "v1:accounts:account",
