@@ -555,6 +555,9 @@ func TestExecuteHopRealRunnersAdoptAStepAwayFromTheReplicaThatWentSilent(t *test
 		t.Run(c.name, func(t *testing.T) {
 			w := newRunnerHop(t)
 			req := hopRequest()
+			req.Step.CPUMilli = 4000
+			req.Step.TimeoutSeconds = 6 * 60 * 60
+			w.e.cfg.RunCeiling = 8 * time.Hour
 			job := JobName(req.RunID, req.StepKey, req.Attempt)
 			step := &hopStep{}
 			w.h.c.script(job, step.script(job))
@@ -569,6 +572,18 @@ func TestExecuteHopRealRunnersAdoptAStepAwayFromTheReplicaThatWentSilent(t *test
 
 			c.silence(w, step)
 			rtWaitUntil(t, "workbench-b to adopt the step", func() bool { return w.holder(job) == "workbench-b" })
+			adopted := w.h.c.jobNow(t, job)
+			resources := adopted.Spec.Template.Spec.Containers[0].Resources
+			if resources == nil || resources.Requests["cpu"] != "4000m" || resources.Limits["cpu"] != "4000m" {
+				t.Fatal("CPU reservation was lost across the agent/Workbench/replacement hop", resources)
+			}
+			if adopted.Spec.ActiveDeadlineSeconds == nil || *adopted.Spec.ActiveDeadlineSeconds != 6*60*60 {
+				t.Fatal("six-hour step deadline was lost across the replacement hop", adopted.Spec.ActiveDeadlineSeconds)
+			}
+			wantDeadline := exNow.Add(-10*time.Minute + 8*time.Hour).Format(time.RFC3339Nano)
+			if adopted.Metadata.Annotations[AnnotRunDeadline] != wantDeadline {
+				t.Fatal("the replacement lost the original run's eight-hour deadline", adopted.Metadata.Annotations[AnnotRunDeadline])
+			}
 			step.ending.Store(true)
 			res := awaitHop(t, done, "workbench-b's outcome")
 

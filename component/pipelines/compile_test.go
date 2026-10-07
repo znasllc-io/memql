@@ -519,6 +519,8 @@ func TestCompileTimeoutsAndASingleShard(t *testing.T) {
 		Stages: []StageSpec{{Name: "tests", Steps: []StepSpec{
 			{Name: "unit", Run: "go test $MEMQL_PACKAGES", Packages: PackagesAffected, Shards: 4, Timeout: "45m"},
 			{Name: "lint", Run: "go vet ./...", Timeout: "1h30m"},
+			{Name: "history", Run: "verify-history", Timeout: "6h"},
+			{Name: "default", Run: "verify-default"},
 		}}},
 	}
 	plan := mustCompilePlan(t, spec, CompileInput{
@@ -536,6 +538,12 @@ func TestCompileTimeoutsAndASingleShard(t *testing.T) {
 	}
 	if got := planStepByKey(t, plan, "tests.lint").TimeoutSeconds; got != 90*60 {
 		t.Errorf("lint timeout = %ds, want 5400", got)
+	}
+	if got := planStepByKey(t, plan, "tests.history").TimeoutSeconds; got != 6*60*60 {
+		t.Errorf("explicit long timeout = %ds, want 21600", got)
+	}
+	if got := planStepByKey(t, plan, "tests.default").TimeoutSeconds; got != 20*60 {
+		t.Errorf("default timeout = %ds, want unchanged 1200", got)
 	}
 }
 

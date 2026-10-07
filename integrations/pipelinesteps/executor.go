@@ -214,6 +214,9 @@ func (e *Executor) Execute(ctx context.Context, req pl.StepRequest) (pl.StepResu
 // never routes on a name it does not know), and a need on a pipeline whose
 // owner did not consent to the fleet.
 func refuseStep(req pl.StepRequest) (pl.StepResult, bool) {
+	if err := pl.CheckCPUMilli(req.Step.CPUMilli, req.Step.RequiresFleet()); err != nil {
+		return refusedResult(pl.CodeStepInvalid, err.Error()), true
+	}
 	if err := pl.CheckMemoryMiB(req.Step.MemoryMiB, req.Step.RequiresFleet()); err != nil {
 		return refusedResult(pl.CodeStepInvalid, err.Error()), true
 	}

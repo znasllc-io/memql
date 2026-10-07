@@ -855,6 +855,105 @@ including development dependencies. Installed Workbench execution, current-sourc
 rescans, SARIF publishing, schedules, Code Quality parity and release gating still
 require the combined rehearsal.
 
+### Bounded full-history secret scanning (October 6)
+
+A monolithic Gitleaks 8.30.1 history scan exhausted its 8 GiB container limit
+even with a 4 GiB Go memory target. That attempt is incomplete, not a passing
+scan. The replacement helper freezes the selected commit and tag objects,
+refuses shallow history, and inventories every reachable commit before running
+separate bounded batches. Initial commits and merge diffs against their first
+parent are included; every parent's own commits remain in the inventory. This
+avoids repeatedly scanning unrelated mainline changes against each side parent
+without using first-parent-only history traversal.
+Each batch must return a consistent redacted report before its commits count as
+covered. A crash, missing report, timeout or exit/report disagreement leaves
+the durable coverage summary incomplete. Timeouts terminate the owned process
+group. Findings fail the command even when history coverage is complete.
+
+The helper also accepts `--jobs` (one by default, at most 32). It bounds both
+active scanner processes and queued batches. Reports retain their original
+inventory indices even when later batches finish first; only validated reports
+increase completed coverage. A failed batch cancels the other owned process
+groups promptly. Parallel execution scans every original commit independently:
+it does not deduplicate blobs or reuse results across commits, paths or allowlist
+contexts. `--jobs=4 --batch-size=1` lets four large diffs use separate CPUs without
+putting many large fragments into one scanner process. The caller must budget
+memory for all processes and set an appropriate whole-scan deadline.
+
+Completed batch reports and logs are packed into `batches.tar`, flushed before
+the coverage acknowledgment, then removed as individual files. The summary's
+report hashes refer to the numbered JSON members of that archive. Unacknowledged
+or failed batches keep their loose diagnostics. This bounds the output file
+count even for one-commit batches over long histories, preserving the existing
+1,024-file pipeline artifact limit. A normal failed scan closes the archive;
+after abrupt termination its complete tar entries remain recoverable, and the
+last acknowledged summary remains incomplete. Archive-write failures cannot
+acknowledge a batch or produce a clean verdict.
+
+A representative 81.39 MB added fragment took 80.9 seconds with pinned Gitleaks
+8.30.1; regex matching used 88% of its sampled CPU time. Generated minified
+architecture files account for much of the repeated input. They remain included.
+The former 90-minute deadline did not cover the measured full-history run. A
+representative benchmark is performance evidence only, never a complete scan.
+The engine manifest declares checkout scanning in `secrets-current` for pull
+requests and history scanning in `secrets-history` for push, merge-group and
+release events. Both stages retain their reports after earlier check failures;
+the command bodies do not choose the event policy. History scanning requests
+`cpuMilli: 4000` and `memoryMiB: 6144`, with four one-commit batches in flight
+and one Go runtime thread per process. This explicitly matches the rehearsal's
+CPU allocation rather than inheriting the namespace's two-CPU default. CPU
+requests survive the agent/Workbench wire, count toward scheduling and are
+bounded by an operator maximum; fleet/native execution refuses this contract
+instead of silently ignoring it. The `pipelineStepV8` forward refuses older
+replicas that cannot enforce explicit CPU, and a real two-Workbench adoption
+test checks that the reservation survives replacement. Image builds preserve
+their one-CPU request/two-CPU limit only when the field is omitted; an explicit
+reservation uses the same operator bound. Partial coverage never establishes
+a qualified full-history deadline.
+Four distinct roughly 81 MB commits scanned in 107.722 seconds with four
+independent processes inside a 6 GiB/four-CPU container, while the earlier
+serial scan also occupied that same allocation. Sampled aggregate memory was
+2.50 GiB. All four reports were valid and clean; this is not full-history
+qualification.
+
+Regression tests include a real Gitleaks scan that finds an added-then-removed
+synthetic credential reachable only through a tag, and one introduced only in a
+merge result and subsequently removed. Serial and parallel runs must report the
+same redacted merge-only finding. Scheduler tests cover out-of-order completion,
+bounded concurrency and prompt cancellation after a failed or invalid report.
+An additional 600-batch test retains all 1,200 report/log members while emitting
+fewer than ten artifact files; archive failures and prior evidence surviving a
+later failed batch are also covered.
+The first complete-history rehearsal finished on October 7: all 10,137 commits
+reachable from main `82c37723251d016bca6a8589f50caed67e1dfbca` and its captured
+tags were covered, with zero findings. The four-CPU/6-GiB container exited zero
+without OOM after 13,984.020 seconds (3h53m04s). Independent verification checked
+the unique inventory, contiguous batch coverage, all 10,137 zero exits, all
+10,137 report hashes, all empty reports, and all 20,274 report/log archive
+members. Inventory SHA-256:
+`11745e42e9daa252d4a26b4397f35a1528b13072a1ab7122ad542faf3e6e8e3e`;
+configuration SHA-256:
+`b123de21bb42f1c9ae94811404a2c52aade4989f0a84bf59532335f03bb9b370`.
+
+The chosen history workload now declares a six-hour step and a 20,700-second
+helper deadline, with setup/finalization headroom. The generic step maximum is
+six hours; its default stays 20 minutes. The run default stays two hours.
+An optional `pipelines-long-runs` operator component sets eight hours on both
+agent and Workbench, leaving queue and earlier-stage time separately bounded.
+No installed overlay is changed by adding this profile. It does not enlarge a
+node, reserve cloud capacity or prove that the declared step can be scheduled.
+The manifest retains checkout scanning for pull requests and full reachable
+history for push, merge-group and release; this change does not reduce scan
+cadence, exclude generated blobs, reuse results or relax finding semantics.
+Scheduled/manual scan parity remains part of the wider delivery work.
+
+Cancellation still terminates owned scanner process groups; report/archive
+finalization happens before coverage is acknowledged. Step/run expiration and
+incomplete coverage remain failures, with existing artifact collection and Job
+cleanup bounds. The longer allowance is not an optimization claim. Legacy
+workflow retirement remains gated on the installed pipeline rehearsal and
+production qualification, neither of which this container measurement proves.
+
 ### Kubernetes artifact export qualification (October 6)
 
 Cluster steps now export declared files into a bounded emptyDir and a separate

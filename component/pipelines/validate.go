@@ -16,7 +16,7 @@ import (
 // DefaultStepTimeout applies when a step names none; MaxStepTimeout caps one.
 const (
 	DefaultStepTimeout = 20 * time.Minute
-	MaxStepTimeout     = 3 * time.Hour
+	MaxStepTimeout     = 6 * time.Hour
 )
 
 // minStepTimeout is the shortest timeout a step may name: under a minute, the

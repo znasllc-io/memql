@@ -77,6 +77,9 @@ func validateStepRuntime(spec *Spec, step StepSpec, scope string) *Refusal {
 		return Refuse(CodeStepInvalid, scope, "A step image must be a container image reference without whitespace; native steps cannot name an image.")
 	}
 	placement := PlacementOf(step)
+	if err := CheckCPUMilli(step.CPUMilli, placement == PlacementFleet); err != nil {
+		return Refuse(CodeStepInvalid, scope, "%s", err)
+	}
 	if err := CheckMemoryMiB(step.MemoryMiB, placement == PlacementFleet); err != nil {
 		return Refuse(CodeStepInvalid, scope, "%s", err)
 	}
@@ -135,6 +138,21 @@ func CheckMemoryMiB(memory int, fleet bool) error {
 	}
 	if fleet {
 		return fmt.Errorf("memoryMiB requires cluster container execution.")
+	}
+	return nil
+}
+
+// CheckCPUMilli checks the portable shape. The runner separately applies
+// its operator-owned maximum before creating any Kubernetes resource.
+func CheckCPUMilli(cpu int, fleet bool) error {
+	if cpu == 0 {
+		return nil
+	}
+	if cpu < 1 || cpu > 256000 {
+		return fmt.Errorf("cpuMilli must be zero or a whole number from 1 through 256000.")
+	}
+	if fleet {
+		return fmt.Errorf("cpuMilli requires cluster container execution.")
 	}
 	return nil
 }

@@ -218,7 +218,7 @@ No step pod has a Docker daemon. A step that builds or runs containers names the
 ### Time
 
 A step runs under its effective timeout: the lesser of its own (`timeout:`, 20
-minutes when it names none, at most 2 hours) and what is left of its run's
+minutes when it names none, at most 6 hours) and what is left of its run's
 wall-clock ceiling (`MEMQL_PIPELINES_RUN_MAX_MINUTES`, 120 minutes by default,
 counted from when the run started) when its Job is created. Whichever bound it
 is names the failure,
@@ -238,6 +238,26 @@ what it was waiting for.
 A step stopped at its deadline reports exit code -1, whatever its command did as
 it was stopped; a step whose command ended before the deadline keeps its own
 answer.
+
+Long workloads require two explicit choices: a repository step timeout and an
+operator run ceiling large enough for queued work and all stages. Declaring a
+six-hour step does not raise the default two-hour run ceiling. An operator may
+compose `deploy/k8s/components/pipelines-long-runs` in the installation overlay
+to set an eight-hour ceiling on both agent and Workbench replicas. This profile
+affects every pipeline in that installation; no shipping instance overlay
+includes it by default. It changes no concurrency, CPU, memory, disk or cleanup
+limits and provisions no worker capacity. The renderable example is
+`deploy/k8s/components/examples/pipelines-long-runs`.
+
+The engine repository's full-history secret scan declares four CPUs, 6 GiB and
+a six-hour step. Its helper has a shorter 20,700-second deadline, leaving time
+for setup, report finalization and collection before the Job deadline. A
+complete local container measurement took 3 hours 53 minutes over 10,137 commits;
+the longer budget is an explicit workload allowance, not a performance
+improvement or a production qualification. The node must fit the step plus its
+collector and existing workloads. The default cloud pool does not demonstrate
+that capacity. Cancellation and an exhausted step or run deadline still fail
+the scan; partial history coverage cannot produce a clean verdict.
 
 ### Steps at once, and their size
 
