@@ -257,9 +257,9 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		t.Fatalf("the pipeline declares no %q service, so the db-gated trees have nothing to test against", manifestPostgresService)
 	}
 
-	fullStages := []string{manifestStageChecks, manifestStageTests}
+	fullStages := []string{manifestStageChecks, "secrets-history", manifestStageTests}
 	analysisStages := append(slices.Clone(fullStages), "analysis")
-	pullRequestStages := []string{manifestStageChecks, manifestStageTests, manifestStageGates}
+	pullRequestStages := []string{manifestStageChecks, "secrets-current", manifestStageTests, manifestStageGates}
 	every := []string{manifestStepGoChecks, manifestStepPathRouting,
 		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks,
 		"sdk-ts-typecheck", "viewkit-checks", "mcp-conformance", "proving"}
@@ -336,7 +336,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			byName := map[string][]pipelines.Step{}
 			for _, step := range plan.Steps() {
 				byName[step.Name] = append(byName[step.Name], step)
-				if step.RunAfterFailure != (step.Stage == "analysis") {
+				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "secrets-current" || step.Stage == "secrets-history") {
 					t.Errorf("failure policy was lost or leaked to another stage: %+v", step)
 				}
 				if step.Kind != pipelines.StepCommand || step.Image != expectedEngineStepImage(spec, step.Name) {

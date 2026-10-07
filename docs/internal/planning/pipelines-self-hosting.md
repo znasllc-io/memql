@@ -863,6 +863,17 @@ A representative 81.39 MB added fragment took 80.9 seconds with pinned Gitleaks
 architecture files account for much of the repeated input. They remain included.
 The configured 90-minute deadline is not a qualified full-history budget. A
 representative benchmark is performance evidence only, never a complete scan.
+The engine manifest declares checkout scanning in `secrets-current` for pull
+requests and history scanning in `secrets-history` for push, merge-group and
+release events. Both stages retain their reports after earlier check failures;
+the command bodies do not choose the event policy. History scanning requests
+`cpuMilli: 4000` and `memoryMiB: 6144`, with four one-commit batches in flight
+and one Go runtime thread per process. This explicitly matches the rehearsal's
+CPU allocation rather than inheriting the namespace's two-CPU default. CPU
+requests survive the agent/Workbench wire, count toward scheduling and are
+bounded by an operator maximum; fleet/native execution refuses this contract
+instead of silently ignoring it. Neither these settings nor partial coverage
+establish a qualified full-history deadline.
 Four distinct roughly 81 MB commits scanned in 107.722 seconds with four
 independent processes inside a 6 GiB/four-CPU container, while the earlier
 serial scan also occupied that same allocation. Sampled aggregate memory was

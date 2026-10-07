@@ -272,6 +272,16 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 	if run.MemoryMiB > maximum {
 		return refuse("memoryMiB %d exceeds this cluster's command limit of %d MiB", run.MemoryMiB, maximum)
 	}
+	if err := pl.CheckCPUMilli(run.CPUMilli, false); err != nil {
+		return refuse("%s", err)
+	}
+	cpuMaximum := cfg.StepCPUMaxMilli
+	if cpuMaximum == 0 {
+		cpuMaximum = defaultStepCPUMaxMilli
+	}
+	if run.CPUMilli > cpuMaximum {
+		return refuse("cpuMilli %d exceeds this cluster's command limit of %d millicores", run.CPUMilli, cpuMaximum)
+	}
 	if err := cfg.ValidatePlacement(); err != nil {
 		return refuse("%s", err)
 	}
@@ -606,7 +616,7 @@ func stepContainer(run StepRun, jobName, secretName string, caches []string) Con
 	return Container{
 		Name:            ContainerStep,
 		Image:           run.Image,
-		Resources:       stepMemoryResources(run.MemoryMiB),
+		Resources:       stepResources(run.MemoryMiB, run.CPUMilli),
 		ImagePullPolicy: "Always",
 		Command:         []string{"/bin/sh", "-c", stepWrapper},
 		WorkingDir:      workspacePath,
@@ -1017,11 +1027,20 @@ func sortedKeys[V any](m map[string]V) []string {
 func ptr[T any](v T) *T { return &v }
 
 // An explicit reservation sets both request and limit: scheduling must account
-// for the memory the command may consume. All other limits remain operator values.
-func stepMemoryResources(memory int) *Resources {
-	if memory == 0 {
+// for the CPU and memory the command may consume. Unspecified resources retain
+// operator defaults, as do clone containers and services.
+func stepResources(memory, cpu int) *Resources {
+	if memory == 0 && cpu == 0 {
 		return nil
 	}
-	value := strconv.Itoa(memory) + "Mi"
-	return &Resources{Requests: map[string]string{"memory": value}, Limits: map[string]string{"memory": value}}
+	resources := &Resources{Requests: map[string]string{}, Limits: map[string]string{}}
+	if memory != 0 {
+		value := strconv.Itoa(memory) + "Mi"
+		resources.Requests["memory"], resources.Limits["memory"] = value, value
+	}
+	if cpu != 0 {
+		value := strconv.Itoa(cpu) + "m"
+		resources.Requests["cpu"], resources.Limits["cpu"] = value, value
+	}
+	return resources
 }

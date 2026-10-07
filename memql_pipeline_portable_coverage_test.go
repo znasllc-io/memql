@@ -1,11 +1,13 @@
 package main
 
 import (
-	"gopkg.in/yaml.v3"
 	"os"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/pipelines"
+	"gopkg.in/yaml.v3"
 )
 
 // These are independent lanes, not packages already included in go-tests.
@@ -163,19 +165,49 @@ func TestEnginePortableTagAndIsolationCoverage(t *testing.T) {
 
 func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 	spec := engineManifest(t).Pipeline
-	for _, name := range []string{"secret-scan", "go-vulnerabilities"} {
-		step, found := engineDeclaredStep(spec, name)
-		if !found || len(step.Artifacts) == 0 || strings.Contains(step.Run, "|| true") {
-			t.Fatalf("security check %s is absent, discards reports or ignores failure", name)
+	graph, _ := engineImportGraph(t)
+	for _, event := range []pipelines.Event{pipelines.EventPullRequest, pipelines.EventPush, pipelines.EventMergeGroup, pipelines.EventRelease} {
+		plan, refusal := compileEngineOpening(spec, graph, event, []string{"README.md"})
+		if refusal != nil {
+			t.Fatal(refusal)
+		}
+		wantStage := "secrets-history"
+		wantCommands := []string{"--unshallow --tags", `--head="$MEMQL_SHA"`, "python3 scripts/ci/gitleaks-history.py", "--jobs=4", "--batch-size=1"}
+		forbidden := "gitleaks dir ."
+		if event == pipelines.EventPullRequest {
+			wantStage = "secrets-current"
+			wantCommands = []string{"--redact=100", "gitleaks dir ."}
+			forbidden = "gitleaks-history.py"
+		}
+		count := 0
+		for _, step := range plan.Steps() {
+			if step.Name != "gitleaks" {
+				continue
+			}
+			count++
+			if step.Stage != wantStage || !step.RunAfterFailure || step.Skip != nil || len(step.Artifacts) == 0 || strings.Contains(step.Run, "|| true") {
+				t.Fatalf("%s selects the wrong scan, skips it, discards reports or ignores failure: %+v", event, step)
+			}
+			if strings.Contains(step.Run, "MEMQL_EVENT") || strings.Contains(step.Run, forbidden) {
+				t.Fatalf("%s hides scan selection inside the command", event)
+			}
+			for _, need := range append(wantCommands, "@v8.30.1") {
+				if !strings.Contains(step.Run, need) {
+					t.Errorf("%s scan omits %s", event, need)
+				}
+			}
+			if event != pipelines.EventPullRequest && (step.CPUMilli != 4000 || step.MemoryMiB != 6144) {
+				t.Fatal("history scan allocation differs from its bounded parallel rehearsal")
+			}
+		}
+		if count != 1 {
+			t.Fatalf("%s plans %d secret scans, want exactly one", event, count)
 		}
 	}
-	secret, _ := engineDeclaredStep(spec, "secret-scan")
-	for _, need := range []string{"@v8.30.1", "--unshallow --tags", `--head="$MEMQL_SHA"`, "--redact=100", "gitleaks dir .", "python3 scripts/ci/gitleaks-history.py"} {
-		if !strings.Contains(secret.Run, need) {
-			t.Errorf("secret scan omits %s", need)
-		}
+	vuln, found := engineDeclaredStep(spec, "go-vulnerabilities")
+	if !found || len(vuln.Artifacts) == 0 || strings.Contains(vuln.Run, "|| true") {
+		t.Fatal("Go vulnerability check is absent, discards reports or ignores failure")
 	}
-	vuln, _ := engineDeclaredStep(spec, "go-vulnerabilities")
 	// govulncheck's JSON/SARIF modes return zero even with findings. Preserve
 	// its text-mode verdict until machine reports have an explicit evaluator.
 	if !strings.Contains(vuln.Run, "@v1.7.0") || !strings.Contains(vuln.Run, "govulncheck github.com/znasllc-io/memql/...") || strings.Contains(vuln.Run, "-format") || !strings.Contains(vuln.Run, `test "$status" -eq 0`) {

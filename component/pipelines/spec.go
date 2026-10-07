@@ -72,6 +72,9 @@ type StageSpec struct {
 // the same contract as a deployable's build.command. There is no step
 // language.
 type StepSpec struct {
+	// CPUMilli requests a bounded CPU reservation for the cluster command.
+	// Zero uses the operator's namespace default; 1000 means one CPU.
+	CPUMilli int `yaml:"cpuMilli,omitempty" json:"cpuMilli,omitempty"`
 	// MemoryMiB requests a bounded memory reservation for the cluster command.
 	// Zero uses the operator's namespace default; services retain their defaults.
 	MemoryMiB int `yaml:"memoryMiB,omitempty" json:"memoryMiB,omitempty"`

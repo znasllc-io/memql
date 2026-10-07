@@ -100,6 +100,7 @@ type Skip struct {
 
 // Step is one compiled step: one v1:work:step row and one Execute call.
 type Step struct {
+	CPUMilli  int `json:"cpuMilli,omitempty"`
 	MemoryMiB int `json:"memoryMiB,omitempty"`
 	// RunAfterFailure is inherited from the stage and bound into the durable
 	// execution fingerprint, so recovery cannot change failure behavior.

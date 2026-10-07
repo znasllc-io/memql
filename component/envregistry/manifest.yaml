@@ -2792,6 +2792,13 @@ variables:
     optional: true
     description: "Maximum explicit pipeline command memory reservation in MiB (default 8192, clamped to 128..1048576). Oversized requests are refused before creating resources. Unspecified command memory and all sidecars retain namespace LimitRange defaults; size the build pool for their combined limits."
 
+  - name: MEMQL_PIPELINES_STEP_CPU_MAX_MILLI
+    component: pipelines
+    scope: node
+    default: "4000"
+    optional: true
+    description: "Maximum explicit pipeline command CPU reservation in millicores (default 4000, clamped to 1..256000; 1000 means one CPU). Oversized requests are refused before creating resources. Unspecified command CPU and all sidecars retain namespace LimitRange defaults; size the build pool for their combined requests."
+
   - name: MEMQL_PIPELINES_WORKSPACE_LIMIT
     component: pipelines
     scope: node

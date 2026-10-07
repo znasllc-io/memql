@@ -15,6 +15,8 @@ import (
 // pipelines component's ConfigMap supplies the namespace and the clone image
 // to the workbench node.
 type Config struct {
+	// StepCPUMaxMilli bounds a manifest's explicit command CPU reservation.
+	StepCPUMaxMilli int
 	// StepMemoryMaxMiB bounds a manifest's explicit command memory reservation.
 	StepMemoryMaxMiB int
 	// Namespace is where step Jobs and their Secrets live
@@ -81,6 +83,7 @@ type Config struct {
 // The environment this package reads. Named once, so the env-registry scan
 // resolves every read to its key.
 const (
+	envStepCPUMax       = "MEMQL_PIPELINES_STEP_CPU_MAX_MILLI"
 	envStepMemoryMax    = "MEMQL_PIPELINES_STEP_MEMORY_MAX_MIB"
 	envNamespace        = "MEMQL_PIPELINES_NAMESPACE"
 	envNodePool         = "MEMQL_PIPELINES_NODE_POOL"
@@ -92,6 +95,7 @@ const (
 )
 
 const (
+	defaultStepCPUMaxMilli  = 4000
 	defaultStepMemoryMaxMiB = 8192
 	defaultNamespace        = "memql-pipelines"
 	cacheClaim              = "memql-pipelines-cache"
@@ -120,6 +124,7 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		namespace = defaultNamespace
 	}
 	return Config{
+		StepCPUMaxMilli:    whole(envStepCPUMax, defaultStepCPUMaxMilli, 1, 256000),
 		StepMemoryMaxMiB:   whole(envStepMemoryMax, defaultStepMemoryMaxMiB, 128, 1048576),
 		Namespace:          namespace,
 		NodePool:           text(envNodePool),

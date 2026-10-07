@@ -26,6 +26,7 @@ import (
 // answers it with a pl.StepResult, whose LogTail is one string of at most the
 // last 40 lines and whose Notes carry the note-class codes.
 type StepRun struct {
+	CPUMilli    int      `json:"cpuMilli,omitempty"`
 	MemoryMiB   int      `json:"memoryMiB,omitempty"`
 	RecoverOnly bool     `json:"recoverOnly,omitempty"`
 	Needs       []string `json:"needs,omitempty"`

@@ -218,30 +218,6 @@ pipeline:
           run: |
             set -eu
             bash ./scripts/ci/bash32-smoke.sh
-        # Blocking scans: reports survive failures as ordinary step artifacts.
-        # Full-history scans fetch only this candidate's ancestry plus tags.
-        - name: secret-scan
-          placement: cluster
-          timeout: 90m
-          memoryMiB: 8192
-          artifacts: [.memql-security/gitleaks]
-          run: |
-            set -eu
-            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
-            mkdir -p .memql-security/gitleaks
-            go install github.com/zricethezav/gitleaks/v8@v8.30.1
-            export GOMAXPROCS=2 GOMEMLIMIT=2GiB
-            if [ "$MEMQL_EVENT" = pull_request ]; then
-              gitleaks dir . --no-banner --redact=100 --report-format=json --report-path=.memql-security/gitleaks/findings.json
-            else
-              if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
-                git fetch --unshallow --tags "https://github.com/${MEMQL_REPOSITORY}.git" "$MEMQL_SHA"
-              else
-                git fetch --tags "https://github.com/${MEMQL_REPOSITORY}.git" "$MEMQL_SHA"
-              fi
-              test "$(git rev-parse HEAD)" = "$MEMQL_SHA"
-              python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks
-            fi
         - name: go-vulnerabilities
           placement: cluster
           timeout: 30m
@@ -264,6 +240,47 @@ pipeline:
           run: |
             set -eu
             python3 scripts/ci/npm-audit.py --report-dir=.memql-security/npm
+    # Event selection is declared, so the plan exposes the selected scan.
+    # Both scans preserve failure reports even when an earlier check failed.
+    - name: secrets-current
+      on: [pull_request]
+      runAfterFailure: true
+      steps:
+        - name: gitleaks
+          placement: cluster
+          timeout: 90m
+          memoryMiB: 8192
+          artifacts: [.memql-security/gitleaks]
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            mkdir -p .memql-security/gitleaks
+            go install github.com/zricethezav/gitleaks/v8@v8.30.1
+            export GOMAXPROCS=2 GOMEMLIMIT=2GiB
+            gitleaks dir . --no-banner --redact=100 --report-format=json --report-path=.memql-security/gitleaks/findings.json
+    - name: secrets-history
+      on: [push, merge_group, release]
+      runAfterFailure: true
+      steps:
+        - name: gitleaks
+          placement: cluster
+          timeout: 90m
+          cpuMilli: 4000
+          memoryMiB: 6144
+          artifacts: [.memql-security/gitleaks]
+          run: |
+            set -eu
+            export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
+            mkdir -p .memql-security/gitleaks
+            go install github.com/zricethezav/gitleaks/v8@v8.30.1
+            export GOMAXPROCS=1 GOMEMLIMIT=1GiB GOGC=100
+            if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+              git fetch --unshallow --tags "https://github.com/${MEMQL_REPOSITORY}.git" "$MEMQL_SHA"
+            else
+              git fetch --tags "https://github.com/${MEMQL_REPOSITORY}.git" "$MEMQL_SHA"
+            fi
+            test "$(git rev-parse HEAD)" = "$MEMQL_SHA"
+            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=4 --batch-size=1
     - name: tests
       steps:
         # ci.yml go-tests: every package outside the db-gated trees that the
