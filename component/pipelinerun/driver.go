@@ -998,7 +998,7 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 		dr.settle(ctx, t, failReceipt(pipelines.CodeExecutorError,
 			"The runner could not report how the step ended: "+dr.mask(end.err.Error())))
 	default:
-		needsReceipts := len(t.step.Artifacts) > 0 && (t.step.Placement == pipelines.PlacementCluster || end.result.Where.Surface == "cluster")
+		needsReceipts := len(t.step.Artifacts) > 0
 		if dr.settle(ctx, t, dr.receiptFor(end.result, end.elapsed, needsReceipts)) {
 			dr.acknowledgeReceipt(ctx, exec, req)
 		}

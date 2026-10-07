@@ -110,9 +110,6 @@ const (
 	notesMaxBytes = 4 << 10
 	// failureMaxBytes bounds a failure's sentence.
 	failureMaxBytes = 2 << 10
-	// entryNameMaxBytes bounds each tar entry name a note quotes: the names
-	// are the step's, and as long as it likes.
-	entryNameMaxBytes = 256
 	// archiveMIME is the archived log's content type.
 	archiveMIME = "text/plain; charset=utf-8"
 	// The tails kept of the clone and, when the step failed, of each

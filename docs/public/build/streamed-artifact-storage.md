@@ -15,20 +15,26 @@ runner must explicitly use it. The app adapter implements both ports. A
 successful stream call returns a ready Library file and an independent durable
 object receipt. A storage error never returns a successful file ID.
 
-The Job collector uses this port directly from its private verified snapshot;
+The Job collector and native Cockpit runner use this port from private verified snapshots;
 it does not fall back to buffering an artifact for the byte-slice port. It checks
 the returned owner/run/step/attempt/path, size and digest before accepting the
-receipt. The Step V6 transport retains opaque intent IDs in the Job outcome and
+receipt. The Step V6 transport retains opaque intent IDs in the step outcome and
 the work-step result metadata. These IDs survive outcome-size trimming even if
-some editable Library links must be omitted. A successful cluster step declaring
+some editable Library links must be omitted. A successful step declaring
 artifacts is refused at the driver boundary if those references are absent or
 malformed. Older workbench replicas cannot accept the V6 action.
 
 The operator can raise the total streamed archive cap to 2 GiB; its default
 remains 64 MiB. The existing bounded Library phase and Job deadline still apply.
 Large-file throughput must be qualified on the installation before selecting a
-larger cap. Native-host artifact transport remains capped at 256 MiB and does
-not yet provide these immutable receipt references.
+larger cap. The engine caps native-host artifacts at 256 MiB; Cockpit additionally limits
+its producer to 64 MiB of files and 20 MiB compressed per worker result. Its base64/gzip
+response is decoded into a bounded private snapshot; no second full archive is
+buffered. Missing declared files, malformed archives, checksum errors or a
+storage adapter without verified receipts fail the step. Every declaration must
+match a regular file before any artifact is uploaded. Cancellation keeps its
+cancelled status and records artifact failures as notes. The command exit code
+is preserved independently of artifact success.
 
 ## Identity and recovery
 
