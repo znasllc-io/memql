@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -53,7 +54,10 @@ import (
 //	FAKE_CLUSTER_DOMAIN  the memql-domain ConfigMap's MEMQL_DOMAIN, or empty for
 //	                     a cluster that is not serving any domain yet
 const fakeKubectlTemplate = `#!/usr/bin/env bash
-printf '%s\n' "$*" >> "$FAKE_KUBECTL_LOG"
+# Pipeline stages run concurrently. Bash may split a long printf into several
+# writes, so each process records its argv separately instead of interleaving
+# two invocations in one append-only file.
+printf '%s\n' "$*" > "$FAKE_KUBECTL_LOG.$$"
 args="$*"
 
 # The domain this cluster already serves -- the default for --domain, so a run
@@ -303,18 +307,69 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 		t.Fatalf("running seed-secrets.sh: %v\nstderr:\n%s", err, stderr.String())
 	}
 
-	raw, readErr := os.ReadFile(logPath)
-	if readErr != nil && !os.IsNotExist(readErr) {
-		t.Fatalf("read kubectl log: %v", readErr)
-	}
-	var calls []string
-	for _, line := range strings.Split(string(raw), "\n") {
-		if strings.TrimSpace(line) != "" {
-			calls = append(calls, line)
-		}
-	}
+	calls := readSeedKubectlCalls(t, logPath)
 	t.Logf("exit=%d\nstdout: %s\nstderr:\n%s", code, stdout.String(), stderr.String())
 	return stdout.String(), stderr.String(), calls, code
+}
+
+// The fixture inventories calls; concurrent pipeline invocations have no total
+// order. Each file is read only after its process has exited.
+func readSeedKubectlCalls(t *testing.T, prefix string) []string {
+	t.Helper()
+	paths, err := filepath.Glob(prefix + ".*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls []string
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		calls = append(calls, strings.TrimSuffix(string(raw), "\n"))
+	}
+	return calls
+}
+
+func TestSeedKubectlRecordsConcurrentLongArgumentVectors(t *testing.T) {
+	tmp := t.TempDir()
+	script, logPath := filepath.Join(tmp, "kubectl"), filepath.Join(tmp, "calls")
+	if err := os.WriteFile(script, []byte(fakeKubectlTemplate), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const count = 24
+	want := make(map[string]bool, count)
+	start := make(chan struct{})
+	errs := make(chan error, count)
+	var jobs sync.WaitGroup
+	for n := range count {
+		args := fmt.Sprintf("fixture-%d=%s", n, strings.Repeat("x", 16<<10))
+		want[args] = true
+		jobs.Go(func() {
+			<-start
+			cmd := exec.Command("bash", script, args)
+			cmd.Env = append(os.Environ(), "FAKE_KUBECTL_LOG="+logPath)
+			errs <- cmd.Run()
+		})
+	}
+	close(start)
+	jobs.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := readSeedKubectlCalls(t, logPath)
+	if len(calls) != count {
+		t.Fatalf("recorded %d calls, want %d", len(calls), count)
+	}
+	for _, call := range calls {
+		if !want[call] {
+			t.Fatal("concurrent argument vectors interleaved or repeated")
+		}
+		delete(want, call)
+	}
 }
 
 // seededLiteral extracts a --from-literal value the script asked kubectl to
