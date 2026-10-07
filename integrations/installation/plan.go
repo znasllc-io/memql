@@ -46,10 +46,10 @@ type preparedPlan struct {
 
 func (p preparedPlan) canonical() ([]byte, string, error) {
 	if p.FormatVersion != 1 || !identifier.MatchString(p.InstallationID) || !identifier.MatchString(p.RequestedBy) ||
-		!identifier.MatchString(p.CandidateApprovalID) || !artifactDigest.MatchString(p.CandidateID) || !commitDigest.MatchString(p.RollbackRevision) {
+		!identifier.MatchString(p.CandidateApprovalID) || !artifactDigest.MatchString(p.CandidateID) || !artifactDigest.MatchString(p.PublicationDigest) || !commitDigest.MatchString(p.RollbackRevision) {
 		return nil, "", errors.New("installation plan has invalid identity or candidate bindings")
 	}
-	for _, digest := range []string{p.WorkflowDigest, p.PublicationDigest, p.RenderDigest, p.ResourceDiffDigest, p.RollbackRenderDigest} {
+	for _, digest := range []string{p.WorkflowDigest, p.RenderDigest, p.ResourceDiffDigest, p.RollbackRenderDigest} {
 		if !internalDigest.MatchString(digest) {
 			return nil, "", errors.New("installation plan requires exact native evidence bindings")
 		}

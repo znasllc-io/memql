@@ -55,7 +55,7 @@ func testPlan() preparedPlan {
 	before := strings.Repeat("b", 40)
 	return preparedPlan{
 		FormatVersion: 1, InstallationID: "installation-one", RequestedBy: "developer-one", WorkflowDigest: d,
-		CandidateID: "sha256:" + strings.Repeat("c", 64), CandidateApprovalID: "owner-approval", PublicationDigest: d,
+		CandidateID: "sha256:" + strings.Repeat("c", 64), CandidateApprovalID: "owner-approval", PublicationDigest: "sha256:" + strings.Repeat("e", 64),
 		RenderDigest: d, ResourceDiffDigest: d, RollbackRevision: before, RollbackRenderDigest: d,
 		Intent: argocd.Intent{FormatVersion: 1, RequestID: id.NewShortId(), Target: argocd.Target{Namespace: "argocd", Name: "installation-one", UID: "application-uid"}, BeforeGeneration: 42,
 			BeforeSpec: json.RawMessage(`{"source":{"repoURL":"https://github.com/acme/install.git","path":"deploy/overlay","targetRevision":"` + before + `"},"project":"installation","destination":{"server":"https://kubernetes.default.svc","namespace":"memql"}}`),
@@ -313,6 +313,7 @@ func TestInstallationPlanRequiresImmutableRollbackAndExactEvidenceBindings(t *te
 		func(p *preparedPlan) { p.RollbackRevision = strings.Repeat("f", 40) },
 		func(p *preparedPlan) { p.Intent.Revision = p.RollbackRevision },
 		func(p *preparedPlan) { p.PublicationDigest = "" },
+		func(p *preparedPlan) { p.PublicationDigest = "memql-id:" + strings.Repeat("e", 64) },
 		func(p *preparedPlan) { p.RenderDigest = "passed" },
 		func(p *preparedPlan) { p.ResourceDiffDigest = "" },
 		func(p *preparedPlan) { p.CandidateApprovalID = "" },
