@@ -626,6 +626,7 @@ jobs:
               - 'component/bus/gen/**'
               - 'component/grpc/gen/**'
               - 'component/node/gen/**'
+              - 'integrations/argocd/gen/**'
               - 'scripts/dev/proto-gen.sh'
             # The VS Code extension + the offline LSP binary it bundles + the
             # packaging script.
