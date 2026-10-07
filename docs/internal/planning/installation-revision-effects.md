@@ -118,12 +118,36 @@ claims, request recovery, changed authority, and the shared revision/preparation
 fence. A separate test reaches the real Executor, Workbench forward handler and
 fresh Runner instances over an HTTP Kubernetes fixture, distinguishing an
 existing durable outcome from an uncertain missing attempt. These tests have
-compiled but have not yet executed against the required local database, which
+passed in required-database CI but have not yet executed against the required local database, which
 is unavailable following Docker's disk-full shutdown. This slice remains
-private and unregistered. Atomic promotion into the final revision journal,
-started-attempt retirement, artifact retention/cleanup, current configuration
+private and unregistered. Started-attempt retirement, artifact retention/cleanup, current configuration
 verification, sealed DSL wiring and installed recovery qualification remain
 required before exposing preparation.
+
+### Atomic preparation handoff
+
+The private promotion operation transfers the shared installation head directly
+from preparation to one revision attempt in a PostgreSQL transaction. It binds
+the original requester, workflow and configuration to the exact signed
+publication, acknowledged source captures, candidate and rollback renders,
+resource diff, and storage/credential observations. A supplied digest cannot
+replace those native verifier results. The Argo intent must name the captured
+Application source, project, namespace and revision. Artifact pins remain with
+the durable source consumer throughout the handoff and rollback lifetime.
+
+The preparation records the promoted plan ID in the same transaction. A lost
+commit reply can be recovered through the stable request ID on another replica;
+concurrent promoters return the same plan. A changed plan refuses, late source
+callbacks cannot reopen preparation, and a historical retry cannot take a
+successor's slot. A failed head update rolls back both journal writes. Migration
+rollback refuses to remove a recorded promotion.
+
+The new promotion tests compile with the race detector; database execution and
+independent review are pending. They cover those transaction and authority
+boundaries using real PostgreSQL and native verifiers over protocol fixtures.
+This is a journal handoff, not complete installation admission: actual receiving
+configuration/renderer identity, compatibility, artifact availability and the
+live rollout/continuity/recovery workflow remain required before registration.
 
 ## Immutable desired state
 

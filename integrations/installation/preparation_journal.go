@@ -22,11 +22,12 @@ type preparationCapture struct {
 }
 
 type preparationRecord struct {
-	ID        string
-	Scope     preparationScope
-	SlotEpoch int64
-	State     string
-	Captures  map[string]preparationCapture
+	ID             string
+	Scope          preparationScope
+	SlotEpoch      int64
+	State          string
+	PromotedPlanID string
+	Captures       map[string]preparationCapture
 }
 
 func (r preparationRecord) String() string {
@@ -131,14 +132,19 @@ func readPreparation(ctx context.Context, tx *sql.Tx, installation, key string) 
 	r := preparationRecord{ID: key}
 	var scope, captures []byte
 	var request, actor, run string
-	err := tx.QueryRowContext(ctx, `SELECT scope,captures,slot_epoch,state,request_id,requested_by,source_run_id FROM installation_preparations WHERE installation_id=$1 AND preparation_id=$2 FOR UPDATE`, installation, key).Scan(&scope, &captures, &r.SlotEpoch, &r.State, &request, &actor, &run)
+	var promoted sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT scope,captures,slot_epoch,state,request_id,requested_by,source_run_id,promoted_plan_id FROM installation_preparations WHERE installation_id=$1 AND preparation_id=$2 FOR UPDATE`, installation, key).Scan(&scope, &captures, &r.SlotEpoch, &r.State, &request, &actor, &run, &promoted)
 	if err != nil {
 		return preparationRecord{}, err
 	}
 	var digest string
 	r.Scope, digest, err = decodePreparationScope(scope)
-	if err != nil || digest != key || r.Scope.InstallationID != installation || r.Scope.RequestID != request || r.Scope.RequestedBy != actor || run != preparationSourceRun(installation, request, actor) || r.SlotEpoch < 1 || (r.State != "preparing" && r.State != "cancelled") {
+	r.PromotedPlanID = promoted.String
+	if err != nil || digest != key || r.Scope.InstallationID != installation || r.Scope.RequestID != request || r.Scope.RequestedBy != actor || run != preparationSourceRun(installation, request, actor) || r.SlotEpoch < 1 || (r.State != "preparing" && r.State != "cancelled" && r.State != "promoted") {
 		return preparationRecord{}, errors.New("installation preparation identity is inconsistent")
+	}
+	if (r.State == "promoted") != promoted.Valid || (promoted.Valid && !internalDigest.MatchString(promoted.String)) {
+		return preparationRecord{}, errors.New("installation preparation promotion marker is inconsistent")
 	}
 	if len(captures) > 64<<10 {
 		return preparationRecord{}, errors.New("preparation capture records exceed their bound")
@@ -174,6 +180,9 @@ func readPreparation(ctx context.Context, tx *sql.Tx, installation, key string) 
 		if c.Acknowledged && c.SourceDigest == "" {
 			return preparationRecord{}, errors.New("unverified source Job was acknowledged")
 		}
+		if r.State == "promoted" && !c.Acknowledged {
+			return preparationRecord{}, errors.New("promoted preparation has unfinished source evidence or cleanup")
+		}
 	}
 	return r, nil
 }
@@ -205,8 +214,13 @@ func (j *preparationJournal) withRecord(ctx context.Context, installation, key, 
 	if err != nil {
 		return preparationRecord{}, err
 	}
-	if r.State != "cancelled" && (plan != "" || active != key || epoch != r.SlotEpoch) {
+	if r.State == "preparing" && (plan != "" || active != key || epoch != r.SlotEpoch) {
 		return preparationRecord{}, errChanged
+	}
+	if r.State == "promoted" {
+		if _, err = promotedRevision(ctx, tx, r); err != nil {
+			return preparationRecord{}, err
+		}
 	}
 	if update != nil {
 		if r.State != "preparing" || actor != r.Scope.RequestedBy || workflow != r.Scope.WorkflowDigest {

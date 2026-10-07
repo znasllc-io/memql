@@ -65,6 +65,9 @@ func (j *revisionJournal) reserve(ctx context.Context, plan preparedPlan) (revis
 	if actor != plan.RequestedBy {
 		return revisionRecord{}, errors.New("installation plan belongs to another requester")
 	}
+	if plan.Preparation != nil {
+		return revisionRecord{}, errors.New("prepared source evidence requires atomic preparation promotion")
+	}
 	body, key, err := plan.canonical()
 	if err != nil {
 		return revisionRecord{}, err

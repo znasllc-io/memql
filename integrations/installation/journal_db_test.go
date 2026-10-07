@@ -20,6 +20,7 @@ import (
 
 const migrationPath = "../../component/database/memory-nodes/migrations/20261007040000_installation_revisions"
 const preparationMigrationPath = "../../component/database/memory-nodes/migrations/20261007110000_installation_preparations"
+const promotionMigrationPath = "../../component/database/memory-nodes/migrations/20261007120000_installation_preparation_promotion"
 
 func journalDB(t *testing.T) (*sql.DB, *sql.DB) {
 	t.Helper()
@@ -45,6 +46,10 @@ func journalDB(t *testing.T) (*sql.DB, *sql.DB) {
 	_, err = first.ExecContext(ctx, string(body))
 	require.NoError(t, err)
 	body, err = os.ReadFile(preparationMigrationPath + ".up.sql")
+	require.NoError(t, err)
+	_, err = first.ExecContext(ctx, string(body))
+	require.NoError(t, err)
+	body, err = os.ReadFile(promotionMigrationPath + ".up.sql")
 	require.NoError(t, err)
 	_, err = first.ExecContext(ctx, string(body))
 	require.NoError(t, err)
