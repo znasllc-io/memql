@@ -70,6 +70,8 @@ require (
 	github.com/livekit/server-sdk-go/v2 v2.18.1 // indirect
 	github.com/magefile/mage v1.17.2 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
+	github.com/moby/moby/api v1.55.0 // indirect
+	github.com/moby/moby/client v0.5.1 // indirect
 	github.com/nats-io/nats.go v1.52.0 // indirect
 	github.com/nats-io/nkeys v0.4.16 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
