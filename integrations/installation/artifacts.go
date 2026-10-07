@@ -60,6 +60,7 @@ type artifactObservation struct {
 
 type artifactEvidence struct {
 	digest, scope, configuration, candidate, rollback, resources, before, after, platform string
+	workflow, operator                                                                    string
 	observed, expires                                                                     time.Time
 }
 
@@ -249,7 +250,7 @@ func (s *artifactAdmission) seal(observations []artifactObservation) (artifactEv
 		Scope    string
 		Receipts []receipt
 	}{s.digest, receipts})
-	return artifactEvidence{digest, s.digest, s.configuration, s.candidate, s.rollback, s.resources, s.before, s.after, s.platform, now, expires}, nil
+	return artifactEvidence{digest: digest, scope: s.digest, configuration: s.configuration, candidate: s.candidate, rollback: s.rollback, resources: s.resources, before: s.before, after: s.after, platform: s.platform, observed: now, expires: expires}, nil
 }
 
 func artifactHash(kind string, value any) string {

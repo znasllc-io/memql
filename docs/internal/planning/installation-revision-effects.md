@@ -99,15 +99,28 @@ in either render, including unchanged infrastructure, requires a complete fresh
 OCI read through an explicitly configured registry. A signed location cannot
 change that registry's transport or supply credentials.
 
-The scope returns immutable image obligations. A sealed DSL host can choose
-their ordering and parallelism and invoke one bounded check for each. Native
+The scope returns immutable image obligations. The installed
+`dsl/installation/automations.memql` recipe reads those obligations, invokes one
+bounded check for each, and requests completion. The ordinary `workflowhost`
+interpreter executes that sequence; a second recipe can compose the same ports.
+Registry trust and opaque observations never enter DSL arguments. Native
 completion refuses omitted, duplicated, expired or rebound observations and
 requires the opaque result from actual manifest/config/layer verification.
 The observation's registry, root digest and platform must match its obligation.
 Scopes expire after one hour; evidence expires no later than thirty minutes
 after its earliest registry read began. Recovery constructs another scope and
 rereads the required bytes, without trusting serialized receipt assertions or
-another process's local state.
+another process's local state. Every callback requires the original identified
+operator under already-admitted internal origin. A recipe cannot grant that
+origin, bind a different operator, load an unbound child or return its own proof.
+
+The private host snapshots the installed recipe before execution. Its digest
+binds the complete definition, native contract and exact engine commit, and the
+final evidence binds that digest and the operator. The full receiving preparer
+must incorporate it into the durable workflow identity before dispatch. Changing
+the recipe or native revision cannot reuse that binding; loader mutation cannot
+replace a recipe already executing. A returned success value or ignored failed
+check is insufficient without native completeness.
 
 `pipelines.CheckPublishedReleaseOverlap` evaluates the existing signed version
 ranges against both old and new dependency versions. Both publications must
@@ -122,7 +135,8 @@ wire compatibility or database migration safety. The receiving host must still
 authenticate and freeze the full configuration, including trust roots and
 credential versions, bind this evidence into preparation, enforce its deadline
 before effects, and require separate migration and continuity qualifications.
-There is no registered automation or public artifact-admission capability yet.
+The recipe and builtin declarations are installed, but no integration provider
+or public artifact-admission entry point is registered yet.
 
 ### Repository rendering
 
