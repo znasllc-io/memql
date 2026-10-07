@@ -727,3 +727,14 @@ The private snapshot retains current renderer and catalog connections for
 reopening retained source and rerendering. Configuration continuity alone does
 not replace fresh artifact, storage or protected-resource verification, grant
 rollback authority, complete an installation or release its active slot.
+
+`reopenPromotedCapture` is the separate native retained-source operation used
+after promotion. It requires the original internal requester, exact active
+installation head and durable preparation/plan relation before opening either
+recorded source role. It repins the same permanent consumer, opens the exact
+receipt and repeats archive closure verification, then checks both the source
+and receipt against their promoted bindings. A second journal transaction after
+the external read rejects cancellation, replacement or changed records. It does
+not dispatch, acknowledge, update capture records or reopen the preparing state.
+Tests use independent real database connections and verify that cancellation
+during the external read discards an otherwise valid proof and closes its body.
