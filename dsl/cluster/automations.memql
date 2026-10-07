@@ -244,6 +244,38 @@ automation releaseCutWorkflow {
   builtin releaseRecordCut()
 }
 
+/// Assemble configured components from exact completed executions. Native ports
+/// resolve facts and enforce scope; this recipe selects and composes the work.
+@template
+automation releaseAssembleCandidateWorkflow {
+  selection := builtin releaseAssemblyPlan()
+  for item in selection.components {
+    for runName in item.runs {
+      builtin releaseAssemblyReadRun(componentName: item.name, runName: runName)
+    }
+    builtin releaseAssemblyReadVersion(componentName: item.name)
+    for artifact in item.artifacts {
+      builtin releaseAssemblyReadArtifact(componentName: item.name, artifactName: artifact.name)
+    }
+  }
+  for targetId in selection.targets {
+    builtin releaseAssemblyReadTarget(targetId: targetId)
+  }
+  facts := builtin releaseAssemblyFacts()
+  candidate := {
+    formatVersion: 1,
+    ownerUserId: facts.ownerUserId,
+    components: facts.versions.select(item => {
+      name: item.name, version: item.version, repository: item.repository, commit: item.commit,
+      artifacts: item.artifacts
+    }),
+    compatibility: selection.compatibility ?? [],
+    evidence: facts.evidence,
+    destinations: facts.destinations
+  }
+  builtin releaseAssemblyPrepare(candidate: candidate)
+}
+
 /// Prepare immutable release evidence for a separate owner approval.
 /// Publication is not available in this scope. A failed preparation retains
 /// its durable record and pins so another replica can resume or retire it.

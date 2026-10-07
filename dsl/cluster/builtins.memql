@@ -67,6 +67,45 @@ builtin releasePrepareCandidate {
   candidate object!
 }
 
+/// Resolve completed work runs through a declared assembly plan, then verify and retain the candidate.
+/// Run aliases select actual executions; versions, receipt identities and digests are read natively.
+@sdk
+@executor("integration.release.assembleCandidate")
+@args(profile="object")
+builtin releaseAssembleCandidate {
+  planName string!
+  runs object!
+}
+
+/// Scoped immutable assembly selection; does not read client-supplied recipes.
+@executor("integration.release.releaseAssemblyPlan")
+builtin releaseAssemblyPlan { }
+
+/// Resolve the complete authorized execution under one declared run input.
+@executor("integration.release.releaseAssemblyReadRun")
+builtin releaseAssemblyReadRun { componentName string! runName string! }
+
+/// Resolve the configured version at the component's exact source revision.
+@executor("integration.release.releaseAssemblyReadVersion")
+builtin releaseAssemblyReadVersion { componentName string! }
+
+/// Resolve an exact declared artifact path and its producer metadata from immutable receipts.
+@executor("integration.release.releaseAssemblyReadArtifact")
+builtin releaseAssemblyReadArtifact { componentName string! artifactName string! }
+
+/// Resolve the declared publication target to its immutable configuration identity.
+@executor("integration.release.releaseAssemblyReadTarget")
+builtin releaseAssemblyReadTarget { targetId string! }
+
+/// Return normalized facts after every declared assembly input was resolved.
+@executor("integration.release.releaseAssemblyFacts")
+builtin releaseAssemblyFacts { }
+
+/// Validate the scoped composition and enter candidate preparation; cannot approve or publish.
+@executor("integration.release.releaseAssemblyPrepare")
+@args(profile="object")
+builtin releaseAssemblyPrepare { candidate object! }
+
 /// Read one exact release candidate owned by the caller.
 @sdk
 @executor("integration.release.getCandidate")

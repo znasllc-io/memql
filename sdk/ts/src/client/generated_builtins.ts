@@ -2969,6 +2969,29 @@ QueryClient.prototype.releaseApproveCandidate = function (this: QueryClient, arg
   return this.executeNamed("releaseApproveCandidate", buildReleaseApproveCandidate(args), opts);
 };
 
+/** Resolve completed work runs through a declared assembly plan, then verify and retain the candidate. Run aliases select actual executions; versions, receipt identities and digests are read natively. */
+export interface ReleaseAssembleCandidateArgs {
+  planName: string;
+  runs: Record<string, unknown>;
+}
+
+export function buildReleaseAssembleCandidate(args: ReleaseAssembleCandidateArgs): string {
+  const parts: string[] = [];
+  parts.push("planName: " + renderMemQLValue(args.planName));
+  parts.push("runs: " + renderMemQLValue(args.runs));
+  return "builtin releaseAssembleCandidate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseAssembleCandidate(args: ReleaseAssembleCandidateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseAssembleCandidate = function (this: QueryClient, args: ReleaseAssembleCandidateArgs = {} as ReleaseAssembleCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseAssembleCandidate", buildReleaseAssembleCandidate(args), opts);
+};
+
 /** Read configured release sources and exact publication target identities. Owner only. */
 export interface ReleaseCandidateConfigurationArgs {
 }
