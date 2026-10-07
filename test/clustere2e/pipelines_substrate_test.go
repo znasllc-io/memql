@@ -48,7 +48,8 @@ package clustere2e
 //     fork's run over rows held in memory.
 //   - STANDING IN: GitHub, as an httptest server the real githubapp client
 //     writes check runs to -- the bodies it receives are what the fixtures
-//     record; the Library, as a recording LibraryStore; the clone token
+//     record; the Library, as recording small-file and verified-stream stores
+//     (fixture receipts, not production object-storage qualification); the clone token
 //     minter, which answers installation 0 with no token, as app/'s does; and
 //     the agent's dispatcher (noMachineDispatcher), which answers exactly as
 //     integrations/agent/worker's Dispatcher answers an owner with no machine
@@ -100,9 +101,11 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -486,6 +489,10 @@ func TestPipelinesSubstrate(t *testing.T) {
 			t.Errorf("the artifact was stored as %s holding %q; want %s holding %q", artifacts[0].MimeType, artifacts[0].Bytes, wantMIME, "1\n")
 		case !slices.Equal(res.ArtifactFileIDs, []string{artifacts[0].id}):
 			t.Errorf("the step's result names artifacts %v; the Library stored %q", res.ArtifactFileIDs, artifacts[0].id)
+		case artifacts[0].receipt == nil:
+			t.Error("the artifact bypassed verified streaming storage")
+		case !slices.Equal(res.ArtifactIntentIDs, []string{artifacts[0].receipt.IntentID}):
+			t.Errorf("the step's result names intents %v; the verified stream stored %q", res.ArtifactIntentIDs, artifacts[0].receipt.IntentID)
 		}
 		if len(res.Notes) > 0 {
 			t.Errorf("the database step carries notes %+v; its log and its one artifact were all stored", res.Notes)
@@ -1769,7 +1776,8 @@ func dispatchedKeys(steps []dispatchedStep) []string {
 // storedFile is one file the Library was handed, with the id it answered.
 type storedFile struct {
 	pipelinesteps.RunFile
-	id string
+	id      string
+	receipt *pipelinesteps.StoredFileReceipt
 }
 
 // recordingLibrary is the owner's Library: it keeps every file it is handed.
@@ -1779,6 +1787,7 @@ type recordingLibrary struct {
 }
 
 var _ pipelinesteps.LibraryStore = (*recordingLibrary)(nil)
+var _ pipelinesteps.StreamLibraryStore = (*recordingLibrary)(nil)
 
 func (l *recordingLibrary) StoreRunFile(_ context.Context, f pipelinesteps.RunFile) (pipelinesteps.StoredFile, error) {
 	l.mu.Lock()
@@ -1787,6 +1796,82 @@ func (l *recordingLibrary) StoreRunFile(_ context.Context, f pipelinesteps.RunFi
 	stored := storedFile{RunFile: f, id: fmt.Sprintf("file-%d", len(l.files)+1)}
 	l.files = append(l.files, stored)
 	return pipelinesteps.StoredFile{FileID: stored.id}, nil
+}
+
+func (l *recordingLibrary) StoreRunFileStream(ctx context.Context, f pipelinesteps.StreamRunFile) (pipelinesteps.StoredFile, error) {
+	if err := ctx.Err(); err != nil {
+		return pipelinesteps.StoredFile{}, err
+	}
+	// This in-memory fixture only accepts small test outputs. Read through
+	// EOF (including one extra byte) before returning any matching receipt.
+	if f.Body == nil || f.Size < 0 || f.Size > 1<<20 {
+		return pipelinesteps.StoredFile{}, errors.New("fixture artifact size is invalid")
+	}
+	body, err := io.ReadAll(io.LimitReader(f.Body, f.Size+1))
+	if err != nil {
+		return pipelinesteps.StoredFile{}, err
+	}
+	sum := sha256.Sum256(body)
+	if int64(len(body)) != f.Size || hex.EncodeToString(sum[:]) != f.SHA256 {
+		return pipelinesteps.StoredFile{}, errors.New("fixture artifact bytes do not match their size and digest")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	fileID := fmt.Sprintf("file-%d", len(l.files)+1)
+	intent := sha256.Sum256([]byte("fixture/artifact/" + fileID))
+	receipt := &pipelinesteps.StoredFileReceipt{
+		IntentID: hex.EncodeToString(intent[:]), FileID: fileID,
+		OwnerUserID: f.OwnerUserID, WorkRunID: f.WorkRunID, StepKey: f.StepKey, Attempt: f.Attempt, Path: f.Path,
+		Container: "fixture", Object: fileID, URL: "https://fixture.invalid/" + fileID, ETag: fileID,
+		Size: f.Size, SHA256: f.SHA256,
+	}
+	l.files = append(l.files, storedFile{RunFile: pipelinesteps.RunFile{
+		OwnerUserID: f.OwnerUserID, WorkRunID: f.WorkRunID, StepKey: f.StepKey,
+		Name: f.Name, MimeType: f.MimeType, Bytes: body,
+	}, id: fileID, receipt: receipt})
+	return pipelinesteps.StoredFile{FileID: fileID, Receipt: receipt}, nil
+}
+
+func TestSubstrateRecordingLibraryStream(t *testing.T) {
+	body := []byte("1\n")
+	sum := sha256.Sum256(body)
+	input := pipelinesteps.StreamRunFile{
+		OwnerUserID: "owner", WorkRunID: "run", StepKey: "database.psql", Attempt: 2,
+		Path: "out/select-1.txt", Name: "out__select-1.txt", MimeType: "text/plain",
+		Size: int64(len(body)), SHA256: hex.EncodeToString(sum[:]),
+	}
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"truncated", "1"}, {"trailing", "1\nextra"}, {"changed", "2\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			library := &recordingLibrary{}
+			f := input
+			f.Body = strings.NewReader(tc.body)
+			got, err := library.StoreRunFileStream(context.Background(), f)
+			if err == nil || got.Receipt != nil || len(library.all()) != 0 {
+				t.Fatalf("invalid bytes returned storage evidence: %+v, %v", got, err)
+			}
+		})
+	}
+	library := &recordingLibrary{}
+	input.Body = bytes.NewReader(body)
+	got, err := library.StoreRunFileStream(context.Background(), input)
+	if err != nil || got.Receipt == nil {
+		t.Fatalf("valid stream: %+v, %v", got, err)
+	}
+	r := got.Receipt
+	if r.FileID != got.FileID || !pl.ValidArtifactIntentIDs([]string{r.IntentID}) ||
+		r.OwnerUserID != input.OwnerUserID || r.WorkRunID != input.WorkRunID || r.StepKey != input.StepKey ||
+		r.Attempt != input.Attempt || r.Path != input.Path || r.Size != input.Size || r.SHA256 != input.SHA256 {
+		t.Fatalf("receipt lost artifact identity: %+v", r)
+	}
+	files := library.all()
+	if len(files) != 1 || !bytes.Equal(files[0].Bytes, body) {
+		t.Fatalf("streamed bytes were not recorded: %+v", files)
+	}
 }
 
 func (l *recordingLibrary) all() []storedFile {
