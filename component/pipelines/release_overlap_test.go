@@ -5,18 +5,22 @@ import (
 	"crypto/rand"
 	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
 func signedOverlapFixture(t *testing.T, release PublishedRelease) VerifiedPublishedRelease {
 	t.Helper()
 	pub, key, err := ed25519.GenerateKey(rand.Reader)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
 	body, err := SignPublishedRelease(release, "key", key)
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
 	v, err := VerifyPublishedRelease(body, release.Publisher, map[string]ed25519.PublicKey{"key": pub})
-	require.NoError(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return v
 }
 
@@ -61,10 +65,11 @@ func TestPublishedOverlapRequiresBothDirectionsAndCompleteDeclarations(t *testin
 				required[0].Requires = "absent"
 			}
 			err := CheckPublishedReleaseOverlap(signedOverlapFixture(t, before), signedOverlapFixture(t, after), required)
-			if fault == "none" {
-				require.NoError(t, err)
-			} else {
-				require.Error(t, err)
+			if fault == "none" && err != nil {
+				t.Fatal(err)
+			}
+			if fault != "none" && err == nil {
+				t.Fatal("expected overlap refusal")
 			}
 		})
 	}
@@ -79,9 +84,17 @@ func TestPublishedOverlapHandlesLargeVersionsWithoutNarrowing(t *testing.T) {
 	// Adding a mirror does not change the bytes belonging to a version.
 	after.Components[0].Artifacts[0].Locations = append(after.Components[0].Artifacts[0].Locations, PublishedLocation{Kind: "oci", Origin: "https://mirror.example", Repository: "acme/engine"})
 	a, b := signedOverlapFixture(t, before), signedOverlapFixture(t, after)
-	require.NoError(t, CheckPublishedReleaseOverlap(a, b, nil))
+	if err := CheckPublishedReleaseOverlap(a, b, nil); err != nil {
+		t.Fatal(err)
+	}
 	again, err := b.Release()
-	require.NoError(t, err)
-	require.Len(t, again.Components[1].Artifacts[0].Locations, 2, "verifier must not mutate verified publication content")
-	require.Error(t, CheckPublishedReleaseOverlap(VerifiedPublishedRelease{}, b, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(again.Components[1].Artifacts[0].Locations); got != 2 {
+		t.Fatalf("verifier mutated verified publication content: got %d locations, want 2", got)
+	}
+	if err := CheckPublishedReleaseOverlap(VerifiedPublishedRelease{}, b, nil); err == nil {
+		t.Fatal("accepted an unverified publication")
+	}
 }
