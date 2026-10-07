@@ -49,7 +49,7 @@ fresh observation recipe against the durable intent; it must not replay an old
 approval against changed executable workflow definitions.
 
 The journal now has an internal reservation/start/observation foundation,
-described below. Source/render verification, workload and continuity probes,
+described below. Composition of source/render verification, workload and continuity probes,
 reconciliation scheduler, rollback workflow and UI remain to be implemented.
 Neither acceptance of a patch nor `Healthy` plus `Synced` completes an update.
 
@@ -85,6 +85,77 @@ changed stored authority, and migration rollback refusing nonempty history.
 The package is in the canonical required-database CI selector. Completion,
 explicit rollback/recovery, cleanup evidence and the scoped DSL/public surface
 remain unfinished; no engine rollout is enabled by this journal alone.
+
+### Preparation before source dispatch
+
+The private preparation journal reserves that same installation head before
+source acquisition. A native scope binds the original requesting operator,
+stable request ID, selected workflow and configuration digests, published
+candidate, and exact candidate/rollback capture specifications. Both captures
+share one preparation-owned run with distinct fixed step keys. A replacement
+host looks up the original scope by request ID before resolving a new start
+time or configuration. Changed inputs cannot reuse an existing request.
+The scope also records the complete native Argo intent before capture, including
+the Application namespace/name/UID, generation, destination cluster, full baseline
+spec, sync options and operation identity. Receiving admission must authenticate
+that live Application and configuration; persisting it is not verification.
+
+The journal commits dispatch intent before contacting Workbench. Retries ask
+the receiver to recover the same attempt; they never authorize a fresh replay.
+If a process dies between committing intent and dispatch, and the receiver has
+neither a queued record nor a Job outcome, the result remains uncertain and the
+installation head stays occupied. Absence of a Job is not proof of no effect.
+Only a future fenced retirement/reconciliation operation may release that
+started preparation. Cancellation currently releases only preparations whose
+source effects have never been marked started.
+
+Execution receipts are persisted before artifact verification, and verified
+source/receipt fingerprints before Job acknowledgement. Artifact verification
+always reopens the pinned archive and repeats the native closure proof, even
+when an earlier host recorded matching digests. Neither stored fingerprints nor
+successful Job cleanup reconstructs verification authority. Each effect
+rechecks the original currently admitted operator and workflow; reads may be
+performed by another currently admitted native operator.
+
+The new database tests cover independent connections, concurrent dispatch
+claims, request recovery, changed authority, and the shared revision/preparation
+fence. A separate test reaches the real Executor, Workbench forward handler and
+fresh Runner instances over an HTTP Kubernetes fixture, distinguishing an
+existing durable outcome from an uncertain missing attempt. These tests passed
+in required-database CI and in the October 7 local installation suite against
+an isolated PostgreSQL/TimescaleDB fixture with `MEMQL_REQUIRE_DB=1` and the race
+detector enabled (19.784 seconds). This slice remains private and unregistered.
+Started-attempt retirement, artifact retention/cleanup, current configuration
+verification, sealed DSL wiring and installed recovery qualification remain
+required before exposing preparation.
+
+### Atomic preparation handoff
+
+The private promotion operation transfers the shared installation head directly
+from preparation to one revision attempt in a PostgreSQL transaction. It binds
+the original requester, workflow and configuration to the exact signed
+publication, acknowledged source captures, candidate and rollback renders,
+resource diff, and storage/credential observations. A supplied digest cannot
+replace those native verifier results. The Argo intent must match the complete
+reserved protocol intent as well as the captured source, project, namespace and
+revision. Artifact pins remain with
+the durable source consumer throughout the handoff and rollback lifetime.
+
+The preparation records the promoted plan ID in the same transaction. A lost
+commit reply can be recovered through the stable request ID on another replica;
+concurrent promoters return the same plan. A changed plan refuses, late source
+callbacks cannot reopen preparation, and a historical retry cannot take a
+successor's slot. A failed head update rolls back both journal writes. Migration
+rollback refuses to remove a recorded promotion.
+
+The promotion tests passed in required-database CI and in the same local race
+suite. Independent review is complete, including a second-connection PostgreSQL
+regression for stable JSONB intent identity and exact large integers. They cover
+those transaction and authority boundaries using real PostgreSQL and native
+verifiers over protocol fixtures.
+This is a journal handoff, not complete installation admission: actual receiving
+configuration/renderer identity, compatibility, artifact availability and the
+live rollout/continuity/recovery workflow remain required before registration.
 
 ## Immutable desired state
 
