@@ -2969,7 +2969,7 @@ QueryClient.prototype.releaseApproveCandidate = function (this: QueryClient, arg
   return this.executeNamed("releaseApproveCandidate", buildReleaseApproveCandidate(args), opts);
 };
 
-/** Read configured release sources and exact registry target identities. Owner only. */
+/** Read configured release sources and exact publication target identities. Owner only. */
 export interface ReleaseCandidateConfigurationArgs {
 }
 

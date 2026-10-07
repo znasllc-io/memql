@@ -45,7 +45,7 @@ builtin releaseCutStatus {
   version  string!  @description("The version to check, in either tag form (v1.2.3) or bare form (1.2.3).")
 }
 
-/// Read configured release sources and exact registry target identities. Owner only.
+/// Read configured release sources and exact publication target identities. Owner only.
 @sdk
 @executor("integration.release.candidateConfiguration")
 builtin releaseCandidateConfiguration { }
