@@ -211,8 +211,9 @@ func engineImportGraph(t *testing.T) (*pipelines.Graph, map[string]bool) {
 // compileEngineOpening compiles the pipeline for one run as
 // component/pipelinerun/tree.go's readPlan does, and must change when it does:
 // the block validated before anything is computed from it, the mode the event
-// decides, the change list a pull request's compare answers, the import graph
-// selected with Affected whenever a step selects packages, and Compile.
+// decides in the installed DSL, the stages selected by the installed DSL,
+// the change list a pull request's compare answers, the import graph selected
+// with Affected whenever a step selects packages, and Compile.
 //
 // The Cockpit trial requires the owner's explicit fleet consent. The separate
 // consent guard below proves a cluster-only connection refuses this manifest.
@@ -225,6 +226,25 @@ func compileEngineOpening(spec *pipelines.Spec, graph *pipelines.Graph, event pi
 		return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeEventUnknown, "", "no mode is decided for event %q", event)
 	}
 	in := pipelines.CompileInput{Mode: mode, Event: event, Compute: pipelines.ComputeClusterAndFleet}
+	stageSelection := pipelines.StageSelection{Included: make([]string, 0, len(spec.Stages))}
+	for _, stage := range spec.Stages {
+		on := stage.On
+		if on == nil {
+			on = []string{}
+		}
+		value, err := workflowhost.Run(context.Background(), "pipelineStageIncluded", map[string]any{
+			"event": string(event), "mode": string(mode), "on": on,
+		}, workflowhost.Options{})
+		included, ok := value.(bool)
+		if err != nil || !ok {
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeStageInvalid, "selection",
+				"pipelineStageIncluded returned %T or failed: %v", value, err)
+		}
+		if included {
+			stageSelection.Included = append(stageSelection.Included, stage.Name)
+		}
+	}
+	in.StageSelection = &stageSelection
 	if mode == pipelines.ModeAffected {
 		in.Changed, in.ChangedKnown = changed, true
 	}

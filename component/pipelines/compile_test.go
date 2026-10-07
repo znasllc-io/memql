@@ -100,6 +100,15 @@ var (
 
 func mustCompilePlan(t *testing.T, spec *Spec, in CompileInput) Plan {
 	t.Helper()
+	if in.StageSelection == nil {
+		// Most compiler tests exercise step mechanics, not DSL stage policy.
+		// The dedicated stage-selection test supplies the policy result.
+		selection := StageSelection{Included: make([]string, 0, len(spec.Stages))}
+		for _, stage := range spec.Stages {
+			selection.Included = append(selection.Included, stage.Name)
+		}
+		in.StageSelection = &selection
+	}
 	plan, r := Compile(spec, in)
 	if r != nil {
 		t.Fatalf("Compile refused: %v", r)
@@ -159,6 +168,7 @@ func TestCompileThePullRequestRunOfTheRecordsExample(t *testing.T) {
 		Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet,
 		Selector: d7Selector(affected), Timings: d7Timings,
 		Changed: []string{"component/memql/engine.go", "docs/README.md"}, ChangedKnown: true,
+		StageSelection: &StageSelection{Included: []string{"checks", "tests"}},
 	}
 	plan := mustCompilePlan(t, d7ExampleSpec(), in)
 
@@ -298,7 +308,8 @@ func TestCompileRefusesANeedOnAClusterOnlyPipeline(t *testing.T) {
 	for _, compute := range []Compute{ComputeCluster, ""} {
 		_, r := Compile(d7ExampleSpec(), CompileInput{
 			Mode: ModeAffected, Event: EventPullRequest, Compute: compute,
-			Selector: d7Selector(Selection{Packages: []string{d7Memql}}),
+			Selector:       d7Selector(Selection{Packages: []string{d7Memql}}),
+			StageSelection: &StageSelection{Included: []string{"checks", "tests"}},
 		})
 		if r == nil || r.Code != CodeFleetNotConsented || r.Scope != "tests/os-checks" {
 			t.Errorf("compute %q: Compile = %v, want pipeline_fleet_not_consented (tests/os-checks)", compute, r)
@@ -314,6 +325,7 @@ func TestCompileRefusesANeedOnAClusterOnlyPipeline(t *testing.T) {
 	_, r := Compile(d7ExampleSpec(), CompileInput{
 		Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeCluster,
 		Selector: d7Selector(Selection{}), Changed: []string{"docs/README.md"}, ChangedKnown: true,
+		StageSelection: &StageSelection{Included: []string{"checks", "tests"}},
 	})
 	if r == nil || r.Code != CodeFleetNotConsented {
 		t.Errorf("with os-checks skipped by its bucket: Compile = %v, want pipeline_fleet_not_consented", r)
@@ -328,6 +340,7 @@ func TestCompileRefusesASecretTheOwnerDidNotAllow(t *testing.T) {
 	push := CompileInput{
 		Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet,
 		Selector: d7Selector(Selection{}), AllowedSecrets: []string{"NPM_TOKEN"},
+		StageSelection: &StageSelection{Included: []string{"checks", "tests", "deploy", "notify"}},
 	}
 
 	_, r := Compile(spec, push)
@@ -347,7 +360,8 @@ func TestCompileRefusesASecretTheOwnerDidNotAllow(t *testing.T) {
 	// A pull request does not plan the deploy stage, so its secret is not asked.
 	mustCompilePlan(t, spec, CompileInput{
 		Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet,
-		Selector: d7Selector(Selection{}),
+		Selector:       d7Selector(Selection{}),
+		StageSelection: &StageSelection{Included: []string{"checks", "tests"}},
 	})
 }
 
@@ -358,6 +372,7 @@ func TestCompileSkipsAPackageStepWhenNothingIsAffected(t *testing.T) {
 		Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet,
 		Selector: d7Selector(Selection{Reason: "no Go package changed"}), Timings: d7Timings,
 		Changed: []string{"docs/README.md"}, ChangedKnown: true,
+		StageSelection: &StageSelection{Included: []string{"checks", "tests"}},
 	})
 	goSkipped := d7GoTests
 	goSkipped.Skip = &Skip{Code: CodeNotAffected, Reason: "No affected Go packages."}
@@ -464,7 +479,10 @@ func TestCloneCompiledStepSharesNoLinks(t *testing.T) {
 }
 
 func TestCompileRefusesAPackageStepWithNoSelector(t *testing.T) {
-	_, r := Compile(d7ExampleSpec(), CompileInput{Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet})
+	_, r := Compile(d7ExampleSpec(), CompileInput{
+		Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet,
+		StageSelection: &StageSelection{Included: []string{"checks", "tests", "deploy", "notify"}},
+	})
 	if r == nil || r.Code != CodeSelectMissing || r.Scope != "tests/go-tests" {
 		t.Errorf("Compile = %v, want pipeline_select_missing (tests/go-tests)", r)
 	}
@@ -483,10 +501,9 @@ func TestCompileReturnsValidatesRefusal(t *testing.T) {
 	}
 }
 
-// `on` names events and modes; a stage whose `on` excludes the run is absent
-// from the plan, and the next stage depends on the stage before it that IS
-// planned.
-func TestCompilePlansAStageByEventOrMode(t *testing.T) {
+// Compile consumes a stage set selected by the workflow policy and preserves
+// dependency order among the included stages.
+func TestCompileConsumesExplicitStageSelection(t *testing.T) {
 	spec := &Spec{Stages: []StageSpec{
 		{Name: "lint", Steps: []StepSpec{{Name: "vet", Run: "go vet ./..."}}},
 		{Name: "slow", On: []string{"full"}, Steps: []StepSpec{{Name: "e2e", Run: "make e2e"}}},
@@ -503,13 +520,47 @@ func TestCompilePlansAStageByEventOrMode(t *testing.T) {
 		{ModeFull, EventPush, []string{"lint", "slow", "report"}, []string{"slow.e2e"}},
 		{ModeFull, EventMergeGroup, []string{"lint", "slow", "queue", "report"}, []string{"queue.smoke"}},
 	} {
-		plan := mustCompilePlan(t, spec, CompileInput{Mode: tc.mode, Event: tc.event})
+		plan := mustCompilePlan(t, spec, CompileInput{
+			Mode: tc.mode, Event: tc.event,
+			StageSelection: &StageSelection{Included: tc.stages},
+		})
 		if got := planStageNames(plan); !reflect.DeepEqual(got, tc.stages) {
 			t.Errorf("%s/%s: stages = %v, want %v", tc.mode, tc.event, got, tc.stages)
 		}
 		if got := planStepByKey(t, plan, "report.sum").DependsOn; !reflect.DeepEqual(got, tc.after) {
 			t.Errorf("%s/%s: report depends on %v, want %v", tc.mode, tc.event, got, tc.after)
 		}
+	}
+}
+
+func TestCompileRefusesConditionalStagesWithoutDSLSelection(t *testing.T) {
+	spec := &Spec{Stages: []StageSpec{{
+		Name: "tests", On: []string{"pull_request"}, Steps: []StepSpec{{Name: "unit", Run: "go test"}},
+	}}}
+	plan, refusal := Compile(spec, CompileInput{Mode: ModeAffected, Event: EventPullRequest})
+	if refusal == nil || refusal.Code != CodeStageInvalid || refusal.Scope != "selection" {
+		t.Fatalf("missing stage selection was accepted: plan=%+v refusal=%+v", plan, refusal)
+	}
+	if !reflect.DeepEqual(plan, Plan{}) {
+		t.Fatalf("refused compile returned a plan: %+v", plan)
+	}
+}
+
+func TestCompileRejectsUnknownOrDuplicateDSLStageSelections(t *testing.T) {
+	spec := &Spec{Stages: []StageSpec{{Name: "tests", Steps: []StepSpec{{Name: "unit", Run: "go test"}}}}}
+	for _, tc := range []struct {
+		name     string
+		selected []string
+	}{
+		{name: "unknown", selected: []string{"deploy"}},
+		{name: "duplicate", selected: []string{"tests", "tests"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, refusal := Compile(spec, CompileInput{StageSelection: &StageSelection{Included: tc.selected}})
+			if refusal == nil || refusal.Code != CodeStageInvalid || refusal.Scope != "selection" {
+				t.Fatalf("invalid selection was accepted: plan=%+v refusal=%+v", plan, refusal)
+			}
+		})
 	}
 }
 

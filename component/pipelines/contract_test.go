@@ -239,6 +239,7 @@ func TestStepKeysAreNeverNested(t *testing.T) {
 		Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet,
 		AllowedSecrets: []string{"DEPLOY_TOKEN"},
 		Selector:       d7Selector(Selection{Full: true}), Timings: d7Timings,
+		StageSelection: &StageSelection{Included: []string{"checks", "tests", "deploy", "notify"}},
 	})
 	if refusal != nil {
 		t.Fatalf("Compile refused the record's example: %v", refusal)

@@ -250,6 +250,74 @@ func TestVersionIsTheTagForAReleaseAndTheSHAOtherwise(t *testing.T) {
 	}
 }
 
+func TestStageApplicabilityComesFromPinnedPipelineDSL(t *testing.T) {
+	dr := &runDriver{}
+	if err := dr.prepareWorkflow(""); err != nil {
+		t.Fatal(err)
+	}
+	stages := []pipelines.StageSpec{
+		{Name: "always"},
+		{Name: "pull-request", On: []string{"pull_request"}},
+		{Name: "full", On: []string{"full"}},
+		{Name: "release", On: []string{"release"}},
+	}
+	cases := []struct {
+		event pipelines.Event
+		mode  pipelines.Mode
+		want  []string
+	}{
+		{pipelines.EventPullRequest, pipelines.ModeAffected, []string{"always", "pull-request"}},
+		{pipelines.EventPush, pipelines.ModeFull, []string{"always", "full"}},
+		{pipelines.EventRelease, pipelines.ModeFull, []string{"always", "full", "release"}},
+	}
+	for _, tc := range cases {
+		got, err := dr.selectStages(context.Background(), stages, tc.event, tc.mode)
+		if err != nil || !slices.Equal(got.Included, tc.want) {
+			t.Errorf("selectStages(%s/%s) = %v, %v; want %v", tc.event, tc.mode, got.Included, err, tc.want)
+		}
+	}
+	if _, pinned := dr.workflow.definitions["pipelineStageIncluded"]; !pinned {
+		t.Fatal("stage applicability definition is not part of the pinned workflow")
+	}
+}
+
+func TestChangedStagePolicyChangesPipelineWorkflowIdentity(t *testing.T) {
+	base := &runDriver{}
+	if err := base.prepareWorkflow(""); err != nil {
+		t.Fatal(err)
+	}
+	changedPolicy := workflowSource(t, `@template automation pipelineStageIncluded {
+ args { event string! mode string! on []string! }
+ return false
+}`)
+	changed := &runDriver{d: Deps{LoadWorkflow: workflowLoader(changedPolicy)}}
+	if err := changed.prepareWorkflow(""); err != nil {
+		t.Fatal(err)
+	}
+	if base.workflowIdentity() == changed.workflowIdentity() {
+		t.Fatal("a changed stage selector retained the same run workflow identity")
+	}
+}
+
+func TestEmptyStageSelectionCannotEraseExistingWork(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  Run
+		want string
+	}{
+		{name: "fresh run", run: Run{}, want: ConclusionSuccess},
+		{name: "existing journal", run: Run{WorkRunID: "work-1"}, want: ConclusionFailure},
+		{name: "failed-only rerun", run: Run{RerunFailedOnly: true}, want: ConclusionFailure},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dr := &runDriver{run: tc.run}
+			if got := dr.emptyPlanVerdict().conclusion; got != tc.want {
+				t.Fatalf("empty plan conclusion = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestPipelineWorkflowCannotReturnEarlyAndPass(t *testing.T) {
 	a := workflowSource(t, `@template automation emptyPipelineWorkflow { args { stages []any! } return true }`)
 	dh := newDriveHarness(t, manifestWorkflow(driveManifest, a.Name))

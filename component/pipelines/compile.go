@@ -15,6 +15,10 @@ type CompileInput struct {
 	Mode    Mode
 	Event   Event
 	Compute Compute
+	// StageSelection is the pipeline DSL's explicit applicability decision.
+	// It is required when any stage declares `on`; nil cannot silently broaden
+	// a conditional pipeline to every event.
+	StageSelection *StageSelection
 	// AllowedSecrets is the pipeline row's secretNames.
 	AllowedSecrets []string
 	// Selector answers which Go packages a step selects. Nil when no step
@@ -25,6 +29,12 @@ type CompileInput struct {
 	ChangedKnown bool
 	// Timings is the pipeline's timing table: import path -> seconds.
 	Timings map[string]float64
+}
+
+// StageSelection is the stage set selected by the installed pipeline policy.
+// Names are checked against the manifest before any stage is compiled.
+type StageSelection struct {
+	Included []string
 }
 
 // Plan is a compiled pipeline: the stages one run executes, in order. It
@@ -106,6 +116,29 @@ func Compile(spec *Spec, in CompileInput) (Plan, *Refusal) {
 	if r := Validate(spec); r != nil {
 		return Plan{}, r
 	}
+	if in.StageSelection == nil {
+		for _, stage := range spec.Stages {
+			if len(stage.On) > 0 {
+				return Plan{}, Refuse(CodeStageInvalid, "selection",
+					"The pipeline DSL did not select stages for this run; conditional stages cannot be compiled without an explicit selection.")
+			}
+		}
+	}
+	selected := map[string]bool(nil)
+	if in.StageSelection != nil {
+		selected = make(map[string]bool, len(in.StageSelection.Included))
+		known := make(map[string]bool, len(spec.Stages))
+		for _, stage := range spec.Stages {
+			known[stage.Name] = true
+		}
+		for _, name := range in.StageSelection.Included {
+			if !known[name] || selected[name] {
+				return Plan{}, Refuse(CodeStageInvalid, "selection",
+					"The pipeline DSL selected unknown or duplicate stage %q.", name)
+			}
+			selected[name] = true
+		}
+	}
 	c := &planCompiler{spec: spec, in: in}
 	if spec.Select != nil {
 		for _, entry := range spec.Select.DBGated {
@@ -118,7 +151,7 @@ func Compile(spec *Spec, in CompileInput) (Plan, *Refusal) {
 	plan := Plan{Workflow: spec.Workflow, Mode: in.Mode, Event: in.Event}
 	var previous []string // the keys of the stage planned before this one
 	for _, stage := range spec.Stages {
-		if !stagePlanned(stage, in) {
+		if selected != nil && !selected[stage.Name] {
 			continue
 		}
 		planned := PlanStage{Name: stage.Name, Needs: compiledCopy(stage.Needs)}
@@ -145,18 +178,6 @@ func Compile(spec *Spec, in CompileInput) (Plan, *Refusal) {
 		plan.Stages = append(plan.Stages, planned)
 	}
 	return plan, nil
-}
-
-func stagePlanned(stage StageSpec, in CompileInput) bool {
-	if len(stage.On) == 0 {
-		return true
-	}
-	for _, on := range stage.On {
-		if on == string(in.Event) || on == string(in.Mode) {
-			return true
-		}
-	}
-	return false
 }
 
 // planCompiler carries one compile's inputs and the answers it asks the

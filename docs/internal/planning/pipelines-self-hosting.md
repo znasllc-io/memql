@@ -260,6 +260,11 @@ record write as a successful update.
 - Ship the default CI/CD workflow as sealed core DSL. Clients configure it,
   call its public constructs, or compose separately named workflows. The
   template must not copy the core workflow into each client repository.
+- The event-to-mode decision and event/mode applicability of manifest stages
+  now run through sealed core pipeline automations. The compiler requires the
+  explicit selected stage set, and the selector definition is part of the
+  recovery fingerprint. Package and changed-path selection still has policy
+  in Go and remains open work.
 - Keep orchestration decisions in DSL; integrations provide bounded effects.
   Change the runtime only for missing general primitives or correctness.
   Audit queries, mutations, specifications, logic and automations while
@@ -291,8 +296,13 @@ record write as a successful update.
   #5823; check newer issue state before implementation).
 - [ ] Finish channel management, false-green evidence and rollout verification
   in the existing OS surfaces (#5504, #5505, #5506).
-- [ ] Refactor default workflow policy into public core DSL with an explicit
-  selection/configuration boundary and a second workflow proving composition.
+- [ ] Finish the default workflow policy boundary in public core DSL:
+  - [x] Event-to-mode and event/mode-to-stage selection are DSL decisions;
+    compilation requires an explicit selected stage set.
+  - [x] A separately named workflow composes the sealed default and proves the
+    default remains reusable.
+  - [ ] Move remaining package and changed-path selection policy behind DSL
+    decisions and keep the manifest as configuration.
 - [ ] Add candidate preparation, compatible component versions, owner approval,
   artifact provenance and idempotent release/deployment receipts.
 - [ ] Reproduce all necessary build/test/security/docs/release lanes for engine,

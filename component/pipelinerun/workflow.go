@@ -178,7 +178,7 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 	}
 	// Notification policy can be reached through a native step, so its pure
 	// recipes are part of the immutable execution contract as well.
-	for _, helper := range []string{"pipelineNotificationCopy", "pipelineNotificationOutcome"} {
+	for _, helper := range []string{"pipelineStageIncluded", "pipelineNotificationCopy", "pipelineNotificationOutcome"} {
 		if err := visit(helper); err != nil {
 			return err
 		}
@@ -186,6 +186,43 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 	p.fingerprint = string(id.New().MustFromMap(identities))
 	dr.workflow = p
 	return nil
+}
+
+func (dr *runDriver) selectStages(ctx context.Context, stages []pipelines.StageSpec, event pipelines.Event, mode pipelines.Mode) (pipelines.StageSelection, error) {
+	selection := pipelines.StageSelection{Included: make([]string, 0, len(stages))}
+	for _, stage := range stages {
+		on := stage.On
+		if on == nil {
+			on = []string{}
+		}
+		value, err := dr.runPinnedWorkflow(ctx, "pipelineStageIncluded", map[string]any{
+			"event": string(event), "mode": string(mode), "on": on,
+		})
+		if err != nil {
+			return pipelines.StageSelection{}, err
+		}
+		included, ok := value.(bool)
+		if !ok {
+			return pipelines.StageSelection{}, fmt.Errorf("pipeline stage policy returned %T, want bool", value)
+		}
+		if included {
+			selection.Included = append(selection.Included, stage.Name)
+		}
+	}
+	return selection, nil
+}
+
+func (dr *runDriver) runPinnedWorkflow(ctx context.Context, name string, args map[string]any) (any, error) {
+	if dr.workflow == nil || dr.workflow.definitions[name] == nil {
+		return nil, fmt.Errorf("pipeline workflow %q was not pinned before selection", name)
+	}
+	return workflowhost.Run(ctx, name, args, workflowhost.Options{Load: func(want string) (*automations.Automation, error) {
+		a := dr.workflow.definitions[want]
+		if a == nil {
+			return nil, fmt.Errorf("pipeline workflow %q was not pinned before execution", want)
+		}
+		return a, nil
+	}})
 }
 
 func cloneWorkflowLiteral(value any) any {
