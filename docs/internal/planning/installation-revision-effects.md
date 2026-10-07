@@ -77,6 +77,14 @@ Application is refused, as is another active operation. Status-only generation
 changes can invalidate preparation; callers must refresh and reassess instead
 of weakening the comparison.
 
+Argo's typed status encoding omits optional empty/false source fields. This
+initial adapter refuses those explicit values before starting, including
+`kustomize.images: []`, rather than waiting forever for a byte-identical source
+that the controller cannot emit. It currently accepts Git/Kustomize sources
+only, and also conservatively refuses meaningful zero-valued source map entries.
+Supporting additional source forms requires a pinned, controller-qualified
+codec; the complete baseline spec and write preconditions remain exact.
+
 The sync preserves the Application's declared sync options. It clears the
 previous operation state atomically so omitted Argo fields cannot inherit an
 earlier selective resource list. Existing automated-sync policy is preserved;

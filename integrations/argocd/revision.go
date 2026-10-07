@@ -191,6 +191,16 @@ func (i Intent) validate() (before, after map[string]any, digest string, err err
 		err = errors.New("ArgoCD revision effect requires a single Git source, project and destination")
 		return
 	}
+	for key := range source {
+		if key != "repoURL" && key != "path" && key != "targetRevision" && key != "kustomize" {
+			err = errors.New("ArgoCD revision effect supports a canonical Git/Kustomize source only")
+			return
+		}
+	}
+	if !canonicalSourceValues(source) {
+		err = errors.New("ArgoCD source contains explicit empty/default fields; omit them before preparing an update")
+		return
+	}
 	if images := object(source, "kustomize")["images"]; images != nil {
 		values, ok := images.([]any)
 		if !ok || len(values) != 0 {
@@ -402,6 +412,45 @@ func emptyArray(value any) bool {
 	}
 	items, ok := value.([]any)
 	return ok && len(items) == 0
+}
+
+// Argo decodes sources into typed structs before writing status. Known optional
+// zero values disappear through omitempty, whereas directory/jsonnet introduces
+// implicit structs. This initial adapter accepts only Git/Kustomize sources
+// without explicit empty/default values, refusing before any effect rather than
+// declaring a valid sync forever unobserved or weakening full-source equality.
+// This intentionally also refuses meaningful zero-valued map entries until a
+// pinned, controller-qualified source codec can represent them without loss.
+func canonicalSourceValues(value any) bool {
+	switch value := value.(type) {
+	case map[string]any:
+		if len(value) == 0 {
+			return false
+		}
+		for _, child := range value {
+			if !canonicalSourceValues(child) {
+				return false
+			}
+		}
+	case []any:
+		if len(value) == 0 {
+			return false
+		}
+		for _, child := range value {
+			if !canonicalSourceValues(child) {
+				return false
+			}
+		}
+	case string:
+		return value != ""
+	case bool:
+		return value
+	case json.Number:
+		return value != "0" && value != "0.0" && value != "-0"
+	default:
+		return false
+	}
+	return true
 }
 
 func decodeSnapshot(body []byte, target Target) (Snapshot, error) {

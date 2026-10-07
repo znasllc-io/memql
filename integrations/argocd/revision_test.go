@@ -397,3 +397,28 @@ func TestRevisionJournalAndResponseDecoding(t *testing.T) {
 	require.Zero(t, f.writeCount())
 	require.False(t, errors.Is(err, ErrChanged))
 }
+
+func TestRevisionRefusesControllerOmittedSourceFieldsBeforeWrite(t *testing.T) {
+	for name, value := range map[string]any{"images": []any{}, "forceCommonLabels": false, "namePrefix": "", "commonAnnotations": map[string]any{}} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.change(t, func(obj map[string]any) {
+				source := object(object(obj, "spec"), "source")
+				// Controller-shaped status omits the explicit zero-valued field
+				// that the unstructured CRD spec may still carry.
+				encoded, err := canonical(source)
+				require.NoError(t, err)
+				controllerSource, err := decodeObject(encoded)
+				require.NoError(t, err)
+				object(source, "kustomize")[name] = value
+				object(object(obj, "status"), "sync")["comparedTo"] = map[string]any{"source": controllerSource}
+			})
+			c := f.client(t)
+			snapshot, err := c.Read(context.Background(), testTarget)
+			require.NoError(t, err)
+			_, err = PlanRevision(snapshot, "request", testRevision, false)
+			require.ErrorContains(t, err, "empty/default")
+			require.Zero(t, f.patchCount())
+		})
+	}
+}
