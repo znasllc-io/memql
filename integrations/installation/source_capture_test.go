@@ -261,7 +261,7 @@ func TestSourceCaptureConfigurationRefusesBeforeDispatch(t *testing.T) {
 			case "reserved-secret":
 				spec.ImagePullSecret = "GIT_TOKEN"
 			case "source-duplicate":
-				spec.Render.Source = []byte(`{"repoURL":"https://github.com/example/installation.git","repoURL":"https://evil.example/x"}`)
+				spec.Render.Source = []byte(strings.Replace(string(spec.Render.Source), `"path":"overlay"`, `"path":"unreviewed","path":"overlay"`, 1))
 			}
 			_, err := newSourceCapture(spec)
 			require.Error(t, err)

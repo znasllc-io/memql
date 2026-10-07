@@ -16,6 +16,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	pl "github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/argocd"
 	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 )
@@ -104,11 +105,12 @@ func newSourceCapture(spec sourceCaptureSpec) (sourceCapture, error) {
 	if err != nil || len(body) > 32<<10 {
 		return empty, errors.New("source capture render specification exceeds its transport bound")
 	}
-	body, err = canonicalJSON(body)
+	render, err := argocd.DecodeRenderSpec(body)
 	if err != nil {
 		return empty, err
 	}
-	render, err := argocd.DecodeRenderSpec(body)
+	// Reject duplicate/unknown fields before normalization can erase them.
+	body, err = canonicalJSON(body)
 	if err != nil {
 		return empty, err
 	}
@@ -148,12 +150,11 @@ func newSourceCapture(spec sourceCaptureSpec) (sourceCapture, error) {
 	if err != nil {
 		return empty, err
 	}
-	sum := sha256.Sum256(canonical)
-	key := hex.EncodeToString(sum[:])
+	key := string(id.NewUntracked().FromString("installation-source-capture-v1:" + string(canonical)))
 	directory := ".memql-source-" + key
 	request.Step.Run = strings.ReplaceAll(command, directoryToken, directory)
 	request.Step.Artifacts = []string{directory + "/source.tar"}
-	return sourceCapture{digest: "sha256:" + key, render: render, path: request.Step.Artifacts[0], request: request}, nil
+	return sourceCapture{digest: "memql-id:" + key, render: render, path: request.Step.Artifacts[0], request: request}, nil
 }
 
 func (c sourceCapture) stepRequest() pl.StepRequest {
@@ -164,7 +165,7 @@ func (c sourceCapture) stepRequest() pl.StepRequest {
 
 func (c sourceCapture) actor(ctx context.Context) (context.Context, error) {
 	actor, err := installationActor(ctx)
-	if err != nil || actor != c.request.OwnerUserID || !artifactDigest.MatchString(c.digest) {
+	if err != nil || actor != c.request.OwnerUserID || !internalDigest.MatchString(c.digest) {
 		return nil, errors.New("source capture requires its identified installation operator")
 	}
 	if err := ctx.Err(); err != nil {
@@ -204,7 +205,7 @@ func (c sourceCapture) run(ctx context.Context, executor sourceCaptureExecutor, 
 }
 
 func (c sourceCapture) reference(receipt sourceCaptureReceipt) (pipelinesteps.RunFileReference, error) {
-	if receipt.ScopeDigest != c.digest || !pl.ValidArtifactIntentIDs([]string{receipt.IntentID}) {
+	if !internalDigest.MatchString(c.digest) || receipt.ScopeDigest != c.digest || !pl.ValidArtifactIntentIDs([]string{receipt.IntentID}) {
 		return pipelinesteps.RunFileReference{}, errors.New("source capture receipt belongs to another scope")
 	}
 	return pipelinesteps.RunFileReference{Scope: pipelinesteps.RunFileReceiptScope{

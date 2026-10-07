@@ -46,6 +46,8 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 	// -- specifically to remove the unguarded coupling a duplicated hash
 	// expression created, so the entry is gone rather than kept.)
 	allow := map[string]string{
+		"installation/source_capture.go":         "verifies private archive bytes against their immutable storage receipt's standard SHA-256; internal capture identities use core/id",
+		"installation/source_capture_test.go":    "independently computes standard SHA-256 fixture receipt checksums for private source archive verification",
 		"release/candidate_assembly_metadata.go": "verifies receipt-bound BuildKit metadata bytes against the original upload's standard SHA-256; identifiers use core/id separately",
 		"release/candidate_assembly_test.go":     "independently computes standard SHA-256 metadata receipt fixtures for artifact integrity tests",
 		"release/candidate_oci_fixture_test.go":  "independently encodes standard OCI content and archive SHA-256 values for preparation integrity tests",
