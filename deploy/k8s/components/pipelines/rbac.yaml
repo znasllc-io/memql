@@ -7,12 +7,13 @@
 # the orphan-Secret sweep and the isolation proof alike -- and the grant is
 # exactly those calls, verb for verb (review M3):
 #
-#   batch/jobs  create, get, patch, delete, deletecollection
+#   batch/jobs  create, get, list, patch, delete, deletecollection
 #               one Job per step attempt, and the isolation probe's; read back
 #               by name while it runs and when another workbench replica adopts
-#               it (the runner polls the one Job it holds, so it neither lists
-#               nor watches); patched with the runner's heartbeat and the step's
-#               outcome; deleted once the agent acknowledged the result; a
+#               it (ordinary progress polls one Job, without a watch);
+#               patched with the runner's heartbeat and the step's
+#               outcome; list inventories a cancelled run's metadata by label
+#               before guarded cleanup; deleted after result acknowledgement; a
 #               cancelled run's Jobs swept with one deletecollection by label.
 #   pods        list, patch
 #               the Job's pods, found by the job-name label: their phase and
@@ -61,15 +62,17 @@ rules:
     verbs: ["list"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
-    verbs: ["create", "get", "patch", "delete", "deletecollection"]
+    verbs: ["create", "get", "list", "patch", "delete", "deletecollection"]
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["list", "patch"]
   # Fixed-file artifact reads over the Kubernetes v5 WebSocket exec protocol.
   # The runner verifies the exact Job/controller/pod/container before and after.
+  # Kubernetes 1.35 additionally authorizes CREATE for WebSocket upgrades:
+  # https://v1-35.docs.kubernetes.io/docs/reference/command-line-tools-reference/feature-gates/#AuthorizePodWebsocketUpgradeCreatePermission
   - apiGroups: [""]
     resources: ["pods/exec"]
-    verbs: ["get"]
+    verbs: ["get", "create"]
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
