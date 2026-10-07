@@ -2479,6 +2479,27 @@ other app carries.
   An `integration` or `node-type` gets a sentence explaining why there is no
   switch instead of a disabled one (rule 12).
 
+### Releases
+
+Cluster → Releases is the owner's review history. It shows immutable component
+versions, source commits, verification evidence and exact publication destinations.
+Approval rechecks the whole candidate; publication is a separate action on one
+artifact and destination. An interrupted publication remains unresolved until the
+native adapter reconciles it. A completed record proves verified readback at that
+time, not continued remote availability. The screen never retries writes on its own.
+
+The candidate journal is SQL authority, not a broadcast graph collection. Visible
+pages read it serially every twenty seconds and on reconnect. Failed reads preserve
+context and remove state-changing actions until a fresh read succeeds. Configuration
+and artifact storage failures do not hide durable candidate/publication history.
+Navigation carries the owner-only `app:cluster/releases` resource; native owner and
+candidate ownership gates remain authoritative. The feature marker is acknowledged
+only at the visible Releases destination, including its empty state.
+
+This surface reviews already-prepared candidates. Candidate assembly, release-tag
+creation/promotion and installed cluster update control are separate delivery work;
+a publication receipt alone does not mean this cluster has updated.
+
 ### Mesh (epic memql#5338)
 
 `src/apps/cluster/mesh/` answers the question an operator arrives with -- is

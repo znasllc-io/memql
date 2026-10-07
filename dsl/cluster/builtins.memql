@@ -45,6 +45,106 @@ builtin releaseCutStatus {
   version  string!  @description("The version to check, in either tag form (v1.2.3) or bare form (1.2.3).")
 }
 
+/// Read configured release sources and exact publication target identities. Owner only.
+@sdk
+@executor("integration.release.candidateConfiguration")
+builtin releaseCandidateConfiguration { }
+
+/// Page through caller-owned review history, including interrupted preparations.
+@sdk
+@executor("integration.release.listCandidates")
+builtin releaseCandidates {
+  cursor string
+  limit integer
+}
+
+/// Verify an immutable candidate using complete work evidence and operator configuration.
+/// This retains artifacts for review and does not approve or publish them.
+@sdk
+@executor("integration.release.prepareCandidate")
+@args(profile="object")
+builtin releasePrepareCandidate {
+  candidate object!
+}
+
+/// Resolve completed work runs through a declared assembly plan, then verify and retain the candidate.
+/// Run aliases select actual executions; versions, receipt identities and digests are read natively.
+@sdk
+@executor("integration.release.assembleCandidate")
+@args(profile="object")
+builtin releaseAssembleCandidate {
+  planName string!
+  runs object!
+}
+
+/// Scoped immutable assembly selection; does not read client-supplied recipes.
+@executor("integration.release.releaseAssemblyPlan")
+builtin releaseAssemblyPlan { }
+
+/// Resolve the complete authorized execution under one declared run input.
+@executor("integration.release.releaseAssemblyReadRun")
+builtin releaseAssemblyReadRun { componentName string! runName string! }
+
+/// Resolve the configured version at the component's exact source revision.
+@executor("integration.release.releaseAssemblyReadVersion")
+builtin releaseAssemblyReadVersion { componentName string! }
+
+/// Resolve an exact declared artifact path and its producer metadata from immutable receipts.
+@executor("integration.release.releaseAssemblyReadArtifact")
+builtin releaseAssemblyReadArtifact { componentName string! artifactName string! }
+
+/// Resolve the declared publication target to its immutable configuration identity.
+@executor("integration.release.releaseAssemblyReadTarget")
+builtin releaseAssemblyReadTarget { targetId string! }
+
+/// Return normalized facts after every declared assembly input was resolved.
+@executor("integration.release.releaseAssemblyFacts")
+builtin releaseAssemblyFacts { }
+
+/// Validate the scoped composition and enter candidate preparation; cannot approve or publish.
+@executor("integration.release.releaseAssemblyPrepare")
+@args(profile="object")
+builtin releaseAssemblyPrepare { candidate object! }
+
+/// Read one exact release candidate owned by the caller.
+@sdk
+@executor("integration.release.getCandidate")
+builtin releaseGetCandidate {
+  candidateId string!
+}
+
+/// Read durable publication intents and verified completion for one candidate.
+@sdk
+@executor("integration.release.candidatePublications")
+builtin releaseCandidatePublications {
+  candidateId string!
+}
+
+/// Separately approve the exact reviewed candidate after fresh verification.
+@sdk
+@executor("integration.release.approveCandidate")
+builtin releaseApproveCandidate {
+  candidateId string!
+}
+
+/// Publish one artifact only under its exact durable candidate approval.
+@sdk
+@executor("integration.release.publishCandidate")
+builtin releasePublishCandidate {
+  candidateId string!
+  approvalId string!
+  targetId string!
+  component string!
+  artifact string!
+}
+
+/// Permanently retire an unpublished candidate and release its retention pins.
+@sdk
+@executor("integration.release.retireCandidate")
+builtin releaseRetireCandidate {
+  candidateId string!
+}
+
 /// Scoped release operation; available only inside an owner-authorized release cut.
 @executor("integration.release.releaseReadSnapshot")
 builtin releaseReadSnapshot { }
@@ -73,6 +173,66 @@ builtin releaseOpenExtensionPin { }
 @executor("integration.release.releaseRecordCut")
 builtin releaseRecordCut { }
 
+/// Read complete, successful execution evidence inside an authorized candidate scope.
+@executor("integration.release.releaseCandidateEvidence")
+builtin releaseCandidateEvidence { }
+
+/// Refuse a candidate excluded by the installed release policy.
+@executor("integration.release.releaseCandidateRefuse")
+builtin releaseCandidateRefuse { }
+
+/// Check component versions at their exact source commits.
+@executor("integration.release.releaseCandidateCheckVersions")
+builtin releaseCandidateCheckVersions { }
+
+/// Check the operator-configured destinations bound into this candidate.
+@executor("integration.release.releaseCandidateCheckTargets")
+builtin releaseCandidateCheckTargets { }
+
+/// Record immutable preparation intent before retaining artifacts.
+@executor("integration.release.releaseCandidateRecordPreparing")
+builtin releaseCandidateRecordPreparing { }
+
+/// Pin every evidence artifact under the durable candidate identity.
+@executor("integration.release.releaseCandidatePinArtifacts")
+builtin releaseCandidatePinArtifacts { }
+
+/// Verify retained bytes and the full OCI image before readiness.
+@executor("integration.release.releaseCandidateVerifyArtifacts")
+builtin releaseCandidateVerifyArtifacts { }
+
+/// Mark ready only after this native scope verified all candidate inputs.
+@executor("integration.release.releaseCandidateMarkReady")
+builtin releaseCandidateMarkReady { }
+
+/// Reverify the exact candidate before its approved publication effect.
+@executor("integration.release.releasePublicationCheckCandidate")
+builtin releasePublicationCheckCandidate { }
+
+/// Open or recover the durable publication intent for the explicit approval.
+@executor("integration.release.releasePublicationBegin")
+builtin releasePublicationBegin { }
+
+/// Reopen retained bytes and verify a private OCI snapshot for publication.
+@executor("integration.release.releasePublicationVerifyImage")
+builtin releasePublicationVerifyImage { }
+
+/// Publish the approved image by digest and verify registry readback.
+@executor("integration.release.releasePublicationWriteImage")
+builtin releasePublicationWriteImage { }
+
+/// Reopen retained bytes and verify a private file snapshot for publication.
+@executor("integration.release.releasePublicationVerifyFile")
+builtin releasePublicationVerifyFile { }
+
+/// Publish the approved file to its exact existing draft and verify all bytes.
+@executor("integration.release.releasePublicationWriteFile")
+builtin releasePublicationWriteFile { }
+
+/// Record completion only from the scoped publisher's verified receipt.
+@executor("integration.release.releasePublicationRecordReceipt")
+builtin releasePublicationRecordReceipt { }
+
 /// Select and calculate a version from the already-read release snapshot.
 @executor("integration.release.releaseSelectCandidate")
 @args(profile="object")
@@ -82,3 +242,107 @@ builtin releaseSelectCandidate { previousTag string! }
 @executor("integration.release.releaseRejectCandidate")
 @args(profile="object")
 builtin releaseRejectCandidate { code string! }
+
+/// Separately create or reconcile the exact owner-approved draft and tag.
+@sdk
+@executor("integration.release.createCandidateDraft")
+builtin releaseCreateCandidateDraft {
+  candidateId string!
+  approvalId string!
+  targetId string!
+}
+
+/// Separately promote a verified draft with the exact approved asset set.
+@sdk
+@executor("integration.release.promoteCandidateDraft")
+builtin releasePromoteCandidateDraft {
+  candidateId string!
+  approvalId string!
+  targetId string!
+}
+
+/// Read durable draft bindings and publication history without remote effects.
+@sdk
+@executor("integration.release.candidateDrafts")
+builtin releaseCandidateDrafts { candidateId string! }
+
+/// Seal complete native publication evidence as an immutable signed catalog record.
+@sdk
+@executor("integration.release.sealPublishedCandidate")
+builtin releaseSealPublishedCandidate {
+  candidateId string!
+  approvalId string!
+}
+
+/// Read a verified public release and portable envelope without private work evidence.
+@sdk
+@executor("integration.release.getPublishedCandidate")
+builtin releaseGetPublishedCandidate { candidateId string! }
+
+/// List verified published releases; identified developers, admins and owners may read.
+@sdk
+@executor("integration.release.listPublishedCandidates")
+builtin releaseListPublishedCandidates {
+  cursor string
+  limit integer
+}
+
+/// Reverify the original owner, exact candidate and installed lifecycle recipes.
+@executor("integration.release.releaseDraftCheckCandidate")
+builtin releaseDraftCheckCandidate { }
+
+/// Bind one remote draft to the immutable candidate and complete asset set.
+@executor("integration.release.releaseDraftBegin")
+builtin releaseDraftBegin { }
+
+/// Recheck a bound ready draft's identity, metadata and source without writing.
+@executor("integration.release.releaseDraftObserveBound")
+builtin releaseDraftObserveBound { }
+
+/// Create only a missing immutable tag; reconcile the same ref after a lost reply.
+@executor("integration.release.releaseDraftEnsureTag")
+builtin releaseDraftEnsureTag { }
+
+/// Read bounded authenticated release inventory for the durable intent marker.
+@executor("integration.release.releaseDraftFind")
+builtin releaseDraftFind { }
+
+/// Durably claim the one allowed draft POST before attempting it.
+@executor("integration.release.releaseDraftClaimCreate")
+builtin releaseDraftClaimCreate { }
+
+/// Attempt one exact draft creation under its native durable fence.
+@executor("integration.release.releaseDraftCreate")
+builtin releaseDraftCreate { }
+
+/// Record the actual draft ID only from native verified remote readback.
+@executor("integration.release.releaseDraftRecord")
+builtin releaseDraftRecord { }
+
+/// Inspect completion of every destination in the owner-approved candidate.
+@executor("integration.release.releasePromotionPublications")
+builtin releasePromotionPublications { }
+
+/// Verify release metadata, source, complete asset inventory and every byte.
+@executor("integration.release.releasePromotionObserve")
+builtin releasePromotionObserve { }
+
+/// Fence asset writes and claim the one allowed promotion attempt.
+@executor("integration.release.releasePromotionClaim")
+builtin releasePromotionClaim { }
+
+/// Promote the approved draft once and verify the published bytes and identity.
+@executor("integration.release.releasePromotionWrite")
+builtin releasePromotionWrite { }
+
+/// Record publication only from the native protocol adapter's verified proof.
+@executor("integration.release.releasePromotionRecord")
+builtin releasePromotionRecord { }
+
+/// Preserve an uncertain effect for observation without another write attempt.
+@executor("integration.release.releaseDraftUncertain")
+builtin releaseDraftUncertain { }
+
+/// Refuse promotion while any approved publication is absent or incomplete.
+@executor("integration.release.releasePromotionRefuse")
+builtin releasePromotionRefuse { }

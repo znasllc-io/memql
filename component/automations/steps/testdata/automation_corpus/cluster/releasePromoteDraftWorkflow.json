@@ -1,0 +1,67 @@
+{
+  "automation": "cluster/automations.memql releasePromoteDraftWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.releasePromoteDraftWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "releaseDraftCheckCandidate"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftBegin"
+          },
+          {
+            "kind": "builtin",
+            "name": "releasePromotionPublications"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.releasePromoteDraftWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "releaseDraftCheckCandidate"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftBegin"
+          },
+          {
+            "kind": "builtin",
+            "name": "releasePromotionPublications"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    }
+  }
+}

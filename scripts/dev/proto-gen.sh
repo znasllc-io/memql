@@ -2,7 +2,7 @@
 #
 # proto-gen.sh -- regenerate (or drift-check) the Go bindings for the proto
 # sources whose committed output is pinned to protoc-gen-go v1.36.11 +
-# protoc-gen-go-grpc v1.6.2: component/grpc, component/node and component/bus.
+# protoc-gen-go-grpc v1.6.2: the PROTO_TARGETS directories below.
 #
 #   scripts/dev/proto-gen.sh                      # regenerate in place (the fix command)
 #   scripts/dev/proto-gen.sh --check              # CI gate: fail on drift, leave tree clean
@@ -23,7 +23,7 @@
 # CI today. This mirrors the existing `make sdk-gen-check` drift gate for the
 # typed SDK.
 #
-# COVERAGE: component/grpc, component/node, component/bus -- every proto dir.
+# COVERAGE: every proto dir in PROTO_TARGETS, including integration wire codecs.
 # (bus was normalized onto the pinned toolchain in the same change that added
 # it here: its older-plugin field names, e.g. SIOpenaiApiKey, were regenerated
 # to SiOpenaiApiKey and the handful of consumers updated -- memql#928.)
@@ -81,6 +81,7 @@ readonly PROTO_TARGETS=(
 	"component/grpc|yes|memql.proto worker.proto deploy_control.proto"
 	"component/node|yes|node.proto"
 	"component/bus|no|bus.proto"
+	"integrations/argocd|no|manifest.proto"
 )
 # Hunks whose only changed lines match this are ignored (the protoc stamp).
 readonly STAMP_IGNORE='^//[[:space:]].*protoc'

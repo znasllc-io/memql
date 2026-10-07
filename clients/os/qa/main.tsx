@@ -105,6 +105,8 @@ import {
   shippedRules as qaShippedRules,
   studioMachine as qaStudioMachine,
 } from "../test/fleet/routingFixtures";
+import { ReleaseBrowser } from "../src/apps/cluster/releases/ReleasesSection";
+import { fileReleaseFixture, releaseFixture } from "../test/cluster/releaseFixtures";
 import { OriginsSection } from "../src/apps/cluster/origins/OriginsSection";
 import { MeshSection } from "../src/apps/cluster/mesh/MeshSection";
 import {
@@ -1038,6 +1040,13 @@ const VIEWS: Record<
   // older release that has not reported and one gone quiet, so the one line
   // worth finding has to be findable among the others. `mesh-node-*` open a
   // node's page through the section's own intent, so no click is needed.
+  "releases": { render: () => <ReleasePreview /> },
+  "releases-empty": { render: () => <ReleasePreview empty /> },
+  "releases-error": { render: () => <ReleasePreview fail /> },
+  "releases-pending": { render: () => <ReleasePreview pending /> },
+  "releases-file": { render: () => <ReleasePreview file /> },
+  "releases-draft-pending": { render: () => <ReleasePreview file pendingDraft /> },
+  "releases-publication-pending": { render: () => <ReleasePreview file pendingPromotion /> },
   "mesh-healthy": { connect: () => clusterConnection({ clusterNodes: meshNodes("healthy") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
   "mesh-island": { connect: () => clusterConnection({ clusterNodes: meshNodes("island") }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
   "mesh-empty": { connect: () => clusterConnection({ clusterNodes: [] }), wrap: (el, role) => clusterSession(el, { role }), render: () => <MeshPane /> },
@@ -1596,6 +1605,16 @@ function AddRulePreview() {
   const rules = useRules(true);
   const actions = useRuleActions(rules.reload);
   return <RoutingTabFrame><RuleWizard actions={actions} rules={rules.rules} routes={catalog.policies} facts={facts} onCancel={() => {}} onDescribe={() => {}} onAdded={() => {}} /></RoutingTabFrame>;
+}
+
+function ReleasePreview({ empty = false, fail = false, pending = false, file = false, pendingDraft = false, pendingPromotion = false }: { empty?: boolean; fail?: boolean; pending?: boolean; file?: boolean; pendingDraft?: boolean; pendingPromotion?: boolean }) {
+  const [fixture] = useState(() => {
+    const f = file ? fileReleaseFixture("ready") : releaseFixture(pending ? "approved" : "ready");
+    f.state.empty = empty; f.state.failedRead = fail; f.state.lostPublishReply = pending;
+    f.state.lostDraftReply = pendingDraft; f.state.lostPromotionReply = pendingPromotion;
+    return f;
+  });
+  return <div style={{ height: "calc(100vh - 40px)", minHeight: 300 }}><ReleaseBrowser query={fixture.query} connected /></div>;
 }
 
 function App() {

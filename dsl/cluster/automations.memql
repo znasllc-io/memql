@@ -243,3 +243,115 @@ automation releaseCutWorkflow {
   }
   builtin releaseRecordCut()
 }
+
+/// Assemble configured components from exact completed executions. Native ports
+/// resolve facts and enforce scope; this recipe selects and composes the work.
+@template
+automation releaseAssembleCandidateWorkflow {
+  selection := builtin releaseAssemblyPlan()
+  for item in selection.components {
+    for runName in item.runs {
+      builtin releaseAssemblyReadRun(componentName: item.name, runName: runName)
+    }
+    builtin releaseAssemblyReadVersion(componentName: item.name)
+    for artifact in item.artifacts {
+      builtin releaseAssemblyReadArtifact(componentName: item.name, artifactName: artifact.name)
+    }
+  }
+  for targetId in selection.targets {
+    builtin releaseAssemblyReadTarget(targetId: targetId)
+  }
+  facts := builtin releaseAssemblyFacts()
+  candidate := {
+    formatVersion: 1,
+    ownerUserId: facts.ownerUserId,
+    components: facts.versions.select(item => {
+      name: item.name, version: item.version, repository: item.repository, commit: item.commit,
+      artifacts: item.artifacts
+    }),
+    compatibility: selection.compatibility ?? [],
+    evidence: facts.evidence,
+    destinations: facts.destinations
+  }
+  builtin releaseAssemblyPrepare(candidate: candidate)
+}
+
+/// Prepare immutable release evidence for a separate owner approval.
+/// Publication is not available in this scope. A failed preparation retains
+/// its durable record and pins so another replica can resume or retire it.
+@template
+automation releasePrepareCandidateWorkflow {
+  facts := builtin releaseCandidateEvidence()
+  if facts.modes.count() == 0 || facts.modes.any(mode => mode != "full") {
+    builtin releaseCandidateRefuse()
+  }
+  // Empty package selections are explicitly planned skips, not executed tests.
+  // A carried earlier attempt requires its original receipt chain and is not
+  // accepted by this recipe. Blocked or undeclared skips fail natively.
+  if facts.skipped.any(item => item.code != "pipeline_not_affected") {
+    builtin releaseCandidateRefuse()
+  }
+  builtin releaseCandidateCheckVersions()
+  builtin releaseCandidateCheckTargets()
+  builtin releaseCandidateRecordPreparing()
+  builtin releaseCandidatePinArtifacts()
+  builtin releaseCandidateVerifyArtifacts()
+  builtin releaseCandidateMarkReady()
+}
+
+/// Publish one artifact from a separately approved immutable candidate.
+/// The native scope binds the owner, approval, target and durable effect ID.
+@template
+automation releasePublishCandidateWorkflow {
+  builtin releasePublicationCheckCandidate()
+  effect := builtin releasePublicationBegin()
+  if effect.complete { return }
+  if effect.kind == "oci" {
+    builtin releasePublicationVerifyImage()
+    builtin releasePublicationWriteImage()
+  } else if effect.kind == "file" {
+    builtin releasePublicationVerifyFile()
+    builtin releasePublicationWriteFile()
+  }
+  builtin releasePublicationRecordReceipt()
+}
+
+/// Create or reconcile one exact reviewed draft. Native fences ensure that an
+/// uncertain create is observed again, never repeated because a read is empty.
+@template
+automation releaseCreateDraftWorkflow {
+  builtin releaseDraftCheckCandidate()
+  binding := builtin releaseDraftBegin()
+  if binding.ready {
+    builtin releaseDraftObserveBound()
+    return
+  }
+  builtin releaseDraftEnsureTag()
+  observed := builtin releaseDraftFind()
+  if !observed.found {
+    attempt := builtin releaseDraftClaimCreate()
+    if !attempt.claimed { builtin releaseDraftUncertain() }
+    builtin releaseDraftCreate()
+  }
+  builtin releaseDraftRecord()
+}
+
+/// Publication is separate from draft creation and asset upload. Verify every
+/// approved destination before exposing a complete release; recovery observes
+/// a started attempt and never repeats its PATCH after an uncertain response.
+@template
+automation releasePromoteDraftWorkflow {
+  builtin releaseDraftCheckCandidate()
+  binding := builtin releaseDraftBegin()
+  publications := builtin releasePromotionPublications()
+  for item in publications {
+    if !item.complete { builtin releasePromotionRefuse() }
+  }
+  observed := builtin releasePromotionObserve()
+  attempt := builtin releasePromotionClaim()
+  if observed.draft {
+    if !attempt.claimed { builtin releaseDraftUncertain() }
+    builtin releasePromotionWrite()
+  }
+  builtin releasePromotionRecord()
+}

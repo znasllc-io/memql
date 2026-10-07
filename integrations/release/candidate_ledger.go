@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
 	pl "github.com/znasllc-io/memql/component/pipelines"
@@ -95,6 +96,50 @@ type candidateQuerier interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+func (l *candidateLedger) get(ctx context.Context, key string) (candidateRecord, error) {
+	owner, err := candidateOwner(ctx)
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	if !strings.HasPrefix(key, "sha256:") || !candidateArtifactDigest(strings.TrimPrefix(key, "sha256:")) {
+		return candidateRecord{}, errors.New("exact candidate digest is required")
+	}
+	db, err := l.database()
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	defer tx.Rollback()
+	record, err := readCandidate(ctx, tx, owner, key)
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	record, err = readCandidateApproval(ctx, tx, owner, record)
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return candidateRecord{}, err
+	}
+	return record, nil
+}
+
+func readCandidateApproval(ctx context.Context, q candidateQuerier, owner string, record candidateRecord) (candidateRecord, error) {
+	if record.State == "approved" {
+		var approvedBy string
+		if err := q.QueryRowContext(ctx, `SELECT approval_id,approved_by FROM release_candidate_approvals WHERE candidate_id=$1`, record.ID).Scan(&record.ApprovalID, &approvedBy); err != nil {
+			return candidateRecord{}, err
+		}
+		if record.ApprovalID == "" || approvedBy != owner {
+			return candidateRecord{}, errors.New("candidate approval identity is inconsistent")
+		}
+	}
+	return record, nil
+}
+
 // Recompute canonical identity on every authority read. Neither corrupted
 // storage nor an accidentally broadened writer may reuse an old approval for a
 // changed body. Unknown JSON fields refuse, rather than disappearing in decode.
@@ -160,7 +205,8 @@ func (l *candidateLedger) change(ctx context.Context, key string, approve, retir
 	}
 	if retire {
 		var effects bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM release_publication_intents WHERE candidate_id=$1)`, key).Scan(&effects); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM release_publication_intents WHERE candidate_id=$1)
+OR EXISTS(SELECT 1 FROM release_draft_intents WHERE candidate_id=$1)`, key).Scan(&effects); err != nil {
 			return candidateRecord{}, err
 		}
 		if effects {

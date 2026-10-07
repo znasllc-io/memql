@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package memql.argocd.wire;
+option go_package = "github.com/znasllc-io/memql/integrations/argocd/gen";
+
+// Wire projection of ArgoCD v2.13.3 RepoServerService.GenerateManifest.
+// Field numbers and wire types follow the pinned upstream contracts:
+// https://github.com/argoproj/argo-cd/blob/v2.13.3/reposerver/repository/repository.proto
+// https://github.com/argoproj/argo-cd/blob/v2.13.3/pkg/apis/application/v1alpha1/generated.proto
+// This is a client codec, not a new service or a replacement Argo SDK. The
+// adapter refuses source options this projection cannot represent exactly.
+message ManifestRequest {
+  Repository repo = 1;
+  string revision = 2;
+  bool noCache = 3;
+  string appLabelKey = 4;
+  string appName = 5;
+  string namespace = 8;
+  ApplicationSource applicationSource = 10;
+  KustomizeOptions kustomizeOptions = 13;
+  string kubeVersion = 14;
+  repeated string apiVersions = 15;
+  bool noRevisionCache = 18;
+  string trackingMethod = 19;
+  map<string, bool> enabledSourceTypes = 20;
+  repeated string projectSourceRepos = 24;
+  string projectName = 25;
+  string installationID = 27;
+}
+
+message Repository {
+  string repo = 1;
+  string username = 2;
+  string password = 3;
+  string type = 11;
+  string project = 20;
+}
+
+message ApplicationSource {
+  string repoURL = 1;
+  string path = 2;
+  string targetRevision = 4;
+  ApplicationSourceKustomize kustomize = 8;
+}
+
+message ApplicationSourceKustomize {
+  string version = 5;
+  string namespace = 9;
+}
+
+message KustomizeOptions {
+  string buildOptions = 1;
+  string binaryPath = 2;
+}
+
+message ManifestResponse {
+  repeated string manifests = 1;
+  string namespace = 2;
+  string server = 3;
+  string revision = 4;
+  string sourceType = 6;
+  // Command output and signature diagnostics are not evidence for this call.
+  reserved 7, 8;
+}

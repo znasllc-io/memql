@@ -10,6 +10,7 @@ import { MeshSection } from "./mesh/MeshSection";
 import { ModulesSection } from "./modules/ModulesSection";
 import { AutomationsSection } from "./automations/AutomationsSection";
 import { OriginsSection } from "./origins/OriginsSection";
+import { ReleasesSection } from "./releases/ReleasesSection";
 import { ReadinessSection } from "./readiness/ReadinessSection";
 import {
   CLUSTER_SECTIONS,
@@ -45,6 +46,7 @@ const CLUSTER_LOG_CONCEPTS = [
 
 export function ClusterApp({
   sectionId,
+  windowVisible = true,
   navigate,
   intent,
   consumeIntent,
@@ -105,6 +107,7 @@ export function ClusterApp({
       />
     );
   }
+  if (sectionId === "releases") return <ReleasesSection visible={windowVisible} />;
   if (sectionId === "modules") return <ModulesSection />;
   if (sectionId === "mesh") return <MeshSection intent={intent} consumeIntent={consumeIntent} />;
   if (sectionId === "automations") return <AutomationsSection />;
