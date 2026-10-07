@@ -517,6 +517,7 @@ const cluster: OsAppManifest = {
   // app on Readiness never can. Advance the revision only when the section
   // changes meaningfully -- never because a node's counts moved.
   attentionChanges: [
+    { id: "cluster:releases", revision: "release-review-1", sectionId: "releases", label: "Review and publish verified releases" },
     { id: "cluster:mesh", revision: "mesh-1", sectionId: "mesh", label: "See what every node hears" },
   ],
   component: ClusterApp,
