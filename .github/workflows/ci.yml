@@ -911,7 +911,7 @@ jobs:
       RUN_PROTO: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.proto == 'true' }}
       # Only when the planner is NOT running (memql#2972, memql#5484). Whenever
       # it runs -- ci, go, dsl or proto -- go-tests and db-tests carry every
-      # gate package for any non-Go change (scripts/ci/selection adds them),
+      # gate package for every change (scripts/ci/selection adds them),
       # so firing this step too would just run them twice. What remains is
       # exactly the diff the planner never sees: docs, manifests, scripts.
       RUN_GATES: ${{ github.event_name == 'pull_request' && needs.changes.outputs.ci != 'true' && needs.changes.outputs.go != 'true' && needs.changes.outputs.dsl != 'true' && needs.changes.outputs.proto != 'true' && needs.changes.outputs.gates == 'true' }}
@@ -1029,7 +1029,7 @@ jobs:
         # the render halves self-skip without kustomize or kubectl on the
         # runner, and the text-level halves, which are the ones that must not
         # skip, do not.
-        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+        run: go test -count=1 -timeout=300s ./ ./integrations ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
       #
@@ -1311,10 +1311,10 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           # The packages whose tests read repository files by PATH, which no
-          # import graph can see: added to the plan for any non-Go change.
+          # import graph can see: added for every change, including Go source.
           # The SAME list as go-checks' gate-inputs step, held to it by
           # scripts/dev/gate_inputs_lane_scope_test.go.
-          GATE_PACKAGES: ./ ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+          GATE_PACKAGES: ./ ./integrations ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
           # The trees whose packages the node-tag passes test. A selected
           # package under one of them (or a changed file only a node tag
           # compiles) runs the tag passes; scripts/ci/selection's live test
