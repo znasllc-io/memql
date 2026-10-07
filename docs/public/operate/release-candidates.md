@@ -225,3 +225,72 @@ flag.
 The candidate identity includes both lifecycle recipes whenever reviewed draft
 metadata is configured. Changed engine or workflow identity requires fresh
 review rather than executing changed code under an old approval.
+
+## Publish portable catalog evidence
+
+After publication, the owner can call
+`releaseSealPublishedCandidate(candidateId, approvalId)`. This local operation
+requires complete native receipts for every approved destination. Each file
+release must also have a verified `published` lifecycle record; uploading to a
+draft is insufficient. Every artifact in the candidate must have a published
+location. Sealing performs no remote writes.
+
+The record includes component names, versions, exact source commits,
+compatibility requirements, artifact sizes and digests, and frozen publication
+locations. OCI locations name a registry and repository, used with the image
+digest. File locations name the API origin, repository, release ID and asset
+ID, plus the reviewed tag and asset name. A consumer still verifies downloaded
+bytes and applies its own connection and credential policy. Locations do not
+grant permission to forward credentials or follow arbitrary redirects.
+
+Publication freezes the approved target configuration in the private native
+journal. Catalog creation reads that snapshot rather than current settings.
+The exported projection omits the owner, work runs, Library references,
+credential references and transport trust. An opaque candidate identity and
+provenance digest bind the private evidence; the release signature attests to
+its native verification. The private evidence remains available to the owner.
+
+Configure `MEMQL_RELEASE_CATALOG` as a global variable:
+
+```json
+{
+  "formatVersion": 1,
+  "publisher": "my-publisher",
+  "keyId": "release-2026",
+  "signingKeySecret": "RELEASE_SIGNING_KEY",
+  "publicKeys": {
+    "release-2026": "BASE64_ED25519_PUBLIC_KEY"
+  }
+}
+```
+
+The referenced global secret contains a base64-encoded 32-byte Ed25519 seed.
+Use a dedicated release key, separate from identity signing. `keyId` and
+`signingKeySecret` may both be omitted on a reader. Public keys are base64
+32-byte Ed25519 keys. Retain trusted old keys while their release records must
+remain readable; removing a key refuses its signatures. An existing catalog
+record is immutable and is not silently signed again during key rotation.
+
+Identified developers, admins and owners can call
+`releaseListPublishedCandidates(cursor, limit)` (limit 1–20) and
+`releaseGetPublishedCandidate(candidateId)`. The latter returns the verified
+public projection, its catalog digest and a portable signed envelope. These
+reads need no publication credentials, retained artifact store or access to
+private candidate records. They do not grant publication authority.
+
+The envelope uses [DSSE](https://github.com/secure-systems-lab/dsse/blob/master/protocol.md)
+with Ed25519 and payload type
+`application/vnd.memql.published-release.v1+json`. A receiving installation
+must pin its accepted publisher and public keys independently; keys delivered
+with an envelope cannot establish trust. The verifier authenticates exact
+payload bytes, rejects unknown versions, ambiguous JSON and oversized inputs,
+and returns an immutable verified value. The Go contract is
+`pipelines.VerifyPublishedRelease`; native same-installation readers can use
+`release.PublishedCatalog` with the same trust policy.
+
+This is a detached record produced after publication, outside the candidate's
+own artifact set, so its digest cannot create a self-reference. It is a
+historical attestation, not a claim that a release is currently newest or that
+remote assets remain available. Update selection, rollback authorization and
+fresh artifact/installation checks remain separate actions. This operation
+does not automatically host the envelope on an external service.

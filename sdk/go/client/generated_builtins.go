@@ -4116,6 +4116,56 @@ func ReleaseGetCandidateBuild(args ReleaseGetCandidateArgs) string {
 	return b.String()
 }
 
+// ReleaseGetPublishedCandidate -- Read a verified public release and portable envelope without private work evidence.
+type ReleaseGetPublishedCandidateArgs struct {
+	CandidateId string
+}
+
+// ReleaseGetPublishedCandidate calls the engine builtin releaseGetPublishedCandidate.
+func (qc *QueryClient) ReleaseGetPublishedCandidate(ctx context.Context, args ReleaseGetPublishedCandidateArgs) (*Result, error) {
+	call := ReleaseGetPublishedCandidateBuild(args)
+	return qc.executeNamed(ctx, "releaseGetPublishedCandidate", call)
+}
+
+func ReleaseGetPublishedCandidateBuild(args ReleaseGetPublishedCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseGetPublishedCandidate(")
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleaseListPublishedCandidates -- List verified published releases; identified developers, admins and owners may read.
+type ReleaseListPublishedCandidatesArgs struct {
+	Cursor string
+	Limit  int
+}
+
+// ReleaseListPublishedCandidates calls the engine builtin releaseListPublishedCandidates.
+func (qc *QueryClient) ReleaseListPublishedCandidates(ctx context.Context, args ReleaseListPublishedCandidatesArgs) (*Result, error) {
+	call := ReleaseListPublishedCandidatesBuild(args)
+	return qc.executeNamed(ctx, "releaseListPublishedCandidates", call)
+}
+
+func ReleaseListPublishedCandidatesBuild(args ReleaseListPublishedCandidatesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseListPublishedCandidates(")
+	if args.Cursor != "" {
+		b.WriteString("cursor: ")
+		b.WriteString(quoteMemQL(args.Cursor))
+	}
+	if args.Limit != 0 {
+		if b.Len() > 39 {
+			b.WriteString(", ")
+		}
+		b.WriteString("limit: ")
+		b.WriteString(fmt.Sprintf("%v", args.Limit))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleasePrepareCandidate -- Verify an immutable candidate using complete work evidence and operator configuration. This retains artifacts for review and does not approve or publish them.
 type ReleasePrepareCandidateArgs struct {
 	Candidate map[string]any
@@ -4228,6 +4278,32 @@ func ReleaseRetireCandidateBuild(args ReleaseRetireCandidateArgs) string {
 	b.WriteString("builtin releaseRetireCandidate(")
 	b.WriteString("candidateId: ")
 	b.WriteString(quoteMemQL(args.CandidateId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleaseSealPublishedCandidate -- Seal complete native publication evidence as an immutable signed catalog record.
+type ReleaseSealPublishedCandidateArgs struct {
+	CandidateId string
+	ApprovalId  string
+}
+
+// ReleaseSealPublishedCandidate calls the engine builtin releaseSealPublishedCandidate.
+func (qc *QueryClient) ReleaseSealPublishedCandidate(ctx context.Context, args ReleaseSealPublishedCandidateArgs) (*Result, error) {
+	call := ReleaseSealPublishedCandidateBuild(args)
+	return qc.executeNamed(ctx, "releaseSealPublishedCandidate", call)
+}
+
+func ReleaseSealPublishedCandidateBuild(args ReleaseSealPublishedCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseSealPublishedCandidate(")
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	if b.Len() > 38 {
+		b.WriteString(", ")
+	}
+	b.WriteString("approvalId: ")
+	b.WriteString(quoteMemQL(args.ApprovalId))
 	b.WriteString(")")
 	return b.String()
 }

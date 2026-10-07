@@ -84,6 +84,9 @@ func (i *Integration) IntegrationName() string { return "release" }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	out := append([]memql.IntegrationCapability{
+		{Name: "sealPublishedCandidate", Description: "Seal verified native publication evidence into a portable signed catalog record. Owner only.", Handler: i.handleCatalogSeal},
+		{Name: "getPublishedCandidate", Description: "Read a verified public release projection without private candidate evidence. Developer, admin or owner.", Handler: i.handleCatalogGet},
+		{Name: "listPublishedCandidates", Description: "List verified published releases available for installation. Developer, admin or owner.", Handler: i.handleCatalogList},
 		{Name: "assembleCandidate", Description: "Resolve declared completed runs into a verified candidate for separate owner review; no publication.", Handler: i.handleCandidateAssemble},
 		{Name: "createCandidateDraft", Description: "Create or reconcile the exact separately approved candidate draft and tag; never publish it.", Handler: i.handleCandidateDraftCreate},
 		{Name: "promoteCandidateDraft", Description: "Publish the exact approved draft only after complete artifact readback; recover uncertain effects without replay.", Handler: i.handleCandidateDraftPromote},
