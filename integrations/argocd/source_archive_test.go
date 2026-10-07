@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -36,6 +37,53 @@ func TestSourceArchiveReverifiesIndependentCapturedObjects(t *testing.T) {
 	}
 	require.Equal(t, captured.Digest(), verified.Digest())
 	require.Equal(t, captured.Files(), verified.Files())
+}
+
+func TestSourceArchiveRequiresEndRecordsBeyondZeroFilledContent(t *testing.T) {
+	for _, size := range []int{1024, 1025} {
+		objects, spec := sourceObjectsFixture(t, map[string]sourceFixtureFile{
+			"overlay/kustomization.yaml": {"100644", "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nconfigMapGenerator:\n  - name: binary\n    files: [payload.bin]\n"},
+			"overlay/payload.bin":        {"100644", string(make([]byte, size))},
+		})
+		var archive bytes.Buffer
+		_, err := CaptureSourceArchive(context.Background(), objects, spec, &archive)
+		require.NoError(t, err)
+		_, err = VerifySourceArchive(context.Background(), archive.Bytes(), spec)
+		require.NoError(t, err)
+		for _, removed := range []int{512, 1024} {
+			truncated := archive.Bytes()[:archive.Len()-removed]
+			require.True(t, allZero(truncated[len(truncated)-1024:]))
+			closed, err := VerifySourceArchive(context.Background(), truncated, spec)
+			require.Error(t, err, "blob size %d, removed %d bytes: content and padding cannot stand in for end records", size, removed)
+			require.Empty(t, closed.Digest())
+		}
+	}
+}
+
+func TestSourceArchiveRejectsDuplicateObjectsAndDifferentSource(t *testing.T) {
+	body, spec, _ := sourceArchiveFixture(t)
+	r := tar.NewReader(bytes.NewReader(body))
+	first, err := r.Next()
+	require.NoError(t, err)
+	entryBytes := 512 + (int(first.Size)+511)/512*512
+	duplicate := append(append([]byte(nil), body[:entryBytes]...), body...)
+	_, err = VerifySourceArchive(context.Background(), duplicate, spec)
+	require.ErrorContains(t, err, "duplicate")
+	for _, field := range []string{"path", "targetRevision"} {
+		var source map[string]any
+		require.NoError(t, json.Unmarshal(spec.Source, &source))
+		if field == "path" {
+			source[field] = "another-overlay"
+		} else {
+			source[field] = strings.Repeat("f", 40)
+		}
+		other := spec
+		other.Source, err = json.Marshal(source)
+		require.NoError(t, err)
+		closed, err := VerifySourceArchive(context.Background(), body, other)
+		require.Error(t, err)
+		require.Empty(t, closed.Digest())
+	}
 }
 
 func rewriteSourceArchive(t *testing.T, body []byte, change func(*tar.Header, []byte) (*tar.Header, []byte), extra bool) []byte {

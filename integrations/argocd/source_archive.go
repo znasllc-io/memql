@@ -85,13 +85,20 @@ func VerifySourceArchive(ctx context.Context, archive []byte, spec RenderSpec) (
 	input := bytes.NewReader(archive)
 	reader := tar.NewReader(input)
 	objects := &archivedGitObjects{objects: map[string][]byte{}, used: map[string]bool{}}
-	total := 0
+	total, padding := 0, 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return ClosedSource{}, err
 		}
+		remaining := input.Len()
 		header, err := reader.Next()
 		if errors.Is(err, io.EOF) {
+			// archive/tar also accepts physical EOF and a single zero record.
+			// Count records AFTER the preceding body, so a zero-filled blob
+			// cannot impersonate either of our two required end records.
+			if remaining-input.Len() != padding+1024 {
+				return ClosedSource{}, errors.New("Git source archive lacks complete end records")
+			}
 			break
 		}
 		if err != nil {
@@ -112,6 +119,7 @@ func VerifySourceArchive(ctx context.Context, archive []byte, spec RenderSpec) (
 			return ClosedSource{}, errors.New("Git source archive entry did not complete")
 		}
 		total += len(body)
+		padding = (512 - len(body)%512) % 512
 		objects.objects[header.Name] = body
 	}
 	if input.Len() != 0 {
