@@ -11,10 +11,11 @@ import (
 
 func TestInstallClusterEvidenceHandoffIsNarrowAndBounded(t *testing.T) {
 	type workflowStep struct {
-		Name string            `yaml:"name"`
-		If   string            `yaml:"if"`
-		Run  string            `yaml:"run"`
-		With map[string]string `yaml:"with"`
+		Name           string            `yaml:"name"`
+		If             string            `yaml:"if"`
+		Run            string            `yaml:"run"`
+		TimeoutMinutes int               `yaml:"timeout-minutes"`
+		With           map[string]string `yaml:"with"`
 	}
 	var workflow struct {
 		Jobs map[string]struct {
@@ -47,6 +48,9 @@ func TestInstallClusterEvidenceHandoffIsNarrowAndBounded(t *testing.T) {
 	}
 	if handoff.If != "always()" {
 		t.Fatalf("evidence handoff condition = %q, want always() so failed installs retain diagnostics", handoff.If)
+	}
+	if handoff.TimeoutMinutes != 1 {
+		t.Fatalf("evidence handoff timeout = %d minutes, want a one-minute bound for the whole step", handoff.TimeoutMinutes)
 	}
 	if !strings.Contains(handoff.Run, "timeout --signal=TERM --kill-after=5s 30s") {
 		t.Fatal("evidence ownership repair must have one finite 30-second timeout")

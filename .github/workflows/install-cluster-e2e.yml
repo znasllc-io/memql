@@ -1112,6 +1112,7 @@ jobs:
       # diagnostics, teardown and artifact upload still get their own steps.
       - name: Hand the evidence back to the runner
         if: always()
+        timeout-minutes: 1
         run: |
           set -euo pipefail
           owner="$(id -u):$(id -g)"
@@ -1148,15 +1149,14 @@ jobs:
             exit 0
           fi
 
-          set +e
-          timeout --signal=TERM --kill-after=5s 30s \
-            sudo chown --no-dereference "$owner" -- "${root_owned[@]}"
-          status=$?
-          set -e
-          if [[ "$status" -ne 0 ]]; then
-            echo "WARNING: bounded evidence ownership repair exited ${status}; continuing with diagnostics and teardown" >&2
+          if timeout --signal=TERM --kill-after=5s 30s \
+              sudo chown --no-dereference "$owner" -- "${root_owned[@]}"; then
+            exit 0
+          else
+            status=$?
           fi
-          exit 0
+          echo "ERROR: bounded evidence ownership repair exited ${status}; continuing with diagnostics and teardown" >&2
+          exit "$status"
 
       # A failed cluster lane is unreadable without the cluster's own account of
       # itself, and the runner is thrown away the moment this job ends. Best
