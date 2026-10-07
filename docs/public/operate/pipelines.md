@@ -237,7 +237,7 @@ pipeline:
     go: import-graph
     dbGated: [component/memql, component/database]
     buckets:
-      gates: ["**/*.md", "**/*.memql", "dsl/**", "scripts/**", "deploy/**"]
+      gates: ["**"]
       os:    ["clients/**", "sdk/ts/**", "brand/**"]
   stages:
     - name: checks
@@ -260,6 +260,9 @@ pipeline:
         - name: os-checks
           run: make os-typecheck os-test os-build
           when: { bucket: os }
+        - name: source-contracts
+          run: go test -count=1 ./ ./integrations
+          when: { bucket: gates }
     - name: deploy
       on: [push]
       steps:
@@ -542,6 +545,13 @@ Go import graph:
   it, which no longer build, rather than selecting nothing and skipping green.
 - A change that touches no Go package, in no directory an import names, selects
   none.
+
+The import graph cannot discover tests that read another package's files by
+path. Declare those contract checks as explicit steps. Their bucket must cover
+every input they inspect, including `.go` and `_test.go` files; omit `when` or
+use `["**"]` when that input set is not narrower. The example's
+`source-contracts` step covers these reads even when a changed child integration
+does not import the parent package containing its source-scanning tests.
 
 It selects **every package** instead whenever the graph cannot say: the change
 could not be read (the compare failed, or listed 300 files, where GitHub stops
