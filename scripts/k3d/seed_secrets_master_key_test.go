@@ -60,6 +60,16 @@ const fakeKubectlTemplate = `#!/usr/bin/env bash
 printf '%s\n' "$*" > "$FAKE_KUBECTL_LOG.$$"
 args="$*"
 
+# Optional client-only qualification captures the document at the fake API
+# boundary. No real client is ever allowed to apply or read cluster resources.
+if [[ -n "${FAKE_KUBECTL_CLIENT:-}" ]]; then
+  case "$args" in
+    'create secret generic memql-secrets '*--dry-run=client*|'annotate --local '*)
+      exec "$FAKE_KUBECTL_CLIENT" "$@" ;;
+    'apply -f -') cat > "$FAKE_KUBECTL_LOG.manifest.$$"; exit 0 ;;
+  esac
+fi
+
 # The domain this cluster already serves -- the default for --domain, so a run
 # with no --domain does not reissue the certificate for a different one.
 case "$args" in
@@ -139,6 +149,9 @@ type seedResult struct {
 
 // scenario configures one run of the script against the fake cluster.
 type scenario struct {
+	// Set only for tests that need the actual client-generated Secret payload
+	// at the fake API apply boundary, rather than an argv inventory.
+	protectedSecret    *[]byte
 	clusterCampaignKey string
 	campaignReadFails  bool
 	envMasterKey       string // exported only when non-empty
@@ -293,6 +306,17 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 	for name, value := range sc.githubApp {
 		env = append(env, name+"="+value)
 	}
+	if sc.protectedSecret != nil {
+		client, err := exec.LookPath("kubectl")
+		if err != nil {
+			t.Skip("kubectl client-side codecs unavailable")
+		}
+		kubeconfig := filepath.Join(tmp, "empty-kubeconfig")
+		if err := os.WriteFile(kubeconfig, []byte("apiVersion: v1\nkind: Config\nclusters: []\ncontexts: []\nusers: []\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		env = append(env, "FAKE_KUBECTL_CLIENT="+client, "KUBECONFIG="+kubeconfig)
+	}
 	cmd.Env = env
 
 	var stdout, stderr strings.Builder
@@ -307,6 +331,27 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 		t.Fatalf("running seed-secrets.sh: %v\nstderr:\n%s", err, stderr.String())
 	}
 
+	if sc.protectedSecret != nil {
+		paths, err := filepath.Glob(logPath + ".manifest.*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range paths {
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.TrimSpace(string(body)) != "" {
+				if len(*sc.protectedSecret) != 0 {
+					t.Fatal("multiple Secret documents reached the fake API")
+				}
+				*sc.protectedSecret = body
+			}
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	calls := readSeedKubectlCalls(t, logPath)
 	t.Logf("exit=%d\nstdout: %s\nstderr:\n%s", code, stdout.String(), stderr.String())
 	return stdout.String(), stderr.String(), calls, code

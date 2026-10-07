@@ -304,6 +304,22 @@ function ensure_namespace() {
 function ensure_merge_shell() {
     if kubectl get secret "$MERGE_SHELL_SECRET" -n "$NAMESPACE" -o name &>/dev/null; then
         cap_info "${MERGE_SHELL_SECRET} already exists; ExternalSecrets have a target to merge into"
+        if [[ "$DRY_RUN" != "true" ]]; then
+            # This resource is supplied outside GitOps. Repair only its two
+            # preservation annotations; never reapply an empty shell over data
+            # populated by ESO, or change an encryption/signing key.
+            local protection
+            protection="$(kubectl get secret "$MERGE_SHELL_SECRET" -n "$NAMESPACE" \
+                -o 'jsonpath={.metadata.annotations.argocd\.argoproj\.io/sync-options}{"\n"}{.metadata.annotations.argocd\.argoproj\.io/compare-options}')" \
+                || cap_fail 5 "failed to read ${MERGE_SHELL_SECRET} preservation metadata"
+            if [[ "$protection" != $'Prune=false\nIgnoreExtraneous' ]]; then
+                kubectl annotate secret "$MERGE_SHELL_SECRET" -n "$NAMESPACE" --overwrite \
+                    argocd.argoproj.io/sync-options=Prune=false \
+                    argocd.argoproj.io/compare-options=IgnoreExtraneous >/dev/null \
+                    || cap_fail 5 "failed to protect ${MERGE_SHELL_SECRET} from GitOps pruning"
+                cap_changed
+            fi
+        fi
         return 0
     fi
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -314,7 +330,13 @@ function ensure_merge_shell() {
     # EMPTY on purpose. Its only job is to exist, so that two ExternalSecrets
     # with creationPolicy: Merge have a target. ESO fills it; nothing here puts
     # a value in it, which is also why this step is safe to re-run.
-    kubectl create secret generic "$MERGE_SHELL_SECRET" -n "$NAMESPACE" >/dev/null \
+    # Include protection in the FIRST API create, avoiding an unprotected
+    # interval between creation and a separate annotate request.
+    kubectl create secret generic "$MERGE_SHELL_SECRET" -n "$NAMESPACE" --dry-run=client -o yaml \
+        | kubectl annotate --local --overwrite -f - \
+            argocd.argoproj.io/sync-options=Prune=false \
+            argocd.argoproj.io/compare-options=IgnoreExtraneous -o yaml \
+        | kubectl create -f - >/dev/null \
         || cap_fail 5 "failed to create ${MERGE_SHELL_SECRET} in ${NAMESPACE}"
     cap_changed
 }

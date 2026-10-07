@@ -1125,6 +1125,9 @@ function seed_memql_secrets() {
         --from-literal="MEMQL_GITHUB_APP_PRIVATE_KEY_B64=$gh_private_key" \
         --from-literal="MEMQL_GITHUB_APP_WEBHOOK_SECRET=$gh_webhook_secret" \
         --dry-run=client -o yaml \
+        | kubectl annotate --local --overwrite -f - \
+            argocd.argoproj.io/sync-options=Prune=false \
+            argocd.argoproj.io/compare-options=IgnoreExtraneous -o yaml \
         | kubectl apply -f - >&2
     SEEDED_COUNT=$((SEEDED_COUNT + 1))
     info "memql-secrets seeded."
