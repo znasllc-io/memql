@@ -140,13 +140,15 @@ func (p *Publisher) Publish(ctx context.Context, v *VerifiedFile) (Receipt, erro
 	if p == nil || v == nil || p.target.Token == "" {
 		return Receipt{}, errors.New("publisher, explicit credential and verified file are required")
 	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+	if err := v.acquire(ctx); err != nil {
+		return Receipt{}, err
+	}
+	defer func() { <-v.gate }()
 	if v.dir == "" {
 		return Receipt{}, errors.New("verified release file is closed or uninitialized")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
 	transport := &http.Transport{
 		Proxy: nil, DialContext: (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: p.target.RootCAs},

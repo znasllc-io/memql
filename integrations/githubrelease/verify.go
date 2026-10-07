@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sync"
 )
 
 // GitHub requires each release asset to be strictly smaller than 2 GiB.
@@ -34,17 +33,17 @@ type Limits struct{ FileBytes int64 }
 // Close waits for any publication and removes the snapshot. No caller path is
 // reopened while publishing. The caller retains the durable source separately.
 type VerifiedFile struct {
-	mu       sync.Mutex
+	gate     chan struct{}
 	dir      string
 	expected Expected
 }
 
 func (v *VerifiedFile) Close() error {
-	if v == nil {
+	if v == nil || v.gate == nil {
 		return nil
 	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
+	v.gate <- struct{}{}
+	defer func() { <-v.gate }()
 	if v.dir == "" {
 		return nil
 	}
@@ -53,6 +52,21 @@ func (v *VerifiedFile) Close() error {
 	}
 	v.dir = ""
 	return nil
+}
+
+func (v *VerifiedFile) acquire(ctx context.Context) error {
+	if v.gate == nil {
+		return errors.New("verified release file is uninitialized")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case v.gate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Verify snapshots all bytes through EOF without network activity. The caller
@@ -91,7 +105,7 @@ func Verify(ctx context.Context, source io.Reader, want Expected, limits Limits)
 	if digest != want.SHA256 || size != want.Size {
 		return nil, errors.New("asset differs from immutable receipt")
 	}
-	return &VerifiedFile{dir: dir, expected: want}, nil
+	return &VerifiedFile{gate: make(chan struct{}, 1), dir: dir, expected: want}, nil
 }
 
 type contextReader struct {
