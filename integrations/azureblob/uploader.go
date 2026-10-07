@@ -74,10 +74,7 @@ func (u *AzureBlobUploader) Upload(ctx context.Context, container, objectName st
 		return "", fmt.Errorf("upload to azure blob: %w", err)
 	}
 
-	// client.URL() is the account service URL (trailing slash); compose the
-	// blob URL from it so we don't have to re-parse the connection string.
-	base := strings.TrimSuffix(u.client.URL(), "/")
-	return fmt.Sprintf("%s/%s/%s", base, container, objectName), nil
+	return storedBlobURL(u.client.ServiceClient().NewContainerClient(container).NewBlockBlobClient(objectName).URL())
 }
 
 // Downloader reads blob bytes back from a stored blob URL. The attachment
@@ -114,15 +111,29 @@ func (u *AzureBlobUploader) DownloadURLWithLimit(ctx context.Context, blobURL st
 func (u *AzureBlobUploader) splitStoredURL(blobURL string) (string, string, bool) {
 	blobURL = strings.TrimSpace(blobURL)
 	if u != nil && u.client != nil {
-		base := strings.TrimSuffix(u.client.URL(), "/")
-		if base != "" && strings.HasPrefix(blobURL, base+"/") {
-			rest := strings.TrimPrefix(blobURL, base+"/")
+		base, baseErr := url.Parse(u.client.URL())
+		stored, storedErr := url.Parse(blobURL)
+		if baseErr == nil && storedErr == nil && base.Scheme == stored.Scheme && base.Host == stored.Host &&
+			strings.HasPrefix(stored.Path, strings.TrimSuffix(base.Path, "/")+"/") {
+			// URL.Path is decoded exactly once. Handing the SDK an escaped
+			// object would turn %2F into %252F and name different bytes.
+			rest := strings.TrimPrefix(stored.Path, strings.TrimSuffix(base.Path, "/")+"/")
 			if idx := strings.Index(rest, "/"); idx > 0 && idx < len(rest)-1 {
 				return rest[:idx], rest[idx+1:], true
 			}
 		}
 	}
 	return ParseBlobObject(blobURL)
+}
+
+func storedBlobURL(value string) (string, error) {
+	reference, err := url.Parse(value)
+	if err != nil {
+		return "", fmt.Errorf("stored blob has no valid reference URL: %w", err)
+	}
+	// Canonicalize path escaping and keep connection credentials out of rows.
+	reference.RawQuery, reference.Fragment, reference.User, reference.ForceQuery, reference.RawPath = "", "", nil, false, ""
+	return reference.String(), nil
 }
 
 // EnsureContainer creates the container if it does not already exist. Used on
