@@ -3,6 +3,7 @@ package installation
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -158,4 +159,56 @@ func TestRetirementWorkflowPortsKeepNativeActorAndScope(t *testing.T) {
 	}
 	require.Zero(t, files.calls)
 	require.Zero(t, executor.calls)
+}
+
+// The generic interpreter serializes callbacks today. The native operation
+// closures also keep their completion gate safe when a host dispatches them
+// concurrently; durable receipts remain the authority in either case.
+func TestRetirementWorkflowConcurrentObservationAndCompletion(t *testing.T) {
+	db, _ := journalDB(t)
+	j := preparationConnection(db)
+	scope, _ := preparationFixture(t)
+	ctx := captureOperator(auth.RoleOwner, scope.RequestedBy)
+	r, err := j.reserve(ctx, scope)
+	require.NoError(t, err)
+	w, err := loadRetirementWorkflow(strings.Repeat("d", 40))
+	require.NoError(t, err)
+	files, executor := retirementFiles(scope), &retirementStopFixture{}
+	for role := range files.ids {
+		files.ids[role] = nil
+	}
+	s := &retirementWorkflowScope{journal: j, installation: scope.InstallationID, key: r.ID, workflow: scope.WorkflowDigest, cleanup: w.digest, operator: scope.RequestedBy, executor: executor, files: files}
+	ops := s.operations()
+	for _, name := range []string{"installationRetirementBegin", "installationRetirementStop"} {
+		_, err = ops[name](ctx, nil)
+		require.NoError(t, err)
+	}
+	for _, role := range []string{"candidate", "rollback"} {
+		for _, name := range []string{"installationRetirementFence", "installationRetirementRelease", "installationRetirementPage"} {
+			_, err = ops[name](ctx, map[string]any{"role": role})
+			require.NoError(t, err)
+		}
+	}
+	// Observation writers and completion contend across real journal reads and
+	// transactions. Calls losing the completion race may correctly refuse.
+	start := make(chan struct{})
+	var group sync.WaitGroup
+	for range 32 {
+		group.Go(func() {
+			<-start
+			_, _ = ops["installationRetirementObserve"](ctx, nil)
+			_, _ = ops["installationRetirementComplete"](ctx, nil)
+		})
+	}
+	close(start)
+	group.Wait()
+	require.True(t, s.observed.Load())
+	require.True(t, s.completed.Load())
+	r, err = j.get(ctx, scope.InstallationID, r.ID)
+	require.NoError(t, err)
+	require.Equal(t, "cancelled", r.State)
+	for name, operation := range ops {
+		_, err = operation(ctx, nil)
+		require.Error(t, err, name+" must reject work after completion")
+	}
 }

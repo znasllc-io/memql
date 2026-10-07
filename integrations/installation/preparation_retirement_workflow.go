@@ -3,6 +3,7 @@ package installation
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
@@ -84,7 +85,7 @@ func (w *retirementWorkflow) run(ctx context.Context, journal *preparationJourna
 	if err := ctx.Err(); err != nil {
 		return preparationRecord{}, err
 	}
-	if !s.observed && !s.completed {
+	if !s.observed.Load() && !s.completed.Load() {
 		return preparationRecord{}, errors.New("cleanup recipe returned no native progress observation")
 	}
 	// Even an ignored operation failure or forged DSL return cannot manufacture
@@ -97,7 +98,7 @@ type retirementWorkflowScope struct {
 	installation, key, workflow, cleanup, operator string
 	executor                                       sourceCaptureExecutor
 	files                                          preparationRetirementFiles
-	observed, completed                            bool
+	observed, completed                            atomic.Bool
 }
 
 func retirementRole(args map[string]any) (string, error) {
@@ -143,7 +144,7 @@ func (s *retirementWorkflowScope) operations() map[string]workflowhost.Operation
 		"installationRetirementComplete": noArgs(func(ctx context.Context) (preparationRecord, error) {
 			r, err := s.journal.finishRetirement(ctx, s.installation, s.key, s.workflow, s.cleanup)
 			if err == nil {
-				s.completed = true
+				s.completed.Store(true)
 			}
 			return r, err
 		}),
@@ -151,7 +152,7 @@ func (s *retirementWorkflowScope) operations() map[string]workflowhost.Operation
 	for name, operation := range ops {
 		ops[name] = func(ctx context.Context, args map[string]any) (any, error) {
 			operator, err := preparationActor(ctx)
-			if err != nil || operator != s.operator || s.completed {
+			if err != nil || operator != s.operator || s.completed.Load() {
 				return nil, errors.New("cleanup operation is outside its active native scope")
 			}
 			return operation(ctx, args)
@@ -201,6 +202,6 @@ func (s *retirementWorkflowScope) observe(ctx context.Context, args map[string]a
 	for _, c := range r.Retirement.Captures {
 		ready = ready && c.Fenced && c.PinsReleased && c.Complete
 	}
-	s.observed = true
+	s.observed.Store(true)
 	return map[string]any{"ready": ready}, nil
 }
