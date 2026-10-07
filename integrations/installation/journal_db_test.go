@@ -19,6 +19,7 @@ import (
 )
 
 const migrationPath = "../../component/database/memory-nodes/migrations/20261007040000_installation_revisions"
+const preparationMigrationPath = "../../component/database/memory-nodes/migrations/20261007110000_installation_preparations"
 
 func journalDB(t *testing.T) (*sql.DB, *sql.DB) {
 	t.Helper()
@@ -40,6 +41,10 @@ func journalDB(t *testing.T) (*sql.DB, *sql.DB) {
 	}
 	first, second := open(), open()
 	body, err := os.ReadFile(migrationPath + ".up.sql")
+	require.NoError(t, err)
+	_, err = first.ExecContext(ctx, string(body))
+	require.NoError(t, err)
+	body, err = os.ReadFile(preparationMigrationPath + ".up.sql")
 	require.NoError(t, err)
 	_, err = first.ExecContext(ctx, string(body))
 	require.NoError(t, err)
@@ -332,6 +337,10 @@ func TestInstallationPlanRequiresImmutableRollbackAndExactEvidenceBindings(t *te
 
 func TestInstallationJournalMigrationCanRollBackOnlyWhileEmpty(t *testing.T) {
 	db, _ := journalDB(t)
+	preparationDown, err := os.ReadFile(preparationMigrationPath + ".down.sql")
+	require.NoError(t, err)
+	_, err = db.Exec(string(preparationDown))
+	require.NoError(t, err)
 	down, err := os.ReadFile(migrationPath + ".down.sql")
 	require.NoError(t, err)
 	_, err = db.Exec(string(down))

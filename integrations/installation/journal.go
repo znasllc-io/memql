@@ -86,6 +86,13 @@ func (j *revisionJournal) reserve(ctx context.Context, plan preparedPlan) (revis
 	if err != nil {
 		return revisionRecord{}, err
 	}
+	var preparation sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT active_preparation_id FROM installation_revision_heads WHERE installation_id=$1`, plan.InstallationID).Scan(&preparation); err != nil {
+		return revisionRecord{}, err
+	}
+	if preparation.Valid {
+		return revisionRecord{}, errBusy
+	}
 	record, err := readRevision(ctx, tx, plan.InstallationID, key)
 	if err == nil {
 		if record.State == "cancelled" {
