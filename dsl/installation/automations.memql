@@ -1,0 +1,11 @@
+/// Read candidate and rollback image bytes in a scoped installation preparation.
+/// Native ports bind the complete inventory, signed artifacts and registry trust;
+/// this recipe chooses ordering and stops on the first unavailable image.
+@template
+automation installationArtifactWorkflow {
+  requirements := builtin installationArtifactRequirements()
+  for item in requirements {
+    builtin installationArtifactCheck(key: item.key)
+  }
+  builtin installationArtifactsComplete()
+}

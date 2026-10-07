@@ -1,0 +1,15 @@
+// Private workflow ports. These declarations do not register an integration
+// or admit a caller. Only the native preparation host can supply their scope.
+
+/// Read the immutable image obligations belonging to this native installation scope.
+@executor("integration.installation.installationArtifactRequirements")
+builtin installationArtifactRequirements { }
+
+/// Verify fresh OCI bytes for one image selected by the native installation scope.
+@executor("integration.installation.installationArtifactCheck")
+@args(profile="object")
+builtin installationArtifactCheck { key string! }
+
+/// Seal evidence only when every native image obligation has a fresh verified result.
+@executor("integration.installation.installationArtifactsComplete")
+builtin installationArtifactsComplete { }
