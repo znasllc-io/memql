@@ -29,9 +29,10 @@ type Spec struct {
 	Stages []StageSpec `yaml:"stages" json:"stages"`
 }
 
-// Select declares how a step's packages are chosen (D8). It is declared, not
-// scripted: the platform reads the Go import graph and the path buckets
-// itself, so no repository ships a selection script.
+// Select declares package-selection facts and path buckets (D8). Sealed core
+// DSL chooses coverage and applicability; the runtime reads the Go import
+// graph and matches paths as mechanics, so no repository ships a selection
+// script.
 type Select struct {
 	// Go is the Go selection strategy; SelectImportGraph is the one there is.
 	Go string `yaml:"go,omitempty" json:"go,omitempty"`

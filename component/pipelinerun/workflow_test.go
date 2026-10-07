@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/znasllc-io/memql/component/actions"
@@ -296,6 +297,232 @@ func TestChangedStagePolicyChangesPipelineWorkflowIdentity(t *testing.T) {
 	}
 	if base.workflowIdentity() == changed.workflowIdentity() {
 		t.Fatal("a changed stage selector retained the same run workflow identity")
+	}
+}
+
+func TestPackageCoverageComesFromPinnedPipelineDSL(t *testing.T) {
+	dr := &runDriver{}
+	if err := dr.prepareWorkflow(""); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name   string
+		mode   pipelines.Mode
+		facts  pipelines.SelectionFacts
+		want   bool
+		reason string
+	}{
+		{name: "full mode", mode: pipelines.ModeFull, want: true, reason: "full run mode"},
+		{name: "unknown comparison", mode: pipelines.ModeAffected, facts: pipelines.SelectionFacts{
+			Paths: []pipelines.ChangedPathFacts{{Path: "docs/readme.md", BaseName: "readme.md", RepositoryPath: true}},
+		}, want: true, reason: "comparison"},
+		{name: "empty comparison", mode: pipelines.ModeAffected, facts: pipelines.SelectionFacts{
+			Known: true, GraphComplete: true,
+		}, want: true, reason: "empty"},
+		{name: "incomplete graph", mode: pipelines.ModeAffected, facts: pipelines.SelectionFacts{
+			Known: true, ChangedCount: 1, GraphComplete: false,
+			Paths: []pipelines.ChangedPathFacts{{Path: "docs/readme.md", BaseName: "readme.md", RepositoryPath: true}},
+		}, want: true, reason: "graph"},
+		{name: "unreadable path", mode: pipelines.ModeAffected, facts: pipelines.SelectionFacts{
+			Known: true, ChangedCount: 1, GraphComplete: true,
+			Paths: []pipelines.ChangedPathFacts{{Path: "../outside.go"}},
+		}, want: true, reason: "repository-relative"},
+		{name: "module file at any depth", mode: pipelines.ModeAffected, facts: pipelines.SelectionFacts{
+			Known: true, ChangedCount: 1, GraphComplete: true,
+			Paths: []pipelines.ChangedPathFacts{{Path: "tools/go.sum", BaseName: "go.sum", RepositoryPath: true}},
+		}, want: true, reason: "module graph"},
+		{name: "root pipeline manifest", mode: pipelines.ModeAffected, facts: pipelines.SelectionFacts{
+			Known: true, ChangedCount: 1, GraphComplete: true,
+			Paths: []pipelines.ChangedPathFacts{{Path: "memql-package.yaml", BaseName: "memql-package.yaml", RepositoryPath: true}},
+		}, want: true, reason: "manifest"},
+		{name: "root manifest name in a subdirectory", mode: pipelines.ModeAffected, facts: pipelines.SelectionFacts{
+			Known: true, ChangedCount: 1, GraphComplete: true,
+			Paths: []pipelines.ChangedPathFacts{{Path: "tools/memql-package.yaml", BaseName: "memql-package.yaml", RepositoryPath: true}},
+		}, want: false},
+		{name: "vendored code", mode: pipelines.ModeAffected, facts: pipelines.SelectionFacts{
+			Known: true, ChangedCount: 1, GraphComplete: true,
+			Paths: []pipelines.ChangedPathFacts{{Path: "vendor/lib/lib.go", BaseName: "lib.go", RepositoryPath: true, Vendored: true}},
+		}, want: true, reason: "vendored"},
+		{name: "configured full path", mode: pipelines.ModeAffected, facts: pipelines.SelectionFacts{
+			Known: true, ChangedCount: 1, GraphComplete: true,
+			Paths: []pipelines.ChangedPathFacts{{Path: "docs/readme.md", BaseName: "readme.md", RepositoryPath: true, ConfiguredFull: true}},
+		}, want: true, reason: "configured full"},
+		{name: "narrow affected path", mode: pipelines.ModeAffected, facts: pipelines.SelectionFacts{
+			Known: true, ChangedCount: 1, GraphComplete: true,
+			Paths: []pipelines.ChangedPathFacts{{Path: "component/memql/engine.go", BaseName: "engine.go", RepositoryPath: true}},
+		}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := dr.selectPackageCoverage(context.Background(), tc.facts, tc.mode)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Full != tc.want {
+				t.Fatalf("selection = %+v, want full=%v", got, tc.want)
+			}
+			if tc.reason != "" && !strings.Contains(got.Reason, tc.reason) {
+				t.Errorf("reason %q does not mention %q", got.Reason, tc.reason)
+			}
+		})
+	}
+	if _, pinned := dr.workflow.definitions["pipelinePackageSelection"]; !pinned {
+		t.Fatal("package coverage policy is not part of the pinned workflow")
+	}
+}
+
+func TestPerStepPackagePolicyComesFromPinnedPipelineDSL(t *testing.T) {
+	dr := &runDriver{}
+	if err := dr.prepareWorkflow(""); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name     string
+		mode     pipelines.Mode
+		packages string
+		full     bool
+		only     string
+		want     pipelines.PackagePolicy
+	}{
+		{name: "full run", mode: pipelines.ModeFull, packages: pipelines.PackagesAffected, want: pipelines.PackagePolicy{Coverage: pipelines.PackageCoverageAll, Filter: pipelines.PackageFilterAll}},
+		{name: "all declaration", mode: pipelines.ModeAffected, packages: pipelines.PackagesAll, only: pipelines.OnlyDBGated, want: pipelines.PackagePolicy{Coverage: pipelines.PackageCoverageAll, Filter: pipelines.PackageFilterDBGated}},
+		{name: "full graph decision", mode: pipelines.ModeAffected, packages: pipelines.PackagesAffected, full: true, only: pipelines.OnlyNotDBGated, want: pipelines.PackagePolicy{Coverage: pipelines.PackageCoverageAll, Filter: pipelines.PackageFilterNotDBGated}},
+		{name: "affected packages", mode: pipelines.ModeAffected, packages: pipelines.PackagesAffected, want: pipelines.PackagePolicy{Coverage: pipelines.PackageCoverageAffected, Filter: pipelines.PackageFilterAll}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, err := dr.selectPackagePolicies(context.Background(), &pipelines.Spec{Stages: []pipelines.StageSpec{{
+				Name: "tests", Steps: []pipelines.StepSpec{{Name: "unit", Packages: tc.packages, Only: tc.only}},
+			}}}, tc.mode, pipelines.Selection{Full: tc.full})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := selected["tests.unit"]; got != tc.want {
+				t.Fatalf("per-step policy = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+	if _, pinned := dr.workflow.definitions["pipelinePackageStepSelection"]; !pinned {
+		t.Fatal("per-step package policy is not part of the pinned workflow")
+	}
+}
+
+func TestPinnedPackagePolicyIsAppliedToImportGraphMechanically(t *testing.T) {
+	dr := &runDriver{}
+	if err := dr.prepareWorkflow(""); err != nil {
+		t.Fatal(err)
+	}
+	spec := &pipelines.Spec{
+		Select: &pipelines.Select{Go: pipelines.SelectImportGraph, DBGated: []string{"component/database"}},
+		Stages: []pipelines.StageSpec{{Name: "tests", Steps: []pipelines.StepSpec{{
+			Name: "db", Run: "go test $MEMQL_PACKAGES", Packages: pipelines.PackagesAffected, Only: pipelines.OnlyDBGated,
+		}}}},
+	}
+	graph, err := pipelines.ScanGoTree(fstest.MapFS{
+		"go.mod":                         {Data: []byte("module example.test/repo\n")},
+		"component/database/database.go": {Data: []byte("package database\n")},
+		"component/app/app.go":           {Data: []byte("package app\nimport _ \"example.test/repo/component/database\"\n")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts, err := pipelines.AnalyzeSelection(graph, []string{"component/database/database.go"}, true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := dr.selectPackageCoverage(context.Background(), facts, pipelines.ModeAffected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection, err := pipelines.ResolveSelection(graph, facts, coverage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policies, err := dr.selectPackagePolicies(context.Background(), spec, pipelines.ModeAffected, selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, refusal := pipelines.Compile(spec, pipelines.CompileInput{
+		Mode: pipelines.ModeAffected, Selector: pipelines.GraphSelector(graph, selection), PackagePolicies: policies,
+	})
+	if refusal != nil {
+		t.Fatal(refusal)
+	}
+	if got, want := plan.Steps()[0].Packages, []string{"example.test/repo/component/database"}; !slices.Equal(got, want) {
+		t.Fatalf("compiled package list = %v, want %v", got, want)
+	}
+}
+
+func TestChangedBucketPolicyComesFromPinnedPipelineDSL(t *testing.T) {
+	dr := &runDriver{}
+	if err := dr.prepareWorkflow(""); err != nil {
+		t.Fatal(err)
+	}
+	spec := &pipelines.Spec{Select: &pipelines.Select{Buckets: map[string][]string{"docs": {"docs/**"}}}}
+	cases := []struct {
+		name    string
+		mode    pipelines.Mode
+		changed []string
+		known   bool
+		want    bool
+	}{
+		{name: "full run", mode: pipelines.ModeFull, want: true},
+		{name: "unknown compare", mode: pipelines.ModeAffected, changed: []string{"docs/readme.md"}, want: true},
+		{name: "empty compare", mode: pipelines.ModeAffected, known: true, want: true},
+		{name: "unsafe path", mode: pipelines.ModeAffected, changed: []string{"../outside"}, known: true, want: true},
+		{name: "matched path", mode: pipelines.ModeAffected, changed: []string{"docs/readme.md"}, known: true, want: true},
+		{name: "unmatched path", mode: pipelines.ModeAffected, changed: []string{"component/memql/engine.go"}, known: true, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := dr.selectBuckets(context.Background(), spec, tc.mode, tc.changed, tc.known)
+			if err != nil {
+				t.Fatal(err)
+			}
+			included := slices.Contains(got.Included, "docs")
+			if included != tc.want {
+				t.Fatalf("included buckets = %v, want docs included=%v", got.Included, tc.want)
+			}
+		})
+	}
+	if _, pinned := dr.workflow.definitions["pipelineBucketIncluded"]; !pinned {
+		t.Fatal("bucket applicability policy is not part of the pinned workflow")
+	}
+}
+
+func TestChangedSelectionPolicyChangesPipelineWorkflowIdentity(t *testing.T) {
+	base := &runDriver{}
+	if err := base.prepareWorkflow(""); err != nil {
+		t.Fatal(err)
+	}
+	changedPolicy := workflowSource(t, `@template automation pipelinePackageSelection {
+ args { mode string! known bool! graphComplete bool! changed []any! }
+ return {full: false, reason: "changed policy"}
+}`)
+	changed := &runDriver{d: Deps{LoadWorkflow: workflowLoader(changedPolicy)}}
+	if err := changed.prepareWorkflow(""); err != nil {
+		t.Fatal(err)
+	}
+	if base.workflowIdentity() == changed.workflowIdentity() {
+		t.Fatal("a changed package selector retained the same run workflow identity")
+	}
+}
+
+func TestChangedPerStepPackagePolicyChangesPipelineWorkflowIdentity(t *testing.T) {
+	base := &runDriver{}
+	if err := base.prepareWorkflow(""); err != nil {
+		t.Fatal(err)
+	}
+	changedPolicy := workflowSource(t, `@template automation pipelinePackageStepSelection {
+ args { mode string! packages string! selectionFull bool! only string! }
+ return {coverage: "all", filter: "all"}
+}`)
+	changed := &runDriver{d: Deps{LoadWorkflow: workflowLoader(changedPolicy)}}
+	if err := changed.prepareWorkflow(""); err != nil {
+		t.Fatal(err)
+	}
+	if base.workflowIdentity() == changed.workflowIdentity() {
+		t.Fatal("a changed per-step package policy retained the same run workflow identity")
 	}
 }
 

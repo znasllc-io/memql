@@ -106,6 +106,11 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 			"The pipeline DSL could not select stages for this run: %v.", err)
 	}
 
+	var changed []string
+	changedKnown := false
+	if run.Mode == pipelines.ModeAffected && (pipelines.NeedsSelector(spec) || pipelines.NeedsBucketSelection(spec)) {
+		changed, changedKnown = dr.changes(ctx)
+	}
 	in := pipelines.CompileInput{
 		Mode:           run.Mode,
 		Event:          run.Event,
@@ -114,8 +119,13 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 		Timings:        p.Timings,
 		StageSelection: &stageSelection,
 	}
-	if run.Mode == pipelines.ModeAffected {
-		in.Changed, in.ChangedKnown = dr.changes(ctx)
+	if pipelines.NeedsBucketSelection(spec) {
+		selection, err := dr.selectBuckets(ctx, spec, run.Mode, changed, changedKnown)
+		if err != nil {
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/buckets",
+				"The pipeline DSL could not select changed-path buckets for this run: %v.", err)
+		}
+		in.BucketSelection = &selection
 	}
 	if pipelines.NeedsSelector(spec) {
 		graph, err := pipelines.ScanGoTree(tree)
@@ -123,20 +133,31 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 			return pipelines.Plan{}, pipelines.Refuse(packages.CodeSourceUnreadable, "",
 				"The Go sources of %s at %s could not be read: %v.", p.Repository, shortSHA(run.SHA), err)
 		}
-		var changed, full []string
-		if in.ChangedKnown {
-			changed = in.Changed
-		}
+		var full []string
 		if spec.Select != nil {
 			full = spec.Select.Full
 		}
-		// A change list that is unknown -- or a full run, which reads none
-		// -- is empty here, and Affected reads an empty list as everything.
-		selection, err := pipelines.Affected(graph, changed, full)
+		facts, err := pipelines.AnalyzeSelection(graph, changed, changedKnown, full)
 		if err != nil {
 			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "select/full", "%v", err)
 		}
+		decision, err := dr.selectPackageCoverage(ctx, facts, run.Mode)
+		if err != nil {
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/packages",
+				"The pipeline DSL could not select package coverage for this run: %v.", err)
+		}
+		selection, err := pipelines.ResolveSelection(graph, facts, decision)
+		if err != nil {
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/packages",
+				"The pipeline DSL selected package coverage that the import graph cannot safely execute: %v.", err)
+		}
 		in.Selector = pipelines.GraphSelector(graph, selection)
+		policies, err := dr.selectPackagePolicies(ctx, spec, run.Mode, selection)
+		if err != nil {
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/packages",
+				"The pipeline DSL could not select per-step package coverage: %v.", err)
+		}
+		in.PackagePolicies = policies
 	}
 	return pipelines.Compile(spec, in)
 }

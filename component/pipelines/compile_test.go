@@ -64,6 +64,31 @@ func d7Selector(affected Selection) selectorStub {
 	return selectorStub{all: slices.Sorted(maps.Keys(d7Dirs)), affected: affected, dirs: d7Dirs}
 }
 
+func testPackagePolicies(spec *Spec, mode Mode, selector Selector) map[string]PackagePolicy {
+	if !NeedsSelector(spec) || selector == nil {
+		return nil
+	}
+	policies := map[string]PackagePolicy{}
+	affected := selector.Affected()
+	for _, stage := range spec.Stages {
+		for _, step := range stage.Steps {
+			if step.Packages == "" {
+				continue
+			}
+			coverage := PackageCoverageAffected
+			if mode != ModeAffected || step.Packages == PackagesAll || affected.Full {
+				coverage = PackageCoverageAll
+			}
+			filter := step.Only
+			if filter == "" {
+				filter = PackageFilterAll
+			}
+			policies[StepKey(stage.Name, step.Name)] = PackagePolicy{Coverage: coverage, Filter: filter}
+		}
+	}
+	return policies
+}
+
 // d7Command is a command step of the record's example as Compile renders it
 // before any packages are chosen.
 func d7Command(stage, name, run string, dependsOn ...string) Step {
@@ -100,6 +125,11 @@ var (
 
 func mustCompilePlan(t *testing.T, spec *Spec, in CompileInput) Plan {
 	t.Helper()
+	if NeedsSelector(spec) && in.PackagePolicies == nil && in.Selector != nil {
+		// Most compiler tests exercise graph mechanics rather than DSL policy.
+		// workflow_test.go runs the pinned selectors against policy cases.
+		in.PackagePolicies = testPackagePolicies(spec, in.Mode, in.Selector)
+	}
 	if in.StageSelection == nil {
 		// Most compiler tests exercise step mechanics, not DSL stage policy.
 		// The dedicated stage-selection test supplies the policy result.
@@ -108,6 +138,13 @@ func mustCompilePlan(t *testing.T, spec *Spec, in CompileInput) Plan {
 			selection.Included = append(selection.Included, stage.Name)
 		}
 		in.StageSelection = &selection
+	}
+	if in.BucketSelection == nil && NeedsBucketSelection(spec) {
+		included := []string{}
+		if spec.Select != nil {
+			included = slices.Sorted(maps.Keys(spec.Select.Buckets))
+		}
+		in.BucketSelection = &BucketSelection{Included: included}
 	}
 	plan, r := Compile(spec, in)
 	if r != nil {
@@ -167,8 +204,8 @@ func TestCompileThePullRequestRunOfTheRecordsExample(t *testing.T) {
 	in := CompileInput{
 		Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet,
 		Selector: d7Selector(affected), Timings: d7Timings,
-		Changed: []string{"component/memql/engine.go", "docs/README.md"}, ChangedKnown: true,
-		StageSelection: &StageSelection{Included: []string{"checks", "tests"}},
+		BucketSelection: &BucketSelection{},
+		StageSelection:  &StageSelection{Included: []string{"checks", "tests"}},
 	}
 	plan := mustCompilePlan(t, d7ExampleSpec(), in)
 
@@ -204,13 +241,13 @@ func TestCompileThePullRequestRunOfTheRecordsExample(t *testing.T) {
 	excluding := d7ExampleSpec()
 	excluding.Select.Buckets["os"] = append(excluding.Select.Buckets["os"], "!clients/vendor/**")
 	vendorOnly := in
-	vendorOnly.Changed = []string{"clients/vendor/lib.js"}
+	vendorOnly.BucketSelection = &BucketSelection{}
 	if got := planStepByKey(t, mustCompilePlan(t, excluding, vendorOnly), "tests.os-checks"); got.Skip == nil {
 		t.Errorf("os-checks ran on a change only under an excluded path: %+v", got)
 	}
 
 	// The same run with a change under clients/: os-checks runs.
-	in.Changed = append(in.Changed, "clients/os/src/main.ts")
+	in.BucketSelection = &BucketSelection{Included: []string{"os"}}
 	plan = mustCompilePlan(t, d7ExampleSpec(), in)
 	if got := planStepByKey(t, plan, "tests.os-checks"); !reflect.DeepEqual(got, d7OSChecks) {
 		t.Errorf("os-checks with a change under clients/ =\n%+v\nwant it to run:\n%+v", got, d7OSChecks)
@@ -225,7 +262,7 @@ func TestCompileThePushRunOfTheRecordsExample(t *testing.T) {
 		Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet,
 		// A selection that would answer differently, to show full mode never reads it.
 		Selector: d7Selector(Selection{Packages: []string{d7Env}}), Timings: d7Timings,
-		Changed: []string{"docs/README.md"}, ChangedKnown: true,
+		BucketSelection: &BucketSelection{Included: []string{"os"}},
 	}
 	plan := mustCompilePlan(t, d7ExampleSpec(), in)
 
@@ -306,10 +343,13 @@ func TestCompileOnlySplitsTheCandidatesByTheDBGatedTrees(t *testing.T) {
 // consented to. Absent compute means cluster.
 func TestCompileRefusesANeedOnAClusterOnlyPipeline(t *testing.T) {
 	for _, compute := range []Compute{ComputeCluster, ""} {
+		selector := d7Selector(Selection{Packages: []string{d7Memql}})
 		_, r := Compile(d7ExampleSpec(), CompileInput{
 			Mode: ModeAffected, Event: EventPullRequest, Compute: compute,
-			Selector:       d7Selector(Selection{Packages: []string{d7Memql}}),
-			StageSelection: &StageSelection{Included: []string{"checks", "tests"}},
+			Selector:        selector,
+			PackagePolicies: testPackagePolicies(d7ExampleSpec(), ModeAffected, selector),
+			BucketSelection: &BucketSelection{Included: []string{"os"}},
+			StageSelection:  &StageSelection{Included: []string{"checks", "tests"}},
 		})
 		if r == nil || r.Code != CodeFleetNotConsented || r.Scope != "tests/os-checks" {
 			t.Errorf("compute %q: Compile = %v, want pipeline_fleet_not_consented (tests/os-checks)", compute, r)
@@ -324,8 +364,10 @@ func TestCompileRefusesANeedOnAClusterOnlyPipeline(t *testing.T) {
 	// answer must not depend on which files a change happened to touch.
 	_, r := Compile(d7ExampleSpec(), CompileInput{
 		Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeCluster,
-		Selector: d7Selector(Selection{}), Changed: []string{"docs/README.md"}, ChangedKnown: true,
-		StageSelection: &StageSelection{Included: []string{"checks", "tests"}},
+		Selector:        d7Selector(Selection{}),
+		PackagePolicies: testPackagePolicies(d7ExampleSpec(), ModeAffected, d7Selector(Selection{})),
+		BucketSelection: &BucketSelection{},
+		StageSelection:  &StageSelection{Included: []string{"checks", "tests"}},
 	})
 	if r == nil || r.Code != CodeFleetNotConsented {
 		t.Errorf("with os-checks skipped by its bucket: Compile = %v, want pipeline_fleet_not_consented", r)
@@ -339,8 +381,10 @@ func TestCompileRefusesASecretTheOwnerDidNotAllow(t *testing.T) {
 	spec.Stages[2].Steps[0].Secrets = []string{"DEPLOY_TOKEN"}
 	push := CompileInput{
 		Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet,
-		Selector: d7Selector(Selection{}), AllowedSecrets: []string{"NPM_TOKEN"},
-		StageSelection: &StageSelection{Included: []string{"checks", "tests", "deploy", "notify"}},
+		Selector: d7Selector(Selection{}), PackagePolicies: testPackagePolicies(spec, ModeFull, d7Selector(Selection{})),
+		AllowedSecrets:  []string{"NPM_TOKEN"},
+		BucketSelection: &BucketSelection{Included: []string{"os"}},
+		StageSelection:  &StageSelection{Included: []string{"checks", "tests", "deploy", "notify"}},
 	}
 
 	_, r := Compile(spec, push)
@@ -371,8 +415,8 @@ func TestCompileSkipsAPackageStepWhenNothingIsAffected(t *testing.T) {
 	plan := mustCompilePlan(t, d7ExampleSpec(), CompileInput{
 		Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet,
 		Selector: d7Selector(Selection{Reason: "no Go package changed"}), Timings: d7Timings,
-		Changed: []string{"docs/README.md"}, ChangedKnown: true,
-		StageSelection: &StageSelection{Included: []string{"checks", "tests"}},
+		BucketSelection: &BucketSelection{},
+		StageSelection:  &StageSelection{Included: []string{"checks", "tests"}},
 	})
 	goSkipped := d7GoTests
 	goSkipped.Skip = &Skip{Code: CodeNotAffected, Reason: "No affected Go packages."}
@@ -389,10 +433,12 @@ func TestCompileAFullSelectionSelectsEveryPackage(t *testing.T) {
 	affected := mustCompilePlan(t, d7ExampleSpec(), CompileInput{
 		Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet,
 		Selector: d7Selector(Selection{Full: true, Reason: "go.mod changed"}), Timings: d7Timings,
+		BucketSelection: &BucketSelection{Included: []string{"os"}},
 	})
 	full := mustCompilePlan(t, d7ExampleSpec(), CompileInput{
 		Mode: ModeFull, Event: EventMergeGroup, Compute: ComputeClusterAndFleet,
 		Selector: d7Selector(Selection{}), Timings: d7Timings,
+		BucketSelection: &BucketSelection{Included: []string{"os"}},
 	})
 	for _, key := range []string{"tests.go-tests#1", "tests.go-tests#2", "tests.go-tests#3", "tests.go-tests#4", "tests.db-tests#3"} {
 		if got, want := planStepByKey(t, affected, key).Packages, planStepByKey(t, full, key).Packages; !reflect.DeepEqual(got, want) {
@@ -481,7 +527,8 @@ func TestCloneCompiledStepSharesNoLinks(t *testing.T) {
 func TestCompileRefusesAPackageStepWithNoSelector(t *testing.T) {
 	_, r := Compile(d7ExampleSpec(), CompileInput{
 		Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet,
-		StageSelection: &StageSelection{Included: []string{"checks", "tests", "deploy", "notify"}},
+		BucketSelection: &BucketSelection{Included: []string{"os"}},
+		StageSelection:  &StageSelection{Included: []string{"checks", "tests", "deploy", "notify"}},
 	})
 	if r == nil || r.Code != CodeSelectMissing || r.Scope != "tests/go-tests" {
 		t.Errorf("Compile = %v, want pipeline_select_missing (tests/go-tests)", r)
@@ -598,25 +645,15 @@ func TestCompileTimeoutsAndASingleShard(t *testing.T) {
 	}
 }
 
-// A bucket can only skip a step when the change is KNOWN. Unknown changes, or
-// a change list that came back empty, run the step: skipping on a change list
-// nobody could read would report green for work that never ran.
-func TestCompileRunsABucketStepWhenTheChangeIsNotKnown(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		changed []string
-		known   bool
-	}{
-		{"unknown changes", []string{"docs/README.md"}, false},
-		{"an empty change list", nil, true},
-	} {
-		plan := mustCompilePlan(t, d7ExampleSpec(), CompileInput{
-			Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet,
-			Selector: d7Selector(Selection{Full: true}), Changed: tc.changed, ChangedKnown: tc.known,
-		})
-		if skip := planStepByKey(t, plan, "tests.os-checks").Skip; skip != nil {
-			t.Errorf("%s: os-checks skipped (%s)", tc.name, skip.Reason)
-		}
+// Compile consumes the DSL's explicit bucket set and does not re-evaluate
+// paths itself.
+func TestCompileRunsAnIncludedBucketStep(t *testing.T) {
+	plan := mustCompilePlan(t, d7ExampleSpec(), CompileInput{
+		Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet,
+		Selector: d7Selector(Selection{Full: true}), BucketSelection: &BucketSelection{Included: []string{"os"}},
+	})
+	if step := planStepByKey(t, plan, "tests.os-checks"); step.Skip != nil {
+		t.Errorf("included os-checks skipped (%s)", step.Skip.Reason)
 	}
 }
 
@@ -631,6 +668,71 @@ func TestNeedsSelector(t *testing.T) {
 	}
 	if NeedsSelector(nil) {
 		t.Error("NeedsSelector(nil) = true")
+	}
+}
+
+func TestCompileRequiresExplicitPackagePolicy(t *testing.T) {
+	input := CompileInput{
+		Selector:       d7Selector(Selection{Packages: []string{d7Memql}}),
+		StageSelection: &StageSelection{Included: []string{"checks", "tests", "deploy", "notify"}},
+	}
+	if _, refusal := Compile(d7ExampleSpec(), input); refusal == nil || refusal.Code != CodeSelectMissing || refusal.Scope != "selection" {
+		t.Fatalf("Compile without package policy = %v, want a selection refusal", refusal)
+	}
+}
+
+func TestCompileRefusesMissingUnknownOrUnsafePackagePolicy(t *testing.T) {
+	spec := &Spec{Select: &Select{DBGated: []string{"component/memql"}}, Stages: []StageSpec{{Name: "tests", Steps: []StepSpec{{
+		Name: "db", Run: "go test", Packages: PackagesAffected, Only: OnlyDBGated,
+	}}}}}
+	selector := d7Selector(Selection{Packages: []string{d7Memql}})
+	cases := []struct {
+		name     string
+		policies map[string]PackagePolicy
+		full     bool
+	}{
+		{name: "missing"},
+		{name: "unknown coverage", policies: map[string]PackagePolicy{"tests.db": {Coverage: "mystery", Filter: PackageFilterDBGated}}},
+		{name: "unknown filter", policies: map[string]PackagePolicy{"tests.db": {Coverage: PackageCoverageAffected, Filter: "mystery"}}},
+		{name: "affected when graph requires full", full: true, policies: map[string]PackagePolicy{"tests.db": {Coverage: PackageCoverageAffected, Filter: PackageFilterDBGated}}},
+		{name: "undeclared step", policies: map[string]PackagePolicy{"elsewhere.unit": {Coverage: PackageCoverageAll, Filter: PackageFilterAll}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			selected := selector
+			if tc.full {
+				selected = d7Selector(Selection{Full: true, Packages: []string{d7Memql}})
+			}
+			_, refusal := Compile(spec, CompileInput{Selector: selected, PackagePolicies: tc.policies})
+			if refusal == nil || (tc.name == "missing" && refusal.Code != CodeSelectMissing) {
+				t.Fatalf("invalid package policy accepted: %v", refusal)
+			}
+		})
+	}
+}
+
+func TestCompileRequiresAnExplicitBucketSelection(t *testing.T) {
+	input := CompileInput{
+		Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet,
+		Selector: d7Selector(Selection{}),
+		PackagePolicies: map[string]PackagePolicy{
+			"tests.go-tests": {Coverage: PackageCoverageAffected, Filter: PackageFilterAll},
+			"tests.db-tests": {Coverage: PackageCoverageAffected, Filter: PackageFilterDBGated},
+		},
+		StageSelection: &StageSelection{Included: []string{"checks", "tests"}},
+	}
+	if _, refusal := Compile(d7ExampleSpec(), input); refusal == nil || refusal.Code != CodeSelectMissing || refusal.Scope != "selection" {
+		t.Fatalf("Compile without bucket selection = %v, want a selection refusal", refusal)
+	}
+
+	input.BucketSelection = &BucketSelection{Included: []string{"unknown"}}
+	if _, refusal := Compile(d7ExampleSpec(), input); refusal == nil || refusal.Code != CodeSelectMissing {
+		t.Fatalf("Compile with unknown bucket = %v, want a selection refusal", refusal)
+	}
+
+	input.BucketSelection = &BucketSelection{Included: []string{"os", "os"}}
+	if _, refusal := Compile(d7ExampleSpec(), input); refusal == nil || refusal.Code != CodeSelectMissing {
+		t.Fatalf("Compile with duplicate bucket = %v, want a selection refusal", refusal)
 	}
 }
 

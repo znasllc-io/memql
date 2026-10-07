@@ -9,6 +9,8 @@ package pipelinerun
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -178,7 +180,10 @@ func (dr *runDriver) prepareWorkflow(name string) error {
 	}
 	// Notification policy can be reached through a native step, so its pure
 	// recipes are part of the immutable execution contract as well.
-	for _, helper := range []string{"pipelineStageIncluded", "pipelineNotificationCopy", "pipelineNotificationOutcome"} {
+	for _, helper := range []string{
+		"pipelineStageIncluded", "pipelinePackageSelection", "pipelinePackageStepSelection", "pipelineBucketIncluded",
+		"pipelineNotificationCopy", "pipelineNotificationOutcome",
+	} {
 		if err := visit(helper); err != nil {
 			return err
 		}
@@ -207,6 +212,92 @@ func (dr *runDriver) selectStages(ctx context.Context, stages []pipelines.StageS
 		}
 		if included {
 			selection.Included = append(selection.Included, stage.Name)
+		}
+	}
+	return selection, nil
+}
+
+func (dr *runDriver) selectPackageCoverage(ctx context.Context, facts pipelines.SelectionFacts, mode pipelines.Mode) (pipelines.SelectionDecision, error) {
+	changed := make([]any, 0, len(facts.Paths))
+	for _, path := range facts.Paths {
+		changed = append(changed, map[string]any{
+			"path": path.Path, "baseName": path.BaseName, "repositoryPath": path.RepositoryPath,
+			"vendored": path.Vendored, "configuredFull": path.ConfiguredFull,
+		})
+	}
+	value, err := dr.runPinnedWorkflow(ctx, "pipelinePackageSelection", map[string]any{
+		"mode": string(mode), "known": facts.Known, "graphComplete": facts.GraphComplete, "changed": changed,
+	})
+	if err != nil {
+		return pipelines.SelectionDecision{}, err
+	}
+	result, ok := value.(map[string]any)
+	if !ok {
+		return pipelines.SelectionDecision{}, fmt.Errorf("pipeline package policy returned %T, want object", value)
+	}
+	full, ok := result["full"].(bool)
+	if !ok {
+		return pipelines.SelectionDecision{}, fmt.Errorf("pipeline package policy returned %T for full, want bool", result["full"])
+	}
+	reason, _ := result["reason"].(string)
+	return pipelines.SelectionDecision{Full: full, Reason: reason}, nil
+}
+
+func (dr *runDriver) selectPackagePolicies(ctx context.Context, spec *pipelines.Spec, mode pipelines.Mode, affected pipelines.Selection) (map[string]pipelines.PackagePolicy, error) {
+	policies := make(map[string]pipelines.PackagePolicy)
+	for _, stage := range spec.Stages {
+		for _, step := range stage.Steps {
+			if step.Packages == "" {
+				continue
+			}
+			value, err := dr.runPinnedWorkflow(ctx, "pipelinePackageStepSelection", map[string]any{
+				"mode": string(mode), "packages": step.Packages, "selectionFull": affected.Full, "only": step.Only,
+			})
+			if err != nil {
+				return nil, err
+			}
+			result, ok := value.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("pipeline package-step policy returned %T, want object", value)
+			}
+			coverage, ok := result["coverage"].(string)
+			if !ok {
+				return nil, fmt.Errorf("pipeline package-step policy returned %T for coverage, want string", result["coverage"])
+			}
+			filter, ok := result["filter"].(string)
+			if !ok {
+				return nil, fmt.Errorf("pipeline package-step policy returned %T for filter, want string", result["filter"])
+			}
+			policies[pipelines.StepKey(stage.Name, step.Name)] = pipelines.PackagePolicy{Coverage: coverage, Filter: filter}
+		}
+	}
+	return policies, nil
+}
+
+func (dr *runDriver) selectBuckets(ctx context.Context, spec *pipelines.Spec, mode pipelines.Mode, changed []string, known bool) (pipelines.BucketSelection, error) {
+	selection := pipelines.BucketSelection{Included: make([]string, 0)}
+	pathsValid := pipelines.RepositoryPathsValid(changed)
+	if spec.Select == nil {
+		return selection, nil
+	}
+	for _, name := range slices.Sorted(maps.Keys(spec.Select.Buckets)) {
+		matches, err := pipelines.AnyPathMatches(spec.Select.Buckets[name], changed)
+		if err != nil {
+			return pipelines.BucketSelection{}, fmt.Errorf("bucket %q: %w", name, err)
+		}
+		value, err := dr.runPinnedWorkflow(ctx, "pipelineBucketIncluded", map[string]any{
+			"mode": string(mode), "known": known, "changedCount": len(changed),
+			"pathsValid": pathsValid, "matched": matches,
+		})
+		if err != nil {
+			return pipelines.BucketSelection{}, err
+		}
+		included, ok := value.(bool)
+		if !ok {
+			return pipelines.BucketSelection{}, fmt.Errorf("pipeline bucket policy returned %T, want bool", value)
+		}
+		if included {
+			selection.Included = append(selection.Included, name)
 		}
 	}
 	return selection, nil

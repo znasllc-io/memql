@@ -77,6 +77,51 @@ automation pipelineStageIncluded {
   return args.on.count() == 0 || args.on.any(value => value == args.event || value == args.mode)
 }
 
+/// Full versus affected package coverage is pipeline policy. Go supplies
+/// path and graph facts; this sealed decision keeps any uncertainty on the
+/// full-coverage side so an unreadable change cannot produce a false green.
+@template
+automation pipelinePackageSelection {
+  args { mode string! known bool! graphComplete bool! changed []any! }
+
+  moduleGraphChanged := args.changed.any(path =>
+    path.baseName == "go.mod" || path.baseName == "go.sum" ||
+    path.baseName == "go.work" || path.baseName == "go.work.sum")
+  full := args.mode != "affected" || !args.known || args.changed.count() == 0 ||
+    !args.graphComplete || args.changed.any(path => !path.repositoryPath) ||
+    args.changed.any(path => path.path == "memql-package.yaml") || moduleGraphChanged ||
+    args.changed.any(path => path.vendored || path.configuredFull)
+  reason := args.mode != "affected" ? "full run mode" :
+    !args.known ? "the changed-file comparison is unavailable" :
+    args.changed.count() == 0 ? "the change list is empty" :
+    !args.graphComplete ? "the import graph is incomplete" :
+    args.changed.any(path => !path.repositoryPath) ? "a changed path is not repository-relative" :
+    args.changed.any(path => path.path == "memql-package.yaml") ? "the pipeline manifest changed" :
+    moduleGraphChanged ? "a Go module graph file changed" :
+    args.changed.any(path => path.vendored) ? "vendored code changed" :
+    args.changed.any(path => path.configuredFull) ? "a configured full-selection path changed" : ""
+  return {full: full, reason: reason}
+}
+
+/// Each packages step's source and db-gated filter are pipeline policy. The
+/// manifest supplies the step's declarations; this sealed decision chooses
+/// the coverage that Go mechanically applies to the import graph.
+@template
+automation pipelinePackageStepSelection {
+  args { mode string! packages string! selectionFull bool! only string! }
+  coverage := args.mode != "affected" || args.packages == "all" || args.selectionFull ? "all" : "affected"
+  packageFilter := args.only == "" ? "all" : args.only
+  return {coverage: coverage, filter: packageFilter}
+}
+
+/// A bucket can skip a step only when the run is affected, the full change
+/// list was read, and no path matched its configured globs.
+@template
+automation pipelineBucketIncluded {
+  args { mode string! known bool! changedCount int! pathsValid bool! matched bool! }
+  return args.mode != "affected" || !args.known || args.changedCount == 0 || !args.pathsValid || args.matched
+}
+
 /// Pull requests test affected packages; trees that land or ship test the full set.
 /// Check re-requests keep their original run's mode and do not select one here.
 @template

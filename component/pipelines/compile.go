@@ -21,12 +21,15 @@ type CompileInput struct {
 	StageSelection *StageSelection
 	// AllowedSecrets is the pipeline row's secretNames.
 	AllowedSecrets []string
-	// Selector answers which Go packages a step selects. Nil when no step
-	// selects packages; Compile refuses pipeline_select_missing if one does.
+	// Selector supplies the import graph's package candidates and directories.
+	// Nil when no step selects packages.
 	Selector Selector
-	// Changed and ChangedKnown gate `when: bucket` steps in affected mode.
-	Changed      []string
-	ChangedKnown bool
+	// PackagePolicies are the pinned DSL's per-step coverage/filter decisions.
+	// Compile refuses a missing or extra decision for a package-selecting step.
+	PackagePolicies map[string]PackagePolicy
+	// BucketSelection is the pipeline DSL's explicit decision about which
+	// changed-path buckets run. Nil cannot silently skip a conditional step.
+	BucketSelection *BucketSelection
 	// Timings is the pipeline's timing table: import path -> seconds.
 	Timings map[string]float64
 }
@@ -83,6 +86,22 @@ func NeedsSelector(spec *Spec) bool {
 	return false
 }
 
+// NeedsBucketSelection reports whether any declared step asks the changed-
+// path policy to decide whether it runs.
+func NeedsBucketSelection(spec *Spec) bool {
+	if spec == nil {
+		return false
+	}
+	for _, stage := range spec.Stages {
+		for _, step := range stage.Steps {
+			if step.When != nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Compile turns a pipeline: block into the plan one run executes.
 //
 // A spec Validate refuses is refused unchanged. Otherwise a stage is planned
@@ -103,15 +122,11 @@ func NeedsSelector(spec *Spec) bool {
 // refusals do not depend on what changed, so a pipeline that refuses one
 // pull request refuses every one.
 //
-// What a step selects is decided last. A `when: { bucket }` step is skipped
-// only in affected mode, and only when the change list is known, holds at
-// least one path, and touches none of the bucket's globs; a bucket is a
-// PathSet, so a path is in it when a plain glob matches and no `!` glob does.
-// A packages step takes every package in any mode but
-// affected, under `packages: all`, or when the affected selection is Full,
-// and the affected packages otherwise; `only` narrows that to the db-gated
-// trees or to the rest, and nothing left is one skipped step. A skip is
-// work that had nothing to do, never a refusal in disguise.
+// What a step selects is decided last. The pipeline DSL explicitly selects
+// which `when: { bucket }` steps run and returns each packages step's coverage
+// and filter. Go applies those choices to the import graph; nothing left is
+// one skipped step. A skip is work that had nothing to do, never a refusal in
+// disguise.
 func Compile(spec *Spec, in CompileInput) (Plan, *Refusal) {
 	if r := Validate(spec); r != nil {
 		return Plan{}, r
@@ -122,6 +137,45 @@ func Compile(spec *Spec, in CompileInput) (Plan, *Refusal) {
 				return Plan{}, Refuse(CodeStageInvalid, "selection",
 					"The pipeline DSL did not select stages for this run; conditional stages cannot be compiled without an explicit selection.")
 			}
+		}
+	}
+	if !NeedsSelector(spec) && len(in.PackagePolicies) > 0 {
+		return Plan{}, Refuse(CodeSelectInvalid, "selection",
+			"The pipeline DSL selected package coverage when no step declares packages.")
+	}
+	knownPackageSteps := map[string]bool{}
+	for _, stage := range spec.Stages {
+		for _, step := range stage.Steps {
+			if step.Packages != "" {
+				knownPackageSteps[StepKey(stage.Name, step.Name)] = true
+			}
+		}
+	}
+	for key := range in.PackagePolicies {
+		if !knownPackageSteps[key] {
+			return Plan{}, Refuse(CodeSelectInvalid, "selection/"+key,
+				"The pipeline DSL selected packages for an undeclared packages step.")
+		}
+	}
+	selectedBuckets := map[string]bool(nil)
+	if NeedsBucketSelection(spec) && in.BucketSelection == nil {
+		return Plan{}, Refuse(CodeSelectMissing, "selection",
+			"The pipeline DSL did not select changed-path buckets; conditional steps cannot be compiled without an explicit selection.")
+	}
+	if in.BucketSelection != nil {
+		selectedBuckets = make(map[string]bool, len(in.BucketSelection.Included))
+		knownBuckets := map[string]bool{}
+		if spec.Select != nil {
+			for name := range spec.Select.Buckets {
+				knownBuckets[name] = true
+			}
+		}
+		for _, name := range in.BucketSelection.Included {
+			if !knownBuckets[name] || selectedBuckets[name] {
+				return Plan{}, Refuse(CodeSelectMissing, "selection",
+					"The pipeline DSL selected unknown or duplicate path bucket %q.", name)
+			}
+			selectedBuckets[name] = true
 		}
 	}
 	selected := map[string]bool(nil)
@@ -139,7 +193,7 @@ func Compile(spec *Spec, in CompileInput) (Plan, *Refusal) {
 			selected[name] = true
 		}
 	}
-	c := &planCompiler{spec: spec, in: in}
+	c := &planCompiler{spec: spec, in: in, selectedBuckets: selectedBuckets}
 	if spec.Select != nil {
 		for _, entry := range spec.Select.DBGated {
 			if tree, ok := dbGatedTree(entry); ok {
@@ -183,9 +237,10 @@ func Compile(spec *Spec, in CompileInput) (Plan, *Refusal) {
 // planCompiler carries one compile's inputs and the answers it asks the
 // Selector for once.
 type planCompiler struct {
-	spec  *Spec
-	in    CompileInput
-	trees []string // select.dbGated, normalized
+	spec            *Spec
+	in              CompileInput
+	trees           []string // select.dbGated, normalized
+	selectedBuckets map[string]bool
 
 	all          []string
 	allRead      bool
@@ -203,6 +258,27 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 
 	if declared.Packages != "" && c.in.Selector == nil {
 		return nil, Refuse(CodeSelectMissing, scope, "The step selects Go packages, and no import graph was read for this run.")
+	}
+	if declared.Packages != "" {
+		policy, ok := c.in.PackagePolicies[StepKey(stage, declared.Name)]
+		if !ok {
+			return nil, Refuse(CodeSelectMissing, scope, "The pipeline DSL did not select package coverage for this step.")
+		}
+		switch policy.Coverage {
+		case PackageCoverageAll:
+		case PackageCoverageAffected:
+			if c.affectedSelection().Full {
+				return nil, Refuse(CodeSelectInvalid, scope,
+					"The pipeline DSL selected affected coverage when the import-graph decision requires full coverage.")
+			}
+		default:
+			return nil, Refuse(CodeSelectInvalid, scope, "The pipeline DSL returned unsupported package coverage %q.", policy.Coverage)
+		}
+		switch policy.Filter {
+		case PackageFilterAll, PackageFilterDBGated, PackageFilterNotDBGated:
+		default:
+			return nil, Refuse(CodeSelectInvalid, scope, "The pipeline DSL returned unsupported package filter %q.", policy.Filter)
+		}
 	}
 
 	step := Step{
@@ -232,7 +308,7 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 		step.Artifacts = ImageBuildArtifacts()
 	}
 
-	if declared.When != nil && c.bucketUntouched(declared.When.Bucket) {
+	if declared.When != nil && !c.selectedBuckets[declared.When.Bucket] {
 		step.Skip = &Skip{Code: CodeNotAffected, Reason: "No change under bucket " + declared.When.Bucket + "."}
 		return []Step{step}, nil
 	}
@@ -240,10 +316,13 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 		return []Step{step}, nil
 	}
 
-	candidates := c.packagesFor(declared)
+	candidates, refusal := c.packagesFor(stage, declared)
+	if refusal != nil {
+		return nil, refusal
+	}
 	if len(candidates) == 0 {
 		reason := "No affected Go packages."
-		if declared.Only == OnlyDBGated {
+		if c.in.PackagePolicies[StepKey(stage, declared.Name)].Filter == PackageFilterDBGated {
 			reason = "No db-gated packages are affected."
 		}
 		step.Skip = &Skip{Code: CodeNotAffected, Reason: reason}
@@ -268,17 +347,19 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 	return []Step{step}, nil
 }
 
-// packagesFor is a packages step's candidates, sorted, after `only`. Any mode
-// but affected selects everything: selecting too much is the safe direction.
-func (c *planCompiler) packagesFor(declared StepSpec) []string {
+// packagesFor mechanically applies the DSL's source and filter decision to
+// the import graph. It does not decide which coverage or filter a step needs.
+func (c *planCompiler) packagesFor(stage string, declared StepSpec) ([]string, *Refusal) {
+	policy := c.in.PackagePolicies[StepKey(stage, declared.Name)]
 	var candidates []string
-	switch {
-	case c.in.Mode != ModeAffected || declared.Packages == PackagesAll:
+	switch policy.Coverage {
+	case PackageCoverageAll:
 		candidates = c.allPackages()
-	case c.affectedSelection().Full:
-		candidates = c.allPackages()
-	default:
+	case PackageCoverageAffected:
 		candidates = c.affectedSelection().Packages
+	default:
+		return nil, Refuse(CodeSelectInvalid, "selection/"+StepKey(stage, declared.Name),
+			"The pipeline DSL returned unsupported package coverage %q.", policy.Coverage)
 	}
 	// A copy: the plan must not share storage with the Selector's answers.
 	sorted := slices.Clone(candidates)
@@ -287,19 +368,23 @@ func (c *planCompiler) packagesFor(declared StepSpec) []string {
 
 	var out []string
 	for _, pkg := range sorted {
-		switch declared.Only {
-		case OnlyDBGated:
+		switch policy.Filter {
+		case PackageFilterAll:
+		case PackageFilterDBGated:
 			if !c.dbGated(pkg) {
 				continue
 			}
-		case OnlyNotDBGated:
+		case PackageFilterNotDBGated:
 			if c.dbGated(pkg) {
 				continue
 			}
+		default:
+			return nil, Refuse(CodeSelectInvalid, "selection/"+StepKey(stage, declared.Name),
+				"The pipeline DSL returned unsupported package filter %q.", policy.Filter)
 		}
 		out = append(out, pkg)
 	}
-	return out
+	return out, nil
 }
 
 func (c *planCompiler) allPackages() []string {
@@ -335,27 +420,6 @@ func (c *planCompiler) dbGated(importPath string) bool {
 		}
 	}
 	return false
-}
-
-// bucketUntouched reports whether a step gated on bucket may be skipped: an
-// affected run whose change list is known and not empty, with no changed path
-// in the bucket. An empty list is read as unknown, as the affected set reads
-// it (Full), because a change that touched nothing is likelier a change
-// nobody could read.
-func (c *planCompiler) bucketUntouched(bucket string) bool {
-	if c.in.Mode != ModeAffected || !c.in.ChangedKnown || len(c.in.Changed) == 0 {
-		return false
-	}
-	inBucket, err := PathSet(c.spec.Select.Buckets[bucket])
-	if err != nil {
-		return false // Validate compiled it; if it cannot, run rather than skip
-	}
-	for _, changed := range c.in.Changed {
-		if inBucket(changed) {
-			return false
-		}
-	}
-	return true
 }
 
 // servicesFor is the declared services a step names, copied so the plan and

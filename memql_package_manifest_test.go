@@ -245,22 +245,90 @@ func compileEngineOpening(spec *pipelines.Spec, graph *pipelines.Graph, event pi
 		}
 	}
 	in.StageSelection = &stageSelection
-	if mode == pipelines.ModeAffected {
-		in.Changed, in.ChangedKnown = changed, true
+	changedKnown := mode == pipelines.ModeAffected
+	if pipelines.NeedsBucketSelection(spec) {
+		selection := pipelines.BucketSelection{Included: []string{}}
+		pathsValid := pipelines.RepositoryPathsValid(changed)
+		if spec.Select != nil {
+			for _, name := range slices.Sorted(maps.Keys(spec.Select.Buckets)) {
+				matched, err := pipelines.AnyPathMatches(spec.Select.Buckets[name], changed)
+				if err != nil {
+					return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/buckets", "%v", err)
+				}
+				value, err := workflowhost.Run(context.Background(), "pipelineBucketIncluded", map[string]any{
+					"mode": string(mode), "known": changedKnown, "changedCount": len(changed),
+					"pathsValid": pathsValid, "matched": matched,
+				}, workflowhost.Options{})
+				included, ok := value.(bool)
+				if err != nil || !ok {
+					return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/buckets",
+						"pipelineBucketIncluded returned %T or failed: %v", value, err)
+				}
+				if included {
+					selection.Included = append(selection.Included, name)
+				}
+			}
+		}
+		in.BucketSelection = &selection
 	}
 	if pipelines.NeedsSelector(spec) {
-		var selected, full []string
-		if in.ChangedKnown {
-			selected = in.Changed
-		}
+		var full []string
 		if spec.Select != nil {
 			full = spec.Select.Full
 		}
-		selection, err := pipelines.Affected(graph, selected, full)
+		facts, err := pipelines.AnalyzeSelection(graph, changed, changedKnown, full)
 		if err != nil {
 			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "select/full", "%v", err)
 		}
+		changedFacts := make([]any, 0, len(facts.Paths))
+		for _, path := range facts.Paths {
+			changedFacts = append(changedFacts, map[string]any{
+				"path": path.Path, "baseName": path.BaseName, "repositoryPath": path.RepositoryPath,
+				"vendored": path.Vendored, "configuredFull": path.ConfiguredFull,
+			})
+		}
+		value, err := workflowhost.Run(context.Background(), "pipelinePackageSelection", map[string]any{
+			"mode": string(mode), "known": facts.Known, "graphComplete": facts.GraphComplete, "changed": changedFacts,
+		}, workflowhost.Options{})
+		decisionValue, ok := value.(map[string]any)
+		if err != nil || !ok {
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/packages",
+				"pipelinePackageSelection returned %T or failed: %v", value, err)
+		}
+		fullCoverage, ok := decisionValue["full"].(bool)
+		if !ok {
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/packages",
+				"pipelinePackageSelection returned %T for full, want bool", decisionValue["full"])
+		}
+		reason, _ := decisionValue["reason"].(string)
+		selection, err := pipelines.ResolveSelection(graph, facts, pipelines.SelectionDecision{Full: fullCoverage, Reason: reason})
+		if err != nil {
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/packages", "%v", err)
+		}
 		in.Selector = pipelines.GraphSelector(graph, selection)
+		in.PackagePolicies = map[string]pipelines.PackagePolicy{}
+		for _, stage := range spec.Stages {
+			for _, step := range stage.Steps {
+				if step.Packages == "" {
+					continue
+				}
+				value, err := workflowhost.Run(context.Background(), "pipelinePackageStepSelection", map[string]any{
+					"mode": string(mode), "packages": step.Packages, "selectionFull": selection.Full, "only": step.Only,
+				}, workflowhost.Options{})
+				policyValue, ok := value.(map[string]any)
+				if err != nil || !ok {
+					return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/packages",
+						"pipelinePackageStepSelection returned %T or failed: %v", value, err)
+				}
+				coverage, coverageOK := policyValue["coverage"].(string)
+				filter, filterOK := policyValue["filter"].(string)
+				if !coverageOK || !filterOK {
+					return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/packages",
+						"pipelinePackageStepSelection returned malformed coverage/filter values")
+				}
+				in.PackagePolicies[pipelines.StepKey(stage.Name, step.Name)] = pipelines.PackagePolicy{Coverage: coverage, Filter: filter}
+			}
+		}
 	}
 	return pipelines.Compile(spec, in)
 }
