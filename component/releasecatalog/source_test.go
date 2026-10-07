@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 func TestSourceConfigurationRefusesAmbiguityAndUntrustedTransport(t *testing.T) {
@@ -91,4 +92,10 @@ func TestUnavailableConfigurationIsNotAnEmptyPublisherList(t *testing.T) {
 	sources, err := r.Sources(readerContext())
 	require.NoError(t, err)
 	require.Empty(t, sources)
+	r = New(func(context.Context, string) (string, error) { return "", memql.ErrVariableNotFound }, nil)
+	sources, err = r.Sources(readerContext())
+	require.NoError(t, err)
+	require.Empty(t, sources)
+	_, err = r.List(readerContext(), "publisher", "", 1)
+	require.ErrorContains(t, err, "not configured")
 }

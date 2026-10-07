@@ -350,8 +350,8 @@ Source and publisher names, and signing key IDs, are lowercase identifiers of
 at most 128 characters using letters, digits, dots, underscores and hyphens;
 the first character is a letter. Secret names use uppercase letters, digits
 and underscores. Configuration permits at most 16 sources, 32 keys per source
-and 256 KiB total. Unknown or duplicate JSON fields refuse. An explicit empty
-`sources` array configures no publishers. Configuration read failures remain
+and 256 KiB total. Unknown or duplicate JSON fields refuse. An unset variable or
+an explicit empty `sources` array configures no publishers. Other read failures remain
 errors rather than appearing as an empty list.
 
 In **Cluster → Updates**, an identified developer, admin or owner can choose a

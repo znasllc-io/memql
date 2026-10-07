@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
@@ -76,6 +77,9 @@ func (r *Reader) configuration(ctx context.Context) (configuration, error) {
 		return cfg, errors.New("release source configuration is unavailable")
 	}
 	raw, err := r.variable(memql.ContextWithFreshRead(ctx), ConfigurationVariable)
+	if memql.IsVariableNotFound(err) {
+		return configuration{FormatVersion: 1, Sources: []source{}}, nil
+	}
 	if err != nil {
 		return cfg, errors.New("release source configuration could not be read")
 	}
@@ -134,6 +138,8 @@ func (s source) endpoint() string {
 }
 
 func (r *Reader) Sources(ctx context.Context) ([]SourceSummary, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	cfg, err := r.configuration(ctx)
 	if err != nil {
 		return nil, err
