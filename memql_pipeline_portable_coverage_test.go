@@ -172,7 +172,7 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 			t.Fatal(refusal)
 		}
 		wantStage := "secrets-history"
-		wantCommands := []string{"--unshallow --tags", `--head="$MEMQL_SHA"`, "python3 scripts/ci/gitleaks-history.py", "--jobs=4", "--batch-size=1"}
+		wantCommands := []string{"--unshallow --tags", `--head="$MEMQL_SHA"`, "python3 scripts/ci/gitleaks-history.py", "--jobs=4", "--batch-size=1", "--timeout=20700"}
 		forbidden := "gitleaks dir ."
 		if event == pipelines.EventPullRequest {
 			wantStage = "secrets-current"
@@ -198,6 +198,9 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 			}
 			if event != pipelines.EventPullRequest && (step.CPUMilli != 4000 || step.MemoryMiB != 6144) {
 				t.Fatal("history scan allocation differs from its bounded parallel rehearsal")
+			}
+			if event != pipelines.EventPullRequest && step.TimeoutSeconds != 6*60*60 {
+				t.Fatal("history scan must declare the measured long-workload budget explicitly")
 			}
 		}
 		if count != 1 {

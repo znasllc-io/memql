@@ -893,7 +893,7 @@ acknowledge a batch or produce a clean verdict.
 A representative 81.39 MB added fragment took 80.9 seconds with pinned Gitleaks
 8.30.1; regex matching used 88% of its sampled CPU time. Generated minified
 architecture files account for much of the repeated input. They remain included.
-The configured 90-minute deadline is not a qualified full-history budget. A
+The former 90-minute deadline did not cover the measured full-history run. A
 representative benchmark is performance evidence only, never a complete scan.
 The engine manifest declares checkout scanning in `secrets-current` for pull
 requests and history scanning in `secrets-history` for push, merge-group and
@@ -908,8 +908,8 @@ instead of silently ignoring it. The `pipelineStepV8` forward refuses older
 replicas that cannot enforce explicit CPU, and a real two-Workbench adoption
 test checks that the reservation survives replacement. Image builds preserve
 their one-CPU request/two-CPU limit only when the field is omitted; an explicit
-reservation uses the same operator bound. Neither these settings nor partial coverage
-establish a qualified full-history deadline.
+reservation uses the same operator bound. Partial coverage never establishes
+a qualified full-history deadline.
 Four distinct roughly 81 MB commits scanned in 107.722 seconds with four
 independent processes inside a 6 GiB/four-CPU container, while the earlier
 serial scan also occupied that same allocation. Sampled aggregate memory was
@@ -924,11 +924,35 @@ bounded concurrency and prompt cancellation after a failed or invalid report.
 An additional 600-batch test retains all 1,200 report/log members while emitting
 fewer than ten artifact files; archive failures and prior evidence surviving a
 later failed batch are also covered.
-The first complete-history
-rehearsal inventories 10,137 commits at main
-`82c37723251d016bca6a8589f50caed67e1dfbca`; its final measured result is still
-pending. Legacy workflow retirement remains gated on that evidence and the
-installed pipeline rehearsal.
+The first complete-history rehearsal finished on October 7: all 10,137 commits
+reachable from main `82c37723251d016bca6a8589f50caed67e1dfbca` and its captured
+tags were covered, with zero findings. The four-CPU/6-GiB container exited zero
+without OOM after 13,984.020 seconds (3h53m04s). Independent verification checked
+the unique inventory, contiguous batch coverage, all 10,137 zero exits, all
+10,137 report hashes, all empty reports, and all 20,274 report/log archive
+members. Inventory SHA-256:
+`11745e42e9daa252d4a26b4397f35a1528b13072a1ab7122ad542faf3e6e8e3e`;
+configuration SHA-256:
+`b123de21bb42f1c9ae94811404a2c52aade4989f0a84bf59532335f03bb9b370`.
+
+The chosen history workload now declares a six-hour step and a 20,700-second
+helper deadline, with setup/finalization headroom. The generic step maximum is
+six hours; its default stays 20 minutes. The run default stays two hours.
+An optional `pipelines-long-runs` operator component sets eight hours on both
+agent and Workbench, leaving queue and earlier-stage time separately bounded.
+No installed overlay is changed by adding this profile. It does not enlarge a
+node, reserve cloud capacity or prove that the declared step can be scheduled.
+The manifest retains checkout scanning for pull requests and full reachable
+history for push, merge-group and release; this change does not reduce scan
+cadence, exclude generated blobs, reuse results or relax finding semantics.
+Scheduled/manual scan parity remains part of the wider delivery work.
+
+Cancellation still terminates owned scanner process groups; report/archive
+finalization happens before coverage is acknowledged. Step/run expiration and
+incomplete coverage remain failures, with existing artifact collection and Job
+cleanup bounds. The longer allowance is not an optimization claim. Legacy
+workflow retirement remains gated on the installed pipeline rehearsal and
+production qualification, neither of which this container measurement proves.
 
 ### Kubernetes artifact export qualification (October 6)
 

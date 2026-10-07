@@ -266,7 +266,9 @@ pipeline:
       steps:
         - name: gitleaks
           placement: cluster
-          timeout: 90m
+          # Full reachable history measured 3h53m on four CPUs. This explicit
+          # budget needs an operator's longer run ceiling; defaults stay 2h.
+          timeout: 6h
           cpuMilli: 4000
           memoryMiB: 6144
           artifacts: [.memql-security/gitleaks]
@@ -282,7 +284,7 @@ pipeline:
               git fetch --tags "https://github.com/${MEMQL_REPOSITORY}.git" "$MEMQL_SHA"
             fi
             test "$(git rev-parse HEAD)" = "$MEMQL_SHA"
-            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=4 --batch-size=1
+            python3 scripts/ci/gitleaks-history.py --head="$MEMQL_SHA" --gitleaks="$(command -v gitleaks)" --output-dir=.memql-security/gitleaks --jobs=4 --batch-size=1 --timeout=20700
     - name: tests
       steps:
         # ci.yml go-tests: every package outside the db-gated trees that the

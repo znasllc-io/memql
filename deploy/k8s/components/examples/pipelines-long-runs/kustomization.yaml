@@ -1,0 +1,7 @@
+# Renderable example only; installed instance overlays remain unchanged.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../overlays/local
+components:
+  - ../../pipelines-long-runs
