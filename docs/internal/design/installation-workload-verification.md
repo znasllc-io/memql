@@ -1,0 +1,123 @@
+---
+title: Installation workload verification
+audience: internal
+status: historical
+area: design
+sinceVersion: 0.25.0
+owner: znas
+---
+
+# Installation workload verification
+
+> Historical: implementation record for the private 0.25.0 workload verifier;
+> retained for its boundary and evidence contract.
+
+Implementation record for the private workload observation host. The broader
+[installation revision workflow](../planning/installation-revision-effects.md)
+is still under local qualification; this host cannot complete an installation
+or release its journal slot.
+
+## Boundary and composition
+
+The installed
+[workload recipe](../../../dsl/installation/workloads/automations.memql)
+lists the native obligations, checks each one, and seals their observations.
+Its ordering and ordinary automation control flow live in DSL. An alternate
+installed recipe can filter, branch, or use a joined parallel loop, but the
+native seal still requires every rendered workload. Skipping a failed check
+with `on error continue` cannot manufacture successful evidence.
+
+The [native host](../../../integrations/installation/workloads_workflow.go)
+snapshots a trusted installed definition and binds its fingerprint together
+with the immutable engine revision. Its three call-local ports have no public
+registration. Each requires the original currently admitted internal operator;
+the check accepts only a scoped obligation key. Resource addresses, registry
+credentials, and opaque observations never become DSL inputs or return values.
+The recipe's ordinary return value is not completion evidence.
+
+The caller supplies a native Argo render and fresh native artifact evidence.
+The latter retains the OCI verifier's root-to-platform-manifest relationship,
+including when the published digest names a multi-platform index. Serialized
+receipts and stored digests cannot reconstruct that relationship. Discovery
+derives obligations for every image-bearing resource in the admitted render.
+The native bound is 256 resources, a five-minute scope capped by artifact
+expiry, and one minute per observation. An observation's lifetime starts before
+its first external read. There is no native polling or retry loop.
+
+## What the observation proves
+
+The Kubernetes codec reads the exact live controller, requires its declared
+configuration and executable fields, and compares its complete image inventory
+with the render. It checks observed generations and converged replica counts
+for the supported apps controllers. StatefulSet current and update revisions
+must agree. DaemonSets must have no unavailable or misscheduled replicas.
+Jobs must be complete, have no active execution, and have the required number
+of successful Pods; failed historical attempts cannot replace those successes.
+Replica and Job completion targets come from the admitted render, including
+the omitted default of one. A live scale-to-zero or changed completion target
+cannot redefine that intention. An explicitly rendered zero-replica target
+remains valid. CloudNativePG requires an explicit rendered instance count.
+
+The codec lists the complete bounded namespace collections, without a label
+filter. Pagination, duplicate identities, missing identities and malformed
+inventories refuse. Exact controller owner references identify Pods and a
+Deployment's ReplicaSets. Objects that match the controller selector but have
+lost or changed ownership also refuse. Owned terminating Pods and additional
+live replicas prevent convergence. Unrelated namespace workloads do not become
+part of the installation's authority.
+
+Each required Pod must have the correct declared images, the exact expected
+container inventory, and matching runtime image IDs from the verified root or
+selected platform manifest. Containerd can report the index root. The verifier
+therefore reads the Pod's exact assigned Node, checks native `nodeInfo` OS and
+architecture against the verified platform and requires Node readiness. The
+OCI verifier has already refused ambiguous platform selection. Arbitrary
+config IDs and unknown digests cannot substitute for that relationship. Running containers must be ready; ordinary init containers must have
+exited successfully; restartable init containers must be running and ready.
+Commands and environment must agree with the controller. Before producing an
+observation the codec rereads every resource and collection, checking Kubernetes
+identities and resource versions for concurrent replacement or mutation.
+
+The evidence seal refuses missing, duplicated, substituted, future-dated or
+expired observations. Its expiry is the earliest observation deadline. A fresh
+receiver rebuilds its scope and repeats the actual reads; an earlier receiver's
+observation map is not durable authority.
+
+## Deliberate limits
+
+This is a declared-field comparison plus concrete controller and Pod checks,
+not general equivalence for every field generated by an admission webhook.
+Image volumes refuse because the supported runtime codec cannot attest their
+resolved mounted digest. New workload kinds require a qualified codec.
+
+A CronJob observation proves a quiescent scheduled definition, with no active
+or unfinished owned Job. It does not prove that a future scheduled execution
+will succeed. That invocation needs its own execution receipt.
+
+For CloudNativePG the codec checks ready instance count, the agreed current and
+target primary, ownership, and the actual `postgres` image on every instance.
+It also checks successful completion of the expected `bootstrap-controller`
+init container. That bootstrap image belongs to separately installed operator
+infrastructure and is not claimed as a signed product-release image. Additional
+database container profiles refuse. This observation does not attest all
+database settings or replace database compatibility and preservation checks.
+
+The completion host must separately bind this workflow and its fresh evidence
+to the exact journal plan, native render and owned Argo intent. It must also
+require storage and credential preservation, migration and mixed-version
+compatibility, and authenticated serving/session/site/stream continuity.
+Neither Kubernetes readiness nor Argo `Healthy`/`Synced` is installation
+completion. The ports perform no Kubernetes write, journal transition, cleanup,
+or retention release.
+
+## Validation
+
+Protocol tests use signed publication envelopes, real OCI manifest/config/layer
+reads and the native Argo render codec. They cover all eight admitted workload
+kinds, multi-platform index/manifest runtime IDs bound to an assigned Node, changed ownership and configuration,
+missing/extra Pods and containers, concurrent resource changes, stale evidence,
+and recovery in a fresh host. Host tests run both the installed recipe and an
+alternate composition, and verify that caller inputs, unbound operations or
+children, omitted checks and ignored failures cannot produce native evidence.
+These fixtures do not substitute for the multi-node installed update and
+rollback rehearsal.
