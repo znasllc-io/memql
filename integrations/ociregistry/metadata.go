@@ -29,19 +29,26 @@ func (m metadataFiles) json(name string) (object, error) {
 	if err != nil {
 		return nil, err
 	}
+	return decodeMetadata(b)
+}
+
+func decodeMetadata(b []byte) (object, error) {
+	if int64(len(b)) > maxJSON {
+		return nil, errors.New("metadata exceeds byte limit")
+	}
 	if !utf8.Valid(b) {
 		return nil, errors.New("metadata must be UTF-8")
 	}
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.UseNumber()
-	if err = uniqueJSON(d, 0); err != nil {
+	if err := uniqueJSON(d, 0); err != nil {
 		return nil, err
 	}
-	if _, err = d.Token(); err != io.EOF {
+	if _, err := d.Token(); err != io.EOF {
 		return nil, errors.New("trailing JSON data")
 	}
 	var o object
-	if err = json.Unmarshal(b, &o); err != nil || o == nil {
+	if err := json.Unmarshal(b, &o); err != nil || o == nil {
 		return nil, errors.New("metadata must be a JSON object")
 	}
 	return o, nil
@@ -108,6 +115,9 @@ func validPlatform(o object, platform string) bool {
 		return false
 	}
 	if o.has("os.features") && string(o["os.features"]) != "[]" && string(o["os.features"]) != "null" {
+		return false
+	}
+	if o.has("features") && string(o["features"]) != "[]" && string(o["features"]) != "null" {
 		return false
 	}
 	return !o.has("os.version") || string(o["os.version"]) == `""` || string(o["os.version"]) == "null"

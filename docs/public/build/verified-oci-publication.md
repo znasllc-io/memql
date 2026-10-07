@@ -90,6 +90,43 @@ candidate and target. Do not change the version, delete partially uploaded
 content or mark publication successful. Registry error bodies and signed URLs
 are not returned as error text because they may contain credentials.
 
+## Read-only image availability
+
+`NewAvailabilityVerifier` uses the same explicit `Target` configuration to
+construct a separate read-only capability. `Check` accepts an immutable image
+digest and baseline Linux platform, then freshly reads and hashes its manifest,
+configuration and every referenced compressed layer. It also supports OCI
+indexes and Docker schema-2 manifest lists, including nested indexes. The
+requested root and exactly one matching platform manifest are both recorded in
+the opaque result. An index's platform declaration is checked again against the
+selected image configuration. No original archive or publisher process is needed.
+
+The verifier admits only GET/HEAD requests and pull-only token scopes. It cannot
+upload, tag, delete or repair content. Blob redirects have the same explicit,
+credential-free boundary described above. Missing, truncated, corrupt,
+ambiguous or unsupported content returns no evidence. Repeating a check uses
+fresh registry reads, including after earlier success.
+
+Native limits are 30 minutes, 8 GiB of unique downloaded content (reducible by
+the caller), 4 MiB per metadata object, 16 MiB of metadata in total, 64 visited
+manifests, four nested index levels, 128 entries per index and 1,024 image layers.
+The layer profile accepts plain OCI tar, gzip, zstd and Docker gzip; external or
+inline descriptors, specialized platform requirements, artifacts and ambiguous
+platformless image entries are refused. Compressed layers are streamed and
+hashed without unpacking or local archive storage. This checks availability and
+descriptor integrity, not compressed layer DiffIDs, provenance, runtime health
+or future retention.
+
+The admitted native host must bind the exact registry configuration, observation
+time and resulting receipt to its durable operation. DSL chooses which proposed
+and rollback images to check and when to refresh evidence. An availability
+result is neither approval nor authority to install an image.
+
+The index/platform relationship follows the [OCI image-index
+specification](https://github.com/opencontainers/image-spec/blob/v1.1.0/image-index.md)
+and [image-manifest
+specification](https://github.com/opencontainers/image-spec/blob/v1.1.0/manifest.md).
+
 ## Local verification
 
 The package tests include a disposable protocol registry, an independently
@@ -99,6 +136,8 @@ valid archives with the builder's independent Python OCI verifier. The optional
 `TestDistributionRegistry` also runs against a separately started Distribution
 registry using `MEMQL_OCI_TEST_REGISTRY=http://127.0.0.1:<port>`; it never loads
 cloud credentials. Stop the disposable registry after testing.
+`TestAvailabilityDistributionRegistry` rechecks that same disposable registry
+after closing the source archive, through independently constructed readers.
 
 Protocol references: [OCI image layout](https://github.com/opencontainers/image-spec/blob/main/image-layout.md),
 [OCI Distribution specification](https://github.com/opencontainers/distribution-spec/blob/main/spec.md),

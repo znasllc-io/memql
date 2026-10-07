@@ -146,13 +146,7 @@ func (p *Publisher) Publish(ctx context.Context, v *VerifiedImage) (Receipt, err
 	if v.dir == "" || v.image == nil {
 		return Receipt{}, errors.New("verified image is closed or uninitialized")
 	}
-	httpTransport := &http.Transport{
-		Proxy: nil, DialContext: (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: p.target.RootCAs},
-		TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: 30 * time.Second,
-		MaxResponseHeaderBytes: 64 << 10, MaxIdleConns: 8, MaxIdleConnsPerHost: 4, IdleConnTimeout: 30 * time.Second,
-		DisableCompression: true,
-	}
+	httpTransport := p.httpTransport()
 	defer httpTransport.CloseIdleConnections()
 	allowed := map[string]int64{}
 	for _, b := range v.blobs {
@@ -240,12 +234,29 @@ type scopedTransport struct {
 	inner     http.RoundTripper
 	image     string
 	blobs     map[string]int64
+	// Availability admits only reads of descriptors discovered beneath the
+	// requested immutable root. A publisher leaves these fields unset.
+	readOnly  bool
+	manifests map[string]int64
 	wrote     atomic.Bool
 	requests  atomic.Int64
 }
 
+func (p *Publisher) httpTransport() *http.Transport {
+	return &http.Transport{
+		Proxy: nil, DialContext: (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: p.target.RootCAs},
+		TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: 30 * time.Second,
+		MaxResponseHeaderBytes: 64 << 10, MaxIdleConns: 8, MaxIdleConnsPerHost: 4, IdleConnTimeout: 30 * time.Second,
+		DisableCompression: true,
+	}
+}
+
 func (s *scopedTransport) permitted(r *http.Request) (int64, error) {
 	p, u := s.publisher, r.URL
+	if s.readOnly && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return 0, errors.New("availability verification permits only reads")
+	}
 	if u.User != nil || u.Fragment != "" || u.RawPath != "" || u.Opaque != "" || path.Clean(u.Path) != strings.TrimSuffix(u.Path, "/") || len(u.RawQuery) > 16384 || (r.Host != "" && r.Host != u.Host) {
 		return 0, errors.New("noncanonical registry request")
 	}
@@ -258,6 +269,9 @@ func (s *scopedTransport) permitted(r *http.Request) (int64, error) {
 			return 0, errors.New("token exchange differs from configured scope")
 		}
 		scope := q.Get("scope")
+		if s.readOnly && scope != "repository:"+p.target.Repository+":pull" {
+			return 0, errors.New("availability token must have pull-only scope")
+		}
 		if scope != "repository:"+p.target.Repository+":pull" && scope != "repository:"+p.target.Repository+":pull,push" && scope != "repository:"+p.target.Repository+":push,pull" {
 			return 0, errors.New("token scope differs from configured repository")
 		}
@@ -271,6 +285,11 @@ func (s *scopedTransport) permitted(r *http.Request) (int64, error) {
 		return 64 << 10, nil
 	}
 	prefix := "/v2/" + p.target.Repository + "/"
+	if s.readOnly && read && len(q) == 0 {
+		if limit, ok := s.manifests[strings.TrimPrefix(u.Path, prefix+"manifests/")]; ok && strings.HasPrefix(u.Path, prefix+"manifests/") {
+			return limit, nil
+		}
+	}
 	if u.Path == prefix+"manifests/"+s.image && len(q) == 0 && (read || r.Method == http.MethodPut) {
 		return maxJSON, nil
 	}
