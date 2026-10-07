@@ -1,0 +1,5 @@
+/// Reactive and recurring responsibilities open work; standing ones add context.
+logic plannerTriggerOpensGoal {
+ args { trigger string }
+ return args.trigger == "reactive" || args.trigger == "recurring"
+}

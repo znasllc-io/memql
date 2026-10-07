@@ -97,6 +97,21 @@ func ClusterInfraRefreshBuild(args ClusterInfraRefreshArgs) string {
 	return b.String()
 }
 
+// ComposeNeedsSourceRows -- Table formats without authored rows reuse source rows; typed output owns its data.
+type ComposeNeedsSourceRowsArgs struct {
+}
+
+// ComposeNeedsSourceRows calls the engine logic composeNeedsSourceRows.
+func (qc *QueryClient) ComposeNeedsSourceRows(ctx context.Context, args ComposeNeedsSourceRowsArgs) (*Result, error) {
+	call := ComposeNeedsSourceRowsBuild(args)
+	return qc.executeNamed(ctx, "composeNeedsSourceRows", call)
+}
+
+func ComposeNeedsSourceRowsBuild(args ComposeNeedsSourceRowsArgs) string {
+	_ = args
+	return "logic composeNeedsSourceRows()"
+}
+
 // ConsolidateMemory -- Entry point for the daily memory-consolidation automation (#586). Per #586 the precise per-owner loop -- similarity clustering of the since-watermark episode batch, the blocking LLM distill per cluster, similarTo dedup, the confidence bump / decay arithmetic, and the max(createdAt) watermark advance -- runs in the Go harness consolidation handler (the same DSL-entry / Go-loop split the knowledge refresh-cron made), because the MemQL body language has no clustering primitive. This body is the scheduled trigger surface; the file header documents the full Go-handler contract it drives. Returns a sentinel until the handler is wired (mirrors the Go in-process poller pattern in integrations/planner/refresh_cron.go).
 type ConsolidateMemoryArgs struct {
 	Event map[string]any
@@ -300,6 +315,43 @@ func InstallDependencyVerdictBuild(args InstallDependencyVerdictArgs) string {
 	return b.String()
 }
 
+// KnowledgeHasSeedArticles -- An absent article list selects the placeholder; an authored list selects fetches.
+type KnowledgeHasSeedArticlesArgs struct {
+	Articles []any
+}
+
+// KnowledgeHasSeedArticles calls the engine logic knowledgeHasSeedArticles.
+func (qc *QueryClient) KnowledgeHasSeedArticles(ctx context.Context, args KnowledgeHasSeedArticlesArgs) (*Result, error) {
+	call := KnowledgeHasSeedArticlesBuild(args)
+	return qc.executeNamed(ctx, "knowledgeHasSeedArticles", call)
+}
+
+func KnowledgeHasSeedArticlesBuild(args KnowledgeHasSeedArticlesArgs) string {
+	var b strings.Builder
+	b.WriteString("logic knowledgeHasSeedArticles(")
+	if args.Articles != nil {
+		b.WriteString("articles: ")
+		b.WriteString(renderMemQLValue(args.Articles))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// KnowledgeRefreshEligible -- Event-driven refresh uses the stale-signal threshold; the sweep uses cadence.
+type KnowledgeRefreshEligibleArgs struct {
+}
+
+// KnowledgeRefreshEligible calls the engine logic knowledgeRefreshEligible.
+func (qc *QueryClient) KnowledgeRefreshEligible(ctx context.Context, args KnowledgeRefreshEligibleArgs) (*Result, error) {
+	call := KnowledgeRefreshEligibleBuild(args)
+	return qc.executeNamed(ctx, "knowledgeRefreshEligible", call)
+}
+
+func KnowledgeRefreshEligibleBuild(args KnowledgeRefreshEligibleArgs) string {
+	_ = args
+	return "logic knowledgeRefreshEligible()"
+}
+
 // MagicLinkExpirySweep -- Hourly sweep that stamps consumedAt + consumedFromIP='system:expiry' on v1:identity:magiclink rows whose expiresAt is in the past, so the row reads as 'spent' in audit queries and any subsequent click is idempotently rejected by the consume handler's own expiresAt guard.
 type MagicLinkExpirySweepArgs struct {
 	Event map[string]any
@@ -343,6 +395,28 @@ func NextDeploymentVersionBuild(args NextDeploymentVersionArgs) string {
 		}
 		b.WriteString("bump: ")
 		b.WriteString(quoteMemQL(args.Bump))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// PlannerTriggerOpensGoal -- Reactive and recurring responsibilities open work; standing ones add context.
+type PlannerTriggerOpensGoalArgs struct {
+	Trigger string
+}
+
+// PlannerTriggerOpensGoal calls the engine logic plannerTriggerOpensGoal.
+func (qc *QueryClient) PlannerTriggerOpensGoal(ctx context.Context, args PlannerTriggerOpensGoalArgs) (*Result, error) {
+	call := PlannerTriggerOpensGoalBuild(args)
+	return qc.executeNamed(ctx, "plannerTriggerOpensGoal", call)
+}
+
+func PlannerTriggerOpensGoalBuild(args PlannerTriggerOpensGoalArgs) string {
+	var b strings.Builder
+	b.WriteString("logic plannerTriggerOpensGoal(")
+	if args.Trigger != "" {
+		b.WriteString("trigger: ")
+		b.WriteString(quoteMemQL(args.Trigger))
 	}
 	b.WriteString(")")
 	return b.String()

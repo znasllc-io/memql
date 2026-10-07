@@ -112,6 +112,16 @@ func rejectUnknownArgs(fn *Function, args map[string]any) error {
 	return nil
 }
 
+// SnapshotArgumentValidator owns a copy of the loaded argument contract.
+// Restricted interpreters use the full validator without invoking an engine
+// function or retaining a schema that the loader may later replace or mutate.
+func (fn *Function) SnapshotArgumentValidator() func(map[string]any) error {
+	owned := &Function{Name: fn.Name, ArgsSchema: fn.ArgsSchema.clone()}
+	return func(args map[string]any) error {
+		return (&functionValidator{}).validateFunctionArgs(owned, args)
+	}
+}
+
 // validateFunctionArgs validates the provided arguments against the function's assertions.
 func (v *functionValidator) validateFunctionArgs(fn *Function, args map[string]any) error {
 	if fn == nil || fn.ArgsSchema == nil || len(fn.ArgsSchema.Fields) == 0 {

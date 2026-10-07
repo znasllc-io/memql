@@ -223,13 +223,14 @@ pipeline:
         - name: secret-scan
           placement: cluster
           timeout: 90m
+          memoryMiB: 8192
           artifacts: [.memql-security/gitleaks]
           run: |
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             mkdir -p .memql-security/gitleaks
             go install github.com/zricethezav/gitleaks/v8@v8.30.1
-            export GOMAXPROCS=2 GOMEMLIMIT=768MiB
+            export GOMAXPROCS=2 GOMEMLIMIT=4GiB
             if [ "$MEMQL_EVENT" = pull_request ]; then
               gitleaks dir . --no-banner --redact=100 --report-format=json --report-path=.memql-security/gitleaks/findings.json
             else

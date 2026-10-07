@@ -24,7 +24,8 @@ automation composeMaterializeWorkflow {
     builtin composeRequireDraft()
   }
   draft := builtin composeWorkflowFacts()
-  if draft.outputKind == "" && (draft.format == "csv" || draft.format == "json") && !draft.hasRows {
+  needsRows := logic composeNeedsSourceRows(outputKind: draft.outputKind, format: draft.format, hasRows: draft.hasRows)
+  if needsRows {
     builtin composeUseSourceRows()
   }
   builtin composeRenderOutput()

@@ -122,6 +122,7 @@ import (
 // silence a failure without establishing that is how a feature becomes inert
 // with a test vouching for it.
 var dslReachedCallers = map[string]string{
+	"integrations/planner/refresh_cron.go knowledgeDomainsDueRefresh": "the installed refreshKnowledgeDomains scheduler supplies internal origin; both plannerRefreshKnowledge and RefreshCron.run refuse client origin before reaching the query (refresh_origin_test.go). The callback preserves that origin, never stamps a request as internal",
 	"integrations/router/evidence_fold.go createWorkApproval": "the nightly evidence fold (epic memql#5146, D5). " +
 		"It is the Go body of the routingEvidenceFold builtin, whose only caller is the tree-loaded " +
 		"automation of that name -- so originForSource has already stamped internal origin, and stamping " +

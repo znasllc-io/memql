@@ -3,6 +3,8 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use common.traits.{ isActiveRecord }
+
 use common.shapes.{ documentChunkDomainLite, documentChunkFull }
 
 /// Returns the parent domainId for every chunk in the active partition. Frontend groups + counts to
@@ -75,10 +77,14 @@ query knowledgeDomain knowledgeDomainsAll {
   sort   "name", "asc"
 }
 
-/// Domains that explicitly opted into scheduled refresh. Due-date policy is evaluated in the refresh workflow.
+/// Domains that explicitly opted into scheduled refresh, read by the trusted planner sweep.
+/// actor.userId scoping cannot cover this cluster-wide enumeration: it must find
+/// opted-in domains belonging to every owner before opening each owner-bound goal.
+/// Client access remains through the caller-scoped knowledge reads. Due-date
+/// policy is evaluated in the refresh workflow.
 @serverOnly
 @unbounded("explicitly enabled knowledge refresh candidates")
-query knowledgeDomain queryDueRefreshDomains {
- filter row => row.active != false && row.refreshCadenceDays > 0
+query knowledgeDomain knowledgeDomainsDueRefresh {
+ filter row => (isActiveRecord(row) || row.active == nil) && row.refreshCadenceDays > 0
  shape knowledgeDomainFull
 }

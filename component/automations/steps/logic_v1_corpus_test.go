@@ -135,6 +135,11 @@ func (p *logicProbe) answer(kind, name string, args map[string]any) any {
 	case "logic":
 		return map[string]any{"logic": name}
 	default: // builtin
+		if name == "composeWorkflowFacts" {
+			// The native callback always supplies these typed facts. A generic
+			// marker object cannot stand in for arguments to a decision logic.
+			return map[string]any{"outputKind": "", "format": "html", "hasRows": false}
+		}
 		return map[string]any{"builtin": name, "args": args}
 	}
 }

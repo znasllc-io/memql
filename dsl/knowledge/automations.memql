@@ -127,7 +127,8 @@ automation knowledgeSeedDomainWorkflow {
   }
   if args.tier == "C" {
     builtin knowledgeResolveSeedEmbedder()
-    if (args.articles ?? []).count() > 0 {
+    hasArticles := logic knowledgeHasSeedArticles(articles: args.articles)
+    if hasArticles {
       for article in args.articles {
         fetched := builtin knowledgeFetchSeedArticle(article: article)
         chunks := builtin knowledgeSplitSeedText(text: fetched.body)
@@ -249,7 +250,8 @@ automation knowledgeRefreshDue {
 automation knowledgeRefreshCandidateWorkflow {
  args { cadence number ageDays number! validSeedTime bool! staleSignalCount number staleEvent bool! }
  due := automation knowledgeRefreshDue(cadence: args.cadence, ageDays: args.ageDays, validSeedTime: args.validSeedTime, staleSignalCount: args.staleSignalCount)
- if (args.staleEvent && (args.staleSignalCount ?? 0) >= 3) || (!args.staleEvent && due) {
+ eligible := logic knowledgeRefreshEligible(staleEvent: args.staleEvent, staleSignalCount: args.staleSignalCount, due: due)
+ if eligible {
   claimed := builtin knowledgeClaimRefresh(hours: 6)
   if claimed { builtin knowledgeOpenRefresh() }
  }

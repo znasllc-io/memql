@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sort"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ type Options struct {
 	// AmbientEngine supplies config/partition bindings only, never a step executor.
 	AmbientEngine *memql.MemQLEngine
 	Load          Loader
+	LoadLogic     func(string) (*memql.Function, error)
 	Operations    map[string]Operation
 }
 
@@ -82,10 +84,14 @@ func Run(ctx context.Context, name string, args map[string]any, opts Options) (a
 	if opts.Load == nil {
 		opts.Load = Load
 	}
+	if opts.LoadLogic == nil {
+		opts.LoadLogic = loadLogic
+	}
 	if opts.Logger == nil {
 		opts.Logger = slog.New(slog.DiscardHandler)
 	}
-	h := &host{opts: opts, definitions: map[string]*automations.Automation{}}
+	opts.Operations = maps.Clone(opts.Operations)
+	h := &host{opts: opts, definitions: map[string]*automations.Automation{}, logics: map[string]*preparedLogic{}}
 	if err := h.prepare(name, map[string]bool{}); err != nil {
 		return nil, err
 	}
@@ -103,6 +109,7 @@ func Run(ctx context.Context, name string, args map[string]any, opts Options) (a
 type host struct {
 	opts        Options
 	definitions map[string]*automations.Automation
+	logics      map[string]*preparedLogic
 	registry    *steps.Registry
 	mu          sync.Mutex
 }
@@ -118,8 +125,12 @@ func (h *host) prepare(name string, visiting map[string]bool) error {
 	if err != nil {
 		return err
 	}
-	if a == nil || !a.Template || !a.IsEnabled() || a.BeforeWrite != nil || a.IsScheduled() || a.IsEventTriggered() || a.JournalRequired || a.Mode != nil || a.Loop != nil {
+	if a == nil || a.Name != name || !a.Template || !a.IsEnabled() || a.BeforeWrite != nil || a.IsScheduled() || a.IsEventTriggered() || a.JournalRequired || a.Mode != nil || a.Loop != nil {
 		return fmt.Errorf("workflow %q is not an enabled callable template", name)
+	}
+	a, err = automations.NewLoader(automations.LoaderOptions{Logger: h.opts.Logger}).Snapshot(a)
+	if err != nil {
+		return err
 	}
 	visiting[name] = true
 	var walk func([]*automations.Step) error
@@ -128,6 +139,12 @@ func (h *host) prepare(name string, visiting map[string]bool) error {
 			switch s.Type {
 			case automations.StepTypeExpression, automations.StepTypeReturn:
 			case automations.StepTypeFunction:
+				if s.Function != nil && s.Function.Kind == "logic" {
+					if err := h.prepareLogic(s.Function.Name, visiting); err != nil {
+						return err
+					}
+					continue
+				}
 				if s.Function == nil || h.opts.Operations[s.Function.Name] == nil {
 					return fmt.Errorf("workflow %q step %q has no scoped operation", name, s.ID)
 				}
@@ -190,11 +207,20 @@ func (h *host) Execute(ctx context.Context, step *automations.Step, sc *automati
 	args, err := sc.Evaluator.ResolveV1Map(ctx, step.Function.Args)
 	var value any
 	if err == nil {
-		h.mu.Lock()
-		if err = ctx.Err(); err == nil {
-			value, err = h.opts.Operations[step.Function.Name](ctx, args)
+		if step.Function.Kind == "logic" {
+			fn := h.logics[step.Function.Name]
+			if fn == nil {
+				err = fmt.Errorf("logic %q was not preflighted", step.Function.Name)
+			} else if err = fn.validate(args); err == nil {
+				value, err = automations.NewLogicRunner(h.opts.AmbientEngine, h.registry, h.opts.Logger).WithoutJournal().RunPreparedLogicBody(ctx, fn.body, args)
+			}
+		} else {
+			h.mu.Lock()
+			if err = ctx.Err(); err == nil {
+				value, err = h.opts.Operations[step.Function.Name](ctx, args)
+			}
+			h.mu.Unlock()
 		}
-		h.mu.Unlock()
 	}
 	r := &automations.StepResult{StepId: step.ID, StartedAt: started, CompletedAt: time.Now(), Status: "success", Result: value}
 	if err != nil {
