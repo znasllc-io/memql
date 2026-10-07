@@ -123,6 +123,9 @@ type Integration struct {
 	armedRetries sync.Map
 	// schedule replaces time.AfterFunc for a retry's timer. Tests only.
 	schedule func(time.Duration, func())
+	// compileTicker replaces only the heartbeat's clock source in tests;
+	// admission, the real database pulse and cancellation still run unchanged.
+	compileTicker func(time.Duration) (<-chan time.Time, func())
 
 	now func() time.Time
 
