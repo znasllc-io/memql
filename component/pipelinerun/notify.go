@@ -792,7 +792,7 @@ func deliveredReceipt(target notifyTarget, ids []string, statuses []OutboundStat
 			sentAt = s.SentAt
 		}
 	}
-	result := map[string]any{"channel": target.name, "kind": target.channel.Kind, "requestIds": slices.Clone(ids)}
+	result := map[string]any{"status": string(pipelines.OutcomeSucceeded), "notificationStatus": "delivered", "channel": target.name, "kind": target.channel.Kind, "requestIds": slices.Clone(ids)}
 	if !sentAt.IsZero() {
 		result["sentAt"] = sentAt.UTC().Format(time.RFC3339)
 	}

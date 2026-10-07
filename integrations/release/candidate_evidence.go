@@ -21,6 +21,10 @@ type candidateEvidenceReader struct {
 // the actor. The fresh-read flag avoids another replica's result cache. Every
 // identity and terminal verdict is checked again after the engine's row gate.
 func (r candidateEvidenceReader) read(ctx context.Context, runID, stepKey string) (pl.ReleaseWorkReceipt, error) {
+	return r.readReceipt(ctx, runID, stepKey, false)
+}
+
+func (r candidateEvidenceReader) readReceipt(ctx context.Context, runID, stepKey string, allStepKinds bool) (pl.ReleaseWorkReceipt, error) {
 	owner, err := candidateOwner(ctx)
 	if err != nil {
 		return pl.ReleaseWorkReceipt{}, err
@@ -32,27 +36,12 @@ func (r candidateEvidenceReader) read(ctx context.Context, runID, stepKey string
 		return pl.ReleaseWorkReceipt{}, errors.New("release evidence requires a bounded run and step identity")
 	}
 	one := func(name string, args map[string]any) (map[string]any, error) {
-		res, err := r.engine.Execute(memql.ContextWithFreshRead(ctx), "query "+renderCall(name, args))
+		rows, err := r.rows(ctx, name, args, 1)
 		if err != nil {
 			return nil, err
 		}
-		if res == nil {
-			return nil, errors.New("release evidence returned no journal row")
-		}
-		// These queries have explicit @row shapes. A changed envelope refuses
-		// rather than treating arbitrary nested data as a successful receipt.
-		b, err := json.Marshal(res.OutputPayload())
-		if err != nil || len(b) > 1<<20 {
-			return nil, errors.New("release evidence exceeds its result bound")
-		}
-		var rows []map[string]any
-		if err := json.Unmarshal(b, &rows); err != nil || len(rows) != 1 {
+		if len(rows) != 1 {
 			return nil, errors.New("release evidence requires exactly one authorized journal row")
-		}
-		for _, key := range []string{"id", "ownerUserId", "runId"} {
-			if value, ok := rows[0][key].(string); ok {
-				rows[0][key] = memql.BareShortId(value)
-			}
 		}
 		return rows[0], nil
 	}
@@ -63,6 +52,9 @@ func (r candidateEvidenceReader) read(ctx context.Context, runID, stepKey string
 	step, err := one("workStepForOwnerRun", map[string]any{"runId": runID, "stepKey": stepKey})
 	if err != nil {
 		return pl.ReleaseWorkReceipt{}, err
+	}
+	if allStepKinds {
+		return pl.InspectReleaseStepReceipt(owner, runID, stepKey, run, step)
 	}
 	return pl.InspectReleaseWorkReceipt(owner, runID, stepKey, run, step)
 }
@@ -86,7 +78,7 @@ func (r candidateEvidenceReader) verify(ctx context.Context, candidate pl.Releas
 		components[c.Name] = c
 	}
 	for _, e := range candidate.Evidence {
-		actual, err := r.read(ctx, e.WorkRunID, e.StepKey)
+		actual, err := r.readReceipt(ctx, e.WorkRunID, e.StepKey, true)
 		if err != nil {
 			return fmt.Errorf("check %s: %w", e.Name, err)
 		}
@@ -112,4 +104,37 @@ func (r candidateEvidenceReader) verify(ctx context.Context, candidate pl.Releas
 		}
 	}
 	return nil
+}
+
+// Only literal owner-query names at native call sites reach this helper.
+func (r candidateEvidenceReader) rows(ctx context.Context, name string, args map[string]any, maxRows int) ([]map[string]any, error) {
+	if _, err := candidateOwner(ctx); err != nil {
+		return nil, err
+	}
+	if r.engine == nil {
+		return nil, errors.New("release evidence reader is unavailable")
+	}
+	res, err := r.engine.Execute(memql.ContextWithFreshRead(ctx), "query "+renderCall(name, args))
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		return nil, errors.New("release evidence returned no journal row")
+	}
+	b, err := json.Marshal(res.OutputPayload())
+	if err != nil || len(b) > 1<<20 {
+		return nil, errors.New("release evidence exceeds its result bound")
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(b, &rows); err != nil || len(rows) > maxRows {
+		return nil, errors.New("release evidence has an invalid or oversized row envelope")
+	}
+	for _, row := range rows {
+		for _, key := range []string{"id", "ownerUserId", "runId"} {
+			if value, ok := row[key].(string); ok {
+				row[key] = memql.BareShortId(value)
+			}
+		}
+	}
+	return rows, nil
 }

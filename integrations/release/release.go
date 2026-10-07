@@ -27,9 +27,11 @@ package release
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
@@ -50,11 +52,13 @@ const resultConcept = "integration:release:result"
 
 // Integration is the DSL-facing capability set.
 type Integration struct {
-	logger   *slog.Logger
-	github   *Client
-	registry *RegistryChecker
-	store    *Store
-	resolver resolver
+	logger        *slog.Logger
+	github        *Client
+	registry      *RegistryChecker
+	store         *Store
+	resolver      resolver
+	candidateDeps atomic.Pointer[CandidateDependencies]
+	candidateDB   func() *sql.DB
 }
 
 // NewIntegration wires the pieces. Every collaborator is a field rather than a
@@ -79,7 +83,15 @@ func (i *Integration) IntegrationName() string { return "release" }
 
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
-	return append([]memql.IntegrationCapability{
+	out := append([]memql.IntegrationCapability{
+		{Name: "candidatePublications", Description: "Read caller-owned durable publication intents and verified completion history; performs no remote effects.", Handler: i.handleCandidateEffects},
+		{Name: "listCandidates", Description: "Read caller-owned candidate review history, including interrupted preparations.", Handler: i.handleCandidateList},
+		{Name: "candidateConfiguration", Description: "Read configured release version sources and exact target identities; no secrets or effects. Owner only.", Handler: i.handleCandidateConfiguration},
+		{Name: "prepareCandidate", Description: "Verify and retain a release candidate for separate owner approval; publishes nothing.", Handler: i.handleCandidatePrepare},
+		{Name: "approveCandidate", Description: "Reverify and approve one exact retained release candidate. Owner only.", Handler: i.handleCandidateApprove},
+		{Name: "publishCandidate", Description: "Publish one exact approved candidate artifact and record verified readback. Owner only.", Handler: i.handleCandidatePublish},
+		{Name: "getCandidate", Description: "Read one caller-owned immutable candidate from its authority journal.", Handler: i.handleCandidateGet},
+		{Name: "retireCandidate", Description: "Fence an unpublished candidate and release its artifact references.", Handler: i.handleCandidateRetire},
 		{
 			Name: "releaseCut",
 			Description: "Cut a new release: compute the next version from the repository's vX.Y.Z tags, " +
@@ -108,6 +120,8 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 	}, workflowhost.ScopedCapabilities((&cutScope{}).operations())...)
+	out = append(out, workflowhost.ScopedCapabilities((&candidatePrepareScope{}).operations())...)
+	return append(out, workflowhost.ScopedCapabilities((&candidatePublishScope{}).operations())...)
 }
 
 // handleCut adapts the DSL argument map to Cut.

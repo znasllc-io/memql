@@ -208,7 +208,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // only the exact repository, commit and version reviewed in a dry run (#5853).
 // 81 -> 82: the shipped, callable pipeline orchestration workflow.
 // Scoped recipes and declarative catalogs are included in the same strict boot.
-const shippedAutomationCount = 131
+// 131 -> 133: candidate preparation and separately approved publication recipes.
+const shippedAutomationCount = 133
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

@@ -243,3 +243,43 @@ automation releaseCutWorkflow {
   }
   builtin releaseRecordCut()
 }
+
+/// Prepare immutable release evidence for a separate owner approval.
+/// Publication is not available in this scope. A failed preparation retains
+/// its durable record and pins so another replica can resume or retire it.
+@template
+automation releasePrepareCandidateWorkflow {
+  facts := builtin releaseCandidateEvidence()
+  if facts.modes.count() == 0 || facts.modes.any(mode => mode != "full") {
+    builtin releaseCandidateRefuse()
+  }
+  // Empty package selections are explicitly planned skips, not executed tests.
+  // A carried earlier attempt requires its original receipt chain and is not
+  // accepted by this recipe. Blocked or undeclared skips fail natively.
+  if facts.skipped.any(item => item.code != "pipeline_not_affected") {
+    builtin releaseCandidateRefuse()
+  }
+  builtin releaseCandidateCheckVersions()
+  builtin releaseCandidateCheckTargets()
+  builtin releaseCandidateRecordPreparing()
+  builtin releaseCandidatePinArtifacts()
+  builtin releaseCandidateVerifyArtifacts()
+  builtin releaseCandidateMarkReady()
+}
+
+/// Publish one artifact from a separately approved immutable candidate.
+/// The native scope binds the owner, approval, target and durable effect ID.
+@template
+automation releasePublishCandidateWorkflow {
+  builtin releasePublicationCheckCandidate()
+  effect := builtin releasePublicationBegin()
+  if effect.complete { return }
+  if effect.kind == "oci" {
+    builtin releasePublicationVerifyImage()
+    builtin releasePublicationWriteImage()
+  } else if effect.kind == "file" {
+    builtin releasePublicationVerifyFile()
+    builtin releasePublicationWriteFile()
+  }
+  builtin releasePublicationRecordReceipt()
+}

@@ -45,6 +45,67 @@ builtin releaseCutStatus {
   version  string!  @description("The version to check, in either tag form (v1.2.3) or bare form (1.2.3).")
 }
 
+/// Read configured release sources and exact publication target identities. Owner only.
+@sdk
+@executor("integration.release.candidateConfiguration")
+builtin releaseCandidateConfiguration { }
+
+/// Page through caller-owned review history, including interrupted preparations.
+@sdk
+@executor("integration.release.listCandidates")
+builtin releaseCandidates {
+  cursor string
+  limit integer
+}
+
+/// Verify an immutable candidate using complete work evidence and operator configuration.
+/// This retains artifacts for review and does not approve or publish them.
+@sdk
+@executor("integration.release.prepareCandidate")
+@args(profile="object")
+builtin releasePrepareCandidate {
+  candidate object!
+}
+
+/// Read one exact release candidate owned by the caller.
+@sdk
+@executor("integration.release.getCandidate")
+builtin releaseGetCandidate {
+  candidateId string!
+}
+
+/// Read durable publication intents and verified completion for one candidate.
+@sdk
+@executor("integration.release.candidatePublications")
+builtin releaseCandidatePublications {
+  candidateId string!
+}
+
+/// Separately approve the exact reviewed candidate after fresh verification.
+@sdk
+@executor("integration.release.approveCandidate")
+builtin releaseApproveCandidate {
+  candidateId string!
+}
+
+/// Publish one artifact only under its exact durable candidate approval.
+@sdk
+@executor("integration.release.publishCandidate")
+builtin releasePublishCandidate {
+  candidateId string!
+  approvalId string!
+  targetId string!
+  component string!
+  artifact string!
+}
+
+/// Permanently retire an unpublished candidate and release its retention pins.
+@sdk
+@executor("integration.release.retireCandidate")
+builtin releaseRetireCandidate {
+  candidateId string!
+}
+
 /// Scoped release operation; available only inside an owner-authorized release cut.
 @executor("integration.release.releaseReadSnapshot")
 builtin releaseReadSnapshot { }
@@ -72,6 +133,66 @@ builtin releaseOpenExtensionPin { }
 /// Scoped release operation; available only inside an owner-authorized release cut.
 @executor("integration.release.releaseRecordCut")
 builtin releaseRecordCut { }
+
+/// Read complete, successful execution evidence inside an authorized candidate scope.
+@executor("integration.release.releaseCandidateEvidence")
+builtin releaseCandidateEvidence { }
+
+/// Refuse a candidate excluded by the installed release policy.
+@executor("integration.release.releaseCandidateRefuse")
+builtin releaseCandidateRefuse { }
+
+/// Check component versions at their exact source commits.
+@executor("integration.release.releaseCandidateCheckVersions")
+builtin releaseCandidateCheckVersions { }
+
+/// Check the operator-configured destinations bound into this candidate.
+@executor("integration.release.releaseCandidateCheckTargets")
+builtin releaseCandidateCheckTargets { }
+
+/// Record immutable preparation intent before retaining artifacts.
+@executor("integration.release.releaseCandidateRecordPreparing")
+builtin releaseCandidateRecordPreparing { }
+
+/// Pin every evidence artifact under the durable candidate identity.
+@executor("integration.release.releaseCandidatePinArtifacts")
+builtin releaseCandidatePinArtifacts { }
+
+/// Verify retained bytes and the full OCI image before readiness.
+@executor("integration.release.releaseCandidateVerifyArtifacts")
+builtin releaseCandidateVerifyArtifacts { }
+
+/// Mark ready only after this native scope verified all candidate inputs.
+@executor("integration.release.releaseCandidateMarkReady")
+builtin releaseCandidateMarkReady { }
+
+/// Reverify the exact candidate before its approved publication effect.
+@executor("integration.release.releasePublicationCheckCandidate")
+builtin releasePublicationCheckCandidate { }
+
+/// Open or recover the durable publication intent for the explicit approval.
+@executor("integration.release.releasePublicationBegin")
+builtin releasePublicationBegin { }
+
+/// Reopen retained bytes and verify a private OCI snapshot for publication.
+@executor("integration.release.releasePublicationVerifyImage")
+builtin releasePublicationVerifyImage { }
+
+/// Publish the approved image by digest and verify registry readback.
+@executor("integration.release.releasePublicationWriteImage")
+builtin releasePublicationWriteImage { }
+
+/// Reopen retained bytes and verify a private file snapshot for publication.
+@executor("integration.release.releasePublicationVerifyFile")
+builtin releasePublicationVerifyFile { }
+
+/// Publish the approved file to its exact existing draft and verify all bytes.
+@executor("integration.release.releasePublicationWriteFile")
+builtin releasePublicationWriteFile { }
+
+/// Record completion only from the scoped publisher's verified receipt.
+@executor("integration.release.releasePublicationRecordReceipt")
+builtin releasePublicationRecordReceipt { }
 
 /// Select and calculate a version from the already-read release snapshot.
 @executor("integration.release.releaseSelectCandidate")

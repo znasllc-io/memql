@@ -78,7 +78,9 @@ func (c *Client) do(ctx context.Context, token, method, path string, body any) (
 	if err != nil {
 		return 0, nil, refuse(CodeGithubUnreachable, "could not build the GitHub request: %v", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	if body != nil {

@@ -664,7 +664,7 @@ func carryPassed(tracks []*stepTrack, prior []WorkStep, priorAttempt int) {
 func (dr *runDriver) decls() []workjournal.StepDecl {
 	out := make([]workjournal.StepDecl, 0, len(dr.tracks))
 	for _, t := range dr.tracks {
-		call := map[string]any{"construct": "pipeline", "name": t.step.Name, "stage": t.step.Stage}
+		call := map[string]any{"construct": "pipeline", "name": t.step.Name, "stage": t.step.Stage, "pipelineKind": string(t.step.Kind)}
 		call["definitionFingerprint"] = t.definition
 		if len(t.step.Packages) > 0 {
 			call["packages"] = slices.Clone(t.step.Packages)

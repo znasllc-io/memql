@@ -18,6 +18,7 @@ type ReleaseWorkReceipt struct {
 	Attempt                                    int
 	DefinitionDigest, ReceiptDigest            string
 	ArtifactIntentIDs                          []string
+	StepKind, Status, SkipCode                 string
 }
 
 // InspectReleaseWorkReceipt is a pure integrity check over an authorized,
@@ -25,6 +26,21 @@ type ReleaseWorkReceipt struct {
 // or certify the artifact bytes. Those responsibilities remain with the
 // native reader, installed release workflow and artifact verifier respectively.
 func InspectReleaseWorkReceipt(owner, runID, stepKey string, run, step map[string]any) (ReleaseWorkReceipt, error) {
+	out, err := InspectReleaseStepReceipt(owner, runID, stepKey, run, step)
+	if err != nil {
+		return ReleaseWorkReceipt{}, err
+	}
+	if out.StepKind != string(StepCommand) || out.Status != "done" {
+		return ReleaseWorkReceipt{}, errors.New("artifact producer requires an actually successful command receipt")
+	}
+	return out, nil
+}
+
+// InspectReleaseStepReceipt preserves typed facts for every declared step.
+// Planned skips and delivered notifications remain distinguishable from tests
+// that actually executed. DSL decides which skip reasons its policy permits;
+// an unplanned skip, failed delivery or ambiguous command can never pass here.
+func InspectReleaseStepReceipt(owner, runID, stepKey string, run, step map[string]any) (ReleaseWorkReceipt, error) {
 	var out ReleaseWorkReceipt
 	var r struct {
 		ID, OwnerUserID, Status, TemplateFingerprint, TriggeredBy, Mode string
@@ -37,10 +53,14 @@ func InspectReleaseWorkReceipt(owner, runID, stepKey string, run, step map[strin
 	var s struct {
 		ID, CreatedAt, OwnerUserID, RunID, Key, Status, StepType, Kind, ErrorCode, FinishedAt string
 		Attempt                                                                               int
-		Call                                                                                  struct{ Construct, DefinitionFingerprint string }
-		Result                                                                                struct {
-			Status   string
-			Metadata struct {
+		Call                                                                                  struct {
+			Construct, DefinitionFingerprint, PipelineKind string
+			Skip                                           *Skip
+		}
+		Result struct {
+			Status, Code, Reason, Channel, Kind, NotificationStatus string
+			RequestIDs                                              []string
+			Metadata                                                struct {
 				ExitCode          *int
 				ArtifactIntentIDs []string
 			}
@@ -66,11 +86,39 @@ func InspectReleaseWorkReceipt(owner, runID, stepKey string, run, step map[strin
 		r.Status != "succeeded" || r.CancelRequested || r.CallerSuppliedPayload || r.Mode != "live" ||
 		r.TriggeredBy != WorkTriggerPrefix+r.Input.Mode || r.Input.PipelineID == "" || r.Input.PipelineRunID == "" || r.Input.Attempt < 1 ||
 		!strings.HasPrefix(r.TemplateFingerprint, "work-definition-v2:") || !releaseDigest("sha256:"+strings.TrimPrefix(r.TemplateFingerprint, "work-definition-v2:")) ||
-		s.Status != "done" || s.ErrorCode != "" || s.StepType != "exec" || s.Kind != "deterministic" || s.Call.Construct != "pipeline" ||
+		(s.Status != "done" && s.Status != "skipped") || s.StepType != "exec" || s.Kind != "deterministic" || s.Call.Construct != "pipeline" ||
 		!strings.HasPrefix(s.Call.DefinitionFingerprint, "work-definition-v2:") || !releaseDigest(definition) ||
-		s.Result.Status != string(OutcomeSucceeded) || s.Result.Metadata.ExitCode == nil || *s.Result.Metadata.ExitCode != 0 ||
+		(s.Call.PipelineKind != string(StepCommand) && s.Call.PipelineKind != string(StepNotify)) ||
 		!ValidArtifactIntentIDs(s.Result.Metadata.ArtifactIntentIDs) || !releaseSource.MatchString(r.Input.Repository) || !releaseCommit.MatchString(r.Input.SHA) {
 		return out, errors.New("release evidence requires a successful live pipeline and exact successful execution receipt")
+	}
+	if s.Status == "skipped" {
+		if s.Call.Skip == nil || s.Call.Skip.Code == "" || s.Call.Skip.Reason == "" || s.ErrorCode != s.Call.Skip.Code ||
+			s.Result.Code != s.Call.Skip.Code || s.Result.Reason != s.Call.Skip.Reason || s.Result.Status != "" || s.Result.Metadata.ExitCode != nil || len(s.Result.Metadata.ArtifactIntentIDs) != 0 {
+			return out, errors.New("release skip does not match the original declared selection")
+		}
+	} else {
+		if s.ErrorCode != "" || s.Call.Skip != nil || s.Result.Status != string(OutcomeSucceeded) {
+			return out, errors.New("release step lacks an actual successful outcome")
+		}
+		switch StepKind(s.Call.PipelineKind) {
+		case StepCommand:
+			if s.Result.Metadata.ExitCode == nil || *s.Result.Metadata.ExitCode != 0 {
+				return out, errors.New("release command requires explicit exit zero")
+			}
+		case StepNotify:
+			if s.Result.NotificationStatus != "delivered" || s.Result.Channel == "" || (s.Result.Kind != "email" && s.Result.Kind != "discord") ||
+				len(s.Result.RequestIDs) == 0 || len(s.Result.RequestIDs) > 20 || len(s.Result.Metadata.ArtifactIntentIDs) != 0 || s.Result.Metadata.ExitCode != nil {
+				return out, errors.New("release notification requires an actual delivery receipt")
+			}
+			seen := map[string]bool{}
+			for _, requestID := range s.Result.RequestIDs {
+				if !releaseIdentity(requestID) || seen[requestID] {
+					return out, errors.New("release notification has invalid delivery identities")
+				}
+				seen[requestID] = true
+			}
+		}
 	}
 	// Hash only journal facts relevant to the receipt. Heartbeats and the node
 	// currently serving the read may change without changing completed work.
@@ -91,9 +139,14 @@ func InspectReleaseWorkReceipt(owner, runID, stepKey string, run, step map[strin
 	digest := sha256.Sum256(append([]byte("memql.release-work-receipt.v1\x00"), body...))
 	ids := slices.Clone(s.Result.Metadata.ArtifactIntentIDs)
 	slices.Sort(ids)
-	return ReleaseWorkReceipt{
+	out = ReleaseWorkReceipt{
 		OwnerUserID: owner, WorkRunID: runID, StepKey: stepKey, ReceiptID: s.ID,
 		Repository: r.Input.Repository, Commit: r.Input.SHA, Mode: r.Input.Mode, Event: r.Input.Event,
 		Attempt: s.Attempt, DefinitionDigest: definition, ReceiptDigest: "sha256:" + hex.EncodeToString(digest[:]), ArtifactIntentIDs: ids,
-	}, nil
+		StepKind: s.Call.PipelineKind, Status: s.Status,
+	}
+	if s.Call.Skip != nil {
+		out.SkipCode = s.Call.Skip.Code
+	}
+	return out, nil
 }
