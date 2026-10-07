@@ -237,9 +237,24 @@ func (j *revisionJournal) get(ctx context.Context, installation, key string) (re
 // A changed executable workflow can still observe, but cannot reuse authority
 // to perform a write under a different recipe.
 func (j *revisionJournal) begin(ctx context.Context, installation, key, workflow string) (revisionRecord, error) {
+	return j.beginWithAdmission(ctx, installation, key, workflow, nil)
+}
+
+// beginAdmitted accepts only a short-lived native proof handle from the
+// revision workflow. It permits requalification after the promoted artifact
+// observation expired, while still requiring the exact plan/recipe and a
+// currently live proof deadline in the transaction that fences the write.
+func (j *revisionJournal) beginAdmitted(ctx context.Context, installation, key, workflow string, admission revisionWriteAdmission) (revisionRecord, error) {
+	return j.beginWithAdmission(ctx, installation, key, workflow, &admission)
+}
+
+func (j *revisionJournal) beginWithAdmission(ctx context.Context, installation, key, workflow string, admission *revisionWriteAdmission) (revisionRecord, error) {
 	return j.withRecord(ctx, installation, key, func(tx *sql.Tx, r *revisionRecord, actor string) error {
 		if actor != r.Plan.RequestedBy || workflow != r.Plan.ExecutionWorkflowDigest || r.Rollback != nil {
 			return errors.New("installation request authority or workflow changed")
+		}
+		if admission != nil && (admission.planID != key || admission.workflow != workflow || !admission.freshUntil.After(time.Now()) || admission.freshUntil.Sub(time.Now()) > time.Minute) {
+			return errors.New("installation start requires a live exact-plan native requalification")
 		}
 		if r.State == "applying" {
 			return nil
@@ -247,11 +262,14 @@ func (j *revisionJournal) begin(ctx context.Context, installation, key, workflow
 		if r.State != "prepared" {
 			return errors.New("installation plan cannot start")
 		}
-		if binding := r.Plan.Preparation; binding != nil {
+		if binding := r.Plan.Preparation; binding != nil && admission == nil {
 			expires, err := time.Parse(time.RFC3339Nano, binding.ArtifactExpiresAt)
 			if err != nil || !expires.After(time.Now()) {
 				return errors.New("installation artifact evidence expired before start; fresh qualification is required")
 			}
+		}
+		if admission != nil && !admission.freshUntil.After(time.Now()) {
+			return errors.New("installation start requalification expired before the durable fence")
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE installation_revision_attempts SET state='applying',started_at=clock_timestamp(),updated_at=clock_timestamp() WHERE plan_id=$1`, key)
 		return err

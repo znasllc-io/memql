@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/pipelines"
@@ -112,7 +113,10 @@ func TestResourceEvidenceBindsSignedImagesAndTheEntireDiff(t *testing.T) {
 	require.NotContains(t, evidence.String(), "private-fixture-value")
 	again, err := verifyImagesAndDiff(context.Background(), resourceAPIFixture(), publication, before, after, "linux/arm64", resourceBindings())
 	require.NoError(t, err)
-	require.Equal(t, evidence, again, "a second verifier reproduces evidence without the first's state")
+	require.Equal(t, evidence.digest, again.digest, "a second verifier reproduces the resource proof without the first's state")
+	require.Equal(t, evidence.changes, again.changes)
+	require.True(t, freshPreservationObservation(evidence.observed, time.Now()))
+	require.True(t, freshPreservationObservation(again.observed, time.Now()))
 	var deleted bool
 	for _, change := range evidence.changes {
 		if change.Resource.Kind == "Secret" {

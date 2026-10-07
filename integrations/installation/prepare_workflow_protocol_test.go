@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -35,6 +36,21 @@ type preparationProtocolFiles struct {
 	files           map[string]*captureFilesFixture
 	requests        []pipelines.StepRequest
 	acknowledgments int
+}
+
+// revisionProtocolAPI routes the Application protocol to the compare-and-swap
+// controller fixture while receiver, renderer and resource verification keep
+// using the independently observed cluster API.
+type revisionProtocolAPI struct {
+	controller *revisionControllerFixture
+	receiver   *receiverFixture
+}
+
+func (a revisionProtocolAPI) Do(ctx context.Context, method, path, contentType string, body []byte) ([]byte, error) {
+	if a.controller != nil && path == a.controller.path && (method != http.MethodGet || a.controller.hasWritten()) {
+		return a.controller.Do(ctx, method, path, contentType, body)
+	}
+	return a.receiver.Do(ctx, method, path, contentType, body)
 }
 
 func (f *preparationProtocolFiles) Execute(ctx context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
@@ -197,6 +213,7 @@ func TestPreparationWorkflowProtocolRecoveryPromotesWithFreshNativeEvidence(t *t
 	rpc.mu.Unlock()
 	fresh := *host
 	fresh.journal = preparationConnection(peerDB)
+	fresh.rendererAddressOverride = address
 	freshSnapshot, err := readReceiver(ctx, receiver, "memql", "receiver", factory)
 	require.NoError(t, err)
 	freshSnapshot.rendererAddress = address
@@ -238,6 +255,32 @@ func TestPreparationWorkflowProtocolRecoveryPromotesWithFreshNativeEvidence(t *t
 		require.NotContains(t, string(body), forbidden)
 	}
 	require.Len(t, external.requests, 2)
+
+	// The new revision recipe independently reopens both retained archives,
+	// re-renders through the observed receiver, rechecks OCI and preservation
+	// evidence, then applies through the exact Application CAS. Losing the first
+	// PATCH reply is recovered by observing its intent, never by sending a
+	// duplicate sync.
+	controller := newRevisionControllerFixture(t, fresh.journal.db(), result)
+	// The shared receiver API must present the same Application snapshot to the
+	// CAS read and the preflight verifier. Copy its exact resourceVersion and
+	// status into the controller-side write adapter.
+	appBody, err := json.Marshal(receiver.objects[controller.path])
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(appBody, &controller.object))
+	controller.loseReply = true
+	revisionAPI := revisionProtocolAPI{controller: controller, receiver: receiver}
+	fresh.api = revisionAPI
+	_, err = fresh.revisions.run(ctx, &revisionJournal{db: fresh.journal.db}, request.InstallationID, result.ID, revisionStart, nil, &fresh)
+	require.ErrorContains(t, err, "unconfirmed")
+	started, err := (&revisionJournal{db: fresh.journal.db}).get(ctx, request.InstallationID, result.ID)
+	require.NoError(t, err)
+	require.Equal(t, "applying", started.State)
+	require.Zero(t, started.ObservationVersion)
+	recoveredRevision, err := fresh.revisions.run(ctx, &revisionJournal{db: fresh.journal.db}, request.InstallationID, result.ID, revisionStart, nil, &fresh)
+	require.NoError(t, err)
+	require.Equal(t, 1, controller.writes, "a lost response after commit is reconciled without another PATCH")
+	require.True(t, recoveredRevision.Observation.IntentObserved)
 
 	// A different process recovers the real promoted plan from PostgreSQL after
 	// Argo changes the actual Application. The full old baseline must refuse;

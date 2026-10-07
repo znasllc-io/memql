@@ -99,8 +99,8 @@ func promotionPlan(r preparationRecord, plan preparedPlan, configuration string,
 		return preparedPlan{}, errors.New("promotion evidence does not describe one candidate and rollback render")
 	}
 	now := time.Now()
-	if !freshPreservationObservation(evidence.storage.observed, now) || !freshPreservationObservation(evidence.sensitive.observed, now) {
-		return preparedPlan{}, errors.New("promotion requires freshly observed storage and protected resources")
+	if !freshPreservationObservation(evidence.resources.observed, now) || !freshPreservationObservation(evidence.storage.observed, now) || !freshPreservationObservation(evidence.sensitive.observed, now) {
+		return preparedPlan{}, errors.New("promotion requires freshly observed resources, storage and protected resources")
 	}
 	if err := promotionIntentMatches(r.Scope, plan); err != nil {
 		return preparedPlan{}, err

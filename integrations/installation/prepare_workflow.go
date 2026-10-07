@@ -35,6 +35,7 @@ type preparationHost struct {
 	tokens                       pipelinesteps.TokenMinter
 	catalog                      CatalogFactory
 	namespace, configurationName string
+	rendererAddressOverride      string // test-only routing to the observed renderer fixture
 	definition                   *automations.Automation
 	revisions                    *revisionWorkflow
 	artifacts                    *artifactWorkflow
@@ -164,6 +165,7 @@ func (s *preparationWorkflowScope) operations() map[string]workflowhost.Operatio
 		"installationAcknowledgeSource":      s.acknowledge,
 		"installationRenderSource":           s.render,
 		"installationVerifyResources":        s.verifyResources,
+		"installationRecheckResources":       s.recheckResources,
 		"installationVerifyStorage":          s.verifyStorage,
 		"installationVerifyProtected":        s.verifyProtected,
 		"installationReobserveConfiguration": s.reobserve,
@@ -359,6 +361,21 @@ func (s *preparationWorkflowScope) verifyResources(ctx context.Context, args map
 	}
 	s.resources = evidence
 	s.artifacts = &artifactWorkflowScope{admission: scope, operator: s.operator, observations: map[string]artifactObservation{}}
+	return nil, nil
+}
+func (s *preparationWorkflowScope) recheckResources(ctx context.Context, args map[string]any) (any, error) {
+	if err := noPreparationArguments(args); err != nil {
+		return nil, err
+	}
+	if s.configuration == nil || s.candidate.Digest() == "" || s.resources.digest == "" || s.artifacts == nil || s.artifacts.result == nil || !freshArtifactObservation(s.artifacts.result.observed, s.artifacts.result.expires, time.Now()) {
+		return nil, errors.New("installation resource recheck requires completed fresh artifact reads")
+	}
+	cfg := s.configuration
+	current, err := verifyImagesAndDiff(ctx, s.host.api, s.candidate, s.renders["rollback"], s.renders["candidate"], cfg.configuration.Platform, cfg.bindings)
+	if err != nil || current.digest != s.resources.digest || current.publication != s.resources.publication || current.before != s.resources.before || current.after != s.resources.after {
+		return nil, errors.New("installation resources changed during immutable artifact verification")
+	}
+	s.resources = current
 	return nil, nil
 }
 func (s *preparationWorkflowScope) verifyStorage(ctx context.Context, args map[string]any) (any, error) {
