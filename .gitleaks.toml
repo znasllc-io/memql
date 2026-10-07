@@ -228,3 +228,8 @@ regexes = ['''memql\.os\.materializer\.v1''']
 description = "Fake recovery key in the VS Code gallery's install-done scenarios (cleared for history in memql#5663). NOT a credential: `editors/vscode/gallery/scenarios/install.ts` renders the extension's screens for screenshots with no cluster behind them, and at commit 66566bfaf the value it showed on the recovery-key card was `mql_rk_` plus seven groups of four characters. No MemQL minter emits `mql_rk_`: the owner recovery key is `mql_rec_` plus 43 base64url characters, which the memql-credential-token rule above matches by shape. The gallery replaced it two hours later with `mql_rk_EXAMPLE-0000-...` (66e3003f7), which cleared the PR lane and cannot clear the commit -- the memql#3484 pattern again. Value-keyed on the exact literal with no `paths`, so any other value, and any key shaped like a real one, still trips the scanner."
 regexTarget = "match"
 regexes = ['''mql_rk_7Q2x-9fKp-L3vD-8wZr-Tn4B-Hc6M-Ye1J''']
+
+[[allowlists]]
+description = "The exact public Kubernetes v1 PersistentVolume collection path, introduced by the installation storage verifier (#5916). It names an API resource, contains no authentication material, and is sent to every Kubernetes API server when reading a volume. Gitleaks 8.30.1 generic-api-key matches the literal after the Go field name apiPath. Match only this entire detected value; paths with appended data and all actual credentials remain scanned. Retain for full-history scans as well as the current tree."
+regexTarget = "secret"
+regexes = ['''^api/v1/persistentvolumes/$''']
