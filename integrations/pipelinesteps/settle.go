@@ -108,8 +108,8 @@ func (s *step) settle(dec pl.StepResult, pod *Pod, f *follower) pl.StepResult {
 	notes := s.newNotes()
 	libCtx, cancelLib := s.libraryContext()
 	defer cancelLib()
-	cr := s.storeLog(libCtx, &res, notes)
-	s.storeFramedArtifacts(libCtx, cr, &res, notes)
+	s.storeLog(libCtx, &res, notes)
+	s.collectStepArtifacts(libCtx, pod, &res, notes)
 	fitOutcome(&res, notes)
 	persistCtx, cancelPersist := s.persistContext()
 	defer cancelPersist()
@@ -301,21 +301,6 @@ func liveLogStops(storeMaxLines int) string {
 // log: a step followed from its first line, as every fleet step is.
 func completeLogNote(storeMaxLines int) string {
 	return liveLogStops(storeMaxLines) + "the complete log is archived to the Library"
-}
-
-// storeFramedArtifacts stores the artifacts the wrapper framed in the step's
-// log, one Library file each, named by their path (stepFiles.storeArtifacts):
-// what it adds is the frame -- the archive the capture decoded out of it, and
-// its verdict on a frame that is missing, cut short or too large.
-func (s *step) storeFramedArtifacts(ctx context.Context, cr CaptureResult, res *pl.StepResult, notes *noteList) {
-	files := s.files()
-	if cr.ArtifactNote != nil {
-		files.artifactFact(res, notes, *cr.ArtifactNote)
-	}
-	if cr.Artifacts == nil {
-		return
-	}
-	files.storeArtifacts(ctx, cr.Artifacts, s.r.cfg.ArtifactMaxBytes, res, notes)
 }
 
 // files files this Run's step through this replica's Library and log.

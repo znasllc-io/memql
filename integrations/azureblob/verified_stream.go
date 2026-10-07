@@ -28,6 +28,10 @@ const (
 // select a fresh destination merely because the previous reply was lost.
 var ErrBlobCommitUncertain = errors.New("blob commit outcome is uncertain")
 
+// ErrBlobDeleteUncertain requires a later read of the same owned object. An
+// accepted DELETE without confirmed absence is not a cleanup receipt.
+var ErrBlobDeleteUncertain = errors.New("blob deletion outcome is uncertain")
+
 // VerifiedBlob names the exact version whose bytes were read and hashed.
 // CreateVerifiedStream never overwrites a committed object. This is not a
 // storage-account WORM policy: consumers must retain this ETag and digest and
@@ -124,6 +128,46 @@ func (u *AzureBlobUploader) VerifyStream(ctx context.Context, container, object 
 		return VerifiedBlob{}, err
 	}
 	return verifyStream(ctx, bc, size, digest)
+}
+
+// DeleteVerifiedStream removes only the exact stored version named by receipt.
+// The caller must authorize ownership and retire all producers before cleanup;
+// this primitive cannot fence later writes. A changed version is never deleted,
+// even if its bytes match. Absence is verified after deletion, including when
+// the reply was lost. The receipt URL is not followed or used for authorization.
+func (u *AzureBlobUploader) DeleteVerifiedStream(ctx context.Context, container, object string, receipt VerifiedBlob) error {
+	if err := verifiedStreamIdentity(receipt.Size, receipt.SHA256); err != nil {
+		return err
+	}
+	if len(receipt.ETag) < 3 || len(receipt.ETag) > 256 || !strings.HasPrefix(receipt.ETag, `"`) || !strings.HasSuffix(receipt.ETag, `"`) || strings.ContainsAny(receipt.ETag, "\r\n") {
+		return errors.New("verified deletion requires the exact quoted ETag from its receipt")
+	}
+	bc, err := u.blockClient(container, object)
+	if err != nil {
+		return err
+	}
+	current, err := verifyStream(ctx, bc, receipt.Size, receipt.SHA256)
+	if bloberror.HasCode(err, bloberror.BlobNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if current.ETag != receipt.ETag {
+		return errors.New("stored object version differs from the cleanup receipt; nothing was deleted")
+	}
+	etag := azcore.ETag(receipt.ETag)
+	_, deleteErr := bc.Delete(ctx, &blob.DeleteOptions{
+		AccessConditions: &blob.AccessConditions{ModifiedAccessConditions: &blob.ModifiedAccessConditions{IfMatch: &etag}},
+	})
+	_, verifyErr := bc.GetProperties(ctx, nil)
+	if bloberror.HasCode(verifyErr, bloberror.BlobNotFound) {
+		return nil
+	}
+	if verifyErr == nil {
+		verifyErr = errors.New("an object remains at the cleanup destination")
+	}
+	return fmt.Errorf("%w: %w", ErrBlobDeleteUncertain, errors.Join(deleteErr, verifyErr))
 }
 
 func verifiedStreamIdentity(size int64, digest string) error {

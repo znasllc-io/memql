@@ -1,6 +1,8 @@
 package pipelinesteps
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -4297,17 +4299,18 @@ func TestCancelRunStopsThisReplicasRunsAndDeletesTheRun(t *testing.T) {
 // The Library
 // ---------------------------------------------------------------------------
 
-// rtFramedLines is the log of a step that prints line and then has the
-// wrapper frame its artifacts (wrapper.go): a blank line, the begin marker,
-// the archive's base64, the end marker.
-func rtFramedLines(t *testing.T, line string, tgz []byte) []string {
+// rtArtifactStream supplies the verified collection boundary to runner tests.
+// The transport/identity seam is tested separately against its API and real K3s.
+func rtArtifactStream(t *testing.T, h *rtHarness, tgz []byte) {
 	t.Helper()
-	marker := ArtifactMarker(testJobName)
-	out := []string{captureKubeLine(rtAt(1100), line), captureKubeLine(rtAt(1101), ""), captureKubeLine(rtAt(1102), marker+" begin")}
-	for i, l := range captureFrameLines(tgz) {
-		out = append(out, captureKubeLine(rtAt(1103+i), l))
+	h.r.collectArtifacts = func(ctx context.Context, run StepRun, _ *Pod, maxBytes int64) (*ArtifactSnapshot, error) {
+		reader, err := gzip.NewReader(bytes.NewReader(tgz))
+		if err != nil {
+			return nil, err
+		}
+		defer reader.Close()
+		return SnapshotArtifacts(ctx, reader, run.Artifacts, maxBytes)
 	}
-	return append(out, captureKubeLine(rtAt(1999), marker+" end"))
 }
 
 // TestRunnerReadsGoTimings (fix round 1): a Go test step's passing packages'
@@ -4390,7 +4393,8 @@ func TestRunnerFitsItsOutcomeInAJobAnnotation(t *testing.T) {
 		for i := 0; i < files; i++ {
 			entries = append(entries, extractTestEntry{name: fmt.Sprintf("dist/f%04d.txt", i), body: "x"})
 		}
-		h.c.script(testJobName, rtFinishingScript(testJobName, 0, rtFramedLines(t, "ok", extractTestTgz(t, entries))...))
+		rtArtifactStream(t, h, extractTestTgz(t, entries))
+		h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "ok")))
 
 		res := h.run(t, run)
 
@@ -4527,13 +4531,14 @@ func TestRunnerMasksStepTextInItsOwnLog(t *testing.T) {
 			run := rtRun()
 			run.Artifacts = []string{"dist/*"}
 			tgz := extractTestTgz(t, []extractTestEntry{{name: path, body: "x"}})
-			h.c.script(testJobName, rtFinishingScript(testJobName, 0, rtFramedLines(t, "ok", tgz)...))
+			rtArtifactStream(t, h, tgz)
+			h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "ok")))
 			c.answer(h.lib)
 
 			res := h.run(t, run)
 
-			if res.Status != pl.OutcomeSucceeded || len(res.Notes) != 1 {
-				t.Fatalf("result = %+v (failure %+v), want a success with a note of the file not stored", res, res.Failure)
+			if res.Status != pl.OutcomeFailed || res.Failure == nil || res.Failure.Code != pl.CodeArtifactUnavailable || len(res.Notes) != 1 {
+				t.Fatalf("result = %+v (failure %+v), want required-artifact failure with a masked note", res, res.Failure)
 			}
 			if note := res.Notes[0].Message; strings.Contains(note, plantedNPM) || !strings.Contains(note, "***") {
 				t.Errorf("note %q, want the Library's answer quoted with the secret masked", note)
@@ -4549,145 +4554,66 @@ func TestRunnerMasksStepTextInItsOwnLog(t *testing.T) {
 	}
 }
 
-// TestRunnerStoresArtifactsUnderTheOwner: a step's artifacts come out of its
-// frame and into the owner's Library, one file each, named by their path; a
-// declared path that matched nothing and an entry that was refused are notes
-// beside the step, never a failure.
+// Required exports are independent of the log and retain owner/run bindings.
 func TestRunnerStoresArtifactsUnderTheOwner(t *testing.T) {
 	h := newRunnerHarness(t)
 	run := rtRun()
-	run.Artifacts = []string{"dist/report.json", "coverage.out", "missing/*.txt"}
-	tgz := extractTestTgz(t, []extractTestEntry{
-		{name: "dist/report.json", body: `{"passed":3}`},
-		{name: "coverage.out", body: "mode: set\n"},
-		{name: "../escape", body: "outside"},
-	})
-	h.c.script(testJobName, rtFinishingScript(testJobName, 0, rtFramedLines(t, "tests passed", tgz)...))
-
+	run.Artifacts = []string{"dist/report.json", "coverage.out"}
+	rtArtifactStream(t, h, extractTestTgz(t, []extractTestEntry{{name: "dist/report.json", body: `{"passed":3}`}, {name: "coverage.out", body: "mode: set\n"}}))
+	h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "tests passed")))
 	res := h.run(t, run)
-
-	if res.Status != pl.OutcomeSucceeded || res.Failure != nil {
-		t.Fatalf("result = %+v (failure %+v), want success: notes change no outcome", res, res.Failure)
-	}
-	if want := []string{"file-2", "file-3"}; !reflect.DeepEqual(res.ArtifactFileIDs, want) {
-		t.Errorf("artifact file ids = %q, want %q", res.ArtifactFileIDs, want)
+	if res.Status != pl.OutcomeSucceeded || !reflect.DeepEqual(res.ArtifactFileIDs, []string{"file-2", "file-3"}) {
+		t.Fatalf("result=%+v failure=%+v", res, res.Failure)
 	}
 	files := h.lib.stored()
 	if len(files) != 3 {
-		t.Fatalf("%d Library files, want the log and two artifacts", len(files))
+		t.Fatal("wrong file count", len(files))
 	}
-	for i, want := range []RunFile{
-		{Name: "tests-go-tests-2.log", MimeType: "text/plain; charset=utf-8"},
-		{Name: "coverage.out", MimeType: "application/octet-stream", Bytes: []byte("mode: set\n")},
-		{Name: "dist__report.json", MimeType: "application/json", Bytes: []byte(`{"passed":3}`)},
-	} {
-		got := files[i]
-		if got.Name != want.Name || got.MimeType != want.MimeType || (want.Bytes != nil && string(got.Bytes) != string(want.Bytes)) {
-			t.Errorf("file %d = %s (%s, %q), want %s (%s, %q)", i, got.Name, got.MimeType, got.Bytes, want.Name, want.MimeType, want.Bytes)
+	for n, want := range []RunFile{{Name: "tests-go-tests-2.log", MimeType: "text/plain; charset=utf-8"}, {Name: "coverage.out", MimeType: "application/octet-stream", Bytes: []byte("mode: set\n")}, {Name: "dist__report.json", MimeType: "application/json", Bytes: []byte(`{"passed":3}`)}} {
+		got := files[n]
+		if got.Name != want.Name || got.MimeType != want.MimeType || (want.Bytes != nil && !bytes.Equal(got.Bytes, want.Bytes)) {
+			t.Fatalf("file %d=%+v", n, got)
 		}
-		if got.OwnerUserID != "user-5d1e" || got.WorkRunID != "work-91c2" || got.StepKey != "tests/go-tests#2" {
-			t.Errorf("file %s is %s's for %s/%s, want the step owner's, bound to the work run and the step", got.Name, got.OwnerUserID, got.WorkRunID, got.StepKey)
+		if got.OwnerUserID != run.OwnerUserID || got.WorkRunID != run.WorkRunID || got.StepKey != run.StepKey {
+			t.Fatal("lost ownership binding")
 		}
 	}
-	// The wrapper's blank line is output (ruling R18); the frame is not.
-	if got := h.sink.messages(); !reflect.DeepEqual(got, []string{"tests passed", ""}) {
-		t.Errorf("store = %q, want the step's line and the wrapper's blank line, and none of the frame", got)
+	if !reflect.DeepEqual(h.sink.messages(), []string{"tests passed"}) {
+		t.Fatal("artifact bytes polluted the log")
 	}
-	if strings.Contains(string(files[0].Bytes), ArtifactMarker(testJobName)) {
-		t.Error("the artifact frame reached the archived log")
-	}
-	var missing, skipped bool
-	for _, n := range res.Notes {
-		if n.Code != pl.CodeArtifactMissing {
-			t.Errorf("note %+v, want only %s notes", n, pl.CodeArtifactMissing)
-		}
-		missing = missing || strings.Contains(n.Message, "missing/*.txt")
-		skipped = skipped || strings.Contains(n.Message, "../escape")
-	}
-	if !missing || !skipped || len(res.Notes) != 2 {
-		t.Errorf("notes = %+v, want one for the path that matched nothing and one for the refused entry", res.Notes)
-	}
+	h.leftNoArchive(t)
+}
 
-	t.Run("a refused entry's name is masked before it is cut, and bounded in its note", func(t *testing.T) {
-		h := newRunnerHarness(t)
-		run := rtRun()
-		run.Artifacts = []string{"dist/report.json"}
-		// The secret straddles the cut at 256 bytes: cut first, and the six
-		// bytes of it before the cut survive where no masker can know them.
-		name := "dist/" + strings.Repeat("n", 245) + plantedNPM + strings.Repeat("n", 20000)
-		tgz := extractTestTgz(t, []extractTestEntry{{name: "dist/report.json", body: "{}"}, {name: name, body: "x"}})
-		h.c.script(testJobName, rtFinishingScript(testJobName, 0, rtFramedLines(t, "ok", tgz)...))
-
-		res := h.run(t, run)
-
-		if len(res.Notes) != 1 {
-			t.Fatalf("notes = %+v, want the one for the refused entry", res.Notes)
-		}
-		note := res.Notes[0].Message
-		if strings.Contains(note, plantedNPM[:6]) || !strings.Contains(note, "nnn***nnn") {
-			t.Errorf("note %.400q... does not mask the secret in the entry's name, whole", note)
-		}
-		if len(note) > 2048 {
-			t.Errorf("the note is %d bytes, over its 2 KiB bound", len(note))
-		}
-	})
-
-	t.Run("notes are bounded: past a few, the rest are counted, not listed", func(t *testing.T) {
-		h := newRunnerHarness(t)
-		run := rtRun()
-		run.Artifacts = []string{"dist/report.json"}
-		for i := 0; i < 400; i++ {
-			run.Artifacts = append(run.Artifacts, fmt.Sprintf("missing/%03d-%s.txt", i, strings.Repeat("p", 200)))
-		}
-		tgz := extractTestTgz(t, []extractTestEntry{{name: "dist/report.json", body: "{}"}})
-		h.c.script(testJobName, rtFinishingScript(testJobName, 0, rtFramedLines(t, "ok", tgz)...))
-
-		res := h.run(t, run)
-
-		if res.Status != pl.OutcomeSucceeded {
-			t.Fatalf("result = %+v, want success", res)
-		}
-		total := 0
-		for _, n := range res.Notes {
-			total += len(n.Message)
-		}
-		if len(res.Notes) > 20 || total > 8<<10 {
-			t.Errorf("%d notes of %d bytes for 400 paths that matched nothing, want a bounded few", len(res.Notes), total)
-		}
-		if last := res.Notes[len(res.Notes)-1].Message; !strings.Contains(last, "more") {
-			t.Errorf("the last note %q does not count the notes left out", last)
-		}
-		if !h.c.hasJob(testJobName) || h.c.jobNow(t, testJobName).Metadata.Annotations[AnnotOutcome] == "" {
-			t.Error("the outcome was not persisted on the Job")
-		}
-	})
-
-	for _, c := range []struct {
-		name     string
-		exit     int32
-		frameMax int64
-		files    []extractTestEntry
-	}{
-		// A gzip of zeros: small on the wire, past the limit unpacked.
-		{"artifacts that unpack past the limit fail a step whose command succeeded", 0, 64 << 10, []extractTestEntry{{name: "dist/zeros", body: strings.Repeat("\x00", 1<<20)}}},
-		{"a frame past the limit fails a step whose command succeeded", 0, 1 << 10, []extractTestEntry{{name: "dist/random", body: rtIncompressible(8 << 10)}}},
-		{"a command that failed keeps its exit code beside the failure", 2, 64 << 10, []extractTestEntry{{name: "dist/zeros", body: strings.Repeat("\x00", 1<<20)}}},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			h := newRunnerHarness(t, func(cfg *Config) { cfg.ArtifactMaxBytes = c.frameMax })
+func TestRunnerFailsWhenRequiredExportCannotBeCaptured(t *testing.T) {
+	for _, fault := range []string{"missing", "traversal", "oversize", "transport"} {
+		t.Run(fault, func(t *testing.T) {
+			h := newRunnerHarness(t, func(cfg *Config) { cfg.ArtifactMaxBytes = 4096 })
 			run := rtRun()
 			run.Artifacts = []string{"dist"}
-			tgz := extractTestTgz(t, c.files)
-			h.c.script(testJobName, rtFinishingScript(testJobName, c.exit, rtFramedLines(t, "built", tgz)...))
-
+			entries := []extractTestEntry{{name: "dist/proof", body: "ok"}}
+			switch fault {
+			case "missing":
+				entries = nil
+			case "traversal":
+				entries = append(entries, extractTestEntry{name: "../escape", body: "bad"})
+			case "oversize":
+				entries[0].body = strings.Repeat("x", 8192)
+			}
+			rtArtifactStream(t, h, extractTestTgz(t, entries))
+			if fault == "transport" {
+				h.r.collectArtifacts = func(context.Context, StepRun, *Pod, int64) (*ArtifactSnapshot, error) {
+					return nil, errors.New("uncertain transport")
+				}
+			}
+			h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "command succeeded")))
 			res := h.run(t, run)
-
-			if res.Status != pl.OutcomeFailed || res.ExitCode != int(c.exit) || res.Failure == nil || res.Failure.Code != pl.CodeArtifactTooLarge {
-				t.Fatalf("result = %+v (failure %+v), want failed %s with the command's exit code %d", res, res.Failure, pl.CodeArtifactTooLarge, c.exit)
+			if res.Status != pl.OutcomeFailed || res.ExitCode != 0 || res.Failure == nil || res.Failure.Code != pl.CodeArtifactUnavailable || len(res.ArtifactFileIDs) != 0 {
+				t.Fatalf("false artifact success: %+v", res)
 			}
-			if len(res.ArtifactFileIDs) != 0 || len(h.lib.stored()) != 1 {
-				t.Errorf("stored %d files, artifact ids %q; want the log alone", len(h.lib.stored()), res.ArtifactFileIDs)
+			if h.c.jobNow(t, testJobName).Metadata.Annotations[AnnotOutcome] == "" {
+				t.Fatal("artifact refusal did not persist its outcome")
 			}
+			h.leftNoArchive(t)
 		})
 	}
 }

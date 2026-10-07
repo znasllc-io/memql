@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,6 +39,10 @@ func runScript(t *testing.T, script, workspace string, env []string) shellRun {
 	// The script is a package constant and the substitute a t.TempDir() path,
 	// single-quoted so a temporary directory with a space in it stays one word.
 	quoted := "'" + strings.ReplaceAll(workspace, "'", `'"'"'`) + "'"
+	script = strings.ReplaceAll(script, "/memql-artifacts", quoted+"/.export")
+	if err := os.MkdirAll(filepath.Join(workspace, ".export"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	return runShell(t, strings.ReplaceAll(script, "/workspace", quoted), env)
 }
 
@@ -138,99 +141,65 @@ func writeFiles(t *testing.T, root string, files map[string]string) {
 	}
 }
 
-func TestStepWrapperFramesDeclaredArtifactsAfterTheCommand(t *testing.T) {
-	requireTools(t, "tar", "gzip", "base64")
-	workspace := t.TempDir()
-	writeFiles(t, workspace, map[string]string{
-		"coverage.out":  "mode: set\n",
-		"reports/a.xml": "<a/>\n",
-		"reports/b.xml": "<b/>\n",
-		"notes.txt":     "not declared\n",
-	})
-
-	// A FAILED step still frames its artifacts -- a failing run's reports are
-	// the ones somebody needs -- and still exits with its own status.
-	res := runScript(t, stepWrapper, workspace, []string{
-		"PATH=" + os.Getenv("PATH"),
-		"MEMQL_STEP_COMMAND=echo running; exit 2",
-		"MEMQL_STEP_ARTIFACTS=coverage.out reports/*.xml",
-		"MEMQL_ARTIFACT_MARKER=" + testMarker,
-	})
-	if res.code != 2 {
-		t.Fatalf("exit status = %d, want the command's own 2 (stderr %q)", res.code, res.stderr)
-	}
-	before, payload := frameOf(t, res.stdout)
-	// Ruling R18: one blank line precedes the begin marker -- the price of
-	// putting the marker on a line of its own whatever the command printed.
-	if strings.Join(before, "|") != "running|" {
-		t.Errorf("the lines before the frame are %q, want the command's output and one blank line", before)
-	}
-
-	tgz, err := base64.StdEncoding.DecodeString(payload)
-	if err != nil {
-		t.Fatalf("the frame is not base64: %v", err)
-	}
-	files := untar(t, tgz)
-	var names []string
-	for name := range files {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	if want := []string{"coverage.out", "reports/a.xml", "reports/b.xml"}; strings.Join(names, ",") != strings.Join(want, ",") {
-		t.Errorf("archived %q, want exactly the declared paths and glob matches %q", names, want)
-	}
-	if got := files["coverage.out"]; got != "mode: set\n" {
-		t.Errorf("coverage.out archived as %q", got)
-	}
-}
-
-// TestStepWrapperBeginsTheFrameOnALineOfItsOwn (the reviewer's IMPORTANT 2,
-// ruling R18): a command whose last output has no trailing newline would glue
-// the begin marker to its last words, the capture's whole-line match would
-// never open the frame, and the base64 would flood the log while the
-// artifacts were lost.
-func TestStepWrapperBeginsTheFrameOnALineOfItsOwn(t *testing.T) {
-	requireTools(t, "tar", "gzip", "base64")
-	workspace := t.TempDir()
-	writeFiles(t, workspace, map[string]string{"coverage.out": "mode: set\n"})
-	res := runScript(t, stepWrapper, workspace, []string{
-		"PATH=" + os.Getenv("PATH"),
-		"MEMQL_STEP_COMMAND=printf 'last words'",
-		"MEMQL_STEP_ARTIFACTS=coverage.out",
-		"MEMQL_ARTIFACT_MARKER=" + testMarker,
-	})
-	if res.code != 0 {
-		t.Fatalf("exit status = %d (stderr %q)", res.code, res.stderr)
-	}
-	before, payload := frameOf(t, res.stdout)
-	if strings.Join(before, "|") != "last words" {
-		t.Errorf("the lines before the frame are %q, want the command's unterminated last line alone", before)
-	}
-	tgz, err := base64.StdEncoding.DecodeString(payload)
-	if err != nil {
-		t.Fatalf("the frame is not base64: %v", err)
-	}
-	if got := untar(t, tgz)["coverage.out"]; got != "mode: set\n" {
-		t.Errorf("coverage.out archived as %q", got)
-	}
-}
-
-// Review Focus 3: an image with no tar or base64 cannot frame its artifacts,
-// and that must cost the artifacts, never the step's outcome.
-func TestStepWrapperWithoutTarKeepsTheStepsStatus(t *testing.T) {
-	nothing := t.TempDir() // a PATH on which no tool exists
-	for _, status := range []string{"0", "4"} {
-		res := runScript(t, stepWrapper, t.TempDir(), []string{
-			"PATH=" + nothing,
-			"MEMQL_STEP_COMMAND=exit " + status,
-			"MEMQL_STEP_ARTIFACTS=coverage.out",
-			"MEMQL_ARTIFACT_MARKER=" + testMarker,
-		})
-		if want := map[string]int{"0": 0, "4": 4}[status]; res.code != want {
-			t.Errorf("command exit %s with no tar: wrapper exited %d, want %d", status, res.code, want)
+func TestStepWrapperExportsArtifactsOutsideLogs(t *testing.T) {
+	requireTools(t, "tar", "chmod", "mv")
+	for _, command := range []string{"printf 'last words'; exit 0", "printf 'last words'; exit 2"} {
+		workspace := t.TempDir()
+		writeFiles(t, workspace, map[string]string{"coverage.out": "mode: set\n", "reports/a.xml": "<a/>", "notes.txt": "not declared"})
+		res := runScript(t, stepWrapper, workspace, []string{"PATH=" + os.Getenv("PATH"), "MEMQL_STEP_COMMAND=" + command, "MEMQL_STEP_ARTIFACTS=coverage.out reports/*.xml"})
+		if res.stdout != "last words" {
+			t.Fatalf("artifact bytes leaked into output: %q", res.stdout)
 		}
-		if want := "\n" + testMarker + " begin\n" + testMarker + " end\n"; res.stdout != want {
-			t.Errorf("command exit %s with no tar: stdout = %q, want an empty frame %q", status, res.stdout, want)
+		wantCode := 0
+		if strings.HasSuffix(command, "2") {
+			wantCode = 2
+		}
+		if res.code != wantCode {
+			t.Fatal(res)
+		}
+		input, err := os.Open(filepath.Join(workspace, ".export/completed.tar"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// This host-shell test checks tar content and output separation. The
+		// real Linux pod test exercises admission by SnapshotArtifacts; macOS
+		// bsdtar adds host provenance xattrs that Linux container tar does not.
+		reader := tar.NewReader(input)
+		files := map[string]string{}
+		for {
+			h, err := reader.Next()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := io.ReadAll(reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			files[h.Name] = string(body)
+		}
+		input.Close()
+		if len(files) != 2 || files["coverage.out"] != "mode: set\n" || files["reports/a.xml"] != "<a/>" {
+			t.Fatal("incorrect artifact contents", files)
+		}
+
+		if modeOf(t, filepath.Join(workspace, ".export/completed.tar")) != 0644 {
+			t.Fatal("collector cannot read exported archive")
+		}
+	}
+}
+
+func TestStepWrapperFailedTarLeavesNoCompletedExport(t *testing.T) {
+	for _, path := range []string{os.Getenv("PATH"), t.TempDir()} {
+		workspace := t.TempDir()
+		res := runScript(t, stepWrapper, workspace, []string{"PATH=" + path, "MEMQL_STEP_COMMAND=exit 4", "MEMQL_STEP_ARTIFACTS=absent"})
+		if res.code != 4 || res.stdout != "" {
+			t.Fatal(res)
+		}
+		if _, err := os.Stat(filepath.Join(workspace, ".export/completed.tar")); !os.IsNotExist(err) {
+			t.Fatal("failed tar published a completed archive", err)
 		}
 	}
 }
