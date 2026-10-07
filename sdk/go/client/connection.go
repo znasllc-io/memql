@@ -92,7 +92,8 @@ type Connection struct {
 	finalOnce sync.Once
 	finalCh   chan struct{}
 
-	// Server info from handshake.
+	// Server info from handshake. Reconnecting callers use ServerInfo() to
+	// read these fields together without racing the next handshake.
 	NodeId string
 	// Version is the WIRE PROTOCOL version the node speaks ("v1"), not its
 	// release. Read EngineVersion for that.
@@ -276,6 +277,23 @@ func (c *Connection) Status() ConnectionStatus {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
 	return c.status
+}
+
+// ConnectionServerInfo is one coherent snapshot of the current handshake.
+// It identifies the serving process; it does not attest a signed release.
+type ConnectionServerInfo struct {
+	NodeID, Version, EngineVersion, EngineCommit string
+	Edition, GrammarVersion, EditorRelease       string
+}
+
+// ServerInfo safely reads handshake metadata while auto-reconnect is active.
+// This synchronization is specific to Go's reconnect goroutine; browser SDK
+// callers read the same fields synchronously on their event loop.
+func (c *Connection) ServerInfo() ConnectionServerInfo {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	return ConnectionServerInfo{c.NodeId, c.Version, c.EngineVersion, c.EngineCommit,
+		c.Edition, c.GrammarVersion, c.EditorRelease}
 }
 
 // Attempt is the number of consecutive failed redials since the last live
@@ -499,6 +517,7 @@ func (c *Connection) handshake(ctx context.Context) error {
 	}
 
 	if hello := resp.GetServerHello(); hello != nil {
+		c.stateMu.Lock()
 		c.NodeId = hello.GetNodeId()
 		c.Version = hello.GetVersion()
 		c.EngineVersion = hello.GetEngineVersion()
@@ -506,12 +525,13 @@ func (c *Connection) handshake(ctx context.Context) error {
 		c.Edition = hello.GetEdition()
 		c.GrammarVersion = hello.GetGrammarVersion()
 		c.EditorRelease = hello.GetEditorRelease()
+		c.stateMu.Unlock()
 		if c.logger != nil {
 			c.logger.Info("connected to MemQL node",
-				"nodeId", c.NodeId,
-				"protocolVersion", c.Version,
-				"engineVersion", c.EngineVersion,
-				"grammarVersion", c.GrammarVersion,
+				"nodeId", hello.GetNodeId(),
+				"protocolVersion", hello.GetVersion(),
+				"engineVersion", hello.GetEngineVersion(),
+				"grammarVersion", hello.GetGrammarVersion(),
 			)
 		}
 	}
