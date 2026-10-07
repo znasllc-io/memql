@@ -112,6 +112,7 @@ func newWorkloadFixture(t *testing.T, kinds ...string) *workloadFixture {
 		discovery[version] = append(discovery[version], map[string]any{"name": plural, "kind": kind, "namespaced": true})
 		path := base + "/namespaces/memql/" + plural + "/" + name
 		pod := map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": workloadMeta(name + "-pod"), "spec": workloadObject(t, workloadJSON(t, podSpec)), "status": map[string]any{"phase": "Running", "conditions": []any{map[string]any{"type": "Ready", "status": "True"}}, "containerStatuses": []any{map[string]any{"name": containerName, "ready": true, "imageID": nextRef, "state": map[string]any{"running": map[string]any{}}}}}}
+		resourceMap(pod, "spec")["nodeName"] = "worker"
 		pm := resourceMap(pod, "metadata")
 		pm["labels"] = labels
 		pm["ownerReferences"] = workloadOwnerFixture(version, kind, name)
@@ -161,6 +162,9 @@ func newWorkloadFixture(t *testing.T, kinds ...string) *workloadFixture {
 	f.api.response["api/v1/namespaces/memql/pods?limit=256"] = workloadJSON(t, workloadListFixture("v1", "Pod", pods))
 	f.api.response["apis/apps/v1/namespaces/memql/replicasets?limit=256"] = workloadJSON(t, workloadListFixture("apps/v1", "ReplicaSet", sets))
 	f.api.response["apis/batch/v1/namespaces/memql/jobs?limit=256"] = workloadJSON(t, workloadListFixture("batch/v1", "Job", jobs))
+	nodeMeta := workloadMeta("worker")
+	delete(nodeMeta, "namespace")
+	f.api.response["api/v1/nodes/worker"] = workloadJSON(t, map[string]any{"apiVersion": "v1", "kind": "Node", "metadata": nodeMeta, "status": map[string]any{"nodeInfo": map[string]any{"operatingSystem": "linux", "architecture": "arm64"}, "conditions": []any{map[string]any{"type": "Ready", "status": "True"}}}})
 	f.artifacts.before = renderInventoryFixture(t, strings.Repeat("a", 40), before)
 	f.artifacts.after = renderInventoryFixture(t, strings.Repeat("b", 40), after)
 	scope, err := newArtifactAdmission(context.Background(), f.api, f.artifacts.config, f.artifacts.old, f.artifacts.next, f.artifacts.before, f.artifacts.after)
@@ -293,7 +297,7 @@ func (a *changingWorkloadAPI) Do(ctx context.Context, method, path, ct string, b
 }
 
 func TestWorkloadsReobserveControllerAndCollectionBeforeSealing(t *testing.T) {
-	for _, path := range []string{"apis/apps/v1/namespaces/memql/deployments/workload-0", "apis/apps/v1/namespaces/memql/replicasets?limit=256", "api/v1/namespaces/memql/pods?limit=256"} {
+	for _, path := range []string{"apis/apps/v1/namespaces/memql/deployments/workload-0", "apis/apps/v1/namespaces/memql/replicasets?limit=256", "api/v1/namespaces/memql/pods?limit=256", "api/v1/nodes/worker"} {
 		t.Run(path, func(t *testing.T) {
 			f := newWorkloadFixture(t, "Deployment")
 			s := f.scope(t)

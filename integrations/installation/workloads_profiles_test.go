@@ -44,7 +44,7 @@ func TestWorkloadProfilesRefuseUnconvergedControllers(t *testing.T) {
 	}
 }
 
-func TestWorkloadsRequireSelectedPlatformManifestRatherThanIndex(t *testing.T) {
+func TestWorkloadsBindIndexAndManifestToTheAssignedNodePlatform(t *testing.T) {
 	f := newWorkloadFixture(t, "Deployment")
 	publication, err := f.artifacts.next.Release()
 	require.NoError(t, err)
@@ -87,7 +87,19 @@ func TestWorkloadsRequireSelectedPlatformManifestRatherThanIndex(t *testing.T) {
 	resourceMap(pod, "status")["containerStatuses"].([]any)[0].(map[string]any)["imageID"] = newRef
 	f.api.response[p] = workloadJSON(t, list)
 	_, err = s.check(context.Background(), s.requirements[0].Key)
-	require.ErrorContains(t, err, "platform manifest")
+	require.NoError(t, err, "containerd reports the verified root index")
+	nodePath := "api/v1/nodes/worker"
+	node := workloadObject(t, f.api.response[nodePath])
+	resourceMap(resourceMap(node, "status"), "nodeInfo")["architecture"] = "amd64"
+	f.api.response[nodePath] = workloadJSON(t, node)
+	_, err = s.check(context.Background(), s.requirements[0].Key)
+	require.ErrorContains(t, err, "verified platform")
+	resourceMap(resourceMap(node, "status"), "nodeInfo")["architecture"] = "arm64"
+	f.api.response[nodePath] = workloadJSON(t, node)
+	resourceMap(pod, "status")["containerStatuses"].([]any)[0].(map[string]any)["imageID"] = oldImage
+	f.api.response[p] = workloadJSON(t, list)
+	_, err = s.check(context.Background(), s.requirements[0].Key)
+	require.ErrorContains(t, err, "verified image and platform")
 }
 
 func TestWorkloadSelectorOwnershipCandidates(t *testing.T) {

@@ -348,7 +348,7 @@ func (s *workloadAdmission) observeWorkload(ctx context.Context, reads *receiver
 		}
 		return nil
 	case "/Pod":
-		return s.observeWorkloadPod(live, spec, false, false)
+		return s.observeWorkloadPod(ctx, reads, live, spec, false, false)
 	case "postgresql.cnpg.io/Cluster":
 		count, err = databaseInstances(spec)
 		if err != nil || workloadCount(status, "readyInstances", 0) != count || !workloadCondition(status, "Ready") || resourceText(status, "currentPrimary") == "" || resourceText(status, "currentPrimary") != resourceText(status, "targetPrimary") {
@@ -436,7 +436,7 @@ func (s *workloadAdmission) observeOwnedWorkloadPods(ctx context.Context, reads 
 			continue
 		}
 		cnpg := object.identity.Kind == "Cluster"
-		if err := s.observeWorkloadPod(pod, podSpec, completed, cnpg); err != nil {
+		if err := s.observeWorkloadPod(ctx, reads, pod, podSpec, completed, cnpg); err != nil {
 			return err
 		}
 		if resourceText(podMeta, "name") == resourceText(resourceMap(live, "status"), "currentPrimary") {
@@ -453,8 +453,11 @@ func (s *workloadAdmission) observeOwnedWorkloadPods(ctx context.Context, reads 
 	return nil
 }
 
-func (s *workloadAdmission) observeWorkloadPod(pod, expected map[string]any, completed, cnpg bool) error {
+func (s *workloadAdmission) observeWorkloadPod(ctx context.Context, reads *receiverReads, pod, expected map[string]any, completed, cnpg bool) error {
 	spec, status := resourceMap(pod, "spec"), resourceMap(pod, "status")
+	if err := s.observeWorkloadNode(ctx, reads, resourceText(spec, "nodeName")); err != nil {
+		return err
+	}
 	// Kubernetes 1.32 does not expose a resolved digest for an image volume.
 	// Registry availability alone cannot prove the bytes actually mounted.
 	if containsImageField(spec["volumes"]) {
@@ -521,8 +524,14 @@ func (s *workloadAdmission) observeWorkloadPod(pod, expected map[string]any, com
 				}
 			}
 			runtime := strings.TrimPrefix(resourceText(state, "imageID"), "docker-pullable://")
-			if state == nil || runtime == "" || runtime != s.runtimeImages[resourceText(w, "image")] {
-				return errors.New("workload runtime image differs from its verified platform manifest")
+			root := resourceText(w, "image")
+			manifest := s.runtimeImages[root]
+			// containerd may report the root index; other runtimes report the
+			// selected manifest. Native OCI verification established exactly one
+			// matching platform, and the Pod's actual Node was checked above.
+			// A config ID, arbitrary digest or unknown root remains insufficient.
+			if state == nil || manifest == "" || (runtime != manifest && runtime != root) {
+				return errors.New("workload runtime image differs from its verified image and platform")
 			}
 			if completed || pair[0] == "initContainers" {
 				if resourceText(w, "restartPolicy") == "Always" && !completed {
@@ -536,6 +545,26 @@ func (s *workloadAdmission) observeWorkloadPod(pod, expected map[string]any, com
 				return errors.New("workload container is not running and ready")
 			}
 		}
+	}
+	return nil
+}
+
+func (s *workloadAdmission) observeWorkloadNode(ctx context.Context, reads *receiverReads, name string) error {
+	if !kubernetesSegment.MatchString(name) || len(name) > 253 {
+		return errors.New("workload Pod has no valid assigned Node")
+	}
+	node, err := reads.get(ctx, "api/v1/nodes/"+name)
+	if err != nil {
+		return err
+	}
+	if resourceText(node, "apiVersion") != "v1" || resourceText(node, "kind") != "Node" || validLiveStorage(node, resourceIdentity{"", "Node", "", name}) != nil {
+		return errors.New("workload Node identity is absent, changed or deleting")
+	}
+	status := resourceMap(node, "status")
+	info := resourceMap(status, "nodeInfo")
+	platform := resourceText(info, "operatingSystem") + "/" + resourceText(info, "architecture")
+	if (platform != "linux/arm64" && platform != "linux/amd64") || platform != s.platform || !workloadCondition(status, "Ready") {
+		return errors.New("workload Node is not ready on the verified platform")
 	}
 	return nil
 }

@@ -9,6 +9,9 @@ owner: znas
 
 # Installation workload verification
 
+> Historical: implementation record for the private 0.25.0 workload verifier;
+> retained for its boundary and evidence contract.
+
 Implementation record for the private workload observation host. The broader
 [installation revision workflow](../planning/installation-revision-effects.md)
 is still under local qualification; this host cannot complete an installation
@@ -60,8 +63,12 @@ live replicas prevent convergence. Unrelated namespace workloads do not become
 part of the installation's authority.
 
 Each required Pod must have the correct declared images, the exact expected
-container inventory, and matching runtime image IDs from the verified platform
-manifests. Running containers must be ready; ordinary init containers must have
+container inventory, and matching runtime image IDs from the verified root or
+selected platform manifest. Containerd can report the index root. The verifier
+therefore reads the Pod's exact assigned Node, checks native `nodeInfo` OS and
+architecture against the verified platform and requires Node readiness. The
+OCI verifier has already refused ambiguous platform selection. Arbitrary
+config IDs and unknown digests cannot substitute for that relationship. Running containers must be ready; ordinary init containers must have
 exited successfully; restartable init containers must be running and ready.
 Commands and environment must agree with the controller. Before producing an
 observation the codec rereads every resource and collection, checking Kubernetes
@@ -103,7 +110,7 @@ or retention release.
 
 Protocol tests use signed publication envelopes, real OCI manifest/config/layer
 reads and the native Argo render codec. They cover all eight admitted workload
-kinds, multi-platform index resolution, changed ownership and configuration,
+kinds, multi-platform index/manifest runtime IDs bound to an assigned Node, changed ownership and configuration,
 missing/extra Pods and containers, concurrent resource changes, stale evidence,
 and recovery in a fresh host. Host tests run both the installed recipe and an
 alternate composition, and verify that caller inputs, unbound operations or

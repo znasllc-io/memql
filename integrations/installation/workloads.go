@@ -45,6 +45,21 @@ func (workloadObservation) GoString() string { return "<installation workload ob
 func (workloadEvidence) String() string      { return "<installation workload evidence>" }
 func (workloadEvidence) GoString() string    { return "<installation workload evidence>" }
 
+// require binds the opaque result at its point of use. The completion host
+// must still require the owned Argo intent and its other independent proofs.
+func (e workloadEvidence) require(rendered argocd.RenderedRevision, artifacts artifactEvidence, workflow, operator string) error {
+	now := time.Now().UTC()
+	if !internalDigest.MatchString(e.digest) || !internalDigest.MatchString(e.scope) ||
+		!internalDigest.MatchString(workflow) || !identifier.MatchString(operator) ||
+		e.render != rendered.Digest() || e.artifacts != artifacts.digest ||
+		e.configuration != artifacts.configuration || e.platform != artifacts.platform ||
+		e.workflow != workflow || e.operator != operator || artifacts.operator != operator ||
+		!freshPreservationObservation(e.observed, now) || !e.expires.After(now) || !artifacts.expires.After(now) {
+		return errors.New("workload evidence is stale or differs from its native completion scope")
+	}
+	return nil
+}
+
 func newWorkloadAdmission(ctx context.Context, api argocd.API, rendered argocd.RenderedRevision, artifacts artifactEvidence) (*workloadAdmission, error) {
 	now := time.Now().UTC()
 	if api == nil || rendered.Digest() == "" ||

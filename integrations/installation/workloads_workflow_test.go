@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
@@ -29,6 +30,27 @@ func TestWorkloadWorkflowInstalledRecipeAndFreshHost(t *testing.T) {
 	first, err := w.run(ctx, f.scope(t), "operator")
 	require.NoError(t, err)
 	require.Equal(t, w.digest, first.workflow)
+	require.NoError(t, first.require(f.artifacts.after, f.evidence, w.digest, "operator"))
+	for _, fault := range []string{"workflow", "actor", "render", "artifacts", "expiry", "future"} {
+		t.Run("consume/"+fault, func(t *testing.T) {
+			e := first
+			switch fault {
+			case "workflow":
+				e.workflow = "changed"
+			case "actor":
+				e.operator = "another"
+			case "render":
+				e.render = f.artifacts.before.Digest()
+			case "artifacts":
+				e.artifacts = "changed"
+			case "expiry":
+				e.expires = time.Now().Add(-time.Second)
+			case "future":
+				e.observed = time.Now().Add(time.Minute)
+			}
+			require.Error(t, e.require(f.artifacts.after, f.evidence, w.digest, "operator"))
+		})
+	}
 	f.api.reads = nil
 	other, err := loadWorkloadWorkflow(strings.Repeat("d", 40))
 	require.NoError(t, err)
