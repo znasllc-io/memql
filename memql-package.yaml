@@ -82,6 +82,7 @@ pipeline:
       - integrations/groups
       - integrations/planner
       - integrations/procedure
+      - integrations/release
       - integrations/shopify
       - integrations/email
       - integrations/sitepreview

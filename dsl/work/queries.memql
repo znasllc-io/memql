@@ -278,6 +278,20 @@ query step workStepsForOwnerRun {
   shape   workStepFull
 }
 
+/// One caller-owned execution receipt. A named key avoids reading an entire
+/// run when verifying a release artifact or one required check.
+@actor
+@unbounded("one step key in one run -- bounded to one journal row")
+query step workStepForOwnerRun {
+  args {
+    runId    string!
+    stepKey  string!
+  }
+  filter row => row.runId == args.runId && row.key == args.stepKey
+             && row.ownerUserId == actor.userId
+  shape workStepFull
+}
+
 /// Every model call of one of the caller's runs. An on-demand read: the concept does not
 /// broadcast, so the Work app shows when it last read this.
 @actor

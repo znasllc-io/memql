@@ -83,6 +83,13 @@ type LibraryReceiptReader interface {
 	ReadRunFileReceipts(context.Context, RunFileReceiptScope, []string) ([]StoredFileReceipt, error)
 }
 
+// LibraryReceiptOpener opens the pinned provider version behind an authorized
+// native receipt. EOF verifies its exact size and SHA-256. The consumer owns
+// closing and must finish verification before any publication effect.
+type LibraryReceiptOpener interface {
+	OpenRunFileReceipt(context.Context, RunFileReceiptScope, string) (StoredFileReceipt, io.ReadCloser, error)
+}
+
 // RunFileReference pins a fixed set of artifacts for one durable consumer.
 // ReferenceID is chosen and persisted by the authorized caller (for example,
 // a publication candidate), and is never reused after release. Each scope has
