@@ -1,0 +1,29 @@
+// Private scoped ports: these declarations grant no callable integration.
+/// Commit retirement before any cleanup effect.
+@executor("integration.installation.installationRetirementBegin")
+builtin installationRetirementBegin { }
+/// Permanently stop and reconcile the preparation-owned producer run.
+@executor("integration.installation.installationRetirementStop")
+builtin installationRetirementStop { }
+/// Permanently fence one capture's future artifact admissions.
+@executor("integration.installation.installationRetirementFence")
+@args(profile="object")
+builtin installationRetirementFence { role string! }
+/// Permanently release one capture's exact source consumer.
+@executor("integration.installation.installationRetirementRelease")
+@args(profile="object")
+builtin installationRetirementRelease { role string! }
+/// Recover the pending artifact page or advance after all its receipts exist.
+@executor("integration.installation.installationRetirementPage")
+@args(profile="object")
+builtin installationRetirementPage { role string! }
+/// Confirm provider retirement for one inventoried artifact.
+@executor("integration.installation.installationRetirementArtifact")
+@args(profile="object")
+builtin installationRetirementArtifact { role string! intentId string! }
+/// Read completion prerequisites from the durable native journal.
+@executor("integration.installation.installationRetirementObserve")
+builtin installationRetirementObserve { }
+/// Release only a fully retired preparation's own installation slot.
+@executor("integration.installation.installationRetirementComplete")
+builtin installationRetirementComplete { }

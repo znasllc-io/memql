@@ -28,6 +28,7 @@ type preparationRecord struct {
 	State          string
 	PromotedPlanID string
 	Captures       map[string]preparationCapture
+	Retirement     *preparationRetirement
 }
 
 func (r preparationRecord) String() string {
@@ -130,21 +131,25 @@ func (j *preparationJournal) reserve(ctx context.Context, scope preparationScope
 
 func readPreparation(ctx context.Context, tx *sql.Tx, installation, key string) (preparationRecord, error) {
 	r := preparationRecord{ID: key}
-	var scope, captures []byte
+	var scope, captures, retirement []byte
 	var request, actor, run string
 	var promoted sql.NullString
-	err := tx.QueryRowContext(ctx, `SELECT scope,captures,slot_epoch,state,request_id,requested_by,source_run_id,promoted_plan_id FROM installation_preparations WHERE installation_id=$1 AND preparation_id=$2 FOR UPDATE`, installation, key).Scan(&scope, &captures, &r.SlotEpoch, &r.State, &request, &actor, &run, &promoted)
+	err := tx.QueryRowContext(ctx, `SELECT scope,captures,slot_epoch,state,request_id,requested_by,source_run_id,promoted_plan_id,retirement FROM installation_preparations WHERE installation_id=$1 AND preparation_id=$2 FOR UPDATE`, installation, key).Scan(&scope, &captures, &r.SlotEpoch, &r.State, &request, &actor, &run, &promoted, &retirement)
 	if err != nil {
 		return preparationRecord{}, err
 	}
 	var digest string
 	r.Scope, digest, err = decodePreparationScope(scope)
 	r.PromotedPlanID = promoted.String
-	if err != nil || digest != key || r.Scope.InstallationID != installation || r.Scope.RequestID != request || r.Scope.RequestedBy != actor || run != preparationSourceRun(installation, request, actor) || r.SlotEpoch < 1 || (r.State != "preparing" && r.State != "cancelled" && r.State != "promoted") {
+	if err != nil || digest != key || r.Scope.InstallationID != installation || r.Scope.RequestID != request || r.Scope.RequestedBy != actor || run != preparationSourceRun(installation, request, actor) || r.SlotEpoch < 1 || (r.State != "preparing" && r.State != "retiring" && r.State != "cancelled" && r.State != "promoted") {
 		return preparationRecord{}, errors.New("installation preparation identity is inconsistent")
 	}
 	if (r.State == "promoted") != promoted.Valid || (promoted.Valid && !internalDigest.MatchString(promoted.String)) {
 		return preparationRecord{}, errors.New("installation preparation promotion marker is inconsistent")
+	}
+	r.Retirement, err = decodePreparationRetirement(retirement, r.State)
+	if err != nil {
+		return preparationRecord{}, err
 	}
 	if len(captures) > 64<<10 {
 		return preparationRecord{}, errors.New("preparation capture records exceed their bound")
@@ -162,7 +167,7 @@ func readPreparation(ctx context.Context, tx *sql.Tx, installation, key string) 
 	}
 	for role, spec := range r.Scope.Captures {
 		c, exists := r.Captures[role]
-		if !exists || (!c.Started && (c.Receipt != nil || c.SourceDigest != "" || c.ReceiptDigest != "" || c.Acknowledged)) || (r.State == "cancelled" && c.Started) {
+		if !exists || (!c.Started && (c.Receipt != nil || c.SourceDigest != "" || c.ReceiptDigest != "" || c.Acknowledged)) || (r.State == "cancelled" && c.Started && r.Retirement == nil) {
 			return preparationRecord{}, errors.New("preparation capture markers are inconsistent")
 		}
 		capture, err := newSourceCapture(spec)
@@ -190,6 +195,10 @@ func readPreparation(ctx context.Context, tx *sql.Tx, installation, key string) 
 // The shared installation head is always locked first. It fences final Argo
 // attempts as well as preparation, including late callbacks on another node.
 func (j *preparationJournal) withRecord(ctx context.Context, installation, key, workflow string, update func(*preparationRecord) error) (preparationRecord, error) {
+	return j.withRecordState(ctx, installation, key, workflow, "preparing", update)
+}
+
+func (j *preparationJournal) withRecordState(ctx context.Context, installation, key, workflow, state string, update func(*preparationRecord) error) (preparationRecord, error) {
 	actor, err := preparationActor(ctx)
 	if err != nil {
 		return preparationRecord{}, err
@@ -214,7 +223,7 @@ func (j *preparationJournal) withRecord(ctx context.Context, installation, key, 
 	if err != nil {
 		return preparationRecord{}, err
 	}
-	if r.State == "preparing" && (plan != "" || active != key || epoch != r.SlotEpoch) {
+	if (r.State == "preparing" || r.State == "retiring") && (plan != "" || active != key || epoch != r.SlotEpoch) {
 		return preparationRecord{}, errChanged
 	}
 	if r.State == "promoted" {
@@ -223,7 +232,7 @@ func (j *preparationJournal) withRecord(ctx context.Context, installation, key, 
 		}
 	}
 	if update != nil {
-		if r.State != "preparing" || actor != r.Scope.RequestedBy || workflow != r.Scope.WorkflowDigest {
+		if r.State != state || actor != r.Scope.RequestedBy || workflow != r.Scope.WorkflowDigest {
 			return preparationRecord{}, errors.New("preparation effect authority or workflow changed")
 		}
 		if err = update(&r); err != nil {
@@ -233,7 +242,11 @@ func (j *preparationJournal) withRecord(ctx context.Context, installation, key, 
 		if err != nil {
 			return preparationRecord{}, err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE installation_preparations SET captures=$2::jsonb,state=$3,updated_at=clock_timestamp() WHERE preparation_id=$1`, key, string(body), r.State)
+		retirement, err := json.Marshal(r.Retirement)
+		if err != nil {
+			return preparationRecord{}, err
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE installation_preparations SET captures=$2::jsonb,state=$3,retirement=$4::jsonb,updated_at=clock_timestamp() WHERE preparation_id=$1`, key, string(body), r.State, string(retirement))
 		if err != nil {
 			return preparationRecord{}, err
 		}
