@@ -212,8 +212,8 @@ func engineImportGraph(t *testing.T) (*pipelines.Graph, map[string]bool) {
 // component/pipelinerun/tree.go's readPlan does, and must change when it does:
 // the block validated before anything is computed from it, the mode the event
 // decides in the installed DSL, the stages selected by the installed DSL,
-// the change list a pull request's compare answers, the import graph selected
-// with Affected whenever a step selects packages, and Compile.
+// the change list a pull request's compare answers, the import graph facts
+// selected by the pinned package policy, and Compile.
 //
 // The Cockpit trial requires the owner's explicit fleet consent. The separate
 // consent guard below proves a cluster-only connection refuses this manifest.
@@ -246,31 +246,7 @@ func compileEngineOpening(spec *pipelines.Spec, graph *pipelines.Graph, event pi
 	}
 	in.StageSelection = &stageSelection
 	changedKnown := mode == pipelines.ModeAffected
-	if pipelines.NeedsBucketSelection(spec) {
-		selection := pipelines.BucketSelection{Included: []string{}}
-		pathsValid := pipelines.RepositoryPathsValid(changed)
-		if spec.Select != nil {
-			for _, name := range slices.Sorted(maps.Keys(spec.Select.Buckets)) {
-				matched, err := pipelines.AnyPathMatches(spec.Select.Buckets[name], changed)
-				if err != nil {
-					return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/buckets", "%v", err)
-				}
-				value, err := workflowhost.Run(context.Background(), "pipelineBucketIncluded", map[string]any{
-					"mode": string(mode), "known": changedKnown, "changedCount": len(changed),
-					"pathsValid": pathsValid, "matched": matched,
-				}, workflowhost.Options{})
-				included, ok := value.(bool)
-				if err != nil || !ok {
-					return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/buckets",
-						"pipelineBucketIncluded returned %T or failed: %v", value, err)
-				}
-				if included {
-					selection.Included = append(selection.Included, name)
-				}
-			}
-		}
-		in.BucketSelection = &selection
-	}
+	selectionFull := false
 	if pipelines.NeedsSelector(spec) {
 		var full []string
 		if spec.Select != nil {
@@ -305,6 +281,7 @@ func compileEngineOpening(spec *pipelines.Spec, graph *pipelines.Graph, event pi
 		if err != nil {
 			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/packages", "%v", err)
 		}
+		selectionFull = selection.Full
 		in.Selector = pipelines.GraphSelector(graph, selection)
 		in.PackagePolicies = map[string]pipelines.PackagePolicy{}
 		for _, stage := range spec.Stages {
@@ -329,6 +306,31 @@ func compileEngineOpening(spec *pipelines.Spec, graph *pipelines.Graph, event pi
 				in.PackagePolicies[pipelines.StepKey(stage.Name, step.Name)] = pipelines.PackagePolicy{Coverage: coverage, Filter: filter}
 			}
 		}
+	}
+	if pipelines.NeedsBucketSelection(spec) {
+		buckets := pipelines.BucketSelection{Included: []string{}}
+		pathsValid := pipelines.RepositoryPathsValid(changed)
+		if spec.Select != nil {
+			for _, name := range slices.Sorted(maps.Keys(spec.Select.Buckets)) {
+				matched, err := pipelines.AnyPathMatches(spec.Select.Buckets[name], changed)
+				if err != nil {
+					return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/buckets", "%v", err)
+				}
+				value, err := workflowhost.Run(context.Background(), "pipelineBucketIncluded", map[string]any{
+					"mode": string(mode), "known": changedKnown, "changedCount": len(changed),
+					"selectionFull": selectionFull, "pathsValid": pathsValid, "matched": matched,
+				}, workflowhost.Options{})
+				included, ok := value.(bool)
+				if err != nil || !ok {
+					return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/buckets",
+						"pipelineBucketIncluded returned %T or failed: %v", value, err)
+				}
+				if included {
+					buckets.Included = append(buckets.Included, name)
+				}
+			}
+		}
+		in.BucketSelection = &buckets
 	}
 	return pipelines.Compile(spec, in)
 }

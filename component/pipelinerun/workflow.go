@@ -274,7 +274,7 @@ func (dr *runDriver) selectPackagePolicies(ctx context.Context, spec *pipelines.
 	return policies, nil
 }
 
-func (dr *runDriver) selectBuckets(ctx context.Context, spec *pipelines.Spec, mode pipelines.Mode, changed []string, known bool) (pipelines.BucketSelection, error) {
+func (dr *runDriver) selectBuckets(ctx context.Context, spec *pipelines.Spec, mode pipelines.Mode, changed []string, known, selectionFull bool) (pipelines.BucketSelection, error) {
 	selection := pipelines.BucketSelection{Included: make([]string, 0)}
 	pathsValid := pipelines.RepositoryPathsValid(changed)
 	if spec.Select == nil {
@@ -286,7 +286,7 @@ func (dr *runDriver) selectBuckets(ctx context.Context, spec *pipelines.Spec, mo
 			return pipelines.BucketSelection{}, fmt.Errorf("bucket %q: %w", name, err)
 		}
 		value, err := dr.runPinnedWorkflow(ctx, "pipelineBucketIncluded", map[string]any{
-			"mode": string(mode), "known": known, "changedCount": len(changed),
+			"mode": string(mode), "known": known, "changedCount": len(changed), "selectionFull": selectionFull,
 			"pathsValid": pathsValid, "matched": matches,
 		})
 		if err != nil {

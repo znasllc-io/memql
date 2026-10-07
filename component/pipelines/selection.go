@@ -50,7 +50,8 @@ const (
 )
 
 // BucketSelection is the set of manifest buckets whose guarded steps should
-// run, selected by the pinned pipeline DSL from path-match facts.
+// run, selected by the pinned pipeline DSL from path-match and full-coverage
+// facts.
 type BucketSelection struct {
 	Included []string
 }

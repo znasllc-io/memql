@@ -10,7 +10,8 @@
             "known": true,
             "matched": true,
             "mode": "s-mode",
-            "pathsValid": true
+            "pathsValid": true,
+            "selectionFull": true
           },
           "topic": "automation.invocation.pipelineBucketIncluded"
         },
@@ -33,7 +34,8 @@
             "known": true,
             "matched": true,
             "mode": "s-mode",
-            "pathsValid": true
+            "pathsValid": true,
+            "selectionFull": true
           },
           "topic": "automation.invocation.pipelineBucketIncluded"
         },

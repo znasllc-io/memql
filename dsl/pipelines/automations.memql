@@ -114,12 +114,13 @@ automation pipelinePackageStepSelection {
   return {coverage: coverage, filter: packageFilter}
 }
 
-/// A bucket can skip a step only when the run is affected, the full change
-/// list was read, and no path matched its configured globs.
+/// A bucket can skip a step only when the run remains safely narrowed, the
+/// change list is complete, and no path matched its configured globs. A full
+/// package-selection decision runs every bucketed step.
 @template
 automation pipelineBucketIncluded {
-  args { mode string! known bool! changedCount int! pathsValid bool! matched bool! }
-  return args.mode != "affected" || !args.known || args.changedCount == 0 || !args.pathsValid || args.matched
+  args { mode string! known bool! changedCount int! selectionFull bool! pathsValid bool! matched bool! }
+  return args.mode != "affected" || args.selectionFull || !args.known || args.changedCount == 0 || !args.pathsValid || args.matched
 }
 
 /// Pull requests test affected packages; trees that land or ship test the full set.

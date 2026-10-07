@@ -119,14 +119,7 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 		Timings:        p.Timings,
 		StageSelection: &stageSelection,
 	}
-	if pipelines.NeedsBucketSelection(spec) {
-		selection, err := dr.selectBuckets(ctx, spec, run.Mode, changed, changedKnown)
-		if err != nil {
-			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/buckets",
-				"The pipeline DSL could not select changed-path buckets for this run: %v.", err)
-		}
-		in.BucketSelection = &selection
-	}
+	selectionFull := false
 	if pipelines.NeedsSelector(spec) {
 		graph, err := pipelines.ScanGoTree(tree)
 		if err != nil {
@@ -151,6 +144,7 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/packages",
 				"The pipeline DSL selected package coverage that the import graph cannot safely execute: %v.", err)
 		}
+		selectionFull = selection.Full
 		in.Selector = pipelines.GraphSelector(graph, selection)
 		policies, err := dr.selectPackagePolicies(ctx, spec, run.Mode, selection)
 		if err != nil {
@@ -158,6 +152,14 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 				"The pipeline DSL could not select per-step package coverage: %v.", err)
 		}
 		in.PackagePolicies = policies
+	}
+	if pipelines.NeedsBucketSelection(spec) {
+		buckets, err := dr.selectBuckets(ctx, spec, run.Mode, changed, changedKnown, selectionFull)
+		if err != nil {
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/buckets",
+				"The pipeline DSL could not select changed-path buckets for this run: %v.", err)
+		}
+		in.BucketSelection = &buckets
 	}
 	return pipelines.Compile(spec, in)
 }
