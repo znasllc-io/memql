@@ -550,8 +550,9 @@ func (wd *WorkerDialer) sendTrigger(ch chan struct{}) {
 	}
 }
 
-// reconcile rebuilds the desired target set (seeds ∪ DB rows), diffs it
-// against currently-active dials, and dials/closes to converge.
+// reconcile rebuilds the desired target set, diffs it against
+// currently-active dials, and dials/closes to converge. Static service seeds
+// bootstrap a type only until DB discovery provides per-node targets for it.
 func (wd *WorkerDialer) reconcile(ctx context.Context) {
 	desired, err := wd.buildDesiredSet(ctx)
 	if err != nil {
@@ -589,26 +590,20 @@ func (wd *WorkerDialer) reconcile(ctx context.Context) {
 	}
 }
 
-// buildDesiredSet returns the full desired target map (seeds ∪ DB
-// discovery), keyed by "<type>@<address>". Callers hold no locks.
+// buildDesiredSet returns DB-discovered targets plus static service seeds for
+// node types that have no DB-discovered target yet, keyed by
+// "<type>@<address>". A generic service seed and per-node addresses for the
+// same type would create duplicate streams to the same peer IDs. Callers hold
+// no locks.
 func (wd *WorkerDialer) buildDesiredSet(ctx context.Context) (map[string]WorkerTarget, error) {
 	desired := make(map[string]WorkerTarget)
-
-	for _, t := range wd.seeds {
-		if wd.isSelf(t.Address) {
-			continue
-		}
-		if !wd.allowDialType(t.NodeType) {
-			continue
-		}
-		desired[targetKey(t)] = t
-	}
 
 	if wd.engine != nil {
 		targets, err := wd.discoverFromDB(ctx)
 		if err != nil {
 			return nil, err
 		}
+		discoveredTypes := make(map[NodeType]struct{})
 		for _, t := range targets {
 			if wd.isSelf(t.Address) {
 				continue
@@ -616,9 +611,25 @@ func (wd *WorkerDialer) buildDesiredSet(ctx context.Context) (map[string]WorkerT
 			if !wd.allowDialType(t.NodeType) {
 				continue
 			}
-			// DB-sourced targets override seeds on the same key because
-			// they carry a node_id we'd otherwise have to learn from
-			// NodeWelcome.
+			// Keep each replica's discovered address and NodeId. The static
+			// service seed is added below only when this type has no DB row.
+			desired[targetKey(t)] = t
+			discoveredTypes[t.NodeType] = struct{}{}
+		}
+		for _, t := range wd.seeds {
+			if wd.isSelf(t.Address) || !wd.allowDialType(t.NodeType) {
+				continue
+			}
+			if _, hasNodeTargets := discoveredTypes[t.NodeType]; hasNodeTargets && t.NodeId == "" {
+				continue
+			}
+			desired[targetKey(t)] = t
+		}
+	} else {
+		for _, t := range wd.seeds {
+			if wd.isSelf(t.Address) || !wd.allowDialType(t.NodeType) {
+				continue
+			}
 			desired[targetKey(t)] = t
 		}
 	}
@@ -788,7 +799,7 @@ func (wd *WorkerDialer) handleConnectExit(entry *dialEntry) {
 	nodeId := entry.nodeId
 	entry.mu.Unlock()
 	if nodeId != "" {
-		wd.peerMgr.DetachConnection(nodeId)
+		wd.peerMgr.detachConnectionIf(nodeId, entry.conn)
 	}
 
 	wd.triggerReconcile()
@@ -806,7 +817,7 @@ func (wd *WorkerDialer) shutdownEntry(entry *dialEntry) {
 	entry.mu.Unlock()
 
 	if nodeId != "" {
-		wd.peerMgr.DetachConnection(nodeId)
+		wd.peerMgr.detachConnectionIf(nodeId, entry.conn)
 	}
 	if entry.cancel != nil {
 		entry.cancel()

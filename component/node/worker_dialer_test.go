@@ -10,6 +10,7 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 func TestParseWorkerPeers_Empty(t *testing.T) {
@@ -354,6 +355,93 @@ func TestWorkerDialerDistinctReplicaAddressesRetainSibling(t *testing.T) {
 		if len(got) != 1 || got[targetKey(other)] != other {
 			t.Fatalf("%s desired peers = %+v; want only sibling %+v", self.NodeId, got, other)
 		}
+	}
+}
+
+func TestWorkerDialerDBTargetsReplaceGenericServiceSeedsByType(t *testing.T) {
+	serviceSeed := WorkerTarget{NodeType: NodeTypeWorkbench, Address: "workbench:50060"}
+	agentSeed := WorkerTarget{NodeType: NodeTypeAgent, Address: "agent:50055"}
+	payload, err := structpb.NewStruct(map[string]any{
+		"nodeType": "workbench",
+		"address":  "10.42.0.29:50060",
+		"health":   "healthy",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	identity := testIdentity()
+	wd := NewWorkerDialer(identity, NewPeerManager(identity, testLogger()), nil, nil,
+		[]WorkerTarget{serviceSeed, agentSeed}, testLogger())
+	wd.engine = discoveryReply{result: &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{
+		Nodes: []*memqlv1.MemoryNode{{
+			Id:      "v1:cluster:node:workbench-a",
+			Payload: payload,
+		}},
+	}}}
+
+	got, err := wd.buildDesiredSet(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	discovered := WorkerTarget{NodeType: NodeTypeWorkbench, NodeId: "workbench-a", Address: "10.42.0.29:50060"}
+	if len(got) != 2 || got[targetKey(discovered)] != discovered || got[targetKey(agentSeed)] != agentSeed {
+		t.Fatalf("desired peers = %+v; want discovered workbench replica and unshadowed agent seed", got)
+	}
+	if _, ok := got[targetKey(serviceSeed)]; ok {
+		t.Fatalf("generic workbench service seed remains alongside per-node targets: %+v", got)
+	}
+}
+
+func TestWorkerDialerRetainsServiceSeedUntilDBHasType(t *testing.T) {
+	seed := WorkerTarget{NodeType: NodeTypeWorkbench, Address: "workbench:50060"}
+	identity := testIdentity()
+	wd := NewWorkerDialer(identity, NewPeerManager(identity, testLogger()), nil, nil, []WorkerTarget{seed}, testLogger())
+	wd.engine = discoveryReply{result: &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{}}}
+
+	got, err := wd.buildDesiredSet(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[targetKey(seed)] != seed {
+		t.Fatalf("desired peers = %+v; want bootstrap seed while DB has no workbench rows", got)
+	}
+}
+
+func TestWorkerDialerStaleEntryCannotDetachReplacementConnection(t *testing.T) {
+	for _, teardown := range []string{"shutdown", "connect exit"} {
+		t.Run(teardown, func(t *testing.T) {
+			identity := testIdentity()
+			pm := NewPeerManager(identity, testLogger())
+			peerID := "agent-a"
+			pm.RegisterMonitored(&nodev1.PeerInfo{NodeId: peerID, NodeType: "agent", Address: "10.42.0.11:50055"})
+
+			oldTarget := WorkerTarget{NodeType: NodeTypeAgent, NodeId: peerID, Address: "10.42.0.10:50055"}
+			newTarget := WorkerTarget{NodeType: NodeTypeAgent, NodeId: peerID, Address: "10.42.0.11:50055"}
+			wd := NewWorkerDialer(identity, pm, nil, nil, []WorkerTarget{oldTarget}, testLogger())
+			oldConn := newPeerConnection(identity, peerID, oldTarget.Address, testLogger())
+			newConn := newPeerConnection(identity, peerID, newTarget.Address, testLogger())
+			t.Cleanup(oldConn.Close)
+			t.Cleanup(newConn.Close)
+			oldEntry := &dialEntry{
+				target: oldTarget,
+				conn:   oldConn,
+				nodeId: peerID,
+				cancel: func() {},
+			}
+			wd.conns[targetKey(oldTarget)] = oldEntry
+			pm.AttachConnection(peerID, newConn)
+
+			switch teardown {
+			case "shutdown":
+				wd.shutdownEntry(oldEntry)
+			case "connect exit":
+				wd.handleConnectExit(oldEntry)
+			}
+			if got := pm.Get(peerID).Connection; got != newConn {
+				t.Fatalf("stale %s cleared the replacement connection: got %p, want %p", teardown, got, newConn)
+			}
+		})
 	}
 }
 
