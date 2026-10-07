@@ -61,22 +61,22 @@ func TestSelectMapsEveryFileOntoAPackage(t *testing.T) {
 		wantTag   bool
 	}{
 		{
-			name:      "a Go file in a leaf module reaches its importers and nothing else",
+			name:      "a Go file in a leaf module reaches its importers plus filesystem gates",
 			changed:   []string{"component/work/compile.go"},
-			wantSeeds: ips("component/work"),
-			wantAll:   ips(".", "app", "component/work", "integrations/work"),
+			wantSeeds: ips(".", "component/work", "scripts/ci"),
+			wantAll:   ips(".", "app", "component/work", "integrations/work", "scripts/ci"),
 		},
 		{
 			name:      "a DELETED Go file lands on the package whose directory held it",
 			changed:   []string{"component/work/removed.go"},
-			wantSeeds: ips("component/work"),
-			wantAll:   ips(".", "app", "component/work", "integrations/work"),
+			wantSeeds: ips(".", "component/work", "scripts/ci"),
+			wantAll:   ips(".", "app", "component/work", "integrations/work", "scripts/ci"),
 		},
 		{
 			name:      "a file only a node tag compiles marks a tag change",
 			changed:   []string{"component/node/compiled_agent.go"},
-			wantSeeds: ips("component/node"),
-			wantAll:   ips(".", "app", "component/node", "component/server", "integrations/agent"),
+			wantSeeds: ips(".", "component/node", "scripts/ci"),
+			wantAll:   ips(".", "app", "component/node", "component/server", "integrations/agent", "scripts/ci"),
 			wantTag:   true,
 		},
 		{
@@ -93,16 +93,16 @@ func TestSelectMapsEveryFileOntoAPackage(t *testing.T) {
 			wantAll:   ips(".", "component/memql", "scripts/ci"),
 		},
 		{
-			name:      "a test file reaches its own package only: importers never link it",
+			name:      "a test file reaches its package and filesystem gates: importers never link it",
 			changed:   []string{"component/memql/engine_test.go"},
-			wantSeeds: ips("component/memql"),
-			wantAll:   ips("component/memql"),
+			wantSeeds: ips(".", "component/memql", "scripts/ci"),
+			wantAll:   ips(".", "component/memql", "scripts/ci"),
 		},
 		{
-			name:      "a DELETED test file reaches its own package only",
+			name:      "a DELETED test file reaches its package and filesystem gates",
 			changed:   []string{"component/work/gone_test.go"},
-			wantSeeds: ips("component/work"),
-			wantAll:   ips("component/work"),
+			wantSeeds: ips(".", "component/work", "scripts/ci"),
+			wantAll:   ips(".", "component/work", "scripts/ci"),
 		},
 		{
 			name:      "the gate packages are run, not propagated: a doc beside a build change adds no importers",
@@ -113,8 +113,8 @@ func TestSelectMapsEveryFileOntoAPackage(t *testing.T) {
 		{
 			name:      "a file in a DELETED package directory climbs to the nearest package",
 			changed:   []string{"component/gone/gone.go"},
-			wantSeeds: ips("."),
-			wantAll:   ips("."),
+			wantSeeds: ips(".", "scripts/ci"),
+			wantAll:   ips(".", "scripts/ci"),
 		},
 		{
 			name:      "a repository document reaches the root and the gate packages",
@@ -123,10 +123,10 @@ func TestSelectMapsEveryFileOntoAPackage(t *testing.T) {
 			wantAll:   ips(".", "scripts/ci"),
 		},
 		{
-			name:      "a Go-only change does not pay for the gate packages",
+			name:      "a Go-only change still runs filesystem gates",
 			changed:   []string{"integrations/agent/agent.go"},
-			wantSeeds: ips("integrations/agent"),
-			wantAll:   ips(".", "app", "integrations/agent"),
+			wantSeeds: ips(".", "integrations/agent", "scripts/ci"),
+			wantAll:   ips(".", "app", "integrations/agent", "scripts/ci"),
 		},
 	}
 	for _, c := range cases {
@@ -160,6 +160,28 @@ func TestSelectRefusesAGatePatternThatMatchesNothing(t *testing.T) {
 	g := loadFixture(t)
 	if _, err := Select(g, []string{"README.md"}, []string{"./no/such/tree/..."}); err == nil {
 		t.Fatal("a gate pattern matching no package must be an error: it would silently stop running the gates")
+	}
+}
+
+func TestSelectChildIntegrationSourceRunsItsFilesystemGate(t *testing.T) {
+	g, err := NewGraph([]Package{
+		{ImportPath: ip("integrations"), Dir: "integrations", ModuleDir: "integrations", Files: []string{"integrations/integration.go"}},
+		{ImportPath: ip("integrations/pipelinesteps"), Dir: "integrations/pipelinesteps", ModuleDir: "integrations", Files: []string{"integrations/pipelinesteps/fleet.go"}},
+		{ImportPath: ip("cmd/consumer"), Dir: "cmd/consumer", ModuleDir: ".", Deps: ips("integrations")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{"fleet.go", "fleet_test.go", "deleted_test.go"} {
+		t.Run(file, func(t *testing.T) {
+			sel, err := Select(g, []string{"integrations/pipelinesteps/" + file}, []string{"./integrations"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sel.Mode != ModeAffected || !reflect.DeepEqual(sel.Packages, ips("integrations", "integrations/pipelinesteps")) {
+				t.Fatalf("child source omitted its filesystem gate or propagated that test-only dependency: %+v", sel)
+			}
+		})
 	}
 }
 

@@ -117,8 +117,8 @@ func TestMakePlanNarrowsAPullRequest(t *testing.T) {
 		t.Fatalf("mode %s (%s), want affected", p.Mode, p.Reason)
 	}
 	goDirs, dbDirs := dirsOf(p.GoShards), dirsOf(p.DBShards)
-	if !goDirs["component/work"] || !goDirs["integrations/work"] || len(goDirs) != 2 {
-		t.Errorf("go lane = %v, want exactly component/work and integrations/work", goDirs)
+	if !goDirs["component/work"] || !goDirs["integrations/work"] || !goDirs["."] || !goDirs["scripts/ci"] || len(goDirs) != 4 {
+		t.Errorf("go lane = %v, want component/work, integrations/work and the declared filesystem gates", goDirs)
 	}
 	if len(dbDirs) != 0 || len(p.DBShards) != 0 {
 		t.Errorf("a change nothing db-gated imports must plan no db shard, got %v", dbDirs)
@@ -126,7 +126,7 @@ func TestMakePlanNarrowsAPullRequest(t *testing.T) {
 	if p.Tags {
 		t.Error("a change reaching no tag tree and no tagged file must skip the tag passes")
 	}
-	if want := []string{"component/work", "integrations"}; strings.Join(p.Modules, " ") != strings.Join(want, " ") {
+	if want := []string{".", "component/work", "integrations"}; strings.Join(p.Modules, " ") != strings.Join(want, " ") {
 		t.Errorf("modules = %v, want %v", p.Modules, want)
 	}
 	out, err := p.GitHubOutput()
