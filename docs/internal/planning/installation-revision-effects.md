@@ -203,11 +203,46 @@ worktrees, replacement refs, inherited Git overrides, concurrent collectors,
 cancellation and partial-output cleanup. This is local CLI evidence, not an
 installed Workbench Job or a cloud deployment.
 
-This ships the collector and verification codec, not a completed preparation
-workflow. Native Job dispatch, private artifact ownership, actual renderer
-configuration, candidate-image/resource checks and installation authority
-still have to be connected and qualified together. A successful collector
-receipt alone does not authorize an update.
+The private `sourceCapture` adapter connects that collector to the existing
+pipeline executor and immutable artifact ports. It constructs one fixed,
+cluster-only request: a pinned Workbench image, exact GitHub commit, five-minute
+command deadline, 1 CPU and 512 MiB, no caches, services, fleet execution or
+repository scripts. Its complete request and credential-free render specification
+are bound into the scope digest. A new directory refuses collisions with
+repository paths. Clone credentials remain in the clone container; an optional
+image-pull credential reaches kubelet only. Other authenticated Git hosts need a
+separate qualified acquisition codec.
+
+Preparation must persist `sourceCaptureSpec` before dispatch: the requesting
+operator, preparation-owned run and work-run IDs, step key and attempt, original
+run start, repository and GitHub App installation ID, immutable collector image,
+platform, image-pull secret **name**, and receiver-owned `RenderSpec`. It must
+also bind the resulting scope digest. A replacement replica reconstructs this
+scope from the journal and uses recovery-only dispatch; it cannot choose a new
+attempt or silently restart an uncertain capture. The total native call is
+bounded at ten minutes, including queueing and collection.
+
+The returned `sourceCaptureReceipt` contains only the scope digest and immutable
+artifact intent ID. The journal records it before acknowledging the Job. Source
+verification separately pins that private receipt, opens the exact owner/run/
+step/attempt and provider version, reads through EOF, checks size and SHA-256,
+and repeats `VerifySourceArchive` against the receiver's specification. It
+returns opaque native evidence; neither the collector's stdout nor a mutable
+Library row is a verdict. Verification can be repeated after Job cleanup.
+
+Cleanup is explicit. A durable stopped preparation may cancel its owned run;
+that run ID must never be reused by a successor. Artifact references remain
+until the journal durably retires their consumer and explicitly releases them.
+A failure or uncertain reply never implies permission to unpin or retry work.
+The adapter owns no second authority journal and exposes no public capability.
+
+Local race tests exercise the real executor/Workbench authority hop with a
+replacement receiver lacking the originating context, reconstruction from
+serialized scope, receipt re-verification, changed inputs, wrong ownership,
+truncation, failed EOF verification and unconfirmed cleanup. The external Job
+and object store are protocol fixtures in this test; an installed collector Job
+and the durable preparation/DSL wiring still need joint qualification. A
+successful capture alone never authorizes an installation update.
 
 ### Signed images and complete resource inventory
 
