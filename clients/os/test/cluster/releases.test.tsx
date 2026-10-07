@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ReleaseBrowser } from "../../src/apps/cluster/releases/ReleasesSection";
-import { releaseFixture, releaseId, releaseResult, candidateRecord } from "./releaseFixtures";
+import { fileReleaseFixture, releaseFixture, releaseId, releaseResult, candidateRecord } from "./releaseFixtures";
 
 async function open() { fireEvent.click(await screen.findByRole("button", { name: "Review engine 0.25.0" })); await screen.findByText("Versions"); }
 async function destination() { fireEvent.click(await screen.findByRole("button", { name: "Review destination rehearsal" })); await screen.findByText("Artifact digest"); }
@@ -131,5 +131,108 @@ describe("release review", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Review engine 0.25.0" }));
     await waitFor(() => expect(screen.getByText("The cluster returned a different release.")).toBeTruthy());
     expect(screen.queryByRole("button", { name: "Approve release" })).toBeNull();
+  });
+});
+
+describe("draft release lifecycle", () => {
+  it("reviews deferred metadata before approval, without inventing draft zero", async () => {
+    const f = fileReleaseFixture("ready");
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open();
+    expect(screen.getByText("MemQL 0.25.0")).toBeTruthy();
+    expect(screen.getByText(/Verified desktop release/)).toBeTruthy();
+    expect(screen.getByText("Select as latest")).toBeTruthy();
+    await twice("Approve release");
+    await destination();
+    await screen.findByRole("button", { name: "Create draft" });
+    expect(screen.queryByText(/Draft #0/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Upload file" })).toBeNull();
+    expect(f.state.calls.some((c) => c.kind === "draft")).toBe(false);
+  });
+  it("separates draft, upload and public publication with exact approved identities", async () => {
+    const f = fileReleaseFixture();
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open(); await destination();
+    fireEvent.click(await screen.findByRole("button", { name: "Create draft" }));
+    expect(screen.getByText(/The tag may trigger repository automation/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    await screen.findByText("Draft #81");
+    expect(f.state.calls.filter((c) => ["publish", "promote"].includes(c.kind))).toHaveLength(0);
+    await twice("Upload file");
+    await screen.findByRole("button", { name: "Publish release" });
+    expect(f.state.calls.filter((c) => c.kind === "promote")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Publish release" }));
+    expect(screen.getByText(/and its uploaded files public/)).toBeTruthy();
+    expect(screen.getByText(/Select as the latest release/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Publish release" }));
+    await screen.findByText("Release public and verified");
+    expect(screen.getByText("Release #81")).toBeTruthy();
+    const identity = { candidateId: releaseId, approvalId: "approval-exact", targetId: "rehearsal" };
+    expect(f.state.calls.filter((c) => ["draft", "publish", "promote"].includes(c.kind))).toEqual([
+      { kind: "draft", args: identity }, { kind: "publish", args: { ...identity, component: "engine", artifact: "bff" } }, { kind: "promote", args: identity },
+    ]);
+    expect(screen.queryByRole("button", { name: "Upload file" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Publish release" })).toBeNull();
+  });
+  it("keeps uncertain creation across remount, forbids retirement and only reconciles explicitly", async () => {
+    const f = fileReleaseFixture(); f.state.lostDraftReply = true;
+    const view = render(<ReleaseBrowser query={f.query} connected />);
+    await open(); await destination(); await twice("Create draft");
+    await screen.findByText("Draft creation reply was lost");
+    view.unmount(); render(<ReleaseBrowser query={f.query} connected />);
+    await open();
+    expect(screen.queryByRole("button", { name: "Retire release" })).toBeNull();
+    await destination(); await screen.findByRole("button", { name: "Reconcile draft" });
+    expect(screen.queryByRole("button", { name: "Create draft" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Upload file" })).toBeNull();
+    expect(f.state.calls.filter((c) => c.kind === "draft")).toHaveLength(1);
+    f.state.lostDraftReply = false;
+    await twice("Reconcile draft"); await screen.findByRole("button", { name: "Upload file" });
+    expect(f.state.calls.filter((c) => c.kind === "draft")).toHaveLength(2);
+  });
+  it("does not repeat an uncertain public publication on remount", async () => {
+    const f = fileReleaseFixture(); f.state.lostPromotionReply = true;
+    const view = render(<ReleaseBrowser query={f.query} connected />);
+    await open(); await destination(); await twice("Create draft"); await twice("Upload file"); await twice("Publish release");
+    await screen.findByText("Public publication reply was lost");
+    view.unmount(); render(<ReleaseBrowser query={f.query} connected />);
+    await open(); await destination(); await screen.findByRole("button", { name: "Reconcile release" });
+    expect(screen.queryByText("Verified when published; remote availability has not been checked again.")).toBeNull();
+    expect(screen.getByText("The public release outcome has not been verified. Reconcile the recorded attempt.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Upload file" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Publish release" })).toBeNull();
+    expect(f.state.calls.filter((c) => c.kind === "promote")).toHaveLength(1);
+    f.state.lostPromotionReply = false;
+    await twice("Reconcile release"); await screen.findByText("Release public and verified");
+    expect(f.state.calls.filter((c) => c.kind === "promote")).toHaveLength(2);
+  });
+  it("requires every candidate destination before public publication", async () => {
+    const f = fileReleaseFixture();
+    const other = { ...f.state.targets[0]!, targetId: "second", artifact: "other" };
+    f.state.targets.push(other);
+    f.state.record.manifest.destinations.push({ ...f.state.record.manifest.destinations[0]!, targetId: "second", artifact: "other" });
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open(); await destination(); await twice("Create draft"); await twice("Upload file");
+    await screen.findByText(/Upload and verify every candidate destination/);
+    expect(screen.queryByRole("button", { name: "Publish release" })).toBeNull();
+  });
+  it("hides writes when draft history fails, without treating it as empty", async () => {
+    const f = fileReleaseFixture(); f.state.failedDraftRead = true;
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open(); await screen.findByText("Draft history unavailable");
+    expect(screen.queryByRole("button", { name: "Retire release" })).toBeNull();
+    await destination();
+    expect(screen.queryByRole("button", { name: "Create draft" })).toBeNull();
+    f.state.failedDraftRead = false;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findByRole("button", { name: "Create draft" });
+  });
+  it("refuses a draft history belonging to a different approval", async () => {
+    const f = fileReleaseFixture();
+    f.state.drafts = [{ candidateId: releaseId, intentId: "intent-old", approvalId: "approval-old", state: "ready", targets: ["rehearsal"], releaseId: 81 }];
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open(); await destination();
+    await screen.findByText(/history does not match this approval/);
+    expect(screen.queryByRole("button", { name: "Upload file" })).toBeNull();
   });
 });

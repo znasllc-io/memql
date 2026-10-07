@@ -3011,6 +3011,27 @@ QueryClient.prototype.releaseCandidateConfiguration = function (this: QueryClien
   return this.executeNamed("releaseCandidateConfiguration", buildReleaseCandidateConfiguration(args), opts);
 };
 
+/** Read durable draft bindings and publication history without remote effects. */
+export interface ReleaseCandidateDraftsArgs {
+  candidateId: string;
+}
+
+export function buildReleaseCandidateDrafts(args: ReleaseCandidateDraftsArgs): string {
+  const parts: string[] = [];
+  parts.push("candidateId: " + renderMemQLValue(args.candidateId));
+  return "builtin releaseCandidateDrafts(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseCandidateDrafts(args: ReleaseCandidateDraftsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseCandidateDrafts = function (this: QueryClient, args: ReleaseCandidateDraftsArgs = {} as ReleaseCandidateDraftsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseCandidateDrafts", buildReleaseCandidateDrafts(args), opts);
+};
+
 /** Read durable publication intents and verified completion for one candidate. */
 export interface ReleaseCandidatePublicationsArgs {
   candidateId: string;
@@ -3053,6 +3074,31 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseCandidates = function (this: QueryClient, args: ReleaseCandidatesArgs = {} as ReleaseCandidatesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseCandidates", buildReleaseCandidates(args), opts);
+};
+
+/** Separately create or reconcile the exact owner-approved draft and tag. */
+export interface ReleaseCreateCandidateDraftArgs {
+  candidateId: string;
+  approvalId: string;
+  targetId: string;
+}
+
+export function buildReleaseCreateCandidateDraft(args: ReleaseCreateCandidateDraftArgs): string {
+  const parts: string[] = [];
+  parts.push("candidateId: " + renderMemQLValue(args.candidateId));
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  parts.push("targetId: " + renderMemQLValue(args.targetId));
+  return "builtin releaseCreateCandidateDraft(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseCreateCandidateDraft(args: ReleaseCreateCandidateDraftArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseCreateCandidateDraft = function (this: QueryClient, args: ReleaseCreateCandidateDraftArgs = {} as ReleaseCreateCandidateDraftArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseCreateCandidateDraft", buildReleaseCreateCandidateDraft(args), opts);
 };
 
 /** Cut a new release of MemQL: compute the next version from the repository's existing vX.Y.Z tags, create the tag at main's head, and publish a GitHub Release -- which is what fires the image-build cascade. Refuses with version_file_stale unless the repo-root VERSION file at main's head already reads the version being cut; VERSION arrives by pull request before the cut. Owner role only, enforced in Go before any network call. Returns the version, the Release URL and the base sha. Requires MEMQL_RELEASE_REPO and the MEMQL_GITHUB_RELEASE_TOKEN credential. */
@@ -3158,6 +3204,31 @@ declare module "./query.js" {
 
 QueryClient.prototype.releasePrepareCandidate = function (this: QueryClient, args: ReleasePrepareCandidateArgs = {} as ReleasePrepareCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releasePrepareCandidate", buildReleasePrepareCandidate(args), opts);
+};
+
+/** Separately promote a verified draft with the exact approved asset set. */
+export interface ReleasePromoteCandidateDraftArgs {
+  candidateId: string;
+  approvalId: string;
+  targetId: string;
+}
+
+export function buildReleasePromoteCandidateDraft(args: ReleasePromoteCandidateDraftArgs): string {
+  const parts: string[] = [];
+  parts.push("candidateId: " + renderMemQLValue(args.candidateId));
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  parts.push("targetId: " + renderMemQLValue(args.targetId));
+  return "builtin releasePromoteCandidateDraft(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releasePromoteCandidateDraft(args: ReleasePromoteCandidateDraftArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releasePromoteCandidateDraft = function (this: QueryClient, args: ReleasePromoteCandidateDraftArgs = {} as ReleasePromoteCandidateDraftArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releasePromoteCandidateDraft", buildReleasePromoteCandidateDraft(args), opts);
 };
 
 /** Publish one artifact only under its exact durable candidate approval. */

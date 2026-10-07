@@ -15,20 +15,21 @@ import (
 // An existing draft and its tag are operator-selected authority. Creation and
 // promotion are separate approved effects, never hidden in file publication.
 type candidateFileTarget struct {
-	ID                string   `json:"id"`
-	Component         string   `json:"component"`
-	Artifact          string   `json:"artifact"`
-	APIOrigin         string   `json:"apiOrigin"`
-	UploadOrigin      string   `json:"uploadOrigin"`
-	DownloadOrigins   []string `json:"downloadOrigins,omitempty"`
-	Repository        string   `json:"repository"`
-	Tag               string   `json:"tag"`
-	SourceCommit      string   `json:"sourceCommit"`
-	ReleaseID         int64    `json:"releaseId"`
-	AssetName         string   `json:"assetName"`
-	CredentialSecret  string   `json:"credentialSecret"`
-	RootCAPEM         string   `json:"rootCaPem,omitempty"`
-	AllowLoopbackHTTP bool     `json:"allowLoopbackHttp,omitempty"`
+	ID                string                  `json:"id"`
+	Component         string                  `json:"component"`
+	Artifact          string                  `json:"artifact"`
+	APIOrigin         string                  `json:"apiOrigin"`
+	UploadOrigin      string                  `json:"uploadOrigin"`
+	DownloadOrigins   []string                `json:"downloadOrigins,omitempty"`
+	Repository        string                  `json:"repository"`
+	Tag               string                  `json:"tag"`
+	SourceCommit      string                  `json:"sourceCommit"`
+	ReleaseID         int64                   `json:"releaseId"`
+	Draft             *githubrelease.Metadata `json:"draft,omitempty"`
+	AssetName         string                  `json:"assetName"`
+	CredentialSecret  string                  `json:"credentialSecret"`
+	RootCAPEM         string                  `json:"rootCaPem,omitempty"`
+	AllowLoopbackHTTP bool                    `json:"allowLoopbackHttp,omitempty"`
 }
 
 func (t candidateFileTarget) snapshot() (candidateFileTarget, githubrelease.Target, string, error) {
@@ -47,7 +48,17 @@ func (t candidateFileTarget) snapshot() (candidateFileTarget, githubrelease.Targ
 		}
 		target.RootCAs = pool
 	}
-	if _, err := githubrelease.NewPublisher(target); err != nil {
+	if t.Draft != nil {
+		owned := *t.Draft
+		t.Draft = &owned
+		if err := t.Draft.Validate(); err != nil {
+			return t, target, "", err
+		}
+	}
+	if t.ReleaseID == 0 && t.Draft == nil {
+		return t, target, "", errors.New("a deferred release target requires exact reviewed draft metadata")
+	}
+	if _, err := githubrelease.NewLifecycle(target); err != nil {
 		return t, target, "", err
 	}
 	fingerprint, err := workjournal.DefinitionFingerprint("release-file-target-v1", []workjournal.StepDecl{{
@@ -97,9 +108,24 @@ func (r candidateTargetReader) checkArtifact(ctx context.Context, d pl.ReleaseDe
 }
 
 func (r candidateTargetReader) filePublisher(ctx context.Context, d pl.ReleaseDestination) (*githubrelease.Publisher, error) {
+	return r.boundFilePublisher(ctx, d, 0)
+}
+
+// releaseID comes only from the native draft journal. It narrows the approved
+// deferred intent; it never replaces a configured existing release identity.
+func (r candidateTargetReader) boundFilePublisher(ctx context.Context, d pl.ReleaseDestination, releaseID int64) (*githubrelease.Publisher, error) {
 	t, target, err := r.resolveFile(ctx, d)
 	if err != nil {
 		return nil, err
+	}
+	if releaseID != 0 {
+		if target.ReleaseID != 0 && target.ReleaseID != releaseID {
+			return nil, errors.New("native draft binding differs from configured release")
+		}
+		target.ReleaseID = releaseID
+	}
+	if target.ReleaseID <= 0 {
+		return nil, errors.New("release upload requires a native draft binding")
 	}
 	if r.secret == nil {
 		return nil, errors.New("release asset credential resolver is unavailable")
@@ -110,4 +136,19 @@ func (r candidateTargetReader) filePublisher(ctx context.Context, d pl.ReleaseDe
 	}
 	target.Token = token
 	return githubrelease.NewPublisher(target)
+}
+
+func (r candidateTargetReader) fileLifecycle(ctx context.Context, d pl.ReleaseDestination) (*githubrelease.Lifecycle, error) {
+	t, target, err := r.resolveFile(ctx, d)
+	if err != nil {
+		return nil, err
+	}
+	if r.secret == nil {
+		return nil, errors.New("release credential resolver is unavailable")
+	}
+	target.Token, err = r.secret(ctx, t.CredentialSecret)
+	if err != nil || target.Token == "" || len(target.Token) > 16<<10 {
+		return nil, errors.New("release credential is unavailable")
+	}
+	return githubrelease.NewLifecycle(target)
 }

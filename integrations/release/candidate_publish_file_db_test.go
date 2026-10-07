@@ -25,6 +25,7 @@ type candidateAssetServer struct {
 	requests, uploads int
 	body              []byte
 	lost, corrupt     bool
+	hook              func(http.ResponseWriter, *http.Request) bool
 }
 
 func candidateFilePublicationFixture(t *testing.T, db *sql.DB) (*candidatePreparer, pl.ReleaseCandidate, *candidateLibraryFixture, *candidateAssetServer) {
@@ -35,6 +36,9 @@ func candidateFilePublicationFixture(t *testing.T, db *sql.DB) (*candidatePrepar
 	var origin string
 	f := &candidateAssetServer{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if f.hook != nil && f.hook(w, r) {
+			return
+		}
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.requests++
