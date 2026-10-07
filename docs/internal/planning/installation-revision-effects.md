@@ -12,8 +12,9 @@ owner: znas
 This is one unfinished part of [self-hosted delivery](pipelines-self-hosting.md).
 The bounded adapter in `integrations/argocd` can observe and change an existing
 Application's Git revision. It is not registered as a public capability, wired
-to an update button, or an installation controller. Its tests use a Kubernetes
-API protocol double; they do not qualify an installed rollout.
+to an update button, or an installation controller. Protocol doubles cover
+failure cases; an opt-in test also exercises the installed controller against
+an isolated ConfigMap. Neither qualifies a serving-engine rollout.
 
 ## Workflow boundary
 
@@ -118,3 +119,30 @@ It does not borrow a previous successful sync. Inline manifests, selective
 resource lists or a substituted operation source cannot establish success.
 Workload readiness, authenticated sessions, subscriptions, website traffic,
 migration compatibility and cleanup remain separate evidence.
+
+## Local controller evidence, October 7
+
+`TestRevisionThroughInstalledArgo` passed against the existing local ArgoCD
+v2.13.3 controller with a separate Application, namespace and AppProject. The
+project allowed only ConfigMaps in that one namespace and denied all
+cluster-scoped resources. The source was the committed
+`test/fixtures/argocd-revision` directory, not the MemQL deployment overlay.
+
+The actual controller changed the ConfigMap from `baseline` to `candidate`
+between two exact commits. The test deliberately discarded the successful
+Kubernetes patch response, then reconstructed the intent and observed completion
+through another client. A same-intent retry issued no second patch. The first
+run also began with stale selective-resource and force-sync options in the
+previous operation state; they were not inherited by the new operation.
+
+The extended test created a separate explicit rollback intent, observed the
+controller restoring the original commit and ConfigMap value, and verified
+that replaying the superseded update refused before another patch. It passed
+under the race detector in 3.727 seconds (2.09 seconds in the test). Fixture
+cleanup used the recorded UIDs for the Application, AppProject and namespace;
+local evidence retains their final state and deletion confirmations.
+
+This proves the revision protocol, controller serialization and recovery
+observation with a real Argo controller. It does not prove candidate authority,
+engine pod replacement, database migration compatibility, user/session/site
+continuity, or the installation journal and reconciliation workflow.

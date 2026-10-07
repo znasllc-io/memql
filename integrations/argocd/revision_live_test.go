@@ -3,7 +3,6 @@ package argocd
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -127,14 +126,44 @@ func TestRevisionThroughInstalledArgo(t *testing.T) {
 	require.Equal(t, int32(1), fault.writes.Load())
 	second, err := New(api)
 	require.NoError(t, err)
+	awaitControllerRevision(t, ctx, second, recovered)
+	require.Equal(t, "candidate", readRevision())
+	// An explicit same-intent reconciliation must not issue a second patch.
+	probe := &lostRevisionReply{API: api}
+	third, err := New(probe)
+	require.NoError(t, err)
+	facts, err := third.Apply(ctx, recovered)
+	require.NoError(t, err)
+	require.True(t, facts.OperationSucceeded && facts.RevisionObserved && facts.Synced)
+	require.Zero(t, probe.writes.Load())
+
+	// Rollback is a NEW explicit intent whose target is the observed immutable
+	// starting commit. It never clears or replays the failed/old request.
+	current, err := second.Read(ctx, target)
+	require.NoError(t, err)
+	rollback, err := PlanRevision(current, "proof-rollback-"+id.NewShortId(), stringAt(source, "targetRevision"), false)
+	require.NoError(t, err)
+	_, err = second.Apply(ctx, rollback)
+	require.NoError(t, err)
+	fourth, err := New(api)
+	require.NoError(t, err)
+	awaitControllerRevision(t, ctx, fourth, rollback)
+	require.Equal(t, "baseline", readRevision())
+	_, err = third.Apply(ctx, recovered)
+	require.ErrorIs(t, err, ErrChanged, "an old update must not undo a completed rollback")
+	require.Zero(t, probe.writes.Load())
+}
+
+func awaitControllerRevision(t *testing.T, ctx context.Context, client *Client, intent Intent) {
+	t.Helper()
 	last := Facts{}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
-		facts, err := second.Observe(ctx, recovered)
+		facts, err := client.Observe(ctx, intent)
 		require.NoError(t, err)
 		if facts != last {
-			t.Logf("controller facts: %+v", facts)
+			t.Logf("controller facts for %s: %+v", intent.Revision, facts)
 			last = facts
 		}
 		if facts.OperationPhase == "Failed" || facts.OperationPhase == "Error" {
@@ -149,14 +178,4 @@ func TestRevisionThroughInstalledArgo(t *testing.T) {
 		case <-ticker.C:
 		}
 	}
-	require.Equal(t, "candidate", readRevision())
-	// An explicit same-intent reconciliation must not issue a second patch.
-	probe := &lostRevisionReply{API: api}
-	third, err := New(probe)
-	require.NoError(t, err)
-	facts, err := third.Apply(ctx, recovered)
-	require.NoError(t, err)
-	require.True(t, facts.OperationSucceeded && facts.RevisionObserved && facts.Synced)
-	require.Zero(t, probe.writes.Load())
-	require.False(t, errors.Is(ctx.Err(), context.DeadlineExceeded))
 }
