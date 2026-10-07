@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
@@ -136,7 +137,63 @@ sys.exit(int(args["--exit-code"]) if fault in ("findings", "disagreement", "outs
         self.assertEqual(active, 0)
         self.assertEqual(completion_order[0], 1)
         self.assertEqual([b["firstIndex"] for b in result["batches"]], [0, 1, 2])
-        self.assertEqual(len(list(self.output.glob("batch-*.json"))), 3)
+        self.assertEqual(list(self.output.glob("batch-*.json")), [])
+        with tarfile.open(self.output / "batches.tar") as archive:
+            self.assertEqual(len(archive.getmembers()), 6)
+
+    def test_many_batches_stay_within_pipeline_artifact_file_bound(self):
+        commits = [format(number, "040x") for number in range(600)]
+        original_git = history.git
+
+        def inventory(source, *args):
+            if args[0] == "rev-list":
+                return "\n".join(commits)
+            return original_git(source, *args)
+
+        def clean_report(command, log, remaining, cancelled):
+            report = next(arg.split("=", 1)[1] for arg in command if arg.startswith("--report-path="))
+            Path(report).write_text("[]\n")
+            log.write("scanner completed\n")
+            return 0
+
+        with patch.object(history, "git", inventory), patch.object(history, "run_scanner", clean_report):
+            result = self.run_scan(jobs=4)
+        self.assertEqual(result["status"], "clean")
+        self.assertEqual(result["completedCommits"], len(commits))
+        self.assertLess(len(list(self.output.iterdir())), 10)
+        with tarfile.open(self.output / "batches.tar") as archive:
+            self.assertEqual(len(archive.getmembers()), 1200)
+            for number in range(600):
+                raw = archive.extractfile(f"batch-{number:05d}.json").read()
+                self.assertEqual(history.hashlib.sha256(raw).hexdigest(), result["batches"][number]["reportSHA256"])
+
+    def test_failed_batch_keeps_prior_archive_and_unacknowledged_diagnostics(self):
+        original = history.run_scanner
+        count = 0
+
+        def fail_second(command, log, remaining, cancelled):
+            nonlocal count
+            count += 1
+            if count == 2:
+                log.write("scanner stopped before report completion\n")
+                return 137
+            return original(command, log, remaining, cancelled)
+
+        with patch.object(history, "run_scanner", fail_second):
+            result = self.run_scan()
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["completedCommits"], 1)
+        with tarfile.open(self.output / "batches.tar") as archive:
+            self.assertEqual(archive.getnames(), ["batch-00000.json", "batch-00000.log"])
+        self.assertTrue((self.output / "batch-00001.log").is_file())
+        self.assertFalse((self.output / "batch-00002.log").exists())
+
+    def test_archive_write_failure_cannot_acknowledge_coverage(self):
+        with patch.object(history.tarfile.TarFile, "add", side_effect=OSError("evidence disk failed")):
+            result = self.run_scan(jobs=2)
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["completedCommits"], 0)
+        self.assertIn("evidence disk failed", result["error"])
 
     def test_parallel_failure_cancels_other_scanners_before_deadline(self):
         started = time.monotonic()

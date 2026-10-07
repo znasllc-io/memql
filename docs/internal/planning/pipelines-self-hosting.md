@@ -848,6 +848,16 @@ contexts. `--jobs=4 --batch-size=1` lets four large diffs use separate CPUs with
 putting many large fragments into one scanner process. The caller must budget
 memory for all processes and set an appropriate whole-scan deadline.
 
+Completed batch reports and logs are packed into `batches.tar`, flushed before
+the coverage acknowledgment, then removed as individual files. The summary's
+report hashes refer to the numbered JSON members of that archive. Unacknowledged
+or failed batches keep their loose diagnostics. This bounds the output file
+count even for one-commit batches over long histories, preserving the existing
+1,024-file pipeline artifact limit. A normal failed scan closes the archive;
+after abrupt termination its complete tar entries remain recoverable, and the
+last acknowledged summary remains incomplete. Archive-write failures cannot
+acknowledge a batch or produce a clean verdict.
+
 A representative 81.39 MB added fragment took 80.9 seconds with pinned Gitleaks
 8.30.1; regex matching used 88% of its sampled CPU time. Generated minified
 architecture files account for much of the repeated input. They remain included.
@@ -864,6 +874,9 @@ synthetic credential reachable only through a tag, and one introduced only in a
 merge result and subsequently removed. Serial and parallel runs must report the
 same redacted merge-only finding. Scheduler tests cover out-of-order completion,
 bounded concurrency and prompt cancellation after a failed or invalid report.
+An additional 600-batch test retains all 1,200 report/log members while emitting
+fewer than ten artifact files; archive failures and prior evidence surviving a
+later failed batch are also covered.
 The first complete-history
 rehearsal inventories 10,137 commits at main
 `82c37723251d016bca6a8589f50caed67e1dfbca`; its final measured result is still

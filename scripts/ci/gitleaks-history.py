@@ -16,6 +16,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 
@@ -108,7 +109,15 @@ def scan_batches(source, commits, output, config, binary, batch_size, jobs, dead
                           "reportSHA256": hashlib.sha256(raw).hexdigest()}
 
     offsets = iter(range(0, len(commits), batch_size))
-    with ThreadPoolExecutor(max_workers=jobs) as pool:
+    # One-commit batches can otherwise create tens of thousands of artifacts.
+    # Pack completed reports/logs before acknowledging them, keeping only the
+    # bounded in-flight or failed batches as loose files. A regular uncompressed
+    # tar remains readable up to its last complete entry after abrupt shutdown;
+    # normal failure also closes it with an end marker. Do not compress a live
+    # evidence stream into a format that needs a final trailer to recover it.
+    with (output / "batches.tar").open("xb") as storage, \
+            tarfile.open(fileobj=storage, mode="w", format=tarfile.USTAR_FORMAT) as archive, \
+            ThreadPoolExecutor(max_workers=jobs) as pool:
         pending = {}
         try:
             while True:
@@ -123,7 +132,14 @@ def scan_batches(source, commits, output, config, binary, batch_size, jobs, dead
                 for future in sorted(done, key=pending.get):
                     pending.pop(future)
                     evidence, receipt = future.result()
+                    number = receipt["firstIndex"] // batch_size
+                    files = [output / f"batch-{number:05d}.{suffix}" for suffix in ("json", "log")]
+                    for file in files:
+                        archive.add(file, arcname=file.name, recursive=False)
+                    storage.flush()
                     accept(evidence, receipt)
+                    for file in files:
+                        file.unlink()
         finally:
             cancelled.set()
             for future in pending:
@@ -133,7 +149,7 @@ def scan_batches(source, commits, output, config, binary, batch_size, jobs, dead
 def scan(source, head, output, config, binary, batch_size, timeout, jobs=1):
     summary = {"status": "incomplete", "version": VERSION, "completedCommits": 0,
                "totalCommits": 0, "findings": 0, "batchSize": batch_size,
-               "jobs": jobs, "batches": []}
+               "jobs": jobs, "batchArchive": "batches.tar", "batches": []}
     deadline = time.monotonic() + timeout
     findings = []
     try:
