@@ -21,6 +21,10 @@ type candidateEvidenceReader struct {
 // the actor. The fresh-read flag avoids another replica's result cache. Every
 // identity and terminal verdict is checked again after the engine's row gate.
 func (r candidateEvidenceReader) read(ctx context.Context, runID, stepKey string) (pl.ReleaseWorkReceipt, error) {
+	return r.readReceipt(ctx, runID, stepKey, false)
+}
+
+func (r candidateEvidenceReader) readReceipt(ctx context.Context, runID, stepKey string, allStepKinds bool) (pl.ReleaseWorkReceipt, error) {
 	owner, err := candidateOwner(ctx)
 	if err != nil {
 		return pl.ReleaseWorkReceipt{}, err
@@ -49,6 +53,9 @@ func (r candidateEvidenceReader) read(ctx context.Context, runID, stepKey string
 	if err != nil {
 		return pl.ReleaseWorkReceipt{}, err
 	}
+	if allStepKinds {
+		return pl.InspectReleaseStepReceipt(owner, runID, stepKey, run, step)
+	}
 	return pl.InspectReleaseWorkReceipt(owner, runID, stepKey, run, step)
 }
 
@@ -71,7 +78,7 @@ func (r candidateEvidenceReader) verify(ctx context.Context, candidate pl.Releas
 		components[c.Name] = c
 	}
 	for _, e := range candidate.Evidence {
-		actual, err := r.read(ctx, e.WorkRunID, e.StepKey)
+		actual, err := r.readReceipt(ctx, e.WorkRunID, e.StepKey, true)
 		if err != nil {
 			return fmt.Errorf("check %s: %w", e.Name, err)
 		}

@@ -253,6 +253,12 @@ automation releasePrepareCandidateWorkflow {
   if facts.modes.count() == 0 || facts.modes.any(mode => mode != "full") {
     builtin releaseCandidateRefuse()
   }
+  // Empty package selections are explicitly planned skips, not executed tests.
+  // A carried earlier attempt requires its original receipt chain and is not
+  // accepted by this recipe. Blocked or undeclared skips fail natively.
+  if facts.skipped.any(item => item.code != "pipeline_not_affected") {
+    builtin releaseCandidateRefuse()
+  }
   builtin releaseCandidateCheckVersions()
   builtin releaseCandidateCheckTargets()
   builtin releaseCandidateRecordPreparing()

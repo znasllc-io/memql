@@ -27,7 +27,7 @@ decide which checks a release requires.
 
 The release evidence reader uses fresh caller-owned work queries and requires
 a successful live pipeline run and a successful deterministic execution step.
-It refuses skipped work, failed or unfinished runs, cancellation, replay,
+Artifact production proof refuses skipped work, failed or unfinished runs, cancellation, replay,
 unknown execution definitions and missing or nonzero exit codes. It verifies
 source, attempt, execution definition and the full recorded call/result. A
 step ID alone is mutable; the receipt digest also binds its recorded version.
@@ -35,10 +35,16 @@ The complete-run reader reconstructs every declared step in its original order
 and checks the run's definition fingerprint. Evidence must include every step
 of every selected run, and every artifact producer must belong to that evidence.
 The installed `releasePrepareCandidateWorkflow` requires full-mode runs before
-recording preparation. This initial path deliberately refuses all skipped steps
-and notification-only receipts; those need explicit typed evidence and policy
-before existing pipelines containing them can qualify. A successful aggregate
-cannot silently replace missing individual receipts.
+recording preparation. Each declaration records whether it is a command or a
+notification. A delivered notification retains its actual delivery identities;
+it never becomes a command exit or an artifact producer. A skipped step must
+match its originally recorded selection code and reason. The installed recipe
+permits only `pipeline_not_affected` (an empty planned selection in a full run),
+while preserving that skip in the complete evidence set. It refuses carried
+`pipeline_passed_earlier` receipts until the original execution chain is
+verified, and unplanned or blocked skips fail natively. A successful aggregate
+cannot silently replace missing individual receipts. Existing runs without
+typed declarations require fresh qualification; missing type is not inferred.
 
 The preparation scope snapshots the installed template and configured version
 sources, binding both plus the immutable engine commit into `workflowDigest`.
@@ -99,8 +105,8 @@ checks, corrupted or unavailable artifacts and retirement during verification.
 Artifact storage and work-evidence adapters have their own real DB/Azurite tests;
 this is not yet an integrated release rehearsal.
 
-Still required before exposing this path: operator/app wiring, explicit support
-for non-command receipts and planned skips, native OCI publication wiring,
+Still required before exposing this path: operator/app wiring, original-receipt
+verification for carried attempts, native OCI publication wiring,
 non-OCI release targets, owner review UI, installation/recovery control, signed
 provenance and complete release qualification. No candidate approval or
 publication is implied by these tests.

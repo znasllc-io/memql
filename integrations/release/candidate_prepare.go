@@ -22,7 +22,7 @@ const candidatePrepareWorkflow = "releasePrepareCandidateWorkflow"
 
 type candidateEvidence interface {
 	verify(context.Context, pl.ReleaseCandidate) error
-	coverage(context.Context, pl.ReleaseCandidate) ([]string, error)
+	coverage(context.Context, pl.ReleaseCandidate) (candidateCoverage, error)
 }
 
 // Private native ports. No client or DSL argument supplies validators, storage
@@ -157,12 +157,21 @@ func (s *candidatePrepareScope) inspectEvidence(ctx context.Context, _ map[strin
 	if err := s.p.evidence.verify(ctx, s.candidate); err != nil {
 		return nil, err
 	}
-	modes, err := s.p.evidence.coverage(ctx, s.candidate)
+	facts, err := s.p.evidence.coverage(ctx, s.candidate)
 	if err != nil {
 		return nil, err
 	}
 	s.evidenceOK = true
-	return map[string]any{"modes": modes}, nil
+	// Convert to an ordinary value object for the DSL evaluator.
+	encoded, err := json.Marshal(facts)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]any
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (s *candidatePrepareScope) versions(ctx context.Context, _ map[string]any) (any, error) {

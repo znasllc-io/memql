@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	pl "github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/component/workjournal"
@@ -14,6 +15,18 @@ import (
 type candidateRunPlan struct {
 	Mode     string
 	Receipts []pl.ReleaseWorkReceipt
+}
+
+type candidateSkippedStep struct {
+	Component string `json:"component"`
+	WorkRunID string `json:"workRunId"`
+	StepKey   string `json:"stepKey"`
+	Code      string `json:"code"`
+}
+
+type candidateCoverage struct {
+	Modes   []string               `json:"modes"`
+	Skipped []candidateSkippedStep `json:"skipped"`
 }
 
 // completeRun reads the whole declared run and checks its original definition
@@ -85,7 +98,7 @@ func (r candidateEvidenceReader) completeRun(ctx context.Context, runID string) 
 			return candidateRunPlan{}, errors.New("release run step order changed")
 		}
 		decls = append(decls, workjournal.StepDecl{Key: step.Key, Kind: step.Kind, StepType: step.StepType, DependsOn: step.DependsOn, Call: step.Call})
-		proof, err := pl.InspectReleaseWorkReceipt(owner, runID, key, runs[0], row)
+		proof, err := pl.InspectReleaseStepReceipt(owner, runID, key, runs[0], row)
 		if err != nil {
 			return candidateRunPlan{}, fmt.Errorf("run step %s: %w", key, err)
 		}
@@ -101,16 +114,17 @@ func (r candidateEvidenceReader) completeRun(ctx context.Context, runID string) 
 // coverage requires every selected run's complete evidence set. Artifacts may
 // only come from those covered runs. This is selection integrity; DSL receives
 // the modes and decides which modes satisfy the release policy.
-func (r candidateEvidenceReader) coverage(ctx context.Context, c pl.ReleaseCandidate) ([]string, error) {
+func (r candidateEvidenceReader) coverage(ctx context.Context, c pl.ReleaseCandidate) (candidateCoverage, error) {
+	out := candidateCoverage{Modes: []string{}, Skipped: []candidateSkippedStep{}}
 	owner, err := candidateOwner(ctx)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
 	if owner != c.OwnerUserID {
-		return nil, errors.New("candidate belongs to another owner")
+		return out, errors.New("candidate belongs to another owner")
 	}
 	if _, _, err := pl.CanonicalReleaseCandidate(c); err != nil {
-		return nil, err
+		return out, err
 	}
 	type source struct{ component, run string }
 	selected := map[source]map[string]pl.ReleaseEvidence{}
@@ -120,36 +134,41 @@ func (r candidateEvidenceReader) coverage(ctx context.Context, c pl.ReleaseCandi
 			selected[key] = map[string]pl.ReleaseEvidence{}
 		}
 		if _, exists := selected[key][e.StepKey]; exists {
-			return nil, errors.New("candidate repeats a check from the same execution")
+			return out, errors.New("candidate repeats a check from the same execution")
 		}
 		selected[key][e.StepKey] = e
 	}
-	modes := []string{}
 	for key, checks := range selected {
 		plan, err := r.completeRun(ctx, key.run)
 		if err != nil {
-			return nil, err
+			return out, err
 		}
 		if len(plan.Receipts) != len(checks) {
-			return nil, errors.New("candidate omitted declared execution evidence")
+			return out, errors.New("candidate omitted declared execution evidence")
 		}
 		for _, receipt := range plan.Receipts {
 			e, ok := checks[receipt.StepKey]
 			if !ok || e.ReceiptID != receipt.ReceiptID || e.ReceiptDigest != receipt.ReceiptDigest {
-				return nil, errors.New("candidate changed its complete run evidence")
+				return out, errors.New("candidate changed its complete run evidence")
+			}
+			if receipt.Status == "skipped" {
+				out.Skipped = append(out.Skipped, candidateSkippedStep{Component: key.component, WorkRunID: key.run, StepKey: receipt.StepKey, Code: receipt.SkipCode})
 			}
 		}
-		if !slices.Contains(modes, plan.Mode) {
-			modes = append(modes, plan.Mode)
+		if !slices.Contains(out.Modes, plan.Mode) {
+			out.Modes = append(out.Modes, plan.Mode)
 		}
 	}
 	for _, component := range c.Components {
 		for _, a := range component.Artifacts {
 			if _, ok := selected[source{component.Name, a.Receipt.WorkRunID}][a.Receipt.StepKey]; !ok {
-				return nil, errors.New("artifact producer is outside complete candidate evidence")
+				return out, errors.New("artifact producer is outside complete candidate evidence")
 			}
 		}
 	}
-	slices.Sort(modes)
-	return modes, nil
+	slices.Sort(out.Modes)
+	slices.SortFunc(out.Skipped, func(a, b candidateSkippedStep) int {
+		return strings.Compare(a.Component+"/"+a.WorkRunID+"/"+a.StepKey, b.Component+"/"+b.WorkRunID+"/"+b.StepKey)
+	})
+	return out, nil
 }

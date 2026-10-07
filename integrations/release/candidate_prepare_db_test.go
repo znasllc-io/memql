@@ -22,6 +22,7 @@ type candidateEvidenceFixture struct {
 	modes     []string
 	calls     int
 	failAfter int
+	skips     []candidateSkippedStep
 }
 
 func (e *candidateEvidenceFixture) verify(context.Context, pl.ReleaseCandidate) error {
@@ -31,8 +32,8 @@ func (e *candidateEvidenceFixture) verify(context.Context, pl.ReleaseCandidate) 
 	}
 	return nil
 }
-func (e *candidateEvidenceFixture) coverage(context.Context, pl.ReleaseCandidate) ([]string, error) {
-	return slices.Clone(e.modes), nil
+func (e *candidateEvidenceFixture) coverage(context.Context, pl.ReleaseCandidate) (candidateCoverage, error) {
+	return candidateCoverage{Modes: slices.Clone(e.modes), Skipped: slices.Clone(e.skips)}, nil
 }
 
 type candidateLibraryFixture struct {
@@ -335,5 +336,29 @@ automation otherCandidateRecipe {
 	p.engineRevision = func() string { return "unknown-dirty" }
 	if _, err := p.prepare(ownerCtx(), c); err == nil {
 		t.Fatal("mutable engine source produced approvable evidence")
+	}
+}
+
+func TestCandidateWorkflowChoosesAllowedPlannedSkips(t *testing.T) {
+	db := candidateTestDB(t)
+	for _, code := range []string{pl.CodeNotAffected, pl.CodePassedEarlier, "pipeline_stage_blocked", "unknown_skip"} {
+		t.Run(code, func(t *testing.T) {
+			p, c, library, evidence := candidatePreparationFixture(t, db)
+			evidence.skips = []candidateSkippedStep{{Component: "engine", WorkRunID: c.Evidence[0].WorkRunID, StepKey: "test.empty", Code: code}}
+			record, err := p.prepare(ownerCtx(), c)
+			if code == pl.CodeNotAffected {
+				if err != nil || record.State != "ready" {
+					t.Fatal("declared empty selection did not qualify", err)
+				}
+				cleanupCandidate(t, db, record.ID)
+			} else {
+				if err == nil {
+					t.Fatal("unproven skip satisfied release policy", code)
+				}
+				if len(library.pins) != 0 || library.opens != 0 {
+					t.Fatal("excluded evidence reached artifacts")
+				}
+			}
+		})
 	}
 }

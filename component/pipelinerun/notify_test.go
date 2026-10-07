@@ -340,7 +340,8 @@ func TestANotifyStageDeliversToDiscordWithTheRunPageAsItsReport(t *testing.T) {
 		argString(args, "errorMessage") != "Delivered to releases (Discord)." {
 		t.Errorf("receipt = %v", args)
 	}
-	if result["channel"] != "releases" || result["kind"] != "discord" ||
+	if result["status"] != "succeeded" || result["notificationStatus"] != "delivered" ||
+		result["channel"] != "releases" || result["kind"] != "discord" ||
 		!slices.Equal(argStrings(result, "requestIds"), []string{row.RequestID}) || result["sentAt"] != testNow.Format(time.RFC3339) {
 		t.Errorf("result = %v", result)
 	}
