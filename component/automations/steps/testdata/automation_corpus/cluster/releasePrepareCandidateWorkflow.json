@@ -1,0 +1,105 @@
+{
+  "automation": "cluster/automations.memql releasePrepareCandidateWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.releasePrepareCandidateWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "releaseCandidateEvidence"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCandidateRefuse"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCandidateCheckVersions"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCandidateCheckTargets"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCandidateRecordPreparing"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCandidatePinArtifacts"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCandidateVerifyArtifacts"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCandidateMarkReady"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.releasePrepareCandidateWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "releaseCandidateEvidence"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCandidateRefuse"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCandidateCheckVersions"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCandidateCheckTargets"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCandidateRecordPreparing"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCandidatePinArtifacts"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCandidateVerifyArtifacts"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCandidateMarkReady"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

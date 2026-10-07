@@ -1,0 +1,65 @@
+{
+  "automation": "cluster/automations.memql releasePublishCandidateWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.releasePublishCandidateWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "releasePublicationCheckCandidate"
+          },
+          {
+            "kind": "builtin",
+            "name": "releasePublicationBegin"
+          },
+          {
+            "kind": "builtin",
+            "name": "releasePublicationRecordReceipt"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.releasePublishCandidateWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "releasePublicationCheckCandidate"
+          },
+          {
+            "kind": "builtin",
+            "name": "releasePublicationBegin"
+          },
+          {
+            "kind": "builtin",
+            "name": "releasePublicationRecordReceipt"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}
