@@ -3185,6 +3185,50 @@ QueryClient.prototype.releaseGetCandidate = function (this: QueryClient, args: R
   return this.executeNamed("releaseGetCandidate", buildReleaseGetCandidate(args), opts);
 };
 
+/** Read a verified public release and portable envelope without private work evidence. */
+export interface ReleaseGetPublishedCandidateArgs {
+  candidateId: string;
+}
+
+export function buildReleaseGetPublishedCandidate(args: ReleaseGetPublishedCandidateArgs): string {
+  const parts: string[] = [];
+  parts.push("candidateId: " + renderMemQLValue(args.candidateId));
+  return "builtin releaseGetPublishedCandidate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseGetPublishedCandidate(args: ReleaseGetPublishedCandidateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseGetPublishedCandidate = function (this: QueryClient, args: ReleaseGetPublishedCandidateArgs = {} as ReleaseGetPublishedCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseGetPublishedCandidate", buildReleaseGetPublishedCandidate(args), opts);
+};
+
+/** List verified published releases; identified developers, admins and owners may read. */
+export interface ReleaseListPublishedCandidatesArgs {
+  cursor?: string;
+  limit?: number;
+}
+
+export function buildReleaseListPublishedCandidates(args: ReleaseListPublishedCandidatesArgs): string {
+  const parts: string[] = [];
+  if (args.cursor !== undefined) parts.push("cursor: " + renderMemQLValue(args.cursor));
+  if (args.limit !== undefined) parts.push("limit: " + renderMemQLValue(args.limit));
+  return "builtin releaseListPublishedCandidates(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseListPublishedCandidates(args: ReleaseListPublishedCandidatesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseListPublishedCandidates = function (this: QueryClient, args: ReleaseListPublishedCandidatesArgs = {} as ReleaseListPublishedCandidatesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseListPublishedCandidates", buildReleaseListPublishedCandidates(args), opts);
+};
+
 /** Verify an immutable candidate using complete work evidence and operator configuration. This retains artifacts for review and does not approve or publish them. */
 export interface ReleasePrepareCandidateArgs {
   candidate: Record<string, unknown>;
@@ -3279,6 +3323,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseRetireCandidate = function (this: QueryClient, args: ReleaseRetireCandidateArgs = {} as ReleaseRetireCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseRetireCandidate", buildReleaseRetireCandidate(args), opts);
+};
+
+/** Seal complete native publication evidence as an immutable signed catalog record. */
+export interface ReleaseSealPublishedCandidateArgs {
+  candidateId: string;
+  approvalId: string;
+}
+
+export function buildReleaseSealPublishedCandidate(args: ReleaseSealPublishedCandidateArgs): string {
+  const parts: string[] = [];
+  parts.push("candidateId: " + renderMemQLValue(args.candidateId));
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  return "builtin releaseSealPublishedCandidate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseSealPublishedCandidate(args: ReleaseSealPublishedCandidateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseSealPublishedCandidate = function (this: QueryClient, args: ReleaseSealPublishedCandidateArgs = {} as ReleaseSealPublishedCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseSealPublishedCandidate", buildReleaseSealPublishedCandidate(args), opts);
 };
 
 /** Replay one of the caller's runs: a NEW run that serves EVERY model call from the journal, so it reaches no provider. Under the default strict policy a request with no journaled match raises a divergence pinned to the first step that differs; permissive makes a fresh call and journals it. Returns {runId}. */

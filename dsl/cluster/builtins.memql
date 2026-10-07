@@ -266,6 +266,27 @@ builtin releasePromoteCandidateDraft {
 @executor("integration.release.candidateDrafts")
 builtin releaseCandidateDrafts { candidateId string! }
 
+/// Seal complete native publication evidence as an immutable signed catalog record.
+@sdk
+@executor("integration.release.sealPublishedCandidate")
+builtin releaseSealPublishedCandidate {
+  candidateId string!
+  approvalId string!
+}
+
+/// Read a verified public release and portable envelope without private work evidence.
+@sdk
+@executor("integration.release.getPublishedCandidate")
+builtin releaseGetPublishedCandidate { candidateId string! }
+
+/// List verified published releases; identified developers, admins and owners may read.
+@sdk
+@executor("integration.release.listPublishedCandidates")
+builtin releaseListPublishedCandidates {
+  cursor string
+  limit integer
+}
+
 /// Reverify the original owner, exact candidate and installed lifecycle recipes.
 @executor("integration.release.releaseDraftCheckCandidate")
 builtin releaseDraftCheckCandidate { }
