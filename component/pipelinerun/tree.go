@@ -152,6 +152,25 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 				"The pipeline DSL could not select per-step package coverage: %v.", err)
 		}
 		in.PackagePolicies = policies
+	} else if pipelines.NeedsBucketSelection(spec) {
+		// A pipeline can have changed-path buckets without selecting Go
+		// packages. Still run the pinned full-versus-affected policy: global
+		// changes such as memql-package.yaml or go.mod must include every
+		// bucketed step even when there is no import graph to resolve.
+		var full []string
+		if spec.Select != nil {
+			full = spec.Select.Full
+		}
+		facts, err := pipelines.AnalyzeChangedPaths(changed, changedKnown, full)
+		if err != nil {
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "select/full", "%v", err)
+		}
+		decision, err := dr.selectPackageCoverage(ctx, facts, run.Mode)
+		if err != nil {
+			return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeSelectInvalid, "selection/packages",
+				"The pipeline DSL could not select full coverage for this run: %v.", err)
+		}
+		selectionFull = decision.Full
 	}
 	if pipelines.NeedsBucketSelection(spec) {
 		buckets, err := dr.selectBuckets(ctx, spec, run.Mode, changed, changedKnown, selectionFull)

@@ -492,6 +492,54 @@ func TestChangedBucketPolicyComesFromPinnedPipelineDSL(t *testing.T) {
 	}
 }
 
+func TestBucketOnlyPipelineUsesFullCoverageEscalation(t *testing.T) {
+	dr := &runDriver{}
+	if err := dr.prepareWorkflow(""); err != nil {
+		t.Fatal(err)
+	}
+	spec := &pipelines.Spec{
+		Select: &pipelines.Select{Buckets: map[string][]string{"docs": {"docs/**"}}},
+		Stages: []pipelines.StageSpec{{Name: "checks", Steps: []pipelines.StepSpec{{
+			Name: "docs", Run: "make docs-checks", When: &pipelines.When{Bucket: "docs"},
+		}}}},
+	}
+	for _, tc := range []struct {
+		name    string
+		changed []string
+		wantRun bool
+	}{
+		{name: "manifest change escalates", changed: []string{"memql-package.yaml"}, wantRun: true},
+		{name: "module graph change escalates", changed: []string{"go.mod"}, wantRun: true},
+		{name: "matching bucket runs", changed: []string{"docs/guide.md"}, wantRun: true},
+		{name: "unmatched path stays narrow", changed: []string{"component/memql/engine.go"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			facts, err := pipelines.AnalyzeChangedPaths(tc.changed, true, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			coverage, err := dr.selectPackageCoverage(context.Background(), facts, pipelines.ModeAffected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			buckets, err := dr.selectBuckets(context.Background(), spec, pipelines.ModeAffected, tc.changed, true, coverage.Full)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, refusal := pipelines.Compile(spec, pipelines.CompileInput{
+				Mode: pipelines.ModeAffected, Event: pipelines.EventPullRequest, Compute: pipelines.ComputeCluster,
+				BucketSelection: &buckets, StageSelection: &pipelines.StageSelection{Included: []string{"checks"}},
+			})
+			if refusal != nil {
+				t.Fatal(refusal)
+			}
+			if got := findPlanStep(t, plan, "checks.docs").Skip == nil; got != tc.wantRun {
+				t.Errorf("bucket-only docs step run = %v, want %v (full=%v)", got, tc.wantRun, coverage.Full)
+			}
+		})
+	}
+}
+
 func TestChangedBucketPolicyChangesPipelineWorkflowIdentity(t *testing.T) {
 	base := &runDriver{}
 	if err := base.prepareWorkflow(""); err != nil {

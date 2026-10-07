@@ -18,6 +18,42 @@ func AnalyzeSelection(g *Graph, changed []string, known bool, fullGlobs []string
 	if g == nil {
 		return SelectionFacts{}, errors.New("there is no import graph to analyze")
 	}
+	facts, err := AnalyzeChangedPaths(changed, known, fullGlobs)
+	if err != nil {
+		return SelectionFacts{}, err
+	}
+	facts.GraphComplete = len(g.incomplete) == 0
+	facts.Incomplete = g.Incomplete()
+	facts.AllPackages = g.importPaths()
+	seeds := map[string]bool{}
+	missing := map[string]bool{} // import paths a changed directory would have, imported where no package is
+	for i := range facts.Paths {
+		pathFacts := &facts.Paths[i]
+		if !pathFacts.RepositoryPath {
+			continue
+		}
+		pathFacts.Vendored = g.isVendoredPath(pathFacts.Path)
+		if importPath, ok := g.PackageAt(pathFacts.Path); ok {
+			seeds[importPath] = true
+		}
+		if importPath, importers := g.orphans(pathFacts.Path); len(importers) > 0 {
+			missing[importPath] = true
+			for _, importer := range importers {
+				seeds[importer] = true
+			}
+		}
+	}
+	facts.Seeds = sortedMapKeys(seeds)
+	facts.Missing = sortedMapKeys(missing)
+	return facts, nil
+}
+
+// AnalyzeChangedPaths reports facts needed by pipeline policy when a pipeline
+// uses changed-path buckets but does not select Go packages. With no import
+// graph to consult, any vendor path is conservatively treated as vendored.
+// Callers that have a graph should use AnalyzeSelection for its exact module
+// boundaries and package seeds.
+func AnalyzeChangedPaths(changed []string, known bool, fullGlobs []string) (SelectionFacts, error) {
 	var inFull func(string) bool
 	if len(fullGlobs) > 0 {
 		set, err := PathSet(fullGlobs)
@@ -27,12 +63,9 @@ func AnalyzeSelection(g *Graph, changed []string, known bool, fullGlobs []string
 		inFull = set
 	}
 	facts := SelectionFacts{
-		Known: known, ChangedCount: len(changed), GraphComplete: len(g.incomplete) == 0,
-		Incomplete: g.Incomplete(), AllPackages: g.importPaths(),
+		Known: known, ChangedCount: len(changed), GraphComplete: true,
 		Paths: make([]ChangedPathFacts, 0, len(changed)),
 	}
-	seeds := map[string]bool{}
-	missing := map[string]bool{} // import paths a changed directory would have, imported where no package is
 	for _, raw := range changed {
 		p, ok := repoPath(raw)
 		if !ok {
@@ -41,26 +74,23 @@ func AnalyzeSelection(g *Graph, changed []string, known bool, fullGlobs []string
 		}
 		pathFacts := ChangedPathFacts{
 			Path: p, BaseName: path.Base(p), RepositoryPath: true,
-			Vendored: g.isVendoredPath(p),
+			Vendored: pathHasSegment(p, "vendor"),
 		}
 		if inFull != nil {
 			pathFacts.ConfiguredFull = inFull(p)
 		}
 		facts.Paths = append(facts.Paths, pathFacts)
-		if importPath, ok := g.PackageAt(p); ok {
-			seeds[importPath] = true
-		}
-		if importPath, importers := g.orphans(p); len(importers) > 0 {
-			missing[importPath] = true
-			for _, importer := range importers {
-				seeds[importer] = true
-			}
+	}
+	return facts, nil
+}
+
+func pathHasSegment(p, segment string) bool {
+	for _, part := range strings.Split(p, "/") {
+		if part == segment {
+			return true
 		}
 	}
-
-	facts.Seeds = sortedMapKeys(seeds)
-	facts.Missing = sortedMapKeys(missing)
-	return facts, nil
+	return false
 }
 
 // ResolveSelection applies the full-versus-affected decision made by the

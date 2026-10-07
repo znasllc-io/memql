@@ -181,6 +181,29 @@ func TestAffectedRefusesASelectFullItCannotRead(t *testing.T) {
 	}
 }
 
+func TestChangedPathFactsSupportBucketOnlyPipelines(t *testing.T) {
+	facts, err := AnalyzeChangedPaths(
+		[]string{"component/memql/engine.go", "vendor/example.test/dep/dep.go", "../outside"},
+		true,
+		[]string{"component/**", "!component/generated/**"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !facts.Known || !facts.GraphComplete || facts.ChangedCount != 3 {
+		t.Fatalf("path-only facts = %+v, want known complete facts for three paths", facts)
+	}
+	if got := facts.Paths[0]; !got.RepositoryPath || !got.ConfiguredFull || got.Vendored {
+		t.Errorf("ordinary path facts = %+v, want valid configured-full path", got)
+	}
+	if got := facts.Paths[1]; !got.RepositoryPath || !got.Vendored {
+		t.Errorf("vendor path facts = %+v, want a conservatively vendored path", got)
+	}
+	if got := facts.Paths[2]; got.RepositoryPath {
+		t.Errorf("outside path facts = %+v, want invalid repository path", got)
+	}
+}
+
 // deletedPackageTree is a tree at the head of a change that deleted package
 // a, which b still imports: the reviewer's probe (epic memql#5477). Nothing
 // owns a/a.go any more and no package lives at the root, so a selection that
