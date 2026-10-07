@@ -137,13 +137,15 @@ func (p *Publisher) Publish(ctx context.Context, v *VerifiedImage) (Receipt, err
 	if p == nil || v == nil {
 		return Receipt{}, errors.New("publisher and verified image are required")
 	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+	if err := v.acquire(ctx); err != nil {
+		return Receipt{}, err
+	}
+	defer func() { <-v.gate }()
 	if v.dir == "" || v.image == nil {
 		return Receipt{}, errors.New("verified image is closed or uninitialized")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
-	defer cancel()
 	httpTransport := &http.Transport{
 		Proxy: nil, DialContext: (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: p.target.RootCAs},

@@ -18,7 +18,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/layout"
@@ -52,7 +51,7 @@ type Limits struct{ ArchiveBytes, UnpackedBytes int64 }
 // VerifiedImage owns a private snapshot. Only Verify can construct a usable
 // handle. Close removes it and waits for any in-flight publication to finish.
 type VerifiedImage struct {
-	mu       sync.Mutex
+	gate     chan struct{}
 	dir      string
 	expected Expected
 	image    v1.Image
@@ -65,14 +64,31 @@ type blob struct {
 }
 
 func (v *VerifiedImage) Close() error {
-	if v == nil {
+	if v == nil || v.gate == nil {
 		return nil
 	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	err := os.RemoveAll(v.dir)
+	v.gate <- struct{}{}
+	defer func() { <-v.gate }()
+	if err := os.RemoveAll(v.dir); err != nil {
+		return err
+	}
 	v.dir, v.image, v.blobs = "", nil, nil
-	return err
+	return nil
+}
+
+func (v *VerifiedImage) acquire(ctx context.Context) error {
+	if v.gate == nil {
+		return errors.New("verified image is uninitialized")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case v.gate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Verify snapshots the entire bounded stream, validates its exact receipt and
@@ -193,7 +209,7 @@ func Verify(ctx context.Context, source io.Reader, want Expected, limits Limits)
 	if err = os.Remove(filepath.Join(dir, "archive")); err != nil {
 		return nil, err
 	}
-	return &VerifiedImage{dir: dir, expected: want, image: img, blobs: blobs}, nil
+	return &VerifiedImage{gate: make(chan struct{}, 1), dir: dir, expected: want, image: img, blobs: blobs}, nil
 }
 
 type contextReader struct {
