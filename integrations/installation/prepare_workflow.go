@@ -35,6 +35,7 @@ type preparationHost struct {
 	catalog                      CatalogFactory
 	namespace, configurationName string
 	definition                   *automations.Automation
+	revisions                    *revisionWorkflow
 	artifacts                    *artifactWorkflow
 	digest                       string
 }
@@ -58,7 +59,11 @@ func (h *preparationHost) bindWorkflow(engineRevision string) error {
 	if err != nil {
 		return err
 	}
-	h.digest = artifactHash("preparation-workflow-v1", []string{engineRevision, h.definition.DefinitionFingerprint(id.NewUntracked()), h.artifacts.digest})
+	h.revisions, err = loadRevisionWorkflow(engineRevision)
+	if err != nil {
+		return err
+	}
+	h.digest = artifactHash("preparation-workflow-v1", []string{engineRevision, h.definition.DefinitionFingerprint(id.NewUntracked()), h.artifacts.digest, h.revisions.digest})
 	return nil
 }
 
@@ -67,7 +72,7 @@ func (h *preparationHost) prepare(ctx context.Context, request preparationReques
 	if err != nil {
 		return revisionRecord{}, err
 	}
-	if h == nil || h.api == nil || h.journal == nil || h.executor == nil || h.files == nil || h.tokens == nil || h.catalog == nil || h.definition == nil || h.artifacts == nil || !internalDigest.MatchString(h.digest) {
+	if h == nil || h.api == nil || h.journal == nil || h.executor == nil || h.files == nil || h.tokens == nil || h.catalog == nil || h.definition == nil || h.artifacts == nil || h.revisions == nil || !internalDigest.MatchString(h.digest) {
 		return revisionRecord{}, errors.New("installation preparation host is incomplete")
 	}
 	if !identifier.MatchString(request.InstallationID) || !identifier.MatchString(request.RequestID) || !artifactDigest.MatchString(request.CandidateID) || !artifactDigest.MatchString(request.CatalogDigest) || !commitDigest.MatchString(request.OverlayRevision) {
@@ -233,7 +238,7 @@ func (s *preparationWorkflowScope) reserve(ctx context.Context, args map[string]
 	if err != nil {
 		return nil, err
 	}
-	scope := preparationScope{FormatVersion: 1, InstallationID: cfg.InstallationID, RequestID: s.request.RequestID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ConfigurationDigest: s.configuration.digest, CandidateID: s.request.CandidateID, PublicationDigest: s.request.CatalogDigest, Intent: intent, Captures: map[string]sourceCaptureSpec{}}
+	scope := preparationScope{FormatVersion: 1, InstallationID: cfg.InstallationID, RequestID: s.request.RequestID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ExecutionWorkflowDigest: s.host.revisions.digest, ConfigurationDigest: s.configuration.digest, CandidateID: s.request.CandidateID, PublicationDigest: s.request.CatalogDigest, Intent: intent, Captures: map[string]sourceCaptureSpec{}}
 	run := preparationSourceRun(cfg.InstallationID, s.request.RequestID, s.operator)
 	for _, role := range []string{"candidate", "rollback"} {
 		render := s.configuration.render
@@ -393,7 +398,7 @@ func (s *preparationWorkflowScope) promote(ctx context.Context, args map[string]
 	}
 	var before struct{ TargetRevision string }
 	_ = json.Unmarshal(s.renders["rollback"].Spec().Source, &before)
-	plan := preparedPlan{FormatVersion: 1, InstallationID: s.request.InstallationID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, CandidateID: s.request.CandidateID, CandidateApprovalID: release.ApprovalID, PublicationDigest: s.request.CatalogDigest, RenderDigest: s.renders["candidate"].Digest(), RollbackRenderDigest: s.renders["rollback"].Digest(), ResourceDiffDigest: s.resources.digest, RollbackRevision: before.TargetRevision, Intent: s.record.Scope.Intent}
+	plan := preparedPlan{FormatVersion: 1, InstallationID: s.request.InstallationID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ExecutionWorkflowDigest: s.host.revisions.digest, CandidateID: s.request.CandidateID, CandidateApprovalID: release.ApprovalID, PublicationDigest: s.request.CatalogDigest, RenderDigest: s.renders["candidate"].Digest(), RollbackRenderDigest: s.renders["rollback"].Digest(), ResourceDiffDigest: s.resources.digest, RollbackRevision: before.TargetRevision, Intent: s.record.Scope.Intent}
 	artifact.workflow, artifact.operator = s.host.artifacts.digest, s.operator
 	artifact.digest = artifactHash("workflow-evidence", []string{artifact.digest, artifact.workflow, artifact.operator})
 	evidence := promotionEvidence{configuration: s.configuration, artifacts: artifact, published: s.candidate, candidateSource: s.sources["candidate"], rollbackSource: s.sources["rollback"], candidateRender: s.renders["candidate"], rollbackRender: s.renders["rollback"], resources: s.resources, storage: s.storage, sensitive: s.sensitive}

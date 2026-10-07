@@ -46,6 +46,7 @@
 {"id":"automation:installationArtifactWorkflow","kind":"automation","label":"installationArtifactWorkflow","attrs":{"origin":"installation/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:installationPrepareWorkflow","kind":"automation","label":"installationPrepareWorkflow","attrs":{"origin":"installation/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:installationRetirementWorkflow","kind":"automation","label":"installationRetirementWorkflow","attrs":{"origin":"installation/retirement/automations.memql","stratum":"0","template":"true"}},
+{"id":"automation:installationRevisionWorkflow","kind":"automation","label":"installationRevisionWorkflow","attrs":{"origin":"installation/revision/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:invokeAgent","kind":"automation","label":"invokeAgent","attrs":{"origin":"agents/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:killSwitchCancelsComputerUseRuns","kind":"automation","label":"killSwitchCancelsComputerUseRuns","attrs":{"filter":"row => row.preferences.computerUseEnabled == false","origin":"worker/automations.memql","stratum":"1","trigger":"graph.node.updated.v1:identity:user","triggerConcept":"v1:identity:user","triggerKind":"node.updated"}},
 {"id":"automation:knowledgeBridgeWorkflow","kind":"automation","label":"knowledgeBridgeWorkflow","attrs":{"origin":"knowledge/automations.memql","stratum":"0","template":"true"}},

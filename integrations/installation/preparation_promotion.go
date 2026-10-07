@@ -61,7 +61,7 @@ type promotionEvidence struct {
 func promotionPlan(r preparationRecord, plan preparedPlan, configuration string, evidence promotionEvidence) (preparedPlan, error) {
 	if plan.Preparation != nil || configuration != r.Scope.ConfigurationDigest ||
 		plan.InstallationID != r.Scope.InstallationID || plan.RequestedBy != r.Scope.RequestedBy ||
-		plan.WorkflowDigest != r.Scope.WorkflowDigest || plan.CandidateID != r.Scope.CandidateID || plan.PublicationDigest != r.Scope.PublicationDigest {
+		plan.WorkflowDigest != r.Scope.WorkflowDigest || plan.ExecutionWorkflowDigest != r.Scope.ExecutionWorkflowDigest || plan.CandidateID != r.Scope.CandidateID || plan.PublicationDigest != r.Scope.PublicationDigest {
 		return preparedPlan{}, errors.New("installation plan differs from its reserved preparation")
 	}
 	artifacts := evidence.artifacts

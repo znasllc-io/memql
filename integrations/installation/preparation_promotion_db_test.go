@@ -19,9 +19,12 @@ import (
 // This fixture runs the real native source/archive, render, publication and
 // preservation verifiers over protocol doubles; PostgreSQL is real. It does
 // not qualify the installed renderer or configuration provider.
-func promotionFixture(t *testing.T, j *preparationJournal) (context.Context, preparationRecord, preparedPlan, promotionEvidence) {
+func promotionFixture(t *testing.T, j *preparationJournal, execution ...string) (context.Context, preparationRecord, preparedPlan, promotionEvidence) {
 	t.Helper()
 	scope, candidateArchive := preparationFixture(t)
+	if len(execution) != 0 {
+		scope.ExecutionWorkflowDigest = execution[0]
+	}
 	rollback, rollbackArchive := captureRevisionFixture(t, "rollback-source-commit")
 	spec := scope.Captures["candidate"]
 	rollback.RunID, rollback.WorkRunID = spec.RunID, spec.WorkRunID
@@ -72,6 +75,7 @@ func promotionFixture(t *testing.T, j *preparationJournal) (context.Context, pre
 	require.NoError(t, err)
 	plan := testPlan()
 	plan.RequestedBy, plan.WorkflowDigest = scope.RequestedBy, scope.WorkflowDigest
+	plan.ExecutionWorkflowDigest = scope.ExecutionWorkflowDigest
 	plan.CandidateID, plan.CandidateApprovalID, plan.PublicationDigest = release.CandidateID, release.ApprovalID, evidence.published.Digest()
 	plan.RenderDigest, plan.RollbackRenderDigest, plan.ResourceDiffDigest = after.Digest(), before.Digest(), evidence.resources.digest
 	var source struct{ TargetRevision string }
@@ -165,7 +169,7 @@ func TestPreparationPromotionTransfersOneHeadAcrossReplicas(t *testing.T) {
 	current, err := j.get(ctx, next.InstallationID, successor.ID)
 	require.NoError(t, err)
 	require.Equal(t, successor, current, "historical replay must not change a successor's head")
-	_, err = revisions.begin(ctx, scope.InstallationID, promoted.ID, scope.WorkflowDigest)
+	_, err = revisions.begin(ctx, scope.InstallationID, promoted.ID, scope.ExecutionWorkflowDigest)
 	require.Error(t, err)
 	// Migration rollback must not erase the source/revision relationship.
 	down, err := os.ReadFile(promotionMigrationPath + ".down.sql")
@@ -292,7 +296,7 @@ func TestPreparationExpiredArtifactBindingCannotStart(t *testing.T) {
 		t.Fatal(t.Context().Err())
 	}
 	journal := &revisionJournal{db: func() *sql.DB { return db }}
-	_, err = journal.begin(ctx, plan.InstallationID, record.ID, plan.WorkflowDigest)
+	_, err = journal.begin(ctx, plan.InstallationID, record.ID, plan.ExecutionWorkflowDigest)
 	require.ErrorContains(t, err, "expired before start")
 	current, err := journal.get(ctx, plan.InstallationID, record.ID)
 	require.NoError(t, err)

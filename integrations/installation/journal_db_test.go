@@ -69,7 +69,7 @@ func testPlan() preparedPlan {
 	d := "memql-id:" + strings.Repeat("a", 64)
 	before := strings.Repeat("b", 40)
 	return preparedPlan{
-		FormatVersion: 1, InstallationID: "installation-one", RequestedBy: "developer-one", WorkflowDigest: d,
+		FormatVersion: 1, InstallationID: "installation-one", RequestedBy: "developer-one", WorkflowDigest: d, ExecutionWorkflowDigest: "memql-id:" + strings.Repeat("e", 64),
 		CandidateID: "sha256:" + strings.Repeat("c", 64), CandidateApprovalID: "owner-approval", PublicationDigest: "sha256:" + strings.Repeat("e", 64),
 		RenderDigest: d, ResourceDiffDigest: d, RollbackRevision: before, RollbackRenderDigest: d,
 		Intent: argocd.Intent{FormatVersion: 1, RequestID: id.NewShortId(), Target: argocd.Target{Namespace: "argocd", Name: "installation-one", UID: "application-uid"}, BeforeGeneration: 42,
@@ -143,12 +143,12 @@ func TestJournalConcurrentReplicasReserveAndStartOneImmutableIntent(t *testing.T
 		require.EqualValues(t, 1, r.SlotEpoch)
 	}
 	require.NotEmpty(t, key)
-	started, err := first.begin(ctx, plan.InstallationID, key, plan.WorkflowDigest)
+	started, err := first.begin(ctx, plan.InstallationID, key, plan.ExecutionWorkflowDigest)
 	require.NoError(t, err)
 	// Drop the first host's return value and all native objects. A different
 	// connection and newly constructed journal recover the same external intent.
 	peer = revisionJournal{db: func() *sql.DB { return peerDB }}
-	recovered, err := peer.begin(ctx, plan.InstallationID, key, plan.WorkflowDigest)
+	recovered, err := peer.begin(ctx, plan.InstallationID, key, plan.ExecutionWorkflowDigest)
 	require.NoError(t, err)
 	require.Equal(t, started, recovered)
 	require.Equal(t, plan.Intent.RequestID, recovered.Plan.Intent.RequestID)
@@ -160,7 +160,7 @@ func TestJournalConcurrentReplicasReserveAndStartOneImmutableIntent(t *testing.T
 	require.Error(t, err)
 	// Read-only recovery does not require loading the original workflow. A new
 	// workflow may NOT turn an old approval into fresh write authority.
-	_, err = peer.begin(ctx, plan.InstallationID, key, "memql-id:"+strings.Repeat("e", 64))
+	_, err = peer.begin(ctx, plan.InstallationID, key, "memql-id:"+strings.Repeat("f", 64))
 	require.Error(t, err)
 	_, err = peer.get(operator(auth.RoleAdmin, "replacement"), plan.InstallationID, key)
 	require.NoError(t, err)
@@ -200,7 +200,7 @@ func TestJournalCancellationFencesLateStartAndCannotReleaseSuccessor(t *testing.
 	cancelled, err := peer.cancel(ctx, plan.InstallationID, old.ID)
 	require.NoError(t, err)
 	require.Equal(t, "cancelled", cancelled.State)
-	_, err = first.begin(ctx, plan.InstallationID, old.ID, plan.WorkflowDigest)
+	_, err = first.begin(ctx, plan.InstallationID, old.ID, plan.ExecutionWorkflowDigest)
 	require.Error(t, err)
 	_, err = first.reserve(ctx, plan)
 	require.ErrorContains(t, err, "permanently cancelled")
@@ -211,9 +211,9 @@ func TestJournalCancellationFencesLateStartAndCannotReleaseSuccessor(t *testing.
 	require.NoError(t, err)
 	_, err = peer.get(ctx, plan.InstallationID, next.ID)
 	require.NoError(t, err)
-	_, err = first.begin(ctx, plan.InstallationID, old.ID, plan.WorkflowDigest)
+	_, err = first.begin(ctx, plan.InstallationID, old.ID, plan.ExecutionWorkflowDigest)
 	require.Error(t, err)
-	_, err = peer.begin(ctx, plan.InstallationID, next.ID, plan.WorkflowDigest)
+	_, err = peer.begin(ctx, plan.InstallationID, next.ID, plan.ExecutionWorkflowDigest)
 	require.NoError(t, err)
 }
 
@@ -231,7 +231,7 @@ func TestJournalConcurrentStartAndCancellationHaveOnlyOneWinner(t *testing.T) {
 		results := make(chan error, 2)
 		go func() {
 			<-gate
-			_, err := first.begin(ctx, plan.InstallationID, r.ID, plan.WorkflowDigest)
+			_, err := first.begin(ctx, plan.InstallationID, r.ID, plan.ExecutionWorkflowDigest)
 			results <- err
 		}()
 		go func() {
@@ -271,7 +271,7 @@ func TestJournalLateObservationCannotOverwriteNewerFactsOrCompleteInstallation(t
 	require.NoError(t, err)
 	_, err = first.observe(ctx, plan.InstallationID, r.ID, 0, argocd.Facts{})
 	require.ErrorIs(t, err, errChanged)
-	_, err = first.begin(ctx, plan.InstallationID, r.ID, plan.WorkflowDigest)
+	_, err = first.begin(ctx, plan.InstallationID, r.ID, plan.ExecutionWorkflowDigest)
 	require.NoError(t, err)
 	good := argocd.Facts{IntentObserved: true, OperationPhase: "Succeeded", OperationSucceeded: true, RevisionObserved: true, Healthy: true, Synced: true}
 	observed, err := peer.observe(operator(auth.RoleAdmin, "replacement"), plan.InstallationID, r.ID, 0, good)
@@ -314,7 +314,7 @@ func TestJournalRevalidatesStoredAuthorityAndRetainsHistoryOnMigrationRollback(t
 		require.NoError(t, err)
 		_, err = db.Exec(`UPDATE installation_revision_attempts SET plan=`+edit+` WHERE plan_id=$1`, r.ID)
 		require.NoError(t, err)
-		_, err = j.begin(ctx, plan.InstallationID, r.ID, plan.WorkflowDigest)
+		_, err = j.begin(ctx, plan.InstallationID, r.ID, plan.ExecutionWorkflowDigest)
 		require.Error(t, err)
 	}
 }

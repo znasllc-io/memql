@@ -236,7 +236,7 @@ func (j *revisionJournal) get(ctx context.Context, installation, key string) (re
 // to perform a write under a different recipe.
 func (j *revisionJournal) begin(ctx context.Context, installation, key, workflow string) (revisionRecord, error) {
 	return j.withRecord(ctx, installation, key, func(tx *sql.Tx, r *revisionRecord, actor string) error {
-		if actor != r.Plan.RequestedBy || workflow != r.Plan.WorkflowDigest {
+		if actor != r.Plan.RequestedBy || workflow != r.Plan.ExecutionWorkflowDigest {
 			return errors.New("installation request authority or workflow changed")
 		}
 		if r.State == "applying" {

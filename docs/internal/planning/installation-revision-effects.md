@@ -74,8 +74,34 @@ Real database tests exercise independent connections, concurrent reservations,
 lost start-reply recovery, late starts after cancellation, stale observations,
 changed stored authority, and migration rollback refusing nonempty history.
 The package is in the canonical required-database CI selector. Completion,
-explicit rollback/recovery, cleanup evidence and the scoped DSL/public surface
-remain unfinished; no engine rollout is enabled by this journal alone.
+explicit rollback, continuity qualification, cleanup scheduling and the public
+surface remain unfinished; no engine rollout is enabled by this journal alone.
+
+### Scoped revision execution and observation
+
+The private installed `installationRevisionWorkflow` performs one bounded pass:
+read the native entry mode, persist start before applying the exact recorded
+Argo intent, then observe its current controller facts. The preparation and
+plan bind a separate `ExecutionWorkflowDigest`, derived from the owned installed
+recipe and immutable engine revision. A preparation recipe fingerprint cannot
+substitute for this execution binding. Promotion verifies both bindings.
+
+Starting requires the original resolved operator, an actual promoted preparation,
+fresh authenticated receiving configuration, and unexpired artifact evidence.
+An uncertain started operation keeps its slot. Repeating the same write scope
+reconciles the recorded intent through the Argo adapter; a lost committed reply
+does not create another sync. A different installed engine can run the explicit
+observation mode, but its operations cannot acquire write authority even if the
+recipe asks to apply. Every controller observation uses the journal version read
+before that request, preserving protection against late observers.
+
+Required-database race tests combine native promotion and revision journals with
+a JSON Patch controller fixture. They exercise lost apply replies, fresh-host
+recovery, changed execution recipes, stale configuration, omitted start, forged
+workflow outputs and unbound children. A successful owned Argo operation with
+`Healthy` and `Synced` still leaves the installation `applying` and its slot
+occupied. These are controller protocol and journal tests, not serving continuity
+or installed rollout evidence. The host remains private and unregistered.
 
 ### Preparation before source dispatch
 

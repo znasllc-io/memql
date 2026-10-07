@@ -214,7 +214,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 136 -> 138: private artifact admission and bounded preparation retirement recipes,
 // measured together by strict boot after merging both installed definitions.
 // 138 -> 139: private preparation host recipe; measured by strict boot.
-const shippedAutomationCount = 139
+// 139 -> 140: private revision execution recipe; measured by strict boot.
+const shippedAutomationCount = 140
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

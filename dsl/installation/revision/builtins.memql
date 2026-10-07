@@ -1,0 +1,12 @@
+/// Read the active revision and native entry mode.
+@executor("integration.installation.installationRevisionRead")
+builtin installationRevisionRead { }
+/// Persist the started fence after fresh native configuration admission.
+@executor("integration.installation.installationRevisionBegin")
+builtin installationRevisionBegin { }
+/// Apply or reconcile exactly the durably admitted Argo intent.
+@executor("integration.installation.installationRevisionApply")
+builtin installationRevisionApply { }
+/// Record fresh controller facts without completing the installation.
+@executor("integration.installation.installationRevisionObserve")
+builtin installationRevisionObserve { }

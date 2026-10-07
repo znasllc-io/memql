@@ -1,0 +1,12 @@
+/// Perform one admitted revision pass and record the controller's current facts.
+/// Native start mode binds the original operator and installed execution recipe.
+/// A replacement observer cannot write; controller facts do not complete an update.
+@template
+automation installationRevisionWorkflow {
+  current := builtin installationRevisionRead()
+  if current.mayApply {
+    builtin installationRevisionBegin()
+    builtin installationRevisionApply()
+  }
+  builtin installationRevisionObserve()
+}
