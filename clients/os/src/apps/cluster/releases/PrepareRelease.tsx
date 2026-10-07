@@ -21,7 +21,7 @@ export function PrepareRelease({ query, connected, visible, back, prepared }: { 
   const executing = useRef(false), mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const inputs = plan?.components.flatMap((c) => c.runs.map((alias) => ({ alias, component: c.name, repository: c.repository }))) ?? [];
-  const current = plan && config.fresh && config.value?.some((p) => JSON.stringify(p) === JSON.stringify(plan));
+  const current = plan && config.fresh && config.value?.some((p) => p.name === plan.name && p.configuration === plan.configuration);
   const complete = plan && inputs.every(({ alias }) => selections[alias] && runFits(plan, alias, selections[alias]!, selections));
   const choose = (alias: string, run: BuildRun) => {
     if (!plan || busy || !current || !runFits(plan, alias, run, selections)) return;

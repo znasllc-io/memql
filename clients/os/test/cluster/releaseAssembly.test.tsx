@@ -78,6 +78,17 @@ describe("release preparation", () => {
     await screen.findByRole("button", { name: "Review engine 0.25.0" });
     expect(f.state.calls.filter((c) => c.kind === "assemble")).toHaveLength(1);
   });
+  it.each(["source", "metadata"])("notices changed %s rules even when the visible plan fields are unchanged", async (changed) => {
+    const f = releaseFixture();
+    const view = render(<ReleaseBrowser query={f.query} connected />);
+    await start(); await choose();
+    view.rerender(<ReleaseBrowser query={f.query} connected={false} />);
+    if (changed === "source") f.state.sources[0]!.path = "other/VERSION";
+    else Object.assign(f.state.assemblies[0]!.components[0]!.artifacts[0]!, { imageMetadataPath: "other/metadata.json" });
+    view.rerender(<ReleaseBrowser query={f.query} connected />);
+    await screen.findByText(/This release plan changed/);
+    expect(screen.queryByRole("button", { name: "Prepare release" })).toBeNull();
+  });
   it("walks run pages rather than treating the first page as all builds", async () => {
     const f = releaseFixture();
     const calls: (string | undefined)[] = [];

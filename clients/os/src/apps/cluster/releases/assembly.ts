@@ -4,6 +4,7 @@ import { body, readTargets, type Target } from "./model";
 
 export interface AssemblyPlan {
   name: string;
+  configuration: string;
   components: { name: string; repository: string; runs: string[]; artifacts: { name: string; run: string; stepKey: string; path: string; kind: string; platform: string }[] }[];
   targets: Target[];
   compatibility: { component: string; requires: string; minVersion: string; maxExclusive: string }[];
@@ -23,6 +24,9 @@ function text(value: unknown): string {
 }
 export function readAssemblies(result: Result): AssemblyPlan[] {
   const config = body(result), targets = readTargets(result);
+  // Preparation fingerprints all assembly/source rules, including metadata paths
+  // not displayed by the picker. A projection of visible fields misses drift.
+  const configuration = JSON.stringify(config);
   const sources = list(config.sources ?? [], 64).map((entry) => { const s = object(entry); return { name: text(s.component), repository: text(s.repository) }; });
   return list(config.assemblies ?? [], 64).map((entry) => {
     const p = object(entry);
@@ -36,7 +40,7 @@ export function readAssemblies(result: Result): AssemblyPlan[] {
     });
     const aliases = components.flatMap((c) => c.runs);
     if (!components.length || !aliases.length || aliases.length > 256 || new Set(aliases.map((a) => a.toLowerCase())).size !== aliases.length) throw new Error("The release plan has conflicting run inputs.");
-    return { name: text(p.name), components, targets: list(p.targets, 1024).map((id) => {
+    return { name: text(p.name), configuration, components, targets: list(p.targets, 1024).map((id) => {
       const target = targets.find((t) => t.targetId === text(id));
       if (!target) throw new Error("A release destination is no longer configured.");
       return target;

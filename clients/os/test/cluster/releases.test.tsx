@@ -197,6 +197,8 @@ describe("draft release lifecycle", () => {
     await screen.findByText("Public publication reply was lost");
     view.unmount(); render(<ReleaseBrowser query={f.query} connected />);
     await open(); await destination(); await screen.findByRole("button", { name: "Reconcile release" });
+    expect(screen.queryByText("Verified when published; remote availability has not been checked again.")).toBeNull();
+    expect(screen.getByText("The public release outcome has not been verified. Reconcile the recorded attempt.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Upload file" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Publish release" })).toBeNull();
     expect(f.state.calls.filter((c) => c.kind === "promote")).toHaveLength(1);

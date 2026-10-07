@@ -133,11 +133,13 @@ function CandidatePage({ candidateId, query, connected, visible, back }: { candi
           action = "draft";
           label = draft?.state === "creating" ? "Reconcile draft" : target.releaseId ? "Verify draft" : "Create draft";
           footer = draft?.state === "creating" ? "Draft creation unresolved" : target.releaseId ? "Draft verification required" : "Draft not created";
+          detail = draft?.state === "creating" ? "The draft creation outcome has not been verified. Reconcile the recorded attempt." : undefined;
           consequence = draft?.state === "creating" ? "Check the existing creation attempt. This will not send another draft creation request." : target.releaseId ? `Verify draft #${target.releaseId} and its reviewed metadata.` : `Create tag ${target.tag} and draft “${target.draft.name}” in ${target.repository}. The tag may trigger repository automation. Public publication is separate.`;
         } else if (draft?.state === "promoting" || (target.draft && draft?.state === "ready" && publicationsComplete)) {
           action = "promote";
           label = draft.state === "promoting" ? "Reconcile release" : "Publish release";
           footer = draft.state === "promoting" ? "Public publication unresolved" : "All artifacts uploaded and verified";
+          detail = draft.state === "promoting" ? "The public release outcome has not been verified. Reconcile the recorded attempt." : detail;
           consequence = draft.state === "promoting" ? "Check the recorded public publication attempt. This will not send another publication request." : `Make “${target.draft!.name}” (${target.repository} ${target.tag}, #${draft.releaseId}) and its uploaded files public.${target.draft!.prerelease ? " Mark as a prerelease." : ""}${target.draft!.latest ? " Select as the latest release." : " Do not select as the latest release."}`;
         } else if (publication?.state !== "complete" && (!target.draft || draft?.state === "ready")) action = "publish";
         else if (target.draft && !publicationsComplete) detail = "Upload and verify every candidate destination before making this release public.";
