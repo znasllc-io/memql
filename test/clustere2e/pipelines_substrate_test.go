@@ -1145,10 +1145,12 @@ func (r *substrateRun) request(step pl.Step) pl.StepRequest {
 		// setFacts composes the clone URL from the repository's name.
 		Repository: pl.Repository{Owner: substrateOwner, Name: substrateRepo,
 			CloneURL: "https://github.com/" + substrateOwner + "/" + substrateRepo + ".git"},
-		SHA:            substrateSHA,
-		Mode:           pl.ModeFull,
-		Event:          pl.EventPush,
-		Version:        pl.Version(pl.EventPush, substrateSHA, ""),
+		SHA:   substrateSHA,
+		Mode:  pl.ModeFull,
+		Event: pl.EventPush,
+		// The substrate consumes an already selected version. Version policy
+		// is tested through pipelineVersionForEvent; this push fixture pins it.
+		Version:        substrateSHA,
 		InstallationID: 0,
 		Compute:        pl.ComputeClusterAndFleet,
 		Step:           step,
