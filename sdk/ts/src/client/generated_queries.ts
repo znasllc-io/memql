@@ -12348,6 +12348,30 @@ QueryClient.prototype.workSignedRunsForOwner = function (this: QueryClient, args
   return this.executeNamed("workSignedRunsForOwner", buildWorkSignedRunsForOwner(args), opts);
 };
 
+/** One caller-owned execution receipt. A named key avoids reading an entire run when verifying a release artifact or one required check. */
+// Bound concept: v1:work:step (machine-readable: BoundConcepts["workStepForOwnerRun"] in generated_concepts.ts).
+export interface WorkStepForOwnerRunArgs {
+  runId: string;
+  stepKey: string;
+}
+
+export function buildWorkStepForOwnerRun(args: WorkStepForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("stepKey: " + renderMemQLValue(args.stepKey));
+  return "query workStepForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workStepForOwnerRun(args: WorkStepForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workStepForOwnerRun = function (this: QueryClient, args: WorkStepForOwnerRunArgs = {} as WorkStepForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workStepForOwnerRun", buildWorkStepForOwnerRun(args), opts);
+};
+
 /** Every step of one of the caller's runs -- the run timeline. Bounded by the run; the client orders by seq, because @unbounded and sort cannot be combined. */
 // Bound concept: v1:work:step (machine-readable: BoundConcepts["workStepsForOwnerRun"] in generated_concepts.ts).
 export interface WorkStepsForOwnerRunArgs {
