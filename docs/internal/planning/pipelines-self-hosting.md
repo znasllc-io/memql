@@ -904,7 +904,11 @@ and one Go runtime thread per process. This explicitly matches the rehearsal's
 CPU allocation rather than inheriting the namespace's two-CPU default. CPU
 requests survive the agent/Workbench wire, count toward scheduling and are
 bounded by an operator maximum; fleet/native execution refuses this contract
-instead of silently ignoring it. Neither these settings nor partial coverage
+instead of silently ignoring it. The `pipelineStepV8` forward refuses older
+replicas that cannot enforce explicit CPU, and a real two-Workbench adoption
+test checks that the reservation survives replacement. Image builds preserve
+their one-CPU request/two-CPU limit only when the field is omitted; an explicit
+reservation uses the same operator bound. Neither these settings nor partial coverage
 establish a qualified full-history deadline.
 Four distinct roughly 81 MB commits scanned in 107.722 seconds with four
 independent processes inside a 6 GiB/four-CPU container, while the earlier

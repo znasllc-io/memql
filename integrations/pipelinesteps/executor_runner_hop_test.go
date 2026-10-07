@@ -555,6 +555,7 @@ func TestExecuteHopRealRunnersAdoptAStepAwayFromTheReplicaThatWentSilent(t *test
 		t.Run(c.name, func(t *testing.T) {
 			w := newRunnerHop(t)
 			req := hopRequest()
+			req.Step.CPUMilli = 4000
 			job := JobName(req.RunID, req.StepKey, req.Attempt)
 			step := &hopStep{}
 			w.h.c.script(job, step.script(job))
@@ -569,6 +570,10 @@ func TestExecuteHopRealRunnersAdoptAStepAwayFromTheReplicaThatWentSilent(t *test
 
 			c.silence(w, step)
 			rtWaitUntil(t, "workbench-b to adopt the step", func() bool { return w.holder(job) == "workbench-b" })
+			resources := w.h.c.jobNow(t, job).Spec.Template.Spec.Containers[0].Resources
+			if resources == nil || resources.Requests["cpu"] != "4000m" || resources.Limits["cpu"] != "4000m" {
+				t.Fatal("CPU reservation was lost across the agent/Workbench/replacement hop", resources)
+			}
 			step.ending.Store(true)
 			res := awaitHop(t, done, "workbench-b's outcome")
 
