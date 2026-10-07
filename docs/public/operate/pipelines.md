@@ -305,12 +305,19 @@ refusal's scope, so it never holds a dot, a slash or a hash.
 
 | Key | Value | Default | Refused when |
 |---|---|---|---|
+| `workflow` | Installed MemQL template composing the compiled steps | `runPipelineStages` | Not an identifier of at most 128 characters, or not an enabled callable installed template: `pipeline_stage_invalid` |
 | `platform` | Default container platform (`linux/amd64` or `linux/arm64`); a step may override it | either Linux architecture on the cluster | Unknown OS/architecture: `pipeline_step_invalid` |
 | `image` | The toolchain image container steps run in. Pin it by digest | none | -- |
 | `services` | Named sidecars a step may ask for, each with `image` (required), `env` (plain `NAME: value` configuration, never a secret) and `ready` (a shell probe the runner waits on before the step's command starts) | none | A name that breaks the rule, a service with no image, or an `env` name that is not upper-case letters, digits and underscores starting with a letter or underscore: `pipeline_step_invalid`, scoped `services` or `services/<name>` |
 | `caches` | Default caches inherited by steps, such as `go` and `npm` | none | -- |
 | `select` | How steps choose what to run. Required once a step names `packages` | none | [Below](#select) |
 | `stages` | The stages, in the order they run. At least one | required | Absent or empty: `pipeline_stage_invalid` |
+
+The default workflow chooses stage order, bounded parallelism and failure
+blocking. A custom `workflow` names installed DSL; the manifest cannot carry
+workflow source. Native code still enforces the run lease, authorized step
+identities, receipts and the final verdict. See
+[Pipeline workflows](../build/integration-boundary.md#pipeline-workflows).
 
 `image` and `caches` are passed to the runner as written; what each cache name
 mounts is the runner's ([Caches](pipelines-substrate.md#caches)): it knows
