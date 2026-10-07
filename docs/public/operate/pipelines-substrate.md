@@ -415,9 +415,10 @@ and output paths. An image build has no registry publication credential.
   timeout: 1h
   imageBuild:
     context: .
-    dockerfile: docker/Dockerfile
+    dockerfile: Dockerfile
     args:
       BUILD_TAGS: edge
+      SPA_DIST_STAGE: spa-build
 ```
 
 `context` and `dockerfile` are clean paths relative to the checkout; neither may
