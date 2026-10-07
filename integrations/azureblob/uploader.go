@@ -173,6 +173,9 @@ func (u *AzureBlobUploader) DownloadWithLimit(ctx context.Context, container, ob
 	}
 	body := resp.Body
 	defer func() { _ = body.Close() }()
+	if hasRetirementMarker(resp.Metadata) {
+		return nil, ErrBlobRetired
+	}
 	if resp.ContentLength != nil && *resp.ContentLength > maxBytes {
 		return nil, fmt.Errorf("azure blob exceeds download limit of %d bytes", maxBytes)
 	}
