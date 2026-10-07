@@ -481,12 +481,16 @@ func TestExecuteNamesTheBindingDeadline(t *testing.T) {
 		needs       []string
 		wantSeconds int
 		wantCode    string
+		runCeiling  time.Duration
 	}{
-		{"the step's own timeout binds", 10 * time.Minute, 900, nil, 900, pl.CodeStepTimeout},
-		{"the run's ceiling binds", 110 * time.Minute, 900, nil, 600, pl.CodeRunCeiling},
-		{"a step with no timeout gets the default", 10 * time.Minute, 0, nil, 1200, pl.CodeStepTimeout},
-		{"a tie is the step's own", 105 * time.Minute, 900, nil, 900, pl.CodeStepTimeout},
-		{"the fleet is handed the same bound", 110 * time.Minute, 900, []string{"docker"}, 600, pl.CodeRunCeiling},
+		{"the step's own timeout binds", 10 * time.Minute, 900, nil, 900, pl.CodeStepTimeout, 0},
+		{"the run's ceiling binds", 110 * time.Minute, 900, nil, 600, pl.CodeRunCeiling, 0},
+		{"a step with no timeout gets the default", 10 * time.Minute, 0, nil, 1200, pl.CodeStepTimeout, 0},
+		{"a tie is the step's own", 105 * time.Minute, 900, nil, 900, pl.CodeStepTimeout, 0},
+		{"the fleet is handed the same bound", 110 * time.Minute, 900, []string{"docker"}, 600, pl.CodeRunCeiling, 0},
+		{"a long step does not raise the default run ceiling", 10 * time.Minute, 21600, nil, 6600, pl.CodeRunCeiling, 0},
+		{"an explicit long run admits a six-hour step", 10 * time.Minute, 21600, nil, 21600, pl.CodeStepTimeout, 8 * time.Hour},
+		{"earlier stages consume the explicit long run budget", 7 * time.Hour, 21600, nil, 3600, pl.CodeRunCeiling, 8 * time.Hour},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			wb := &scriptedWorkbench{step: func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
@@ -494,6 +498,9 @@ func TestExecuteNamesTheBindingDeadline(t *testing.T) {
 			}}
 			fleet := &fakeFleet{}
 			e := newTestExecutor(wb, fleet)
+			if c.runCeiling > 0 {
+				e.cfg.RunCeiling = c.runCeiling
+			}
 			req := exRequest()
 			req.RunStartedAt = exNow.Add(-c.started).Format(time.RFC3339)
 			req.Step.TimeoutSeconds = c.stepTimeout

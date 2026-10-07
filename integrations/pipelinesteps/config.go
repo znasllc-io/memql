@@ -15,6 +15,9 @@ import (
 // pipelines component's ConfigMap supplies the namespace and the clone image
 // to the workbench node.
 type Config struct {
+	// StepCPUMaxMilli bounds a manifest's explicit command CPU reservation.
+	StepCPUMaxMilli int
+
 	// ImageBuilder is an operator opt-in to the fixed, separately installed
 	// rootless builder security profile. Empty disables image build requests.
 	ImageBuilder string
@@ -84,6 +87,8 @@ type Config struct {
 // The environment this package reads. Named once, so the env-registry scan
 // resolves every read to its key.
 const (
+	envStepCPUMax = "MEMQL_PIPELINES_STEP_CPU_MAX_MILLI"
+
 	envImageBuilder     = "MEMQL_PIPELINES_IMAGE_BUILDER"
 	envStepMemoryMax    = "MEMQL_PIPELINES_STEP_MEMORY_MAX_MIB"
 	envNamespace        = "MEMQL_PIPELINES_NAMESPACE"
@@ -96,6 +101,7 @@ const (
 )
 
 const (
+	defaultStepCPUMaxMilli  = 4000
 	defaultStepMemoryMaxMiB = 8192
 	defaultNamespace        = "memql-pipelines"
 	cacheClaim              = "memql-pipelines-cache"
@@ -124,6 +130,8 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		namespace = defaultNamespace
 	}
 	return Config{
+		StepCPUMaxMilli: whole(envStepCPUMax, defaultStepCPUMaxMilli, 1, 256000),
+
 		ImageBuilder:       text(envImageBuilder),
 		StepMemoryMaxMiB:   whole(envStepMemoryMax, defaultStepMemoryMaxMiB, 128, 1048576),
 		Namespace:          namespace,

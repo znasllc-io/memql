@@ -69,6 +69,31 @@ func (p PodSpec) FSGroupForTest() int64 {
 	return *p.SecurityContext.FSGroup
 }
 
+func TestImageBuildCPUReservationHonorsOperatorBudget(t *testing.T) {
+	cfg, run := imageBuildRun()
+	run.CPUMilli = 4000
+	job, err := BuildJob(cfg, run, testJobName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer := job.Spec.Template.Spec.Containers[0]
+	if producer.Resources.Requests["cpu"] != "4000m" || producer.Resources.Limits["cpu"] != "4000m" || producer.Resources.Limits["memory"] != "2048Mi" {
+		t.Fatal("typed build replaced an explicit resource reservation", producer.Resources)
+	}
+	if producer.SecurityContext.SeccompProfile.LocalhostProfile != imageBuildProfile("linux/arm64") {
+		t.Fatal("resource reservation changed the fixed builder security profile")
+	}
+	for _, container := range append(job.Spec.Template.Spec.InitContainers, job.Spec.Template.Spec.Containers[1:]...) {
+		if container.Resources != nil && container.Resources.Limits["cpu"] == "4000m" {
+			t.Fatal("producer CPU reservation leaked to another container")
+		}
+	}
+	cfg.StepCPUMaxMilli = 2000
+	if refused, err := BuildJob(cfg, run, testJobName); err == nil || refused.Kind != "" {
+		t.Fatal("typed build bypassed operator CPU cap")
+	}
+}
+
 func TestImageBuildRefusesUnsafeForwardBeforeResources(t *testing.T) {
 	for name, edit := range map[string]func(*Config, *StepRun){
 		"disabled":            func(c *Config, r *StepRun) { c.ImageBuilder = "" },
