@@ -8,7 +8,8 @@ and workspace ownership. `scripts/ci/prepare.py` only materializes the exact
 candidate and `.github/memql-pin` as siblings inside `.memql-ci/`.
 
 This package requires the engine's DSL workflow and `runAfterFailure` contract
-(engine PR #5883). The Cockpit build dependency remains `.github/memql-pin`;
+(engine PR #5883, merged as `82c37723251d016bca6a8589f50caed67e1dfbca`,
+or a compatible descendant). The Cockpit build dependency remains `.github/memql-pin`;
 the pipeline engine and the engine source used to compile Cockpit are separate
 pins. Neither selecting this manifest nor compiling it grants fleet access.
 
@@ -71,3 +72,18 @@ stubbed and their homes are temporary. The preparation tests additionally
 prove that unstaged source and engine-pin edits cannot enter a run of HEAD.
 The remaining native platforms and installed release aggregation still require
 their own evidence.
+
+The exact declared Linux ARM64 commands at source `7947670` also passed all 13
+discovered fuzz targets (20 seconds each), govulncheck v1.3.0, and the headless
+four-platform release build. The latter produced four archives and a JSON/XML
+CycloneDX inventory for each built binary. Govulncheck reported no reachable or
+imported-package vulnerabilities and one advisory in a required module whose
+vulnerable code was not called.
+
+CodeQL 2.27.1 completed its declared manual Go build and security-and-quality
+suite and retained SARIF. It scanned 172 of 379 Go files in that Linux headless
+invocation; it does not qualify other build tags or operating systems. Its one
+finding was an unchecked close in the existing Linux GPU-device access probe.
+The probe writes no data; it now refuses a failed close. This is a code fix,
+not a suppression, and the original scan remains evidence of the original
+source rather than a zero-finding claim for the changed source.
