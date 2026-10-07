@@ -56,6 +56,11 @@ func makeSelfSignedCertKey(t *testing.T, dir string, keyMode os.FileMode) (certP
 	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: keyDER}), keyMode); err != nil {
 		t.Fatalf("write key: %v", err)
 	}
+	// Creation mode is filtered by umask. Exercise the exact fixture mode
+	// even when the caller protects newly created files with umask 077.
+	if err := os.Chmod(keyPath, keyMode); err != nil {
+		t.Fatalf("set key mode: %v", err)
+	}
 	return certPath, keyPath
 }
 
@@ -309,6 +314,9 @@ func TestVerifyPrivateKeyFileMode_AcceptsAndRejects(t *testing.T) {
 	if err := os.WriteFile(good, []byte("x"), 0o600); err != nil {
 		t.Fatalf("write good: %v", err)
 	}
+	if err := os.Chmod(good, 0o600); err != nil {
+		t.Fatalf("set good mode: %v", err)
+	}
 	if err := verifyPrivateKeyFileMode(good); err != nil {
 		t.Errorf("0600 key rejected: %v", err)
 	}
@@ -316,6 +324,9 @@ func TestVerifyPrivateKeyFileMode_AcceptsAndRejects(t *testing.T) {
 	bad := filepath.Join(dir, "bad.key")
 	if err := os.WriteFile(bad, []byte("x"), 0o644); err != nil {
 		t.Fatalf("write bad: %v", err)
+	}
+	if err := os.Chmod(bad, 0o644); err != nil {
+		t.Fatalf("set bad mode: %v", err)
 	}
 	if err := verifyPrivateKeyFileMode(bad); err == nil {
 		t.Error("0644 key accepted; expected rejection")
