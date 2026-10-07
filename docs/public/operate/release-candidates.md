@@ -93,6 +93,14 @@ inconsistent references refuse before preparation.
 
 ## Assemble and review
 
+In MemQL OS, open **Cluster → Releases** and select **Prepare release**. Choose
+a configured plan, then one successful full-mode run for each declared input.
+The picker walks older pages when needed and shows only runs from the declared
+repository. Multiple inputs for one component must use distinct work runs at
+the same commit. Review the inputs, artifacts and destinations, then prepare.
+The candidate page shows the resolved versions and verification evidence for
+separate approval. A changed plan requires choosing and reviewing it again.
+
 Pass only the configured plan name and its run identities. A reusable recipe
 can accept the run identity as an argument:
 
@@ -148,6 +156,20 @@ Related: [Engine, integration and workflow boundaries](../build/integration-boun
 [Pipelines](pipelines.md) and [Verified OCI publication](../build/verified-oci-publication.md).
 
 ## Create a draft and publish its complete contents
+
+The Releases screen keeps these actions separate: approve the candidate,
+create or verify its draft, upload each file, and publish the release. The
+review includes the release name, notes, tag source, prerelease flag and latest
+selection. Draft creation also creates the tag, which may trigger repository
+automation. Public publication is offered only after every candidate
+destination has a complete receipt. Existing draft targets without reviewed
+metadata retain their upload action but cannot be promoted from the screen.
+
+After a lost response, reopen the candidate and use its explicit reconciliation
+action. Opening the page never retries a write. If current history or
+configuration cannot be read, actions wait while the last record remains
+visible. Recorded completion describes the earlier verified outcome, not a
+fresh remote availability check.
 
 A file target may declare `releaseId: 0` together with exact `draft` metadata.
 Approval then covers the immutable source, tag, notes, connection settings and

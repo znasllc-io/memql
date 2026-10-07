@@ -48,9 +48,43 @@ revision independently of the serving engine. The replacement engine runs a
 fresh observation recipe against the durable intent; it must not replay an old
 approval against changed executable workflow definitions.
 
-The journal, source/render verification, workload and continuity probes,
+The journal now has an internal reservation/start/observation foundation,
+described below. Source/render verification, workload and continuity probes,
 reconciliation scheduler, rollback workflow and UI remain to be implemented.
 Neither acceptance of a patch nor `Healthy` plus `Synced` completes an update.
+
+## Native installation journal
+
+`integrations/installation` is private and unregistered. Its native plan binds
+the requesting operator, installed workflow, candidate and owner approval,
+publication evidence, rendered resources/diff, immutable starting revision and
+rollback render, and the complete Argo protocol intent. Persisting these
+bindings does not verify their evidence. The candidate, source, render and
+compatibility verifiers must be implemented before exposing preparation or
+an update action; a caller-supplied digest is not proof.
+
+All replicas serialize on one installation head in PostgreSQL. Reserving the
+same plan returns the same intent; a different plan cannot take an active slot.
+The native start operation commits `applying` before any external write.
+Cancellation is allowed only from `prepared`, is permanent for that plan, and
+cannot release a successor's slot. A timeout, crash or uncertain external reply
+does not release a started attempt.
+
+Each authority read recomputes the plan identity and rejects unexpected fields
+or changed bindings. The current resolved developer/admin/owner role is checked
+before storage; a new write also requires the original requesting identity and
+workflow digest. Read-only observation remains available to another currently
+authorized operator without reloading that old recipe. Observations use a
+version captured before the external read, so a late result cannot overwrite a
+newer result. Argo success remains an observation and cannot mark an installation
+complete or permit the next update.
+
+Real database tests exercise independent connections, concurrent reservations,
+lost start-reply recovery, late starts after cancellation, stale observations,
+changed stored authority, and migration rollback refusing nonempty history.
+The package is in the canonical required-database CI selector. Completion,
+explicit rollback/recovery, cleanup evidence and the scoped DSL/public surface
+remain unfinished; no engine rollout is enabled by this journal alone.
 
 ## Immutable desired state
 

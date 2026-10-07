@@ -269,6 +269,7 @@ readonly DB_GATED_TREES=(
 	"integrations/similarity"
 	"integrations/library"
 	"integrations/groups"
+	"integrations/installation"
 	"integrations/planner"
 	"integrations/procedure"
 	"integrations/release"
