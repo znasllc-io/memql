@@ -5,4 +5,4 @@ metadata:
   labels:
     memql.io/delivery-proof: argocd-revision
 data:
-  revision: baseline
+  revision: candidate
