@@ -14,6 +14,7 @@ import (
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/core/num"
 	"github.com/znasllc-io/memql/integrations/azureblob"
+	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 )
 
 var errPipelineUploadStale = errors.New("artifact upload generation has been replaced; stale writer refused")
@@ -48,6 +49,15 @@ func (s *pipelinesLibraryStore) reserveStream(ctx context.Context, db *sql.DB, i
 	// is not a claim of atomic quota enforcement across those other paths.
 	if err := lockPipelineUploadOwner(ctx, tx, identity.OwnerUserID); err != nil {
 		return x, err
+	}
+	fenced, err := readPipelineScopeFence(ctx, tx, pipelinesteps.RunFileReceiptScope{
+		OwnerUserID: identity.OwnerUserID, WorkRunID: identity.WorkRunID, StepKey: identity.StepKey, Attempt: identity.Attempt,
+	})
+	if err != nil {
+		return x, err
+	}
+	if fenced {
+		return x, errPipelineScopeFenced
 	}
 	existing, err := readPipelineIntent(ctx, tx, x.ID)
 	if err == nil {

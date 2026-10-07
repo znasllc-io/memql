@@ -1,0 +1,20 @@
+/// Reconcile a bounded page of each capture, preserving native progress for another pass.
+/// Every external operation retains its journal, actor and immutable scope gates.
+@template
+automation installationRetirementWorkflow {
+  builtin installationRetirementBegin()
+  builtin installationRetirementStop()
+  for role in ["candidate", "rollback"] {
+    builtin installationRetirementFence(role: role)
+    builtin installationRetirementRelease(role: role)
+    pending := builtin installationRetirementPage(role: role)
+    for artifact in pending.items {
+      builtin installationRetirementArtifact(role: role, intentId: artifact.intentId)
+    }
+    builtin installationRetirementPage(role: role)
+  }
+  observed := builtin installationRetirementObserve()
+  if observed.ready {
+    builtin installationRetirementComplete()
+  }
+}

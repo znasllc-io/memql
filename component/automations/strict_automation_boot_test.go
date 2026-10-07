@@ -211,7 +211,11 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 131 -> 133: candidate preparation and separately approved publication recipes.
 // 133 -> 134: assemble a candidate from declared completed pipeline runs.
 // 134 -> 136: separately create/reconcile drafts and promote verified releases.
-const shippedAutomationCount = 138
+// 136 -> 138: private artifact admission and bounded preparation retirement recipes,
+// measured together by strict boot after merging both installed definitions.
+// 138 -> 139: private receiving preparation recipe, measured after combining
+// preparation and retirement on the same installed tree.
+const shippedAutomationCount = 139
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

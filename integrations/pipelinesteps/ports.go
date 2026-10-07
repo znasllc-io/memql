@@ -114,6 +114,19 @@ type RetiredFileReceipt struct {
 	IntentID, FileID, TombstoneETag string
 }
 
+// LibraryArtifactScopeRetirement closes a producer before inventorying even
+// its unacknowledged uploads. Calls require internal origin and the owner's
+// actor. Fence is permanent and idempotent, including before the first upload.
+// Read returns at most 128 IDs in ascending order, including non-ready intents;
+// start with an empty cursor and repeat with the last ID until an empty page.
+// The native caller must durably retire the producer first, then release its
+// consumers and retire every intent. This fence alone does not stop an already
+// admitted provider request or confirm that bytes have been retired.
+type LibraryArtifactScopeRetirement interface {
+	FenceRunFileScope(context.Context, RunFileReceiptScope) error
+	ReadFencedRunFileIntents(context.Context, RunFileReceiptScope, string) ([]string, error)
+}
+
 // LibraryStore stores a step's files in its owner's Library.
 type LibraryStore interface {
 	StoreRunFile(ctx context.Context, f RunFile) (StoredFile, error)

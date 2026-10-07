@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -34,7 +35,7 @@ func TestPipelineLifecycleAzuriteDBRetirementRecoveryAcrossClients(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	container := "pipeline-retire-" + strings.ToLower(id.NewShortId())
 	if _, err := client.CreateContainer(ctx, container, nil); err != nil {
@@ -59,6 +60,39 @@ func TestPipelineLifecycleAzuriteDBRetirementRecoveryAcrossClients(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Run("producer-stopped-before-provider-request", func(t *testing.T) {
+		blocked := pipelineBlockedScopeUpload{AzureBlobUploader: u1, entered: make(chan struct{}), proceed: make(chan struct{})}
+		writer, _, _ := pipelineStreamDBStore(t, blocked)
+		cleaner, _, _ := pipelineStreamDBStore(t, u2)
+		writer.bucket, cleaner.bucket = container, container
+		file := pipelineStreamFile(id.NewShortId(), "late source archive")
+		owner, scope := pipelineLifecycleScope(file)
+		uploaded := make(chan error, 1)
+		go func() { _, err := writer.StoreRunFileStream(ctx, file); uploaded <- err }()
+		defer func() {
+			close(blocked.proceed)
+			if err := <-uploaded; !errors.Is(err, azureblob.ErrBlobRetired) {
+				t.Errorf("pre-fence provider request recreated retired bytes: %v", err)
+			}
+		}()
+		select {
+		case <-blocked.entered:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		if err := cleaner.FenceRunFileScope(owner, scope); err != nil {
+			t.Fatal(err)
+		}
+		ids, err := cleaner.ReadFencedRunFileIntents(owner, scope, "")
+		if err != nil || len(ids) != 1 {
+			t.Fatal("in-flight intent absent", ids, err)
+		}
+		if receipt, err := cleaner.RetireRunFile(owner, scope, ids[0]); err != nil || receipt.TombstoneETag == "" {
+			t.Fatal("provider absence was not permanently fenced", receipt, err)
+		}
+		// The deferred resumed request reaches the real provider after the
+		// leased tombstone, despite having reserved before the admissions fence.
+	})
 	one, _, db := pipelineStreamDBStore(t, pipelineLostRetirementReply{u1})
 	two, _, _ := pipelineStreamDBStore(t, u2)
 	one.bucket, two.bucket = container, container
@@ -96,4 +130,19 @@ func TestPipelineLifecycleAzuriteDBRetirementRecoveryAcrossClients(t *testing.T)
 		t.Fatal("retired destination admitted retry")
 	}
 	t.Log("real leased tombstone and durable retirement recovered across independent clients")
+}
+
+type pipelineBlockedScopeUpload struct {
+	*azureblob.AzureBlobUploader
+	entered, proceed chan struct{}
+}
+
+func (u pipelineBlockedScopeUpload) CreateVerifiedStream(ctx context.Context, container, object string, body io.Reader, size int64, digest, mime string) (azureblob.VerifiedBlob, error) {
+	close(u.entered)
+	select {
+	case <-u.proceed:
+	case <-ctx.Done():
+		return azureblob.VerifiedBlob{}, ctx.Err()
+	}
+	return u.AzureBlobUploader.CreateVerifiedStream(ctx, container, object, body, size, digest, mime)
 }
