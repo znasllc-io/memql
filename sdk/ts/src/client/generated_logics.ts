@@ -92,6 +92,25 @@ QueryClient.prototype.clusterInfraRefresh = function (this: QueryClient, args: C
   return this.executeNamed("clusterInfraRefresh", buildClusterInfraRefresh(args), opts);
 };
 
+/** Table formats without authored rows reuse source rows; typed output owns its data. */
+export interface ComposeNeedsSourceRowsArgs {
+}
+
+export function buildComposeNeedsSourceRows(args: ComposeNeedsSourceRowsArgs): string {
+  void args;
+  return "logic composeNeedsSourceRows()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    composeNeedsSourceRows(args?: ComposeNeedsSourceRowsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.composeNeedsSourceRows = function (this: QueryClient, args: ComposeNeedsSourceRowsArgs = {} as ComposeNeedsSourceRowsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("composeNeedsSourceRows", buildComposeNeedsSourceRows(args), opts);
+};
+
 /** Entry point for the daily memory-consolidation automation (#586). Per #586 the precise per-owner loop -- similarity clustering of the since-watermark episode batch, the blocking LLM distill per cluster, similarTo dedup, the confidence bump / decay arithmetic, and the max(createdAt) watermark advance -- runs in the Go harness consolidation handler (the same DSL-entry / Go-loop split the knowledge refresh-cron made), because the MemQL body language has no clustering primitive. This body is the scheduled trigger surface; the file header documents the full Go-handler contract it drives. Returns a sentinel until the handler is wired (mirrors the Go in-process poller pattern in integrations/planner/refresh_cron.go). */
 export interface ConsolidateMemoryArgs {
   event: Record<string, unknown>;
@@ -302,6 +321,46 @@ QueryClient.prototype.installDependencyVerdict = function (this: QueryClient, ar
   return this.executeNamed("installDependencyVerdict", buildInstallDependencyVerdict(args), opts);
 };
 
+/** An absent article list selects the placeholder; an authored list selects fetches. */
+export interface KnowledgeHasSeedArticlesArgs {
+  articles?: unknown[];
+}
+
+export function buildKnowledgeHasSeedArticles(args: KnowledgeHasSeedArticlesArgs): string {
+  const parts: string[] = [];
+  if (args.articles !== undefined) parts.push("articles: " + renderMemQLValue(args.articles));
+  return "logic knowledgeHasSeedArticles(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    knowledgeHasSeedArticles(args: KnowledgeHasSeedArticlesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.knowledgeHasSeedArticles = function (this: QueryClient, args: KnowledgeHasSeedArticlesArgs = {} as KnowledgeHasSeedArticlesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("knowledgeHasSeedArticles", buildKnowledgeHasSeedArticles(args), opts);
+};
+
+/** Event-driven refresh uses the stale-signal threshold; the sweep uses cadence. */
+export interface KnowledgeRefreshEligibleArgs {
+}
+
+export function buildKnowledgeRefreshEligible(args: KnowledgeRefreshEligibleArgs): string {
+  void args;
+  return "logic knowledgeRefreshEligible()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    knowledgeRefreshEligible(args?: KnowledgeRefreshEligibleArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.knowledgeRefreshEligible = function (this: QueryClient, args: KnowledgeRefreshEligibleArgs = {} as KnowledgeRefreshEligibleArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("knowledgeRefreshEligible", buildKnowledgeRefreshEligible(args), opts);
+};
+
 /** Hourly sweep that stamps consumedAt + consumedFromIP='system:expiry' on v1:identity:magiclink rows whose expiresAt is in the past, so the row reads as 'spent' in audit queries and any subsequent click is idempotently rejected by the consume handler's own expiresAt guard. */
 export interface MagicLinkExpirySweepArgs {
   event: Record<string, unknown>;
@@ -344,6 +403,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.nextDeploymentVersion = function (this: QueryClient, args: NextDeploymentVersionArgs = {} as NextDeploymentVersionArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("nextDeploymentVersion", buildNextDeploymentVersion(args), opts);
+};
+
+/** Reactive and recurring responsibilities open work; standing ones add context. */
+export interface PlannerTriggerOpensGoalArgs {
+  trigger?: string;
+}
+
+export function buildPlannerTriggerOpensGoal(args: PlannerTriggerOpensGoalArgs): string {
+  const parts: string[] = [];
+  if (args.trigger !== undefined) parts.push("trigger: " + renderMemQLValue(args.trigger));
+  return "logic plannerTriggerOpensGoal(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    plannerTriggerOpensGoal(args: PlannerTriggerOpensGoalArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.plannerTriggerOpensGoal = function (this: QueryClient, args: PlannerTriggerOpensGoalArgs = {} as PlannerTriggerOpensGoalArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("plannerTriggerOpensGoal", buildPlannerTriggerOpensGoal(args), opts);
 };
 
 /** Decides which departed cluster nodes to retire (ADR S2.1 pure logic, #2235). Reads MEMQL_NODE_STALE_PRUNE_MINUTES (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns the rows of `query staleClusterNodes(olderThan: cutoff)` -- the LATEST non-stopped rows whose lastSeen is past the window (the olderThan arg pushes a `row.lastSeen < args.olderThan` predicate onto the query, #1642). The calling automation's `for` loop appends the terminal health='stopped' row per returned node through updateNodeHealth. */

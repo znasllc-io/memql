@@ -97,7 +97,8 @@ automation plannerInjectStanding {
 @template
 automation plannerHonorResponsibility {
  args { row object! agentId string! }
- if args.row.trigger == "reactive" || args.row.trigger == "recurring" {
+ opensGoal := logic plannerTriggerOpensGoal(trigger: args.row.trigger)
+ if opensGoal {
   goal := automation plannerOpenResponsibility(row: args.row, agentId: args.agentId)
   return "opened " + args.row.trigger + " goal " + goal + " (agent " + args.agentId + ")"
  }

@@ -60,6 +60,13 @@ type statementLogicEntry struct {
 
 var statementLogics = &statementLogicCache{entries: map[string]statementLogicEntry{}}
 
+// PrepareLogicBody creates owned statements for preflight and subsequent
+// RunPreparedLogicBody execution. It does not retain the loader's mutable body
+// or share the ordinary dispatch cache.
+func (r *LogicRunner) PrepareLogicBody(name string, body []map[string]any) (*Automation, error) {
+	return r.parseLogicBody(name, body)
+}
+
 // statementLogic returns the executable form of a logic's compiled body.
 func (r *LogicRunner) statementLogic(fnName string, body []map[string]any) (*Automation, error) {
 	key := reflect.ValueOf(body).Pointer()
@@ -69,7 +76,17 @@ func (r *LogicRunner) statementLogic(fnName string, body []map[string]any) (*Aut
 		return e.automation, nil
 	}
 	statementLogics.mu.Unlock()
+	a, err := r.parseLogicBody(fnName, body)
+	if err != nil {
+		return nil, err
+	}
+	statementLogics.mu.Lock()
+	statementLogics.entries[fnName] = statementLogicEntry{body: key, automation: a}
+	statementLogics.mu.Unlock()
+	return a, nil
+}
 
+func (r *LogicRunner) parseLogicBody(fnName string, body []map[string]any) (*Automation, error) {
 	data, err := json.Marshal(map[string]any{
 		"name":  "logic:" + fnName,
 		"steps": body,
@@ -81,23 +98,29 @@ func (r *LogicRunner) statementLogic(fnName string, body []map[string]any) (*Aut
 	if err != nil {
 		return nil, fmt.Errorf("logic %q: %w", fnName, err)
 	}
-	statementLogics.mu.Lock()
-	statementLogics.entries[fnName] = statementLogicEntry{body: key, automation: a}
-	statementLogics.mu.Unlock()
 	return a, nil
 }
 
 // RunLogicBody implements memql.LogicRunner (see the file comment).
 func (r *LogicRunner) RunLogicBody(ctx context.Context, fnName string, body []map[string]any, args map[string]any) (any, error) {
+	a, err := r.statementLogic(fnName, body)
+	if err != nil {
+		return nil, err
+	}
+	return r.RunPreparedLogicBody(ctx, a, args)
+}
+
+// RunPreparedLogicBody executes the exact statements already admitted by a
+// scoped host. The host owns the prepared definition and never mutates it.
+func (r *LogicRunner) RunPreparedLogicBody(ctx context.Context, a *Automation, args map[string]any) (any, error) {
 	if memql.InBeforeWrite(ctx) {
 		r = r.WithoutJournal()
 	}
 	if r.stepRegistry == nil {
 		return nil, fmt.Errorf("logic runner has no step registry wired")
 	}
-	a, err := r.statementLogic(fnName, body)
-	if err != nil {
-		return nil, err
+	if a == nil {
+		return nil, fmt.Errorf("logic runner has no prepared body")
 	}
 	evaluator := r.newEvaluatorForLogic(ctx, args)
 	evaluator.enterStatements()

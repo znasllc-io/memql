@@ -2,3 +2,15 @@
 //
 // Logic bodies for the knowledge-domain automations.
 
+
+/// An absent article list selects the placeholder; an authored list selects fetches.
+logic knowledgeHasSeedArticles {
+ args { articles []any }
+ return (args.articles ?? []).count() > 0
+}
+
+/// Event-driven refresh uses the stale-signal threshold; the sweep uses cadence.
+logic knowledgeRefreshEligible {
+ args { staleEvent bool! staleSignalCount number due bool! }
+ return (args.staleEvent && (args.staleSignalCount ?? 0) >= 3) || (!args.staleEvent && args.due)
+}

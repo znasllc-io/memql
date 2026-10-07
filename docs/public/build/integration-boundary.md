@@ -68,6 +68,9 @@ the template and synchronous children. Direct calls to those private callback
 names fail closed; serialized arguments cannot create the scope.
 
 Before any effect, the host checks the entire child call tree. Scoped recipes
+execute owned snapshots of those templates, logic bodies, argument contracts
+and operation bindings; a loader reload cannot replace work after that check.
+Scoped recipes
 cannot start an independent journal, acquire a new execution mode, detach child
 work, or finish a parallel block before all branches join. Required arguments,
 preconditions, cancellation, caller identity and the existing run association
@@ -75,6 +78,15 @@ are preserved. The ambient engine supplies expression context only, not a
 second path to arbitrary engine operations. Generic scoped callbacks serialize
 within one invocation; pipeline step execution has its own bounded parallel
 host and receipt synchronization.
+
+Reusable decisions belong in `logic` definitions. A scoped template can call
+installed, enabled logics that compute solely over their arguments and caller
+context. The host validates their argument schemas and preflights every nested
+logic before any callback runs. Queries, mutations, builtins, actions, child
+automations, recursive logic calls and independently gated logic definitions
+are refused in this value-only path. Such operations must use the explicit
+ports authorized by the native entry point. This uses the ordinary logic
+interpreter and expression semantics.
 
 This host does not promise recovery for every recipe. Each native operation
 retains its existing journal and reconciliation contract. Pipeline recovery

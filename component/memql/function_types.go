@@ -502,7 +502,10 @@ func (f *FunctionArgsField) clone() *FunctionArgsField {
 		Secret:       f.Secret,
 	}
 	if len(f.Enum) > 0 {
-		clone.Enum = append([]any(nil), f.Enum...)
+		clone.Enum = make([]any, len(f.Enum))
+		for i, value := range f.Enum {
+			clone.Enum[i] = cloneAny(value)
+		}
 	}
 	if f.Minimum != nil {
 		v := *f.Minimum

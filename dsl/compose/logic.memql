@@ -1,0 +1,5 @@
+/// Table formats without authored rows reuse source rows; typed output owns its data.
+logic composeNeedsSourceRows {
+ args { outputKind string! format string! hasRows bool! }
+ return args.outputKind == "" && (args.format == "csv" || args.format == "json") && !args.hasRows
+}

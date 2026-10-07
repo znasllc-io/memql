@@ -6,8 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
@@ -55,12 +57,19 @@ func (c *RefreshCron) goalsRef() responsibilityGoals {
 }
 
 func (c *RefreshCron) run(ctx context.Context) error {
+	if !auth.OriginFromContext(ctx).IsInternal() {
+		return fmt.Errorf("knowledge refresh requires the trusted scheduler")
+	}
 	if c.engine == nil {
 		return fmt.Errorf("knowledge refresh has no engine")
 	}
 	_, err := workflowhost.Run(ctx, "knowledgeRefreshSweep", nil, workflowhost.Options{Operations: map[string]workflowhost.Operation{
 		"knowledgeRefreshCandidates": func(ctx context.Context, _ map[string]any) (any, error) {
-			result, err := c.engine.Execute(systemActorContext(ctx), "query queryDueRefreshDomains()")
+			call, err := parser.RenderCall("knowledgeDomainsDueRefresh", nil)
+			if err != nil {
+				return nil, err
+			}
+			result, err := c.engine.Execute(systemActorContext(ctx), call)
 			if err != nil {
 				return nil, err
 			}
