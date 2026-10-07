@@ -65,8 +65,10 @@ func imageBuildContainer(cfg Config, run StepRun, jobName string) Container {
 		SeccompProfile:           &SeccompProfile{Type: "Localhost", LocalhostProfile: imageBuildProfile(run.Platform)},
 	}
 	c.VolumeMounts = append(c.VolumeMounts, VolumeMount{Name: imageBuildStateVolume, MountPath: imageBuildStatePath})
-	c.Resources.Requests["cpu"] = "1"
-	c.Resources.Limits["cpu"] = "2"
+	if run.CPUMilli == 0 {
+		c.Resources.Requests["cpu"] = "1"
+		c.Resources.Limits["cpu"] = "2"
+	}
 	c.Resources.Requests["ephemeral-storage"] = "1Gi"
 	c.Resources.Limits["ephemeral-storage"] = cfg.WorkspaceLimit
 	return c

@@ -104,6 +104,9 @@ var coverageAllowList = map[string]exemption{
 	// --- git / build-context metadata, read by no gate ---
 	".gitattributes": {
 		reason: "git metadata; no gate reads it",
+		mentionedBy: map[string]string{
+			"integrations/argocd/source_test.go": "in-memory Git-object fixtures name .gitattributes to test closed-source validation; they do not read the repository's tracked file",
+		},
 	},
 	".dockerignore": {
 		reason: "docker build-context metadata; no PR lane builds an image (see the Dockerfile note below)",
