@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
@@ -204,7 +205,12 @@ func TestPreparationWorkflowProtocolRecoveryPromotesWithFreshNativeEvidence(t *t
 	require.NoError(t, err)
 	require.Equal(t, "prepared", result.State)
 	require.NotEmpty(t, result.Plan.Preparation.ArtifactDigest)
+	// Preservation observes live state after potentially slow registry reads.
+	// Earlier observations cannot borrow the freshness of the configuration read.
+	require.False(t, recovered.storage.observed.Before(recovered.artifacts.result.observed))
+	require.False(t, recovered.sensitive.observed.Before(recovered.artifacts.result.observed))
 	require.Equal(t, freshSnapshot.digest, result.Plan.Preparation.ConfigurationDigest)
+	require.Equal(t, freshSnapshot.invariantDigest, result.Plan.Preparation.ConfigurationInvariantDigest)
 	require.Len(t, external.requests, 2, "recovery must not launch duplicate source jobs")
 	require.Equal(t, 2, external.acknowledgments, "durable acknowledgments are reused")
 	for _, file := range external.files {
@@ -232,4 +238,93 @@ func TestPreparationWorkflowProtocolRecoveryPromotesWithFreshNativeEvidence(t *t
 		require.NotContains(t, string(body), forbidden)
 	}
 	require.Len(t, external.requests, 2)
+
+	// A different process recovers the real promoted plan from PostgreSQL after
+	// Argo changes the actual Application. The full old baseline must refuse;
+	// the separately bound invariant and owned-current-intent proof may succeed.
+	planHost := &revisionJournal{db: fresh.journal.db}
+	current, err := planHost.get(ctx, request.InstallationID, result.ID)
+	require.NoError(t, err)
+	current, err = planHost.begin(ctx, request.InstallationID, result.ID, current.Plan.WorkflowDigest)
+	require.NoError(t, err)
+	require.Equal(t, "applying", current.State)
+	receiverAppliedIntent(t, receiver, current.Plan.Intent, "Failed")
+	_, err = readReceiver(ctx, receiver, "memql", "receiver", factory)
+	require.Error(t, err, "a failed applied Application must not be disguised as a healthy baseline")
+	continuation, err := readReceiverContinuation(ctx, receiver, "memql", "receiver", factory, current.Plan, current.Plan.Intent)
+	require.NoError(t, err)
+	require.NoError(t, continuation.require(current.Plan, current.Plan.Intent))
+	require.Equal(t, freshSnapshot.invariantDigest, continuation.invariantDigest)
+	require.NotEqual(t, freshSnapshot.digest, continuation.snapshot.digest)
+	var currentSource map[string]any
+	require.NoError(t, json.Unmarshal(continuation.snapshot.render.Source, &currentSource))
+	require.Equal(t, candidateSHA, currentSource["targetRevision"], "the actual current source is preserved")
+	encoded, err := json.Marshal(continuation)
+	require.NoError(t, err)
+	require.JSONEq(t, `{}`, string(encoded))
+
+	changedIntent := current.Plan.Intent
+	changedIntent.RequestID = "another-request"
+	require.Error(t, continuation.require(current.Plan, changedIntent))
+	changedPlan := current.Plan
+	changedPlan.RequestedBy = "another-operator"
+	require.Error(t, continuation.require(changedPlan, current.Plan.Intent))
+	for _, observed := range []time.Time{time.Now().Add(-2 * time.Minute), time.Now().Add(time.Minute)} {
+		stale, staleSnapshot := *continuation, *continuation.snapshot
+		stale.observed, staleSnapshot.observed = observed, observed
+		stale.snapshot = &staleSnapshot
+		require.Error(t, stale.require(current.Plan, current.Plan.Intent))
+	}
+	_, err = readReceiverContinuation(context.Background(), receiver, "memql", "receiver", factory, current.Plan, current.Plan.Intent)
+	require.Error(t, err)
+
+	appPath := "apis/argoproj.io/v1alpha1/namespaces/argocd/applications/memql"
+	appBytes, err := json.Marshal(receiver.objects[appPath])
+	require.NoError(t, err)
+	for _, fault := range []string{"target replaced", "foreign spec", "foreign marker", "foreign operation", "missing operation", "Application ABA", "catalog credential rotated", "renderer config rotated", "invariant substituted"} {
+		t.Run("continuation/"+fault, func(t *testing.T) {
+			var actual map[string]any
+			require.NoError(t, json.Unmarshal(appBytes, &actual))
+			receiver.objects[appPath] = actual
+			oldBefore := receiver.before
+			catalogMeta := resourceMap(receiver.objects["api/v1/namespaces/memql/secrets/catalog"], "metadata")
+			configMeta := resourceMap(receiver.objects["api/v1/namespaces/argocd/configmaps/argocd-cm"], "metadata")
+			catalogVersion, configVersion := catalogMeta["resourceVersion"], configMeta["resourceVersion"]
+			t.Cleanup(func() {
+				receiver.before = oldBefore
+				catalogMeta["resourceVersion"], configMeta["resourceVersion"] = catalogVersion, configVersion
+			})
+			plan := current.Plan
+			switch fault {
+			case "target replaced":
+				resourceMap(actual, "metadata")["uid"] = "foreign-application"
+			case "foreign spec":
+				resourceMap(resourceMap(actual, "spec"), "destination")["namespace"] = "another"
+			case "foreign marker":
+				resourceMap(resourceMap(actual, "metadata"), "annotations")["memql.io/update-intent"] = "foreign"
+			case "foreign operation":
+				resourceMap(resourceMap(resourceMap(actual, "status"), "operationState"), "operation")["info"] = []any{}
+			case "missing operation":
+				delete(resourceMap(actual, "status"), "operationState")
+			case "Application ABA":
+				first := receiver.reads[appPath]
+				receiver.before = func(path string, n int) {
+					if path == appPath && n == first+2 {
+						resourceMap(actual, "metadata")["resourceVersion"] = "24"
+					}
+				}
+			case "catalog credential rotated":
+				catalogMeta["resourceVersion"] = "99"
+			case "renderer config rotated":
+				configMeta["resourceVersion"] = "99"
+			case "invariant substituted":
+				binding := *plan.Preparation
+				binding.ConfigurationInvariantDigest = plan.WorkflowDigest
+				plan.Preparation = &binding
+			}
+			_, err := readReceiverContinuation(ctx, receiver, "memql", "receiver", factory, plan, current.Plan.Intent)
+			require.Error(t, err)
+			require.NotContains(t, err.Error(), "private-")
+		})
+	}
 }

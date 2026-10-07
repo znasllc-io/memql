@@ -30,7 +30,8 @@ type countingBlobClient struct {
 	total   int
 	// block, when non-nil, holds every Get until it is closed. Used to
 	// force genuine concurrency for the singleflight assertion.
-	block chan struct{}
+	block   chan struct{}
+	started chan struct{}
 }
 
 func newCountingBlobClient(objects map[string][]byte) *countingBlobClient {
@@ -42,7 +43,14 @@ func (c *countingBlobClient) Get(_ context.Context, key string) ([]byte, error) 
 	c.gets[key]++
 	c.total++
 	blocker := c.block
+	started := c.started
 	c.mu.Unlock()
+	if started != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+	}
 
 	if blocker != nil {
 		<-blocker
@@ -289,8 +297,50 @@ func TestConcurrentColdRequestsCollapseToOneDownload(t *testing.T) {
 	close(client.block)
 	wg.Wait()
 
-	if got := client.count(key); got > 2 {
-		t.Errorf("%d concurrent downloads for one asset, want the singleflight to collapse them (allowing 1 slip for scheduling)", got)
+	if got := client.count(key); got != 1 {
+		t.Errorf("%d concurrent downloads for one asset, want exactly 1", got)
+	}
+}
+
+// TestLateCacheMissReusesCompletedDownload covers the gap between a caller's
+// first cache lookup and entry into singleflight. That caller can observe a
+// miss, pause while another request completes the download, then resume after
+// the first flight has left the group. It must reuse the now-cached bytes.
+func TestLateCacheMissReusesCompletedDownload(t *testing.T) {
+	key := testBundlePrefix + "assets/app.abc123.js"
+	client := newCountingBlobClient(map[string][]byte{key: []byte("console.log(1)")})
+	client.block = make(chan struct{})
+	client.started = make(chan struct{}, 1)
+	opener := NewBlobOpener(client).(*blobOpener)
+	opened, err := opener.Open("blob://" + testBundlePrefix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fsys := opened.(*blobFS)
+	name := "assets/app.abc123.js"
+
+	// This lookup represents the delayed caller's already-observed miss.
+	if _, ok := fsys.cache.Get(key); ok {
+		t.Fatal("test asset unexpectedly started in the cache")
+	}
+	leader := make(chan error, 1)
+	go func() {
+		_, err := fsys.openAfterCacheMiss(name)
+		leader <- err
+	}()
+	<-client.started
+	close(client.block)
+	if err := <-leader; err != nil {
+		t.Fatal(err)
+	}
+
+	// Resume the previously observed miss only after the first download has
+	// completed and its singleflight entry has been removed.
+	if _, err := fsys.openAfterCacheMiss(name); err != nil {
+		t.Fatal(err)
+	}
+	if got := client.count(key); got != 1 {
+		t.Fatalf("late cache miss triggered %d downloads, want the completed cached value", got)
 	}
 }
 

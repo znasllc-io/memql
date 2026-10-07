@@ -198,3 +198,38 @@ func (r *receiverReads) finish(ctx context.Context) (string, error) {
 	}
 	return artifactHash("receiving-configuration-v1", bindings), nil
 }
+
+// Called only after finish has reobserved every original resource. Application
+// spec/generation/operation changes belong to the separately verified native
+// intent. Its actual identity remains bound here; no synthetic baseline object
+// is substituted into either read or verification.
+func (r *receiverReads) configurationInvariant(application receiverNamed) (string, error) {
+	path, err := receiverPath("argoproj.io/v1alpha1", "applications", application.Namespace, application.Name)
+	if err != nil {
+		return "", err
+	}
+	app, ok := r.reads[path]
+	if !ok || app.uid == "" || app.version == "" || app.stable == nil {
+		return "", errors.New("installation invariant has no authenticated Application")
+	}
+	paths := make([]string, 0, len(r.reads))
+	for key := range r.reads {
+		paths = append(paths, key)
+	}
+	sort.Strings(paths)
+	bindings := make([]any, 0, len(paths))
+	for _, key := range paths {
+		read := r.reads[key]
+		stable := read.stable
+		if key == path {
+			stable = []string{"argoproj.io/v1alpha1", "Application", application.Namespace, application.Name, app.uid}
+		} else if stable == nil {
+			stable = read.body
+			if _, collection := read.body["items"]; collection {
+				stable = receiverCollectionIdentity(read.body)
+			}
+		}
+		bindings = append(bindings, []any{key, stable})
+	}
+	return artifactHash("receiving-configuration-invariant-v1", bindings), nil
+}

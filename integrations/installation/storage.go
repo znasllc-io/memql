@@ -24,6 +24,7 @@ import (
 type storageEvidence struct {
 	digest, before, after string
 	volumes               []storageObservation
+	observed              time.Time
 }
 
 type storageObservation struct {
@@ -73,6 +74,7 @@ func storageBytes(raw string) (*big.Int, error) {
 // applying the original rollback revision after an expansion would ask for a
 // shrink. That needs a separately qualified maintenance/rollback contract.
 func verifyStoragePreservation(ctx context.Context, api argocd.API, before, after argocd.RenderedRevision) (storageEvidence, error) {
+	observed := time.Now().UTC()
 	if api == nil || before.Digest() == "" || after.Digest() == "" {
 		return storageEvidence{}, errors.New("storage verification requires native renders and cluster reads")
 	}
@@ -153,7 +155,7 @@ func verifyStoragePreservation(ctx context.Context, api argocd.API, before, afte
 		BeforeResources, AfterResources []resourceAddress
 		Volumes                         []storageObservation
 	}{before.Digest(), after.Digest(), inventoryAddresses(old), inventoryAddresses(next), observations})
-	return storageEvidence{"memql-id:" + string(id.NewUntracked().FromString("installation-storage-evidence-v1:"+string(body))), before.Digest(), after.Digest(), observations}, nil
+	return storageEvidence{digest: "memql-id:" + string(id.NewUntracked().FromString("installation-storage-evidence-v1:"+string(body))), before: before.Digest(), after: after.Digest(), volumes: observations, observed: observed}, nil
 }
 
 func sameJSON(a, b any) bool {

@@ -129,7 +129,19 @@ func (b *blobFS) Open(name string) (fs.File, error) {
 	// client-side route costs three failed Gets plus one cache hit. That is
 	// unchanged from before this cache existed, and prerendering the routes
 	// that matter removes it (see the prerender budget in site-hosting.md).
+	return b.openAfterCacheMiss(name)
+}
+
+// openAfterCacheMiss handles a caller that already observed the cache miss.
+// Recheck inside the singleflight callback as well: a caller can be descheduled
+// between the first lookup and Do, then arrive after an earlier flight has
+// populated the cache and left the group.
+func (b *blobFS) openAfterCacheMiss(name string) (fs.File, error) {
+	key := b.cacheKey(name)
 	fetched, err, _ := b.sf.Do(key, func() (any, error) {
+		if data, ok := b.cache.Get(key); ok {
+			return data, nil
+		}
 		data, err := b.client.Get(context.Background(), key)
 		if err != nil {
 			return nil, err

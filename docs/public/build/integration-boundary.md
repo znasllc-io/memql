@@ -49,6 +49,14 @@ checks needed to fulfill that operation. Neither may silently repeat an
 unreconciled side effect. A native safety ceiling remains mandatory even when a
 workflow chooses a smaller limit.
 
+Keep durable identity separate from live evidence. A source digest or stored
+receipt can identify an exact input or completed effect; it cannot replace a
+fresh observation of mutable credentials, storage or installation state. When
+a write depends on those observations, its native gate must bind them to the
+intended operation, enforce their lifetime and revalidate before a new write.
+The DSL places slow operations before final checks and chooses how to handle a
+refusal. Changing the recipe must not extend native evidence lifetimes.
+
 Use existing branches, collection expressions, loops, bounded parallelism,
 child automations and actions. Add syntax only for a missing reusable semantic,
 with parser, interpreter, diagnostics and conformance coverage. Do not add a

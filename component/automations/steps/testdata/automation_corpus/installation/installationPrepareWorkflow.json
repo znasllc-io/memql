@@ -85,16 +85,16 @@
             "name": "installationVerifyResources"
           },
           {
+            "kind": "automation",
+            "name": "installationArtifactWorkflow"
+          },
+          {
             "kind": "builtin",
             "name": "installationVerifyStorage"
           },
           {
             "kind": "builtin",
             "name": "installationVerifyProtected"
-          },
-          {
-            "kind": "automation",
-            "name": "installationArtifactWorkflow"
           },
           {
             "kind": "builtin",
@@ -195,16 +195,16 @@
             "name": "installationVerifyResources"
           },
           {
+            "kind": "automation",
+            "name": "installationArtifactWorkflow"
+          },
+          {
             "kind": "builtin",
             "name": "installationVerifyStorage"
           },
           {
             "kind": "builtin",
             "name": "installationVerifyProtected"
-          },
-          {
-            "kind": "automation",
-            "name": "installationArtifactWorkflow"
           },
           {
             "kind": "builtin",
