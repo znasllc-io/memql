@@ -138,7 +138,7 @@ func (u *AzureBlobUploader) DeleteVerifiedStream(ctx context.Context, container,
 	if err := verifiedStreamIdentity(receipt.Size, receipt.SHA256); err != nil {
 		return err
 	}
-	if len(receipt.ETag) < 3 || len(receipt.ETag) > 256 || !strings.HasPrefix(receipt.ETag, `"`) || !strings.HasSuffix(receipt.ETag, `"`) || strings.ContainsAny(receipt.ETag, "\r\n") {
+	if !validVerifiedETag(receipt.ETag) {
 		return errors.New("verified deletion requires the exact quoted ETag from its receipt")
 	}
 	bc, err := u.blockClient(container, object)
@@ -173,6 +173,9 @@ func verifiedStreamIdentity(size int64, digest string) error {
 	if size < 0 || size > MaxVerifiedStreamBytes {
 		return errors.New("verified stream size is outside the 0 through 2 GiB bound")
 	}
+	if len(digest) != sha256.Size*2 {
+		return errors.New("verified stream needs a lowercase SHA-256 digest")
+	}
 	decoded, err := hex.DecodeString(digest)
 	if err != nil || len(decoded) != sha256.Size || hex.EncodeToString(decoded) != digest {
 		return errors.New("verified stream needs a lowercase SHA-256 digest")
@@ -185,6 +188,9 @@ func verifyStream(ctx context.Context, bc *blockblob.Client, size int64, digest 
 	if err != nil {
 		return VerifiedBlob{}, err
 	}
+	if hasRetirementMarker(props.Metadata) {
+		return VerifiedBlob{}, ErrBlobRetired
+	}
 	if props.ETag == nil || *props.ETag == "" || props.ContentLength == nil || *props.ContentLength != size {
 		return VerifiedBlob{}, errors.New("stored object has no version identity or differs from the expected size")
 	}
@@ -195,6 +201,9 @@ func verifyStream(ctx context.Context, bc *blockblob.Client, size int64, digest 
 		return VerifiedBlob{}, err
 	}
 	defer response.Body.Close()
+	if hasRetirementMarker(response.Metadata) {
+		return VerifiedBlob{}, ErrBlobRetired
+	}
 	if response.ETag == nil || *response.ETag != *props.ETag || response.ContentLength == nil || *response.ContentLength != size {
 		return VerifiedBlob{}, errors.New("stored object changed during verification")
 	}

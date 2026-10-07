@@ -143,6 +143,10 @@ func (u *AzureBlobUploader) DownloadStreamURL(ctx context.Context, blobURL strin
 	if err != nil {
 		return nil, fmt.Errorf("open azure blob stream: %w", err)
 	}
+	if hasRetirementMarker(resp.Metadata) {
+		_ = resp.Body.Close()
+		return nil, ErrBlobRetired
+	}
 	return resp.Body, nil
 }
 
@@ -162,6 +166,10 @@ func (u *AzureBlobUploader) DownloadRangeURL(ctx context.Context, blobURL string
 	})
 	if err != nil {
 		return nil, fmt.Errorf("open azure blob range stream: %w", err)
+	}
+	if hasRetirementMarker(resp.Metadata) {
+		_ = resp.Body.Close()
+		return nil, ErrBlobRetired
 	}
 	return resp.Body, nil
 }
