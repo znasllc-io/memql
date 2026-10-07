@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"maps"
@@ -389,17 +390,47 @@ func (w *runnerHop) holder(job string) string {
 	return node
 }
 
-// ackedAway waits for the step's Job and Secret to be deleted, and says how
-// many times each was.
+// ackedAway proves one applied deletion per object, with identity and revision
+// guards on every request. A final heartbeat or controller status update may
+// conflict with the first DELETE; retrying that refusal is not a second effect.
 func (w *runnerHop) ackedAway(t *testing.T, job string) {
 	t.Helper()
 	secret := SecretName(job)
 	rtWaitUntil(t, "the step's Job and Secret to be acked away", func() bool {
 		return !w.h.c.hasJob(job) && !w.h.c.hasSecret(secret)
 	})
-	jobs, secrets := w.h.c.requestsFor(http.MethodDelete, kubeJobs+"/"+job), w.h.c.requestsFor(http.MethodDelete, kubeSecrets+"/"+secret)
-	if len(jobs) != 1 || len(secrets) != 1 {
-		t.Errorf("the Job was deleted %d time(s) and its Secret %d, want once each", len(jobs), len(secrets))
+	var jobs, secrets []ObjectMeta
+	w.h.c.with(func(c *rtCluster) {
+		jobs = append(jobs, c.deletedJobs...)
+		secrets = append(secrets, c.deletedSecrets...)
+	})
+	for _, object := range []struct {
+		name, path string
+		deleted    []ObjectMeta
+	}{{job, kubeJobs, jobs}, {secret, kubeSecrets, secrets}} {
+		var removed []ObjectMeta
+		for _, meta := range object.deleted {
+			if meta.Name == object.name {
+				removed = append(removed, meta)
+			}
+		}
+		if len(removed) != 1 {
+			t.Errorf("%s had %d applied deletions, want exactly one", object.name, len(removed))
+			continue
+		}
+		requests := w.h.c.requestsFor(http.MethodDelete, object.path+"/"+object.name)
+		if len(requests) == 0 {
+			t.Errorf("%s disappeared without a guarded DELETE", object.name)
+		}
+		for _, req := range requests {
+			var opts struct {
+				Preconditions struct{ UID, ResourceVersion string }
+			}
+			if err := json.Unmarshal([]byte(req.Body), &opts); err != nil ||
+				opts.Preconditions.UID == "" || opts.Preconditions.UID != removed[0].UID || opts.Preconditions.ResourceVersion == "" {
+				t.Errorf("%s DELETE did not guard the original object and its observed revision: %s", object.name, req.Body)
+			}
+		}
 	}
 }
 
@@ -594,9 +625,27 @@ func TestExecuteHopRealRunnersAdoptAStepAwayFromTheReplicaThatWentSilent(t *test
 // takes the outcome from it, never forwards the step again, and acks, and the
 // Job and its Secret are deleted once.
 func TestExecuteHopRealRunnersTakeALostReplyFromTheJob(t *testing.T) {
+	for _, conflict := range []bool{false, true} {
+		t.Run(fmt.Sprintf("concurrent-revision-change=%t", conflict), func(t *testing.T) {
+			testLostReplyCleanup(t, conflict)
+		})
+	}
+}
+
+func testLostReplyCleanup(t *testing.T, conflict bool) {
 	w := newRunnerHop(t)
 	req := hopRequest()
 	job := JobName(req.RunID, req.StepKey, req.Attempt)
+	var releaseDelete chan struct{}
+	if conflict {
+		releaseDelete = make(chan struct{})
+		w.h.c.with(func(c *rtCluster) { c.holdJobDeletes = map[string]chan struct{}{job: releaseDelete} })
+		defer func() {
+			if releaseDelete != nil {
+				close(releaseDelete)
+			}
+		}()
+	}
 	step := &hopStep{}
 	step.printing.Store(true)
 	w.h.c.script(job, step.script(job))
@@ -607,7 +656,20 @@ func TestExecuteHopRealRunnersTakeALostReplyFromTheJob(t *testing.T) {
 	})
 	w.mesh.flap("workbench-a")
 	step.ending.Store(true)
+	if conflict {
+		rtWaitUntil(t, "the first guarded Job DELETE", func() bool {
+			return len(w.h.c.requestsFor(http.MethodDelete, kubeJobs+"/"+job)) > 0
+		})
+		// The result is already durable; a heartbeat or the Job controller
+		// advances its revision after the cleanup reader observed it.
+		w.h.c.with(func(c *rtCluster) { c.annotateLocked(job, "fixture-concurrent-update", "changed") })
+		close(releaseDelete)
+		releaseDelete = nil
+	}
 	res := awaitHop(t, done, "the outcome, from the step's status")
+	if conflict && len(w.h.c.requestsFor(http.MethodDelete, kubeJobs+"/"+job)) < 2 {
+		t.Fatal("the stale revision did not require a fresh guarded cleanup attempt")
+	}
 
 	var recorded pl.StepResult
 	for _, p := range w.h.c.appliedPatches() {
