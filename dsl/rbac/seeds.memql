@@ -344,6 +344,8 @@ seed capability cap-developer-read-app-cluster-modules { roleSlug: "developer"  
 seed capability cap-owner-execute-app-cluster-modules { roleSlug: "owner"  verb: "execute"  resourceType: "app:cluster/modules"  predefined: true }
 @description("developer: flip a STOREFRONT pack in the modules section of the cluster app; every other pack stays owner-only (Connect Shopify design, D4).")
 seed capability cap-developer-execute-app-cluster-modules { roleSlug: "developer"  verb: "execute"  resourceType: "app:cluster/modules"  predefined: true }
+@description("owner: review exact release candidates and their durable publication records.")
+seed capability cap-owner-read-app-cluster-releases { roleSlug: "owner" verb: "read" resourceType: "app:cluster/releases" predefined: true }
 @description("owner: open the origins section of the cluster app -- reproduces the OS registry floor min owner (memql#5300).")
 seed capability cap-owner-read-app-cluster-origins { roleSlug: "owner"  verb: "read"  resourceType: "app:cluster/origins"  predefined: true }
 @description("owner: open the audit section of the cluster app -- reproduces the OS registry floor min owner (memql#5300).")
