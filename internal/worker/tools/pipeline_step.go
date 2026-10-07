@@ -1283,7 +1283,9 @@ func packArtifacts(dir string, declared []string) artifactPack {
 				// Gone or unreadable since the walk: it is not sent.
 				continue
 			}
-			hdr := &tar.Header{Name: f.name, Mode: int64(f.mode), Size: int64(len(data)), ModTime: f.mod, Typeflag: tar.TypeReg}
+			// GNU encodes long/Unicode names without PAX metadata. The engine
+			// accepts only plain regular-file snapshots before issuing receipts.
+			hdr := &tar.Header{Format: tar.FormatGNU, Name: f.name, Mode: int64(f.mode), Size: int64(len(data)), ModTime: f.mod, Typeflag: tar.TypeReg}
 			if err := tw.WriteHeader(hdr); err != nil {
 				return err
 			}

@@ -1511,3 +1511,42 @@ func TestRedactedArgsPreviewHidesThePipelineTokenAndSecrets(t *testing.T) {
 		t.Errorf("nothing was redacted: %s", preview)
 	}
 }
+
+// The engine snapshots plain regular files, including Unicode and long names,
+// before storing verified receipts. PAX metadata is intentionally not admitted.
+func TestPipelineStepArtifactHeadersFitVerifiedSnapshotContract(t *testing.T) {
+	allowLocalClones(t)
+	fx := newPipelineFixture(t)
+	p, _ := pipelineTestPolicy(t, "")
+	name := "dist/" + strings.Repeat("long-", 35) + "résumé %2F #.txt"
+	res := decoded(t)(runPipelineStepQuietly(t, stepArgs(t, fx,
+		`mkdir -p dist && printf 'verified bytes\n' > "$ARTIFACT_PATH"`,
+		map[string]any{"artifacts": []any{"dist/*"}, "env": map[string]any{"ARTIFACT_PATH": name}}), p))
+	if res.ExitCode != 0 || len(res.ArtifactsMissing) != 0 || res.ArtifactsTooLarge {
+		t.Fatalf("artifact producer failed: %+v", res)
+	}
+	data, err := base64.StdEncoding.DecodeString(res.ArtifactsTgzBase64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	h, err := tr.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Name != name || h.Typeflag != tar.TypeReg || len(h.PAXRecords) != 0 || len(h.Xattrs) != 0 {
+		t.Fatalf("artifact header violates engine snapshot contract: %+v", h)
+	}
+	body, err := io.ReadAll(tr)
+	if err != nil || string(body) != "verified bytes\n" {
+		t.Fatalf("wrong content: %q %v", body, err)
+	}
+	if _, err := tr.Next(); err != io.EOF {
+		t.Fatalf("unexpected remaining entry: %v", err)
+	}
+}

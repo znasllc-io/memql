@@ -168,13 +168,17 @@ here on the old answer in the meantime is refused by the new one.
    ends, anything it left running in its group is killed, the way a pod's
    teardown ends what its container started.
 8. **Artifacts**, the declared paths or globs relative to the checkout,
-   directories taken whole, packed as a `tar.gz`. Only regular files travel,
+   directories taken whole, packed as a GNU `tar.gz` so long and Unicode
+   names do not require PAX metadata. Only regular files travel,
    and never through a link that leads out of the checkout. Up to 64 MiB of
    files and 20 MiB compressed -- what one result can carry on the worker
    stream, whose messages are capped at 32 MiB. Over either, the archive is
    left out and the result says `artifactsTooLarge`; the step keeps its own
    exit status. A declared path nothing matched is listed in
-   `artifactsMissing`.
+   `artifactsMissing`. The receiving engine verifies the complete archive and
+   requires immutable storage receipts for every declared artifact. Missing or
+   unverifiable artifacts fail the pipeline step even when its command exited
+   zero; the command exit status remains available separately.
 9. **Cleanup and recovery.** Container cancellation removes the exact attempt's
    command container, services, anonymous volumes and network with a separate
    thirty-second cleanup context. Every resource name is recorded before
