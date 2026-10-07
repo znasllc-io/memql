@@ -112,6 +112,13 @@ func (s *cutScope) operations() map[string]workflowhost.Operation {
 
 // Protocol reads return immutable facts; DSL selects the version from this snapshot.
 func (s *cutScope) readSnapshot(ctx context.Context, _ map[string]any) (any, error) {
+	if s.tagged {
+		return nil, refuse(CodeCandidateRequired, "a tagged candidate cannot be replaced within its publication scope")
+	}
+	s.versionChecked = false
+	s.cfg, s.tags, s.head = settings{}, nil, ""
+	s.out = Outcome{}
+	s.previous, s.next = version{}, version{}
 	cfg, err := s.i.resolver.loadSettings(ctx)
 	if err != nil {
 		return nil, err
@@ -148,6 +155,14 @@ func (s *cutScope) readSnapshot(ctx context.Context, _ map[string]any) (any, err
 }
 
 func (s *cutScope) selectCandidate(_ context.Context, a map[string]any) (any, error) {
+	if s.tagged {
+		return nil, refuse(CodeCandidateRequired, "a tagged candidate cannot be replaced within its publication scope")
+	}
+	// Validation belongs to one selected candidate. A workflow may choose
+	// again, but cannot carry the old candidate's validation into that choice.
+	s.versionChecked = false
+	s.out = Outcome{}
+	s.previous, s.next = version{}, version{}
 	tag, _ := a["previousTag"].(string)
 	previous, ok := parseReleaseTag(tag)
 	if !ok || s.head == "" || !slices.Contains(tagNames(s.tags), tag) {
