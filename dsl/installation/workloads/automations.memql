@@ -1,0 +1,10 @@
+/// Check each rendered workload against its verified platform images.
+/// The native host derives obligations and rejects incomplete or stale evidence.
+@template
+automation installationWorkloadWorkflow {
+  requirements := builtin installationWorkloadRequirements()
+  for item in requirements {
+    builtin installationWorkloadCheck(key: item.key)
+  }
+  builtin installationWorkloadsComplete()
+}
