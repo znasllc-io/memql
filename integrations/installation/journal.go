@@ -26,6 +26,7 @@ type revisionRecord struct {
 	SlotEpoch          int64
 	ObservationVersion int64
 	Observation        *argocd.Facts
+	Rollback           *rollbackRecord
 }
 
 // The role is from the current resolved request, not a persisted claim or DSL
@@ -177,7 +178,8 @@ FROM installation_revision_attempts WHERE installation_id=$1 AND plan_id=$2 FOR 
 		}
 		r.Observation = &facts
 	}
-	return r, nil
+	r.Rollback, err = readRollback(ctx, tx, r)
+	return r, err
 }
 
 // withRecord always locks head then attempt, including reads. A historical
@@ -236,7 +238,7 @@ func (j *revisionJournal) get(ctx context.Context, installation, key string) (re
 // to perform a write under a different recipe.
 func (j *revisionJournal) begin(ctx context.Context, installation, key, workflow string) (revisionRecord, error) {
 	return j.withRecord(ctx, installation, key, func(tx *sql.Tx, r *revisionRecord, actor string) error {
-		if actor != r.Plan.RequestedBy || workflow != r.Plan.ExecutionWorkflowDigest {
+		if actor != r.Plan.RequestedBy || workflow != r.Plan.ExecutionWorkflowDigest || r.Rollback != nil {
 			return errors.New("installation request authority or workflow changed")
 		}
 		if r.State == "applying" {
@@ -284,7 +286,7 @@ func (j *revisionJournal) cancel(ctx context.Context, installation, key string) 
 // expected version for the old result. Healthy/Synced does not release the slot.
 func (j *revisionJournal) observe(ctx context.Context, installation, key string, expectedVersion int64, facts argocd.Facts) (revisionRecord, error) {
 	return j.withRecord(ctx, installation, key, func(tx *sql.Tx, r *revisionRecord, _ string) error {
-		if r.State != "applying" || r.ObservationVersion != expectedVersion {
+		if r.State != "applying" || r.Rollback != nil || r.ObservationVersion != expectedVersion {
 			return errChanged
 		}
 		body, err := json.Marshal(facts)

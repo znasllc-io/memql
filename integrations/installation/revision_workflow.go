@@ -146,7 +146,7 @@ func (s *revisionWorkflowScope) writable(ctx context.Context) (revisionRecord, e
 	if err != nil {
 		return revisionRecord{}, err
 	}
-	if s.mode != revisionStart || r.Plan.Preparation == nil || r.Plan.RequestedBy != s.operator || r.Plan.ExecutionWorkflowDigest != s.workflow.digest {
+	if s.mode != revisionStart || r.Rollback != nil || r.Plan.Preparation == nil || r.Plan.RequestedBy != s.operator || r.Plan.ExecutionWorkflowDigest != s.workflow.digest {
 		return revisionRecord{}, errors.New("installation observation does not grant revision write authority")
 	}
 	return r, nil
