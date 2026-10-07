@@ -183,3 +183,31 @@ func PathSet(globs []string) (func(path string) bool, error) {
 		return false
 	}, nil
 }
+
+// AnyPathMatches reports whether at least one repository change matches a
+// configured path set. Matching is mechanical; the pipeline DSL decides
+// whether that fact means a guarded step runs.
+func AnyPathMatches(globs, changed []string) (bool, error) {
+	match, err := PathSet(globs)
+	if err != nil {
+		return false, err
+	}
+	for _, path := range changed {
+		if match(path) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// RepositoryPathsValid reports whether every changed path is a safe,
+// repository-relative path. It is evidence passed to policy, not a policy
+// answer itself.
+func RepositoryPathsValid(changed []string) bool {
+	for _, path := range changed {
+		if _, ok := repoPath(path); !ok {
+			return false
+		}
+	}
+	return true
+}

@@ -263,8 +263,11 @@ record write as a successful update.
 - The event-to-mode decision and event/mode applicability of manifest stages
   now run through sealed core pipeline automations. The compiler requires the
   explicit selected stage set, and the selector definition is part of the
-  recovery fingerprint. Package and changed-path selection still has policy
-  in Go and remains open work.
+  recovery fingerprint. Full-versus-affected package coverage, per-step
+  package source/filter, and changed-path bucket applicability also come from
+  pinned core DSL decisions. Go supplies path/glob and import-graph facts and
+  applies the returned choices mechanically; the manifest remains the
+  configuration source.
 - Keep orchestration decisions in DSL; integrations provide bounded effects.
   Change the runtime only for missing general primitives or correctness.
   Audit queries, mutations, specifications, logic and automations while
@@ -301,8 +304,9 @@ record write as a successful update.
     compilation requires an explicit selected stage set.
   - [x] A separately named workflow composes the sealed default and proves the
     default remains reusable.
-  - [ ] Move remaining package and changed-path selection policy behind DSL
-    decisions and keep the manifest as configuration.
+  - [x] Move full-versus-affected coverage, per-step package source/filter,
+    and changed-path bucket applicability behind pinned DSL decisions; keep
+    import-graph traversal and path matching as Go mechanics.
 - [ ] Add candidate preparation, compatible component versions, owner approval,
   artifact provenance and idempotent release/deployment receipts.
 - [ ] Reproduce all necessary build/test/security/docs/release lanes for engine,
@@ -639,7 +643,7 @@ their server-side staging path.
 | Required automation records | `component/automations/journal.go` continued after journal failures; the shared driver journal also previously hid failed step writes. | Shared driver-journal writes now return errors. Added opt-in `@journalRequired` for generic automations: require run/step intent, receipts and completion; stop on failed heartbeats; propagate the requirement to descendants. Fault, race and real-database tests cover a fresh executor resuming an unfinished read without repeating a completed read. This is not an external-effect or ownership guarantee. |
 | Definition identity on resume | The automation fingerprint covered step IDs/types/conditions, omitting call arguments, nested bodies and execution policy. | Fingerprint the complete serialized definition, excluding source location, caches and top-level prose. Changed definitions and old incomplete fingerprints refuse resume. Tests cover changes to callees, arguments, retry/error/journal policy, nested bodies and input contracts. Transitive callee identity still requires pinned engine/bundle versions in the release candidate. |
 | Safe replay | Generic resume guards side effects with `AllowSideEffects`; pipeline recovery has a separate driver. | Reuse the journal and recovery ownership primitives, but replace blanket replay permission with per-effect reconciliation. Validate pinned inputs, artifact availability and uncertain external outcomes before resuming. |
-| Default workflow policy | Event-to-mode selection and substantial orchestration currently live in `component/pipelines` and `component/pipelinerun`. | Move the default choices to sealed public DSL; preserve bounded execution, distributed ownership and protocol validation in runtime capabilities. Prove composition with a separately named workflow. |
+| Default workflow policy | Event-to-mode, stage applicability, full-versus-affected coverage, per-step package source/filter, and changed-path bucket decisions run through pinned core DSL. Go supplies import-graph/path facts and applies the choices mechanically; bounded execution and authorization remain native. | Keep auditing the driver for remaining product policy. Preserve the separate workflow composition test and move only decisions, never safety enforcement, across the DSL boundary. |
 
 Remaining generic recovery gaps include ownership fencing, a run interrupted
 before its first step intent, a run whose steps completed but terminal receipt

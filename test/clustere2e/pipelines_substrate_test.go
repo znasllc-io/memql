@@ -1110,12 +1110,20 @@ func compileSubstratePlan(t *testing.T) substratePlan {
 		if spec.Select != nil {
 			full = spec.Select.Full
 		}
-		// A full run reads no change list, and Affected reads none as all.
-		selection, err := pl.Affected(graph, nil, full)
+		// A full run reads no change list. The sealed pipeline policy decides
+		// full coverage; this compile fixture supplies that explicit decision.
+		facts, err := pl.AnalyzeSelection(graph, nil, false, full)
+		if err != nil {
+			t.Fatalf("analyzing the synthetic tree's packages: %v", err)
+		}
+		selection, err := pl.ResolveSelection(graph, facts, pl.SelectionDecision{Full: true, Reason: "full run mode"})
 		if err != nil {
 			t.Fatalf("selecting the synthetic tree's packages: %v", err)
 		}
 		in.Selector = pl.GraphSelector(graph, selection)
+		in.PackagePolicies = map[string]pl.PackagePolicy{
+			"shards.packages": {Coverage: pl.PackageCoverageAll, Filter: pl.PackageFilterAll},
+		}
 		all = in.Selector.All()
 	}
 	plan, refusal := pl.Compile(spec, in)

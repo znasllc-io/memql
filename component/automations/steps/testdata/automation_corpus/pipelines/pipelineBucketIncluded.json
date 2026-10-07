@@ -1,0 +1,53 @@
+{
+  "automation": "pipelines/automations.memql pipelineBucketIncluded",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "changedCount": 3,
+            "known": true,
+            "matched": true,
+            "mode": "s-mode",
+            "pathsValid": true,
+            "selectionFull": true
+          },
+          "topic": "automation.invocation.pipelineBucketIncluded"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": true,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "changedCount": 3,
+            "known": true,
+            "matched": true,
+            "mode": "s-mode",
+            "pathsValid": true,
+            "selectionFull": true
+          },
+          "topic": "automation.invocation.pipelineBucketIncluded"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": true,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

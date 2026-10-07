@@ -1,0 +1,55 @@
+{
+  "automation": "pipelines/automations.memql pipelinePackageStepSelection",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "mode": "s-mode",
+            "only": "s-only",
+            "packages": "s-packages",
+            "selectionFull": true
+          },
+          "topic": "automation.invocation.pipelinePackageStepSelection"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "coverage": "all",
+            "filter": "s-only"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "mode": "s-mode",
+            "only": "s-only",
+            "packages": "s-packages",
+            "selectionFull": true
+          },
+          "topic": "automation.invocation.pipelinePackageStepSelection"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "coverage": "all",
+            "filter": "s-only"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

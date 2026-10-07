@@ -9,9 +9,26 @@ import (
 
 func affectedOrFatal(t *testing.T, g *Graph, changed []string, fullGlobs ...string) Selection {
 	t.Helper()
-	sel, err := Affected(g, changed, fullGlobs)
+	facts, err := AnalyzeSelection(g, changed, true, fullGlobs)
 	if err != nil {
-		t.Fatalf("Affected(%v, %v): %v", changed, fullGlobs, err)
+		t.Fatalf("AnalyzeSelection(%v, %v): %v", changed, fullGlobs, err)
+	}
+	sel, err := ResolveSelection(g, facts, SelectionDecision{})
+	if err != nil {
+		t.Fatalf("ResolveSelection(%v): %v", changed, err)
+	}
+	return sel
+}
+
+func fullOrFatal(t *testing.T, g *Graph, changed []string, fullGlobs ...string) Selection {
+	t.Helper()
+	facts, err := AnalyzeSelection(g, changed, true, fullGlobs)
+	if err != nil {
+		t.Fatalf("AnalyzeSelection(%v, %v): %v", changed, fullGlobs, err)
+	}
+	sel, err := ResolveSelection(g, facts, SelectionDecision{Full: true, Reason: "full coverage selected by DSL"})
+	if err != nil {
+		t.Fatalf("ResolveSelection(%v): %v", changed, err)
 	}
 	return sel
 }
@@ -68,33 +85,34 @@ func TestAffectedSelectsTheSeedAndItsImportersTransitively(t *testing.T) {
 	}
 }
 
-// Every way a change can defeat the graph selects everything, and says why.
-func TestAffectedSelectsEverythingWhenTheChangeDefeatsTheGraph(t *testing.T) {
+// The graph adapter applies a full-coverage decision uniformly. The actual
+// policy that selects Full for these facts is exercised through the pinned
+// DSL by component/pipelinerun.
+func TestResolveSelectionAppliesFullDecisionToEveryPackage(t *testing.T) {
 	g := scanTree(t, true)
 	cases := []struct {
 		name    string
 		changed []string
-		reason  string // a fragment the reason must carry
 	}{
-		{"an empty change list", nil, "empty"},
-		{"the root go.mod", []string{"go.mod"}, "go.mod"},
-		{"a nested go.mod", []string{"docs/guide.md", "sub/go.mod"}, "sub/go.mod"},
-		{"a go.sum anywhere", []string{"tools/go.sum"}, "tools/go.sum"},
-		{"go.work", []string{"go.work"}, "go.work"},
-		{"go.work.sum", []string{"go.work.sum"}, "go.work.sum"},
-		{"the manifest", []string{"memql-package.yaml"}, "memql-package.yaml"},
-		{"vendored code", []string{"vendor/example.test/dep/dep.go"}, "vendor"},
-		{"a path outside the repository", []string{"../elsewhere/x.go"}, "not repository-relative"},
-		{"an absolute path", []string{"/a/a.go"}, "not repository-relative"},
+		{"an empty change list", nil},
+		{"the root go.mod", []string{"go.mod"}},
+		{"a nested go.mod", []string{"docs/guide.md", "sub/go.mod"}},
+		{"a go.sum anywhere", []string{"tools/go.sum"}},
+		{"go.work", []string{"go.work"}},
+		{"go.work.sum", []string{"go.work.sum"}},
+		{"the manifest", []string{"memql-package.yaml"}},
+		{"vendored code", []string{"vendor/example.test/dep/dep.go"}},
+		{"a path outside the repository", []string{"../elsewhere/x.go"}},
+		{"an absolute path", []string{"/a/a.go"}},
 	}
 	for _, c := range cases {
-		sel := affectedOrFatal(t, g, c.changed)
+		sel := fullOrFatal(t, g, c.changed)
 		if !sel.Full {
 			t.Errorf("%s: selected %v, want Full", c.name, sel.Packages)
 			continue
 		}
-		if !strings.Contains(sel.Reason, c.reason) {
-			t.Errorf("%s: reason %q does not mention %q", c.name, sel.Reason, c.reason)
+		if sel.Reason == "" {
+			t.Errorf("%s: full selection has no explanation", c.name)
 		}
 		if !reflect.DeepEqual(sel.Packages, everyFixturePackage) {
 			t.Errorf("%s: a Full selection lists %v, want every package", c.name, sel.Packages)
@@ -114,19 +132,16 @@ func TestAffectedReadsTheManifestAtTheRootOnly(t *testing.T) {
 	}
 }
 
-// A file that does not parse leaves the graph unable to say what a change
-// reaches, so every change selects everything -- a docs-only one included.
-func TestAffectedSelectsEverythingOverAnIncompleteGraph(t *testing.T) {
+// A file that does not parse is reported as incomplete graph evidence; the
+// DSL policy selects full coverage from that fact.
+func TestSelectionFactsReportAnIncompleteGraph(t *testing.T) {
 	g := scanTree(t, false)
-	sel := affectedOrFatal(t, g, []string{"docs/guide.md"})
-	if !sel.Full {
-		t.Fatalf("an incomplete graph selected %v, want Full", sel.Packages)
+	facts, err := AnalyzeSelection(g, []string{"docs/guide.md"}, true, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(sel.Reason, "broken/x.go") {
-		t.Errorf("reason %q does not name the file that did not parse", sel.Reason)
-	}
-	if len(sel.Packages) != len(g.Packages()) {
-		t.Errorf("Full selected %d of %d packages", len(sel.Packages), len(g.Packages()))
+	if facts.GraphComplete || len(facts.Incomplete) != 1 || !strings.Contains(facts.Incomplete[0], "broken/x.go") {
+		t.Errorf("incomplete graph facts = %v, want broken/x.go", g.Incomplete())
 	}
 }
 
@@ -136,9 +151,13 @@ func TestAffectedSelectsEverythingOnASelectFullMatch(t *testing.T) {
 	g := scanTree(t, true)
 	full := []string{"docs/**", "!docs/drafts/**"}
 
-	sel := affectedOrFatal(t, g, []string{"a/a_test.go", "docs/guide.md"}, full...)
-	if !sel.Full || !strings.Contains(sel.Reason, "docs/guide.md") {
-		t.Errorf("docs/guide.md under select.full %v: got %+v, want Full naming the path", full, sel)
+	facts, err := AnalyzeSelection(g, []string{"a/a_test.go", "docs/guide.md"}, true, full)
+	if err != nil || len(facts.Paths) != 2 || !facts.Paths[1].ConfiguredFull {
+		t.Fatalf("configured full-match facts = %+v, %v", facts, err)
+	}
+	sel := fullOrFatal(t, g, []string{"a/a_test.go", "docs/guide.md"}, full...)
+	if !sel.Full || sel.Reason == "" {
+		t.Errorf("docs/guide.md under select.full %v: got %+v, want Full with a reason", full, sel)
 	}
 	// The excepted path narrows like any other file.
 	sel = affectedOrFatal(t, g, []string{"docs/drafts/plan.md"}, full...)
@@ -153,12 +172,35 @@ func TestAffectedSelectsEverythingOnASelectFullMatch(t *testing.T) {
 func TestAffectedRefusesASelectFullItCannotRead(t *testing.T) {
 	g := scanTree(t, true)
 	for _, full := range [][]string{{"docs/{a,b}/**"}, {"!docs/**"}} {
-		if sel, err := Affected(g, []string{"docs/guide.md"}, full); err == nil {
+		if sel, err := AnalyzeSelection(g, []string{"docs/guide.md"}, true, full); err == nil {
 			t.Errorf("select.full %v read as %+v, want an error", full, sel)
 		}
 	}
-	if _, err := Affected(nil, []string{"a/a.go"}, nil); err == nil {
-		t.Error("Affected over no graph answered without an error")
+	if _, err := AnalyzeSelection(nil, []string{"a/a.go"}, true, nil); err == nil {
+		t.Error("AnalyzeSelection over no graph answered without an error")
+	}
+}
+
+func TestChangedPathFactsSupportBucketOnlyPipelines(t *testing.T) {
+	facts, err := AnalyzeChangedPaths(
+		[]string{"component/memql/engine.go", "vendor/example.test/dep/dep.go", "../outside"},
+		true,
+		[]string{"component/**", "!component/generated/**"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !facts.Known || !facts.GraphComplete || facts.ChangedCount != 3 {
+		t.Fatalf("path-only facts = %+v, want known complete facts for three paths", facts)
+	}
+	if got := facts.Paths[0]; !got.RepositoryPath || !got.ConfiguredFull || got.Vendored {
+		t.Errorf("ordinary path facts = %+v, want valid configured-full path", got)
+	}
+	if got := facts.Paths[1]; !got.RepositoryPath || !got.Vendored {
+		t.Errorf("vendor path facts = %+v, want a conservatively vendored path", got)
+	}
+	if got := facts.Paths[2]; got.RepositoryPath {
+		t.Errorf("outside path facts = %+v, want invalid repository path", got)
 	}
 }
 
@@ -313,6 +355,9 @@ func TestCompileSelectsPackagesThroughTheGraph(t *testing.T) {
 		Mode:     ModeAffected,
 		Event:    EventPullRequest,
 		Selector: GraphSelector(g, sel),
+		PackagePolicies: map[string]PackagePolicy{
+			"tests.go-tests": {Coverage: PackageCoverageAffected, Filter: PackageFilterAll},
+		},
 	})
 	if refusal != nil {
 		t.Fatal(refusal)

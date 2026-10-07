@@ -8,94 +8,119 @@ import (
 	"strings"
 )
 
-// FullTriggers are the paths whose change selects everything, beside a
-// pipeline's own select.full globs.
-var FullTriggers = []string{"go.mod", "go.sum", "go.work", "go.work.sum"} // matched by base name anywhere
-
 // ManifestPath is the manifest a pipeline is declared in; its change selects
-// everything, because it can change what every step runs.
-const ManifestPath = "memql-package.yaml" // matched at the root
+const ManifestPath = "memql-package.yaml"
 
-// Affected selects what changed touches: the package each changed path
-// belongs to (its directory or the nearest package above), plus every
-// package importing one of them, transitively. A changed path whose
-// directory holds no package seeds the packages importing the import path
-// that directory would have -- the nearest go.mod's module path plus the
-// directory below it -- and so their importers too: that is a package the
-// change deleted or moved away, and they no longer build. Full when: the
-// change list is empty, a full trigger or a select.full glob matches, or the
-// graph is incomplete.
-//
-// Every one of those is a change the graph cannot reason about, and the
-// answer to "cannot say" is everything, never nothing: a selection that is
-// too wide costs minutes, one that is too narrow merges a red build, and the
-// full run in the merge queue is the backstop only for the first kind of
-// mistake (design record D1, section 5). An empty change list in particular
-// is read as a diff that could not be read, not as a change that touched
-// nothing. Vendored code at a module root counts as a full trigger too: the
-// graph skips vendor directories, as the go tool does, so it cannot say who a
-// vendored change reaches.
-//
-// select.full is read with PathSet, as Validate admits it: a path is in it
-// when a plain glob matches and no `!` glob does. A list PathSet cannot read
-// is an error, never a list that matches nothing.
-//
-// A changed path that no package owns (PackageAt), and where no import
-// points, seeds nothing. That is how a change confined to files no Go package
-// can see selects no packages, and the steps selecting packages skip. The
-// "where no import points" half is what keeps a deletion from reading that
-// way: once package a is deleted nothing owns a/a.go, yet b still imports a,
-// and a selection of nothing would skip green over a b that no longer builds.
-// Only the repository's own imports count (ScanGoTree), and an import that
-// resolves still narrows to its package and that package's importers.
-func Affected(g *Graph, changed []string, fullGlobs []string) (Selection, error) {
+// AnalyzeSelection reports facts a DSL policy uses to choose full or affected
+// package coverage. Path normalization, glob matching and graph lookups are
+// mechanics; no fallback decision is made here.
+func AnalyzeSelection(g *Graph, changed []string, known bool, fullGlobs []string) (SelectionFacts, error) {
 	if g == nil {
-		return Selection{}, errors.New("there is no import graph to select from")
+		return SelectionFacts{}, errors.New("there is no import graph to analyze")
 	}
-	var inFull func(string) bool
-	if len(fullGlobs) > 0 {
-		set, err := PathSet(fullGlobs)
-		if err != nil {
-			return Selection{}, fmt.Errorf("select.full: %w", err)
-		}
-		inFull = set
+	facts, err := AnalyzeChangedPaths(changed, known, fullGlobs)
+	if err != nil {
+		return SelectionFacts{}, err
 	}
-	everything := func(reason string) (Selection, error) {
-		return Selection{Full: true, Reason: reason, Packages: g.importPaths()}, nil
-	}
-
-	if len(changed) == 0 {
-		return everything("the change list is empty, which is a diff that could not be read: narrowing to nothing would skip every step")
-	}
-	if unread := g.Incomplete(); len(unread) > 0 {
-		return everything(firstAndCount(unread) + " could not be read, so the graph cannot say what a change reaches")
-	}
+	facts.GraphComplete = len(g.incomplete) == 0
+	facts.Incomplete = g.Incomplete()
+	facts.AllPackages = g.importPaths()
 	seeds := map[string]bool{}
 	missing := map[string]bool{} // import paths a changed directory would have, imported where no package is
-	for _, raw := range changed {
-		p, ok := repoPath(raw)
-		if !ok {
-			return everything(fmt.Sprintf("changed path %q is not repository-relative", clip(raw)))
+	for i := range facts.Paths {
+		pathFacts := &facts.Paths[i]
+		if !pathFacts.RepositoryPath {
+			continue
 		}
-		if reason, ok := g.fullTrigger(p); ok {
-			return everything(reason)
-		}
-		if inFull != nil && inFull(p) {
-			return everything(p + " is under select.full")
-		}
-		if importPath, ok := g.PackageAt(p); ok {
+		pathFacts.Vendored = g.isVendoredPath(pathFacts.Path)
+		if importPath, ok := g.PackageAt(pathFacts.Path); ok {
 			seeds[importPath] = true
 		}
-		if importPath, importers := g.orphans(p); len(importers) > 0 {
+		if importPath, importers := g.orphans(pathFacts.Path); len(importers) > 0 {
 			missing[importPath] = true
 			for _, importer := range importers {
 				seeds[importer] = true
 			}
 		}
 	}
+	facts.Seeds = sortedMapKeys(seeds)
+	facts.Missing = sortedMapKeys(missing)
+	return facts, nil
+}
+
+// AnalyzeChangedPaths reports facts needed by pipeline policy when a pipeline
+// uses changed-path buckets but does not select Go packages. With no import
+// graph to consult, any vendor path is conservatively treated as vendored.
+// Callers that have a graph should use AnalyzeSelection for its exact module
+// boundaries and package seeds.
+func AnalyzeChangedPaths(changed []string, known bool, fullGlobs []string) (SelectionFacts, error) {
+	var inFull func(string) bool
+	if len(fullGlobs) > 0 {
+		set, err := PathSet(fullGlobs)
+		if err != nil {
+			return SelectionFacts{}, fmt.Errorf("select.full: %w", err)
+		}
+		inFull = set
+	}
+	facts := SelectionFacts{
+		Known: known, ChangedCount: len(changed), GraphComplete: true,
+		Paths: make([]ChangedPathFacts, 0, len(changed)),
+	}
+	for _, raw := range changed {
+		p, ok := repoPath(raw)
+		if !ok {
+			facts.Paths = append(facts.Paths, ChangedPathFacts{Path: raw})
+			continue
+		}
+		pathFacts := ChangedPathFacts{
+			Path: p, BaseName: path.Base(p), RepositoryPath: true,
+			Vendored: pathHasSegment(p, "vendor"),
+		}
+		if inFull != nil {
+			pathFacts.ConfiguredFull = inFull(p)
+		}
+		facts.Paths = append(facts.Paths, pathFacts)
+	}
+	return facts, nil
+}
+
+func pathHasSegment(p, segment string) bool {
+	for _, part := range strings.Split(p, "/") {
+		if part == segment {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveSelection applies the full-versus-affected decision made by the
+// pinned pipeline DSL, then performs the import-graph traversal. It refuses
+// an affected answer when the facts are unsafe to narrow, so a malformed or
+// changed policy cannot silently skip required package work.
+func ResolveSelection(g *Graph, facts SelectionFacts, decision SelectionDecision) (Selection, error) {
+	if g == nil {
+		return Selection{}, errors.New("there is no import graph to select from")
+	}
+	if !decision.Full {
+		if !facts.Known || facts.ChangedCount == 0 || !facts.GraphComplete {
+			return Selection{}, errors.New("pipeline DSL selected affected packages with an unknown change list or incomplete graph")
+		}
+		for _, p := range facts.Paths {
+			if !p.RepositoryPath {
+				return Selection{}, fmt.Errorf("pipeline DSL selected affected packages for non-repository path %q", clip(p.Path))
+			}
+		}
+	}
+	if decision.Full {
+		reason := strings.TrimSpace(decision.Reason)
+		if reason == "" {
+			reason = "the pinned pipeline DSL selected full package coverage"
+		}
+		return Selection{Full: true, Reason: reason, Packages: slices.Clone(facts.AllPackages)}, nil
+	}
 
 	selected := map[string]bool{}
-	queue := sortedMapKeys(seeds)
+	queue := slices.Clone(facts.Seeds)
 	for len(queue) > 0 {
 		next := queue[0]
 		queue = queue[1:]
@@ -105,48 +130,43 @@ func Affected(g *Graph, changed []string, fullGlobs []string) (Selection, error)
 		selected[next] = true
 		queue = append(queue, g.importers[next]...)
 	}
-	sel := Selection{Seeds: sortedMapKeys(seeds), Packages: sortedMapKeys(selected)}
-	paths := count(len(changed), "changed path", "changed paths")
+	sel := Selection{Seeds: slices.Clone(facts.Seeds), Packages: sortedMapKeys(selected)}
+	paths := count(facts.ChangedCount, "changed path", "changed paths")
 	if len(sel.Seeds) == 0 {
 		sel.Reason = paths + ", none in a Go package"
 		return sel, nil
 	}
 	verb := "seed"
-	if len(changed) == 1 {
+	if facts.ChangedCount == 1 {
 		verb = "seeds"
 	}
 	sel.Reason = fmt.Sprintf("%s %s %s; with their importers, %d of %d are selected",
-		paths, verb, count(len(sel.Seeds), "package", "packages"), len(sel.Packages), len(g.pkgs))
-	if len(missing) > 0 {
+		paths, verb, count(len(sel.Seeds), "package", "packages"), len(sel.Packages), len(facts.AllPackages))
+	if len(facts.Missing) > 0 {
 		it := "it"
-		if len(missing) > 1 {
+		if len(facts.Missing) > 1 {
 			it = "them"
 		}
-		sel.Reason += "; the change leaves no package at " + firstAndCount(sortedMapKeys(missing)) +
+		sel.Reason += "; the change leaves no package at " + firstAndCount(facts.Missing) +
 			", and the packages still importing " + it + " are seeds"
 	}
 	return sel, nil
 }
 
-// fullTrigger reports why a changed path selects everything on its own, if
-// it does.
-func (g *Graph) fullTrigger(p string) (string, bool) {
-	if slices.Contains(FullTriggers, path.Base(p)) {
-		return p + " changes the module graph the selection is computed from", true
-	}
-	if p == ManifestPath {
-		return ManifestPath + " can change what every step runs", true
-	}
+// isVendoredPath reports whether p is under a vendor directory at a module
+// root, one of the graph's structural facts. The DSL decides the coverage
+// policy for such a path.
+func (g *Graph) isVendoredPath(p string) bool {
 	for root := range g.modules {
 		vendor := "vendor/"
 		if root != "." {
 			vendor = root + "/vendor/"
 		}
 		if strings.HasPrefix(p, vendor) {
-			return p + " is vendored code, which the import graph does not read", true
+			return true
 		}
 	}
-	return "", false
+	return false
 }
 
 // GraphSelector adapts a graph and its selection to Compile's Selector.
