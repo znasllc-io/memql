@@ -315,8 +315,13 @@ Its namespace Role grants `get` on `pods/exec`; the runner checks the Job,
 controller owner reference, pod UID and container identities before and after
 transfer. It admits only declared regular files from a complete bounded tar
 stream. Missing, unsafe or uncertain exports fail a step even if its command
-exited successfully. The existing small-file Library limit still applies;
-release-size storage, durable upload intents and retention are separate work.
+exited successfully. Files stream from private snapshots into the durable
+Library upload journal, with owner/run/step/attempt/path, size and digest
+verified against the returned receipt. Step V6 retains immutable upload intent
+IDs in the outcome and work-step metadata. The archive cap defaults to 64 MiB
+and can be raised to 2 GiB; Library file and owner quotas still apply. Shared
+admission across legacy upload paths and safe physical retirement remain
+separate work. See [streamed storage](../../../../docs/public/build/streamed-artifact-storage.md).
 
 Collection must finish before the Job deadline removes its collector. A
 replacement runner can reread the same completed export while that pod exists.
