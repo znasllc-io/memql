@@ -14,9 +14,12 @@ import (
 // pending intent survives lost replies and controller replacement; repeating
 // begin returns the same effect identity rather than starting a new effect.
 type candidatePublication struct {
-	EffectID, CandidateID, ApprovalID, State string
-	Target                                   pl.ReleaseDestination
-	Artifact                                 pl.ReleaseArtifact
+	EffectID    string                `json:"effectId"`
+	CandidateID string                `json:"candidateId"`
+	ApprovalID  string                `json:"approvalId"`
+	State       string                `json:"state"`
+	Target      pl.ReleaseDestination `json:"target"`
+	Artifact    pl.ReleaseArtifact    `json:"artifact"`
 }
 
 type candidatePublicationReceipt struct {

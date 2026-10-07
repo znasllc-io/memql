@@ -45,6 +45,53 @@ builtin releaseCutStatus {
   version  string!  @description("The version to check, in either tag form (v1.2.3) or bare form (1.2.3).")
 }
 
+/// Read configured release sources and exact registry target identities. Owner only.
+@executor("integration.release.candidateConfiguration")
+builtin releaseCandidateConfiguration { }
+
+/// Page through caller-owned review history, including interrupted preparations.
+@executor("integration.release.listCandidates")
+builtin releaseCandidates {
+  cursor string
+  limit integer
+}
+
+/// Verify an immutable candidate using complete work evidence and operator configuration.
+/// This retains artifacts for review and does not approve or publish them.
+@executor("integration.release.prepareCandidate")
+@args(profile="object")
+builtin releasePrepareCandidate {
+  candidate object!
+}
+
+/// Read one exact release candidate owned by the caller.
+@executor("integration.release.getCandidate")
+builtin releaseGetCandidate {
+  candidateId string!
+}
+
+/// Separately approve the exact reviewed candidate after fresh verification.
+@executor("integration.release.approveCandidate")
+builtin releaseApproveCandidate {
+  candidateId string!
+}
+
+/// Publish one artifact only under its exact durable candidate approval.
+@executor("integration.release.publishCandidate")
+builtin releasePublishCandidate {
+  candidateId string!
+  approvalId string!
+  targetId string!
+  component string!
+  artifact string!
+}
+
+/// Permanently retire an unpublished candidate and release its retention pins.
+@executor("integration.release.retireCandidate")
+builtin releaseRetireCandidate {
+  candidateId string!
+}
+
 /// Scoped release operation; available only inside an owner-authorized release cut.
 @executor("integration.release.releaseReadSnapshot")
 builtin releaseReadSnapshot { }

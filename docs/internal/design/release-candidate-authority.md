@@ -11,9 +11,39 @@ owner: znas
 
 The native candidate journal separates verification, owner approval and an
 external publication effect. It is infrastructure for the installed release
-workflow, not an alternative workflow or a public approval API. Preparation and
-approval and publication entry points remain private. Scoped operations are registered only to
-support the installed template; direct calls refuse even for an owner.
+workflow, not an alternative workflow. Owner-gated builtins provide preparation,
+review, approval, publication and retirement. Scoped operations are registered
+only to support the installed template; direct calls refuse even for an owner.
+
+The BFF and agent wire the same native pipeline artifact store and configured
+blob client that hold the original upload receipts. Without that binding,
+artifact operations refuse. Existing review history remains readable from the
+database even if blob storage or operator configuration is unavailable. No
+schedule or publication is enabled merely by registering these capabilities.
+
+`MEMQL_RELEASE_CANDIDATES` is an explicit global variable containing a bounded
+JSON object with `formatVersion: 1`, `sources` and `registries`. Source entries
+carry `component`, `repository`, `path`, optional `jsonField` and optional
+`credentialSecret`. Registry entries use the connection and credential-reference
+contract in `candidate_targets.go`; no secret value belongs in this JSON.
+Configuration is reread without the engine's result cache for each operation.
+Unknown or duplicate JSON fields, duplicate source/target identities and unsafe destinations fail
+before effects. There is no environment or plaintext credential fallback.
+
+`releaseCandidateConfiguration()` exposes source rules and target identity,
+origin and repository, never credential values. `releasePrepareCandidate`
+accepts a candidate object and returns its verified immutable manifest and
+digest. `releaseCandidates` returns owner-scoped summaries with a bounded limit
+(default 20, maximum 50) and opaque keyset continuation cursor. Immutable
+creation time and candidate identity determine order, so status changes do not
+move entries between pages. Each summary revalidates its stored manifest;
+interrupted preparations remain discoverable. New entries created after the
+first page appear on a fresh listing. `releaseGetCandidate` reads that exact candidate; `releaseApproveCandidate`
+reverifies it and returns its separately persisted approval ID.
+`releasePublishCandidate` requires both identities and the exact target,
+component and artifact. `releaseRetireCandidate` fences only unpublished
+candidates and releases their references. Every entry rejects non-owners before
+configuration, database or network access. Review history is scoped to its owner.
 
 `component/pipelines.ReleaseCandidate` binds independently versioned components,
 exact repository commits, compatibility ranges, immutable artifact receipts,
@@ -93,7 +123,7 @@ Deleting an uncertain intent or releasing its artifacts is not recovery.
 Every authority read recomputes the stored manifest's identity and checks its
 owner. Migration rollback refuses to discard candidate history.
 
-The private approval entry reads an existing candidate by exact digest and
+The owner-gated approval entry reads an existing candidate by exact digest and
 repeats preparation before committing separate owner approval. A changed policy,
 engine revision or source configuration refuses before creating a replacement
 candidate or artifact pin. Publication repeats the same verification against
@@ -128,10 +158,20 @@ cleanup. A separate opt-in test accepts a disposable loopback Distribution
 registry; it has also verified the retained rootless BuildKit archive by its
 independently recorded archive and image digests. These tests use fixture
 work-evidence and artifact-storage ports, so they do not establish the complete
-Workbench-to-Library-to-publication path. Process-crash scratch recovery and
-post-publication retention remain unfinished.
+Workbench-to-Library-to-publication path.
 
-Still required before exposing this path: operator/app wiring, original-receipt
+The app-level opt-in proof extends that evidence through actual engine builtins,
+SQL work receipts, the native upload journal and Library store, independent
+Azure clients against Azurite, and a disposable Distribution registry. One
+engine prepares; a second approves, discovers and publishes; the first recovers
+the same persisted approval. It publishes the retained rootless BuildKit archive
+against independently recorded archive and image digests. Its original work
+executions and source-version HTTP service remain fixtures: it does not claim an
+installed Workbench release or self-update. The test confirms deletion of its
+own Azurite container and removes only its own journal rows. Process-crash
+scratch recovery and post-publication retention remain unfinished.
+
+Still required for the complete delivery path: original-receipt
 verification for carried attempts,
 non-OCI release targets, owner review UI, installation/recovery control, signed
 provenance and complete release qualification. No candidate approval or

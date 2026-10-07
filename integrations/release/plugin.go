@@ -2,6 +2,7 @@ package release
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/identity/githubconnect"
@@ -27,7 +28,7 @@ func init() {
 			Variable: pctx.ResolveSystemVariable,
 			Secret:   pctx.ResolveSystemSecret,
 		}}
-		return NewIntegration(pctx.Logger, pctx.Engine, resolver{
+		integration := NewIntegration(pctx.Logger, pctx.Engine, resolver{
 			systemSecret:   pctx.ResolveSystemSecret,
 			systemVariable: pctx.ResolveSystemVariable,
 			env:            osEnv,
@@ -39,6 +40,17 @@ func init() {
 				})
 				return mintReleaseToken(ctx, client, repo)
 			},
-		}), nil
+		})
+		// Reading retained review history must survive unavailable object
+		// storage or operator configuration. Writes still require native ports.
+		integration.candidateDB = func() *sql.DB {
+			if pctx.BunDB != nil {
+				if db := pctx.BunDB(); db != nil {
+					return db.DB
+				}
+			}
+			return nil
+		}
+		return integration, nil
 	})
 }

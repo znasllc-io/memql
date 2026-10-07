@@ -44,8 +44,8 @@ type candidatePublishRequest struct {
 	CandidateID, ApprovalID, TargetID, Component, Artifact string
 }
 
-// The entry point remains private until operator/app wiring is complete.
-// It selects only one already approved effect; the DSL composes its protocol
+// The owner entry selects one already approved effect using native app wiring;
+// the DSL composes its protocol
 // operations. Registry credentials never enter DSL arguments or journal rows.
 func (p *candidatePreparer) publish(ctx context.Context, request candidatePublishRequest) (candidatePublication, error) {
 	if _, err := candidateOwner(ctx); err != nil {
@@ -69,7 +69,7 @@ func (p *candidatePreparer) publishWithWorkflow(ctx context.Context, request can
 	if err != nil {
 		return out, err
 	}
-	if record.State != "approved" || request.ApprovalID == "" {
+	if record.State != "approved" || request.ApprovalID == "" || request.ApprovalID != record.ApprovalID {
 		return out, errors.New("publication requires a separate exact candidate approval")
 	}
 	if _, err := candidatePublicationFor(record, request.TargetID, request.Component, request.Artifact); err != nil {

@@ -42,8 +42,8 @@ type candidatePreparer struct {
 	logger         *slog.Logger
 }
 
-// prepare is intentionally not a public capability yet. The installed recipe
-// orders separate effects; the native scope makes readiness impossible until
+// The public owner entry binds native dependencies before calling prepare.
+// The installed recipe orders effects; the scope makes readiness impossible until
 // this exact immutable candidate passed every integrity gate. Approval remains
 // a separate owner request and publication is not available in this scope.
 func (p *candidatePreparer) prepare(ctx context.Context, input pl.ReleaseCandidate) (candidateRecord, error) {
