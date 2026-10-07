@@ -36,10 +36,7 @@ var apiFrontDoors = []string{
 // does not 404, it hands HTTP/1.1 to an h2c backend and fails with a protocol
 // error naming nothing. Pair with `make frontdoor-paths` locally to fix.
 func TestFrontDoorPathsAreNotStale(t *testing.T) {
-	out, err := exec.Command("go", "run", "../../../cmd/frontdoorpaths").CombinedOutput()
-	if err != nil {
-		t.Fatalf("generator failed: %v\n%s", err, out)
-	}
+	out := generatedFrontdoorPathBlock(t)
 
 	for _, path := range apiFrontDoors {
 		t.Run(path, func(t *testing.T) {
@@ -114,10 +111,7 @@ func TestTheGeneratedPathSliceIsNotStale(t *testing.T) {
 // api host would route a different set from the cluster's while every staleness
 // gate stayed green.
 func TestTheGeneratedPathSliceMatchesTheIngressBlock(t *testing.T) {
-	block, err := exec.Command("go", "run", "../../../cmd/frontdoorpaths").CombinedOutput()
-	if err != nil {
-		t.Fatalf("generator failed: %v\n%s", err, block)
-	}
+	block := generatedFrontdoorPathBlock(t)
 
 	var fromYAML []string
 	for _, line := range strings.Split(string(block), "\n") {
@@ -146,6 +140,19 @@ func TestTheGeneratedPathSliceMatchesTheIngressBlock(t *testing.T) {
 	if !slices.Equal(fromYAML, fromGo) {
 		t.Errorf("the Ingress block and the Go slice route different sets, in different orders, or both.\nIngress: %v\nGo:      %v", fromYAML, fromGo)
 	}
+}
+
+func generatedFrontdoorPathBlock(t *testing.T) []byte {
+	t.Helper()
+	cmd := exec.Command("go", "run", "../../../cmd/frontdoorpaths")
+	// make test exports GOFLAGS=-v. A cold compiler writes package names to
+	// stderr; they are diagnostics, never part of the generated YAML.
+	cmd.Stderr = os.Stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("generator failed: %v\n%s", err, out)
+	}
+	return out
 }
 
 // TestFrontDoorHostsAreNotStale asserts the generated front door equals what
