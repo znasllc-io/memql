@@ -24,7 +24,7 @@ type Selection struct {
 	// Reason says why the run is full, or summarises the narrowing.
 	Reason string
 	// Seeds are the packages the changed files map onto, in either scope,
-	// plus the gate packages when a non-Go file changed (affected mode).
+	// plus the declared filesystem gate packages (affected mode).
 	Seeds []string
 	// Packages is the affected set (affected mode): every seed, plus every
 	// package whose test binary depends on a package whose BUILD changed.
@@ -67,14 +67,14 @@ func fullTrigger(file string) (string, bool) {
 //     reaches the package AND every package whose test binary depends on it.
 //   - test scope -- a _test.go source, a test build's embed, or any other
 //     file under the package's directory that no build names (testdata, a
-//     fixture, a README). Only the package's own tests can read it, so it
-//     reaches that package and nothing else.
+//     fixture, a README). Importers do not link it, so the import graph adds
+//     only that package. Filesystem gates below may also read the file.
 //
 // gate lists `go test` package patterns whose tests read repository files by
 // PATH rather than through an import (docs gates, manifest gates, the
-// path-routing guards), which no graph can see. They are added, in test
-// scope, whenever a changed file is not Go source. The CI step passes the
-// same list the go-checks gate-inputs step runs.
+// path-routing guards), which no graph can see. They are always added in test
+// scope: Go source and test files are also inputs to source-scanning contracts.
+// The CI step passes the same list the go-checks gate-inputs step runs.
 //
 // Every changed path lands on a package or turns the run full; a file is
 // never dropped. The order of the rules:
@@ -95,7 +95,7 @@ func Select(g *Graph, changed []string, gate []string) (Selection, error) {
 	}
 	built := map[string]bool{}  // packages whose build changed: reach importers
 	tested := map[string]bool{} // packages only whose tests changed
-	nonGo, tagChange := false, false
+	tagChange := false
 	for _, raw := range changed {
 		f := path.Clean(strings.TrimSpace(raw))
 		if f == "." || path.IsAbs(f) || f == ".." || strings.HasPrefix(f, "../") {
@@ -105,9 +105,6 @@ func Select(g *Graph, changed []string, gate []string) (Selection, error) {
 			return Selection{Mode: ModeFull, Reason: reason}, nil
 		}
 		isGo := strings.HasSuffix(f, ".go")
-		if !isGo {
-			nonGo = true
-		}
 		buildOwners, testOwners := g.owners[f], g.testOwners[f]
 		if len(buildOwners) == 0 && len(testOwners) == 0 {
 			ip, ok := g.nearest(f)
@@ -130,15 +127,13 @@ func Select(g *Graph, changed []string, gate []string) (Selection, error) {
 			tagChange = true
 		}
 	}
-	if nonGo {
-		for _, pat := range gate {
-			ips, err := g.Expand(pat)
-			if err != nil {
-				return Selection{}, fmt.Errorf("gate package pattern: %w", err)
-			}
-			for _, ip := range ips {
-				tested[ip] = true
-			}
+	for _, pat := range gate {
+		ips, err := g.Expand(pat)
+		if err != nil {
+			return Selection{}, fmt.Errorf("gate package pattern: %w", err)
+		}
+		for _, ip := range ips {
+			tested[ip] = true
 		}
 	}
 	seeds := map[string]bool{}

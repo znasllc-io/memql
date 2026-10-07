@@ -91,10 +91,10 @@ pipeline:
       - test/inboundhop
       - test/pipelinehop
     buckets:
-      # Every change that is not Go source. ci.yml's planner adds its gate
-      # packages for exactly that change (scripts/ci/selection): their tests read
-      # repository files by path, which no import graph can see.
-      gates: ["**", "!**/*.go"]
+      # Filesystem gates read Go source as well as manifests and docs. The
+      # import graph cannot discover these dependencies, so every PR runs them,
+      # matching ci.yml's declared gate packages in scripts/ci/selection.
+      gates: ["**"]
       # What the OS shell's checks read: a hand copy of ci.yml's osclient bucket
       # (nothing holds the two together) without the root Dockerfile, which only
       # that lane's image build reads and this step does not run, and with the
@@ -454,8 +454,8 @@ pipeline:
             go test -tags workbench -timeout=300s ./app/ ./component/node/
     # ci.yml go-checks' gate-inputs step, which ci.yml runs on a pull request
     # only: a full run tests every package in go-tests, these among them, so
-    # this stage is planned for a pull request alone. The step runs when the
-    # change is not all Go source. The stage comes after the tests so a red gate
+    # this stage is planned for every pull request, including Go-only changes.
+    # The stage comes after the tests so a red gate
     # never skips a test; a red test stage skips it in turn, as the seam skips
     # every stage after a failed one. The packages are ci.yml's GATE_PACKAGES;
     # the test holds them equal.
@@ -469,7 +469,7 @@ pipeline:
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
-            go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+            go test -count=1 -timeout=300s ./ ./integrations ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
 
     # Analysis records findings independently of build/test success. It runs on
     # main pushes and release qualification, including their re-runs. The
