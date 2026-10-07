@@ -104,6 +104,7 @@ sys.exit(int(args["--exit-code"]) if fault in ("findings", "disagreement", "outs
         active = peak = 0
         completion_order = []
         barrier = threading.Barrier(2)
+        later_finished = threading.Event()
 
         def measured(command, log, remaining, cancelled):
             nonlocal active, peak
@@ -115,11 +116,13 @@ sys.exit(int(args["--exit-code"]) if fault in ("findings", "disagreement", "outs
             try:
                 if number < 2:
                     barrier.wait(timeout=5)
-                if number == 0:
-                    time.sleep(0.2)  # Later inventory entries can finish first.
+                if number == 0 and not later_finished.wait(timeout=5):
+                    raise RuntimeError("later batch did not finish concurrently")
                 code = original(command, log, remaining, cancelled)
                 with lock:
                     completion_order.append(number)
+                if number == 1:
+                    later_finished.set()
                 return code
             finally:
                 with lock:
