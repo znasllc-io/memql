@@ -61,10 +61,11 @@ func validateAssemblyPlans(plans []candidateAssemblyPlan, versions *candidateVer
 			}
 			components[component.Name] = true
 			for _, alias := range component.Runs {
-				if !candidateJSONField.MatchString(alias) || aliases[alias] {
+				key := strings.ToLower(alias) // input JSON rejects case-folded duplicate keys
+				if !candidateJSONField.MatchString(alias) || aliases[key] {
 					return errors.New("assembly run inputs must have unique bounded names")
 				}
-				aliases[alias] = true
+				aliases[key] = true
 			}
 			for _, artifact := range component.Artifacts {
 				key := component.Name + "/" + artifact.Name

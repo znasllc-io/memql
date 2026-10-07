@@ -26,7 +26,7 @@ func assemblyTestPlan() candidateAssemblyPlan {
 func TestCandidateAssemblyDeclarationIsBoundedAndClosed(t *testing.T) {
 	versions := &candidateVersionReader{sources: map[string]candidateVersionSource{"engine": {Component: "engine"}}}
 	targets := &candidateTargetReader{targets: map[string]candidateRegistryTarget{"registry": {ID: "registry", Component: "engine", Artifact: "image"}}}
-	for _, failure := range []string{"valid", "duplicate plans", "unconfigured component", "duplicate aliases", "undeclared run", "duplicate artifacts", "unknown kind", "metadata missing", "metadata same path", "unsupported platform", "traversal", "duplicate targets", "unknown target", "unknown compatibility", "too many plans"} {
+	for _, failure := range []string{"valid", "duplicate plans", "unconfigured component", "duplicate aliases", "case-folded aliases", "undeclared run", "duplicate artifacts", "unknown kind", "metadata missing", "metadata same path", "unsupported platform", "traversal", "duplicate targets", "unknown target", "unknown compatibility", "too many plans"} {
 		t.Run(failure, func(t *testing.T) {
 			p := assemblyTestPlan()
 			plans := []candidateAssemblyPlan{p}
@@ -37,6 +37,8 @@ func TestCandidateAssemblyDeclarationIsBoundedAndClosed(t *testing.T) {
 				p.Components[0].Name = "other"
 			case "duplicate aliases":
 				p.Components[0].Runs = []string{"engine_arm64", "engine_arm64"}
+			case "case-folded aliases":
+				p.Components[0].Runs = []string{"engine_arm64", "Engine_arm64"}
 			case "undeclared run":
 				p.Components[0].Artifacts[0].Run = "another"
 			case "duplicate artifacts":

@@ -59,7 +59,7 @@ There is no default repository, destination or credential. For example:
 
 A component names one configured version source. Each run input is a unique
 identifier of at most 64 characters: a letter followed by letters, digits or
-underscores. Multiple runs for one component must have exactly the same
+underscores. Names cannot differ only by letter case. Multiple runs for one component must have exactly the same
 repository and commit; they can cover different platforms or check suites.
 Different components can refer to the same run through separate input names.
 
@@ -118,7 +118,8 @@ callers cannot select just the successful checks. Unfinished, failed,
 foreign-owned or incompatible-source runs refuse. Every evidence artifact is
 pinned and verified, including reports and metadata not selected for publication.
 
-The resulting candidate is `ready`, with no approval ID or publication effect.
+A new candidate is `ready`, with no approval ID or publication effect. Repeating
+the same inputs recovers the existing candidate and its current review state.
 `releaseGetCandidate` and `releaseCandidates` expose its durable review record.
 `releasePrepareCandidate` remains available for callers that already hold a
 complete candidate manifest.
