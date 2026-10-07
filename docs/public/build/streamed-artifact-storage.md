@@ -15,20 +15,26 @@ runner must explicitly use it. The app adapter implements both ports. A
 successful stream call returns a ready Library file and an independent durable
 object receipt. A storage error never returns a successful file ID.
 
-The Job collector uses this port directly from its private verified snapshot;
+The Job collector and native Cockpit runner use this port from private verified snapshots;
 it does not fall back to buffering an artifact for the byte-slice port. It checks
 the returned owner/run/step/attempt/path, size and digest before accepting the
-receipt. The Step V6 transport retains opaque intent IDs in the Job outcome and
+receipt. The Step V6 transport retains opaque intent IDs in the step outcome and
 the work-step result metadata. These IDs survive outcome-size trimming even if
-some editable Library links must be omitted. A successful cluster step declaring
+some editable Library links must be omitted. A successful step declaring
 artifacts is refused at the driver boundary if those references are absent or
 malformed. Older workbench replicas cannot accept the V6 action.
 
 The operator can raise the total streamed archive cap to 2 GiB; its default
 remains 64 MiB. The existing bounded Library phase and Job deadline still apply.
 Large-file throughput must be qualified on the installation before selecting a
-larger cap. Native-host artifact transport remains capped at 256 MiB and does
-not yet provide these immutable receipt references.
+larger cap. The engine caps native-host artifacts at 256 MiB; Cockpit additionally limits
+its producer to 64 MiB of files and 20 MiB compressed per worker result. Its base64/gzip
+response is decoded into a bounded private snapshot; no second full archive is
+buffered. Missing declared files, malformed archives, checksum errors or a
+storage adapter without verified receipts fail the step. Every declaration must
+match a regular file before any artifact is uploaded. Cancellation keeps its
+cancelled status and records artifact failures as notes. The command exit code
+is preserved independently of artifact success.
 
 ## Identity and recovery
 
@@ -77,7 +83,7 @@ returned object version and bytes before publication. Looking up a saved receipt
 is not a new byte verification.
 
 Admission counts the owner's current files, retained versions, open upload
-sessions and all streaming journal entries before moving bytes. A current file
+sessions and every unretired streaming journal entry before moving bytes. A current file
 is counted only once when its ID, URL, size and digest exactly match a journal
 entry. A changed or removed Library row cannot free retained object capacity.
 Superseded version rows are conservatively counted separately. Interrupted
@@ -96,8 +102,47 @@ An upload intent, unknown commit and its reserved capacity do not expire merely
 because a process stopped responding. A previous producer may still commit
 after a timeout. This port does not delete pending objects or release their
 reservations on an age or lease test. It recovers by retrying the same identity.
-Physical retirement requires a separately proven producer fence and conditional
-object retirement; no periodic deletion is implied by this implementation.
+`LibraryArtifactLifecycle` supplies the bounded reference and retirement
+operations. These native ports require internal origin and the exact owner,
+run, step and attempt scope. The calling workflow authorizes that scope and
+chooses retention policy; there is no public journal endpoint or automatic
+age-based deletion.
+
+Before verifying or consuming artifacts, a publication pins their exact intent
+set with a durable `ReferenceID`. Pinning locks the same owner and intent rows
+as retirement, and succeeds only for ready receipts. Repeating the same pin is
+safe; changing its artifact set is refused. A candidate spanning producing steps
+uses one scoped reference per step. Release only after the consumer is durably
+retired. A release is recorded even when its pin has not arrived, and the same
+reference identity can never be pinned again. A delayed message cannot resurrect
+that consumer.
+
+Retirement refuses active references, advances the upload generation and
+persists a random private lease identity before contacting the provider. New
+reservations, finalizers, pins and ready-receipt reads refuse that intent from
+then on. The provider conditionally replaces only the observed object version
+or absence with a zero-byte tombstone, acquires an infinite lease with the saved
+identity, and commits an empty block list under that lease. This removes staging
+that raced before lease acquisition; writers without the lease cannot stage or
+commit afterward. Readback must confirm the matching tombstone, infinite lease
+and empty uncommitted-block inventory. Download and verification paths refuse
+tombstones even when the expected artifact was itself empty.
+
+Only that confirmed fence allows the journal to mark the intent retired and
+release its reserved capacity. A lost provider or journal reply keeps the intent
+recoverable with the same lease identity. Retired intent and reference records
+remain permanently. Do not delete their tombstones or break their leases: doing
+so would admit delayed create-only producers again. Library presentation changes
+remain the workflow's responsibility; mutable rows do not determine whether a
+storage fence succeeded. Provider soft-delete history and snapshots may retain
+old versions, so this receipt does not claim all account storage was purged.
+
+The provider contracts are documented in Azure's
+[Put Block](https://learn.microsoft.com/en-us/rest/api/storageservices/put-block)
+and [Lease Blob](https://learn.microsoft.com/en-us/rest/api/storageservices/lease-blob)
+references. Local qualification uses independent clients against Azurite and
+real PostgreSQL, including lost responses, staging during lease acquisition,
+late writers and concurrent pin/retire operations.
 
 DSL owns artifact selection, required/optional failure handling, retries and
 retention policy. Native code owns the journal, generation fencing, capacity

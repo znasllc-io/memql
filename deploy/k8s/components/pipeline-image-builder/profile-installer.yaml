@@ -1,0 +1,66 @@
+# Optional operator component. The only host mount is its own seccomp directory;
+# it has no cluster API credential, privileged container, or host namespace.
+# The build pool value must match MEMQL_PIPELINES_NODE_POOL in its overlay.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: memql-rootless-buildkit-v1
+  namespace: memql-build-system
+  labels:
+    app.kubernetes.io/part-of: memql
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/name: memql-rootless-buildkit-v1 }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: memql-rootless-buildkit-v1 }
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      nodeSelector:
+        kubernetes.io/os: linux
+        memql.io/pipeline-pool: builds
+      tolerations:
+        - { key: memql.io/pipeline-pool, operator: Equal, value: builds, effect: NoSchedule }
+      securityContext:
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: profiles
+          image: docker.io/rancher/mirrored-library-busybox@sha256:101b4afd76732482eff9b95cae5f94bcf295e521fbec4e01b69c5421f3f3f3e5
+          command: [sh, -ec]
+          args:
+            - |
+              main() {
+                for architecture in amd64 arm64; do
+                  file="rootless-buildkit-v1-${architecture}.json"
+                  digest=$(sha256sum "/profiles/$file"); digest=${digest%% *}
+                  target="rootless-buildkit-v1-${architecture}-${digest}.json"
+                  cp "/profiles/$file" "/installed/.$target.pending"
+                  chmod 0644 "/installed/.$target.pending"
+                  mv -f "/installed/.$target.pending" "/installed/$target"
+                done
+                exec sleep 2147483647
+              }
+              main
+          readinessProbe:
+            exec:
+              command: [sh, -ec, "for arch in amd64 arm64; do file=rootless-buildkit-v1-$arch.json; digest=$(sha256sum /profiles/$file); digest=${digest%% *}; cmp /profiles/$file /installed/rootless-buildkit-v1-$arch-$digest.json || exit 1; done"]
+            periodSeconds: 10
+          securityContext:
+            runAsUser: 0
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 10m, memory: 8Mi, ephemeral-storage: 1Mi }
+            limits: { cpu: 100m, memory: 32Mi, ephemeral-storage: 16Mi }
+          volumeMounts:
+            - { name: profiles, mountPath: /profiles, readOnly: true }
+            - { name: installed, mountPath: /installed }
+      volumes:
+        - name: profiles
+          configMap: { name: memql-rootless-buildkit-v1 }
+        - name: installed
+          hostPath:
+            path: /var/lib/kubelet/seccomp/memql/pipelines
+            type: DirectoryOrCreate

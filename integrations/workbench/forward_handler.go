@@ -58,10 +58,10 @@ const (
 	// on its own goroutine and never on the stream's receive loop.
 	// The version is part of the action: an older replica must reject the
 	// request, not silently discard execution/recovery fields it cannot enforce.
-	// V6 retains verified upload intent identities for required Job artifacts.
+	// V7 carries the typed, operator-approved rootless image-build contract.
 	// Durable retirement fences the pre-create claim.
 	// Older runners could create an attempt after its receipt was cleaned up.
-	PipelineStepAction = "pipelineStepV6"
+	PipelineStepAction = "pipelineStepV7"
 	// PipelineStatusAction asks after a step's Job: running, finished (with
 	// the outcome), absent or stale. Quick -- the runner bounds it at ten
 	// seconds -- and still answered off the receive loop, as are the next two.

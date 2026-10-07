@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,47 +18,69 @@ import (
 
 const maxPipelineReceiptIDs = 1024
 
+type pipelineReceiptQuerier interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
 var _ pipelinesteps.LibraryReceiptReader = (*pipelinesLibraryStore)(nil)
 
 // ReadRunFileReceipts is a server-only native journal read. Run authorization
 // happens at the caller, which supplies the verified scope and owner actor.
 // The SQL repeats every scope predicate; an ID alone is never authority.
 func (s *pipelinesLibraryStore) ReadRunFileReceipts(ctx context.Context, scope pipelinesteps.RunFileReceiptScope, ids []string) ([]pipelinesteps.StoredFileReceipt, error) {
-	scope.OwnerUserID = memql.BareShortId(strings.TrimSpace(scope.OwnerUserID))
-	scope.WorkRunID = memql.BareShortId(strings.TrimSpace(scope.WorkRunID))
-	access, _ := auth.AccessFromContext(ctx)
-	if auth.OriginFromContext(ctx) != auth.OriginInternal || access == nil || scope.OwnerUserID == "" || memql.BareShortId(access.UserId) != scope.OwnerUserID {
-		return nil, errors.New("artifact receipts require a trusted server call under the scoped owner's actor")
-	}
-	for _, value := range []string{scope.OwnerUserID, scope.WorkRunID, scope.StepKey} {
-		if value == "" || len(value) > 4096 || !utf8.ValidString(value) || strings.IndexFunc(value, unicode.IsControl) >= 0 {
-			return nil, errors.New("artifact receipt scope is invalid")
-		}
-	}
-	if scope.Attempt < 1 || len(ids) > maxPipelineReceiptIDs {
-		return nil, errors.New("artifact receipt read requires a positive attempt and at most 1024 IDs")
-	}
-	seen := make(map[string]bool, len(ids))
-	for _, key := range ids {
-		if len(key) != 64 {
-			return nil, errors.New("artifact receipt IDs must be 64 characters")
-		}
-		decoded, err := hex.DecodeString(key)
-		if err != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != key || seen[key] {
-			return nil, errors.New("artifact receipt IDs must be unique lowercase SHA-256 identities")
-		}
-		seen[key] = true
+	var err error
+	if scope, err = validatePipelineReceiptScope(ctx, scope, ids); err != nil {
+		return nil, err
 	}
 	if len(ids) == 0 {
 		return []pipelinesteps.StoredFileReceipt{}, nil
 	}
-	if s.uploadDB == nil {
-		return nil, errors.New("artifact receipt journal is unavailable")
+	db, err := s.pipelineReceiptDB()
+	if err != nil {
+		return nil, err
 	}
-	db := s.uploadDB()
-	if db == nil {
-		return nil, errors.New("artifact receipt journal is unavailable")
+	return readPipelineReceipts(ctx, db, scope, ids)
+}
+
+func (s *pipelinesLibraryStore) pipelineReceiptDB() (*sql.DB, error) {
+	if s.uploadDB != nil {
+		if db := s.uploadDB(); db != nil {
+			return db, nil
+		}
 	}
+	return nil, errors.New("artifact receipt journal is unavailable")
+}
+
+func validatePipelineReceiptScope(ctx context.Context, scope pipelinesteps.RunFileReceiptScope, ids []string) (pipelinesteps.RunFileReceiptScope, error) {
+	scope.OwnerUserID = memql.BareShortId(strings.TrimSpace(scope.OwnerUserID))
+	scope.WorkRunID = memql.BareShortId(strings.TrimSpace(scope.WorkRunID))
+	access, _ := auth.AccessFromContext(ctx)
+	if auth.OriginFromContext(ctx) != auth.OriginInternal || access == nil || scope.OwnerUserID == "" || memql.BareShortId(access.UserId) != scope.OwnerUserID {
+		return scope, errors.New("artifact receipts require a trusted server call under the scoped owner's actor")
+	}
+	for _, value := range []string{scope.OwnerUserID, scope.WorkRunID, scope.StepKey} {
+		if value == "" || len(value) > 4096 || !utf8.ValidString(value) || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+			return scope, errors.New("artifact receipt scope is invalid")
+		}
+	}
+	if scope.Attempt < 1 || len(ids) > maxPipelineReceiptIDs {
+		return scope, errors.New("artifact receipt read requires a positive attempt and at most 1024 IDs")
+	}
+	seen := make(map[string]bool, len(ids))
+	for _, key := range ids {
+		if len(key) != 64 {
+			return scope, errors.New("artifact receipt IDs must be 64 characters")
+		}
+		decoded, err := hex.DecodeString(key)
+		if err != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != key || seen[key] {
+			return scope, errors.New("artifact receipt IDs must be unique lowercase SHA-256 identities")
+		}
+		seen[key] = true
+	}
+	return scope, nil
+}
+
+func readPipelineReceipts(ctx context.Context, db pipelineReceiptQuerier, scope pipelinesteps.RunFileReceiptScope, ids []string) ([]pipelinesteps.StoredFileReceipt, error) {
 	encoded, err := json.Marshal(ids)
 	if err != nil {
 		return nil, err

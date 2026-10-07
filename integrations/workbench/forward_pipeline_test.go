@@ -329,7 +329,7 @@ func TestPipelineStepDoesNotBlockTheReceiveLoop(t *testing.T) {
 func TestLegacyPipelineActionsCannotBypassRecoveryOrReceiptContracts(t *testing.T) {
 	runner := newFakePipelineRunner(t)
 	h := pipelineHandler(runner)
-	for _, action := range []string{"pipelineStep", "pipelineStepV2", "pipelineStepV3", "pipelineStepV4", "pipelineStepV5", "pipelineAck", "pipelineReceiptAck", "pipelineReceiptAckV2", "pipelineCancel"} {
+	for _, action := range []string{"pipelineStep", "pipelineStepV2", "pipelineStepV3", "pipelineStepV4", "pipelineStepV5", "pipelineStepV6", "pipelineAck", "pipelineReceiptAck", "pipelineReceiptAckV2", "pipelineCancel"} {
 		out := newReplyLog()
 		h.HandleForwardedRequest(context.Background(), pipelineForward("legacy-"+action, action, `{}`, systemAuthority(t)), out.send)
 		if response := out.next(t, action); response.GetErrorCode() == "" {
