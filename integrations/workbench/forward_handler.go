@@ -58,9 +58,10 @@ const (
 	// on its own goroutine and never on the stream's receive loop.
 	// The version is part of the action: an older replica must reject the
 	// request, not silently discard execution/recovery fields it cannot enforce.
-	// V4 enforces durable retirement before and after the pre-create claim.
+	// V7 carries the typed, operator-approved rootless image-build contract.
+	// Durable retirement fences the pre-create claim.
 	// Older runners could create an attempt after its receipt was cleaned up.
-	PipelineStepAction = "pipelineStepV4"
+	PipelineStepAction = "pipelineStepV7"
 	// PipelineStatusAction asks after a step's Job: running, finished (with
 	// the outcome), absent or stale. Quick -- the runner bounds it at ten
 	// seconds -- and still answered off the receive loop, as are the next two.

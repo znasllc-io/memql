@@ -135,6 +135,13 @@ order, parallel execution, failure blocking and declared continuation after
 failure (including notifications).
 Separate DSL templates own event-to-mode/version mapping and notification copy.
 
+Artifact storage is a bounded native effect with an immutable operation identity,
+verified bytes and durable receipt. Its mechanics and current admission and
+retirement limits are described in [streamed artifact storage](streamed-artifact-storage.md).
+Registry publication follows the same split: [verified OCI publication](verified-oci-publication.md)
+owns bounded verification and digest-addressed protocol effects; the workflow
+chooses the candidate, approvals, destination and release ordering.
+
 ## Implementations in other languages
 
 An in-process engine adapter is compiled Go. An external system or worker

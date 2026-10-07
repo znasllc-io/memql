@@ -193,10 +193,13 @@ func initNamed(job Job, name string) (Container, int, bool) {
 func stepOf(t *testing.T, job Job) Container {
 	t.Helper()
 	containers := job.Spec.Template.Spec.Containers
-	if len(containers) != 1 {
-		t.Fatalf("%d main containers, want exactly the step", len(containers))
+	for _, container := range containers {
+		if container.Name == ContainerStep {
+			return container
+		}
 	}
-	return containers[0]
+	t.Fatal("Job has no command container")
+	return Container{}
 }
 
 func cloneOf(t *testing.T, job Job) Container {
@@ -385,7 +388,7 @@ func TestBuildJob(t *testing.T) {
 	t.Run("each service is a native sidecar, in name order, probed when it declares ready", func(t *testing.T) {
 		job := mustBuild(t, testConfig(), testRun())
 		init := job.Spec.Template.Spec.InitContainers
-		if names := initNames(job); !reflect.DeepEqual(names, []string{"cache-prep", "clone", "svc-postgres", "svc-redis"}) {
+		if names := initNames(job); !reflect.DeepEqual(names, []string{"cache-prep", "clone", "svc-postgres", "svc-redis", "artifact-prep"}) {
 			t.Fatalf("init containers = %q, want cache-prep, clone, svc-postgres, svc-redis (services sorted by name)", names)
 		}
 
@@ -474,7 +477,6 @@ func TestBuildJob(t *testing.T) {
 			// jobspec_template_test.go).
 			{Name: "MEMQL_STEP_COMMAND", Value: "go test $$MEMQL_PACKAGES"},
 			{Name: "MEMQL_STEP_ARTIFACTS", Value: "coverage.out reports/*.xml"},
-			{Name: "MEMQL_ARTIFACT_MARKER", Value: "::memql-artifacts::4887b49fa27936d6"},
 			{Name: "GIT_CONFIG_COUNT", Value: "1"},
 			{Name: "GIT_CONFIG_KEY_0", Value: "safe.directory"},
 			{Name: "GIT_CONFIG_VALUE_0", Value: "/workspace"},
@@ -487,6 +489,7 @@ func TestBuildJob(t *testing.T) {
 		}
 		wantMounts := []VolumeMount{
 			{Name: "workspace", MountPath: "/workspace"},
+			{Name: "artifacts", MountPath: "/memql-artifacts"},
 			{Name: "cache", MountPath: "/cache", SubPath: testCache},
 		}
 		if !reflect.DeepEqual(step.VolumeMounts, wantMounts) {
@@ -514,7 +517,7 @@ func TestBuildJob(t *testing.T) {
 		}
 		wantField(t, doc, false, "spec", "template", "spec", "containers", 0, "securityContext", "allowPrivilegeEscalation")
 		wantField(t, doc, "/workspace", "spec", "template", "spec", "containers", 0, "workingDir")
-		wantField(t, doc, testCache, "spec", "template", "spec", "containers", 0, "volumeMounts", 1, "subPath")
+		wantField(t, doc, testCache, "spec", "template", "spec", "containers", 0, "volumeMounts", 2, "subPath")
 	})
 
 	// Ruling R13: the clone container's uid never matches every step image's,
@@ -602,6 +605,7 @@ func TestBuildJob(t *testing.T) {
 		wantVolumes := []Volume{
 			{Name: "workspace", EmptyDir: &EmptyDirVolumeSource{SizeLimit: "7Gi"}},
 			{Name: "cache", PersistentVolumeClaim: &PersistentVolumeClaimVolumeSource{ClaimName: "steps-cache"}},
+			{Name: "artifacts", EmptyDir: &EmptyDirVolumeSource{SizeLimit: "7Gi"}},
 		}
 		if got := job.Spec.Template.Spec.Volumes; !reflect.DeepEqual(got, wantVolumes) {
 			t.Errorf("volumes = %s, want %s", mustJSON(t, got), mustJSON(t, wantVolumes))
@@ -613,7 +617,7 @@ func TestBuildJob(t *testing.T) {
 		run := testRun()
 		run.Caches = nil
 		bare := mustBuild(t, testConfig(), run)
-		if got := bare.Spec.Template.Spec.Volumes; !reflect.DeepEqual(got, wantVolumes[:1]) {
+		if got := bare.Spec.Template.Spec.Volumes; !reflect.DeepEqual(got, []Volume{wantVolumes[0], wantVolumes[2]}) {
 			t.Errorf("no caches declared, volumes = %s, want only the workspace", mustJSON(t, got))
 		}
 	})
@@ -994,6 +998,8 @@ func TestBuildJobIsAPureFunctionOfItsInputs(t *testing.T) {
 func TestEveryContainerGivesUpTheRuntimesRawSockets(t *testing.T) {
 	want := map[string][]string{
 		ContainerCachePrep:         {"ALL"},
+		"artifact-prep":            {"ALL"},
+		ContainerArtifacts:         {"ALL"},
 		ContainerClone:             {"ALL"},
 		ServicePrefix + "postgres": {"NET_RAW"},
 		ServicePrefix + "redis":    {"NET_RAW"},

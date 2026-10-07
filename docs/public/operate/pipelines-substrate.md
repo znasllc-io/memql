@@ -400,6 +400,69 @@ build capacity.
 
 ---
 
+## Image builds
+
+An `imageBuild` step exports one OCI archive from a pinned source checkout. DSL
+still chooses which builds to run, their order and the later publication policy.
+The native runner fixes the builder image, security profile, resource bounds
+and output paths. An image build has no registry publication credential.
+
+```yaml
+- name: build-edge
+  platform: linux/arm64
+  memoryMiB: 4096
+  caches: []
+  timeout: 1h
+  imageBuild:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      BUILD_TAGS: edge
+      SPA_DIST_STAGE: spa-build
+```
+
+`context` and `dockerfile` are clean paths relative to the checkout; neither may
+resolve outside it. `target` optionally names a Dockerfile stage. `args` holds
+at most 64 public arguments: never put secrets there. A step uses the matching
+Linux architecture, rather than silently emulating another architecture.
+Artifacts are fixed to `.memql-image-build/image.oci.tar` and
+`.memql-image-build/metadata.json`, recovered by the normal collector after the
+producer terminates and filed through immutable Library receipts. Publication
+must independently verify the OCI contents and required evidence.
+
+Operators explicitly install the optional `pipeline-image-builder` Kubernetes
+component, set `MEMQL_PIPELINES_IMAGE_BUILDER=rootless-buildkit-v1`, and choose a
+dedicated `MEMQL_PIPELINES_NODE_POOL`. The component's default pool is `builds`;
+its selector and toleration must match any configured value. It installs
+content-addressed seccomp profiles on those nodes. A missing profile refuses
+container startup; there is no permissive fallback. The fixed installer alone
+mounts its kubelet seccomp directory in `memql-build-system`. That operator
+namespace admits host paths; the untrusted `memql-pipelines` namespace keeps
+baseline admission and its service accounts have no grants in the operator
+namespace. The installer has no API token or allowed network access.
+
+BuildKit runs as UID/GID 1000 with only SETUID/SETGID for its pinned mapping
+helpers. The local seccomp profile permits rootless namespaces and mounts but
+denies process inspection (`ptrace`, `process_vm_readv`, `process_vm_writev`) and
+other privileged kernel APIs. The build has no host mount, Docker socket,
+service-account token, shared cache, service sidecar or forwarded secret.
+Network isolation and CPU, memory, scratch, duration and collection ceilings
+still apply. Clone credentials stay in the separate init container.
+
+Rootless BuildKit uses its native snapshotter and no process sandbox inside
+this disposable container: Dockerfile processes can disrupt their own builder.
+The container PID boundary and complete Pod deletion contain those processes;
+these builds cannot share a daemon across attempts. The profile does not grant
+BuildKit insecure entitlements. Host user-namespace and AppArmor policy must
+support this profile; qualify the actual node runtime and architecture before
+opting in. Local ARM64 qualification does not certify an amd64 cloud node.
+
+The opt-in `TestImageBuildAgainstLocalKubernetes` exercises the actual generated
+Job against a disposable local namespace, with an explicit pushed fixture SHA.
+It proves positive and denied network controls, process restrictions, pinned
+checkout, image export, two independent artifact readers, OCI verification and
+foreground Job/Pod cleanup. Runtime profile changes require repeating this proof.
+
 ## The isolation proof
 
 Before the first step it creates, each workbench replica proves that
@@ -711,21 +774,22 @@ A step's `artifacts:` are paths or globs relative to the working copy.
   kind, `<`, `>`). Anything else refuses the step `pipeline_job_rejected`
   before it runs. A plain dotfile (`.coverage`) and an ordinary glob
   (`dist/*.js`) are fine.
-- **How they leave the pod.** After the command exits, the step's wrapper tars
-  the declared paths, gzips and base64-encodes the archive and prints it between
-  two marker lines; the capture lifts it out of the output, so it reaches
-  neither the log nor the tail. The step's image needs `tar`, `gzip` and
-  `base64` for that: without them the artifacts are lost -- a
-  `pipeline_artifact_missing` note -- and the step keeps its own outcome. A
-  fleet machine packs them itself, under its own caps (the Cockpit's page).
+- **How they leave the pod.** After the command exits, the wrapper uses `tar`
+  to export declared files to a separate scratch volume. A credential-free
+  collector mounts that export read-only. Workbench checks Job ownership, pod
+  UID and producer/collector identities before and after the bounded Kubernetes
+  transfer. Artifact bytes never depend on the container log. The collector
+  must remain alive through transfer; the Job deadline still bounds it. A
+  fleet machine uses its existing packed byte transport and separate caps.
 - **What is kept**: regular files under a declared path -- never a link, a
   device or a FIFO, an absolute name or a `..` -- at most 1024 files, and the
-  whole decoded archive at most `MEMQL_PIPELINES_ARTIFACT_MAX_BYTES` (64 MiB by
-  default). Past that nothing is stored and the step fails
-  `pipeline_artifact_too_large`: a step whose command passed fails, its exit
-  code 0 kept, and a command that failed keeps its own failure. A refused entry
-  is skipped and named in a note, and a declared path nothing matched is a
-  `pipeline_artifact_missing` note.
+  whole archive at most `MEMQL_PIPELINES_ARTIFACT_MAX_BYTES` (64 MiB by default,
+  configurable through 2 GiB for streamed Jobs). A missing path, unsafe entry,
+  incomplete transfer or storage failure fails required Job artifacts with
+  `pipeline_artifact_unavailable`, preserving the command's exit code and any
+  earlier command failure. Fleet byte transport additionally caps at 256 MiB;
+  its oversized archive fails with `pipeline_artifact_too_large`, while missing
+  files and omitted entries retain its existing note behavior.
 - **Where they go**: one Library file each, owned by the pipeline's owner, with
   source `pipeline`, bound to the work run and the step (`producedByRunId`,
   `producedByStepKey`), and ready at once. A file is named by its path with every
@@ -733,11 +797,17 @@ A step's `artifacts:` are paths or globs relative to the working copy.
   type its extension names, else `application/octet-stream`. The Library serves
   every file as an attachment, so a step's `.html` or `.svg` is downloaded, never
   rendered in the OS's origin.
-- **What the Library will not take is a note, never a failure.** A file over the
-  Library's per-file limit (`MEMQL_LIBRARY_MAX_UPLOAD_BYTES`), an owner over
-  their quota (`MEMQL_LIBRARY_USER_QUOTA_BYTES`), a node with no object storage,
-  or a storage error leaves that file out -- the log as much as an artifact --
-  with a `pipeline_artifact_missing` note saying which.
+- **Verified Job receipts.** The streamed storage port checks each file's
+  length and SHA-256 and retains an independent object ETag receipt. Durable
+  upload intent IDs survive Job-outcome trimming and are kept in the work-step
+  result metadata. A candidate must resolve those IDs under its exact
+  owner/run/step/attempt and verify the pinned object; editable Library file IDs
+  alone are not release evidence. See [streamed artifact storage](../build/streamed-artifact-storage.md).
+- **Storage limits.** The Library's file limit (`MEMQL_LIBRARY_MAX_UPLOAD_BYTES`)
+  and owner quota (`MEMQL_LIBRARY_USER_QUOTA_BYTES`) apply. Missing storage or a
+  refused upload fails required Job artifacts. Log archival and the native-host
+  byte path retain their existing `pipeline_artifact_missing` notes. Native
+  artifact transport does not yet return immutable upload intent references.
 
 ---
 
@@ -753,15 +823,16 @@ a clone token. Fleet execution currently has no durable remote receipt lookup;
 an interrupted fleet intent is also uncertain and is not dispatched again.
 Inspect the original attempt before authorizing new work.
 
-The workbench action is `pipelineStepV2` and its receipt acknowledgement is
-`pipelineReceiptAckV2`. Older replicas reject these actions instead of ignoring
+The workbench action is `pipelineStepV6` and its receipt acknowledgement is
+`pipelineReceiptAckV3`. Older replicas reject these actions instead of ignoring
 new execution, recovery or cleanup guarantees. Upgrade the coordinated engine
 set and drain old drivers before enabling the new protocol.
 
-Retention is bounded. Durable external-attempt identity, late-delivery
-reconciliation, and deduplicating artifacts if interruption happens before the
-runner records its final outcome remain required for complete recovery. A
-missing receipt is never proof that the external work did not run.
+Job retirement fences delayed creation and confirms owned resource absence.
+Streamed upload intents preserve object and file identity across an interrupted
+finalization. Physical artifact retention still needs a proven producer fence;
+an expired lease or missing reply does not permit deleting an uncertain upload.
+A missing receipt is never proof that the external work did not run.
 
 ### Cancel
 
@@ -906,10 +977,11 @@ Registered in `scripts/secrets/manifest.yaml` under the `pipelines` component.
 |---|---|---|---|
 | `MEMQL_PIPELINES_NAMESPACE` | `memql-pipelines` | workbench | The namespace the runner creates step Jobs and their Secrets in. It must be the one the pipelines component grants the engine's identity Jobs in, `memql-pipelines`: any other value makes every create a 403, and every step fails `pipeline_runner_unavailable`. The component's `memql-pipelines` ConfigMap sets it |
 | `MEMQL_PIPELINES_CLONE_IMAGE` | none | workbench | The image `clone` and `cache-prep` run, which needs `git`, `base64` and `tr`. Pin it by digest: it is handed the repository token. Unset, the node cannot run steps, and every step sent to it fails `pipeline_runner_unavailable`. The ConfigMap pins `docker.io/library/buildpack-deps:bookworm-scm` by its multi-arch index digest |
+| `MEMQL_PIPELINES_IMAGE_BUILDER` | none | workbench | Explicit opt-in to the operator-installed `rootless-buildkit-v1` profile; requires a dedicated pool and compatible runtime. Unset refuses image builds. |
 | `MEMQL_PIPELINES_NODE_POOL` | none | workbench | Select nodes labeled `memql.io/pipeline-pool=<value>` and tolerate only the matching `NoSchedule` taint, for both steps and isolation probes. A lowercase DNS label of at most 63 characters; malformed values refuse execution. Unset means Linux placement without a pool constraint. |
 | `MEMQL_PIPELINES_RUN_MAX_MINUTES` | `120` | agent, workbench | A run's wall-clock ceiling, clamped to 5..1440. It bounds how long a step may wait for a slot, and a step's Job is given no more than what is left of it; past it the step fails `pipeline_run_ceiling`. The agent's value sets each run's deadline, stamped on its Job and Secret. Orphan cleanup waits until that deadline plus the Job TTL, regardless of the sweeping workbench's ceiling. The workbench value is only a retention fallback for legacy or malformed Secret metadata |
 | `MEMQL_PIPELINES_LOG_STORE_MAX_LINES` | `2000` | workbench (a cluster step), agent (a fleet step) | How many lines of one step reach the log store, clamped to 100..100000, before one `pipeline_log_capped` line. The Library's log keeps every line |
-| `MEMQL_PIPELINES_ARTIFACT_MAX_BYTES` | `67108864` (64 MiB) | workbench (a cluster step), agent (a fleet step) | The cap on one step's decoded artifact archive, clamped to 1 MiB..256 MiB. Past it nothing is stored, and the step fails `pipeline_artifact_too_large` |
+| `MEMQL_PIPELINES_ARTIFACT_MAX_BYTES` | `67108864` (64 MiB) | workbench (a cluster step), agent (a fleet step) | The archive cap, clamped to 1 MiB..2 GiB. Native-host byte transport additionally caps at 256 MiB. Library limits and bounded collection/storage deadlines still apply |
 | `MEMQL_PIPELINES_WORKSPACE_LIMIT` | `20Gi` | workbench | The size limit of every step's `/workspace`, a whole number of `Ki`, `Mi`, `Gi` or `Ti`; anything else is the default. It must equal the LimitRange's default ephemeral-storage limit ([Steps at once, and their size](#steps-at-once-and-their-size)), and the component's ConfigMap sets it so in every overlay |
 | `MEMQL_PIPELINES_RUN_RETENTION_DAYS` | `30` | the nightly retention sweep | Days after a finished run's latest version before its records are archived and deleted ([Retention](#retention)) |
 
@@ -949,6 +1021,7 @@ run's page and, for a failed step, the check run, with its sentence.
 | `pipeline_no_machine_for_need` | failure | No machine of the owner's that offers the need, allows pipeline steps and is online could take the step, and nothing ran; or the machine's own pipelines policy refused it | Turn on a machine that has the need and allows pipelines in its `policy.yaml` (listing the repository, when `repos` lists any), or drop the need |
 | `pipeline_fleet_disabled` | failure | The owner's computer use is switched off, so no step runs on their machines; nothing was sent | Switch computer use back on in Fleet |
 | `pipeline_artifact_too_large` | failure | The step's artifacts were over `MEMQL_PIPELINES_ARTIFACT_MAX_BYTES` or the archive's limits (on a fleet machine, the machine's own caps), and none was stored. A command that passed has its step fail; its exit code stays | Narrow the artifact paths, or raise the cap |
+| `pipeline_artifact_unavailable` | failure | Required Job artifacts could not be completely collected, verified or stored with matching durable receipts | Inspect the step's collection or storage failure, resolve it, then re-run |
 | `pipeline_artifact_missing` | note | A declared path matched no file; the step printed no readable artifact frame (an image without `tar`, `gzip` or `base64`); an entry was refused; or a file, the log included, was not stored: over the Library's per-file limit, over the owner's quota, no object storage on the node, a storage error | Check the path, or the setting the note names |
 | `pipeline_log_capped` | note | The live log stopped at `MEMQL_PIPELINES_LOG_STORE_MAX_LINES` lines | Open the full log, which is in the Library |
 | `pipeline_timings_unreadable` | note | The step's Go test timings could not be read from its log; its packages keep their earlier weights in the timing table | Nothing |
@@ -1039,10 +1112,10 @@ test fails on any reference that is not a digest of this repository.
   and `MEMQL_AZURE_STORAGE_CONNECTION_STRING`. A step's log and artifacts are
   filed by the workbench (a cluster step) and the agent (a fleet step) with the
   storage the bff's Library uses. No cloud overlay declares either key: put both
-  in `memql-secrets`, which every node reads. Without them every step still
-  runs, and each log and artifact is a `pipeline_artifact_missing` note ("this
-  node has no object storage configured") instead of a Library file. A local
-  cluster has both, for its in-cluster Azurite.
+  in `memql-secrets`, which every node reads. Without storage, required Job
+  artifacts fail the step. Log archival and native-host byte uploads record
+  `pipeline_artifact_missing` notes instead of Library files. A local cluster
+  has both keys for its in-cluster Azurite.
 - [ ] **Bring a cluster that predates the substrate onto it**: an install whose
   Argo CD runs its own AppProject adds `memql-pipelines` as a destination before
   it syncs a revision carrying the pipelines component (the repository's `memql`

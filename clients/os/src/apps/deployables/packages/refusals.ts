@@ -746,6 +746,10 @@ const COPY: Record<string, RefusalCopy> = {
     title: "A declared artifact path matched no file",
     next: "Check the path in memql-package.yaml.",
   },
+  pipeline_artifact_unavailable: {
+    title: "The step's artifacts could not be verified and saved",
+    next: "Open the step's failure details, resolve the collection or storage error, then re-run.",
+  },
   pipeline_log_capped: {
     // A NOTE: nothing was lost, only the live view stopped.
     title: "The live log stopped at its line limit",

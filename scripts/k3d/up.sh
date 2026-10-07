@@ -997,11 +997,17 @@ function kustomize_source_block() {
 # alone -- that is a statement about which REPO owns the operator stack, not an
 # environment branch.
 function _register_operator_app() {
-    local app="$1"
-    kubectl apply -f "${REPO_ROOT}/deploy/argocd/apps/${app}.yaml" >&2
+    local app="$1" manifest patch
     if [[ "${REPO_URL}" == "https://github.com/znasllc-io/memql.git" ]]; then
-        kubectl -n "${ARGOCD_NAMESPACE}" patch application "${app}" --type=merge \
-            -p "{\"spec\":{\"source\":{\"targetRevision\":\"${TARGET_REVISION}\"}}}" >&2
+        # ArgoCD can start syncing immediately on apply. Render the selected
+        # revision BEFORE that first write, rather than briefly admitting main.
+        # Capture first so a failed render cannot pipe partial output to apply.
+        patch="{\"spec\":{\"source\":{\"targetRevision\":\"$(cap_json_escape "${TARGET_REVISION}")\"}}}"
+        manifest="$(kubectl patch --local -f "${REPO_ROOT}/deploy/argocd/apps/${app}.yaml" \
+            --type=merge -p "$patch" -o yaml)" || return $?
+        printf '%s\n' "$manifest" | kubectl apply -f - >&2
+    else
+        kubectl apply -f "${REPO_ROOT}/deploy/argocd/apps/${app}.yaml" >&2
     fi
 }
 

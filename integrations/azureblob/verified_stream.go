@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -27,6 +26,10 @@ const (
 // could not be confirmed. Reconcile the same object, size and digest; never
 // select a fresh destination merely because the previous reply was lost.
 var ErrBlobCommitUncertain = errors.New("blob commit outcome is uncertain")
+
+// ErrBlobDeleteUncertain requires a later read of the same owned object. An
+// accepted DELETE without confirmed absence is not a cleanup receipt.
+var ErrBlobDeleteUncertain = errors.New("blob deletion outcome is uncertain")
 
 // VerifiedBlob names the exact version whose bytes were read and hashed.
 // CreateVerifiedStream never overwrites a committed object. This is not a
@@ -126,9 +129,52 @@ func (u *AzureBlobUploader) VerifyStream(ctx context.Context, container, object 
 	return verifyStream(ctx, bc, size, digest)
 }
 
+// DeleteVerifiedStream removes only the exact stored version named by receipt.
+// The caller must authorize ownership and retire all producers before cleanup;
+// this primitive cannot fence later writes. A changed version is never deleted,
+// even if its bytes match. Absence is verified after deletion, including when
+// the reply was lost. The receipt URL is not followed or used for authorization.
+func (u *AzureBlobUploader) DeleteVerifiedStream(ctx context.Context, container, object string, receipt VerifiedBlob) error {
+	if err := verifiedStreamIdentity(receipt.Size, receipt.SHA256); err != nil {
+		return err
+	}
+	if !validVerifiedETag(receipt.ETag) {
+		return errors.New("verified deletion requires the exact quoted ETag from its receipt")
+	}
+	bc, err := u.blockClient(container, object)
+	if err != nil {
+		return err
+	}
+	current, err := verifyStream(ctx, bc, receipt.Size, receipt.SHA256)
+	if bloberror.HasCode(err, bloberror.BlobNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if current.ETag != receipt.ETag {
+		return errors.New("stored object version differs from the cleanup receipt; nothing was deleted")
+	}
+	etag := azcore.ETag(receipt.ETag)
+	_, deleteErr := bc.Delete(ctx, &blob.DeleteOptions{
+		AccessConditions: &blob.AccessConditions{ModifiedAccessConditions: &blob.ModifiedAccessConditions{IfMatch: &etag}},
+	})
+	_, verifyErr := bc.GetProperties(ctx, nil)
+	if bloberror.HasCode(verifyErr, bloberror.BlobNotFound) {
+		return nil
+	}
+	if verifyErr == nil {
+		verifyErr = errors.New("an object remains at the cleanup destination")
+	}
+	return fmt.Errorf("%w: %w", ErrBlobDeleteUncertain, errors.Join(deleteErr, verifyErr))
+}
+
 func verifiedStreamIdentity(size int64, digest string) error {
 	if size < 0 || size > MaxVerifiedStreamBytes {
 		return errors.New("verified stream size is outside the 0 through 2 GiB bound")
+	}
+	if len(digest) != sha256.Size*2 {
+		return errors.New("verified stream needs a lowercase SHA-256 digest")
 	}
 	decoded, err := hex.DecodeString(digest)
 	if err != nil || len(decoded) != sha256.Size || hex.EncodeToString(decoded) != digest {
@@ -142,6 +188,9 @@ func verifyStream(ctx context.Context, bc *blockblob.Client, size int64, digest 
 	if err != nil {
 		return VerifiedBlob{}, err
 	}
+	if hasRetirementMarker(props.Metadata) {
+		return VerifiedBlob{}, ErrBlobRetired
+	}
 	if props.ETag == nil || *props.ETag == "" || props.ContentLength == nil || *props.ContentLength != size {
 		return VerifiedBlob{}, errors.New("stored object has no version identity or differs from the expected size")
 	}
@@ -152,6 +201,9 @@ func verifyStream(ctx context.Context, bc *blockblob.Client, size int64, digest 
 		return VerifiedBlob{}, err
 	}
 	defer response.Body.Close()
+	if hasRetirementMarker(response.Metadata) {
+		return VerifiedBlob{}, ErrBlobRetired
+	}
 	if response.ETag == nil || *response.ETag != *props.ETag || response.ContentLength == nil || *response.ContentLength != size {
 		return VerifiedBlob{}, errors.New("stored object changed during verification")
 	}
@@ -165,10 +217,9 @@ func verifyStream(ctx context.Context, bc *blockblob.Client, size int64, digest 
 	}
 	// A configured client may use SAS authorization. A durable artifact
 	// reference must not carry that credential or its expiration with it.
-	reference, err := url.Parse(bc.URL())
+	reference, err := storedBlobURL(bc.URL())
 	if err != nil {
 		return VerifiedBlob{}, errors.New("stored stream has no valid reference URL")
 	}
-	reference.RawQuery, reference.Fragment, reference.User, reference.ForceQuery = "", "", nil, false
-	return VerifiedBlob{URL: reference.String(), ETag: string(*props.ETag), Size: size, SHA256: digest}, nil
+	return VerifiedBlob{URL: reference, ETag: string(*props.ETag), Size: size, SHA256: digest}, nil
 }

@@ -185,7 +185,8 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 	}
 
 	step := Step{
-		Key: StepKey(stage, declared.Name), Stage: stage, Name: declared.Name, Kind: StepCommand, Run: declared.Run,
+		ImageBuild: CloneImageBuild(declared.ImageBuild),
+		Key:        StepKey(stage, declared.Name), Stage: stage, Name: declared.Name, Kind: StepCommand, Run: declared.Run,
 		MemoryMiB:       declared.MemoryMiB,
 		CPUMilli:        declared.CPUMilli,
 		Execution:       ExecutionOf(declared.Execution),
@@ -204,6 +205,10 @@ func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []
 
 	if step.Execution == ExecutionNative {
 		step.Image = ""
+	}
+	if step.ImageBuild != nil {
+		step.Image = "" // the operator-approved builder image is never source configuration
+		step.Artifacts = ImageBuildArtifacts()
 	}
 
 	if declared.When != nil && c.bucketUntouched(declared.When.Bucket) {

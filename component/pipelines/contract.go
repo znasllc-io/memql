@@ -100,8 +100,9 @@ type Skip struct {
 
 // Step is one compiled step: one v1:work:step row and one Execute call.
 type Step struct {
-	CPUMilli  int `json:"cpuMilli,omitempty"`
-	MemoryMiB int `json:"memoryMiB,omitempty"`
+	CPUMilli   int         `json:"cpuMilli,omitempty"`
+	ImageBuild *ImageBuild `json:"imageBuild,omitempty"`
+	MemoryMiB  int         `json:"memoryMiB,omitempty"`
 	// RunAfterFailure is inherited from the stage and bound into the durable
 	// execution fingerprint, so recovery cannot change failure behavior.
 	RunAfterFailure bool   `json:"runAfterFailure,omitempty"`
@@ -226,6 +227,10 @@ type StepResult struct {
 	Where           Where    `json:"where"`
 	LogFileID       string   `json:"logFileId,omitempty"`
 	ArtifactFileIDs []string `json:"artifactFileIds,omitempty"`
+	// ArtifactIntentIDs name durable, immutable upload records. Unlike
+	// editable Library links, these IDs are never trimmed from an outcome.
+	// Candidate consumers resolve them under the owning run/step/attempt.
+	ArtifactIntentIDs []string `json:"artifactIntentIds,omitempty"`
 	// LogTail is the last lines of output -- at most 40 lines and at most 16
 	// KiB, because the runner's outcome rides a Job annotation and all of a
 	// Job's annotations share 256 KiB -- for a failed step's inline excerpt

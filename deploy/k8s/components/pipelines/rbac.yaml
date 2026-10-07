@@ -65,6 +65,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["list", "patch"]
+  # Fixed-file artifact reads over the Kubernetes v5 WebSocket exec protocol.
+  # The runner verifies the exact Job/controller/pod/container before and after.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["get"]
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]

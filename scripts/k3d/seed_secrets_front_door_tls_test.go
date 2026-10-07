@@ -276,20 +276,7 @@ func (e *frontDoorEnv) run(t *testing.T, args ...string) (seedResult, []string, 
 
 func (e *frontDoorEnv) kubectlCalls(t *testing.T) []string {
 	t.Helper()
-	raw, err := os.ReadFile(e.kubectlLog)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		t.Fatalf("read kubectl log: %v", err)
-	}
-	var calls []string
-	for _, l := range strings.Split(string(raw), "\n") {
-		if strings.TrimSpace(l) != "" {
-			calls = append(calls, l)
-		}
-	}
-	return calls
+	return readSeedKubectlCalls(t, e.kubectlLog)
 }
 
 func (e *frontDoorEnv) mkcertLog(t *testing.T) string {

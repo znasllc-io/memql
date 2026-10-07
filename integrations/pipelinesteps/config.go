@@ -17,6 +17,10 @@ import (
 type Config struct {
 	// StepCPUMaxMilli bounds a manifest's explicit command CPU reservation.
 	StepCPUMaxMilli int
+
+	// ImageBuilder is an operator opt-in to the fixed, separately installed
+	// rootless builder security profile. Empty disables image build requests.
+	ImageBuilder string
 	// StepMemoryMaxMiB bounds a manifest's explicit command memory reservation.
 	StepMemoryMaxMiB int
 	// Namespace is where step Jobs and their Secrets live
@@ -47,7 +51,7 @@ type Config struct {
 	LogStoreMaxLines int
 	// ArtifactMaxBytes caps one step's decoded artifact archive
 	// (MEMQL_PIPELINES_ARTIFACT_MAX_BYTES, default 64 MiB, clamped to
-	// 1 MiB..256 MiB).
+	// 1 MiB..2 GiB). The native-host byte transport additionally caps at 256 MiB.
 	ArtifactMaxBytes int64
 	// ArchiveMaxBytes caps one step's archived log.
 	ArchiveMaxBytes int64
@@ -83,7 +87,9 @@ type Config struct {
 // The environment this package reads. Named once, so the env-registry scan
 // resolves every read to its key.
 const (
-	envStepCPUMax       = "MEMQL_PIPELINES_STEP_CPU_MAX_MILLI"
+	envStepCPUMax = "MEMQL_PIPELINES_STEP_CPU_MAX_MILLI"
+
+	envImageBuilder     = "MEMQL_PIPELINES_IMAGE_BUILDER"
 	envStepMemoryMax    = "MEMQL_PIPELINES_STEP_MEMORY_MAX_MIB"
 	envNamespace        = "MEMQL_PIPELINES_NAMESPACE"
 	envNodePool         = "MEMQL_PIPELINES_NODE_POOL"
@@ -124,7 +130,9 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		namespace = defaultNamespace
 	}
 	return Config{
-		StepCPUMaxMilli:    whole(envStepCPUMax, defaultStepCPUMaxMilli, 1, 256000),
+		StepCPUMaxMilli: whole(envStepCPUMax, defaultStepCPUMaxMilli, 1, 256000),
+
+		ImageBuilder:       text(envImageBuilder),
 		StepMemoryMaxMiB:   whole(envStepMemoryMax, defaultStepMemoryMaxMiB, 128, 1048576),
 		Namespace:          namespace,
 		NodePool:           text(envNodePool),
@@ -133,7 +141,7 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		StepServiceAccount: stepServiceAccount,
 		RunCeiling:         pl.ParseRunCeiling(text(pl.EnvRunCeiling)),
 		LogStoreMaxLines:   whole(envLogStoreMaxLines, 2000, 100, 100000),
-		ArtifactMaxBytes:   int64(whole(envArtifactMaxBytes, 64*mebibyte, mebibyte, 256*mebibyte)),
+		ArtifactMaxBytes:   int64(whole(envArtifactMaxBytes, 64*mebibyte, mebibyte, 2*1024*mebibyte)),
 		ArchiveMaxBytes:    64 * mebibyte,
 		DefaultStepTimeout: 20 * time.Minute,
 		JobTTL:             30 * time.Minute,

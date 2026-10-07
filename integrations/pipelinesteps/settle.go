@@ -108,8 +108,8 @@ func (s *step) settle(dec pl.StepResult, pod *Pod, f *follower) pl.StepResult {
 	notes := s.newNotes()
 	libCtx, cancelLib := s.libraryContext()
 	defer cancelLib()
-	cr := s.storeLog(libCtx, &res, notes)
-	s.storeFramedArtifacts(libCtx, cr, &res, notes)
+	s.storeLog(libCtx, &res, notes)
+	s.collectStepArtifacts(libCtx, pod, &res, notes)
 	fitOutcome(&res, notes)
 	persistCtx, cancelPersist := s.persistContext()
 	defer cancelPersist()
@@ -303,21 +303,6 @@ func completeLogNote(storeMaxLines int) string {
 	return liveLogStops(storeMaxLines) + "the complete log is archived to the Library"
 }
 
-// storeFramedArtifacts stores the artifacts the wrapper framed in the step's
-// log, one Library file each, named by their path (stepFiles.storeArtifacts):
-// what it adds is the frame -- the archive the capture decoded out of it, and
-// its verdict on a frame that is missing, cut short or too large.
-func (s *step) storeFramedArtifacts(ctx context.Context, cr CaptureResult, res *pl.StepResult, notes *noteList) {
-	files := s.files()
-	if cr.ArtifactNote != nil {
-		files.artifactFact(res, notes, *cr.ArtifactNote)
-	}
-	if cr.Artifacts == nil {
-		return
-	}
-	files.storeArtifacts(ctx, cr.Artifacts, s.r.cfg.ArtifactMaxBytes, res, notes)
-}
-
 // files files this Run's step through this replica's Library and log.
 func (s *step) files() stepFiles {
 	return stepFiles{library: s.r.library, run: s.run, mask: s.mask, log: s.log, node: "workbench node"}
@@ -381,32 +366,6 @@ func (f stepFiles) fileLog(ctx context.Context, archive []byte, res *pl.StepResu
 	res.LogFileID = f.store(ctx, logFileName(f.run.StepKey), archiveMIME, archive, "the step's log", notes)
 }
 
-// storeArtifacts extracts a step's artifact archive within maxBytes and stores
-// each file in the owner's Library, named by its path. An archive past its
-// limits fails the step (artifactFact); an entry the extractor refused, and a
-// declared path that matched nothing, are notes.
-func (f stepFiles) storeArtifacts(ctx context.Context, tgz []byte, maxBytes int64, res *pl.StepResult, notes *noteList) {
-	files, missing, err := ExtractArtifacts(tgz, f.run.Artifacts, maxBytes)
-	var skipped *SkippedEntriesError
-	switch {
-	case errors.Is(err, ErrArtifactsTooLarge):
-		f.artifactFact(res, notes, pl.Failure{Code: pl.CodeArtifactTooLarge,
-			Message: artifactsNotStored + strings.TrimPrefix(err.Error(), pl.CodeArtifactTooLarge+": ")})
-		return
-	case errors.As(err, &skipped):
-		notes.add(pl.CodeArtifactMissing, f.skippedNote(skipped))
-	case err != nil:
-		notes.add(pl.CodeArtifactMissing, "the step's artifacts were not stored: "+err.Error())
-		return
-	}
-	f.noteMissing(notes, missing)
-	for _, file := range files {
-		if id := f.store(ctx, artifactFileName(file.Path), artifactMIME(file.Path), file.Bytes, "the artifact "+f.quote(file.Path), notes); id != "" {
-			res.ArtifactFileIDs = append(res.ArtifactFileIDs, id)
-		}
-	}
-}
-
 // noteMissing notes each declared artifact path that matched no file.
 func (f stepFiles) noteMissing(notes *noteList, paths []string) {
 	for _, p := range paths {
@@ -420,8 +379,7 @@ func (f stepFiles) noteMissing(notes *noteList, paths []string) {
 const artifactsNotStored = "the step's artifacts were not stored: "
 
 // artifactFact records what became of the artifacts by the class of its
-// code: a note changes nothing; a failure-class code (the only one is
-// artifacts too large to keep) fails the step even when its command
+// code: a note changes nothing; a failure-class code fails the step even when its command
 // succeeded: the command's exit code stays as it was, and an earlier typed
 // failure keeps its place. A CANCELLED step stays cancelled whatever the
 // fact: the run's cancel is its answer (Executor.Cancel's contract), so the
@@ -435,48 +393,17 @@ func (f stepFiles) artifactFact(res *pl.StepResult, notes *noteList, fact pl.Fai
 	case class != pl.ClassFailure:
 		notes.add(fact.Code, fact.Message)
 	case res.Status == pl.OutcomeCancelled:
-		notes.add(pl.CodeArtifactMissing, "the step's artifacts were too large to keep: "+
-			strings.TrimPrefix(fact.Message, artifactsNotStored))
+		message := fact.Message
+		if fact.Code == pl.CodeArtifactTooLarge {
+			message = "the step's artifacts were too large to keep: " + strings.TrimPrefix(fact.Message, artifactsNotStored)
+		}
+		notes.add(pl.CodeArtifactMissing, message)
 	default:
 		res.Status = pl.OutcomeFailed
 		if res.Failure == nil {
 			res.Failure = &pl.Failure{Code: fact.Code, Message: cutBytes(f.mask(fact.Message), failureMaxBytes)}
 		}
 	}
-}
-
-// skippedNote names the entries the extractor refused, within a note's
-// bounds: the names are the step's, masked, and each cut to
-// entryNameMaxBytes.
-func (f stepFiles) skippedNote(e *SkippedEntriesError) string {
-	total := len(e.Entries) + e.More
-	var b strings.Builder
-	if total == 1 {
-		b.WriteString("1 entry of the step's artifacts was not stored: ")
-	} else {
-		fmt.Fprintf(&b, "%d entries of the step's artifacts were not stored: ", total)
-	}
-	const room = len(", and 99999 more")
-	listed := 0
-	for _, entry := range e.Entries {
-		name := f.mask(entry.Name)
-		if cut := cutBytes(name, entryNameMaxBytes); cut != name {
-			name = cut + "..."
-		}
-		item := strconv.Quote(name) + " (" + entry.Reason + ")"
-		if listed > 0 {
-			item = ", " + item
-		}
-		if b.Len()+len(item)+room > noteMaxBytes {
-			break
-		}
-		b.WriteString(item)
-		listed++
-	}
-	if rest := total - listed; rest > 0 {
-		fmt.Fprintf(&b, ", and %d more", rest)
-	}
-	return b.String()
 }
 
 // store stores one file in the owner's Library and answers its id, or "" with

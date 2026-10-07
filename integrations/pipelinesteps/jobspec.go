@@ -205,6 +205,9 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 	}
 	initContainers = append(initContainers, cloneContainer(cfg, run, secretName))
 	initContainers = append(initContainers, serviceContainers(run.Services)...)
+	if len(run.Artifacts) > 0 {
+		initContainers = append(initContainers, artifactPrepContainer(cfg))
+	}
 
 	// The workspace is as large as a step may write (review M4): the
 	// LimitRange's default ephemeral-storage limit already bounds the whole
@@ -219,6 +222,17 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 		})
 	}
 
+	containers := []Container{stepContainer(run, jobName, secretName, caches)}
+	podSecurity := &PodSecurityContext{SeccompProfile: &SeccompProfile{Type: "RuntimeDefault"}}
+	if run.ImageBuild != nil {
+		containers[0] = imageBuildContainer(cfg, run, jobName)
+		volumes = append(volumes, Volume{Name: imageBuildStateVolume, EmptyDir: &EmptyDirVolumeSource{SizeLimit: cfg.WorkspaceLimit}})
+		podSecurity.FSGroup = ptr(int64(1000))
+	}
+	if len(run.Artifacts) > 0 {
+		volumes = append(volumes, Volume{Name: artifactVolume, EmptyDir: &EmptyDirVolumeSource{SizeLimit: cfg.WorkspaceLimit}})
+		containers = append(containers, artifactCollector(cfg, run.TimeoutSeconds))
+	}
 	return Job{
 		APIVersion: "batch/v1",
 		Kind:       "Job",
@@ -243,12 +257,10 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 					AutomountServiceAccountToken:  ptr(false),
 					EnableServiceLinks:            ptr(false),
 					TerminationGracePeriodSeconds: ptr(int64(stepGracePeriodSeconds)),
-					SecurityContext: &PodSecurityContext{
-						SeccompProfile: &SeccompProfile{Type: "RuntimeDefault"},
-					},
-					InitContainers: initContainers,
-					Containers:     []Container{stepContainer(run, jobName, secretName, caches)},
-					Volumes:        volumes,
+					SecurityContext:               podSecurity,
+					InitContainers:                initContainers,
+					Containers:                    containers,
+					Volumes:                       volumes,
 				},
 			},
 		},
@@ -319,10 +331,15 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 	if run.TimeoutSeconds <= 0 {
 		return refuse("the step has %d seconds left to run; a Job without a deadline would run until its TTL", run.TimeoutSeconds)
 	}
-	if strings.TrimSpace(run.Image) == "" {
+	if run.ImageBuild != nil {
+		if err := checkImageBuildRun(cfg, run); err != nil {
+			return refuse("%s", err)
+		}
+	}
+	if strings.TrimSpace(run.Image) == "" && run.ImageBuild == nil {
 		return refuse("the step names no image to run in")
 	}
-	if strings.TrimSpace(run.Command) == "" {
+	if strings.TrimSpace(run.Command) == "" && run.ImageBuild == nil {
 		return refuse("the step has no command to run")
 	}
 	if !shaShape.MatchString(run.SHA) {
@@ -594,7 +611,6 @@ func stepContainer(run StepRun, jobName, secretName string, caches []string) Con
 		env = append(env, plainVar(stepArtifactsVar, strings.Join(run.Artifacts, " ")))
 	}
 	env = append(env,
-		plainVar(artifactMarkerVar, ArtifactMarker(jobName)),
 		plainVar(gitConfigCountVar, "1"),
 		plainVar(gitConfigKeyVar, "safe.directory"),
 		plainVar(gitConfigValueVar, workspacePath),
@@ -609,6 +625,9 @@ func stepContainer(run StepRun, jobName, secretName string, caches []string) Con
 	}
 
 	mounts := []VolumeMount{{Name: workspaceVolume, MountPath: workspacePath}}
+	if len(run.Artifacts) > 0 {
+		mounts = append(mounts, VolumeMount{Name: artifactVolume, MountPath: artifactPath})
+	}
 	if len(caches) > 0 {
 		// The step's own directory only, never the claim's root (ruling R15b).
 		mounts = append(mounts, VolumeMount{Name: cacheVolume, MountPath: cachePath, SubPath: stepCacheDir(run)})

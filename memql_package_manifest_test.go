@@ -286,17 +286,23 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			runs: every, absent: []string{manifestStepGateInputs}},
 		// The compiler of this very manifest: Go source only, and the db-gated
 		// driver (component/pipelinerun) imports it, so the change reaches both
-		// test steps and no bucket.
+		// test steps and the filesystem-gates bucket.
 		{
 			name: "a pull request changing Go", event: pipelines.EventPullRequest,
 			changed: []string{"component/pipelines/compile.go"}, stages: pullRequestStages,
-			runs:  append(slices.Clone(always), manifestStepGoTests, manifestStepDBTests),
-			skips: []string{manifestStepGateInputs, manifestStepOSChecks},
+			runs:  append(slices.Clone(always), manifestStepGoTests, manifestStepDBTests, manifestStepGateInputs),
+			skips: []string{manifestStepOSChecks},
 		},
 		// Not Go source, so the gate packages run; nothing the OS shell reads.
 		{
 			name: "a pull request changing only docs", event: pipelines.EventPullRequest,
 			changed: []string{"docs/public/overview/quickstart.md"}, stages: pullRequestStages,
+			runs:  append(slices.Clone(always), manifestStepGateInputs),
+			skips: []string{manifestStepOSChecks},
+		},
+		{
+			name: "a child integration source needs the filesystem gates", event: pipelines.EventPullRequest,
+			changed: []string{"integrations/pipelinesteps/fleet_test.go"}, stages: pullRequestStages,
 			runs:  append(slices.Clone(always), manifestStepGateInputs),
 			skips: []string{manifestStepOSChecks},
 		},
@@ -498,8 +504,8 @@ func TestEngineManifestDBGatedTreesAreTheScriptsTrees(t *testing.T) {
 	}
 }
 
-// The gate-inputs step runs the packages ci.yml's planner adds whenever a change
-// is not Go source (the plan step's GATE_PACKAGES, held to go-checks' own
+// The gate-inputs step runs the packages ci.yml's planner adds for every change
+// (the plan step's GATE_PACKAGES, held to go-checks' own
 // gate-inputs step by scripts/dev/gate_inputs_lane_scope_test.go): their tests
 // read repository files by path, which no import graph can see.
 func TestEngineManifestGateStepRunsThePlannersGatePackages(t *testing.T) {
@@ -529,6 +535,9 @@ func TestEngineManifestGateStepRunsThePlannersGatePackages(t *testing.T) {
 	if len(want) == 0 || len(got) == 0 {
 		t.Fatalf("could not read both lists (ci.yml's GATE_PACKAGES %v, the %s step's %v); this comparison cannot pass over nothing",
 			want, manifestStepGateInputs, got)
+	}
+	if !slices.Contains(got, "./integrations") {
+		t.Error("gate-inputs must run ./integrations: its SHA-256 contract reads child Go source by path, outside the import graph")
 	}
 	slices.Sort(want)
 	slices.Sort(got)

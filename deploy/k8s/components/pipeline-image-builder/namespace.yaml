@@ -1,0 +1,11 @@
+# Operator-owned node configuration, separate from untrusted build Jobs.
+# HostPath is required for kubelet seccomp profiles, which baseline forbids.
+# No engine or pipeline service account has any grant in this namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: memql-build-system
+  labels:
+    app.kubernetes.io/part-of: memql
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: restricted

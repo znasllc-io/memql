@@ -110,9 +110,6 @@ const (
 	notesMaxBytes = 4 << 10
 	// failureMaxBytes bounds a failure's sentence.
 	failureMaxBytes = 2 << 10
-	// entryNameMaxBytes bounds each tar entry name a note quotes: the names
-	// are the step's, and as long as it likes.
-	entryNameMaxBytes = 256
 	// archiveMIME is the archived log's content type.
 	archiveMIME = "text/plain; charset=utf-8"
 	// The tails kept of the clone and, when the step failed, of each
@@ -147,12 +144,13 @@ func isStepJobName(name string) bool { return stepJobNameShape.MatchString(name)
 
 // Runner runs pipeline steps as Kubernetes Jobs on the workbench node.
 type Runner struct {
-	cfg     Config
-	kube    *Kube
-	sink    func() LineSink
-	library LibraryStore
-	tokens  TokenMinter
-	log     *slog.Logger
+	collectArtifacts func(context.Context, StepRun, *Pod, int64) (*ArtifactSnapshot, error)
+	cfg              Config
+	kube             *Kube
+	sink             func() LineSink
+	library          LibraryStore
+	tokens           TokenMinter
+	log              *slog.Logger
 
 	// now is the clock of the claim, of its freshness and of the classifier.
 	now func() time.Time
@@ -222,6 +220,7 @@ func NewRunner(cfg Config, kube *Kube, sink func() LineSink, library LibraryStor
 	cfg.NodeID = strings.TrimSpace(cfg.NodeID)
 	return &Runner{
 		cfg: cfg, kube: kube, sink: sink, library: library, tokens: tokens,
+		collectArtifacts: kube.CollectArtifacts,
 		log:              slog.Default().With("component", "pipelines.runner"),
 		now:              time.Now,
 		tempDir:          os.TempDir(),
@@ -1108,11 +1107,6 @@ func (s *step) ensureCapture() error {
 		ArtifactMax:   s.r.cfg.ArtifactMaxBytes,
 		ArchivePath:   archive,
 		Sink:          sink,
-	}
-	// Only a step that declares artifacts expects a frame; any other would
-	// be noted for lacking one.
-	if len(s.run.Artifacts) > 0 {
-		o.Marker = ArtifactMarker(s.jobName)
 	}
 	c, err := s.r.openCapture(o)
 	if err != nil {

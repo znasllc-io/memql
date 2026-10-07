@@ -998,7 +998,8 @@ func (dr *runDriver) runStep(ctx context.Context, t *stepTrack) {
 		dr.settle(ctx, t, failReceipt(pipelines.CodeExecutorError,
 			"The runner could not report how the step ended: "+dr.mask(end.err.Error())))
 	default:
-		if dr.settle(ctx, t, dr.receiptFor(end.result, end.elapsed)) {
+		needsReceipts := len(t.step.Artifacts) > 0
+		if dr.settle(ctx, t, dr.receiptFor(end.result, end.elapsed, needsReceipts)) {
 			dr.acknowledgeReceipt(ctx, exec, req)
 		}
 	}
@@ -1292,7 +1293,7 @@ func cancelReceipt() receipt {
 // before it is kept -- a code and a status as much as a message, a job name
 // and a machine label as much as a log line: none of them is the driver's to
 // vouch for, and each reaches a row, the check run or a log line.
-func (dr *runDriver) receiptFor(res pipelines.StepResult, elapsed time.Duration) receipt {
+func (dr *runDriver) receiptFor(res pipelines.StepResult, elapsed time.Duration, requiresVerifiedArtifacts bool) receipt {
 	masks := dr.maskValues()
 	mask := func(s string) string { return pipelines.MaskSecrets(strings.TrimSpace(s), masks) }
 	rec := receipt{
@@ -1334,6 +1335,17 @@ func (dr *runDriver) receiptFor(res pipelines.StepResult, elapsed time.Duration)
 	}
 	if len(notes) > 0 {
 		metadata["notes"] = notes
+	}
+	validIntents := pipelines.ValidArtifactIntentIDs(res.ArtifactIntentIDs)
+	for _, id := range res.ArtifactIntentIDs {
+		validIntents = validIntents && mask(id) == id
+	}
+	if !validIntents || (requiresVerifiedArtifacts && res.Status == pipelines.OutcomeSucceeded && len(res.ArtifactIntentIDs) == 0) {
+		rec.status, rec.report = WorkStepFailed, StepFailed
+		rec.code, rec.message = pipelines.CodeArtifactUnavailable, "The step returned no complete, valid artifact receipt identities."
+		status = string(pipelines.OutcomeFailed)
+	} else if len(res.ArtifactIntentIDs) > 0 {
+		metadata["artifactIntentIds"] = slices.Clone(res.ArtifactIntentIDs)
 	}
 	rec.result = map[string]any{"status": status, "metadata": metadata}
 	// A package path is written to the pipeline's timing table: one that

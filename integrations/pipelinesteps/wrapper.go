@@ -24,28 +24,12 @@ package pipelinesteps
 // MEMQL_* contract (pl.StepRequest.Environment), so a step must not rely on
 // them.
 
-// stepWrapper is the step container's entrypoint (`/bin/sh -c stepWrapper`).
-// It runs the manifest's command and, when artifacts are declared, frames them
-// on stdout as base64 of a tar.gz between two marker lines, which the capture
-// lifts out of the log. POSIX sh only; tar and base64 are needed only when
-// artifacts are declared, and id only when caches are. The step's own exit
-// status is what the container exits with, whatever the framing does: an image
-// without tar loses its artifacts (a note), never its outcome.
-//
-// MEMQL_CACHES names the declared caches. For each, the wrapper points the
-// tool at a tree of the step's cache that belongs to the uid the step runs as
-// (/cache/go-u<uid>, /cache/npm-u<uid>); a step declaring no cache keeps
-// whatever its image sets. A step whose uid cannot be determined (no id in the
-// image) runs uncached: guessing a uid would put it among another uid's files,
-// where it fails rather than misses.
-//
-// The begin marker is printed after a newline (ruling R18): a command whose
-// last output has no trailing newline would otherwise glue the marker to its
-// last words, and the capture matches the marker as a whole line. One blank
-// log line is the price.
-//
-// The command arrives in MEMQL_STEP_COMMAND rather than in the script text, so
-// nothing about it is ever quoted, escaped or interpolated here.
+// stepWrapper runs the command under its original umask, then writes a raw
+// archive into the pod's export volume. No artifact bytes enter container logs.
+// The collector mounts only this volume, read-only, and the runner reads it only
+// after this container has terminated. A failed tar leaves no completed archive.
+// The command's exit code remains its own; missing required artifacts are a
+// separate runner failure. Globs have already passed artifactProblem.
 const stepWrapper = `cd /workspace || exit 70
 if [ -n "${MEMQL_CACHES:-}" ] && u=$(id -u 2>/dev/null) && [ -n "$u" ]; then
   for c in $MEMQL_CACHES; do
@@ -58,11 +42,12 @@ fi
 /bin/sh -c "$MEMQL_STEP_COMMAND"
 rc=$?
 if [ -n "${MEMQL_STEP_ARTIFACTS:-}" ]; then
-  printf '\n%s begin\n' "$MEMQL_ARTIFACT_MARKER"
-  # Word-split on purpose: the list is validated server-side (no spaces, no metacharacters,
-  # no glob that can reach . or ..) and globs are allowed to expand.
-  COPYFILE_DISABLE=1 tar -czf - -- $MEMQL_STEP_ARTIFACTS 2>/dev/null | base64
-  echo "$MEMQL_ARTIFACT_MARKER end"
+  # This mask applies only to the exported archive, after the command ended.
+  # The credential-free collector can read it regardless of the command uid.
+  (umask 0022
+   COPYFILE_DISABLE=1 tar -cf /memql-artifacts/pending.tar -- $MEMQL_STEP_ARTIFACTS 2>/dev/null &&
+   chmod 0644 /memql-artifacts/pending.tar &&
+   mv /memql-artifacts/pending.tar /memql-artifacts/completed.tar)
 fi
 exit $rc`
 

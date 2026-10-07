@@ -237,7 +237,7 @@ pipeline:
     go: import-graph
     dbGated: [component/memql, component/database]
     buckets:
-      gates: ["**/*.md", "**/*.memql", "dsl/**", "scripts/**", "deploy/**"]
+      gates: ["**"]
       os:    ["clients/**", "sdk/ts/**", "brand/**"]
   stages:
     - name: checks
@@ -260,6 +260,9 @@ pipeline:
         - name: os-checks
           run: make os-typecheck os-test os-build
           when: { bucket: os }
+        - name: source-contracts
+          run: go test -count=1 ./ ./integrations
+          when: { bucket: gates }
     - name: deploy
       on: [push]
       steps:
@@ -354,7 +357,8 @@ mounts is the runner's ([Caches](pipelines-substrate.md#caches)): it knows
 | `image` | Container image for this step; pin by digest when reproducibility matters | pipeline image | Explicit image on a native step: `pipeline_step_invalid` |
 | `placement` | `cluster` or `fleet`, independently of execution | fleet for native execution or host needs, otherwise cluster | Native execution on the cluster, unknown placement, or fleet without consent |
 | `platform` | Step OS/architecture; overrides the pipeline platform | pipeline platform | Fleet requires an explicit platform; containers require Linux |
-| `run` | A shell command, run in a fresh working copy of the commit -- the same contract as a deployable's `build.command`. There is no step language | required | Blank: `pipeline_step_invalid` |
+| `imageBuild` | One rootless Dockerfile build: `{ context, dockerfile, target?, args? }`; produces an OCI archive and metadata | none | Requires explicit Linux architecture, cluster placement, memory at least 512 MiB and the operator profile. No command, image override, services, caches, secrets, pull credential, package selection or artifact override; see [Image builds](pipelines-substrate.md#image-builds) |
+| `run` | A shell command, run in a fresh working copy of the commit -- the same contract as a deployable's `build.command`. There is no step language | required unless `imageBuild` is present | Blank without `imageBuild`: `pipeline_step_invalid` |
 | `packages` | `affected` or `all`: select Go packages into `MEMQL_PACKAGES` | none: the step selects no packages | Another value: `pipeline_step_invalid`. No `select.go`: `pipeline_select_missing` |
 | `only` | `db-gated` or `not-db-gated`: keep the selected packages under a `select.dbGated` tree, or the rest | none | Another value, or set without `packages`: `pipeline_step_invalid`. No `select.dbGated`: `pipeline_select_invalid` |
 | `shards` | Split the packages over up to this many steps, at most 8. 0 and 1 mean one step | one step | Below 0 or above 8, or above 1 without `packages`: `pipeline_step_invalid` |
@@ -543,6 +547,13 @@ Go import graph:
   it, which no longer build, rather than selecting nothing and skipping green.
 - A change that touches no Go package, in no directory an import names, selects
   none.
+
+The import graph cannot discover tests that read another package's files by
+path. Declare those contract checks as explicit steps. Their bucket must cover
+every input they inspect, including `.go` and `_test.go` files; omit `when` or
+use `["**"]` when that input set is not narrower. The example's
+`source-contracts` step covers these reads even when a changed child integration
+does not import the parent package containing its source-scanning tests.
 
 It selects **every package** instead whenever the graph cannot say: the change
 could not be read (the compare failed, or listed 300 files, where GitHub stops

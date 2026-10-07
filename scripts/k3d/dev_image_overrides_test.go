@@ -279,6 +279,55 @@ func TestPointApplicationPatchesAReleasedApplicationToTheOperandOnly(t *testing.
 	}
 }
 
+// A coarse clock tick (or a descheduled shell) can exhaust the deadline
+// before the first read. Still observe the cluster once, but do not sleep or
+// accept an unreadable/out-of-date answer after the budget is exhausted.
+func TestDevWaitObservesOnceAtTheDeadline(t *testing.T) {
+	for _, wait := range []struct {
+		name, call, ready string
+	}{
+		{"application", "wait_for_application_synced", "Synced"},
+		{"deployment", "wait_for_local_images bff", "memql-bff:local"},
+	} {
+		for _, ready := range []bool{true, false} {
+			name := wait.name + "/unavailable"
+			answer, wantCode := "", 5
+			if ready {
+				name, answer, wantCode = wait.name+"/ready", wait.ready, 0
+			}
+			t.Run(name, func(t *testing.T) {
+				tmp := t.TempDir()
+				reads := filepath.Join(tmp, "reads")
+				harness := filepath.Join(tmp, "harness.sh")
+				body := "set -euo pipefail\n" +
+					"source \"" + filepath.Join(repoRoot(t), "scripts", "k3d", "dev.sh") + "\"\n" +
+					"SECONDS=0\nMEMQL_K3D_SYNC_TIMEOUT=1\nAPP_NAME=memql-local\n" +
+					"function info() { SECONDS=3600; }\n" +
+					"function sleep() { exit 99; }\n" +
+					"function kubectl() { case \"$*\" in *jsonpath*) printf 'read\\n' >> \"" + reads + "\"; printf '%s' '" + answer + "';; esac; }\n" +
+					wait.call + "\n"
+				if err := os.WriteFile(harness, []byte(body), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				out, err := exec.Command("bash", harness).CombinedOutput()
+				code := 0
+				if ee, ok := err.(*exec.ExitError); ok {
+					code = ee.ExitCode()
+				} else if err != nil {
+					t.Fatal(err)
+				}
+				if code != wantCode {
+					t.Fatalf("exit = %d, want %d: %s", code, wantCode, out)
+				}
+				got, err := os.ReadFile(reads)
+				if err != nil || string(got) != "read\n" {
+					t.Fatalf("want exactly one observation, got %q: %v; %s", got, err, out)
+				}
+			})
+		}
+	}
+}
+
 // THE DESTRUCTIVE FAILURE THIS EXISTS FOR. An older kubectl renders a bare
 // string array as Go's `[a b]` rather than JSON. The previous reader
 // comma-split that text, so the whole rendering became ONE entry, nothing

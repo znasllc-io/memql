@@ -4,6 +4,7 @@ package pipelinesteps
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -496,51 +497,69 @@ func machineTimeout(words string) (time.Duration, bool) {
 	return d, err == nil && d > 0
 }
 
-// storeReturnedArtifacts files the artifacts the machine returned through the
-// cluster runner's own helpers (stepFiles.storeArtifacts): what it adds is the
-// machine's answer -- its archive, sent base64 and refused before it is
-// decoded when far past the cap, or its word on what matched nothing when it
-// sent none. An archive past this cluster's cap, or past what the machine
-// sends back, fails the step as one past the cluster's does.
+// storeReturnedArtifacts snapshots the bounded native-host archive before
+// filing any artifact. Every declaration must be present and every stored file
+// must have the same immutable receipt required of a cluster producer.
 func (f *Fleet) storeReturnedArtifacts(ctx context.Context, files stepFiles, out *fleetOutput, res *pl.StepResult, notes *noteList) {
-	if len(files.run.Artifacts) == 0 || out == nil {
+	if len(files.run.Artifacts) == 0 {
 		return
 	}
-	tooLarge := func(why string) {
-		files.artifactFact(res, notes, pl.Failure{Code: pl.CodeArtifactTooLarge, Message: artifactsNotStored + why})
+	fail := func(code, why string) {
+		files.artifactFact(res, notes, pl.Failure{Code: code, Message: artifactsNotStored + why})
+	}
+	if out == nil {
+		fail(pl.CodeArtifactUnavailable, "the machine returned no artifact result")
+		return
 	}
 	if out.ArtifactsTooLarge {
-		tooLarge("the machine that ran the step found them larger than it sends back")
+		fail(pl.CodeArtifactTooLarge, "the machine that ran the step found them larger than it sends back")
+		return
+	}
+	if len(out.ArtifactsMissing) > 0 {
+		files.noteMissing(notes, out.ArtifactsMissing)
+		fail(pl.CodeArtifactUnavailable, "the machine reported missing required artifacts")
 		return
 	}
 	encoded := strings.TrimSpace(out.ArtifactsTgzBase64)
 	if encoded == "" {
-		// No archive: the paths the machine says matched nothing -- none, for
-		// one that packed nothing and names nothing, say after a failed
-		// command. Only a machine that says nothing at all leaves every
-		// declared path to read as matching nothing.
-		missing := out.ArtifactsMissing
-		if missing == nil {
-			for _, p := range extractPatterns(files.run.Artifacts) {
-				missing = append(missing, p.declared)
-			}
-		}
-		files.noteMissing(notes, missing)
+		fail(pl.CodeArtifactUnavailable, "the machine returned no archive for its required artifacts")
 		return
 	}
-	// A gzip stream is no larger than what it holds plus framing, so an
-	// archive far past the cap compressed is past it uncompressed: refused
-	// before it is decoded rather than after.
-	if int64(base64.StdEncoding.DecodedLen(len(encoded))) > f.cfg.ArtifactMaxBytes+f.cfg.ArtifactMaxBytes/64+extractStreamSlack {
-		tooLarge(fmt.Sprintf("the machine's archive of them is larger than this cluster keeps (%d bytes)", f.cfg.ArtifactMaxBytes))
+	// Preserve the native transport's 256 MiB payload ceiling and refuse an
+	// oversized encoded response before decompression. Decode directly into
+	// a bounded private snapshot rather than allocating another full archive.
+	maxBytes := min(f.cfg.ArtifactMaxBytes, int64(256<<20))
+	if int64(base64.StdEncoding.DecodedLen(len(encoded))) > maxBytes+maxBytes/64+extractStreamSlack {
+		fail(pl.CodeArtifactTooLarge, fmt.Sprintf("the machine's archive of them is larger than this cluster keeps (%d bytes)", maxBytes))
 		return
 	}
-	tgz, err := base64.StdEncoding.DecodeString(encoded)
+	decoded := base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded))
+	compressed, err := gzip.NewReader(decoded)
 	if err != nil {
-		notes.add(pl.CodeArtifactMissing, "the step's artifacts were not stored: the machine's archive of them is not base64: "+err.Error())
+		fail(pl.CodeArtifactUnavailable, "the machine's archive cannot be read: "+err.Error())
 		return
 	}
-	files.storeArtifacts(ctx, tgz, f.cfg.ArtifactMaxBytes, res, notes)
+	defer compressed.Close()
+	snapshot, err := SnapshotArtifacts(ctx, compressed, files.run.Artifacts, extractStreamBudget(maxBytes))
+	if err == nil {
+		defer snapshot.Close()
+		var total int64
+		for _, file := range snapshot.Files {
+			total += file.Size
+		}
+		if total > maxBytes {
+			err = ErrArtifactsTooLarge
+		} else {
+			err = files.storeArtifactSnapshot(ctx, snapshot, res, notes)
+		}
+	}
+	if err != nil {
+		code := pl.CodeArtifactUnavailable
+		if errors.Is(err, ErrArtifactsTooLarge) {
+			code = pl.CodeArtifactTooLarge
+		}
+		fail(code, err.Error())
+	}
 }
 
 func (f *Fleet) lineSink() LineSink {
