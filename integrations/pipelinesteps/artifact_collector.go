@@ -187,17 +187,17 @@ func (s *step) collectStepArtifacts(ctx context.Context, pod *Pod, res *pl.StepR
 		slices.SortFunc(snapshot.Files, func(a, b SnapshotFile) int { return strings.Compare(a.Path, b.Path) })
 		files := s.files()
 		for _, file := range snapshot.Files {
-			var body []byte
-			body, err = readSmallArtifact(file, s.r.cfg.ArtifactMaxBytes)
+			var stored StoredFile
+			stored, err = files.storeVerifiedArtifact(ctx, file, notes)
 			if err != nil {
 				break
 			}
-			fileID := files.store(ctx, artifactFileName(file.Path), artifactMIME(file.Path), body, "the artifact "+files.quote(file.Path), notes)
-			if fileID == "" {
-				err = errors.New("required artifact could not be durably filed")
+			res.ArtifactFileIDs = append(res.ArtifactFileIDs, stored.FileID)
+			res.ArtifactIntentIDs = append(res.ArtifactIntentIDs, stored.Receipt.IntentID)
+			if !pl.ValidArtifactIntentIDs(res.ArtifactIntentIDs) {
+				err = errors.New("artifact storage returned repeated or invalid intent identities")
 				break
 			}
-			res.ArtifactFileIDs = append(res.ArtifactFileIDs, fileID)
 		}
 	}
 	if err != nil {
@@ -206,6 +206,41 @@ func (s *step) collectStepArtifacts(ctx context.Context, pod *Pod, res *pl.StepR
 			res.Failure = &pl.Failure{Code: pl.CodeArtifactUnavailable, Message: cutBytes(s.mask("required artifacts were not captured: "+err.Error()), failureMaxBytes)}
 		}
 	}
+}
+
+func (f stepFiles) storeVerifiedArtifact(ctx context.Context, file SnapshotFile, notes *noteList) (StoredFile, error) {
+	store, ok := f.library.(StreamLibraryStore)
+	if !ok {
+		return StoredFile{}, errors.New("required artifact storage has no verified streaming port")
+	}
+	input, err := file.Open()
+	if err != nil {
+		return StoredFile{}, err
+	}
+	defer input.Close()
+	name := artifactFileName(file.Path)
+	got, err := store.StoreRunFileStream(ctx, StreamRunFile{
+		OwnerUserID: f.run.OwnerUserID, WorkRunID: f.run.WorkRunID, StepKey: f.run.StepKey,
+		Attempt: f.run.Attempt, Path: file.Path, Name: name, MimeType: artifactMIME(file.Path),
+		Size: file.Size, SHA256: file.SHA256, Body: input,
+	})
+	what := "the artifact " + f.quote(file.Path)
+	if err != nil {
+		f.log.Warn("pipelines: a step's file could not be stored in the Library", "file", f.mask(name), "error", f.mask(err.Error()))
+		notes.add(pl.CodeArtifactMissing, what+" was not stored in the Library: "+err.Error())
+		return StoredFile{}, err
+	}
+	if got.Omitted != "" {
+		notes.add(pl.CodeArtifactMissing, what+" was not stored in the Library: "+got.Omitted)
+		return StoredFile{}, errors.New("required artifact was omitted by storage")
+	}
+	r := got.Receipt
+	if r == nil || got.FileID == "" || r.FileID != got.FileID || !pl.ValidArtifactIntentIDs([]string{r.IntentID}) ||
+		r.OwnerUserID != f.run.OwnerUserID || r.WorkRunID != f.run.WorkRunID || r.StepKey != f.run.StepKey || r.Attempt != f.run.Attempt ||
+		r.Path != file.Path || r.Size != file.Size || r.SHA256 != file.SHA256 || r.Container == "" || r.Object == "" || r.URL == "" || r.ETag == "" {
+		return StoredFile{}, errors.New("artifact storage returned no matching verified receipt")
+	}
+	return got, nil
 }
 
 func sameCollectorSpec(a, b *Container) bool {

@@ -1302,7 +1302,8 @@ type rtLibrary struct {
 	// a Library that does not answer.
 	block bool
 	// idPad lengthens every file id it answers.
-	idPad string
+	idPad      string
+	nextIntent uint64
 }
 
 func (l *rtLibrary) StoreRunFile(ctx context.Context, f RunFile) (StoredFile, error) {
@@ -4408,6 +4409,9 @@ func TestRunnerFitsItsOutcomeInAJobAnnotation(t *testing.T) {
 			t.Errorf("status %s, log file %.20q...; want a success that keeps its log", res.Status, res.LogFileID)
 		}
 		kept := len(res.ArtifactFileIDs)
+		if len(res.ArtifactIntentIDs) != files {
+			t.Fatalf("trimmed durable evidence identities: got %d, want %d", len(res.ArtifactIntentIDs), files)
+		}
 		if kept == 0 || kept == files {
 			t.Fatalf("%d of %d artifact file ids kept, want as many as fit", kept, files)
 		}

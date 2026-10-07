@@ -528,8 +528,10 @@ func (f *Fleet) storeReturnedArtifacts(ctx context.Context, files stepFiles, out
 	// A gzip stream is no larger than what it holds plus framing, so an
 	// archive far past the cap compressed is past it uncompressed: refused
 	// before it is decoded rather than after.
-	if int64(base64.StdEncoding.DecodedLen(len(encoded))) > f.cfg.ArtifactMaxBytes+f.cfg.ArtifactMaxBytes/64+extractStreamSlack {
-		tooLarge(fmt.Sprintf("the machine's archive of them is larger than this cluster keeps (%d bytes)", f.cfg.ArtifactMaxBytes))
+	// The cluster's streaming cap does not enlarge this byte-slice transport.
+	maxBytes := min(f.cfg.ArtifactMaxBytes, int64(256<<20))
+	if int64(base64.StdEncoding.DecodedLen(len(encoded))) > maxBytes+maxBytes/64+extractStreamSlack {
+		tooLarge(fmt.Sprintf("the machine's archive of them is larger than this cluster keeps (%d bytes)", maxBytes))
 		return
 	}
 	tgz, err := base64.StdEncoding.DecodeString(encoded)
@@ -537,7 +539,7 @@ func (f *Fleet) storeReturnedArtifacts(ctx context.Context, files stepFiles, out
 		notes.add(pl.CodeArtifactMissing, "the step's artifacts were not stored: the machine's archive of them is not base64: "+err.Error())
 		return
 	}
-	files.storeArtifacts(ctx, tgz, f.cfg.ArtifactMaxBytes, res, notes)
+	files.storeArtifacts(ctx, tgz, maxBytes, res, notes)
 }
 
 func (f *Fleet) lineSink() LineSink {

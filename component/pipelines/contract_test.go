@@ -38,16 +38,17 @@ func TestStepRequestWireNamesArePinned(t *testing.T) {
 
 func TestStepResultWireNamesArePinned(t *testing.T) {
 	raw, err := json.Marshal(StepResult{
-		Failure:         &Failure{Code: CodeStepTimeout},
-		StartedAt:       "s",
-		FinishedAt:      "f",
-		LogFileID:       "l",
-		ArtifactFileIDs: []string{"a"},
-		LogTail:         "t",
-		LogLines:        1,
-		LogCapped:       true,
-		Timings:         map[string]float64{"p": 1},
-		Notes:           []Failure{{Code: CodeArtifactMissing}},
+		Failure:           &Failure{Code: CodeStepTimeout},
+		StartedAt:         "s",
+		FinishedAt:        "f",
+		LogFileID:         "l",
+		ArtifactFileIDs:   []string{"a"},
+		ArtifactIntentIDs: []string{strings.Repeat("a", 64)},
+		LogTail:           "t",
+		LogLines:          1,
+		LogCapped:         true,
+		Timings:           map[string]float64{"p": 1},
+		Notes:             []Failure{{Code: CodeArtifactMissing}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +58,7 @@ func TestStepResultWireNamesArePinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"artifactFileIds", "exitCode", "failure", "finishedAt", "logCapped",
+		"artifactFileIds", "artifactIntentIds", "exitCode", "failure", "finishedAt", "logCapped",
 		"logFileId", "logLines", "logTail", "notes", "startedAt", "status", "timings", "where",
 	}
 	if keys := sortedKeys(got); !reflect.DeepEqual(keys, want) {

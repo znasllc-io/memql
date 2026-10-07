@@ -51,6 +51,7 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		// core/id's content address is a different algorithm/representation.
 		"azureblob/verified_stream.go":              "verifies externally supplied standard SHA-256 digests of immutable artifact bytes, never MemQL row identifiers",
 		"pipelinesteps/artifact_snapshot.go":        "computes standard SHA-256 artifact byte digests consumed by the immutable storage and OCI protocols",
+		"pipelinesteps/artifact_receipts_test.go":   "independently verifies the streamed bytes against their standard SHA-256 receipt digest; fixture intent IDs use a counter",
 		"pipelinesteps/pod_file_live_test.go":       "verifies the exact file bytes carried by a real Kubernetes exec stream against a standard SHA-256 fixture",
 		"azureblob/verified_stream_test.go":         "independently computes standard SHA-256 artifact fixtures for the streaming storage protocol",
 		"azureblob/verified_stream_azurite_test.go": "checks real stored artifact bytes against standard SHA-256 digests, including an OCI archive",

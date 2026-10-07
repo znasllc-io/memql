@@ -1623,16 +1623,21 @@ func (e *fakeExecutor) cancelled() []string {
 // passed is a step that ran on the cluster and passed, with everything a
 // runner reports: where, for how long, its log and its artifacts.
 func passed(req pipelines.StepRequest) pipelines.StepResult {
+	var intents []string
+	if len(req.Step.Artifacts) > 0 {
+		intents = []string{strings.Repeat("a", 64)}
+	}
 	return pipelines.StepResult{
-		Status:          pipelines.OutcomeSucceeded,
-		ExitCode:        0,
-		StartedAt:       "2026-10-03T12:00:00Z",
-		FinishedAt:      "2026-10-03T12:00:42Z",
-		Where:           pipelines.Where{Surface: "cluster", NodeID: "workbench-0", JobName: "job-" + req.StepKey},
-		LogFileID:       "file-log-" + req.StepKey,
-		ArtifactFileIDs: []string{"file-art-" + req.StepKey},
-		LogTail:         "ok\n",
-		LogLines:        12,
+		Status:            pipelines.OutcomeSucceeded,
+		ExitCode:          0,
+		StartedAt:         "2026-10-03T12:00:00Z",
+		FinishedAt:        "2026-10-03T12:00:42Z",
+		Where:             pipelines.Where{Surface: "cluster", NodeID: "workbench-0", JobName: "job-" + req.StepKey},
+		LogFileID:         "file-log-" + req.StepKey,
+		ArtifactFileIDs:   []string{"file-art-" + req.StepKey},
+		ArtifactIntentIDs: intents,
+		LogTail:           "ok\n",
+		LogLines:          12,
 	}
 }
 

@@ -225,6 +225,10 @@ type StepResult struct {
 	Where           Where    `json:"where"`
 	LogFileID       string   `json:"logFileId,omitempty"`
 	ArtifactFileIDs []string `json:"artifactFileIds,omitempty"`
+	// ArtifactIntentIDs name durable, immutable upload records. Unlike
+	// editable Library links, these IDs are never trimmed from an outcome.
+	// Candidate consumers resolve them under the owning run/step/attempt.
+	ArtifactIntentIDs []string `json:"artifactIntentIds,omitempty"`
 	// LogTail is the last lines of output -- at most 40 lines and at most 16
 	// KiB, because the runner's outcome rides a Job annotation and all of a
 	// Job's annotations share 256 KiB -- for a failed step's inline excerpt
