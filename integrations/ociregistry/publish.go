@@ -30,7 +30,11 @@ type Target struct {
 	Origin, Repository              string
 	Username, Password, BearerToken string
 	TokenEndpoint, TokenService     string
-	RootCAs                         *x509.CertPool
+	// BlobDownloadOrigins permits credential-free GETs for verified blob
+	// readback, through at most three redirects. Exact HTTPS origins only;
+	// include the full sorted list in the controller's approved target digest.
+	BlobDownloadOrigins []string
+	RootCAs             *x509.CertPool
 	// AllowLoopbackHTTP is an explicit installation setting for a loopback
 	// registry; it never enables plaintext for a remote registry or token host.
 	AllowLoopbackHTTP bool
@@ -40,6 +44,7 @@ type Publisher struct {
 	target        Target
 	origin, token *url.URL
 	repo          name.Repository
+	downloads     map[string]bool
 }
 
 type Receipt struct {
@@ -60,7 +65,7 @@ var uploadIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,256}$`)
 
 func endpoint(raw string, allowHTTP bool) (*url.URL, error) {
 	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" || u.Opaque != "" {
+	if err != nil || u.Host == "" || strings.ContainsAny(u.Hostname(), "*%\\ \t\r\n") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" || u.Opaque != "" {
 		return nil, errors.New("invalid configured registry endpoint")
 	}
 	if u.Scheme != "https" {
@@ -106,7 +111,23 @@ func NewPublisher(t Target) (*Publisher, error) {
 	if t.RootCAs != nil {
 		t.RootCAs = t.RootCAs.Clone()
 	}
-	return &Publisher{target: t, origin: u, token: token, repo: repo}, nil
+	if len(t.BlobDownloadOrigins) > 16 {
+		return nil, errors.New("too many configured blob download origins")
+	}
+	downloads := map[string]bool{}
+	for _, origin := range t.BlobDownloadOrigins {
+		d, err := endpoint(origin, false)
+		if err != nil || (d.Path != "" && d.Path != "/") {
+			return nil, errors.New("blob downloads require exact HTTPS origins")
+		}
+		key := d.Scheme + "://" + d.Host
+		if key == u.Scheme+"://"+u.Host || (token != nil && key == token.Scheme+"://"+token.Host) || downloads[key] {
+			return nil, errors.New("blob download origins must be distinct from credential endpoints and each other")
+		}
+		downloads[key] = true
+	}
+	t.BlobDownloadOrigins = append([]string(nil), t.BlobDownloadOrigins...)
+	return &Publisher{target: t, origin: u, token: token, repo: repo, downloads: downloads}, nil
 }
 
 // Publish verifies registry bytes by digest before returning a receipt. It is a
@@ -296,10 +317,19 @@ func (s *scopedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 	// Upload session Location is validated when used, as is every request made
-	// by the library. HTTP redirects are refused before following any location.
+	// by the library. Only exact verified blob GETs have a separate, explicit
+	// credential-free download contract. The library never follows redirects.
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		resp.Body.Close()
-		return nil, errors.New("registry redirects require an explicit transport contract")
+		blobDigest := strings.TrimPrefix(r.URL.Path, "/v2/"+s.publisher.target.Repository+"/blobs/")
+		_, verifiedBlob := s.blobs[blobDigest]
+		if r.Method != http.MethodGet || !verifiedBlob {
+			resp.Body.Close()
+			return nil, errors.New("registry redirects are limited to verified blob downloads")
+		}
+		resp, err = s.download(r, resp)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if resp.StatusCode >= 400 {
 		limit = 64 << 10
@@ -308,6 +338,55 @@ func (s *scopedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		limit = 0
 	}
 	resp.Body = &boundedBody{ReadCloser: resp.Body, remaining: limit}
+	return resp, nil
+}
+
+// Follow storage redirects directly below registry authentication. No header
+// from the authenticated request is copied, no cookie jar exists, and storage
+// responses cannot drive a token exchange. Never include a signed URL in errors.
+func (s *scopedTransport) download(original *http.Request, resp *http.Response) (*http.Response, error) {
+	base := original.URL
+	for hops := 0; resp.StatusCode >= 300 && resp.StatusCode < 400; hops++ {
+		location := resp.Header.Get("Location")
+		resp.Body.Close()
+		if hops >= 3 || location == "" || len(location) > 16384 {
+			return nil, errors.New("blob download redirect limit or invalid location")
+		}
+		next, err := url.Parse(location)
+		if err != nil || next.User != nil || next.Fragment != "" || next.RawPath != "" || next.Opaque != "" {
+			return nil, errors.New("invalid blob download location")
+		}
+		for _, part := range strings.Split(next.Path, "/") {
+			if part == "." || part == ".." {
+				return nil, errors.New("noncanonical blob download path")
+			}
+		}
+		next = base.ResolveReference(next)
+		if next.Scheme != "https" || !s.publisher.downloads[next.Scheme+"://"+next.Host] || next.Path == "" || path.Clean(next.Path) != next.Path {
+			return nil, errors.New("blob download left configured origins")
+		}
+		request, err := http.NewRequestWithContext(original.Context(), http.MethodGet, next.String(), nil)
+		if err != nil {
+			return nil, errors.New("invalid blob download request")
+		}
+		if s.requests.Add(1) > 8*maxEntries+64 {
+			return nil, errors.New("registry request count exceeds limit")
+		}
+		resp, err = s.inner.RoundTrip(request)
+		if err != nil {
+			return nil, errors.New("blob download transport failed")
+		}
+		if resp.Header.Get("WWW-Authenticate") != "" || resp.Header.Get("Proxy-Authenticate") != "" {
+			resp.Body.Close()
+			return nil, errors.New("blob download authentication challenges refused")
+		}
+		base = next
+	}
+	// The registry library sees only the original registry request; signed
+	// storage locations/cookies must not reach its response diagnostics.
+	resp.Request = original
+	resp.Header.Del("Location")
+	resp.Header.Del("Set-Cookie")
 	return resp, nil
 }
 

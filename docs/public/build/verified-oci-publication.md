@@ -57,10 +57,22 @@ endpoint and service. Requests for broader repository scopes are refused.
 The protocol implementation uses pinned `go-containerregistry` v0.22.1. Every
 request is checked against the configured origin, repository, verified digests
 and supported upload paths before transport. Mutable manifest tags, cross-repo
-mounts, unknown digests, arbitrary token realms and HTTP redirects are refused.
-An installation requiring object-store download redirects needs a separately
-specified transport contract; this primitive does not silently trust the
-registry's redirect destination. Response bodies, headers, request count,
+mounts, unknown digests and arbitrary token realms are refused. Write, manifest
+and token redirects are refused too.
+
+Verified blob GETs may follow at most three redirects to exact HTTPS origins
+in the operator's `BlobDownloadOrigins` list (at most 16). Bind the complete
+sorted list into the approved target digest. Download origins are distinct from
+registry and credential endpoints; no wildcard, scheme downgrade or implicit
+port match is accepted. These GETs copy no authorization, cookie or referrer
+headers and cannot exchange tokens or answer authentication challenges. Every
+hop stays within the configured origins and every downloaded byte still has to
+match the original descriptor's size and digest. Signed URLs are not included
+in errors or passed through to registry response diagnostics. This supports
+explicitly configured data endpoints, including the [dedicated data endpoints
+used by Azure Container Registry](https://learn.microsoft.com/en-us/azure/container-registry/container-registry-dedicated-data-endpoints).
+
+Response bodies, headers, request count,
 concurrency and operation duration are bounded. Caller cancellation applies
 throughout publication.
 
