@@ -144,11 +144,13 @@ type Toleration struct {
 // PodSecurityContext is the pod-wide security context.
 type PodSecurityContext struct {
 	SeccompProfile *SeccompProfile `json:"seccompProfile,omitempty"`
+	FSGroup        *int64          `json:"fsGroup,omitempty"`
 }
 
 // SeccompProfile names a seccomp profile; the step pod uses RuntimeDefault.
 type SeccompProfile struct {
-	Type string `json:"type"`
+	Type             string `json:"type"`
+	LocalhostProfile string `json:"localhostProfile,omitempty"`
 }
 
 // Container is one container of the step's pod. RestartPolicy is set only on
@@ -186,17 +188,20 @@ type Resources struct {
 // because 0 -- root -- is a value the runner writes, and absent means the
 // image's own user.
 type SecurityContext struct {
-	ReadOnlyRootFilesystem   *bool         `json:"readOnlyRootFilesystem,omitempty"`
-	RunAsUser                *int64        `json:"runAsUser,omitempty"`
-	AllowPrivilegeEscalation *bool         `json:"allowPrivilegeEscalation,omitempty"`
-	Capabilities             *Capabilities `json:"capabilities,omitempty"`
+	SeccompProfile           *SeccompProfile `json:"seccompProfile,omitempty"`
+	RunAsGroup               *int64          `json:"runAsGroup,omitempty"`
+	ReadOnlyRootFilesystem   *bool           `json:"readOnlyRootFilesystem,omitempty"`
+	RunAsUser                *int64          `json:"runAsUser,omitempty"`
+	AllowPrivilegeEscalation *bool           `json:"allowPrivilegeEscalation,omitempty"`
+	Capabilities             *Capabilities   `json:"capabilities,omitempty"`
 }
 
 // Capabilities are the Linux capabilities a container gives up from the
-// container runtime's default set, by name ("NET_RAW") or all of them
-// ("ALL"). Drop only: no container the runner builds adds one back.
+// container runtime's default set. Only the fixed rootless builder adds
+// SETUID/SETGID back for its pinned mapping helpers after dropping ALL.
 type Capabilities struct {
 	Drop []string `json:"drop,omitempty"`
+	Add  []string `json:"add,omitempty"`
 }
 
 // Probe is a service's startup probe -- an exec command polled until it

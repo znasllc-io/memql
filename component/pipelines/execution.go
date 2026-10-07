@@ -63,6 +63,16 @@ func CheckExecutionNeeds(execution string, needs []string) error {
 // runs a container step in its image; it cannot reinterpret it as native work.
 func validateStepRuntime(spec *Spec, step StepSpec, scope string) *Refusal {
 	execution, platform := ExecutionOf(step.Execution), PlatformOf(spec, step)
+	if step.ImageBuild != nil {
+		if err := CheckImageBuild(step.ImageBuild, platform); err != nil {
+			return Refuse(CodeStepInvalid, scope, "%s", err)
+		}
+		if step.MemoryMiB < 512 || step.Run != "" || step.Image != "" || len(step.Services) != 0 || len(cachesFor(spec, step)) != 0 ||
+			len(step.Secrets) != 0 || step.ImagePullSecret != "" || len(step.Artifacts) != 0 || step.Packages != "" ||
+			execution != ExecutionContainer || PlacementOf(step) != PlacementCluster || len(stepNeeds(step)) != 0 {
+			return Refuse(CodeStepInvalid, scope, "imageBuild requires at least 512 MiB and cluster container execution without run, image, services, caches, secrets, artifacts or package selection.")
+		}
+	}
 	if step.Image != "" && (execution == ExecutionNative || strings.ContainsFunc(step.Image, isSpaceOrControl)) {
 		return Refuse(CodeStepInvalid, scope, "A step image must be a container image reference without whitespace; native steps cannot name an image.")
 	}

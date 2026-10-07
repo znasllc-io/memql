@@ -90,10 +90,11 @@ func (d *fakeDispatcher) only(t *testing.T) (worker.Request, context.Context) {
 // read and upload both run under it -- it answers its context: one already
 // ended stores nothing.
 type fakeLibrary struct {
-	mu    sync.Mutex
-	files []RunFile
-	omit  map[string]string
-	fail  map[string]error
+	mu         sync.Mutex
+	files      []RunFile
+	omit       map[string]string
+	fail       map[string]error
+	nextIntent uint64
 }
 
 func (l *fakeLibrary) StoreRunFile(ctx context.Context, f RunFile) (StoredFile, error) {
@@ -125,8 +126,11 @@ func (l *fakeLibrary) StoreRunFileStream(ctx context.Context, f StreamRunFile) (
 	if err != nil || got.Omitted != "" {
 		return got, err
 	}
-	intent := sha256.Sum256([]byte(f.Path))
-	got.Receipt = &StoredFileReceipt{IntentID: hex.EncodeToString(intent[:]), FileID: got.FileID,
+	l.mu.Lock()
+	l.nextIntent++
+	intent := fmt.Sprintf("%064x", l.nextIntent)
+	l.mu.Unlock()
+	got.Receipt = &StoredFileReceipt{IntentID: intent, FileID: got.FileID,
 		OwnerUserID: f.OwnerUserID, WorkRunID: f.WorkRunID, StepKey: f.StepKey, Attempt: f.Attempt, Path: f.Path,
 		Container: "fixture", Object: f.Path, URL: "https://fixture.invalid/" + f.Path, ETag: "fixture-version",
 		Size: f.Size, SHA256: f.SHA256}
