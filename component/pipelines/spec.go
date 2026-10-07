@@ -72,6 +72,9 @@ type StageSpec struct {
 // the same contract as a deployable's build.command. There is no step
 // language.
 type StepSpec struct {
+	// ImageBuild asks the cluster's fixed rootless builder for an OCI archive.
+	// It cannot carry a shell command, services, caches or publication secrets.
+	ImageBuild *ImageBuild `yaml:"imageBuild,omitempty" json:"imageBuild,omitempty"`
 	// MemoryMiB requests a bounded memory reservation for the cluster command.
 	// Zero uses the operator's namespace default; services retain their defaults.
 	MemoryMiB int `yaml:"memoryMiB,omitempty" json:"memoryMiB,omitempty"`

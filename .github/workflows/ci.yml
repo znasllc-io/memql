@@ -572,6 +572,10 @@ jobs:
               # The pipelines leaf's fixtures (epic memql#5477): recorded GitHub
               # deliveries and Go-tree archives, read only by its own Go tests.
               - 'component/pipelines/testdata/**'
+              # Rootless builder profiles are read by the substrate's Go
+              # contract tests; its Dockerfile is a live cluster fixture.
+              - 'deploy/k8s/components/pipeline-image-builder/**'
+              - 'integrations/pipelinesteps/testdata/**'
               # Configuration readiness fixtures, read by the fold tests in
               # component/memql/readiness AND by the TypeScript mirror. The
               # test gate that consumes them runs in db-tests, which gates on
