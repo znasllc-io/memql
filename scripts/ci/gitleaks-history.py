@@ -18,6 +18,7 @@ import sys
 import time
 
 VERSION = "8.30.1"
+FINDINGS_EXIT = 10  # Gitleaks reserves 1 for scanner/partial-scan failure.
 
 
 def git(source, *args):
@@ -98,6 +99,7 @@ def scan(source, head, output, config, binary, batch_size, timeout):
             # side parent. This is NOT --first-parent history traversal.
             options = "--no-walk=unsorted --root --diff-merges=first-parent --no-ext-diff --no-textconv " + " ".join(batch)
             command = [binary, "git", str(source), "--no-banner", "--redact=100",
+                       f"--exit-code={FINDINGS_EXIT}",
                        f"--config={frozen_config}", f"--log-opts={options}",
                        "--report-format=json", f"--report-path={report}"]
             remaining = deadline - time.monotonic()
@@ -105,12 +107,12 @@ def scan(source, head, output, config, binary, batch_size, timeout):
                 raise RuntimeError("history scan deadline expired")
             with (output / f"batch-{number:05d}.log").open("x") as log:
                 code = run_scanner(command, log, remaining)
-            if code not in (0, 1):
+            if code not in (0, FINDINGS_EXIT):
                 raise RuntimeError(f"batch {number} scanner failed with exit {code}")
             evidence = json.loads(report.read_text())
             if not isinstance(evidence, list) or any(not isinstance(item, dict) for item in evidence):
                 raise RuntimeError(f"batch {number} has no valid findings array")
-            if bool(evidence) != (code == 1):
+            if bool(evidence) != (code == FINDINGS_EXIT):
                 raise RuntimeError(f"batch {number} result disagrees with its report")
             if any(item.get("Commit") not in batch for item in evidence):
                 raise RuntimeError(f"batch {number} reported a commit outside its inventory")

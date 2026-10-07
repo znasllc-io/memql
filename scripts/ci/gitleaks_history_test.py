@@ -54,9 +54,10 @@ fault = os.getenv("SCANNER_FAULT", "")
 if fault == "crash": sys.exit(137)
 if fault == "missing": sys.exit(0)
 if fault == "hang": time.sleep(30)
-report = [{"Commit": commits[0], "Secret": "REDACTED"}] if fault == "findings" else []
+report = [{"Commit": commits[0], "Secret": "REDACTED"}] if fault in ("findings", "partial") else []
 pathlib.Path(args["--report-path"]).write_text(json.dumps(report))
-sys.exit(1 if fault in ("findings", "disagreement") else 0)
+if fault == "partial": sys.exit(1)
+sys.exit(int(args["--exit-code"]) if fault in ("findings", "disagreement") else 0)
 ''')
         self.scanner.chmod(0o700)
 
@@ -83,7 +84,7 @@ sys.exit(1 if fault in ("findings", "disagreement") else 0)
         self.assertEqual(len(json.loads((self.output / "findings.json").read_text())), 3)
 
     def test_crash_missing_report_and_exit_disagreement_are_incomplete(self):
-        for fault in ("crash", "missing", "disagreement"):
+        for fault in ("crash", "missing", "disagreement", "partial"):
             with self.subTest(fault=fault), patch.dict(os.environ, SCANNER_FAULT=fault):
                 self.output = self.root / fault
                 self.output.mkdir()
