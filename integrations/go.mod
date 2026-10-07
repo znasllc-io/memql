@@ -10,6 +10,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.1
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.1
 	github.com/coder/websocket v1.8.15
+	github.com/google/go-containerregistry v0.22.1
 	github.com/livekit/protocol v1.50.4
 	github.com/livekit/server-sdk-go/v2 v2.18.1
 	github.com/pion/opus v0.1.1-0.20260923000601-86ced7318333
@@ -51,6 +52,16 @@ require (
 	golang.org/x/net v0.59.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
+)
+
+require (
+	github.com/docker/cli v29.7.2+incompatible // indirect
+	github.com/docker/docker-credential-helpers v0.9.3 // indirect
+	github.com/opencontainers/go-digest v1.0.0 // indirect
+	github.com/opencontainers/image-spec v1.1.1 // indirect
+	github.com/sirupsen/logrus v1.9.4 // indirect
+	golang.org/x/tools v0.50.0 // indirect
+	gotest.tools/v3 v3.5.2 // indirect
 )
 
 require (
