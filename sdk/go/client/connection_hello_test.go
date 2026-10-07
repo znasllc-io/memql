@@ -1,6 +1,8 @@
 package client
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -9,6 +11,46 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
+
+func TestServerInfoIsCoherentDuringRepeatedHandshakes(t *testing.T) {
+	stream := newMockStream()
+	d := NewDispatcher(stream, nil)
+	go d.Run()
+	defer d.Stop()
+	c := &Connection{dispatcher: d}
+	stop := make(chan struct{})
+	var readers sync.WaitGroup
+	readers.Add(1)
+	go func() {
+		defer readers.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				info := c.ServerInfo()
+				if info.NodeID != info.EngineCommit || info.NodeID != info.EngineVersion {
+					t.Errorf("handshake snapshot mixed serving processes: %+v", info)
+					return
+				}
+			}
+		}
+	}()
+	defer func() { close(stop); readers.Wait() }()
+	for n := 0; n < 100; n++ {
+		value := fmt.Sprintf("node-%d", n)
+		errCh := make(chan error, 1)
+		go func() { errCh <- c.handshake(t.Context()) }()
+		select {
+		case sent := <-stream.sendCh:
+			stream.recvCh <- &memqlv1.MemqlServerMessage{CorrelateTo: sent.MessageId,
+				Payload: &memqlv1.MemqlServerMessage_ServerHello{ServerHello: &memqlv1.ServerHello{NodeId: value, EngineCommit: value, EngineVersion: value}}}
+		case <-time.After(2 * time.Second):
+			t.Fatal("handshake request missing")
+		}
+		require.NoError(t, <-errCh)
+	}
+}
 
 // handshakeAgainst runs Connection.handshake over a mock stream that answers
 // the ClientHello with hello, and returns the connection it filled in.
