@@ -92,7 +92,16 @@ implementations. Every Go method has a TS equivalent; idioms diverge
 only where the host language demands it (`context.Context` ->
 `AbortSignal`, `<-chan` -> `AsyncIterable`, etc.).
 
-#### The one recorded deviation: live data (memql#4538)
+#### Transport-specific TLS configuration
+
+Go's `ConnectConfig.RootCAs` accepts an explicit `*x509.CertPool` for operator
+configured TLS roots. Nil uses system roots; hostname verification remains on,
+and plaintext endpoints refuse this option. The connection clones the pool.
+Browser TypeScript clients use the browser's trust store and cannot supply a
+custom CA through JavaScript, so this transport option has no browser analogue.
+The query, result and authorization contracts stay identical.
+
+#### The recorded store deviation: live data (memql#4538)
 
 **Wire parity yes, store parity deferred.**
 

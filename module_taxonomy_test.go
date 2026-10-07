@@ -54,10 +54,11 @@ const (
 // decided it.
 var pluginKinds = map[string]moduleKind{
 	// --- TRUE INTEGRATIONS: an outbound call to somebody else's system. ---
-	"email":   kindIntegration, // Microsoft Graph / SMTP
-	"release": kindIntegration, // api.github.com + ghcr.io -- tags, Releases, manifests
-	"shopify": kindIntegration, // Storefront + Admin APIs
-	"storage": kindIntegration, // Azure Blob
+	"email":            kindIntegration, // Microsoft Graph / SMTP
+	"release":          kindIntegration, // api.github.com + ghcr.io -- tags, Releases, manifests
+	"releaseDiscovery": kindIntegration, // another installation's authenticated gRPC release catalog
+	"shopify":          kindIntegration, // Storefront + Admin APIs
+	"storage":          kindIntegration, // Azure Blob
 
 	// --- COMPONENTS: engine internals an operator cannot switch off. ---
 	// Turning any of these off does not remove a feature, it breaks the

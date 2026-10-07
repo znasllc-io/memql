@@ -518,6 +518,7 @@ const cluster: OsAppManifest = {
   // changes meaningfully -- never because a node's counts moved.
   attentionChanges: [
     { id: "cluster:releases", revision: "release-lifecycle-2", sectionId: "releases", label: "Prepare releases from builds and review public publication" },
+    { id: "cluster:updates", revision: "signed-discovery-1", sectionId: "updates", label: "Check signed releases from configured publishers" },
     { id: "cluster:mesh", revision: "mesh-1", sectionId: "mesh", label: "See what every node hears" },
   ],
   component: ClusterApp,

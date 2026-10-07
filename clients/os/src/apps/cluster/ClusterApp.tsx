@@ -11,6 +11,7 @@ import { ModulesSection } from "./modules/ModulesSection";
 import { AutomationsSection } from "./automations/AutomationsSection";
 import { OriginsSection } from "./origins/OriginsSection";
 import { ReleasesSection } from "./releases/ReleasesSection";
+import { UpdatesSection } from "./updates/UpdatesSection";
 import { ReadinessSection } from "./readiness/ReadinessSection";
 import {
   CLUSTER_SECTIONS,
@@ -108,6 +109,7 @@ export function ClusterApp({
     );
   }
   if (sectionId === "releases") return <ReleasesSection visible={windowVisible} />;
+  if (sectionId === "updates") return <UpdatesSection visible={windowVisible} />;
   if (sectionId === "modules") return <ModulesSection />;
   if (sectionId === "mesh") return <MeshSection intent={intent} consumeIntent={consumeIntent} />;
   if (sectionId === "automations") return <AutomationsSection />;

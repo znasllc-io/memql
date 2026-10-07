@@ -103,6 +103,8 @@ import (
 	// present in the DSL and absent from the registry is a boot-time
 	// resolution failure. It refuses harmlessly wherever nothing is seeded.
 	_ "github.com/znasllc-io/memql/integrations/release"
+	// The cross-installation reader uses the root module's canonical Go SDK.
+	_ "github.com/znasllc-io/memql/component/releasecatalog"
 	_ "github.com/znasllc-io/memql/integrations/router"
 	// The sync runtime (epic memql#4378): the inbound dispatcher and the
 	// backfill / reconciliation runners. The outbox DRAIN worker is not

@@ -3164,6 +3164,31 @@ QueryClient.prototype.releaseCutStatus = function (this: QueryClient, args: Rele
   return this.executeNamed("releaseCutStatus", buildReleaseCutStatus(args), opts);
 };
 
+/** Read one page of remote releases and independently verify every signed envelope. */
+export interface ReleaseDiscoverPublishedCandidatesArgs {
+  sourceId: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export function buildReleaseDiscoverPublishedCandidates(args: ReleaseDiscoverPublishedCandidatesArgs): string {
+  const parts: string[] = [];
+  parts.push("sourceId: " + renderMemQLValue(args.sourceId));
+  if (args.cursor !== undefined) parts.push("cursor: " + renderMemQLValue(args.cursor));
+  if (args.limit !== undefined) parts.push("limit: " + renderMemQLValue(args.limit));
+  return "builtin releaseDiscoverPublishedCandidates(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseDiscoverPublishedCandidates(args: ReleaseDiscoverPublishedCandidatesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseDiscoverPublishedCandidates = function (this: QueryClient, args: ReleaseDiscoverPublishedCandidatesArgs = {} as ReleaseDiscoverPublishedCandidatesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseDiscoverPublishedCandidates", buildReleaseDiscoverPublishedCandidates(args), opts);
+};
+
 /** Read one exact release candidate owned by the caller. */
 export interface ReleaseGetCandidateArgs {
   candidateId: string;
@@ -3304,6 +3329,31 @@ QueryClient.prototype.releasePublishCandidate = function (this: QueryClient, arg
   return this.executeNamed("releasePublishCandidate", buildReleasePublishCandidate(args), opts);
 };
 
+/** Reverify an exact discovery selection without approving or starting installation. */
+export interface ReleaseReadDiscoveredCandidateArgs {
+  sourceId: string;
+  candidateId: string;
+  catalogDigest: string;
+}
+
+export function buildReleaseReadDiscoveredCandidate(args: ReleaseReadDiscoveredCandidateArgs): string {
+  const parts: string[] = [];
+  parts.push("sourceId: " + renderMemQLValue(args.sourceId));
+  parts.push("candidateId: " + renderMemQLValue(args.candidateId));
+  parts.push("catalogDigest: " + renderMemQLValue(args.catalogDigest));
+  return "builtin releaseReadDiscoveredCandidate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseReadDiscoveredCandidate(args: ReleaseReadDiscoveredCandidateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseReadDiscoveredCandidate = function (this: QueryClient, args: ReleaseReadDiscoveredCandidateArgs = {} as ReleaseReadDiscoveredCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseReadDiscoveredCandidate", buildReleaseReadDiscoveredCandidate(args), opts);
+};
+
 /** Permanently retire an unpublished candidate and release its retention pins. */
 export interface ReleaseRetireCandidateArgs {
   candidateId: string;
@@ -3346,6 +3396,25 @@ declare module "./query.js" {
 
 QueryClient.prototype.releaseSealPublishedCandidate = function (this: QueryClient, args: ReleaseSealPublishedCandidateArgs = {} as ReleaseSealPublishedCandidateArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("releaseSealPublishedCandidate", buildReleaseSealPublishedCandidate(args), opts);
+};
+
+/** Read configured update publishers without endpoints, keys or credentials. */
+export interface ReleaseSourcesArgs {
+}
+
+export function buildReleaseSources(args: ReleaseSourcesArgs): string {
+  void args;
+  return "builtin releaseSources()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    releaseSources(args?: ReleaseSourcesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.releaseSources = function (this: QueryClient, args: ReleaseSourcesArgs = {} as ReleaseSourcesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("releaseSources", buildReleaseSources(args), opts);
 };
 
 /** Replay one of the caller's runs: a NEW run that serves EVERY model call from the journal, so it reaches no provider. Under the default strict policy a request with no journaled match raises a divergence pinned to the first step that differs; permissive makes a fresh call and journals it. Returns {runId}. */

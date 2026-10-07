@@ -316,3 +316,79 @@ historical attestation, not a claim that a release is currently newest or that
 remote assets remain available. Update selection, rollback authorization and
 fresh artifact/installation checks remain separate actions. This operation
 does not automatically host the envelope on an external service.
+
+## Discover releases from another installation
+
+On the receiving installation, set the `MEMQL_RELEASE_SOURCES` global variable:
+
+```json
+{
+  "formatVersion": 1,
+  "sources": [
+    {
+      "id": "upstream",
+      "publisher": "my-publisher",
+      "endpoint": "https://api.publisher.example.com",
+      "credentialSecret": "PUBLISHER_READ_TOKEN",
+      "publicKeys": {"release-2026": "BASE64_ED25519_PUBLIC_KEY"}
+    }
+  ]
+}
+```
+
+`endpoint` is the publisher's authenticated gRPC TLS front door. It has no
+catalog path, query or embedded credentials. The referenced global secret
+contains a bearer token for an identified developer, admin or owner on the
+publisher. Expired credentials must be replaced by the operator. An optional
+`rootCaPem` supplies the CA certificates trusted for that endpoint; omitting it
+uses system roots. Certificate hostname verification remains enabled. The
+publisher's release signing keys are separate from its TLS trust and credentials.
+Obtain those keys through a trusted operator channel, independently of the
+catalog response.
+
+Source and publisher names, and signing key IDs, are lowercase identifiers of
+at most 128 characters using letters, digits, dots, underscores and hyphens;
+the first character is a letter. Secret names use uppercase letters, digits
+and underscores. Configuration permits at most 16 sources, 32 keys per source
+and 256 KiB total. Unknown or duplicate JSON fields refuse. An explicit empty
+`sources` array configures no publishers. Configuration read failures remain
+errors rather than appearing as an empty list.
+
+In **Cluster → Updates**, an identified developer, admin or owner can choose a
+configured publisher, browse published releases, and inspect an exact release.
+**Check again** requests a fresh read. Opening or reconnecting a visible page
+also refreshes it; the screen does not continuously poll remote publishers.
+Failures and disconnections keep the last displayed record without calling it
+freshly verified. This screen has no install or publication effect.
+
+The same reads are available as DSL builtins and generated Go/TypeScript SDK
+methods:
+
+| Construct | Result |
+|---|---|
+| `releaseSources()` | Configured source IDs and publisher names, without endpoints or credentials |
+| `releaseDiscoverPublishedCandidates(sourceId, cursor, limit)` | One page of independently verified release summaries, with an opaque next cursor |
+| `releaseReadDiscoveredCandidate(sourceId, candidateId, catalogDigest)` | Reverified public projection of that exact selection |
+
+The discovery limit is 1–10, default 10. A call lasts at most 30 seconds and
+reads only one page. The unsigned remote list supplies candidate locators;
+every displayed component and version comes from the signed record verified
+against the receiving installation's configured publisher and keys. Malformed
+or unverifiable entries fail the page without returning partial results. No
+credential values, remote private diagnostics or publisher configuration are
+returned to the caller.
+
+Each call resolves current configuration and credentials. Selecting a release
+does not cache trust or authorize installation. A native installation preparer
+must independently call `releasecatalog.Reader.Get` with the source ID,
+candidate ID and catalog digest; it receives an opaque
+`pipelines.VerifiedPublishedRelease`. A serialized projection or `verified`
+flag from a client cannot create that value. Another receiving replica can
+reverify the selection without the discovering replica's local state.
+
+Discovery verifies the publisher's attestation. It does not prove that a
+release is newest, that remote artifacts are still available, or that the
+release is compatible with the receiving cluster. DSL policy owns update
+selection, cadence, retries and the installation workflow; native preparation
+owns fresh artifact and cluster evidence, effect fencing and rollback authority.
+This boundary also applies when an automation calls the discovery builtins.
