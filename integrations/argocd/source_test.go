@@ -331,6 +331,16 @@ func TestSourceClosureBoundsReadsAndRedactsProviderErrors(t *testing.T) {
 	})
 	_, err = VerifySourceClosure(ctx, reader, spec)
 	require.ErrorIs(t, err, context.Canceled)
+	objects, spec := sourceObjectsFixture(t, sourceFilesFixture())
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	reader = objectReaderFunc(func(ctx context.Context, kind, oid string) (io.ReadCloser, error) {
+		body, err := objects.OpenGitObject(ctx, kind, oid)
+		cancel()
+		return body, err
+	})
+	_, err = VerifySourceClosure(ctx, reader, spec)
+	require.ErrorIs(t, err, context.Canceled, "a completed read must not hide cancellation")
 }
 
 func TestSourceClosureRejectsMalformedButCorrectlyHashedTrees(t *testing.T) {

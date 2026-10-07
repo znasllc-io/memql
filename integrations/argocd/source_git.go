@@ -167,6 +167,9 @@ func (v *sourceVerifier) read(kind, oid string) ([]byte, error) {
 	}
 	body, readErr := io.ReadAll(io.LimitReader(reader, maxSourceObject+1))
 	closeErr := reader.Close()
+	if err := v.ctx.Err(); err != nil {
+		return nil, err
+	}
 	if readErr != nil || closeErr != nil {
 		return nil, errors.New("Git source object read did not complete")
 	}
@@ -260,7 +263,7 @@ func (v *sourceVerifier) plainFile(p string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(v.files) >= maxSourceCount {
+	if _, known := v.files[p]; !known && len(v.files) >= maxSourceCount {
 		return nil, errors.New("Git source exceeds its file bound")
 	}
 	digest := "memql-id:" + string(id.NewUntracked().FromString("memql-source-file-v1\n"+string(body)))
