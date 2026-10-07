@@ -247,6 +247,71 @@ func TestPublishExplicitTokenEndpoint(t *testing.T) {
 	}
 }
 
+func TestRegistryCannotBroadenTokenScopeAfterAuthentication(t *testing.T) {
+	v, _ := verifiedFixture(t)
+	var exchanges atomic.Int64
+	var origin string
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			exchanges.Add(1)
+			if scopes := r.URL.Query()["scope"]; len(scopes) != 1 || scopes[0] != "repository:receipts/image:pull" {
+				t.Errorf("broadened token exchange escaped guard: %v", scopes)
+			}
+			_, _ = io.WriteString(w, `{"token":"initial-token"}`)
+			return
+		}
+		if r.URL.Path == "/v2/" {
+			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm=%q,service="fixture"`, origin+"/token"))
+		} else {
+			if r.Header.Get("Authorization") != "Bearer initial-token" {
+				t.Error("initial authentication was not exercised")
+			}
+			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm=%q,service="fixture",scope="repository:other/image:pull,push"`, origin+"/token"))
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer s.Close()
+	origin = s.URL
+	p, err := NewPublisher(Target{Origin: origin, Repository: "receipts/image", AllowLoopbackHTTP: true, Username: "operator", Password: "test-credential", TokenEndpoint: origin + "/token", TokenService: "fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Publish(context.Background(), v); err == nil {
+		t.Fatal("scope expansion succeeded")
+	}
+	if exchanges.Load() != 1 {
+		t.Fatalf("token exchange count=%d; expected only the initial authorized exchange", exchanges.Load())
+	}
+}
+
+func TestRegistryCannotMoveUploadIntoAnotherRepository(t *testing.T) {
+	v, _ := verifiedFixture(t)
+	handler := quietRegistry()
+	var wrongRepository atomic.Int64
+	var redirected atomic.Int64
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/other/") {
+			wrongRepository.Add(1)
+			w.WriteHeader(201)
+			return
+		}
+		if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/blobs/uploads/") {
+			redirected.Add(1)
+			w.Header().Set("Location", "/v2/other/image/blobs/uploads/id")
+			w.WriteHeader(202)
+			return
+		}
+		handler.ServeHTTP(w, r)
+	}))
+	defer s.Close()
+	if _, err := publisher(t, s.URL).Publish(context.Background(), v); !errors.Is(err, ErrUncertain) {
+		t.Fatalf("expected uncertain after session creation, got %v", err)
+	}
+	if redirected.Load() == 0 || wrongRepository.Load() != 0 {
+		t.Fatalf("upload session attempts=%d, wrong repository requests=%d", redirected.Load(), wrongRepository.Load())
+	}
+}
+
 func TestTransportContractRejectsOtherRepositoriesTagsAndScopes(t *testing.T) {
 	p := publisher(t, "http://127.0.0.1:1234")
 	s := &scopedTransport{publisher: p, image: sha([]byte("image")), blobs: map[string]int64{sha([]byte("blob")): 4}}
