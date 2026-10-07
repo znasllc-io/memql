@@ -665,3 +665,16 @@ acknowledging duplicate captures. This establishes composition and recovery of
 preparation. It does not substitute for the installed serving-engine update and
 rollback rehearsal. The automation corpus records the bounded operation order
 with stubbed effects; native authority and evidence are exercised separately.
+
+
+The private `installation.NewPreparer` constructor accepts all native execution
+and source-lifecycle ports together and rejects an incomplete host. Its
+identifiers-only `PrepareSelection` and `PreparationResult` expose no credential,
+rendered material, source archive or caller-provided proof. The app adapter uses
+`buildinfo.Commit()`, the projected cluster API/namespace, the existing serving
+Library uploader, the existing Workbench forwarder and repository token minter,
+and `releasecatalog.NewSnapshot`. `MEMQL_INSTALLATION_CONFIG_NAME` explicitly
+selects the receiving ConfigMap; absence disables preparation. Constructing this
+adapter does not register a capability, provide a fleet fallback or authorize a
+revision write. The revision recipe's separate immutable execution binding must
+be connected before public activation.

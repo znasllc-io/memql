@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -115,4 +116,43 @@ func TestPreparationRecipeCannotAssertOrIgnoreMissingEvidence(t *testing.T) {
 			require.Empty(t, result.ID)
 		})
 	}
+}
+
+// A recipe may fan out the same admitted operation. The native scope must not
+// race its start time or let those calls create distinct durable reservations.
+func TestPreparationPortsConcurrentReservationsKeepOneScope(t *testing.T) {
+	db, _ := journalDB(t)
+	receiver := newReceiverFixture(t)
+	images := newAdmissionFixture(t)
+	before, err := images.old.Release()
+	require.NoError(t, err)
+	after, err := images.next.Release()
+	require.NoError(t, err)
+	receiver.config.Rollback = receiverSelection{CandidateID: before.CandidateID, CatalogDigest: images.old.Digest()}
+	receiver.saveConfig()
+	publications := preparationCatalogFixture{images.old.Digest(): images.old, images.next.Digest(): images.next}
+	factory := func(context.Context, []byte, string) (Catalog, error) { return publications, nil }
+	host := &preparationHost{api: receiver, journal: preparationConnection(db), executor: &captureExecutorFixture{}, files: &captureFilesFixture{}, tokens: preparationTokenFixture{}, catalog: factory, namespace: "memql", configurationName: "receiver"}
+	require.NoError(t, host.bindWorkflow(strings.Repeat("a", 40)))
+	ctx := captureOperator(auth.RoleOwner, "operator")
+	config, err := readReceiver(ctx, receiver, "memql", "receiver", factory)
+	require.NoError(t, err)
+	request := preparationRequest{InstallationID: receiver.config.InstallationID, RequestID: "concurrent-reserve", CandidateID: after.CandidateID, CatalogDigest: images.next.Digest(), OverlayRevision: strings.Repeat("b", 40)}
+	scope := &preparationWorkflowScope{host: host, request: request, operator: "operator", configuration: config}
+	_, err = scope.resolve(ctx, nil)
+	require.NoError(t, err)
+	operation := scope.operations()["installationReservePreparation"]
+	failures := make([]error, 8)
+	var group sync.WaitGroup
+	for n := range failures {
+		group.Add(1)
+		go func() { defer group.Done(); _, failures[n] = operation(ctx, nil) }()
+	}
+	group.Wait()
+	for _, err := range failures {
+		require.NoError(t, err)
+	}
+	saved, err := host.journal.getByRequest(ctx, request.InstallationID, request.RequestID)
+	require.NoError(t, err)
+	require.Equal(t, saved, scope.record)
 }

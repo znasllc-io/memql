@@ -219,8 +219,17 @@ func TestPreparationWorkflowProtocolRecoveryPromotesWithFreshNativeEvidence(t *t
 	require.Equal(t, 1, images.reads[images.oldLayer])
 	require.Equal(t, 1, images.reads[images.newLayer])
 	images.mu.Unlock()
-	historical, err := fresh.prepare(ctx, request)
+	adapter, err := NewPreparer(PreparationDependencies{API: receiver, Database: fresh.journal.db, Executor: external, Files: external, Tokens: preparationTokenFixture{}, Catalog: factory, Namespace: "memql", ConfigurationName: "receiver", EngineRevision: strings.Repeat("a", 40)})
 	require.NoError(t, err)
-	require.Equal(t, result, historical)
+	historical, err := adapter.Prepare(ctx, PrepareSelection{InstallationID: request.InstallationID, RequestID: request.RequestID, CandidateID: request.CandidateID, CatalogDigest: request.CatalogDigest, OverlayRevision: request.OverlayRevision})
+	require.NoError(t, err)
+	require.Equal(t, result.ID, historical.PlanID)
+	require.Equal(t, result.Plan.Preparation.ID, historical.PreparationID)
+	require.Equal(t, result.State, historical.State)
+	body, err := json.Marshal(historical)
+	require.NoError(t, err)
+	for _, forbidden := range []string{"private-", "fixture-value", "repository", "credential", "sourceDigest"} {
+		require.NotContains(t, string(body), forbidden)
+	}
 	require.Len(t, external.requests, 2)
 }

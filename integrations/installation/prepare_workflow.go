@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
@@ -129,6 +130,9 @@ func (s *preparationWorkflowScope) run(ctx context.Context) (revisionRecord, err
 }
 
 type preparationWorkflowScope struct {
+	// Native preparation proofs mutate together. Artifact checks share a read
+	// lock and retain their own bounded concurrency inside the child scope.
+	mu                  sync.RWMutex
 	host                *preparationHost
 	request             preparationRequest
 	operator            string
@@ -169,7 +173,15 @@ func (s *preparationWorkflowScope) operations() map[string]workflowhost.Operatio
 		}
 	}
 	for name, operation := range operations {
+		artifactRead := name == "installationArtifactRequirements" || name == "installationArtifactCheck" || name == "installationArtifactsComplete"
 		operations[name] = func(ctx context.Context, args map[string]any) (any, error) {
+			if artifactRead {
+				s.mu.RLock()
+				defer s.mu.RUnlock()
+			} else {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+			}
 			actor, err := preparationActor(ctx)
 			if err != nil || actor != s.operator || s.result != nil {
 				return nil, errors.New("installation operation is outside its admitted scope")
