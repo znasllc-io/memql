@@ -209,6 +209,41 @@ configuration, candidate-image/resource checks and installation authority
 still have to be connected and qualified together. A successful collector
 receipt alone does not authorize an update.
 
+### Signed images and complete resource inventory
+
+The private installation verifier now resolves every rendered object's API
+address through fresh Kubernetes discovery. It binds both complete inventories,
+including unchanged objects' scope and paths, to the signed publication,
+platform, native image bindings, both renders, and a sorted create/update/delete
+diff. Discovery is bounded and shared only within one invocation. Another
+replica can reproduce the evidence without the first process's cache.
+
+Every workload image in the candidate and rollback render must name an exact
+SHA-256 digest. A configured candidate image slot must match the signed
+component, artifact, platform and published registry location. Added or changed
+unbound images refuse. The codec includes normal, init and ephemeral containers,
+image volumes, and the CloudNativePG image; the database's PostgreSQL-version
+tag can coexist with its immutable digest. Nested Argo Applications and other
+unqualified controller kinds refuse rather than hiding an additional source or
+image input. Native configuration supplies image bindings; a caller cannot
+submit its own inventory or claim it was verified.
+
+The full diff retains changes to Secrets, storage, routing and RBAC even when
+they contain no images. Secret bytes are absent from ordinary formatting.
+This is observation only: live protected-resource preservation, compatibility,
+artifact availability, renderer/configuration identity and the scoped
+preparation/installation workflow remain required. In particular, recording a
+Secret deletion does not authorize it, and a signed image does not prove that
+its registry is reachable or that the currently installed database can safely
+change. No public capability or Argo write is enabled by this verifier.
+
+Race tests cover signed versus substituted/mutable/unbound image inputs,
+image-volume artifacts, API discovery failures and scope changes, complete
+resource diffs and reproducibility. The installation journal's publication
+binding uses the catalog's SHA-256 digest; native render/diff bindings continue
+to use their own `memql-id` domain. The journal suite runs with a required real
+database and continues to exercise independent connections and effect fencing.
+
 ### Update and rollback source
 
 The update names a full Git commit in the existing installation repository and
