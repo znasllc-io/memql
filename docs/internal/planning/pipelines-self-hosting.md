@@ -853,6 +853,11 @@ A representative 81.39 MB added fragment took 80.9 seconds with pinned Gitleaks
 architecture files account for much of the repeated input. They remain included.
 The configured 90-minute deadline is not a qualified full-history budget. A
 representative benchmark is performance evidence only, never a complete scan.
+Four distinct roughly 81 MB commits scanned in 107.722 seconds with four
+independent processes inside a 6 GiB/four-CPU container, while the earlier
+serial scan also occupied that same allocation. Sampled aggregate memory was
+2.50 GiB. All four reports were valid and clean; this is not full-history
+qualification.
 
 Regression tests include a real Gitleaks scan that finds an added-then-removed
 synthetic credential reachable only through a tag, and one introduced only in a
