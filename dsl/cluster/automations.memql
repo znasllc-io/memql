@@ -274,7 +274,12 @@ automation releasePublishCandidateWorkflow {
   builtin releasePublicationCheckCandidate()
   effect := builtin releasePublicationBegin()
   if effect.complete { return }
-  builtin releasePublicationVerifyImage()
-  builtin releasePublicationWriteImage()
+  if effect.kind == "oci" {
+    builtin releasePublicationVerifyImage()
+    builtin releasePublicationWriteImage()
+  } else if effect.kind == "file" {
+    builtin releasePublicationVerifyFile()
+    builtin releasePublicationWriteFile()
+  }
   builtin releasePublicationRecordReceipt()
 }

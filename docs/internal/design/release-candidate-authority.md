@@ -22,13 +22,24 @@ database even if blob storage or operator configuration is unavailable. No
 schedule or publication is enabled merely by registering these capabilities.
 
 `MEMQL_RELEASE_CANDIDATES` is an explicit global variable containing a bounded
-JSON object with `formatVersion: 1`, `sources` and `registries`. Source entries
+JSON object with `formatVersion: 1`, `sources` and at least one target in
+`registries` or `releaseAssets`. Source entries
 carry `component`, `repository`, `path`, optional `jsonField` and optional
 `credentialSecret`. Registry entries use the connection and credential-reference
 contract in `candidate_targets.go`; no secret value belongs in this JSON.
 Configuration is reread without the engine's result cache for each operation.
 Unknown or duplicate JSON fields, duplicate source/target identities and unsafe destinations fail
 before effects. There is no environment or plaintext credential fallback.
+
+Release asset targets bind an existing draft ID, tag, exact source repository
+and commit, filename, API/upload/download origins, trust and credential
+reference (`candidate_file_targets.go`). Their namespace is shared with registry
+targets; duplicate IDs refuse across both formats. A file destination must
+match its component's source, requires a file smaller than 2 GiB and cannot
+consume an OCI image as an ordinary release asset. Configuration discovery
+exposes the kind, draft, tag and filename for review, never credentials.
+Draft/tag creation and release promotion are separate effects, not side effects
+of this adapter. They remain required for the complete release-assembly workflow.
 
 `releaseCandidateConfiguration()` exposes source rules and target identity,
 origin and repository, never credential values. `releasePrepareCandidate`
@@ -139,14 +150,25 @@ engine revision or source configuration refuses before creating a replacement
 candidate or artifact pin. Publication repeats the same verification against
 the owned snapshot it will execute. The installed
 `releasePublishCandidateWorkflow` composes candidate verification, durable
-intent, image verification, registry write/readback and completion. Mandatory
+intent, artifact verification, destination write/readback and completion. It
+selects separate OCI and file operations by the approved artifact kind. Mandatory
 native prerequisites prevent another recipe from omitting these operations and
 claiming success. Credentials resolve only after the approved intent exists.
 The native OCI handle owns temporary verified bytes and closes on success and
 failure. An uncertain write retains its intent and all candidate pins; another
 host reconciles the same immutable image without selecting another effect.
 A completed intent is historical publication evidence, not a promise that a
-registry administrator has never subsequently removed those bytes.
+destination administrator has never subsequently removed those bytes.
+
+The file path uses `integrations/githubrelease` to snapshot receipt-bound bytes,
+publish only to the selected existing draft and verify a full independent
+download. It repeats draft/tag checks and never creates, promotes, deletes or
+overwrites a release or asset. A failed readback retains the same pending SQL
+intent and all pins. Another engine can reconcile the same destination and
+finish it without uploading a second asset. Both verified snapshot types close
+on success and failure; publication cancellation includes time waiting for an
+already busy handle. GitHub has no atomic upload precondition for draft/tag
+state, so release controllers must coordinate promotion and tag mutation.
 
 Database-backed tests exercise concurrent approval, changed destinations,
 retirement and late calls, stored-manifest tampering, lost publication replies
@@ -181,8 +203,14 @@ installed Workbench release or self-update. The test confirms deletion of its
 own Azurite container and removes only its own journal rows. Process-crash
 scratch recovery and post-publication retention remain unfinished.
 
+File workflow tests use the ordinary DSL interpreter, real SQL candidate
+authority and an HTTP draft-release fixture. Lost responses, corrupt readback,
+second-host recovery, changed authority, omitted native verification, retained
+pins and scratch cleanup are covered. Artifact/work ports are fixtures in these
+tests; they make no GitHub writes.
+
 Still required for the complete delivery path: original-receipt
-verification for carried attempts,
-non-OCI release targets, owner review UI, installation/recovery control, signed
+verification for carried attempts, release assembly/promotion,
+owner review UI, installation/recovery control, signed
 provenance and complete release qualification. No candidate approval or
 publication is implied by these tests.

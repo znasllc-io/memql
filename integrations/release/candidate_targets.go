@@ -75,6 +75,7 @@ func (t candidateRegistryTarget) snapshot() (candidateRegistryTarget, ociregistr
 
 type candidateTargetReader struct {
 	targets map[string]candidateRegistryTarget
+	files   map[string]candidateFileTarget
 	secret  func(context.Context, string) (string, error)
 }
 
@@ -90,7 +91,7 @@ func (r candidateTargetReader) resolve(ctx context.Context, d pl.ReleaseDestinat
 		return candidateRegistryTarget{}, ociregistry.Target{}, err
 	}
 	t, ok := r.targets[d.TargetID]
-	if !ok || t.ID != d.TargetID || t.Component != d.Component || t.Artifact != d.Artifact || d.Operation != "publish" || d.DesiredStateDigest != "" || d.RollbackCandidateID != "" {
+	if !ok || t.ID != d.TargetID || t.Component != d.Component || t.Artifact != d.Artifact || d.Operation != "publish" || d.DesiredStateDigest != "" || d.RollbackCandidateID != "" || r.files[d.TargetID].ID != "" {
 		return t, ociregistry.Target{}, errors.New("candidate has no matching operator registry target")
 	}
 	t, target, digest, err := t.snapshot()

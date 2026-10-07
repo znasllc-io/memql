@@ -49,6 +49,8 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		"release/candidate_oci_fixture_test.go": "independently encodes standard OCI content and archive SHA-256 values for preparation integrity tests",
 		"ociregistry/verify.go":                 "OCI descriptors and immutable archive receipts require standard SHA-256 over exact bytes, not MemQL identifiers",
 		"ociregistry/verify_test.go":            "independently computes OCI fixture digests and artifact receipt SHA-256 values",
+		"githubrelease/verify.go":               "GitHub asset digests and immutable file receipts require standard SHA-256 of exact bytes, not MemQL identifiers",
+		"githubrelease/verify_test.go":          "independently computes standard SHA-256 release asset fixture receipts",
 		// Release artifact digests are standard SHA-256 over the exact blob
 		// bytes, independently verifiable with sha256sum and OCI tooling.
 		// core/id's content address is a different algorithm/representation.

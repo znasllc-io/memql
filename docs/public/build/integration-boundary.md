@@ -141,6 +141,9 @@ retirement limits are described in [streamed artifact storage](streamed-artifact
 Registry publication follows the same split: [verified OCI publication](verified-oci-publication.md)
 owns bounded verification and digest-addressed protocol effects; the workflow
 chooses the candidate, approvals, destination and release ordering.
+[Verified release assets](verified-release-assets.md) supplies the corresponding
+file upload/readback operation for an explicitly selected existing GitHub draft.
+Draft creation and promotion remain separate workflow effects.
 
 ## Implementations in other languages
 

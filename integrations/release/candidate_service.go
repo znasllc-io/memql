@@ -49,6 +49,7 @@ type candidateOperatorConfiguration struct {
 	FormatVersion int                       `json:"formatVersion"`
 	Sources       []candidateVersionSource  `json:"sources"`
 	Registries    []candidateRegistryTarget `json:"registries"`
+	ReleaseAssets []candidateFileTarget     `json:"releaseAssets,omitempty"`
 }
 
 func decodeCandidateObject(body []byte, into any) error {
@@ -155,7 +156,7 @@ func (i *Integration) configuredCandidate(ctx context.Context) (*candidatePrepar
 	if err := decodeCandidateObject([]byte(raw), &cfg); err != nil {
 		return nil, err
 	}
-	if cfg.FormatVersion != 1 || len(cfg.Sources) == 0 || len(cfg.Sources) > 64 || len(cfg.Registries) == 0 || len(cfg.Registries) > 1024 {
+	if cfg.FormatVersion != 1 || len(cfg.Sources) == 0 || len(cfg.Sources) > 64 || len(cfg.Registries)+len(cfg.ReleaseAssets) == 0 || len(cfg.Registries)+len(cfg.ReleaseAssets) > 1024 {
 		return nil, errors.New("release candidate configuration requires bounded version sources and publication targets")
 	}
 	client := i.candidateDeps.Load().SourceClient
@@ -175,7 +176,7 @@ func (i *Integration) configuredCandidate(ctx context.Context) (*candidatePrepar
 		}
 		versions.sources[source.Component] = source
 	}
-	targets := &candidateTargetReader{targets: map[string]candidateRegistryTarget{}, secret: i.resolver.systemSecret}
+	targets := &candidateTargetReader{targets: map[string]candidateRegistryTarget{}, files: map[string]candidateFileTarget{}, secret: i.resolver.systemSecret}
 	for _, target := range cfg.Registries {
 		owned, _, _, err := target.snapshot()
 		if err != nil {
@@ -185,6 +186,16 @@ func (i *Integration) configuredCandidate(ctx context.Context) (*candidatePrepar
 			return nil, errors.New("release registry has a duplicate identity or no version source")
 		}
 		targets.targets[target.ID] = owned
+	}
+	for _, target := range cfg.ReleaseAssets {
+		owned, _, _, err := target.snapshot()
+		if err != nil {
+			return nil, err
+		}
+		if targets.targets[target.ID].ID != "" || targets.files[target.ID].ID != "" || versions.sources[target.Component].Repository != target.Repository {
+			return nil, errors.New("release asset target has a duplicate identity or no matching source repository")
+		}
+		targets.files[target.ID] = owned
 	}
 	p.evidence, p.versionReader, p.targetReader = candidateEvidenceReader{engine: i.store.engine}, versions, targets
 	return p, nil
@@ -204,6 +215,11 @@ func (i *Integration) handleCandidateConfiguration(ctx context.Context, _ map[st
 		pl.ReleaseDestination
 		Origin               string `json:"origin"`
 		Repository           string `json:"repository"`
+		Kind                 string `json:"kind"`
+		Tag                  string `json:"tag,omitempty"`
+		SourceCommit         string `json:"sourceCommit,omitempty"`
+		ReleaseID            int64  `json:"releaseId,omitempty"`
+		AssetName            string `json:"assetName,omitempty"`
 		CredentialConfigured bool   `json:"credentialConfigured"`
 	}
 	targets := make([]targetView, 0, len(p.targetReader.targets))
@@ -212,7 +228,15 @@ func (i *Integration) handleCandidateConfiguration(ctx context.Context, _ map[st
 		if err != nil {
 			return nil, err
 		}
-		targets = append(targets, targetView{ReleaseDestination: pl.ReleaseDestination{TargetID: target.ID, TargetDigest: digest, Component: target.Component, Artifact: target.Artifact, Operation: "publish"}, Origin: target.Origin, Repository: target.Repository, CredentialConfigured: target.PasswordSecret != "" || target.BearerSecret != ""})
+		targets = append(targets, targetView{ReleaseDestination: pl.ReleaseDestination{TargetID: target.ID, TargetDigest: digest, Component: target.Component, Artifact: target.Artifact, Operation: "publish"}, Kind: "oci", Origin: target.Origin, Repository: target.Repository, CredentialConfigured: target.PasswordSecret != "" || target.BearerSecret != ""})
+	}
+	for _, target := range p.targetReader.files {
+		_, _, digest, err := target.snapshot()
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, targetView{ReleaseDestination: pl.ReleaseDestination{TargetID: target.ID, TargetDigest: digest, Component: target.Component, Artifact: target.Artifact, Operation: "publish"},
+			Kind: "file", Origin: target.APIOrigin, Repository: target.Repository, Tag: target.Tag, SourceCommit: target.SourceCommit, ReleaseID: target.ReleaseID, AssetName: target.AssetName, CredentialConfigured: true})
 	}
 	slices.SortFunc(targets, func(a, b targetView) int { return strings.Compare(a.TargetID, b.TargetID) })
 	return resultNode("candidate-configuration", "", map[string]any{"sources": sources, "targets": targets})

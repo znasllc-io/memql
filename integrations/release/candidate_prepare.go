@@ -206,18 +206,22 @@ func (s *candidatePrepareScope) versions(ctx context.Context, _ map[string]any) 
 func (s *candidatePrepareScope) targets(ctx context.Context, _ map[string]any) (any, error) {
 	s.targetsOK = false
 	for _, target := range s.candidate.Destinations {
+		matched := false
 		for _, component := range s.candidate.Components {
 			if component.Name != target.Component {
 				continue
 			}
 			for _, artifact := range component.Artifacts {
-				if artifact.Name == target.Artifact && artifact.Kind != "oci" {
-					return nil, errors.New("registry destination requires an OCI image artifact")
+				if artifact.Name == target.Artifact {
+					if err := s.p.targetReader.checkArtifact(ctx, target, component, artifact); err != nil {
+						return nil, fmt.Errorf("target %s: %w", target.TargetID, err)
+					}
+					matched = true
 				}
 			}
 		}
-		if err := s.p.targetReader.check(ctx, target); err != nil {
-			return nil, fmt.Errorf("target %s: %w", target.TargetID, err)
+		if !matched {
+			return nil, errors.New("candidate destination has no matching artifact")
 		}
 	}
 	s.targetsOK = true
