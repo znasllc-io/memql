@@ -82,6 +82,11 @@ tags     = ["memql", "credential", "bearer-token"]
 # have now tried the second thing (memql#3484).
 
 [[allowlists]]
+description = "Planted failure-truncation sentinel in TestFleetStepMasksItsFailureBeforeCuttingIt, never an issued credential. Commit 8610a3c3 used the variable name secret; its later rename left that historical fixture detectable. The test sends this value only to fakeDispatcher and checks masking before truncation. Match only these exact fixture bytes, not arbitrary test files or token shapes."
+regexTarget = "secret"
+regexes = ['''^S3CRET-straddling-the-failure-cut$''']
+
+[[allowlists]]
 description    = "Local Postgres dev credentials (memql_dev). Dev-only; not a production fallback -- see issue #85. Allowed in Docker Compose files, dev scripts, the local k3d overlay and seed-secrets script, and documentation."
 condition      = "AND"
 regexTarget    = "match"
