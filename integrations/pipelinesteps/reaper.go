@@ -56,6 +56,18 @@ func (r *Runner) reap(ctx context.Context) (deleted int, more bool, err error) {
 			}
 			meta := r.reapPending[0]
 			r.reapPending = r.reapPending[1:]
+			if strings.HasSuffix(meta.Name, runRetirementSuffix) {
+				if r.reapRunRetirement(ctx, meta, now) {
+					deleted++
+				}
+				continue
+			}
+			if jobName, marker := strings.CutSuffix(meta.Name, retirementSuffix); marker {
+				if r.reapRetirement(ctx, meta, jobName, now) {
+					deleted++
+				}
+				continue
+			}
 			if jobName, ok := orphanedSecret(meta, now, r.cfg.RunCeiling, r.cfg.JobTTL); ok && r.reapSecret(ctx, meta, jobName) {
 				deleted++
 			}
@@ -84,6 +96,20 @@ func (r *Runner) reap(ctx context.Context) (deleted int, more bool, err error) {
 	}
 }
 
+func (r *Runner) reapRunRetirement(ctx context.Context, meta ObjectMeta, now time.Time) bool {
+	deadline, err := time.Parse(time.RFC3339Nano, meta.Annotations[AnnotRunDeadline])
+	runID := meta.Annotations[annotRetiredRun]
+	if err != nil || runID == "" || meta.Name != runRetirementName(runID) || len(meta.OwnerReferences) != 0 ||
+		meta.Labels[LabelManagedBy] != ManagedBy || !deadline.Add(r.cfg.JobTTL).Before(now) {
+		return false
+	}
+	names, _, err := r.kube.runResourceNames(ctx, runID)
+	if err != nil || len(names) != 0 {
+		return false
+	}
+	return r.kube.DeleteObservedSecret(ctx, meta) == nil
+}
+
 // orphanedSecret says a step Secret is old enough to reap and has no owner,
 // and names the Job it was made for. A Secret whose name is not a step Job's
 // is not one the reaper judges.
@@ -106,6 +132,12 @@ func (r *Runner) reapSecret(parent context.Context, meta ObjectMeta, jobName str
 	secretName := meta.Name
 	ctx, cancel := context.WithTimeout(parent, quickCallTimeout)
 	defer cancel()
+	if strings.HasPrefix(meta.Annotations[annotCreation], "creating ") {
+		_, err := r.kube.SecretMetadata(ctx, jobName+retirementSuffix)
+		if !deploycontrol.IsNotFound(err) {
+			return false // retirement with an unresolved POST needs reconciliation
+		}
+	}
 	switch _, err := r.kube.GetJob(ctx, jobName); {
 	case err == nil:
 		return false // its Job exists: the Secret is the Job's to take
@@ -119,4 +151,17 @@ func (r *Runner) reapSecret(parent context.Context, meta ObjectMeta, jobName str
 	}
 	r.log.Info("pipelines: deleted an orphaned step Secret, which no Job owned", "secret", secretName)
 	return true
+}
+
+func (r *Runner) reapRetirement(ctx context.Context, meta ObjectMeta, jobName string, now time.Time) bool {
+	deadline, err := time.Parse(time.RFC3339Nano, meta.Annotations[AnnotRunDeadline])
+	if err != nil || !isStepJobName(jobName) || len(meta.OwnerReferences) != 0 ||
+		meta.Labels[LabelManagedBy] != ManagedBy || !deadline.Add(r.cfg.JobTTL).Before(now) {
+		return false
+	}
+	absent, err := r.receiptResourcesAbsent(ctx, jobName)
+	if err != nil || !absent {
+		return false
+	}
+	return r.kube.DeleteObservedSecret(ctx, meta) == nil
 }

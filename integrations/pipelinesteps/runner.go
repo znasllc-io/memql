@@ -325,13 +325,15 @@ func (r *Runner) CancelRun(ctx context.Context, req CancelRequest) (int, error) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, quickCallTimeout)
 	defer cancel()
-	// Deleted first, so the count is of the Jobs the run had; the Runs then
-	// find their Jobs gone, or delete them again.
-	n, err := r.kube.DeleteRun(ctx, req.RunID)
+	defer r.cancelLocalRun(req.RunID)
+	return r.cleanupRun(ctx, req.RunID)
+}
+
+func (r *Runner) cancelLocalRun(runID string) {
 	r.mu.Lock()
 	var cancels []context.CancelFunc
 	for e := range r.inflight {
-		if e.runID == req.RunID {
+		if e.runID == runID {
 			cancels = append(cancels, e.cancel)
 		}
 	}
@@ -339,7 +341,6 @@ func (r *Runner) CancelRun(ctx context.Context, req CancelRequest) (int, error) 
 	for _, c := range cancels {
 		c()
 	}
-	return n, err
 }
 
 // track registers a Run until the returned func is called.
@@ -438,12 +439,13 @@ type step struct {
 	tokenRead     bool
 	claimFailures int
 	// ownedSecret: this Run made the Job its Secret's owner.
-	ownedSecret      bool
-	secretPrepared   bool
-	creationSent     string
-	creationAttempts int
-	creationUnknown  bool
-	quotaNoted       bool
+	ownedSecret        bool
+	secretPrepared     bool
+	creationSent       string
+	creationAttempts   int
+	creationUnknown    bool
+	creationDispatched bool
+	quotaNoted         bool
 	// claimSent is the claim this Run last sent: the Job carrying exactly it
 	// is this Run's own claim, whatever answer was lost. claimAdopts says
 	// that claim was sent over another Run's, and claimCursor is the log
@@ -648,6 +650,12 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 	}
 	// Before anything exists for the step: a refused step leaves no token,
 	// no Secret and no Job.
+	if err := s.checkRetirement(); err != nil {
+		if errors.Is(err, errAttemptRetired) || s.ctx.Err() != nil {
+			return s.abandon(nil), Job{}, true
+		}
+		return s.failed(pl.CodeExecutionUncertain, "the attempt cannot start: "+apiMessage(err)), Job{}, true
+	}
 	if res, done := s.isolationGate(runDeadline); done {
 		return res, Job{}, true
 	}
@@ -704,6 +712,12 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 		// when that is less (deadlineCode names which).
 		spec.Spec.ActiveDeadlineSeconds = ptr(int64(min(own, left) / time.Second))
 		s.freshenToken()
+		if err := s.checkRetirement(); err != nil {
+			if errors.Is(err, errAttemptRetired) || s.ctx.Err() != nil {
+				return s.abandon(nil), Job{}, true
+			}
+			return s.failed(pl.CodeExecutionUncertain, "the attempt cannot claim creation: "+apiMessage(err)), Job{}, true
+		}
 		claimed, claimErr := s.claimCreation()
 		if claimErr != nil {
 			if s.ctx.Err() != nil {
@@ -727,7 +741,23 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 		if !claimed {
 			return pl.StepResult{}, Job{}, false
 		}
+		// Retirement can win between the first read and the claim. If it
+		// arrives after this read, cleanup sees the creating claim and must
+		// wait for the POST's result instead of reporting absence as success.
+		if err := s.checkRetirement(); err != nil {
+			if releaseErr := s.releaseUnusedCreation(); releaseErr != nil {
+				s.log.Warn("pipelines: unused creation claim awaits reconciliation", "error", releaseErr)
+			}
+			if errors.Is(err, errAttemptRetired) || s.ctx.Err() != nil {
+				return s.abandon(nil), Job{}, true
+			}
+			return s.failed(pl.CodeExecutionUncertain, "the attempt cannot create its Job: "+apiMessage(err)), Job{}, true
+		}
+		s.creationDispatched = true
 		j, made, err := s.r.kube.CreateJob(s.ctx, spec)
+		if rejectedJobCreate(err) {
+			s.creationDispatched = false
+		}
 		switch {
 		case err == nil:
 			if made {
@@ -1040,8 +1070,11 @@ func (s *step) where() pl.Where {
 func (s *step) deleteSecret() {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), quickCallTimeout)
 	defer cancel()
-	if err := s.r.kube.DeleteSecret(ctx, SecretName(s.jobName)); err != nil {
-		s.log.Warn("pipelines: the Secret of a Job that was never created could not be deleted", "error", err)
+	if !s.creationDispatched && s.creationSent != "" {
+		_ = s.releaseUnusedCreation()
+	}
+	if err := s.r.cleanupReceipt(ctx, s.jobName); err != nil {
+		s.log.Warn("pipelines: cleanup of an unstarted attempt remains unconfirmed", "error", err)
 	}
 }
 
