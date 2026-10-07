@@ -114,4 +114,26 @@ describe("release preparation", () => {
     await act(async () => resolve(releaseResult({ targets: f.state.targets, sources: f.state.sources, assemblies: f.state.assemblies })));
     await screen.findByRole("button", { name: "Prepare release" });
   });
+  it("keeps an unchanged plan when another replica returns reordered object keys", async () => {
+    const f = releaseFixture();
+    const view = render(<ReleaseBrowser query={f.query} connected />);
+    await start(); await choose();
+    view.rerender(<ReleaseBrowser query={f.query} connected={false} />);
+    const reordered = (value: unknown): unknown => Array.isArray(value) ? value.map(reordered) : value !== null && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, v]) => [key, reordered(v)])) : value;
+    f.query.releaseCandidateConfiguration = async () => releaseResult(reordered({ targets: f.state.targets, sources: f.state.sources, assemblies: f.state.assemblies }) as object);
+    view.rerender(<ReleaseBrowser query={f.query} connected />);
+    await screen.findByRole("button", { name: "Prepare release" });
+    expect(screen.queryByText(/This release plan changed/)).toBeNull();
+  });
+  it("ignores changing builtin node IDs and timestamps on reconnect", async () => {
+    const f = releaseFixture();
+    const view = render(<ReleaseBrowser query={f.query} connected />);
+    await start(); await choose();
+    // The configuration fixture uses the real id-keyed builtin reply envelope
+    // and creates a different node ID and createdAt for every read.
+    view.rerender(<ReleaseBrowser query={f.query} connected={false} />);
+    view.rerender(<ReleaseBrowser query={f.query} connected />);
+    await screen.findByRole("button", { name: "Prepare release" });
+    expect(screen.queryByText(/This release plan changed/)).toBeNull();
+  });
 });

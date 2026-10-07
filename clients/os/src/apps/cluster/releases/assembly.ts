@@ -22,11 +22,20 @@ function text(value: unknown): string {
   if (typeof value !== "string" || !value) throw new Error("The release assembly record is incomplete.");
   return value;
 }
+function orderedConfiguration(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(orderedConfiguration);
+  if (value !== null && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map((key) => [key, orderedConfiguration((value as Record<string, unknown>)[key])]));
+  return value;
+}
 export function readAssemblies(result: Result): AssemblyPlan[] {
   const config = body(result), targets = readTargets(result);
   // Preparation fingerprints all assembly/source rules, including metadata paths
   // not displayed by the picker. A projection of visible fields misses drift.
-  const configuration = JSON.stringify(config);
+  // Protobuf Struct map order can differ between replicas. Preserve array
+  // order, but compare object fields independently of wire insertion order.
+  // Builtin result envelopes also carry a new row ID and timestamp per read.
+  // Only the declared configuration payload participates in equality.
+  const configuration = JSON.stringify(orderedConfiguration({ sources: config.sources, targets: config.targets, assemblies: config.assemblies }));
   const sources = list(config.sources ?? [], 64).map((entry) => { const s = object(entry); return { name: text(s.component), repository: text(s.repository) }; });
   return list(config.assemblies ?? [], 64).map((entry) => {
     const p = object(entry);

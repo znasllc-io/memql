@@ -16,6 +16,7 @@ export function candidateRecord(state = "ready") {
 export function releaseResult(value: object) { return new Result({ data: [value] } as never); }
 export const buildRun = { id: "pipeline-1", status: "completed", conclusion: "success", mode: "full", workRunId: "work-build-1", repository: "example/memql", sha: "d".repeat(40), title: "Build engine 0.25.0", finishedAt: "2026-10-06T18:00:00Z" };
 export function releaseFixture(initial = "ready") {
+  let configurationRead = 0;
   const state = { record: candidateRecord(initial), publications: [] as object[], targets: [releaseTarget] as Target[], drafts: [] as Draft[], empty: false, failedRead: false, failedDraftRead: false, lostPublishReply: false, lostDraftReply: false, lostPromotionReply: false, lostAssemblyReply: false,
     sources: [{ component: "engine", repository: "example/memql", path: "VERSION" }],
     assemblies: [{ name: "engine-release", components: [{ name: "engine", runs: ["build"], artifacts: [{ name: "bff", run: "build", stepKey: "build.bff", path: "bff.tar", kind: "oci", platform: "linux/arm64" }] }], targets: ["rehearsal"], compatibility: [] }],
@@ -23,7 +24,10 @@ export function releaseFixture(initial = "ready") {
   const query: ReleaseQueries = {
     releaseCandidates: async (args) => { state.calls.push({ kind: "list", args }); if (state.failedRead) throw new Error("Release journal unavailable"); return releaseResult({ candidates: state.empty ? [] : [{ candidateId: releaseId, state: state.record.state, components: state.record.manifest.components, createdAt: "2026-10-06T18:00:00Z", evidenceCount: 1 }] }); },
     releaseGetCandidate: async (args) => { state.calls.push({ kind: "get", args }); if (state.failedRead) throw new Error("Release journal unavailable"); return releaseResult(state.record); },
-    releaseCandidateConfiguration: async () => releaseResult({ targets: state.targets, sources: state.sources, assemblies: state.assemblies }),
+    releaseCandidateConfiguration: async () => {
+      const id = `configuration-${++configurationRead}`;
+      return releaseResult({ [id]: { id, concept: "v1:release:candidate-configuration", createdAt: `2026-10-06T18:00:${String(configurationRead).padStart(2, "0")}Z`, payload: { targets: state.targets, sources: state.sources, assemblies: state.assemblies } } });
+    },
     releaseCandidatePublications: async () => releaseResult({ candidateId: releaseId, publications: state.publications }),
     releaseApproveCandidate: async (args) => { state.calls.push({ kind: "approve", args }); Object.assign(state.record, { state: "approved", approvalId: "approval-exact" }); return releaseResult(state.record); },
     releaseRetireCandidate: async (args) => { state.calls.push({ kind: "retire", args }); state.record.state = "retired"; return releaseResult(state.record); },
