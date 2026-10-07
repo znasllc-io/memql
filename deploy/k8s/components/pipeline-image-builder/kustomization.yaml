@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - namespace.yaml
+  - networkpolicy.yaml
+  - profile-installer.yaml
+configMapGenerator:
+  - name: memql-rootless-buildkit-v1
+    namespace: memql-build-system
+    files:
+      - rootless-buildkit-v1-amd64.json
+      - rootless-buildkit-v1-arm64.json

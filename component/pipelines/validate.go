@@ -288,7 +288,7 @@ func validateStep(spec *Spec, stage string, j int, step StepSpec, seen map[strin
 	}
 	scope := stage + "/" + step.Name
 
-	if strings.TrimSpace(step.Run) == "" {
+	if strings.TrimSpace(step.Run) == "" && step.ImageBuild == nil {
 		return Refuse(CodeStepInvalid, scope, "Step %s has no command to run.", scope)
 	}
 
