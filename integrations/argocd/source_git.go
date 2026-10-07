@@ -311,7 +311,11 @@ func (v *sourceVerifier) checkAttributes(dir string) error {
 }
 
 func sourcePath(base, reference string) (string, error) {
-	if reference == "" || !utf8.ValidString(reference) || path.IsAbs(reference) || strings.ContainsAny(reference, ":?#\\") || strings.ContainsFunc(reference, unicode.IsControl) {
+	// Pinned Kustomize recognizes GitHub shorthand and user@host/path as
+	// remote Git sources before checking for a local directory. Reject those
+	// syntaxes before cleaning the path; a committed shadow is not the input
+	// the renderer would use. Colon rejection also covers git:: and schemes.
+	if reference == "" || !utf8.ValidString(reference) || path.IsAbs(reference) || strings.ContainsAny(reference, ":?#@\\") || strings.ContainsFunc(reference, unicode.IsControl) || strings.HasPrefix(strings.ToLower(reference), "github.com/") {
 		return "", errors.New("Kustomize input must be a repository-relative file or directory")
 	}
 	joined := path.Join(base, reference)

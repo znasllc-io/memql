@@ -305,6 +305,38 @@ func TestSourceClosureRefusesOpenOrAmbiguousInputs(t *testing.T) {
 	}
 }
 
+func TestSourceClosureRejectsSchemeLessRemoteReferencesDespiteLocalShadow(t *testing.T) {
+	for _, field := range []string{"resources", "bases", "components"} {
+		for _, reference := range []string{"github.com/example/remote/base", "GitHub.COM/example/remote/base", "user@example.invalid/org/repo/base", "git@github.com/example/remote/base"} {
+			t.Run(field+"/"+reference, func(t *testing.T) {
+				files := sourceFilesFixture()
+				settings := files["overlay/kustomization.yaml"]
+				switch field {
+				case "resources":
+					settings.body = strings.Replace(settings.body, "resources: [../base]", "resources: ["+reference+"]", 1)
+				case "bases":
+					settings.body += "bases: [" + reference + "]\n"
+				case "components":
+					settings.body = strings.Replace(settings.body, "components: [../component]", "components: ["+reference+"]", 1)
+				}
+				files["overlay/kustomization.yaml"] = settings
+				// A matching local directory must not trick the verifier: the
+				// pinned renderer interprets these references as remote first.
+				version, kind := "v1beta1", "Kustomization"
+				if field == "components" {
+					version, kind = "v1alpha1", "Component"
+				}
+				files["overlay/"+reference+"/kustomization.yaml"] = sourceFixtureFile{"100644", "apiVersion: kustomize.config.k8s.io/" + version + "\nkind: " + kind + "\nresources: [deployment.yaml]\n"}
+				files["overlay/"+reference+"/deployment.yaml"] = files["base/deployment.yaml"]
+				objects, spec := sourceObjectsFixture(t, files)
+				closed, err := VerifySourceClosure(context.Background(), objects, spec)
+				require.Error(t, err)
+				require.Empty(t, closed.Digest())
+			})
+		}
+	}
+}
+
 type objectReaderFunc func(context.Context, string, string) (io.ReadCloser, error)
 
 func (f objectReaderFunc) OpenGitObject(ctx context.Context, kind, oid string) (io.ReadCloser, error) {
