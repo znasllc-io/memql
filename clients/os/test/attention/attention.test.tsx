@@ -12,6 +12,9 @@ import { OS_REGISTRY } from "../../src/apps/registry";
 import { rowsResult, withSession } from "../deployables/harness";
 import type { AttentionChange } from "../../src/attention/model";
 import { NO_PARTS } from "../../src/apps/deployables/parts";
+import { ClusterApp } from "../../src/apps/cluster/ClusterApp";
+import { ConnectionStatusContext } from "../../src/chrome/connection";
+import { releaseFixture } from "../cluster/releaseFixtures";
 import { SourceView } from "../../src/apps/deployables/page/SourceView";
 import { SharedPackagesProvider, usePackages } from "../../src/apps/deployables/packages/usePackages";
 
@@ -48,6 +51,31 @@ const wrap = (node: React.ReactNode, userId = "alice") => withSession(<Attention
 afterEach(cleanup);
 
 describe("shared attention", () => {
+  it("opens release review and acknowledges its feature only at the visible release destination", async () => {
+    const fake = setup();
+    const fixture = releaseFixture(); fixture.state.empty = true;
+    Object.assign((h.connection as { query: object }).query, fixture.query);
+    const cluster = OS_REGISTRY.apps.find(app => app.id === "cluster")!;
+    const feature = cluster.attentionChanges!.find(change => change.id === "cluster:releases")!;
+    const apps = [{ ...cluster, attentionChanges: [feature] }];
+    function Destination({ section = "settings", visible = true }: { section?: string; visible?: boolean }) {
+      return <AttentionProvider apps={apps}><AttentionMarker appId="cluster" />
+        <AttentionDestination appId="cluster" sectionId={section} visible={visible}>
+          <ConnectionStatusContext.Provider value="connected"><ClusterApp sectionId={section} windowVisible={visible} navigate={() => {}} askContext={() => {}} /></ConnectionStatusContext.Provider>
+        </AttentionDestination>
+      </AttentionProvider>;
+    }
+    const view = render(withSession(<Destination />, { role: "owner" }));
+    await screen.findByRole("img", { name: "Unseen change" });
+    expect(fake.executeNamed.mock.calls.some(([name]) => name === "acknowledgeAttention")).toBe(false);
+    view.rerender(withSession(<Destination section="releases" visible={false} />, { role: "owner" }));
+    expect(screen.getByRole("img", { name: "Unseen change" })).toBeTruthy();
+    view.rerender(withSession(<Destination section="releases" />, { role: "owner" }));
+    await screen.findByText(/No release candidates have been prepared/);
+    await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
+    expect(fake.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")?.[1]).toContain('changeId: "cluster:releases"');
+  });
+
   it("acknowledges the Email app only when its inbox is visible", async () => {
     const fake = setup();
     const email = OS_REGISTRY.apps.find(app => app.id === "email")!;
