@@ -45,6 +45,16 @@ component and artifact. `releaseRetireCandidate` fences only unpublished
 candidates and releases their references. Every entry rejects non-owners before
 configuration, database or network access. Review history is scoped to its owner.
 
+`releaseCandidatePublications` reads the candidate's durable pending and complete
+publication records without configuration, credentials or a remote probe. It
+checks the candidate and approval under the same row lock as the effect read,
+validates every destination against the immutable manifest, and verifies stored
+completion proof. Missing intent means no recorded attempt, not confirmed remote
+absence; complete means verified readback at publication time, not perpetual
+remote availability. The public candidate operations have generated Go and
+TypeScript SDK methods. A UI must use these records for recovery after refresh;
+browser state cannot establish publication success.
+
 `component/pipelines.ReleaseCandidate` binds independently versioned components,
 exact repository commits, compatibility ranges, immutable artifact receipts,
 work receipt digests, the installed workflow identity and operator destinations.

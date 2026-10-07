@@ -273,5 +273,14 @@ func TestReleaseCandidateThroughNativeLibraryAndSecondEngine(t *testing.T) {
 	if publication["state"] != "complete" {
 		t.Fatal("native publication incomplete")
 	}
+	effectHistory := candidateEngineRows(t, engine, actor, "builtin", "releaseCandidatePublications", map[string]any{"candidateId": key})[0]
+	effectBody, err := json.Marshal(effectHistory["publications"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var effects []map[string]any
+	if err := json.Unmarshal(effectBody, &effects); err != nil || len(effects) != 1 || effects[0]["effectId"] != publication["effectId"] || effects[0]["state"] != "complete" {
+		t.Fatal("original engine could not recover durable publication history", err)
+	}
 	t.Logf("native journal+Library+Azurite+second-engine publication: candidate=%s effect=%s image=%s", key, publication["effectId"], imageDigest)
 }

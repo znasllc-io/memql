@@ -12995,6 +12995,34 @@ func WorkSignedRunsForOwnerBuild(args WorkSignedRunsForOwnerArgs) string {
 	return "query workSignedRunsForOwner()"
 }
 
+// WorkStepForOwnerRun -- One caller-owned execution receipt. A named key avoids reading an entire run when verifying a release artifact or one required check.
+//
+// Bound concept: v1:work:step (machine-readable: BoundConcepts["workStepForOwnerRun"] in generated_concepts.go).
+type WorkStepForOwnerRunArgs struct {
+	RunId   string
+	StepKey string
+}
+
+// WorkStepForOwnerRun calls the engine query workStepForOwnerRun.
+func (qc *QueryClient) WorkStepForOwnerRun(ctx context.Context, args WorkStepForOwnerRunArgs) (*Result, error) {
+	call := WorkStepForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workStepForOwnerRun", call)
+}
+
+func WorkStepForOwnerRunBuild(args WorkStepForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workStepForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("stepKey: ")
+	b.WriteString(quoteMemQL(args.StepKey))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkStepsForOwnerRun -- Every step of one of the caller's runs -- the run timeline. Bounded by the run; the client orders by seq, because @unbounded and sort cannot be combined.
 //
 // Bound concept: v1:work:step (machine-readable: BoundConcepts["workStepsForOwnerRun"] in generated_concepts.go).

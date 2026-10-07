@@ -3834,6 +3834,91 @@ func RecordFeedbackBuild(args RecordFeedbackArgs) string {
 	return b.String()
 }
 
+// ReleaseApproveCandidate -- Separately approve the exact reviewed candidate after fresh verification.
+type ReleaseApproveCandidateArgs struct {
+	CandidateId string
+}
+
+// ReleaseApproveCandidate calls the engine builtin releaseApproveCandidate.
+func (qc *QueryClient) ReleaseApproveCandidate(ctx context.Context, args ReleaseApproveCandidateArgs) (*Result, error) {
+	call := ReleaseApproveCandidateBuild(args)
+	return qc.executeNamed(ctx, "releaseApproveCandidate", call)
+}
+
+func ReleaseApproveCandidateBuild(args ReleaseApproveCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseApproveCandidate(")
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleaseCandidateConfiguration -- Read configured release sources and exact registry target identities. Owner only.
+type ReleaseCandidateConfigurationArgs struct {
+}
+
+// ReleaseCandidateConfiguration calls the engine builtin releaseCandidateConfiguration.
+func (qc *QueryClient) ReleaseCandidateConfiguration(ctx context.Context, args ReleaseCandidateConfigurationArgs) (*Result, error) {
+	call := ReleaseCandidateConfigurationBuild(args)
+	return qc.executeNamed(ctx, "releaseCandidateConfiguration", call)
+}
+
+func ReleaseCandidateConfigurationBuild(args ReleaseCandidateConfigurationArgs) string {
+	_ = args
+	return "builtin releaseCandidateConfiguration()"
+}
+
+// ReleaseCandidatePublications -- Read durable publication intents and verified completion for one candidate.
+type ReleaseCandidatePublicationsArgs struct {
+	CandidateId string
+}
+
+// ReleaseCandidatePublications calls the engine builtin releaseCandidatePublications.
+func (qc *QueryClient) ReleaseCandidatePublications(ctx context.Context, args ReleaseCandidatePublicationsArgs) (*Result, error) {
+	call := ReleaseCandidatePublicationsBuild(args)
+	return qc.executeNamed(ctx, "releaseCandidatePublications", call)
+}
+
+func ReleaseCandidatePublicationsBuild(args ReleaseCandidatePublicationsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseCandidatePublications(")
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleaseCandidates -- Page through caller-owned review history, including interrupted preparations.
+type ReleaseCandidatesArgs struct {
+	Cursor string
+	Limit  int
+}
+
+// ReleaseCandidates calls the engine builtin releaseCandidates.
+func (qc *QueryClient) ReleaseCandidates(ctx context.Context, args ReleaseCandidatesArgs) (*Result, error) {
+	call := ReleaseCandidatesBuild(args)
+	return qc.executeNamed(ctx, "releaseCandidates", call)
+}
+
+func ReleaseCandidatesBuild(args ReleaseCandidatesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseCandidates(")
+	if args.Cursor != "" {
+		b.WriteString("cursor: ")
+		b.WriteString(quoteMemQL(args.Cursor))
+	}
+	if args.Limit != 0 {
+		if b.Len() > 26 {
+			b.WriteString(", ")
+		}
+		b.WriteString("limit: ")
+		b.WriteString(fmt.Sprintf("%v", args.Limit))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseCut -- Cut a new release of MemQL: compute the next version from the repository's existing vX.Y.Z tags, create the tag at main's head, and publish a GitHub Release -- which is what fires the image-build cascade. Refuses with version_file_stale unless the repo-root VERSION file at main's head already reads the version being cut; VERSION arrives by pull request before the cut. Owner role only, enforced in Go before any network call. Returns the version, the Release URL and the base sha. Requires MEMQL_RELEASE_REPO and the MEMQL_GITHUB_RELEASE_TOKEN credential.
 type ReleaseCutArgs struct {
 	// Which part of the newest existing version to increment. major and minor zero the parts below them.
@@ -3929,6 +4014,110 @@ func ReleaseCutStatusBuild(args ReleaseCutStatusArgs) string {
 	b.WriteString("builtin releaseCutStatus(")
 	b.WriteString("version: ")
 	b.WriteString(quoteMemQL(args.Version))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleaseGetCandidate -- Read one exact release candidate owned by the caller.
+type ReleaseGetCandidateArgs struct {
+	CandidateId string
+}
+
+// ReleaseGetCandidate calls the engine builtin releaseGetCandidate.
+func (qc *QueryClient) ReleaseGetCandidate(ctx context.Context, args ReleaseGetCandidateArgs) (*Result, error) {
+	call := ReleaseGetCandidateBuild(args)
+	return qc.executeNamed(ctx, "releaseGetCandidate", call)
+}
+
+func ReleaseGetCandidateBuild(args ReleaseGetCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseGetCandidate(")
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleasePrepareCandidate -- Verify an immutable candidate using complete work evidence and operator configuration. This retains artifacts for review and does not approve or publish them.
+type ReleasePrepareCandidateArgs struct {
+	Candidate map[string]any
+}
+
+// ReleasePrepareCandidate calls the engine builtin releasePrepareCandidate.
+func (qc *QueryClient) ReleasePrepareCandidate(ctx context.Context, args ReleasePrepareCandidateArgs) (*Result, error) {
+	call := ReleasePrepareCandidateBuild(args)
+	return qc.executeNamed(ctx, "releasePrepareCandidate", call)
+}
+
+func ReleasePrepareCandidateBuild(args ReleasePrepareCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releasePrepareCandidate(")
+	b.WriteString("candidate: ")
+	b.WriteString(renderMemQLValue(args.Candidate))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleasePublishCandidate -- Publish one artifact only under its exact durable candidate approval.
+type ReleasePublishCandidateArgs struct {
+	CandidateId string
+	ApprovalId  string
+	TargetId    string
+	Component   string
+	Artifact    string
+}
+
+// ReleasePublishCandidate calls the engine builtin releasePublishCandidate.
+func (qc *QueryClient) ReleasePublishCandidate(ctx context.Context, args ReleasePublishCandidateArgs) (*Result, error) {
+	call := ReleasePublishCandidateBuild(args)
+	return qc.executeNamed(ctx, "releasePublishCandidate", call)
+}
+
+func ReleasePublishCandidateBuild(args ReleasePublishCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releasePublishCandidate(")
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("approvalId: ")
+	b.WriteString(quoteMemQL(args.ApprovalId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("targetId: ")
+	b.WriteString(quoteMemQL(args.TargetId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("component: ")
+	b.WriteString(quoteMemQL(args.Component))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("artifact: ")
+	b.WriteString(quoteMemQL(args.Artifact))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleaseRetireCandidate -- Permanently retire an unpublished candidate and release its retention pins.
+type ReleaseRetireCandidateArgs struct {
+	CandidateId string
+}
+
+// ReleaseRetireCandidate calls the engine builtin releaseRetireCandidate.
+func (qc *QueryClient) ReleaseRetireCandidate(ctx context.Context, args ReleaseRetireCandidateArgs) (*Result, error) {
+	call := ReleaseRetireCandidateBuild(args)
+	return qc.executeNamed(ctx, "releaseRetireCandidate", call)
+}
+
+func ReleaseRetireCandidateBuild(args ReleaseRetireCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseRetireCandidate(")
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
 	b.WriteString(")")
 	return b.String()
 }

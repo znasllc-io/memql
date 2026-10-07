@@ -84,6 +84,7 @@ func (i *Integration) IntegrationName() string { return "release" }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	out := append([]memql.IntegrationCapability{
+		{Name: "candidatePublications", Description: "Read caller-owned durable publication intents and verified completion history; performs no remote effects.", Handler: i.handleCandidateEffects},
 		{Name: "listCandidates", Description: "Read caller-owned candidate review history, including interrupted preparations.", Handler: i.handleCandidateList},
 		{Name: "candidateConfiguration", Description: "Read configured release version sources and exact target identities; no secrets or effects. Owner only.", Handler: i.handleCandidateConfiguration},
 		{Name: "prepareCandidate", Description: "Verify and retain a release candidate for separate owner approval; publishes nothing.", Handler: i.handleCandidatePrepare},

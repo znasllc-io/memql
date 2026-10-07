@@ -117,17 +117,25 @@ func (l *candidateLedger) get(ctx context.Context, key string) (candidateRecord,
 	if err != nil {
 		return candidateRecord{}, err
 	}
+	record, err = readCandidateApproval(ctx, tx, owner, record)
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return candidateRecord{}, err
+	}
+	return record, nil
+}
+
+func readCandidateApproval(ctx context.Context, q candidateQuerier, owner string, record candidateRecord) (candidateRecord, error) {
 	if record.State == "approved" {
 		var approvedBy string
-		if err := tx.QueryRowContext(ctx, `SELECT approval_id,approved_by FROM release_candidate_approvals WHERE candidate_id=$1`, key).Scan(&record.ApprovalID, &approvedBy); err != nil {
+		if err := q.QueryRowContext(ctx, `SELECT approval_id,approved_by FROM release_candidate_approvals WHERE candidate_id=$1`, record.ID).Scan(&record.ApprovalID, &approvedBy); err != nil {
 			return candidateRecord{}, err
 		}
 		if record.ApprovalID == "" || approvedBy != owner {
 			return candidateRecord{}, errors.New("candidate approval identity is inconsistent")
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return candidateRecord{}, err
 	}
 	return record, nil
 }

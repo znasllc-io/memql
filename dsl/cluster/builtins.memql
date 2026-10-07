@@ -46,10 +46,12 @@ builtin releaseCutStatus {
 }
 
 /// Read configured release sources and exact registry target identities. Owner only.
+@sdk
 @executor("integration.release.candidateConfiguration")
 builtin releaseCandidateConfiguration { }
 
 /// Page through caller-owned review history, including interrupted preparations.
+@sdk
 @executor("integration.release.listCandidates")
 builtin releaseCandidates {
   cursor string
@@ -58,6 +60,7 @@ builtin releaseCandidates {
 
 /// Verify an immutable candidate using complete work evidence and operator configuration.
 /// This retains artifacts for review and does not approve or publish them.
+@sdk
 @executor("integration.release.prepareCandidate")
 @args(profile="object")
 builtin releasePrepareCandidate {
@@ -65,18 +68,28 @@ builtin releasePrepareCandidate {
 }
 
 /// Read one exact release candidate owned by the caller.
+@sdk
 @executor("integration.release.getCandidate")
 builtin releaseGetCandidate {
   candidateId string!
 }
 
+/// Read durable publication intents and verified completion for one candidate.
+@sdk
+@executor("integration.release.candidatePublications")
+builtin releaseCandidatePublications {
+  candidateId string!
+}
+
 /// Separately approve the exact reviewed candidate after fresh verification.
+@sdk
 @executor("integration.release.approveCandidate")
 builtin releaseApproveCandidate {
   candidateId string!
 }
 
 /// Publish one artifact only under its exact durable candidate approval.
+@sdk
 @executor("integration.release.publishCandidate")
 builtin releasePublishCandidate {
   candidateId string!
@@ -87,6 +100,7 @@ builtin releasePublishCandidate {
 }
 
 /// Permanently retire an unpublished candidate and release its retention pins.
+@sdk
 @executor("integration.release.retireCandidate")
 builtin releaseRetireCandidate {
   candidateId string!
