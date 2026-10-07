@@ -1105,19 +1105,58 @@ jobs:
 
       # HAND THE EVIDENCE BACK, WHATEVER HAPPENED.
       #
-      # Everything the CLI wrote under sudo is root-owned and mode 0600 (the
-      # receipt is written that way deliberately -- it is a record of an
-      # install, and `writeAtomic` does not widen it). The steps above chown the
-      # files they need on the success path; this is the FAILURE path, where the
-      # evidence matters most and where those steps did not run.
-      #
-      # Without it a failed install uploads nothing: `actions/upload-artifact`
-      # runs as the runner, and a 0600 root-owned receipt is simply unreadable
-      # to it. The artifact would be empty for exactly the runs somebody needs
-      # to read.
+      # The installer receipt and baseline snapshots are written under sudo.
+      # Keep this repair to the known evidence files: RUNNER_TEMP also contains
+      # runner-owned files and tools that this lane does not need to change.
+      # A single finite timeout bounds even a stuck filesystem, after which
+      # diagnostics, teardown and artifact upload still get their own steps.
       - name: Hand the evidence back to the runner
         if: always()
-        run: sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP" || true
+        run: |
+          set -euo pipefail
+          owner="$(id -u):$(id -g)"
+          evidence=(
+            "$RUNNER_TEMP/before.txt"
+            "$RUNNER_TEMP/during.txt"
+            "$RUNNER_TEMP/after.txt"
+            "$RUNNER_TEMP/during.json"
+            "$RUNNER_TEMP/after.json"
+            "$RUNNER_TEMP/install-receipt.json"
+            "$RUNNER_TEMP/install-report.json"
+            "$RUNNER_TEMP/repair-report.json"
+            "$RUNNER_TEMP/upgrade-report.json"
+            "$RUNNER_TEMP/uninstall-report.json"
+            "$RUNNER_TEMP/pipelines-e2e.txt"
+            "$RUNNER_TEMP/diagnostics.txt"
+          )
+          root_owned=()
+          for path in "${evidence[@]}"; do
+            # Do not follow symlinks or change a multiply-linked file. The
+            # workflow only needs to transfer ordinary evidence files.
+            if [[ ! -f "$path" || -L "$path" ]]; then
+              continue
+            fi
+            metadata="$(stat -c '%u %h' -- "$path" 2>/dev/null || true)"
+            [[ -n "$metadata" ]] || continue
+            read -r file_uid link_count <<<"$metadata" || continue
+            if [[ "$file_uid" == 0 && "$link_count" == 1 ]]; then
+              root_owned+=("$path")
+            fi
+          done
+          if ((${#root_owned[@]} == 0)); then
+            echo "no root-owned evidence files need handoff"
+            exit 0
+          fi
+
+          set +e
+          timeout --signal=TERM --kill-after=5s 30s \
+            sudo chown --no-dereference "$owner" -- "${root_owned[@]}"
+          status=$?
+          set -e
+          if [[ "$status" -ne 0 ]]; then
+            echo "WARNING: bounded evidence ownership repair exited ${status}; continuing with diagnostics and teardown" >&2
+          fi
+          exit 0
 
       # A failed cluster lane is unreadable without the cluster's own account of
       # itself, and the runner is thrown away the moment this job ends. Best
