@@ -4,10 +4,13 @@ package pipelinesteps
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -41,7 +44,13 @@ func fleetReq() pl.StepRequest {
 	req.Step.Image = ""
 	req.Step.Caches = nil
 	req.Step.Services = nil
-	req.Step.Artifacts = []string{"coverage.out", "dist/report.json", "missing.txt"}
+	req.Step.Artifacts = nil
+	return req
+}
+
+func fleetArtifactReq() pl.StepRequest {
+	req := fleetReq()
+	req.Step.Artifacts = []string{"coverage.out", "dist/report.json"}
 	return req
 }
 
@@ -81,10 +90,11 @@ func (d *fakeDispatcher) only(t *testing.T) (worker.Request, context.Context) {
 // read and upload both run under it -- it answers its context: one already
 // ended stores nothing.
 type fakeLibrary struct {
-	mu    sync.Mutex
-	files []RunFile
-	omit  map[string]string
-	fail  map[string]error
+	mu         sync.Mutex
+	files      []RunFile
+	omit       map[string]string
+	fail       map[string]error
+	nextIntent uint64
 }
 
 func (l *fakeLibrary) StoreRunFile(ctx context.Context, f RunFile) (StoredFile, error) {
@@ -101,6 +111,30 @@ func (l *fakeLibrary) StoreRunFile(ctx context.Context, f RunFile) (StoredFile, 
 	}
 	l.files = append(l.files, f)
 	return StoredFile{FileID: fmt.Sprintf("file-%d", len(l.files))}, nil
+}
+
+func (l *fakeLibrary) StoreRunFileStream(ctx context.Context, f StreamRunFile) (StoredFile, error) {
+	body, err := io.ReadAll(io.LimitReader(f.Body, f.Size+1))
+	if err != nil {
+		return StoredFile{}, err
+	}
+	sum := sha256.Sum256(body)
+	if int64(len(body)) != f.Size || hex.EncodeToString(sum[:]) != f.SHA256 {
+		return StoredFile{}, errors.New("fixture received unverified bytes")
+	}
+	got, err := l.StoreRunFile(ctx, RunFile{OwnerUserID: f.OwnerUserID, WorkRunID: f.WorkRunID, StepKey: f.StepKey, Name: f.Name, MimeType: f.MimeType, Bytes: body})
+	if err != nil || got.Omitted != "" {
+		return got, err
+	}
+	l.mu.Lock()
+	l.nextIntent++
+	intent := fmt.Sprintf("%064x", l.nextIntent)
+	l.mu.Unlock()
+	got.Receipt = &StoredFileReceipt{IntentID: intent, FileID: got.FileID,
+		OwnerUserID: f.OwnerUserID, WorkRunID: f.WorkRunID, StepKey: f.StepKey, Attempt: f.Attempt, Path: f.Path,
+		Container: "fixture", Object: f.Path, URL: "https://fixture.invalid/" + f.Path, ETag: "fixture-version",
+		Size: f.Size, SHA256: f.SHA256}
+	return got, nil
 }
 
 func (l *fakeLibrary) named(name string) (RunFile, bool) {
@@ -167,6 +201,8 @@ func TestFleetStepRoutesByNeedLabelsAndPipelinesLabel(t *testing.T) {
 	d := &fakeDispatcher{}
 	f, _, tokens, _ := newTestFleet(t, d)
 	req := fleetReq()
+	req.Step.Artifacts = []string{"coverage.out"}
+	d.answer = fleetArtifactAnswer(base64.StdEncoding.EncodeToString(extractTestTgz(t, []extractTestEntry{{name: "coverage.out", body: "proof"}})))
 	if res := runFleet(t, f, req); res.Status != pl.OutcomeSucceeded {
 		t.Fatalf("result = %+v, want success", res)
 	}
@@ -540,8 +576,7 @@ func TestFleetStepCapturesTheMachinesOutput(t *testing.T) {
 
 // TestFleetStepStoresItsArtifactsAndNotes: the machine packs the declared
 // paths; they land in the owner's Library under the same limits as the
-// cluster's, and what did not arrive is a note beside the step, never a
-// failure of a step that passed.
+// cluster's, with mandatory immutable receipts for every declared file.
 func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 	tgz := extractTestTgz(t, []extractTestEntry{
 		{name: "coverage.out", body: "mode: set\n"},
@@ -549,7 +584,7 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 	})
 	output := func(extra string) string {
 		return `{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"` + base64.StdEncoding.EncodeToString(tgz) +
-			`","artifactsMissing":["missing.txt"]` + extra + `}`
+			`","artifactsMissing":[]` + extra + `}`
 	}
 	answer := func(out string) func(context.Context, worker.Request) (worker.Result, error) {
 		return func(context.Context, worker.Request) (worker.Result, error) {
@@ -560,7 +595,7 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 	t.Run("the declared files", func(t *testing.T) {
 		d := &fakeDispatcher{answer: answer(output(""))}
 		f, lib, _, _ := newTestFleet(t, d)
-		res := runFleet(t, f, fleetReq())
+		res := runFleet(t, f, fleetArtifactReq())
 		if res.Status != pl.OutcomeSucceeded || res.Failure != nil {
 			t.Fatalf("result = %+v, want a success", res)
 		}
@@ -572,18 +607,18 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 		if cov.OwnerUserID != "user-5d1e" || cov.WorkRunID != "work-91c2" || cov.StepKey != "tests.go-tests#2" {
 			t.Errorf("artifact = %+v, want it the owner's and bound to the run and step", cov)
 		}
-		if len(res.ArtifactFileIDs) != 2 {
+		if len(res.ArtifactFileIDs) != 2 || len(res.ArtifactIntentIDs) != 2 || !pl.ValidArtifactIntentIDs(res.ArtifactIntentIDs) {
 			t.Errorf("ArtifactFileIDs = %v, want two", res.ArtifactFileIDs)
 		}
-		if len(res.Notes) != 1 || res.Notes[0].Code != pl.CodeArtifactMissing || !strings.Contains(res.Notes[0].Message, "missing.txt") {
-			t.Errorf("notes = %+v, want one %s naming missing.txt", res.Notes, pl.CodeArtifactMissing)
+		if len(res.Notes) != 0 {
+			t.Errorf("unexpected notes: %+v", res.Notes)
 		}
 	})
 
 	t.Run("too large on the machine fails a passing step", func(t *testing.T) {
 		d := &fakeDispatcher{answer: answer(`{"exitCode":0,"durationMs":10,"artifactsTooLarge":true,"artifactsMissing":[]}`)}
 		f, _, _, _ := newTestFleet(t, d)
-		res := runFleet(t, f, fleetReq())
+		res := runFleet(t, f, fleetArtifactReq())
 		if res.Status != pl.OutcomeFailed || res.Failure == nil || res.Failure.Code != pl.CodeArtifactTooLarge || res.ExitCode != 0 {
 			t.Fatalf("result = %+v (failure %+v), want failed %s with the command's own exit 0",
 				res, res.Failure, pl.CodeArtifactTooLarge)
@@ -594,7 +629,7 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 		d := &fakeDispatcher{answer: answer(output(""))}
 		f, lib, _, _ := newTestFleet(t, d)
 		f.cfg.ArtifactMaxBytes = 4
-		res := runFleet(t, f, fleetReq())
+		res := runFleet(t, f, fleetArtifactReq())
 		if res.Failure == nil || res.Failure.Code != pl.CodeArtifactTooLarge {
 			t.Fatalf("result = %+v, want %s", res, pl.CodeArtifactTooLarge)
 		}
@@ -603,14 +638,14 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 		}
 	})
 
-	t.Run("what the Library would not keep is a note", func(t *testing.T) {
+	t.Run("required artifacts refused by the Library fail the step", func(t *testing.T) {
 		d := &fakeDispatcher{answer: answer(output(""))}
 		f, lib, _, _ := newTestFleet(t, d)
 		lib.omit = map[string]string{"coverage.out": "the owner's Library is over its quota"}
 		lib.fail = map[string]error{logFileName("tests.go-tests#2"): errors.New("blob storage timed out")}
-		res := runFleet(t, f, fleetReq())
-		if res.Status != pl.OutcomeSucceeded || res.LogFileID != "" {
-			t.Fatalf("result = %+v, want a success with no log file", res)
+		res := runFleet(t, f, fleetArtifactReq())
+		if res.Status != pl.OutcomeFailed || res.Failure == nil || res.Failure.Code != pl.CodeArtifactUnavailable || res.LogFileID != "" {
+			t.Fatalf("result = %+v, want artifact failure with no log file", res)
 		}
 		var said []string
 		for _, n := range res.Notes {
@@ -627,21 +662,20 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 		}
 	})
 
-	t.Run("an archive that is not an archive is a note", func(t *testing.T) {
+	t.Run("an invalid archive fails the step", func(t *testing.T) {
 		d := &fakeDispatcher{answer: answer(`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"bm90IGEgdGFyLmd6","artifactsMissing":[]}`)}
 		f, lib, _, _ := newTestFleet(t, d)
-		res := runFleet(t, f, fleetReq())
-		if res.Status != pl.OutcomeSucceeded || len(res.Notes) == 0 || res.Notes[0].Code != pl.CodeArtifactMissing {
-			t.Fatalf("result = %+v, want a success with a %s note", res, pl.CodeArtifactMissing)
+		res := runFleet(t, f, fleetArtifactReq())
+		if res.Status != pl.OutcomeFailed || res.Failure == nil || res.Failure.Code != pl.CodeArtifactUnavailable {
+			t.Fatalf("result = %+v, want failure %s", res, pl.CodeArtifactMissing)
 		}
 		if len(lib.files) != 1 {
 			t.Errorf("Library = %d files, want only the log", len(lib.files))
 		}
 	})
 
-	// No archive: which declared paths matched nothing is the machine's word
-	// when it gives one (artifactsMissing), and every declared path only when
-	// it says nothing.
+	// Every absent archive fails required artifacts, regardless of whether
+	// the machine included a missing-path explanation.
 	for _, c := range []struct {
 		name, out string
 		missing   []string
@@ -651,14 +685,14 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 		{"no archive from a failed command that packed nothing and names nothing",
 			`{"exitCode":2,"durationMs":10,"artifactsTgzBase64":"","artifactsMissing":[]}`, nil},
 		{"no archive and no word from the machine: every declared path",
-			`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":""}`, fleetReq().Step.Artifacts},
+			`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":""}`, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			d := &fakeDispatcher{answer: answer(c.out)}
 			f, lib, _, _ := newTestFleet(t, d)
-			res := runFleet(t, f, fleetReq())
-			if len(lib.files) != 1 || res.Failure != nil {
-				t.Fatalf("result = %+v with %d Library files, want no failure and only the log", res, len(lib.files))
+			res := runFleet(t, f, fleetArtifactReq())
+			if len(lib.files) != 1 || res.Status != pl.OutcomeFailed || res.Failure == nil || res.Failure.Code != pl.CodeArtifactUnavailable {
+				t.Fatalf("result = %+v with %d Library files, want artifact failure and only the log", res, len(lib.files))
 			}
 			if len(res.Notes) != len(c.missing) {
 				t.Fatalf("notes = %+v, want one for each of %q", res.Notes, c.missing)
@@ -676,7 +710,7 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 		// failure, and the command's exit status stays as it chose.
 		d := &fakeDispatcher{answer: answer(`{"exitCode":2,"durationMs":10,"artifactsTooLarge":true,"artifactsMissing":[]}`)}
 		f, _, _, _ := newTestFleet(t, d)
-		res := runFleet(t, f, fleetReq())
+		res := runFleet(t, f, fleetArtifactReq())
 		if res.Status != pl.OutcomeFailed || res.ExitCode != 2 || res.Failure == nil || res.Failure.Code != pl.CodeArtifactTooLarge {
 			t.Fatalf("result = %+v (failure %+v), want failed %s with the command's exit 2", res, res.Failure, pl.CodeArtifactTooLarge)
 		}
@@ -689,27 +723,27 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 			strings.Repeat("A", 90000) + `","artifactsMissing":[]}`)}
 		f, _, _, _ := newTestFleet(t, d)
 		f.cfg.ArtifactMaxBytes = 4
-		res := runFleet(t, f, fleetReq())
+		res := runFleet(t, f, fleetArtifactReq())
 		if res.Status != pl.OutcomeFailed || res.Failure == nil || res.Failure.Code != pl.CodeArtifactTooLarge {
 			t.Fatalf("result = %+v (failure %+v), want failed %s", res, res.Failure, pl.CodeArtifactTooLarge)
 		}
 	})
 
-	t.Run("an agent node with no Library notes each file it could not store", func(t *testing.T) {
+	t.Run("an agent node with no Library fails required artifacts", func(t *testing.T) {
 		d := &fakeDispatcher{answer: answer(output(""))}
 		f, _, _, _ := newTestFleet(t, d)
 		f.library = nil
-		res := runFleet(t, f, fleetReq())
-		if res.Status != pl.OutcomeSucceeded || res.LogFileID != "" || len(res.ArtifactFileIDs) != 0 {
-			t.Fatalf("result = %+v, want a success with no files", res)
+		res := runFleet(t, f, fleetArtifactReq())
+		if res.Status != pl.OutcomeFailed || res.Failure == nil || res.Failure.Code != pl.CodeArtifactUnavailable || res.LogFileID != "" || len(res.ArtifactFileIDs) != 0 {
+			t.Fatalf("result = %+v, want artifact failure with no files", res)
 		}
 		var said []string
 		for _, n := range res.Notes {
 			said = append(said, n.Message)
 		}
-		all := strings.Join(said, " | ")
+		all := strings.Join(said, " | ") + " | " + res.Failure.Message
 		for _, want := range []string{"the step's log was not stored: this agent node has no Library to store it in",
-			`the artifact "coverage.out" was not stored: this agent node has no Library to store it in`} {
+			`required artifact storage has no verified streaming port`} {
 			if !strings.Contains(all, want) {
 				t.Errorf("notes %q do not say %q", all, want)
 			}
@@ -723,7 +757,7 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 		}}
 		f, lib, _, _ := newTestFleet(t, d)
 		f.cfg.LogStoreMaxLines = 2
-		req := fleetReq()
+		req := fleetArtifactReq()
 		req.Step.Artifacts = nil
 		res := runFleet(t, f, req)
 		if !res.LogCapped || len(res.Notes) != 1 || res.Notes[0].Code != pl.CodeLogCapped ||
@@ -745,11 +779,14 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 		d := &fakeDispatcher{answer: answer(`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"` + many + `","artifactsMissing":[]}`)}
 		f, _, _, _ := newTestFleet(t, d)
 		f.library = &rtLibrary{idPad: "-" + strings.Repeat("i", 800)}
-		req := fleetReq()
+		req := fleetArtifactReq()
 		req.Step.Artifacts = []string{"dist/*"}
 		res := runFleet(t, f, req)
 		if kept := len(res.ArtifactFileIDs); kept == 0 || kept == files {
 			t.Fatalf("%d of %d artifact file ids kept, want as many as fit", kept, files)
+		}
+		if len(res.ArtifactIntentIDs) != files {
+			t.Fatalf("lost durable receipt IDs: %d", len(res.ArtifactIntentIDs))
 		}
 		if n := outcomeBytes(res); n > outcomeMaxBytes {
 			t.Errorf("the outcome is %d bytes, over outcomeMaxBytes (%d)", n, outcomeMaxBytes)
@@ -787,13 +824,9 @@ func TestFleetStepMasksTheMachinesWordsForEveryFormOfASecret(t *testing.T) {
 	}
 }
 
-// TestFleetStepMasksASecretInAnArtifactEntryName: an artifact entry's name is
-// the step's to choose, and the note beside the step quotes a refused one --
-// a note that rides the step's result to the run's rows and its check run.
-// The fleet files a machine's artifacts through the runner's own helpers
-// (settle.go), so the note is masked as the cluster's is: the name masked
-// before it is cut, and the note masked whole once it is written, quoting and
-// all.
+// TestFleetStepMasksASecretInAnArtifactEntryName verifies that rejecting an
+// unsafe or undeclared archive neither files a partial artifact nor leaks
+// producer-controlled secret-bearing paths through its failure explanation.
 func TestFleetStepMasksASecretInAnArtifactEntryName(t *testing.T) {
 	// A secret holding what quoting writes: a name carrying its unescaped
 	// form is spelled as the secret once the note quotes it.
@@ -802,14 +835,13 @@ func TestFleetStepMasksASecretInAnArtifactEntryName(t *testing.T) {
 		name   string
 		entry  string
 		secret string // what must appear in no note
-		masked string // what the note says instead
 	}{
-		{"a secret in a refused entry's name", "secrets/" + plantedNPM + ".txt", plantedNPM, "secrets/***.txt"},
+		{"a secret in a refused entry's name", "secrets/" + plantedNPM + ".txt", plantedNPM},
 		// The secret straddles the cut at 256 bytes: cut first, and the six
 		// bytes of it before the cut survive where no masker can know them.
 		{"a secret straddling the cut of a long name", "dist/" + strings.Repeat("n", 245) + plantedNPM + strings.Repeat("n", 20000),
-			plantedNPM[:6], "nnn***nnn"},
-		{"a secret the note's quoting spells out", `secrets/quo"ted-` + strings.Repeat("q", 12), quoted, `"secrets/***"`},
+			plantedNPM[:6]},
+		{"a secret the note's quoting spells out", `secrets/quo"ted-` + strings.Repeat("q", 12), quoted},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tgz := extractTestTgz(t, []extractTestEntry{
@@ -827,22 +859,19 @@ func TestFleetStepMasksASecretInAnArtifactEntryName(t *testing.T) {
 
 			res := runFleet(t, f, req)
 
-			if res.Status != pl.OutcomeSucceeded || res.Failure != nil {
-				t.Fatalf("result = %+v (failure %+v), want a success: a refused entry is a note", res, res.Failure)
+			if res.Status != pl.OutcomeFailed || res.Failure == nil || res.Failure.Code != pl.CodeArtifactUnavailable {
+				t.Fatalf("result = %+v (failure %+v), want failure: a refused entry invalidates the snapshot", res, res.Failure)
 			}
-			if _, ok := lib.named("coverage.out"); !ok {
-				t.Errorf("the declared artifact beside the refused entry was not stored: %+v", lib.files)
+			if _, ok := lib.named("coverage.out"); ok {
+				t.Errorf("a partial archive was stored before validation: %+v", lib.files)
 			}
 			var said []string
 			for _, n := range res.Notes {
 				said = append(said, n.Message)
 			}
-			all := strings.Join(said, " | ")
+			all := strings.Join(said, " | ") + " | " + res.Failure.Message
 			if strings.Contains(all, c.secret) {
 				t.Errorf("notes %.600q... carry the secret %q", all, c.secret)
-			}
-			if !strings.Contains(all, c.masked) {
-				t.Errorf("notes %.600q... do not quote the refused entry as %q", all, c.masked)
 			}
 		})
 	}
