@@ -147,6 +147,14 @@ releasing the installation slot. Neither an empty unfenced inventory nor an
 elapsed timeout can prove completion. Composition with started preparation
 retirement remains unfinished; no public cleanup action is registered.
 
+The local required-database race tests cover lost upload receipts, replacement
+hosts, concurrent reservations, pagination and owner authorization. A separate
+regression observes the older writer waiting on the actual native PostgreSQL
+advisory lock, then refusing after the fence commits. The real Azurite test
+resumes an admitted upload after cleanup establishes its leased tombstone and
+confirms that the provider refuses it. These tests passed; they do not qualify
+the unfinished installation cleanup workflow.
+
 ### Atomic preparation handoff
 
 The private promotion operation transfers the shared installation head directly
