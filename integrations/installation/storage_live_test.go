@@ -87,6 +87,11 @@ func TestStorageAgainstInstalledLocalCluster(t *testing.T) {
 	require.GreaterOrEqual(t, len(evidence.volumes), 3, "database data/WAL and installation blob storage must be observed")
 	again, err := verifyStoragePreservation(ctx, storageLiveAPI{kubeconfig}, before, after)
 	require.NoError(t, err)
-	require.Equal(t, evidence, again, "independent reads bind the same current PVC/PV identities")
+	require.Equal(t, evidence.digest, again.digest, "independent reads bind the same current PVC/PV identities")
+	require.Equal(t, evidence.before, again.before)
+	require.Equal(t, evidence.after, again.after)
+	require.Equal(t, evidence.volumes, again.volumes)
+	require.True(t, freshPreservationObservation(evidence.observed, time.Now()))
+	require.True(t, freshPreservationObservation(again.observed, time.Now()))
 	t.Logf("read-only installed storage proof: volumes=%d digest=%s", len(evidence.volumes), evidence.digest)
 }

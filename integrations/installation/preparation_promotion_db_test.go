@@ -200,7 +200,7 @@ func TestPreparationPromotionRejectsChangedAuthorityAndEvidence(t *testing.T) {
 	db, _ := journalDB(t)
 	j := preparationConnection(db)
 	ctx, r, plan, evidence := promotionFixture(t, j)
-	for _, fault := range []string{"missing configuration proof", "changed configuration invariant", "stale configuration", "future configuration", "missing artifacts", "expired artifacts", "wrong artifact operator", "wrong artifact render", "operator", "role", "origin", "workflow", "configuration", "candidate", "approval", "source", "receipt", "render", "resource-diff", "storage", "sensitive", "destination", "cluster", "source-path", "application", "application-namespace", "application-uid", "generation", "sync-options"} {
+	for _, fault := range []string{"missing configuration proof", "changed configuration invariant", "stale configuration", "future configuration", "missing artifacts", "expired artifacts", "wrong artifact operator", "wrong artifact render", "operator", "role", "origin", "workflow", "configuration", "candidate", "approval", "source", "receipt", "render", "resource-diff", "storage", "stale storage", "future storage", "undated storage", "sensitive", "stale sensitive", "future sensitive", "undated sensitive", "destination", "cluster", "source-path", "application", "application-namespace", "application-uid", "generation", "sync-options"} {
 		t.Run(fault, func(t *testing.T) {
 			caller, p, e := ctx, plan, evidence
 			workflow, configuration := r.Scope.WorkflowDigest, r.Scope.ConfigurationDigest
@@ -251,8 +251,20 @@ func TestPreparationPromotionRejectsChangedAuthorityAndEvidence(t *testing.T) {
 				e.resources.before = e.resources.after
 			case "storage":
 				e.storage = storageEvidence{}
+			case "stale storage":
+				e.storage.observed = time.Now().Add(-2 * time.Minute)
+			case "future storage":
+				e.storage.observed = time.Now().Add(time.Minute)
+			case "undated storage":
+				e.storage.observed = time.Time{}
 			case "sensitive":
 				e.sensitive = sensitiveEvidence{}
+			case "stale sensitive":
+				e.sensitive.observed = time.Now().Add(-2 * time.Minute)
+			case "future sensitive":
+				e.sensitive.observed = time.Now().Add(time.Minute)
+			case "undated sensitive":
+				e.sensitive.observed = time.Time{}
 			case "destination":
 				p.Intent.BeforeSpec = []byte(strings.ReplaceAll(string(p.Intent.BeforeSpec), `"namespace":"memql"`, `"namespace":"other"`))
 			case "cluster":

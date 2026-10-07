@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/integrations/argocd"
@@ -66,7 +67,12 @@ func TestSensitiveEvidenceReadsCredentialsWithoutRetainingValues(t *testing.T) {
 	other, _, _, _ := sensitiveFixture(t)
 	again, err := verifySensitivePreservation(context.Background(), other, before, after, required)
 	require.NoError(t, err)
-	require.Equal(t, evidence, again, "a fresh replica must observe the same native evidence")
+	require.Equal(t, evidence.digest, again.digest, "a fresh replica must bind the same native resources")
+	require.Equal(t, evidence.before, again.before)
+	require.Equal(t, evidence.after, again.after)
+	require.Equal(t, evidence.observations, again.observations)
+	require.True(t, freshPreservationObservation(evidence.observed, time.Now()))
+	require.True(t, freshPreservationObservation(again.observed, time.Now()))
 	editStorageResponse(t, other, protectedSecretPath, func(value map[string]any) { resourceMap(value, "metadata")["uid"] = "replacement-uid" })
 	replaced, err := verifySensitivePreservation(context.Background(), other, before, after, required)
 	require.NoError(t, err)
