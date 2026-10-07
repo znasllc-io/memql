@@ -162,6 +162,15 @@ func (s *candidatePublishScope) begin(ctx context.Context, _ map[string]any) (an
 		return nil, err
 	}
 	s.intent = intent
+	if intent.Artifact.Kind == "file" {
+		plan, err := s.p.targetReader.draftPlan(ctx, s.record, intent.Target.TargetID)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.p.ledger.beginDraft(ctx, s.record.ID, s.request.ApprovalID, plan); err != nil {
+			return nil, err
+		}
+	}
 	if intent.State == "complete" {
 		s.out = intent
 	}

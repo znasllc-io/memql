@@ -13,6 +13,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	pl "github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/integrations/githubrelease"
 	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 )
 
@@ -218,14 +219,15 @@ func (i *Integration) handleCandidateConfiguration(ctx context.Context, _ map[st
 	slices.SortFunc(sources, func(a, b candidateVersionSource) int { return strings.Compare(a.Component, b.Component) })
 	type targetView struct {
 		pl.ReleaseDestination
-		Origin               string `json:"origin"`
-		Repository           string `json:"repository"`
-		Kind                 string `json:"kind"`
-		Tag                  string `json:"tag,omitempty"`
-		SourceCommit         string `json:"sourceCommit,omitempty"`
-		ReleaseID            int64  `json:"releaseId,omitempty"`
-		AssetName            string `json:"assetName,omitempty"`
-		CredentialConfigured bool   `json:"credentialConfigured"`
+		Origin               string                  `json:"origin"`
+		Repository           string                  `json:"repository"`
+		Kind                 string                  `json:"kind"`
+		Tag                  string                  `json:"tag,omitempty"`
+		SourceCommit         string                  `json:"sourceCommit,omitempty"`
+		ReleaseID            int64                   `json:"releaseId,omitempty"`
+		Draft                *githubrelease.Metadata `json:"draft,omitempty"`
+		AssetName            string                  `json:"assetName,omitempty"`
+		CredentialConfigured bool                    `json:"credentialConfigured"`
 	}
 	targets := make([]targetView, 0, len(p.targetReader.targets))
 	for _, target := range p.targetReader.targets {
@@ -241,7 +243,7 @@ func (i *Integration) handleCandidateConfiguration(ctx context.Context, _ map[st
 			return nil, err
 		}
 		targets = append(targets, targetView{ReleaseDestination: pl.ReleaseDestination{TargetID: target.ID, TargetDigest: digest, Component: target.Component, Artifact: target.Artifact, Operation: "publish"},
-			Kind: "file", Origin: target.APIOrigin, Repository: target.Repository, Tag: target.Tag, SourceCommit: target.SourceCommit, ReleaseID: target.ReleaseID, AssetName: target.AssetName, CredentialConfigured: true})
+			Kind: "file", Origin: target.APIOrigin, Repository: target.Repository, Tag: target.Tag, SourceCommit: target.SourceCommit, ReleaseID: target.ReleaseID, Draft: target.Draft, AssetName: target.AssetName, CredentialConfigured: true})
 	}
 	slices.SortFunc(targets, func(a, b targetView) int { return strings.Compare(a.TargetID, b.TargetID) })
 	return resultNode("candidate-configuration", "", map[string]any{"sources": sources, "targets": targets, "assemblies": p.assemblyPlans})

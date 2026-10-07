@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	pl "github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/integrations/githubrelease"
 )
 
 func fileTargetFixture() candidateFileTarget {
@@ -116,5 +117,40 @@ func TestCandidateFileOnlyConfigurationAndGlobalTargetUniqueness(t *testing.T) {
 				t.Fatal("unsafe configuration accepted or disclosed", err)
 			}
 		})
+	}
+}
+
+func TestCandidateDeferredDraftIsBoundBeforeCredentialAccess(t *testing.T) {
+	target := fileTargetFixture()
+	target.ReleaseID = 0
+	if _, _, _, err := target.snapshot(); err == nil {
+		t.Fatal("implicit deferred draft admitted")
+	}
+	target.Draft = &githubrelease.Metadata{Name: "Version 0.25.0", Body: "Reviewed notes"}
+	_, _, digest, err := target.snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := pl.ReleaseDestination{TargetID: target.ID, TargetDigest: digest, Component: target.Component, Artifact: target.Artifact, Operation: "publish"}
+	reader := candidateTargetReader{files: map[string]candidateFileTarget{target.ID: target}, secret: func(context.Context, string) (string, error) {
+		t.Fatal("unbound upload reached credentials")
+		return "", nil
+	}}
+	if _, err := reader.filePublisher(ownerCtx(), destination); err == nil {
+		t.Fatal("deferred draft admitted upload")
+	}
+	metadata := *target.Draft
+	metadata.Latest = true
+	changed := target
+	changed.Draft = &metadata
+	_, _, next, err := changed.snapshot()
+	if err != nil || next == digest {
+		t.Fatal("latest choice escaped approval", err)
+	}
+	other := target
+	other.APIOrigin = "https://API.GITHUB.COM:443/"
+	other.Repository = "ACME/Engine"
+	if draftResourceKey(other) != draftResourceKey(target) {
+		t.Fatal("case or default port bypasses shared release fence")
 	}
 }

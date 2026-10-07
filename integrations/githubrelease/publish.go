@@ -97,6 +97,10 @@ func validTag(tag string) bool {
 // configuration validation, but Publish requires an explicit credential.
 // No ambient proxy, netrc, Git credential helper or host discovery is used.
 func NewPublisher(t Target) (*Publisher, error) {
+	return newPublisher(t, true)
+}
+
+func newPublisher(t Target, requireID bool) (*Publisher, error) {
 	api, err := origin(t.APIOrigin, t.AllowLoopbackHTTP)
 	if err != nil {
 		return nil, err
@@ -105,7 +109,7 @@ func NewPublisher(t Target) (*Publisher, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !repositoryPattern.MatchString(t.Repository) || !validTag(t.Tag) || !commitPattern.MatchString(t.SourceCommit) || !assetNamePattern.MatchString(t.AssetName) || t.ReleaseID <= 0 || len(t.Token) > 16<<10 {
+	if !repositoryPattern.MatchString(t.Repository) || !validTag(t.Tag) || !commitPattern.MatchString(t.SourceCommit) || !assetNamePattern.MatchString(t.AssetName) || t.ReleaseID < 0 || (requireID && t.ReleaseID == 0) || len(t.Token) > 16<<10 {
 		return nil, errors.New("release target requires exact repository, draft ID, tag, commit and stable asset name")
 	}
 	for _, c := range t.Token {
@@ -149,15 +153,8 @@ func (p *Publisher) Publish(ctx context.Context, v *VerifiedFile) (Receipt, erro
 	if v.dir == "" {
 		return Receipt{}, errors.New("verified release file is closed or uninitialized")
 	}
-	transport := &http.Transport{
-		Proxy: nil, DialContext: (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: p.target.RootCAs},
-		TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: 30 * time.Second,
-		MaxResponseHeaderBytes: 64 << 10, MaxIdleConns: 4, MaxIdleConnsPerHost: 2,
-		IdleConnTimeout: 30 * time.Second, DisableCompression: true,
-	}
-	defer transport.CloseIdleConnections()
-	s := &publication{p: p, client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	s, close := p.session()
+	defer close()
 	assetID, err := s.publish(ctx, v)
 	if err != nil {
 		if s.attempted {
@@ -173,11 +170,24 @@ func (p *Publisher) Publish(ctx context.Context, v *VerifiedFile) (Receipt, erro
 		AssetID: assetID, AssetName: t.AssetName, SHA256: v.expected.SHA256, Size: v.expected.Size}, nil
 }
 
+func (p *Publisher) session() (*publication, func()) {
+	transport := &http.Transport{
+		Proxy: nil, DialContext: (&net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: p.target.RootCAs},
+		TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: 30 * time.Second,
+		MaxResponseHeaderBytes: 64 << 10, MaxIdleConns: 4, MaxIdleConnsPerHost: 2,
+		IdleConnTimeout: 30 * time.Second, DisableCompression: true,
+	}
+	s := &publication{p: p, client: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	return s, transport.CloseIdleConnections
+}
+
 type publication struct {
-	p         *Publisher
-	client    *http.Client
-	requests  int
-	attempted bool
+	p           *Publisher
+	client      *http.Client
+	requests    int
+	maxRequests int
+	attempted   bool
 }
 
 func (s *publication) releasePath() string {
@@ -248,7 +258,11 @@ func (s *publication) publish(ctx context.Context, v *VerifiedFile) (int64, erro
 
 func (s *publication) request(ctx context.Context, method, endpoint string, body io.Reader, size int64, accept string, credential bool) (*http.Response, error) {
 	s.requests++
-	if s.requests > 96 {
+	limit := s.maxRequests
+	if limit == 0 {
+		limit = 96
+	}
+	if s.requests > limit {
 		return nil, errors.New("release protocol request limit exceeded")
 	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
@@ -314,6 +328,11 @@ func (s *publication) checkRelease(ctx context.Context) error {
 	if release.ID != t.ReleaseID || !release.Draft || release.Immutable || release.Tag != t.Tag || release.UploadURL != s.p.upload+s.releasePath()+"/assets{?name,label}" {
 		return errors.New("release is not the configured draft or upload authority changed")
 	}
+	return s.checkTag(ctx)
+}
+
+func (s *publication) checkTag(ctx context.Context) error {
+	t := s.p.target
 	var ref struct {
 		Ref    string    `json:"ref"`
 		Object gitObject `json:"object"`

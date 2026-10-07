@@ -1,0 +1,105 @@
+{
+  "automation": "cluster/automations.memql releaseCreateDraftWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.releaseCreateDraftWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "releaseDraftCheckCandidate"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftBegin"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftEnsureTag"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftFind"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftClaimCreate"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftUncertain"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftCreate"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftRecord"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.releaseCreateDraftWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "releaseDraftCheckCandidate"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftBegin"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftEnsureTag"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftFind"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftClaimCreate"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftUncertain"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftCreate"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseDraftRecord"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

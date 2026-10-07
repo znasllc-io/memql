@@ -3895,6 +3895,26 @@ func ReleaseCandidateConfigurationBuild(args ReleaseCandidateConfigurationArgs) 
 	return "builtin releaseCandidateConfiguration()"
 }
 
+// ReleaseCandidateDrafts -- Read durable draft bindings and publication history without remote effects.
+type ReleaseCandidateDraftsArgs struct {
+	CandidateId string
+}
+
+// ReleaseCandidateDrafts calls the engine builtin releaseCandidateDrafts.
+func (qc *QueryClient) ReleaseCandidateDrafts(ctx context.Context, args ReleaseCandidateDraftsArgs) (*Result, error) {
+	call := ReleaseCandidateDraftsBuild(args)
+	return qc.executeNamed(ctx, "releaseCandidateDrafts", call)
+}
+
+func ReleaseCandidateDraftsBuild(args ReleaseCandidateDraftsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseCandidateDrafts(")
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseCandidatePublications -- Read durable publication intents and verified completion for one candidate.
 type ReleaseCandidatePublicationsArgs struct {
 	CandidateId string
@@ -3941,6 +3961,38 @@ func ReleaseCandidatesBuild(args ReleaseCandidatesArgs) string {
 		b.WriteString("limit: ")
 		b.WriteString(fmt.Sprintf("%v", args.Limit))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleaseCreateCandidateDraft -- Separately create or reconcile the exact owner-approved draft and tag.
+type ReleaseCreateCandidateDraftArgs struct {
+	CandidateId string
+	ApprovalId  string
+	TargetId    string
+}
+
+// ReleaseCreateCandidateDraft calls the engine builtin releaseCreateCandidateDraft.
+func (qc *QueryClient) ReleaseCreateCandidateDraft(ctx context.Context, args ReleaseCreateCandidateDraftArgs) (*Result, error) {
+	call := ReleaseCreateCandidateDraftBuild(args)
+	return qc.executeNamed(ctx, "releaseCreateCandidateDraft", call)
+}
+
+func ReleaseCreateCandidateDraftBuild(args ReleaseCreateCandidateDraftArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseCreateCandidateDraft(")
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("approvalId: ")
+	b.WriteString(quoteMemQL(args.ApprovalId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("targetId: ")
+	b.WriteString(quoteMemQL(args.TargetId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -4080,6 +4132,38 @@ func ReleasePrepareCandidateBuild(args ReleasePrepareCandidateArgs) string {
 	b.WriteString("builtin releasePrepareCandidate(")
 	b.WriteString("candidate: ")
 	b.WriteString(renderMemQLValue(args.Candidate))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ReleasePromoteCandidateDraft -- Separately promote a verified draft with the exact approved asset set.
+type ReleasePromoteCandidateDraftArgs struct {
+	CandidateId string
+	ApprovalId  string
+	TargetId    string
+}
+
+// ReleasePromoteCandidateDraft calls the engine builtin releasePromoteCandidateDraft.
+func (qc *QueryClient) ReleasePromoteCandidateDraft(ctx context.Context, args ReleasePromoteCandidateDraftArgs) (*Result, error) {
+	call := ReleasePromoteCandidateDraftBuild(args)
+	return qc.executeNamed(ctx, "releasePromoteCandidateDraft", call)
+}
+
+func ReleasePromoteCandidateDraftBuild(args ReleasePromoteCandidateDraftArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releasePromoteCandidateDraft(")
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("approvalId: ")
+	b.WriteString(quoteMemQL(args.ApprovalId))
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("targetId: ")
+	b.WriteString(quoteMemQL(args.TargetId))
 	b.WriteString(")")
 	return b.String()
 }

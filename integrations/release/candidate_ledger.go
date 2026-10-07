@@ -205,7 +205,8 @@ func (l *candidateLedger) change(ctx context.Context, key string, approve, retir
 	}
 	if retire {
 		var effects bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM release_publication_intents WHERE candidate_id=$1)`, key).Scan(&effects); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM release_publication_intents WHERE candidate_id=$1)
+OR EXISTS(SELECT 1 FROM release_draft_intents WHERE candidate_id=$1)`, key).Scan(&effects); err != nil {
 			return candidateRecord{}, err
 		}
 		if effects {

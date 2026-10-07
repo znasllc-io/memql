@@ -315,3 +315,43 @@ automation releasePublishCandidateWorkflow {
   }
   builtin releasePublicationRecordReceipt()
 }
+
+/// Create or reconcile one exact reviewed draft. Native fences ensure that an
+/// uncertain create is observed again, never repeated because a read is empty.
+@template
+automation releaseCreateDraftWorkflow {
+  builtin releaseDraftCheckCandidate()
+  binding := builtin releaseDraftBegin()
+  if binding.ready {
+    builtin releaseDraftObserveBound()
+    return
+  }
+  builtin releaseDraftEnsureTag()
+  observed := builtin releaseDraftFind()
+  if !observed.found {
+    attempt := builtin releaseDraftClaimCreate()
+    if !attempt.claimed { builtin releaseDraftUncertain() }
+    builtin releaseDraftCreate()
+  }
+  builtin releaseDraftRecord()
+}
+
+/// Publication is separate from draft creation and asset upload. Verify every
+/// approved destination before exposing a complete release; recovery observes
+/// a started attempt and never repeats its PATCH after an uncertain response.
+@template
+automation releasePromoteDraftWorkflow {
+  builtin releaseDraftCheckCandidate()
+  binding := builtin releaseDraftBegin()
+  publications := builtin releasePromotionPublications()
+  for item in publications {
+    if !item.complete { builtin releasePromotionRefuse() }
+  }
+  observed := builtin releasePromotionObserve()
+  attempt := builtin releasePromotionClaim()
+  if observed.draft {
+    if !attempt.claimed { builtin releaseDraftUncertain() }
+    builtin releasePromotionWrite()
+  }
+  builtin releasePromotionRecord()
+}
