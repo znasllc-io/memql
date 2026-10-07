@@ -119,6 +119,9 @@ func verifySensitivePreservation(ctx context.Context, api argocd.API, before, af
 		if err := protectedApplyOptions(meta); err != nil {
 			return sensitiveEvidence{}, err
 		}
+		if !existed && !protectedFromPrune(meta) {
+			return sensitiveEvidence{}, errors.New("out-of-band protected resource requires explicit Argo prune and comparison protection")
+		}
 		if err := owners.observe(ctx, key, meta, 0); err != nil {
 			return sensitiveEvidence{}, err
 		}
@@ -142,8 +145,6 @@ func verifySensitivePreservation(ctx context.Context, api argocd.API, before, af
 				if ea != nil || eb != nil || !sameJSON(a, b) || !sameJSON(b, current) {
 					return sensitiveEvidence{}, errors.New("rendered secret would change existing credential material")
 				}
-			} else if !hasArgoOption(meta, "argocd.argoproj.io/sync-options", "Prune=false") || !hasArgoOption(meta, "argocd.argoproj.io/compare-options", "IgnoreExtraneous") {
-				return sensitiveEvidence{}, errors.New("out-of-band secret requires explicit Argo prune and comparison protection")
 			}
 		} else {
 			if resourceText(resourceMap(live, "status"), "phase") != "Active" {
@@ -211,6 +212,10 @@ func hasArgoOption(meta map[string]any, key, expected string) bool {
 		}
 	}
 	return found
+}
+
+func protectedFromPrune(meta map[string]any) bool {
+	return hasArgoOption(meta, "argocd.argoproj.io/sync-options", "Prune=false") && hasArgoOption(meta, "argocd.argoproj.io/compare-options", "IgnoreExtraneous")
 }
 
 func protectedApplyOptions(meta map[string]any) error {

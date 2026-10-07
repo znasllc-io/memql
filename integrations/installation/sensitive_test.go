@@ -219,3 +219,74 @@ func TestSensitiveOwnershipIncludesFreshAncestorsAndScope(t *testing.T) {
 		})
 	}
 }
+
+func TestSensitiveRefusesPrunableOutOfBandNamespacesAndAncestors(t *testing.T) {
+	for _, fault := range []string{"namespace", "ancestor"} {
+		t.Run(fault, func(t *testing.T) {
+			api, before, after, required := sensitiveFixture(t)
+			omit := func(value map[string]any) bool {
+				if fault == "namespace" {
+					return resourceText(value, "kind") != "Namespace"
+				}
+				return resourceText(value, "kind") != "ConfigMap"
+			}
+			before, after = editSensitiveRender(t, before, omit), editSensitiveRender(t, after, omit)
+			if fault == "ancestor" {
+				api.response["api/v1/namespaces/memql/configmaps/settings"] = `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"settings","namespace":"memql","uid":"owner-uid","resourceVersion":"3","annotations":{"argocd.argoproj.io/tracking-id":"installation:/ConfigMap:memql/settings"}},"data":{"value":"before"}}`
+				editStorageResponse(t, api, protectedSecretPath, func(value map[string]any) {
+					resourceMap(value, "metadata")["ownerReferences"] = []any{map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "name": "settings", "uid": "owner-uid"}}
+				})
+			}
+			evidence, err := verifySensitivePreservation(context.Background(), api, before, after, required)
+			require.Error(t, err, "an out-of-band protected object may still belong to the Application's prunable live inventory")
+			require.Empty(t, evidence.digest)
+			path := "api/v1/namespaces/memql"
+			if fault == "ancestor" {
+				path += "/configmaps/settings"
+			}
+			editStorageResponse(t, api, path, func(value map[string]any) {
+				resourceMap(value, "metadata")["annotations"] = map[string]any{"argocd.argoproj.io/sync-options": "Prune=false", "argocd.argoproj.io/compare-options": "IgnoreExtraneous"}
+			})
+			_, err = verifySensitivePreservation(context.Background(), api, before, after, required)
+			require.NoError(t, err, "explicit protection permits stable out-of-band objects")
+		})
+	}
+}
+
+func TestSensitiveCertificateOwnerCannotRestoreADifferentLiveIssuer(t *testing.T) {
+	api, before, after, required := sensitiveFixture(t)
+	certificate := `{"apiVersion":"cert-manager.io/v1","kind":"Certificate","metadata":{"name":"identity","namespace":"memql"},"spec":{"secretName":"keys","issuerRef":{"name":"approved"}}}`
+	appendCertificate := func(rendered argocd.RenderedRevision, revision string) argocd.RenderedRevision {
+		manifests := []string{certificate}
+		for _, body := range rendered.Resources() {
+			manifests = append(manifests, string(body))
+		}
+		return renderInventoryFixture(t, revision, manifests)
+	}
+	before, after = appendCertificate(before, strings.Repeat("a", 40)), appendCertificate(after, strings.Repeat("b", 40))
+	api.response["apis/cert-manager.io/v1"] = `{"groupVersion":"cert-manager.io/v1","resources":[{"name":"certificates","kind":"Certificate","namespaced":true}]}`
+	path := "apis/cert-manager.io/v1/namespaces/memql/certificates/identity"
+	api.response[path] = strings.Replace(certificate, `"namespace":"memql"`, `"namespace":"memql","uid":"certificate-uid","resourceVersion":"3"`, 1)
+	editStorageResponse(t, api, protectedSecretPath, func(value map[string]any) {
+		resourceMap(value, "metadata")["ownerReferences"] = []any{map[string]any{"apiVersion": "cert-manager.io/v1", "kind": "Certificate", "name": "identity", "uid": "certificate-uid"}}
+	})
+	_, err := verifySensitivePreservation(context.Background(), api, before, after, required)
+	require.NoError(t, err)
+	editStorageResponse(t, api, path, func(value map[string]any) {
+		resourceMap(resourceMap(value, "spec"), "issuerRef")["name"] = "live-issuer"
+	})
+	evidence, err := verifySensitivePreservation(context.Background(), api, before, after, required)
+	require.Error(t, err)
+	require.Empty(t, evidence.digest)
+}
+
+func TestSensitiveRefusesUnchangedRenderedOwnerThatWouldOverwriteLiveMaterial(t *testing.T) {
+	api, before, after, required := sensitiveFixture(t)
+	api.response["api/v1/namespaces/memql/configmaps/settings"] = `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"settings","namespace":"memql","uid":"owner-uid","resourceVersion":"3"},"data":{"value":"live-changed"}}`
+	editStorageResponse(t, api, protectedSecretPath, func(value map[string]any) {
+		resourceMap(value, "metadata")["ownerReferences"] = []any{map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "name": "settings", "uid": "owner-uid"}}
+	})
+	evidence, err := verifySensitivePreservation(context.Background(), api, before, after, required)
+	require.Error(t, err, "equal Git declarations can still overwrite different live owner material")
+	require.Empty(t, evidence.digest)
+}

@@ -94,6 +94,12 @@ func (p *protectedOwners) observe(ctx context.Context, child resourceIdentity, m
 		if err != nil || resourceText(live, "apiVersion") != version || resourceText(live, "kind") != parent.Kind || validLiveStorage(live, parent) != nil || resourceText(resourceMap(live, "metadata"), "uid") != uid {
 			return errors.New("protected resource owner is absent, replaced or deleting")
 		}
+		if !existed && !protectedFromPrune(resourceMap(live, "metadata")) {
+			return errors.New("out-of-band protected owner requires explicit Argo prune and comparison protection")
+		}
+		if existed && !protectedOwnerMatchesLive(candidate.value, live) {
+			return errors.New("rendered protected owner differs from its live material")
+		}
 		for _, value := range []map[string]any{live, previous.value, candidate.value} {
 			if err := protectedApplyOptions(resourceMap(value, "metadata")); err != nil {
 				return err
@@ -107,6 +113,52 @@ func (p *protectedOwners) observe(ctx context.Context, child resourceIdentity, m
 		p.seen[parent] = protectedOwnerObservation{Address: resourceAddress{parent, version, path}, UID: uid, Digest: sensitiveDigest("owner", live)}
 	}
 	return nil
+}
+
+// An unchanged Git declaration can still overwrite drifted controller state.
+// Compare actual material, not only the two desired revisions. Apart from
+// known Secret/Namespace defaults, undeclared live controller defaults refuse
+// until a qualified codec describes them; silently ignoring them is unsafe.
+func protectedOwnerMatchesLive(desired, live map[string]any) bool {
+	if resourceText(desired, "kind") == "Secret" {
+		a, ea := secretValue(desired)
+		b, eb := secretValue(live)
+		if ea != nil || eb != nil || !sameJSON(a, b) {
+			return false
+		}
+	} else {
+		material := func(value map[string]any) map[string]any {
+			out := map[string]any{}
+			for field, content := range value {
+				if field != "apiVersion" && field != "kind" && field != "metadata" && field != "status" {
+					out[field] = content
+				}
+			}
+			if resourceText(value, "kind") == "Namespace" {
+				if spec := resourceMap(value, "spec"); len(spec) == 0 {
+					out["spec"] = map[string]any{"finalizers": []any{"kubernetes"}}
+				}
+			}
+			return out
+		}
+		if !sameJSON(material(desired), material(live)) {
+			return false
+		}
+	}
+	meta, current := resourceMap(desired, "metadata"), resourceMap(live, "metadata")
+	for _, field := range []string{"ownerReferences", "finalizers"} {
+		if value, present := meta[field]; present && !sameJSON(value, current[field]) {
+			return false
+		}
+	}
+	for _, field := range []string{"labels", "annotations"} {
+		for key, value := range resourceMap(meta, field) {
+			if !sameJSON(value, resourceMap(current, field)[key]) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (p *protectedOwners) digests() map[string]string {

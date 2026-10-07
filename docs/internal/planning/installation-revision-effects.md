@@ -302,14 +302,18 @@ Rendered credentials must equal both the rollback declaration and the live
 Secret, including type and immutability. The codec observes Kubernetes's
 `stringData` precedence and decoded `data` semantics. Creation, removal,
 ownership changes, terminating namespaces, destructive Argo resource options
-and hooks refuse ordinary update qualification. Secrets outside Git require
-explicit `Prune=false` and `IgnoreExtraneous` protection. Conflicting duplicate
-options cannot establish that protection.
+and hooks refuse ordinary update qualification. Every protected object outside
+Git, including namespaces and owner ancestors, requires explicit `Prune=false`
+and `IgnoreExtraneous` protection. Conflicting duplicate options cannot
+establish that protection.
 
 Owner references are resolved through fresh API discovery, including
 cluster-scoped owners of namespaced resources. Bounded ancestor reads verify
 UIDs and reject missing/deleting owners, cycles and changes to rendered owners
-that could garbage-collect otherwise unchanged credentials. Evidence retains
+that could garbage-collect otherwise unchanged credentials. Unchanged rendered
+owners must also match live material: restoring drifted Certificate or other
+controller configuration can rotate credentials. Unknown controller defaults
+require a qualified codec rather than being silently ignored. Evidence retains
 only resource identities and fingerprints. Arbitrary annotations, including
 last-applied configuration containing Secret data, are never retained in the
 observation or formatted as diagnostics.
