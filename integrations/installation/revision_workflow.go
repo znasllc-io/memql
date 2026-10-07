@@ -3,7 +3,6 @@ package installation
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
@@ -121,7 +120,7 @@ func (w *revisionWorkflow) run(ctx context.Context, journal *revisionJournal, in
 	if err := ctx.Err(); err != nil {
 		return revisionRecord{}, err
 	}
-	if !s.observed.Load() {
+	if !s.observed {
 		return revisionRecord{}, errors.New("installation execution returned no native observation")
 	}
 	return journal.get(ctx, installation, key)
@@ -153,7 +152,7 @@ type revisionWorkflowScope struct {
 	needsWrite        bool
 	preflightComplete bool
 	reobserved        bool
-	observed          atomic.Bool
+	observed          bool
 }
 
 func (s *revisionWorkflowScope) operations() map[string]workflowhost.Operation {
@@ -650,6 +649,6 @@ func (s *revisionWorkflowScope) observe(ctx context.Context, args map[string]any
 	if _, err := s.journal.observe(ctx, s.installation, s.key, r.ObservationVersion, facts); err != nil {
 		return nil, err
 	}
-	s.observed.Store(true)
+	s.observed = true
 	return map[string]any{"operationSucceeded": facts.OperationSucceeded, "healthy": facts.Healthy, "synced": facts.Synced}, nil
 }
