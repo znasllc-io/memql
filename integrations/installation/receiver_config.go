@@ -109,19 +109,21 @@ type receiverConfiguration struct {
 // The snapshot owns private configuration and credentials. Only its digest can
 // be persisted; every replacement receiver obtains and validates fresh reads.
 type receiverSnapshot struct {
-	configuration   receiverConfiguration
-	digest          string
-	observed        time.Time
-	application     argocd.Snapshot
-	render          argocd.RenderSpec
-	catalog         Catalog
-	registries      []ociregistry.Target
-	bindings        []imageBinding
-	dependencies    []pipelines.ReleaseDependency
-	protected       []resourceIdentity
-	pullCredential  string
-	rendererAddress string
-	rendererTLS     *tls.Config
+	configuration     receiverConfiguration
+	digest            string
+	invariantDigest   string
+	observed          time.Time
+	application       argocd.Snapshot
+	applicationTarget argocd.Target
+	render            argocd.RenderSpec
+	catalog           Catalog
+	registries        []ociregistry.Target
+	bindings          []imageBinding
+	dependencies      []pipelines.ReleaseDependency
+	protected         []resourceIdentity
+	pullCredential    string
+	rendererAddress   string
+	rendererTLS       *tls.Config
 }
 
 func (s *receiverSnapshot) String() string {
@@ -133,6 +135,12 @@ func (s *receiverSnapshot) String() string {
 func (s *receiverSnapshot) GoString() string { return s.String() }
 
 func readReceiver(ctx context.Context, api argocd.API, namespace, name string, factory CatalogFactory) (*receiverSnapshot, error) {
+	return readReceiverInputs(ctx, api, namespace, name, factory, nil)
+}
+
+// A continuation substitutes a stricter owned-intent requirement for the idle
+// baseline requirement. The actual Application bytes are never rewritten.
+func readReceiverInputs(ctx context.Context, api argocd.API, namespace, name string, factory CatalogFactory, active *argocd.Intent) (*receiverSnapshot, error) {
 	if _, err := preparationActor(ctx); err != nil {
 		return nil, err
 	}
@@ -227,13 +235,17 @@ func readReceiver(ctx context.Context, api argocd.API, namespace, name string, f
 		}
 		s.protected = append(s.protected, key)
 	}
-	if err := s.observeArgo(ctx, r); err != nil {
+	if err := s.observeArgo(ctx, r, active); err != nil {
 		return nil, err
 	}
 	if err := s.observeRenderer(ctx, r); err != nil {
 		return nil, err
 	}
 	s.digest, err = r.finish(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.invariantDigest, err = r.configurationInvariant(cfg.Application)
 	if err != nil {
 		return nil, err
 	}

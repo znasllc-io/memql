@@ -248,6 +248,44 @@ func TestReceiverRefusesChangedOrUnqualifiedConfiguration(t *testing.T) {
 		})
 	}
 }
+func TestReceiverCopyInitPermitsOnlyInheritedLiteralTimeout(t *testing.T) {
+	for _, fault := range []string{"", "other variable", "different timeout", "indirect timeout", "extra field", "extra variable", "envFrom", "different command"} {
+		t.Run("fault="+fault, func(t *testing.T) {
+			f := newReceiverFixture(t)
+			pod := resourceMap(f.objects["api/v1/namespaces/argocd/pods/renderer-pod"], "spec")
+			container := pod["containers"].([]any)[0].(map[string]any)
+			container["env"] = []any{map[string]any{"name": "ARGOCD_EXEC_TIMEOUT", "value": "1200s"}}
+			env := map[string]any{"name": "ARGOCD_EXEC_TIMEOUT", "value": "1200s"}
+			init := map[string]any{"name": "copyutil", "image": oldImage, "command": []any{"/bin/cp", "-n", "/usr/local/bin/argocd", "/var/run/argocd/argocd-cmp-server"}, "env": []any{env}}
+			pod["initContainers"] = []any{init}
+			switch fault {
+			case "other variable":
+				env["name"] = "LD_PRELOAD"
+			case "different timeout":
+				env["value"] = "30s"
+			case "indirect timeout":
+				delete(env, "value")
+				env["valueFrom"] = map[string]any{"secretKeyRef": map[string]any{"name": "private", "key": "timeout"}}
+			case "extra field":
+				env["unexpected"] = "private"
+			case "extra variable":
+				init["env"] = append(init["env"].([]any), map[string]any{"name": "LD_PRELOAD", "value": "private"})
+			case "envFrom":
+				init["envFrom"] = []any{map[string]any{"secretRef": map[string]any{"name": "private"}}}
+			case "different command":
+				init["command"] = []any{"/bin/sh", "-c", "private"}
+			}
+			_, err := readReceiver(captureOperator(auth.RoleOwner, "operator"), f, "memql", "receiver", f.factory(t))
+			if fault == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, "init container requires qualification")
+				require.NotContains(t, err.Error(), "private")
+			}
+		})
+	}
+}
+
 func TestReceiverRequiresCurrentNativeOperator(t *testing.T) {
 	for _, ctx := range []context.Context{context.Background(), operator(auth.RoleOwner, "operator"), captureOperator(auth.RoleReader, "operator")} {
 		f := newReceiverFixture(t)

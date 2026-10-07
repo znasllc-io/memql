@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
@@ -101,7 +102,7 @@ func (h *preparationHost) prepare(ctx context.Context, request preparationReques
 	if err != nil {
 		return revisionRecord{}, err
 	}
-	if cfg.configuration.InstallationID != request.InstallationID || (prior.ID != "" && prior.Scope.ConfigurationDigest != cfg.digest) {
+	if cfg.configuration.InstallationID != request.InstallationID || (prior.ID != "" && (prior.Scope.ConfigurationDigest != cfg.digest || prior.Scope.ConfigurationInvariantDigest != cfg.invariantDigest)) {
 		return revisionRecord{}, errors.New("installation receiving configuration changed")
 	}
 	s := &preparationWorkflowScope{host: h, request: request, operator: actor, configuration: cfg, record: prior, sources: map[string]verifiedSourceCapture{}, renders: map[string]argocd.RenderedRevision{}}
@@ -134,6 +135,9 @@ func (s *preparationWorkflowScope) run(ctx context.Context) (revisionRecord, err
 }
 
 type preparationWorkflowScope struct {
+	// Native preparation proofs mutate together. Artifact checks share a read
+	// lock and retain their own bounded concurrency inside the child scope.
+	mu                  sync.RWMutex
 	host                *preparationHost
 	request             preparationRequest
 	operator            string
@@ -174,7 +178,15 @@ func (s *preparationWorkflowScope) operations() map[string]workflowhost.Operatio
 		}
 	}
 	for name, operation := range operations {
+		artifactRead := name == "installationArtifactRequirements" || name == "installationArtifactCheck" || name == "installationArtifactsComplete"
 		operations[name] = func(ctx context.Context, args map[string]any) (any, error) {
+			if artifactRead {
+				s.mu.RLock()
+				defer s.mu.RUnlock()
+			} else {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+			}
 			actor, err := preparationActor(ctx)
 			if err != nil || actor != s.operator || s.result != nil {
 				return nil, errors.New("installation operation is outside its admitted scope")
@@ -238,7 +250,7 @@ func (s *preparationWorkflowScope) reserve(ctx context.Context, args map[string]
 	if err != nil {
 		return nil, err
 	}
-	scope := preparationScope{FormatVersion: 1, InstallationID: cfg.InstallationID, RequestID: s.request.RequestID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ExecutionWorkflowDigest: s.host.revisions.digest, ConfigurationDigest: s.configuration.digest, CandidateID: s.request.CandidateID, PublicationDigest: s.request.CatalogDigest, Intent: intent, Captures: map[string]sourceCaptureSpec{}}
+	scope := preparationScope{FormatVersion: 1, InstallationID: cfg.InstallationID, RequestID: s.request.RequestID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ExecutionWorkflowDigest: s.host.revisions.digest, ConfigurationDigest: s.configuration.digest, ConfigurationInvariantDigest: s.configuration.invariantDigest, CandidateID: s.request.CandidateID, PublicationDigest: s.request.CatalogDigest, Intent: intent, Captures: map[string]sourceCaptureSpec{}}
 	run := preparationSourceRun(cfg.InstallationID, s.request.RequestID, s.operator)
 	for _, role := range []string{"candidate", "rollback"} {
 		render := s.configuration.render

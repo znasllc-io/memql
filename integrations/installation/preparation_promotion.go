@@ -16,25 +16,26 @@ import (
 // journal. Promotion does not release source artifact pins. Their eventual
 // retirement must account for the revision, including its rollback lifetime.
 type preparationBinding struct {
-	ArtifactDigest            string `json:"artifactDigest"`
-	ArtifactWorkflowDigest    string `json:"artifactWorkflowDigest"`
-	ArtifactExpiresAt         string `json:"artifactExpiresAt"`
-	RollbackPublicationDigest string `json:"rollbackPublicationDigest"`
-	ID                        string `json:"id"`
-	ConfigurationDigest       string `json:"configurationDigest"`
-	CandidateSourceDigest     string `json:"candidateSourceDigest"`
-	RollbackSourceDigest      string `json:"rollbackSourceDigest"`
-	CandidateReceiptDigest    string `json:"candidateReceiptDigest"`
-	RollbackReceiptDigest     string `json:"rollbackReceiptDigest"`
-	StorageDigest             string `json:"storageDigest"`
-	SensitiveDigest           string `json:"sensitiveDigest"`
+	ArtifactDigest               string `json:"artifactDigest"`
+	ArtifactWorkflowDigest       string `json:"artifactWorkflowDigest"`
+	ArtifactExpiresAt            string `json:"artifactExpiresAt"`
+	RollbackPublicationDigest    string `json:"rollbackPublicationDigest"`
+	ID                           string `json:"id"`
+	ConfigurationDigest          string `json:"configurationDigest"`
+	ConfigurationInvariantDigest string `json:"configurationInvariantDigest"`
+	CandidateSourceDigest        string `json:"candidateSourceDigest"`
+	RollbackSourceDigest         string `json:"rollbackSourceDigest"`
+	CandidateReceiptDigest       string `json:"candidateReceiptDigest"`
+	RollbackReceiptDigest        string `json:"rollbackReceiptDigest"`
+	StorageDigest                string `json:"storageDigest"`
+	SensitiveDigest              string `json:"sensitiveDigest"`
 }
 
 func (b preparationBinding) validate() error {
 	if expires, err := time.Parse(time.RFC3339Nano, b.ArtifactExpiresAt); err != nil || expires.IsZero() || !artifactDigest.MatchString(b.RollbackPublicationDigest) {
 		return errors.New("installation artifact binding is incomplete")
 	}
-	for _, value := range []string{b.ID, b.ConfigurationDigest, b.CandidateSourceDigest, b.RollbackSourceDigest,
+	for _, value := range []string{b.ID, b.ConfigurationDigest, b.ConfigurationInvariantDigest, b.CandidateSourceDigest, b.RollbackSourceDigest,
 		b.CandidateReceiptDigest, b.RollbackReceiptDigest, b.StorageDigest, b.SensitiveDigest, b.ArtifactDigest, b.ArtifactWorkflowDigest} {
 		if !internalDigest.MatchString(value) {
 			return errors.New("installation preparation binding is incomplete")
@@ -65,7 +66,7 @@ func promotionPlan(r preparationRecord, plan preparedPlan, configuration string,
 		return preparedPlan{}, errors.New("installation plan differs from its reserved preparation")
 	}
 	artifacts := evidence.artifacts
-	if evidence.configuration == nil || evidence.configuration.digest != configuration || evidence.configuration.observed.IsZero() ||
+	if evidence.configuration == nil || evidence.configuration.digest != configuration || evidence.configuration.invariantDigest != r.Scope.ConfigurationInvariantDigest || evidence.configuration.observed.IsZero() ||
 		evidence.configuration.observed.After(time.Now()) || time.Since(evidence.configuration.observed) > time.Minute ||
 		artifacts.configuration != configuration || !internalDigest.MatchString(artifacts.digest) || !internalDigest.MatchString(artifacts.workflow) ||
 		artifacts.operator != r.Scope.RequestedBy || artifacts.candidate != plan.PublicationDigest ||
@@ -100,7 +101,7 @@ func promotionPlan(r preparationRecord, plan preparedPlan, configuration string,
 	if err := promotionIntentMatches(r.Scope, plan); err != nil {
 		return preparedPlan{}, err
 	}
-	plan.Preparation = &preparationBinding{ID: r.ID, ConfigurationDigest: configuration,
+	plan.Preparation = &preparationBinding{ID: r.ID, ConfigurationDigest: configuration, ConfigurationInvariantDigest: evidence.configuration.invariantDigest,
 		CandidateSourceDigest: r.Captures["candidate"].SourceDigest, RollbackSourceDigest: r.Captures["rollback"].SourceDigest,
 		CandidateReceiptDigest: r.Captures["candidate"].ReceiptDigest, RollbackReceiptDigest: r.Captures["rollback"].ReceiptDigest,
 		StorageDigest: evidence.storage.digest, SensitiveDigest: evidence.sensitive.digest,
@@ -156,7 +157,7 @@ func promotedRevision(ctx context.Context, tx *sql.Tx, r preparationRecord) (rev
 		return revisionRecord{}, err
 	}
 	b := revision.Plan.Preparation
-	if r.State != "promoted" || b == nil || b.ID != r.ID || b.ConfigurationDigest != r.Scope.ConfigurationDigest ||
+	if r.State != "promoted" || b == nil || b.ID != r.ID || b.ConfigurationDigest != r.Scope.ConfigurationDigest || b.ConfigurationInvariantDigest != r.Scope.ConfigurationInvariantDigest ||
 		revision.SlotEpoch != r.SlotEpoch+1 || revision.Plan.RequestedBy != r.Scope.RequestedBy ||
 		revision.Plan.WorkflowDigest != r.Scope.WorkflowDigest || revision.Plan.CandidateID != r.Scope.CandidateID || revision.Plan.PublicationDigest != r.Scope.PublicationDigest ||
 		b.CandidateSourceDigest != r.Captures["candidate"].SourceDigest || b.RollbackSourceDigest != r.Captures["rollback"].SourceDigest ||

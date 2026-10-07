@@ -2380,6 +2380,12 @@ variables:
     optional: true
     description: "Cap on the number of files in a package source. Default 20000, the publisher's number. Bounds the count independently of size: a degenerate tree of hundreds of thousands of near-empty files stays under both byte caps while still driving that many individual blob writes."
 
+  - name: MEMQL_INSTALLATION_CONFIG_NAME
+    component: installation
+    scope: node
+    optional: true
+    description: "Named operator-managed ConfigMap containing installation.json in the receiving pod namespace. No default and no client-selected configuration: installation preparation refuses when absent. Connections, trust, image bindings and Secret references are read afresh through the authenticated Kubernetes API. This setting does not register or authorize an installation update action."
+
   - name: MEMQL_NAMESPACE
     component: packages
     scope: node

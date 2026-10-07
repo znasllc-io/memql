@@ -26,7 +26,7 @@ func (a receiverApplicationAPI) Do(_ context.Context, method, path, _ string, bo
 	}
 	return append([]byte(nil), a.body...), nil
 }
-func (s *receiverSnapshot) observeArgo(ctx context.Context, r *receiverReads) error {
+func (s *receiverSnapshot) observeArgo(ctx context.Context, r *receiverReads, active *argocd.Intent) error {
 	cfg := s.configuration
 	app, err := r.object(ctx, "argoproj.io/v1alpha1", "Application", "applications", cfg.Application.Namespace, cfg.Application.Name)
 	if err != nil {
@@ -39,13 +39,26 @@ func (s *receiverSnapshot) observeArgo(ctx context.Context, r *receiverReads) er
 		return errors.New("installation Application must target this receiving cluster and one explicit namespace")
 	}
 	revision := resourceText(source, "targetRevision")
-	if !commitDigest.MatchString(revision) || app["operation"] != nil || spec["sources"] != nil || !sameJSON(resourceMap(resourceMap(app, "status"), "sync")["revision"], revision) || resourceText(resourceMap(resourceMap(app, "status"), "sync"), "status") != "Synced" || resourceText(resourceMap(resourceMap(app, "status"), "health"), "status") != "Healthy" {
+	if !commitDigest.MatchString(revision) || spec["sources"] != nil {
+		return errors.New("installation Application requires one immutable revision")
+	}
+	if active == nil && (app["operation"] != nil || !sameJSON(resourceMap(resourceMap(app, "status"), "sync")["revision"], revision) || resourceText(resourceMap(resourceMap(app, "status"), "sync"), "status") != "Synced" || resourceText(resourceMap(resourceMap(app, "status"), "health"), "status") != "Healthy") {
 		return errors.New("installation requires an idle healthy Application at its exact immutable baseline")
 	}
 	body, _ := json.Marshal(app)
 	path, _ := receiverPath("argoproj.io/v1alpha1", "applications", cfg.Application.Namespace, cfg.Application.Name)
 	client, _ := argocd.New(receiverApplicationAPI{path, body})
 	target := argocd.Target{Namespace: cfg.Application.Namespace, Name: cfg.Application.Name, UID: resourceText(resourceMap(app, "metadata"), "uid")}
+	s.applicationTarget = target
+	if active != nil {
+		if active.Target != target {
+			return errors.New("installation continuation targets a different Application")
+		}
+		facts, err := client.Observe(ctx, *active)
+		if err != nil || !facts.IntentObserved || (!facts.OperationPending && facts.OperationPhase == "") {
+			return errors.New("installation continuation requires the actual owned Application intent and operation")
+		}
+	}
 	s.application, err = client.Read(ctx, target)
 	if err != nil {
 		return errors.New("installation Application baseline is unsupported")
@@ -130,6 +143,9 @@ func (s *receiverSnapshot) observeArgo(ctx context.Context, r *receiverReads) er
 		return errors.New("installation renderer configuration is unsupported")
 	}
 	// Exercise the same full-source intent validation before acquisition.
+	if active != nil {
+		return nil // The exact active intent was independently verified above.
+	}
 	_, err = argocd.PlanRevision(s.application, "configuration-observation", revision, false)
 	return err
 }

@@ -747,7 +747,9 @@ verification result. Custom binary mounts, sidecars, commands, Kustomize
 versions and unsupported transports require their own qualified profile.
 Mutable image tags do not satisfy this contract. Renderer environment names
 are qualified explicitly; inline passwords and telemetry credentials refuse
-in favor of versioned references.
+in favor of versioned references. The fixed copy-helper init command may inherit
+the main container's literal `ARGOCD_EXEC_TIMEOUT`; other init environment,
+indirect values and changed commands remain unqualified.
 
 The native connection verifies the renderer's certificate chain and service
 DNS identity and additionally pins the exact leaf from its named Secret. It
@@ -787,3 +789,63 @@ acknowledging duplicate captures. This establishes composition and recovery of
 preparation. It does not substitute for the installed serving-engine update and
 rollback rehearsal. The automation corpus records the bounded operation order
 with stubbed effects; native authority and evidence are exercised separately.
+
+
+The private `installation.NewPreparer` constructor accepts all native execution
+and source-lifecycle ports together and rejects an incomplete host. Its
+identifiers-only `PrepareSelection` and `PreparationResult` expose no credential,
+rendered material, source archive or caller-provided proof. The app adapter uses
+`buildinfo.Commit()`, the projected cluster API/namespace, the existing serving
+Library uploader, the existing Workbench forwarder and repository token minter,
+and `releasecatalog.NewSnapshot`. `MEMQL_INSTALLATION_CONFIG_NAME` explicitly
+selects the receiving ConfigMap; absence disables preparation. Constructing this
+adapter does not register a capability, provide a fleet fallback or authorize a
+revision write. The revision recipe's separate immutable execution binding must
+be connected before public activation.
+
+### Installed renderer qualification
+
+The October 7 local renderer bootstrap created its named TLS Secret, pinned the
+existing Argo platform image in its normal and copy-helper containers, and added
+one ingress policy permitting only MemQL BFF/agent pods on TCP 8081. The renderer
+became ready, all three existing Argo Applications stayed Healthy/Synced, and
+the 26 captured serving Deployment, engine Pod and database objects retained
+their identities and specifications. The Application baseline, receiver
+configuration, preparation RBAC and protected-resource annotations were held.
+
+`TestReceivingRendererThroughInstalledArgo` then read 12 actual renderer inputs
+through an explicitly selected authenticated Kubernetes connection, checked
+Deployment/ReplicaSet/Pod ownership and image identity, verified the live TLS
+leaf against the named Secret, and reobserved the complete read set. It passed
+with the race detector in 2.715 seconds. Its operator-authenticated loopback
+forward is a diagnostic transport; this result does not qualify serving-node
+RBAC, network-policy reachability, a candidate publication or an engine update.
+The opt-in test requires `MEMQL_INSTALLATION_RENDERER_TEST_KUBECONFIG`,
+`MEMQL_INSTALLATION_RENDERER_TEST_ADDRESS` and the reviewed platform digest in
+`MEMQL_INSTALLATION_RENDERER_TEST_IMAGE`. It only reads the installed renderer.
+
+### Receiving configuration after an owned revision change
+
+Preparation binds both the full baseline configuration digest and a separate
+configuration invariant digest. The latter retains every configuration, Secret,
+renderer, project, repository and discovery binding, while binding the
+Application's authenticated name, namespace and UID separately from its mutable
+spec, generation and operation. Both digests originate from the same reobserved
+read set and are carried through the durable preparation and promotion.
+
+The private continuation reader observes the actual current Application. It
+requires the native Argo verifier to match the complete desired spec, exact
+intent marker and an owned pending or recorded operation against the supplied
+journal-bound intent. A failed owned operation is eligible for observation;
+an unrelated operation or a forged healthy baseline is not. The reader never
+rewrites current Application bytes to recreate the old baseline. It reobserves
+the Application's exact UID/resource version together with every other input.
+
+Its opaque evidence binds the complete admitted plan, invariant digest, active
+intent digest, exact target and observation time. Each use recomputes those
+identities and refuses expired or substituted evidence. Only a native host may
+select the journal-bound forward intent or a separately validated reversal.
+The private snapshot retains current renderer and catalog connections for
+reopening retained source and rerendering. Configuration continuity alone does
+not replace fresh artifact, storage or protected-resource verification, grant
+rollback authority, complete an installation or release its active slot.
