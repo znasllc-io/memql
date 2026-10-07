@@ -108,7 +108,8 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 	}, workflowhost.ScopedCapabilities((&cutScope{}).operations())...)
-	return append(out, workflowhost.ScopedCapabilities((&candidatePrepareScope{}).operations())...)
+	out = append(out, workflowhost.ScopedCapabilities((&candidatePrepareScope{}).operations())...)
+	return append(out, workflowhost.ScopedCapabilities((&candidatePublishScope{}).operations())...)
 }
 
 // handleCut adapts the DSL argument map to Cut.

@@ -19,6 +19,7 @@ import (
 )
 
 const candidatePrepareWorkflow = "releasePrepareCandidateWorkflow"
+const candidatePublishWorkflow = "releasePublishCandidateWorkflow"
 
 type candidateEvidence interface {
 	verify(context.Context, pl.ReleaseCandidate) error
@@ -57,6 +58,10 @@ func (p *candidatePreparer) prepare(ctx context.Context, input pl.ReleaseCandida
 }
 
 func (p *candidatePreparer) prepareWithWorkflow(ctx context.Context, input pl.ReleaseCandidate, definition *automations.Automation) (candidateRecord, error) {
+	return p.prepareWithExpectedIdentity(ctx, input, definition, "", nil)
+}
+
+func (p *candidatePreparer) prepareWithExpectedIdentity(ctx context.Context, input pl.ReleaseCandidate, definition *automations.Automation, expectedID string, publication *automations.Automation) (candidateRecord, error) {
 	owner, err := candidateOwner(ctx)
 	if err != nil {
 		return candidateRecord{}, err
@@ -74,6 +79,16 @@ func (p *candidatePreparer) prepareWithWorkflow(ctx context.Context, input pl.Re
 	if err != nil {
 		return candidateRecord{}, err
 	}
+	if publication == nil {
+		publication, err = workflowhost.Load(candidatePublishWorkflow)
+		if err != nil {
+			return candidateRecord{}, err
+		}
+	}
+	publication, err = automations.NewLoader(automations.LoaderOptions{Logger: p.logger}).Snapshot(publication)
+	if err != nil || !publication.Trusted {
+		return candidateRecord{}, errors.New("candidate publication recipe must be installed and immutable")
+	}
 	versions, sources, err := p.versionReader.freezeFor(input.Components)
 	if err != nil {
 		return candidateRecord{}, err
@@ -89,7 +104,7 @@ func (p *candidatePreparer) prepareWithWorkflow(ctx context.Context, input pl.Re
 	// Child templates/logics are refused below until their snapshots also enter
 	// this identity; a reload cannot change execution under the same digest.
 	fingerprint, err := workjournal.DefinitionFingerprint("release-candidate-preparation-v1", []workjournal.StepDecl{{
-		Key: "prepare", Kind: workjournal.KindDeterministic, StepType: "exec", Call: map[string]any{"workflow": owned, "versionSources": sources, "engineRevision": revision},
+		Key: "prepare", Kind: workjournal.KindDeterministic, StepType: "exec", Call: map[string]any{"workflow": owned, "publicationWorkflow": publication, "versionSources": sources, "engineRevision": revision},
 	}})
 	if err != nil {
 		return candidateRecord{}, err
@@ -98,6 +113,9 @@ func (p *candidatePreparer) prepareWithWorkflow(ctx context.Context, input pl.Re
 	body, key, err := pl.CanonicalReleaseCandidate(input)
 	if err != nil {
 		return candidateRecord{}, err
+	}
+	if expectedID != "" && key != expectedID {
+		return candidateRecord{}, errors.New("candidate policy, engine or source configuration changed; prepare a new candidate for review")
 	}
 	var candidate pl.ReleaseCandidate
 	if err := json.Unmarshal(body, &candidate); err != nil {

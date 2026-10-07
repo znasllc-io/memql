@@ -105,6 +105,26 @@ builtin releaseCandidateVerifyArtifacts { }
 @executor("integration.release.releaseCandidateMarkReady")
 builtin releaseCandidateMarkReady { }
 
+/// Reverify the exact candidate before its approved publication effect.
+@executor("integration.release.releasePublicationCheckCandidate")
+builtin releasePublicationCheckCandidate { }
+
+/// Open or recover the durable publication intent for the explicit approval.
+@executor("integration.release.releasePublicationBegin")
+builtin releasePublicationBegin { }
+
+/// Reopen retained bytes and verify a private OCI snapshot for publication.
+@executor("integration.release.releasePublicationVerifyImage")
+builtin releasePublicationVerifyImage { }
+
+/// Publish the approved image by digest and verify registry readback.
+@executor("integration.release.releasePublicationWriteImage")
+builtin releasePublicationWriteImage { }
+
+/// Record completion only from the scoped publisher's verified receipt.
+@executor("integration.release.releasePublicationRecordReceipt")
+builtin releasePublicationRecordReceipt { }
+
 /// Select and calculate a version from the already-read release snapshot.
 @executor("integration.release.releaseSelectCandidate")
 @args(profile="object")

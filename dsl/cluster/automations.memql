@@ -266,3 +266,15 @@ automation releasePrepareCandidateWorkflow {
   builtin releaseCandidateVerifyArtifacts()
   builtin releaseCandidateMarkReady()
 }
+
+/// Publish one artifact from a separately approved immutable candidate.
+/// The native scope binds the owner, approval, target and durable effect ID.
+@template
+automation releasePublishCandidateWorkflow {
+  builtin releasePublicationCheckCandidate()
+  effect := builtin releasePublicationBegin()
+  if effect.complete { return }
+  builtin releasePublicationVerifyImage()
+  builtin releasePublicationWriteImage()
+  builtin releasePublicationRecordReceipt()
+}

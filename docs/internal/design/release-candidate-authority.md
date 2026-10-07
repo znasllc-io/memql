@@ -12,7 +12,7 @@ owner: znas
 The native candidate journal separates verification, owner approval and an
 external publication effect. It is infrastructure for the installed release
 workflow, not an alternative workflow or a public approval API. Preparation and
-approval entry points remain private. Scoped operations are registered only to
+approval and publication entry points remain private. Scoped operations are registered only to
 support the installed template; direct calls refuse even for an owner.
 
 `component/pipelines.ReleaseCandidate` binds independently versioned components,
@@ -46,8 +46,9 @@ verified, and unplanned or blocked skips fail natively. A successful aggregate
 cannot silently replace missing individual receipts. Existing runs without
 typed declarations require fresh qualification; missing type is not inferred.
 
-The preparation scope snapshots the installed template and configured version
-sources, binding both plus the immutable engine commit into `workflowDigest`.
+The preparation scope snapshots the installed preparation and publication
+templates and configured version sources, binding them plus the immutable
+engine commit into `workflowDigest`.
 Children and logic bodies are refused until their definitions can also be
 included in that identity. Native version reads use the exact source commit and
 operator-selected `VERSION` or top-level JSON version property. Candidate
@@ -92,6 +93,21 @@ Deleting an uncertain intent or releasing its artifacts is not recovery.
 Every authority read recomputes the stored manifest's identity and checks its
 owner. Migration rollback refuses to discard candidate history.
 
+The private approval entry reads an existing candidate by exact digest and
+repeats preparation before committing separate owner approval. A changed policy,
+engine revision or source configuration refuses before creating a replacement
+candidate or artifact pin. Publication repeats the same verification against
+the owned snapshot it will execute. The installed
+`releasePublishCandidateWorkflow` composes candidate verification, durable
+intent, image verification, registry write/readback and completion. Mandatory
+native prerequisites prevent another recipe from omitting these operations and
+claiming success. Credentials resolve only after the approved intent exists.
+The native OCI handle owns temporary verified bytes and closes on success and
+failure. An uncertain write retains its intent and all candidate pins; another
+host reconciles the same immutable image without selecting another effect.
+A completed intent is historical publication evidence, not a promise that a
+registry administrator has never subsequently removed those bytes.
+
 Database-backed tests exercise concurrent approval, changed destinations,
 retirement and late calls, stored-manifest tampering, lost publication replies
 and mismatched completion receipts. Real engine/journal tests cover scoped
@@ -105,8 +121,18 @@ checks, corrupted or unavailable artifacts and retirement during verification.
 Artifact storage and work-evidence adapters have their own real DB/Azurite tests;
 this is not yet an integrated release rehearsal.
 
+Publication tests use the same DSL host and real SQL journal with an OCI
+registry. They cover lost final replies, corrupt readback, recovery from another
+host, wrong approval, changed inputs, omitted operations and temporary-file
+cleanup. A separate opt-in test accepts a disposable loopback Distribution
+registry; it has also verified the retained rootless BuildKit archive by its
+independently recorded archive and image digests. These tests use fixture
+work-evidence and artifact-storage ports, so they do not establish the complete
+Workbench-to-Library-to-publication path. Process-crash scratch recovery and
+post-publication retention remain unfinished.
+
 Still required before exposing this path: operator/app wiring, original-receipt
-verification for carried attempts, native OCI publication wiring,
+verification for carried attempts,
 non-OCI release targets, owner review UI, installation/recovery control, signed
 provenance and complete release qualification. No candidate approval or
 publication is implied by these tests.

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
 	pl "github.com/znasllc-io/memql/component/pipelines"
@@ -93,6 +94,33 @@ VALUES($1,$2,$3::jsonb,'preparing') ON CONFLICT(candidate_id) DO NOTHING`, key, 
 
 type candidateQuerier interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func (l *candidateLedger) get(ctx context.Context, key string) (candidateRecord, error) {
+	owner, err := candidateOwner(ctx)
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	if !strings.HasPrefix(key, "sha256:") || !candidateArtifactDigest(strings.TrimPrefix(key, "sha256:")) {
+		return candidateRecord{}, errors.New("exact candidate digest is required")
+	}
+	db, err := l.database()
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	defer tx.Rollback()
+	record, err := readCandidate(ctx, tx, owner, key)
+	if err != nil {
+		return candidateRecord{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return candidateRecord{}, err
+	}
+	return record, nil
 }
 
 // Recompute canonical identity on every authority read. Neither corrupted
