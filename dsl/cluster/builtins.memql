@@ -168,6 +168,14 @@ builtin releasePublicationVerifyImage { }
 @executor("integration.release.releasePublicationWriteImage")
 builtin releasePublicationWriteImage { }
 
+/// Reopen retained bytes and verify a private file snapshot for publication.
+@executor("integration.release.releasePublicationVerifyFile")
+builtin releasePublicationVerifyFile { }
+
+/// Publish the approved file to its exact existing draft and verify all bytes.
+@executor("integration.release.releasePublicationWriteFile")
+builtin releasePublicationWriteFile { }
+
 /// Record completion only from the scoped publisher's verified receipt.
 @executor("integration.release.releasePublicationRecordReceipt")
 builtin releasePublicationRecordReceipt { }

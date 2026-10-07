@@ -9,6 +9,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/githubrelease"
 	"github.com/znasllc-io/memql/integrations/ociregistry"
 	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 )
@@ -87,6 +88,9 @@ func (p *candidatePreparer) publishWithWorkflow(ctx context.Context, request can
 		if scope.image != nil {
 			err = errors.Join(err, scope.image.Close())
 		}
+		if scope.file != nil {
+			err = errors.Join(err, scope.file.Close())
+		}
 	}()
 	ctx, cancel := context.WithTimeout(ctx, time.Hour)
 	defer cancel()
@@ -116,6 +120,7 @@ type candidatePublishScope struct {
 	checked     bool
 	intent, out candidatePublication
 	image       *ociregistry.VerifiedImage
+	file        *githubrelease.VerifiedFile
 	proof       *candidatePublicationReceipt
 }
 
@@ -125,6 +130,8 @@ func (s *candidatePublishScope) operations() map[string]workflowhost.Operation {
 		"releasePublicationBegin":          s.begin,
 		"releasePublicationVerifyImage":    s.verifyImage,
 		"releasePublicationWriteImage":     s.write,
+		"releasePublicationVerifyFile":     s.verifyFile,
+		"releasePublicationWriteFile":      s.writeFile,
 		"releasePublicationRecordReceipt":  s.complete,
 	}
 }
@@ -158,7 +165,7 @@ func (s *candidatePublishScope) begin(ctx context.Context, _ map[string]any) (an
 	if intent.State == "complete" {
 		s.out = intent
 	}
-	return map[string]any{"complete": intent.State == "complete"}, nil
+	return map[string]any{"complete": intent.State == "complete", "kind": intent.Artifact.Kind}, nil
 }
 
 func (s *candidatePublishScope) verifyImage(ctx context.Context, _ map[string]any) (any, error) {
@@ -226,7 +233,7 @@ func (s *candidatePublishScope) complete(ctx context.Context, _ map[string]any) 
 		return nil, nil
 	}
 	if s.proof == nil || s.intent.EffectID == "" {
-		return nil, errors.New("publication completion requires verified registry readback")
+		return nil, errors.New("publication completion requires verified destination readback")
 	}
 	if err := s.p.ledger.finishPublication(ctx, s.intent, *s.proof); err != nil {
 		return nil, err
