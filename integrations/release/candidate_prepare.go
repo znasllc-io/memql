@@ -42,6 +42,7 @@ type candidatePreparer struct {
 	logger           *slog.Logger
 	assemblyPlans    []candidateAssemblyPlan
 	assemblyWorkflow *automations.Automation
+	draftDefinitions map[string]*automations.Automation
 }
 
 // The public owner entry binds native dependencies before calling prepare.
@@ -106,6 +107,26 @@ func (p *candidatePreparer) prepareWithExpectedIdentity(ctx context.Context, inp
 	// Child templates/logics are refused below until their snapshots also enter
 	// this identity; a reload cannot change execution under the same digest.
 	policy := map[string]any{"workflow": owned, "publicationWorkflow": publication, "versionSources": sources, "engineRevision": revision}
+	for _, target := range p.targetReader.files {
+		if target.Draft == nil {
+			continue
+		}
+		for _, name := range []string{candidateDraftWorkflow, candidatePromotionWorkflow} {
+			definition := p.draftDefinitions[name]
+			if definition == nil {
+				definition, err = workflowhost.Load(name)
+				if err != nil {
+					return candidateRecord{}, err
+				}
+			}
+			definition, err = automations.NewLoader(automations.LoaderOptions{Logger: p.logger}).Snapshot(definition)
+			if err != nil || definition == nil || !definition.Trusted {
+				return candidateRecord{}, errors.New("release lifecycle recipes must be immutable and installed")
+			}
+			policy[name] = definition
+		}
+		break
+	}
 	if len(p.assemblyPlans) > 0 {
 		assembly := p.assemblyWorkflow
 		if assembly == nil {
@@ -239,6 +260,11 @@ func (s *candidatePrepareScope) targets(ctx context.Context, _ map[string]any) (
 		}
 		if !matched {
 			return nil, errors.New("candidate destination has no matching artifact")
+		}
+		if _, file := s.p.targetReader.files[target.TargetID]; file {
+			if _, err := s.p.targetReader.draftPlan(ctx, candidateRecord{Manifest: s.candidate}, target.TargetID); err != nil {
+				return nil, err
+			}
 		}
 	}
 	s.targetsOK = true

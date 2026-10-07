@@ -242,3 +242,107 @@ builtin releaseSelectCandidate { previousTag string! }
 @executor("integration.release.releaseRejectCandidate")
 @args(profile="object")
 builtin releaseRejectCandidate { code string! }
+
+/// Separately create or reconcile the exact owner-approved draft and tag.
+@sdk
+@executor("integration.release.createCandidateDraft")
+builtin releaseCreateCandidateDraft {
+  candidateId string!
+  approvalId string!
+  targetId string!
+}
+
+/// Separately promote a verified draft with the exact approved asset set.
+@sdk
+@executor("integration.release.promoteCandidateDraft")
+builtin releasePromoteCandidateDraft {
+  candidateId string!
+  approvalId string!
+  targetId string!
+}
+
+/// Read durable draft bindings and publication history without remote effects.
+@sdk
+@executor("integration.release.candidateDrafts")
+builtin releaseCandidateDrafts { candidateId string! }
+
+/// Seal complete native publication evidence as an immutable signed catalog record.
+@sdk
+@executor("integration.release.sealPublishedCandidate")
+builtin releaseSealPublishedCandidate {
+  candidateId string!
+  approvalId string!
+}
+
+/// Read a verified public release and portable envelope without private work evidence.
+@sdk
+@executor("integration.release.getPublishedCandidate")
+builtin releaseGetPublishedCandidate { candidateId string! }
+
+/// List verified published releases; identified developers, admins and owners may read.
+@sdk
+@executor("integration.release.listPublishedCandidates")
+builtin releaseListPublishedCandidates {
+  cursor string
+  limit integer
+}
+
+/// Reverify the original owner, exact candidate and installed lifecycle recipes.
+@executor("integration.release.releaseDraftCheckCandidate")
+builtin releaseDraftCheckCandidate { }
+
+/// Bind one remote draft to the immutable candidate and complete asset set.
+@executor("integration.release.releaseDraftBegin")
+builtin releaseDraftBegin { }
+
+/// Recheck a bound ready draft's identity, metadata and source without writing.
+@executor("integration.release.releaseDraftObserveBound")
+builtin releaseDraftObserveBound { }
+
+/// Create only a missing immutable tag; reconcile the same ref after a lost reply.
+@executor("integration.release.releaseDraftEnsureTag")
+builtin releaseDraftEnsureTag { }
+
+/// Read bounded authenticated release inventory for the durable intent marker.
+@executor("integration.release.releaseDraftFind")
+builtin releaseDraftFind { }
+
+/// Durably claim the one allowed draft POST before attempting it.
+@executor("integration.release.releaseDraftClaimCreate")
+builtin releaseDraftClaimCreate { }
+
+/// Attempt one exact draft creation under its native durable fence.
+@executor("integration.release.releaseDraftCreate")
+builtin releaseDraftCreate { }
+
+/// Record the actual draft ID only from native verified remote readback.
+@executor("integration.release.releaseDraftRecord")
+builtin releaseDraftRecord { }
+
+/// Inspect completion of every destination in the owner-approved candidate.
+@executor("integration.release.releasePromotionPublications")
+builtin releasePromotionPublications { }
+
+/// Verify release metadata, source, complete asset inventory and every byte.
+@executor("integration.release.releasePromotionObserve")
+builtin releasePromotionObserve { }
+
+/// Fence asset writes and claim the one allowed promotion attempt.
+@executor("integration.release.releasePromotionClaim")
+builtin releasePromotionClaim { }
+
+/// Promote the approved draft once and verify the published bytes and identity.
+@executor("integration.release.releasePromotionWrite")
+builtin releasePromotionWrite { }
+
+/// Record publication only from the native protocol adapter's verified proof.
+@executor("integration.release.releasePromotionRecord")
+builtin releasePromotionRecord { }
+
+/// Preserve an uncertain effect for observation without another write attempt.
+@executor("integration.release.releaseDraftUncertain")
+builtin releaseDraftUncertain { }
+
+/// Refuse promotion while any approved publication is absent or incomplete.
+@executor("integration.release.releasePromotionRefuse")
+builtin releasePromotionRefuse { }

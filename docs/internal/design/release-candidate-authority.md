@@ -31,7 +31,8 @@ Configuration is reread without the engine's result cache for each operation.
 Unknown or duplicate JSON fields, duplicate source/target identities and unsafe destinations fail
 before effects. There is no environment or plaintext credential fallback.
 
-Release asset targets bind an existing draft ID, tag, exact source repository
+Release asset targets bind an existing draft ID or explicit deferred draft
+metadata, tag, exact source repository
 and commit, filename, API/upload/download origins, trust and credential
 reference (`candidate_file_targets.go`). Their namespace is shared with registry
 targets; duplicate IDs refuse across both formats. A file destination must
@@ -39,7 +40,7 @@ match its component's source, requires a file smaller than 2 GiB and cannot
 consume an OCI image as an ordinary release asset. Configuration discovery
 exposes the kind, draft, tag and filename for review, never credentials.
 Draft/tag creation and release promotion are separate effects, not side effects
-of this adapter. They remain required for the complete release-assembly workflow.
+of asset upload. Separate owner entries compose them through scoped DSL recipes.
 
 Named `assemblies` declare components, run aliases, exact producing paths,
 compatibility and configured destinations. `releaseAssembleCandidate` accepts
@@ -232,7 +233,52 @@ missing or substituted inputs and malformed producer metadata. These are not
 an installed build-and-release rehearsal.
 
 Still required for the complete delivery path: original-receipt
-verification for carried attempts, draft/tag creation and promotion,
-owner review UI, installation/recovery control, signed
+verification for carried attempts, installed installation/recovery control, signed
 provenance and complete release qualification. No candidate approval or
 publication is implied by these tests.
+
+## Draft creation and promotion
+
+`releaseCreateCandidateDraft` and `releasePromoteCandidateDraft` accept only
+candidate, approval and target identities. Deferred targets have `releaseId: 0`
+and exact name/body/prerelease/latest metadata. Candidate approval covers that
+intent, including connection trust and the complete file set. The native journal
+narrows it to an observed release ID without rewriting operator configuration.
+Existing positive-ID targets still upload; lifecycle actions additionally
+require reviewed metadata. Preparation fingerprints both lifecycle recipes.
+
+`releaseCreateDraftWorkflow` orders fresh verification, durable binding,
+immutable tag reconciliation, draft inventory, the unique creation claim,
+creation and receipt recording. `releasePromoteDraftWorkflow` requires every
+candidate destination to have a complete publication, observes all release
+bytes, claims promotion, writes and records readback. Native ports enforce
+those prerequisites independently of recipe ordering. Latest selection is a
+reviewed flag, not a Go policy; selecting it requires exact latest-ID readback.
+
+`release_draft_intents` has one row per normalized API origin, repository and
+tag. It binds the candidate, owner, approval, canonical plan and unique intent
+marker. States are prepared, creating, ready, promoting and published. A
+transaction commits creating/promoting before entering the remote effect. After
+that point another host observes only; neither an empty inventory nor a lost
+connection authorizes another draft POST or promotion PATCH. A crash between
+claim and send is conservatively uncertain. There is no automatic claim reset.
+
+A file upload takes the same native resource lock through the protocol effect.
+Promotion must also see every publication receipt complete. Pending receipts
+remain a fence after an uploader process dies and its transaction releases.
+Claiming promotion blocks every subsequent native upload. These are our own
+writer guarantees; GitHub has no atomic draft/tag/asset CAS against an external
+administrator. Complete before/after observations detect visible drift.
+
+`releaseCandidateDrafts` reads owner-scoped historical records independently of
+configuration and credentials. Records expose actual bound IDs and started or
+completed states without secrets. A draft intent prevents candidate retirement;
+schema rollback refuses to discard a nonempty journal. Uncertainty retains all
+candidate evidence. Mutable remote state is never inferred from UI state.
+
+Real SQL and ordinary DSL tests cover one create across concurrent hosts, lost
+creation and promotion replies, fresh-host observation, pending-publication
+refusal, upload/promotion locking, changed metadata and mandatory native scope.
+Local HTTP fixtures verify exact tag, marker, metadata, asset bytes and latest
+selection. They perform no public release effects and do not claim a complete
+installed multi-repository release rehearsal.

@@ -15,7 +15,12 @@ export interface Candidate {
   };
 }
 export interface Publication { candidateId: string; approvalId: string; effectId: string; state: "pending" | "complete"; target: Destination; artifactKind: "oci" | "file" }
-export interface Target extends Destination { origin: string; repository: string; kind: "oci" | "file"; tag?: string; assetName?: string; releaseId?: number }
+export interface DraftMetadata { name: string; body: string; prerelease: boolean; latest: boolean }
+export interface Target extends Destination { origin: string; repository: string; kind: "oci" | "file"; tag?: string; sourceCommit?: string; assetName?: string; releaseId?: number; draft?: DraftMetadata }
+export interface Draft {
+  intentId: string; candidateId: string; approvalId: string; state: "prepared" | "creating" | "ready" | "promoting" | "published";
+  releaseId?: number; targets: string[];
+}
 export interface CandidatePage { candidates: CandidateSummary[]; nextCursor?: string }
 
 function object(value: unknown): Record<string, unknown> {
@@ -92,10 +97,40 @@ export function readPublications(result: Result, expected: string): Publication[
 export function readTargets(result: Result): Target[] {
   return array(body(result).targets).map((entry) => {
     const t = object(entry);
-    if (t.kind === "file" && (typeof t.releaseId !== "number" || !Number.isSafeInteger(t.releaseId) || t.releaseId < 1)) throw new Error("The draft release identity is unavailable.");
     if (t.kind !== "oci" && t.kind !== "file") throw new Error("This publication destination is not supported.");
-    return { ...destination(t), kind: t.kind, origin: string(t.origin), repository: string(t.repository), tag: typeof t.tag === "string" ? t.tag : undefined, assetName: typeof t.assetName === "string" ? t.assetName : undefined, releaseId: typeof t.releaseId === "number" ? t.releaseId : undefined };
+    let draft: DraftMetadata | undefined;
+    if (t.draft !== undefined) {
+      const d = object(t.draft);
+      if (typeof d.body !== "string" || d.body.length > 65536 || typeof d.prerelease !== "boolean" || typeof d.latest !== "boolean" || (d.latest && d.prerelease)) throw new Error("The draft release metadata is invalid.");
+      draft = { name: string(d.name), body: d.body, prerelease: d.prerelease, latest: d.latest };
+    }
+    if (t.releaseId !== undefined && (typeof t.releaseId !== "number" || !Number.isSafeInteger(t.releaseId) || t.releaseId < 0)) throw new Error("The draft release identity is unavailable.");
+    const releaseId = typeof t.releaseId === "number" && t.releaseId > 0 ? t.releaseId : undefined;
+    if (t.kind === "file" && !releaseId && !draft) throw new Error("The draft release identity is unavailable.");
+    return { ...destination(t), kind: t.kind, origin: string(t.origin), repository: string(t.repository), tag: t.kind === "file" ? string(t.tag) : undefined, assetName: t.kind === "file" ? string(t.assetName) : undefined, sourceCommit: typeof t.sourceCommit === "string" ? t.sourceCommit : undefined, releaseId, draft };
   });
+}
+export function readDrafts(result: Result, expected: string): Draft[] {
+  const v = body(result), targets = new Set<string>();
+  if (digest(v.candidateId) !== expected) throw new Error("The cluster returned draft history for another release.");
+  return array(v.drafts).map((entry) => {
+    const d = object(entry);
+    if (digest(d.candidateId) !== expected || !["prepared", "creating", "ready", "promoting", "published"].includes(string(d.state))) throw new Error("The cluster returned inconsistent draft history.");
+    const releaseId = d.releaseId === undefined ? undefined : d.releaseId;
+    if ((releaseId !== undefined && (typeof releaseId !== "number" || !Number.isSafeInteger(releaseId) || releaseId < 1)) || (["ready", "promoting", "published"].includes(String(d.state)) && releaseId === undefined)) throw new Error("The recorded draft release identity is unavailable.");
+    const ids = array(d.targets, 64).map(string);
+    if (!ids.length || ids.some((id) => { if (targets.has(id)) return true; targets.add(id); return false; })) throw new Error("The cluster returned conflicting draft history.");
+    return { intentId: string(d.intentId), candidateId: expected, approvalId: string(d.approvalId), state: d.state as Draft["state"], releaseId: releaseId as number | undefined, targets: ids };
+  });
+}
+export function historiesMatch(record: Candidate, publications: Publication[], drafts: Draft[]): boolean {
+  const destinations = record.manifest.destinations;
+  return publications.every((p) => p.approvalId === record.approvalId && destinations.some((d) => destinationKey(d) === destinationKey(p.target) && d.targetDigest === p.target.targetDigest))
+    && drafts.every((d) => d.approvalId === record.approvalId && d.targets.every((id) => destinations.some((target) => target.targetId === id)));
+}
+export function allPublicationsComplete(record: Candidate, publications: Publication[]): boolean {
+  const destinations = record.manifest.destinations.filter((d) => d.operation === "publish");
+  return destinations.length > 0 && destinations.every((d) => publications.some((p) => p.state === "complete" && p.approvalId === record.approvalId && destinationKey(d) === destinationKey(p.target) && d.targetDigest === p.target.targetDigest));
 }
 export function destinationKey(d: Destination): string { return `${d.targetId}/${d.component}/${d.artifact}/${d.operation}`; }
 export function matchingTarget(d: Destination, targets: Target[] | null): Target | undefined {

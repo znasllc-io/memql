@@ -10,7 +10,9 @@ owner: znas
 # Verified release assets
 
 The native `integrations/githubrelease` package verifies an immutable file and
-publishes that exact asset to an existing GitHub draft release. It supports
+publishes that exact asset to a bound GitHub draft release. Separate lifecycle
+operations create tags and drafts, observe complete releases and promote them.
+It supports
 ordinary archives, extension packages and SDK files without interpreting or
 executing their contents. It has no public DSL registration. A release
 controller must first bind caller authority, a separately approved destination,
@@ -18,8 +20,9 @@ a durable publication intent and retained source bytes.
 
 DSL chooses the release, version, source commit, assets, approval sequence and
 eventual promotion. The native operation handles protocol requests, byte
-verification and reconciliation of the same effect. It never creates a tag or
-release, changes a release's visibility, deletes an asset or overwrites one.
+verification and reconciliation of the same effect. Asset publication never
+implicitly creates a tag or release or changes visibility. No operation deletes
+or overwrites an asset.
 
 ## Input and ownership
 
@@ -53,7 +56,9 @@ lowercase Git object IDs.
 The explicit draft ID matters: GitHub's
 [release-by-tag endpoint](https://docs.github.com/en/rest/releases/releases)
 finds published releases. A workflow must select or create its draft separately
-and bind that ID before approval. `target_commitish` is not proof of where an
+and bind that ID before upload. A candidate may approve an exact deferred draft
+intent; native creation records the returned ID without changing the approved
+destination. `target_commitish` is not proof of where an
 existing tag points.
 
 ## Publication and recovery
@@ -104,9 +109,10 @@ the remote asset remains present forever.
 Tests use local HTTP and TLS fixtures, including concurrent publishers,
 annotated tags, lost replies, conflicting/starter assets, malformed or excessive
 metadata, credential confinement, corrupt/truncated byte streams, cancellation
-and second-host reconciliation. They do not publish to GitHub. Installed
-controller composition and qualification must exercise the caller's real
-authority, retained storage and durable intent as well as this protocol seam.
+and second-host reconciliation. They do not publish to GitHub. The candidate
+controller additionally exercises native SQL authority, retained artifacts and
+scoped DSL composition. Full installed qualification must cover these contracts
+across the serving cluster too.
 
 Related: [Assembling release candidates](../operate/release-candidates.md),
 [Engine, integration and workflow boundaries](integration-boundary.md)

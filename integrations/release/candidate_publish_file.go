@@ -50,16 +50,51 @@ func (s *candidatePublishScope) writeFile(ctx context.Context, _ map[string]any)
 	if s.file == nil {
 		return nil, errors.New("release asset write requires verified immutable bytes")
 	}
-	publisher, err := s.p.targetReader.filePublisher(ctx, s.intent.Target)
+	plan, err := s.p.targetReader.draftPlan(ctx, s.record, s.intent.Target.TargetID)
 	if err != nil {
 		return nil, err
 	}
-	receipt, err := publisher.Publish(ctx, s.file)
+	binding, err := s.p.ledger.beginDraft(ctx, s.record.ID, s.request.ApprovalID, plan)
 	if err != nil {
 		return nil, err
 	}
-	if receipt.Size != s.intent.Artifact.Size || receipt.SHA256 != s.intent.Artifact.Digest {
-		return nil, errors.New("release asset readback differs from approved bytes")
+	var receipt githubrelease.Receipt
+	err = s.p.ledger.withDraftUpload(ctx, s.record.ID, s.request.ApprovalID, plan, func(releaseID int64) error {
+		var lifecycle *githubrelease.Lifecycle
+		marker := ""
+		if plan.Target.ReleaseID == 0 {
+			marker = binding.IntentID
+		}
+		if plan.Target.Draft != nil {
+			var err error
+			lifecycle, err = s.p.targetReader.fileLifecycle(ctx, s.intent.Target)
+			if err != nil {
+				return err
+			}
+			if err := lifecycle.CheckDraft(ctx, releaseID, *plan.Target.Draft, marker); err != nil {
+				return err
+			}
+		}
+		publisher, err := s.p.targetReader.boundFilePublisher(ctx, s.intent.Target, releaseID)
+		if err != nil {
+			return err
+		}
+		receipt, err = publisher.Publish(ctx, s.file)
+		if err != nil {
+			return err
+		}
+		if receipt.Size != s.intent.Artifact.Size || receipt.SHA256 != s.intent.Artifact.Digest {
+			return errors.New("release asset readback differs from approved bytes")
+		}
+		if lifecycle != nil {
+			if err := lifecycle.CheckDraft(ctx, releaseID, *plan.Target.Draft, marker); err != nil {
+				return githubrelease.ErrUncertain
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	s.proof = &candidatePublicationReceipt{TargetDigest: s.intent.Target.TargetDigest, ArchiveDigest: receipt.SHA256, Platform: s.intent.Artifact.Platform}
 	return nil, nil
