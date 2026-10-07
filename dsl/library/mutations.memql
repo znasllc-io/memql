@@ -301,6 +301,9 @@ mutation file createLibraryFile {
 }
 
 /// Record verified pipeline bytes under the durable upload journal's file id.
+/// actor.userId scopes ownership but cannot prove that bytes were uploaded and
+/// verified. Only the internal storage finalizer may attest the journal's file
+/// identity, digest, size and blobUrl; an owner must not forge that evidence.
 /// Recovery preserves every existing field, then reads back and verifies the
 /// row. It cannot reset lifecycle or overwrite an owner's intervening edit.
 @serverOnly
