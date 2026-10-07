@@ -119,7 +119,8 @@ The template receives the compiled `stages` and may compose
 `pipelineSkipStep`. The native host restricts every step key to its claimed run,
 retains secret and worker isolation, and records actual effects. Calling the
 same step twice still yields one receipt. The shipped recipe chooses stage
-order, parallel execution, failure blocking and the notification exception.
+order, parallel execution, failure blocking and declared continuation after
+failure (including notifications).
 Separate DSL templates own event-to-mode/version mapping and notification copy.
 
 ## Implementations in other languages

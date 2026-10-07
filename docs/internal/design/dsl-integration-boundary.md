@@ -30,7 +30,7 @@ audit, not a claim that every source line received a security review.
 
 | Native entry point | DSL now owns | Native responsibilities retained |
 | --- | --- | --- |
-| `component/pipelinerun` | Stage sequence, bounded concurrency, failure blocking, notification exception; event mode/version and notification copy | Immutable compiled steps, worker authority, leases, secrets, receipts, recovery and final verdict from actual results |
+| `component/pipelinerun` | Stage sequence, bounded concurrency, failure blocking, declared continuation after failure; event mode/version and notification copy | Immutable compiled steps, worker authority, leases, secrets, receipts, recovery and final verdict from actual results |
 | `integrations/release` | Candidate selection, validation/publication sequence, optional extension pin, completion record | Semver/tag parsing, exact commit/version checks, owner gate and remote effects |
 | `integrations/knowledge` | Catalog and corpus data, seed tiers/recipes, ingestion and embedding loops, training prompt/tools, bridge composition | Extraction, chunk/vector operations, input identity and bounded model execution |
 | `integrations/library` | Extract/summary/index sequence, status decisions, training and reviewed revision recipe | Row authority, exact revision approval, bytes, version locks and work receipts |

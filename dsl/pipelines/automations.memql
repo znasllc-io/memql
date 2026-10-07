@@ -38,7 +38,7 @@ automation pollPipelines {
 }
 
 /// The default pipeline workflow: stages in manifest order, independent steps
-/// concurrently, and notifications even after a previous stage failed.
+/// concurrently, and declared follow-up stages even after an earlier failure.
 /// The pipeline runtime supplies compiled steps and enforces the run lease.
 /// A different installed automation may compose these same bounded operations.
 @template
@@ -52,8 +52,8 @@ automation runPipelineStages {
     }
     failed := facts.steps.where(prior => prior.stageIndex < stage.stageIndex &&
       (prior.status == "failed" || prior.status == "refused" || prior.status == "cancelled")).first()
-    announces := stage.steps.count() > 0 && stage.steps.all(item => item.kind == "notify")
-    if failed != nil && !announces {
+    continues := stage.steps.count() > 0 && stage.steps.all(item => item.kind == "notify" || item.runAfterFailure)
+    if failed != nil && !continues {
       for item in stage.steps {
         builtin pipelineSkipStep(stepKey: item.key, code: "pipeline_stage_blocked",
           reason: "Not run: stage " + failed.stage + " failed.")

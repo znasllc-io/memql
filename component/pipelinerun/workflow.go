@@ -313,7 +313,7 @@ func (h *pipelineWorkflowHost) facts() map[string]any {
 	for index, stage := range h.dr.stages {
 		for _, t := range stage.tracks {
 			s := t.snapshot()
-			states = append(states, map[string]any{"key": t.step.Key, "stage": stage.name, "stageIndex": index, "status": string(s.Status), "kind": string(t.step.Kind)})
+			states = append(states, map[string]any{"key": t.step.Key, "stage": stage.name, "stageIndex": index, "status": string(s.Status), "kind": string(t.step.Kind), "runAfterFailure": t.step.RunAfterFailure})
 		}
 	}
 	return map[string]any{"stopped": h.dr.lease.isLost() || h.dr.lease.isCancelled(), "steps": states}
@@ -384,7 +384,7 @@ func (dr *runDriver) execute(ctx context.Context) error {
 	for index, stage := range dr.stages {
 		items := []any{}
 		for _, t := range stage.tracks {
-			items = append(items, map[string]any{"key": t.step.Key, "kind": string(t.step.Kind)})
+			items = append(items, map[string]any{"key": t.step.Key, "kind": string(t.step.Kind), "runAfterFailure": t.step.RunAfterFailure})
 		}
 		stages = append(stages, map[string]any{"name": stage.name, "stageIndex": index, "steps": items})
 	}

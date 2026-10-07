@@ -339,6 +339,7 @@ mounts is the runner's ([Caches](pipelines-substrate.md#caches)): it knows
 | `name` | The stage's name | Missing, breaking the rule, or used twice: `pipeline_stage_invalid` |
 | `needs` | Earlier stages this one depends on. Recorded rather than scheduled on: stages run in the order written whatever it says | A stage that comes later, the stage itself, or no stage at all: `pipeline_stage_invalid` |
 | `on` | The events (`pull_request`, `merge_group`, `push`, `release`) and modes (`affected`, `full`) the stage runs for. Absent means every run | Anything else: `pipeline_event_unknown` |
+| `runAfterFailure` | Boolean, default `false`. Run this stage even when an earlier stage failed; useful for independent security analysis. Does not erase failures or bypass cancellation | Non-boolean values fail manifest parsing |
 | `steps` | The stage's steps, which run at once | Both `steps` and `channel`, or neither: `pipeline_stage_invalid` |
 | `channel` | Makes the stage a notify stage naming a channel. It carries no steps, and compiles to one step, `<stage>.notify` | A name that breaks the rule: `pipeline_stage_invalid` |
 
@@ -360,7 +361,7 @@ mounts is the runner's ([Caches](pipelines-substrate.md#caches)): it knows
 | `needs` | `{ <need>: true }`, the need one of `display`, `docker`, `gpu`, `macos_tooling`, `user_files`: a native step needs a fleet machine that offers it. Host needs cannot pass through a container boundary; use `placement: fleet` to request an ordinary Docker container on a worker. A need set `false` is the same as none | runs on the cluster | A need outside the set: `pipeline_need_unknown`. Any need on a pipeline whose compute is `cluster`: `pipeline_fleet_not_consented` |
 | `services` | Declared services the step runs beside | none | A name `services` does not declare: `pipeline_service_unknown` |
 | `caches` | Overrides the pipeline's cache list; `[]` disables inherited caches, including for a native image build beside container test steps | pipeline caches | Native steps with nonempty effective caches: `pipeline_step_invalid` |
-| `timeout` | A duration such as `20m` or `1h30m`, from 1 minute to 2 hours. A step still running at its timeout is stopped and fails `pipeline_step_timeout` | `20m` | Not a duration, under `1m` or over `2h`: `pipeline_step_invalid` |
+| `timeout` | A duration such as `20m` or `1h30m`, from 1 minute to 3 hours. A step still running at its timeout is stopped and fails `pipeline_step_timeout` | `20m` | Not a duration, under `1m` or over `3h`: `pipeline_step_invalid` |
 | `artifacts` | Paths the runner saves as Library files owned by the pipeline's owner ([Artifacts](pipelines-substrate.md#artifacts)) | none | -- |
 | `secrets` | Names of secrets the step's environment receives, each under its own name ([Secrets](#secrets)) | none | A name that is not upper-case letters, digits and underscores starting with a letter (at most 128 characters), or that begins `MEMQL_`: `pipeline_secret_invalid`. A name the pipeline does not allow: `pipeline_secret_not_allowed` |
 | `imagePullSecret` | Name of an owner-allowed Docker config JSON secret for the step and service images; cluster container steps only | none | The same name/consent rules as `secrets`; declaring it as an environment secret or using fleet/native execution is refused |
@@ -466,8 +467,11 @@ Stages run one at a time, in the order written, and the steps of a stage run at
 once. Every step waits for every step of the stage before it, whatever `needs`
 says. The first stage that fails stops the run: every later step is skipped
 `pipeline_stage_blocked`, and the check run's table says *Not run: an earlier
-stage failed* -- except a notify stage's, which runs, because announcing the
-failure is what it is for ([Notify stages](#notify-stages)).
+stage failed* -- except notify stages and stages declaring
+`runAfterFailure: true`. Independent analysis can still collect evidence after
+failed tests. A passing later stage never turns the run green or unblocks a
+subsequent ordinary stage. Cancellation and a lost driver lease still stop it.
+The declaration is part of the execution definition checked during recovery.
 
 `on` names events, modes or both. `on: [push]` runs on the default branch's
 pushes only; `on: [full]` on the merge queue, pushes and releases;
@@ -483,8 +487,9 @@ Discord channel, one per recipient for an email channel -- and the step reports
 what the delivery's row reports: delivered, failed, or not there yet when its
 time ran out. Write the notify stage last:
 
-- **It runs after an earlier stage failed**, to say so; every other stage
-  after a failure is *Not run*.
+- **It runs after an earlier stage failed**, to say so; ordinary stages
+  after a failure are *Not run*. A stage may explicitly opt in with
+  `runAfterFailure: true`.
 - **A notify stage that fails fails the run**, and blocks every stage written
   after it, as any failed stage does.
 - **A cancel before the hand-over sends nothing.** A cancel after it cannot
