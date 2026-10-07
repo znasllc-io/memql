@@ -427,15 +427,10 @@ func (dr *runDriver) steer(ctx context.Context) (verdict, bool) {
 		return refusedWith(refusal), true
 	}
 
-	// Resolve and pin the workflow before the first step intent.
-	if err := dr.prepareWorkflow(plan.Workflow); err != nil {
-		return refusedWith(pipelines.Refuse(pipelines.CodeStageInvalid, "workflow", "%s", err)), true
-	}
-
 	if len(plan.Stages) == 0 {
-		// No stage applies to this run: a success with nothing to run, and
-		// no work goal for nothing.
-		return verdict{conclusion: ConclusionSuccess}, true
+		// A changed DSL selector must not erase an already-journaled plan on
+		// recovery (or turn a failed-only rerun into a passing empty run).
+		return dr.emptyPlanVerdict(), true
 	}
 
 	// The work run.
@@ -456,6 +451,19 @@ func (dr *runDriver) steer(ctx context.Context) (verdict, bool) {
 		return verdict{conclusion: ConclusionFailure, workCode: pipelines.CodeExecutorError, workMessage: "Pipeline workflow failed: " + dr.mask(workflowErr.Error())}, true
 	}
 	return dr.verdictOfSteps(), true
+}
+
+func (dr *runDriver) emptyPlanVerdict() verdict {
+	if strings.TrimSpace(dr.run.WorkRunID) != "" || dr.run.RerunFailedOnly {
+		return verdict{
+			conclusion:  ConclusionFailure,
+			workCode:    pipelines.CodeNodeLost,
+			workMessage: "The pipeline DSL selected no stages for a run with an existing work plan, so its original checks cannot be proven. Re-run the pipeline.",
+		}
+	}
+	// No stage applies to a fresh run: success with nothing to run, and no
+	// work goal for nothing.
+	return verdict{conclusion: ConclusionSuccess}
 }
 
 // abort logs why a drive stopped short. A lost lease was logged where it was

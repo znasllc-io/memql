@@ -97,6 +97,14 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 	if refusal := pipelines.Validate(spec); refusal != nil {
 		return pipelines.Plan{}, refusal
 	}
+	if err := dr.prepareWorkflow(spec.Workflow); err != nil {
+		return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeStageInvalid, "workflow", "%s", err)
+	}
+	stageSelection, err := dr.selectStages(ctx, spec.Stages, run.Event, run.Mode)
+	if err != nil {
+		return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeStageInvalid, "selection",
+			"The pipeline DSL could not select stages for this run: %v.", err)
+	}
 
 	in := pipelines.CompileInput{
 		Mode:           run.Mode,
@@ -104,6 +112,7 @@ func (dr *runDriver) readPlan(ctx context.Context) (pipelines.Plan, *pipelines.R
 		Compute:        p.Compute,
 		AllowedSecrets: p.SecretNames,
 		Timings:        p.Timings,
+		StageSelection: &stageSelection,
 	}
 	if run.Mode == pipelines.ModeAffected {
 		in.Changed, in.ChangedKnown = dr.changes(ctx)

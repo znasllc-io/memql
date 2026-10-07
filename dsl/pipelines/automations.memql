@@ -69,6 +69,14 @@ automation runPipelineStages {
   }
 }
 
+/// Stage applicability is pipeline policy: the manifest declares the events
+/// and modes, and the sealed workflow decides which stages a run includes.
+@template
+automation pipelineStageIncluded {
+  args { event string! mode string! on []string! }
+  return args.on.count() == 0 || args.on.any(value => value == args.event || value == args.mode)
+}
+
 /// Pull requests test affected packages; trees that land or ship test the full set.
 /// Check re-requests keep their original run's mode and do not select one here.
 @template
