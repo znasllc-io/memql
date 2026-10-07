@@ -271,6 +271,7 @@ readonly DB_GATED_TREES=(
 	"integrations/groups"
 	"integrations/planner"
 	"integrations/procedure"
+	"integrations/release"
 	"integrations/shopify"
 	"integrations/email"
 	"integrations/sitepreview"

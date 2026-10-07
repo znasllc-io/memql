@@ -24,6 +24,9 @@ func TestPipelineReceiptReadRefusesBeforeDatabaseAccess(t *testing.T) {
 		if _, err := s.ReadRunFileReceipts(ctx, scope, []string{valid}); err == nil {
 			t.Fatal("untrusted/mismatched actor read accepted")
 		}
+		if _, _, err := s.OpenRunFileReceipt(ctx, scope, valid); err == nil {
+			t.Fatal("untrusted actor opened artifact stream")
+		}
 	}
 	for _, ids := range [][]string{{"short"}, {strings.Repeat("A", 64)}, {strings.Repeat("z", 64)}, {valid, valid}, make([]string, 1025), {strings.Repeat("a", 1<<20)}} {
 		if _, err := s.ReadRunFileReceipts(trusted, scope, ids); err == nil {

@@ -11,6 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/integrations/pipelinesteps"
+
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/znasllc-io/memql/core/id"
@@ -109,6 +112,22 @@ func TestPipelineStreamAzuriteDBRecoveryAcrossClients(t *testing.T) {
 	}
 	if err := db.QueryRowContext(ctx, "SELECT state FROM pipeline_artifact_uploads WHERE intent_id=$1", got.Receipt.IntentID).Scan(&state); err != nil || state != "ready" {
 		t.Fatalf("final receipt: %s %v", state, err)
+	}
+	trusted := auth.ContextWithInternalOrigin(auth.ContextWithUserActor(ctx, f.OwnerUserID))
+	scope := pipelinesteps.RunFileReceiptScope{OwnerUserID: f.OwnerUserID, WorkRunID: f.WorkRunID, StepKey: f.StepKey, Attempt: f.Attempt}
+	opened, body, err := second.OpenRunFileReceipt(trusted, scope, got.Receipt.IntentID)
+	if err != nil || opened != *got.Receipt {
+		t.Fatalf("native journal to pinned object: %+v %v", opened, err)
+	}
+	count, readErr := io.Copy(io.Discard, body)
+	closeErr := body.Close()
+	if readErr != nil || closeErr != nil || count != size {
+		t.Fatal("verified receipt EOF", count, readErr, closeErr)
+	}
+	scope.Attempt++
+	if _, body, err := second.OpenRunFileReceipt(trusted, scope, got.Receipt.IntentID); err == nil {
+		body.Close()
+		t.Fatal("another attempt opened immutable artifact")
 	}
 	t.Logf("verified %d streamed bytes across lost upload reply, lost Library reply and independent-client recovery; file=%s etag=%s", size, got.FileID, got.Receipt.ETag)
 }
