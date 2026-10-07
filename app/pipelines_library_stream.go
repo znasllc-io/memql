@@ -69,12 +69,8 @@ func (s *pipelinesLibraryStore) StoreRunFileStream(ctx context.Context, f pipeli
 	if err := s.finalizeStream(ownerCtx, db, intent); err != nil {
 		return pipelinesteps.StoredFile{}, fmt.Errorf("verified artifact retained; Library finalization requires reconciliation: %w", err)
 	}
-	return pipelinesteps.StoredFile{FileID: intent.FileID, Receipt: &pipelinesteps.StoredFileReceipt{
-		IntentID: intent.ID, FileID: intent.FileID, OwnerUserID: identity.OwnerUserID,
-		WorkRunID: identity.WorkRunID, StepKey: identity.StepKey, Attempt: identity.Attempt, Path: identity.Path,
-		Container: identity.Container, Object: intent.Object, URL: intent.URL, ETag: intent.ETag,
-		Size: identity.Size, SHA256: identity.SHA256,
-	}}, nil
+	receipt := pipelineIntentReceipt(intent)
+	return pipelinesteps.StoredFile{FileID: intent.FileID, Receipt: &receipt}, nil
 }
 
 // All non-stream fields are immutable. JSON is persisted as a structured
@@ -105,6 +101,9 @@ func (s *pipelinesLibraryStore) streamIdentity(f pipelinesteps.StreamRunFile) (p
 	}
 	if path.IsAbs(x.Path) || path.Clean(x.Path) != x.Path || x.Path == "." || x.Path == ".." || strings.HasPrefix(x.Path, "../") || strings.Contains(x.Path, "\\") {
 		return x, errors.New("artifact path must be canonical and relative to the export")
+	}
+	if len(x.SHA256) != 64 {
+		return x, errors.New("streamed artifact requires a lowercase SHA-256 digest")
 	}
 	digest, err := hex.DecodeString(x.SHA256)
 	if err != nil || len(digest) != sha256.Size || hex.EncodeToString(digest) != x.SHA256 {

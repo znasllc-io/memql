@@ -66,6 +66,16 @@ version and digest before using it; a Library file ID alone is not immutable
 release evidence. A later ETag change is refused even if the bytes hash to the
 same digest.
 
+Step results may retain just the opaque intent IDs to keep their journal and
+transport records bounded. `LibraryReceiptReader.ReadRunFileReceipts` resolves
+up to 1024 unique IDs in the supplied order, under an exact owner/run/step/attempt
+scope. It requires internal origin and the matching owner actor; its SQL repeats
+the scope checks. Missing, not-ready or mismatched entries refuse the entire
+read. There is no public HTTP or DSL endpoint for this native journal accessor.
+The calling capability must first authorize the run, and must still verify the
+returned object version and bytes before publication. Looking up a saved receipt
+is not a new byte verification.
+
 Admission counts the owner's current files, retained versions, open upload
 sessions and all streaming journal entries before moving bytes. A current file
 is counted only once when its ID, URL, size and digest exactly match a journal
