@@ -40,7 +40,8 @@ limits. The private snapshot temporarily needs room for the archive and its
 materialized blobs, at most twice the archive ceiling plus metadata overhead.
 After validation only the private layout remains. The returned opaque handle
 is the publication input; `Close` removes its files and waits for publication
-using that handle to finish.
+using that handle to finish. Publication's 30-minute ceiling includes waiting
+for the handle; a queued caller's cancellation does not wait for another transfer.
 
 This proves content integrity and platform. It does not prove source
 provenance, vulnerability clearance, approval or deployment health.

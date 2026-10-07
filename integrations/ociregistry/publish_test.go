@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/registry"
 )
@@ -73,6 +74,56 @@ func TestPublishRegistryReadbackAndDuplicate(t *testing.T) {
 	}
 	if _, err := p.Publish(context.Background(), &VerifiedImage{}); err == nil {
 		t.Fatal("forged handle accepted")
+	}
+}
+
+func TestPublishQueueDeadlineIncludesHandleAdmission(t *testing.T) {
+	v, _ := verifiedFixture(t)
+	entered := make(chan struct{})
+	var once sync.Once
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(entered) })
+		<-r.Context().Done()
+	}))
+	defer s.Close()
+	p := publisher(t, s.URL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	active := make(chan error, 1)
+	go func() { _, err := p.Publish(ctx, v); active <- err }()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("active publication never acquired the handle")
+	}
+	queuedCtx, stopQueued := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer stopQueued()
+	queued := make(chan error, 1)
+	go func() { _, err := p.Publish(queuedCtx, v); queued <- err }()
+	select {
+	case err := <-queued:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatal("queued publication ignored deadline", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued publication waited for unrelated transfer after its deadline")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- v.Close() }()
+	select {
+	case <-closed:
+		t.Fatal("Close removed the active publication's snapshot")
+	default:
+	}
+	cancel()
+	if err := <-active; !errors.Is(err, context.Canceled) {
+		t.Fatal("active publication lost cancellation", err)
+	}
+	if err := <-closed; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Publish(context.Background(), v); err == nil {
+		t.Fatal("closed handle published")
 	}
 }
 
