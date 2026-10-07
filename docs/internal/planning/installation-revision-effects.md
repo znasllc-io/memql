@@ -179,8 +179,21 @@ entry. Parallel callbacks on different connections preserve each other's
 receipts. Only confirmed producer stop and completion of both capture scopes
 release the installation slot as `cancelled`. A lost final reply returns that
 history without touching a successor's head. Migration rollback refuses to
-erase cleanup history. Scoped DSL composition and installed recovery evidence
-remain unfinished, and these operations remain private and unregistered.
+erase cleanup history.
+
+The private installed `installationRetirementWorkflow` now composes these
+operations as one bounded reconciliation pass. It processes one page per
+capture, then observes whether native cleanup receipts permit final release.
+A returned `retiring` record means more work remains, never completion. A
+fresh host resumes its pending page and the caller schedules another pass.
+The native host owns the recipe snapshot, binds its fingerprint and immutable
+engine revision, refuses unbound operations/children before effects, rechecks
+the original operator on each callback, and ignores claimed DSL return proofs.
+Local required-database race tests exercise the installed recipe and a second
+recipe with reversed role order and joined parallel artifact calls, including
+lost provider replies and recovery on an independent connection. The
+reconciliation scheduler, public surface and installed recovery qualification
+remain unfinished; these operations remain private and unregistered.
 
 ### Atomic preparation handoff
 
