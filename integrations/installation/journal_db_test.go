@@ -202,6 +202,50 @@ func TestJournalCancellationFencesLateStartAndCannotReleaseSuccessor(t *testing.
 	require.NoError(t, err)
 }
 
+func TestJournalConcurrentStartAndCancellationHaveOnlyOneWinner(t *testing.T) {
+	db, peerDB := journalDB(t)
+	first := revisionJournal{db: func() *sql.DB { return db }}
+	peer := revisionJournal{db: func() *sql.DB { return peerDB }}
+	ctx := operator(auth.RoleDeveloper, "developer-one")
+	for range 8 {
+		plan := testPlan()
+		plan.InstallationID = "race-" + id.NewShortId()
+		r, err := first.reserve(ctx, plan)
+		require.NoError(t, err)
+		gate := make(chan struct{})
+		results := make(chan error, 2)
+		go func() {
+			<-gate
+			_, err := first.begin(ctx, plan.InstallationID, r.ID, plan.WorkflowDigest)
+			results <- err
+		}()
+		go func() {
+			<-gate
+			_, err := peer.cancel(ctx, plan.InstallationID, r.ID)
+			results <- err
+		}()
+		close(gate)
+		wins := 0
+		for range 2 {
+			if err := <-results; err == nil {
+				wins++
+			}
+		}
+		require.Equal(t, 1, wins)
+		stored, err := peer.get(ctx, plan.InstallationID, r.ID)
+		require.NoError(t, err)
+		require.Contains(t, []string{"applying", "cancelled"}, stored.State)
+		successor := testPlan()
+		successor.InstallationID = plan.InstallationID
+		_, err = first.reserve(ctx, successor)
+		if stored.State == "applying" {
+			require.ErrorIs(t, err, errBusy)
+		} else {
+			require.NoError(t, err)
+		}
+	}
+}
+
 func TestJournalLateObservationCannotOverwriteNewerFactsOrCompleteInstallation(t *testing.T) {
 	db, peerDB := journalDB(t)
 	first := revisionJournal{db: func() *sql.DB { return db }}
