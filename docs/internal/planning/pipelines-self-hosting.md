@@ -728,3 +728,32 @@ initialization instead of its intended long-running migration; the injected
 deadline now applies only to that migration. The three database lock regressions
 pass ten repeated runs. Final PR checks and local rollout still need their own
 recorded results; earlier green runs are not a claim about the final commit.
+
+### Standalone security analysis measurements (October 6)
+
+Pinned CodeQL 2.27.1 completed Go, JavaScript/TypeScript and Python analysis
+outside Actions on local Linux ARM64. The clean source was
+`701ec06fedd139b0bb825abbfd35893ccdbcd214`. Go produced 84 findings, JavaScript
+15 and Python zero. Exact rule/file/line comparison maps every Go finding to a
+historical GitHub alert: 61 dismissed as false positives and 23 still open. Of the
+JavaScript findings, 14 matched open alerts; the additional download path remains
+for triage. Analysis completion is a fact, not a clean security verdict, and
+historical dismissals must retain their evidence rather than silently suppressing
+new results.
+
+The Go run took over two hours on two CPUs, including 41 minutes 49 seconds of
+SARIF export. Its declaration now allows three hours and the tested 6 GiB memory
+allocation; the general maximum step duration is three hours. An operator must
+also configure enough total run time for the entire serialized suite. The
+previous 90-minute scan and default two-hour run ceiling cannot qualify this
+workload. Full-history Gitleaks also exceeded the former 30-minute declaration;
+its bound is now 90 minutes, with two Go runtime threads and a 768 MiB soft GC
+target. Its complete measured outcome remains separate evidence.
+
+The 13,599,430-byte Go SARIF report round-tripped through the bounded GitHub API
+wire adapter against an in-process server; it was not uploaded publicly. Its
+SHA-256 is `25f293bfeaed12795325b4c9c49049da288d5476d9156d579ff406d621c28774`.
+SBOM generation covered 53 Go modules and seven npm lockfiles in nine reports,
+including development dependencies. Installed Workbench execution, current-source
+rescans, SARIF publishing, schedules, Code Quality parity and release gating still
+require the combined rehearsal.

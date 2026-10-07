@@ -219,7 +219,7 @@ func TestValidate(t *testing.T) {
 		{"a service nobody declared", fromValidateBase(func(s *Spec) { build(s).Services = []string{"redis"} }), CodeServiceUnknown, "checks/build"},
 		{"a timeout that is not a duration", fromValidateBase(func(s *Spec) { build(s).Timeout = "20" }), CodeStepInvalid, "checks/build"},
 		{"a timeout under a minute", fromValidateBase(func(s *Spec) { build(s).Timeout = "59s" }), CodeStepInvalid, "checks/build"},
-		{"a timeout over the cap", fromValidateBase(func(s *Spec) { build(s).Timeout = "2h1m" }), CodeStepInvalid, "checks/build"},
+		{"a timeout over the cap", fromValidateBase(func(s *Spec) { build(s).Timeout = "3h1m" }), CodeStepInvalid, "checks/build"},
 		{"a secret name in lower case", fromValidateBase(func(s *Spec) { build(s).Secrets = []string{"npm_token"} }), CodeSecretInvalid, "checks/build"},
 		{"a secret name of 129 characters", fromValidateBase(func(s *Spec) {
 			build(s).Secrets = []string{"A" + strings.Repeat("B", 128)}
@@ -308,7 +308,7 @@ func TestValidate(t *testing.T) {
 		"a bucket nobody declared":                   `when.bucket is "web"`,
 		"a timeout that is not a duration":           "is not a duration",
 		"a timeout under a minute":                   "under the 1m minimum",
-		"a timeout over the cap":                     "over the 2h maximum",
+		"a timeout over the cap":                     "over the 3h maximum",
 		"a secret name in lower case":                "is not a secret name",
 		"a secret name of 129 characters":            "is not a secret name",
 		"a secret named MEMQL_*":                     "reserved",
