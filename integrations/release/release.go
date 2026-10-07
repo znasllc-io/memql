@@ -79,7 +79,7 @@ func (i *Integration) IntegrationName() string { return "release" }
 
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
-	return append([]memql.IntegrationCapability{
+	out := append([]memql.IntegrationCapability{
 		{
 			Name: "releaseCut",
 			Description: "Cut a new release: compute the next version from the repository's vX.Y.Z tags, " +
@@ -108,6 +108,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 	}, workflowhost.ScopedCapabilities((&cutScope{}).operations())...)
+	return append(out, workflowhost.ScopedCapabilities((&candidatePrepareScope{}).operations())...)
 }
 
 // handleCut adapts the DSL argument map to Cut.

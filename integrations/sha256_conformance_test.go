@@ -46,8 +46,9 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 	// -- specifically to remove the unguarded coupling a duplicated hash
 	// expression created, so the entry is gone rather than kept.)
 	allow := map[string]string{
-		"ociregistry/verify.go":      "OCI descriptors and immutable archive receipts require standard SHA-256 over exact bytes, not MemQL identifiers",
-		"ociregistry/verify_test.go": "independently computes OCI fixture digests and artifact receipt SHA-256 values",
+		"release/candidate_oci_fixture_test.go": "independently encodes standard OCI content and archive SHA-256 values for preparation integrity tests",
+		"ociregistry/verify.go":                 "OCI descriptors and immutable archive receipts require standard SHA-256 over exact bytes, not MemQL identifiers",
+		"ociregistry/verify_test.go":            "independently computes OCI fixture digests and artifact receipt SHA-256 values",
 		// Release artifact digests are standard SHA-256 over the exact blob
 		// bytes, independently verifiable with sha256sum and OCI tooling.
 		// core/id's content address is a different algorithm/representation.

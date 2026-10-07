@@ -77,7 +77,10 @@ func TestCandidateEvidenceThroughRealJournalAndOwnerQueries(t *testing.T) {
 	fp := "work-definition-v2:" + strings.Repeat("d", 64)
 	work := workjournal.Work{OwnerUserID: owner, Template: "pipeline:evidence", GoalKey: id.NewShortId(), RunKey: "1", Statement: "Candidate evidence fixture", TriggeredBy: pl.WorkTriggerPrefix + "full",
 		Input: map[string]any{"repository": "acme/engine", "sha": strings.Repeat("b", 40), "mode": "full", "event": "push", "pipelineId": "pipeline-fixture", "pipelineRunId": "run-fixture", "attempt": 1},
-		Steps: []workjournal.StepDecl{{Key: "build.image", Kind: workjournal.KindDeterministic, StepType: "exec", Call: map[string]any{"construct": "pipeline", "definitionFingerprint": fp}}}}
+		Steps: []workjournal.StepDecl{
+			{Key: "build.image", Kind: workjournal.KindDeterministic, StepType: "exec", Call: map[string]any{"construct": "pipeline", "definitionFingerprint": fp}},
+			{Key: "test.full", Kind: workjournal.KindDeterministic, StepType: "exec", Call: map[string]any{"construct": "pipeline", "definitionFingerprint": fp}},
+		}}
 	_, runID, err := workjournal.IDs(work)
 	if err != nil {
 		t.Fatal(err)
@@ -92,6 +95,13 @@ func TestCandidateEvidenceThroughRealJournalAndOwnerQueries(t *testing.T) {
 	}
 	result := map[string]any{"status": "succeeded", "metadata": map[string]any{"exitCode": 0, "artifactIntentIds": []string{strings.Repeat("c", 64)}}}
 	if err := step.Finish(actor, workjournal.Receipt{Status: "done", Result: result}); err != nil {
+		t.Fatal(err)
+	}
+	check, err := run.Step(actor, "test.full")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := check.Finish(actor, workjournal.Receipt{Status: "done", Result: map[string]any{"status": "succeeded", "metadata": map[string]any{"exitCode": 0}}}); err != nil {
 		t.Fatal(err)
 	}
 	reader := candidateEvidenceReader{engine: evidenceFreshRead{t, engine}}
@@ -112,6 +122,17 @@ func TestCandidateEvidenceThroughRealJournalAndOwnerQueries(t *testing.T) {
 	c.Evidence = []pl.ReleaseEvidence{{Name: "build", Component: "engine", WorkRunID: runID, StepKey: "build.image", Attempt: got.Attempt, ReceiptID: got.ReceiptID, ReceiptDigest: got.ReceiptDigest, DefinitionDigest: got.DefinitionDigest, ArtifactIntentIDs: got.ArtifactIntentIDs}}
 	if err := reader.verify(actor, c); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := reader.coverage(actor, c); err == nil {
+		t.Fatal("partial evidence passed complete-run coverage")
+	}
+	tested, err := reader.read(actor, runID, "test.full")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Evidence = append(c.Evidence, pl.ReleaseEvidence{Name: "full-tests", Component: "engine", WorkRunID: runID, StepKey: "test.full", Attempt: tested.Attempt, ReceiptID: tested.ReceiptID, ReceiptDigest: tested.ReceiptDigest, DefinitionDigest: tested.DefinitionDigest})
+	if modes, err := reader.coverage(actor, c); err != nil || len(modes) != 1 || modes[0] != "full" {
+		t.Fatal("complete journal declaration did not verify", modes, err)
 	}
 	stranger := auth.ContextWithAccess(t.Context(), &auth.AccessContext{UserId: "stranger-" + owner, Role: auth.RoleOwner})
 	if _, err := reader.read(stranger, runID, "build.image"); err == nil {

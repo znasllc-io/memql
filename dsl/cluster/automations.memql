@@ -243,3 +243,20 @@ automation releaseCutWorkflow {
   }
   builtin releaseRecordCut()
 }
+
+/// Prepare immutable release evidence for a separate owner approval.
+/// Publication is not available in this scope. A failed preparation retains
+/// its durable record and pins so another replica can resume or retire it.
+@template
+automation releasePrepareCandidateWorkflow {
+  facts := builtin releaseCandidateEvidence()
+  if facts.modes.count() == 0 || facts.modes.any(mode => mode != "full") {
+    builtin releaseCandidateRefuse()
+  }
+  builtin releaseCandidateCheckVersions()
+  builtin releaseCandidateCheckTargets()
+  builtin releaseCandidateRecordPreparing()
+  builtin releaseCandidatePinArtifacts()
+  builtin releaseCandidateVerifyArtifacts()
+  builtin releaseCandidateMarkReady()
+}

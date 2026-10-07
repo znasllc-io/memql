@@ -11,8 +11,9 @@ owner: znas
 
 The native candidate journal separates verification, owner approval and an
 external publication effect. It is infrastructure for the installed release
-workflow, not an alternative workflow or a public approval API. The current
-methods are private and are not registered as DSL capabilities.
+workflow, not an alternative workflow or a public approval API. Preparation and
+approval entry points remain private. Scoped operations are registered only to
+support the installed template; direct calls refuse even for an owner.
 
 `component/pipelines.ReleaseCandidate` binds independently versioned components,
 exact repository commits, compatibility ranges, immutable artifact receipts,
@@ -30,8 +31,33 @@ It refuses skipped work, failed or unfinished runs, cancellation, replay,
 unknown execution definitions and missing or nonzero exit codes. It verifies
 source, attempt, execution definition and the full recorded call/result. A
 step ID alone is mutable; the receipt digest also binds its recorded version.
-This does not prove complete release coverage: the sealed DSL must select the
-required evidence and enforce its complete policy before preparing a candidate.
+The complete-run reader reconstructs every declared step in its original order
+and checks the run's definition fingerprint. Evidence must include every step
+of every selected run, and every artifact producer must belong to that evidence.
+The installed `releasePrepareCandidateWorkflow` requires full-mode runs before
+recording preparation. This initial path deliberately refuses all skipped steps
+and notification-only receipts; those need explicit typed evidence and policy
+before existing pipelines containing them can qualify. A successful aggregate
+cannot silently replace missing individual receipts.
+
+The preparation scope snapshots the installed template and configured version
+sources, binding both plus the immutable engine commit into `workflowDigest`.
+Children and logic bodies are refused until their definitions can also be
+included in that identity. Native version reads use the exact source commit and
+operator-selected `VERSION` or top-level JSON version property. Candidate
+arguments cannot choose a file, credential or moving branch. Registry targets
+bind their exact connection settings, download origins, certificate roots and
+credential references. Credentials resolve only from the secret provider and
+never enter the manifest. A changed target refuses before credential lookup.
+
+The DSL orders evidence, source-version and destination checks, preparation
+intent, artifact pins, byte verification and readiness. Native operations retain
+each prerequisite: another recipe cannot skip verification and mark ready.
+Every evidence artifact is pinned, not only the image selected for publication.
+Product OCI archives undergo complete archive, platform, image and layer checks.
+Evidence and destination reads repeat immediately before readiness; publication
+must repeat verification again because later journal/configuration changes cannot
+be locked by a completed read. Preparation itself publishes nothing.
 
 Artifact bytes come from the native upload journal, not an editable Library
 row. `OpenRunFileReceipt` repeats owner, internal-origin and producing-attempt
@@ -66,8 +92,15 @@ and mismatched completion receipts. Real engine/journal tests cover scoped
 evidence and changed receipts. Storage tests include actual Azurite version
 reads and a 128 MiB journal-to-object read across independent clients.
 
-Still required before exposing this path: sealed workflow selection and full
-coverage validation, trusted target resolution, durable artifact pinning,
-native OCI publication wiring, owner review UI, installation/recovery control,
-signed provenance and complete release qualification. No candidate approval or
-publication is implied by these primitive tests.
+Preparation tests use real candidate storage, the ordinary DSL interpreter,
+HTTP source-version fixtures and actual OCI verification. They cover another
+host with no local scope state, changed policy/engine identity, omitted native
+checks, corrupted or unavailable artifacts and retirement during verification.
+Artifact storage and work-evidence adapters have their own real DB/Azurite tests;
+this is not yet an integrated release rehearsal.
+
+Still required before exposing this path: operator/app wiring, explicit support
+for non-command receipts and planned skips, native OCI publication wiring,
+non-OCI release targets, owner review UI, installation/recovery control, signed
+provenance and complete release qualification. No candidate approval or
+publication is implied by these tests.

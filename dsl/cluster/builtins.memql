@@ -73,6 +73,38 @@ builtin releaseOpenExtensionPin { }
 @executor("integration.release.releaseRecordCut")
 builtin releaseRecordCut { }
 
+/// Read complete, successful execution evidence inside an authorized candidate scope.
+@executor("integration.release.releaseCandidateEvidence")
+builtin releaseCandidateEvidence { }
+
+/// Refuse a candidate excluded by the installed release policy.
+@executor("integration.release.releaseCandidateRefuse")
+builtin releaseCandidateRefuse { }
+
+/// Check component versions at their exact source commits.
+@executor("integration.release.releaseCandidateCheckVersions")
+builtin releaseCandidateCheckVersions { }
+
+/// Check the operator-configured destinations bound into this candidate.
+@executor("integration.release.releaseCandidateCheckTargets")
+builtin releaseCandidateCheckTargets { }
+
+/// Record immutable preparation intent before retaining artifacts.
+@executor("integration.release.releaseCandidateRecordPreparing")
+builtin releaseCandidateRecordPreparing { }
+
+/// Pin every evidence artifact under the durable candidate identity.
+@executor("integration.release.releaseCandidatePinArtifacts")
+builtin releaseCandidatePinArtifacts { }
+
+/// Verify retained bytes and the full OCI image before readiness.
+@executor("integration.release.releaseCandidateVerifyArtifacts")
+builtin releaseCandidateVerifyArtifacts { }
+
+/// Mark ready only after this native scope verified all candidate inputs.
+@executor("integration.release.releaseCandidateMarkReady")
+builtin releaseCandidateMarkReady { }
+
 /// Select and calculate a version from the already-read release snapshot.
 @executor("integration.release.releaseSelectCandidate")
 @args(profile="object")
