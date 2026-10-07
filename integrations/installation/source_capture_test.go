@@ -37,6 +37,10 @@ func (o captureObjects) OpenGitObject(_ context.Context, kind, oid string) (io.R
 }
 
 func captureFixture(t *testing.T) (sourceCaptureSpec, []byte) {
+	return captureRevisionFixture(t, "private-source-commit")
+}
+
+func captureRevisionFixture(t *testing.T, message string) (sourceCaptureSpec, []byte) {
 	t.Helper()
 	objects := captureObjects{}
 	add := func(kind string, body []byte) string {
@@ -56,7 +60,7 @@ func captureFixture(t *testing.T) (sourceCaptureSpec, []byte) {
 	kustomization := add("blob", []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources: [config.yaml]\n"))
 	tree := add("tree", append(entry("100644", "config.yaml", config), entry("100644", "kustomization.yaml", kustomization)...))
 	root := add("tree", entry("40000", "overlay", tree))
-	commit := add("commit", []byte("tree "+root+"\nauthor Fixture <fixture@example.invalid> 1 +0000\ncommitter Fixture <fixture@example.invalid> 1 +0000\n\nprivate-source-commit\n"))
+	commit := add("commit", []byte("tree "+root+"\nauthor Fixture <fixture@example.invalid> 1 +0000\ncommitter Fixture <fixture@example.invalid> 1 +0000\n\n"+message+"\n"))
 	spec := sourceCaptureSpec{OwnerUserID: "operator-one", RunID: "capture-run", WorkRunID: "capture-work", StepKey: "prepare.source", Attempt: 1,
 		RunStartedAt: time.Now().UTC().Format(time.RFC3339Nano), Repository: pl.Repository{Owner: "example", Name: "installation", CloneURL: "https://github.com/example/installation.git"},
 		CollectorImage: "registry.example/collector@sha256:" + strings.Repeat("a", 64), Platform: "linux/arm64",
