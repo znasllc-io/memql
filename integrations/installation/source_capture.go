@@ -165,13 +165,13 @@ func (c sourceCapture) stepRequest() pl.StepRequest {
 
 func (c sourceCapture) actor(ctx context.Context) (context.Context, error) {
 	actor, err := installationActor(ctx)
-	if err != nil || actor != c.request.OwnerUserID || !internalDigest.MatchString(c.digest) {
-		return nil, errors.New("source capture requires its identified installation operator")
+	if err != nil || auth.OriginFromContext(ctx) != auth.OriginInternal || actor != c.request.OwnerUserID || !internalDigest.MatchString(c.digest) {
+		return nil, errors.New("source capture requires an admitted native call under its identified installation operator")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return auth.ContextWithInternalOrigin(ctx), nil
+	return ctx, nil
 }
 
 // run performs one fixed capture operation. Lost replies use the journal's

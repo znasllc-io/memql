@@ -21,6 +21,11 @@ import (
 	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 )
 
+// Models the separately admitted native preparation host, never a client call.
+func captureOperator(role auth.Role, user string) context.Context {
+	return auth.ContextWithInternalOrigin(operator(role, user))
+}
+
 type captureObjects map[string][]byte
 
 func (o captureObjects) OpenGitObject(_ context.Context, kind, oid string) (io.ReadCloser, error) {
@@ -144,7 +149,7 @@ func TestSourceCaptureRecoversAndReverifiesWithoutOriginalProcess(t *testing.T) 
 	first, err := newSourceCapture(spec)
 	require.NoError(t, err)
 	executor, files := capturePorts(first, body)
-	ctx := operator(auth.RoleDeveloper, spec.OwnerUserID)
+	ctx := captureOperator(auth.RoleDeveloper, spec.OwnerUserID)
 	receipt, err := first.run(ctx, executor, false, "")
 	require.NoError(t, err)
 	require.Zero(t, executor.acked)
@@ -192,7 +197,7 @@ func TestSourceCaptureRefusesChangedScopeAndArtifactBytes(t *testing.T) {
 			c, err := newSourceCapture(spec)
 			require.NoError(t, err)
 			executor, files := capturePorts(c, body)
-			ctx := operator(auth.RoleAdmin, spec.OwnerUserID)
+			ctx := captureOperator(auth.RoleAdmin, spec.OwnerUserID)
 			switch fault {
 			case "missing-artifact":
 				executor.result.ArtifactIntentIDs = nil
@@ -212,7 +217,7 @@ func TestSourceCaptureRefusesChangedScopeAndArtifactBytes(t *testing.T) {
 			require.NoError(t, err)
 			switch fault {
 			case "owner":
-				ctx = operator(auth.RoleAdmin, "other")
+				ctx = captureOperator(auth.RoleAdmin, "other")
 			case "receipt-scope":
 				receipt.ScopeDigest = "sha256:" + strings.Repeat("f", 64)
 			case "path":
@@ -274,18 +279,27 @@ func TestSourceCaptureActorCancellationAndCleanupFailures(t *testing.T) {
 	c, err := newSourceCapture(spec)
 	require.NoError(t, err)
 	executor, files := capturePorts(c, body)
-	for _, ctx := range []context.Context{context.Background(), operator(auth.RoleReader, spec.OwnerUserID), operator(auth.RoleOwner, "other")} {
+	for _, ctx := range []context.Context{context.Background(), operator(auth.RoleOwner, spec.OwnerUserID), auth.ContextWithClientOrigin(captureOperator(auth.RoleOwner, spec.OwnerUserID)), captureOperator(auth.RoleReader, spec.OwnerUserID), captureOperator(auth.RoleOwner, "other")} {
 		_, err = c.run(ctx, executor, false, "")
 		require.Error(t, err)
 	}
-	ctx, cancel := context.WithCancel(operator(auth.RoleOwner, spec.OwnerUserID))
+	ctx, cancel := context.WithCancel(captureOperator(auth.RoleOwner, spec.OwnerUserID))
 	cancel()
 	_, err = c.run(ctx, executor, false, "")
 	require.Error(t, err)
 	require.Empty(t, executor.requests)
-	ctx = operator(auth.RoleOwner, spec.OwnerUserID)
+	ctx = captureOperator(auth.RoleOwner, spec.OwnerUserID)
 	receipt, err := c.run(ctx, executor, false, "")
 	require.NoError(t, err)
+	client := operator(auth.RoleOwner, spec.OwnerUserID)
+	_, err = c.verify(client, files, receipt)
+	require.Error(t, err)
+	require.Empty(t, files.refs)
+	require.Zero(t, files.opens)
+	require.Error(t, c.acknowledge(client, executor, receipt))
+	require.Zero(t, executor.acked)
+	require.Error(t, c.cancel(client, executor))
+	require.Empty(t, executor.cancelledRun)
 	_, err = c.verify(ctx, files, receipt)
 	require.NoError(t, err)
 	executor.ackError = errors.New("delete not confirmed")
@@ -304,7 +318,7 @@ func TestSourceCaptureBindsChangedNativeInputsAndConfinesPullCredential(t *testi
 	c, err := newSourceCapture(spec)
 	require.NoError(t, err)
 	executor, _ := capturePorts(c, body)
-	ctx := operator(auth.RoleDeveloper, spec.OwnerUserID)
+	ctx := captureOperator(auth.RoleDeveloper, spec.OwnerUserID)
 	_, err = c.run(ctx, executor, false, "")
 	require.Error(t, err)
 	require.Empty(t, executor.requests)

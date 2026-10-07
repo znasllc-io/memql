@@ -99,7 +99,7 @@ func TestSourceCaptureUsesWorkbenchHopAndFreshReplicaRecovery(t *testing.T) {
 		handler.SetPipelineRunner(captureHopRunner{state: state})
 		return pipelinesteps.NewExecutor(pipelinesteps.ConfigFromEnv(func(string) string { return "" }), captureHopForwarder{handler, node}, nil, logger)
 	}
-	ctx, cancel := context.WithTimeout(operator(auth.RoleDeveloper, spec.OwnerUserID), 5*time.Second)
+	ctx, cancel := context.WithTimeout(captureOperator(auth.RoleDeveloper, spec.OwnerUserID), 5*time.Second)
 	defer cancel()
 	receipt, err := first.run(ctx, executor("workbench-a"), false, "")
 	require.NoError(t, err)

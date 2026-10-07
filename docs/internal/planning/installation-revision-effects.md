@@ -204,7 +204,9 @@ cancellation and partial-output cleanup. This is local CLI evidence, not an
 installed Workbench Job or a cloud deployment.
 
 The private `sourceCapture` adapter connects that collector to the existing
-pipeline executor and immutable artifact ports. It constructs one fixed,
+pipeline executor and immutable artifact ports. It requires an already-admitted
+native context under the matching identified operator; it never upgrades an
+inbound client's origin. It constructs one fixed,
 cluster-only request: a pinned Workbench image, exact GitHub commit, five-minute
 command deadline, 1 CPU and 512 MiB, no caches, services, fleet execution or
 repository scripts. Its complete request and credential-free render specification
