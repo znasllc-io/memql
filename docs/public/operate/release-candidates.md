@@ -92,13 +92,20 @@ inconsistent references refuse before preparation.
 
 ## Assemble and review
 
-Pass only the configured plan name and its run identities:
+Pass only the configured plan name and its run identities. A reusable recipe
+can accept the run identity as an argument:
 
 ```memql
-builtin releaseAssembleCandidate(
-  planName: "coordinated",
-  runs: { engine_arm64: "completed-work-run-id" }
-)
+@template
+automation prepareCoordinatedRelease {
+  args {
+    runId string!
+  }
+  builtin releaseAssembleCandidate(
+    planName: "coordinated",
+    runs: { engine_arm64: args.runId }
+  )
+}
 ```
 
 `releaseCandidateConfiguration()` exposes declared plans, source rules and
