@@ -337,6 +337,17 @@ func inventoryImages(inventory map[resourceIdentity]resourceObject) (map[imageSl
 		case "/Pod":
 			pod = spec
 		case "postgresql.cnpg.io/Cluster":
+			// Extension volumes and ImageCatalog references introduce image
+			// selection beyond imageName. Refuse until those codecs and their
+			// independent published artifact bindings have been qualified.
+			if spec["imageCatalogRef"] != nil || resourceMap(spec, "postgresql")["extensions"] != nil {
+				return nil, errors.New("database image catalogs and extension volumes need a qualified installation codec")
+			}
+			for field, value := range spec {
+				if field != "imageName" && (field == "image" || containsImageField(value)) {
+					return nil, errors.New("database additional image fields need a qualified installation codec")
+				}
+			}
 			image, err := immutableImage(resourceText(spec, "imageName"))
 			if err != nil {
 				return nil, fmt.Errorf("%s: database image is not immutable", key)

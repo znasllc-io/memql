@@ -225,7 +225,10 @@ unbound images refuse. The codec includes normal, init and ephemeral containers,
 image volumes, and the CloudNativePG image; the database's PostgreSQL-version
 tag can coexist with its immutable digest. Nested Argo Applications and other
 unqualified controller kinds refuse rather than hiding an additional source or
-image input. Native configuration supplies image bindings; a caller cannot
+image input. CloudNativePG extension volumes, image catalogs and additional
+image fields also refuse until their separate artifact inputs are qualified;
+checking only the database's `imageName` would miss those images.
+Native configuration supplies image bindings; a caller cannot
 submit its own inventory or claim it was verified.
 
 The full diff retains changes to Secrets, storage, routing and RBAC even when

@@ -195,6 +195,37 @@ func TestDatabaseDigestRetainsPostgresTagWithoutChangingArtifactIdentity(t *test
 	require.Equal(t, "registry.example/memql/db@sha256:"+strings.Repeat("a", 64), ref)
 }
 
+func TestDatabaseExtensionAndCatalogImagesCannotEscapeVerification(t *testing.T) {
+	publication := publishedFixture(t)
+	for _, extra := range []string{
+		`"postgresql":{"extensions":[{"name":"vector","image":{"reference":"registry.example/unverified/extension:latest"}}]}`,
+		`"postgresql":{"extensions":[{"name":"vector","image":{"reference":"` + nextImage + `"}}]}`,
+		`"postgresql":{"extensions":[{"name":"vector"}]}`,
+		`"imageCatalogRef":{"apiGroup":"postgresql.cnpg.io","kind":"ClusterImageCatalog","name":"mutable-catalog","major":18}`,
+		`"newImageFeature":{"image":{"reference":"` + nextImage + `"}}`,
+	} {
+		for _, where := range []string{"candidate", "rollback"} {
+			t.Run(where+"/"+extra, func(t *testing.T) {
+				database := `{"apiVersion":"postgresql.cnpg.io/v1","kind":"Cluster","metadata":{"name":"db","namespace":"memql"},"spec":{"imageName":"` + oldImage + `"}}`
+				withExtra := strings.Replace(database, `"imageName":`, extra+`,"imageName":`, 1)
+				old, next := append(resourceManifests(oldImage), database), append(resourceManifests(nextImage), database)
+				if where == "candidate" {
+					next[len(next)-1] = withExtra
+				} else {
+					old[len(old)-1] = withExtra
+				}
+				before := renderInventoryFixture(t, strings.Repeat("a", 40), old)
+				after := renderInventoryFixture(t, strings.Repeat("b", 40), next)
+				api := resourceAPIFixture()
+				api.response["apis/postgresql.cnpg.io/v1"] = `{"groupVersion":"postgresql.cnpg.io/v1","resources":[{"name":"clusters","kind":"Cluster","namespaced":true}]}`
+				evidence, err := verifyImagesAndDiff(context.Background(), api, publication, before, after, "linux/arm64", resourceBindings())
+				require.ErrorContains(t, err, "qualified installation codec")
+				require.Empty(t, evidence.digest)
+			})
+		}
+	}
+}
+
 func TestResourceEvidenceBindsUnchangedObjectDiscoveryAddresses(t *testing.T) {
 	publication := publishedFixture(t)
 	manifests := resourceManifests(oldImage)
