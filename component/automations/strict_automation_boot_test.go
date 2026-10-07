@@ -218,7 +218,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 139 -> 140: private revision execution recipe; measured by strict boot.
 // 140 -> 141: private workload observation recipe; measured by strict boot.
 // 141 -> 142: private rollback preparation recipe; measured by strict boot.
-const shippedAutomationCount = 142
+// 142 -> 143: sealed pipelineStageIncluded policy; stage applicability is now
+// decided by the pinned core pipeline workflow rather than Go.
+const shippedAutomationCount = 143
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):
