@@ -61,6 +61,17 @@ func TestAzuriteVerifiedStreamLargeObjectAndRecovery(t *testing.T) {
 	if same, err := u.VerifyStream(ctx, "blockstest", object, size, digest); err != nil || same != got {
 		t.Fatalf("original object was changed: %+v %v", same, err)
 	}
+	stale := got
+	stale.ETag = `"stale-identity"`
+	if err := u.DeleteVerifiedStream(ctx, "blockstest", object, stale); err == nil {
+		t.Fatal("stale receipt deleted a real object")
+	}
+	if err := u.DeleteVerifiedStream(ctx, "blockstest", object, got); err != nil {
+		t.Fatal("verified cleanup", err)
+	}
+	if err := other.DeleteVerifiedStream(ctx, "blockstest", object, got); err != nil {
+		t.Fatal("replacement cleanup reconciliation", err)
+	}
 	t.Logf("verified %d bytes through streaming upload, readback, recovery and overwrite refusal", size)
 }
 

@@ -50,6 +50,8 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		// bytes, independently verifiable with sha256sum and OCI tooling.
 		// core/id's content address is a different algorithm/representation.
 		"azureblob/verified_stream.go":              "verifies externally supplied standard SHA-256 digests of immutable artifact bytes, never MemQL row identifiers",
+		"pipelinesteps/artifact_snapshot.go":        "computes standard SHA-256 artifact byte digests consumed by the immutable storage and OCI protocols",
+		"pipelinesteps/pod_file_live_test.go":       "verifies the exact file bytes carried by a real Kubernetes exec stream against a standard SHA-256 fixture",
 		"azureblob/verified_stream_test.go":         "independently computes standard SHA-256 artifact fixtures for the streaming storage protocol",
 		"azureblob/verified_stream_azurite_test.go": "checks real stored artifact bytes against standard SHA-256 digests, including an OCI archive",
 		"email/acs.go":      "Azure Communication Services requires SHA-256 content digests and HMAC-SHA256 request authentication; these are wire signatures, not row IDs",

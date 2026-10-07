@@ -514,6 +514,7 @@ const (
 	CodePipelineNodeLost            = "pipeline_node_lost"
 	CodePipelineArtifactTooLarge    = "pipeline_artifact_too_large"
 	CodePipelineArtifactMissing     = "pipeline_artifact_missing"
+	CodePipelineArtifactUnavailable = "pipeline_artifact_unavailable"
 	CodePipelineLogCapped           = "pipeline_log_capped"
 	CodePipelineTimingsUnreadable   = "pipeline_timings_unreadable"
 	CodePipelineOutcomeTrimmed      = "pipeline_outcome_trimmed"

@@ -162,6 +162,7 @@ permission must be explicitly configured; this change grants no permission and
 puts no upload credential into a build Job. See GitHub's
 [external CI guide](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/use-with-existing-ci-system)
 and [SARIF API](https://docs.github.com/en/rest/code-scanning/code-scanning#upload-an-analysis-as-sarif-data).
+
 ### Large artifact storage primitive
 
 `azureblob.CreateVerifiedStream` stages bounded chunks, checks the complete
@@ -178,6 +179,37 @@ archive. The Workbench transport still uses its existing small-artifact path;
 builder-to-store streaming, durable artifact ownership, retention and release
 publication remain to be wired. Uncommitted blocks have provider-managed
 expiration, and committed objects need explicit ownership-guarded cleanup.
+
+`DeleteVerifiedStream` verifies the receipt's size, digest and exact ETag before
+an ETag-conditional delete, then confirms absence. A stale receipt cannot delete
+a replacement version; a lost reply is reconciled by a read. Its caller must
+prove ownership and retire producers before requesting cleanup. Unit tests cover
+replacement during deletion and uncertain responses; real Azurite proves stale
+receipt refusal, confirmed removal and replacement-caller reconciliation.
+
+`ClusterAPI.ReadPodFile` now provides a bounded file read over Kubernetes'
+[versioned exec protocol](https://github.com/kubernetes/apimachinery/blob/v0.32.0/pkg/util/remotecommand/constants.go).
+It executes `cat` with a literal path argument, with no shell, stdin or terminal,
+uses the cluster CA and current projected identity, refuses redirects and
+requires both a successful remote exit and normal connection closure. The
+operation is capped at 2 GiB and 30 minutes; partial output is never success.
+Callers still need to authorize and check the Job/pod identity around the read:
+the exec API has no UID precondition.
+
+`SnapshotArtifacts` accepts a complete uncompressed archive into private scratch
+files, computes each file's byte digest, and refuses unsafe or duplicate paths,
+links, undeclared or missing files, truncated transfers and trailing payloads.
+All temporary files are removed on refusal or explicit close. A real local K3s
+fixture proved a 128 MiB file through the authenticated stream, snapshot,
+create-only Azurite upload and independent readback/reconciliation. It also
+proved oversize and missing-file refusal; the fixture deletes its namespace,
+blob container and local snapshots. Credentials never entered the fixture pod.
+
+These primitives are not yet the installed runner's artifact path. The collector
+container contract, narrowly scoped `pods/exec` grant, caller identity checks,
+durable intake intent/receipt, quota/retention and final release wiring must land
+together before large artifacts can qualify a pipeline run. The live fixture's
+namespace-scoped loopback proxy is a test harness, not a product connection path.
 
 ### Cluster update requirements (owner clarification, October 6)
 
@@ -822,3 +854,26 @@ SBOM generation covered 53 Go modules and seven npm lockfiles in nine reports,
 including development dependencies. Installed Workbench execution, current-source
 rescans, SARIF publishing, schedules, Code Quality parity and release gating still
 require the combined rehearsal.
+
+### Kubernetes artifact export qualification (October 6)
+
+Cluster steps now export declared files into a bounded emptyDir and a separate
+credential-free collector. The collector mounts only the export, read-only;
+archive bytes never enter kubelet logs. Workbench verifies the Job's ownership,
+controller reference, pod UID and terminated producer/running collector
+identities before and after the complete bounded transfer. Required missing,
+unsafe, changed or unfiled artifacts fail the step. Step V5 refuses replicas
+that cannot enforce this transport contract.
+
+The local generated-Job test passed in 175 seconds: an exact public checkout
+produced a 16 MiB file, two independent clients recovered the same SHA-256,
+command logs contained no artifact bytes, a stale UID was refused, and
+foreground deletion confirmed no remaining Job or pod. Focused runner and
+Workbench race tests and the namespace RBAC render gate passed. This proof uses
+the installed namespace resource defaults; without them a fixture's tiny
+collector disk limit becomes the entire pod's disk allowance.
+
+The current Library adapter remains bounded to small files and materializes one
+file at a time. Release-size streaming storage, durable upload intent and
+retention, installed mixed-version behavior and complete release qualification
+are still required. A node-local emptyDir is not durable across node loss.

@@ -1000,13 +1000,17 @@ function wait_for_application_synced() {
     local timeout="${MEMQL_K3D_SYNC_TIMEOUT:-300}"
     local deadline=$((SECONDS + timeout)) sync=""
     info "Waiting for ${APP_NAME} to sync (up to ${timeout}s)..."
-    while ((SECONDS < deadline)); do
+    # Always observe once: SECONDS has whole-second precision and may cross
+    # the deadline between its calculation and the first read.
+    while true; do
         sync="$(kubectl -n "${ARGOCD_NAMESPACE}" get application "${APP_NAME}" -o 'jsonpath={.status.sync.status}' 2>/dev/null || true)"
         if [[ "$sync" == "Synced" ]]; then
             info "${APP_NAME} is Synced."
             return 0
         fi
-        sleep 5
+        ((SECONDS < deadline)) || break
+        local remaining=$((deadline - SECONDS))
+        sleep "$((remaining < 5 ? remaining : 5))"
         (( (deadline - SECONDS) % 15 == 0 )) && info "  still ${sync:-unknown} ..."
     done
     cap_fail 5 "${APP_NAME} did not reach Synced within ${timeout}s (last: ${sync:-unknown}); inspect: kubectl -n ${ARGOCD_NAMESPACE} get application ${APP_NAME}"
@@ -1056,13 +1060,15 @@ function wait_for_local_images() {
         matched=false
         images=""
         info "Waiting for ${deployment} to name ${want} (up to ${timeout}s)..."
-        while ((SECONDS < deadline)); do
+        while true; do
             images="$(kubectl -n "${NAMESPACE}" get deployment "${deployment}" -o 'jsonpath={.spec.template.spec.containers[*].image}' 2>/dev/null || true)"
             if every_image_is "$images" "$want"; then
                 matched=true
                 break
             fi
-            sleep 5
+            ((SECONDS < deadline)) || break
+            local remaining=$((deadline - SECONDS))
+            sleep "$((remaining < 5 ? remaining : 5))"
             (( (deadline - SECONDS) % 15 == 0 )) && info "  still ${images:-unknown} ..."
         done
         if [[ "$matched" != true ]]; then

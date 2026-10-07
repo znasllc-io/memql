@@ -302,3 +302,22 @@ docker buildx imagetools inspect docker.io/library/buildpack-deps:bookworm-scm
   an `azureblob-*` cache class requires the script's `--enable-blob-driver`.
 - `component_test.go` beside this file: the component's own files, read
   without a renderer.
+
+## Artifact collection
+
+Cluster Jobs export declared files to a bounded scratch volume. A separate
+credential-free collector mounts only that volume, read-only, and stays alive
+until receipt cleanup or the Job deadline. It sees no checkout, cache, clone
+token or command secrets. Artifact bytes do not pass through container logs.
+
+The runner uses the Kubernetes v5 exec protocol for a fixed `cat` invocation.
+Its namespace Role grants `get` on `pods/exec`; the runner checks the Job,
+controller owner reference, pod UID and container identities before and after
+transfer. It admits only declared regular files from a complete bounded tar
+stream. Missing, unsafe or uncertain exports fail a step even if its command
+exited successfully. The existing small-file Library limit still applies;
+release-size storage, durable upload intents and retention are separate work.
+
+Collection must finish before the Job deadline removes its collector. A
+replacement runner can reread the same completed export while that pod exists.
+This does not make a node-local emptyDir survive loss of its Kubernetes node.
