@@ -88,6 +88,42 @@ remain unfinished; no engine rollout is enabled by this journal alone.
 
 ## Immutable desired state
 
+### Artifact and declared compatibility admission
+
+The private `artifactAdmission` scope binds native receiving configuration,
+signed candidate and installed rollback publications, both complete renders,
+the resource diff, platform, image slots and required component dependencies.
+Configured slots must match signed OCI artifacts in both publications. All
+remaining workload images must stay at their immutable baseline. Every image
+in either render, including unchanged infrastructure, requires a complete fresh
+OCI read through an explicitly configured registry. A signed location cannot
+change that registry's transport or supply credentials.
+
+The scope returns immutable image obligations. A sealed DSL host can choose
+their ordering and parallelism and invoke one bounded check for each. Native
+completion refuses omitted, duplicated, expired or rebound observations and
+requires the opaque result from actual manifest/config/layer verification.
+The observation's registry, root digest and platform must match its obligation.
+Scopes expire after one hour; evidence expires no later than thirty minutes
+after its earliest registry read began. Recovery constructs another scope and
+rereads the required bytes, without trusting serialized receipt assertions or
+another process's local state.
+
+`pipelines.CheckPublishedReleaseOverlap` evaluates the existing signed version
+ranges against both old and new dependency versions. Both publications must
+have the same component identities. Every required dependency and every pair
+declared by either publication must be declared by both. Republishing different
+source/artifact bytes under the same component version is refused; adding a
+mirror for the same bytes is allowed.
+
+This is declared dependency compatibility and current artifact readability,
+not installation approval, registry retention, image unpackability, replica
+wire compatibility or database migration safety. The receiving host must still
+authenticate and freeze the full configuration, including trust roots and
+credential versions, bind this evidence into preparation, enforce its deadline
+before effects, and require separate migration and continuity qualifications.
+There is no registered automation or public artifact-admission capability yet.
+
 ### Repository rendering
 
 `argocd.RenderRevision` is a bounded, read-only gRPC adapter to the existing
