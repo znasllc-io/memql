@@ -252,6 +252,9 @@ type rtCluster struct {
 	jobs    map[string]*rtJob
 	secrets map[string]Secret
 	scripts map[string]*rtScript
+	// Applied deletes exclude rejected preconditions and already-absent objects.
+	// Requests alone cannot count effects: cleanup deliberately retries conflicts.
+	deletedJobs, deletedSecrets []ObjectMeta
 	// quotaRefusals is how many Job creates the ceiling refuses first.
 	quotaRefusals int
 	// quotaJobs are Jobs the ceiling refuses for as long as they are named.
@@ -673,6 +676,7 @@ func (c *rtCluster) deleteJob(w http.ResponseWriter, name string, q map[string][
 			return
 		}
 	}
+	c.deletedJobs = append(c.deletedJobs, c.jobs[name].job.Metadata)
 	c.deleteJobLocked(name)
 	rtJSON(w, 200, map[string]any{"kind": "Status", "status": "Success"})
 }
@@ -853,6 +857,7 @@ func (c *rtCluster) deleteSecret(w http.ResponseWriter, name string, q map[strin
 			return
 		}
 	}
+	c.deletedSecrets = append(c.deletedSecrets, c.secrets[name].Metadata)
 	delete(c.secrets, name)
 	rtJSON(w, 200, map[string]any{"kind": "Status", "status": "Success"})
 }

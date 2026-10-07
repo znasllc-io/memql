@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -90,6 +91,9 @@ type pipelinesLibraryStore struct {
 	// Zero takes the Library's own, read at each call:
 	// server.LibraryMaxUploadBytes() and server.LibraryUserQuotaBytes().
 	maxBytes, quotaBytes int64
+	// Short transactions fence streaming uploads across replicas. No session
+	// advisory lock survives outside a transaction, so PgBouncer is supported.
+	uploadDB func() *sql.DB
 }
 
 var _ pipelinesteps.LibraryStore = (*pipelinesLibraryStore)(nil)
@@ -119,7 +123,14 @@ func (a *App) pipelinesLibraryStoreFor(uploader server.FileUploader, bucket stri
 	if a.engine != nil {
 		engine = &AttachmentEngineAdapter{Engine: a.engine}
 	}
-	return newPipelinesLibraryStore(engine, uploader, bucket, a.Logger)
+	store := newPipelinesLibraryStore(engine, uploader, bucket, a.Logger)
+	store.uploadDB = func() *sql.DB {
+		if db := a.BunDB(); db != nil {
+			return db.DB
+		}
+		return nil
+	}
+	return store
 }
 
 // StoreRunFile files one of a step's files in its owner's Library.
