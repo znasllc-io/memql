@@ -1,0 +1,51 @@
+{
+  "automation": "installation/automations.memql installationArtifactWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.installationArtifactWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "installationArtifactRequirements"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.installationArtifactWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "installationArtifactRequirements"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    }
+  }
+}
