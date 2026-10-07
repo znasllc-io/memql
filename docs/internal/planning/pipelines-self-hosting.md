@@ -180,6 +180,13 @@ builder-to-store streaming, durable artifact ownership, retention and release
 publication remain to be wired. Uncommitted blocks have provider-managed
 expiration, and committed objects need explicit ownership-guarded cleanup.
 
+`DeleteVerifiedStream` verifies the receipt's size, digest and exact ETag before
+an ETag-conditional delete, then confirms absence. A stale receipt cannot delete
+a replacement version; a lost reply is reconciled by a read. Its caller must
+prove ownership and retire producers before requesting cleanup. Unit tests cover
+replacement during deletion and uncertain responses; real Azurite proves stale
+receipt refusal, confirmed removal and replacement-caller reconciliation.
+
 `ClusterAPI.ReadPodFile` now provides a bounded file read over Kubernetes'
 [versioned exec protocol](https://github.com/kubernetes/apimachinery/blob/v0.32.0/pkg/util/remotecommand/constants.go).
 It executes `cat` with a literal path argument, with no shell, stdin or terminal,

@@ -20,17 +20,20 @@ import (
 )
 
 type verifiedFixture struct {
-	mu                     sync.Mutex
-	blocks                 map[string][]byte
-	body                   []byte
-	exists                 bool
-	commits, writes        int
-	lostCommit, failedRead bool
-	badETag, extraBody     bool
-	onBlock                func()
-	stageErr               error
-	headBarrier            chan struct{}
-	heads                  int
+	mu                                         sync.Mutex
+	blocks                                     map[string][]byte
+	body                                       []byte
+	exists                                     bool
+	commits, writes                            int
+	lostCommit, failedRead                     bool
+	badETag, extraBody                         bool
+	onBlock                                    func()
+	stageErr                                   error
+	headBarrier                                chan struct{}
+	heads                                      int
+	deletes                                    int
+	etag                                       string
+	lostDelete, refusedDelete, replaceAtDelete bool
 }
 
 func verifiedSHA(body []byte) string {
@@ -56,6 +59,9 @@ func (f *verifiedFixture) do(r *http.Request) (*http.Response, error) {
 	status := http.StatusOK
 	body := []byte(nil)
 	headers := http.Header{"Etag": {`"stored-v1"`}, "Content-Length": {strconv.Itoa(len(f.body))}}
+	if f.etag != "" {
+		headers.Set("Etag", f.etag)
+	}
 	switch {
 	case r.Method == http.MethodHead:
 		if !f.exists {
@@ -75,7 +81,7 @@ func (f *verifiedFixture) do(r *http.Request) (*http.Response, error) {
 		if f.failedRead {
 			return nil, errors.New("lost read connection")
 		}
-		if r.Header.Get("If-Match") != `"stored-v1"` {
+		if r.Header.Get("If-Match") != headers.Get("Etag") {
 			return nil, errors.New("read lacks observed ETag")
 		}
 		body = bytes.Clone(f.body)
@@ -127,6 +133,25 @@ func (f *verifiedFixture) do(r *http.Request) (*http.Response, error) {
 			return nil, errors.New("commit accepted, connection lost")
 		}
 		status = 201
+	case r.Method == http.MethodDelete:
+		f.deletes++
+		if f.replaceAtDelete {
+			f.etag = `"replacement-v2"`
+			headers.Set("Etag", f.etag)
+		}
+		if r.Header.Get("If-Match") != headers.Get("Etag") {
+			status = 412
+			headers.Set("x-ms-error-code", "ConditionNotMet")
+			break
+		}
+		if f.refusedDelete {
+			return nil, errors.New("delete response lost before effect")
+		}
+		f.exists = false
+		if f.lostDelete {
+			return nil, errors.New("delete accepted, response lost")
+		}
+		status = 202
 	default:
 		return nil, fmt.Errorf("unexpected blob request: %s", r.Method)
 	}
@@ -150,6 +175,45 @@ func TestVerifiedStreamCommitsAndReconcilesActualBytes(t *testing.T) {
 			recovered, err := next.CreateVerifiedStream(context.Background(), "test", "archive", bytes.NewReader(nil), int64(len(body)), digest, "")
 			if err != nil || recovered != got || f.commits != 1 {
 				t.Fatalf("recovery repeated upload: %+v %v; commits=%d", recovered, err, f.commits)
+			}
+		})
+	}
+}
+
+func TestVerifiedStreamCleanupIsBoundToObservedVersion(t *testing.T) {
+	for _, name := range []string{"delete", "lost reply", "absent", "wrong receipt", "wrong bytes", "replacement before delete", "unknown delete", "wildcard"} {
+		t.Run(name, func(t *testing.T) {
+			f := &verifiedFixture{exists: true, body: []byte("abc")}
+			receipt := VerifiedBlob{ETag: `"stored-v1"`, Size: 3, SHA256: verifiedSHA([]byte("abc"))}
+			wantErr, wantExists, wantDeletes := false, false, 1
+			switch name {
+			case "lost reply":
+				f.lostDelete = true
+			case "absent":
+				f.exists = false
+				wantDeletes = 0
+			case "wrong receipt":
+				receipt.ETag = `"old-v0"`
+				wantErr, wantExists, wantDeletes = true, true, 0
+			case "wrong bytes":
+				f.body = []byte("xyz")
+				wantErr, wantExists, wantDeletes = true, true, 0
+			case "replacement before delete":
+				f.replaceAtDelete = true
+				wantErr, wantExists = true, true
+			case "unknown delete":
+				f.refusedDelete = true
+				wantErr, wantExists = true, true
+			case "wildcard":
+				receipt.ETag = "*"
+				wantErr, wantExists, wantDeletes = true, true, 0
+			}
+			err := verifiedClient(t, f).DeleteVerifiedStream(t.Context(), "test", "archive", receipt)
+			if (err != nil) != wantErr || f.exists != wantExists || f.deletes != wantDeletes {
+				t.Fatalf("err=%v exists=%v deletes=%d", err, f.exists, f.deletes)
+			}
+			if name == "unknown delete" && !errors.Is(err, ErrBlobDeleteUncertain) {
+				t.Fatal("unknown deletion reported as settled", err)
 			}
 		})
 	}
