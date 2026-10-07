@@ -2,8 +2,6 @@ package argocd
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,12 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/argocd/gen"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 )
 
-//go:generate ../../scripts/dev/proto-gen.sh --only=integrations/argocd
+//go:generate sh -c "cd ../.. && make proto-gen PROTO_GEN_ONLY=integrations/argocd"
 
 const (
 	generateManifestRPC = "/repository.RepoServerService/GenerateManifest"
@@ -140,8 +139,10 @@ func RenderRevision(ctx context.Context, rpc ManifestRPC, spec RenderSpec, crede
 	if err != nil {
 		return RenderedRevision{}, errors.New("ArgoCD render could not be encoded")
 	}
-	sum := sha256.Sum256(append([]byte("memql-argocd-render-v1\n"), body...))
-	return RenderedRevision{spec: specBody, resources: resources, digest: "sha256:" + hex.EncodeToString(sum[:])}, nil
+	// This digest names private native evidence, not an OCI or exported
+	// artifact. Keep it on the same core/id convention as the intent journal.
+	digest := "memql-id:" + string(id.NewUntracked().FromString("memql-argocd-render-v1\n"+string(body)))
+	return RenderedRevision{spec: specBody, resources: resources, digest: digest}, nil
 }
 
 func renderRequest(spec RenderSpec, credentials RepositoryCredentials) (*gen.ManifestRequest, []byte, error) {
