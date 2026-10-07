@@ -197,6 +197,7 @@ var appReadFloors = map[string][]Role{
 	"app:email/logs":            {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:cluster":               {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:cluster/modules":       {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:cluster/releases":      {RoleOwner},
 	"app:cluster/origins":       {RoleOwner},
 	"app:cluster/audit":         {RoleOwner},
 	"app:cluster/logs":          {RoleOwner, RoleDeveloper, RoleAdmin},
