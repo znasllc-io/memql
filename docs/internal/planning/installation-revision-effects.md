@@ -247,6 +247,44 @@ binding uses the catalog's SHA-256 digest; native render/diff bindings continue
 to use their own `memql-id` domain. The journal suite runs with a required real
 database and continues to exercise independent connections and effect fencing.
 
+### Live storage preservation
+
+A separate private read-only verifier checks storage against the receiving
+cluster, including resources whose committed spec has not changed. Software
+updates currently require the same desired storage declarations in both
+renders and exact agreement with live requested and reported capacity. A
+larger live volume cannot silently inherit a smaller committed value. Pending
+expansion and resizing refuse: rolling back to the original overlay after an
+expansion needs a separately qualified maintenance plan. Positive integer
+binary and SI capacity forms are compared exactly, without floating point;
+other quantity forms refuse until qualified.
+
+The verifier reads each declared PVC and its bound PV, verifies both identities
+and the PV's claim reference, and binds the backing volume specification. For
+CloudNativePG it reads the complete bounded namespace PVC inventory, verifies
+controller ownership against the current database UID and checks data/WAL
+roles, capacity and enough claims for the live instance count. Missing labels
+cannot hide an owned claim. Truncated lists, replaced ownership, deleting or
+unbound volumes, missing WAL, changed bootstrap/storage declarations, and
+unqualified persistent controllers refuse. New persistent storage, standalone
+PV management, StatefulSet claim templates and tablespaces require additional
+codecs and maintenance contracts. Ordinary formatting contains no resource
+bodies or storage paths.
+
+The October 7 read-only local rehearsal used the installed repo-server's TLS
+identity to render commits `3f00b7a9a37ce6fb414f50b0ae9d74ef44bc5fb8` and
+`9a7fecc14987c9fa240f7e5eef3fd6ba083b7b65`. Independent local Kubernetes reads
+agreed on four current PVC/PV bindings. The live case passed in 2.87 seconds;
+the required-database installation race suite, including the live case, passed
+in 6.898 seconds. The rehearsal caught a real protocol detail: Kubernetes
+omits type metadata inside a typed PVC list. The codec derives absent type
+fields from the verified collection while refusing contradictory fields.
+
+This storage proof grants no database restart, resizing or installation
+authority. Secret/namespace preservation, compatibility and continuity,
+artifact availability, actual renderer configuration, durable preparation
+and the scoped installation workflow remain unfinished.
+
 ### Update and rollback source
 
 The update names a full Git commit in the existing installation repository and
