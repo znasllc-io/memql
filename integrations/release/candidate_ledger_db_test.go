@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -26,13 +25,6 @@ func candidateTestDB(t *testing.T) *sql.DB {
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		dbtest.Unreachable(t, "candidate approval journal", dbtest.DSN(), err)
-	}
-	migration, err := os.ReadFile("../../component/database/memory-nodes/migrations/20261007030000_release_candidates.up.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(t.Context(), string(migration)); err != nil {
-		t.Fatal(err)
 	}
 	return db
 }
