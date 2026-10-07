@@ -184,21 +184,7 @@ func (s *step) collectStepArtifacts(ctx context.Context, pod *Pod, res *pl.StepR
 	snapshot, err := s.r.collectArtifacts(ctx, s.run, pod, s.r.cfg.ArtifactMaxBytes)
 	if err == nil {
 		defer snapshot.Close()
-		slices.SortFunc(snapshot.Files, func(a, b SnapshotFile) int { return strings.Compare(a.Path, b.Path) })
-		files := s.files()
-		for _, file := range snapshot.Files {
-			var stored StoredFile
-			stored, err = files.storeVerifiedArtifact(ctx, file, notes)
-			if err != nil {
-				break
-			}
-			res.ArtifactFileIDs = append(res.ArtifactFileIDs, stored.FileID)
-			res.ArtifactIntentIDs = append(res.ArtifactIntentIDs, stored.Receipt.IntentID)
-			if !pl.ValidArtifactIntentIDs(res.ArtifactIntentIDs) {
-				err = errors.New("artifact storage returned repeated or invalid intent identities")
-				break
-			}
-		}
+		err = s.files().storeArtifactSnapshot(ctx, snapshot, res, notes)
 	}
 	if err != nil {
 		res.Status = pl.OutcomeFailed
@@ -206,6 +192,24 @@ func (s *step) collectStepArtifacts(ctx context.Context, pod *Pod, res *pl.StepR
 			res.Failure = &pl.Failure{Code: pl.CodeArtifactUnavailable, Message: cutBytes(s.mask("required artifacts were not captured: "+err.Error()), failureMaxBytes)}
 		}
 	}
+}
+
+// storeArtifactSnapshot files a fully validated capture through the same
+// immutable receipt contract regardless of where the producer ran.
+func (f stepFiles) storeArtifactSnapshot(ctx context.Context, snapshot *ArtifactSnapshot, res *pl.StepResult, notes *noteList) error {
+	slices.SortFunc(snapshot.Files, func(a, b SnapshotFile) int { return strings.Compare(a.Path, b.Path) })
+	for _, file := range snapshot.Files {
+		stored, err := f.storeVerifiedArtifact(ctx, file, notes)
+		if err != nil {
+			return err
+		}
+		res.ArtifactFileIDs = append(res.ArtifactFileIDs, stored.FileID)
+		res.ArtifactIntentIDs = append(res.ArtifactIntentIDs, stored.Receipt.IntentID)
+		if !pl.ValidArtifactIntentIDs(res.ArtifactIntentIDs) {
+			return errors.New("artifact storage returned repeated or invalid intent identities")
+		}
+	}
+	return nil
 }
 
 func (f stepFiles) storeVerifiedArtifact(ctx context.Context, file SnapshotFile, notes *noteList) (StoredFile, error) {

@@ -1,6 +1,8 @@
 package pipelinerun
 
 import (
+	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -34,5 +36,59 @@ func TestInvalidOrMissingArtifactIntentsCannotProduceSuccessfulReceipts(t *testi
 				t.Fatalf("invalid evidence produced a success: %+v", r)
 			}
 		})
+	}
+}
+
+// Exercise compilation, placement, executor handoff and the real work journal:
+// a fleet runner's presentation fields cannot bypass the receipt requirement.
+func TestNativeArtifactStepCannotSucceedWithOnlyEditableLibraryIDs(t *testing.T) {
+	for _, surface := range []string{"fleet", "", "cluster"} {
+		for _, verified := range []bool{false, true} {
+			t.Run(fmt.Sprintf("surface=%s/verified=%t", surface, verified), func(t *testing.T) {
+				manifest := `formatVersion: 1
+name: shop
+pipeline:
+  platform: linux/arm64
+  stages:
+    - name: build
+      steps:
+        - name: native
+          execution: native
+          placement: fleet
+          run: make artifact
+          artifacts: [dist/release.zip]
+`
+				dh := newDriveHarness(t, manifest)
+				dh.p.Compute = pipelines.ComputeClusterAndFleet
+				dh.store.addPipeline(dh.p)
+				dh.exec.answer = func(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+					if req.Step.Placement != pipelines.PlacementFleet || len(req.Step.Artifacts) != 1 {
+						t.Errorf("test did not reach a declared fleet artifact: %+v", req.Step)
+					}
+					res := passed(req)
+					res.Where.Surface = surface
+					if !verified {
+						res.ArtifactIntentIDs = nil
+					}
+					return res, nil
+				}
+				run := dh.openRun(t, pushOpening())
+				deliver(t, dh.integ, run)
+				got, _ := dh.store.run(run.ID)
+				want := ConclusionFailure
+				if verified {
+					want = ConclusionSuccess
+				}
+				if got.Conclusion != want || len(dh.exec.sent()) != 1 {
+					t.Fatalf("native artifact receipt gate: conclusion=%s want=%s requests=%d", got.Conclusion, want, len(dh.exec.sent()))
+				}
+				if !verified {
+					receipts := dh.work.receiptsOf("build.native")
+					if len(receipts) != 1 || argString(receipts[0].Args, "errorCode") != pipelines.CodeArtifactUnavailable {
+						t.Fatalf("wrong native refusal: %+v", receipts)
+					}
+				}
+			})
+		}
 	}
 }

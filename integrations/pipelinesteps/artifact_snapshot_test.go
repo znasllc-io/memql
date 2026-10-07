@@ -121,3 +121,27 @@ func TestArtifactSnapshotKeepsMeasuredBytesInPrivateFiles(t *testing.T) {
 type snapshotErrorReader struct{ err error }
 
 func (r snapshotErrorReader) Read([]byte) (int, error) { return 0, r.err }
+
+// Cockpit uses GNU long-name encoding so filenames are preserved without
+// admitting PAX metadata to the verified snapshot contract.
+func TestArtifactSnapshotAcceptsNativeGNULongUnicodeNames(t *testing.T) {
+	name := "dist/" + strings.Repeat("long-", 35) + "résumé %2F #.txt"
+	body := snapshotTar(t, []tar.Header{{Format: tar.FormatGNU, Name: name, Typeflag: tar.TypeReg, Mode: 0600, Size: 3}})
+	snapshot, err := SnapshotArtifacts(t.Context(), bytes.NewReader(body), []string{"dist/*"}, int64(len(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = snapshot.Close() })
+	if len(snapshot.Files) != 1 || snapshot.Files[0].Path != name || snapshot.Files[0].Size != 3 {
+		t.Fatalf("native filename was lost: %+v", snapshot.Files)
+	}
+	file, err := snapshot.Files[0].Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil || string(data) != "aaa" {
+		t.Fatalf("wrong snapshot bytes: %q %v", data, err)
+	}
+}
