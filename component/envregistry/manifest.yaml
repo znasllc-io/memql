@@ -2783,7 +2783,14 @@ variables:
     scope: node
     default: "67108864"
     optional: true
-    description: "The cap in bytes on one pipeline step's decoded artifact archive (default 67108864, 64 MiB, clamped to 1 MiB..256 MiB), past which the archive is dropped and reported as pipeline_artifact_too_large; a value that is not a positive whole number falls back to the default."
+    description: "The cap in bytes on one pipeline step's artifact archive (default 67108864, 64 MiB, clamped to 1 MiB..2 GiB). Cluster Jobs use verified streaming storage; native-host byte transport additionally caps at 256 MiB. Required Job artifacts that cannot be collected or stored fail the step. A value that is not a positive whole number falls back to the default."
+
+  - name: MEMQL_PIPELINES_IMAGE_BUILDER
+    component: pipelines
+    scope: node
+    default: ""
+    optional: true
+    description: "Opt in to rootless-buildkit-v1 after installing its versioned seccomp profiles on the dedicated build pool. Empty disables image builds. The fixed builder gets no step secrets, shared caches, services, host socket or publication authority."
 
   - name: MEMQL_PIPELINES_STEP_MEMORY_MAX_MIB
     component: pipelines

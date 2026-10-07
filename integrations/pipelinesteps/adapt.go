@@ -31,6 +31,7 @@ func stepRunFor(req pl.StepRequest, timeoutSeconds int, deadlineCode string) Ste
 		}
 	}
 	return StepRun{
+		ImageBuild:      pl.CloneImageBuild(req.Step.ImageBuild),
 		MemoryMiB:       req.Step.MemoryMiB,
 		RecoverOnly:     req.RecoverOnly,
 		Execution:       req.Step.Execution,

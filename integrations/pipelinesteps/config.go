@@ -15,6 +15,9 @@ import (
 // pipelines component's ConfigMap supplies the namespace and the clone image
 // to the workbench node.
 type Config struct {
+	// ImageBuilder is an operator opt-in to the fixed, separately installed
+	// rootless builder security profile. Empty disables image build requests.
+	ImageBuilder string
 	// StepMemoryMaxMiB bounds a manifest's explicit command memory reservation.
 	StepMemoryMaxMiB int
 	// Namespace is where step Jobs and their Secrets live
@@ -81,6 +84,7 @@ type Config struct {
 // The environment this package reads. Named once, so the env-registry scan
 // resolves every read to its key.
 const (
+	envImageBuilder     = "MEMQL_PIPELINES_IMAGE_BUILDER"
 	envStepMemoryMax    = "MEMQL_PIPELINES_STEP_MEMORY_MAX_MIB"
 	envNamespace        = "MEMQL_PIPELINES_NAMESPACE"
 	envNodePool         = "MEMQL_PIPELINES_NODE_POOL"
@@ -120,6 +124,7 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		namespace = defaultNamespace
 	}
 	return Config{
+		ImageBuilder:       text(envImageBuilder),
 		StepMemoryMaxMiB:   whole(envStepMemoryMax, defaultStepMemoryMaxMiB, 128, 1048576),
 		Namespace:          namespace,
 		NodePool:           text(envNodePool),

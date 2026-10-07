@@ -400,6 +400,68 @@ build capacity.
 
 ---
 
+## Image builds
+
+An `imageBuild` step exports one OCI archive from a pinned source checkout. DSL
+still chooses which builds to run, their order and the later publication policy.
+The native runner fixes the builder image, security profile, resource bounds
+and output paths. An image build has no registry publication credential.
+
+```yaml
+- name: build-edge
+  platform: linux/arm64
+  memoryMiB: 4096
+  caches: []
+  timeout: 1h
+  imageBuild:
+    context: .
+    dockerfile: docker/Dockerfile
+    args:
+      BUILD_TAGS: edge
+```
+
+`context` and `dockerfile` are clean paths relative to the checkout; neither may
+resolve outside it. `target` optionally names a Dockerfile stage. `args` holds
+at most 64 public arguments: never put secrets there. A step uses the matching
+Linux architecture, rather than silently emulating another architecture.
+Artifacts are fixed to `.memql-image-build/image.oci.tar` and
+`.memql-image-build/metadata.json`, recovered by the normal collector after the
+producer terminates and filed through immutable Library receipts. Publication
+must independently verify the OCI contents and required evidence.
+
+Operators explicitly install the optional `pipeline-image-builder` Kubernetes
+component, set `MEMQL_PIPELINES_IMAGE_BUILDER=rootless-buildkit-v1`, and choose a
+dedicated `MEMQL_PIPELINES_NODE_POOL`. The component's default pool is `builds`;
+its selector and toleration must match any configured value. It installs
+content-addressed seccomp profiles on those nodes. A missing profile refuses
+container startup; there is no permissive fallback. The fixed installer alone
+mounts its kubelet seccomp directory in `memql-build-system`. That operator
+namespace admits host paths; the untrusted `memql-pipelines` namespace keeps
+baseline admission and its service accounts have no grants in the operator
+namespace. The installer has no API token or allowed network access.
+
+BuildKit runs as UID/GID 1000 with only SETUID/SETGID for its pinned mapping
+helpers. The local seccomp profile permits rootless namespaces and mounts but
+denies process inspection (`ptrace`, `process_vm_readv`, `process_vm_writev`) and
+other privileged kernel APIs. The build has no host mount, Docker socket,
+service-account token, shared cache, service sidecar or forwarded secret.
+Network isolation and CPU, memory, scratch, duration and collection ceilings
+still apply. Clone credentials stay in the separate init container.
+
+Rootless BuildKit uses its native snapshotter and no process sandbox inside
+this disposable container: Dockerfile processes can disrupt their own builder.
+The container PID boundary and complete Pod deletion contain those processes;
+these builds cannot share a daemon across attempts. The profile does not grant
+BuildKit insecure entitlements. Host user-namespace and AppArmor policy must
+support this profile; qualify the actual node runtime and architecture before
+opting in. Local ARM64 qualification does not certify an amd64 cloud node.
+
+The opt-in `TestImageBuildAgainstLocalKubernetes` exercises the actual generated
+Job against a disposable local namespace, with an explicit pushed fixture SHA.
+It proves positive and denied network controls, process restrictions, pinned
+checkout, image export, two independent artifact readers, OCI verification and
+foreground Job/Pod cleanup. Runtime profile changes require repeating this proof.
+
 ## The isolation proof
 
 Before the first step it creates, each workbench replica proves that
@@ -914,6 +976,7 @@ Registered in `scripts/secrets/manifest.yaml` under the `pipelines` component.
 |---|---|---|---|
 | `MEMQL_PIPELINES_NAMESPACE` | `memql-pipelines` | workbench | The namespace the runner creates step Jobs and their Secrets in. It must be the one the pipelines component grants the engine's identity Jobs in, `memql-pipelines`: any other value makes every create a 403, and every step fails `pipeline_runner_unavailable`. The component's `memql-pipelines` ConfigMap sets it |
 | `MEMQL_PIPELINES_CLONE_IMAGE` | none | workbench | The image `clone` and `cache-prep` run, which needs `git`, `base64` and `tr`. Pin it by digest: it is handed the repository token. Unset, the node cannot run steps, and every step sent to it fails `pipeline_runner_unavailable`. The ConfigMap pins `docker.io/library/buildpack-deps:bookworm-scm` by its multi-arch index digest |
+| `MEMQL_PIPELINES_IMAGE_BUILDER` | none | workbench | Explicit opt-in to the operator-installed `rootless-buildkit-v1` profile; requires a dedicated pool and compatible runtime. Unset refuses image builds. |
 | `MEMQL_PIPELINES_NODE_POOL` | none | workbench | Select nodes labeled `memql.io/pipeline-pool=<value>` and tolerate only the matching `NoSchedule` taint, for both steps and isolation probes. A lowercase DNS label of at most 63 characters; malformed values refuse execution. Unset means Linux placement without a pool constraint. |
 | `MEMQL_PIPELINES_RUN_MAX_MINUTES` | `120` | agent, workbench | A run's wall-clock ceiling, clamped to 5..1440. It bounds how long a step may wait for a slot, and a step's Job is given no more than what is left of it; past it the step fails `pipeline_run_ceiling`. The agent's value sets each run's deadline, stamped on its Job and Secret. Orphan cleanup waits until that deadline plus the Job TTL, regardless of the sweeping workbench's ceiling. The workbench value is only a retention fallback for legacy or malformed Secret metadata |
 | `MEMQL_PIPELINES_LOG_STORE_MAX_LINES` | `2000` | workbench (a cluster step), agent (a fleet step) | How many lines of one step reach the log store, clamped to 100..100000, before one `pipeline_log_capped` line. The Library's log keeps every line |
