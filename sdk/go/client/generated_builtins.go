@@ -3854,6 +3854,32 @@ func ReleaseApproveCandidateBuild(args ReleaseApproveCandidateArgs) string {
 	return b.String()
 }
 
+// ReleaseAssembleCandidate -- Resolve completed work runs through a declared assembly plan, then verify and retain the candidate. Run aliases select actual executions; versions, receipt identities and digests are read natively.
+type ReleaseAssembleCandidateArgs struct {
+	PlanName string
+	Runs     map[string]any
+}
+
+// ReleaseAssembleCandidate calls the engine builtin releaseAssembleCandidate.
+func (qc *QueryClient) ReleaseAssembleCandidate(ctx context.Context, args ReleaseAssembleCandidateArgs) (*Result, error) {
+	call := ReleaseAssembleCandidateBuild(args)
+	return qc.executeNamed(ctx, "releaseAssembleCandidate", call)
+}
+
+func ReleaseAssembleCandidateBuild(args ReleaseAssembleCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseAssembleCandidate(")
+	b.WriteString("planName: ")
+	b.WriteString(quoteMemQL(args.PlanName))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("runs: ")
+	b.WriteString(renderMemQLValue(args.Runs))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseCandidateConfiguration -- Read configured release sources and exact publication target identities. Owner only.
 type ReleaseCandidateConfigurationArgs struct {
 }

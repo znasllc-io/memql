@@ -84,6 +84,7 @@ func (i *Integration) IntegrationName() string { return "release" }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	out := append([]memql.IntegrationCapability{
+		{Name: "assembleCandidate", Description: "Resolve declared completed runs into a verified candidate for separate owner review; no publication.", Handler: i.handleCandidateAssemble},
 		{Name: "candidatePublications", Description: "Read caller-owned durable publication intents and verified completion history; performs no remote effects.", Handler: i.handleCandidateEffects},
 		{Name: "listCandidates", Description: "Read caller-owned candidate review history, including interrupted preparations.", Handler: i.handleCandidateList},
 		{Name: "candidateConfiguration", Description: "Read configured release version sources and exact target identities; no secrets or effects. Owner only.", Handler: i.handleCandidateConfiguration},
@@ -121,6 +122,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 	}, workflowhost.ScopedCapabilities((&cutScope{}).operations())...)
 	out = append(out, workflowhost.ScopedCapabilities((&candidatePrepareScope{}).operations())...)
+	out = append(out, workflowhost.ScopedCapabilities((&candidateAssemblyScope{}).operations())...)
 	return append(out, workflowhost.ScopedCapabilities((&candidatePublishScope{}).operations())...)
 }
 

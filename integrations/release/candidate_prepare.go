@@ -36,10 +36,12 @@ type candidatePreparer struct {
 		pipelinesteps.LibraryArtifactLifecycle
 		pipelinesteps.LibraryReceiptOpener
 	}
-	versionReader  *candidateVersionReader
-	targetReader   *candidateTargetReader
-	engineRevision func() string
-	logger         *slog.Logger
+	versionReader    *candidateVersionReader
+	targetReader     *candidateTargetReader
+	engineRevision   func() string
+	logger           *slog.Logger
+	assemblyPlans    []candidateAssemblyPlan
+	assemblyWorkflow *automations.Automation
 }
 
 // The public owner entry binds native dependencies before calling prepare.
@@ -103,8 +105,23 @@ func (p *candidatePreparer) prepareWithExpectedIdentity(ctx context.Context, inp
 	// The fingerprint binds the exact owned DSL body and the native contract.
 	// Child templates/logics are refused below until their snapshots also enter
 	// this identity; a reload cannot change execution under the same digest.
+	policy := map[string]any{"workflow": owned, "publicationWorkflow": publication, "versionSources": sources, "engineRevision": revision}
+	if len(p.assemblyPlans) > 0 {
+		assembly := p.assemblyWorkflow
+		if assembly == nil {
+			assembly, err = workflowhost.Load(candidateAssembleWorkflow)
+			if err != nil {
+				return candidateRecord{}, err
+			}
+		}
+		assembly, err = automations.NewLoader(automations.LoaderOptions{Logger: p.logger}).Snapshot(assembly)
+		if err != nil || assembly == nil || !assembly.Trusted {
+			return candidateRecord{}, errors.New("candidate assembly recipe must be installed and immutable")
+		}
+		policy["assemblyWorkflow"], policy["assemblyPlans"] = assembly, p.assemblyPlans
+	}
 	fingerprint, err := workjournal.DefinitionFingerprint("release-candidate-preparation-v1", []workjournal.StepDecl{{
-		Key: "prepare", Kind: workjournal.KindDeterministic, StepType: "exec", Call: map[string]any{"workflow": owned, "publicationWorkflow": publication, "versionSources": sources, "engineRevision": revision},
+		Key: "prepare", Kind: workjournal.KindDeterministic, StepType: "exec", Call: policy,
 	}})
 	if err != nil {
 		return candidateRecord{}, err
