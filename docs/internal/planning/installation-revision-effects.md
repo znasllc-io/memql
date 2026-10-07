@@ -135,6 +135,42 @@ the installation verification/rollout workflow. The test also caught and fixed
 an incorrect assumption that a repository inherits the Application's project:
 its credential/cache project is a separate explicit input and may be empty.
 
+### Committed source closure
+
+`argocd.VerifySourceClosure` verifies raw Git commit, tree and blob object
+bodies against the exact requested Git object identities. It walks the
+supported Kustomize dependency graph directly from those objects; it does not
+read a checkout, trust an archive's commit label or execute Git filters.
+The owned result binds the canonical render specification and each input's
+path, mode, blob identity and native content digest. File contents and commit
+messages are absent from its public projection and generic formatting.
+
+The supported graph includes local resources, bases, components, patches,
+generator files and explicit environment values, transformer configurations,
+and the built-in namespace transformer. Remote inputs, symlinks, submodules,
+Argo source-parameter overrides, checkout filters, executable generators and
+unqualified Kustomize fields refuse verification. Object bytes, aggregate
+bytes, object/file counts, directory depth and YAML structure are bounded.
+New file-bearing features need an input codec before they can be admitted.
+Inline strategic patches must use the explicit `patches.patch` field: the
+legacy `patchesStrategicMerge` decoder can fall back from inline parsing to
+file loading. This codec is qualified against the installed Kustomize v5.4.3
+implementation; the consumer must still authenticate that renderer.
+[Pinned strategic-patch loader](https://github.com/kubernetes-sigs/kustomize/blob/kustomize/v5.4.3/api/internal/builtins/PatchStrategicMergeTransformer.go).
+
+A read-only committed-object rehearsal verified 61 local-overlay inputs and
+43 cloud-overlay inputs at `23de433a7e9bbf606ed645d81369c27e86b0284e`, with
+repeatable digests. This reads the cloud overlay's source only; it neither
+contacts nor changes a cloud installation. The `git cat-file` reader used by
+that opt-in test is test scaffolding, not the production acquisition adapter.
+
+This is still a private verification primitive. Its production provider must
+constrain authenticated source acquisition and honor cancellation throughout
+reads. Preparation must bind this result to the actual renderer/configuration
+snapshot and render result, verify candidate images and protected resources,
+and repeat the relevant checks before an effect. A source-closure digest alone
+does not grant installation approval or prove rollback readiness.
+
 ### Update and rollback source
 
 The update names a full Git commit in the existing installation repository and
