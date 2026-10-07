@@ -51,6 +51,28 @@ const wrap = (node: React.ReactNode, userId = "alice") => withSession(<Attention
 afterEach(cleanup);
 
 describe("shared attention", () => {
+  it("acknowledges update discovery only at the visible Updates destination", async () => {
+    const fake = setup();
+    Object.assign((h.connection as { query: object }).query, { releaseSources: async () => rowsResult([{ sources: [] }]) });
+    const cluster = OS_REGISTRY.apps.find(app => app.id === "cluster")!;
+    const feature = cluster.attentionChanges!.find(change => change.id === "cluster:updates")!;
+    function Destination({ section = "settings", visible = true }: { section?: string; visible?: boolean }) {
+      return <AttentionProvider apps={[{ ...cluster, attentionChanges: [feature] }]}><AttentionMarker appId="cluster" />
+        <AttentionDestination appId="cluster" sectionId={section} visible={visible}>
+          <ConnectionStatusContext.Provider value="connected"><ClusterApp sectionId={section} windowVisible={visible} navigate={() => {}} askContext={() => {}} /></ConnectionStatusContext.Provider>
+        </AttentionDestination>
+      </AttentionProvider>;
+    }
+    const view = render(withSession(<Destination />, { role: "owner" }));
+    await screen.findByRole("img", { name: "Unseen change" });
+    expect(fake.executeNamed.mock.calls.some(([name]) => name === "acknowledgeAttention")).toBe(false);
+    view.rerender(withSession(<Destination section="updates" visible={false} />, { role: "owner" }));
+    expect(screen.getByRole("img", { name: "Unseen change" })).toBeTruthy();
+    view.rerender(withSession(<Destination section="updates" />, { role: "owner" }));
+    await screen.findByText("No release publishers are configured.");
+    await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
+    expect(fake.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")?.[1]).toContain('changeId: "cluster:updates"');
+  });
   it("opens release review and acknowledges its feature only at the visible release destination", async () => {
     const fake = setup();
     const fixture = releaseFixture(); fixture.state.empty = true;

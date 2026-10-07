@@ -346,6 +346,9 @@ seed capability cap-owner-execute-app-cluster-modules { roleSlug: "owner"  verb:
 seed capability cap-developer-execute-app-cluster-modules { roleSlug: "developer"  verb: "execute"  resourceType: "app:cluster/modules"  predefined: true }
 @description("owner: review exact release candidates and their durable publication records.")
 seed capability cap-owner-read-app-cluster-releases { roleSlug: "owner" verb: "read" resourceType: "app:cluster/releases" predefined: true }
+seed capability cap-owner-read-app-cluster-updates { roleSlug: "owner" verb: "read" resourceType: "app:cluster/updates" predefined: true }
+seed capability cap-admin-read-app-cluster-updates { roleSlug: "admin" verb: "read" resourceType: "app:cluster/updates" predefined: true }
+seed capability cap-developer-read-app-cluster-updates { roleSlug: "developer" verb: "read" resourceType: "app:cluster/updates" predefined: true }
 @description("owner: open the origins section of the cluster app -- reproduces the OS registry floor min owner (memql#5300).")
 seed capability cap-owner-read-app-cluster-origins { roleSlug: "owner"  verb: "read"  resourceType: "app:cluster/origins"  predefined: true }
 @description("owner: open the audit section of the cluster app -- reproduces the OS registry floor min owner (memql#5300).")

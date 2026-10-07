@@ -287,6 +287,29 @@ builtin releaseListPublishedCandidates {
   limit integer
 }
 
+/// Read configured update publishers without endpoints, keys or credentials.
+@sdk
+@executor("integration.releaseDiscovery.sources")
+builtin releaseSources { }
+
+/// Read one page of remote releases and independently verify every signed envelope.
+@sdk
+@executor("integration.releaseDiscovery.discover")
+builtin releaseDiscoverPublishedCandidates {
+  sourceId string!
+  cursor string
+  limit integer
+}
+
+/// Reverify an exact discovery selection without approving or starting installation.
+@sdk
+@executor("integration.releaseDiscovery.get")
+builtin releaseReadDiscoveredCandidate {
+  sourceId string!
+  candidateId string!
+  catalogDigest string!
+}
+
 /// Reverify the original owner, exact candidate and installed lifecycle recipes.
 @executor("integration.release.releaseDraftCheckCandidate")
 builtin releaseDraftCheckCandidate { }

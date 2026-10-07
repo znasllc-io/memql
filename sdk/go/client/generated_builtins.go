@@ -4096,6 +4096,42 @@ func ReleaseCutStatusBuild(args ReleaseCutStatusArgs) string {
 	return b.String()
 }
 
+// ReleaseDiscoverPublishedCandidates -- Read one page of remote releases and independently verify every signed envelope.
+type ReleaseDiscoverPublishedCandidatesArgs struct {
+	SourceId string
+	Cursor   string
+	Limit    int
+}
+
+// ReleaseDiscoverPublishedCandidates calls the engine builtin releaseDiscoverPublishedCandidates.
+func (qc *QueryClient) ReleaseDiscoverPublishedCandidates(ctx context.Context, args ReleaseDiscoverPublishedCandidatesArgs) (*Result, error) {
+	call := ReleaseDiscoverPublishedCandidatesBuild(args)
+	return qc.executeNamed(ctx, "releaseDiscoverPublishedCandidates", call)
+}
+
+func ReleaseDiscoverPublishedCandidatesBuild(args ReleaseDiscoverPublishedCandidatesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseDiscoverPublishedCandidates(")
+	b.WriteString("sourceId: ")
+	b.WriteString(quoteMemQL(args.SourceId))
+	if args.Cursor != "" {
+		if b.Len() > 43 {
+			b.WriteString(", ")
+		}
+		b.WriteString("cursor: ")
+		b.WriteString(quoteMemQL(args.Cursor))
+	}
+	if args.Limit != 0 {
+		if b.Len() > 43 {
+			b.WriteString(", ")
+		}
+		b.WriteString("limit: ")
+		b.WriteString(fmt.Sprintf("%v", args.Limit))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseGetCandidate -- Read one exact release candidate owned by the caller.
 type ReleaseGetCandidateArgs struct {
 	CandidateId string
@@ -4262,6 +4298,38 @@ func ReleasePublishCandidateBuild(args ReleasePublishCandidateArgs) string {
 	return b.String()
 }
 
+// ReleaseReadDiscoveredCandidate -- Reverify an exact discovery selection without approving or starting installation.
+type ReleaseReadDiscoveredCandidateArgs struct {
+	SourceId      string
+	CandidateId   string
+	CatalogDigest string
+}
+
+// ReleaseReadDiscoveredCandidate calls the engine builtin releaseReadDiscoveredCandidate.
+func (qc *QueryClient) ReleaseReadDiscoveredCandidate(ctx context.Context, args ReleaseReadDiscoveredCandidateArgs) (*Result, error) {
+	call := ReleaseReadDiscoveredCandidateBuild(args)
+	return qc.executeNamed(ctx, "releaseReadDiscoveredCandidate", call)
+}
+
+func ReleaseReadDiscoveredCandidateBuild(args ReleaseReadDiscoveredCandidateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin releaseReadDiscoveredCandidate(")
+	b.WriteString("sourceId: ")
+	b.WriteString(quoteMemQL(args.SourceId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("candidateId: ")
+	b.WriteString(quoteMemQL(args.CandidateId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("catalogDigest: ")
+	b.WriteString(quoteMemQL(args.CatalogDigest))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseRetireCandidate -- Permanently retire an unpublished candidate and release its retention pins.
 type ReleaseRetireCandidateArgs struct {
 	CandidateId string
@@ -4306,6 +4374,21 @@ func ReleaseSealPublishedCandidateBuild(args ReleaseSealPublishedCandidateArgs) 
 	b.WriteString(quoteMemQL(args.ApprovalId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// ReleaseSources -- Read configured update publishers without endpoints, keys or credentials.
+type ReleaseSourcesArgs struct {
+}
+
+// ReleaseSources calls the engine builtin releaseSources.
+func (qc *QueryClient) ReleaseSources(ctx context.Context, args ReleaseSourcesArgs) (*Result, error) {
+	call := ReleaseSourcesBuild(args)
+	return qc.executeNamed(ctx, "releaseSources", call)
+}
+
+func ReleaseSourcesBuild(args ReleaseSourcesArgs) string {
+	_ = args
+	return "builtin releaseSources()"
 }
 
 // ReplayRun -- Replay one of the caller's runs: a NEW run that serves EVERY model call from the journal, so it reaches no provider. Under the default strict policy a request with no journaled match raises a divergence pinned to the first step that differs; permissive makes a fresh call and journals it. Returns {runId}.
