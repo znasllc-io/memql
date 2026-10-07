@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
@@ -79,6 +80,10 @@ func promotionFixture(t *testing.T, j *preparationJournal) (context.Context, pre
 	require.NoError(t, json.Unmarshal(rollback.Render.Source, &source))
 	plan.RollbackRevision = source.TargetRevision
 	plan.Intent = scope.Intent
+	// This journal fixture owns native observations directly. Receiver tests
+	// independently verify how authenticated configuration is constructed.
+	evidence.configuration = &receiverSnapshot{digest: scope.ConfigurationDigest, observed: time.Now().UTC()}
+	evidence.artifacts = artifactEvidence{digest: scope.WorkflowDigest, workflow: scope.WorkflowDigest, operator: scope.RequestedBy, configuration: scope.ConfigurationDigest, candidate: plan.PublicationDigest, rollback: plan.PublicationDigest, resources: plan.ResourceDiffDigest, before: plan.RollbackRenderDigest, after: plan.RenderDigest, observed: time.Now().UTC(), expires: time.Now().Add(30 * time.Minute)}
 	return ctx, r, plan, evidence
 }
 
@@ -195,11 +200,29 @@ func TestPreparationPromotionRejectsChangedAuthorityAndEvidence(t *testing.T) {
 	db, _ := journalDB(t)
 	j := preparationConnection(db)
 	ctx, r, plan, evidence := promotionFixture(t, j)
-	for _, fault := range []string{"operator", "role", "origin", "workflow", "configuration", "candidate", "approval", "source", "receipt", "render", "resource-diff", "storage", "sensitive", "destination", "cluster", "source-path", "application", "application-namespace", "application-uid", "generation", "sync-options"} {
+	for _, fault := range []string{"missing configuration proof", "stale configuration", "future configuration", "missing artifacts", "expired artifacts", "wrong artifact operator", "wrong artifact render", "operator", "role", "origin", "workflow", "configuration", "candidate", "approval", "source", "receipt", "render", "resource-diff", "storage", "sensitive", "destination", "cluster", "source-path", "application", "application-namespace", "application-uid", "generation", "sync-options"} {
 		t.Run(fault, func(t *testing.T) {
 			caller, p, e := ctx, plan, evidence
 			workflow, configuration := r.Scope.WorkflowDigest, r.Scope.ConfigurationDigest
 			switch fault {
+			case "missing configuration proof":
+				e.configuration = nil
+			case "stale configuration":
+				copy := *e.configuration
+				copy.observed = time.Now().Add(-2 * time.Minute)
+				e.configuration = &copy
+			case "future configuration":
+				copy := *e.configuration
+				copy.observed = time.Now().Add(time.Minute)
+				e.configuration = &copy
+			case "missing artifacts":
+				e.artifacts = artifactEvidence{}
+			case "expired artifacts":
+				e.artifacts.expires = time.Now().Add(-time.Second)
+			case "wrong artifact operator":
+				e.artifacts.operator = "other"
+			case "wrong artifact render":
+				e.artifacts.before = e.artifacts.after
 			case "operator":
 				caller = captureOperator(auth.RoleOwner, "another")
 			case "role":
@@ -250,4 +273,28 @@ func TestPreparationPromotionRejectsChangedAuthorityAndEvidence(t *testing.T) {
 			require.Equal(t, r, current)
 		})
 	}
+}
+
+func TestPreparationExpiredArtifactBindingCannotStart(t *testing.T) {
+	db, _ := journalDB(t)
+	preparation := preparationConnection(db)
+	ctx, prepared, plan, evidence := promotionFixture(t, preparation)
+	evidence.artifacts.expires = time.Now().Add(10 * time.Second)
+	record, err := preparation.promote(ctx, prepared.Scope.InstallationID, prepared.ID, prepared.Scope.WorkflowDigest, prepared.Scope.ConfigurationDigest, plan, evidence)
+	require.NoError(t, err)
+	// Let an actually persisted proof expire; no test changes stored authority
+	// or reconstructs a usable proof from the plan's serialized digest.
+	timer := time.NewTimer(time.Until(evidence.artifacts.expires) + time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-t.Context().Done():
+		t.Fatal(t.Context().Err())
+	}
+	journal := &revisionJournal{db: func() *sql.DB { return db }}
+	_, err = journal.begin(ctx, plan.InstallationID, record.ID, plan.WorkflowDigest)
+	require.ErrorContains(t, err, "expired before start")
+	current, err := journal.get(ctx, plan.InstallationID, record.ID)
+	require.NoError(t, err)
+	require.Equal(t, "prepared", current.State)
 }
