@@ -30,6 +30,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/integrations"
@@ -130,6 +132,7 @@ type PlannerIntegration struct {
 	// consumer was executeApprovedPlan, which went with the loop; the option
 	// is kept for the same reason dbGetter is.
 	clusterClaimer ExecutionClaimer
+	workflowClaims workflowClaimer
 }
 
 // PlannerArg is a functional option for NewPlannerIntegration.
@@ -216,7 +219,15 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 	// model.
 	p.captureDispatch = NewAuthoringCaptureDispatcher(p.agentLoop, p.engine, p.logger)
 	p.refreshCron = NewRefreshCron(p.engine, p.logger)
+	p.refreshCron.claims = p.workflowClaims
 	p.reactiveLoop = NewReactiveLoop(p.engine, p.logger)
+	p.reactiveLoop.claims = p.workflowClaims
+	p.reactiveLoop.writeGate = func(ctx context.Context, id string) (func(), error) {
+		if p.directDBGetter == nil || p.directDBGetter() == nil {
+			return nil, fmt.Errorf("standing directive requires a shared database")
+		}
+		return memql.AcquireWriteGate(ctx, p.directDBGetter().DB, "agent-directive:"+strings.TrimPrefix(id, "v1:agents:agent:"))
+	}
 	return p, nil
 }
 
@@ -306,21 +317,7 @@ func (p *PlannerIntegration) Start(ctx context.Context) {
 				"graph.node.updated.v1:work:run (authoring capture)",
 			},
 		)
-		// Start the daily-refresh cron poller (#644). Polls
-		// queryDueRefreshDomains, does the elapsed-time math Go-side,
-		// and spawns trainSpecialist(mode='refresh') Plans -- which the
-		// dispatcher above then picks up.
-		if p.refreshCron != nil {
-			p.refreshCron.Start(ctx)
-		}
-		// Start the reactive planner loop (#638-#641). Polls
-		// activeResponsibilitiesAcrossUsers, does the cron / condition
-		// due-check Go-side, routes each due responsibility to an agent,
-		// honors it per archetype (a work goal vs context injection), and runs the
-		// per-user goals x responsibilities convergence step.
-		if p.reactiveLoop != nil {
-			p.reactiveLoop.Start(ctx)
-		}
+		// Refresh and responsibility sweeps run through the DSL scheduler.
 	}
 	// Delegate the rest of the lifecycle (health-check ticker,
 	// readyCh close, IsRunning bookkeeping) to the base
@@ -345,12 +342,7 @@ func (p *PlannerIntegration) Stop(ctx context.Context) {
 	}
 	p.unsubscribes = nil
 	p.mu.Unlock()
-	if p.refreshCron != nil {
-		p.refreshCron.Stop()
-	}
-	if p.reactiveLoop != nil {
-		p.reactiveLoop.Stop()
-	}
+
 	if p.Integration != nil {
 		p.Integration.Stop(ctx)
 	}
@@ -361,3 +353,8 @@ func (p *PlannerIntegration) Stop(ctx context.Context) {
 // of type common.ComponentName) but a future refactor that drops
 // the const elsewhere might appear unused without this guard.
 var _ = common.ComponentName("planner")
+
+// WithWorkflowClaims installs durable, fail-closed admission for scheduled workflow effects.
+func WithWorkflowClaims(claims workflowClaimer) PlannerArg {
+	return func(p *PlannerIntegration) { p.workflowClaims = claims }
+}

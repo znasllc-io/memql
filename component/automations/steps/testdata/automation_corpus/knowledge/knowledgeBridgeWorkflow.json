@@ -1,0 +1,63 @@
+{
+  "automation": "knowledge/automations.memql knowledgeBridgeWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "bridgeId": "s-bridgeId",
+            "roleSlug": "s-roleSlug"
+          },
+          "topic": "automation.invocation.knowledgeBridgeWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "knowledgeBridgeExists"
+          },
+          {
+            "kind": "builtin",
+            "name": "knowledgeBridgeInputs"
+          }
+        ],
+        "result": {
+          "output": "",
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "bridgeId": "s-bridgeId",
+            "roleSlug": "s-roleSlug"
+          },
+          "topic": "automation.invocation.knowledgeBridgeWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "knowledgeBridgeExists"
+          },
+          {
+            "kind": "builtin",
+            "name": "knowledgeBridgeInputs"
+          }
+        ],
+        "result": {
+          "output": "",
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

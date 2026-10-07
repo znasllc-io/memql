@@ -22,8 +22,10 @@ func TestReceiptCleanupRequiresPodAbsence(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			kube, _ := newKubeFake(t, map[string]kubeAnswer{
-				"GET " + kubeJobs + "/" + kubeJobName:                absent,
-				"GET " + kubeSecrets + "/" + SecretName(kubeJobName): absent,
+				"POST " + kubeSecrets: kubeOK(201, Secret{}),
+				"GET " + kubeSecrets + "/" + kubeJobName + retirementSuffix: kubeOK(200, Secret{Metadata: ObjectMeta{UID: "marker", Labels: map[string]string{LabelManagedBy: ManagedBy}}}),
+				"GET " + kubeJobs + "/" + kubeJobName:                       absent,
+				"GET " + kubeSecrets + "/" + SecretName(kubeJobName):        absent,
 				"GET " + kubePods: tc.podAnswer,
 			})
 			r := NewRunner(Config{}, kube, nil, nil, nil)

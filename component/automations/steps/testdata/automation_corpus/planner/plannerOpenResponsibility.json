@@ -1,0 +1,83 @@
+{
+  "automation": "planner/automations.memql plannerOpenResponsibility",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "s-agentId",
+            "row": {}
+          },
+          "topic": "automation.invocation.plannerOpenResponsibility"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "input": {
+                "statement": "Honor responsibility "
+              },
+              "statement": "Honor responsibility "
+            },
+            "kind": "builtin",
+            "name": "plannerOpenResponsibilityGoal"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "input": {
+                "statement": "Honor responsibility "
+              },
+              "statement": "Honor responsibility "
+            },
+            "builtin": "plannerOpenResponsibilityGoal"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "s-agentId",
+            "row": {}
+          },
+          "topic": "automation.invocation.plannerOpenResponsibility"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "input": {
+                "statement": "Honor responsibility "
+              },
+              "statement": "Honor responsibility "
+            },
+            "kind": "builtin",
+            "name": "plannerOpenResponsibilityGoal"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "input": {
+                "statement": "Honor responsibility "
+              },
+              "statement": "Honor responsibility "
+            },
+            "builtin": "plannerOpenResponsibilityGoal"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

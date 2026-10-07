@@ -31,6 +31,7 @@ func (dr *runDriver) definitionOf(step pipelines.Step) string {
 		Key: step.Key, Kind: workjournal.KindDeterministic, StepType: "exec",
 		Call: map[string]any{
 			"engineRevision": revision, "step": step,
+			"workflow":   dr.workflowIdentity(),
 			"repository": dr.p.Repository, "pipelineId": bareID(dr.p.ID),
 			"ownerUserId": dr.p.OwnerUserID, "compute": dr.p.Compute,
 			"sha": dr.run.SHA, "version": dr.run.Version,

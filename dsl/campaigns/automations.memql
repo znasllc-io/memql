@@ -29,3 +29,75 @@ automation ingestCampaignFeedback {
 
   ingest := builtin campaignIngestFeedback(inboundRequestId: args.id)
 }
+
+/// Advance scheduled work, apply the authored warmup policy, then drain selected delivery jobs.
+/// Native delivery polling owns transport liveness; it enters this workflow once per pass.
+@template
+automation campaignDrainWorkflow {
+ builtin campaignPromoteSeries()
+ builtin campaignDrainWelcomes()
+ builtin campaignPromoteSchedules()
+ builtin campaignApplyWarmup()
+ jobs := builtin campaignDrainableJobs()
+ for id in jobs { builtin campaignDrainJob(id: id) }
+ builtin campaignFlushReputation()
+}
+
+/// One failed series occurrence or welcome must not block another selected row.
+@template
+automation campaignSelectedPageWorkflow {
+ args { ids []string! }
+ for id in args.ids { builtin campaignProcessSelected(id: id) on error continue }
+}
+
+/// Warming decisions consume observed rates and operator thresholds; the native limiter still caps every send.
+@template
+automation campaignWarmupDecision {
+ args {
+  domains []any! minDomainVolume int! maxComplaintRate number! maxBounceRate number! maxComplaintLabel string! maxBounceLabel string!
+  step int! stepLabel string! stepCount string! finalStep int! rateLabel string! started bool!
+  accepted int! acceptedLabel string! minVolume int! minVolumeLabel string! heldHours number! minHours number!
+  minDurationLabel string! heldMinutesLabel string! heldHoursLabel string!
+ }
+ if !args.started {
+  return {step: args.step, decision: "started", reset: true, reason: "warming started at step " + args.stepLabel + " of " + args.stepCount +
+   " (" + args.rateLabel + "/min); advancing needs " + args.minVolumeLabel + " accepted messages and " + args.minDurationLabel +
+   " at this step with bounce and complaint rates inside their thresholds"}
+ }
+ worst := automation campaignWarmupWorstDomain(domains: args.domains, minDomainVolume: args.minDomainVolume,
+  maxComplaintRate: args.maxComplaintRate, maxBounceRate: args.maxBounceRate, maxComplaintLabel: args.maxComplaintLabel, maxBounceLabel: args.maxBounceLabel)
+ if worst.reason != "" {
+  return {step: args.step > 0 ? args.step - 1 : 0, decision: args.step > 0 ? "reduced" : "held", reset: true,
+   reason: worst.reason + " at " + worst.domain + "; holding at a rate that is already producing this is not neutral"}
+ }
+ if args.step >= args.finalStep {
+  return {step: args.step, decision: "held", reset: false, reason: "at the final step (" + args.rateLabel + "/min); the ramp is finished and only ever reduces from here"}
+ }
+ if args.heldHours < args.minHours {
+  return {step: args.step, decision: "held", reset: false, reason: "step " + args.stepLabel + " has run for " + args.heldMinutesLabel + " of the " +
+   args.minDurationLabel + " minimum; providers judge over time, and a step they have not seen yet proves nothing"}
+ }
+ if args.accepted < args.minVolume {
+  return {step: args.step, decision: "held", reset: false, reason: "step " + args.stepLabel + " has sent " + args.acceptedLabel + " of the " + args.minVolumeLabel +
+   " messages needed to judge it; a clean rate over too little volume is an empty numerator, not evidence"}
+ }
+ return {step: args.step + 1, decision: "advanced", reset: true, reason: "step " + args.stepLabel + " sent " + args.acceptedLabel + " messages over " + args.heldHoursLabel +
+  " with every measurable domain inside its bounce (" + args.maxBounceLabel + "%) and complaint (" + args.maxComplaintLabel + "%) thresholds"}
+}
+
+/// Check each measurable domain, keeping a failing small domain visible instead of hiding it in an aggregate.
+@template
+automation campaignWarmupWorstDomain {
+ args { domains []any! minDomainVolume int! maxComplaintRate number! maxBounceRate number! maxComplaintLabel string! maxBounceLabel string! }
+ for domain in args.domains if domain.accepted >= args.minDomainVolume {
+  if domain.complaintRate > args.maxComplaintRate {
+   return {domain: domain.name, reason: "complaint rate " + domain.complaintLabel + "% is over the " + args.maxComplaintLabel + "% threshold (" +
+    domain.complaintsLabel + " of " + domain.acceptedLabel + ")"}
+  }
+  if domain.bounceRate > args.maxBounceRate {
+   return {domain: domain.name, reason: "hard bounce rate " + domain.bounceLabel + "% is over the " + args.maxBounceLabel + "% threshold (" +
+    domain.bouncesLabel + " of " + domain.acceptedLabel + ")"}
+  }
+ }
+ return {domain: "", reason: ""}
+}

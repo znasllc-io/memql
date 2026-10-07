@@ -218,3 +218,28 @@ automation publishEngineRelease {
     dryRun: false
   )
 }
+
+/// Compose a release cut under the adapter's owner-authorized, exact-candidate scope.
+/// The public releaseCut builtin enters this workflow after resolving the actor.
+@template
+automation releaseCutWorkflow {
+  args {
+    dryRun bool!
+    bumpExtensionPin bool!
+  }
+  snapshot := builtin releaseReadSnapshot()
+  if snapshot.tagsAtHead.count() > 0 { builtin releaseRejectCandidate(code: "already_released_at_head") }
+  if snapshot.versions.count() == 0 { builtin releaseRejectCandidate(code: "no_release_tags") }
+  builtin releaseSelectCandidate(previousTag: snapshot.versions.first())
+  builtin releaseCheckVersion()
+  if args.dryRun {
+    builtin releaseMarkDryRun()
+    return
+  }
+  builtin releaseCreateTag()
+  builtin releasePublishTag()
+  if args.bumpExtensionPin {
+    builtin releaseOpenExtensionPin()
+  }
+  builtin releaseRecordCut()
+}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	pure "github.com/znasllc-io/memql/component/compose"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -402,295 +403,328 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 		return fail("materialization stopped", err)
 	}
 
-	existingFileId := stableMaterializeID("materialized-file", compositionId)
-	existingFile, err := st.libraryFileById(ctx, existingFileId)
-	if err != nil {
-		return fail("checking an earlier output failed", err)
-	}
-	sourceFileId := ""
-	needsSource := a.Format != pure.FormatText && a.Format != pure.FormatMarkdown || a.DeployableKind != "" || a.OutputKind != ""
-	if needsSource {
-		sourceFileId = stableMaterializeID("materialized-source", compositionId)
-	}
-	sourceComplete := !needsSource
-	if needsSource {
-		source, sourceErr := st.libraryFileById(ctx, sourceFileId)
-		if sourceErr != nil {
-			return fail("checking the source package failed", sourceErr)
-		}
-		sourceComplete = source != nil && stringOf(source["status"]) == "ready"
-	}
-	if existingFile != nil && sourceComplete {
-		// The filing row is written only after uploading all bytes. Its identity is
-		// stable even when the final composition update was interrupted.
-		if err := st.setLibraryFileReady(ctx, existingFileId, stringOf(existingFile["summary"])); err != nil {
-			return fail("the output file could not be marked ready", err)
-		}
-		if err := st.updateCompositionState(ctx, map[string]any{"compositionId": compositionId, "status": "ready", "failureReason": "", "outputFileId": existingFileId, "sourceFileId": sourceFileId, "sha256": existingFile["sha256"]}); err != nil {
-			return nil, err
-		}
-		row, err := st.compositionById(ctx, compositionId)
-		if err != nil {
-			return nil, err
-		}
-		return compositionResult(compositionId, row), nil
-	}
-
-	// --- the template, resolved under the caller ---
+	var sourceFileId, fileId, fileName, mimeType string
+	var needsSource, sourceComplete bool
 	var templateName, templateBody string
-	if a.TemplateId != "" && request.Recipe == nil {
-		row, terr := st.templateById(ctx, a.TemplateId)
-		if terr != nil {
-			return fail("the template could not be read: "+terr.Error(), terr)
-		}
-		if row == nil {
-			// REFUSED RATHER THAN RENDERED WITHOUT. A template the
-			// caller cannot read is one they may not use, and silently
-			// producing an unbranded document that looks finished is
-			// worse than a refusal naming the template.
-			return fail("that template is not readable by you, so nothing was rendered through it", nil)
-		}
-		templateName = stringOf(row["name"])
-		if fileId := strings.TrimSpace(stringOf(row["fileId"])); fileId != "" {
-			templateBody, terr = i.templateBody(ctx, fileId)
-			if terr != nil {
-				return fail("the template contents could not be read: "+terr.Error(), terr)
-			}
-		}
-	}
-
-	if err := st.updateCompositionState(ctx, map[string]any{
-		"compositionId": compositionId, "status": "composing", "failureReason": "", "runId": runId,
-	}); err != nil {
-		i.log().Warn("compose: could not mark the composition composing", "error", err, "compositionId", compositionId)
-	}
-
-	// --- step 2: compose (THE ONE REASONING STEP) ---
 	draft := pure.Draft{Title: a.Name, Body: a.Draft}
 	var models []pure.ModelContribution
-	switch composer := i.composerRef(); {
-	case request.Recipe != nil:
-		draft, models = request.Recipe.Draft, request.Recipe.Provenance.Models
-		templateBody = request.TemplateBody
-		templateName = request.Recipe.Provenance.TemplateName
-	case composer != nil:
-		reply, cerr := composer.Compose(ctx, ComposeRequest{
-			Statement:    a.Statement,
-			Format:       a.Format,
-			OutputKind:   a.OutputKind,
-			Sources:      i.narrowed(resolved),
-			TemplateName: templateName,
-			TemplateBody: templateBody,
-			Draft:        a.Draft,
-		})
-		if cerr != nil {
-			return fail("composing the draft failed: "+cerr.Error(), cerr)
-		}
-		draft = reply.Draft
-		models = reply.Models
-		if strings.TrimSpace(draft.Title) == "" {
-			draft.Title = a.Name
-		}
-	case strings.TrimSpace(a.Draft) != "":
-		// NO COMPOSER AND A SUPPLIED DRAFT is a complete, honest run --
-		// and it is what lets the render/stamp/file tail be exercised on
-		// a node with no provider configured. `models` stays EMPTY,
-		// which is the truthful record: nothing thought.
-	default:
-		return fail("this node has no composer configured and no draft was supplied, so there is nothing to render", nil)
-	}
+	var prov pure.Provenance
+	var recipe pure.RenderRecipe
+	var rendered pure.Result
+	var output map[string]any
+	var err error
+	operations := map[string]workflowhost.Operation{
+		"composeRecoverOutput": func(ctx context.Context, _ map[string]any) (any, error) {
+			existingFileId := stableMaterializeID("materialized-file", compositionId)
+			existingFile, err := st.libraryFileById(ctx, existingFileId)
+			if err != nil {
+				return fail("checking an earlier output failed", err)
+			}
+			sourceFileId = ""
+			needsSource = a.Format != pure.FormatText && a.Format != pure.FormatMarkdown || a.DeployableKind != "" || a.OutputKind != ""
+			if needsSource {
+				sourceFileId = stableMaterializeID("materialized-source", compositionId)
+			}
+			sourceComplete = !needsSource
+			if needsSource {
+				source, sourceErr := st.libraryFileById(ctx, sourceFileId)
+				if sourceErr != nil {
+					return fail("checking the source package failed", sourceErr)
+				}
+				sourceComplete = source != nil && stringOf(source["status"]) == "ready"
+			}
+			if existingFile != nil && sourceComplete {
+				// The filing row is written only after uploading all bytes. Its identity is
+				// stable even when the final composition update was interrupted.
+				if err := st.setLibraryFileReady(ctx, existingFileId, stringOf(existingFile["summary"])); err != nil {
+					return fail("the output file could not be marked ready", err)
+				}
+				if err := st.updateCompositionState(ctx, map[string]any{"compositionId": compositionId, "status": "ready", "failureReason": "", "outputFileId": existingFileId, "sourceFileId": sourceFileId, "sha256": existingFile["sha256"]}); err != nil {
+					return nil, err
+				}
+				row, err := st.compositionById(ctx, compositionId)
+				if err != nil {
+					return nil, err
+				}
+				output = compositionResult(compositionId, row)
+				return true, nil
+			}
 
-	if err := i.checkCompositionCancellation(ctx, compositionId); err != nil {
-		return fail("materialization stopped", err)
-	}
-
-	// The two data formats take their rows from the sources rather than
-	// from prose, and a composer that returned none is not an error --
-	// it means the draft's body was the interesting part and the rows
-	// are the sources'.
-	if a.OutputKind == "" && (a.Format == pure.FormatCSV || a.Format == pure.FormatJSON) && len(draft.Rows) == 0 {
-		draft.Header, draft.Rows = tabularRows(resolved)
-	}
-
-	if err := st.updateCompositionState(ctx, map[string]any{
-		"compositionId": compositionId, "status": "rendering",
-	}); err != nil {
-		i.log().Warn("compose: could not mark the composition rendering", "error", err, "compositionId", compositionId)
-	}
-
-	if err := i.checkCompositionCancellation(ctx, compositionId); err != nil {
-		return fail("materialization stopped", err)
-	}
-
-	// --- steps 3 + 4: render and stamp ---
-	prov := pure.Provenance{
-		Title:         a.Name,
-		Statement:     a.Statement,
-		AuthorName:    firstNonEmpty(userEmail, userId),
-		AuthorId:      userId,
-		Instance:      i.instanceRef(),
-		CompositionId: compositionId,
-		GoalId:        goalId,
-		TemplateName:  templateName,
-		Sources:       pureSources(resolved),
-		Models:        models,
-		CreatedAt:     started,
-	}
-
-	if a.OutputKind == "email_template" && request.Recipe == nil {
-		draft.Body, err = EmbedEmailAssets(draft.Body, resolved)
-		if err != nil {
-			return fail("embedding email assets failed", err)
-		}
-	}
-	recipe := pure.RenderRecipe{Name: a.Name, Format: a.Format, OutputKind: a.OutputKind, DeployableKind: a.DeployableKind, Draft: draft, Provenance: prov}
-	if request.Recipe != nil {
-		recipe = *request.Recipe
-	} else {
-		request.Recipe, request.TemplateBody = &recipe, templateBody
-		raw, marshalErr := json.Marshal(request)
-		if marshalErr != nil {
-			return fail("capturing render recipe failed", marshalErr)
-		}
-		var snapshot map[string]any
-		if err = json.Unmarshal(raw, &snapshot); err != nil {
-			return fail("capturing render recipe failed", err)
-		}
-		if err = st.writeInternal(ctx, "mutation "+call("saveCompositionRecipe", map[string]any{"compositionId": compositionId, "request": snapshot})); err != nil {
-			return fail("saving render recipe failed", err)
-		}
-	}
-	rendered, err := pure.RenderRecipeBytes(recipe)
-	if err != nil {
-		return fail("rendering the file failed: "+err.Error(), err)
-	}
-
-	if err := i.checkCompositionCancellation(ctx, compositionId); err != nil {
-		return fail("materialization stopped", err)
-	}
-
-	// --- step 5: file ---
-	fileId := stableMaterializeID("materialized-file", compositionId)
-	fileName := outputFileName(a.Name, a.Format, a.DeployableKind)
-	if a.OutputKind == "email_template" {
-		fileName = strings.TrimSuffix(fileName, ".json") + ".email.json"
-	}
-	mimeType := a.Format.MimeType()
-	if a.DeployableKind != "" {
-		mimeType = "application/zip"
-	}
-
-	if needsSource && !sourceComplete {
-		inputs, marshalErr := json.MarshalIndent(i.narrowed(resolved), "", "  ")
-		if marshalErr != nil {
-			return fail("capturing source inputs failed", marshalErr)
-		}
-		extras := map[string][]byte{"inputs/sources.json": inputs, "inputs/template.txt": []byte(templateBody)}
-		for _, source := range resolved {
-			for _, asset := range source.Files {
-				if len(asset.Image) > 0 {
-					extras["inputs/assets/"+asset.SHA256] = asset.Image
+			return false, nil
+		},
+		"composeReadTemplate": func(ctx context.Context, _ map[string]any) (any, error) {
+			if a.TemplateId != "" && request.Recipe == nil {
+				row, terr := st.templateById(ctx, a.TemplateId)
+				if terr != nil {
+					return fail("the template could not be read: "+terr.Error(), terr)
+				}
+				if row == nil {
+					// REFUSED RATHER THAN RENDERED WITHOUT. A template the
+					// caller cannot read is one they may not use, and silently
+					// producing an unbranded document that looks finished is
+					// worse than a refusal naming the template.
+					return fail("that template is not readable by you, so nothing was rendered through it", nil)
+				}
+				templateName = stringOf(row["name"])
+				if fileId := strings.TrimSpace(stringOf(row["fileId"])); fileId != "" {
+					templateBody, terr = i.templateBody(ctx, fileId)
+					if terr != nil {
+						return fail("the template contents could not be read: "+terr.Error(), terr)
+					}
 				}
 			}
+
+			if err := st.updateCompositionState(ctx, map[string]any{
+				"compositionId": compositionId, "status": "composing", "failureReason": "", "runId": runId,
+			}); err != nil {
+				i.log().Warn("compose: could not mark the composition composing", "error", err, "compositionId", compositionId)
+			}
+
+			return nil, nil
+		},
+		"composeWorkflowFacts": func(context.Context, map[string]any) (any, error) {
+			return map[string]any{"savedRecipe": request.Recipe != nil, "hasComposer": i.composerRef() != nil, "hasDraft": strings.TrimSpace(a.Draft) != "", "hasRows": len(draft.Rows) > 0, "format": string(a.Format), "outputKind": a.OutputKind, "needsSource": needsSource, "sourceComplete": sourceComplete, "hasRecipeId": a.RecipeId != ""}, nil
+		},
+		"composeRestoreDraft": func(context.Context, map[string]any) (any, error) {
+			if request.Recipe == nil {
+				return nil, errors.New("compose: no saved recipe")
+			}
+			draft, models = request.Recipe.Draft, request.Recipe.Provenance.Models
+			templateBody = request.TemplateBody
+			templateName = request.Recipe.Provenance.TemplateName
+
+			return nil, nil
+		},
+		"composeGenerateDraft": func(ctx context.Context, _ map[string]any) (any, error) {
+			if i.composerRef() == nil {
+				return nil, errors.New("compose: no composer configured")
+			}
+			reply, cerr := i.composerRef().Compose(ctx, ComposeRequest{
+				Statement:    a.Statement,
+				Format:       a.Format,
+				OutputKind:   a.OutputKind,
+				Sources:      i.narrowed(resolved),
+				TemplateName: templateName,
+				TemplateBody: templateBody,
+				Draft:        a.Draft,
+			})
+			if cerr != nil {
+				return fail("composing the draft failed: "+cerr.Error(), cerr)
+			}
+			draft = reply.Draft
+			models = reply.Models
+			if strings.TrimSpace(draft.Title) == "" {
+				draft.Title = a.Name
+			}
+			return nil, nil
+		},
+		"composeRequireDraft": func(ctx context.Context, _ map[string]any) (any, error) {
+			if strings.TrimSpace(a.Draft) == "" {
+				return fail("this node has no composer configured and no draft was supplied, so there is nothing to render", nil)
+			}
+			return nil, nil
+		},
+		"composeUseSourceRows": func(context.Context, map[string]any) (any, error) {
+			draft.Header, draft.Rows = tabularRows(resolved)
+			return nil, nil
+		},
+		"composeRenderOutput": func(ctx context.Context, _ map[string]any) (any, error) {
+			if err := st.updateCompositionState(ctx, map[string]any{
+				"compositionId": compositionId, "status": "rendering",
+			}); err != nil {
+				i.log().Warn("compose: could not mark the composition rendering", "error", err, "compositionId", compositionId)
+			}
+
+			if err := i.checkCompositionCancellation(ctx, compositionId); err != nil {
+				return fail("materialization stopped", err)
+			}
+
+			// --- steps 3 + 4: render and stamp ---
+			prov = pure.Provenance{
+				Title:         a.Name,
+				Statement:     a.Statement,
+				AuthorName:    firstNonEmpty(userEmail, userId),
+				AuthorId:      userId,
+				Instance:      i.instanceRef(),
+				CompositionId: compositionId,
+				GoalId:        goalId,
+				TemplateName:  templateName,
+				Sources:       pureSources(resolved),
+				Models:        models,
+				CreatedAt:     started,
+			}
+
+			if a.OutputKind == "email_template" && request.Recipe == nil {
+				draft.Body, err = EmbedEmailAssets(draft.Body, resolved)
+				if err != nil {
+					return fail("embedding email assets failed", err)
+				}
+			}
+			recipe = pure.RenderRecipe{Name: a.Name, Format: a.Format, OutputKind: a.OutputKind, DeployableKind: a.DeployableKind, Draft: draft, Provenance: prov}
+			if request.Recipe != nil {
+				recipe = *request.Recipe
+			} else {
+				request.Recipe, request.TemplateBody = &recipe, templateBody
+				raw, marshalErr := json.Marshal(request)
+				if marshalErr != nil {
+					return fail("capturing render recipe failed", marshalErr)
+				}
+				var snapshot map[string]any
+				if err = json.Unmarshal(raw, &snapshot); err != nil {
+					return fail("capturing render recipe failed", err)
+				}
+				if err = st.writeInternal(ctx, "mutation "+call("saveCompositionRecipe", map[string]any{"compositionId": compositionId, "request": snapshot})); err != nil {
+					return fail("saving render recipe failed", err)
+				}
+			}
+			rendered, err = pure.RenderRecipeBytes(recipe)
+			if err != nil {
+				return fail("rendering the file failed: "+err.Error(), err)
+			}
+
+			if err := i.checkCompositionCancellation(ctx, compositionId); err != nil {
+				return fail("materialization stopped", err)
+			}
+			fileId = stableMaterializeID("materialized-file", compositionId)
+			fileName = outputFileName(a.Name, a.Format, a.DeployableKind)
+			if a.OutputKind == "email_template" {
+				fileName = strings.TrimSuffix(fileName, ".json") + ".email.json"
+			}
+			mimeType = a.Format.MimeType()
+			if a.DeployableKind != "" {
+				mimeType = "application/zip"
+			}
+
+			return nil, nil
+		},
+		"composeFileSource": func(ctx context.Context, _ map[string]any) (any, error) {
+			inputs, marshalErr := json.MarshalIndent(i.narrowed(resolved), "", "  ")
+			if marshalErr != nil {
+				return fail("capturing source inputs failed", marshalErr)
+			}
+			extras := map[string][]byte{"inputs/sources.json": inputs, "inputs/template.txt": []byte(templateBody)}
+			for _, source := range resolved {
+				for _, asset := range source.Files {
+					if len(asset.Image) > 0 {
+						extras["inputs/assets/"+asset.SHA256] = asset.Image
+					}
+				}
+			}
+			source, packageErr := pure.BuildSourcePackage(recipe, fileName, rendered, extras)
+			if packageErr != nil {
+				return fail("source package verification failed", packageErr)
+			}
+			sourceName := strings.TrimSuffix(fileName, "."+string(a.Format)) + "-source.zip"
+			blob, storageError := i.storeBytes(ctx, userId, sourceFileId, sourceName, "application/zip", source.Bytes)
+			if storageError != "" {
+				return fail(storageError, nil)
+			}
+			rc, _ := common.RunFromContext(ctx)
+			if err = st.createLibraryFile(ctx, map[string]any{"fileId": sourceFileId, "name": sourceName, "mimeType": "application/zip", "size": len(source.Bytes), "sha256": source.SHA256(), "blobUrl": blob, "source": "agent_generated", "producedByRunId": runId, "producedByStepKey": rc.StepKey, "format": "other", "summary": source.Note, "folderId": a.FolderId}); err != nil {
+				return fail("filing source package failed", err)
+			}
+			if err = st.setLibraryFileReady(ctx, sourceFileId, source.Note); err != nil {
+				return fail("completing source package failed", err)
+			}
+			return nil, nil
+		},
+		"composeFileOutput": func(ctx context.Context, _ map[string]any) (any, error) {
+			if err := st.updateCompositionState(ctx, map[string]any{
+				"compositionId": compositionId, "modelsUsed": modelRows(models), "provenanceEmbedded": rendered.Embedded,
+				"provenanceNote": rendered.Note, "sha256": rendered.SHA256(),
+			}); err != nil {
+				return fail("recording output provenance failed", err)
+			}
+
+			blobUrl, storageErr := i.storeBytes(ctx, userId, fileId, fileName, mimeType, rendered.Bytes)
+			if storageErr != "" {
+				// THE ROW IS STILL WRITTEN AND THEN MARKED FAILED, which is the
+				// Library upload route's own shape: the owner has to be able to
+				// SEE that their materialization did not store, and what is
+				// never written is a placeholder that reads to every consumer
+				// as a successfully stored file.
+				return fail(storageErr, nil)
+			}
+
+			if err := i.checkCompositionCancellation(ctx, compositionId); err != nil {
+				return fail("materialization stopped", err)
+			}
+			runContext, _ := common.RunFromContext(ctx)
+			if err := st.createLibraryFile(ctx, map[string]any{
+				"fileId":            fileId,
+				"name":              fileName,
+				"mimeType":          mimeType,
+				"size":              len(rendered.Bytes),
+				"sha256":            rendered.SHA256(),
+				"blobUrl":           blobUrl,
+				"source":            "agent_generated",
+				"producedByRunId":   runId,
+				"producedByStepKey": runContext.StepKey,
+				"format":            libraryFormatFor(a.Format, a.DeployableKind),
+				"summary":           fileSummary(a, prov),
+				"folderId":          a.FolderId,
+			}); err != nil {
+				return fail("the output could not be filed in your Library: "+err.Error(), err)
+			}
+			if err := st.setLibraryFileReady(ctx, fileId, fileSummary(a, prov)); err != nil {
+				// The native work step completes only after the durable delivery
+				// receipt exists. A stored blob alone cannot mark the run successful.
+				return fail("the output file could not be marked ready", err)
+			}
+
+			if err := i.checkCompositionCancellation(ctx, compositionId); err != nil {
+				return fail("materialization stopped", err)
+			}
+
+			return nil, nil
+		},
+		"composeCompleteOutput": func(ctx context.Context, _ map[string]any) (any, error) {
+			if err := st.updateCompositionState(ctx, map[string]any{
+				"compositionId":      compositionId,
+				"status":             "ready",
+				"outputFileId":       fileId,
+				"sourceFileId":       sourceFileId,
+				"modelsUsed":         modelRows(models),
+				"provenanceEmbedded": rendered.Embedded,
+				"provenanceNote":     rendered.Note,
+				"sha256":             rendered.SHA256(),
+			}); err != nil {
+				return nil, fmt.Errorf("compose: the file was written but the record could not be completed: %w", err)
+			}
+			output = map[string]any{
+				"compositionId":      compositionId,
+				"goalId":             goalId,
+				"runId":              runId,
+				"outputFileId":       fileId,
+				"sourceFileId":       sourceFileId,
+				"name":               fileName,
+				"format":             string(a.Format),
+				"deployableKind":     a.DeployableKind,
+				"sizeBytes":          len(rendered.Bytes),
+				"sha256":             rendered.SHA256(),
+				"provenanceEmbedded": rendered.Embedded,
+				"provenanceNote":     rendered.Note,
+				"modelsUsed":         modelRows(models),
+				"sourcesResolved":    len(resolved),
+			}
+			return nil, nil
+		},
+		"composeRecordRecipeUse": func(ctx context.Context, _ map[string]any) (any, error) {
+			i.bumpRecipe(ctx, a.RecipeId)
+			return nil, nil
+		},
+	}
+	// The native scope rechecks cancellation at every effect boundary.
+	for name, op := range operations {
+		operations[name] = func(ctx context.Context, args map[string]any) (any, error) {
+			if err := i.checkCompositionCancellation(ctx, compositionId); err != nil {
+				return fail("materialization stopped", err)
+			}
+			return op(ctx, args)
 		}
-		source, packageErr := pure.BuildSourcePackage(recipe, fileName, rendered, extras)
-		if packageErr != nil {
-			return fail("source package verification failed", packageErr)
-		}
-		sourceName := strings.TrimSuffix(fileName, "."+string(a.Format)) + "-source.zip"
-		blob, storageError := i.storeBytes(ctx, userId, sourceFileId, sourceName, "application/zip", source.Bytes)
-		if storageError != "" {
-			return fail(storageError, nil)
-		}
-		rc, _ := common.RunFromContext(ctx)
-		if err = st.createLibraryFile(ctx, map[string]any{"fileId": sourceFileId, "name": sourceName, "mimeType": "application/zip", "size": len(source.Bytes), "sha256": source.SHA256(), "blobUrl": blob, "source": "agent_generated", "producedByRunId": runId, "producedByStepKey": rc.StepKey, "format": "other", "summary": source.Note, "folderId": a.FolderId}); err != nil {
-			return fail("filing source package failed", err)
-		}
-		if err = st.setLibraryFileReady(ctx, sourceFileId, source.Note); err != nil {
-			return fail("completing source package failed", err)
-		}
 	}
-
-	if err := st.updateCompositionState(ctx, map[string]any{
-		"compositionId": compositionId, "modelsUsed": modelRows(models), "provenanceEmbedded": rendered.Embedded,
-		"provenanceNote": rendered.Note, "sha256": rendered.SHA256(),
-	}); err != nil {
-		return fail("recording output provenance failed", err)
-	}
-
-	blobUrl, storageErr := i.storeBytes(ctx, userId, fileId, fileName, mimeType, rendered.Bytes)
-	if storageErr != "" {
-		// THE ROW IS STILL WRITTEN AND THEN MARKED FAILED, which is the
-		// Library upload route's own shape: the owner has to be able to
-		// SEE that their materialization did not store, and what is
-		// never written is a placeholder that reads to every consumer
-		// as a successfully stored file.
-		return fail(storageErr, nil)
-	}
-
-	if err := i.checkCompositionCancellation(ctx, compositionId); err != nil {
-		return fail("materialization stopped", err)
-	}
-	runContext, _ := common.RunFromContext(ctx)
-	if err := st.createLibraryFile(ctx, map[string]any{
-		"fileId":            fileId,
-		"name":              fileName,
-		"mimeType":          mimeType,
-		"size":              len(rendered.Bytes),
-		"sha256":            rendered.SHA256(),
-		"blobUrl":           blobUrl,
-		"source":            "agent_generated",
-		"producedByRunId":   runId,
-		"producedByStepKey": runContext.StepKey,
-		"format":            libraryFormatFor(a.Format, a.DeployableKind),
-		"summary":           fileSummary(a, prov),
-		"folderId":          a.FolderId,
-	}); err != nil {
-		return fail("the output could not be filed in your Library: "+err.Error(), err)
-	}
-	if err := st.setLibraryFileReady(ctx, fileId, fileSummary(a, prov)); err != nil {
-		// The native work step completes only after the durable delivery
-		// receipt exists. A stored blob alone cannot mark the run successful.
-		return fail("the output file could not be marked ready", err)
-	}
-
-	if err := i.checkCompositionCancellation(ctx, compositionId); err != nil {
-		return fail("materialization stopped", err)
-	}
-
-	if err := st.updateCompositionState(ctx, map[string]any{
-		"compositionId":      compositionId,
-		"status":             "ready",
-		"outputFileId":       fileId,
-		"sourceFileId":       sourceFileId,
-		"modelsUsed":         modelRows(models),
-		"provenanceEmbedded": rendered.Embedded,
-		"provenanceNote":     rendered.Note,
-		"sha256":             rendered.SHA256(),
-	}); err != nil {
-		return nil, fmt.Errorf("compose: the file was written but the record could not be completed: %w", err)
-	}
-
-	if a.RecipeId != "" {
-		i.bumpRecipe(ctx, a.RecipeId)
-	}
-
-	return map[string]any{
-		"compositionId":      compositionId,
-		"goalId":             goalId,
-		"runId":              runId,
-		"outputFileId":       fileId,
-		"sourceFileId":       sourceFileId,
-		"name":               fileName,
-		"format":             string(a.Format),
-		"deployableKind":     a.DeployableKind,
-		"sizeBytes":          len(rendered.Bytes),
-		"sha256":             rendered.SHA256(),
-		"provenanceEmbedded": rendered.Embedded,
-		"provenanceNote":     rendered.Note,
-		"modelsUsed":         modelRows(models),
-		"sourcesResolved":    len(resolved),
-	}, nil
+	_, err = workflowhost.Run(ctx, "composeMaterializeWorkflow", nil, workflowhost.Options{Logger: i.log(), Operations: operations})
+	return output, err
 }
 
 // renderDeployable produces the package source zip (design D8).

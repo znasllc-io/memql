@@ -1,0 +1,57 @@
+{
+  "automation": "platform/automations.memql customDomainReconcileWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "bindings": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.customDomainReconcileWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "customDomainReconcileBinding"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "bindings": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.customDomainReconcileWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "customDomainReconcileBinding"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

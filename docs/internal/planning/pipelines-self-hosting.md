@@ -114,12 +114,13 @@ The October 6 inventory found these gaps; definitions are not execution proof:
 
 | Coverage | MemQL definition / remaining work |
 | --- | --- |
-| Engine build/vet, environment and DSL validation, generated contracts | Core `go-checks` exists; add the five tagged build/vet variants and cluster-E2E compilation. |
-| Unit and database suites | Four ordinary shards and five database shards exist; add all seven node-tag test variants. Database-required execution must fail on a missing database. |
+| Engine build/vet, environment and DSL validation, generated contracts | Core checks, five tagged build/vet variants and both cluster-E2E compilation variants are declared in the package (PR #5869). Installed Workbench execution remains to be proved. |
+| Unit and database suites | Four ordinary shards, five database shards and all seven node-tag test variants are declared. Database-required execution must fail on a missing database. |
 | Fuzz, conformance, differential, proving | Definitions exist; reproduce triggers, pinned tool versions, seeds and artifacts. Microbenchmarks are not capacity tests. |
-| Module and shell boundaries | Port standalone `GOWORK=off` build/vet/tidy checks and Bash 3.2 compatibility. |
+| Module and shell boundaries | Standalone module build/vet/tidy and Bash 3.2 lanes are declared. Local tool runs covered all 53 tracked modules and the capability scripts. |
 | OS, SDK, Viewkit and editors | Initial OS/TypeScript definitions exist; port OS Docker-stage validation and VS Code/productivity extension packaging and Linux/macOS desktop/web host matrices. Native work remains explicit and consented. |
-| Secrets and vulnerabilities | Port Gitleaks including full-history scheduled scans, all-module govulncheck, CodeQL analysis/upload, SBOM generation and Scorecard. These security lanes are absent from the current package. |
+| Secrets and vulnerabilities | Gitleaks, workspace govulncheck and all-lockfile npm audits are declared and passed local tool runs. Standalone three-language CodeQL and complete Go/npm SBOM lanes are being added. SARIF publication, Scorecard and periodic scheduling remain open. |
+| Code Quality | The enabled GitHub product uses Actions and has license/AI-credit charges. Inventory and replace its deterministic Go, JavaScript/TypeScript and Python rules. Its AI findings are enabled on push; proprietary AI findings/autofixes are not replaced by the CodeQL security suite. Do not describe that suite as complete Code Quality parity. |
 | Additional delivery security | Add dependency/container vulnerability checks and verified provenance/signatures with explicit blocking policy. These extend coverage; they were not existing dedicated workflow lanes. |
 | Build and release | Replace seven engine-image builds, database/toolchain images, fixture mirrors, SDK/editor/docs publication and the legacy tag-triggered release cascade. |
 | Companion repositories | Port Cockpit, project-template and instance checks and release paths independently; their current package declarations do not provide equivalent CI. |
@@ -142,6 +143,41 @@ Future suite placeholders, intentionally outside this delivery implementation:
 These will consume the same pinned-candidate execution and artifact contracts.
 They have no fabricated baselines or pass thresholds and are not required checks
 until implemented and calibrated. Keep their activation explicit.
+
+### Security report ingestion primitive
+
+The GitHub App client now has bounded SARIF upload and processing-status
+primitives. They submit exact report bytes with a pinned commit/ref, return a
+content digest and accepted upload id, and distinguish pending, complete and
+failed ingestion. Redirects are refused. Ambiguous POST responses never trigger
+an automatic second upload. Framing and size checks do not substitute for
+successful scanner execution or artifact/source verification.
+
+The adapter is tested against an in-process GitHub fixture, including real
+standalone CodeQL report bytes. It is not yet a live GitHub upload or a wired
+pipeline publication stage. The caller must journal upload intent/receipt,
+bind the report to its execution evidence, reconcile uncertain submission,
+and retain/report ingestion failures. The GitHub App's code-scanning alerts
+permission must be explicitly configured; this change grants no permission and
+puts no upload credential into a build Job. See GitHub's
+[external CI guide](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/use-with-existing-ci-system)
+and [SARIF API](https://docs.github.com/en/rest/code-scanning/code-scanning#upload-an-analysis-as-sarif-data).
+### Large artifact storage primitive
+
+`azureblob.CreateVerifiedStream` stages bounded chunks, checks the complete
+source's declared size and SHA-256, and commits with a create-only condition.
+Adoption reads and hashes the stored bytes under an ETag condition; a lost
+commit response is never a successful upload on its own. Different concurrent
+attempts use distinct block ids. Receipts retain the verified ETag, digest and
+size and strip signed URL credentials. This does not enable a storage-account
+immutability policy: later consumers still verify the pinned content.
+
+Local Azurite tests cover a 128 MiB stream, reconciliation by a replacement
+caller, overwrite refusal, an empty stream and the real rootless-builder OCI
+archive. The Workbench transport still uses its existing small-artifact path;
+builder-to-store streaming, durable artifact ownership, retention and release
+publication remain to be wired. Uncommitted blocks have provider-managed
+expiration, and committed objects need explicit ownership-guarded cleanup.
 
 ### Cluster update requirements (owner clarification, October 6)
 
@@ -738,3 +774,51 @@ initialization instead of its intended long-running migration; the injected
 deadline now applies only to that migration. The three database lock regressions
 pass ten repeated runs. Final PR checks and local rollout still need their own
 recorded results; earlier green runs are not a claim about the final commit.
+
+### Durable retirement of pipeline attempts (October 6)
+
+The local rehearsal exposed a queued Job starting after its run was reported
+failed. Receipt cleanup and run cancellation now write separate, credential-free
+stop markers before collecting execution resources. Creators check those markers
+on both sides of their metadata compare-and-swap. An absent Job with an unresolved
+create claim leaves cleanup pending; it is not evidence that a late API request
+cannot still arrive. Run cancellation inventories owned objects and uses guarded
+deletes instead of erasing creation claims with collection deletion.
+
+Markers survive Job garbage collection. Resolved markers expire after the maximum
+supported run lifetime plus resource retention; unresolved creation evidence stays
+for reconciliation. The cross-node protocol is Step V4, receipt Ack V3 and Cancel
+V2, so an older replica cannot claim these guarantees. Local Kubernetes testing
+exercised late admission, confirmed resource absence, and delayed original
+envelopes after both attempt and run retirement. Recovery and cancellation passed
+repeated race tests. Installation into the combined engine and the complete
+release/update rehearsal remain required; this is not production qualification.
+
+### Standalone security analysis measurements (October 6)
+
+Pinned CodeQL 2.27.1 completed Go, JavaScript/TypeScript and Python analysis
+outside Actions on local Linux ARM64. The clean source was
+`701ec06fedd139b0bb825abbfd35893ccdbcd214`. Go produced 84 findings, JavaScript
+15 and Python zero. Exact rule/file/line comparison maps every Go finding to a
+historical GitHub alert: 61 dismissed as false positives and 23 still open. Of the
+JavaScript findings, 14 matched open alerts; the additional download path remains
+for triage. Analysis completion is a fact, not a clean security verdict, and
+historical dismissals must retain their evidence rather than silently suppressing
+new results.
+
+The Go run took over two hours on two CPUs, including 41 minutes 49 seconds of
+SARIF export. Its declaration now allows three hours and the tested 6 GiB memory
+allocation; the general maximum step duration is three hours. An operator must
+also configure enough total run time for the entire serialized suite. The
+previous 90-minute scan and default two-hour run ceiling cannot qualify this
+workload. Full-history Gitleaks also exceeded the former 30-minute declaration;
+its bound is now 90 minutes, with two Go runtime threads and a 768 MiB soft GC
+target. Its complete measured outcome remains separate evidence.
+
+The 13,599,430-byte Go SARIF report round-tripped through the bounded GitHub API
+wire adapter against an in-process server; it was not uploaded publicly. Its
+SHA-256 is `25f293bfeaed12795325b4c9c49049da288d5476d9156d579ff406d621c28774`.
+SBOM generation covered 53 Go modules and seven npm lockfiles in nine reports,
+including development dependencies. Installed Workbench execution, current-source
+rescans, SARIF publishing, schedules, Code Quality parity and release gating still
+require the combined rehearsal.

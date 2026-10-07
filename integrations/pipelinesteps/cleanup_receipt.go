@@ -13,14 +13,15 @@ import (
 // UID and revision preconditions guard against replacement after the read.
 func (r *Runner) cleanupReceipt(ctx context.Context, jobName string) error {
 	job, err := r.kube.GetJob(ctx, jobName)
+	jobExists := err == nil
 	if err == nil {
 		if job.Metadata.Labels[LabelManagedBy] != ManagedBy {
 			return fmt.Errorf("pipelinesteps: refusing cleanup of unowned Job %s", jobName)
 		}
-		if err := r.kube.DeleteObservedJob(ctx, job.Metadata); err != nil {
-			return err
-		}
 	} else if !deploycontrol.IsNotFound(err) {
+		return err
+	}
+	if err := r.retireAttempt(ctx, jobName); err != nil {
 		return err
 	}
 	secretName := SecretName(jobName)
@@ -29,11 +30,22 @@ func (r *Runner) cleanupReceipt(ctx context.Context, jobName string) error {
 		if secret.Labels[LabelManagedBy] != ManagedBy {
 			return fmt.Errorf("pipelinesteps: refusing cleanup of unowned Secret %s", secretName)
 		}
+		// A POST may have left its creator but not reached admission yet.
+		// Absence cannot prove that it will not arrive later. Keep the claim
+		// and leave the durable receipt's cleanup pending until reconciled.
+		if !jobExists && secret.Annotations[annotCreation] != creationQueued {
+			return fmt.Errorf("pipelinesteps: cleanup of %s awaits resolution of Job creation", jobName)
+		}
 		if err := r.kube.DeleteObservedSecret(ctx, secret); err != nil {
 			return err
 		}
 	} else if !deploycontrol.IsNotFound(err) {
 		return err
+	}
+	if jobExists {
+		if err := r.kube.DeleteObservedJob(ctx, job.Metadata); err != nil {
+			return err
+		}
 	}
 	for {
 		gone, err := r.receiptResourcesAbsent(ctx, jobName)

@@ -1,0 +1,97 @@
+{
+  "automation": "router/automations.memql routingRuleProposalWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "sentence": "s-sentence",
+            "whenKeys": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.routingRuleProposalWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "routingProposalCatalog"
+          },
+          {
+            "args": {
+              "data": {
+                "levels": [
+                  "fast",
+                  "strong",
+                  "reasoning",
+                  "embeddings"
+                ],
+                "sentence": "s-sentence",
+                "whenKeys": [
+                  "a"
+                ]
+              },
+              "prompt": "compileRule"
+            },
+            "kind": "builtin",
+            "name": "routingGenerateRuleProposal"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "sentence": "s-sentence",
+            "whenKeys": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.routingRuleProposalWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "routingProposalCatalog"
+          },
+          {
+            "args": {
+              "data": {
+                "levels": [
+                  "fast",
+                  "strong",
+                  "reasoning",
+                  "embeddings"
+                ],
+                "sentence": "s-sentence",
+                "whenKeys": [
+                  "a"
+                ]
+              },
+              "prompt": "compileRule"
+            },
+            "kind": "builtin",
+            "name": "routingGenerateRuleProposal"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

@@ -3,59 +3,16 @@ package release
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 )
 
-// cut.go -- the release-cut handler, in the order the steps must happen.
-//
-// ===========================================================================
-// THE OWNER WALL IS FIRST, AND IT IS THE LOAD-BEARING ONE
-// ===========================================================================
-// A builtin is not covered by the per-row-authz classification buckets: those
-// walk queries and mutations, and a builtin is neither. So the DSL half of the
-// double wall -- `requiresOwner` on the releaseCuts query -- gates the HISTORY
-// READ and by construction cannot gate this. The Go check below is what stands
-// between any authenticated caller and a published release of the product.
-//
-// It runs BEFORE the configuration is resolved, which is not merely tidy. A
-// non-owner who reached the config first would learn, from the refusal they
-// got back, whether this cluster has a release credential seeded -- and the
-// difference between release_repo_unconfigured and credential_unavailable
-// tells them how far along the setup is. Refusing first means a non-owner
-// learns exactly one thing: no.
-//
-// THE PREDICATE IS AccessContext.IsClusterOwner, i.e. Role == owner. Chosen so
-// the two walls agree by construction: `requiresOwner` is `role == "owner"`
-// over the same actor envelope, and a Go wall that checked something subtly
-// different (IsPrivilegedUser, say, which admits admin) would make the read
-// and the write disagree about who may do this.
-//
-// FAIL CLOSED ON A MISSING ACTOR. No AccessContext means the middleware never
-// resolved one, and the honest reading of that is "unauthenticated", not
-// "trusted internal call". There is no legitimate caller of this builtin
-// without one.
-//
-// ===========================================================================
-// THE ORDER OF OPERATIONS, AND WHY IT IS THIS ORDER
-// ===========================================================================
-//  1. owner wall            -- above.
-//  2. resolve config        -- repo, then credential; setup states, not faults.
-//  3. read tags + head sha  -- one walk, so the two answers cannot disagree.
-//  4. refuse if head is already released.
-//  5. compute the next version.
-//  6. refuse unless VERSION at head reads it -- see versionfile.go. VERSION
-//     equals the tag a cut creates, and it arrives by pull request first.
-//  7. dry run stops here    -- with the plan and nothing created.
-//  8. create the tag ref    -- ATOMIC, and therefore the concurrency gate.
-//  9. publish the Release   -- the step that fires the cascade.
-// 10. optional pin-bump PR  -- degrades to a note, never fails the cut.
-// 11. write the row + audit -- bookkeeping; a failure here is logged, not
-//     propagated, because the release has already shipped.
-//
-// Eight and nine are the only irreversible steps, and they are adjacent and
-// last-but-three on purpose: everything that can refuse has refused by then.
+// Publication is composed by releaseCutWorkflow in dsl/cluster. The adapter
+// retains the owner gate, exact-candidate validation, atomic tag creation and
+// honest recording of a tag whose Release failed to publish.
 
 // Outcome is what a cut returns to the DSL caller.
 type Outcome struct {
@@ -102,141 +59,201 @@ func requireOwner(ctx context.Context) (*auth.AccessContext, error) {
 	return ac, nil
 }
 
-// Cut performs a release cut.
+// Cut preserves the public entry point while executing the installed DSL
+// workflow. The scope contains credentials and irreversible-effect state; none
+// of it can be supplied by DSL arguments or carried in an untrusted row.
 func (i *Integration) Cut(ctx context.Context, req CutRequest) (Outcome, error) {
 	actor, err := requireOwner(ctx)
 	if err != nil {
 		return Outcome{}, err
 	}
-
-	// Validate the bump before anything touches the network. The DSL enum
-	// refuses a bad value first; this is the direct-Go-caller path and the
-	// place a typo stops rather than becoming a request.
-	bump := strings.TrimSpace(req.Bump)
-	if bump != "major" && bump != "minor" && bump != "patch" {
+	req.Bump = strings.TrimSpace(req.Bump)
+	if req.Bump != "major" && req.Bump != "minor" && req.Bump != "patch" {
 		return Outcome{}, refuse(CodeInvalidBump, "bump must be major, minor or patch, not %q", req.Bump)
 	}
-
-	cfg, err := i.resolver.loadSettings(ctx)
+	scope := &cutScope{i: i, actor: actor, req: req}
+	_, err = workflowhost.Run(ctx, "releaseCutWorkflow", map[string]any{
+		"dryRun": req.DryRun, "bumpExtensionPin": req.BumpExtensionPin,
+	}, workflowhost.Options{Logger: i.logger, Operations: scope.operations()})
 	if err != nil {
 		return Outcome{}, err
 	}
+	return scope.out, nil
+}
 
-	tags, err := i.github.ListTagRefs(ctx, cfg.token, cfg.repo)
+type cutScope struct {
+	i                                 *Integration
+	actor                             *auth.AccessContext
+	req                               CutRequest
+	cfg                               settings
+	tags                              []tagRef
+	head                              string
+	previous, next                    version
+	out                               Outcome
+	versionChecked, tagged, published bool
+}
+
+func (s *cutScope) operations() map[string]workflowhost.Operation {
+	return map[string]workflowhost.Operation{
+		"releaseReadSnapshot":    s.readSnapshot,
+		"releaseSelectCandidate": s.selectCandidate,
+		"releaseRejectCandidate": s.rejectCandidate,
+		"releaseCheckVersion":    s.checkVersion,
+		"releaseMarkDryRun": func(context.Context, map[string]any) (any, error) {
+			s.out.DryRun, s.out.Status = true, "dry_run"
+			return nil, nil
+		},
+		"releaseCreateTag":        s.createTag,
+		"releasePublishTag":       s.publishTag,
+		"releaseOpenExtensionPin": s.openExtensionPin,
+		"releaseRecordCut":        s.recordCut,
+	}
+}
+
+// Protocol reads return immutable facts; DSL selects the version from this snapshot.
+func (s *cutScope) readSnapshot(ctx context.Context, _ map[string]any) (any, error) {
+	if s.tagged {
+		return nil, refuse(CodeCandidateRequired, "a tagged candidate cannot be replaced within its publication scope")
+	}
+	s.versionChecked = false
+	s.cfg, s.tags, s.head = settings{}, nil, ""
+	s.out = Outcome{}
+	s.previous, s.next = version{}, version{}
+	cfg, err := s.i.resolver.loadSettings(ctx)
 	if err != nil {
-		return Outcome{}, err
+		return nil, err
 	}
-	headSha, err := i.github.MainHeadSha(ctx, cfg.token, cfg.repo)
+	tags, err := s.i.github.ListTagRefs(ctx, cfg.token, cfg.repo)
 	if err != nil {
-		return Outcome{}, err
+		return nil, err
 	}
-
-	if existing := tagsAtSha(tags, headSha); len(existing) > 0 {
-		return Outcome{}, refuse(CodeAlreadyReleasedAtHead,
-			"main's head (%s) already carries the release tag %s. Cutting again would publish a second version of identical code; land a change first, or move the existing tag by hand if that is really what you want.",
-			shortSha(headSha), strings.Join(existing, ", "))
-	}
-
-	previous, ok := newestRelease(tagNames(tags))
-	if !ok {
-		return Outcome{}, refuse(CodeNoReleaseTags,
-			"%s has no vX.Y.Z tag, so there is no previous version to bump. The FIRST release of a repository is a version somebody chooses; create that tag and Release by hand, and this button takes over from there.",
-			cfg.repo)
-	}
-	next, err := previous.bump(bump)
+	head, err := s.i.github.MainHeadSha(ctx, cfg.token, cfg.repo)
 	if err != nil {
-		return Outcome{}, err
+		return nil, err
 	}
-
-	// Before the dry-run return, so the plan a card shows is one the cut
-	// would accept -- see versionfile.go.
-	if err := i.checkVersionFile(ctx, cfg, headSha, previous, next, bump); err != nil {
-		return Outcome{}, err
-	}
-
-	out := Outcome{
-		Version:     next.tag(),
-		BareVersion: next.bare(),
-		Tag:         next.tag(),
-		Bump:        bump,
-		BaseSha:     headSha,
-		PreviousTag: previous.tag(),
-		Repository:  cfg.repo.String(),
-	}
-
-	if req.DryRun {
-		// Nothing created, nothing written, nothing audited. The whole
-		// value of this path is that it exercises the credential, the
-		// repository name and the arithmetic against the real API
-		// without producing a release -- which is what makes it the
-		// runbook's first step after configuring release access. It only
-		// READS repository state (App authentication may mint a token),
-		// so it proves the token can read the repository and
-		// nothing about whether it may create the tag or the Release:
-		// those refusals (credential_unavailable on a 403, ref_exists,
-		// tag_created_release_failed) exist only past this return.
-		out.DryRun = true
-		out.Status = "dry_run"
-		return out, nil
-	}
-
-	// A public cut is a decision about the reviewed plan, never whatever main
-	// happens to name when a later call reaches another replica. The caller
-	// carries all three values from the dry-run result; no process-local plan
-	// or session cache is involved.
-	if req.ExpectedRepository == "" || req.ExpectedSha == "" || req.ExpectedVersion == "" {
-		return Outcome{}, refuse(CodeCandidateRequired,
-			"publishing requires expectedRepository, expectedSha and expectedVersion from a reviewed dry run; no tag or Release was created.")
-	}
-	if req.ExpectedRepository != out.Repository || req.ExpectedSha != out.BaseSha || req.ExpectedVersion != out.Version {
-		return Outcome{}, refuse(CodeCandidateChanged,
-			"the release candidate changed: the current plan is %s %s at %s. Review a new dry run before publishing; no tag or Release was created.", out.Repository, out.Version, out.BaseSha)
-	}
-
-	if err := i.github.CreateTagRef(ctx, cfg.token, cfg.repo, next.tag(), headSha); err != nil {
-		return Outcome{}, err
-	}
-
-	release, err := i.github.CreateRelease(ctx, cfg.token, cfg.repo, next.tag(), req.Notes)
-	if err != nil {
-		// THE HALF-DONE STATE. The tag exists and no Release does, so
-		// the cascade never fired. Recorded as a row before returning,
-		// because the alternative -- a bare error -- leaves a tag on
-		// the repository that nothing in this cluster knows about, and
-		// the next cut of the same bump then fails with ref_exists
-		// naming a tag whose origin nobody can explain.
-		rec := Record{
-			Version: next.tag(), Bump: bump, BaseSha: headSha,
-			RequestedBy: actor.UserId, RequestedByEmail: actor.PrimaryEmail,
-			Status: "tag_created_release_failed", TagName: next.tag(),
-			Error: describeRefusal(err),
+	versions := []version{}
+	for _, t := range tags {
+		if v, ok := parseReleaseTag(t.Name); ok {
+			versions = append(versions, v)
 		}
-		i.recordAndAudit(ctx, rec, string(actor.Role))
-		return Outcome{}, refuseHalfDone(next.tag(),
-			"the tag %s was created and the GitHub Release was not, so no images will be built. Publish a Release for that tag by hand to start the build, or delete the tag to undo the cut. The underlying failure was: %s",
-			next.tag(), describeRefusal(err))
 	}
-
-	out.ReleaseURL = release.HTMLURL
-	out.Status = "dispatched"
-
-	if req.BumpExtensionPin {
-		// A follow-on, and explicitly not part of the cut's success.
-		// The release is published by the time this runs; a token
-		// scoped for cutting alone legitimately cannot open a PR, and
-		// failing here would report a shipped release as a failure.
-		prURL, note := i.openPinBumpPR(ctx, cfg, next)
-		out.PinBumpPrURL, out.PinBumpNote = prURL, note
+	slices.SortFunc(versions, func(a, b version) int {
+		if a.newer(b) {
+			return -1
+		}
+		if b.newer(a) {
+			return 1
+		}
+		return 0
+	})
+	names := []string{}
+	for _, v := range versions {
+		names = append(names, v.tag())
 	}
+	s.cfg, s.tags, s.head = cfg, tags, head
+	return map[string]any{"versions": names, "tagsAtHead": tagsAtSha(tags, head)}, nil
+}
 
-	rec := Record{
-		Version: next.tag(), Bump: bump, BaseSha: headSha,
-		RequestedBy: actor.UserId, RequestedByEmail: actor.PrimaryEmail,
-		Status: "dispatched", TagName: next.tag(), ReleaseURL: release.HTMLURL,
-		PinBumpPrURL: out.PinBumpPrURL, PinBumpNote: out.PinBumpNote,
+func (s *cutScope) selectCandidate(_ context.Context, a map[string]any) (any, error) {
+	if s.tagged {
+		return nil, refuse(CodeCandidateRequired, "a tagged candidate cannot be replaced within its publication scope")
 	}
-	i.recordAndAudit(ctx, rec, string(actor.Role))
-	return out, nil
+	// Validation belongs to one selected candidate. A workflow may choose
+	// again, but cannot carry the old candidate's validation into that choice.
+	s.versionChecked = false
+	s.out = Outcome{}
+	s.previous, s.next = version{}, version{}
+	tag, _ := a["previousTag"].(string)
+	previous, ok := parseReleaseTag(tag)
+	if !ok || s.head == "" || !slices.Contains(tagNames(s.tags), tag) {
+		return nil, refuse(CodeCandidateRequired, "selected version is outside the repository snapshot")
+	}
+	next, err := previous.bump(s.req.Bump)
+	if err != nil {
+		return nil, err
+	}
+	s.previous, s.next = previous, next
+	s.out = Outcome{Version: next.tag(), BareVersion: next.bare(), Tag: next.tag(), Bump: s.req.Bump, BaseSha: s.head, PreviousTag: previous.tag(), Repository: s.cfg.repo.String()}
+	return nil, nil
+}
+
+func (s *cutScope) rejectCandidate(_ context.Context, a map[string]any) (any, error) {
+	code, _ := a["code"].(string)
+	switch code {
+	case CodeAlreadyReleasedAtHead:
+		return nil, refuse(code, "main's head (%s) already carries the release tag %s. Cutting again would publish a second version of identical code; land a change first, or move the existing tag by hand if that is really what you want.", shortSha(s.head), strings.Join(tagsAtSha(s.tags, s.head), ", "))
+	case CodeNoReleaseTags:
+		return nil, refuse(code, "%s has no vX.Y.Z tag, so there is no previous version to bump. The FIRST release of a repository is a version somebody chooses; create that tag and Release by hand, and this button takes over from there.", s.cfg.repo)
+	default:
+		return nil, refuse(CodeCandidateRequired, "release workflow refused its candidate")
+	}
+}
+
+func (s *cutScope) checkVersion(ctx context.Context, _ map[string]any) (any, error) {
+	if s.out.BaseSha == "" {
+		return nil, refuse(CodeCandidateRequired, "read a release candidate before checking its version")
+	}
+	err := s.i.checkVersionFile(ctx, s.cfg, s.out.BaseSha, s.previous, s.next, s.req.Bump)
+	s.versionChecked = err == nil
+	return nil, err
+}
+
+func (s *cutScope) createTag(ctx context.Context, _ map[string]any) (any, error) {
+	if _, err := requireOwner(ctx); err != nil {
+		return nil, err
+	}
+	if !s.versionChecked || s.req.DryRun {
+		return nil, refuse(CodeCandidateRequired, "a checked publication candidate is required")
+	}
+	if s.req.ExpectedRepository == "" || s.req.ExpectedSha == "" || s.req.ExpectedVersion == "" {
+		return nil, refuse(CodeCandidateRequired, "publishing requires expectedRepository, expectedSha and expectedVersion from a reviewed dry run; no tag or Release was created.")
+	}
+	if s.req.ExpectedRepository != s.out.Repository || s.req.ExpectedSha != s.out.BaseSha || s.req.ExpectedVersion != s.out.Version {
+		return nil, refuse(CodeCandidateChanged, "the release candidate changed: the current plan is %s %s at %s. Review a new dry run before publishing; no tag or Release was created.", s.out.Repository, s.out.Version, s.out.BaseSha)
+	}
+	if s.tagged {
+		return nil, nil
+	}
+	err := s.i.github.CreateTagRef(ctx, s.cfg.token, s.cfg.repo, s.next.tag(), s.out.BaseSha)
+	s.tagged = err == nil
+	return nil, err
+}
+
+func (s *cutScope) publishTag(ctx context.Context, _ map[string]any) (any, error) {
+	if _, err := requireOwner(ctx); err != nil {
+		return nil, err
+	}
+	if !s.tagged {
+		return nil, refuse(CodeCandidateRequired, "publication requires the tag created for this checked candidate")
+	}
+	if s.published {
+		return nil, nil
+	}
+	release, err := s.i.github.CreateRelease(ctx, s.cfg.token, s.cfg.repo, s.next.tag(), s.req.Notes)
+	if err != nil {
+		rec := Record{Version: s.next.tag(), Bump: s.req.Bump, BaseSha: s.out.BaseSha, RequestedBy: s.actor.UserId, RequestedByEmail: s.actor.PrimaryEmail, Status: "tag_created_release_failed", TagName: s.next.tag(), Error: describeRefusal(err)}
+		s.i.recordAndAudit(ctx, rec, string(s.actor.Role))
+		return nil, refuseHalfDone(s.next.tag(), "the tag %s was created and the GitHub Release was not, so no images will be built. Publish a Release for that tag by hand to start the build, or delete the tag to undo the cut. The underlying failure was: %s", s.next.tag(), describeRefusal(err))
+	}
+	s.published = true
+	s.out.ReleaseURL, s.out.Status = release.HTMLURL, "dispatched"
+	return nil, nil
+}
+
+func (s *cutScope) openExtensionPin(ctx context.Context, _ map[string]any) (any, error) {
+	if !s.published {
+		return nil, refuse(CodeCandidateRequired, "the release must be published before opening its extension pin")
+	}
+	s.out.PinBumpPrURL, s.out.PinBumpNote = s.i.openPinBumpPR(ctx, s.cfg, s.next)
+	return nil, nil
+}
+
+func (s *cutScope) recordCut(ctx context.Context, _ map[string]any) (any, error) {
+	if !s.published {
+		return nil, refuse(CodeCandidateRequired, "no release was published in this invocation")
+	}
+	s.i.recordAndAudit(ctx, Record{Version: s.next.tag(), Bump: s.req.Bump, BaseSha: s.out.BaseSha, RequestedBy: s.actor.UserId, RequestedByEmail: s.actor.PrimaryEmail, Status: "dispatched", TagName: s.next.tag(), ReleaseURL: s.out.ReleaseURL, PinBumpPrURL: s.out.PinBumpPrURL, PinBumpNote: s.out.PinBumpNote}, string(s.actor.Role))
+	return nil, nil
 }
 
 // recordAndAudit writes the row and the audit event, logging rather than

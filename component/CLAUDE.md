@@ -190,6 +190,17 @@ core), pending engine-generic absorption or bundle delivery.
 
 ---
 
+## Workflow boundary
+
+Read [Engine, integration and workflow boundaries](../docs/public/build/integration-boundary.md)
+when adding an engine capability. Components interpret and enforce; `.memql`
+chooses recipes, order, thresholds, content and task policy. Internal runtime
+algorithms, authorization, cost ceilings, approval validation, shared locks,
+receipts and cancellation remain mandatory native machinery. Do not move an
+integration workflow into `component/` or `app/` to disguise the same coupling.
+Use the existing scoped automation interpreter for authorized native operations
+that need declarative composition, and preserve the parent's identity and run.
+
 ## Component Architecture
 
 ```

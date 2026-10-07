@@ -28,7 +28,7 @@ import (
 // Opening is what one cause asks a pipeline to open.
 type Opening struct {
 	Event pipelines.Event
-	// Mode is the event's mode when empty (pipelines.ModeFor); a re-run
+	// Mode is the event's mode when empty (modeForEvent); a re-run
 	// carries its original's.
 	Mode        pipelines.Mode
 	SHA         string
@@ -100,15 +100,22 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 	}
 	mode := o.Mode
 	if mode == "" {
-		m, ok := pipelines.ModeFor(o.Event)
-		if !ok {
+		m, err := modeForEvent(ctx, o.Event)
+		if err != nil {
+			return OpenResult{}, err
+		}
+		if m == "" {
 			return OpenResult{}, fmt.Errorf("pipelines: event %q opens no run", o.Event)
 		}
 		mode = m
 	}
 	version := o.Version
 	if version == "" {
-		version = pipelines.Version(o.Event, sha, o.ReleaseTag)
+		var err error
+		version, err = versionForEvent(ctx, o.Event, sha, o.ReleaseTag)
+		if err != nil {
+			return OpenResult{}, err
+		}
 	}
 	key := pipelines.RunKey(p.Repository, sha, mode, o.Event)
 

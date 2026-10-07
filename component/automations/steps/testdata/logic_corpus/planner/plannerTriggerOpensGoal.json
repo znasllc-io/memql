@@ -1,0 +1,197 @@
+{
+  "construct": "planner/logic.memql plannerTriggerOpensGoal",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "trigger": "s-trigger"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "trigger": "s-trigger"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "trigger": "s-trigger"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "trigger": "s-trigger"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "trigger": "s-trigger"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "trigger": "s-trigger"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "trigger": "s-trigger"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "trigger": "s-trigger"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    }
+  }
+}

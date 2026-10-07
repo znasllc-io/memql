@@ -1,0 +1,93 @@
+{
+  "automation": "cluster/automations.memql releaseCutWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "bumpExtensionPin": true,
+            "dryRun": true
+          },
+          "topic": "automation.invocation.releaseCutWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "releaseReadSnapshot"
+          },
+          {
+            "args": {
+              "code": "no_release_tags"
+            },
+            "kind": "builtin",
+            "name": "releaseRejectCandidate"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseSelectCandidate"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCheckVersion"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseMarkDryRun"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "bumpExtensionPin": true,
+            "dryRun": true
+          },
+          "topic": "automation.invocation.releaseCutWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "releaseReadSnapshot"
+          },
+          {
+            "args": {
+              "code": "no_release_tags"
+            },
+            "kind": "builtin",
+            "name": "releaseRejectCandidate"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseSelectCandidate"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseCheckVersion"
+          },
+          {
+            "kind": "builtin",
+            "name": "releaseMarkDryRun"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

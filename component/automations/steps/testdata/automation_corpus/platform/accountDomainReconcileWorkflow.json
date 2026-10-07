@@ -1,0 +1,63 @@
+{
+  "automation": "platform/automations.memql accountDomainReconcileWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "ids": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.accountDomainReconcileWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "accountId": "a"
+            },
+            "kind": "builtin",
+            "name": "customDomainReconcileAccount"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "ids": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.accountDomainReconcileWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "accountId": "a"
+            },
+            "kind": "builtin",
+            "name": "customDomainReconcileAccount"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

@@ -41,7 +41,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/znasllc-io/memql/component/memql"
 	"io"
 	"net/http"
 	"net/url"
@@ -240,81 +239,3 @@ func cleanWikipediaText(text string) string {
 //
 // On a per-article fetch failure we log + continue with the next
 // article. Returns the total chunks written across all articles.
-func (i *Integration) writeTierCWikipediaChunks(
-	ctx context.Context,
-	d StandardDomain,
-	articles []string,
-	recipeVersion string,
-) (int, error) {
-	if len(articles) == 0 {
-		return 0, fmt.Errorf("writeTierCWikipediaChunks: no articles configured for %q", d.ID)
-	}
-	// The cluster's embedder BINDING, not a package const (epic memql#5137,
-	// D6). A seeder writes vectors the recall path will later compare against,
-	// so seeding with a different embedder than the one bound produces a corpus
-	// that returns confident wrong neighbours -- never an error.
-	boundEmbedder, err := memql.ResolveEmbedderProvider(ctx)
-	if err != nil {
-		return 0, err
-	}
-	provider, err := i.embeddingProvider(ctx, boundEmbedder)
-	if err != nil {
-		return 0, fmt.Errorf("resolve embedding provider %q: %w", boundEmbedder, err)
-	}
-
-	written := 0
-	chunkIndex := 0
-
-	for _, articleName := range articles {
-		title, body, canonicalURL, err := fetchWikipediaArticle(ctx, articleName)
-		if err != nil {
-			i.Logger.Warn("knowledge.tierC.wikipedia: fetch failed",
-				"domainId", d.ID, "article", articleName, "err", err)
-			continue
-		}
-		if strings.TrimSpace(body) == "" {
-			i.Logger.Warn("knowledge.tierC.wikipedia: empty body",
-				"domainId", d.ID, "article", articleName)
-			continue
-		}
-
-		// Chunk via the existing knowledge integration's chunker
-		// (paragraph + sentence-boundary aware).
-		chunks := Chunk(body, defaultChunkSize, defaultOverlap)
-		if len(chunks) == 0 {
-			continue
-		}
-		i.Logger.Info("knowledge.tierC.wikipedia: ingesting article",
-			"domainId", d.ID, "article", articleName, "chunkCount", len(chunks))
-
-		// Wikipedia content carries an attribution requirement (CC-BY-SA).
-		// We encode the title + canonical URL in the seedSource and as
-		// a metadata header in the chunk body so retrieval-time UIs can
-		// surface attribution.
-		seedSource := "wikipedia:" + title
-
-		for _, chunkText := range chunks {
-			if strings.TrimSpace(chunkText) == "" {
-				chunkIndex++
-				continue
-			}
-
-			chunk := seedChunk{
-				Kind:     "factExample",
-				Title:    fmt.Sprintf("%s: %s (Wikipedia)", d.Name, title),
-				Body:     fmt.Sprintf("Source: Wikipedia article \"%s\" (%s; CC-BY-SA).\n\n%s", title, canonicalURL, chunkText),
-				KeyTerms: []string{"wikipedia", title, d.Name},
-			}
-			if err := i.storeSeedChunk(ctx, d, recipeVersion, chunkIndex, chunk, seedSource, "llmSeeded", boundEmbedder, provider); err != nil {
-				i.Logger.Warn("knowledge.tierC.wikipedia: chunk write failed",
-					"domainId", d.ID, "article", articleName, "chunkIndex", chunkIndex, "err", err)
-				chunkIndex++
-				continue
-			}
-			written++
-			chunkIndex++
-		}
-	}
-
-	return written, nil
-}

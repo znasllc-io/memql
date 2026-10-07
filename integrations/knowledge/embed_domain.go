@@ -35,6 +35,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -168,82 +169,79 @@ func (i *Integration) embedDomainItemsHandler(ctx context.Context, args map[stri
 	}
 
 	dimensions := memql.EmbeddingDimensions(ctx, providerName, provider.Dimensions())
-	embedded := 0
-	already := 0
-	failed := 0
-	// touchedDocuments collects every parent Document id we saw so its
-	// embeddingStatus rollup gets recomputed once at the end.
-	touchedDocuments := make(map[string]struct{})
 
+	items := make([]any, 0, len(chunks))
+	byID := make(map[string]chunkRow, len(chunks))
+	documents := map[string]bool{}
 	for _, c := range chunks {
+		items = append(items, map[string]any{"id": c.id, "documentId": c.documentId})
+		byID[c.id] = c
 		if c.documentId != "" {
-			touchedDocuments[c.documentId] = struct{}{}
+			documents[c.documentId] = true
 		}
-		has, herr := i.hasVector(ctx, c.id, providerName, dimensions)
-		if herr != nil {
-			i.Logger.Warn("knowledge.embedDomainItems: hasVector check failed",
-				"chunkId", c.id, "err", herr)
-			failed++
-			continue
-		}
-		if has {
-			already++
-			continue
-		}
-		vec, eerr := provider.Embed(ctx, c.text)
-		if eerr != nil {
-			i.Logger.Warn("knowledge.embedDomainItems: embed chunk failed",
-				"chunkId", c.id, "err", eerr)
-			failed++
-			continue
-		}
-		if serr := i.storeVector(ctx, providerName, c.id, "v1:knowledge:documentChunk", vec); serr != nil {
-			i.Logger.Warn("knowledge.embedDomainItems: store vector failed",
-				"chunkId", c.id, "err", serr)
-			failed++
-			continue
-		}
-		embedded++
-		dimensions = len(vec)
 	}
-
-	// Drive the Document embeddingStatus rollup. When the caller scoped
-	// the run to a single documentId, only that Document is rolled up;
-	// otherwise every parent Document whose chunks we touched is.
-	docsUpdated := 0
 	if documentId != "" {
-		touchedDocuments[documentId] = struct{}{}
+		documents[documentId] = true
 	}
-	for docId := range touchedDocuments {
-		if err := i.rollupDocumentEmbeddingStatus(ctx, docId, providerName, dimensions); err != nil {
-			i.Logger.Warn("knowledge.embedDomainItems: document rollup failed",
-				"documentId", docId, "err", err)
-			continue
-		}
-		docsUpdated++
+	docs := make([]any, 0, len(documents))
+	for doc := range documents {
+		docs = append(docs, doc)
+	}
+	results := []any{}
+	rolledUp := []any{}
+	result, err := workflowhost.Run(ctx, "knowledgeEmbedDomainWorkflow", map[string]any{
+		"domainId": domainId, "documentId": documentId, "chunks": items, "documents": docs,
+	}, workflowhost.Options{Logger: i.Logger, Operations: map[string]workflowhost.Operation{
+		"knowledgeEmbedSelectedChunk": func(ctx context.Context, a map[string]any) (any, error) {
+			c, ok := byID[stringArg(a, "chunkId")]
+			if !ok {
+				return nil, fmt.Errorf("chunk is outside this domain's selected input")
+			}
+			has, err := i.hasVector(ctx, c.id, providerName, dimensions)
+			status := "already"
+			if err == nil && !has {
+				var vec []float32
+				vec, err = provider.Embed(ctx, c.text)
+				if err == nil {
+					err = i.storeVector(ctx, providerName, c.id, "v1:knowledge:documentChunk", vec)
+					if err == nil {
+						dimensions = len(vec)
+					}
+				}
+				status = "embedded"
+			}
+			if err != nil {
+				status = "failed"
+				i.Logger.Warn("knowledge.embedDomainItems: chunk failed", "chunkId", c.id, "err", err)
+			}
+			results = append(results, map[string]any{"status": status})
+			return nil, nil
+		},
+		"knowledgeRollupSelectedDocument": func(ctx context.Context, a map[string]any) (any, error) {
+			doc := stringArg(a, "documentId")
+			if !documents[doc] {
+				return nil, fmt.Errorf("document is outside this domain's selected input")
+			}
+			err := i.rollupDocumentEmbeddingStatus(ctx, doc, providerName, dimensions)
+			if err != nil {
+				i.Logger.Warn("knowledge.embedDomainItems: document rollup failed", "documentId", doc, "err", err)
+			}
+			rolledUp = append(rolledUp, map[string]any{"ok": err == nil})
+			return nil, nil
+		},
+		"knowledgeEmbeddingReceipts": func(context.Context, map[string]any) (any, error) {
+			return map[string]any{"chunks": results, "documents": rolledUp}, nil
+		},
+	}})
+	if err != nil {
+		return nil, err
+	}
+	i.Logger.Info("knowledge.embedDomainItems: completed", "elapsed_ms", time.Since(handlerStart).Milliseconds(), "domainId", domainId, "provider", providerName)
+	body, err := json.Marshal(result)
+	if err != nil {
+		return nil, err
 	}
 
-	i.Logger.Info("knowledge.embedDomainItems: completed",
-		"elapsed_ms", time.Since(handlerStart).Milliseconds(),
-		"domainId", domainId,
-		"documentId", documentId,
-		"chunks", len(chunks),
-		"embedded", embedded,
-		"already", already,
-		"failed", failed,
-		"documentsRolledUp", docsUpdated,
-		"provider", providerName,
-	)
-
-	body, _ := json.Marshal(map[string]any{
-		"domainId":          domainId,
-		"documentId":        documentId,
-		"total":             len(chunks),
-		"embedded":          embedded,
-		"already":           already,
-		"failed":            failed,
-		"documentsRolledUp": docsUpdated,
-	})
 	return []memorynodes.MemoryNode{{
 		ID:        "knowledge-embed-domain-result",
 		Concept:   "integration:knowledge:embedDomainItems",

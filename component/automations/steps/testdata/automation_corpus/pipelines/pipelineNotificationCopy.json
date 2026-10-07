@@ -1,0 +1,93 @@
+{
+  "automation": "pipelines/automations.memql pipelineNotificationCopy",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "branch": "s-branch",
+            "commitTitle": "s-commitTitle",
+            "duration": "s-duration",
+            "durationMs": 3,
+            "eventName": "s-eventName",
+            "failedCode": "s-failedCode",
+            "failedMessage": "s-failedMessage",
+            "failedStage": "s-failedStage",
+            "failedStep": "s-failedStep",
+            "outcome": "s-outcome",
+            "pipeline": "s-pipeline",
+            "prLabel": "s-prLabel",
+            "prNumber": 3,
+            "sha": "s-sha",
+            "stageCount": "s-stageCount",
+            "stages": 3,
+            "version": "s-version"
+          },
+          "topic": "automation.invocation.pipelineNotificationCopy"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "color": 3066993,
+            "headline": "Run s-sha",
+            "lines": [
+              "s-commitTitle (s-sha)"
+            ],
+            "subject": "Run s-sha",
+            "title": "s-pipeline · Run s-sha",
+            "username": "MemQL Pipelines"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "branch": "s-branch",
+            "commitTitle": "s-commitTitle",
+            "duration": "s-duration",
+            "durationMs": 3,
+            "eventName": "s-eventName",
+            "failedCode": "s-failedCode",
+            "failedMessage": "s-failedMessage",
+            "failedStage": "s-failedStage",
+            "failedStep": "s-failedStep",
+            "outcome": "s-outcome",
+            "pipeline": "s-pipeline",
+            "prLabel": "s-prLabel",
+            "prNumber": 3,
+            "sha": "s-sha",
+            "stageCount": "s-stageCount",
+            "stages": 3,
+            "version": "s-version"
+          },
+          "topic": "automation.invocation.pipelineNotificationCopy"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "color": 3066993,
+            "headline": "Run s-sha",
+            "lines": [
+              "s-commitTitle (s-sha)"
+            ],
+            "subject": "Run s-sha",
+            "title": "s-pipeline · Run s-sha",
+            "username": "MemQL Pipelines"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

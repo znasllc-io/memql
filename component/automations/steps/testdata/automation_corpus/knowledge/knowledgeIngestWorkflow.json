@@ -1,0 +1,57 @@
+{
+  "automation": "knowledge/automations.memql knowledgeIngestWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "chunks": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.knowledgeIngestWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "knowledgeWriteIndexedChunk"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "chunks": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.knowledgeIngestWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "knowledgeWriteIndexedChunk"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

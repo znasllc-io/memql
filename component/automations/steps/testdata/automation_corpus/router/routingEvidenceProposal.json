@@ -1,0 +1,99 @@
+{
+  "automation": "router/automations.memql routingEvidenceProposal",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "calls": 3,
+            "callsText": "s-callsText",
+            "direction": "s-direction",
+            "failureRate": 3,
+            "failures": 3,
+            "failuresText": "s-failuresText",
+            "level": "s-level",
+            "measured": true,
+            "model": "s-model",
+            "percent": "s-percent",
+            "valid": true,
+            "validity": 3,
+            "validityPercent": "s-validityPercent",
+            "week": "s-week"
+          },
+          "topic": "automation.invocation.routingEvidenceProposal"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "form": {
+                "description": "Generated from a probe: s-model measured well enough at level s-level to be routed again.",
+                "excludes": [],
+                "onUnavailable": "degrade",
+                "policy": "localFirst",
+                "precedence": 50
+              },
+              "reason": "s-model is excluded at level s-level, and a probe since then measured s-validityPercent% structured validity -- at or above the 90% bar. Approving retires the exclusion; declining records the decision so this week's evidence does not ask again."
+            },
+            "kind": "builtin",
+            "name": "routingRenderEvidenceProposal"
+          }
+        ],
+        "result": {
+          "output": true,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "calls": 3,
+            "callsText": "s-callsText",
+            "direction": "s-direction",
+            "failureRate": 3,
+            "failures": 3,
+            "failuresText": "s-failuresText",
+            "level": "s-level",
+            "measured": true,
+            "model": "s-model",
+            "percent": "s-percent",
+            "valid": true,
+            "validity": 3,
+            "validityPercent": "s-validityPercent",
+            "week": "s-week"
+          },
+          "topic": "automation.invocation.routingEvidenceProposal"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "form": {
+                "description": "Generated from a probe: s-model measured well enough at level s-level to be routed again.",
+                "excludes": [],
+                "onUnavailable": "degrade",
+                "policy": "localFirst",
+                "precedence": 50
+              },
+              "reason": "s-model is excluded at level s-level, and a probe since then measured s-validityPercent% structured validity -- at or above the 90% bar. Approving retires the exclusion; declining records the decision so this week's evidence does not ask again."
+            },
+            "kind": "builtin",
+            "name": "routingRenderEvidenceProposal"
+          }
+        ],
+        "result": {
+          "output": true,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

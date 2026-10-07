@@ -1,0 +1,127 @@
+{
+  "automation": "campaigns/automations.memql campaignWarmupDecision",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "accepted": 3,
+            "acceptedLabel": "s-acceptedLabel",
+            "domains": [
+              "a"
+            ],
+            "finalStep": 3,
+            "heldHours": 3,
+            "heldHoursLabel": "s-heldHoursLabel",
+            "heldMinutesLabel": "s-heldMinutesLabel",
+            "maxBounceLabel": "s-maxBounceLabel",
+            "maxBounceRate": 3,
+            "maxComplaintLabel": "s-maxComplaintLabel",
+            "maxComplaintRate": 3,
+            "minDomainVolume": 3,
+            "minDurationLabel": "s-minDurationLabel",
+            "minHours": 3,
+            "minVolume": 3,
+            "minVolumeLabel": "s-minVolumeLabel",
+            "rateLabel": "s-rateLabel",
+            "started": true,
+            "step": 3,
+            "stepCount": "s-stepCount",
+            "stepLabel": "s-stepLabel"
+          },
+          "topic": "automation.invocation.campaignWarmupDecision"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "domains": [
+                "a"
+              ],
+              "maxBounceLabel": "s-maxBounceLabel",
+              "maxBounceRate": 3,
+              "maxComplaintLabel": "s-maxComplaintLabel",
+              "maxComplaintRate": 3,
+              "minDomainVolume": 3
+            },
+            "kind": "automation",
+            "name": "campaignWarmupWorstDomain"
+          }
+        ],
+        "result": {
+          "output": {
+            "decision": "held",
+            "reason": "at the final step (s-rateLabel/min); the ramp is finished and only ever reduces from here",
+            "reset": false,
+            "step": 3
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "accepted": 3,
+            "acceptedLabel": "s-acceptedLabel",
+            "domains": [
+              "a"
+            ],
+            "finalStep": 3,
+            "heldHours": 3,
+            "heldHoursLabel": "s-heldHoursLabel",
+            "heldMinutesLabel": "s-heldMinutesLabel",
+            "maxBounceLabel": "s-maxBounceLabel",
+            "maxBounceRate": 3,
+            "maxComplaintLabel": "s-maxComplaintLabel",
+            "maxComplaintRate": 3,
+            "minDomainVolume": 3,
+            "minDurationLabel": "s-minDurationLabel",
+            "minHours": 3,
+            "minVolume": 3,
+            "minVolumeLabel": "s-minVolumeLabel",
+            "rateLabel": "s-rateLabel",
+            "started": true,
+            "step": 3,
+            "stepCount": "s-stepCount",
+            "stepLabel": "s-stepLabel"
+          },
+          "topic": "automation.invocation.campaignWarmupDecision"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "domains": [
+                "a"
+              ],
+              "maxBounceLabel": "s-maxBounceLabel",
+              "maxBounceRate": 3,
+              "maxComplaintLabel": "s-maxComplaintLabel",
+              "maxComplaintRate": 3,
+              "minDomainVolume": 3
+            },
+            "kind": "automation",
+            "name": "campaignWarmupWorstDomain"
+          }
+        ],
+        "result": {
+          "output": {
+            "decision": "held",
+            "reason": "at the final step (s-rateLabel/min); the ramp is finished and only ever reduces from here",
+            "reset": false,
+            "step": 3
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

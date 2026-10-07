@@ -66,6 +66,28 @@ func TestAnnotationArgFormChangeIsMeaning(t *testing.T) {
 	}
 }
 
+func TestAnnotationKeywordWideningKeepsExistingContracts(t *testing.T) {
+	old := Surface{Annotations: map[string]Item{"trigger": {Name: "trigger", Form: "keyword arguments(event:string, schedule:string)", On: []string{"automation"}}}}
+	for _, tc := range []struct {
+		name, form string
+		breaks     bool
+	}{
+		{"additional keys", "keyword arguments(event:string, lease:string, node:string, schedule:string)", false},
+		{"removed key", "keyword arguments(event:string, node:string)", true},
+		{"changed type", "keyword arguments(event:string, node:string, schedule:int)", true},
+		{"changed positional form", "one string or keyword arguments(event:string, node:string, schedule:string)", true},
+		{"changed repeatability", "keyword arguments(event:string, node:string, schedule:string) repeatable", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := Surface{Annotations: map[string]Item{"trigger": {Name: "trigger", Form: tc.form, On: []string{"automation"}}}}
+			fs := Diff(old, now, Reservations{})
+			if (len(fs) > 0) != tc.breaks {
+				t.Fatalf("breaks=%v, findings=%+v", tc.breaks, fs)
+			}
+		})
+	}
+}
+
 // An ADDITION is never a finding. memqlbreaking reports BREAKS; a command that
 // reports every change is a command whose output nobody reads, and the one
 // signal that matters drowns.

@@ -1,0 +1,47 @@
+{
+  "automation": "compose/automations.memql composeRecipeOutputName",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "date": "s-date",
+            "recipeName": "s-recipeName",
+            "requestedName": "s-requestedName"
+          },
+          "topic": "automation.invocation.composeRecipeOutputName"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": "s-requestedName",
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "date": "s-date",
+            "recipeName": "s-recipeName",
+            "requestedName": "s-requestedName"
+          },
+          "topic": "automation.invocation.composeRecipeOutputName"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": "s-requestedName",
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

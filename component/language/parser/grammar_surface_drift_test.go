@@ -81,6 +81,12 @@ var grammarSurfaceCorpus = []struct {
 	accept bool
 	src    string
 }{
+	{"scheduled node placement", true, `@trigger(schedule="0 * * * * *", node="planner", lease="planner-maintenance")
+automation placed { return true }`},
+	{"node placement without schedule", false, `@trigger(event="system.startup",node="planner")
+automation misplaced { return true }`},
+	{"lease without node", false, `@trigger(schedule="0 * * * * *",lease="orphan")
+automation orphan { return true }`},
 	// ---- currently legal forms -------------------------------------------
 	{"before write create", true, `@trigger(before="create", concept="v1:probe:ticket")
 automation adjust { row.status = "queued" }`},

@@ -3699,3 +3699,11 @@ before-write automation for adjusting fields on the triggering row: it changes
 the incoming version without issuing another write. See
 [loop protection](memql.md#loop-protection) and
 [before-write adjustments](memql.md#before-write-adjustments).
+
+## Put workflow decisions in DSL
+
+Ordering, prompt recipes, optional failure handling, policy thresholds and
+notification content belong in `.memql`. Native operations retain authority,
+approval checks, resource ceilings and durable receipts. A one-line action that
+calls a whole Go workflow does not create this separation. See
+[Engine, integration and workflow boundaries](../build/integration-boundary.md).

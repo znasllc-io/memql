@@ -274,3 +274,37 @@ builtin campaignTestAudienceSend {
   requestId string!
   audienceId string! @description("The testing audience reviewed by the caller. Must still match the organization's saved setting; never replaces the saved setting.")
 }
+
+/// Bounded campaign operation within an authorized delivery scope.
+@executor("integration.campaigns.campaignPromoteSeries")
+builtin campaignPromoteSeries {  }
+
+/// Bounded campaign operation within an authorized delivery scope.
+@executor("integration.campaigns.campaignDrainWelcomes")
+builtin campaignDrainWelcomes {  }
+
+/// Bounded campaign operation within an authorized delivery scope.
+@executor("integration.campaigns.campaignPromoteSchedules")
+builtin campaignPromoteSchedules {  }
+
+/// Bounded campaign operation within an authorized delivery scope.
+@executor("integration.campaigns.campaignApplyWarmup")
+builtin campaignApplyWarmup {  }
+
+/// Bounded campaign operation within an authorized delivery scope.
+@executor("integration.campaigns.campaignDrainableJobs")
+builtin campaignDrainableJobs {  }
+
+/// Bounded campaign operation within an authorized delivery scope.
+@executor("integration.campaigns.campaignDrainJob")
+@args(profile="object")
+builtin campaignDrainJob { id string! }
+
+/// Bounded campaign operation within an authorized delivery scope.
+@executor("integration.campaigns.campaignFlushReputation")
+builtin campaignFlushReputation {  }
+
+/// Bounded campaign operation within an authorized delivery scope.
+@executor("integration.campaigns.campaignProcessSelected")
+@args(profile="object")
+builtin campaignProcessSelected { id string! }

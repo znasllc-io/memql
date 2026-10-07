@@ -1,0 +1,63 @@
+{
+  "automation": "campaigns/automations.memql campaignWarmupWorstDomain",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "domains": [
+              "a"
+            ],
+            "maxBounceLabel": "s-maxBounceLabel",
+            "maxBounceRate": 3,
+            "maxComplaintLabel": "s-maxComplaintLabel",
+            "maxComplaintRate": 3,
+            "minDomainVolume": 3
+          },
+          "topic": "automation.invocation.campaignWarmupWorstDomain"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "domain": "",
+            "reason": ""
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "domains": [
+              "a"
+            ],
+            "maxBounceLabel": "s-maxBounceLabel",
+            "maxBounceRate": 3,
+            "maxComplaintLabel": "s-maxComplaintLabel",
+            "maxComplaintRate": 3,
+            "minDomainVolume": 3
+          },
+          "topic": "automation.invocation.campaignWarmupWorstDomain"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "domain": "",
+            "reason": ""
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

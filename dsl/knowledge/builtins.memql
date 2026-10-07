@@ -1,0 +1,175 @@
+
+/// Bounded operation within an authorized knowledge workflow.
+@executor("integration.knowledge.knowledgeWriteIndexedChunk")
+@args(profile="object")
+builtin knowledgeWriteIndexedChunk {
+ seq int!
+ text string!
+}
+
+/// Bounded operation within an authorized knowledge workflow.
+@executor("integration.knowledge.knowledgeEmbedSelectedChunk")
+@args(profile="object")
+builtin knowledgeEmbedSelectedChunk {
+ chunkId string!
+}
+
+/// Bounded operation within an authorized knowledge workflow.
+@executor("integration.knowledge.knowledgeRollupSelectedDocument")
+@args(profile="object")
+builtin knowledgeRollupSelectedDocument {
+ documentId string!
+}
+
+/// Bounded operation within an authorized knowledge workflow.
+@executor("integration.knowledge.knowledgeEmbeddingReceipts")
+builtin knowledgeEmbeddingReceipts {
+
+}
+
+/// Bounded operation within an authorized knowledge workflow.
+@executor("integration.knowledge.knowledgeTrainingCorpus")
+builtin knowledgeTrainingCorpus {
+
+}
+
+/// Bounded operation within an authorized knowledge workflow.
+@executor("integration.knowledge.knowledgeTrainingSpecialist")
+builtin knowledgeTrainingSpecialist {
+
+}
+
+/// Bounded operation within an authorized knowledge workflow.
+@executor("integration.knowledge.knowledgeTrainingTurn")
+@args(profile="object")
+builtin knowledgeTrainingTurn {
+ prompt string!
+ data object!
+ tools []string!
+}
+
+/// Bounded operation within an authorized knowledge workflow.
+@executor("integration.knowledge.knowledgeTrainingReset")
+builtin knowledgeTrainingReset {
+
+}
+
+/// Bounded operation within an authorized knowledge workflow.
+@executor("integration.knowledge.knowledgeGenerateSeedChunks")
+@args(profile="object")
+builtin knowledgeGenerateSeedChunks {
+ prompt string!
+ schema string!
+ data object!
+}
+
+/// Bounded operation within an authorized knowledge workflow.
+@executor("integration.knowledge.knowledgeStoreSeedChunk")
+@args(profile="object")
+builtin knowledgeStoreSeedChunk {
+ kind string!
+ title string!
+ body string!
+ keyTerms []string
+ seedSource string!
+ source string!
+ index int
+}
+
+/// Bounded operation within an authorized knowledge workflow.
+@executor("integration.knowledge.knowledgeStampSeed")
+builtin knowledgeStampSeed {
+
+}
+
+/// Bounded operation within an authorized knowledge workflow.
+@executor("integration.knowledge.knowledgeFetchSeedArticle")
+@args(profile="object")
+builtin knowledgeFetchSeedArticle {
+ article string!
+}
+
+/// Bounded operation within an authorized knowledge workflow.
+@executor("integration.knowledge.knowledgeSplitSeedText")
+@args(profile="object")
+builtin knowledgeSplitSeedText {
+ text string!
+}
+
+/// Resolve the embedder before any best-effort seed writes.
+@executor("integration.knowledge.knowledgeResolveSeedEmbedder")
+builtin knowledgeResolveSeedEmbedder { }
+
+/// Bounded operation inside the authorized knowledge bridge scope.
+@executor("integration.knowledge.knowledgeBridgeExists")
+builtin knowledgeBridgeExists { }
+
+/// Bounded operation inside the authorized knowledge bridge scope.
+@executor("integration.knowledge.knowledgeBridgeInputs")
+builtin knowledgeBridgeInputs { }
+
+/// Bounded operation inside the authorized knowledge bridge scope.
+@executor("integration.knowledge.knowledgeStampBridge")
+builtin knowledgeStampBridge { }
+
+/// Bounded operation in the knowledge catalog scope.
+@executor("integration.knowledge.knowledgeCatalogDomainExists")
+@args(profile="object")
+builtin knowledgeCatalogDomainExists { domainId string! }
+
+/// Bounded operation in the knowledge catalog scope.
+@executor("integration.knowledge.knowledgeCreateCatalogDomain")
+@args(profile="object")
+builtin knowledgeCreateCatalogDomain { domainId string! tier string! category string! source string! }
+
+/// Bounded operation in the knowledge catalog scope.
+@executor("integration.knowledge.knowledgeSeedCorpusExists")
+@args(profile="object")
+builtin knowledgeSeedCorpusExists { key string! }
+
+/// Bounded operation in the knowledge catalog scope.
+@executor("integration.knowledge.knowledgePurgeSeedCorpus")
+@args(profile="object")
+builtin knowledgePurgeSeedCorpus { key string! }
+
+/// Bounded operation in the knowledge catalog scope.
+@executor("integration.knowledge.knowledgeIngestSeedCorpus")
+@args(profile="object")
+builtin knowledgeIngestSeedCorpus { key string! source string! }
+
+/// Bounded operation in the knowledge catalog scope.
+@executor("integration.knowledge.knowledgePurgeRetiredCorpus")
+@args(profile="object")
+builtin knowledgePurgeRetiredCorpus { domainId string! sourceRef string! }
+
+/// Bounded operation in the knowledge catalog scope.
+@executor("integration.knowledge.knowledgeSeedSelectedDomain")
+@args(profile="object")
+builtin knowledgeSeedSelectedDomain { domainId string! }
+
+/// Bounded planner operation for the scheduled knowledge workflow.
+@executor("integration.planner.plannerRefreshKnowledge")
+builtin plannerRefreshKnowledge {  }
+
+/// Bounded planner operation for the scheduled knowledge workflow.
+@executor("integration.planner.knowledgeRefreshCandidates")
+builtin knowledgeRefreshCandidates {  }
+
+/// Bounded planner operation for the scheduled knowledge workflow.
+@executor("integration.planner.knowledgeRefreshCandidate")
+@args(profile="object")
+builtin knowledgeRefreshCandidate { domain object! }
+
+/// Bounded planner operation for the scheduled knowledge workflow.
+@executor("integration.planner.knowledgeClaimRefresh")
+@args(profile="object")
+builtin knowledgeClaimRefresh { hours number! }
+
+/// Bounded planner operation for the scheduled knowledge workflow.
+@executor("integration.planner.knowledgeOpenRefresh")
+builtin knowledgeOpenRefresh {  }
+
+/// Bounded planner operation for the scheduled knowledge workflow.
+@executor("integration.planner.knowledgeDispatchRefresh")
+@args(profile="object")
+builtin knowledgeDispatchRefresh { owner string! statement string! automation string! input object! requestedVia string! triggeredBy string! }

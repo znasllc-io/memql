@@ -1,0 +1,51 @@
+{
+  "automation": "knowledge/automations.memql knowledgeSeedAllWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "domainIdPrefix": "s-domainIdPrefix",
+            "domains": [
+              "a"
+            ],
+            "tierFilter": "s-tierFilter"
+          },
+          "topic": "automation.invocation.knowledgeSeedAllWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "domainIdPrefix": "s-domainIdPrefix",
+            "domains": [
+              "a"
+            ],
+            "tierFilter": "s-tierFilter"
+          },
+          "topic": "automation.invocation.knowledgeSeedAllWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

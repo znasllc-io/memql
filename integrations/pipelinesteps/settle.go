@@ -526,13 +526,16 @@ func (s *step) abandon(pod *Pod) pl.StepResult {
 			return out
 		}
 	}
-	if err := s.r.kube.DeleteJob(ctx, s.jobName); err != nil {
-		s.log.Warn("pipelines: the cancelled step's Job could not be deleted; its TTL will", "error", err)
+	if !s.creationDispatched && s.creationSent != "" {
+		if err := s.releaseUnusedCreation(); err != nil {
+			s.log.Warn("pipelines: unused creation claim awaits reconciliation", "error", err)
+		}
 	}
-	if err := s.r.kube.DeleteSecret(ctx, SecretName(s.jobName)); err != nil {
-		s.log.Warn("pipelines: the cancelled step's Secret could not be deleted", "error", err)
+	if err := s.r.cleanupReceipt(ctx, s.jobName); err != nil {
+		s.log.Warn("pipelines: the step was cancelled; resource cleanup remains unconfirmed", "error", err)
+		return s.cancelled(pod, "the step was cancelled; its durable receipt must reconcile pending cleanup")
 	}
-	s.log.Info("pipelines: the step was cancelled; its Job and Secret are deleted")
+	s.log.Info("pipelines: the step was cancelled; its execution resources are absent and the stop marker is retained")
 	return s.cancelled(pod, "the step was cancelled")
 }
 

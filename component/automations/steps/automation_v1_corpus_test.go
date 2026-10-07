@@ -110,8 +110,14 @@ func (r *automationProbe) Execute(ctx context.Context, step *automations.Step, s
 		}
 		name := strings.TrimSpace(step.Automation.Name)
 		r.probe.calls = append(r.probe.calls, probeCall{Kind: "automation", Name: name, Args: canonicalArgs(args)})
+		var output any = map[string]any{"automation": name}
+		if name == "knowledgeRefreshDue" {
+			// This child returns a boolean decision. Preserve its value contract
+			// when a caller passes it to a typed logic rather than an if directly.
+			output = true
+		}
 		return &automations.StepResult{StepId: step.ID, Status: "success", Result: &automations.AutomationExecution{
-			AutomationName: name, Status: "completed", Output: map[string]any{"automation": name},
+			AutomationName: name, Status: "completed", Output: output,
 		}}, nil
 	case automations.StepTypeFunction:
 		if step.Function != nil && r.kinds[step.Function.Name] == "logic" {

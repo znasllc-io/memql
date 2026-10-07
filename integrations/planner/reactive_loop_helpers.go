@@ -210,3 +210,12 @@ func compactResponsibilities(rows []map[string]any) []map[string]any {
 	}
 	return out
 }
+
+// mustJSONObject encodes typed call arguments, not executable policy.
+func mustJSONObject(m map[string]any) string {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}

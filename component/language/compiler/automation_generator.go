@@ -246,6 +246,8 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	}
 	if automation.Schedule != "" {
 		output["schedule"] = automation.Schedule
+		output["scheduleNode"] = automation.ScheduleNode
+		output["scheduleLease"] = automation.ScheduleLease
 	}
 
 	// Trigger (event-based)

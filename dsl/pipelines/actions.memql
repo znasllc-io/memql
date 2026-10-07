@@ -1,0 +1,13 @@
+use capabilities.integration.pipelines.{ executeStep, reportProgress }
+
+/// Execute one compiled step of the pipeline run whose lease the caller holds.
+/// The runtime owns its intent, receipt, reconciliation and cancellation.
+action executePipelineStep {
+  args { stepKey string! }
+  capability executeStep(stepKey: args.stepKey)
+}
+
+/// Publish this run's current step receipts to its existing GitHub check.
+action reportPipelineProgress {
+  capability reportProgress()
+}

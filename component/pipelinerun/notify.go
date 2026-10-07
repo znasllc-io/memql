@@ -14,7 +14,9 @@ import (
 	"unicode"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/pipelinenotify"
 	"github.com/znasllc-io/memql/component/pipelines"
 )
 
@@ -23,7 +25,7 @@ import (
 //
 // THE DRIVER DELIVERS, NEVER THE STEP RUNNER. A notify step is the driver's
 // own: it reads the channel the stage names, composes the message
-// (pipelines.DiscordMessage, EmailMessage) with the run page as its report
+// (pipelinenotify.DiscordMessage, EmailMessage) with the run page as its report
 // link, and stages it on the platform's outbound path -- one
 // v1:platform:outboundRequest per destination -- for the outbound worker
 // (component/outbound) to deliver. The step's receipt is written after the
@@ -458,7 +460,10 @@ func (dr *runDriver) maskFor(target notifyTarget) func(string) string {
 // row has an id of its own, drawn here, so nothing staged can be a row that
 // existed before this drive.
 func (dr *runDriver) notifyRequests(ctx context.Context, step pipelines.Step, target notifyTarget) ([]NotificationRequest, *pipelines.Failure) {
-	n := dr.notification(ctx, step)
+	n, err := dr.notification(ctx, step)
+	if err != nil {
+		return nil, notifyFailure(pipelines.CodeNotifyFailed, "The notification workflow failed: %s", dr.mask(err.Error()))
+	}
 	request := func() (NotificationRequest, *pipelines.Failure) {
 		id, err := newNotifyRequestID()
 		if err != nil {
@@ -473,7 +478,7 @@ func (dr *runDriver) notifyRequests(ctx context.Context, step pipelines.Step, ta
 	}
 
 	if target.secret != "" {
-		body, err := pipelines.DiscordMessage(n)
+		body, err := pipelinenotify.DiscordMessage(n)
 		if err != nil {
 			return nil, composeFailed(err)
 		}
@@ -487,7 +492,7 @@ func (dr *runDriver) notifyRequests(ctx context.Context, step pipelines.Step, ta
 		req.Medium, req.TargetSecret, req.Body = secretTargetMedium, target.secret, string(body)
 		return []NotificationRequest{req}, nil
 	}
-	subject, body, err := pipelines.EmailMessage(n)
+	subject, body, err := pipelinenotify.EmailMessage(n)
 	if err != nil {
 		return nil, composeFailed(err)
 	}
@@ -516,13 +521,13 @@ func (dr *runDriver) notifyRequests(ctx context.Context, step pipelines.Step, ta
 // EVERY TEXT IN IT IS MASKED with every value the drive resolved, here, before
 // a composer sees it: the composers escape what they are given, and a value
 // escaped is no longer the string a mask looks for.
-func (dr *runDriver) notification(ctx context.Context, step pipelines.Step) pipelines.Notification {
+func (dr *runDriver) notification(ctx context.Context, step pipelines.Step) (pipelinenotify.Notification, error) {
 	f := dr.facts
 	masks := dr.maskValues()
 	mask := func(s string) string { return pipelines.MaskSecrets(s, masks) }
 	origin := strings.TrimSpace(dr.d.OSOrigin())
 	now := dr.d.now()
-	n := pipelines.Notification{
+	n := pipelinenotify.Notification{
 		Pipeline: mask(dr.p.Name), Event: f.event, Version: mask(f.version), SHA: f.sha,
 		Branch: mask(f.branch), PullRequest: f.pullRequest, Title: mask(f.title),
 		OSOrigin: origin, At: now,
@@ -552,7 +557,7 @@ func (dr *runDriver) notification(ctx context.Context, step pipelines.Step) pipe
 				if name == "" {
 					name = s.Key
 				}
-				n.Outcome = pipelines.NotifyFailed
+				n.Outcome = pipelinenotify.NotifyFailed
 				n.FailedStep, n.FailedCode, n.FailedMessage = mask(s.Stage+"/"+name), mask(s.Code), mask(s.Message)
 			}
 		}
@@ -561,13 +566,16 @@ func (dr *runDriver) notification(ctx context.Context, step pipelines.Step) pipe
 		}
 	}
 	n.Artifacts = dr.notifyFiles(ctx, files, origin, mask)
-	if n.Outcome == "" {
-		n.Outcome = pipelines.NotifyPassed
-		if dr.previousRunFailed(ctx) {
-			n.Outcome = pipelines.NotifyRecovered
-		}
+	value, err := workflowhost.Run(ctx, "pipelineNotificationOutcome", map[string]any{"failed": n.Outcome == pipelinenotify.NotifyFailed, "previousFailed": dr.previousRunFailed(ctx)}, workflowhost.Options{})
+	if err != nil {
+		return n, err
 	}
-	return n
+	outcome, _ := value.(string)
+	n.Outcome = pipelinenotify.NotifyOutcome(outcome)
+	if !n.Outcome.Valid() {
+		return n, fmt.Errorf("notification workflow returned invalid outcome %q", outcome)
+	}
+	return n, nil
 }
 
 // passedOrCarried reports a stage that passed: one of its steps passed in this

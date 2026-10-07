@@ -307,14 +307,24 @@ func (w *Worker) drainNewsletterWelcomes(ctx, systemCtx context.Context) {
 			w.logger.Debug("campaigns: newsletter scan unavailable", "error", err)
 			return
 		}
+		selected := map[string]map[string]any{}
+		ids := []string{}
 		for _, row := range rows {
-			if ctx.Err() != nil {
-				return
-			}
-			if err = w.sendNewsletterWelcome(ctx, systemCtx, row); err != nil {
-				w.logger.Error("campaigns: newsletter progress not saved", "signup", bare(str(row, "id")), "error", err)
-			}
+			id := str(row, "id")
+			selected[id] = row
+			ids = append(ids, id)
 		}
+		if err := campaignPage(ctx, ids, func(ctx context.Context, id string) error {
+			err := w.sendNewsletterWelcome(ctx, systemCtx, selected[id])
+			if err != nil {
+				w.logger.Error("campaign row could not advance", "id", id, "error", err)
+			}
+			return err
+		}); err != nil {
+			w.logger.Warn("campaign page workflow failed", "error", err)
+			return
+		}
+
 		if next == "" || next == cursor {
 			return
 		}

@@ -1,0 +1,105 @@
+{
+  "automation": "compose/automations.memql composeMaterializeWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.composeMaterializeWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "composeRecoverOutput"
+          },
+          {
+            "kind": "builtin",
+            "name": "composeReadTemplate"
+          },
+          {
+            "kind": "builtin",
+            "name": "composeWorkflowFacts"
+          },
+          {
+            "kind": "builtin",
+            "name": "composeRequireDraft"
+          },
+          {
+            "kind": "builtin",
+            "name": "composeWorkflowFacts"
+          },
+          {
+            "kind": "builtin",
+            "name": "composeRenderOutput"
+          },
+          {
+            "kind": "builtin",
+            "name": "composeFileOutput"
+          },
+          {
+            "kind": "builtin",
+            "name": "composeCompleteOutput"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.composeMaterializeWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "composeRecoverOutput"
+          },
+          {
+            "kind": "builtin",
+            "name": "composeReadTemplate"
+          },
+          {
+            "kind": "builtin",
+            "name": "composeWorkflowFacts"
+          },
+          {
+            "kind": "builtin",
+            "name": "composeRequireDraft"
+          },
+          {
+            "kind": "builtin",
+            "name": "composeWorkflowFacts"
+          },
+          {
+            "kind": "builtin",
+            "name": "composeRenderOutput"
+          },
+          {
+            "kind": "builtin",
+            "name": "composeFileOutput"
+          },
+          {
+            "kind": "builtin",
+            "name": "composeCompleteOutput"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

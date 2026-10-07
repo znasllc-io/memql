@@ -1,0 +1,157 @@
+/// Responsibility cadence and placement use the common scheduler and shared lease.
+@trigger(schedule="@every 45s", node="planner", lease="responsibility-sweep")
+automation pursueResponsibilities {
+ builtin plannerPursueResponsibilities()
+}
+
+/// Process each selected owner independently, under authority bound by the native reader.
+@template
+automation plannerResponsibilitySweep {
+ owners := builtin plannerResponsibilityOwners()
+ for owner in owners {
+  builtin plannerProcessOwner(owner: owner) on error continue
+ }
+}
+
+/// Honor individual responsibilities before reasoning across the owner's whole working set.
+@template
+automation plannerOwnerWorkflow {
+ args { ids []string! }
+ for id in args.ids {
+  builtin plannerProcessResponsibility(id: id) on error continue
+ }
+ builtin plannerConverge()
+}
+
+/// Standing directives are context; reactive directives are reevaluated and recurring ones use cron facts.
+@template
+automation plannerResponsibilityDue {
+ args { trigger string! recurringDue bool! }
+ return args.trigger == "reactive" || (args.trigger == "recurring" && args.recurringDue)
+}
+
+/// A live goal suppresses reactive work; a shared cooldown also covers delayed visibility and replica handoff.
+@template
+automation plannerResponsibilityWorkflow {
+ args { row object! recurringDue bool! }
+ if args.row.id == "" { return false }
+ if args.row.trigger == "standing" {
+  standingAgent := automation plannerRouteResponsibility(row: args.row)
+  if standingAgent == "" { return false }
+  standingClaim := builtin plannerClaimResponsibility(purpose: "standing-eval", minutes: 30)
+  if !standingClaim { return false }
+  builtin plannerRecordEvaluation(result: "standing directive active on standingAgent " + standingAgent)
+  return true
+ }
+ due := automation plannerResponsibilityDue(trigger: args.row.trigger, recurringDue: args.recurringDue)
+ if !due { return false }
+ if args.row.trigger != "recurring" {
+  live := builtin plannerHasLiveGoal()
+  if live { return false }
+ }
+ claimed := builtin plannerClaimResponsibility(purpose: "honor", minutes: 30)
+ if !claimed { return false }
+ agent := automation plannerRouteResponsibility(row: args.row)
+ receipt := builtin plannerTryHonor(agentId: agent)
+ if !receipt.ok {
+  builtin plannerRecordEvaluation(result: "honor failed: " + receipt.result)
+  return false
+ }
+ builtin plannerRecordEvaluation(result: receipt.result)
+ return true
+}
+
+/// Route assistants directly; reuse a bound specialist or resolve one before assigning and injecting context.
+@template
+automation plannerRouteResponsibility {
+ args { row object! }
+ if args.row.targetKind == "assistant" {
+  assistant :=  builtin plannerResolveAssistant()
+  if assistant != "" && assistant != args.row.assignedAgentId {
+   builtin plannerAssignResponsibility(kind: "assistant", agentId: assistant, roleSlug: "")
+  }
+  return assistant
+ }
+ if args.row.targetKind == "specialist" && args.row.assignedAgentId != "" {
+  automation plannerInjectStanding(row: args.row, agentId: args.row.assignedAgentId)
+  return args.row.assignedAgentId
+ }
+ agent := builtin plannerResolveSpecialist()
+ if agent == "" { builtin plannerWorkflowRefusal(message: "factory resolved no agent for responsibility " + args.row.id) }
+ builtin plannerAssignResponsibility(kind: "specialist", agentId: agent, roleSlug: args.row.assignedRoleSlug)
+ automation plannerInjectStanding(row: args.row, agentId: agent)
+ return agent
+}
+
+/// Standing context is periodically reasserted through one idempotent append operation.
+@template
+automation plannerInjectStanding {
+ args { row object! agentId string! }
+ if args.row.trigger == "standing" && args.agentId != "" && args.row.statement != "" {
+  claimed := builtin plannerClaimResponsibility(purpose: "standing-inject", minutes: 30)
+  if claimed { builtin plannerAppendDirective(agentId: args.agentId) }
+ }
+}
+
+/// Trigger archetypes choose whether honoring means opening work or adding context.
+@template
+automation plannerHonorResponsibility {
+ args { row object! agentId string! }
+ opensGoal := logic plannerTriggerOpensGoal(trigger: args.row.trigger)
+ if opensGoal {
+  goal := automation plannerOpenResponsibility(row: args.row, agentId: args.agentId)
+  return "opened " + args.row.trigger + " goal " + goal + " (agent " + args.agentId + ")"
+ }
+ if args.row.trigger == "standing" {
+  automation plannerInjectStanding(row: args.row, agentId: args.agentId)
+  return "injected standing directive into agent " + args.agentId
+ }
+ builtin plannerWorkflowRefusal(message: "unknown trigger " + args.row.trigger)
+}
+
+/// Goal wording and input are authored; the native opener always binds the selected owner and responsibility.
+@template
+automation plannerOpenResponsibility {
+ args { row object! agentId string! }
+ statement := args.row.statement == "" ? "Honor responsibility " + args.row.id : args.row.statement
+ return builtin plannerOpenResponsibilityGoal(statement: statement, input: {
+  responsibilityId: args.row.id, trigger: args.row.trigger, statement: statement, successCriteria: args.row.successCriteria
+ })
+}
+
+/// Run the conductor at most hourly per owner and stay quiet when there is nothing to reason about.
+@template
+automation plannerConvergenceWorkflow {
+ args { owner string! responsibilities []any! observedAt string! }
+ claimed := builtin plannerClaimConvergence(minutes: 60)
+ if !claimed { return }
+ goals := builtin plannerSpaceGoals()
+ if goals.count() == 0 && args.responsibilities.count() == 0 { return }
+ memory := builtin plannerRecentMemory(text: "active goals and standing responsibilities I am pursuing", k: 8)
+ actions := builtin plannerConvergenceTurn(prompt: "reactiveConductor", data: {
+  user: {userId: args.owner}, spaceGoals: goals, responsibilities: args.responsibilities, recentMemory: memory, now: args.observedAt
+ })
+ for id in actions {
+  builtin plannerDispatchConvergence(id: id) on error continue
+ }
+}
+
+/// Confidence, duplicate suppression and action routing belong to the conductor's DSL recipe.
+@template
+automation plannerConvergenceAction {
+ args { action object! statementKey string! }
+ if args.action.confidence < 0.6 { return }
+ if args.action.kind != "createPlan" && args.action.kind != "surfaceNudge" && args.action.kind != "extendSpecialist" { return }
+ key := args.action.responsibilityId == "" ? args.statementKey : args.action.responsibilityId
+ claimed := builtin plannerClaimAction(key: key, minutes: 30)
+ if !claimed { return }
+ if args.action.kind == "createPlan" {
+  builtin plannerConvergenceGoal()
+ } else if args.action.kind == "surfaceNudge" {
+  if args.action.responsibilityId != "" {
+   builtin plannerConvergenceNudge(result: "nudge: " + args.action.statement)
+  } else { builtin plannerLogNudge() }
+ } else if args.action.responsibilityId != "" {
+  builtin plannerConvergenceSpecialist()
+ }
+}

@@ -33,31 +33,9 @@ package router
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"sort"
 	"strings"
 )
-
-// MinimumCalls is the floor below which a week's evidence proposes nothing.
-//
-// TWENTY, and the row records the count even when it is under -- so an operator
-// asking why nothing was proposed reads the answer rather than inferring it.
-// Nineteen calls all failing is not evidence; it is a bad afternoon.
-const MinimumCalls = 20
-
-// FailureThreshold is the structured-failure rate above which a demotion is
-// proposed. EXCEEDS, not meets: a boundary decided by nothing is a boundary two
-// replicas can disagree about.
-const FailureThreshold = 0.3
-
-// PromotionThreshold is the measured structured validity at or above which an
-// EXCLUDED model is proposed for promotion back.
-//
-// It is deliberately not `1 - FailureThreshold`. The two numbers measure
-// different things -- one is a failure rate in service, the other a validity
-// rate on the probe suite -- and tying them together would make a change to one
-// silently move the other.
-const PromotionThreshold = 0.9
 
 // The four levels, mirroring the closed set the catalog and the rule grammar
 // share. A fifth here that the grammar does not know would render a rule that
@@ -81,8 +59,7 @@ type Window struct {
 
 // FailureRate is the structured-failure rate, or zero when nothing was counted.
 //
-// ZERO FOR AN EMPTY WINDOW, and it is safe here only because MinimumCalls gates
-// every caller: a rate over no calls is not a rate, and the floor is what stops
+// ZERO FOR AN EMPTY WINDOW. Workflow policy applies its evidence floor: a rate over no calls is not a rate, and the floor is what stops
 // this being read as "this model never fails".
 func (w Window) FailureRate() float64 {
 	if w.Calls <= 0 {
@@ -170,77 +147,6 @@ type Proposal struct {
 	Reason string
 }
 
-// ProposeExclusion decides whether a week's evidence warrants a demotion, and
-// renders it when it does.
-//
-// The three refusals in order: an incomplete window (usually one with no
-// level), a window under the call floor, and a window at or below the
-// threshold. Each returns ok=false with no error -- a fold that proposes
-// nothing is the ordinary case, and reporting it as a failure would make the
-// nightly log unreadable and the real failures invisible in it.
-func ProposeExclusion(w Window, render Renderer) (Proposal, bool, error) {
-	if render == nil {
-		return Proposal{}, false, fmt.Errorf("router: an evidence proposal needs a rule renderer; there must be exactly one in the tree and this call did not supply it")
-	}
-	if !w.Valid() || w.Calls < MinimumCalls || w.FailureRate() <= FailureThreshold {
-		return Proposal{}, false, nil
-	}
-
-	form := exclusionForm(w)
-	source, err := render(form)
-	if err != nil {
-		return Proposal{}, false, fmt.Errorf("router: render the proposed rule: %w", err)
-	}
-	return Proposal{
-		ModelId:    w.ModelId,
-		Level:      w.Level,
-		Week:       w.Week,
-		Direction:  DirectionDemotion,
-		RuleName:   form.Name,
-		RuleSource: source,
-		Hash:       ProposalHash(source),
-		Reason: fmt.Sprintf(
-			"%d of %d structured calls to %s at level %s failed in %s (%.0f%%), over the %d-call floor and above the %.0f%% threshold. Approving adds a rule excluding it at that level; declining records the decision so this week's evidence does not ask again.",
-			w.StructuredFailures, w.Calls, w.ModelId, w.Level, w.Week,
-			w.FailureRate()*100, MinimumCalls, FailureThreshold*100),
-	}, true, nil
-}
-
-// ProposePromotion is the symmetric case: an EXCLUDED model whose newer
-// measurement passes.
-//
-// It reads a MEASUREMENT rather than a week of calls, and that asymmetry is
-// forced rather than chosen: an excluded model serves no calls, so there is no
-// service evidence to fold. The probe is the only thing that can speak for it,
-// which is also why the threshold is a validity rate and not the complement of
-// the failure rate.
-func ProposePromotion(w Window, measuredValidity float64, hasMeasurement bool, render Renderer) (Proposal, bool, error) {
-	if render == nil {
-		return Proposal{}, false, fmt.Errorf("router: an evidence proposal needs a rule renderer; there must be exactly one in the tree and this call did not supply it")
-	}
-	if !w.Valid() || !hasMeasurement || measuredValidity < PromotionThreshold {
-		return Proposal{}, false, nil
-	}
-
-	form := promotionForm(w)
-	source, err := render(form)
-	if err != nil {
-		return Proposal{}, false, fmt.Errorf("router: render the proposed rule: %w", err)
-	}
-	return Proposal{
-		ModelId:    w.ModelId,
-		Level:      w.Level,
-		Week:       w.Week,
-		Direction:  DirectionPromotion,
-		RuleName:   form.Name,
-		RuleSource: source,
-		Hash:       ProposalHash(source),
-		Reason: fmt.Sprintf(
-			"%s is excluded at level %s, and a probe since then measured %.0f%% structured validity -- at or above the %.0f%% bar. Approving retires the exclusion; declining records the decision so this week's evidence does not ask again.",
-			w.ModelId, w.Level, measuredValidity*100, PromotionThreshold*100),
-	}, true, nil
-}
-
 // ProposalHash is the artifact hash an approval carries.
 //
 // OVER THE RENDERED SOURCE, so it covers what will actually be armed. Hashing
@@ -266,42 +172,6 @@ func RuleName(direction, modelId, level string) string {
 		word = strings.ToUpper(word[:1]) + word[1:]
 	}
 	return "evidence" + word + "_" + slugForRule(modelId) + "_" + level
-}
-
-func exclusionForm(w Window) Form {
-	return Form{
-		Name: RuleName(DirectionDemotion, w.ModelId, w.Level),
-		Description: fmt.Sprintf(
-			"Generated from %s evidence: %d of %d structured calls to %s at level %s failed.",
-			w.Week, w.StructuredFailures, w.Calls, w.ModelId, w.Level),
-		// ONLY the key that is set. `level` is the whole of the condition: the
-		// evidence is per level, so a rule that also pinned a prompt or a role
-		// would exclude the model somewhere narrower than the evidence covers.
-		When:          map[string]string{"level": w.Level},
-		Policy:        "localFirst",
-		Level:         w.Level,
-		Precedence:    50,
-		OnUnavailable: "degrade",
-		Excludes:      []string{"fleet:" + w.ModelId},
-	}
-}
-
-func promotionForm(w Window) Form {
-	return Form{
-		Name: RuleName(DirectionPromotion, w.ModelId, w.Level),
-		Description: fmt.Sprintf(
-			"Generated from a probe: %s measured well enough at level %s to be routed again.",
-			w.ModelId, w.Level),
-		When:          map[string]string{"level": w.Level},
-		Policy:        "localFirst",
-		Level:         w.Level,
-		Precedence:    50,
-		OnUnavailable: "degrade",
-		// EMPTY, not absent-of-a-field. A promotion is the same rule with
-		// nothing excluded, which is what retires the exclusion when the
-		// authoring pipeline re-arms it under the same name.
-		Excludes: nil,
-	}
 }
 
 // slugForRule reduces a model tag to something a rule name may carry.

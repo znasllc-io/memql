@@ -115,3 +115,11 @@ automation archiveAccountGroup {
 automation reconcileAccountDomains {
   walk := builtin accountDomainReconcile()
 }
+
+/// Display text for an account's derived group. Membership and authority remain native invariants.
+@template
+automation accountGroupPresentation {
+ args { accountId string! name string! }
+ name := args.name == "" ? "Account " + args.accountId : args.name
+ return { name: name, description: "Everyone who works on " + name + "." }
+}

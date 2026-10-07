@@ -2933,11 +2933,14 @@
         "active",
         "category",
         "description",
+        "lastSeededAt",
         "name",
         "predefined",
+        "refreshCadenceDays",
         "relevantForRoles",
         "requiredByToolSlugs",
         "source",
+        "staleSignalCount",
         "tier"
       ],
       "required": [

@@ -1,0 +1,103 @@
+{
+  "automation": "planner/automations.memql plannerRouteResponsibility",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "row": {}
+          },
+          "topic": "automation.invocation.plannerRouteResponsibility"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "plannerResolveSpecialist"
+          },
+          {
+            "args": {
+              "agentId": {
+                "args": {},
+                "builtin": "plannerResolveSpecialist"
+              },
+              "kind": "specialist"
+            },
+            "kind": "builtin",
+            "name": "plannerAssignResponsibility"
+          },
+          {
+            "args": {
+              "agentId": {
+                "args": {},
+                "builtin": "plannerResolveSpecialist"
+              },
+              "row": {}
+            },
+            "kind": "automation",
+            "name": "plannerInjectStanding"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {},
+            "builtin": "plannerResolveSpecialist"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "row": {}
+          },
+          "topic": "automation.invocation.plannerRouteResponsibility"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "plannerResolveSpecialist"
+          },
+          {
+            "args": {
+              "agentId": {
+                "args": {},
+                "builtin": "plannerResolveSpecialist"
+              },
+              "kind": "specialist"
+            },
+            "kind": "builtin",
+            "name": "plannerAssignResponsibility"
+          },
+          {
+            "args": {
+              "agentId": {
+                "args": {},
+                "builtin": "plannerResolveSpecialist"
+              },
+              "row": {}
+            },
+            "kind": "automation",
+            "name": "plannerInjectStanding"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {},
+            "builtin": "plannerResolveSpecialist"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

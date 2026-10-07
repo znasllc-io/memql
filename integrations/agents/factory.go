@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
@@ -125,55 +126,13 @@ func (i *Integration) handleEnsureForGoal(ctx context.Context, args map[string]a
 	}
 	run := runForFactory(ctx, args)
 
-	// Step 1-2: load the user's agents + the role catalog + the skill
-	// catalog. All three are best-effort -- the analysis prompt tolerates
-	// an empty slice.
-	existing := i.loadExistingAgents(ctx, ownerUserId)
-	roleCatalog := i.loadRoleCatalog(ctx)
-	skillCatalog := i.loadSkillCatalog(ctx)
-
-	// Step 3: structured analysis.
-	decision, err := i.decideForGoal(ctx, goal, existing, roleCatalog, skillCatalog)
+	scope := &factoryScope{i: i, owner: ownerUserId, goal: goal, run: run}
+	_, err = workflowhost.Run(ctx, "agentFactoryWorkflow", nil, workflowhost.Options{Operations: scope.operations()})
 	if err != nil {
-		return nil, fmt.Errorf("ensureForGoal: analyze: %w", err)
+		return nil, err
 	}
-
-	// Step 4: dispatch.
-	var agentId, agentName, roleSlug, action string
-	switch decision.Action {
-	case "match":
-		if decision.TargetAgentId == "" {
-			return nil, fmt.Errorf("ensureForGoal: action=match but targetAgentId is empty")
-		}
-		match, ok := findById(existing, decision.TargetAgentId)
-		if !ok {
-			return nil, fmt.Errorf("ensureForGoal: action=match targetAgentId %q not found in user's agents", decision.TargetAgentId)
-		}
-		agentId = match.Id
-		agentName = match.Name
-		roleSlug = match.RoleSlug
-		action = "match"
-	case "extend":
-		updated, err := i.extendAgent(ctx, ownerUserId, existing, decision, run)
-		if err != nil {
-			return nil, err
-		}
-		agentId = updated.Id
-		agentName = updated.Name
-		roleSlug = updated.RoleSlug
-		action = "extend"
-	case "create":
-		created, err := i.createAgent(ctx, ownerUserId, decision, roleCatalog, run)
-		if err != nil {
-			return nil, err
-		}
-		agentId = created.Id
-		agentName = created.Name
-		roleSlug = created.RoleSlug
-		action = "create"
-	default:
-		return nil, fmt.Errorf("ensureForGoal: analyze returned unknown action %q (expected match|extend|create)", decision.Action)
-	}
+	agentId, agentName, roleSlug, action := scope.result.Id, scope.result.Name, scope.result.RoleSlug, scope.decision.Action
+	decision := scope.decision
 
 	resultPayload := map[string]any{
 		"agentId":   agentId,
@@ -375,13 +334,13 @@ func analyzeGoalPromptData(goal string, existing []agentSnapshot, roles []roleSn
 
 // analyzeGoal invokes the agentFactoryAnalyze prompt via
 // InvokeAIStructured. Returns the parsed decision struct.
-func (i *Integration) analyzeGoal(ctx context.Context, goal string, existing []agentSnapshot, roles []roleSnapshot, skills []skillSnapshot, priorError string) (factoryDecision, error) {
+func (i *Integration) analyzeGoal(ctx context.Context, goal string, existing []agentSnapshot, roles []roleSnapshot, skills []skillSnapshot, priorError, prompt, schema string) (factoryDecision, error) {
 	data := analyzeGoalPromptData(goal, existing, roles, skills, time.Now().UTC().Format(time.RFC3339), priorError)
 	rawJSON, err := i.engine.InvokeAIStructured(
 		ctx,
-		"agentFactoryAnalyze",
+		prompt,
 		data,
-		"agentFactoryDecision",
+		schema,
 		factoryDecisionSchema,
 		true, // strict
 	)

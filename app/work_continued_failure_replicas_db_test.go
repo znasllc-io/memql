@@ -147,7 +147,7 @@ automation continuesPast`+stamp+` {
 		t.Fatal("replica A could not claim a fresh run")
 	}
 	if _, err := db.ExecContext(context.Background(),
-		`UPDATE automation_execution_claims SET claimed_at = now() - interval '10 minutes' WHERE automation_name = 'work.run.dispatch' AND dedup_key = ?`, runId); err != nil {
+		`UPDATE automation_execution_claims SET claimed_at = now() - interval '10 minutes', expires_at = now() - interval '6 minutes' WHERE automation_name = 'work.run.dispatch' AND dedup_key = ?`, runId); err != nil {
 		t.Fatal(err)
 	}
 

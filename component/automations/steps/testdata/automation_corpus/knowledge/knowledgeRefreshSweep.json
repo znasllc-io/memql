@@ -1,0 +1,51 @@
+{
+  "automation": "knowledge/automations.memql knowledgeRefreshSweep",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.knowledgeRefreshSweep"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "knowledgeRefreshCandidates"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.knowledgeRefreshSweep"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "knowledgeRefreshCandidates"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    }
+  }
+}

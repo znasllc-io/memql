@@ -235,3 +235,53 @@ builtin produceArtifact {
   ownerUserId  string!
   partitionId      string!
 }
+
+/// Scoped operation for the authorized specialist factory.
+@executor("integration.agents.agentFactoryReadAgents")
+builtin agentFactoryReadAgents {
+
+}
+
+/// Scoped operation for the authorized specialist factory.
+@executor("integration.agents.agentFactoryReadRoles")
+builtin agentFactoryReadRoles {
+
+}
+
+/// Scoped operation for the authorized specialist factory.
+@executor("integration.agents.agentFactoryReadSkills")
+builtin agentFactoryReadSkills {
+
+}
+
+/// Scoped operation for the authorized specialist factory.
+@executor("integration.agents.agentFactoryAnalyzeOnce")
+@args(profile="object")
+builtin agentFactoryAnalyzeOnce {
+ prompt string!
+ schema string!
+}
+
+/// Scoped operation for the authorized specialist factory.
+@executor("integration.agents.agentFactoryRejectDecision")
+builtin agentFactoryRejectDecision {
+
+}
+
+/// Scoped operation for the authorized specialist factory.
+@executor("integration.agents.agentFactoryMatch")
+builtin agentFactoryMatch {
+
+}
+
+/// Scoped operation for the authorized specialist factory.
+@executor("integration.agents.agentFactoryExtend")
+builtin agentFactoryExtend {
+
+}
+
+/// Scoped operation for the authorized specialist factory.
+@executor("integration.agents.agentFactoryCreate")
+builtin agentFactoryCreate {
+
+}

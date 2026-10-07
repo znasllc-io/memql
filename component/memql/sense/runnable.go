@@ -127,6 +127,8 @@ type RunnableTrigger struct {
 	Concept  string
 	Event    string
 	Schedule string
+	Node     string
+	Lease    string
 }
 
 // runnableKeywords is the closed set of runnable construct keywords. See
@@ -605,6 +607,8 @@ func triggerFromAttributes(attrs []*parser.Attribute) *RunnableTrigger {
 			Event:    attrArgString(a.Args, "event"),
 			Concept:  attrArgString(a.Args, "concept"),
 			Schedule: attrArgString(a.Args, "schedule"),
+			Node:     attrArgString(a.Args, "node"),
+			Lease:    attrArgString(a.Args, "lease"),
 		}
 		if tr.Event == "" && tr.Concept == "" && tr.Schedule == "" {
 			return nil

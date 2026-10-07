@@ -1427,6 +1427,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "cluster/mutations.memql", Name: "createReleaseCut"}:       true,
 		{Path: "cluster/mutations.memql", Name: "updateReleaseCutStatus"}: true,
 
+		// The scheduler must enumerate every owner's explicitly opted-in domain.
+		// actor.userId scoping would omit other owners; the native refresh entry
+		// refuses client origin and each opened goal retains its selected owner.
+		{Path: "knowledge/queries.memql", Name: "knowledgeDomainsDueRefresh"}: true,
+
 		// Indexers attest to verified source content and classifier receipts.
 		// Caller-scoping prevents cross-owner writes but cannot prevent an
 		// owner from forging sourceHash/content or model-written wording.

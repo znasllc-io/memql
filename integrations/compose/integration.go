@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	pure "github.com/znasllc-io/memql/component/compose"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -251,7 +252,7 @@ func (i *Integration) IntegrationName() string { return integrationName }
 // dsl/compose/builtins.memql, because a capability the DSL names and the
 // registry lacks is a BOOT failure on every node type.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
-	return []memql.IntegrationCapability{
+	return append([]memql.IntegrationCapability{
 		{Name: "execute", Description: "Execute the persisted materialization belonging to the current work run.", Handler: i.handleExecute, ArgsSchema: map[string]string{"compositionId": "string (required) -- the composition this run owns"}},
 		{
 			Name:        "materialize",
@@ -305,7 +306,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"sources": "[]object (required) -- the same {kind, ref, label} list materialize takes",
 			},
 		},
-	}
+	}, workflowhost.ScopedCapabilities(map[string]workflowhost.Operation{"composeRecoverOutput": nil, "composeReadTemplate": nil, "composeWorkflowFacts": nil, "composeRestoreDraft": nil, "composeGenerateDraft": nil, "composeRequireDraft": nil, "composeUseSourceRows": nil, "composeRenderOutput": nil, "composeFileSource": nil, "composeFileOutput": nil, "composeCompleteOutput": nil, "composeRecordRecipeUse": nil})...)
 }
 
 // ---------------------------------------------------------------------------

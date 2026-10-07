@@ -1,0 +1,97 @@
+{
+  "automation": "agents/automations.memql agentFactoryDecide",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.agentFactoryDecide"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "prompt": "agentFactoryAnalyze",
+              "schema": "agentFactoryDecision"
+            },
+            "kind": "builtin",
+            "name": "agentFactoryAnalyzeOnce"
+          },
+          {
+            "args": {
+              "prompt": "agentFactoryAnalyze",
+              "schema": "agentFactoryDecision"
+            },
+            "kind": "builtin",
+            "name": "agentFactoryAnalyzeOnce"
+          },
+          {
+            "args": {
+              "prompt": "agentFactoryAnalyze",
+              "schema": "agentFactoryDecision"
+            },
+            "kind": "builtin",
+            "name": "agentFactoryAnalyzeOnce"
+          },
+          {
+            "kind": "builtin",
+            "name": "agentFactoryRejectDecision"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.agentFactoryDecide"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "prompt": "agentFactoryAnalyze",
+              "schema": "agentFactoryDecision"
+            },
+            "kind": "builtin",
+            "name": "agentFactoryAnalyzeOnce"
+          },
+          {
+            "args": {
+              "prompt": "agentFactoryAnalyze",
+              "schema": "agentFactoryDecision"
+            },
+            "kind": "builtin",
+            "name": "agentFactoryAnalyzeOnce"
+          },
+          {
+            "args": {
+              "prompt": "agentFactoryAnalyze",
+              "schema": "agentFactoryDecision"
+            },
+            "kind": "builtin",
+            "name": "agentFactoryAnalyzeOnce"
+          },
+          {
+            "kind": "builtin",
+            "name": "agentFactoryRejectDecision"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

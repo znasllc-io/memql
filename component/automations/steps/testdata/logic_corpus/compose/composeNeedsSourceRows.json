@@ -1,0 +1,245 @@
+{
+  "construct": "compose/logic.memql composeNeedsSourceRows",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "format": "s-format",
+          "hasRows": true,
+          "outputKind": "s-outputKind"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    }
+  }
+}

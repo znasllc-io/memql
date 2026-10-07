@@ -143,14 +143,15 @@ func (c StrictClusterClaimer) ClaimWithTTL(ctx context.Context, name, key string
 // opt-in variant (memql#2548): the default Claim path (ttl <= 0) is unchanged,
 // so automation/planner callers keep exactly-once-within-retention semantics.
 //
-// With ttl > 0 a claim whose claimed_at is older than ttl is RE-WINNABLE: a
+// With ttl > 0 an expired claim is RE-WINNABLE: a
 // peer takes it over (a fresh insert and a takeover of a stale row both count
 // as "won"), while a claim still within its ttl is honoured (the peer loses,
 // exactly as before). This bounds the outbound-delivery claim/stamp wedge: a
 // replica that dies after claiming an attempt but before stamping a terminal
 // status leaves the row pending with a persisted claim; without a lease every
 // peer re-claims-and-loses that key until the 1h retention prune elapses. The
-// lease is the claim row's own age, so it needs no extra state.
+// stored expiry also prevents cleanup, or a caller with a shorter TTL, from
+// shortening a live claim. Rows written before expiry support use their age.
 //
 // The ttl must exceed the longest time a LIVE claimant holds the claim (one
 // delivery attempt) or a slow-but-alive node is stolen from, double-running
@@ -184,16 +185,17 @@ func (g *ClusterExecutionGuard) claimWithTTL(ctx context.Context, automationName
 	var err error
 	if ttl > 0 {
 		// Attempt-scoped lease: on conflict, take the claim over only if the
-		// existing one is older than ttl. RowsAffected is 1 for a fresh insert
+		// existing lease has expired. RowsAffected is 1 for a fresh insert
 		// OR a stale-claim takeover (both "won"), and 0 when a peer still holds
 		// a fresh claim (lost). Postgres serialises concurrent upserts on the
 		// conflicting row, so at most one peer wins a takeover.
 		res, err = db.DB.ExecContext(ctx,
-			`INSERT INTO automation_execution_claims (automation_name, dedup_key, claimed_by)
-			 VALUES ($1, $2, $3)
+			`INSERT INTO automation_execution_claims (automation_name, dedup_key, claimed_by, expires_at)
+			 VALUES ($1, $2, $3, now() + make_interval(secs => $4))
 			 ON CONFLICT (automation_name, dedup_key)
-			 DO UPDATE SET claimed_by = EXCLUDED.claimed_by, claimed_at = now()
-			 WHERE automation_execution_claims.claimed_at < now() - make_interval(secs => $4)`,
+			 DO UPDATE SET claimed_by = EXCLUDED.claimed_by, claimed_at = now(), expires_at = EXCLUDED.expires_at
+			 WHERE COALESCE(automation_execution_claims.expires_at,
+               automation_execution_claims.claimed_at + make_interval(secs => $4)) < now()`,
 			automationName, dedupKey, g.nodeId, ttl.Seconds())
 	} else {
 		res, err = db.DB.ExecContext(ctx,
@@ -293,7 +295,7 @@ func (g *ClusterExecutionGuard) prune(ctx context.Context) {
 	}
 	cutoff := time.Now().Add(-g.retention)
 	if _, err := db.DB.ExecContext(ctx,
-		`DELETE FROM automation_execution_claims WHERE claimed_at < $1`, cutoff); err != nil {
+		`DELETE FROM automation_execution_claims WHERE claimed_at < $1 AND (expires_at IS NULL OR expires_at < now())`, cutoff); err != nil {
 		g.warn("automation cluster guard: prune failed", "error", err)
 	}
 }

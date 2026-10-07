@@ -1,0 +1,45 @@
+/// Bounded operation within an authorized evidence workflow.
+@executor("integration.router.routingReadEvidenceWindows")
+@args(profile="object")
+builtin routingReadEvidenceWindows {
+ days number!
+ failureCategories []any!
+}
+
+/// Bounded operation within an authorized evidence workflow.
+@executor("integration.router.routingEvaluateEvidence")
+@args(profile="object")
+builtin routingEvaluateEvidence {
+ key string!
+}
+
+/// Bounded operation within an authorized evidence workflow.
+@executor("integration.router.routingPriorEvidence")
+@args(profile="object")
+builtin routingPriorEvidence {
+ key string!
+}
+
+/// Bounded operation within an authorized evidence workflow.
+@executor("integration.router.routingOpenEvidenceReview")
+@args(profile="object")
+builtin routingOpenEvidenceReview {
+ key string!
+ days number!
+}
+
+/// Bounded operation within an authorized evidence workflow.
+@executor("integration.router.routingWriteEvidence")
+@args(profile="object")
+builtin routingWriteEvidence {
+ key string!
+ outcome string!
+}
+
+/// Bounded operation within an authorized evidence workflow.
+@executor("integration.router.routingRenderEvidenceProposal")
+@args(profile="object")
+builtin routingRenderEvidenceProposal {
+ form object!
+ reason string!
+}

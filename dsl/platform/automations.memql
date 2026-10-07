@@ -95,7 +95,7 @@ automation notePackageUpstreamFromWebhook {
 /// The polling fallback for clusters no webhook can reach. Every 10 minutes, which is the cadence
 /// of a cue rather than of a deploy -- nothing here deploys anything, and the person who sees the
 /// cue decides whether a ten-minute-old answer was worth acting on.
-@trigger(schedule="0 */10 * * * *")
+@trigger(schedule="0 */10 * * * *", node="workbench", lease="package-poll")
 automation pollPackageUpstreams {
   poll := builtin packagePollUpstream()
 }
@@ -151,4 +151,31 @@ automation recordPreviewOrderObservation {
     orderId: args.id ?? "",
     storeId: args.storeId ?? ""
   )
+}
+
+/// Reconcile unsettled bindings independently; a provider failure on one does not stop the rest.
+@template
+automation customDomainReconcileWorkflow {
+ args { bindings []any! }
+ for binding in args.bindings if binding.status != "live" && binding.status != "removed" {
+  builtin customDomainReconcileBinding(bindingId: binding.id) on error continue
+ }
+}
+
+/// Each selected account advances its DNS proof independently.
+@template
+automation accountDomainReconcileWorkflow {
+ args { ids []string! }
+ for id in args.ids { builtin customDomainReconcileAccount(accountId: id) on error continue }
+}
+
+/// Continue existing doors even if reservation reads fail, then report that failure honestly.
+@template
+automation accountDoorReconcileWorkflow {
+ builtin customDomainSyncReservations() on error continue
+ doors := builtin customDomainReadDoors()
+ for door in doors if door.status != "live" && door.status != "removed" {
+  builtin customDomainReconcileDoor(doorId: door.id) on error continue
+ }
+ builtin customDomainRequireReservations()
 }

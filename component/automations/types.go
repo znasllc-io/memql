@@ -80,7 +80,9 @@ type Automation struct {
 
 	// Schedule is an optional cron expression for scheduled execution.
 	// If omitted, the automation must be triggered manually or by events.
-	Schedule string `json:"schedule,omitempty"`
+	Schedule      string `json:"schedule,omitempty"`
+	ScheduleNode  string `json:"scheduleNode,omitempty"`
+	ScheduleLease string `json:"scheduleLease,omitempty"`
 
 	// Trigger defines event-based triggers for this automation.
 	// When an event matching the pattern is published, this automation runs.

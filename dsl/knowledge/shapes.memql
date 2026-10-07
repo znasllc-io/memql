@@ -18,6 +18,9 @@
 /// Nothing here is credential-adjacent: a knowledge domain is a catalog entry.
 @row
 shape knowledgeDomain knowledgeDomainFull {
+ refreshCadenceDays
+ lastSeededAt
+ staleSignalCount
   row.id
   name
   description

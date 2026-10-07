@@ -393,6 +393,8 @@ func TestTheBearerCallsAnswerNotConfiguredOnANilClient(t *testing.T) {
 	_, _, checks["CommitForRef"] = c.CommitForRef(ctx, installToken, "acme", "widget", "main")
 	_, checks["Tarball"] = c.Tarball(ctx, installToken, "acme", "widget", headSHA)
 	_, _, checks["ScopedInstallationToken"] = c.ScopedInstallationToken(ctx, 42, []string{"widget"}, map[string]string{"contents": "read"})
+	_, checks["UploadSARIF"] = c.UploadSARIF(ctx, installToken, "acme", "widget", SARIFAnalysis{})
+	_, checks["SARIFUploadStatus"] = c.SARIFUploadStatus(ctx, installToken, "acme", "widget", "id")
 	for name, err := range checks {
 		if !errors.Is(err, ErrNotConfigured) {
 			t.Errorf("%s on a nil client: want ErrNotConfigured, got %v", name, err)

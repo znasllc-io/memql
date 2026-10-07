@@ -2,24 +2,8 @@
 // the append-only version history (v1:library:documentVersion) and the
 // user / assistant / restore flows that append to it (memql#1228-1231).
 //
-// Why a Go integration instead of pure DSL: appending a version is a
-// read-then-compute-then-write dance the MemQL DSL cannot express on
-// its own --
-//
-//   - the next versionNumber is (current latest versionNumber) + 1, and
-//     MemQL has no arithmetic;
-//   - the version row needs a freshly minted id, and MemQL has no
-//     id-mint primitive in a mutation body;
-//   - optimistic concurrency needs to compare the caller's expected
-//     version against the current latest, which is a read + branch.
-//
-// So the handlers here read the current history (documentVersions-
-// ForOwner), compute the next version + parent pointer in Go, and call
-// the low-level appendDocumentVersion to append the immutable
-// snapshot. They also re-insert the backing generatedOutput (same id,
-// new version) so the artifact index + Library viewer -- which resolve
-// content through the backing row -- reflect the latest edit, and bump
-// the artifact index's updatedAt watermark.
+// Native operations own version identity, authorization, shared write locks and
+// exact revision approval. Analysis, training and revision recipes live in DSL.
 //
 // Capabilities:
 //
@@ -49,6 +33,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -124,7 +109,7 @@ func (i *Integration) IntegrationName() string { return "library" }
 
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
-	return []memql.IntegrationCapability{
+	return append([]memql.IntegrationCapability{
 		{Name: "requestDocumentRevision", Description: "Prepare a revision request awaiting human approval.", Handler: i.handleRequestDocumentRevision},
 		{Name: "documentRevisionStatus", Description: "Read an owned revision request and its saved draft.", Handler: i.handleDocumentRevisionStatus},
 		{Name: "executeDocumentRevision", Description: "Execute an exact approved revision in its owning Nexus run.", Handler: i.handleExecuteDocumentRevision},
@@ -228,7 +213,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"fileId": "string (required) -- the v1:library:file row id, which must belong to the acting user",
 			},
 		},
-	}
+	}, libraryWorkflowCapabilities()...)
 }
 
 // restampResult is what the re-stamp answers with. `restamped` false is not
@@ -1293,4 +1278,12 @@ func timestampField(row map[string]any, field string) string {
 		return value.UTC().Format(time.RFC3339Nano)
 	}
 	return stringField(row, field)
+}
+
+func libraryWorkflowCapabilities() []memql.IntegrationCapability {
+	operations := (&analysisScope{}).operations()
+	for _, name := range []string{"libraryReadTrainingText", "libraryIngestTrainingText", "libraryRecordTrainingDomain", "libraryAuditTraining", "libraryComposeRevision"} {
+		operations[name] = nil
+	}
+	return workflowhost.ScopedCapabilities(operations)
 }

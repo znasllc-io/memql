@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"io/fs"
 	"maps"
 	"net/url"
@@ -218,7 +220,7 @@ func compileEngineOpening(spec *pipelines.Spec, graph *pipelines.Graph, event pi
 	if refusal := pipelines.Validate(spec); refusal != nil {
 		return pipelines.Plan{}, refusal
 	}
-	mode, ok := pipelines.ModeFor(event)
+	mode, ok := manifestEventMode(event)
 	if !ok {
 		return pipelines.Plan{}, pipelines.Refuse(pipelines.CodeEventUnknown, "", "no mode is decided for event %q", event)
 	}
@@ -256,6 +258,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 	}
 
 	fullStages := []string{manifestStageChecks, manifestStageTests}
+	analysisStages := append(slices.Clone(fullStages), "analysis")
 	pullRequestStages := []string{manifestStageChecks, manifestStageTests, manifestStageGates}
 	every := []string{manifestStepGoChecks, manifestStepPathRouting,
 		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks,
@@ -275,11 +278,11 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		// A full run tests every package in go-tests, the gate packages among
 		// them, so the gates stage is absent, as ci.yml runs that step only on a
 		// pull request.
-		{name: "a push to the default branch", event: pipelines.EventPush, stages: fullStages,
+		{name: "a push to the default branch", event: pipelines.EventPush, stages: analysisStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
 		{name: "a merge group", event: pipelines.EventMergeGroup, stages: fullStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
-		{name: "a release", event: pipelines.EventRelease, stages: fullStages,
+		{name: "a release", event: pipelines.EventRelease, stages: analysisStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
 		// The compiler of this very manifest: Go source only, and the db-gated
 		// driver (component/pipelinerun) imports it, so the change reaches both
@@ -333,6 +336,9 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			byName := map[string][]pipelines.Step{}
 			for _, step := range plan.Steps() {
 				byName[step.Name] = append(byName[step.Name], step)
+				if step.RunAfterFailure != (step.Stage == "analysis") {
+					t.Errorf("failure policy was lost or leaked to another stage: %+v", step)
+				}
 				if step.Kind != pipelines.StepCommand || step.Image != expectedEngineStepImage(spec, step.Name) {
 					t.Errorf("step %s is a %s step in %q; every step is a command in the toolchain image %q",
 						step.Key, step.Kind, step.Image, spec.Image)
@@ -381,7 +387,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 				}
 			}
 
-			if mode, _ := pipelines.ModeFor(o.event); mode == pipelines.ModeFull {
+			if mode, _ := manifestEventMode(o.event); mode == pipelines.ModeFull {
 				checkEngineTestsPartitionEveryPackage(t, spec, graph, byName)
 			}
 		})
@@ -668,4 +674,25 @@ func expectedEngineStepImage(spec *pipelines.Spec, name string) string {
 		return declared.Image
 	}
 	return spec.Image
+}
+
+func manifestEventMode(event pipelines.Event) (pipelines.Mode, bool) {
+	value, err := workflowhost.Run(context.Background(), "pipelineModeForEvent", map[string]any{"event": string(event)}, workflowhost.Options{})
+	mode, _ := value.(string)
+	return pipelines.Mode(mode), err == nil && mode != ""
+}
+
+func TestEngineSecurityAnalysisKeepsLanguagesAndInventories(t *testing.T) {
+	spec := engineManifest(t).Pipeline
+	for name, command := range map[string]string{
+		"codeql-go":         "--language=go",
+		"codeql-javascript": "--language=javascript-typescript",
+		"codeql-python":     "--language=python",
+		"sbom":              "scripts/ci/sbom.py",
+	} {
+		step, ok := engineDeclaredStep(spec, name)
+		if !ok || !strings.Contains(step.Run, command) || len(step.Artifacts) == 0 {
+			t.Fatalf("%s lost its analysis or retained reports: %+v", name, step)
+		}
+	}
 }

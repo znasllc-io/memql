@@ -198,3 +198,110 @@ builtin libraryDocumentRevisionStatus {
 builtin libraryExecuteDocumentRevision {
  requestId string!
 }
+
+/// Bounded operation inside the file-owner analysis scope.
+@executor("integration.library.libraryAnalysisInput")
+builtin libraryAnalysisInput {}
+
+/// Bounded operation inside the file-owner analysis scope.
+@executor("integration.library.libraryAnalysisStatus")
+@args(profile="object")
+builtin libraryAnalysisStatus {
+ status string!
+ embeddingStatus string
+ summary string
+}
+
+/// Bounded operation inside the file-owner analysis scope.
+@executor("integration.library.libraryAnalysisRestamp")
+builtin libraryAnalysisRestamp {}
+
+/// Bounded operation inside the file-owner analysis scope.
+@executor("integration.library.libraryAnalysisSkip")
+@args(profile="object")
+builtin libraryAnalysisSkip {
+ key string!
+ reason string!
+}
+
+/// Bounded operation inside the file-owner analysis scope.
+@executor("integration.library.libraryAnalysisExtract")
+builtin libraryAnalysisExtract {}
+
+/// Bounded operation inside the file-owner analysis scope.
+@executor("integration.library.libraryAnalysisFail")
+@args(profile="object")
+builtin libraryAnalysisFail {
+ reason string!
+}
+
+/// Bounded operation inside the file-owner analysis scope.
+@executor("integration.library.libraryAnalysisSummary")
+@args(profile="object")
+builtin libraryAnalysisSummary {
+ prompt string!
+ text string!
+}
+
+/// Bounded operation inside the file-owner analysis scope.
+@executor("integration.library.libraryAnalysisArtifact")
+builtin libraryAnalysisArtifact {}
+
+/// Bounded operation inside the file-owner analysis scope.
+@executor("integration.library.libraryAnalysisChunks")
+@args(profile="object")
+builtin libraryAnalysisChunks {
+ text string!
+}
+
+/// Bounded operation inside the file-owner analysis scope.
+@executor("integration.library.libraryAnalysisWriteChunk")
+@args(profile="object")
+builtin libraryAnalysisWriteChunk {
+ chunkId string!
+ artifactId string!
+ seq int!
+ text string!
+ total int!
+}
+
+/// Bounded operation inside the file-owner analysis scope.
+@executor("integration.library.libraryAnalysisEmbed")
+@args(profile="object")
+builtin libraryAnalysisEmbed {
+ nodeId string!
+ text string!
+}
+
+/// Bounded operation inside the file-owner analysis scope.
+@executor("integration.library.libraryAnalysisIndexDone")
+@args(profile="object")
+builtin libraryAnalysisIndexDone {
+ chunks int!
+ embedded int!
+}
+
+/// Results recorded by this file analysis pass.
+@executor("integration.library.libraryAnalysisResults")
+builtin libraryAnalysisResults { }
+
+/// Bounded operation within an authorized Library workflow.
+@executor("integration.library.libraryReadTrainingText")
+builtin libraryReadTrainingText {  }
+
+/// Bounded operation within an authorized Library workflow.
+@executor("integration.library.libraryIngestTrainingText")
+builtin libraryIngestTrainingText {  }
+
+/// Bounded operation within an authorized Library workflow.
+@executor("integration.library.libraryRecordTrainingDomain")
+builtin libraryRecordTrainingDomain {  }
+
+/// Bounded operation within an authorized Library workflow.
+@executor("integration.library.libraryAuditTraining")
+builtin libraryAuditTraining {  }
+
+/// Bounded operation within an authorized Library workflow.
+@executor("integration.library.libraryComposeRevision")
+@args(profile="object")
+builtin libraryComposeRevision { name string! format string! statement string! }

@@ -87,3 +87,23 @@ automation produceArtifact {
     )
   )
 }
+
+/// Catalog acquisition, correction attempts and the match/extend/create decision are an authored workflow.
+@template
+automation agentFactoryWorkflow {
+ builtin agentFactoryReadAgents()
+ builtin agentFactoryReadRoles()
+ builtin agentFactoryReadSkills()
+ action := automation agentFactoryDecide()
+ if action == "match" { builtin agentFactoryMatch() } else if action == "extend" { builtin agentFactoryExtend() } else if action == "create" { builtin agentFactoryCreate() }
+}
+
+/// Correct only invalid model decisions, with at most three calls; provider and write errors propagate immediately.
+@template
+automation agentFactoryDecide {
+ for attempt in [1, 2, 3] {
+  answer := builtin agentFactoryAnalyzeOnce(prompt: "agentFactoryAnalyze", schema: "agentFactoryDecision")
+  if answer.valid { return answer.action }
+ }
+ builtin agentFactoryRejectDecision()
+}

@@ -39,18 +39,6 @@
 // trigger would make them ALSO run on their own, which the load-time gate
 // refuses by name.
 //
-// # What is still NOT here, and why (carried forward from memql#4115)
-//
-// The refresh CADENCE stays in Go. This file used to hold a nightly 02:30
-// automation firing logicRefreshDueKnowledgeDomains, which returned a
-// candidate COUNT and did nothing else; memql#644 replaced it with an
-// in-process poller. The poller keeps deciding WHEN, and what it opens is now
-// a goal naming trainSpecialist above rather than a Plan.
-//
-// The other lifecycle duties an older header promised -- auto-archive of
-// zero-citation domains, supersession rollup -- are still unbuilt. They land
-// here if they land as automations at all.
-
 /// Train one knowledge domain's corpus. Opened as a goal by the specialist-training gate and by the
 /// refresh cadence; mode='refresh' supersedes stale chunks rather than only adding.
 @template
@@ -72,4 +60,210 @@ automation trainSpecialist {
     topic: args.topic ?? "",
     mode: args.mode ?? "initial"
   )
+}
+
+/// Ingest each chunk as a bounded vector-backed write. A failed write stops the source.
+@template
+automation knowledgeIngestWorkflow {
+  args { chunks []any! }
+  for chunk in args.chunks {
+    builtin knowledgeWriteIndexedChunk(seq: chunk.seq, text: chunk.text)
+  }
+}
+
+/// Warm selected chunks, then update each touched document from actual index coverage.
+@template
+automation knowledgeEmbedDomainWorkflow {
+  args { domainId string! documentId string! chunks []any! documents []any! }
+  for chunk in args.chunks {
+    builtin knowledgeEmbedSelectedChunk(chunkId: chunk.id)
+  }
+  for documentId in args.documents {
+    builtin knowledgeRollupSelectedDocument(documentId: documentId)
+  }
+  receipts := builtin knowledgeEmbeddingReceipts()
+  return {
+    domainId: args.domainId, documentId: args.documentId, total: args.chunks.count(),
+    embedded: receipts.chunks.where(item => item.status == "embedded").count(),
+    already: receipts.chunks.where(item => item.status == "already").count(),
+    failed: receipts.chunks.where(item => item.status == "failed").count(),
+    documentsRolledUp: receipts.documents.where(item => item.ok).count()
+  }
+}
+
+/// Refresh training can inspect the old corpus; initial training does not fetch it.
+@template
+automation knowledgeTrainingContext {
+  args { mode string! }
+  if args.mode == "refresh" { return builtin knowledgeTrainingCorpus() }
+  return []
+}
+
+/// Select the trainer prompt, tools and refresh bookkeeping in DSL.
+@template
+automation knowledgeTrainWorkflow {
+  args { domainId string! specialistId string! topic string! mode string! partitionId string! }
+  corpus := automation knowledgeTrainingContext(mode: args.mode)
+  specialist := builtin knowledgeTrainingSpecialist()
+  summary := builtin knowledgeTrainingTurn(
+    prompt: "trainerAgent",
+    data: {
+      plan: {input: {domainId: args.domainId, specialistId: args.specialistId, topic: args.topic, mode: args.mode}},
+      targetSpecialist: specialist, existingCorpus: corpus, partition: args.partitionId, now: now
+    },
+    tools: ["webSearch", "fetchUrl", "writeKnowledgeChunk", "markChunkSuperseded", "embedChunk"]
+  )
+  if args.mode == "refresh" { builtin knowledgeTrainingReset() }
+  return summary
+}
+
+/// Seed a knowledge domain with its declared content policy. A/B generation,
+/// disclaimers, authoritative article selection and placeholders are workflow choices.
+@template
+automation knowledgeSeedDomainWorkflow {
+  args {
+    domainId string! domainName string! domainDescription string! category string!
+    tier string! broadSurvey bool! articles []any
+  }
+  if args.tier == "C" {
+    builtin knowledgeResolveSeedEmbedder()
+    hasArticles := logic knowledgeHasSeedArticles(articles: args.articles)
+    if hasArticles {
+      for article in args.articles {
+        fetched := builtin knowledgeFetchSeedArticle(article: article)
+        chunks := builtin knowledgeSplitSeedText(text: fetched.body)
+        for text in chunks {
+          builtin knowledgeStoreSeedChunk(
+            kind: "factExample", title: args.domainName + ": " + fetched.title + " (Wikipedia)",
+            body: "Source: Wikipedia article \"" + fetched.title + "\" (" + fetched.url + "; CC-BY-SA).\n\n" + text,
+            keyTerms: ["wikipedia", fetched.title, args.domainName], seedSource: "wikipedia:" + fetched.title, source: "llmSeeded"
+          ) on error continue
+        }
+      } on error continue
+    } else {
+      builtin knowledgeStoreSeedChunk(
+        kind: "principle", title: "Tier-C placeholder for " + args.domainName,
+        body: "**This domain doesn't auto-seed content.** Specialist domains in this tier (clinical medicine, surgical technique, securities advice, legal practice, etc.) carry too much downstream risk for LLM-generated baseline content. Upload your own authoritative materials -- textbooks, professional society guidelines, peer-reviewed articles -- via the Knowledge panel's document-attach flow. Until then, an agent assigned this domain answers from its general LLM pretraining alone.",
+        keyTerms: ["placeholder", "specialist", "upload", "authoritative"], seedSource: "tier-c-placeholder", source: "llmSeeded"
+      )
+    }
+  } else {
+    generated := builtin knowledgeGenerateSeedChunks(
+      prompt: "seedDomainContent", schema: "seedDomainContent",
+      data: {domainId: args.domainId, domainName: args.domainName, domainDescription: args.domainDescription,
+        category: args.category, tier: args.tier == "B" ? "B" : "A", broadSurvey: args.broadSurvey,
+        targetCount: args.broadSurvey ? 60 : 30}
+    )
+    builtin knowledgeResolveSeedEmbedder()
+    if args.tier == "B" {
+      builtin knowledgeStoreSeedChunk(
+        kind: "principle", title: "Disclaimer: general information only", body: "**General information only -- not professional advice.** Content in this domain is generated for educational reference. For specific decisions involving health, legal, financial, or safety matters, consult a licensed professional. The agent should: (1) frame answers as general information, not personal advice; (2) name what kind of professional could help with the specific situation; (3) decline to give actionable specifics where they could cause harm if applied without expert oversight.",
+        keyTerms: ["disclaimer", "professional advice", "safety", "consult"], seedSource: "seed-disclaimer", source: "llmSeeded"
+      ) on error continue
+    }
+    for chunk in generated if chunk.title != "" && chunk.body != "" {
+      builtin knowledgeStoreSeedChunk(kind: chunk.kind, title: chunk.title, body: chunk.body, keyTerms: chunk.keyTerms,
+        seedSource: "llm-generated", source: "llmSeeded") on error continue
+    }
+  }
+  builtin knowledgeStampSeed() on error continue
+}
+
+/// Reuse a bridge or generate its cross-domain content once, with best-effort individual chunk writes.
+@template
+automation knowledgeBridgeWorkflow {
+ args { bridgeId string! roleSlug string! }
+ exists := builtin knowledgeBridgeExists() on error continue
+ if exists == true { return args.bridgeId }
+ inputs := builtin knowledgeBridgeInputs()
+ if inputs.domains.count() < 2 { return "" }
+ chunks := builtin knowledgeGenerateSeedChunks(prompt: "seedDomainBridge", schema: "seedDomainBridge", data: {
+  roleSlug: args.roleSlug, roleLabel: inputs.roleLabel, domains: inputs.domains, targetCount: 10
+ })
+ builtin knowledgeResolveSeedEmbedder()
+ for chunk in chunks if chunk.title != "" && chunk.body != "" {
+  builtin knowledgeStoreSeedChunk(index: chunk.index, kind: chunk.kind, title: chunk.title, body: chunk.body,
+   keyTerms: chunk.keyTerms, seedSource: "llm-bridge", source: "crossDomainBridge") on error continue
+ }
+ builtin knowledgeStampBridge() on error continue
+ return args.bridgeId
+}
+
+/// Create missing catalog entries, replace changed corpus sources and remove retired sources.
+@template
+automation knowledgeSeedCatalogWorkflow {
+ args { domains []any! corpora []any! retired []any! forceIngest bool! }
+ for domain in args.domains {
+  exists := builtin knowledgeCatalogDomainExists(domainId: domain.id)
+  if exists != true {
+   builtin knowledgeCreateCatalogDomain(domainId: domain.id, tier: domain.tier,
+    category: domain.category == "" ? "business" : domain.category,
+    source: domain.source == "" ? "llmSeeded" : domain.source)
+  }
+ }
+ for corpus in args.corpora {
+  exists := builtin knowledgeSeedCorpusExists(key: corpus.key)
+  if args.forceIngest || exists != true {
+   builtin knowledgePurgeSeedCorpus(key: corpus.key) on error continue
+   builtin knowledgeIngestSeedCorpus(key: corpus.key, source: "appStructure") on error continue
+  }
+ }
+ for corpus in args.retired {
+  builtin knowledgePurgeRetiredCorpus(domainId: corpus.domainId, sourceRef: corpus.sourceRef) on error continue
+ }
+}
+
+/// Select a subset of the catalog and seed each selected domain independently.
+@template
+automation knowledgeSeedAllWorkflow {
+ args { domains []any! tierFilter string! domainIdPrefix string! }
+ for domain in args.domains if (args.tierFilter == "" || domain.tier == args.tierFilter) && (args.domainIdPrefix == "" || domain.id startsWith args.domainIdPrefix) {
+  builtin knowledgeSeedSelectedDomain(domainId: domain.id) on error continue
+ }
+}
+
+/// Hourly backstop for domains that explicitly enable a refresh cadence.
+@trigger(schedule="0 0 * * * *", node="planner", lease="knowledge-refresh")
+automation refreshKnowledgeDomains {
+ builtin plannerRefreshKnowledge()
+}
+
+/// Read the selected domains and handle each independently.
+@template
+automation knowledgeRefreshSweep {
+ domains := builtin knowledgeRefreshCandidates()
+ for domain in domains {
+  builtin knowledgeRefreshCandidate(domain: domain) on error continue
+ }
+}
+
+/// An absent or unreadable seed timestamp is due; nonpositive cadence disables refresh.
+@template
+automation knowledgeRefreshDue {
+ args { cadence number ageDays number! validSeedTime bool! staleSignalCount number }
+ cadence := args.cadence ?? 90
+ return cadence > 0 && (!args.validSeedTime || args.ageDays > cadence)
+}
+
+/// Stale signals and cadence share one durable six-hour claim across planner replicas.
+@template
+automation knowledgeRefreshCandidateWorkflow {
+ args { cadence number ageDays number! validSeedTime bool! staleSignalCount number staleEvent bool! }
+ due := automation knowledgeRefreshDue(cadence: args.cadence, ageDays: args.ageDays, validSeedTime: args.validSeedTime, staleSignalCount: args.staleSignalCount)
+ eligible := logic knowledgeRefreshEligible(staleEvent: args.staleEvent, staleSignalCount: args.staleSignalCount, due: due)
+ if eligible {
+  claimed := builtin knowledgeClaimRefresh(hours: 6)
+  if claimed { builtin knowledgeOpenRefresh() }
+ }
+}
+
+/// The goal statement and training recipe are policy, supplied here to the bounded goal opener.
+@template
+automation knowledgeOpenRefreshWorkflow {
+ args { domainId string! name string! owner string! }
+ name := args.name == "" ? args.domainId : args.name
+ builtin knowledgeDispatchRefresh(owner: args.owner == "" ? "system" : args.owner,
+  statement: "Refresh knowledge domain \"" + name + "\" (cadence backstop)", automation: "trainSpecialist",
+  input: {domainId: args.domainId, mode: "refresh", specialistId: "", topic: name},
+  requestedVia: "api", triggeredBy: "refresh.cadence")
 }

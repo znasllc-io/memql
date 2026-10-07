@@ -194,6 +194,9 @@ func (s *AuthoredScheduler) Activate(construct *memql.AuthoredConstruct) error {
 		return fmt.Errorf("authored scheduler: compile %s: %w", origin, err)
 	}
 	automation.Origin = origin
+	if automation.ScheduleNode != "" || automation.ScheduleLease != "" {
+		return fmt.Errorf("authored scheduler: node and lease placement belong to an installed DSL bundle; user automations use owner-scoped scheduling")
+	}
 	if automation.Name != construct.Name {
 		return fmt.Errorf("authored scheduler: construct name %q does not match automation name %q in source", construct.Name, automation.Name)
 	}

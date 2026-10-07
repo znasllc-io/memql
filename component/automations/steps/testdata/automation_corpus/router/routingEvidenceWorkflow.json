@@ -1,0 +1,69 @@
+{
+  "automation": "router/automations.memql routingEvidenceWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.routingEvidenceWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "days": 7,
+              "failureCategories": [
+                "structured",
+                "schema",
+                "validation",
+                "contract"
+              ]
+            },
+            "kind": "builtin",
+            "name": "routingReadEvidenceWindows"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.routingEvidenceWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "days": 7,
+              "failureCategories": [
+                "structured",
+                "schema",
+                "validation",
+                "contract"
+              ]
+            },
+            "kind": "builtin",
+            "name": "routingReadEvidenceWindows"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    }
+  }
+}

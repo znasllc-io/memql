@@ -116,6 +116,8 @@ type Executor struct {
 
 	// sandboxRun suppresses journalling for Gate-2 dry-runs (memql#2932)
 	sandboxRun bool
+	// borrowedRun preserves the native owner's context in ExecuteInScope.
+	borrowedRun bool
 
 	// journal writes the run and step rows (journal.go). Nil under a
 	// sandboxed dry-run and when no engine is configured; every method on a
@@ -968,7 +970,7 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 // their own, and inherit the targeted step's context from the call that
 // started them.
 func (e *Executor) withRunContext(ctx context.Context, stepCtx *StepContext, step *Step) context.Context {
-	if e == nil || e.sandboxRun || stepCtx == nil || stepCtx.Execution == nil || step == nil {
+	if e == nil || e.sandboxRun || e.borrowedRun || stepCtx == nil || stepCtx.Execution == nil || step == nil {
 		return ctx
 	}
 	exec := stepCtx.Execution

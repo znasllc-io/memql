@@ -104,7 +104,7 @@ const EditionStatus = "frozen"
 // own.
 // Bounded parallel iteration changes the grammar again; its companion editor
 // release is prepared with the engine, and publication is a separate action.
-const EditorRelease = "0.6.3"
+const EditorRelease = "0.6.4"
 
 // FrontEnd is how one edition's source reaches the core parser.
 type FrontEnd struct {

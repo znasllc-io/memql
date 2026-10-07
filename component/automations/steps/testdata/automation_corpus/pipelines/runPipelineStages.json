@@ -1,0 +1,57 @@
+{
+  "automation": "pipelines/automations.memql runPipelineStages",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "stages": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.runPipelineStages"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "pipelineWorkflowFacts"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "stages": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.runPipelineStages"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "pipelineWorkflowFacts"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/frontdoor"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -161,50 +162,54 @@ func (r *DoorReconciler) Run(ctx context.Context) (DoorPassResult, error) {
 		return out, fmt.Errorf("customdomain: door reconciler has no store")
 	}
 
-	// A FAILURE TO READ RESERVATIONS IS REPORTED, NOT SWALLOWED, and the first
-	// version of this got it exactly backwards.
-	//
-	// Its comment said the failure "must not stop the doors that already exist
-	// from advancing, and in particular must not stop a teardown" -- but BOTH
-	// directions of D9 live inside open(): the reservation comparison is the
-	// only code that can move a door to `removing`, and it is downstream of
-	// this read. So a failed read blocked opening AND teardown, and the pass
-	// then returned {0,0,0,0,0,0} with no error, which the automation records
-	// as a success every two minutes forever. A cluster that cannot see its
-	// reservations was indistinguishable from a cluster with nothing to do.
-	//
-	// The step loop still runs -- a door already `issuing` should keep
-	// advancing while the account read is broken -- but the pass ends in an
-	// error, so the automation step fails and somebody can see it.
-	openErr := r.open(ctx, &out)
-	if openErr != nil {
-		out.Failed++
-		r.warn("could not read account reservations; no door was opened or torn down this pass", "error", openErr)
-	}
-
-	doors, err := r.doors.ToReconcile(ctx)
-	if err != nil {
-		return out, err
-	}
-	for _, d := range doors {
-		// The query already excludes the two settled statuses; this is the
-		// same rule stated once more in Go, as a guard rather than a filter --
-		// a future widening of that filter must not silently start dispatching
-		// cluster operations for doors that are done.
-		if !NonTerminal(d.Status) {
-			continue
-		}
-		out.Checked++
-		if err := r.step(ctx, d, &out); err != nil {
-			out.Failed++
-			r.warn("account front door reconciliation step failed",
-				"reservedName", d.ReservedName, "status", d.Status, "error", err)
-		}
-	}
-	if openErr != nil {
-		return out, fmt.Errorf("customdomain: account front door pass could not read reservations, so no door was opened or torn down: %w", openErr)
-	}
-	return out, nil
+	selected := map[string]Door{}
+	var reservationErr error
+	_, err := workflowhost.Run(ctx, "accountDoorReconcileWorkflow", nil, workflowhost.Options{Logger: r.logger, Operations: map[string]workflowhost.Operation{
+		"customDomainSyncReservations": func(ctx context.Context, _ map[string]any) (any, error) {
+			reservationErr = r.open(ctx, &out)
+			if reservationErr != nil {
+				out.Failed++
+				r.warn("could not read account reservations", "error", reservationErr)
+			}
+			return nil, reservationErr
+		},
+		"customDomainReadDoors": func(ctx context.Context, _ map[string]any) (any, error) {
+			doors, err := r.doors.ToReconcile(ctx)
+			if err != nil {
+				return nil, err
+			}
+			facts := []any{}
+			for _, d := range doors {
+				selected[d.ID] = d
+				facts = append(facts, map[string]any{"id": d.ID, "status": d.Status})
+			}
+			return facts, nil
+		},
+		"customDomainReconcileDoor": func(ctx context.Context, a map[string]any) (any, error) {
+			id, _ := a["doorId"].(string)
+			d, ok := selected[id]
+			if !ok {
+				return nil, fmt.Errorf("door outside reconciliation snapshot")
+			}
+			if !NonTerminal(d.Status) {
+				return nil, nil
+			}
+			out.Checked++
+			err := r.step(ctx, d, &out)
+			if err != nil {
+				out.Failed++
+				r.warn("account front door reconciliation step failed", "reservedName", d.ReservedName, "error", err)
+			}
+			return nil, err
+		},
+		"customDomainRequireReservations": func(context.Context, map[string]any) (any, error) {
+			if reservationErr != nil {
+				return nil, fmt.Errorf("customdomain: account front door pass could not read reservations, so no door was opened or torn down: %w", reservationErr)
+			}
+			return nil, nil
+		},
+	}})
+	return out, err
 }
 
 // open creates a door for every held reservation that has none, and asks for

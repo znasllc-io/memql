@@ -1,0 +1,125 @@
+{
+  "automation": "knowledge/automations.memql knowledgeSeedCatalogWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "corpora": [
+              "a"
+            ],
+            "domains": [
+              "a"
+            ],
+            "forceIngest": true,
+            "retired": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.knowledgeSeedCatalogWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "knowledgeCatalogDomainExists"
+          },
+          {
+            "args": {
+              "category": "business",
+              "source": "llmSeeded"
+            },
+            "kind": "builtin",
+            "name": "knowledgeCreateCatalogDomain"
+          },
+          {
+            "kind": "builtin",
+            "name": "knowledgeSeedCorpusExists"
+          },
+          {
+            "kind": "builtin",
+            "name": "knowledgePurgeSeedCorpus"
+          },
+          {
+            "args": {
+              "source": "appStructure"
+            },
+            "kind": "builtin",
+            "name": "knowledgeIngestSeedCorpus"
+          },
+          {
+            "kind": "builtin",
+            "name": "knowledgePurgeRetiredCorpus"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "corpora": [
+              "a"
+            ],
+            "domains": [
+              "a"
+            ],
+            "forceIngest": true,
+            "retired": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.knowledgeSeedCatalogWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "knowledgeCatalogDomainExists"
+          },
+          {
+            "args": {
+              "category": "business",
+              "source": "llmSeeded"
+            },
+            "kind": "builtin",
+            "name": "knowledgeCreateCatalogDomain"
+          },
+          {
+            "kind": "builtin",
+            "name": "knowledgeSeedCorpusExists"
+          },
+          {
+            "kind": "builtin",
+            "name": "knowledgePurgeSeedCorpus"
+          },
+          {
+            "args": {
+              "source": "appStructure"
+            },
+            "kind": "builtin",
+            "name": "knowledgeIngestSeedCorpus"
+          },
+          {
+            "kind": "builtin",
+            "name": "knowledgePurgeRetiredCorpus"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

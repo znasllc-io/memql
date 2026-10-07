@@ -52,6 +52,7 @@ func (a *App) setupPlannerIntegration() {
 		// event reaches every planner replica; the shared cluster guard's
 		// DB-PK claim makes exactly one replica dispatch the agent turn.
 		planner.WithClusterClaimer(a.clusterGuard),
+		planner.WithWorkflowClaims(a.clusterGuard.StrictClaimer()),
 	)
 	if err != nil {
 		a.fatal("failed to create planner integration", "error", err, "component", planner.ComponentName)
@@ -75,6 +76,9 @@ func (a *App) setupPlannerIntegration() {
 		a.Logger.Info("planner: app-delegation triage installed (row-backed probe)")
 	}
 
+	if err := a.engine.RegisterIntegration(plannerIntegration); err != nil {
+		a.fatal("register planner capabilities", "error", err)
+	}
 	a.Dependencies = append(a.Dependencies, plannerIntegration)
 	a.Logger.Info("planner integration registered")
 }

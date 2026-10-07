@@ -43,6 +43,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
@@ -97,7 +98,7 @@ func (i *Integration) IntegrationName() string { return "agents" }
 // `askSpecialist`, `requestUserFeedback`, `produceArtifact`, plus
 // `runAgentTurn`, which the work spine's templates call.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
-	return []memql.IntegrationCapability{
+	return append([]memql.IntegrationCapability{
 		{
 			Name:        "invoke",
 			Description: "Async-invoke a DSL-registered agent. Opens a v1:work:goal naming the invokeAgent template and returns {goalId, runId}. The run dispatcher claims the run on an agent node and runs the turn.",
@@ -184,7 +185,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"partitionId": "string (required) -- space the plan lives in (auto-stamped)",
 			},
 		},
-	}
+	}, workflowhost.ScopedCapabilities((&factoryScope{}).operations())...)
 }
 
 // envelopeConcept is the namespace used for the MemoryNode this

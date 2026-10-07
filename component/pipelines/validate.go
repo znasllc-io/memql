@@ -16,7 +16,7 @@ import (
 // DefaultStepTimeout applies when a step names none; MaxStepTimeout caps one.
 const (
 	DefaultStepTimeout = 20 * time.Minute
-	MaxStepTimeout     = 2 * time.Hour
+	MaxStepTimeout     = 3 * time.Hour
 )
 
 // minStepTimeout is the shortest timeout a step may name: under a minute, the
@@ -45,6 +45,7 @@ var (
 	// ("stage.step#2") and of a refusal's scope ("stage/step"), so it may
 	// hold no dot, slash or hash.
 	manifestNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
+	workflowNameRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,127}$`)
 	// serviceEnvKeyRe is an environment variable name a sidecar can be given.
 	serviceEnvKeyRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 	// secretNameRe is a globalSecret name a step may reference; it becomes an
@@ -84,6 +85,9 @@ var stageOnValues = map[string]bool{
 func Validate(spec *Spec) *Refusal {
 	if spec == nil {
 		return Refuse(CodeNotDeclared, "", "The manifest has no pipeline: block.")
+	}
+	if spec.Workflow != "" && !workflowNameRe.MatchString(spec.Workflow) {
+		return Refuse(CodeStageInvalid, "workflow", "workflow must name an installed MemQL automation (letters, digits or underscores, starting with a letter, at most 128 characters).")
 	}
 	if len(spec.Stages) == 0 {
 		return Refuse(CodeStageInvalid, "", "The pipeline declares no stages.")

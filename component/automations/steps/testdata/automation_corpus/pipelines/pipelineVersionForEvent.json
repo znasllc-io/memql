@@ -1,0 +1,47 @@
+{
+  "automation": "pipelines/automations.memql pipelineVersionForEvent",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "eventName": "s-eventName",
+            "sha": "s-sha",
+            "tag": "s-tag"
+          },
+          "topic": "automation.invocation.pipelineVersionForEvent"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": "s-sha",
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "eventName": "s-eventName",
+            "sha": "s-sha",
+            "tag": "s-tag"
+          },
+          "topic": "automation.invocation.pipelineVersionForEvent"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": "s-sha",
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

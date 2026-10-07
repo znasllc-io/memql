@@ -164,6 +164,8 @@ const (
 // Keyword key sets, shared by the placement and its docs.
 var (
 	triggerKeys = []ArgSpec{
+		{Name: "node", Type: "string", Doc: "Run this scheduled automation only on an elected replica of this node type. Requires schedule=."},
+		{Name: "lease", Type: "string", Doc: "Stable cluster lease scope for a placed schedule. Requires node=; defaults to schedule:<automation-name>."},
 		{Name: "before", Type: "string", Doc: "Adjust the incoming row before create, update, or write; requires concept."},
 		{Name: "event", Type: "string", Doc: "Event pattern, e.g. \"node.created\" (with concept=) or a raw topic such as \"system.startup\"."},
 		{Name: "concept", Type: "string", Doc: "Concept id the triggering event targets; required by the structured node.* event kinds."},

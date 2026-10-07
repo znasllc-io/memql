@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/deploycontrol"
 )
 
@@ -138,21 +139,33 @@ func (r *Reconciler) Run(ctx context.Context) (PassResult, error) {
 	if err != nil {
 		return out, err
 	}
+	byID := map[string]Binding{}
+	facts := []any{}
 	for _, b := range bindings {
-		// The query already excludes the two settled statuses; this is the
-		// same rule stated once more in Go, as a guard rather than a filter --
-		// a future widening of that filter must not silently start dispatching
-		// cluster operations for rows that are done.
-		if !NonTerminal(b.Status) {
-			continue
-		}
-		out.Checked++
-		if err := r.step(ctx, b, &out); err != nil {
-			out.Failed++
-			r.warn("custom domain reconciliation step failed", "hostname", b.Hostname, "status", b.Status, "error", err)
-		}
+		byID[b.ID] = b
+		facts = append(facts, map[string]any{"id": b.ID, "status": b.Status})
 	}
-	return out, nil
+	_, err = workflowhost.Run(ctx, "customDomainReconcileWorkflow", map[string]any{"bindings": facts}, workflowhost.Options{Logger: r.logger, Operations: map[string]workflowhost.Operation{
+		"customDomainReconcileBinding": func(ctx context.Context, args map[string]any) (any, error) {
+			id, _ := args["bindingId"].(string)
+			b, ok := byID[id]
+			if !ok {
+				return nil, fmt.Errorf("binding is outside this reconciliation snapshot")
+			}
+			// A terminal binding cannot issue/remove resources even if a workflow changes.
+			if !NonTerminal(b.Status) {
+				return nil, nil
+			}
+			out.Checked++
+			err := r.step(ctx, b, &out)
+			if err != nil {
+				out.Failed++
+				r.warn("custom domain reconciliation step failed", "hostname", b.Hostname, "status", b.Status, "error", err)
+			}
+			return nil, err
+		},
+	}})
+	return out, err
 }
 
 // step advances one binding by at most one state.

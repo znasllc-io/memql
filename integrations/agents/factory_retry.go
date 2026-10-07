@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"sort"
 	"strings"
 )
@@ -87,28 +88,9 @@ func (i *Integration) decideForGoal(
 	roles []roleSnapshot,
 	skills []skillSnapshot,
 ) (factoryDecision, error) {
-	var priorError string
-	var lastErr error
-	for attempt := 1; attempt <= maxFactoryAnalyzeAttempts; attempt++ {
-		decision, err := i.analyzeGoal(ctx, goal, existing, roles, skills, priorError)
-		if err != nil {
-			if !correctable(err) {
-				// Provider down, engine handle missing, prompt not registered:
-				// re-asking cannot help. Fail now rather than three times.
-				return factoryDecision{}, err
-			}
-			lastErr, priorError = err, err.Error()
-			continue
-		}
-		if verr := validateFactoryDecision(decision, existing, roles); verr != nil {
-			lastErr, priorError = verr, verr.Error()
-			continue
-		}
-		return decision, nil
-	}
-	return factoryDecision{}, fmt.Errorf(
-		"agentFactoryAnalyze did not produce an applicable decision in %d attempts; last rejection: %w",
-		maxFactoryAnalyzeAttempts, lastErr)
+	scope := &factoryScope{i: i, goal: goal, existing: existing, roles: roles, skills: skills}
+	_, err := workflowhost.Run(ctx, "agentFactoryDecide", nil, workflowhost.Options{Operations: scope.operations()})
+	return scope.decision, err
 }
 
 // slugList renders the catalog's slugs for a feedback message. Sorted, because

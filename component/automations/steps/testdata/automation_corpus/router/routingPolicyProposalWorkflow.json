@@ -1,0 +1,73 @@
+{
+  "automation": "router/automations.memql routingPolicyProposalWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "sentence": "s-sentence"
+          },
+          "topic": "automation.invocation.routingPolicyProposalWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "routingProposalCatalog"
+          },
+          {
+            "args": {
+              "data": {
+                "sentence": "s-sentence"
+              },
+              "prompt": "composeRoutingPolicy"
+            },
+            "kind": "builtin",
+            "name": "routingGeneratePolicyProposal"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "sentence": "s-sentence"
+          },
+          "topic": "automation.invocation.routingPolicyProposalWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "routingProposalCatalog"
+          },
+          {
+            "args": {
+              "data": {
+                "sentence": "s-sentence"
+              },
+              "prompt": "composeRoutingPolicy"
+            },
+            "kind": "builtin",
+            "name": "routingGeneratePolicyProposal"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

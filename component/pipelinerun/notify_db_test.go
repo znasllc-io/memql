@@ -320,7 +320,9 @@ func startRowWorker(t *testing.T, eng *memqlengine.MemQLEngine) *rowWorker {
 				continue
 			}
 			cursor = ""
-			if res.GetMeta() != nil { cursor = res.GetMeta().Cursor }
+			if res.GetMeta() != nil {
+				cursor = res.GetMeta().Cursor
+			}
 			for _, row := range rowsOf(res) {
 				if !w.serves(rowString(row, "requestedBy")) {
 					continue
