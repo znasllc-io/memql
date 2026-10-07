@@ -76,6 +76,7 @@ type sourceVerifier struct {
 	visited    map[string]bool
 	settings   int
 	attributes map[string]bool
+	verified   func(string, string, []byte) error
 }
 
 // VerifySourceClosure follows file reads, not workflow policy. It verifies the
@@ -83,6 +84,10 @@ type sourceVerifier struct {
 // of Kustomize inputs. It never follows a symlink, submodule, remote base or
 // executable generator. No checkout, Git filter or working-tree file is read.
 func VerifySourceClosure(ctx context.Context, objects GitObjects, spec RenderSpec) (ClosedSource, error) {
+	return verifySourceClosure(ctx, objects, spec, nil)
+}
+
+func verifySourceClosure(ctx context.Context, objects GitObjects, spec RenderSpec, verified func(string, string, []byte) error) (ClosedSource, error) {
 	if objects == nil {
 		return ClosedSource{}, errors.New("Git source objects are unavailable")
 	}
@@ -95,7 +100,7 @@ func VerifySourceClosure(ctx context.Context, objects GitObjects, spec RenderSpe
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	v := &sourceVerifier{ctx: ctx, objects: objects, bodies: map[string][]byte{}, trees: map[string]map[string]gitEntry{}, files: map[string]SourceFile{}, visiting: map[string]bool{}, visited: map[string]bool{}, attributes: map[string]bool{}}
+	v := &sourceVerifier{ctx: ctx, objects: objects, bodies: map[string][]byte{}, trees: map[string]map[string]gitEntry{}, files: map[string]SourceFile{}, visiting: map[string]bool{}, visited: map[string]bool{}, attributes: map[string]bool{}, verified: verified}
 	commit, err := v.read("commit", request.Revision)
 	if err != nil {
 		return ClosedSource{}, err
@@ -183,6 +188,11 @@ func (v *sourceVerifier) read(kind, oid string) ([]byte, error) {
 	_, _ = hash.Write(body)
 	if hex.EncodeToString(hash.Sum(nil)) != oid {
 		return nil, errors.New("Git source object does not match its requested identity")
+	}
+	if v.verified != nil {
+		if err := v.verified(kind, oid, body); err != nil {
+			return nil, err
+		}
 	}
 	v.bytes += len(body)
 	v.bodies[key] = body

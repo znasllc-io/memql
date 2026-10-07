@@ -171,6 +171,44 @@ snapshot and render result, verify candidate images and protected resources,
 and repeat the relevant checks before an effect. A source-closure digest alone
 does not grant installation approval or prove rollback readiness.
 
+### Private source transport
+
+`cmd/installation-source` supplies the bounded raw-object reader in the
+Workbench runtime image. An isolated Job can run `/app/installation-source
+--repository=/workspace --spec=/inputs/render.json --output=/artifacts/source.tar`
+against its pinned checkout. The specification comes from native installation
+configuration. Git replacement refs, global configuration, hooks, filesystem
+monitors, transport and lazy fetch are disabled; only raw object reads run,
+with no inherited clone credentials. Dirty working-tree files do not affect
+the result. Cancellation and byte limits terminate and reap the reader process.
+
+The collector writes a private, mode-0600 uncompressed USTAR artifact and one
+content-free JSON result on stdout. The artifact contains only the verified
+commit/tree/blob objects consumed by the input graph; source bytes and commit
+messages can be confidential, so it must not become a public release asset.
+Output installation is atomic and never overwrites an existing file. A repeat
+verifies the existing archive; failure removes the collector's partial file.
+
+`argocd.VerifySourceArchive` independently repeats the object-identity and
+source-closure proof against the engine's own specification. It bounds entries
+and bytes, rejects extraction/link/PAX tricks, duplicate or unused objects,
+trailing data and truncated end records, and extracts nothing. Zero-filled
+file content or tar padding cannot substitute for the final two records.
+
+On October 7 the compiled collector captured the same committed local and
+cloud input sets above (61 and 43 files), producing 319,488-byte and
+291,328-byte private archives. A second process independently verified each
+existing output and reported no change. Real-Git race tests also exercise dirty
+worktrees, replacement refs, inherited Git overrides, concurrent collectors,
+cancellation and partial-output cleanup. This is local CLI evidence, not an
+installed Workbench Job or a cloud deployment.
+
+This ships the collector and verification codec, not a completed preparation
+workflow. Native Job dispatch, private artifact ownership, actual renderer
+configuration, candidate-image/resource checks and installation authority
+still have to be connected and qualified together. A successful collector
+receipt alone does not authorize an update.
+
 ### Update and rollback source
 
 The update names a full Git commit in the existing installation repository and

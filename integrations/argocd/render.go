@@ -1,6 +1,7 @@
 package argocd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -45,6 +46,39 @@ type RenderSpec struct {
 	APIVersions           []string        `json:"apiVersions"`
 	KustomizeBuildOptions string          `json:"kustomizeBuildOptions"`
 	KustomizeBinaryPath   string          `json:"kustomizeBinaryPath"`
+}
+
+// DecodeRenderSpec reads a native collector specification without accepting
+// duplicate fields, unknown options or trailing JSON. Semantic validation uses
+// the same codec as the repository renderer, before any source is collected.
+func DecodeRenderSpec(body []byte) (RenderSpec, error) {
+	if len(body) > 512<<10 {
+		return RenderSpec{}, errors.New("render specification exceeds its bound")
+	}
+	fields, err := decodeObject(body)
+	if err != nil {
+		return RenderSpec{}, errors.New("render specification contains invalid or ambiguous JSON")
+	}
+	var spec RenderSpec
+	d := json.NewDecoder(bytes.NewReader(body))
+	d.DisallowUnknownFields()
+	if d.Decode(&spec) != nil {
+		return RenderSpec{}, errors.New("render specification contains unsupported fields")
+	}
+	// encoding/json otherwise accepts case variants of a field name, allowing
+	// both source and Source to assign the same struct field in one object.
+	encoded, _ := json.Marshal(spec)
+	var canonical map[string]json.RawMessage
+	_ = json.Unmarshal(encoded, &canonical)
+	for field := range fields {
+		if _, known := canonical[field]; !known {
+			return RenderSpec{}, errors.New("render specification contains unsupported fields")
+		}
+	}
+	if _, _, err := renderRequest(spec, RepositoryCredentials{}); err != nil {
+		return RenderSpec{}, err
+	}
+	return spec, nil
 }
 
 // RepositoryCredentials are transient HTTPS credentials, including an already

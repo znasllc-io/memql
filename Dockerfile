@@ -265,6 +265,9 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -ldflags="-s -w" -o /app/bin/healthcheck ./cmd/healthcheck
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -ldflags="-s -w" -o /app/bin/installation-source ./cmd/installation-source
 
 # --- MemQL OS shell SPA (memql#3314) ----------------------------------------
 #
@@ -384,6 +387,8 @@ WORKDIR /app
 
 COPY --from=builder /app/bin/memql ./memql
 COPY --from=builder /app/bin/healthcheck ./healthcheck
+# Trusted source collector for isolated Workbench Jobs; it invokes only Git object reads.
+COPY --from=builder /app/bin/installation-source ./installation-source
 # Same site-bundle copies as every other runtime stage: empty for this node
 # type, and present so a stage selector change cannot silently ship an image
 # with no bundle directory at all.
