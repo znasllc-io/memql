@@ -321,9 +321,45 @@ omits type metadata inside a typed PVC list. The codec derives absent type
 fields from the verified collection while refusing contradictory fields.
 
 This storage proof grants no database restart, resizing or installation
-authority. Secret/namespace preservation, compatibility and continuity,
-artifact availability, actual renderer configuration, durable preparation
-and the scoped installation workflow remain unfinished.
+authority. Compatibility and continuity, artifact availability, actual
+renderer configuration, durable preparation and the scoped installation
+workflow remain unfinished.
+
+### Live credentials and namespace preservation
+
+A separate private read-only verifier compares every rendered Secret and
+Namespace, the namespaces containing rendered objects, and native-configured
+protected resources seeded outside Git. Its result binds fresh UIDs, logical
+credential fingerprints, namespace state and ownership to both complete
+renders. A second replica obtains fresh observations; replacement or rotation
+invalidates earlier evidence. The configured protected-resource list must come
+from the receiving installation, never a client's claimed allowlist.
+
+Rendered credentials must equal both the rollback declaration and the live
+Secret, including type and immutability. The codec observes Kubernetes's
+`stringData` precedence and decoded `data` semantics. Creation, removal,
+ownership changes, terminating namespaces, destructive Argo resource options
+and hooks refuse ordinary update qualification. Every protected object outside
+Git, including namespaces and owner ancestors, requires explicit `Prune=false`
+and `IgnoreExtraneous` protection. Conflicting duplicate options cannot
+establish that protection.
+
+Owner references are resolved through fresh API discovery, including
+cluster-scoped owners of namespaced resources. Bounded ancestor reads verify
+UIDs and reject missing/deleting owners, cycles and changes to rendered owners
+that could garbage-collect otherwise unchanged credentials. Unchanged rendered
+owners must also match live material: restoring drifted Certificate or other
+controller configuration can rotate credentials. Unknown controller defaults
+require a qualified codec rather than being silently ignored. Evidence retains
+only resource identities and fingerprints. Arbitrary annotations, including
+last-applied configuration containing Secret data, are never retained in the
+observation or formatted as diagnostics.
+
+This is a preservation observation, not an installation authority or a promise
+against concurrent external changes. The admitted preparer must still verify
+Application-level sync policy and renderer identity, bind all evidence to its
+durable preparation, and recheck it before an effect. Actual installed update,
+rollback, credential/session continuity and recovery remain separate gates.
 
 ### Update and rollback source
 
