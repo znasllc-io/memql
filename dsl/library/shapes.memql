@@ -227,6 +227,10 @@ shape uploadSession uploadSessionSize {
 shape file libraryFileSize {
   row.id
   size
+  // Exact identity lets native quota admission deduplicate a retained upload
+  // receipt only while the current file still references those same bytes.
+  blobUrl
+  sha256
 }
 
 /// Full projection of one file chunk, including the body text the embedding was computed from.

@@ -300,6 +300,39 @@ mutation file createLibraryFile {
   }
 }
 
+/// Record verified pipeline bytes under the durable upload journal's file id.
+/// Recovery preserves every existing field, then reads back and verifies the
+/// row. It cannot reset lifecycle or overwrite an owner's intervening edit.
+@serverOnly
+@actor
+@createOnly("producedByRunId", "producedByStepKey", "name", "mimeType", "size", "sha256", "blobUrl", "ownerUserId", "source", "format", "status", "embeddingStatus", "archived", "versionNumber", "versionUploadedAt")
+mutation file recordStoredPipelineFile {
+  args {
+    fileId string!
+    producedByRunId string!
+    producedByStepKey string!
+    name string!
+    mimeType string!
+    size int!
+    sha256 string!
+    blobUrl string!
+    format enum("markdown", "document", "pdf", "spreadsheet", "image", "text", "conversation", "other")!
+  }
+  insert {
+    accept { producedByRunId, producedByStepKey, name, mimeType, size, sha256, blobUrl, format }
+    stamp {
+      id: args.fileId
+      ownerUserId: actor.userId
+      source: "pipeline"
+      status: "stored"
+      embeddingStatus: "none"
+      archived: false
+      versionNumber: 1
+      versionUploadedAt: now
+    }
+  }
+}
+
 /// Advance a Library file through the analysis lifecycle: the new status, and whatever the pass
 /// learned along with it (a summary, how much of the file is embedded, or why it failed). Every
 /// field but the status is optional and an absent one is NOT written, so a later transition cannot
