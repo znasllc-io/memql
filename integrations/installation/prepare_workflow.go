@@ -97,7 +97,7 @@ func (h *preparationHost) prepare(ctx context.Context, request preparationReques
 	if err != nil {
 		return revisionRecord{}, err
 	}
-	if cfg.configuration.InstallationID != request.InstallationID || (prior.ID != "" && prior.Scope.ConfigurationDigest != cfg.digest) {
+	if cfg.configuration.InstallationID != request.InstallationID || (prior.ID != "" && (prior.Scope.ConfigurationDigest != cfg.digest || prior.Scope.ConfigurationInvariantDigest != cfg.invariantDigest)) {
 		return revisionRecord{}, errors.New("installation receiving configuration changed")
 	}
 	s := &preparationWorkflowScope{host: h, request: request, operator: actor, configuration: cfg, record: prior, sources: map[string]verifiedSourceCapture{}, renders: map[string]argocd.RenderedRevision{}}
@@ -245,7 +245,7 @@ func (s *preparationWorkflowScope) reserve(ctx context.Context, args map[string]
 	if err != nil {
 		return nil, err
 	}
-	scope := preparationScope{FormatVersion: 1, InstallationID: cfg.InstallationID, RequestID: s.request.RequestID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ConfigurationDigest: s.configuration.digest, CandidateID: s.request.CandidateID, PublicationDigest: s.request.CatalogDigest, Intent: intent, Captures: map[string]sourceCaptureSpec{}}
+	scope := preparationScope{FormatVersion: 1, InstallationID: cfg.InstallationID, RequestID: s.request.RequestID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ConfigurationDigest: s.configuration.digest, ConfigurationInvariantDigest: s.configuration.invariantDigest, CandidateID: s.request.CandidateID, PublicationDigest: s.request.CatalogDigest, Intent: intent, Captures: map[string]sourceCaptureSpec{}}
 	run := preparationSourceRun(cfg.InstallationID, s.request.RequestID, s.operator)
 	for _, role := range []string{"candidate", "rollback"} {
 		render := s.configuration.render

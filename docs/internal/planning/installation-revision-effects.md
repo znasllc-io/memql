@@ -701,3 +701,29 @@ RBAC, network-policy reachability, a candidate publication or an engine update.
 The opt-in test requires `MEMQL_INSTALLATION_RENDERER_TEST_KUBECONFIG`,
 `MEMQL_INSTALLATION_RENDERER_TEST_ADDRESS` and the reviewed platform digest in
 `MEMQL_INSTALLATION_RENDERER_TEST_IMAGE`. It only reads the installed renderer.
+
+### Receiving configuration after an owned revision change
+
+Preparation binds both the full baseline configuration digest and a separate
+configuration invariant digest. The latter retains every configuration, Secret,
+renderer, project, repository and discovery binding, while binding the
+Application's authenticated name, namespace and UID separately from its mutable
+spec, generation and operation. Both digests originate from the same reobserved
+read set and are carried through the durable preparation and promotion.
+
+The private continuation reader observes the actual current Application. It
+requires the native Argo verifier to match the complete desired spec, exact
+intent marker and an owned pending or recorded operation against the supplied
+journal-bound intent. A failed owned operation is eligible for observation;
+an unrelated operation or a forged healthy baseline is not. The reader never
+rewrites current Application bytes to recreate the old baseline. It reobserves
+the Application's exact UID/resource version together with every other input.
+
+Its opaque evidence binds the complete admitted plan, invariant digest, active
+intent digest, exact target and observation time. Each use recomputes those
+identities and refuses expired or substituted evidence. Only a native host may
+select the journal-bound forward intent or a separately validated reversal.
+The private snapshot retains current renderer and catalog connections for
+reopening retained source and rerendering. Configuration continuity alone does
+not replace fresh artifact, storage or protected-resource verification, grant
+rollback authority, complete an installation or release its active slot.

@@ -18,7 +18,7 @@ func preparationFixture(t *testing.T) (preparationScope, []byte) {
 	t.Helper()
 	spec, body := captureFixture(t)
 	scope := preparationScope{FormatVersion: 1, InstallationID: "installation-one", RequestID: "request-one", RequestedBy: spec.OwnerUserID,
-		WorkflowDigest: "memql-id:" + strings.Repeat("a", 64), ConfigurationDigest: "memql-id:" + strings.Repeat("b", 64), CandidateID: "sha256:" + strings.Repeat("c", 64), PublicationDigest: "sha256:" + strings.Repeat("d", 64)}
+		WorkflowDigest: "memql-id:" + strings.Repeat("a", 64), ConfigurationDigest: "memql-id:" + strings.Repeat("b", 64), ConfigurationInvariantDigest: "memql-id:" + strings.Repeat("f", 64), CandidateID: "sha256:" + strings.Repeat("c", 64), PublicationDigest: "sha256:" + strings.Repeat("d", 64)}
 	spec.RunID = preparationSourceRun(scope.InstallationID, scope.RequestID, scope.RequestedBy)
 	spec.WorkRunID = spec.RunID
 	spec.StepKey = "source-candidate"

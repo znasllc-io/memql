@@ -82,7 +82,7 @@ func promotionFixture(t *testing.T, j *preparationJournal) (context.Context, pre
 	plan.Intent = scope.Intent
 	// This journal fixture owns native observations directly. Receiver tests
 	// independently verify how authenticated configuration is constructed.
-	evidence.configuration = &receiverSnapshot{digest: scope.ConfigurationDigest, observed: time.Now().UTC()}
+	evidence.configuration = &receiverSnapshot{digest: scope.ConfigurationDigest, invariantDigest: scope.ConfigurationInvariantDigest, observed: time.Now().UTC()}
 	evidence.artifacts = artifactEvidence{digest: scope.WorkflowDigest, workflow: scope.WorkflowDigest, operator: scope.RequestedBy, configuration: scope.ConfigurationDigest, candidate: plan.PublicationDigest, rollback: plan.PublicationDigest, resources: plan.ResourceDiffDigest, before: plan.RollbackRenderDigest, after: plan.RenderDigest, observed: time.Now().UTC(), expires: time.Now().Add(30 * time.Minute)}
 	return ctx, r, plan, evidence
 }
@@ -200,13 +200,17 @@ func TestPreparationPromotionRejectsChangedAuthorityAndEvidence(t *testing.T) {
 	db, _ := journalDB(t)
 	j := preparationConnection(db)
 	ctx, r, plan, evidence := promotionFixture(t, j)
-	for _, fault := range []string{"missing configuration proof", "stale configuration", "future configuration", "missing artifacts", "expired artifacts", "wrong artifact operator", "wrong artifact render", "operator", "role", "origin", "workflow", "configuration", "candidate", "approval", "source", "receipt", "render", "resource-diff", "storage", "sensitive", "destination", "cluster", "source-path", "application", "application-namespace", "application-uid", "generation", "sync-options"} {
+	for _, fault := range []string{"missing configuration proof", "changed configuration invariant", "stale configuration", "future configuration", "missing artifacts", "expired artifacts", "wrong artifact operator", "wrong artifact render", "operator", "role", "origin", "workflow", "configuration", "candidate", "approval", "source", "receipt", "render", "resource-diff", "storage", "sensitive", "destination", "cluster", "source-path", "application", "application-namespace", "application-uid", "generation", "sync-options"} {
 		t.Run(fault, func(t *testing.T) {
 			caller, p, e := ctx, plan, evidence
 			workflow, configuration := r.Scope.WorkflowDigest, r.Scope.ConfigurationDigest
 			switch fault {
 			case "missing configuration proof":
 				e.configuration = nil
+			case "changed configuration invariant":
+				copy := *e.configuration
+				copy.invariantDigest = r.Scope.WorkflowDigest
+				e.configuration = &copy
 			case "stale configuration":
 				copy := *e.configuration
 				copy.observed = time.Now().Add(-2 * time.Minute)
