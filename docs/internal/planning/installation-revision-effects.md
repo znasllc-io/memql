@@ -105,9 +105,9 @@ the receiver to recover the same attempt; they never authorize a fresh replay.
 If a process dies between committing intent and dispatch, and the receiver has
 neither a queued record nor a Job outcome, the result remains uncertain and the
 installation head stays occupied. Absence of a Job is not proof of no effect.
-Only a future fenced retirement/reconciliation operation may release that
-started preparation. Cancellation currently releases only preparations whose
-source effects have never been marked started.
+Only confirmed fenced retirement may release that started preparation. The
+private retirement operations below retain the slot throughout cleanup;
+cancellation before dispatch remains a separate immediate journal transition.
 
 Execution receipts are persisted before artifact verification, and verified
 source/receipt fingerprints before Job acknowledgement. Artifact verification
@@ -125,9 +125,9 @@ existing durable outcome from an uncertain missing attempt. These tests passed
 in required-database CI and in the October 7 local installation suite against
 an isolated PostgreSQL/TimescaleDB fixture with `MEMQL_REQUIRE_DB=1` and the race
 detector enabled (19.784 seconds). This slice remains private and unregistered.
-Started-attempt retirement, artifact retention/cleanup, current configuration
-verification, sealed DSL wiring and installed recovery qualification remain
-required before exposing preparation.
+The scoped cleanup recipe, current configuration verification, sealed DSL
+wiring and installed recovery qualification remain required before exposing
+preparation.
 
 ### Producer retirement foundation
 
@@ -144,8 +144,7 @@ provider request may still be in flight. The owning workflow must first retire
 the producer, then fence it, release its durable consumer pins, and reconcile
 every inventoried intent through the permanent provider tombstone before
 releasing the installation slot. Neither an empty unfenced inventory nor an
-elapsed timeout can prove completion. Composition with started preparation
-retirement remains unfinished; no public cleanup action is registered.
+elapsed timeout can prove completion. No public cleanup action is registered.
 
 The local required-database race tests cover lost upload receipts, replacement
 hosts, concurrent reservations, pagination and owner authorization. A separate
@@ -154,6 +153,47 @@ advisory lock, then refusing after the fence commits. The real Azurite test
 resumes an admitted upload after cleanup establishes its leased tombstone and
 confirms that the provider refuses it. These tests passed; they do not qualify
 the unfinished installation cleanup workflow.
+
+### Retiring a started preparation
+
+The private journal now commits `retiring` before cleanup, keeping the original
+dispatch history and installation head. That transition blocks late source
+dispatch, receipt, verification, acknowledgement and promotion callbacks. It
+binds the original requesting operator and preparation workflow plus a separate
+selected cleanup workflow fingerprint; persisted fingerprints alone do not
+authorize an external caller or replace the native workflow host.
+
+Separate bounded operations stop the preparation-owned Workbench run, fence
+each capture's artifact scope, permanently release its exact source consumer,
+load one inventory page, and retire one inventoried artifact. The native gates
+enforce those prerequisites; the cleanup recipe owns ordering and iteration.
+A capture without a recorded receipt can still have unknown uploads, so both
+capture scopes must reach a confirmed empty inventory after retirement. Pinning
+requires a committed capture receipt, and retirement closes any known consumer
+before a delayed verifier can acquire another pin.
+
+Each page holds at most 128 intent IDs and native retirement receipt digests.
+A replacement host recovers a pending page after a lost reply. Advancing its
+cursor requires every receipt, and an external error preserves the unconfirmed
+entry. Parallel callbacks on different connections preserve each other's
+receipts. Only confirmed producer stop and completion of both capture scopes
+release the installation slot as `cancelled`. A lost final reply returns that
+history without touching a successor's head. Migration rollback refuses to
+erase cleanup history.
+
+The private installed `installationRetirementWorkflow` now composes these
+operations as one bounded reconciliation pass. It processes one page per
+capture, then observes whether native cleanup receipts permit final release.
+A returned `retiring` record means more work remains, never completion. A
+fresh host resumes its pending page and the caller schedules another pass.
+The native host owns the recipe snapshot, binds its fingerprint and immutable
+engine revision, refuses unbound operations/children before effects, rechecks
+the original operator on each callback, and ignores claimed DSL return proofs.
+Local required-database race tests exercise the installed recipe and a second
+recipe with reversed role order and joined parallel artifact calls, including
+lost provider replies and recovery on an independent connection. The
+reconciliation scheduler, public surface and installed recovery qualification
+remain unfinished; these operations remain private and unregistered.
 
 ### Atomic preparation handoff
 

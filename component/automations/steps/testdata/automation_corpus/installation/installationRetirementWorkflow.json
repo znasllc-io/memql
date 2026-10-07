@@ -1,0 +1,177 @@
+{
+  "automation": "installation/retirement/automations.memql installationRetirementWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.installationRetirementWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "installationRetirementBegin"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationRetirementStop"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementFence"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementRelease"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementPage"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementPage"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementFence"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementRelease"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementPage"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementPage"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationRetirementObserve"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.installationRetirementWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "installationRetirementBegin"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationRetirementStop"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementFence"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementRelease"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementPage"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementPage"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementFence"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementRelease"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementPage"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationRetirementPage"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationRetirementObserve"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}
