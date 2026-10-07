@@ -129,6 +129,24 @@ Started-attempt retirement, artifact retention/cleanup, current configuration
 verification, sealed DSL wiring and installed recovery qualification remain
 required before exposing preparation.
 
+### Producer retirement foundation
+
+The Library adapter can permanently fence an authorized owner/run/step/attempt
+before enumerating its artifacts. The fence shares the upload admission lock,
+including an SQL trigger that refuses an older replica's delayed reservation
+or recovery during a rolling update. A replacement can repeat the fence after
+a lost response. Inventory is bounded to 128 ordered intent IDs per call and
+includes reserved and retired records, so a lost upload response cannot hide
+bytes from cleanup. Migration rollback refuses nonempty fence history.
+
+This closes admission, not the entire cleanup operation. A previously admitted
+provider request may still be in flight. The owning workflow must first retire
+the producer, then fence it, release its durable consumer pins, and reconcile
+every inventoried intent through the permanent provider tombstone before
+releasing the installation slot. Neither an empty unfenced inventory nor an
+elapsed timeout can prove completion. Composition with started preparation
+retirement remains unfinished; no public cleanup action is registered.
+
 ### Atomic preparation handoff
 
 The private promotion operation transfers the shared installation head directly
