@@ -78,6 +78,38 @@ func pipelineStreamDBStore(t *testing.T, uploader server.FileUploader) (*pipelin
 	return s, e, db.DB
 }
 
+// Factories are call-local to each sequential subtest. Every request gets a
+// new store (quota/fault configuration is never shared); the second request
+// runs on the other engine and SQL connection, with none of the first's state.
+type pipelineStoreFactory func(*testing.T, server.FileUploader) (*pipelinesLibraryStore, *memql.MemQLEngine, *sql.DB)
+type pipelineDBReplicas struct {
+	engines   [2]*memql.MemQLEngine
+	databases [2]*sql.DB
+}
+
+func pipelineDBTestReplicas(t *testing.T) pipelineDBReplicas {
+	t.Helper()
+	var r pipelineDBReplicas
+	for n := range r.engines {
+		_, r.engines[n], r.databases[n] = pipelineStreamDBStore(t, &pipelineStreamFake{})
+	}
+	return r
+}
+func (r pipelineDBReplicas) caseFactory() pipelineStoreFactory {
+	next := 0
+	return func(t *testing.T, uploader server.FileUploader) (*pipelinesLibraryStore, *memql.MemQLEngine, *sql.DB) {
+		t.Helper()
+		if next >= len(r.engines) {
+			t.Fatal("pipeline fixture needs another independent replica")
+		}
+		engine, db := r.engines[next], r.databases[next]
+		next++
+		s := newPipelinesLibraryStore(&AttachmentEngineAdapter{Engine: engine}, uploader, "stream-test", quietLogger())
+		s.uploadDB = func() *sql.DB { return db }
+		return s, engine, db
+	}
+}
+
 func pipelineStreamFile(owner, body string) pipelinesteps.StreamRunFile {
 	sum := sha256.Sum256([]byte(body))
 	return pipelinesteps.StreamRunFile{OwnerUserID: owner, WorkRunID: id.NewShortId(), StepKey: "build/image", Attempt: 1,
@@ -85,10 +117,10 @@ func pipelineStreamFile(owner, body string) pipelinesteps.StreamRunFile {
 		SHA256: hex.EncodeToString(sum[:]), Body: strings.NewReader(body)}
 }
 
-func TestPipelineStreamDBLostLibraryWriteRecoversOnAnotherEngine(t *testing.T) {
+func testPipelineStreamDBLostLibraryWriteRecoversOnAnotherEngine(t *testing.T, newStore pipelineStoreFactory) {
 	u := &pipelineStreamFake{}
-	first, e, db := pipelineStreamDBStore(t, u)
-	second, _, _ := pipelineStreamDBStore(t, u)
+	first, e, db := newStore(t, u)
+	second, _, _ := newStore(t, u)
 	f := pipelineStreamFile(id.NewShortId(), "stable artifact bytes")
 	delegate := first.engine
 	first.engine = pipelineStreamEngineFunc(func(ctx context.Context, q string) (any, error) {
@@ -162,9 +194,9 @@ func (pipelineUnreadableSource) Read([]byte) (int, error) {
 	return 0, errors.New("source must not be read on recovery")
 }
 
-func TestPipelineStreamDBMetadataDisagreementRefusedBeforeUpload(t *testing.T) {
+func testPipelineStreamDBMetadataDisagreementRefusedBeforeUpload(t *testing.T, newStore pipelineStoreFactory) {
 	u := &pipelineStreamFake{}
-	s, _, db := pipelineStreamDBStore(t, u)
+	s, _, db := newStore(t, u)
 	f := pipelineStreamFile(id.NewShortId(), "abc")
 	x, err := s.streamIdentity(f)
 	if err != nil {
@@ -191,10 +223,10 @@ func TestPipelineStreamDBMetadataDisagreementRefusedBeforeUpload(t *testing.T) {
 	}
 }
 
-func TestPipelineStreamDBConcurrentCapacityAndGenerationFence(t *testing.T) {
+func testPipelineStreamDBConcurrentCapacityAndGenerationFence(t *testing.T, newStore pipelineStoreFactory) {
 	u := &pipelineStreamFake{}
-	a, _, adb := pipelineStreamDBStore(t, u)
-	b, _, bdb := pipelineStreamDBStore(t, u)
+	a, _, adb := newStore(t, u)
+	b, _, bdb := newStore(t, u)
 	a.quotaBytes, b.quotaBytes = 10, 10
 	owner := id.NewShortId()
 	ctx := memql.ContextWithFreshRead(auth.ContextWithUserActor(context.Background(), owner))
@@ -256,9 +288,9 @@ func TestPipelineStreamDBConcurrentCapacityAndGenerationFence(t *testing.T) {
 	}
 }
 
-func TestPipelineStreamDBBadBytesKeepCapacityAndNeverCreateReadyRow(t *testing.T) {
+func testPipelineStreamDBBadBytesKeepCapacityAndNeverCreateReadyRow(t *testing.T, newStore pipelineStoreFactory) {
 	u := &pipelineStreamFake{}
-	s, _, db := pipelineStreamDBStore(t, u)
+	s, _, db := newStore(t, u)
 	s.quotaBytes = 3
 	f := pipelineStreamFile(id.NewShortId(), "abc")
 	f.Body = bytes.NewBufferString("bad")
@@ -282,9 +314,9 @@ func TestPipelineStreamDBBadBytesKeepCapacityAndNeverCreateReadyRow(t *testing.T
 	}
 }
 
-func TestPipelineStreamDBReadyTransitionFailureIsNotSuccess(t *testing.T) {
+func testPipelineStreamDBReadyTransitionFailureIsNotSuccess(t *testing.T, newStore pipelineStoreFactory) {
 	u := &pipelineStreamFake{}
-	s, _, _ := pipelineStreamDBStore(t, u)
+	s, _, _ := newStore(t, u)
 	delegate := s.engine
 	failing := pipelineStreamEngineFunc(func(ctx context.Context, q string) (any, error) {
 		if strings.Contains(q, "setLibraryFileStatus(") {
@@ -304,10 +336,10 @@ func TestPipelineStreamDBReadyTransitionFailureIsNotSuccess(t *testing.T) {
 	}
 }
 
-func TestPipelineStreamDBAdmissionSerializesFinalization(t *testing.T) {
+func testPipelineStreamDBAdmissionSerializesFinalization(t *testing.T, newStore pipelineStoreFactory) {
 	u := &pipelineStreamFake{}
-	a, _, adb := pipelineStreamDBStore(t, u)
-	b, _, bdb := pipelineStreamDBStore(t, u)
+	a, _, adb := newStore(t, u)
+	b, _, bdb := newStore(t, u)
 	a.quotaBytes, b.quotaBytes = 20, 20
 	f := pipelineStreamFile(id.NewShortId(), "123456")
 	x, _ := a.streamIdentity(f)
@@ -367,9 +399,9 @@ func TestPipelineStreamDBAdmissionSerializesFinalization(t *testing.T) {
 	}
 }
 
-func TestPipelineStreamDBRetainedBytesSurviveEditableFileChanges(t *testing.T) {
+func testPipelineStreamDBRetainedBytesSurviveEditableFileChanges(t *testing.T, newStore pipelineStoreFactory) {
 	u := &pipelineStreamFake{}
-	s, e, db := pipelineStreamDBStore(t, u)
+	s, e, db := newStore(t, u)
 	s.quotaBytes = 10
 	f := pipelineStreamFile(id.NewShortId(), "123456")
 	got, err := s.StoreRunFileStream(context.Background(), f)
@@ -398,4 +430,28 @@ func TestPipelineStreamDBRetainedBytesSurviveEditableFileChanges(t *testing.T) {
 	if _, err := s.StoreRunFileStream(ctx, next); err == nil || !strings.Contains(err.Error(), "quota") {
 		t.Fatalf("editable row released immutable capacity: %v", err)
 	}
+}
+
+// The cases use unique owners and fresh stores, with two independent real
+// engines/connections owned by this parent. Reusing only their immutable DSL
+// loading preserves replica behavior without paying a full boot per case.
+func TestPipelineStreamDB(t *testing.T) {
+	replicas := pipelineDBTestReplicas(t)
+	t.Run("TestPipelineStreamDBLostLibraryWriteRecoversOnAnotherEngine", func(t *testing.T) {
+		testPipelineStreamDBLostLibraryWriteRecoversOnAnotherEngine(t, replicas.caseFactory())
+	})
+	t.Run("TestPipelineStreamDBMetadataDisagreementRefusedBeforeUpload", func(t *testing.T) {
+		testPipelineStreamDBMetadataDisagreementRefusedBeforeUpload(t, replicas.caseFactory())
+	})
+	t.Run("TestPipelineStreamDBConcurrentCapacityAndGenerationFence", func(t *testing.T) {
+		testPipelineStreamDBConcurrentCapacityAndGenerationFence(t, replicas.caseFactory())
+	})
+	t.Run("TestPipelineStreamDBBadBytesKeepCapacityAndNeverCreateReadyRow", func(t *testing.T) {
+		testPipelineStreamDBBadBytesKeepCapacityAndNeverCreateReadyRow(t, replicas.caseFactory())
+	})
+	t.Run("TestPipelineStreamDBReadyTransitionFailureIsNotSuccess", func(t *testing.T) { testPipelineStreamDBReadyTransitionFailureIsNotSuccess(t, replicas.caseFactory()) })
+	t.Run("TestPipelineStreamDBAdmissionSerializesFinalization", func(t *testing.T) { testPipelineStreamDBAdmissionSerializesFinalization(t, replicas.caseFactory()) })
+	t.Run("TestPipelineStreamDBRetainedBytesSurviveEditableFileChanges", func(t *testing.T) {
+		testPipelineStreamDBRetainedBytesSurviveEditableFileChanges(t, replicas.caseFactory())
+	})
 }

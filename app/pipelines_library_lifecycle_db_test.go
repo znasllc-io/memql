@@ -51,10 +51,10 @@ func pipelineLifecycleScope(f pipelinesteps.StreamRunFile) (context.Context, pip
 		pipelinesteps.RunFileReceiptScope{OwnerUserID: f.OwnerUserID, WorkRunID: f.WorkRunID, StepKey: f.StepKey, Attempt: f.Attempt}
 }
 
-func TestPipelineLifecycleDBPinsAndPermanentReleaseAcrossReplicas(t *testing.T) {
+func testPipelineLifecycleDBPinsAndPermanentReleaseAcrossReplicas(t *testing.T, newStore pipelineStoreFactory) {
 	u := &pipelineRetirementFake{}
-	writer, _, _ := pipelineStreamDBStore(t, u)
-	other, _, _ := pipelineStreamDBStore(t, u)
+	writer, _, _ := newStore(t, u)
+	other, _, _ := newStore(t, u)
 	f := pipelineStreamFile(id.NewShortId(), "artifact")
 	stored, err := writer.StoreRunFileStream(context.Background(), f)
 	if err != nil {
@@ -105,9 +105,9 @@ func TestPipelineLifecycleDBPinsAndPermanentReleaseAcrossReplicas(t *testing.T) 
 	}
 }
 
-func TestPipelineLifecycleDBReleaseBeforeDelayedPinAndNoPartialPin(t *testing.T) {
+func testPipelineLifecycleDBReleaseBeforeDelayedPinAndNoPartialPin(t *testing.T, newStore pipelineStoreFactory) {
 	u := &pipelineRetirementFake{}
-	s, _, db := pipelineStreamDBStore(t, u)
+	s, _, db := newStore(t, u)
 	f := pipelineStreamFile(id.NewShortId(), "data")
 	stored, err := s.StoreRunFileStream(context.Background(), f)
 	if err != nil {
@@ -132,10 +132,10 @@ func TestPipelineLifecycleDBReleaseBeforeDelayedPinAndNoPartialPin(t *testing.T)
 	}
 }
 
-func TestPipelineLifecycleDBPinAndRetireAreMutuallyExclusive(t *testing.T) {
+func testPipelineLifecycleDBPinAndRetireAreMutuallyExclusive(t *testing.T, newStore pipelineStoreFactory) {
 	u := &pipelineRetirementFake{}
-	one, _, _ := pipelineStreamDBStore(t, u)
-	two, _, _ := pipelineStreamDBStore(t, u)
+	one, _, _ := newStore(t, u)
+	two, _, _ := newStore(t, u)
 	for range 6 {
 		f := pipelineStreamFile(id.NewShortId(), "data")
 		stored, err := one.StoreRunFileStream(context.Background(), f)
@@ -156,10 +156,10 @@ func TestPipelineLifecycleDBPinAndRetireAreMutuallyExclusive(t *testing.T) {
 	}
 }
 
-func TestPipelineLifecycleDBUnknownRetirementRetainsQuotaAndRejectsLateWriters(t *testing.T) {
+func testPipelineLifecycleDBUnknownRetirementRetainsQuotaAndRejectsLateWriters(t *testing.T, newStore pipelineStoreFactory) {
 	u := &pipelineRetirementFake{entered: make(chan struct{}), proceed: make(chan struct{}), err: errors.New("lost provider reply")}
-	one, _, db := pipelineStreamDBStore(t, u)
-	two, _, _ := pipelineStreamDBStore(t, u)
+	one, _, db := newStore(t, u)
+	two, _, _ := newStore(t, u)
 	one.quotaBytes = 4
 	two.quotaBytes = 4
 	f := pipelineStreamFile(id.NewShortId(), "data")
@@ -220,4 +220,21 @@ func TestPipelineLifecycleRequiresAuthorityBeforeJournal(t *testing.T) {
 			t.Fatal("untrusted retirement")
 		}
 	}
+}
+
+// The cases use unique owners and fresh stores, with two independent real
+// engines/connections owned by this parent. Reusing only their immutable DSL
+// loading preserves replica behavior without paying a full boot per case.
+func TestPipelineLifecycleDB(t *testing.T) {
+	replicas := pipelineDBTestReplicas(t)
+	t.Run("TestPipelineLifecycleDBPinsAndPermanentReleaseAcrossReplicas", func(t *testing.T) {
+		testPipelineLifecycleDBPinsAndPermanentReleaseAcrossReplicas(t, replicas.caseFactory())
+	})
+	t.Run("TestPipelineLifecycleDBReleaseBeforeDelayedPinAndNoPartialPin", func(t *testing.T) {
+		testPipelineLifecycleDBReleaseBeforeDelayedPinAndNoPartialPin(t, replicas.caseFactory())
+	})
+	t.Run("TestPipelineLifecycleDBPinAndRetireAreMutuallyExclusive", func(t *testing.T) { testPipelineLifecycleDBPinAndRetireAreMutuallyExclusive(t, replicas.caseFactory()) })
+	t.Run("TestPipelineLifecycleDBUnknownRetirementRetainsQuotaAndRejectsLateWriters", func(t *testing.T) {
+		testPipelineLifecycleDBUnknownRetirementRetainsQuotaAndRejectsLateWriters(t, replicas.caseFactory())
+	})
 }
