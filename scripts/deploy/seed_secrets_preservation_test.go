@@ -70,10 +70,11 @@ type preservationSecret struct {
 	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
 	Kind       string `json:"kind" yaml:"kind"`
 	Metadata   struct {
-		Name        string            `json:"name" yaml:"name"`
-		Namespace   string            `json:"namespace" yaml:"namespace"`
-		UID         string            `json:"uid,omitempty" yaml:"uid"`
-		Annotations map[string]string `json:"annotations" yaml:"annotations"`
+		Name            string            `json:"name" yaml:"name"`
+		Namespace       string            `json:"namespace" yaml:"namespace"`
+		UID             string            `json:"uid,omitempty" yaml:"uid"`
+		ResourceVersion string            `json:"resourceVersion,omitempty" yaml:"resourceVersion"`
+		Annotations     map[string]string `json:"annotations" yaml:"annotations"`
 	} `json:"metadata" yaml:"metadata"`
 	Data map[string]string `json:"data" yaml:"data"`
 	Type string            `json:"type" yaml:"type"`
@@ -86,6 +87,9 @@ func TestSeedInstanceSecretProtectionPreservesCredentials(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name, fail        string
+		syncOptions       string
+		wantSync          string
+		refused           bool
 		exists, protected bool
 		dry, skip         bool
 	}{
@@ -97,6 +101,12 @@ func TestSeedInstanceSecretProtectionPreservesCredentials(t *testing.T) {
 		{name: "skip-cluster", exists: true, skip: true},
 		{name: "read-failure", exists: true, fail: "read"},
 		{name: "annotation-failure", exists: true, fail: "annotate"},
+		{name: "protected-with-deletion-guard", exists: true, protected: true, syncOptions: "Prune=false,Delete=false", wantSync: "Prune=false,Delete=false"},
+		{name: "retain-deletion-guard", exists: true, syncOptions: "Delete=false", wantSync: "Delete=false,Prune=false"},
+		{name: "contradictory-prune", exists: true, syncOptions: "Prune=false,Prune=true", refused: true},
+		{name: "duplicate-prune", exists: true, syncOptions: "Prune=false,Prune=false", refused: true},
+		{name: "destructive-force", exists: true, syncOptions: "Force=true", refused: true},
+		{name: "destructive-replace", exists: true, syncOptions: "Replace=true", refused: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -104,13 +114,16 @@ func TestSeedInstanceSecretProtectionPreservesCredentials(t *testing.T) {
 			const fixtureValue = "fixture-encryption-key-do-not-rotate"
 			original := preservationSecret{APIVersion: "v1", Kind: "Secret", Type: "Opaque", Data: map[string]string{"MEMQL_MASTER_KEY": base64.StdEncoding.EncodeToString([]byte(fixtureValue))}}
 			original.Metadata.Name, original.Metadata.Namespace, original.Metadata.UID = "memql-secrets", "installation-fixture", "same-secret-uid"
+			original.Metadata.ResourceVersion = "7"
 			original.Metadata.Annotations = map[string]string{"example.com/retained": "unchanged"}
-			annotations := ""
 			if tc.protected {
 				original.Metadata.Annotations["argocd.argoproj.io/sync-options"] = "Prune=false"
 				original.Metadata.Annotations["argocd.argoproj.io/compare-options"] = "IgnoreExtraneous"
-				annotations = "Prune=false\nIgnoreExtraneous"
 			}
+			if tc.syncOptions != "" {
+				original.Metadata.Annotations["argocd.argoproj.io/sync-options"] = tc.syncOptions
+			}
+			annotations := "7|" + original.Metadata.Annotations["argocd.argoproj.io/sync-options"] + "|" + original.Metadata.Annotations["argocd.argoproj.io/compare-options"]
 			if tc.exists {
 				body, err := json.Marshal(original)
 				require.NoError(t, err)
@@ -137,11 +150,15 @@ func TestSeedInstanceSecretProtectionPreservesCredentials(t *testing.T) {
 			err = cmd.Run()
 			envelope, parseErr := deploycontrol.ParseCapabilityResult(stdout.Bytes())
 			require.NoError(t, parseErr, stdout.String())
-			if tc.fail != "" {
+			if tc.fail != "" || tc.refused {
 				require.Error(t, err)
 				require.False(t, envelope.OK)
 				require.NotNil(t, envelope.Error)
-				require.Equal(t, 5, envelope.Error.Code)
+				wantCode := 5
+				if tc.refused {
+					wantCode = 3
+				}
+				require.Equal(t, wantCode, envelope.Error.Code)
 			} else {
 				require.NoError(t, err, stderr.String())
 				require.True(t, envelope.OK)
@@ -164,8 +181,11 @@ func TestSeedInstanceSecretProtectionPreservesCredentials(t *testing.T) {
 				if tc.exists || tc.dry || tc.skip {
 					require.False(t, strings.HasPrefix(operation, "create "), operation)
 				}
-				if tc.dry || tc.skip || tc.protected || tc.fail == "read" {
+				if tc.dry || tc.skip || tc.protected || tc.fail == "read" || tc.refused {
 					require.False(t, strings.HasPrefix(operation, "annotate "), operation)
+				}
+				if strings.HasPrefix(operation, "annotate secret ") {
+					require.Contains(t, operation, "--resource-version=7")
 				}
 			}
 			body, err := os.ReadFile(state)
@@ -186,8 +206,12 @@ func TestSeedInstanceSecretProtectionPreservesCredentials(t *testing.T) {
 			} else {
 				require.Empty(t, final.Data)
 			}
-			if tc.fail == "" && !tc.dry && !tc.skip {
-				require.Equal(t, "Prune=false", final.Metadata.Annotations["argocd.argoproj.io/sync-options"])
+			if tc.fail == "" && !tc.dry && !tc.skip && !tc.refused {
+				wantSync := tc.wantSync
+				if wantSync == "" {
+					wantSync = "Prune=false"
+				}
+				require.Equal(t, wantSync, final.Metadata.Annotations["argocd.argoproj.io/sync-options"])
 				require.Equal(t, "IgnoreExtraneous", final.Metadata.Annotations["argocd.argoproj.io/compare-options"])
 			} else {
 				require.Equal(t, original.Metadata.Annotations, final.Metadata.Annotations)

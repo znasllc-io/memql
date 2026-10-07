@@ -15,7 +15,8 @@
 #   memql-db-app-creds   -- Postgres credentials for the in-cluster DB
 #
 # Called by `make secrets` and by `make up` on first boot.
-# Safe to re-run: uses `kubectl apply` (idempotent, creates or updates).
+# Safe to re-run: ordinary configuration uses `kubectl apply`; memql-secrets
+# uses create or a resource-version-guarded merge patch to preserve metadata.
 #
 # PREREQUISITES
 #   - kubectl context points at the k3d cluster (k3d-memql or equivalent).
@@ -64,6 +65,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 # shellcheck source=../lib/localtls.sh
 source "${SCRIPT_DIR}/../lib/localtls.sh"
+# shellcheck source=../lib/argocd-preservation.sh
+source "${SCRIPT_DIR}/../lib/argocd-preservation.sh"
 
 cap_init "k3d.seedSecrets" "Seed the k8s Secrets that the local k3d overlay requires."
 cap_spec_param "namespace" "k8s namespace to seed into"
@@ -1125,10 +1128,8 @@ function seed_memql_secrets() {
         --from-literal="MEMQL_GITHUB_APP_PRIVATE_KEY_B64=$gh_private_key" \
         --from-literal="MEMQL_GITHUB_APP_WEBHOOK_SECRET=$gh_webhook_secret" \
         --dry-run=client -o yaml \
-        | kubectl annotate --local --overwrite -f - \
-            argocd.argoproj.io/sync-options=Prune=false \
-            argocd.argoproj.io/compare-options=IgnoreExtraneous -o yaml \
-        | kubectl apply -f - >&2
+        | argocd_preservation_manifest \
+        | argocd_preservation_write_secret "$NAMESPACE" memql-secrets >&2
     SEEDED_COUNT=$((SEEDED_COUNT + 1))
     info "memql-secrets seeded."
 }
@@ -1228,6 +1229,10 @@ function main() {
     # the CA, the front-door TLS and the DB credentials, and then reported
     # changed:false.
     load_cluster_secret_snapshot
+    if [[ "$CLUSTER_SECRET_STATE" == present ]]; then
+        argocd_preservation_load "$NAMESPACE" memql-secrets \
+            || cap_fail $? "cannot safely preserve memql-secrets GitOps metadata; resolve its conflicting options or cluster access before seeding"
+    fi
     resolve_master_key
     resolve_signing_key
     resolve_signing_key_created_at

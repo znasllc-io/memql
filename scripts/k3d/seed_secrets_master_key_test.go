@@ -64,9 +64,10 @@ args="$*"
 # boundary. No real client is ever allowed to apply or read cluster resources.
 if [[ -n "${FAKE_KUBECTL_CLIENT:-}" ]]; then
   case "$args" in
-    'create secret generic memql-secrets '*--dry-run=client*|'annotate --local '*)
+    'create secret generic memql-secrets '*--dry-run=client*|'annotate --local '*|'patch --local '*)
       exec "$FAKE_KUBECTL_CLIENT" "$@" ;;
-    'apply -f -') cat > "$FAKE_KUBECTL_LOG.manifest.$$"; exit 0 ;;
+    'apply -f -'|'create -f -'|'patch secret memql-secrets '*--patch-file=/dev/stdin*)
+      cat > "$FAKE_KUBECTL_LOG.manifest.$$"; exit 0 ;;
   esac
 fi
 
@@ -90,6 +91,8 @@ esac
 
 # Value reads.
 case "$args" in
+  *"get secret memql-secrets"*jsonpath*metadata.resourceVersion*)
+    printf '7|%s|%s' "${FAKE_SYNC_OPTIONS:-}" "${FAKE_COMPARE_OPTIONS:-}"; exit 0 ;;
   *"get secret memql-secrets"*jsonpath*MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET*)
     [ -n "$FAKE_CAMPAIGN_READ_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
     printf '%s' "$FAKE_CAMPAIGN_KEY_B64"; exit 0 ;;
@@ -152,6 +155,8 @@ type scenario struct {
 	// Set only for tests that need the actual client-generated Secret payload
 	// at the fake API apply boundary, rather than an argv inventory.
 	protectedSecret    *[]byte
+	syncOptions        string
+	compareOptions     string
 	clusterCampaignKey string
 	campaignReadFails  bool
 	envMasterKey       string // exported only when non-empty
@@ -283,6 +288,8 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 		"HOME=" + tmp,
 		"FAKE_KUBECTL_LOG=" + logPath,
 		"FAKE_SECRET_STATE=" + state,
+		"FAKE_SYNC_OPTIONS=" + sc.syncOptions,
+		"FAKE_COMPARE_OPTIONS=" + sc.compareOptions,
 		"FAKE_CAMPAIGN_KEY_B64=" + enc(sc.clusterCampaignKey),
 		"FAKE_CAMPAIGN_READ_FAILS=" + campaignReadFails,
 		"FAKE_MASTER_KEY_B64=" + enc(sc.clusterKey),

@@ -65,6 +65,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/argocd-preservation.sh
+source "${SCRIPT_DIR}/../lib/argocd-preservation.sh"
 
 #=============================================================================
 # CAPABILITY SPEC
@@ -308,14 +310,13 @@ function ensure_merge_shell() {
             # This resource is supplied outside GitOps. Repair only its two
             # preservation annotations; never reapply an empty shell over data
             # populated by ESO, or change an encryption/signing key.
-            local protection
-            protection="$(kubectl get secret "$MERGE_SHELL_SECRET" -n "$NAMESPACE" \
-                -o 'jsonpath={.metadata.annotations.argocd\.argoproj\.io/sync-options}{"\n"}{.metadata.annotations.argocd\.argoproj\.io/compare-options}')" \
-                || cap_fail 5 "failed to read ${MERGE_SHELL_SECRET} preservation metadata"
-            if [[ "$protection" != $'Prune=false\nIgnoreExtraneous' ]]; then
+            argocd_preservation_load "$NAMESPACE" "$MERGE_SHELL_SECRET" \
+                || cap_fail $? "cannot safely preserve ${MERGE_SHELL_SECRET} GitOps metadata; resolve its conflicting options or cluster access before seeding"
+            if [[ "$ARGO_PRESERVATION_CHANGED" == true ]]; then
                 kubectl annotate secret "$MERGE_SHELL_SECRET" -n "$NAMESPACE" --overwrite \
-                    argocd.argoproj.io/sync-options=Prune=false \
-                    argocd.argoproj.io/compare-options=IgnoreExtraneous >/dev/null \
+                    --resource-version="$ARGO_PRESERVATION_RV" \
+                    "argocd.argoproj.io/sync-options=${ARGO_PRESERVATION_SYNC}" \
+                    "argocd.argoproj.io/compare-options=${ARGO_PRESERVATION_COMPARE}" >/dev/null \
                     || cap_fail 5 "failed to protect ${MERGE_SHELL_SECRET} from GitOps pruning"
                 cap_changed
             fi
@@ -333,9 +334,7 @@ function ensure_merge_shell() {
     # Include protection in the FIRST API create, avoiding an unprotected
     # interval between creation and a separate annotate request.
     kubectl create secret generic "$MERGE_SHELL_SECRET" -n "$NAMESPACE" --dry-run=client -o yaml \
-        | kubectl annotate --local --overwrite -f - \
-            argocd.argoproj.io/sync-options=Prune=false \
-            argocd.argoproj.io/compare-options=IgnoreExtraneous -o yaml \
+        | argocd_preservation_manifest \
         | kubectl create -f - >/dev/null \
         || cap_fail 5 "failed to create ${MERGE_SHELL_SECRET} in ${NAMESPACE}"
     cap_changed
