@@ -555,14 +555,6 @@ func assertIsolationProof(t *testing.T, run *substrateRun) {
 	}
 }
 
-// assertNativeSidecar holds a step's Job, as the API server held it, to the
-// native-sidecar shape: the service is an init container that runs for the
-// pod's life (restartPolicy Always), behind a startup probe that runs the
-// manifest's `ready` -- through the runner's $-escape (ruling R25), so the
-// container receives it as written -- started after the clone, and with no
-// privilege to gain; the step is the pod's one container. The kubelet starts
-// the step only once that probe passes, which is what the one-shot psql relies
-// on.
 // Cancel through the deployed Workbench identity, rather than the operator's
 // cluster-admin client. An empty run still needs the bounded Job inventory to
 // confirm cleanup; a durable stop marker alone is not a successful cancellation.
@@ -615,6 +607,9 @@ func TestPipelineRunCancellationGrant(t *testing.T) {
 	}
 }
 
+// assertNativeSidecar checks the actual Job's service as a restartable init
+// container with its ready probe, followed by the step and artifact collector.
+// The one-shot psql must start only after the service probe passes.
 func assertNativeSidecar(t *testing.T, job pipelinesteps.Job, sidecar, ready string) {
 	t.Helper()
 	pod := job.Spec.Template.Spec
