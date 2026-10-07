@@ -10,6 +10,69 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 )
 
+func TestWorkloadsUseRenderedCardinalityWhenDefaultWasOmitted(t *testing.T) {
+	for _, kind := range []string{"Deployment", "StatefulSet", "ReplicaSet", "Job"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newWorkloadFixture(t, kind)
+			s := f.scope(t)
+			key := s.requirements[0].Key
+			object := s.objects[key]
+			field := "replicas"
+			if kind == "Job" {
+				field = "completions"
+			}
+			require.NotContains(t, resourceMap(object.value, "spec"), field)
+			live := workloadObject(t, f.api.response[object.apiPath])
+			resourceMap(live, "spec")[field] = json.Number("1")
+			f.api.response[object.apiPath] = workloadJSON(t, live)
+			_, err := s.check(context.Background(), key)
+			require.NoError(t, err, "the API's materialized default still matches the admitted render")
+
+			podPath := "api/v1/namespaces/memql/pods?limit=256"
+			pods := workloadObject(t, f.api.response[podPath])
+			if kind == "Job" {
+				// A live completion target may not redefine what the reviewed Job
+				// was supposed to run, even when all its extra Pods succeeded.
+				resourceMap(live, "spec")[field] = json.Number("2")
+				resourceMap(live, "status")["succeeded"] = json.Number("2")
+				original := pods["items"].([]any)[0]
+				extra := workloadObject(t, workloadJSON(t, original))
+				resourceMap(extra, "metadata")["name"] = "extra-success"
+				resourceMap(extra, "metadata")["uid"] = "extra-success-uid"
+				pods["items"] = append(pods["items"].([]any), extra)
+			} else {
+				// A human/HPA scale-down is live state, never the admitted
+				// default of one. Empty Pod inventories must not make it green.
+				resourceMap(live, "spec")[field] = json.Number("0")
+				for _, count := range []string{"replicas", "readyReplicas", "availableReplicas", "updatedReplicas", "currentReplicas"} {
+					resourceMap(live, "status")[count] = json.Number("0")
+				}
+				pods["items"] = []any{}
+			}
+			f.api.response[podPath] = workloadJSON(t, pods)
+			f.api.response[object.apiPath] = workloadJSON(t, live)
+			_, err = s.check(context.Background(), key)
+			require.Error(t, err, "live counts cannot replace omitted defaults in the admitted render")
+
+			// An explicitly reviewed zero-replica target (or two-completion
+			// Job) is legitimate. Re-render and obtain fresh native artifact
+			// evidence so this positive case has the new admitted intention.
+			manifest := workloadObject(t, string(f.artifacts.after.Resources()[0]))
+			resourceMap(manifest, "spec")[field] = resourceMap(live, "spec")[field]
+			f.artifacts.after = renderInventoryFixture(t, strings.Repeat("b", 40), []string{workloadJSON(t, manifest)})
+			admission, err := newArtifactAdmission(context.Background(), f.api, f.artifacts.config, f.artifacts.old, f.artifacts.next, f.artifacts.before, f.artifacts.after)
+			require.NoError(t, err)
+			workflow, err := loadArtifactWorkflow(strings.Repeat("d", 40))
+			require.NoError(t, err)
+			f.evidence, err = workflow.run(captureOperator(auth.RoleOwner, "operator"), admission, "operator")
+			require.NoError(t, err)
+			newScope := f.scope(t)
+			_, err = newScope.seal(observeWorkloads(t, newScope))
+			require.NoError(t, err, "explicit admitted cardinality still governs legitimate convergence")
+		})
+	}
+}
+
 func TestWorkloadProfilesRefuseUnconvergedControllers(t *testing.T) {
 	for _, kind := range []string{"StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob", "Pod", "Cluster"} {
 		t.Run(kind, func(t *testing.T) {

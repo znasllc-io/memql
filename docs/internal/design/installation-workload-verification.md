@@ -53,6 +53,10 @@ for the supported apps controllers. StatefulSet current and update revisions
 must agree. DaemonSets must have no unavailable or misscheduled replicas.
 Jobs must be complete, have no active execution, and have the required number
 of successful Pods; failed historical attempts cannot replace those successes.
+Replica and Job completion targets come from the admitted render, including
+the omitted default of one. A live scale-to-zero or changed completion target
+cannot redefine that intention. An explicitly rendered zero-replica target
+remains valid. CloudNativePG requires an explicit rendered instance count.
 
 The codec lists the complete bounded namespace collections, without a label
 filter. Pagination, duplicate identities, missing identities and malformed

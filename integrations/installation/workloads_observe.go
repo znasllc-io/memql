@@ -281,7 +281,12 @@ func (s *workloadAdmission) observeWorkload(ctx context.Context, reads *receiver
 	completed := false
 	switch object.identity.Group + "/" + object.identity.Kind {
 	case "apps/Deployment", "apps/StatefulSet", "apps/ReplicaSet":
-		count = workloadCount(spec, "replicas", 1)
+		// Cardinality belongs to the admitted render, including omitted API
+		// defaults. A manual scale-down cannot redefine readiness as zero.
+		count = workloadCount(want, "replicas", 1)
+		if workloadCount(spec, "replicas", 1) != count {
+			return errors.New("workload replica target differs from its admitted render")
+		}
 		if count < 0 || count > 256 || generation < 1 || receiverInteger(status["observedGeneration"]) != generation {
 			return errors.New("workload controller has not observed its desired generation")
 		}
@@ -317,7 +322,10 @@ func (s *workloadAdmission) observeWorkload(ctx context.Context, reads *receiver
 			return errors.New("daemon workload has unavailable or misplaced pods")
 		}
 	case "batch/Job":
-		count = workloadCount(spec, "completions", 1)
+		count = workloadCount(want, "completions", 1)
+		if workloadCount(spec, "completions", 1) != count {
+			return errors.New("job completion target differs from its admitted render")
+		}
 		if count < 1 || count > 256 || workloadCount(status, "succeeded", 0) != count || workloadCount(status, "active", 0) != 0 || !workloadCondition(status, "Complete") || workloadCondition(status, "Failed") {
 			return errors.New("installation job has not completed")
 		}
@@ -350,7 +358,7 @@ func (s *workloadAdmission) observeWorkload(ctx context.Context, reads *receiver
 	case "/Pod":
 		return s.observeWorkloadPod(ctx, reads, live, spec, false, false)
 	case "postgresql.cnpg.io/Cluster":
-		count, err = databaseInstances(spec)
+		count, err = databaseInstances(want)
 		if err != nil || workloadCount(status, "readyInstances", 0) != count || !workloadCondition(status, "Ready") || resourceText(status, "currentPrimary") == "" || resourceText(status, "currentPrimary") != resourceText(status, "targetPrimary") {
 			return errors.New("database instances are not ready on the requested primary")
 		}
