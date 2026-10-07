@@ -128,7 +128,7 @@ func (s *pipelinesLibraryStore) finalizeStream(ctx context.Context, db *sql.DB, 
 	if err != nil {
 		return err
 	}
-	if current.Generation != intent.Generation {
+	if current.Generation != intent.Generation || (current.State != "blob_verified" && current.State != "ready") {
 		return errPipelineUploadStale
 	}
 	if current.ETag != intent.ETag || current.URL != intent.URL || current.State == "reserved" {

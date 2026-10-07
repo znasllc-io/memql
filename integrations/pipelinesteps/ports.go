@@ -83,6 +83,30 @@ type LibraryReceiptReader interface {
 	ReadRunFileReceipts(context.Context, RunFileReceiptScope, []string) ([]StoredFileReceipt, error)
 }
 
+// RunFileReference pins a fixed set of artifacts for one durable consumer.
+// ReferenceID is chosen and persisted by the authorized caller (for example,
+// a publication candidate), and is never reused after release. Each scope has
+// its own reference identity; a candidate may pin several producing steps.
+type RunFileReference struct {
+	Scope       RunFileReceiptScope
+	ReferenceID string
+	IntentIDs   []string
+}
+
+// LibraryArtifactLifecycle coordinates references and retirement across
+// replicas. All calls require internal origin and the scoped owner's actor.
+// Pin precedes byte verification/use; release follows the durable consumer's
+// retirement. A released reference cannot be resurrected by a delayed pin.
+type LibraryArtifactLifecycle interface {
+	PinRunFileReceipts(context.Context, RunFileReference) ([]StoredFileReceipt, error)
+	ReleaseRunFileReference(context.Context, RunFileReference) error
+	RetireRunFile(context.Context, RunFileReceiptScope, string) (RetiredFileReceipt, error)
+}
+
+type RetiredFileReceipt struct {
+	IntentID, FileID, TombstoneETag string
+}
+
 // LibraryStore stores a step's files in its owner's Library.
 type LibraryStore interface {
 	StoreRunFile(ctx context.Context, f RunFile) (StoredFile, error)

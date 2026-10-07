@@ -54,6 +54,9 @@ func (s *pipelinesLibraryStore) reserveStream(ctx context.Context, db *sql.DB, i
 		if existing.Identity != identity {
 			return x, errors.New("artifact intent already exists with different immutable metadata")
 		}
+		if existing.State == "retiring" || existing.State == "retired" {
+			return x, errors.New("artifact intent was permanently retired")
+		}
 		if err := tx.QueryRowContext(ctx, `UPDATE pipeline_artifact_uploads SET generation=generation+1,
 updated_at=clock_timestamp() WHERE intent_id=$1 RETURNING generation`, x.ID).Scan(&existing.Generation); err != nil {
 			return x, err
@@ -87,8 +90,8 @@ func lockPipelineUploadOwner(ctx context.Context, tx *sql.Tx, owner string) erro
 }
 
 // Ready intents still own retained bytes even if their editable Library row
-// is removed or points elsewhere. Count that receipt permanently, deduplicating
-// only a current file which names exactly those same bytes. Owner locking also
+// is removed or points elsewhere. Count until a confirmed retirement fence,
+// deduplicating only a current file which names exactly those same bytes. Owner locking also
 // covers finalization, so no reservation can disappear between these reads.
 func (s *pipelinesLibraryStore) admitPipelineStream(ctx context.Context, tx *sql.Tx, identity pipelineStreamIdentity) error {
 	remaining := s.userQuota()
@@ -102,19 +105,24 @@ func (s *pipelinesLibraryStore) admitPipelineStream(ctx context.Context, tx *sql
 	if err := charge(identity.Size); err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, "SELECT file_id, size_bytes, blob_url, identity->>'SHA256' FROM pipeline_artifact_uploads WHERE owner_user_id=$1", identity.OwnerUserID)
+	rows, err := tx.QueryContext(ctx, "SELECT file_id, size_bytes, blob_url, identity->>'SHA256', state FROM pipeline_artifact_uploads WHERE owner_user_id=$1", identity.OwnerUserID)
 	if err != nil {
 		return err
 	}
 	retained := map[string]azureblob.VerifiedBlob{}
 	for rows.Next() {
 		var fileID string
+		var state string
 		var blob azureblob.VerifiedBlob
-		if err := rows.Scan(&fileID, &blob.Size, &blob.URL, &blob.SHA256); err != nil {
+		if err := rows.Scan(&fileID, &blob.Size, &blob.URL, &blob.SHA256, &state); err != nil {
 			rows.Close()
 			return err
 		}
-		if err := charge(blob.Size); err != nil {
+		charged := blob.Size
+		if state == "retired" {
+			charged = 0
+		}
+		if err := charge(charged); err != nil {
 			rows.Close()
 			return err
 		}
@@ -186,7 +194,7 @@ func savePipelineVerified(ctx context.Context, db *sql.DB, intent pipelineUpload
 	if err != nil {
 		return err
 	}
-	if current.Generation != intent.Generation {
+	if current.Generation != intent.Generation || (current.State != "reserved" && current.State != "blob_verified" && current.State != "ready") {
 		return errPipelineUploadStale
 	}
 	if current.ETag != "" && (current.ETag != blob.ETag || current.URL != blob.URL) {
