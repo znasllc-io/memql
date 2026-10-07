@@ -60,6 +60,25 @@ const fakeKubectlTemplate = `#!/usr/bin/env bash
 printf '%s\n' "$*" > "$FAKE_KUBECTL_LOG.$$"
 args="$*"
 
+# Optional client-only qualification captures the document at the fake API
+# boundary. No real client is ever allowed to apply or read cluster resources.
+if [[ -n "${FAKE_KUBECTL_CLIENT:-}" ]]; then
+  case "$args" in
+    'create secret generic memql-secrets '*--dry-run=client*|'annotate --local '*|'patch --local '*)
+      exec "$FAKE_KUBECTL_CLIENT" "$@" ;;
+    'patch secret memql-secrets '*--patch-file=/dev/stdin*)
+      document="$FAKE_KUBECTL_LOG.manifest.$$"
+      cat > "$document"
+      if [[ "${FAKE_ROTATE_DURING_READ:-}" != 1 ]]; then exit 0; fi
+      version="$("$FAKE_KUBECTL_CLIENT" patch --local --type=merge -f "$document" -p '{}' -o 'jsonpath={.metadata.resourceVersion}')"
+      if [[ "$version" == 7 && -f "$FAKE_KUBECTL_LOG.rotation" ]]; then exit 0; fi
+      printf 'Error from server (Conflict): fixture rotation changed resourceVersion\n' >&2
+      exit 1 ;;
+    'apply -f -'|'create -f -')
+      cat > "$FAKE_KUBECTL_LOG.manifest.$$"; exit 0 ;;
+  esac
+fi
+
 # The domain this cluster already serves -- the default for --domain, so a run
 # with no --domain does not reissue the certificate for a different one.
 case "$args" in
@@ -80,12 +99,18 @@ esac
 
 # Value reads.
 case "$args" in
+  *"get secret memql-secrets"*jsonpath*metadata.resourceVersion*)
+    rv=7
+    if [[ "${FAKE_ROTATE_DURING_READ:-}" == 1 && ! -f "$FAKE_KUBECTL_LOG.rotation" ]]; then rv=6; fi
+    printf '%s|%s|%s' "$rv" "${FAKE_SYNC_OPTIONS:-}" "${FAKE_COMPARE_OPTIONS:-}"; exit 0 ;;
   *"get secret memql-secrets"*jsonpath*MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET*)
     [ -n "$FAKE_CAMPAIGN_READ_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
     printf '%s' "$FAKE_CAMPAIGN_KEY_B64"; exit 0 ;;
   *"get secret memql-secrets"*jsonpath*MEMQL_MASTER_KEY*)
     [ -n "$FAKE_JSONPATH_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
-    printf '%s' "$FAKE_MASTER_KEY_B64"; exit 0 ;;
+    printf '%s' "$FAKE_MASTER_KEY_B64"
+    if [[ "${FAKE_ROTATE_DURING_READ:-}" == 1 ]]; then : > "$FAKE_KUBECTL_LOG.rotation"; fi
+    exit 0 ;;
   *"get secret memql-secrets"*jsonpath*MEMQL_IDENTITY_SIGNING_KEY_B64*)
     [ -n "$FAKE_JSONPATH_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
     printf '%s' "$FAKE_SIGNING_KEY_B64"; exit 0 ;;
@@ -139,6 +164,12 @@ type seedResult struct {
 
 // scenario configures one run of the script against the fake cluster.
 type scenario struct {
+	// Set only for tests that need the actual client-generated Secret payload
+	// at the fake API apply boundary, rather than an argv inventory.
+	protectedSecret    *[]byte
+	syncOptions        string
+	compareOptions     string
+	rotateDuringRead   bool
 	clusterCampaignKey string
 	campaignReadFails  bool
 	envMasterKey       string // exported only when non-empty
@@ -270,6 +301,8 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 		"HOME=" + tmp,
 		"FAKE_KUBECTL_LOG=" + logPath,
 		"FAKE_SECRET_STATE=" + state,
+		"FAKE_SYNC_OPTIONS=" + sc.syncOptions,
+		"FAKE_COMPARE_OPTIONS=" + sc.compareOptions,
 		"FAKE_CAMPAIGN_KEY_B64=" + enc(sc.clusterCampaignKey),
 		"FAKE_CAMPAIGN_READ_FAILS=" + campaignReadFails,
 		"FAKE_MASTER_KEY_B64=" + enc(sc.clusterKey),
@@ -280,6 +313,9 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 		"MEMQL_K3D_NAMESPACE=memql",
 		"STUB_CAROOT=" + stubCaroot,
 		"STUB_LOG=" + filepath.Join(tmp, "mkcert-stub.log"),
+	}
+	if sc.rotateDuringRead {
+		env = append(env, "FAKE_ROTATE_DURING_READ=1")
 	}
 	if sc.envMasterKey != "" {
 		env = append(env, "MEMQL_MASTER_KEY="+sc.envMasterKey)
@@ -292,6 +328,17 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 	}
 	for name, value := range sc.githubApp {
 		env = append(env, name+"="+value)
+	}
+	if sc.protectedSecret != nil {
+		client, err := exec.LookPath("kubectl")
+		if err != nil {
+			t.Skip("kubectl client-side codecs unavailable")
+		}
+		kubeconfig := filepath.Join(tmp, "empty-kubeconfig")
+		if err := os.WriteFile(kubeconfig, []byte("apiVersion: v1\nkind: Config\nclusters: []\ncontexts: []\nusers: []\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		env = append(env, "FAKE_KUBECTL_CLIENT="+client, "KUBECONFIG="+kubeconfig)
 	}
 	cmd.Env = env
 
@@ -307,6 +354,27 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 		t.Fatalf("running seed-secrets.sh: %v\nstderr:\n%s", err, stderr.String())
 	}
 
+	if sc.protectedSecret != nil {
+		paths, err := filepath.Glob(logPath + ".manifest.*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range paths {
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.TrimSpace(string(body)) != "" {
+				if len(*sc.protectedSecret) != 0 {
+					t.Fatal("multiple Secret documents reached the fake API")
+				}
+				*sc.protectedSecret = body
+			}
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	calls := readSeedKubectlCalls(t, logPath)
 	t.Logf("exit=%d\nstdout: %s\nstderr:\n%s", code, stdout.String(), stderr.String())
 	return stdout.String(), stderr.String(), calls, code
