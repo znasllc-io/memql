@@ -854,3 +854,26 @@ SBOM generation covered 53 Go modules and seven npm lockfiles in nine reports,
 including development dependencies. Installed Workbench execution, current-source
 rescans, SARIF publishing, schedules, Code Quality parity and release gating still
 require the combined rehearsal.
+
+### Kubernetes artifact export qualification (October 6)
+
+Cluster steps now export declared files into a bounded emptyDir and a separate
+credential-free collector. The collector mounts only the export, read-only;
+archive bytes never enter kubelet logs. Workbench verifies the Job's ownership,
+controller reference, pod UID and terminated producer/running collector
+identities before and after the complete bounded transfer. Required missing,
+unsafe, changed or unfiled artifacts fail the step. Step V5 refuses replicas
+that cannot enforce this transport contract.
+
+The local generated-Job test passed in 175 seconds: an exact public checkout
+produced a 16 MiB file, two independent clients recovered the same SHA-256,
+command logs contained no artifact bytes, a stale UID was refused, and
+foreground deletion confirmed no remaining Job or pod. Focused runner and
+Workbench race tests and the namespace RBAC render gate passed. This proof uses
+the installed namespace resource defaults; without them a fixture's tiny
+collector disk limit becomes the entire pod's disk allowance.
+
+The current Library adapter remains bounded to small files and materializes one
+file at a time. Release-size streaming storage, durable upload intent and
+retention, installed mixed-version behavior and complete release qualification
+are still required. A node-local emptyDir is not durable across node loss.

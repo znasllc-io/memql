@@ -175,6 +175,7 @@ var wantRunnerGrants = map[string][]string{
 	"networking.k8s.io/networkpolicies": {"list"},
 	"/pods":                             {"list", "patch"},
 	"/pods/log":                         {"get"},
+	"/pods/exec":                        {"get"},
 	"/secrets":                          {"create", "get", "list", "patch", "delete", "deletecollection"},
 }
 

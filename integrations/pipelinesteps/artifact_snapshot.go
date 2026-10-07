@@ -182,3 +182,25 @@ func (r *artifactSnapshotReader) Read(p []byte) (int, error) {
 	}
 	return n, err
 }
+
+// readSmallArtifact bridges the current Library byte-slice port. The collector
+// itself remains streaming; release-size files require a streaming store port.
+func readSmallArtifact(file SnapshotFile, maxBytes int64) ([]byte, error) {
+	if file.Size < 0 || file.Size > maxBytes || file.Size > 256<<20 {
+		return nil, errors.New("artifact exceeds the current Library adapter bound")
+	}
+	input, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer input.Close()
+	body, err := io.ReadAll(io.LimitReader(input, file.Size+1))
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(body)
+	if int64(len(body)) != file.Size || hex.EncodeToString(sum[:]) != file.SHA256 {
+		return nil, errors.New("private artifact snapshot changed before storage")
+	}
+	return body, nil
+}

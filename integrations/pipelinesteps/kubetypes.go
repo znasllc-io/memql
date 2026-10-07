@@ -186,6 +186,7 @@ type Resources struct {
 // because 0 -- root -- is a value the runner writes, and absent means the
 // image's own user.
 type SecurityContext struct {
+	ReadOnlyRootFilesystem   *bool         `json:"readOnlyRootFilesystem,omitempty"`
 	RunAsUser                *int64        `json:"runAsUser,omitempty"`
 	AllowPrivilegeEscalation *bool         `json:"allowPrivilegeEscalation,omitempty"`
 	Capabilities             *Capabilities `json:"capabilities,omitempty"`
@@ -256,6 +257,7 @@ type VolumeMount struct {
 	Name      string `json:"name"`
 	MountPath string `json:"mountPath"`
 	SubPath   string `json:"subPath,omitempty"`
+	ReadOnly  bool   `json:"readOnly,omitempty"`
 }
 
 // Volume is one pod volume: scratch (EmptyDir) or a claim.
@@ -337,6 +339,7 @@ type PodCondition struct {
 // the container's readiness probe passing -- the isolation probe's listener
 // accepting connections; false and absent alike are not ready.
 type ContainerStatus struct {
+	ContainerID  string         `json:"containerID,omitempty"`
 	Name         string         `json:"name"`
 	Image        string         `json:"image,omitempty"`
 	State        ContainerState `json:"state"`
