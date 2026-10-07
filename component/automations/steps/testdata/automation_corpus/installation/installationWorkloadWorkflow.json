@@ -1,0 +1,51 @@
+{
+  "automation": "installation/workloads/automations.memql installationWorkloadWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.installationWorkloadWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "installationWorkloadRequirements"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.installationWorkloadWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "installationWorkloadRequirements"
+          }
+        ],
+        "refused": true,
+        "result": {
+          "output": null,
+          "status": "failed"
+        }
+      }
+    }
+  }
+}
