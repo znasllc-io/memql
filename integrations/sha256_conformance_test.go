@@ -46,6 +46,8 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 	// -- specifically to remove the unguarded coupling a duplicated hash
 	// expression created, so the entry is gone rather than kept.)
 	allow := map[string]string{
+		"ociregistry/verify.go":      "OCI descriptors and immutable archive receipts require standard SHA-256 over exact bytes, not MemQL identifiers",
+		"ociregistry/verify_test.go": "independently computes OCI fixture digests and artifact receipt SHA-256 values",
 		// Release artifact digests are standard SHA-256 over the exact blob
 		// bytes, independently verifiable with sha256sum and OCI tooling.
 		// core/id's content address is a different algorithm/representation.
@@ -55,6 +57,7 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		"pipelinesteps/artifact_snapshot.go":        "computes standard SHA-256 artifact byte digests consumed by the immutable storage and OCI protocols",
 		"pipelinesteps/artifact_receipts_test.go":   "independently verifies the streamed bytes against their standard SHA-256 receipt digest; fixture intent IDs use a counter",
 		"pipelinesteps/image_build_profile_test.go": "verifies the exact seccomp file bytes against the SHA-256 in the kubelet Localhost profile path; not a MemQL object identity",
+		"pipelinesteps/fleet_test.go":               "independently verifies native worker artifact bytes against their standard SHA-256 receipt digest; fixture intent IDs use a counter",
 		"pipelinesteps/pod_file_live_test.go":       "verifies the exact file bytes carried by a real Kubernetes exec stream against a standard SHA-256 fixture",
 		"azureblob/verified_stream_test.go":         "independently computes standard SHA-256 artifact fixtures for the streaming storage protocol",
 		"azureblob/verified_stream_azurite_test.go": "checks real stored artifact bytes against standard SHA-256 digests, including an OCI archive",
