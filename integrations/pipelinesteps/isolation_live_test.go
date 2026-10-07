@@ -137,10 +137,15 @@ func localPipelineControls(t *testing.T) (context.Context, string, string, func(
 }
 
 func localPipelineKube(t *testing.T, ctx context.Context, cluster, ns string) *Kube {
+	return localPipelineKubeProxy(t, ctx, cluster, ns, nil)
+}
+
+func localPipelineKubeProxy(t *testing.T, ctx context.Context, cluster, ns string, proxyOptions []string) *Kube {
 	t.Helper()
 	// The proxy uses kubectl's local credentials without copying a token or
 	// client key into the test. It binds an ephemeral loopback port only.
-	proxy := exec.CommandContext(ctx, "kubectl", "--context", cluster, "proxy", "--address=127.0.0.1", "--port=0")
+	args := []string{"--context", cluster, "proxy", "--address=127.0.0.1", "--port=0"}
+	proxy := exec.CommandContext(ctx, "kubectl", append(args, proxyOptions...)...)
 	stdout, err := proxy.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)

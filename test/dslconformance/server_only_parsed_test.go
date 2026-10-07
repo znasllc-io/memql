@@ -1158,6 +1158,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "library/mutations.memql", Name: "createLibraryFileVersion"}: true,
 		{Path: "library/mutations.memql", Name: "supersedeLibraryFileHead"}: true,
 
+		// Ownership does not attest storage: only the internal finalizer may
+		// record the durable journal's verified bytes and reserved file id.
+		// An actor.userId filter alone would let an owner forge that evidence.
+		{Path: "library/mutations.memql", Name: "recordStoredPipelineFile"}: true,
+
 		// Document history is authored only after a shared write lock, a fresh
 		// owned-row read and a revision comparison. Even the document's owner
 		// must not bypass those checks to forge version numbers or timestamps.
