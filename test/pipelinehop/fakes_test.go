@@ -28,16 +28,19 @@ import (
 // DSL store, the work journal and the Postgres advisory gate.
 
 // testManifest is the tiny repository's memql-package.yaml: two stages, the
-// second waiting on the first, so stage order is observable in what the
-// runner is handed.
+// second waiting on the first, and one affected-package step so the agent's
+// GitHub compare and stage order are observable in what the runner is handed.
 const testManifest = `formatVersion: 1
 name: shop
 pipeline:
   image: ghcr.io/acme/toolchain@sha256:5491
+  select:
+    go: import-graph
   stages:
     - name: checks
       steps:
         - name: vet
+          packages: affected
           run: go vet ./...
     - name: tests
       needs: [checks]
