@@ -379,8 +379,11 @@ func TestSitesAllScopesToTheCallerAndOpensForAClusterOwner(t *testing.T) {
 	eng, _, _ := sharedReadMergeEngine(t)
 	t.Setenv(memqlDomainEnv, siteTestDomain)
 
-	mineSlug := "mine-" + uniqueSuffix("site")
-	theirsSlug := "theirs-" + uniqueSuffix("site")
+	// sitesAll is a sorted list with the engine's 500-row default window.
+	// Prefix the fixtures so they remain on its first page even when a local
+	// DB has accumulated rows from previous test runs.
+	mineSlug := "000-mine-" + uniqueSuffix("site")
+	theirsSlug := "001-theirs-" + uniqueSuffix("site")
 	mineId := "site-mine-" + uniqueSuffix("site")
 	theirsId := "site-theirs-" + uniqueSuffix("site")
 

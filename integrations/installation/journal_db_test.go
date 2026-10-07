@@ -22,6 +22,7 @@ const migrationPath = "../../component/database/memory-nodes/migrations/20261007
 const preparationMigrationPath = "../../component/database/memory-nodes/migrations/20261007110000_installation_preparations"
 const promotionMigrationPath = "../../component/database/memory-nodes/migrations/20261007120000_installation_preparation_promotion"
 const retirementMigrationPath = "../../component/database/memory-nodes/migrations/20261007140000_installation_preparation_retirement"
+const rollbackMigrationPath = "../../component/database/memory-nodes/migrations/20261007150000_installation_rollbacks"
 
 func journalDB(t *testing.T) (*sql.DB, *sql.DB) {
 	t.Helper()
@@ -58,6 +59,10 @@ func journalDB(t *testing.T) (*sql.DB, *sql.DB) {
 	require.NoError(t, err)
 	_, err = first.ExecContext(ctx, string(body))
 	require.NoError(t, err)
+	body, err = os.ReadFile(rollbackMigrationPath + ".up.sql")
+	require.NoError(t, err)
+	_, err = first.ExecContext(ctx, string(body))
+	require.NoError(t, err)
 	return first, second
 }
 
@@ -69,7 +74,7 @@ func testPlan() preparedPlan {
 	d := "memql-id:" + strings.Repeat("a", 64)
 	before := strings.Repeat("b", 40)
 	return preparedPlan{
-		FormatVersion: 1, InstallationID: "installation-one", RequestedBy: "developer-one", WorkflowDigest: d,
+		FormatVersion: 1, InstallationID: "installation-one", RequestedBy: "developer-one", WorkflowDigest: d, ExecutionWorkflowDigest: "memql-id:" + strings.Repeat("e", 64),
 		CandidateID: "sha256:" + strings.Repeat("c", 64), CandidateApprovalID: "owner-approval", PublicationDigest: "sha256:" + strings.Repeat("e", 64),
 		RenderDigest: d, ResourceDiffDigest: d, RollbackRevision: before, RollbackRenderDigest: d,
 		Intent: argocd.Intent{FormatVersion: 1, RequestID: id.NewShortId(), Target: argocd.Target{Namespace: "argocd", Name: "installation-one", UID: "application-uid"}, BeforeGeneration: 42,
@@ -143,12 +148,12 @@ func TestJournalConcurrentReplicasReserveAndStartOneImmutableIntent(t *testing.T
 		require.EqualValues(t, 1, r.SlotEpoch)
 	}
 	require.NotEmpty(t, key)
-	started, err := first.begin(ctx, plan.InstallationID, key, plan.WorkflowDigest)
+	started, err := first.begin(ctx, plan.InstallationID, key, plan.ExecutionWorkflowDigest)
 	require.NoError(t, err)
 	// Drop the first host's return value and all native objects. A different
 	// connection and newly constructed journal recover the same external intent.
 	peer = revisionJournal{db: func() *sql.DB { return peerDB }}
-	recovered, err := peer.begin(ctx, plan.InstallationID, key, plan.WorkflowDigest)
+	recovered, err := peer.begin(ctx, plan.InstallationID, key, plan.ExecutionWorkflowDigest)
 	require.NoError(t, err)
 	require.Equal(t, started, recovered)
 	require.Equal(t, plan.Intent.RequestID, recovered.Plan.Intent.RequestID)
@@ -160,10 +165,42 @@ func TestJournalConcurrentReplicasReserveAndStartOneImmutableIntent(t *testing.T
 	require.Error(t, err)
 	// Read-only recovery does not require loading the original workflow. A new
 	// workflow may NOT turn an old approval into fresh write authority.
-	_, err = peer.begin(ctx, plan.InstallationID, key, "memql-id:"+strings.Repeat("e", 64))
+	_, err = peer.begin(ctx, plan.InstallationID, key, "memql-id:"+strings.Repeat("f", 64))
 	require.Error(t, err)
 	_, err = peer.get(operator(auth.RoleAdmin, "replacement"), plan.InstallationID, key)
 	require.NoError(t, err)
+}
+
+func TestJournalExpiredArtifactReceiptNeedsFreshCallLocalRequalification(t *testing.T) {
+	db, _ := journalDB(t)
+	journal := &revisionJournal{db: func() *sql.DB { return db }}
+	plan := testPlan()
+	internal := func(label string) string { return artifactHash("expired-requalification-test", label) }
+	plan.Preparation = &preparationBinding{
+		ID: internal("preparation"), ConfigurationDigest: internal("configuration"), ConfigurationInvariantDigest: internal("invariant"),
+		CandidateSourceDigest: internal("candidate-source"), RollbackSourceDigest: internal("rollback-source"),
+		CandidateReceiptDigest: internal("candidate-receipt"), RollbackReceiptDigest: internal("rollback-receipt"),
+		StorageDigest: internal("storage"), SensitiveDigest: internal("sensitive"), ArtifactDigest: internal("artifact"), ArtifactWorkflowDigest: internal("artifact-workflow"),
+		ArtifactExpiresAt: time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano), RollbackPublicationDigest: "sha256:" + strings.Repeat("f", 64),
+	}
+	body, key, err := plan.canonical()
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO installation_revision_heads(installation_id) VALUES($1)`, plan.InstallationID)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO installation_revision_attempts(plan_id,installation_id,requested_by,slot_epoch,plan,state) VALUES($1,$2,$3,1,$4::jsonb,'prepared')`, key, plan.InstallationID, plan.RequestedBy, string(body))
+	require.NoError(t, err)
+	_, err = db.Exec(`UPDATE installation_revision_heads SET active_plan_id=$2,slot_epoch=1 WHERE installation_id=$1`, plan.InstallationID, key)
+	require.NoError(t, err)
+	ctx := operator(auth.RoleDeveloper, plan.RequestedBy)
+	_, err = journal.begin(ctx, plan.InstallationID, key, plan.ExecutionWorkflowDigest)
+	require.ErrorContains(t, err, "expired before start")
+	_, err = journal.beginAdmitted(ctx, plan.InstallationID, key, plan.ExecutionWorkflowDigest, revisionWriteAdmission{planID: key, workflow: plan.ExecutionWorkflowDigest, freshUntil: time.Now().Add(-time.Second)})
+	require.ErrorContains(t, err, "live exact-plan")
+	_, err = journal.beginAdmitted(ctx, plan.InstallationID, key, plan.ExecutionWorkflowDigest, revisionWriteAdmission{planID: key, workflow: plan.ExecutionWorkflowDigest, freshUntil: time.Now().Add(time.Minute)})
+	require.NoError(t, err, "fresh native exact-plan admission replaces an expired historical artifact receipt")
+	record, err := journal.get(ctx, plan.InstallationID, key)
+	require.NoError(t, err)
+	require.Equal(t, "applying", record.State)
 }
 
 func TestJournalDistinctConcurrentRequestsCannotBothAcquireInstallation(t *testing.T) {
@@ -200,7 +237,7 @@ func TestJournalCancellationFencesLateStartAndCannotReleaseSuccessor(t *testing.
 	cancelled, err := peer.cancel(ctx, plan.InstallationID, old.ID)
 	require.NoError(t, err)
 	require.Equal(t, "cancelled", cancelled.State)
-	_, err = first.begin(ctx, plan.InstallationID, old.ID, plan.WorkflowDigest)
+	_, err = first.begin(ctx, plan.InstallationID, old.ID, plan.ExecutionWorkflowDigest)
 	require.Error(t, err)
 	_, err = first.reserve(ctx, plan)
 	require.ErrorContains(t, err, "permanently cancelled")
@@ -211,9 +248,9 @@ func TestJournalCancellationFencesLateStartAndCannotReleaseSuccessor(t *testing.
 	require.NoError(t, err)
 	_, err = peer.get(ctx, plan.InstallationID, next.ID)
 	require.NoError(t, err)
-	_, err = first.begin(ctx, plan.InstallationID, old.ID, plan.WorkflowDigest)
+	_, err = first.begin(ctx, plan.InstallationID, old.ID, plan.ExecutionWorkflowDigest)
 	require.Error(t, err)
-	_, err = peer.begin(ctx, plan.InstallationID, next.ID, plan.WorkflowDigest)
+	_, err = peer.begin(ctx, plan.InstallationID, next.ID, plan.ExecutionWorkflowDigest)
 	require.NoError(t, err)
 }
 
@@ -231,7 +268,7 @@ func TestJournalConcurrentStartAndCancellationHaveOnlyOneWinner(t *testing.T) {
 		results := make(chan error, 2)
 		go func() {
 			<-gate
-			_, err := first.begin(ctx, plan.InstallationID, r.ID, plan.WorkflowDigest)
+			_, err := first.begin(ctx, plan.InstallationID, r.ID, plan.ExecutionWorkflowDigest)
 			results <- err
 		}()
 		go func() {
@@ -271,7 +308,7 @@ func TestJournalLateObservationCannotOverwriteNewerFactsOrCompleteInstallation(t
 	require.NoError(t, err)
 	_, err = first.observe(ctx, plan.InstallationID, r.ID, 0, argocd.Facts{})
 	require.ErrorIs(t, err, errChanged)
-	_, err = first.begin(ctx, plan.InstallationID, r.ID, plan.WorkflowDigest)
+	_, err = first.begin(ctx, plan.InstallationID, r.ID, plan.ExecutionWorkflowDigest)
 	require.NoError(t, err)
 	good := argocd.Facts{IntentObserved: true, OperationPhase: "Succeeded", OperationSucceeded: true, RevisionObserved: true, Healthy: true, Synced: true}
 	observed, err := peer.observe(operator(auth.RoleAdmin, "replacement"), plan.InstallationID, r.ID, 0, good)
@@ -314,7 +351,7 @@ func TestJournalRevalidatesStoredAuthorityAndRetainsHistoryOnMigrationRollback(t
 		require.NoError(t, err)
 		_, err = db.Exec(`UPDATE installation_revision_attempts SET plan=`+edit+` WHERE plan_id=$1`, r.ID)
 		require.NoError(t, err)
-		_, err = j.begin(ctx, plan.InstallationID, r.ID, plan.WorkflowDigest)
+		_, err = j.begin(ctx, plan.InstallationID, r.ID, plan.ExecutionWorkflowDigest)
 		require.Error(t, err)
 	}
 }
@@ -347,6 +384,10 @@ func TestInstallationPlanRequiresImmutableRollbackAndExactEvidenceBindings(t *te
 
 func TestInstallationJournalMigrationCanRollBackOnlyWhileEmpty(t *testing.T) {
 	db, _ := journalDB(t)
+	rollbackDown, err := os.ReadFile(rollbackMigrationPath + ".down.sql")
+	require.NoError(t, err)
+	_, err = db.Exec(string(rollbackDown))
+	require.NoError(t, err)
 	preparationDown, err := os.ReadFile(preparationMigrationPath + ".down.sql")
 	require.NoError(t, err)
 	_, err = db.Exec(string(preparationDown))

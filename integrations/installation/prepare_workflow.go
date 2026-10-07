@@ -35,7 +35,9 @@ type preparationHost struct {
 	tokens                       pipelinesteps.TokenMinter
 	catalog                      CatalogFactory
 	namespace, configurationName string
+	rendererAddressOverride      string // test-only routing to the observed renderer fixture
 	definition                   *automations.Automation
+	revisions                    *revisionWorkflow
 	artifacts                    *artifactWorkflow
 	digest                       string
 }
@@ -59,7 +61,11 @@ func (h *preparationHost) bindWorkflow(engineRevision string) error {
 	if err != nil {
 		return err
 	}
-	h.digest = artifactHash("preparation-workflow-v1", []string{engineRevision, h.definition.DefinitionFingerprint(id.NewUntracked()), h.artifacts.digest})
+	h.revisions, err = loadRevisionWorkflow(engineRevision)
+	if err != nil {
+		return err
+	}
+	h.digest = artifactHash("preparation-workflow-v1", []string{engineRevision, h.definition.DefinitionFingerprint(id.NewUntracked()), h.artifacts.digest, h.revisions.digest})
 	return nil
 }
 
@@ -68,7 +74,7 @@ func (h *preparationHost) prepare(ctx context.Context, request preparationReques
 	if err != nil {
 		return revisionRecord{}, err
 	}
-	if h == nil || h.api == nil || h.journal == nil || h.executor == nil || h.files == nil || h.tokens == nil || h.catalog == nil || h.definition == nil || h.artifacts == nil || !internalDigest.MatchString(h.digest) {
+	if h == nil || h.api == nil || h.journal == nil || h.executor == nil || h.files == nil || h.tokens == nil || h.catalog == nil || h.definition == nil || h.artifacts == nil || h.revisions == nil || !internalDigest.MatchString(h.digest) {
 		return revisionRecord{}, errors.New("installation preparation host is incomplete")
 	}
 	if !identifier.MatchString(request.InstallationID) || !identifier.MatchString(request.RequestID) || !artifactDigest.MatchString(request.CandidateID) || !artifactDigest.MatchString(request.CatalogDigest) || !commitDigest.MatchString(request.OverlayRevision) {
@@ -159,6 +165,7 @@ func (s *preparationWorkflowScope) operations() map[string]workflowhost.Operatio
 		"installationAcknowledgeSource":      s.acknowledge,
 		"installationRenderSource":           s.render,
 		"installationVerifyResources":        s.verifyResources,
+		"installationRecheckResources":       s.recheckResources,
 		"installationVerifyStorage":          s.verifyStorage,
 		"installationVerifyProtected":        s.verifyProtected,
 		"installationReobserveConfiguration": s.reobserve,
@@ -245,7 +252,7 @@ func (s *preparationWorkflowScope) reserve(ctx context.Context, args map[string]
 	if err != nil {
 		return nil, err
 	}
-	scope := preparationScope{FormatVersion: 1, InstallationID: cfg.InstallationID, RequestID: s.request.RequestID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ConfigurationDigest: s.configuration.digest, ConfigurationInvariantDigest: s.configuration.invariantDigest, CandidateID: s.request.CandidateID, PublicationDigest: s.request.CatalogDigest, Intent: intent, Captures: map[string]sourceCaptureSpec{}}
+	scope := preparationScope{FormatVersion: 1, InstallationID: cfg.InstallationID, RequestID: s.request.RequestID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ExecutionWorkflowDigest: s.host.revisions.digest, ConfigurationDigest: s.configuration.digest, ConfigurationInvariantDigest: s.configuration.invariantDigest, CandidateID: s.request.CandidateID, PublicationDigest: s.request.CatalogDigest, Intent: intent, Captures: map[string]sourceCaptureSpec{}}
 	run := preparationSourceRun(cfg.InstallationID, s.request.RequestID, s.operator)
 	for _, role := range []string{"candidate", "rollback"} {
 		render := s.configuration.render
@@ -356,6 +363,21 @@ func (s *preparationWorkflowScope) verifyResources(ctx context.Context, args map
 	s.artifacts = &artifactWorkflowScope{admission: scope, operator: s.operator, observations: map[string]artifactObservation{}}
 	return nil, nil
 }
+func (s *preparationWorkflowScope) recheckResources(ctx context.Context, args map[string]any) (any, error) {
+	if err := noPreparationArguments(args); err != nil {
+		return nil, err
+	}
+	if s.configuration == nil || s.candidate.Digest() == "" || s.resources.digest == "" || s.artifacts == nil || s.artifacts.result == nil || !freshArtifactObservation(s.artifacts.result.observed, s.artifacts.result.expires, time.Now()) {
+		return nil, errors.New("installation resource recheck requires completed fresh artifact reads")
+	}
+	cfg := s.configuration
+	current, err := verifyImagesAndDiff(ctx, s.host.api, s.candidate, s.renders["rollback"], s.renders["candidate"], cfg.configuration.Platform, cfg.bindings)
+	if err != nil || current.digest != s.resources.digest || current.publication != s.resources.publication || current.before != s.resources.before || current.after != s.resources.after {
+		return nil, errors.New("installation resources changed during immutable artifact verification")
+	}
+	s.resources = current
+	return nil, nil
+}
 func (s *preparationWorkflowScope) verifyStorage(ctx context.Context, args map[string]any) (any, error) {
 	if err := noPreparationArguments(args); err != nil {
 		return nil, err
@@ -405,7 +427,7 @@ func (s *preparationWorkflowScope) promote(ctx context.Context, args map[string]
 	}
 	var before struct{ TargetRevision string }
 	_ = json.Unmarshal(s.renders["rollback"].Spec().Source, &before)
-	plan := preparedPlan{FormatVersion: 1, InstallationID: s.request.InstallationID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, CandidateID: s.request.CandidateID, CandidateApprovalID: release.ApprovalID, PublicationDigest: s.request.CatalogDigest, RenderDigest: s.renders["candidate"].Digest(), RollbackRenderDigest: s.renders["rollback"].Digest(), ResourceDiffDigest: s.resources.digest, RollbackRevision: before.TargetRevision, Intent: s.record.Scope.Intent}
+	plan := preparedPlan{FormatVersion: 1, InstallationID: s.request.InstallationID, RequestedBy: s.operator, WorkflowDigest: s.host.digest, ExecutionWorkflowDigest: s.host.revisions.digest, CandidateID: s.request.CandidateID, CandidateApprovalID: release.ApprovalID, PublicationDigest: s.request.CatalogDigest, RenderDigest: s.renders["candidate"].Digest(), RollbackRenderDigest: s.renders["rollback"].Digest(), ResourceDiffDigest: s.resources.digest, RollbackRevision: before.TargetRevision, Intent: s.record.Scope.Intent}
 	artifact.workflow, artifact.operator = s.host.artifacts.digest, s.operator
 	artifact.digest = artifactHash("workflow-evidence", []string{artifact.digest, artifact.workflow, artifact.operator})
 	evidence := promotionEvidence{configuration: s.configuration, artifacts: artifact, published: s.candidate, candidateSource: s.sources["candidate"], rollbackSource: s.sources["rollback"], candidateRender: s.renders["candidate"], rollbackRender: s.renders["rollback"], resources: s.resources, storage: s.storage, sensitive: s.sensitive}

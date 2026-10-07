@@ -53,6 +53,7 @@ type resourceEvidence struct {
 	digest                     string
 	publication, before, after string
 	changes                    []resourceChange
+	observed                   time.Time
 }
 
 func (e resourceEvidence) String() string {
@@ -110,6 +111,9 @@ func verifyImagesAndDiff(ctx context.Context, api argocd.API, published pipeline
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+	// Start the freshness window before any receiving-cluster discovery. A slow
+	// API read must not make old resource facts appear newly observed.
+	observed := time.Now().UTC()
 	// Share only this invocation's discovery; another replica obtains its own
 	// facts, and a later preparation cannot inherit a process-local cache.
 	schemas := map[string]map[string]resourceType{}
@@ -178,7 +182,7 @@ func verifyImagesAndDiff(ctx context.Context, api argocd.API, published pipeline
 	if err != nil {
 		return resourceEvidence{}, errors.New("resource evidence could not be encoded")
 	}
-	return resourceEvidence{digest: "memql-id:" + string(id.NewUntracked().FromString("installation-resource-evidence-v1:"+string(body))), publication: published.Digest(), before: before.Digest(), after: after.Digest(), changes: changes}, nil
+	return resourceEvidence{digest: "memql-id:" + string(id.NewUntracked().FromString("installation-resource-evidence-v1:"+string(body))), publication: published.Digest(), before: before.Digest(), after: after.Digest(), changes: changes, observed: observed}, nil
 }
 
 func sameRenderScope(before, after argocd.RenderSpec) error {

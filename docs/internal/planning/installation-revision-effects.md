@@ -74,8 +74,64 @@ Real database tests exercise independent connections, concurrent reservations,
 lost start-reply recovery, late starts after cancellation, stale observations,
 changed stored authority, and migration rollback refusing nonempty history.
 The package is in the canonical required-database CI selector. Completion,
-explicit rollback/recovery, cleanup evidence and the scoped DSL/public surface
-remain unfinished; no engine rollout is enabled by this journal alone.
+explicit rollback, continuity qualification, cleanup scheduling and the public
+surface remain unfinished; no engine rollout is enabled by this journal alone.
+
+### Scoped revision execution and observation
+
+The private installed `installationRevisionWorkflow` performs one bounded pass:
+read the native entry mode, persist start before applying the exact recorded
+Argo intent, then observe its current controller facts. The preparation and
+plan bind a separate `ExecutionWorkflowDigest`, derived from the owned installed
+recipe and immutable engine revision. A preparation recipe fingerprint cannot
+substitute for this execution binding. Promotion verifies both bindings.
+
+Starting requires the original resolved operator, an actual promoted preparation,
+fresh authenticated receiving configuration, and unexpired artifact evidence.
+An uncertain started operation keeps its slot. Repeating the same write scope
+reconciles the recorded intent through the Argo adapter; a lost committed reply
+does not create another sync. A different installed engine can run the explicit
+observation mode, but its operations cannot acquire write authority even if the
+recipe asks to apply. Every controller observation uses the journal version read
+before that request, preserving protection against late observers.
+
+Required-database race tests combine native promotion and revision journals with
+a JSON Patch controller fixture. They exercise lost apply replies, fresh-host
+recovery, changed execution recipes, stale configuration, omitted start, forged
+workflow outputs and unbound children. A successful owned Argo operation with
+`Healthy` and `Synced` still leaves the installation `applying` and its slot
+occupied. These are controller protocol and journal tests, not serving continuity
+or installed rollout evidence. The host remains private and unregistered.
+
+### Explicit reversal journal
+
+The private Argo adapter can now derive a rollback from one exact owned terminal
+operation. It reads the current Application, requires no pending operation,
+accepts only the owned `Succeeded`, `Failed` or `Error` outcome, and derives the
+previous immutable commit from the original intent. The reversal preserves the
+complete source, destination, project, sync policy and prune choice. A changed
+Application, foreign marker, unowned outcome or mutable baseline refuses before
+a write. Restoring a persisted reversal revalidates its complete relation to the
+parent intent.
+
+The native rollback journal retains that parent's installation head. Reserving
+the reversal permanently fences the forward recipe, starting commits before an
+external request, and observations have their own monotonic version. Another
+replica recovers the same intent after a lost response; a late observer cannot
+replace newer facts. Failed and successful reverse syncs both retain the head
+until independent continuity and cleanup verification. Schema rollback refuses
+to erase reversal history.
+
+Required-database race tests cover concurrent reservations through independent
+connections, the durable start before the controller PATCH, lost committed
+replies, changed authority or stored bindings, stale observations and retained
+ownership after failure. The isolated installed Argo ConfigMap test also ran
+the new derived reversal path, passed under race in 3.749 seconds, and confirmed
+UID-guarded deletion of its Application, AppProject and namespace. This is
+controller protocol evidence, not an engine-update or serving-continuity result.
+The journal remains private: its native host must still compose fresh receiving,
+artifact and preservation verifiers before any possible write. Digest fields
+in a journal row alone do not satisfy those proofs.
 
 ### Preparation before source dispatch
 

@@ -30,19 +30,20 @@ var (
 // NOT verify them. The future scoped preparer must supply their actual proofs
 // before using this journal; there is no public prepare/start escape hatch.
 type preparedPlan struct {
-	FormatVersion        int                 `json:"formatVersion"`
-	InstallationID       string              `json:"installationId"`
-	RequestedBy          string              `json:"requestedBy"`
-	WorkflowDigest       string              `json:"workflowDigest"`
-	CandidateID          string              `json:"candidateId"`
-	CandidateApprovalID  string              `json:"candidateApprovalId"`
-	PublicationDigest    string              `json:"publicationDigest"`
-	RenderDigest         string              `json:"renderDigest"`
-	ResourceDiffDigest   string              `json:"resourceDiffDigest"`
-	RollbackRevision     string              `json:"rollbackRevision"`
-	RollbackRenderDigest string              `json:"rollbackRenderDigest"`
-	Preparation          *preparationBinding `json:"preparation,omitempty"`
-	Intent               argocd.Intent       `json:"intent"`
+	FormatVersion           int                 `json:"formatVersion"`
+	InstallationID          string              `json:"installationId"`
+	RequestedBy             string              `json:"requestedBy"`
+	WorkflowDigest          string              `json:"workflowDigest"`
+	ExecutionWorkflowDigest string              `json:"executionWorkflowDigest"`
+	CandidateID             string              `json:"candidateId"`
+	CandidateApprovalID     string              `json:"candidateApprovalId"`
+	PublicationDigest       string              `json:"publicationDigest"`
+	RenderDigest            string              `json:"renderDigest"`
+	ResourceDiffDigest      string              `json:"resourceDiffDigest"`
+	RollbackRevision        string              `json:"rollbackRevision"`
+	RollbackRenderDigest    string              `json:"rollbackRenderDigest"`
+	Preparation             *preparationBinding `json:"preparation,omitempty"`
+	Intent                  argocd.Intent       `json:"intent"`
 }
 
 func (p preparedPlan) canonical() ([]byte, string, error) {
@@ -50,7 +51,7 @@ func (p preparedPlan) canonical() ([]byte, string, error) {
 		!identifier.MatchString(p.CandidateApprovalID) || !artifactDigest.MatchString(p.CandidateID) || !artifactDigest.MatchString(p.PublicationDigest) || !commitDigest.MatchString(p.RollbackRevision) {
 		return nil, "", errors.New("installation plan has invalid identity or candidate bindings")
 	}
-	for _, digest := range []string{p.WorkflowDigest, p.RenderDigest, p.ResourceDiffDigest, p.RollbackRenderDigest} {
+	for _, digest := range []string{p.WorkflowDigest, p.ExecutionWorkflowDigest, p.RenderDigest, p.ResourceDiffDigest, p.RollbackRenderDigest} {
 		if !internalDigest.MatchString(digest) {
 			return nil, "", errors.New("installation plan requires exact native evidence bindings")
 		}

@@ -139,10 +139,9 @@ func TestRevisionThroughInstalledArgo(t *testing.T) {
 
 	// Rollback is a NEW explicit intent whose target is the observed immutable
 	// starting commit. It never clears or replays the failed/old request.
-	current, err := second.Read(ctx, target)
+	rollback, err := second.PlanRollback(ctx, recovered, "proof-rollback-"+id.NewShortId())
 	require.NoError(t, err)
-	rollback, err := PlanRevision(current, "proof-rollback-"+id.NewShortId(), stringAt(source, "targetRevision"), false)
-	require.NoError(t, err)
+	require.NoError(t, ValidateRollback(recovered, rollback))
 	_, err = second.Apply(ctx, rollback)
 	require.NoError(t, err)
 	fourth, err := New(api)

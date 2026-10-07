@@ -6,11 +6,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/integrations/argocd"
 	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 )
 
@@ -116,6 +118,38 @@ func TestPreparationRecipeCannotAssertOrIgnoreMissingEvidence(t *testing.T) {
 			require.Empty(t, result.ID)
 		})
 	}
+}
+
+func TestPreparationRechecksAndRefreshesResourceObservation(t *testing.T) {
+	f := newAdmissionFixture(t)
+	api := resourceAPIFixture()
+	initial, err := verifyImagesAndDiff(context.Background(), api, f.next, f.before, f.after, f.config.Platform, f.config.Bindings)
+	require.NoError(t, err)
+	time.Sleep(time.Millisecond)
+	observed := time.Now().UTC()
+	scope := &preparationWorkflowScope{
+		host:      &preparationHost{api: api},
+		operator:  "operator",
+		candidate: f.next,
+		rollback:  f.old,
+		configuration: &receiverSnapshot{
+			configuration: receiverConfiguration{Platform: f.config.Platform},
+			digest:        f.config.ConfigurationDigest,
+			bindings:      f.config.Bindings,
+		},
+		renders:   map[string]argocd.RenderedRevision{"rollback": f.before, "candidate": f.after},
+		resources: initial,
+		artifacts: &artifactWorkflowScope{result: &artifactEvidence{observed: observed, expires: observed.Add(time.Minute)}},
+	}
+
+	_, err = scope.operations()["installationRecheckResources"](captureOperator(auth.RoleOwner, "operator"), nil)
+	require.NoError(t, err)
+	require.Equal(t, initial.digest, scope.resources.digest)
+	require.Equal(t, initial.publication, scope.resources.publication)
+	require.Equal(t, initial.before, scope.resources.before)
+	require.Equal(t, initial.after, scope.resources.after)
+	require.True(t, scope.resources.observed.After(initial.observed), "recheck must replace the older resource observation")
+	require.True(t, scope.resources.observed.After(observed), "resource evidence must be refreshed after artifact verification")
 }
 
 // A recipe may fan out the same admitted operation. The native scope must not

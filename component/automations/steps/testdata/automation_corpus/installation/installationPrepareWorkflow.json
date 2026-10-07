@@ -90,6 +90,10 @@
           },
           {
             "kind": "builtin",
+            "name": "installationRecheckResources"
+          },
+          {
+            "kind": "builtin",
             "name": "installationVerifyStorage"
           },
           {
@@ -197,6 +201,10 @@
           {
             "kind": "automation",
             "name": "installationArtifactWorkflow"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationRecheckResources"
           },
           {
             "kind": "builtin",

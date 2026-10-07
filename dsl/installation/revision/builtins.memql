@@ -1,0 +1,44 @@
+/// Read the active revision and native entry mode.
+@executor("integration.installation.installationRevisionRead")
+builtin installationRevisionRead { }
+/// Authenticate the complete current receiver configuration and exact baseline.
+@executor("integration.installation.installationRevisionConfiguration")
+builtin installationRevisionConfiguration { }
+/// Reopen both signed publications under the receiver's current trust.
+@executor("integration.installation.installationRevisionResolve")
+builtin installationRevisionResolve { }
+/// Recheck candidate and rollback compatibility against current dependencies.
+@executor("integration.installation.installationRevisionCompatibility")
+builtin installationRevisionCompatibility { }
+/// Reopen only the exact promoted preparation's retained source bytes.
+@executor("integration.installation.installationRevisionReopenSource")
+@args(profile="object")
+builtin installationRevisionReopenSource { role string! }
+/// Render one reopened source through the authenticated receiving renderer.
+@executor("integration.installation.installationRevisionRenderSource")
+@args(profile="object")
+builtin installationRevisionRenderSource { role string! }
+/// Verify the signed images and complete rendered resource diff.
+@executor("integration.installation.installationRevisionVerifyResources")
+builtin installationRevisionVerifyResources { }
+/// Recheck resources after immutable registry reads.
+@executor("integration.installation.installationRevisionRecheckResources")
+builtin installationRevisionRecheckResources { }
+/// Reobserve storage against the exact promoted renders.
+@executor("integration.installation.installationRevisionVerifyStorage")
+builtin installationRevisionVerifyStorage { }
+/// Reobserve protected resources and namespace ownership.
+@executor("integration.installation.installationRevisionVerifyProtected")
+builtin installationRevisionVerifyProtected { }
+/// Reauthenticate receiver configuration immediately before the start fence.
+@executor("integration.installation.installationRevisionReobserveConfig")
+builtin installationRevisionReobserveConfig { }
+/// Persist the started fence after complete fresh native admission.
+@executor("integration.installation.installationRevisionBegin")
+builtin installationRevisionBegin { }
+/// Apply or reconcile exactly the durably admitted Argo intent.
+@executor("integration.installation.installationRevisionApply")
+builtin installationRevisionApply { }
+/// Record fresh controller facts without completing the installation.
+@executor("integration.installation.installationRevisionObserve")
+builtin installationRevisionObserve { }

@@ -215,8 +215,10 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // measured together by strict boot after merging both installed definitions.
 // 138 -> 139: private receiving preparation recipe, measured after combining
 // preparation and retirement on the same installed tree.
-// 139 -> 140: private workload observation recipe, measured by strict boot.
-const shippedAutomationCount = 140
+// 139 -> 140: private revision execution recipe; measured by strict boot.
+// 140 -> 141: private workload observation recipe; measured by strict boot.
+// 141 -> 142: private rollback preparation recipe; measured by strict boot.
+const shippedAutomationCount = 142
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

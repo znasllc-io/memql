@@ -25,6 +25,7 @@ automation installationPrepareWorkflow {
   }
   builtin installationVerifyResources()
   automation installationArtifactWorkflow()
+  builtin installationRecheckResources()
   builtin installationVerifyStorage()
   builtin installationVerifyProtected()
   builtin installationReobserveConfiguration()

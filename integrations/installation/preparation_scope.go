@@ -19,8 +19,9 @@ type preparationScope struct {
 	RequestID                    string                       `json:"requestId"`
 	RequestedBy                  string                       `json:"requestedBy"`
 	WorkflowDigest               string                       `json:"workflowDigest"`
-	ConfigurationDigest          string                       `json:"configurationDigest"`
+	ExecutionWorkflowDigest      string                       `json:"executionWorkflowDigest"`
 	ConfigurationInvariantDigest string                       `json:"configurationInvariantDigest"`
+	ConfigurationDigest          string                       `json:"configurationDigest"`
 	CandidateID                  string                       `json:"candidateId"`
 	PublicationDigest            string                       `json:"publicationDigest"`
 	Intent                       argocd.Intent                `json:"intent"`
@@ -34,7 +35,7 @@ func preparationSourceRun(installation, request, actor string) string {
 func (s preparationScope) canonical() ([]byte, string, error) {
 	if s.FormatVersion != 1 || !identifier.MatchString(s.InstallationID) || !identifier.MatchString(s.RequestID) ||
 		!identifier.MatchString(s.RequestedBy) || !internalDigest.MatchString(s.WorkflowDigest) ||
-		!internalDigest.MatchString(s.ConfigurationDigest) || !internalDigest.MatchString(s.ConfigurationInvariantDigest) || !artifactDigest.MatchString(s.CandidateID) || !artifactDigest.MatchString(s.PublicationDigest) || len(s.Captures) != 2 {
+		!internalDigest.MatchString(s.ExecutionWorkflowDigest) || !internalDigest.MatchString(s.ConfigurationDigest) || !internalDigest.MatchString(s.ConfigurationInvariantDigest) || !artifactDigest.MatchString(s.CandidateID) || !artifactDigest.MatchString(s.PublicationDigest) || len(s.Captures) != 2 {
 		return nil, "", errors.New("installation preparation requires complete native identity and configuration bindings")
 	}
 	run := preparationSourceRun(s.InstallationID, s.RequestID, s.RequestedBy)

@@ -50,6 +50,10 @@ builtin installationRenderSource { role string! }
 @executor("integration.installation.installationVerifyResources")
 builtin installationVerifyResources { }
 
+/// Recheck the complete rendered resource inventory after immutable artifact reads.
+@executor("integration.installation.installationRecheckResources")
+builtin installationRecheckResources { }
+
 /// Verify live persistent storage against both renders.
 @executor("integration.installation.installationVerifyStorage")
 builtin installationVerifyStorage { }

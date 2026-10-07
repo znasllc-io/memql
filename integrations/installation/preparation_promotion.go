@@ -62,7 +62,7 @@ type promotionEvidence struct {
 func promotionPlan(r preparationRecord, plan preparedPlan, configuration string, evidence promotionEvidence) (preparedPlan, error) {
 	if plan.Preparation != nil || configuration != r.Scope.ConfigurationDigest ||
 		plan.InstallationID != r.Scope.InstallationID || plan.RequestedBy != r.Scope.RequestedBy ||
-		plan.WorkflowDigest != r.Scope.WorkflowDigest || plan.CandidateID != r.Scope.CandidateID || plan.PublicationDigest != r.Scope.PublicationDigest {
+		plan.WorkflowDigest != r.Scope.WorkflowDigest || plan.ExecutionWorkflowDigest != r.Scope.ExecutionWorkflowDigest || plan.CandidateID != r.Scope.CandidateID || plan.PublicationDigest != r.Scope.PublicationDigest {
 		return preparedPlan{}, errors.New("installation plan differs from its reserved preparation")
 	}
 	artifacts := evidence.artifacts
@@ -99,8 +99,8 @@ func promotionPlan(r preparationRecord, plan preparedPlan, configuration string,
 		return preparedPlan{}, errors.New("promotion evidence does not describe one candidate and rollback render")
 	}
 	now := time.Now()
-	if !freshPreservationObservation(evidence.storage.observed, now) || !freshPreservationObservation(evidence.sensitive.observed, now) {
-		return preparedPlan{}, errors.New("promotion requires freshly observed storage and protected resources")
+	if !freshPreservationObservation(evidence.resources.observed, now) || !freshPreservationObservation(evidence.storage.observed, now) || !freshPreservationObservation(evidence.sensitive.observed, now) {
+		return preparedPlan{}, errors.New("promotion requires freshly observed resources, storage and protected resources")
 	}
 	if err := promotionIntentMatches(r.Scope, plan); err != nil {
 		return preparedPlan{}, err

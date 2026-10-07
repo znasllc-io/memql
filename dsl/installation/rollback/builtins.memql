@@ -1,0 +1,27 @@
+/// Reconcile the durable reversal and read its native entry mode.
+@executor("integration.installation.installationRollbackRead")
+builtin installationRollbackRead { }
+/// Authenticate current configuration against the owned forward intent.
+@executor("integration.installation.installationRollbackConfiguration")
+builtin installationRollbackConfiguration { }
+/// Reopen only the original promoted preparation's retained source bytes.
+@executor("integration.installation.installationRollbackReopenSource")
+builtin installationRollbackReopenSource { role string! }
+/// Recheck native resource identity after potentially slow artifact reads.
+@executor("integration.installation.installationRollbackRecheckResources")
+builtin installationRollbackRecheckResources { }
+/// Reobserve the complete configuration before admitting a reversal write.
+@executor("integration.installation.installationRollbackReobserveConfiguration")
+builtin installationRollbackReobserveConfiguration { }
+/// Persist the exact derived reversal and native evidence bindings.
+@executor("integration.installation.installationRollbackReserve")
+builtin installationRollbackReserve { }
+/// Persist the reversal start before an external request.
+@executor("integration.installation.installationRollbackBegin")
+builtin installationRollbackBegin { }
+/// Apply or reconcile only the exact admitted reversal.
+@executor("integration.installation.installationRollbackApply")
+builtin installationRollbackApply { }
+/// Record controller facts without completing the installation.
+@executor("integration.installation.installationRollbackObserve")
+builtin installationRollbackObserve { }
