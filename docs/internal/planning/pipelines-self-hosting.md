@@ -838,9 +838,28 @@ covered. A crash, missing report, timeout or exit/report disagreement leaves
 the durable coverage summary incomplete. Timeouts terminate the owned process
 group. Findings fail the command even when history coverage is complete.
 
+The helper also accepts `--jobs` (one by default, at most 32). It bounds both
+active scanner processes and queued batches. Reports retain their original
+inventory indices even when later batches finish first; only validated reports
+increase completed coverage. A failed batch cancels the other owned process
+groups promptly. Parallel execution scans every original commit independently:
+it does not deduplicate blobs or reuse results across commits, paths or allowlist
+contexts. `--jobs=4 --batch-size=1` lets four large diffs use separate CPUs without
+putting many large fragments into one scanner process. The caller must budget
+memory for all processes and set an appropriate whole-scan deadline.
+
+A representative 81.39 MB added fragment took 80.9 seconds with pinned Gitleaks
+8.30.1; regex matching used 88% of its sampled CPU time. Generated minified
+architecture files account for much of the repeated input. They remain included.
+The configured 90-minute deadline is not a qualified full-history budget. A
+representative benchmark is performance evidence only, never a complete scan.
+
 Regression tests include a real Gitleaks scan that finds an added-then-removed
 synthetic credential reachable only through a tag, and one introduced only in a
-merge result and subsequently removed. The first complete-history
+merge result and subsequently removed. Serial and parallel runs must report the
+same redacted merge-only finding. Scheduler tests cover out-of-order completion,
+bounded concurrency and prompt cancellation after a failed or invalid report.
+The first complete-history
 rehearsal inventories 10,137 commits at main
 `82c37723251d016bca6a8589f50caed67e1dfbca`; its final measured result is still
 pending. Legacy workflow retirement remains gated on that evidence and the

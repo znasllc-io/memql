@@ -5,6 +5,8 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -52,20 +54,24 @@ assert all(flag in opts for flag in ("--no-walk=unsorted", "--root", "--diff-mer
 commits = [arg for arg in opts if not arg.startswith("--")]
 fault = os.getenv("SCANNER_FAULT", "")
 if fault == "crash": sys.exit(137)
+if fault == "mixed":
+    if commits[0] == os.getenv("SCANNER_FAIL_COMMIT"): sys.exit(137)
+    time.sleep(30)
 if fault == "missing": sys.exit(0)
 if fault == "hang": time.sleep(30)
 report = [{"Commit": commits[0], "Secret": "REDACTED"}] if fault in ("findings", "partial") else []
+if fault == "outside": report = [{"Commit": "0" * 40, "Secret": "REDACTED"}]
 pathlib.Path(args["--report-path"]).write_text(json.dumps(report))
 if fault == "partial": sys.exit(1)
-sys.exit(int(args["--exit-code"]) if fault in ("findings", "disagreement") else 0)
+sys.exit(int(args["--exit-code"]) if fault in ("findings", "disagreement", "outside") else 0)
 ''')
         self.scanner.chmod(0o700)
 
     def git(self, *args):
         return subprocess.check_output(["git", "-C", str(self.repo), *args], text=True).strip()
 
-    def run_scan(self):
-        return history.scan(self.repo, self.head, self.output, self.config, str(self.scanner), 1, 20)
+    def run_scan(self, jobs=1):
+        return history.scan(self.repo, self.head, self.output, self.config, str(self.scanner), 1, 20, jobs)
 
     def test_complete_inventory_includes_root_and_tag_only_ancestry(self):
         result = self.run_scan()
@@ -84,11 +90,65 @@ sys.exit(int(args["--exit-code"]) if fault in ("findings", "disagreement") else 
         self.assertEqual(len(json.loads((self.output / "findings.json").read_text())), 3)
 
     def test_crash_missing_report_and_exit_disagreement_are_incomplete(self):
-        for fault in ("crash", "missing", "disagreement", "partial"):
+        for fault in ("crash", "missing", "disagreement", "partial", "outside"):
             with self.subTest(fault=fault), patch.dict(os.environ, SCANNER_FAULT=fault):
                 self.output = self.root / fault
                 self.output.mkdir()
                 result = self.run_scan()
+                self.assertEqual(result["status"], "incomplete")
+                self.assertEqual(result["completedCommits"], 0)
+
+    def test_parallel_scanners_preserve_inventory_and_bound_active_processes(self):
+        original = history.run_scanner
+        lock = threading.Lock()
+        active = peak = 0
+        completion_order = []
+        barrier = threading.Barrier(2)
+
+        def measured(command, log, remaining, cancelled):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            report = next(arg.split("=", 1)[1] for arg in command if arg.startswith("--report-path="))
+            number = int(Path(report).stem.split("-")[1])
+            try:
+                if number < 2:
+                    barrier.wait(timeout=5)
+                if number == 0:
+                    time.sleep(0.2)  # Later inventory entries can finish first.
+                code = original(command, log, remaining, cancelled)
+                with lock:
+                    completion_order.append(number)
+                return code
+            finally:
+                with lock:
+                    active -= 1
+
+        with patch.object(history, "run_scanner", measured):
+            result = self.run_scan(jobs=2)
+        self.assertEqual(result["status"], "clean")
+        self.assertEqual(result["completedCommits"], 3)
+        self.assertEqual(peak, 2)
+        self.assertEqual(active, 0)
+        self.assertEqual(completion_order[0], 1)
+        self.assertEqual([b["firstIndex"] for b in result["batches"]], [0, 1, 2])
+        self.assertEqual(len(list(self.output.glob("batch-*.json"))), 3)
+
+    def test_parallel_failure_cancels_other_scanners_before_deadline(self):
+        started = time.monotonic()
+        with patch.dict(os.environ, SCANNER_FAULT="mixed", SCANNER_FAIL_COMMIT=self.head):
+            result = self.run_scan(jobs=2)
+        self.assertEqual(result["status"], "incomplete")
+        self.assertEqual(result["completedCommits"], 0)
+        self.assertLess(time.monotonic() - started, 10)  # Overall deadline is 20s.
+
+    def test_parallel_report_failure_never_completes_coverage(self):
+        for fault in ("missing", "disagreement", "partial", "outside"):
+            with self.subTest(fault=fault), patch.dict(os.environ, SCANNER_FAULT=fault):
+                self.output = self.root / ("parallel-" + fault)
+                self.output.mkdir()
+                result = self.run_scan(jobs=2)
                 self.assertEqual(result["status"], "incomplete")
                 self.assertEqual(result["completedCommits"], 0)
 
@@ -109,6 +169,7 @@ sys.exit(int(args["--exit-code"]) if fault in ("findings", "disagreement") else 
 
     def test_invalid_cli_and_failed_evidence_write_have_one_error_envelope(self):
         for args, code in (([], 2), (["--output-dir", str(self.repo)], 2),
+                           (["--output-dir", str(self.output), "--jobs=33"], 2),
                            (["--output-dir", str(self.repo / "file" / "evidence")], 5)):
             with self.subTest(args=args):
                 result = subprocess.run([sys.executable, history.__file__, *args],
@@ -136,6 +197,14 @@ sys.exit(int(args["--exit-code"]) if fault in ("findings", "disagreement") else 
         findings = json.loads((self.output / "findings.json").read_text())
         self.assertTrue(any(item["Commit"] == introduced for item in findings))
         self.assertNotIn("Z" * 16, (self.output / "findings.json").read_text())
+        serial = sorted(item["Fingerprint"] for item in findings)
+        self.output = self.root / "parallel-evidence"
+        self.output.mkdir()
+        parallel = self.run_scan(jobs=2)
+        self.assertEqual(parallel["status"], "findings")
+        self.assertEqual(parallel["completedCommits"], 5)
+        self.assertEqual(sorted(item["Fingerprint"] for item in json.loads(
+            (self.output / "findings.json").read_text())), serial)
 
     @unittest.skipUnless(os.getenv("MEMQL_GITLEAKS_TEST_BIN"), "requires pinned real Gitleaks")
     def test_real_scanner_finds_removed_secret_on_tag_only_branch(self):
