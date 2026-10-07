@@ -29,7 +29,21 @@ func preparationFixture(t *testing.T) (preparationScope, []byte) {
 	source["targetRevision"] = strings.Repeat("a", 40)
 	rollback.Render.Source, _ = json.Marshal(source)
 	scope.Captures = map[string]sourceCaptureSpec{"candidate": spec, "rollback": rollback}
+	bindPreparationIntent(t, &scope)
 	return scope, body
+}
+
+func bindPreparationIntent(t *testing.T, scope *preparationScope) {
+	t.Helper()
+	scope.Intent = testPlan().Intent
+	before, after := scope.Captures["rollback"].Render, scope.Captures["candidate"].Render
+	var source struct{ TargetRevision string }
+	require.NoError(t, json.Unmarshal(after.Source, &source))
+	scope.Intent.Revision, scope.Intent.Target.Name = source.TargetRevision, after.AppName
+	var err error
+	scope.Intent.BeforeSpec, err = json.Marshal(map[string]any{"source": json.RawMessage(before.Source), "project": before.ProjectName,
+		"destination": map[string]string{"server": "https://kubernetes.default.svc", "namespace": before.Namespace}})
+	require.NoError(t, err)
 }
 
 func preparationConnection(db *sql.DB) *preparationJournal {

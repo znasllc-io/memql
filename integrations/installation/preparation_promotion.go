@@ -91,10 +91,17 @@ func promotionPlan(r preparationRecord, plan preparedPlan, configuration string,
 	return plan, nil
 }
 
-// The protocol intent must update the Application that supplied these renders,
-// and only its target revision. A valid proof for one repository or namespace
-// cannot be transplanted into another otherwise well-formed Argo intent.
+// The intent must equal the native protocol baseline reserved before source
+// dispatch: Application namespace/name/UID, generation, complete spec,
+// destination cluster, request identity and sync options. Receiving admission
+// must still authenticate that baseline and renderer; this comparison does not
+// discover a live Application from a name or a claimed configuration digest.
 func promotionIntentMatches(scope preparationScope, plan preparedPlan) error {
+	expectedIntent, expectedErr := scope.Intent.Digest()
+	actualIntent, actualErr := plan.Intent.Digest()
+	if expectedErr != nil || actualErr != nil || expectedIntent != actualIntent {
+		return errors.New("installation intent differs from the reserved native Application intent")
+	}
 	before, after := scope.Captures["rollback"].Render, scope.Captures["candidate"].Render
 	var spec struct {
 		Source      json.RawMessage `json:"source"`

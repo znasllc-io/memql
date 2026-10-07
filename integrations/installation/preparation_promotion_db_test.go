@@ -26,6 +26,7 @@ func promotionFixture(t *testing.T, j *preparationJournal) (context.Context, pre
 	rollback.RunID, rollback.WorkRunID = spec.RunID, spec.WorkRunID
 	rollback.RunStartedAt, rollback.StepKey = spec.RunStartedAt, "source-rollback"
 	scope.Captures["rollback"] = rollback
+	bindPreparationIntent(t, &scope)
 	evidence := promotionEvidence{published: publishedFixture(t)}
 	release, err := evidence.published.Release()
 	require.NoError(t, err)
@@ -77,10 +78,7 @@ func promotionFixture(t *testing.T, j *preparationJournal) (context.Context, pre
 	plan.Intent.Revision = source.TargetRevision
 	require.NoError(t, json.Unmarshal(rollback.Render.Source, &source))
 	plan.RollbackRevision = source.TargetRevision
-	plan.Intent.Target.Name = spec.Render.AppName
-	plan.Intent.BeforeSpec, err = json.Marshal(map[string]any{"source": json.RawMessage(rollback.Render.Source), "project": spec.Render.ProjectName,
-		"destination": map[string]string{"server": "https://kubernetes.default.svc", "namespace": spec.Render.Namespace}})
-	require.NoError(t, err)
+	plan.Intent = scope.Intent
 	return ctx, r, plan, evidence
 }
 
@@ -139,7 +137,7 @@ func TestPreparationPromotionTransfersOneHeadAcrossReplicas(t *testing.T) {
 	changed := plan
 	changed.Intent.RequestID = "changed-intent"
 	_, err = peer.promote(ctx, scope.InstallationID, prepared.ID, scope.WorkflowDigest, scope.ConfigurationDigest, changed, evidence)
-	require.ErrorIs(t, err, errChanged)
+	require.Error(t, err)
 	// The source binding cannot be copied into the direct reservation path.
 	revisions := revisionJournal{db: func() *sql.DB { return peerDB }}
 	_, err = revisions.reserve(ctx, promoted.Plan)
@@ -197,7 +195,7 @@ func TestPreparationPromotionRejectsChangedAuthorityAndEvidence(t *testing.T) {
 	db, _ := journalDB(t)
 	j := preparationConnection(db)
 	ctx, r, plan, evidence := promotionFixture(t, j)
-	for _, fault := range []string{"operator", "role", "origin", "workflow", "configuration", "candidate", "approval", "source", "receipt", "render", "resource-diff", "storage", "sensitive", "destination", "source-path", "application"} {
+	for _, fault := range []string{"operator", "role", "origin", "workflow", "configuration", "candidate", "approval", "source", "receipt", "render", "resource-diff", "storage", "sensitive", "destination", "cluster", "source-path", "application", "application-namespace", "application-uid", "generation", "sync-options"} {
 		t.Run(fault, func(t *testing.T) {
 			caller, p, e := ctx, plan, evidence
 			workflow, configuration := r.Scope.WorkflowDigest, r.Scope.ConfigurationDigest
@@ -230,10 +228,20 @@ func TestPreparationPromotionRejectsChangedAuthorityAndEvidence(t *testing.T) {
 				e.sensitive = sensitiveEvidence{}
 			case "destination":
 				p.Intent.BeforeSpec = []byte(strings.ReplaceAll(string(p.Intent.BeforeSpec), `"namespace":"memql"`, `"namespace":"other"`))
+			case "cluster":
+				p.Intent.BeforeSpec = []byte(strings.ReplaceAll(string(p.Intent.BeforeSpec), "https://kubernetes.default.svc", "https://another-cluster.invalid"))
 			case "source-path":
 				p.Intent.BeforeSpec = []byte(strings.ReplaceAll(string(p.Intent.BeforeSpec), `"path":"overlay"`, `"path":"other"`))
 			case "application":
 				p.Intent.Target.Name = "another"
+			case "application-namespace":
+				p.Intent.Target.Namespace = "another-argocd"
+			case "application-uid":
+				p.Intent.Target.UID = "replacement-application"
+			case "generation":
+				p.Intent.BeforeGeneration++
+			case "sync-options":
+				p.Intent.Prune = !p.Intent.Prune
 			}
 			_, err := j.promote(caller, r.Scope.InstallationID, r.ID, workflow, configuration, p, e)
 			require.Error(t, err)

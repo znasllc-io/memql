@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/integrations/argocd"
 )
 
 // Native receiver configuration supplies these values. The UI may select a
@@ -21,6 +22,7 @@ type preparationScope struct {
 	ConfigurationDigest string                       `json:"configurationDigest"`
 	CandidateID         string                       `json:"candidateId"`
 	PublicationDigest   string                       `json:"publicationDigest"`
+	Intent              argocd.Intent                `json:"intent"`
 	Captures            map[string]sourceCaptureSpec `json:"captures"`
 }
 
@@ -51,6 +53,12 @@ func (s preparationScope) canonical() ([]byte, string, error) {
 	if a.Repository != b.Repository || a.RunStartedAt != b.RunStartedAt || a.CollectorImage != b.CollectorImage ||
 		a.Platform != b.Platform || a.CloneInstallationID != b.CloneInstallationID || a.ImagePullSecret != b.ImagePullSecret {
 		return nil, "", errors.New("candidate and rollback acquisition configuration differs")
+	}
+	if _, err := s.Intent.Digest(); err != nil {
+		return nil, "", err
+	}
+	if err := promotionIntentMatches(s, preparedPlan{Intent: s.Intent}); err != nil {
+		return nil, "", err
 	}
 	body, err := json.Marshal(s)
 	if err != nil || len(body) > 128<<10 {

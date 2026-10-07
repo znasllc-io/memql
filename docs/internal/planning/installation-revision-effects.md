@@ -95,6 +95,10 @@ candidate, and exact candidate/rollback capture specifications. Both captures
 share one preparation-owned run with distinct fixed step keys. A replacement
 host looks up the original scope by request ID before resolving a new start
 time or configuration. Changed inputs cannot reuse an existing request.
+The scope also records the complete native Argo intent before capture, including
+the Application namespace/name/UID, generation, destination cluster, full baseline
+spec, sync options and operation identity. Receiving admission must authenticate
+that live Application and configuration; persisting it is not verification.
 
 The journal commits dispatch intent before contacting Workbench. Retries ask
 the receiver to recover the same attempt; they never authorize a fresh replay.
@@ -131,8 +135,9 @@ from preparation to one revision attempt in a PostgreSQL transaction. It binds
 the original requester, workflow and configuration to the exact signed
 publication, acknowledged source captures, candidate and rollback renders,
 resource diff, and storage/credential observations. A supplied digest cannot
-replace those native verifier results. The Argo intent must name the captured
-Application source, project, namespace and revision. Artifact pins remain with
+replace those native verifier results. The Argo intent must match the complete
+reserved protocol intent as well as the captured source, project, namespace and
+revision. Artifact pins remain with
 the durable source consumer throughout the handoff and rollback lifetime.
 
 The preparation records the promoted plan ID in the same transaction. A lost
