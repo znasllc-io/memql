@@ -170,7 +170,7 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 		}
 	}
 	secret, _ := engineDeclaredStep(spec, "secret-scan")
-	for _, need := range []string{"@v8.30.1", "--unshallow --tags", `--log-opts="HEAD --tags"`, "--redact=100", "gitleaks dir .", "gitleaks git ."} {
+	for _, need := range []string{"@v8.30.1", "--unshallow --tags", `--head="$MEMQL_SHA"`, "--redact=100", "gitleaks dir .", "python3 scripts/ci/gitleaks-history.py"} {
 		if !strings.Contains(secret.Run, need) {
 			t.Errorf("secret scan omits %s", need)
 		}

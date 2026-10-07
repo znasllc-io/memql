@@ -822,3 +822,26 @@ SBOM generation covered 53 Go modules and seven npm lockfiles in nine reports,
 including development dependencies. Installed Workbench execution, current-source
 rescans, SARIF publishing, schedules, Code Quality parity and release gating still
 require the combined rehearsal.
+
+### Bounded full-history secret scanning (October 6)
+
+A monolithic Gitleaks 8.30.1 history scan exhausted its 8 GiB container limit
+even with a 4 GiB Go memory target. That attempt is incomplete, not a passing
+scan. The replacement helper freezes the selected commit and tag objects,
+refuses shallow history, and inventories every reachable commit before running
+separate bounded batches. Initial commits and merge diffs against their first
+parent are included; every parent's own commits remain in the inventory. This
+avoids repeatedly scanning unrelated mainline changes against each side parent
+without using first-parent-only history traversal.
+Each batch must return a consistent redacted report before its commits count as
+covered. A crash, missing report, timeout or exit/report disagreement leaves
+the durable coverage summary incomplete. Timeouts terminate the owned process
+group. Findings fail the command even when history coverage is complete.
+
+Regression tests include a real Gitleaks scan that finds an added-then-removed
+synthetic credential reachable only through a tag, and one introduced only in a
+merge result and subsequently removed. The first complete-history
+rehearsal inventories 10,137 commits at main
+`82c37723251d016bca6a8589f50caed67e1dfbca`; its final measured result is still
+pending. Legacy workflow retirement remains gated on that evidence and the
+installed pipeline rehearsal.
