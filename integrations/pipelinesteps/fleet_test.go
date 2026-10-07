@@ -197,6 +197,8 @@ func TestFleetStepRoutesByNeedLabelsAndPipelinesLabel(t *testing.T) {
 	d := &fakeDispatcher{}
 	f, _, tokens, _ := newTestFleet(t, d)
 	req := fleetReq()
+	req.Step.Artifacts = []string{"coverage.out"}
+	d.answer = fleetArtifactAnswer(base64.StdEncoding.EncodeToString(extractTestTgz(t, []extractTestEntry{{name: "coverage.out", body: "proof"}})))
 	if res := runFleet(t, f, req); res.Status != pl.OutcomeSucceeded {
 		t.Fatalf("result = %+v, want success", res)
 	}

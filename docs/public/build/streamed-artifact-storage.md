@@ -27,7 +27,8 @@ malformed. Older workbench replicas cannot accept the V6 action.
 The operator can raise the total streamed archive cap to 2 GiB; its default
 remains 64 MiB. The existing bounded Library phase and Job deadline still apply.
 Large-file throughput must be qualified on the installation before selecting a
-larger cap. Native-host artifact transport remains capped at 256 MiB. Its base64/gzip
+larger cap. The engine caps native-host artifacts at 256 MiB; Cockpit additionally limits
+its producer to 64 MiB of files and 20 MiB compressed per worker result. Its base64/gzip
 response is decoded into a bounded private snapshot; no second full archive is
 buffered. Missing declared files, malformed archives, checksum errors or a
 storage adapter without verified receipts fail the step. Every declaration must
