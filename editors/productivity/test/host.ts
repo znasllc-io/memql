@@ -19,6 +19,9 @@ export async function run(): Promise<void> {
   check(document?.languageId === "json", "New template must open in a JSON editor.");
   check(JSON.parse(document.getText()).subject === "Thanks for subscribing", "New template lost its subject.");
   await vscode.commands.executeCommand("memql.productivity.previewTemplate");
+  // Opening the editor does not await its webview. Verify the untitled preview
+  // before navigating away and hiding it during its first load.
+  check(await tools.templateReady(document.uri, document.version) === "Thanks for subscribing", "New template preview did not render the subject.");
   // Actual VS Code file I/O, through a virtual workspace on the browser host.
   const root = vscode.workspace.workspaceFolders?.[0]?.uri;
   check(root, "The host test requires its isolated fixture workspace.");
