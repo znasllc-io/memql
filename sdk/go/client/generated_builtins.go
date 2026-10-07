@@ -3854,7 +3854,7 @@ func ReleaseApproveCandidateBuild(args ReleaseApproveCandidateArgs) string {
 	return b.String()
 }
 
-// ReleaseCandidateConfiguration -- Read configured release sources and exact registry target identities. Owner only.
+// ReleaseCandidateConfiguration -- Read configured release sources and exact publication target identities. Owner only.
 type ReleaseCandidateConfigurationArgs struct {
 }
 
