@@ -259,11 +259,14 @@ expansion needs a separately qualified maintenance plan. Positive integer
 binary and SI capacity forms are compared exactly, without floating point;
 other quantity forms refuse until qualified.
 
-The verifier reads each declared PVC and its bound PV, verifies both identities
-and the PV's claim reference, and binds the backing volume specification. For
+The verifier reads each declared PVC and its bound PV, verifies both identities,
+their matching capacity and the PV's claim reference, and binds the backing
+volume specification. For
 CloudNativePG it reads the complete bounded namespace PVC inventory, verifies
 controller ownership against the current database UID and checks data/WAL
-roles, capacity and enough claims for the live instance count. Missing labels
+roles, capacity and enough claims for the live instance count. Candidate,
+rollback and live replica counts must agree; scaling requires its own
+maintenance contract because it creates or retires persistent storage. Missing labels
 cannot hide an owned claim. Truncated lists, replaced ownership, deleting or
 unbound volumes, missing WAL, changed bootstrap/storage declarations, and
 unqualified persistent controllers refuse. New persistent storage, standalone

@@ -226,6 +226,10 @@ func observeClaim(ctx context.Context, api argocd.API, live map[string]any, key 
 		return storageObservation{}, err
 	}
 	pvSpec := resourceMap(pv, "spec")
+	volumeCapacity, err := storageBytes(resourceText(resourceMap(pvSpec, "capacity"), "storage"))
+	if err != nil || volumeCapacity.Cmp(want) != 0 {
+		return storageObservation{}, errors.New("persistent volume capacity differs from the protected claim")
+	}
 	claim := resourceMap(pvSpec, "claimRef")
 	if resourceText(resourceMap(pv, "status"), "phase") != "Bound" || resourceText(claim, "kind") != "PersistentVolumeClaim" ||
 		resourceText(claim, "namespace") != key.Namespace || resourceText(claim, "name") != key.Name || resourceText(claim, "uid") != resourceText(meta, "uid") || resourceText(pvSpec, "storageClassName") != class {
@@ -238,6 +242,16 @@ func observeClaim(ctx context.Context, api argocd.API, live map[string]any, key 
 
 func observeDatabaseClaims(ctx context.Context, api argocd.API, before, after resourceObject, live map[string]any) ([]storageObservation, error) {
 	previous, candidate, current := resourceMap(before.value, "spec"), resourceMap(after.value, "spec"), resourceMap(live, "spec")
+	count, err := databaseInstances(current)
+	if err != nil {
+		return nil, err
+	}
+	for _, spec := range []map[string]any{previous, candidate} {
+		declared, err := databaseInstances(spec)
+		if err != nil || declared != count {
+			return nil, errors.New("database replica changes need a qualified maintenance contract")
+		}
+	}
 	for _, field := range []string{"storage", "walStorage", "tablespaces", "bootstrap", "externalClusters"} {
 		if !sameJSON(previous[field], candidate[field]) {
 			return nil, errors.New("database storage or bootstrap changes need a qualified maintenance contract")
@@ -315,12 +329,19 @@ func observeDatabaseClaims(ctx context.Context, api argocd.API, before, after re
 		}
 		out = append(out, observation)
 	}
-	instances, ok := current["instances"].(json.Number)
-	count, err := instances.Int64()
-	if !ok || err != nil || count < 1 || count > 256 || int64(roles["PG_DATA"]) < count || int64(roles["PG_WAL"]) < count {
+	if int64(roles["PG_DATA"]) < count || int64(roles["PG_WAL"]) < count {
 		return nil, errors.New("database data and WAL volumes must both be observed")
 	}
 	return out, nil
+}
+
+func databaseInstances(spec map[string]any) (int64, error) {
+	instances, ok := spec["instances"].(json.Number)
+	count, err := instances.Int64()
+	if !ok || err != nil || count < 1 || count > 256 {
+		return 0, errors.New("database instance count is absent or invalid")
+	}
+	return count, nil
 }
 
 func mentionsDatabaseOwner(meta map[string]any, name, uid string) bool {

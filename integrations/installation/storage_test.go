@@ -3,6 +3,7 @@ package installation
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -220,4 +221,49 @@ func TestDatabaseClaimsMustUseTheConfiguredStorageClass(t *testing.T) {
 	evidence, err := verifyStoragePreservation(context.Background(), api, before, after)
 	require.ErrorContains(t, err, "volume storage class differs")
 	require.Empty(t, evidence.digest)
+}
+
+func TestStorageRequiresMatchingReplicaCountsAndBackingCapacity(t *testing.T) {
+	for _, where := range []string{"candidate", "rollback"} {
+		for _, count := range []any{json.Number("0"), json.Number("2"), json.Number("1.5"), "1", nil} {
+			t.Run(where+"/"+fmt.Sprint(count), func(t *testing.T) {
+				api, before, after := storageFixture(t)
+				original, revision := after, strings.Repeat("b", 40)
+				if where == "rollback" {
+					original, revision = before, strings.Repeat("a", 40)
+				}
+				manifests := []string{}
+				for _, body := range original.Resources() {
+					value, err := resourceJSON(body)
+					require.NoError(t, err)
+					if resourceText(value, "kind") == "Cluster" {
+						resourceMap(value, "spec")["instances"] = count
+					}
+					encoded, err := json.Marshal(value)
+					require.NoError(t, err)
+					manifests = append(manifests, string(encoded))
+				}
+				changed := renderInventoryFixture(t, revision, manifests)
+				if where == "rollback" {
+					before = changed
+				} else {
+					after = changed
+				}
+				evidence, err := verifyStoragePreservation(context.Background(), api, before, after)
+				require.Error(t, err)
+				require.Empty(t, evidence.digest)
+			})
+		}
+	}
+	for _, capacity := range []string{"1Gi", "20Gi", "", "invalid"} {
+		t.Run("backing capacity/"+capacity, func(t *testing.T) {
+			api, before, after := storageFixture(t)
+			editStorageResponse(t, api, "api/v1/persistentvolumes/db-1-pv", func(pv map[string]any) {
+				resourceMap(resourceMap(pv, "spec"), "capacity")["storage"] = capacity
+			})
+			evidence, err := verifyStoragePreservation(context.Background(), api, before, after)
+			require.ErrorContains(t, err, "volume capacity differs")
+			require.Empty(t, evidence.digest)
+		})
+	}
 }
