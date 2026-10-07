@@ -26,19 +26,11 @@ Owner release approval and permission to update this installation remain
 separate gates. Native calls enforce those identities and bind every operation
 to the durable installation record.
 
-The following is the proposed scoped recipe, not a registered automation yet:
-
-```memql
-@template
-automation installationPrepareWorkflow {
-  builtin installationResolvePublishedCandidate()
-  builtin installationResolveOverlayCommit()
-  builtin installationCheckCompatibility()
-  builtin installationVerifyResourceDiff()
-  builtin installationCaptureRollbackPoint()
-  builtin installationRecordPreparedIntent()
-}
-```
+The private [installed preparation recipe](../../../dsl/installation/automations.memql)
+now composes the bounded operations through the ordinary automation interpreter.
+Its native receiving host and evidence gates are described under
+[receiving configuration](#receiving-configuration-and-preparation-composition).
+It is not exposed as a public update capability.
 
 Starting an authorized update records the operation before calling the ArgoCD
 adapter. A short reconciliation recipe reads its observed facts, chooses
@@ -49,8 +41,7 @@ fresh observation recipe against the durable intent; it must not replay an old
 approval against changed executable workflow definitions.
 
 The journal now has an internal reservation/start/observation foundation,
-described below. Composition of source/render verification, workload and continuity probes,
-reconciliation scheduler, rollback workflow and UI remain to be implemented.
+described below. Source/render verification is composed in the private preparation recipe. Workload and continuity probes, the reconciliation scheduler, rollback workflow and UI remain to be implemented.
 Neither acceptance of a patch nor `Healthy` plus `Synced` completes an update.
 
 ## Native installation journal
@@ -59,9 +50,9 @@ Neither acceptance of a patch nor `Healthy` plus `Synced` completes an update.
 the requesting operator, installed workflow, candidate and owner approval,
 publication evidence, rendered resources/diff, immutable starting revision and
 rollback render, and the complete Argo protocol intent. Persisting these
-bindings does not verify their evidence. The candidate, source, render and
-compatibility verifiers must be implemented before exposing preparation or
-an update action; a caller-supplied digest is not proof.
+bindings does not verify their evidence. Preparation composes the native candidate,
+source, render and compatibility verifiers and requires their opaque results
+before promotion; a caller-supplied digest is not proof.
 
 All replicas serialize on one installation head in PostgreSQL. Reserving the
 same plan returns the same intent; a different plan cannot take an active slot.
@@ -642,3 +633,101 @@ This proves the revision protocol, controller serialization and recovery
 observation with a real Argo controller. It does not prove candidate authority,
 engine pod replacement, database migration compatibility, user/session/site
 continuity, or the installation journal and reconciliation workflow.
+
+## Receiving configuration and preparation composition
+
+The private receiving host now reads `installation.json` from one named
+operator-managed Kubernetes ConfigMap. Its constructor receives the namespace
+and name from native wiring; a preparation request selects only installation,
+request, candidate/catalog identities, an exact overlay commit, and prune
+intent. It cannot supply trust, connection material, a rendered inventory, or
+an assertion that verification succeeded. The host and its DSL ports remain
+unregistered while the installed update/recovery qualification is unfinished.
+
+`receiverConfiguration` in `integrations/installation/receiver_config.go` is
+the version-1 schema. It includes:
+
+- `installationId`, `platform`, and the named Argo `application`;
+- `catalog` publisher identity, HTTPS endpoint, signing keys, and named
+  credential/optional CA Secret keys; `rollback` names its exact signed
+  candidate and catalog digest;
+- `renderer` Deployment, Service, container, immutable platform image,
+  `argocd-2.13.3-kustomize-5.4.3` profile, configuration ConfigMap and TLS Secret;
+- `collector` immutable image, GitHub App installation ID and optional pull
+  credential Secret key;
+- `registries` with explicit HTTPS routes and optional named credential/CA
+  keys; `imageBindings`, required component `dependencies`, and `protected`
+  Secrets/namespaces.
+
+Secret references resolve in the receiving ConfigMap's namespace, except
+renderer material and workload references, which resolve in the Argo
+Application's namespace. API access must use the existing projected-service-
+account `deploycontrol.ClusterAPI`, with its cluster CA and rotating token.
+Grant GET only on the named configuration, Application, AppProject, renderer
+Deployment/Service, its Pods/ReplicaSets and referenced ConfigMaps/Secrets;
+renderer EndpointSlice discovery and repository Secret selection need bounded
+namespace LISTs. Repository selection observes the registered repository/cache
+project independently of the Application project, following the pinned
+[Argo repository selection](https://github.com/argoproj/argo-cd/blob/v2.13.3/util/db/repository_secrets.go); a complete empty inventory
+permits the public repository default. Only Secret identities and versions enter
+that durable binding. API/version
+and resource discovery are read-only. The reader never seeds these resources,
+writes credentials, changes RBAC or alters the serving cluster.
+
+Configuration and Secret UIDs/resourceVersions bind change-away-and-back and
+credential rotation without saving credential values or their hashes. Every
+read set is reobserved before it is accepted. Application, Deployment and Pod
+status-only RV churn does not alter persistent configuration identity; their
+identity, spec and generation remain bound, and ready state and the actual
+runtime image are freshly checked. EndpointSlice list RVs can advance because
+of unrelated writes, so their complete ordered contents bind the inventory.
+Missing/truncated collections, replacements and inconsistent endpoints refuse.
+
+The renderer must be fully ready, with service endpoints addressing Pods owned
+through ReplicaSets by the configured Deployment. Each observed runtime image
+must match the configured immutable platform image. That image/profile pairing
+is an operator-reviewed trust input; a version label is not an executable
+verification result. Custom binary mounts, sidecars, commands, Kustomize
+versions and unsupported transports require their own qualified profile.
+Mutable image tags do not satisfy this contract. Renderer environment names
+are qualified explicitly; inline passwords and telemetry credentials refuse
+in favor of versioned references.
+
+The native connection verifies the renderer's certificate chain and service
+DNS identity and additionally pins the exact leaf from its named Secret. It
+never inherits Argo's permissive default TLS behavior. The configured
+certificate must actually be mounted and served; Argo 2.13 requires repo-server
+restart after certificate changes ([Argo TLS configuration](https://argo-cd.readthedocs.io/en/release-2.13/operator-manual/tls/)).
+The catalog port freezes one authenticated source using the existing SDK and
+signed-envelope reader; it does not introduce another transport or treat
+browser-supplied release fields as evidence.
+
+`installationPrepareWorkflow` now expresses publication lookup, compatibility,
+reservation, capture/verification/acknowledgment/render of each source,
+resource/storage/protected-resource checks, the artifact child recipe,
+configuration reobservation and atomic promotion. The native host binds both
+installed recipes and the engine revision before source dispatch. Recovery
+looks up the existing request before selecting a new start time and cannot
+recycle a request with changed inputs. A fresh host repeats private source and
+artifact verification; successful serialized fingerprints are not proof.
+
+Promotion binds the fresh configuration observation, artifact recipe/operator,
+rollback publication and artifact expiry alongside the existing source,
+render, storage and sensitive-resource bindings. An expired artifact binding
+cannot begin a new revision effect. A previously started revision retains its
+history and recovery identity after expiry; this is not permission for a new
+attempt. Migration compatibility, serving continuity, complete update and
+rollback orchestration, operator seeding/wiring and the installed multi-repo
+rehearsal remain required before registering the update entry point.
+
+
+The local protocol recovery test runs the installed preparation and artifact
+recipes through real journal connections, signed publications, private source
+archives, a certificate-verified gRPC renderer and an HTTPS OCI registry. A
+candidate-render interruption leaves both captures durably acknowledged. A
+replacement host reopens both archives and rerenders both revisions, reads
+complete candidate and rollback image bytes, and promotes without launching or
+acknowledging duplicate captures. This establishes composition and recovery of
+preparation. It does not substitute for the installed serving-engine update and
+rollback rehearsal. The automation corpus records the bounded operation order
+with stubbed effects; native authority and evidence are exercised separately.

@@ -1,0 +1,225 @@
+{
+  "automation": "installation/automations.memql installationPrepareWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.installationPrepareWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "installationResolvePublications"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationCheckCompatibility"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationReservePreparation"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationCaptureSource"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationVerifySource"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationAcknowledgeSource"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationRenderSource"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationCaptureSource"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationVerifySource"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationAcknowledgeSource"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationRenderSource"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationVerifyResources"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationVerifyStorage"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationVerifyProtected"
+          },
+          {
+            "kind": "automation",
+            "name": "installationArtifactWorkflow"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationReobserveConfiguration"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationPromotePreparation"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.installationPrepareWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "installationResolvePublications"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationCheckCompatibility"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationReservePreparation"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationCaptureSource"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationVerifySource"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationAcknowledgeSource"
+          },
+          {
+            "args": {
+              "role": "rollback"
+            },
+            "kind": "builtin",
+            "name": "installationRenderSource"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationCaptureSource"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationVerifySource"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationAcknowledgeSource"
+          },
+          {
+            "args": {
+              "role": "candidate"
+            },
+            "kind": "builtin",
+            "name": "installationRenderSource"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationVerifyResources"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationVerifyStorage"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationVerifyProtected"
+          },
+          {
+            "kind": "automation",
+            "name": "installationArtifactWorkflow"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationReobserveConfiguration"
+          },
+          {
+            "kind": "builtin",
+            "name": "installationPromotePreparation"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

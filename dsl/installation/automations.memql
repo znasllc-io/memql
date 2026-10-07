@@ -9,3 +9,24 @@ automation installationArtifactWorkflow {
   }
   builtin installationArtifactsComplete()
 }
+
+// Selection and ordering are visible here. Each native operation preserves
+// its own evidence and journal gates even if a different recipe omits a step.
+@template
+automation installationPrepareWorkflow {
+  builtin installationResolvePublications()
+  builtin installationCheckCompatibility()
+  builtin installationReservePreparation()
+  for role in ["rollback", "candidate"] {
+    builtin installationCaptureSource(role: role)
+    builtin installationVerifySource(role: role)
+    builtin installationAcknowledgeSource(role: role)
+    builtin installationRenderSource(role: role)
+  }
+  builtin installationVerifyResources()
+  builtin installationVerifyStorage()
+  builtin installationVerifyProtected()
+  automation installationArtifactWorkflow()
+  builtin installationReobserveConfiguration()
+  builtin installationPromotePreparation()
+}

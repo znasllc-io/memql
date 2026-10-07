@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
@@ -243,6 +244,12 @@ func (j *revisionJournal) begin(ctx context.Context, installation, key, workflow
 		}
 		if r.State != "prepared" {
 			return errors.New("installation plan cannot start")
+		}
+		if binding := r.Plan.Preparation; binding != nil {
+			expires, err := time.Parse(time.RFC3339Nano, binding.ArtifactExpiresAt)
+			if err != nil || !expires.After(time.Now()) {
+				return errors.New("installation artifact evidence expired before start; fresh qualification is required")
+			}
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE installation_revision_attempts SET state='applying',started_at=clock_timestamp(),updated_at=clock_timestamp() WHERE plan_id=$1`, key)
 		return err

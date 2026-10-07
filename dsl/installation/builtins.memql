@@ -13,3 +13,55 @@ builtin installationArtifactCheck { key string! }
 /// Seal evidence only when every native image obligation has a fresh verified result.
 @executor("integration.installation.installationArtifactsComplete")
 builtin installationArtifactsComplete { }
+
+/// Read and verify the exact candidate and rollback publications.
+@executor("integration.installation.installationResolvePublications")
+builtin installationResolvePublications { }
+
+/// Verify both directions of the declared release overlap.
+@executor("integration.installation.installationCheckCompatibility")
+builtin installationCheckCompatibility { }
+
+/// Durably reserve the authenticated preparation before source effects.
+@executor("integration.installation.installationReservePreparation")
+builtin installationReservePreparation { }
+
+/// Acquire or recover one exact source capture.
+@executor("integration.installation.installationCaptureSource")
+@args(profile="object")
+builtin installationCaptureSource { role string! }
+
+/// Reopen and verify one private captured source archive.
+@executor("integration.installation.installationVerifySource")
+@args(profile="object")
+builtin installationVerifySource { role string! }
+
+/// Acknowledge only a durably verified source capture.
+@executor("integration.installation.installationAcknowledgeSource")
+@args(profile="object")
+builtin installationAcknowledgeSource { role string! }
+
+/// Render one verified source with the authenticated native renderer.
+@executor("integration.installation.installationRenderSource")
+@args(profile="object")
+builtin installationRenderSource { role string! }
+
+/// Verify the complete image and resource diff and scope artifact reads.
+@executor("integration.installation.installationVerifyResources")
+builtin installationVerifyResources { }
+
+/// Verify live persistent storage against both renders.
+@executor("integration.installation.installationVerifyStorage")
+builtin installationVerifyStorage { }
+
+/// Verify live credentials and protected namespaces against both renders.
+@executor("integration.installation.installationVerifyProtected")
+builtin installationVerifyProtected { }
+
+/// Require unchanged receiving configuration and fresh renderer readiness.
+@executor("integration.installation.installationReobserveConfiguration")
+builtin installationReobserveConfiguration { }
+
+/// Atomically promote only complete native preparation evidence.
+@executor("integration.installation.installationPromotePreparation")
+builtin installationPromotePreparation { }

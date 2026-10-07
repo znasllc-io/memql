@@ -41,6 +41,10 @@ func captureFixture(t *testing.T) (sourceCaptureSpec, []byte) {
 }
 
 func captureRevisionFixture(t *testing.T, message string) (sourceCaptureSpec, []byte) {
+	return captureRevisionWithRenderFixture(t, message, nil)
+}
+
+func captureRevisionWithRenderFixture(t *testing.T, message string, template *argocd.RenderSpec) (sourceCaptureSpec, []byte) {
 	t.Helper()
 	objects := captureObjects{}
 	add := func(kind string, body []byte) string {
@@ -68,6 +72,11 @@ func captureRevisionFixture(t *testing.T, message string) (sourceCaptureSpec, []
 			AppName: "installation", AppLabelKey: "app.kubernetes.io/instance", Namespace: "memql", ProjectName: "installation",
 			ProjectSourceRepos: []string{"https://github.com/example/installation.git"}, TrackingMethod: "annotation+label", InstallationID: "installation",
 			KubeVersion: "1.35.7", APIVersions: []string{"v1/ConfigMap"}}}
+	if template != nil {
+		source := spec.Render.Source
+		spec.Render = *template
+		spec.Render.Source = source
+	}
 	var archive bytes.Buffer
 	_, err := argocd.CaptureSourceArchive(context.Background(), objects, spec.Render, &archive)
 	require.NoError(t, err)

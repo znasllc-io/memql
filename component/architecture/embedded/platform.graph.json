@@ -44,6 +44,7 @@
 {"id":"automation:ingestCampaignFeedback","kind":"automation","label":"ingestCampaignFeedback","attrs":{"origin":"campaigns/automations.memql","stratum":"0","trigger":"graph.node.created.v1:platform:inboundRequest","triggerConcept":"v1:platform:inboundRequest","triggerKind":"node.created"}},
 {"id":"automation:installInstance","kind":"automation","label":"installInstance","attrs":{"origin":"deployment/automations.memql","stratum":"0","trigger":"instance.installRequested"}},
 {"id":"automation:installationArtifactWorkflow","kind":"automation","label":"installationArtifactWorkflow","attrs":{"origin":"installation/automations.memql","stratum":"0","template":"true"}},
+{"id":"automation:installationPrepareWorkflow","kind":"automation","label":"installationPrepareWorkflow","attrs":{"origin":"installation/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:installationRetirementWorkflow","kind":"automation","label":"installationRetirementWorkflow","attrs":{"origin":"installation/retirement/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:invokeAgent","kind":"automation","label":"invokeAgent","attrs":{"origin":"agents/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:killSwitchCancelsComputerUseRuns","kind":"automation","label":"killSwitchCancelsComputerUseRuns","attrs":{"filter":"row => row.preferences.computerUseEnabled == false","origin":"worker/automations.memql","stratum":"1","trigger":"graph.node.updated.v1:identity:user","triggerConcept":"v1:identity:user","triggerKind":"node.updated"}},

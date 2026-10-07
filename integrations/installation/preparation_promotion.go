@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/znasllc-io/memql/component/pipelines"
 	"github.com/znasllc-io/memql/integrations/argocd"
@@ -15,19 +16,26 @@ import (
 // journal. Promotion does not release source artifact pins. Their eventual
 // retirement must account for the revision, including its rollback lifetime.
 type preparationBinding struct {
-	ID                     string `json:"id"`
-	ConfigurationDigest    string `json:"configurationDigest"`
-	CandidateSourceDigest  string `json:"candidateSourceDigest"`
-	RollbackSourceDigest   string `json:"rollbackSourceDigest"`
-	CandidateReceiptDigest string `json:"candidateReceiptDigest"`
-	RollbackReceiptDigest  string `json:"rollbackReceiptDigest"`
-	StorageDigest          string `json:"storageDigest"`
-	SensitiveDigest        string `json:"sensitiveDigest"`
+	ArtifactDigest            string `json:"artifactDigest"`
+	ArtifactWorkflowDigest    string `json:"artifactWorkflowDigest"`
+	ArtifactExpiresAt         string `json:"artifactExpiresAt"`
+	RollbackPublicationDigest string `json:"rollbackPublicationDigest"`
+	ID                        string `json:"id"`
+	ConfigurationDigest       string `json:"configurationDigest"`
+	CandidateSourceDigest     string `json:"candidateSourceDigest"`
+	RollbackSourceDigest      string `json:"rollbackSourceDigest"`
+	CandidateReceiptDigest    string `json:"candidateReceiptDigest"`
+	RollbackReceiptDigest     string `json:"rollbackReceiptDigest"`
+	StorageDigest             string `json:"storageDigest"`
+	SensitiveDigest           string `json:"sensitiveDigest"`
 }
 
 func (b preparationBinding) validate() error {
+	if expires, err := time.Parse(time.RFC3339Nano, b.ArtifactExpiresAt); err != nil || expires.IsZero() || !artifactDigest.MatchString(b.RollbackPublicationDigest) {
+		return errors.New("installation artifact binding is incomplete")
+	}
 	for _, value := range []string{b.ID, b.ConfigurationDigest, b.CandidateSourceDigest, b.RollbackSourceDigest,
-		b.CandidateReceiptDigest, b.RollbackReceiptDigest, b.StorageDigest, b.SensitiveDigest} {
+		b.CandidateReceiptDigest, b.RollbackReceiptDigest, b.StorageDigest, b.SensitiveDigest, b.ArtifactDigest, b.ArtifactWorkflowDigest} {
 		if !internalDigest.MatchString(value) {
 			return errors.New("installation preparation binding is incomplete")
 		}
@@ -40,6 +48,8 @@ func (b preparationBinding) validate() error {
 // exposing an update. This private journal operation only transfers ownership
 // and verifies the relationships among the supplied native observations.
 type promotionEvidence struct {
+	configuration                   *receiverSnapshot
+	artifacts                       artifactEvidence
 	published                       pipelines.VerifiedPublishedRelease
 	candidateSource, rollbackSource verifiedSourceCapture
 	candidateRender, rollbackRender argocd.RenderedRevision
@@ -53,6 +63,15 @@ func promotionPlan(r preparationRecord, plan preparedPlan, configuration string,
 		plan.InstallationID != r.Scope.InstallationID || plan.RequestedBy != r.Scope.RequestedBy ||
 		plan.WorkflowDigest != r.Scope.WorkflowDigest || plan.CandidateID != r.Scope.CandidateID || plan.PublicationDigest != r.Scope.PublicationDigest {
 		return preparedPlan{}, errors.New("installation plan differs from its reserved preparation")
+	}
+	artifacts := evidence.artifacts
+	if evidence.configuration == nil || evidence.configuration.digest != configuration || evidence.configuration.observed.IsZero() ||
+		evidence.configuration.observed.After(time.Now()) || time.Since(evidence.configuration.observed) > time.Minute ||
+		artifacts.configuration != configuration || !internalDigest.MatchString(artifacts.digest) || !internalDigest.MatchString(artifacts.workflow) ||
+		artifacts.operator != r.Scope.RequestedBy || artifacts.candidate != plan.PublicationDigest ||
+		!artifactDigest.MatchString(artifacts.rollback) || artifacts.resources != plan.ResourceDiffDigest ||
+		artifacts.before != plan.RollbackRenderDigest || artifacts.after != plan.RenderDigest || !artifacts.expires.After(time.Now()) {
+		return preparedPlan{}, errors.New("promotion requires fresh native configuration and complete scoped artifact evidence")
 	}
 	release, err := evidence.published.Release()
 	if err != nil || evidence.published.Digest() != plan.PublicationDigest || release.CandidateID != plan.CandidateID || release.ApprovalID != plan.CandidateApprovalID {
@@ -84,7 +103,8 @@ func promotionPlan(r preparationRecord, plan preparedPlan, configuration string,
 	plan.Preparation = &preparationBinding{ID: r.ID, ConfigurationDigest: configuration,
 		CandidateSourceDigest: r.Captures["candidate"].SourceDigest, RollbackSourceDigest: r.Captures["rollback"].SourceDigest,
 		CandidateReceiptDigest: r.Captures["candidate"].ReceiptDigest, RollbackReceiptDigest: r.Captures["rollback"].ReceiptDigest,
-		StorageDigest: evidence.storage.digest, SensitiveDigest: evidence.sensitive.digest}
+		StorageDigest: evidence.storage.digest, SensitiveDigest: evidence.sensitive.digest,
+		ArtifactDigest: artifacts.digest, ArtifactWorkflowDigest: artifacts.workflow, ArtifactExpiresAt: artifacts.expires.UTC().Format(time.RFC3339Nano), RollbackPublicationDigest: artifacts.rollback}
 	if _, _, err := plan.canonical(); err != nil {
 		return preparedPlan{}, err
 	}
