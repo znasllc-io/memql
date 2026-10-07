@@ -1,0 +1,345 @@
+# Commands are interpreted by the installed MemQL pipeline workflow.
+# Native steps require explicit fleet consent and matching host tools.
+# See docs/pipeline-coverage.md before enabling or retiring legacy workflows.
+formatVersion: 1
+name: memql-cockpit
+pipeline:
+  image: ghcr.io/znasllc-io/memql-toolchain@sha256:7a457e4d96d2e7f03032a686a65d5447c3b6a78987c19d5622bdbfdc917e11fc
+  platform: linux/arm64
+  stages:
+  - name: checks
+    steps:
+    - name: build
+      placement: cluster
+      timeout: 30m
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        CGO_ENABLED=0 go build ./...
+    - name: vet
+      placement: cluster
+      timeout: 30m
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        go vet ./...
+    - name: gofmt
+      placement: cluster
+      timeout: 30m
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        test -z "$(gofmt -l .)"
+    - name: memql-pin-guard
+      placement: cluster
+      timeout: 30m
+      run: |
+        set -eu
+        python3 -m unittest discover -s scripts/ci -p '*_test.py'
+        ! grep -rlnE '^[[:space:]]*repository:[[:space:]]*znasllc-io/memql' .github/workflows/
+    - name: test
+      placement: fleet
+      timeout: 30m
+      execution: native
+      platform: linux/amd64
+      needs:
+        docker: true
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        docker info >/dev/null
+        export MEMQL_TEST_DOCKER_IMAGE=alpine@sha256:5b10f432ef3da1b8d4c7eb6c487f2f5a8f096bc91145e68878dd4a5019afde11
+        export MEMQL_TEST_PIPELINE_POSTGRES_IMAGE=postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        go test -race -count=1 -timeout=600s ./...
+    - name: fuzz
+      placement: cluster
+      timeout: 60m
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        bash <<'MEMQL_FUZZ'
+        set -euo pipefail
+        found="$(
+          grep -rn --include='*_test.go' -oE '^func Fuzz[A-Za-z0-9_]*' . |
+            awk -F: '{ sub(/^func /, "", $3); sub(/\/[^/]*$/, "", $1); print $1, $3 }' |
+            sort -u
+        )"
+        if [ -z "$found" ]; then
+          echo "no fuzz targets found; the discovery pattern has drifted from the code"
+          exit 1
+        fi
+        echo "found $(echo "$found" | wc -l) fuzz targets"
+        failed=""
+        while read -r pkg target; do
+          [ -n "$target" ] || continue
+          echo "== $pkg $target"
+          if ! go test "$pkg" -run '^$' -fuzz "^${target}$" -fuzztime=20s; then
+            failed="$failed $target"
+          fi
+        done <<EOF
+        $found
+        EOF
+        if [ -n "$failed" ]; then
+          echo "fuzz targets failed:$failed"
+          exit 1
+        fi
+        MEMQL_FUZZ
+    - name: build-computeruse-linux-amd64
+      placement: fleet
+      timeout: 60m
+      execution: native
+      platform: linux/amd64
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        CGO_ENABLED=1 go build -tags computeruse ./...
+        CGO_ENABLED=1 go vet -tags computeruse ./...
+    - name: build-computeruse-darwin-arm64
+      placement: fleet
+      timeout: 60m
+      execution: native
+      platform: darwin/arm64
+      needs:
+        macos_tooling: true
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        CGO_ENABLED=1 go build -tags computeruse ./...
+        CGO_ENABLED=1 go vet -tags computeruse ./...
+        ./scripts/macos/package-menubar.sh --arch=arm64
+        python3 scripts/macos/package_test.py --archive=dist/memql-menubar-darwin-arm64.tar.gz
+        env -u GOFLAGS make cockpit-computeruse-host VERSION=0.15.0-dev.ci
+        ./scripts/macos/package-app.sh --worker="$PWD/bin/memql-computeruse-darwin-arm64" --arch=arm64 --version=0.15.0-dev.ci
+        python3 scripts/macos/app_package_test.py --archive=dist/memql-app-darwin-arm64.tar.gz
+        python3 scripts/macos/local_install_test.py --worker=bin/memql-computeruse-darwin-arm64 --archive=dist/memql-app-darwin-arm64.tar.gz --version=0.15.0-dev.ci
+    - name: install-scripts-linux-amd64
+      placement: fleet
+      timeout: 30m
+      execution: native
+      platform: linux/amd64
+      run: |
+        set -eu
+        command -v shellcheck >/dev/null
+        for file in scripts/install/*.sh; do bash -n "$file"; done
+        sh -n install.sh
+        shellcheck -x --source-path=scripts/install scripts/install/*.sh
+        shellcheck -s sh install.sh
+        bash scripts/install/lib_test.sh
+        bash scripts/install/menubar_test.sh
+        python3 scripts/install/render-mark.py --check
+        python3 scripts/install/ui_test.py
+    - name: install-scripts-darwin-arm64
+      placement: fleet
+      timeout: 30m
+      execution: native
+      platform: darwin/arm64
+      run: |
+        set -eu
+        command -v shellcheck >/dev/null
+        for file in scripts/install/*.sh; do bash -n "$file"; done
+        sh -n install.sh
+        shellcheck -x --source-path=scripts/install scripts/install/*.sh
+        shellcheck -s sh install.sh
+        bash scripts/install/lib_test.sh
+        bash scripts/install/menubar_test.sh
+        python3 scripts/install/render-mark.py --check
+        python3 scripts/install/ui_test.py
+  - name: security
+    runAfterFailure: true
+    steps:
+    - name: govulncheck
+      placement: cluster
+      timeout: 30m
+      artifacts:
+      - .memql-ci/memql-cockpit/.memql-security/go
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        mkdir -p .memql-security/go
+        go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        govulncheck ./... > .memql-security/go/findings.txt 2>&1
+    - name: gitleaks
+      placement: cluster
+      timeout: 90m
+      artifacts:
+      - .memql-security/gitleaks
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.6 GOMAXPROCS=2 GOMEMLIMIT=768MiB
+        mkdir -p .memql-security/gitleaks
+        go install github.com/zricethezav/gitleaks/v8@v8.30.1
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
+        if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+          git -c credential.helper= fetch --unshallow --tags https://github.com/znasllc-io/memql-cockpit.git "$MEMQL_SHA"
+        else
+          git -c credential.helper= fetch --tags https://github.com/znasllc-io/memql-cockpit.git "$MEMQL_SHA"
+        fi
+        test "$(git rev-parse HEAD)" = "$MEMQL_SHA"
+        gitleaks git . --no-banner --redact=100 --report-format=json --report-path=.memql-security/gitleaks/findings.json
+    - name: codeql-go
+      placement: cluster
+      timeout: 3h
+      artifacts:
+      - .memql-ci/memql-cockpit/.memql-security/codeql
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        mkdir -p .memql-security/codeql
+        curl --fail --location --output ../codeql.tar.gz https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.27.1/codeql-bundle-linux-arm64.tar.gz
+        printf '%s  %s\n' 5f05cc0793971e48824d00e570afe6144a27a325360b43bd823d755aed919817 ../codeql.tar.gz | sha256sum -c -
+        tar -xzf ../codeql.tar.gz -C ..
+        ../codeql/codeql version --format=json > .memql-security/codeql/version.json
+        ../codeql/codeql database create ../codeql-database --language=go --source-root="$PWD" --command='go build ./...' --threads=2 --ram=4096
+        ../codeql/codeql database analyze ../codeql-database codeql/go-queries:codeql-suites/go-security-and-quality.qls --threads=2 --ram=4096 --format=sarifv2.1.0 --sarif-category=/language:go --output=.memql-security/codeql/results.sarif
+      memoryMiB: 6144
+  - name: release-build
+    'on':
+    - release
+    steps:
+    - name: headless
+      placement: cluster
+      timeout: 60m
+      artifacts:
+      - .memql-ci/memql-cockpit/dist
+      - .memql-ci/memql-cockpit/bin
+      - .memql-ci/memql-cockpit/sbom
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        env -u GOFLAGS make dist
+        mkdir -p sbom
+        go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        for asset in bin/memql-*; do
+          name=$(basename "$asset")
+          cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
+          cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
+        done
+    - name: computeruse-darwin-arm64
+      placement: fleet
+      timeout: 60m
+      execution: native
+      platform: darwin/arm64
+      needs:
+        macos_tooling: true
+      artifacts:
+      - .memql-ci/memql-cockpit/bin
+      - .memql-ci/memql-cockpit/dist
+      - .memql-ci/memql-cockpit/sbom
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        test "$(go env GOOS)/$(go env GOARCH)" = darwin/arm64
+        env -u GOFLAGS make cockpit-computeruse-host
+        ./scripts/macos/package-menubar.sh --arch=arm64
+        python3 scripts/macos/package_test.py --archive=dist/memql-menubar-darwin-arm64.tar.gz
+        ./scripts/macos/package-app.sh --worker="$PWD/bin/memql-computeruse-darwin-arm64" --arch=arm64
+        python3 scripts/macos/app_package_test.py --archive=dist/memql-app-darwin-arm64.tar.gz
+        mkdir -p sbom
+        go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        for asset in bin/memql-*; do
+          name=$(basename "$asset")
+          cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
+          cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
+        done
+    - name: computeruse-darwin-amd64
+      placement: fleet
+      timeout: 60m
+      execution: native
+      platform: darwin/amd64
+      needs:
+        macos_tooling: true
+      artifacts:
+      - .memql-ci/memql-cockpit/bin
+      - .memql-ci/memql-cockpit/dist
+      - .memql-ci/memql-cockpit/sbom
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        test "$(go env GOOS)/$(go env GOARCH)" = darwin/amd64
+        env -u GOFLAGS make cockpit-computeruse-host
+        ./scripts/macos/package-menubar.sh --arch=amd64
+        python3 scripts/macos/package_test.py --archive=dist/memql-menubar-darwin-amd64.tar.gz
+        ./scripts/macos/package-app.sh --worker="$PWD/bin/memql-computeruse-darwin-amd64" --arch=amd64
+        python3 scripts/macos/app_package_test.py --archive=dist/memql-app-darwin-amd64.tar.gz
+        mkdir -p sbom
+        go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        for asset in bin/memql-*; do
+          name=$(basename "$asset")
+          cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
+          cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
+        done
+    - name: computeruse-linux-arm64
+      placement: fleet
+      timeout: 60m
+      execution: native
+      platform: linux/arm64
+      artifacts:
+      - .memql-ci/memql-cockpit/bin
+      - .memql-ci/memql-cockpit/sbom
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        test "$(go env GOOS)/$(go env GOARCH)" = linux/arm64
+        env -u GOFLAGS make cockpit-computeruse-host
+        mkdir -p sbom
+        go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        for asset in bin/memql-*; do
+          name=$(basename "$asset")
+          cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
+          cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
+        done
+    - name: computeruse-linux-amd64
+      placement: fleet
+      timeout: 60m
+      execution: native
+      platform: linux/amd64
+      artifacts:
+      - .memql-ci/memql-cockpit/bin
+      - .memql-ci/memql-cockpit/sbom
+      run: |
+        set -eu
+        export GOTOOLCHAIN=go1.26.6 GOWORK=off GOFLAGS=-p=2 GOMAXPROCS=2
+        python3 scripts/ci/prepare.py
+        cd .memql-ci/memql-cockpit
+        test "$(go env GOOS)/$(go env GOARCH)" = linux/amd64
+        env -u GOFLAGS make cockpit-computeruse-host
+        mkdir -p sbom
+        go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.10.0
+        export PATH="$(go env GOPATH)/bin:$PATH"
+        for asset in bin/memql-*; do
+          name=$(basename "$asset")
+          cyclonedx-gomod bin -version "$(cat VERSION)" -json -output "sbom/$name.cdx.json" "$asset"
+          cyclonedx-gomod bin -version "$(cat VERSION)" -output "sbom/$name.cdx.xml" "$asset"
+        done
