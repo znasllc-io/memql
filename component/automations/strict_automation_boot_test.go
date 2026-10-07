@@ -213,7 +213,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 134 -> 136: separately create/reconcile drafts and promote verified releases.
 // 136 -> 138: private artifact admission and bounded preparation retirement recipes,
 // measured together by strict boot after merging both installed definitions.
-// 138 -> 139: private preparation host recipe; measured by strict boot.
+// 138 -> 139: private receiving preparation recipe, measured after combining
+// preparation and retirement on the same installed tree.
 // 139 -> 140: private revision execution recipe; measured by strict boot.
 const shippedAutomationCount = 140
 

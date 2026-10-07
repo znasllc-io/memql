@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/integrations/argocd"
@@ -70,7 +71,12 @@ func TestStorageEvidenceReadsOwnedLiveClaimsAndBoundVolumes(t *testing.T) {
 	other, _, _ := storageFixture(t)
 	again, err := verifyStoragePreservation(context.Background(), other, before, after)
 	require.NoError(t, err)
-	require.Equal(t, evidence, again, "independent replicas must agree without cached ownership")
+	require.Equal(t, evidence.digest, again.digest, "independent replicas must agree without cached ownership")
+	require.Equal(t, evidence.before, again.before)
+	require.Equal(t, evidence.after, again.after)
+	require.Equal(t, evidence.volumes, again.volumes)
+	require.True(t, freshPreservationObservation(evidence.observed, time.Now()))
+	require.True(t, freshPreservationObservation(again.observed, time.Now()))
 	editStorageResponse(t, other, "api/v1/persistentvolumes/db-1-pv", func(pv map[string]any) {
 		resourceMap(pv, "metadata")["uid"] = "replacement-pv-uid"
 	})

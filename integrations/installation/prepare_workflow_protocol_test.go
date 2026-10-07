@@ -205,6 +205,10 @@ func TestPreparationWorkflowProtocolRecoveryPromotesWithFreshNativeEvidence(t *t
 	require.NoError(t, err)
 	require.Equal(t, "prepared", result.State)
 	require.NotEmpty(t, result.Plan.Preparation.ArtifactDigest)
+	// Preservation observes live state after potentially slow registry reads.
+	// Earlier observations cannot borrow the freshness of the configuration read.
+	require.False(t, recovered.storage.observed.Before(recovered.artifacts.result.observed))
+	require.False(t, recovered.sensitive.observed.Before(recovered.artifacts.result.observed))
 	require.Equal(t, freshSnapshot.digest, result.Plan.Preparation.ConfigurationDigest)
 	require.Equal(t, freshSnapshot.invariantDigest, result.Plan.Preparation.ConfigurationInvariantDigest)
 	require.Len(t, external.requests, 2, "recovery must not launch duplicate source jobs")

@@ -849,3 +849,34 @@ The private snapshot retains current renderer and catalog connections for
 reopening retained source and rerendering. Configuration continuity alone does
 not replace fresh artifact, storage or protected-resource verification, grant
 rollback authority, complete an installation or release its active slot.
+
+`reopenPromotedCapture` is the separate native retained-source operation used
+after promotion. It requires the original internal requester, exact active
+installation head and durable preparation/plan relation before opening either
+recorded source role. It repins the same permanent consumer, opens the exact
+receipt and repeats archive closure verification, then checks both the source
+and receipt against their promoted bindings. A second journal transaction after
+the external read rejects cancellation, replacement or changed records. It does
+not dispatch, acknowledge, update capture records or reopen the preparing state.
+Tests use independent real database connections and verify that cancellation
+during the external read discards an otherwise valid proof and closes its body.
+
+### Preservation observation freshness
+
+The preparation recipe verifies storage and protected resources after its OCI
+reads, then reobserves receiving configuration. Native storage and credential
+proofs carry their observation start time separately from the stable resource
+digest. Promotion refuses missing, future or more than one-minute-old proofs;
+a recently read configuration cannot refresh an earlier preservation result.
+The timer starts before external reads, so a slow verifier cannot give its
+earliest observation a later timestamp. The source/registry protocol test checks
+that preservation reads follow completed image reads, and database regressions
+verify that invalid observation times cannot change the preparation journal.
+
+This admission rule does not make a stored preservation digest into continuing
+write authority. Before a possible new forward or reverse Argo write, the
+execution host must obtain fresh native storage and protected-resource evidence
+for the exact promoted renders and compare the preserved identities and values
+with the plan's bindings. That execution revalidation remains required before
+public activation; observing an already-owned operation does not itself perform
+a new write.

@@ -282,9 +282,55 @@ func TestCompileDB_LocalDispatchAndTwoPlannerReplicasShareClaim(t *testing.T) {
 	}
 }
 
+// Hold the heartbeat clock until the test has reached the state it exercises.
+// The dispatch claim, owner reads, heartbeat write, blocked database operation,
+// cancellation and second replica all remain real. Waiting fifteen wall-clock
+// seconds for each pulse tests the standard library, not those guarantees.
+type heldCompileTicker struct {
+	ticks    chan time.Time
+	interval chan time.Duration
+	stopped  chan struct{}
+}
+
+func holdCompileTicker(i *Integration) *heldCompileTicker {
+	ticker := &heldCompileTicker{make(chan time.Time), make(chan time.Duration, 1), make(chan struct{})}
+	i.compileTicker = func(interval time.Duration) (<-chan time.Time, func()) {
+		ticker.interval <- interval
+		return ticker.ticks, func() { close(ticker.stopped) }
+	}
+	return ticker
+}
+
+func (ticker *heldCompileTicker) pulse(t *testing.T) {
+	t.Helper()
+	select {
+	case interval := <-ticker.interval:
+		if interval != compileHeartbeatInterval {
+			t.Fatalf("heartbeat interval = %v, want %v", interval, compileHeartbeatInterval)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("heartbeat did not start its clock")
+	}
+	select {
+	case ticker.ticks <- time.Now():
+	case <-time.After(3 * time.Second):
+		t.Fatal("heartbeat did not accept its pulse")
+	}
+}
+
+func (ticker *heldCompileTicker) requireStopped(t *testing.T) {
+	t.Helper()
+	select {
+	case <-ticker.stopped:
+	case <-time.After(time.Second):
+		t.Fatal("compile outcome did not stop the heartbeat clock")
+	}
+}
+
 func TestCompileDB_HeartbeatKeepsLongCompileAliveWithoutLeaseTakeover(t *testing.T) {
 	t.Setenv("MEMQL_NODE_ID", "planner-long-compile")
 	db, bff, planners, probe := compileDB(t)
+	ticker := holdCompileTicker(planners[0])
 	probe.proceed = make(chan struct{})
 	var releaseOnce sync.Once
 	release := func() { releaseOnce.Do(func() { close(probe.proceed) }) }
@@ -316,6 +362,7 @@ func TestCompileDB_HeartbeatKeepsLongCompileAliveWithoutLeaseTakeover(t *testing
 	if planners[1].dispatchCompile(context.Background(), hint) {
 		t.Fatal("a second planner stole an active compile after lease expiry")
 	}
+	ticker.pulse(t)
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		run, err = bff.store().runForOwner(actorCtx(owner), runID)
@@ -339,6 +386,7 @@ func TestCompileDB_HeartbeatKeepsLongCompileAliveWithoutLeaseTakeover(t *testing
 	}
 	release()
 	finishCompile(t, probe)
+	ticker.requireStopped(t)
 	run, err = bff.store().runForOwner(actorCtx(owner), runID)
 	if err != nil || rowString(run, "status") != "running" {
 		t.Fatalf("heartbeat overwrote compile outcome: %+v, %v", run, err)
@@ -476,6 +524,7 @@ func (e *blockedHeartbeatEngine) Execute(ctx context.Context, query string) (*me
 
 func TestCompileDB_OutcomeCancelsAStalledHeartbeat(t *testing.T) {
 	_, bff, planners, probe := compileDB(t)
+	ticker := holdCompileTicker(planners[0])
 	blocked := &blockedHeartbeatEngine{Engine: planners[0].engine, entered: make(chan struct{}, 1), unblock: make(chan struct{})}
 	planners[0].engine = blocked
 	defer close(blocked.unblock)
@@ -491,6 +540,7 @@ func TestCompileDB_OutcomeCancelsAStalledHeartbeat(t *testing.T) {
 		t.Fatal("planner did not claim compile")
 	}
 	awaitCompile(t, probe)
+	ticker.pulse(t)
 	select {
 	case <-blocked.entered:
 	case <-time.After(20 * time.Second):
@@ -505,6 +555,7 @@ func TestCompileDB_OutcomeCancelsAStalledHeartbeat(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("compile outcome blocked joining a heartbeat whose database call was never cancelled")
 	}
+	ticker.requireStopped(t)
 }
 
 func TestCompileDB_QuickEstimatePromotesAcrossReplicasWithoutResettingSpend(t *testing.T) {

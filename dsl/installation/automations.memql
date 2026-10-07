@@ -24,9 +24,9 @@ automation installationPrepareWorkflow {
     builtin installationRenderSource(role: role)
   }
   builtin installationVerifyResources()
+  automation installationArtifactWorkflow()
   builtin installationVerifyStorage()
   builtin installationVerifyProtected()
-  automation installationArtifactWorkflow()
   builtin installationReobserveConfiguration()
   builtin installationPromotePreparation()
 }

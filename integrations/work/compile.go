@@ -178,6 +178,14 @@ func (i *Integration) claimCompile(ctx context.Context, runId string) bool {
 
 type compileHeartbeatKey struct{}
 
+func (i *Integration) newCompileTicker() (<-chan time.Time, func()) {
+	if i.compileTicker != nil {
+		return i.compileTicker(compileHeartbeatInterval)
+	}
+	ticker := time.NewTicker(compileHeartbeatInterval)
+	return ticker.C, ticker.Stop
+}
+
 func (i *Integration) compileWithHeartbeat(ctx context.Context, compiler Compiler, req CompileRequest) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
@@ -196,13 +204,13 @@ func (i *Integration) compileWithHeartbeat(ctx context.Context, compiler Compile
 	ctx = context.WithValue(ctx, compileHeartbeatKey{}, stopHeartbeat)
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(compileHeartbeatInterval)
-		defer ticker.Stop()
+		ticks, stopTicker := i.newCompileTicker()
+		defer stopTicker()
 		for {
 			select {
 			case <-heartbeatCtx.Done():
 				return
-			case <-ticker.C:
+			case <-ticks:
 				pulseCtx, cancelPulse := context.WithTimeout(heartbeatCtx, 5*time.Second)
 				run, err := i.store().runForOwner(pulseCtx, req.RunId)
 				if err != nil {

@@ -21,6 +21,7 @@ import (
 type sensitiveEvidence struct {
 	digest, before, after string
 	observations          []sensitiveObservation
+	observed              time.Time
 }
 
 type sensitiveObservation struct {
@@ -36,6 +37,7 @@ func (e sensitiveEvidence) String() string {
 func (e sensitiveEvidence) GoString() string { return e.String() }
 
 func verifySensitivePreservation(ctx context.Context, api argocd.API, before, after argocd.RenderedRevision, required []resourceIdentity) (sensitiveEvidence, error) {
+	observed := time.Now().UTC()
 	if api == nil || before.Digest() == "" || after.Digest() == "" || len(required) == 0 || len(required) > 128 {
 		return sensitiveEvidence{}, errors.New("protected resource verification requires native renders, configured resources and cluster reads")
 	}
@@ -173,7 +175,7 @@ func verifySensitivePreservation(ctx context.Context, api argocd.API, before, af
 		Observed                        []sensitiveObservation
 		Owners                          map[string]string
 	}{before.Digest(), after.Digest(), inventoryAddresses(old), inventoryAddresses(next), observations, owners.digests()})
-	return sensitiveEvidence{digest, before.Digest(), after.Digest(), observations}, nil
+	return sensitiveEvidence{digest: digest, before: before.Digest(), after: after.Digest(), observations: observations, observed: observed}, nil
 }
 
 func sensitivePath(key resourceIdentity) (string, error) {

@@ -1,0 +1,27 @@
+use installation.builtins.{ installationResolvePublications, installationCheckCompatibility, installationRenderSource, installationVerifyResources, installationVerifyStorage, installationVerifyProtected }
+
+/// Reconcile first; qualify retained inputs before any possible reverse sync.
+/// Argo observations leave continuity and cleanup obligations outstanding.
+@template
+automation installationRollbackWorkflow {
+  current := builtin installationRollbackRead()
+  if current.needsWrite {
+    builtin installationRollbackConfiguration()
+    builtin installationResolvePublications()
+    builtin installationCheckCompatibility()
+    for role in ["rollback", "candidate"] {
+      builtin installationRollbackReopenSource(role: role)
+      builtin installationRenderSource(role: role)
+    }
+    builtin installationVerifyResources()
+    automation installationArtifactWorkflow()
+    builtin installationRollbackRecheckResources()
+    builtin installationVerifyStorage()
+    builtin installationVerifyProtected()
+    builtin installationRollbackReobserveConfiguration()
+    builtin installationRollbackReserve()
+    builtin installationRollbackBegin()
+    builtin installationRollbackApply()
+  }
+  builtin installationRollbackObserve()
+}
