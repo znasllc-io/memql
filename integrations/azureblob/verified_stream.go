@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -218,10 +217,9 @@ func verifyStream(ctx context.Context, bc *blockblob.Client, size int64, digest 
 	}
 	// A configured client may use SAS authorization. A durable artifact
 	// reference must not carry that credential or its expiration with it.
-	reference, err := url.Parse(bc.URL())
+	reference, err := storedBlobURL(bc.URL())
 	if err != nil {
 		return VerifiedBlob{}, errors.New("stored stream has no valid reference URL")
 	}
-	reference.RawQuery, reference.Fragment, reference.User, reference.ForceQuery = "", "", nil, false
-	return VerifiedBlob{URL: reference.String(), ETag: string(*props.ETag), Size: size, SHA256: digest}, nil
+	return VerifiedBlob{URL: reference, ETag: string(*props.ETag), Size: size, SHA256: digest}, nil
 }
