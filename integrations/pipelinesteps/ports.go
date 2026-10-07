@@ -68,6 +68,21 @@ type StreamLibraryStore interface {
 	StoreRunFileStream(context.Context, StreamRunFile) (StoredFile, error)
 }
 
+// RunFileReceiptScope is established by the caller from an authorized run,
+// not reconstructed from an untrusted artifact ID or editable Library entry.
+type RunFileReceiptScope struct {
+	OwnerUserID, WorkRunID, StepKey string
+	Attempt                         int
+}
+
+// LibraryReceiptReader resolves compact journal IDs to ready immutable
+// receipts. It requires a trusted internal call under the scoped owner's actor.
+// This read does not verify present object bytes; a publication consumer must
+// verify the returned ETag, size and digest before using the object.
+type LibraryReceiptReader interface {
+	ReadRunFileReceipts(context.Context, RunFileReceiptScope, []string) ([]StoredFileReceipt, error)
+}
+
 // LibraryStore stores a step's files in its owner's Library.
 type LibraryStore interface {
 	StoreRunFile(ctx context.Context, f RunFile) (StoredFile, error)

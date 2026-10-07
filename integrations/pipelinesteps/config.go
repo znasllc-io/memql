@@ -45,7 +45,7 @@ type Config struct {
 	LogStoreMaxLines int
 	// ArtifactMaxBytes caps one step's decoded artifact archive
 	// (MEMQL_PIPELINES_ARTIFACT_MAX_BYTES, default 64 MiB, clamped to
-	// 1 MiB..256 MiB).
+	// 1 MiB..2 GiB). The native-host byte transport additionally caps at 256 MiB.
 	ArtifactMaxBytes int64
 	// ArchiveMaxBytes caps one step's archived log.
 	ArchiveMaxBytes int64
@@ -128,7 +128,7 @@ func ConfigFromEnv(getenv func(string) string) Config {
 		StepServiceAccount: stepServiceAccount,
 		RunCeiling:         pl.ParseRunCeiling(text(pl.EnvRunCeiling)),
 		LogStoreMaxLines:   whole(envLogStoreMaxLines, 2000, 100, 100000),
-		ArtifactMaxBytes:   int64(whole(envArtifactMaxBytes, 64*mebibyte, mebibyte, 256*mebibyte)),
+		ArtifactMaxBytes:   int64(whole(envArtifactMaxBytes, 64*mebibyte, mebibyte, 2*1024*mebibyte)),
 		ArchiveMaxBytes:    64 * mebibyte,
 		DefaultStepTimeout: 20 * time.Minute,
 		JobTTL:             30 * time.Minute,

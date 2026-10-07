@@ -15,6 +15,21 @@ runner must explicitly use it. The app adapter implements both ports. A
 successful stream call returns a ready Library file and an independent durable
 object receipt. A storage error never returns a successful file ID.
 
+The Job collector uses this port directly from its private verified snapshot;
+it does not fall back to buffering an artifact for the byte-slice port. It checks
+the returned owner/run/step/attempt/path, size and digest before accepting the
+receipt. The Step V6 transport retains opaque intent IDs in the Job outcome and
+the work-step result metadata. These IDs survive outcome-size trimming even if
+some editable Library links must be omitted. A successful cluster step declaring
+artifacts is refused at the driver boundary if those references are absent or
+malformed. Older workbench replicas cannot accept the V6 action.
+
+The operator can raise the total streamed archive cap to 2 GiB; its default
+remains 64 MiB. The existing bounded Library phase and Job deadline still apply.
+Large-file throughput must be qualified on the installation before selecting a
+larger cap. Native-host artifact transport remains capped at 256 MiB and does
+not yet provide these immutable receipt references.
+
 ## Identity and recovery
 
 The caller supplies owner, work run, step, positive attempt, canonical relative
@@ -50,6 +65,16 @@ outside the editable Library row. Publication code must verify this object
 version and digest before using it; a Library file ID alone is not immutable
 release evidence. A later ETag change is refused even if the bytes hash to the
 same digest.
+
+Step results may retain just the opaque intent IDs to keep their journal and
+transport records bounded. `LibraryReceiptReader.ReadRunFileReceipts` resolves
+up to 1024 unique IDs in the supplied order, under an exact owner/run/step/attempt
+scope. It requires internal origin and the matching owner actor; its SQL repeats
+the scope checks. Missing, not-ready or mismatched entries refuse the entire
+read. There is no public HTTP or DSL endpoint for this native journal accessor.
+The calling capability must first authorize the run, and must still verify the
+returned object version and bytes before publication. Looking up a saved receipt
+is not a new byte verification.
 
 Admission counts the owner's current files, retained versions, open upload
 sessions and all streaming journal entries before moving bytes. A current file
