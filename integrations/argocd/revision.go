@@ -6,8 +6,6 @@ package argocd
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/core/id"
 )
 
 const (
@@ -207,8 +207,9 @@ func (i Intent) validate() (before, after map[string]any, digest string, err err
 	if err != nil {
 		return nil, nil, "", err
 	}
-	sum := sha256.Sum256(raw)
-	digest = "sha256:" + hex.EncodeToString(sum[:])
+	// This is an internal content identity, not an OCI/SHA wire digest. Avoid
+	// retaining the intermediate per-byte ID history of a potentially large spec.
+	digest = "memql-id:" + string(id.NewUntracked().FromBytes(raw))
 	after, err = decodeObject(i.BeforeSpec)
 	if err == nil {
 		object(after, "source")["targetRevision"] = i.Revision
