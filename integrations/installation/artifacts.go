@@ -62,6 +62,10 @@ type artifactEvidence struct {
 	digest, scope, configuration, candidate, rollback, resources, before, after, platform string
 	workflow, operator                                                                    string
 	observed, expires                                                                     time.Time
+	// Retain the verified root-to-platform-manifest relationship for later
+	// runtime image observations. These facts are private, not restored from a
+	// serialized receipt or supplied by a workflow.
+	runtimeImages map[string]string
 }
 
 func (*artifactAdmission) String() string    { return "<installation artifact scope>" }
@@ -234,6 +238,7 @@ func (s *artifactAdmission) seal(observations []artifactObservation) (artifactEv
 		Image              ociregistry.AvailabilityReceipt
 	}
 	receipts := make([]receipt, 0, len(s.requirements))
+	runtimeImages := make(map[string]string, len(s.requirements))
 	expires := now.Add(30 * time.Minute)
 	for _, want := range s.requirements {
 		obs, exists := byKey[want.Key]
@@ -242,6 +247,7 @@ func (s *artifactAdmission) seal(observations []artifactObservation) (artifactEv
 			return artifactEvidence{}, errors.New("artifact observation differs from required image or platform")
 		}
 		receipts = append(receipts, receipt{want.Key, obs.started, obs.completed, got})
+		runtimeImages[want.Image] = got.Repository + "@" + got.ManifestDigest
 		if end := obs.started.Add(30 * time.Minute); end.Before(expires) {
 			expires = end
 		}
@@ -250,7 +256,7 @@ func (s *artifactAdmission) seal(observations []artifactObservation) (artifactEv
 		Scope    string
 		Receipts []receipt
 	}{s.digest, receipts})
-	return artifactEvidence{digest: digest, scope: s.digest, configuration: s.configuration, candidate: s.candidate, rollback: s.rollback, resources: s.resources, before: s.before, after: s.after, platform: s.platform, observed: now, expires: expires}, nil
+	return artifactEvidence{digest: digest, scope: s.digest, configuration: s.configuration, candidate: s.candidate, rollback: s.rollback, resources: s.resources, before: s.before, after: s.after, platform: s.platform, observed: now, expires: expires, runtimeImages: runtimeImages}, nil
 }
 
 func artifactHash(kind string, value any) string {

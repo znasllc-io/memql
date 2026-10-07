@@ -1,0 +1,15 @@
+// Call-local ports: these declarations neither register an integration nor
+// admit a caller. Only the native workload host supplies their evidence scope.
+
+/// List every image-bearing workload in the admitted immutable render.
+@executor("integration.installation.installationWorkloadRequirements")
+builtin installationWorkloadRequirements { }
+
+/// Observe one controller and its owned Pods through bounded Kubernetes reads.
+@executor("integration.installation.installationWorkloadCheck")
+@args(profile="object")
+builtin installationWorkloadCheck { key string! }
+
+/// Seal only a complete set of fresh native workload observations.
+@executor("integration.installation.installationWorkloadsComplete")
+builtin installationWorkloadsComplete { }
