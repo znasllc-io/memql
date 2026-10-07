@@ -25,7 +25,7 @@ is not evidence that its host, trigger or publication path has run.
 | `install-scripts-lint.yml` | Bash/POSIX syntax, ShellCheck, installer library/menu tests and rendered-mark/UI assertions on Linux amd64 and macOS arm64 | ShellCheck must already be installed on each consenting host. No host package installation is implicit. |
 | `govulncheck.yml` | Exact v1.3.0 scanner, complete module, retained findings | Weekly trigger and installed run; findings and scanner failures remain failures. |
 | `gitleaks.yml` | Exact v8.30.1 scanner, candidate history and tags, redacted report | Installed full-history run. Cockpit's legacy PR scan is also full-history; this port preserves it. |
-| `codeql.yml` | Go manual build, pinned CodeQL 2.27.1 bundle with verified SHA-256, **security-and-quality**, retained SARIF | Weekly trigger, real scan, SARIF publication and triage. Successful analysis does not mean zero findings. |
+| `codeql.yml` | Go manual build, pinned CodeQL 2.27.1 bundle with verified SHA-256, **security-and-quality**, retained SARIF | Weekly trigger and SARIF publication remain unqualified. Local Linux headless scan passed; other build tags and operating systems need their own coverage. |
 | `release.yml` | Headless four-platform build/archives; native computer-use builds on darwin/linux × arm64/amd64; macOS menu/app archives | Exact release-event/tag qualification, collection of all four computer-use checksums, immutable cross-step artifact aggregation and GitHub release upload. No upload command or credential is introduced here. |
 | `sbom.yml` | CycloneDX v1.10.0 inventories **each built binary**, JSON and XML retained with that build | Cross-step collection and publication of the eight binary inventories; manual release-asset re-inventory trigger. A source dependency list cannot substitute for these binary inventories. |
 | `scorecard.yml` | No equivalent declared | Scorecard's branch-protection event, weekly trigger, identity-token attestation, public result publication and SARIF upload require an installed authorized equivalent. This row cannot be marked passed by another scan. |
@@ -86,4 +86,7 @@ invocation; it does not qualify other build tags or operating systems. Its one
 finding was an unchecked close in the existing Linux GPU-device access probe.
 The probe writes no data; it now refuses a failed close. This is a code fix,
 not a suppression, and the original scan remains evidence of the original
-source rather than a zero-finding claim for the changed source.
+source rather than a zero-finding claim for the changed source. The final
+exact-source scan at `bb81d162c46ff4cb5ad1e2dc54499033e792622b` completed with
+zero SARIF findings, again covering 172 of 379 Go files. The affected Linux
+inference package tests passed in the same pinned Linux container.
