@@ -2,7 +2,6 @@ package azureblob
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/lease"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 const retiredStreamMetadata = "memql_retired_stream"
@@ -54,8 +54,7 @@ func (u *AzureBlobUploader) RetireVerifiedStream(ctx context.Context, container,
 	if err != nil {
 		return RetiredBlob{}, err
 	}
-	fingerprint := sha256.Sum256([]byte(fmt.Sprintf("%s\n%d\n%s\n%s", leaseID, receipt.Size, receipt.SHA256, receipt.ETag)))
-	marker := hex.EncodeToString(fingerprint[:])
+	marker := string(id.NewUntracked().FromString(fmt.Sprintf("%s\n%d\n%s\n%s", leaseID, receipt.Size, receipt.SHA256, receipt.ETag)))
 	props, err := bc.GetProperties(ctx, nil)
 	var condition *blob.ModifiedAccessConditions
 	switch {
