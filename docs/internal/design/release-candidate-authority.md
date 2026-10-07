@@ -41,7 +41,17 @@ exposes the kind, draft, tag and filename for review, never credentials.
 Draft/tag creation and release promotion are separate effects, not side effects
 of this adapter. They remain required for the complete release-assembly workflow.
 
-`releaseCandidateConfiguration()` exposes source rules and target identity,
+Named `assemblies` declare components, run aliases, exact producing paths,
+compatibility and configured destinations. `releaseAssembleCandidate` accepts
+only a plan name and run IDs. Its installed recipe orders complete-run,
+source-version, artifact and destination reads, then projects their facts into
+a candidate and invokes preparation. Native scope checks prevent omitting or
+substituting declared facts. Bounded BuildKit metadata from the exact producer
+supplies the image digest; full pinned OCI verification remains mandatory.
+The public [assembly contract](../../public/operate/release-candidates.md)
+documents configuration and bounds.
+
+`releaseCandidateConfiguration()` exposes assembly plans, source rules and target identity,
 origin and repository, never credential values. `releasePrepareCandidate`
 accepts a candidate object and returns its verified immutable manifest and
 digest. `releaseCandidates` returns owner-scoped summaries with a bounded limit
@@ -99,7 +109,10 @@ typed declarations require fresh qualification; missing type is not inferred.
 
 The preparation scope snapshots the installed preparation and publication
 templates and configured version sources, binding them plus the immutable
-engine commit into `workflowDigest`.
+engine commit into `workflowDigest`. When assemblies are configured, their
+complete plan set and the installed assembly recipe enter that identity too.
+This conservative binding forces another review after any plan change. Assembly
+passes its already-owned recipe snapshot into preparation.
 Children and logic bodies are refused until their definitions can also be
 included in that identity. Native version reads use the exact source commit and
 operator-selected `VERSION` or top-level JSON version property. Candidate
@@ -123,7 +136,10 @@ checks before resolving its object. `OpenReceiptStream` reads only the recorded
 ETag from the configured storage account and verifies size and SHA-256 before
 successful EOF. A consumer must close the stream and finish verification
 before any external effect. OCI structure/platform verification is separate.
-Consumers must pin every needed artifact before opening its bytes.
+Preparation and publication consumers pin every artifact before verification or
+effects. Assembly discovery may open only bounded, receipt-bound image metadata
+before a candidate identity exists. It publishes nothing; retirement racing
+discovery makes subsequent preparation refuse.
 
 The native SQL journal provides these transitions across replicas:
 
@@ -209,8 +225,14 @@ second-host recovery, changed authority, omitted native verification, retained
 pins and scratch cleanup are covered. Artifact/work ports are fixtures in these
 tests; they make no GitHub writes.
 
+Assembly tests use real SQL Workbench journals and separate engine instances,
+HTTP source-version fixtures, receipt-store fixtures and full OCI verification.
+They exercise complete evidence, owner separation, changed plans/recipes,
+missing or substituted inputs and malformed producer metadata. These are not
+an installed build-and-release rehearsal.
+
 Still required for the complete delivery path: original-receipt
-verification for carried attempts, release assembly/promotion,
+verification for carried attempts, draft/tag creation and promotion,
 owner review UI, installation/recovery control, signed
 provenance and complete release qualification. No candidate approval or
 publication is implied by these tests.

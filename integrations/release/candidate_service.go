@@ -50,6 +50,7 @@ type candidateOperatorConfiguration struct {
 	Sources       []candidateVersionSource  `json:"sources"`
 	Registries    []candidateRegistryTarget `json:"registries"`
 	ReleaseAssets []candidateFileTarget     `json:"releaseAssets,omitempty"`
+	Assemblies    []candidateAssemblyPlan   `json:"assemblies,omitempty"`
 }
 
 func decodeCandidateObject(body []byte, into any) error {
@@ -197,7 +198,11 @@ func (i *Integration) configuredCandidate(ctx context.Context) (*candidatePrepar
 		}
 		targets.files[target.ID] = owned
 	}
+	if err := validateAssemblyPlans(cfg.Assemblies, versions, targets); err != nil {
+		return nil, err
+	}
 	p.evidence, p.versionReader, p.targetReader = candidateEvidenceReader{engine: i.store.engine}, versions, targets
+	p.assemblyPlans = cfg.Assemblies
 	return p, nil
 }
 
@@ -239,7 +244,7 @@ func (i *Integration) handleCandidateConfiguration(ctx context.Context, _ map[st
 			Kind: "file", Origin: target.APIOrigin, Repository: target.Repository, Tag: target.Tag, SourceCommit: target.SourceCommit, ReleaseID: target.ReleaseID, AssetName: target.AssetName, CredentialConfigured: true})
 	}
 	slices.SortFunc(targets, func(a, b targetView) int { return strings.Compare(a.TargetID, b.TargetID) })
-	return resultNode("candidate-configuration", "", map[string]any{"sources": sources, "targets": targets})
+	return resultNode("candidate-configuration", "", map[string]any{"sources": sources, "targets": targets, "assemblies": p.assemblyPlans})
 }
 
 func (i *Integration) handleCandidatePrepare(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

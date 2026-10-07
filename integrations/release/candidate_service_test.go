@@ -20,7 +20,7 @@ func TestCandidateCommandsGateEveryNonOwnerBeforeConfiguration(t *testing.T) {
 	for _, role := range []auth.Role{auth.RoleAdmin, auth.RoleDeveloper, auth.RoleWriter, auth.RoleReader, auth.Role("")} {
 		for _, capability := range i.Capabilities() {
 			switch capability.Name {
-			case "candidateConfiguration", "candidatePublications", "listCandidates", "prepareCandidate", "approveCandidate", "publishCandidate", "getCandidate", "retireCandidate":
+			case "candidateConfiguration", "candidatePublications", "listCandidates", "assembleCandidate", "prepareCandidate", "approveCandidate", "publishCandidate", "getCandidate", "retireCandidate":
 			default:
 				continue
 			}

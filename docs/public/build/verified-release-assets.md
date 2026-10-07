@@ -108,5 +108,6 @@ and second-host reconciliation. They do not publish to GitHub. Installed
 controller composition and qualification must exercise the caller's real
 authority, retained storage and durable intent as well as this protocol seam.
 
-Related: [Engine, integration and workflow boundaries](integration-boundary.md)
+Related: [Assembling release candidates](../operate/release-candidates.md),
+[Engine, integration and workflow boundaries](integration-boundary.md)
 and [Verified OCI publication](verified-oci-publication.md).

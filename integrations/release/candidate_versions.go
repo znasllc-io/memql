@@ -77,49 +77,7 @@ func (r candidateVersionReader) freezeFor(components []pl.ReleaseComponent) (can
 }
 
 func (r candidateVersionReader) check(ctx context.Context, component pl.ReleaseComponent) error {
-	if _, err := candidateOwner(ctx); err != nil {
-		return err
-	}
-	source, ok := r.sources[component.Name]
-	if !ok || source.Component != component.Name || source.Repository != component.Repository {
-		return errors.New("component has no matching configured version source")
-	}
-	if err := source.validate(); err != nil {
-		return err
-	}
-	if r.client == nil {
-		return errors.New("source version reader is unavailable")
-	}
-	// The candidate structure also checks this, but the bounded native reader
-	// never accepts a moving branch or tag even when invoked independently.
-	if !candidateSourceCommit(component.Commit) {
-		return errors.New("version read requires an exact source commit")
-	}
-	repo, _ := parseRepo(source.Repository)
-	token := ""
-	if source.CredentialSecret != "" {
-		if r.resolver.systemSecret == nil {
-			return errors.New("version source credential resolver is unavailable")
-		}
-		var err error
-		token, err = r.resolver.systemSecret(ctx, source.CredentialSecret)
-		if err != nil || strings.TrimSpace(token) == "" {
-			return errors.New("version source credential is unavailable")
-		}
-	} else if r.resolver.appToken != nil {
-		var err error
-		token, err = r.resolver.appToken(ctx, repo)
-		if err != nil {
-			return errors.New("version source installation credential is unavailable")
-		}
-	}
-	// A public repository can be read anonymously. There is deliberately no
-	// plaintext-variable or environment fallback for a configured secret.
-	raw, _, err := r.client.GetFile(ctx, token, repo, source.Path, component.Commit)
-	if err != nil {
-		return err
-	}
-	version, err := candidateFileVersion(raw, source.JSONField)
+	version, err := r.readVersion(ctx, component)
 	if err != nil {
 		return err
 	}
@@ -127,6 +85,52 @@ func (r candidateVersionReader) check(ctx context.Context, component pl.ReleaseC
 		return errors.New("source version does not match the release candidate")
 	}
 	return nil
+}
+
+func (r candidateVersionReader) readVersion(ctx context.Context, component pl.ReleaseComponent) (string, error) {
+	if _, err := candidateOwner(ctx); err != nil {
+		return "", err
+	}
+	source, ok := r.sources[component.Name]
+	if !ok || source.Component != component.Name || source.Repository != component.Repository {
+		return "", errors.New("component has no matching configured version source")
+	}
+	if err := source.validate(); err != nil {
+		return "", err
+	}
+	if r.client == nil {
+		return "", errors.New("source version reader is unavailable")
+	}
+	// The candidate structure also checks this, but the bounded native reader
+	// never accepts a moving branch or tag even when invoked independently.
+	if !candidateSourceCommit(component.Commit) {
+		return "", errors.New("version read requires an exact source commit")
+	}
+	repo, _ := parseRepo(source.Repository)
+	token := ""
+	if source.CredentialSecret != "" {
+		if r.resolver.systemSecret == nil {
+			return "", errors.New("version source credential resolver is unavailable")
+		}
+		var err error
+		token, err = r.resolver.systemSecret(ctx, source.CredentialSecret)
+		if err != nil || strings.TrimSpace(token) == "" {
+			return "", errors.New("version source credential is unavailable")
+		}
+	} else if r.resolver.appToken != nil {
+		var err error
+		token, err = r.resolver.appToken(ctx, repo)
+		if err != nil {
+			return "", errors.New("version source installation credential is unavailable")
+		}
+	}
+	// A public repository can be read anonymously. There is deliberately no
+	// plaintext-variable or environment fallback for a configured secret.
+	raw, _, err := r.client.GetFile(ctx, token, repo, source.Path, component.Commit)
+	if err != nil {
+		return "", err
+	}
+	return candidateFileVersion(raw, source.JSONField)
 }
 
 func candidateSourceCommit(value string) bool {
