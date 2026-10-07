@@ -265,9 +265,12 @@ func TestPreparationWorkflowProtocolRecoveryPromotesWithFreshNativeEvidence(t *t
 	changedPlan := current.Plan
 	changedPlan.RequestedBy = "another-operator"
 	require.Error(t, continuation.require(changedPlan, current.Plan.Intent))
-	stale := *continuation
-	stale.observed = time.Now().Add(-2 * time.Minute)
-	require.Error(t, stale.require(current.Plan, current.Plan.Intent))
+	for _, observed := range []time.Time{time.Now().Add(-2 * time.Minute), time.Now().Add(time.Minute)} {
+		stale, staleSnapshot := *continuation, *continuation.snapshot
+		stale.observed, staleSnapshot.observed = observed, observed
+		stale.snapshot = &staleSnapshot
+		require.Error(t, stale.require(current.Plan, current.Plan.Intent))
+	}
 	_, err = readReceiverContinuation(context.Background(), receiver, "memql", "receiver", factory, current.Plan, current.Plan.Intent)
 	require.Error(t, err)
 
