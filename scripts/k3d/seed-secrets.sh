@@ -15,7 +15,8 @@
 #   memql-db-app-creds   -- Postgres credentials for the in-cluster DB
 #
 # Called by `make secrets` and by `make up` on first boot.
-# Safe to re-run: uses `kubectl apply` (idempotent, creates or updates).
+# Safe to re-run: ordinary configuration uses `kubectl apply`; memql-secrets
+# uses create or a resource-version-guarded merge patch to preserve metadata.
 #
 # PREREQUISITES
 #   - kubectl context points at the k3d cluster (k3d-memql or equivalent).
@@ -64,6 +65,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 # shellcheck source=../lib/localtls.sh
 source "${SCRIPT_DIR}/../lib/localtls.sh"
+# shellcheck source=../lib/argocd-preservation.sh
+source "${SCRIPT_DIR}/../lib/argocd-preservation.sh"
 
 cap_init "k3d.seedSecrets" "Seed the k8s Secrets that the local k3d overlay requires."
 cap_spec_param "namespace" "k8s namespace to seed into"
@@ -236,6 +239,12 @@ function load_cluster_secret_snapshot() {
             ;;
     esac
     CLUSTER_SECRET_STATE="present"
+
+    # Capture the guard BEFORE reading credentials. A rotation during any
+    # later read must make the eventual merge patch conflict, never let stale
+    # values acquire the newer version's write authority.
+    argocd_preservation_load "$NAMESPACE" memql-secrets \
+        || cap_fail $? "cannot safely preserve memql-secrets GitOps metadata; resolve its conflicting options or cluster access before seeding"
 
     local raw
     raw="$(kubectl get secret memql-secrets --namespace="$NAMESPACE" \
@@ -1125,7 +1134,9 @@ function seed_memql_secrets() {
         --from-literal="MEMQL_GITHUB_APP_PRIVATE_KEY_B64=$gh_private_key" \
         --from-literal="MEMQL_GITHUB_APP_WEBHOOK_SECRET=$gh_webhook_secret" \
         --dry-run=client -o yaml \
-        | kubectl apply -f - >&2
+        | argocd_preservation_manifest \
+        | argocd_preservation_write_secret "$NAMESPACE" memql-secrets >&2 \
+        || cap_fail 5 "memql-secrets changed concurrently or could not be written; read the current cluster state before retrying"
     SEEDED_COUNT=$((SEEDED_COUNT + 1))
     info "memql-secrets seeded."
 }

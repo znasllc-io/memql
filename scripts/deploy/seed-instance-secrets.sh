@@ -65,6 +65,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/argocd-preservation.sh
+source "${SCRIPT_DIR}/../lib/argocd-preservation.sh"
 
 #=============================================================================
 # CAPABILITY SPEC
@@ -304,6 +306,21 @@ function ensure_namespace() {
 function ensure_merge_shell() {
     if kubectl get secret "$MERGE_SHELL_SECRET" -n "$NAMESPACE" -o name &>/dev/null; then
         cap_info "${MERGE_SHELL_SECRET} already exists; ExternalSecrets have a target to merge into"
+        if [[ "$DRY_RUN" != "true" ]]; then
+            # This resource is supplied outside GitOps. Repair only its two
+            # preservation annotations; never reapply an empty shell over data
+            # populated by ESO, or change an encryption/signing key.
+            argocd_preservation_load "$NAMESPACE" "$MERGE_SHELL_SECRET" \
+                || cap_fail $? "cannot safely preserve ${MERGE_SHELL_SECRET} GitOps metadata; resolve its conflicting options or cluster access before seeding"
+            if [[ "$ARGO_PRESERVATION_CHANGED" == true ]]; then
+                kubectl annotate secret "$MERGE_SHELL_SECRET" -n "$NAMESPACE" --overwrite \
+                    --resource-version="$ARGO_PRESERVATION_RV" \
+                    "argocd.argoproj.io/sync-options=${ARGO_PRESERVATION_SYNC}" \
+                    "argocd.argoproj.io/compare-options=${ARGO_PRESERVATION_COMPARE}" >/dev/null \
+                    || cap_fail 5 "failed to protect ${MERGE_SHELL_SECRET} from GitOps pruning"
+                cap_changed
+            fi
+        fi
         return 0
     fi
     if [[ "$DRY_RUN" == "true" ]]; then
@@ -314,7 +331,11 @@ function ensure_merge_shell() {
     # EMPTY on purpose. Its only job is to exist, so that two ExternalSecrets
     # with creationPolicy: Merge have a target. ESO fills it; nothing here puts
     # a value in it, which is also why this step is safe to re-run.
-    kubectl create secret generic "$MERGE_SHELL_SECRET" -n "$NAMESPACE" >/dev/null \
+    # Include protection in the FIRST API create, avoiding an unprotected
+    # interval between creation and a separate annotate request.
+    kubectl create secret generic "$MERGE_SHELL_SECRET" -n "$NAMESPACE" --dry-run=client -o yaml \
+        | argocd_preservation_manifest \
+        | kubectl create -f - >/dev/null \
         || cap_fail 5 "failed to create ${MERGE_SHELL_SECRET} in ${NAMESPACE}"
     cap_changed
 }
