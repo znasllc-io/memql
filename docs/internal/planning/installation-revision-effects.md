@@ -121,10 +121,11 @@ The new database tests cover independent connections, concurrent dispatch
 claims, request recovery, changed authority, and the shared revision/preparation
 fence. A separate test reaches the real Executor, Workbench forward handler and
 fresh Runner instances over an HTTP Kubernetes fixture, distinguishing an
-existing durable outcome from an uncertain missing attempt. These tests have
-passed in required-database CI but have not yet executed against the required local database, which
-is unavailable following Docker's disk-full shutdown. This slice remains
-private and unregistered. Started-attempt retirement, artifact retention/cleanup, current configuration
+existing durable outcome from an uncertain missing attempt. These tests passed
+in required-database CI and in the October 7 local installation suite against
+an isolated PostgreSQL/TimescaleDB fixture with `MEMQL_REQUIRE_DB=1` and the race
+detector enabled (19.784 seconds). This slice remains private and unregistered.
+Started-attempt retirement, artifact retention/cleanup, current configuration
 verification, sealed DSL wiring and installed recovery qualification remain
 required before exposing preparation.
 
@@ -147,9 +148,11 @@ callbacks cannot reopen preparation, and a historical retry cannot take a
 successor's slot. A failed head update rolls back both journal writes. Migration
 rollback refuses to remove a recorded promotion.
 
-The new promotion tests compile with the race detector; database execution and
-independent review are pending. They cover those transaction and authority
-boundaries using real PostgreSQL and native verifiers over protocol fixtures.
+The promotion tests passed in required-database CI and in the same local race
+suite. Independent review is complete, including a second-connection PostgreSQL
+regression for stable JSONB intent identity and exact large integers. They cover
+those transaction and authority boundaries using real PostgreSQL and native
+verifiers over protocol fixtures.
 This is a journal handoff, not complete installation admission: actual receiving
 configuration/renderer identity, compatibility, artifact availability and the
 live rollout/continuity/recovery workflow remain required before registration.
