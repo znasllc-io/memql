@@ -13,10 +13,38 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uptrace/bun/driver/pgdriver"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
+
+// SQL fence tests need independent real connections, but do not exercise DSL
+// quota queries. Keep those at an explicit empty-library seam rather than boot
+// the entire engine repeatedly. The upload/recovery tests below still use two
+// full engines, and the stream suite owns actual Library quota behavior.
+func pipelineScopeSQLStore(t *testing.T) (*pipelinesLibraryStore, *sql.DB) {
+	t.Helper()
+	db := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN())))
+	t.Cleanup(func() { _ = db.Close() })
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		dbtest.Unreachable(t, "pipeline producer scope", dbtest.DSN(), err)
+	}
+	engine := pipelineStreamEngineFunc(func(_ context.Context, query string) (any, error) {
+		switch query {
+		case "query libraryFileSizesForOwner()", "query libraryFileVersionSizesForOwner()", "query openUploadSessionsForOwner()":
+			return nil, nil
+		default:
+			return nil, errors.New("SQL fence fixture cannot execute a Library mutation or unrelated query")
+		}
+	})
+	s := newPipelinesLibraryStore(engine, &pipelineRetirementFake{}, "stream-test", quietLogger())
+	s.uploadDB = func() *sql.DB { return db }
+	return s, db
+}
 
 func TestPipelineScopeDBFenceBeforeFirstUploadSurvivesReplacement(t *testing.T) {
 	u := &pipelineStreamFake{}
@@ -113,8 +141,8 @@ func TestPipelineScopeDBDiscoversLostUploadAndRetiresWithoutReceipt(t *testing.T
 }
 
 func TestPipelineScopeDBFenceSerializesConcurrentReservationsAcrossReplicas(t *testing.T) {
-	one, _, db1 := pipelineStreamDBStore(t, &pipelineStreamFake{})
-	two, _, db2 := pipelineStreamDBStore(t, &pipelineStreamFake{})
+	one, db1 := pipelineScopeSQLStore(t)
+	two, db2 := pipelineScopeSQLStore(t)
 	for range 4 {
 		f := pipelineStreamFile(id.NewShortId(), "data")
 		ctx, scope := pipelineLifecycleScope(f)
@@ -176,7 +204,7 @@ func TestPipelineScopeDBFenceSerializesConcurrentReservationsAcrossReplicas(t *t
 }
 
 func TestPipelineScopeDBInventoryPagesAndAuthorization(t *testing.T) {
-	s, _, db := pipelineStreamDBStore(t, &pipelineStreamFake{})
+	s, db := pipelineScopeSQLStore(t)
 	f := pipelineStreamFile(id.NewShortId(), "data")
 	ctx, scope := pipelineLifecycleScope(f)
 	identity, err := s.streamIdentity(f)
@@ -247,7 +275,7 @@ func TestPipelineScopeDBInventoryPagesAndAuthorization(t *testing.T) {
 }
 
 func TestPipelineScopeDBDownMigrationRefusesDurableFences(t *testing.T) {
-	s, _, db := pipelineStreamDBStore(t, &pipelineStreamFake{})
+	s, db := pipelineScopeSQLStore(t)
 	f := pipelineStreamFile(id.NewShortId(), "data")
 	ctx, scope := pipelineLifecycleScope(f)
 	if err := s.FenceRunFileScope(ctx, scope); err != nil {
@@ -268,7 +296,7 @@ func TestPipelineScopeDBDownMigrationRefusesDurableFences(t *testing.T) {
 }
 
 func TestPipelineScopeDBRejectsOlderWriterAdmissionAndRecovery(t *testing.T) {
-	s, _, db := pipelineStreamDBStore(t, &pipelineRetirementFake{})
+	s, db := pipelineScopeSQLStore(t)
 	f := pipelineStreamFile(id.NewShortId(), "data")
 	ctx, scope := pipelineLifecycleScope(f)
 	identity, err := s.streamIdentity(f)
@@ -306,7 +334,7 @@ VALUES ($1,$2,$3::jsonb,$4,$5,$6,1,'reserved')`, pipelineIntentID(identity), ide
 }
 
 func TestPipelineScopeDBLegacyInsertWaitsForNativeFenceCommit(t *testing.T) {
-	s, _, db := pipelineStreamDBStore(t, &pipelineStreamFake{})
+	s, db := pipelineScopeSQLStore(t)
 	f := pipelineStreamFile(id.NewShortId(), "data")
 	owner, scope := pipelineLifecycleScope(f)
 	ctx, cancel := context.WithTimeout(owner, 10*time.Second)
