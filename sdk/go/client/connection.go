@@ -13,6 +13,8 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -124,6 +126,10 @@ type ConnectConfig struct {
 	Endpoint string
 	Token    string // JWT bearer token (empty for no-auth mode)
 	Logger   *slog.Logger
+	// RootCAs supplies an explicit trust store for a TLS endpoint. Nil uses
+	// system roots. The pool is cloned at connection time; hostname verification
+	// always remains enabled. A plaintext endpoint cannot carry this option.
+	RootCAs *x509.CertPool
 	// Reconnect turns on SDK-owned auto-reconnect with resubscribe
 	// (memql#4537). nil keeps the historic one-shot behaviour exactly.
 	Reconnect *ReconnectConfig
@@ -134,10 +140,9 @@ type ConnectConfig struct {
 //
 // The endpoint may be a bare host:port (plaintext gRPC), or carry
 // an explicit scheme: http://, grpc:// (plaintext), https://,
-// grpcs:// (TLS). When TLS is selected the client uses the system
-// trust store, so a publicly-trusted https://bff.<domain> endpoint
-// Just Works. The local k3d cluster is reached over plaintext gRPC
-// via the bff port-forward (localhost:50051). See
+// grpcs:// (TLS). TLS uses system roots unless RootCAs supplies the operator's
+// trust store. Local k3d and cloud installations use their TLS front doors
+// at https://api.<domain>; a local CA can be supplied through RootCAs. See
 // ParseClusterEndpoint for the full grammar.
 func Connect(ctx context.Context, cfg ConnectConfig) (*Connection, error) {
 	dial, useTLS, err := ParseClusterEndpoint(cfg.Endpoint)
@@ -146,11 +151,15 @@ func Connect(ctx context.Context, cfg ConnectConfig) (*Connection, error) {
 	}
 	var transport grpc.DialOption
 	if useTLS {
-		// nil tls.Config -> use system trust store + ServerName from
-		// the dial target. The cockpit talks to a public-looking name
-		// (bff.${DOMAIN}) so SNI / verify-hostname work out of the box.
-		transport = grpc.WithTransportCredentials(credentials.NewTLS(nil))
+		config := &tls.Config{MinVersion: tls.VersionTLS12}
+		if cfg.RootCAs != nil {
+			config.RootCAs = cfg.RootCAs.Clone()
+		}
+		transport = grpc.WithTransportCredentials(credentials.NewTLS(config))
 	} else {
+		if cfg.RootCAs != nil {
+			return nil, fmt.Errorf("custom certificate roots require a TLS endpoint")
+		}
 		transport = grpc.WithTransportCredentials(insecure.NewCredentials())
 	}
 	if cfg.Logger != nil {
@@ -163,6 +172,11 @@ func Connect(ctx context.Context, cfg ConnectConfig) (*Connection, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", dial, err)
 	}
+	// Stream creation can wait for TCP/TLS before the handshake sees ctx.
+	// Bound the whole connection attempt, while keeping a successfully handed
+	// off stream independent of the caller's short-lived connect context.
+	stopConnect := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stopConnect()
 
 	// The stream context must outlive the connect timeout.
 	// Use a background context for the stream's lifetime, with metadata if needed.
@@ -176,6 +190,9 @@ func Connect(ctx context.Context, cfg ConnectConfig) (*Connection, error) {
 	stream, err := client.Stream(streamCtx)
 	if err != nil {
 		conn.Close()
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("open stream: %w", ctx.Err())
+		}
 		return nil, fmt.Errorf("open stream: %w", err)
 	}
 
@@ -205,6 +222,10 @@ func Connect(ctx context.Context, cfg ConnectConfig) (*Connection, error) {
 	if err := c.handshake(ctx); err != nil {
 		c.Close()
 		return nil, fmt.Errorf("handshake: %w", err)
+	}
+	if !stopConnect() && ctx.Err() != nil {
+		c.Close()
+		return nil, fmt.Errorf("connect: %w", ctx.Err())
 	}
 
 	if c.reconnect != nil {

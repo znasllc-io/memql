@@ -130,6 +130,11 @@
         "requires": "app:cluster/releases"
       },
       {
+        "id": "updates",
+        "name": "Updates",
+        "requires": "app:cluster/updates"
+      },
+      {
         "id": "modules",
         "name": "Modules",
         "requires": "app:cluster/modules"
