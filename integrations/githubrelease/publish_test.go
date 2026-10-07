@@ -562,6 +562,18 @@ func TestCloseWaitsForPublicationAndCancellation(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("download did not start")
 	}
+	queuedCtx, stopQueued := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer stopQueued()
+	queued := make(chan error, 1)
+	go func() { _, err := p.Publish(queuedCtx, v); queued <- err }()
+	select {
+	case err := <-queued:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatal("queued publication ignored deadline", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued publication waited for unrelated transfer after its deadline")
+	}
 	closed := make(chan error, 1)
 	go func() { closed <- v.Close() }()
 	select {

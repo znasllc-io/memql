@@ -85,8 +85,9 @@ different release requires its own explicitly authorized workflow. It follows
 at most three binary-download redirects to configured HTTPS origins without
 credentials, cookies or referrers. API and upload redirects are refused.
 
-Each publication has a 30-minute ceiling, at most 96 protocol requests,
-30-second metadata reads, bounded response headers and 2 MiB metadata bodies.
+Each publication has a 30-minute ceiling including handle admission, at most
+96 protocol requests, 30-second metadata reads, bounded response headers and
+2 MiB metadata bodies.
 Pagination checks at most 1,000 assets plus an empty final page. The file and
 inventory ceilings reflect GitHub's
 [release limits](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases).
