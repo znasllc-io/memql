@@ -58,7 +58,7 @@ function main() {
   case "$*" in
     'account show '*) printf 'fixture-subscription\n' ;;
     'keyvault show '*) return 0 ;;
-    'keyvault secret show '*--query*) printf 'postgres://memql:fixture-password@database:5432/memql\n' ;;
+    'keyvault secret show '*--query*) printf 'postgres://fixture:fixture-password@database.invalid:5432/fixture\n' ;;
     'keyvault secret show '*) return 0 ;;
     *) printf 'unexpected vault write\n' >&2; return 90 ;;
   esac

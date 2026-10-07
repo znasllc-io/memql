@@ -66,7 +66,15 @@ if [[ -n "${FAKE_KUBECTL_CLIENT:-}" ]]; then
   case "$args" in
     'create secret generic memql-secrets '*--dry-run=client*|'annotate --local '*|'patch --local '*)
       exec "$FAKE_KUBECTL_CLIENT" "$@" ;;
-    'apply -f -'|'create -f -'|'patch secret memql-secrets '*--patch-file=/dev/stdin*)
+    'patch secret memql-secrets '*--patch-file=/dev/stdin*)
+      document="$FAKE_KUBECTL_LOG.manifest.$$"
+      cat > "$document"
+      if [[ "${FAKE_ROTATE_DURING_READ:-}" != 1 ]]; then exit 0; fi
+      version="$("$FAKE_KUBECTL_CLIENT" patch --local --type=merge -f "$document" -p '{}' -o 'jsonpath={.metadata.resourceVersion}')"
+      if [[ "$version" == 7 && -f "$FAKE_KUBECTL_LOG.rotation" ]]; then exit 0; fi
+      printf 'Error from server (Conflict): fixture rotation changed resourceVersion\n' >&2
+      exit 1 ;;
+    'apply -f -'|'create -f -')
       cat > "$FAKE_KUBECTL_LOG.manifest.$$"; exit 0 ;;
   esac
 fi
@@ -92,13 +100,17 @@ esac
 # Value reads.
 case "$args" in
   *"get secret memql-secrets"*jsonpath*metadata.resourceVersion*)
-    printf '7|%s|%s' "${FAKE_SYNC_OPTIONS:-}" "${FAKE_COMPARE_OPTIONS:-}"; exit 0 ;;
+    rv=7
+    if [[ "${FAKE_ROTATE_DURING_READ:-}" == 1 && ! -f "$FAKE_KUBECTL_LOG.rotation" ]]; then rv=6; fi
+    printf '%s|%s|%s' "$rv" "${FAKE_SYNC_OPTIONS:-}" "${FAKE_COMPARE_OPTIONS:-}"; exit 0 ;;
   *"get secret memql-secrets"*jsonpath*MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET*)
     [ -n "$FAKE_CAMPAIGN_READ_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
     printf '%s' "$FAKE_CAMPAIGN_KEY_B64"; exit 0 ;;
   *"get secret memql-secrets"*jsonpath*MEMQL_MASTER_KEY*)
     [ -n "$FAKE_JSONPATH_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
-    printf '%s' "$FAKE_MASTER_KEY_B64"; exit 0 ;;
+    printf '%s' "$FAKE_MASTER_KEY_B64"
+    if [[ "${FAKE_ROTATE_DURING_READ:-}" == 1 ]]; then : > "$FAKE_KUBECTL_LOG.rotation"; fi
+    exit 0 ;;
   *"get secret memql-secrets"*jsonpath*MEMQL_IDENTITY_SIGNING_KEY_B64*)
     [ -n "$FAKE_JSONPATH_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
     printf '%s' "$FAKE_SIGNING_KEY_B64"; exit 0 ;;
@@ -157,6 +169,7 @@ type scenario struct {
 	protectedSecret    *[]byte
 	syncOptions        string
 	compareOptions     string
+	rotateDuringRead   bool
 	clusterCampaignKey string
 	campaignReadFails  bool
 	envMasterKey       string // exported only when non-empty
@@ -300,6 +313,9 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 		"MEMQL_K3D_NAMESPACE=memql",
 		"STUB_CAROOT=" + stubCaroot,
 		"STUB_LOG=" + filepath.Join(tmp, "mkcert-stub.log"),
+	}
+	if sc.rotateDuringRead {
+		env = append(env, "FAKE_ROTATE_DURING_READ=1")
 	}
 	if sc.envMasterKey != "" {
 		env = append(env, "MEMQL_MASTER_KEY="+sc.envMasterKey)

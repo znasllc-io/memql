@@ -240,6 +240,12 @@ function load_cluster_secret_snapshot() {
     esac
     CLUSTER_SECRET_STATE="present"
 
+    # Capture the guard BEFORE reading credentials. A rotation during any
+    # later read must make the eventual merge patch conflict, never let stale
+    # values acquire the newer version's write authority.
+    argocd_preservation_load "$NAMESPACE" memql-secrets \
+        || cap_fail $? "cannot safely preserve memql-secrets GitOps metadata; resolve its conflicting options or cluster access before seeding"
+
     local raw
     raw="$(kubectl get secret memql-secrets --namespace="$NAMESPACE" \
               -o 'jsonpath={.data.MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET}' 2>/dev/null)" \
@@ -1129,7 +1135,8 @@ function seed_memql_secrets() {
         --from-literal="MEMQL_GITHUB_APP_WEBHOOK_SECRET=$gh_webhook_secret" \
         --dry-run=client -o yaml \
         | argocd_preservation_manifest \
-        | argocd_preservation_write_secret "$NAMESPACE" memql-secrets >&2
+        | argocd_preservation_write_secret "$NAMESPACE" memql-secrets >&2 \
+        || cap_fail 5 "memql-secrets changed concurrently or could not be written; read the current cluster state before retrying"
     SEEDED_COUNT=$((SEEDED_COUNT + 1))
     info "memql-secrets seeded."
 }
@@ -1229,10 +1236,6 @@ function main() {
     # the CA, the front-door TLS and the DB credentials, and then reported
     # changed:false.
     load_cluster_secret_snapshot
-    if [[ "$CLUSTER_SECRET_STATE" == present ]]; then
-        argocd_preservation_load "$NAMESPACE" memql-secrets \
-            || cap_fail $? "cannot safely preserve memql-secrets GitOps metadata; resolve its conflicting options or cluster access before seeding"
-    fi
     resolve_master_key
     resolve_signing_key
     resolve_signing_key_created_at

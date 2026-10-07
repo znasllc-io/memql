@@ -66,6 +66,7 @@ function argocd_preservation_load() {
     if [[ "$ARGO_PRESERVATION_SYNC" != "$sync" || "$ARGO_PRESERVATION_COMPARE" != "$compare" ]]; then
         ARGO_PRESERVATION_CHANGED=true
     fi
+    return 0
 }
 
 function argocd_preservation_resource_version() {
@@ -77,6 +78,7 @@ function argocd_preservation_resource_version() {
     else
         cat
     fi
+    return $?
 }
 
 function argocd_preservation_manifest() {
@@ -97,4 +99,5 @@ function argocd_preservation_write_secret() {
         # generated after an earlier observation that this Secret was absent.
         kubectl create -f -
     fi
+    return $?
 }

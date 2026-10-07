@@ -73,3 +73,21 @@ func TestSeedSecretsAppliesProtectedCredentialsInOneWrite(t *testing.T) {
 		})
 	}
 }
+
+// A later metadata read must not authorize restoring credential values read
+// before another operator's rotation. The fake API advances version 6 to 7
+// immediately after returning the old master key and rejects stale writes.
+func TestSeedSecretsRefusesRotationDuringCredentialRead(t *testing.T) {
+	var attempted []byte
+	stdout, stderr, _, code := runSeedSecretsFull(t, scenario{
+		secretState: "present", clusterKey: strings.Repeat("ac", 32), protectedSecret: &attempted,
+		syncOptions: "Delete=false", compareOptions: "IgnoreExtraneous", rotateDuringRead: true,
+	})
+	require.NotEmpty(t, attempted, "the fixture must reach the guarded patch")
+	require.Equal(t, 5, code, "a concurrent rotation must refuse the stale write")
+	require.Contains(t, stderr, "Conflict")
+	envelope := parseEnvelope(t, stdout)
+	require.False(t, envelope.OK)
+	require.NotNil(t, envelope.Error)
+	require.Equal(t, 5, envelope.Error.Code)
+}
