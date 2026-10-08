@@ -109,6 +109,9 @@ Both composers use **Add to review**. New notes get a ready-to-propose state and
 the previous request is collapsed. **Propose changes** generates the same before/after review and
 approval controls for passage feedback and standalone extensions. Overlapping
 status reads cannot let an old completed request hide a new proposal.
+Reopening an editor restores the latest owned request from a DSL lookup in
+MemQL, even when the browser has an older saved receipt. Request ordering uses
+admission time, so later heartbeats on an older review cannot displace it.
 
 Choose up to 100 current notes and **Propose changes**. This starts one AI
 analysis against the exact saved Markdown source, up to 128 KiB. The DSL

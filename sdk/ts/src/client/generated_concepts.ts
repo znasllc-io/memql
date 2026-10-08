@@ -1086,6 +1086,7 @@ export const BoundConcepts = {
   workComputerScopesForOwnerRun: "v1:work:approval",
   workContinuationForOwnerRun: "v1:work:observation",
   workDescriptionGuidance: "v1:work:observation",
+  workDocumentRevisionRequest: "v1:work:run",
   workGoalForOwner: "v1:work:goal",
   workGoalsForOwner: "v1:work:goal",
   workGoalsForResponsibility: "v1:work:goal",

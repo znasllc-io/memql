@@ -439,3 +439,18 @@ query approval workApprovalsForOwnedRun {
  filter row => row.runId == args.runId && row.ownerUserId == actor.userId
  shape workApprovalFull
 }
+
+/// Recover this person's latest document review across editor windows and restarts.
+/// Returns only an owned request identifier; Library checks the backing document
+/// before retrieving its review. This lookup exposes no captured document bytes.
+/// startedAt orders requests by admission, not by a later approval or heartbeat.
+@actor
+query run workDocumentRevisionRequest {
+  args { artifactId string! }
+  filter row => row.ownerUserId == actor.userId
+              && row.automationName == "reviseLibraryDocument"
+              && row.?input.proposal.artifactId == args.artifactId
+  shape workRevisionRequest
+  sort "startedAt", "desc"
+  paginate 1
+}

@@ -224,3 +224,9 @@ shape feedbackPolicy feedbackPolicyFull {
   reusableAfterSignatures
   row.createdAt
 }
+
+/// Request identity only; recovery must not expose captured document bytes.
+@row
+shape run workRevisionRequest {
+  input.requestId
+}

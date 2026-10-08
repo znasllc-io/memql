@@ -12110,6 +12110,28 @@ QueryClient.prototype.workDescriptionGuidance = function (this: QueryClient, arg
   return this.executeNamed("workDescriptionGuidance", buildWorkDescriptionGuidance(args), opts);
 };
 
+/** Recover this person's latest document review across editor windows and restarts. Returns only an owned request identifier; Library checks the backing document before retrieving its review. This lookup exposes no captured document bytes. startedAt orders requests by admission, not by a later approval or heartbeat. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workDocumentRevisionRequest"] in generated_concepts.ts).
+export interface WorkDocumentRevisionRequestArgs {
+  artifactId: string;
+}
+
+export function buildWorkDocumentRevisionRequest(args: WorkDocumentRevisionRequestArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  return "query workDocumentRevisionRequest(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workDocumentRevisionRequest(args: WorkDocumentRevisionRequestArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workDocumentRevisionRequest = function (this: QueryClient, args: WorkDocumentRevisionRequestArgs = {} as WorkDocumentRevisionRequestArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workDocumentRevisionRequest", buildWorkDocumentRevisionRequest(args), opts);
+};
+
 /** One of the caller's goals by id. */
 // Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalForOwner"] in generated_concepts.ts).
 export interface WorkGoalForOwnerArgs {

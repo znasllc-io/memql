@@ -111,7 +111,12 @@ func (i *Integration) handleDocumentReview(ctx context.Context, args map[string]
 		delete(row, "ownerUserId")
 		delete(row, "requestId")
 	}
-	return reviewResult(map[string]any{"comments": rows, "hasMore": more, "version": doc.version, "revision": doc.revision})
+	request, err := i.revisionRow(memql.ContextWithFreshRead(ctx), "workDocumentRevisionRequest", map[string]any{"artifactId": doc.artifact})
+	if err != nil {
+		return nil, err
+	}
+	return reviewResult(map[string]any{"comments": rows, "hasMore": more, "version": doc.version, "revision": doc.revision,
+		"requestId": asString(request["requestId"])})
 }
 
 var reviewRequestID = regexp.MustCompile(`^[a-zA-Z0-9_-]{8,120}$`)

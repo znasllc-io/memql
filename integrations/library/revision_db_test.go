@@ -204,6 +204,10 @@ func TestDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing
 			}
 			args, note := f.submit(artifact, doc, anchor, tc.feedback)
 			request := asString(args["requestId"])
+			recovered := f.query(f.other, f.ctx, "query", "libraryDocumentReview", map[string]any{"artifactId": artifact})
+			if len(recovered) != 1 || recovered[0]["requestId"] != request {
+				t.Fatalf("new editor on another replica cannot recover the review: %v", recovered)
+			}
 			f.ai.answer = revisionAnswer{Summary: tc.name, Edits: tc.edits}
 			for n := range f.ai.answer.Edits {
 				f.ai.answer.Edits[n].CommentIDs = []string{note}
@@ -268,6 +272,36 @@ func TestDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing
 		})
 	}
 }
+func TestDocumentRevisionRecoveryOrdersByRequestAndRechecksAccess(t *testing.T) {
+	f := newRevisionDB(t)
+	artifact, doc := f.document("# Guide\n\nOriginal content.\n")
+	anchor := map[string]any{"kind": "document-end"}
+	old, note := f.submit(artifact, doc, anchor, "Add next steps.")
+	latest, _ := f.submit(artifact, doc, anchor, "Add practice questions.")
+	// Finishing analysis on an older request creates newer row versions. Those
+	// writes must not hide a request admitted later on another replica.
+	f.ai.answer = revisionAnswer{Summary: "Next steps", Edits: []revisionReplacement{{Before: "Original content.", After: "Original content.\n\nTry an example.", Reason: "Add next steps", CommentIDs: []string{note}}}}
+	var wait *workstate.HumanWait
+	if err := f.execute(f.engine, asString(old["requestId"]), false); !errors.As(err, &wait) {
+		t.Fatalf("older analysis: %v", err)
+	}
+	rows := f.query(f.other, f.ctx, "query", "libraryDocumentReview", map[string]any{"artifactId": artifact})
+	if len(rows) != 1 || rows[0]["requestId"] != latest["requestId"] {
+		t.Fatalf("older row update hid latest request: %v", rows)
+	}
+	head := f.query(f.other, f.ctx, "query", "workDocumentRevisionRequest", map[string]any{"artifactId": memql.BareShortId(artifact)})
+	if len(head) != 1 || len(head[0]) != 1 || head[0]["requestId"] != latest["requestId"] {
+		t.Fatalf("recovery must project only the latest request identity: %v", head)
+	}
+	if _, err := f.second.handleDocumentReview(revisionActor("outsider", auth.RoleWriter), map[string]any{"artifactId": artifact}, 0); err == nil {
+		t.Fatal("outsider recovered a private document review")
+	}
+	rows = f.query(f.other, revisionActor("outsider", auth.RoleWriter), "query", "workDocumentRevisionRequest", map[string]any{"artifactId": memql.BareShortId(artifact)})
+	if len(rows) != 0 {
+		t.Fatal("outsider discovered another person's review receipt")
+	}
+}
+
 func TestDocumentRevisionRefusesStaleApprovalAndAllowsDecline(t *testing.T) {
 	f := newRevisionDB(t)
 	source := "# Guide\n\nA paragraph."
