@@ -445,6 +445,9 @@ and output paths. An image build has no registry publication credential.
 resolve outside it. `target` optionally names a Dockerfile stage. `args` holds
 at most 64 public arguments: never put secrets there. A step uses the matching
 Linux architecture, rather than silently emulating another architecture.
+The runner supplies the pinned commit as `MEMQL_COMMIT` and, for a release
+event, the bare release version as `MEMQL_RELEASE`; both names are reserved and
+cannot be set in the manifest. Other events receive an empty `MEMQL_RELEASE`.
 Artifacts are fixed to `.memql-image-build/image.oci.tar` and
 `.memql-image-build/metadata.json`, recovered by the normal collector after the
 producer terminates and filed through immutable Library receipts. Publication

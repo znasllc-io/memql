@@ -2,6 +2,7 @@ package pipelinesteps
 
 import (
 	"fmt"
+	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -33,8 +34,19 @@ func checkImageBuildRun(cfg Config, run StepRun) error {
 	if cfg.NodePool == "" {
 		return fmt.Errorf("image builds require a dedicated operator-selected build pool")
 	}
-	if err := pl.CheckImageBuild(run.ImageBuild, run.Platform); err != nil {
+	if run.Env["MEMQL_SHA"] != run.SHA {
+		return fmt.Errorf("image builds require the platform-pinned MEMQL_SHA to match the source checkout")
+	}
+	base := pl.CloneImageBuild(run.ImageBuild)
+	provided := maps.Clone(base.Args)
+	delete(base.Args, "MEMQL_COMMIT")
+	delete(base.Args, "MEMQL_RELEASE")
+	if err := pl.CheckImageBuild(base, run.Platform); err != nil {
 		return err
+	}
+	want := imageBuildWithProvenance(base, run.SHA, pl.Event(run.Env[eventVar]), run.Env["MEMQL_VERSION"])
+	if !maps.Equal(provided, want.Args) {
+		return fmt.Errorf("image-build provenance arguments do not match the pinned source and release")
 	}
 	if run.Image != "" || run.Command != "" || len(run.Secrets) != 0 || run.ImagePullSecret != "" ||
 		len(run.Services) != 0 || len(run.Caches) != 0 || len(run.Needs) != 0 ||
@@ -42,6 +54,27 @@ func checkImageBuildRun(cfg Config, run StepRun) error {
 		return fmt.Errorf("image builds require their fixed artifacts, at least 512 MiB, and no command, image, secrets, services, caches or host needs")
 	}
 	return nil
+}
+
+// imageBuildWithProvenance adds the source facts chosen by the pipeline
+// driver, not by repository configuration. Older Workbench replicas also
+// receive these as ordinary BuildKit args, so an agent and runner rolling
+// upgrade cannot silently produce an unstamped image.
+func imageBuildWithProvenance(build *pl.ImageBuild, sha string, event pl.Event, version string) *pl.ImageBuild {
+	out := pl.CloneImageBuild(build)
+	if out == nil {
+		return nil
+	}
+	if out.Args == nil {
+		out.Args = make(map[string]string)
+	}
+	out.Args["MEMQL_COMMIT"] = sha
+	release := ""
+	if event == pl.EventRelease {
+		release = strings.TrimPrefix(version, "v")
+	}
+	out.Args["MEMQL_RELEASE"] = release
+	return out
 }
 
 // This container contains neither clone credentials nor publication authority.

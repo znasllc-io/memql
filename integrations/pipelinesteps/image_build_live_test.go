@@ -82,6 +82,8 @@ func TestImageBuildAgainstLocalKubernetes(t *testing.T) {
 	run.MemoryMiB, run.TimeoutSeconds = 2048, 420
 	run.Artifacts = pl.ImageBuildArtifacts()
 	run.SHA, run.Repository.Owner, run.Repository.Name, run.Repository.CloneURL = sha, "znasllc-io", "memql", "https://github.com/znasllc-io/memql.git"
+	run.Env["MEMQL_SHA"] = sha
+	run.ImageBuild = imageBuildWithProvenance(run.ImageBuild, run.SHA, pl.Event(run.Env[eventVar]), run.Env["MEMQL_VERSION"])
 	run.RunDeadline = time.Now().Add(7 * time.Minute).Format(time.RFC3339Nano)
 	name := JobName(run.RunID, run.StepKey, run.Attempt)
 	job, err := BuildJob(cfg, run, name)
