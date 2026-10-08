@@ -104,6 +104,6 @@ export class RevisionReview {
     const draftURI = vscode.Uri.parse(`memql-revision-preview:/draft-${this.count}.md`);
     this.snapshots.set(sourceURI.toString(), String(proposal.content));
     this.snapshots.set(draftURI.toString(), proposal.revisedContent);
-    await vscode.commands.executeCommand("vscode.diff", sourceURI, draftURI, "Reviewed source ↔ Revised draft");
+    await vscode.commands.executeCommand("vscode.diff", sourceURI, draftURI, "Reviewed source ↔ Revised draft", { preview: false });
   }
 }
