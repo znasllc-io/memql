@@ -323,6 +323,9 @@ func (a *App) engineAndBus() {
 	a.engine.SetScopedWorkflowRunner(func(ctx context.Context, name string, args map[string]any, operations map[string]memql.WorkflowOperation) (any, error) {
 		return workflowhost.Run(ctx, name, args, workflowhost.Options{Logger: a.Logger, AmbientEngine: a.engine, Operations: operations})
 	})
+	a.engine.SetScopedSnapshotRunner(func(ctx context.Context, value map[string]any, contract, entry string, args map[string]any, operations map[string]memql.WorkflowOperation) (any, error) {
+		return workflowhost.RunPhase(ctx, value, contract, entry, args, workflowhost.Options{Logger: a.Logger, AmbientEngine: a.engine, Operations: operations})
+	})
 	a.engine.SetLogicRunner(automations.NewLogicRunner(a.engine, a.stepRegistry, a.Logger))
 	automations.InstallBeforeWriteHooks(a.engine, loadedAutomations, a.stepRegistry, a.Logger)
 

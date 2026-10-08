@@ -27,7 +27,7 @@ func (p *PlannerIntegration) Capabilities() []memql.IntegrationCapability {
 		"knowledgeRefreshCandidates": nil, "knowledgeRefreshCandidate": nil, "knowledgeClaimRefresh": nil, "knowledgeOpenRefresh": nil, "knowledgeDispatchRefresh": nil,
 	})...)
 	ops := map[string]workflowhost.Operation{}
-	for _, name := range work.SpineOperations() {
+	for _, name := range append(append(work.SpineOperations(), work.SpineDraftOperations()...), work.SpineRemedyOperations()...) {
 		ops[name] = nil
 	}
 	return append(capabilities, workflowhost.ScopedCapabilities(ops)...)

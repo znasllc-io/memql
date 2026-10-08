@@ -150,6 +150,7 @@ type MemQLEngine struct {
 	// actionable failure mode.
 	logicRunner    LogicRunner
 	scopedWorkflow ScopedWorkflowRunner
+	scopedSnapshot ScopedSnapshotRunner
 	// promotedAuthored records the (kind:name) of constructs promoted into the
 	// shared registries via PromoteAuthoredConstruct, so re-promotion replaces
 	// the prior promotion while a name a SEALED core construct owns is still

@@ -72,6 +72,7 @@ var (
 // RunJournal is what resume needs from the rows: the run's envelope and
 // the completed steps' trimmed results.
 type RunJournal struct {
+	Spine                 map[string]any
 	ExecutionAuthority    map[string]any
 	HeartbeatAt           time.Time
 	HasRunningStep        bool
@@ -259,6 +260,7 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 	}
 	j.HeartbeatAt, _ = time.Parse(time.RFC3339Nano, stringField(run, "heartbeatAt"))
 	j.WaitingOn, _ = run["waitingOn"].(map[string]any)
+	j.Spine, _ = run["spine"].(map[string]any)
 	j.HumanResumeId = stringField(run, "humanResumeId")
 	j.Variables, _ = run["variables"].(map[string]any)
 	if ev, ok := run["triggerEvent"].(map[string]any); ok {

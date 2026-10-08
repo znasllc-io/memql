@@ -1,0 +1,11 @@
+
+/// Choose a localized remedy; a retry never restores a consumed budget or erases completed effects.
+logic workSpineRecoveryAct {
+ args { symptom string! retriesSpent int! maxRetries int! hasGoal bool! }
+ if args.symptom == "environment" { return "heal" }
+ if args.retriesSpent >= args.maxRetries { return "ask" }
+ if args.symptom == "transient" { return "retry" }
+ if args.hasGoal && args.symptom == "contract" { return "repair" }
+ if args.hasGoal && args.symptom == "plan" { return "replan" }
+ return "ask"
+}

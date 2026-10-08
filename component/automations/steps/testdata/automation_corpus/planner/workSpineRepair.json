@@ -1,0 +1,73 @@
+{
+  "automation": "planner/automations.memql workSpineRepair",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.workSpineRepair"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "spineRemedyRepair"
+          },
+          {
+            "args": {
+              "reason": "The failed step could not be run again with the violation as guidance: "
+            },
+            "kind": "builtin",
+            "name": "spineRemedyAsk"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "reason": "The failed step could not be run again with the violation as guidance: "
+            },
+            "builtin": "spineRemedyAsk"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.workSpineRepair"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "spineRemedyRepair"
+          },
+          {
+            "args": {
+              "reason": "The failed step could not be run again with the violation as guidance: "
+            },
+            "kind": "builtin",
+            "name": "spineRemedyAsk"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "reason": "The failed step could not be run again with the violation as guidance: "
+            },
+            "builtin": "spineRemedyAsk"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

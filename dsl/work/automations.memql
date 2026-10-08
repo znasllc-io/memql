@@ -61,3 +61,11 @@ automation validateGoalAnswer {
   }
   check := builtin workValidateAnswer(runId: args.id ?? "", ownerUserId: args.ownerUserId ?? "")
 }
+
+/// Recovery policy is reusable DSL; native journaling enforces terminal causes, budgets and consent.
+@template
+automation workSpineRecovery {
+ args { symptom string! retriesSpent int! maxRetries int! hasGoal bool! }
+ act := logic workSpineRecoveryAct(symptom: args.symptom, retriesSpent: args.retriesSpent, maxRetries: args.maxRetries, hasGoal: args.hasGoal)
+ return { act: act, retrySeconds: 30 }
+}

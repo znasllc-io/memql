@@ -118,7 +118,7 @@ func TestCompileDB_BFFRunEventCrossesToOnePlannerReplica(t *testing.T) {
 	}
 	got := awaitCompile(t, probe)
 	pinned, pinErr := workflowhost.SnapshotFromMap(got.request.Spine)
-	if pinErr != nil || pinned.Entry != "defaultWorkSpine" || len(pinned.Constructs) != 4 {
+	if pinErr != nil || pinned.Entry != "defaultWorkSpine" || len(pinned.Entries) != 5 {
 		t.Fatalf("pinned Spine lost across BFF/planner hop: %v %+v", pinErr, pinned)
 	}
 	if got.request.StartedAt.IsZero() {

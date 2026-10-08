@@ -151,7 +151,7 @@ func (l *PlannerAgentLoop) reasoningDraft(ctx context.Context, req CompileReques
 			return out, err
 		}
 	}
-	bundle, err := synthesizeWorkReasoningBundle(req, agentId, dec)
+	bundle, err := synthesizeWorkReasoningBundleInScope(ctx, req, agentId, dec)
 	if err != nil {
 		return out, err
 	}

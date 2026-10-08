@@ -1,4 +1,4 @@
-use planner.builtins.{ spineCandidates, spineUseCandidate, spineClassify, spinePrepareSections, spineDraft, spineRefuse }
+use planner.builtins.{ spineCandidates, spineUseCandidate, spineClassify, spinePrepareSections, spineDraft, spineRefuse, spineRemedyAsk }
 
 /// A company policy that runs only an exact owned catalog match and spends no model calls.
 @template
@@ -32,4 +32,24 @@ logic companyAnswerRoute {
  if args.triage.intent == "automation" { return "refuse" }
  if args.triage.sectionable { return "sectionable" }
  return "trivial"
+}
+
+/// Optional hook configuration, evaluated without effects before the goal is opened.
+/// Unlisted phases reuse the platform defaults; this is bundle code, not account configuration.
+@template
+automation companyAnswerSpinePhases {
+ return {workSpineRecovery: "companyReviewedRecovery", workSpineReplan: "companyReviewedReplan"}
+}
+
+/// Require human review instead of automatically repeating or changing failed work.
+@template
+automation companyReviewedRecovery {
+ args { symptom string! retriesSpent int! maxRetries int! hasGoal bool! }
+ return {act: "ask", retrySeconds: 30}
+}
+
+/// The runtime still creates and validates the persisted approval under the run owner's authority.
+@template
+automation companyReviewedReplan {
+ return builtin spineRemedyAsk(reason: "Review the failed step before changing this plan.")
 }

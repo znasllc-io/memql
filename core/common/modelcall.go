@@ -53,6 +53,9 @@ const (
 // never served from a journal, and that is not a gap -- a journal entry only
 // means anything relative to a run that can be replayed.
 type RunContext struct {
+	// Spine is the immutable workflow closure restored from the run row on
+	// the executing replica. It is source data and never grants authority.
+	Spine map[string]any
 	// Continuation requires one specific saved checkpoint when resuming a
 	// suspended step. It applies only to StepKey and grants no authority.
 	Continuation *StepContinuation

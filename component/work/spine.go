@@ -10,3 +10,11 @@ const DefaultSpine = "defaultWorkSpine"
 func SpineOperations() []string {
 	return []string{"spineContext", "spineCandidates", "spineUseCandidate", "spineClassify", "spineAcknowledge", "spinePrepareSections", "spineDraft", "spineDesign", "spineEmit", "spineValidate", "spineRepair", "spinePersist", "spineRefuse"}
 }
+
+// SpineDraftOperations bind source encoding, not model calls or external effects.
+func SpineDraftOperations() []string { return []string{"spineDraftFacts", "spineDraftAppend"} }
+
+// SpineRemedyOperations bind one claimed repair or replan; none is a public authority token.
+func SpineRemedyOperations() []string {
+	return []string{"spineRemedyContext", "spineRemedyGenerate", "spineRemedyValidate", "spineRemedyPersist", "spineRemedyInstall", "spineRemedyRepair", "spineRemedyAsk"}
+}

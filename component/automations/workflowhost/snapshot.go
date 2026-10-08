@@ -5,11 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"sync"
 
+	"github.com/znasllc-io/memql/component/actions"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
@@ -28,6 +31,11 @@ type Snapshot struct {
 	Contract   string       `json:"contract"`
 	Version    string       `json:"version"`
 	Constructs []Definition `json:"constructs"`
+	// Entries are additional native-invoked phases in the same frozen closure.
+	// Each invocation still binds only that phase's native operations.
+	Entries []string `json:"entries,omitempty"`
+	// Phases maps native hook names to captured developer templates.
+	Phases map[string]string `json:"phases,omitempty"`
 }
 
 type Definition struct {
@@ -60,9 +68,23 @@ var installedSources = sync.OnceValues(func() (map[string]string, error) {
 			}
 			out[key] = s.Source
 		}
+		for _, s := range memql.ExtractActionSlices(raw.Content) {
+			key := "action:" + s.Name
+			if _, exists := out[key]; exists {
+				return nil, fmt.Errorf("duplicate workflow source %q", key)
+			}
+			out[key] = s.Source
+		}
 	}
 	return out, nil
 })
+
+var ErrSourceNotFound = errors.New("workflow source is not installed")
+
+// InstalledSource reads the installed bundle, never caller-supplied source.
+func InstalledSource(kind, name string) (string, error) {
+	return installedSource(kind, name)
+}
 
 func installedSource(kind, name string) (string, error) {
 	all, err := installedSources()
@@ -71,7 +93,7 @@ func installedSource(kind, name string) (string, error) {
 	}
 	source, ok := all[kind+":"+name]
 	if !ok {
-		return "", fmt.Errorf("workflow %s %q is not installed", kind, name)
+		return "", fmt.Errorf("%w: %s %q", ErrSourceNotFound, kind, name)
 	}
 	return source, nil
 }
@@ -79,13 +101,21 @@ func installedSource(kind, name string) (string, error) {
 // Capture compiles and preflights installed sources before returning a durable
 // snapshot. Even unreachable branches are checked before the first effect.
 func Capture(entry, contract string, source SourceLoader, operations map[string]Operation) (*Snapshot, error) {
+	return CaptureEntries(entry, contract, nil, source, operations)
+}
+
+// CaptureEntries also freezes phases invoked by native callbacks, whose
+// dependency edges cannot be found by walking static automation calls.
+func CaptureEntries(entry, contract string, entries []string, source SourceLoader, operations map[string]Operation) (*Snapshot, error) {
 	if entry == "" || contract == "" {
 		return nil, fmt.Errorf("workflow snapshot requires an entry and contract")
 	}
 	if source == nil {
 		source = installedSource
 	}
-	s := &Snapshot{Entry: entry, Contract: contract}
+	s := &Snapshot{Entry: entry, Contract: contract, Entries: slices.Clone(entries)}
+	sort.Strings(s.Entries)
+	s.Entries = slices.Compact(s.Entries)
 	seen := map[string]bool{}
 	bytes := 0
 	load := func(kind, name string) (string, error) {
@@ -109,6 +139,11 @@ func Capture(entry, contract string, source SourceLoader, operations map[string]
 	if err := h.prepare(entry, map[string]bool{}); err != nil {
 		return nil, err
 	}
+	for _, name := range s.Entries {
+		if err := h.prepare(name, map[string]bool{}); err != nil {
+			return nil, err
+		}
+	}
 	sort.Slice(s.Constructs, func(i, j int) bool {
 		a, b := s.Constructs[i], s.Constructs[j]
 		return a.Kind+":"+a.Name < b.Kind+":"+b.Name
@@ -117,9 +152,40 @@ func Capture(entry, contract string, source SourceLoader, operations map[string]
 	return s, nil
 }
 
+// CapturePhases captures named hook overrides alongside any configuration entry.
+// The mapping is fingerprinted with the source; it grants no operations.
+func CapturePhases(entry, contract string, phases map[string]string, entries []string, source SourceLoader, operations map[string]Operation) (*Snapshot, error) {
+	entries = slices.Clone(entries)
+	for _, name := range phases {
+		entries = append(entries, name)
+	}
+	s, err := CaptureEntries(entry, contract, entries, source, operations)
+	if err != nil {
+		return nil, err
+	}
+	s.Phases = make(map[string]string, len(phases))
+	for phase, name := range phases {
+		if phase == "" || name == "" {
+			return nil, fmt.Errorf("empty workflow phase")
+		}
+		s.Phases[phase] = name
+	}
+	s.Version = s.digest()
+	return s, nil
+}
+
+// PhaseEntry resolves a native hook through its immutable source configuration.
+func (s *Snapshot) PhaseEntry(phase string) string {
+	if name := s.Phases[phase]; name != "" {
+		return name
+	}
+	return phase
+}
+
 func sourceOptions(source SourceLoader, operations map[string]Operation) Options {
 	logger := slog.New(slog.DiscardHandler)
 	return Options{Logger: logger, Operations: operations,
+		LoadAction: func(ref string) (*actions.Action, error) { return sourceAction(source, ref) },
 		Load: func(name string) (*automations.Automation, error) {
 			body, err := source("automation", name)
 			if err != nil {
@@ -173,8 +239,19 @@ func (s *Snapshot) CheckArgs(args map[string]any) error {
 // RunSnapshot never consults the installed registry. Missing children, changed
 // source, incompatible contracts and invalid operations fail before any effect.
 func RunSnapshot(ctx context.Context, s *Snapshot, contract string, args map[string]any, opts Options) (any, error) {
+	if s == nil {
+		return nil, fmt.Errorf("missing workflow snapshot")
+	}
+	return RunSnapshotEntry(ctx, s, contract, s.Entry, args, opts)
+}
+
+// RunSnapshotEntry invokes one admitted phase without substituting installed source.
+func RunSnapshotEntry(ctx context.Context, s *Snapshot, contract, entry string, args map[string]any, opts Options) (any, error) {
 	if s == nil || s.Contract != contract || s.Entry == "" || s.Version != s.digest() {
 		return nil, fmt.Errorf("invalid or incompatible workflow snapshot")
+	}
+	if entry != s.Entry && !slices.Contains(s.Entries, entry) {
+		return nil, fmt.Errorf("workflow entry %q was not captured", entry)
 	}
 	if len(s.Constructs) == 0 || len(s.Constructs) > maxSnapshotConstructs {
 		return nil, fmt.Errorf("invalid workflow snapshot size")
@@ -184,7 +261,7 @@ func RunSnapshot(ctx context.Context, s *Snapshot, contract string, args map[str
 	for _, d := range s.Constructs {
 		key := d.Kind + ":" + d.Name
 		bytes += len(d.Source)
-		if bytes > maxSnapshotBytes || (d.Kind != "automation" && d.Kind != "logic") || d.Name == "" || all[key] != "" {
+		if bytes > maxSnapshotBytes || (d.Kind != "automation" && d.Kind != "logic" && d.Kind != "action") || d.Name == "" || all[key] != "" {
 			return nil, fmt.Errorf("invalid workflow snapshot definition %q", key)
 		}
 		all[key] = d.Source
@@ -197,7 +274,7 @@ func RunSnapshot(ctx context.Context, s *Snapshot, contract string, args map[str
 		return body, nil
 	}, opts.Operations)
 	frozen.AmbientEngine, frozen.Logger = opts.AmbientEngine, opts.Logger
-	return Run(ctx, s.Entry, args, frozen)
+	return Run(ctx, entry, args, frozen)
 }
 
 // Map is a detached JSON object suitable for an immutable, server-written row.
@@ -221,4 +298,28 @@ func SnapshotFromMap(value map[string]any) (*Snapshot, error) {
 		return nil, fmt.Errorf("invalid workflow snapshot fingerprint")
 	}
 	return &s, nil
+}
+
+// RunPhase uses the stored multi-phase closure, or installed definitions for
+// ordinary calls and v1 snapshots written before phase capture existed.
+func RunPhase(ctx context.Context, value map[string]any, contract, entry string, args map[string]any, opts Options) (any, error) {
+	if value != nil {
+		snapshot, err := SnapshotFromMap(value)
+		if err != nil {
+			return nil, err
+		}
+		if snapshot.Contract != contract {
+			return nil, fmt.Errorf("incompatible workflow contract")
+		}
+		if len(snapshot.Entries) > 0 {
+			return RunSnapshotEntry(ctx, snapshot, contract, snapshot.PhaseEntry(entry), args, opts)
+		}
+	}
+	// Capture even legacy calls before execution so actions and children cannot
+	// change mid-invocation. This does not promise replay across separate calls.
+	snapshot, err := Capture(entry, contract, nil, opts.Operations)
+	if err != nil {
+		return nil, err
+	}
+	return RunSnapshot(ctx, snapshot, contract, args, opts)
 }

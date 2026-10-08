@@ -21,6 +21,7 @@ func workExecutionContext(ctx context.Context, j, source *automations.RunJournal
 	// Routing is the owner's choice from the run row (the Ask route picker's):
 	// every model call the run's steps make on this replica honours it.
 	run := common.RunContext{RunId: j.RunId, GoalId: j.GoalId, OwnerUserId: j.OwnerUserId, Mode: j.Mode, ReplayPolicy: j.ReplayPolicy, ForkAtStepKey: j.ForkAtStepKey, Routing: j.Routing}
+	run.Spine = j.Spine
 	if run.Mode == "" {
 		run.Mode = common.RunModeLive
 	}

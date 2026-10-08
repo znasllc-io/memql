@@ -1,0 +1,73 @@
+{
+  "automation": "planner/automations.memql workSpineReplan",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.workSpineReplan"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "spineRemedyContext"
+          },
+          {
+            "args": {
+              "reason": "This run was to be re-planned from the step it failed at, and it has no failed step to re-plan from."
+            },
+            "kind": "builtin",
+            "name": "spineRemedyAsk"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "reason": "This run was to be re-planned from the step it failed at, and it has no failed step to re-plan from."
+            },
+            "builtin": "spineRemedyAsk"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.workSpineReplan"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "spineRemedyContext"
+          },
+          {
+            "args": {
+              "reason": "This run was to be re-planned from the step it failed at, and it has no failed step to re-plan from."
+            },
+            "kind": "builtin",
+            "name": "spineRemedyAsk"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "reason": "This run was to be re-planned from the step it failed at, and it has no failed step to re-plan from."
+            },
+            "builtin": "spineRemedyAsk"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

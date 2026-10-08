@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -17,14 +18,18 @@ import (
 )
 
 func TestExecutionHopRestoresOwnerGoalAndReplay(t *testing.T) {
-	j := &automations.RunJournal{RunId: "r", GoalId: "g", OwnerUserId: "u", Mode: "replay", ReplayPolicy: "strict", ForkedFromRunId: "source"}
+	snapshot, err := workspine.CaptureSpine("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := &automations.RunJournal{RunId: "r", GoalId: "g", OwnerUserId: "u", Mode: "replay", ReplayPolicy: "strict", ForkedFromRunId: "source", Spine: snapshot.Map()}
 	source := &automations.RunJournal{RunId: "source", GoalId: "g", OwnerUserId: "u", StepOrder: []string{"draft", "file"}}
 	ctx, err := workExecutionContext(context.Background(), j, source, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	run, ok := common.RunFromContext(ctx)
-	if !ok || run.RunId != "r" || run.GoalId != "g" || run.OwnerUserId != "u" || run.Mode != "replay" || run.SourceRunId != "source" || run.SourceGoalId != "g" || len(run.StepOrder) != 2 {
+	if !ok || !reflect.DeepEqual(run.Spine, j.Spine) || run.RunId != "r" || run.GoalId != "g" || run.OwnerUserId != "u" || run.Mode != "replay" || run.SourceRunId != "source" || run.SourceGoalId != "g" || len(run.StepOrder) != 2 {
 		t.Fatalf("lost run context: %+v", run)
 	}
 	ac, _ := auth.AccessFromContext(ctx)

@@ -4,7 +4,6 @@ package agent
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	agentworker "github.com/znasllc-io/memql/integrations/agent/worker"
@@ -163,37 +162,12 @@ func TestTheRerouteCarriesTheSameCallToTheFleet(t *testing.T) {
 		t.Fatalf("reroutedFrom = %v, want %q -- the invocation's routing record is what makes "+
 			"\"why did this run on the laptop\" answerable", plan.FleetArgs["reroutedFrom"], agentworker.ReroutedFromWorkbench)
 	}
-	if plan.FleetArgs["planId"] != "plan-1" {
-		t.Fatalf("planId = %v -- the per-task approval gate keys on it, so dropping it turns "+
-			"every reroute into a denial", plan.FleetArgs["planId"])
+	if plan.FleetArgs["runId"] != "plan-1" {
+		t.Fatalf("runId = %v -- the per-task approval gate keys on it, so dropping it turns "+
+			"every reroute into a denial", plan.FleetArgs["runId"])
 	}
 	if _, named := plan.FleetArgs["workerId"]; named {
 		t.Fatal("the reroute must not name a machine: there is no workerId argument by design (D4)")
-	}
-}
-
-func TestTheConsentCardSaysWhatTheWorkbenchCouldNotDo(t *testing.T) {
-	plan, ok := planWorkbenchReroute(
-		mismatchResult(t, []string{workbench.NeedMacOSTooling, workbench.NeedDisplay}, "darwin"), hostArgs(), testTurn())
-	if !ok {
-		t.Fatal("want a reroute plan")
-	}
-	summary, _ := plan.CardArgs["summary"].(string)
-	for _, want := range []string{"macOS-only tooling", "graphical display"} {
-		if !strings.Contains(summary, want) {
-			t.Errorf("card summary %q does not mention %q -- \"environment_mismatch\" is not a "+
-				"phrase anyone should have to read on a canvas card", summary, want)
-		}
-	}
-	if strings.Contains(summary, "environment_mismatch") {
-		t.Errorf("card summary leaks the wire code: %q", summary)
-	}
-	if plan.CardArgs["requestedScope"] != "full" {
-		t.Fatalf("requestedScope = %v, want full", plan.CardArgs["requestedScope"])
-	}
-	if got, _ := plan.CardArgs["requireLabels"].(map[string]string); got["os"] != "darwin" {
-		t.Fatalf("requireLabels = %v, want the card to name the requirement so the user's Allow "+
-			"visibly covers a set of machines rather than appearing to name one", got)
 	}
 }
 

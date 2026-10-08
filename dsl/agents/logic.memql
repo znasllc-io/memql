@@ -1,0 +1,19 @@
+
+/// A display-only mismatch benefits from observing the UI. Other needs retain the original host call.
+logic agentRecoveryUsesDesktop {
+ args { needs []string! }
+ return args.needs.count() == 1 && args.needs.0 == "display"
+}
+
+/// Human wording for the bounded recovery consent card.
+logic agentRecoveryExplanation {
+ args { needs []string! action string! }
+ reasons := args.needs.select(need => need == "display" ? "a graphical display" : need == "gpu" ? "a GPU" : need == "macos_tooling" ? "macOS-only tooling" : need == "user_files" ? "files that are on your own machine" : need == "os" ? "a different operating system" : need).reduce("", (text, word) => text == "" ? word : text + ", " + word)
+ return "The sandboxed workbench cannot run this " + args.action + " step: it needs " + reasons + "."
+}
+
+/// Only a verified consent refusal is a reason to ask for access.
+logic agentRecoveryNeedsConsent {
+ args { errorCode string! }
+ return args.errorCode == "denied_no_per_task_approval" || args.errorCode == "denied_by_scope"
+}

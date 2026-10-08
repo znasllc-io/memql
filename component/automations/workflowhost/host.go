@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/actions"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/automations/steps"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -28,7 +29,10 @@ type Options struct {
 	AmbientEngine *memql.MemQLEngine
 	Load          Loader
 	LoadLogic     func(string) (*memql.Function, error)
-	Operations    map[string]Operation
+	LoadAction    func(string) (*actions.Action, error)
+	// Operations binds builtin names and fully qualified action capabilities.
+	// No action can escape this allowlist to the ambient engine or local shell.
+	Operations map[string]Operation
 }
 
 var installed = sync.OnceValues(func() (map[string]*automations.Automation, error) {
@@ -87,6 +91,9 @@ func Run(ctx context.Context, name string, args map[string]any, opts Options) (a
 	if opts.LoadLogic == nil {
 		opts.LoadLogic = loadLogic
 	}
+	if opts.LoadAction == nil {
+		opts.LoadAction = loadAction
+	}
 	if opts.Logger == nil {
 		opts.Logger = slog.New(slog.DiscardHandler)
 	}
@@ -97,6 +104,7 @@ func Run(ctx context.Context, name string, args map[string]any, opts Options) (a
 	}
 	h.registry = steps.NewRegistry()
 	h.registry.Register(automations.StepTypeFunction, h)
+	h.registry.Register(automations.StepTypeAction, h)
 	execution, err := h.TriggerAutomationWithArgs(ctx, name, args)
 	if err != nil {
 		// The interpreter stores an error's printable text for its journal.
@@ -111,6 +119,7 @@ type host struct {
 	definitions map[string]*automations.Automation
 	logics      map[string]*preparedLogic
 	registry    *steps.Registry
+	actions     map[string]*actions.Registry
 	mu          sync.Mutex
 }
 
@@ -138,6 +147,10 @@ func (h *host) prepare(name string, visiting map[string]bool) error {
 		for _, s := range body {
 			switch s.Type {
 			case automations.StepTypeExpression, automations.StepTypeReturn:
+			case automations.StepTypeAction:
+				if err := h.prepareAction(s); err != nil {
+					return err
+				}
 			case automations.StepTypeFunction:
 				if s.Function != nil && s.Function.Kind == "logic" {
 					if err := h.prepareLogic(s.Function.Name, visiting); err != nil {
@@ -203,6 +216,9 @@ func (h *host) TriggerAutomationWithArgs(ctx context.Context, name string, args 
 }
 
 func (h *host) Execute(ctx context.Context, step *automations.Step, sc *automations.StepContext) (*automations.StepResult, error) {
+	if step.Type == automations.StepTypeAction {
+		return h.executeAction(ctx, step, sc)
+	}
 	started := time.Now()
 	args, err := sc.Evaluator.ResolveV1Map(ctx, step.Function.Args)
 	var value any

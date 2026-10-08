@@ -14,3 +14,22 @@ logic workSpineRoute {
  if args.triage.sectionable { return "sectionable" }
  return "author"
 }
+
+/// Reusable section instruction policy, shared by inline and cataloguable live sections.
+logic workSpineSectionInstruction {
+ args { section object! goal string! }
+ prefix := args.section.effectful ? "Carry out only the section below, one part of a larger goal, and report what you did as text. Make only the changes this section describes." : args.section.live ? "Produce only the section below, one part of a larger goal, and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools." : args.section.dependent ? "Produce only the section below and return its complete content as text; it builds on the results of earlier sections, given after the goal input. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable." : "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable."
+ dependency := args.section.effectful && args.section.dependent && !args.section.live ? " It builds on the results of earlier sections, given after the goal input." : ""
+ goal := args.section.live ? "" : "\n\nOverall goal (context only): " + args.goal
+ purpose := args.section.live || args.section.purpose != "" ? "\nPurpose: " + args.section.purpose : ""
+ finished := args.section.postcondition == "" ? "" : "\nIt is finished when: " + args.section.postcondition
+ return prefix + dependency + goal + "\n\nSection: " + args.section.label + "\n" + args.section.instruction + purpose + finished
+}
+
+/// Explain which mandatory validator refused a proposed replan.
+logic workSpineReplanRefusal {
+ args { stage string! message string! }
+ if args.stage == "source" { return "The re-planned draft does not compile: " + args.message }
+ if args.stage == "prefix" { return "The re-planned draft does not keep the completed steps where they would be served: " + args.message }
+ return "The re-planned draft asks for arguments this run was not given: " + args.message
+}

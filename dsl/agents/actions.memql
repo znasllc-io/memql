@@ -1,0 +1,17 @@
+use capabilities.integration.agents.{ spineRetryHost, spineObserveComputer, spineRequestScope }
+
+/// Run the original headless call on an eligible computer, subject to every worker gate.
+action retrySpineHost {
+ capability spineRetryHost()
+}
+
+/// Read the authorized desktop window list to inform the next computer-use step.
+action observeSpineComputer {
+ capability spineObserveComputer(action: "window_list")
+}
+
+/// Explain why this step needs access; the native gate supplies owner, run and minimum scope.
+action requestSpineComputerScope {
+ args { summary string! }
+ capability spineRequestScope(summary: args.summary)
+}

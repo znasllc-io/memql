@@ -65,6 +65,12 @@ func extractActionBundleSlices(source string) []KeywordSlice {
 	return extractKeywordSlicesWithImports(source, actionBundleHeader)
 }
 
+// ExtractActionSlices returns independently compilable authored actions,
+// including their imports, for hosts that freeze a workflow's dependencies.
+func ExtractActionSlices(source string) []KeywordSlice {
+	return extractActionBundleSlices(source)
+}
+
 // extractCapabilityBundleSlices returns each top-level `capability <dotted.name>
 // { ... }` declaration in `source` as a self-contained slice. Capabilities carry
 // no imports in practice, but the shared helper prepends any file-top `use`
