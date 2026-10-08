@@ -96,9 +96,11 @@ function updateFind(scroll=true) {
  findRanges=[];findIndex=-1;
  if(findQuery.value){
   const escaped=findQuery.value.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-  const pattern=new RegExp(escaped,"giu");let match:RegExpExecArray|null;
+  const pattern=new RegExp(escaped,"giu");let match:RegExpExecArray|null;let startNode=0,endNode=0;
   while((match=pattern.exec(text))&&findRanges.length<5000){
-   const start=nodes.find(part=>part.start<=match!.index&&part.end>match!.index),end=nodes.find(part=>part.start<match!.index+match![0].length&&part.end>=match!.index+match![0].length);
+   while(startNode<nodes.length&&nodes[startNode].end<=match.index)startNode++;
+   while(endNode<nodes.length&&nodes[endNode].end<match.index+match[0].length)endNode++;
+   const start=nodes[startNode],end=nodes[endNode];
    if(start&&end){const range=document.createRange();range.setStart(start.node,match.index-start.start);range.setEnd(end.node,match.index+match[0].length-end.start);findRanges.push(range);}
   }
  }
@@ -317,17 +319,29 @@ function showNotes(open:boolean) {
 }
 function currentNoteAnchor(row:ReviewRow):Anchor|undefined {
   if(historyPreview||row.anchor.kind!=="markdown")return;
-  let anchor=row.anchor;
-  if(row.outdated){
-    const quote=anchor.sourceQuote;if(!quote)return;
-    const source=sourceIdentity.replace(/\r\n/g,"\n"),offset=source.indexOf(quote);if(offset<0||source.indexOf(quote,offset+1)>=0)return;
-    const start=source.slice(0,offset).split("\n").length-1,end=start+quote.split("\n").length;
-    const starts=Array.from(content.querySelectorAll<HTMLElement>(`[data-start-line="${start}"]`));
-    const ends=Array.from(content.querySelectorAll<HTMLElement>(`[data-end-line="${end}"]`));
-    if(!starts.length||!ends.length)return;
-    anchor={...anchor,startLine:start,endLine:end,startBlock:Number(starts.at(-1)!.dataset.blockId),endBlock:Number(ends.at(-1)!.dataset.blockId)};
+  const anchor=row.anchor;
+  if(!row.outdated&&rangeFor(anchor)?.toString().trim()===anchor.quote.trim())return anchor;
+  if(anchor.sourceQuote){
+    const source=sourceIdentity.replace(/\r\n/g,"\n"),offset=source.indexOf(anchor.sourceQuote);
+    if(offset>=0&&source.indexOf(anchor.sourceQuote,offset+1)<0){
+      const start=source.slice(0,offset).split("\n").length-1,end=start+anchor.sourceQuote.split("\n").length;
+      const from=Array.from(content.querySelectorAll<HTMLElement>(`[data-start-line="${start}"]`)).at(-1),to=Array.from(content.querySelectorAll<HTMLElement>(`[data-end-line="${end}"]`)).at(-1);
+      if(from&&to){const relocated={...anchor,startLine:start,endLine:end,startBlock:Number(from.dataset.blockId),endBlock:Number(to.dataset.blockId)};if(rangeFor(relocated)?.toString().trim()===anchor.quote.trim())return relocated;}
+    }
   }
-  const range=rangeFor(anchor);return range?.toString().trim()===anchor.quote.trim()?anchor:undefined;
+  // Preserve a note when its exact selected text still has one rendered match,
+  // even if a name elsewhere in the paragraph changes. Repeated text is not
+  // enough evidence to move an annotation to a different passage.
+  const walker=document.createTreeWalker(content,NodeFilter.SHOW_TEXT);
+  const nodes:{node:Node;start:number;end:number}[]=[];let text="",node:Node|null;
+  while((node=walker.nextNode())){if(node.parentElement?.closest("button"))continue;const value=node.textContent??"";nodes.push({node,start:text.length,end:text.length+value.length});text+=value;}
+  const offset=text.indexOf(anchor.quote);if(!anchor.quote||offset<0||text.indexOf(anchor.quote,offset+1)>=0)return;
+  const start=nodes.find(part=>part.start<=offset&&part.end>offset),end=nodes.find(part=>part.start<offset+anchor.quote.length&&part.end>=offset+anchor.quote.length);
+  if(!start||!end)return;
+  const from=mapped(start.node),to=mapped(end.node);if(!from||!to)return;
+  const prefix=document.createRange();prefix.selectNodeContents(from);prefix.setEnd(start.node,offset-start.start);
+  const suffix=document.createRange();suffix.selectNodeContents(to);suffix.setEnd(end.node,offset+anchor.quote.length-end.start);
+  return {...anchor,startLine:Number(from.dataset.startLine),endLine:Number(to.dataset.endLine),startBlock:Number(from.dataset.blockId),endBlock:Number(to.dataset.blockId),startTextOffset:prefix.toString().length,endTextOffset:suffix.toString().length};
 }
 function openNote(id:string) {
   activeNote=id;showNotes(true);renderNotes();Array.from(byId("personal-notes").querySelectorAll<HTMLElement>("[data-note-id]")).find(element=>element.dataset.noteId===id)?.scrollIntoView?.({block:"nearest"});

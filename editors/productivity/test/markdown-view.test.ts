@@ -258,6 +258,8 @@ test("Read selection offers copy and private notes; markers open the separate no
  f.document("# Title\n\nA completely different passage.\n",18);f.send({type:"notes",rows:[{id:"private-1",body:"Remember this for the meeting.",anchor,outdated:true}]});
  assert.equal(f.doc.querySelectorAll(".note-marker").length,0);assert.match(f.el("personal-notes").textContent!,/earlier version/);
  f.document("# Title\n\nNew introduction.\n\nKeep **this selection** and the rest.\n",19);assert.equal(f.doc.querySelectorAll(".note-marker").length,1);
+ f.document("# Title\n\nKeep **this selection** with a corrected name.\n",20);assert.equal(f.doc.querySelectorAll(".note-marker").length,1);
+ f.document("# Title\n\nKeep **this selection**.\n\nRepeat **this selection**.\n",21);assert.equal(f.doc.querySelectorAll(".note-marker").length,0);
  f.dom.window.close();
 });
 
