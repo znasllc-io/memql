@@ -83,6 +83,10 @@ var promptLevels = map[string]string{
 	// result. The agent chooses actions and writes a user-facing reply; it does
 	// not emit executable DSL, so the agent reply band is sufficient.
 	"workAgentReply": "strong",
+	// Proposes bounded Markdown edits a person reviews as an actual diff.
+	// Native validation checks source identity and exact approval before writing;
+	// the prose judgment band is sufficient and no executable DSL is emitted.
+	"libraryRevisionPassages": "strong",
 	// workContextCheckpoint summarizes a bounded immutable prefix. Originals
 	// remain available for recall; this derived memory neither executes work nor
 	// changes authority. The fast band handles this constrained extraction.
