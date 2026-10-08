@@ -1,5 +1,8 @@
 /// Work inside this run's isolated Linux workspace. Use for files, code and
 /// headless tools; it has no access to the person's computer or private files.
+/// http_fetch accepts {url, method?, headers?, body?, timeoutSec?, extractText?, maxBytes?}.
+/// For web-page research use extractText=true; this returns readable prose capped at 12 KiB by default.
+/// maxBytes bounds the returned body; truncated=true means the result is an excerpt.
 @handler(type="function", name="workbenchDispatchHost")
 @requiresAgentRole("assistant", "specialist")
 tool workbenchHost {

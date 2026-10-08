@@ -13,25 +13,28 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/core/num"
+	"github.com/znasllc-io/memql/core/readabletext"
 )
 
 // Default limits. Configurable per-call via args when the LLM has a
 // reason; otherwise the defaults apply. Hard caps keep a runaway
 // agent from eating the agent node.
 const (
-	defaultExecTimeout = 60 * time.Second
-	maxExecTimeout     = 600 * time.Second
-	maxExecOutputBytes = 1 << 20 // 1 MiB cap per exec; stdout + stderr each
-	maxFSReadBytes     = 1 << 20 // 1 MiB cap per fs_read
-	maxFSWriteBytes    = 1 << 24 // 16 MiB cap per fs_write
-	maxFSListEntries   = 1000
-	defaultHTTPTimeout = 30 * time.Second
-	maxHTTPTimeout     = 120 * time.Second
-	maxHTTPRespBytes   = 5 << 20 // 5 MiB cap on http_fetch response
-	httpDialTimeout    = 10 * time.Second
-	httpMaxRedirects   = 10
+	defaultExecTimeout   = 60 * time.Second
+	maxExecTimeout       = 600 * time.Second
+	maxExecOutputBytes   = 1 << 20 // 1 MiB cap per exec; stdout + stderr each
+	maxFSReadBytes       = 1 << 20 // 1 MiB cap per fs_read
+	maxFSWriteBytes      = 1 << 24 // 16 MiB cap per fs_write
+	maxFSListEntries     = 1000
+	defaultHTTPTimeout   = 30 * time.Second
+	maxHTTPTimeout       = 120 * time.Second
+	maxHTTPRespBytes     = 5 << 20  // 5 MiB cap on http_fetch response
+	defaultHTTPTextBytes = 12 << 10 // Bound the readable excerpt passed to a model.
+	httpDialTimeout      = 10 * time.Second
+	httpMaxRedirects     = 10
 )
 
 // httpFetchClient is the scoped http.Client used by handleHTTPFetch.
@@ -332,6 +335,20 @@ func (i *Integration) handleFSStat(_ context.Context, ws *workspace, args map[st
 // Headers passed through. The workbench is the HTTP client -- the
 // user's machine is not involved.
 func (i *Integration) handleHTTPFetch(ctx context.Context, _ *workspace, args map[string]any) dispatchResult {
+	extractText, _ := args["extractText"].(bool)
+	if value, present := args["extractText"]; present {
+		if _, valid := value.(bool); !valid {
+			return errResult("http_fetch", "invalid_arg", "extractText must be a boolean")
+		}
+	}
+	defaultLimit := maxHTTPRespBytes
+	if extractText {
+		defaultLimit = defaultHTTPTextBytes
+	}
+	outputLimit := intArg(args["maxBytes"], defaultLimit)
+	if outputLimit <= 0 || outputLimit > maxHTTPRespBytes {
+		return errResult("http_fetch", "invalid_arg", "maxBytes must be between 1 and 5242880")
+	}
 	url, _ := args["url"].(string)
 	if strings.TrimSpace(url) == "" {
 		return errResult("http_fetch", "missing_arg", "http_fetch requires `url`")
@@ -369,6 +386,20 @@ func (i *Integration) handleHTTPFetch(ctx context.Context, _ *workspace, args ma
 		bodyBytes = bodyBytes[:maxHTTPRespBytes]
 		truncated = true
 	}
+	sourceBytes := len(bodyBytes)
+	if extractText {
+		bodyBytes = []byte(readabletext.Extract(string(bodyBytes), resp.Header.Get("Content-Type")))
+	}
+	if len(bodyBytes) > outputLimit {
+		end := outputLimit
+		if extractText {
+			for end > 0 && !utf8.RuneStart(bodyBytes[end]) {
+				end--
+			}
+		}
+		bodyBytes = bodyBytes[:end]
+		truncated = true
+	}
 	headers := make(map[string]string, len(resp.Header))
 	for k, v := range resp.Header {
 		if len(v) > 0 {
@@ -379,13 +410,15 @@ func (i *Integration) handleHTTPFetch(ctx context.Context, _ *workspace, args ma
 		OK:     resp.StatusCode < 400,
 		Action: "http_fetch",
 		Payload: map[string]any{
-			"url":       url,
-			"method":    method,
-			"status":    resp.StatusCode,
-			"headers":   headers,
-			"body":      string(bodyBytes),
-			"bytes":     len(bodyBytes),
-			"truncated": truncated,
+			"url":           url,
+			"method":        method,
+			"status":        resp.StatusCode,
+			"headers":       headers,
+			"body":          string(bodyBytes),
+			"bytes":         len(bodyBytes),
+			"truncated":     truncated,
+			"extractedText": extractText,
+			"sourceBytes":   sourceBytes,
 		},
 	}
 }
