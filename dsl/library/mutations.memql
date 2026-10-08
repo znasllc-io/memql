@@ -162,6 +162,11 @@ mutation memory createMemory {
 @serverOnly
 mutation documentVersion appendDocumentVersion {
   args {
+    branchRootArtifactId string
+    branchParentArtifactId string
+    branchParentVersion int
+    branchParentRevision string
+    branchName string
     versionAt datetime!
     versionId        string!
     documentId       string!
@@ -177,6 +182,11 @@ mutation documentVersion appendDocumentVersion {
   }
   insert {
     id: args.versionId
+    args.branchRootArtifactId
+    args.branchParentArtifactId
+    args.branchParentVersion
+    args.branchParentRevision
+    args.branchName
     args.documentId
     ownerUserId: actor.userId
     args.versionNumber
@@ -1095,6 +1105,7 @@ mutation file stampLibraryFileProvenance {
 @actor
 mutation documentComment appendDocumentComment {
   args {
+    purpose enum("feedback", "note")
     commentId string!
     artifactId string!
     authorUserId string!
@@ -1105,7 +1116,7 @@ mutation documentComment appendDocumentComment {
     requestId string!
   }
   insert {
-    accept { artifactId, authorUserId, revision, versionNumber, anchor, body, requestId }
+    accept { purpose, artifactId, authorUserId, revision, versionNumber, anchor, body, requestId }
     stamp { id: args.commentId, ownerUserId: actor.userId }
   }
 }

@@ -213,7 +213,7 @@ func (i *Integration) handleRequestDocumentRevision(ctx context.Context, args ma
 				return nil, err
 			}
 			rows := extractRows(raw)
-			if len(rows) != 1 || memql.BareShortId(stringField(rows[0], "artifactId")) != doc.artifact || stringField(rows[0], "revision") != doc.revision {
+			if len(rows) != 1 || stringField(rows[0], "purpose") == "note" || memql.BareShortId(stringField(rows[0], "artifactId")) != doc.artifact || stringField(rows[0], "revision") != doc.revision {
 				return nil, fmt.Errorf("one selected comment is unavailable or belongs to an earlier revision")
 			}
 			row := rows[0]

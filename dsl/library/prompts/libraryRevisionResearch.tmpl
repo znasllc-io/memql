@@ -18,3 +18,5 @@ Document:
 {{ .document }}
 Feedback with selected passages (JSON):
 {{ .passages }}
+
+Whole-document feedback (scope="document") identifies where to apply the instruction, not how much to change. Infer the requested operation from the person's words. "Replace the wrong name everywhere" or "use first person" calls for targeted corrections throughout the document, preserving every unrelated byte, structure and formatting. Only a request to remake, rewrite or substantially reorganize the whole document authorizes a full rewrite, keeping its topic and verified facts unless directed otherwise. A full rewrite may use one complete-source replacement; otherwise use the smallest exact patches, including enough unchanged context to distinguish repeated occurrences. No additional mode choice or clarification loop is needed for a clear instruction.

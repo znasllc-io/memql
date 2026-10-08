@@ -3282,11 +3282,13 @@ QueryClient.prototype.documentVersions = function (this: QueryClient, args: Docu
 // Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["documentVersionsForOwner"] in generated_concepts.ts).
 export interface DocumentVersionsForOwnerArgs {
   documentId: string;
+  documentIdAlias?: string;
 }
 
 export function buildDocumentVersionsForOwner(args: DocumentVersionsForOwnerArgs): string {
   const parts: string[] = [];
   parts.push("documentId: " + renderMemQLValue(args.documentId));
+  if (args.documentIdAlias !== undefined) parts.push("documentIdAlias: " + renderMemQLValue(args.documentIdAlias));
   return "query documentVersionsForOwner(" + parts.join(", ") + ")";
 }
 
@@ -4381,6 +4383,68 @@ QueryClient.prototype.libraryArtifactsByLens = function (this: QueryClient, args
   return this.executeNamed("libraryArtifactsByLens", buildLibraryArtifactsByLens(args), opts);
 };
 
+/** Branch roots retain their exact parent link even after their document changes. */
+// Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["libraryDocumentBranches"] in generated_concepts.ts).
+export interface LibraryDocumentBranchesArgs {
+  rootArtifactId: string;
+}
+
+export function buildLibraryDocumentBranches(args: LibraryDocumentBranchesArgs): string {
+  const parts: string[] = [];
+  parts.push("rootArtifactId: " + renderMemQLValue(args.rootArtifactId));
+  return "query libraryDocumentBranches(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryDocumentBranches(args: LibraryDocumentBranchesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryDocumentBranches = function (this: QueryClient, args: LibraryDocumentBranchesArgs = {} as LibraryDocumentBranchesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryDocumentBranches", buildLibraryDocumentBranches(args), opts);
+};
+
+/** Cursor-based retained document history. Bodies are fetched only on selection. */
+// Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["libraryDocumentHistoryPage"] in generated_concepts.ts).
+export interface LibraryDocumentHistoryPageArgs {
+}
+
+export function buildLibraryDocumentHistoryPage(args: LibraryDocumentHistoryPageArgs): string {
+  void args;
+  return "query libraryDocumentHistoryPage()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryDocumentHistoryPage(args?: LibraryDocumentHistoryPageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryDocumentHistoryPage = function (this: QueryClient, args: LibraryDocumentHistoryPageArgs = {} as LibraryDocumentHistoryPageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryDocumentHistoryPage", buildLibraryDocumentHistoryPage(args), opts);
+};
+
+/** One owned immutable snapshot, including the initial version zero. */
+// Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["libraryDocumentVersionByNumber"] in generated_concepts.ts).
+export interface LibraryDocumentVersionByNumberArgs {
+}
+
+export function buildLibraryDocumentVersionByNumber(args: LibraryDocumentVersionByNumberArgs): string {
+  void args;
+  return "query libraryDocumentVersionByNumber()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryDocumentVersionByNumber(args?: LibraryDocumentVersionByNumberArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryDocumentVersionByNumber = function (this: QueryClient, args: LibraryDocumentVersionByNumberArgs = {} as LibraryDocumentVersionByNumberArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryDocumentVersionByNumber", buildLibraryDocumentVersionByNumber(args), opts);
+};
+
 /** Fetch one Library file by id, gated to the caller: `row.ownerUserId == actor.userId`, over a concept declaring the composite tier. Backs the artifact detail view and the download / export route, which needs name, mimeType, size and blobUrl together to stream the bytes with correct headers. */
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFileById"] in generated_concepts.ts).
 export interface LibraryFileByIdArgs {
@@ -4476,6 +4540,26 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryFileChunksForFile = function (this: QueryClient, args: LibraryFileChunksForFileArgs = {} as LibraryFileChunksForFileArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryFileChunksForFile", buildLibraryFileChunksForFile(args), opts);
+};
+
+/** Cursor-based retained file history, with content resolved through owned storage. */
+// Bound concept: v1:library:fileVersion (machine-readable: BoundConcepts["libraryFileHistoryPage"] in generated_concepts.ts).
+export interface LibraryFileHistoryPageArgs {
+}
+
+export function buildLibraryFileHistoryPage(args: LibraryFileHistoryPageArgs): string {
+  void args;
+  return "query libraryFileHistoryPage()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryFileHistoryPage(args?: LibraryFileHistoryPageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryFileHistoryPage = function (this: QueryClient, args: LibraryFileHistoryPageArgs = {} as LibraryFileHistoryPageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryFileHistoryPage", buildLibraryFileHistoryPage(args), opts);
 };
 
 /** The sizes of every file the caller holds, ARCHIVED INCLUDED -- the stored half of the storage quota (memql#4782, design C4). Archived files keep their bytes and keep counting: retention is real, and a quota that forgot archived rows would let 'archive then re-upload' mint unbounded storage. UNBOUNDED for the same fail-open reason as its session sibling; owner-scoped, two fields per row. */

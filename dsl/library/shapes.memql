@@ -70,6 +70,11 @@ shape memory memoryFull {
 /// (documentVersionById).
 @row
 shape documentVersion documentVersionSummary {
+  branchRootArtifactId
+  branchParentArtifactId
+  branchParentVersion
+  branchParentRevision
+  branchName
   row.id
   ownerUserId
   documentId
@@ -89,6 +94,11 @@ shape documentVersion documentVersionSummary {
 /// latest version to compute the next versionNumber.
 @row
 shape documentVersion documentVersionFull {
+  branchRootArtifactId
+  branchParentArtifactId
+  branchParentVersion
+  branchParentRevision
+  branchName
   row.id
   ownerUserId
   documentId
@@ -277,6 +287,7 @@ shape watchedFolder watchedFolderFull {
 /// Document feedback with its immutable source revision and author.
 @row
 shape documentComment documentCommentFull {
+  purpose
   row.id
   ownerUserId
   artifactId

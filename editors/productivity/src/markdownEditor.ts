@@ -30,8 +30,8 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
     if (!target) throw new Error("Open a Markdown document first.");
     return target;
   }
-  async feedbackSelection(): Promise<void> {
-    if (this.active?.panel.visible) await this.active.panel.webview.postMessage({type:"selectionFeedback"});
+  async feedbackSelection(type="selectionFeedback"): Promise<void> {
+    if (this.active?.panel.visible) await this.active.panel.webview.postMessage({type});
   }
   async show(mode: "source" | "reading" | "review" | "split", uri?: vscode.Uri): Promise<void> {
     const target = this.document(uri);
@@ -90,10 +90,19 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
     let disposed = false;
     let commentPending: { fingerprint: string; requestId: string } | undefined;
     let saving = false;
+    let historyBusy=false, historyGeneration=0;
+    let preview: {version:number;revision:string;content:string}|undefined;
+    const branchKey=`memql.markdownBranch:${document.uri.toString()}`;
+    let branchPending=this.context.workspaceState.get<{fingerprint:string;requestId:string}>(branchKey);
     let generation = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let refreshedRun = "";
     const error = (e: unknown) => panel.webview.postMessage({ type: "error", message: e instanceof Error ? e.message : "The document could not be loaded." });
+    const refreshNotes = async () => {
+      if(document.uri.scheme!=="memql-file")return;
+      try { const result=await this.files.notes(await this.load(document.uri));if(!disposed)await panel.webview.postMessage({type:"notes",rows:result.notes??[],hasMore:result.hasMore}); }
+      catch(e){if(!disposed)await panel.webview.postMessage({type:"notesError",message:e instanceof Error?e.message:"Notes could not be loaded."});}
+    };
     const refreshComments = async () => {
       if (document.uri.scheme !== "memql-file") return;
       const ticket = ++generation;
@@ -105,7 +114,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
         const content = document.getText();
         await panel.webview.postMessage({ type: "comments", rows: rows.map(row => ({ ...row,
           outdated: row.outdated || document.isDirty || row.revision !== base.revision ||
-            !row.anchor || ((row.anchor as Record<string,unknown>).kind !== "document-end" && !anchorStillMatches(content, row.anchor as MarkdownAnchor)) })) });
+            !row.anchor || (!["document-end","document"].includes(String((row.anchor as Record<string,unknown>).kind)) && !anchorStillMatches(content, row.anchor as MarkdownAnchor)) })) });
         if (review.hasMore) await error(new Error("Showing the first 500 comments. Older feedback remains stored in MemQL."));
       } catch (e) { if (!disposed && generation === ticket) await error(e); }
     };
@@ -132,10 +141,11 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
     const render = async () => {
       try {
         await panel.webview.postMessage({ type: "document", html: renderMarkdown(document.getText()), version: document.version, sourceIdentity: document.getText(),
-          connected: document.uri.scheme === "memql-file" && !document.isDirty,
+          historyAvailable: document.uri.scheme === "memql-file", connected: document.uri.scheme === "memql-file" && !document.isDirty,
           status: document.uri.scheme !== "memql-file" ? "Local document. Open its MemQL copy to share feedback."
             : document.isDirty ? "Unsaved changes. Save before adding revision-bound feedback." : "Feedback is saved to MemQL." });
         await refreshComments();
+        await refreshNotes();
         await refreshRevision();
       } catch (e) { await error(e); }
     };
@@ -156,7 +166,36 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
           }
           else if (message.type === "rendered" && message.version === document.version && typeof message.text === "string") {
             this.rendered.set(document.uri.toString(), { version: message.version, text: message.text });
-          } else if (message.type === "source" || message.type === "reading" || message.type === "review" || message.type === "split") await this.show(message.type, document.uri);
+          } else if(message.type === "copy") { await vscode.commands.executeCommand("editor.action.clipboardCopyAction");
+          } else if(message.type === "refreshNotes") { await refreshNotes();
+          } else if(message.type === "find") { await vscode.commands.executeCommand("editor.action.webvieweditor.showFind");
+          } else if (["history", "historyVersion", "historyCurrent", "historyFork", "historyOpen"].includes(message.type)) {
+            if (document.uri.scheme !== "memql-file") throw new Error("Open a saved MemQL document to use history.");
+            if(message.type === "historyCurrent") { preview=undefined; historyGeneration++; await panel.webview.postMessage({type:"historyCurrent"}); await render(); return; }
+            if(historyBusy)return;
+            historyBusy=true; const ticket=++historyGeneration;
+            try {
+              const base=await this.load(document.uri);
+              if(message.type === "history") {
+                const data=await this.files.history(base,Number.isInteger(message.beforeVersion)?message.beforeVersion:undefined);
+                if(ticket===historyGeneration)await panel.webview.postMessage({type:"history",data,append:Number.isInteger(message.beforeVersion)});
+              } else if(message.type === "historyVersion") {
+                if(!Number.isInteger(message.version)||message.version<0)throw new Error("Choose a saved version.");
+                const snapshot=await this.files.version(base,message.version);
+                if(ticket===historyGeneration){preview=snapshot;this.dictation.cancel(panel);await panel.webview.postMessage({type:"historyVersion",...snapshot,html:renderMarkdown(snapshot.content)});}
+              } else if(message.type === "historyFork") {
+                if(!preview || typeof message.name!=="string" || document.isDirty)throw new Error("Save your local changes before starting a branch.");
+                const fingerprint=JSON.stringify([preview.version,preview.revision,message.name]);
+                if(branchPending?.fingerprint!==fingerprint){branchPending={fingerprint,requestId:globalThis.crypto.randomUUID()};await this.context.workspaceState.update(branchKey,branchPending);}
+                const uri=await this.files.fork(base,preview.version,preview.revision,message.name,branchPending.requestId);
+                await this.show("review",vscode.Uri.parse(uri));
+              } else if(message.type === "historyOpen" && typeof message.artifactId==="string") {
+                await this.show("reading",vscode.Uri.parse(this.files.artifactURI(base,message.artifactId,String(message.name||"Document"))));
+              }
+            } catch(e) {await panel.webview.postMessage({type:"historyError",message:e instanceof Error?e.message:"History could not be loaded. Retry."});}
+            finally {historyBusy=false;await panel.webview.postMessage({type:"historyIdle"});}
+          } else if (preview && !["external","dictationCancel"].includes(message.type)) return;
+          else if (message.type === "source" || message.type === "reading" || message.type === "review" || message.type === "split") await this.show(message.type, document.uri);
           else if (message.type === "dictationStart") { if(document.uri.scheme!=="memql-file"||document.isDirty)throw new Error("Save the MemQL document before dictating feedback.");void this.dictation.start(panel,await this.load(document.uri)).catch(error); }
           else if (message.type === "dictationStop") await this.dictation.stop(panel);
           else if (message.type === "dictationCancel") this.dictation.cancel(panel);
@@ -184,24 +223,25 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
           }
           else if (message.type === "external" && typeof message.href === "string" && /^https?:\/\//i.test(message.href)) {
             await vscode.env.openExternal(vscode.Uri.parse(message.href));
-          } else if (message.type === "comment" && !saving) {
+          } else if ((message.type === "comment" || message.type === "note") && !saving) {
             if (document.uri.scheme !== "memql-file" || document.isDirty || message.version !== document.version) throw new Error("Save this revision before adding feedback, then select the passage again.");
             if (typeof message.body !== "string" || !message.body.trim() || message.body.length > 16000) throw new Error("Enter a comment of up to 16000 characters.");
-            const anchor = message.selection?.kind === "document-end" ? {kind:"document-end", quote:"End of document"} : markdownAnchor(document.getText(), message.selection);
+            const anchor = message.selection?.kind === "document" ? {kind:"document",quote:"Entire document"} : message.selection?.kind === "document-end" ? {kind:"document-end", quote:"End of document"} : markdownAnchor(document.getText(), message.selection);
             const base = await this.load(document.uri);
             if (new TextDecoder().decode(base.content) !== document.getText()) throw new Error("Compare this document with its saved revision before adding feedback.");
-            const fingerprint = JSON.stringify([base.revision, anchor, message.body]);
+            const fingerprint = JSON.stringify([message.type, base.revision, anchor, message.body]);
             if (commentPending?.fingerprint !== fingerprint) commentPending = { fingerprint, requestId: globalThis.crypto.randomUUID() };
             saving = true;
             try {
-              await this.files.comment(base, { ...anchor }, message.body, commentPending.requestId);
+              await (message.type === "note" ? this.files.note(base, { ...anchor }, message.body, commentPending.requestId) : this.files.comment(base, { ...anchor }, message.body, commentPending.requestId));
               commentPending = undefined;
               await refreshComments();
+              await refreshNotes();
               // Re-enable actions only after their new request is visible and
               // this handler has released the write guard. An immediate
               // Propose click must not be silently discarded as another save.
               saving = false;
-              await panel.webview.postMessage({ type: "saved" });
+              await panel.webview.postMessage({ type: message.type==="note"?"noteSaved":"saved" });
             } finally { saving = false; }
           }
         } catch (e) { await error(e); }

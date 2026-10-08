@@ -125,6 +125,11 @@
         "command": "memql.productivity.checkTools",
         "title": "Check Editor Tools",
         "category": "MemQL"
+      },
+      {
+        "command": "memql.productivity.markdown.note",
+        "title": "Add note",
+        "category": "MemQL Productivity"
       }
     ],
     "customEditors": [
@@ -179,6 +184,10 @@
         {
           "command": "memql.productivity.markdown.feedback",
           "when": "false"
+        },
+        {
+          "command": "memql.productivity.markdown.note",
+          "when": "false"
         }
       ],
       "webview/context": [
@@ -191,6 +200,11 @@
           "command": "memql.productivity.markdown.feedback",
           "when": "webviewId == memql.productivity.markdown && webviewSection == markdownReadOnly && memqlMarkdownFeedback",
           "group": "6_feedback"
+        },
+        {
+          "command": "memql.productivity.markdown.note",
+          "when": "webviewId == memql.productivity.markdown && webviewSection == markdownReadOnly && memqlMarkdownNote",
+          "group": "6_feedback@2"
         }
       ],
       "editor/title": [

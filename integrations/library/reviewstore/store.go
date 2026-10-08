@@ -41,3 +41,11 @@ func Append(ctx context.Context, engine memql.IntegrationEngineAccess, owner str
 	}
 	return execute(ctx, engine, owner, "mutation", call)
 }
+
+func Notes(ctx context.Context, engine memql.IntegrationEngineAccess, owner, artifact, author string) (*memql.ExecuteResult, error) {
+	call, err := langparser.RenderCall("documentNotesForArtifact", map[string]any{"artifactId": artifact, "authorUserId": author})
+	if err != nil {
+		return nil, err
+	}
+	return execute(ctx, engine, owner, "query", call)
+}

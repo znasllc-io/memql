@@ -36,10 +36,33 @@ after both extensions have been compiled. `npm run package` creates a VSIX
 with both entry points; it does not publish it.
 
 Markdown has **Source**, **Read**, and **Review** modes. Read is a clean reading
-surface with **Copy** in its context menu. Review adds **Feedback** to that menu
+surface with **Copy** and **Add note** for selected text. Review adds **Feedback** to that menu
 for selected text. Cut and Paste are available in Source and editable feedback
 fields, never on the rendered document. Review offers one feedback action for selections and sections, plus
-a document extension entry point at the end. **Markdown Split View** remains
+a circular plus button at the end to extend the document. The circular revision
+button above the document accepts whole-document direction: a name correction
+changes only relevant references; a requested rewrite can rework the whole
+document. Both require proposal review and approval.
+
+The header’s **Find in document** button and ⌘F/Ctrl+F use VS Code’s find widget
+in Read and Review, including next/previous matches. Source uses the native
+VS Code text editor, including Find/Replace, selection, Cut/Copy/Paste and undo.
+
+**Version history** opens retained versions without replacing the current head.
+Choose a version, preview it, then **Start branch** to create a separate Markdown
+document with its own history and a durable link to the exact parent revision.
+History loads earlier pages on demand. Initial generated content is retained
+before its first edit; versions not retained by older releases cannot be recovered.
+
+**Add note** creates a personal passage annotation, available in Read and Review.
+The header’s Notes button opens a separate panel; passage markers show note
+previews on hover and open the note on click. Unchanged, unambiguous passages
+keep their markers after edits; otherwise the note remains listed as belonging
+to an earlier version. Notes reuse document annotations with an explicit purpose,
+are visible only to their author through this surface, and are rejected as AI
+revision input. They do not enter the standalone MemQLOS notes list.
+
+ **Markdown Split View** remains
 available in the editor title and command palette. These views share one VS Code
 document, including unsaved changes. Save before adding shared feedback. Local files remain local; opening
 one never silently uploads it or starts another Cockpit backup process.

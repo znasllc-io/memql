@@ -111,6 +111,11 @@ func (i *Integration) IntegrationName() string { return "library" }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append([]memql.IntegrationCapability{
+		{Name: "documentNotes", Description: "Read the caller’s personal notes.", Handler: i.handleDocumentNotes},
+		{Name: "addDocumentNote", Description: "Save a personal note, excluded from AI feedback.", Handler: i.handleAddDocumentNote},
+		{Name: "documentHistory", Description: "Read retained versions and branch provenance.", Handler: i.handleDocumentHistory},
+		{Name: "documentVersion", Description: "Open an owned immutable snapshot.", Handler: i.handleDocumentVersion},
+		{Name: "forkDocumentVersion", Description: "Create a recoverable independent branch from an exact snapshot.", Handler: i.handleForkDocumentVersion},
 		{Name: "modifyRevisionItem", Description: "Capture a person-requested revision of one immutable proposal item.", Handler: i.handleModifyRevisionItem},
 		{Name: "requestDocumentRevision", Description: "Capture feedback and start revision analysis.", Handler: i.handleRequestDocumentRevision},
 		{Name: "documentRevisionStatus", Description: "Read an owned revision request and its saved draft.", Handler: i.handleDocumentRevisionStatus},
@@ -375,6 +380,10 @@ func (i *Integration) handleEditDocument(ctx context.Context, args map[string]an
 		})
 	}
 
+	latest, err = i.ensureInitialVersion(ownerCtx, doc, latest)
+	if err != nil {
+		return nil, err
+	}
 	parentVersionId := ""
 	if latest != nil {
 		parentVersionId = stringField(latest, "id")
@@ -870,7 +879,7 @@ type appendArgs struct {
 
 func (i *Integration) appendVersion(ctx context.Context, a appendArgs) error {
 	_, err := versionstore.Append(ctx, i.engine, map[string]any{
-		"versionId": a.versionId, "documentId": a.documentId, "versionNumber": a.versionNumber,
+		"versionId": a.versionId, "documentId": memql.BareShortId(a.documentId), "versionNumber": a.versionNumber,
 		"content": a.content, "attachmentId": a.attachmentId, "authorKind": a.authorKind,
 		"authorId": a.authorId, "note": a.note, "parentVersionId": a.parentVersionId,
 		"producedByRunId": a.producedByRunId, "partitionId": a.partitionId, "versionAt": a.versionAt,
@@ -1029,12 +1038,7 @@ func (i *Integration) loadGeneratedOutput(ctx context.Context, documentId string
 // versionHistory returns every retained version of the document under
 // the owner actor.
 func (i *Integration) versionHistory(ctx context.Context, documentId string) ([]map[string]any, error) {
-	q := fmt.Sprintf(`query documentVersionsForOwner(documentId: %s)`, langparser.QuoteString(documentId))
-	raw, err := i.engine.Execute(ctx, q)
-	if err != nil {
-		return nil, err
-	}
-	return extractRows(raw), nil
+	return i.historyRows(ctx, "documentVersionsForOwner", map[string]any{"documentId": documentId})
 }
 
 // latestVersion returns the current latest version row + its number

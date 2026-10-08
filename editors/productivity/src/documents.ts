@@ -1,5 +1,5 @@
 import {
-  buildCancelGoal, buildLibraryModifyRevisionItem, buildLibraryArtifactById, buildLibraryFileById, buildGeneratedOutputById,
+  buildLibraryDocumentNotes, buildLibraryAddDocumentNote, buildLibraryDocumentHistory, buildLibraryDocumentVersion, buildLibraryForkDocumentVersion, buildCancelGoal, buildLibraryModifyRevisionItem, buildLibraryArtifactById, buildLibraryFileById, buildGeneratedOutputById,
   buildTemplateById, buildCampaignSaveTemplate, buildDocumentVersions, buildEditDocument, buildLibraryDocumentReview, buildLibraryAddDocumentComment, buildLibraryRequestDocumentRevision, buildLibraryDocumentRevisionStatus, buildDecideApproval,
 } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
@@ -69,6 +69,34 @@ export class Documents {
       content = await this.api.readBytes(lease, resource.id);
     }
     return { resource, lease, sourceId, kind, content, mime, version, revision };
+  }
+  async history(document: OpenDocument, beforeVersion?: number): Promise<Record<string, unknown>> {
+    const rows = await this.api.execute(document.lease, "libraryDocumentHistory", buildLibraryDocumentHistory({artifactId:document.resource.id,beforeVersion}));
+    if (!rows[0]) throw new Error("Version history could not be loaded.");
+    return rows[0];
+  }
+  async version(document: OpenDocument, versionNumber: number): Promise<{version:number;revision:string;content:string}> {
+    const row = (await this.api.execute(document.lease,"libraryDocumentVersion",buildLibraryDocumentVersion({artifactId:document.resource.id,versionNumber})))[0];
+    if (!row || row.version !== versionNumber || typeof row.content !== "string" || typeof row.revision !== "string") throw new Error("This version could not be opened.");
+    return row as {version:number;revision:string;content:string};
+  }
+  async fork(document: OpenDocument, versionNumber:number, revision:string, name:string, requestId:string):Promise<string> {
+    const row=(await this.api.execute(document.lease,"libraryForkDocumentVersion",buildLibraryForkDocumentVersion({artifactId:document.resource.id,versionNumber,revision,name,requestId})))[0];
+    if (!row || typeof row.artifactId!=="string" || !/^[\w-]{1,160}$/.test(row.artifactId) || typeof row.name!=="string") throw new Error("The branch was not confirmed. Retry to recover it.");
+    return this.artifactURI(document, row.artifactId, row.name);
+  }
+  artifactURI(document: OpenDocument, id:string, name:string):string {
+    if (!/^[\w-]{1,160}$/.test(id)) throw new Error("Invalid document link.");
+    const filename=/\.(md|markdown)$/i.test(name)?name:name+".md";
+    return `memql-file://${document.resource.domain}/artifacts/${id}/${encodeURIComponent(filename)}`;
+  }
+  async notes(document:OpenDocument):Promise<Record<string,unknown>> {
+    const row=(await this.api.execute(document.lease,"libraryDocumentNotes",buildLibraryDocumentNotes({artifactId:document.resource.id})))[0];
+    if(!row)throw new Error("Your notes could not be loaded.");return row;
+  }
+  async note(document:OpenDocument,anchor:Record<string,unknown>,body:string,requestId:string):Promise<void>{
+    const row=(await this.api.execute(document.lease,"libraryAddDocumentNote",buildLibraryAddDocumentNote({artifactId:document.resource.id,expectedVersion:document.version,expectedRevision:document.revision??"",anchor,body,requestId})))[0];
+    if(!row?.saved)throw new Error("Your note was not confirmed. Retry to recover it.");
   }
   async review(document: OpenDocument): Promise<Record<string, unknown>> {
     const rows = await this.api.execute(document.lease, "libraryDocumentReview", buildLibraryDocumentReview({ artifactId: document.resource.id }));

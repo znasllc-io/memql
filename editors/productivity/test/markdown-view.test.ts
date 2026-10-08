@@ -111,7 +111,7 @@ test("one feedback action carries addition requests at precise section and passa
   sections[1].click();assert.equal(f.el("composer-title").textContent,"Add feedback");f.input("feedback","Add an exercise");f.el("add").click();
   const section=f.messages.find(m=>m.type==="comment").selection;
   assert.equal(section.intent,undefined);assert.equal(section.scope,"section");assert.equal(section.startLine,6);assert.equal(section.quote,"Examples");assert.equal(section.endTextOffset,8);
-  f.send({type:"saved"});f.select();assert.equal(f.doc.querySelectorAll("#selection-tools button").length,1);f.el("selection-feedback").click();assert.equal(f.el("composer-title").textContent,"Add feedback");f.input("feedback","Add a concrete example");f.el("add").click();
+  f.send({type:"saved"});f.select();assert.equal(f.doc.querySelectorAll("#selection-tools button").length,3);f.el("selection-feedback").click();assert.equal(f.el("composer-title").textContent,"Add feedback");f.input("feedback","Add a concrete example");f.el("add").click();
   const passage=f.messages.filter(m=>m.type==="comment").at(-1).selection;
   assert.equal(passage.intent,undefined);assert.equal(passage.scope,undefined);assert.equal(passage.quote,"this selection");assert.equal(passage.startTextOffset,5);assert.equal(passage.endTextOffset,19);
   f.dom.window.close();
@@ -133,7 +133,7 @@ test("navigation keeps review open and uses the proposed insertion location, inc
   const f=fixture({reviewOpen:true});f.document("# Workshop\n\n## Schedule\n\n- Lunch break\n\n## Activities\n\nRead an excerpt.\n");
   let target:Element|undefined;f.dom.window.HTMLElement.prototype.scrollIntoView=function(){target=this;};
   const rows=[{id:"ext",body:"Add questions after lunch",anchor:{kind:"document-end",quote:"End of document"}}];f.send({type:"comments",rows});
-  const end=f.doc.querySelector<HTMLButtonElement>('.passage')!;end.focus();end.click();assert.equal(target,f.el("extend"));assert.equal(f.el("review-panel").hidden,false);assert.equal(f.doc.activeElement,end);
+  const end=f.doc.querySelector<HTMLButtonElement>('#comments .passage')!;end.focus();end.click();assert.equal(target,f.el("extend"));assert.equal(f.el("review-panel").hidden,false);assert.equal(f.doc.activeElement,end);
   f.send({type:"revision",status:{status:"waiting",approvalId:"ap",proposal:{commentIds:["ext"],comments:rows,edits:[{before:"- Lunch break",after:"- Lunch break\n- Questions",commentIds:["ext"]}]}}});
   assert.equal(f.doc.querySelector('.change>summary')!.textContent,"Extend: Schedule");
   f.doc.querySelector<HTMLButtonElement>('.request-context .passage')!.click();assert.equal(target?.tagName,"LI");assert.match(target?.textContent??"",/Lunch break/);assert.equal(f.el("review-panel").hidden,false);assert.equal(f.state().reviewOpen,true);
@@ -165,7 +165,7 @@ test("polling preserves explanations, item decisions, focus and modification dra
 test("Read is a quiet reading mode and restores Review without losing the draft",()=>{
  const f=fixture();f.document();f.select();f.el("annotate").click();f.input("feedback","Keep this draft");
  f.send({type:"viewMode",mode:"reading"});assert.equal(f.doc.body.classList.contains("review-mode"),false);assert.equal(f.el("review-panel").hidden,true);assert.equal(f.el("composer").hidden,true);
- f.select();assert.equal(f.el("selection-tools").hidden,true);
+ f.select();assert.equal(f.el("selection-tools").hidden,false);assert.equal(f.el("selection-feedback").hidden,true);
  f.send({type:"revision",status:{status:"waiting",approvalId:"new",proposal:{}}});assert.equal(f.el("review-panel").hidden,true);
  f.send({type:"viewMode",mode:"review"});assert.equal(f.el("review-panel").hidden,false);f.el("annotate").click();assert.equal((f.el("feedback") as HTMLTextAreaElement).value,"Keep this draft");f.dom.window.close();
 });
@@ -222,4 +222,41 @@ test("speech failure appears once, preserves typed feedback and clears on retry"
  assert.equal((f.el("add") as HTMLButtonElement).disabled,false);
  f.el("dictate").click();assert.equal(f.el("composer-status").textContent,"");assert.equal(f.messages.at(-1).type,"dictationStart");
  assert.ok(!f.messages.some(m=>m.type==="comment"));f.dom.window.close();
+});
+
+test("document-wide feedback and extension remain different scopes without prescribing a rewrite",()=>{
+ const f=fixture();f.document();f.el("document-feedback").click();assert.equal(f.el("composer-title").textContent,"Revise entire document");
+ f.input("feedback","Replace Alice with Morgan throughout.");f.el("add").click();assert.equal(f.messages.at(-1).selection.kind,"document");
+ f.send({type:"saved"});f.el("extend").click();f.input("feedback","Add an example.");f.el("add").click();assert.equal(f.messages.at(-1).selection.kind,"document-end");
+ f.el("find").click();assert.equal(f.messages.at(-1).type,"find");f.dom.window.close();
+});
+test("history preview isolates source and feedback, survives polling and returns to the current document",()=>{
+ const f=fixture({reviewOpen:true});f.document();f.send({type:"document",html:renderMarkdown("Current text"),version:17,sourceIdentity:"Current text",connected:true,historyAvailable:true});
+ f.el("history-toggle").click();assert.equal(f.messages.at(-1).type,"history");assert.equal(f.el("review-panel").hidden,true);
+ f.send({type:"history",data:{versions:[{version:7,current:true},{version:0}],hasMore:true,beforeVersion:0,branches:[]}});f.send({type:"historyIdle"});
+ f.doc.querySelector<HTMLButtonElement>('[aria-label="Open version 0"]')!.click();assert.equal(f.messages.at(-1).version,0);
+ f.send({type:"historyVersion",version:0,revision:"initial",html:renderMarkdown("Earlier text")});f.send({type:"historyIdle"});
+ assert.equal(f.el("content").textContent?.trim(),"Earlier text");assert.equal((f.el("source") as HTMLButtonElement).disabled,true);assert.equal((f.el("extend") as HTMLButtonElement).disabled,true);
+ f.document("Latest after polling",18);assert.equal(f.el("content").textContent?.trim(),"Earlier text");
+ f.input("branch-name","Alternative");f.el("history-fork").click();assert.equal(f.messages.at(-1).name,"Alternative");
+ f.send({type:"historyError",message:"Connection interrupted"});f.send({type:"historyIdle"});assert.equal(f.el("history-retry").hidden,false);f.el("history-retry").click();assert.equal(f.messages.at(-1).type,"historyFork");
+ f.send({type:"historyIdle"});f.send({type:"historyCurrent"});assert.equal(f.el("content").textContent?.trim(),"Latest after polling");assert.equal((f.el("source") as HTMLButtonElement).disabled,false);
+ f.dom.window.close();
+});
+
+test("Read selection offers copy and private notes; markers open the separate notes panel",()=>{
+ const f=fixture();f.document();f.send({type:"viewMode",mode:"reading"});f.select();
+ assert.equal(f.el("selection-tools").hidden,false);assert.equal(f.el("selection-feedback").hidden,true);
+ f.el("selection-copy").click();assert.equal(f.messages.at(-1).type,"copy");f.el("selection-note").click();
+ assert.equal(f.el("composer-title").textContent,"Add note");f.input("feedback","Remember this for the meeting.");f.el("add").click();
+ const saved=f.messages.at(-1);assert.equal(saved.type,"note");assert.equal(saved.selection.quote,"this selection");
+ const anchor={...saved.selection,kind:"markdown",sourceQuote:"Keep **this selection** and the rest."};
+ f.send({type:"notes",rows:[{id:"private-1",body:"Remember this for the meeting.",anchor}]});f.send({type:"noteSaved"});
+ assert.equal(f.el("notes-panel").hidden,false);assert.equal(f.el("review-panel").hidden,true);assert.equal(f.doc.querySelectorAll(".note-marker").length,1);
+ f.el("notes-close").click();f.doc.querySelector<HTMLButtonElement>(".note-marker")!.click();assert.equal(f.el("notes-panel").hidden,false);assert.match(f.el("personal-notes").textContent!,/Remember this/);assert.equal(f.doc.querySelectorAll("#comments .note").length,0);
+ // A changed passage stays listed but must not acquire a misleading marker.
+ f.document("# Title\n\nA completely different passage.\n",18);f.send({type:"notes",rows:[{id:"private-1",body:"Remember this for the meeting.",anchor,outdated:true}]});
+ assert.equal(f.doc.querySelectorAll(".note-marker").length,0);assert.match(f.el("personal-notes").textContent!,/earlier version/);
+ f.document("# Title\n\nNew introduction.\n\nKeep **this selection** and the rest.\n",19);assert.equal(f.doc.querySelectorAll(".note-marker").length,1);
+ f.dom.window.close();
 });

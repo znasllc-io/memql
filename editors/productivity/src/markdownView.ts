@@ -14,22 +14,81 @@ const prepare = byId("prepare-revision") as HTMLButtonElement;
 document.addEventListener("contextmenu", event => {
   const inDocument = event.target instanceof Node && content.contains(event.target);
   if (inDocument) captureSelection();
-  contextSelection = inDocument && mode === "review" && connected && selection
+  contextSelection = inDocument && !historyPreview && connected && selection
     ? { anchor: selection, rect: selectionRect } : undefined;
   document.body.dataset.vscodeContext = JSON.stringify({webviewSection:"markdownReadOnly",
-    preventDefaultContextMenuItems:true,memqlMarkdownFeedback:!!contextSelection});
-  if (!(event.target instanceof HTMLTextAreaElement)) return;
+    preventDefaultContextMenuItems:true,memqlMarkdownFeedback:mode==="review"&&!!contextSelection,memqlMarkdownNote:!!contextSelection});
+  if (!((event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement))) return;
   const readOnly = event.target.readOnly || event.target.disabled;
   event.target.dataset.vscodeContext = JSON.stringify({
     webviewSection: readOnly ? "markdownReadOnly" : "markdownInput",
     preventDefaultContextMenuItems: readOnly,
   });
 }, true);
-type Anchor = { kind?: "markdown"; intent?: "extend"; scope?: "section"; sectionPath?: string[]; startLine: number; endLine: number; quote: string; startBlock: number; endBlock: number; startTextOffset: number; endTextOffset: number; prefix?: string; suffix?: string } | { kind: "document-end"; quote: string };
+type Anchor = { kind?: "markdown"; intent?: "extend"; scope?: "section"; sectionPath?: string[]; sourceQuote?: string; startLine: number; endLine: number; quote: string; startBlock: number; endBlock: number; startTextOffset: number; endTextOffset: number; prefix?: string; suffix?: string } | { kind: "document-end"; quote: string; intent?: never; scope?: never; sectionPath?: never } | { kind: "document"; quote: string; intent?: never; scope?: never; sectionPath?: never };
 type ReviewRow = { id: string; body: string; outdated?: boolean; anchor: Anchor };
-const state = (api.getState() ?? {}) as { draft?: string; anchor?: Anchor; draftVersion?: number; source?: string; instruction?: string; reviewOpen?: boolean; included?: string[]; seen?: string[]; decisions?: Record<string, "accepted" | "declined">; modifications?: Record<string,string>; expanded?: Record<string,boolean>; reviewSource?: string };
+const state = (api.getState() ?? {}) as { draft?: string; purpose?: "feedback"|"note"; anchor?: Anchor; draftVersion?: number; source?: string; instruction?: string; reviewOpen?: boolean; included?: string[]; seen?: string[]; decisions?: Record<string, "accepted" | "declined">; modifications?: Record<string,string>; expanded?: Record<string,boolean>; reviewSource?: string };
 let restored = false;
+let composerPurpose:"feedback"|"note"=state.purpose??"feedback";
+let notesOpen=false;
+let personalNotes:ReviewRow[]=[];
+let activeNote="";
 let mode = "reading";
+let historyOpen=false, historyBusy=false, historyPreview=false;
+let historyData: Record<string,any>={}, historyVersions: Record<string,any>[]=[];
+let latestDocument: any;
+let previewVersion: number|undefined;
+let historyRetry: Record<string,unknown>={type:"history"};
+const branchName=byId("branch-name") as HTMLInputElement;
+function historyRequest(message:Record<string,unknown>) {
+  if(historyBusy)return;
+  historyRetry=message;historyBusy=true;byId("history-status").textContent=message.type==="historyFork"?"Creating branch…":"Loading…";
+  byId("history-retry").hidden=true;historyControls();api.postMessage(message);
+}
+function historyControls() {
+  for(const button of Array.from(document.querySelectorAll<HTMLButtonElement>("#history-panel button:not(#history-close)")))button.disabled=historyBusy;
+  (byId("history-fork") as HTMLButtonElement).disabled=historyBusy||!branchName.value.trim()||!latestDocument?.connected;
+  branchName.disabled=historyBusy;
+  (byId("history-toggle") as HTMLButtonElement).disabled=!latestDocument?.historyAvailable;
+  for(const button of views??[])button.disabled=historyPreview;
+  (byId("notes-toggle") as HTMLButtonElement).disabled=historyPreview||!latestDocument?.historyAvailable;
+}
+function showHistory(open:boolean) {
+  historyOpen=open;document.body.classList.toggle("history-open",open);byId("history-panel").hidden=!open;
+  byId("history-toggle").setAttribute("aria-expanded",String(open));
+  if(open){showNotes(false);closeComposer();byId("selection-tools").hidden=true;document.body.classList.remove("review-open");byId("review-panel").hidden=true;byId("review-toggle").setAttribute("aria-expanded","false");}
+  else showReview(reviewRequested);
+  renderNoteMarkers();
+}
+function renderHistory() {
+  const list=byId("history-versions");list.replaceChildren();
+  for(const entry of historyVersions){
+    const button=textElement("button","","history-version") as HTMLButtonElement;
+    button.setAttribute("aria-label",`Open version ${entry.version}`);button.setAttribute("aria-pressed",String(historyPreview&&entry.version===previewVersion));
+    button.append(textElement("strong",`Version ${entry.version}${entry.current?" · Current":""}`));
+    const date=entry.createdAt?new Date(entry.createdAt).toLocaleString():"";
+    button.append(textElement("small",[date,entry.authorKind==="user"?"Human edit":entry.authorKind==="assistant"?"AI revision":entry.authorKind==="system"?"Snapshot":""].filter(Boolean).join(" · ")));
+    if(entry.note)button.append(textElement("p",entry.note));
+    button.addEventListener("click",()=>historyRequest({type:"historyVersion",version:entry.version}));list.append(button);
+  }
+  if(!historyVersions.length)list.append(textElement("p","No saved versions are available.","empty"));
+  byId("history-more").hidden=!historyData.hasMore;
+  const family=byId("history-family");family.replaceChildren();
+  const link=(id:string,name:string,label:string)=>{const button=textElement("button",label,"passage");button.addEventListener("click",()=>historyRequest({type:"historyOpen",artifactId:id,name}));family.append(button);};
+  if(historyData.parentArtifactId){family.append(textElement("small",`${historyData.branchName} · branched from version ${historyData.parentVersion}`));link(historyData.parentArtifactId,"Document","Open parent document");}
+  for(const branch of historyData.branches??[])link(branch.artifactId,branch.name,branch.name);
+  if(historyData.branchesHasMore)family.append(textElement("small","Showing the 100 most recent branches. All branches remain available in Files."));
+  historyControls();
+}
+byId("find").addEventListener("click",()=>api.postMessage({type:"find"}));
+byId("history-toggle").addEventListener("click",()=>{showHistory(!historyOpen);if(historyOpen)historyRequest({type:"history"});});
+byId("history-close").addEventListener("click",()=>{showHistory(false);byId("history-toggle").focus();});
+byId("history-more").addEventListener("click",()=>historyRequest({type:"history",beforeVersion:historyData.beforeVersion}));
+byId("history-retry").addEventListener("click",()=>historyRequest(historyRetry));
+byId("history-current").addEventListener("click",()=>api.postMessage({type:"historyCurrent"}));
+byId("history-fork").addEventListener("click",()=>historyRequest({type:"historyFork",name:branchName.value.trim()}));
+branchName.addEventListener("input",historyControls);
+
 let dictationPhase="idle", dictatedBase="", dictationTarget="feedback", dictationError="";
 let dictationAvailable=false;
 let reviewRequested = state.reviewOpen ?? false;
@@ -51,7 +110,7 @@ let rows: ReviewRow[] = [];
 const selected = new Set<string>(state.included ?? []);
 const seen = new Set<string>(state.seen ?? []);
 feedback.value = state.draft ?? ""; instruction.value = state.instruction ?? "";
-function saveState() { const saved = { draft: feedback.value, anchor: draftAnchor, source: sourceIdentity || state.source, instruction: instruction.value, reviewOpen: reviewRequested, included: [...selected], seen: [...seen], decisions, modifications, expanded, reviewSource }; api.setState(saved); if (restored) api.postMessage({type:"draftState",state:saved}); }
+function saveState() { const saved = { draft: feedback.value, purpose:composerPurpose, anchor: draftAnchor, source: sourceIdentity || state.source, instruction: instruction.value, reviewOpen: reviewRequested, included: [...selected], seen: [...seen], decisions, modifications, expanded, reviewSource }; api.setState(saved); if (restored) api.postMessage({type:"draftState",state:saved}); }
 function activeRun() { return revision && !revision.cancelRequested && !["succeeded", "failed", "cancelled"].includes(revision.status); }
 function dictate(target: string) {
   if(dictationPhase==="idle") {
@@ -75,10 +134,13 @@ function controls() {
   byId("dictation-status").textContent=dictationTarget==="feedback"&&dictationError?"":dictationStatus("feedback");
   annotate.disabled = dictationPhase!=="idle"&&dictationTarget!=="feedback" || !connected || (!selection && !(feedback.value && draftAnchor));
   annotate.title = selection ? "Add feedback on this selection" : feedback.value && draftAnchor ? "Continue your feedback" : "Select text to add feedback";
-  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>("#extend,.section-feedback"))) button.disabled = !connected||dictationPhase!=="idle";
+  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>("#extend,#document-feedback,.section-feedback"))) button.disabled = !connected||dictationPhase!=="idle";
   feedback.readOnly=dictationPhase!=="idle";
   add.disabled = dictationPhase!=="idle" || !connected || !draftAnchor || !feedback.value.trim() || commentBusy;
-  add.textContent = commentBusy ? "Adding…" : "Add to review";
+  add.textContent = commentBusy ? "Saving…" : composerPurpose==="note" ? "Save note" : "Add to review";
+  (byId("selection-note") as HTMLButtonElement).disabled=!connected;
+  (byId("selection-feedback") as HTMLButtonElement).disabled=!connected;
+  byId("selection-feedback").hidden=mode!=="review";
   prepare.disabled = dictationPhase!=="idle" || !connected || revisionBusy || !!activeRun() || selected.size === 0;
   prepare.textContent = revisionBusy ? "Submitting…" : "Propose changes";
   byId("review-submit").hidden = !!activeRun() || selected.size === 0;
@@ -86,9 +148,9 @@ function controls() {
   const count = rows.filter(row => !row.outdated).length;
   byId("note-count").textContent = String(count); byId("note-count").hidden = !count;
 }
-function showReview(open: boolean) { if(!open&&dictationPhase!=="idle"&&dictationTarget!=="feedback")api.postMessage({type:"dictationCancel"});reviewRequested = open; open = open && mode === "review"; document.body.classList.toggle("review-open", open); byId("review-panel").hidden = !open; byId("review-toggle").setAttribute("aria-expanded", String(open)); if (open) byId("selection-tools").hidden = true; saveState(); }
+function showReview(open: boolean) { if(open&&notesOpen)return; if(!open&&dictationPhase!=="idle"&&dictationTarget!=="feedback")api.postMessage({type:"dictationCancel"});reviewRequested = open; open = open && mode === "review" && !historyOpen && !historyPreview; document.body.classList.toggle("review-open", open); byId("review-panel").hidden = !open; byId("review-toggle").setAttribute("aria-expanded", String(open)); if (open) byId("selection-tools").hidden = true; saveState(); renderNoteMarkers(); }
 function position(element: HTMLElement, rect?: DOMRect, compact = false) {
-  const width = compact ? 236 : Math.min(360, window.innerWidth - 32);
+  const width = compact ? 294 : Math.min(360, window.innerWidth - 32);
   const height = compact ? 42 : Math.min(340, window.innerHeight - 32);
   element.style.left = `${Math.max(16, Math.min(window.innerWidth - width - 16, rect ? rect.left + rect.width / 2 - width / 2 : (window.innerWidth - width) / 2))}px`;
   const below = rect ? rect.bottom + 10 : Math.max(90, window.innerHeight / 3);
@@ -99,18 +161,19 @@ function highlight(name: string, ranges: Range[]) {
   const css = (window as any).CSS, Constructor = (window as any).Highlight;
   if (css?.highlights && Constructor) { if (ranges.length) css.highlights.set(name, new Constructor(...ranges)); else css.highlights.delete(name); }
 }
-function openComposer(anchor: Anchor, rect?: DOMRect) {
-  if (mode !== "review") return;
+function openComposer(anchor: Anchor, rect?: DOMRect, purpose:"feedback"|"note"="feedback") {
+  if (purpose==="feedback" && mode !== "review" || historyPreview || !connected) return;
   // A second selection must never silently move an unfinished note.
-  if (feedback.value.trim() && draftAnchor && JSON.stringify(draftAnchor) !== JSON.stringify(anchor)) {
+  if (feedback.value.trim() && draftAnchor && (JSON.stringify(draftAnchor) !== JSON.stringify(anchor) || purpose!==composerPurpose)) {
     byId("composer-status").textContent = "Your unfinished note is still attached to its original selection. Save it before starting another.";
-  } else { draftAnchor = anchor; byId("composer-status").textContent = ""; }
+  } else { draftAnchor = anchor; composerPurpose=purpose; byId("composer-status").textContent = ""; }
+  document.body.classList.toggle("note-composing",composerPurpose==="note");
   const extend = isExtension(draftAnchor);
-  byId("composer-title").textContent = extend ? draftAnchor?.kind === "document-end" ? "Extend document" : draftAnchor?.scope === "section" ? "Extend section" : "Extend passage" : "Add feedback";
-  feedback.setAttribute("aria-label", extend ? "Extension request" : "Feedback");
-  feedback.placeholder = extend ? "What would you like to add here?" : "Describe what you’d like to change, add, move, or research…";
+  byId("composer-title").textContent = composerPurpose==="note" ? "Add note" : draftAnchor?.kind === "document" ? "Revise entire document" : extend ? draftAnchor?.kind === "document-end" ? "Extend document" : draftAnchor?.scope === "section" ? "Extend section" : "Extend passage" : "Add feedback";
+  feedback.setAttribute("aria-label", composerPurpose==="note" ? "Personal note" : extend ? "Extension request" : "Feedback");
+  feedback.placeholder = composerPurpose==="note" ? "Write a note for yourself…" : draftAnchor?.kind === "document" ? "Describe a correction to apply throughout, or how you’d like the document rewritten…" : extend ? "What would you like to add here?" : "Describe what you’d like to change, add, move, or research…";
   byId("selected").textContent = draftAnchor?.quote ?? "";
-  byId("selected").hidden = draftAnchor?.kind === "document-end";
+  byId("selected").hidden = draftAnchor?.kind === "document-end" || draftAnchor?.kind === "document";
   byId("composer").hidden = false; byId("selection-tools").hidden = true;
   highlight("memql-active", selectionRange ? [selectionRange] : []);
   position(byId("composer"), rect); controls(); saveState(); feedback.focus();
@@ -121,7 +184,7 @@ function mapped(node: Node | null): HTMLElement | null {
   return (node?.nodeType === Node.ELEMENT_NODE ? node as Element : node?.parentElement)?.closest<HTMLElement>("[data-start-line][data-end-line]") ?? null;
 }
 function captureSelection() {
-  if (mode !== "review") { selection=undefined; byId("selection-tools").hidden=true; return; }
+  if (historyPreview) { selection=undefined; byId("selection-tools").hidden=true; return; }
   if (!byId("composer").hidden) return;
   const selected = window.getSelection();
   if (!selected?.rangeCount || selected.isCollapsed) { selection = undefined; selectionRange = undefined; byId("selection-tools").hidden = true; controls(); return; }
@@ -133,23 +196,26 @@ function captureSelection() {
   const endPrefix = document.createRange(); endPrefix.selectNodeContents(end); endPrefix.setEnd(range.endContainer,range.endOffset);
   selection = {startBlock:Number(start.dataset.blockId),endBlock:Number(end.dataset.blockId),startTextOffset:prefix.toString().length,endTextOffset:endPrefix.toString().length,startLine:Number(start.dataset.startLine),endLine:Number(end.dataset.endLine),quote:selected.toString(),prefix:prefix.toString().slice(-80),suffix:(end.textContent ?? "").slice(endPrefix.toString().length,endPrefix.toString().length+80)};
   selectionRange = range.cloneRange(); selectionRect = typeof range.getBoundingClientRect === "function" ? range.getBoundingClientRect() : undefined;
-  byId("selection-tools").hidden = !connected; position(byId("selection-tools"),selectionRect,true); controls();
+  byId("selection-tools").hidden = false; position(byId("selection-tools"),selectionRect,true); controls();
 }
 document.addEventListener("selectionchange",captureSelection);
-byId("selection-feedback").addEventListener("mousedown", event => event.preventDefault());
+for(const id of ["selection-copy","selection-feedback","selection-note"])byId(id).addEventListener("mousedown", event => event.preventDefault());
+byId("selection-copy").addEventListener("click",()=>api.postMessage({type:"copy"}));
+byId("selection-note").addEventListener("click",()=>{if(selection)openComposer(selection,selectionRect,"note");});
 annotate.addEventListener("mousedown",event => event.preventDefault());
 for (const id of ["selection-feedback","annotate"]) byId(id).addEventListener("click",() => { const anchor = selection ?? draftAnchor; if (anchor && connected) openComposer(anchor,selectionRect); });
+byId("document-feedback").addEventListener("click",()=>{selectionRange=undefined;openComposer({kind:"document",quote:"Entire document"},byId("document-feedback").getBoundingClientRect());});
 byId("extend").addEventListener("click",() => openComposer({kind:"document-end",quote:"End of document"},byId("extend").getBoundingClientRect()));
 byId("dictate").addEventListener("click",()=>dictate("feedback"));
 byId("composer-close").addEventListener("click",closeComposer);
-byId("review-toggle").addEventListener("click",() => showReview(byId("review-panel").hidden));
+byId("review-toggle").addEventListener("click",() => {const open=byId("review-panel").hidden;showNotes(false);showHistory(false);showReview(open)});
 byId("review-close").addEventListener("click",() => { showReview(false); byId("review-toggle").focus(); });
 feedback.addEventListener("input",() => { controls(); saveState(); });
 instruction.addEventListener("input",saveState);
 add.addEventListener("click",() => {
   if (add.disabled || !draftAnchor) return;
   commentBusy = true; controls(); byId("composer-status").textContent = "";
-  api.postMessage({type:"comment",version,selection:draftAnchor,body:feedback.value});
+  api.postMessage({type:composerPurpose==="note"?"note":"comment",version,selection:draftAnchor,body:feedback.value});
 });
 prepare.addEventListener("click",() => {
   if (prepare.disabled) return;
@@ -157,12 +223,12 @@ prepare.addEventListener("click",() => {
   api.postMessage({type:"prepareRevision",version,commentIds:[...selected],instruction:instruction.value});
 });
 document.addEventListener("keydown",event => {
-  if (event.key === "Escape") { if (!byId("composer").hidden) closeComposer(); else if (!byId("review-panel").hidden) { showReview(false); byId("review-toggle").focus(); } else byId("selection-tools").hidden = true; }
+  if (event.key === "Escape") { if(notesOpen){showNotes(false);byId("notes-toggle").focus();return;} if(historyOpen){showHistory(false);byId("history-toggle").focus();return;} if (!byId("composer").hidden) closeComposer(); else if (!byId("review-panel").hidden) { showReview(false); byId("review-toggle").focus(); } else byId("selection-tools").hidden = true; }
   if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !byId("composer").hidden) { event.preventDefault(); add.click(); }
   if ((event.ctrlKey || event.metaKey) && event.altKey && event.key.toLowerCase() === "m" && selection && connected) { event.preventDefault(); openComposer(selection,selectionRect); }
 });
 window.addEventListener("scroll",() => { byId("selection-tools").hidden = true; },{passive:true});
-window.addEventListener("resize",() => { byId("selection-tools").hidden = true; if (!byId("composer").hidden) position(byId("composer")); });
+window.addEventListener("resize",() => { byId("selection-tools").hidden = true; if (!byId("composer").hidden) position(byId("composer"));renderNoteMarkers(); });
 for (const mode of ["source","reading","review"]) byId(mode).addEventListener("click",() => api.postMessage({type:mode}));
 const views = Array.from(document.querySelectorAll<HTMLButtonElement>(".views button"));
 views.forEach((button,index) => button.addEventListener("keydown",event => {
@@ -172,7 +238,7 @@ views.forEach((button,index) => button.addEventListener("keydown",event => {
 content.addEventListener("click",event => { const link = (event.target as Element).closest<HTMLElement>("[data-external]"); if (link) { event.preventDefault(); api.postMessage({type:"external",href:link.dataset.external}); } });
 function textElement(tag: string, text: string, className = "") { const element = document.createElement(tag); element.textContent = text; element.className = className; return element; }
 function rangeFor(anchor: Anchor): Range | undefined {
-  if (anchor.kind === "document-end") return;
+  if (anchor.kind === "document-end" || anchor.kind === "document") return;
   const start = content.querySelector<HTMLElement>(`[data-block-id="${anchor.startBlock}"]`), end = content.querySelector<HTMLElement>(`[data-block-id="${anchor.endBlock}"]`);
   if (!start || !end) return;
   const at = (element:HTMLElement,offset:number):[Node,number]|undefined => {
@@ -184,6 +250,7 @@ function rangeFor(anchor: Anchor): Range | undefined {
 }
 function isExtension(anchor?: Anchor) { return anchor?.kind === "document-end" || anchor?.intent === "extend"; }
 function location(anchor?: Anchor): string {
+  if (anchor?.kind === "document") return "Entire document";
   if (anchor?.kind === "document-end") return "Document end";
   if (anchor?.scope === "section") return anchor.quote;
   return anchor?.sectionPath?.at(-1) || "Selected passage";
@@ -192,7 +259,7 @@ function jumpTo(anchor: Anchor, scroll = true) {
   activeAnchor = anchor;
   for (const element of document.querySelectorAll(".document-target")) element.classList.remove("document-target");
   const range = rangeFor(anchor);
-  const target = anchor.kind === "document-end" ? byId("extend") : mapped(range?.startContainer ?? null)
+  const target = anchor.kind === "document" ? byId("document-feedback") : anchor.kind === "document-end" ? byId("extend") : mapped(range?.startContainer ?? null)
     ?? content.querySelector<HTMLElement>(`[data-start-line="${anchor.startLine}"]`);
   if(scroll)target?.scrollIntoView?.({ block: window.innerWidth < 1000 ? "start" : "center", behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
   target?.classList.add("document-target");
@@ -205,6 +272,53 @@ function locationButton(anchor: Anchor, label = location(anchor)) {
   jump.addEventListener("click", () => jumpTo(anchor));
   return jump;
 }
+function showNotes(open:boolean) {
+  notesOpen=open&&!historyPreview;document.body.classList.toggle("notes-open",notesOpen);byId("notes-panel").hidden=!notesOpen;byId("notes-toggle").setAttribute("aria-expanded",String(notesOpen));
+  if(notesOpen){historyOpen=false;document.body.classList.remove("history-open","review-open");byId("history-panel").hidden=true;byId("history-toggle").setAttribute("aria-expanded","false");byId("review-panel").hidden=true;byId("review-toggle").setAttribute("aria-expanded","false");byId("selection-tools").hidden=true;}
+  renderNoteMarkers();
+}
+function currentNoteAnchor(row:ReviewRow):Anchor|undefined {
+  if(historyPreview||row.anchor.kind!=="markdown")return;
+  let anchor=row.anchor;
+  if(row.outdated){
+    const quote=anchor.sourceQuote;if(!quote)return;
+    const source=sourceIdentity.replace(/\r\n/g,"\n"),offset=source.indexOf(quote);if(offset<0||source.indexOf(quote,offset+1)>=0)return;
+    const start=source.slice(0,offset).split("\n").length-1,end=start+quote.split("\n").length;
+    const starts=Array.from(content.querySelectorAll<HTMLElement>(`[data-start-line="${start}"]`));
+    const ends=Array.from(content.querySelectorAll<HTMLElement>(`[data-end-line="${end}"]`));
+    if(!starts.length||!ends.length)return;
+    anchor={...anchor,startLine:start,endLine:end,startBlock:Number(starts.at(-1)!.dataset.blockId),endBlock:Number(ends.at(-1)!.dataset.blockId)};
+  }
+  const range=rangeFor(anchor);return range?.toString().trim()===anchor.quote.trim()?anchor:undefined;
+}
+function openNote(id:string) {
+  activeNote=id;showNotes(true);renderNotes();Array.from(byId("personal-notes").querySelectorAll<HTMLElement>("[data-note-id]")).find(element=>element.dataset.noteId===id)?.scrollIntoView?.({block:"nearest"});
+}
+function renderNotes() {
+  const list=byId("personal-notes");list.replaceChildren();
+  byId("personal-note-count").textContent=String(personalNotes.length);byId("personal-note-count").hidden=!personalNotes.length;
+  if(!personalNotes.length)list.append(textElement("p","Select a passage and choose Add note.","empty"));
+  for(const row of personalNotes){
+    const card=textElement("article","","personal-note"+(row.id===activeNote?" active":""));card.dataset.noteId=row.id;
+    const anchor=currentNoteAnchor(row);
+    if(anchor){const button=textElement("button",location(anchor),"passage");button.setAttribute("aria-label","Show note passage in document");button.addEventListener("click",()=>jumpTo(anchor));card.append(button);}
+    else card.append(textElement("small","Passage from an earlier version"));
+    card.append(textElement("blockquote",row.anchor.quote),textElement("p",row.body));list.append(card);
+  }
+  renderNoteMarkers();
+}
+function renderNoteMarkers() {
+  const markers=byId("note-markers");markers.replaceChildren();const ranges:Range[]=[];
+  if(historyPreview){highlight("memql-notes",[]);return;}
+  const groups=new Map<HTMLElement,ReviewRow[]>();
+  for(const row of personalNotes){const anchor=currentNoteAnchor(row);if(!anchor)continue;const range=rangeFor(anchor);if(range)ranges.push(range);const block=mapped(range?.startContainer??null);if(block)groups.set(block,[...(groups.get(block)??[]),row]);}
+  const top=markers.getBoundingClientRect().top;
+  for(const [block,notes] of groups){const button=textElement("button",String(notes.length),"note-marker") as HTMLButtonElement;button.setAttribute("aria-label",`Open ${notes.length===1?"note":notes.length+" notes"} on: ${notes[0].anchor.quote}`);button.title=notes.map(row=>row.body).join("\n\n");button.style.top=`${Math.max(0,block.getBoundingClientRect().top-top)}px`;button.addEventListener("click",()=>openNote(notes[0].id));markers.append(button);}
+  highlight("memql-notes",ranges);
+}
+byId("notes-toggle").addEventListener("click",()=>{showNotes(!notesOpen);if(notesOpen)api.postMessage({type:"refreshNotes"});});
+byId("notes-close").addEventListener("click",()=>{showNotes(false);byId("notes-toggle").focus();});
+byId("notes-retry").addEventListener("click",()=>api.postMessage({type:"refreshNotes"}));
 function editLocation(edit: Record<string, any>): Anchor | undefined {
   const before = String(edit.before ?? "");
   if (!before) return {kind:"document-end", quote:"End of document"};
@@ -258,7 +372,7 @@ function requestNote(row: ReviewRow, editable: boolean): HTMLElement {
     paint(); head.append(toggle);
   }
   article.append(head, textElement("p", row.body));
-  if (row.anchor?.kind !== "document-end" && row.anchor?.scope !== "section") {
+  if (row.anchor?.kind !== "document-end" && row.anchor?.kind !== "document" && row.anchor?.scope !== "section") {
     const quote = document.createElement("details"); quote.className = "request-quote";
     quote.append(textElement("summary", "Selected text"), textElement("blockquote", row.anchor?.quote ?? "")); article.append(quote);
   }
@@ -388,6 +502,10 @@ function renderRevisionContent() {
 }
 window.addEventListener("message",event=>{
   const message=event.data;
+  if(message.type==="selectionNote"&&contextSelection&&connected&&!historyPreview){openComposer(contextSelection.anchor,contextSelection.rect,"note");contextSelection=undefined;}
+  if(message.type==="notes"){personalNotes=message.rows??[];byId("notes-status").textContent=message.hasMore?"Showing your 500 most recent notes. Older notes remain saved.":"";byId("notes-retry").hidden=true;renderNotes();}
+  if(message.type==="notesError"){byId("notes-status").textContent=message.message;byId("notes-retry").hidden=false;}
+  if(message.type==="noteSaved"){commentBusy=false;feedback.value="";draftAnchor=undefined;closeComposer();controls();showNotes(true);}
   if(message.type==="selectionFeedback" && contextSelection && connected && mode==="review") {
     openComposer(contextSelection.anchor,contextSelection.rect);contextSelection=undefined;
   }
@@ -404,7 +522,7 @@ window.addEventListener("message",event=>{
   }
   if(message.type==="restoreDraft") {
     if(message.state && !restored) {
-      Object.assign(state,message.state); Object.assign(decisions,state.decisions??{});Object.assign(modifications,state.modifications??{});Object.assign(expanded,state.expanded??{});reviewSource=state.reviewSource??""; draftAnchor=state.anchor; feedback.value=state.draft??""; instruction.value=state.instruction??"";
+      Object.assign(state,message.state); Object.assign(decisions,state.decisions??{});Object.assign(modifications,state.modifications??{});Object.assign(expanded,state.expanded??{});reviewSource=state.reviewSource??""; draftAnchor=state.anchor; composerPurpose=state.purpose??"feedback"; feedback.value=state.draft??""; instruction.value=state.instruction??"";
       selected.clear(); seen.clear(); for(const id of state.included??[])selected.add(id); for(const id of state.seen??[])seen.add(id);
       showReview(state.reviewOpen??false); controls();
     }
@@ -412,13 +530,29 @@ window.addEventListener("message",event=>{
   }
   if(message.type==="viewMode") {
     const changed=mode!==message.mode;
-    mode=message.mode;contextSelection=undefined;document.body.classList.toggle("review-mode",mode==="review");
+    mode=message.mode;if(changed&&mode==="review")showNotes(false);contextSelection=undefined;document.body.classList.toggle("review-mode",mode==="review");
     for(const item of ["source","reading","review"])byId(item).setAttribute("aria-pressed",String(item===mode));
     showReview(changed&&mode==="review" ? true : reviewRequested);
     if(mode!=="review"){if(dictationPhase!=="idle")api.postMessage({type:"dictationCancel"});byId("selection-tools").hidden=true;byId("composer").hidden=true;highlight("memql-active",[]);for(const el of document.querySelectorAll(".document-target"))el.classList.remove("document-target");}
     renderRevision();
   }
+  if(message.type==="history"){historyData=message.data;historyVersions=message.append?[...historyVersions,...message.data.versions]:message.data.versions;byId("history-status").textContent="";renderHistory();}
+  if(message.type==="historyVersion"){
+    showNotes(false);
+    historyPreview=true;previewVersion=message.version;connected=false;selection=undefined;selectionRange=undefined;contextSelection=undefined;
+    document.body.classList.add("history-preview");content.innerHTML=message.html;highlight("memql-active",[]);
+    byId("history-banner").hidden=false;byId("history-caption").textContent=`Version ${message.version} · Read-only preview`;
+    branchName.value=`Branch from v${message.version}`;byId("history-branch").hidden=false;byId("history-status").textContent=latestDocument?.connected?"":"Save your local changes before starting a branch.";
+    document.documentElement.scrollTop=0;showReview(reviewRequested);renderHistory();controls();
+  }
+  if(message.type==="historyCurrent"){
+    historyPreview=false;previewVersion=undefined;document.body.classList.remove("history-preview");byId("history-banner").hidden=true;byId("history-branch").hidden=true;
+    if(latestDocument)window.dispatchEvent(new MessageEvent("message",{data:latestDocument}));renderHistory();showReview(reviewRequested);
+  }
+  if(message.type==="historyIdle"){historyBusy=false;historyControls();}
+  if(message.type==="historyError"){byId("history-status").textContent=message.message;byId("history-retry").hidden=false;}
   if(message.type==="document") {
+    latestDocument=message;historyControls();if(historyPreview)return;
     contextSelection=undefined;
     const scroll=document.documentElement.scrollTop;
     content.innerHTML=message.html; // Host uses the HTML-disabled Markdown renderer.
@@ -428,7 +562,7 @@ window.addEventListener("message",event=>{
     if(sourceIdentity && sourceIdentity!==incoming)activeAnchor=undefined;
     sourceIdentity=incoming;if(activeAnchor&&mode==="review")jumpTo(activeAnchor,false);selection=undefined;selectionRange=undefined;byId("selection-tools").hidden=true;
     if(!connected)byId("status").textContent=message.status??"Save the document before sharing feedback.";
-    document.documentElement.scrollTop=scroll;renderRevision();controls();saveState();api.postMessage({type:"rendered",version,text:content.textContent?.slice(0,500)});
+    document.documentElement.scrollTop=scroll;renderRevision();renderNotes();controls();saveState();api.postMessage({type:"rendered",version,text:content.textContent?.slice(0,500)});
   }
   if(message.type==="comments") {
     const next=message.rows??[],different=JSON.stringify(next)!==JSON.stringify(rows);rows=next;

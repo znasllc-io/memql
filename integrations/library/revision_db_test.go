@@ -200,9 +200,11 @@ func TestDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing
 	f := newRevisionDB(t)
 	for _, tc := range []struct {
 		name, source, quote, feedback, want string
-		extension, section                  bool
+		extension, section, whole           bool
 		edits                               []revisionReplacement
 	}{
+		{name: "document-wide name correction", whole: true, source: "# Guide\n\n**Alice** opens the workshop.\n\n## Close\n\nThank Alice at the end.\n", feedback: "Replace Alice with Morgan throughout.", want: "# Guide\n\n**Morgan** opens the workshop.\n\n## Close\n\nThank Morgan at the end.\n", edits: []revisionReplacement{{Before: "**Alice**", After: "**Morgan**", Reason: "Correct the name"}, {Before: "Thank Alice", After: "Thank Morgan", Reason: "Correct the second reference"}}},
+		{name: "requested full rewrite", whole: true, source: "# Workshop\n\nAlice prepares tools.\n", feedback: "Rewrite as a first-person checklist.", want: "# Workshop checklist\n\n- I prepare the tools.\n", edits: []revisionReplacement{{Before: "# Workshop\n\nAlice prepares tools.\n", After: "# Workshop checklist\n\n- I prepare the tools.\n", Reason: "Apply the requested perspective and structure"}}},
 		{name: "precise rephrase", source: "# Guide\n\nKeep the opening. This bit is verbose. Keep the ending.\n", quote: "This bit is verbose.", feedback: "Rephrase only this sentence.", want: "# Guide\n\nKeep the opening. This is clear. Keep the ending.\n", edits: []revisionReplacement{{Before: "This bit is verbose.", After: "This is clear.", Reason: "Shorten the selected sentence"}}},
 		{name: "delete", source: "# Guide\n\nKeep this. Remove this. Keep that.\n", quote: "Remove this.", feedback: "Delete this sentence.", want: "# Guide\n\nKeep this. Keep that.\n", edits: []revisionReplacement{{Before: "Remove this. ", After: "", Reason: "Remove the selected sentence"}}},
 		{name: "move and expand", source: "# Guide\n\nMove this example. Keep the intro.\n\n## Examples\n\nExisting example.\n", quote: "Move this example.", feedback: "Move this into Examples and explain it.", want: "# Guide\n\nKeep the intro.\n\n## Examples\n\nExisting example.\n\nMoved example, with an explanation.\n", edits: []revisionReplacement{{Before: "Move this example. ", After: "", Reason: "Remove from intro"}, {Before: "Existing example.", After: "Existing example.\n\nMoved example, with an explanation.", Reason: "Move into Examples and explain"}}},
@@ -214,6 +216,9 @@ func TestDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			artifact, doc := f.document(tc.source)
 			anchor := map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": tc.quote, "sourceQuote": strings.Split(tc.source, "\n")[2]}
+			if tc.whole {
+				anchor = map[string]any{"kind": "document"}
+			}
 			if tc.extension {
 				anchor = map[string]any{"kind": "document-end"}
 			}

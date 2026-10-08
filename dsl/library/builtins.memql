@@ -332,3 +332,54 @@ builtin libraryModifyRevisionItem {
  instruction string!
  newRequestId string!
 }
+
+
+@sdk
+@executor("integration.library.documentHistory")
+@args(profile="object")
+@description("Read owned document history metadata, with a version cursor and branch provenance.")
+builtin libraryDocumentHistory {
+  artifactId string!
+  beforeVersion int
+}
+
+@sdk
+@executor("integration.library.documentVersion")
+@args(profile="object")
+@description("Open a retained Markdown snapshot without changing its current document.")
+builtin libraryDocumentVersion {
+  artifactId string!
+  versionNumber int!
+}
+
+@sdk
+@executor("integration.library.forkDocumentVersion")
+@args(profile="object")
+@description("Create an independent document branch from an exact owned snapshot. Durable request identity makes retries safe across replicas; original content and history are preserved.")
+builtin libraryForkDocumentVersion {
+  artifactId string!
+  versionNumber int!
+  revision string!
+  name string!
+  requestId string!
+}
+
+
+@sdk
+@executor("integration.library.documentNotes")
+@args(profile="object")
+@description("Read the caller's personal document notes after checking current document access. These are not AI feedback.")
+builtin libraryDocumentNotes { artifactId string! }
+
+@sdk
+@executor("integration.library.addDocumentNote")
+@args(profile="object")
+@description("Save a personal note on an exact selected passage. Notes never enter AI revision requests.")
+builtin libraryAddDocumentNote {
+  artifactId string!
+  expectedVersion int!
+  expectedRevision string!
+  anchor object!
+  body string!
+  requestId string!
+}

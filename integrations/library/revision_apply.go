@@ -96,6 +96,10 @@ func (i *Integration) applyRevision(ctx context.Context, ids work.ReviewGoalRece
 		if err != nil {
 			return nil, err
 		}
+		latest, err = i.ensureInitialVersion(ctx, doc.backing, latest)
+		if err != nil {
+			return nil, err
+		}
 		versionAt := nextDocumentTime(doc.backing, latest)
 		if err = i.appendVersion(ctx, appendArgs{versionAt: versionAt, versionId: operationID, documentId: doc.source, versionNumber: version + 1, content: content, authorKind: "assistant", note: asString(proposal["summary"]), parentVersionId: stringField(latest, "id"), producedByRunId: ids.RunID, partitionId: stringField(doc.backing, "partitionId")}); err != nil {
 			return nil, err

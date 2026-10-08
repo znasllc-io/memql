@@ -51,6 +51,10 @@ func revisionPassages(captured map[string]any) ([]revisionPassage, error) {
 			passages = append(passages, revisionPassage{StartLine: len(lines), EndLine: len(lines), Comments: []map[string]any{{"id": comment["id"], "kind": "extend", "quote": "End of document", "feedback": comment["body"], "prefix": anchor["prefix"], "suffix": anchor["suffix"], "sectionPath": anchor["sectionPath"]}}})
 			continue
 		}
+		if anchor["kind"] == "document" {
+			passages = append(passages, revisionPassage{StartLine: 0, EndLine: len(lines), Comments: []map[string]any{{"id": comment["id"], "kind": "feedback", "scope": "document", "quote": "Entire document", "feedback": comment["body"]}}})
+			continue
+		}
 		start, _ := intArg(anchor["startLine"])
 		end, _ := intArg(anchor["endLine"])
 		if end > len(lines) || strings.Join(lines[start:end], "\n") != anchor["sourceQuote"] {
