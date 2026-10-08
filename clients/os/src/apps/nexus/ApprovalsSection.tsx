@@ -189,7 +189,9 @@ export function ApprovalsSection({
       const labels = decisionLabels(selected);
       // A DECIDED PROMOTION MOVES THE LADDER ON ITS OWN: the procedure is a
       // feed, so its page and its row follow the answer without a re-read.
-      const decideIt = (decision: "approved" | "rejected") => void decide.decide(selected.id, decision);
+      const documentReview = selected.subject?.reviewType === "library-document"
+        ? { requestId: String(selected.subject.requestId), proposalHash: selected.artifactHash } : undefined;
+      const decideIt = (decision: "approved" | "rejected") => void decide.decide(selected.id, decision, undefined, documentReview);
       acts.push({
         label: labels.reject,
         busy: decide.deciding === idTail(selected.id),
@@ -652,6 +654,7 @@ function approvalContext(approval: ApprovalRow, run: RunRow | null): string {
  * falls back to the words every other kind uses.
  */
 function decisionLabels(approval: ApprovalRow): { approve: string; reject: string } {
+  if (approval.subject?.reviewType === "library-document") return { approve: "Apply all changes", reject: "Decline all" };
   if (approval.kind !== PROCEDURE_PROMOTION) return { approve: "Approve", reject: "Reject" };
   const offered = (value: string) => approval.options.find((o) => o.value === value)?.label.trim() ?? "";
   const approve = offered("approved");

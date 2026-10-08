@@ -11,7 +11,8 @@ function fixture(initial: any = {}) {
   Object.assign(dom.window,{acquireVsCodeApi:()=>({postMessage:(message:any)=>messages.push(message),getState:()=>state,setState:(value:any)=>{state=value;}})});
   dom.window.eval(readFileSync("dist-test/markdown-view.js","utf8"));
   const doc=dom.window.document,el=(id:string)=>doc.getElementById(id)!;
-  const send=(data:unknown)=>dom.window.dispatchEvent(new dom.window.MessageEvent("message",{data}));
+  const send=(data:any)=>{if(data.type==="revision" && data.status?.proposal?.edits && !data.status.items)data={...data,status:{...data.status,proposalHash:"test-hash",items:data.status.proposal.edits.map((edit:any,index:number)=>({id:`item-${index}-${edit.after}`,edits:[edit],commentIds:edit.commentIds??[]}))}};return dom.window.dispatchEvent(new dom.window.MessageEvent("message",{data}));};
+  send({type:"viewMode",mode:"review"});
   const document=(source="# Title\n\nKeep **this selection** and the rest.\n",version=17,connected=true)=>send({type:"document",html:renderMarkdown(source),version,sourceIdentity:source,connected,status:"Save first"});
   const select=(selector="strong")=>{const range=doc.createRange();range.selectNodeContents(doc.querySelector(selector)!);dom.window.getSelection()!.removeAllRanges();dom.window.getSelection()!.addRange(range);doc.dispatchEvent(new dom.window.Event("selectionchange"));};
   const input=(id:string,value:string)=>{(el(id) as HTMLTextAreaElement).value=value;el(id).dispatchEvent(new dom.window.Event("input"));};
@@ -45,12 +46,13 @@ test("multiple notes submit together; actual proposed changes precede approval a
   const status={prepared:true,approvalId:"exact-approval",status:"waiting",decision:"",proposal:{summary:"Move and expand",revisedContent:"Revised",edits:[{before:"<script>private()</script>",after:"<img src=x>",reason:"Move this"},{before:"Destination",after:"Destination\n\nMoved text.",reason:"Insert there"}]}};
   f.send({type:"revision",status});assert.equal(f.doc.querySelectorAll("#revision script,#revision img").length,0);assert.equal(f.doc.querySelectorAll(".change").length,2);assert.equal(f.el("review-panel").hidden,false);assert.equal(f.el("review-submit").hidden,true);assert.equal(f.el("review-footer").hidden,false);
   const approve=f.el("review-actions").lastElementChild;f.send({type:"revision",status});assert.equal(f.el("review-actions").lastElementChild,approve,"polling must preserve focus and expanded changes");
-  [...f.doc.querySelectorAll<HTMLButtonElement>("#review-actions button")].find(b=>b.textContent==="Approve & apply")!.click();assert.equal(f.messages.at(-1).approvalId,"exact-approval");assert.equal(f.messages.at(-1).decision,"approved");
+  for(const button of [...f.doc.querySelectorAll<HTMLButtonElement>(".item-actions button")].filter(b=>b.textContent==="Accept")){const key=button.dataset.focusKey;[...f.doc.querySelectorAll<HTMLButtonElement>("[data-focus-key]")].find(b=>b.dataset.focusKey===key)!.click();}
+  [...f.doc.querySelectorAll<HTMLButtonElement>("#review-actions button")].find(b=>b.textContent==="Apply accepted (2)")!.click();assert.equal(f.messages.at(-1).approvalId,"exact-approval");assert.equal(f.messages.at(-1).decision,"approved");
   f.send({type:"revision",status:{...status,status:"succeeded",decision:"approved",result:{applied:true}}});f.send({type:"revisionIdle"});assert.match(f.el("revision").textContent!,/Changes applied/);f.dom.window.close();
 });
 test("selection choices survive refresh and views retain accessible keyboard controls",()=>{
   const f=fixture();f.document();const rows=[{id:"a",body:"One",anchor:{kind:"document-end"}},{id:"b",body:"Two",anchor:{kind:"document-end"}}];f.send({type:"comments",rows});(f.doc.querySelector('[role="switch"]') as HTMLInputElement).click();f.send({type:"comments",rows});assert.equal((f.doc.querySelector('[role="switch"]') as HTMLButtonElement).getAttribute("aria-checked"),"false");
-  f.el("split").click();assert.equal(f.messages.at(-1).type,"split");f.send({type:"viewMode",mode:"split"});assert.equal(f.el("split").getAttribute("aria-pressed"),"true");f.el("source").dispatchEvent(new f.dom.window.KeyboardEvent("keydown",{key:"ArrowRight",bubbles:true}));assert.equal(f.doc.activeElement?.id,"reading");
+  f.el("review").click();assert.equal(f.messages.at(-1).type,"review");f.send({type:"viewMode",mode:"review"});assert.equal(f.el("review").getAttribute("aria-pressed"),"true");f.el("source").dispatchEvent(new f.dom.window.KeyboardEvent("keydown",{key:"ArrowRight",bubbles:true}));assert.equal(f.doc.activeElement?.id,"reading");
   f.document("Local edits",18,false);assert.equal((f.el("prepare-revision") as HTMLButtonElement).disabled,true);assert.equal((f.el("extend") as HTMLButtonElement).disabled,true);f.dom.window.close();
 });
 
@@ -77,7 +79,8 @@ test("standalone extensions replace the previous review with the same diff and a
   f.send({type:"revisionIdle"});
   assert.equal(f.el("review-footer").hidden,false);assert.equal(f.el("review-submit").hidden,true);
   assert.equal(f.doc.querySelectorAll(".change").length,1);assert.match(f.el("revision").textContent!,/## Next steps/);
-  assert.ok([...f.doc.querySelectorAll<HTMLButtonElement>("#review-actions button")].some(button=>button.textContent==="Approve & apply"&&!button.disabled));f.dom.window.close();
+  f.doc.querySelector<HTMLButtonElement>(".item-actions button")!.click();
+  assert.ok([...f.doc.querySelectorAll<HTMLButtonElement>("#review-actions button")].some(button=>button.textContent==="Apply accepted (1)"&&!button.disabled));f.dom.window.close();
 });
 
 
@@ -123,4 +126,31 @@ test("submission failure preserves requests, retry controls and unaddressed requ
   assert.equal(f.el("review-actions").textContent,"Retry submission");assert.match(f.el("revision").textContent!,/Add examples/);
   f.send({type:"revision",status:{status:"waiting",prepared:true,approvalId:"ap",proposal:{commentIds:["ext"],comments:rows,edits:[]}}});
   assert.match(f.el("revision").textContent!,/No change proposed for this request/);assert.equal(f.doc.querySelectorAll('[role="switch"]').length,0);f.dom.window.close();
+});
+
+test("polling preserves explanations, item decisions, focus and modification drafts",()=>{
+ const f=fixture();f.document();
+ const status={status:"waiting",approvalId:"approval",proposal:{artifactId:"doc",revision:"v1",version:1,edits:[{before:"this selection",after:"better words",reason:"Use clear wording",commentIds:["note"]}],comments:[{id:"note",body:"Rephrase",anchor:{kind:"document-end"}}]}};
+ f.send({type:"revision",status});
+ const why=f.doc.querySelector<HTMLDetailsElement>(".change-reason")!;why.open=true;
+ [...f.doc.querySelectorAll<HTMLButtonElement>(".item-actions button")].find(b=>b.textContent==="Modify with AI")!.click();
+ const input=f.doc.querySelector<HTMLTextAreaElement>(".item-modify textarea")!;input.value="Research this claim first";input.dispatchEvent(new f.dom.window.Event("input"));input.focus();input.setSelectionRange(5,9);
+ f.send({type:"revision",status:{...status,heartbeat:2}});f.send({type:"revisionIdle"});
+ assert.equal(f.doc.querySelector<HTMLDetailsElement>(".change-reason")!.open,true);
+ const restored=f.doc.querySelector<HTMLTextAreaElement>(".item-modify textarea")!;assert.equal(restored.value,"Research this claim first");assert.equal(f.doc.activeElement,restored);assert.equal(restored.selectionStart,5);assert.equal(restored.selectionEnd,9);
+ f.doc.querySelector<HTMLButtonElement>(".item-modify button")!.click();assert.equal(f.messages.at(-1).type,"modifyRevisionItem");assert.equal(f.messages.at(-1).instruction,"Research this claim first");f.dom.window.close();
+});
+
+test("Read is a quiet reading mode and restores Review without losing the draft",()=>{
+ const f=fixture();f.document();f.select();f.el("annotate").click();f.input("feedback","Keep this draft");
+ f.send({type:"viewMode",mode:"reading"});assert.equal(f.doc.body.classList.contains("review-mode"),false);assert.equal(f.el("review-panel").hidden,true);assert.equal(f.el("composer").hidden,true);
+ f.select();assert.equal(f.el("selection-tools").hidden,true);
+ f.send({type:"revision",status:{status:"waiting",approvalId:"new",proposal:{}}});assert.equal(f.el("review-panel").hidden,true);
+ f.send({type:"viewMode",mode:"review"});assert.equal(f.el("review-panel").hidden,false);f.el("annotate").click();assert.equal((f.el("feedback") as HTMLTextAreaElement).value,"Keep this draft");f.dom.window.close();
+});
+
+test("dictation appends cumulative transcripts once and leaves submission to the person",()=>{
+ const f=fixture();f.document();f.el("extend").click();f.input("feedback","Please");f.send({type:"dictationAvailable",available:true});f.el("dictate").click();assert.equal(f.messages.at(-1).type,"dictationStart");
+ f.send({type:"dictation",phase:"listening",text:"add"});f.send({type:"dictation",phase:"listening",text:"add examples"});assert.equal((f.el("feedback") as HTMLTextAreaElement).value,"Please add examples");assert.equal((f.el("add") as HTMLButtonElement).disabled,true);
+ f.el("dictate").click();assert.equal(f.messages.at(-1).type,"dictationStop");f.send({type:"dictation",phase:"idle",text:"add examples.",final:true});assert.equal((f.el("add") as HTMLButtonElement).disabled,false);assert.equal((f.el("feedback") as HTMLTextAreaElement).value,"Please add examples.");assert.ok(!f.messages.some(m=>m.type==="comment"));f.dom.window.close();
 });

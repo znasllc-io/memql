@@ -2431,6 +2431,50 @@ func LibraryDocumentRevisionStatusBuild(args LibraryDocumentRevisionStatusArgs) 
 	return b.String()
 }
 
+// LibraryModifyRevisionItem -- Revise one proposal item with AI; retain every other item unchanged.
+type LibraryModifyRevisionItemArgs struct {
+	RequestId    string
+	ApprovalId   string
+	ItemId       string
+	Instruction  string
+	NewRequestId string
+}
+
+// LibraryModifyRevisionItem calls the engine builtin libraryModifyRevisionItem.
+func (qc *QueryClient) LibraryModifyRevisionItem(ctx context.Context, args LibraryModifyRevisionItemArgs) (*Result, error) {
+	call := LibraryModifyRevisionItemBuild(args)
+	return qc.executeNamed(ctx, "libraryModifyRevisionItem", call)
+}
+
+func LibraryModifyRevisionItemBuild(args LibraryModifyRevisionItemArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryModifyRevisionItem(")
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("approvalId: ")
+	b.WriteString(quoteMemQL(args.ApprovalId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("itemId: ")
+	b.WriteString(quoteMemQL(args.ItemId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("instruction: ")
+	b.WriteString(quoteMemQL(args.Instruction))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("newRequestId: ")
+	b.WriteString(quoteMemQL(args.NewRequestId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryRemoveArtifactLabel -- Remove a label from a Library artifact index row. Idempotent -- a label already absent is left alone and nothing is written. Same owner-threaded load/write shape as libraryAddArtifactLabel.
 type LibraryRemoveArtifactLabelArgs struct {
 	ArtifactId string

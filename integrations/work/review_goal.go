@@ -170,9 +170,33 @@ func (i *Integration) validatePlanReview(ctx context.Context, kind string, subje
 	return validate(ctx, subject)
 }
 
+// SetPlanReviewAnswerValidator binds a typed selection to an immutable proposal.
+// The owning integration validates its contract; Work persists and replays the
+// person's exact answer under the existing cross-replica decision lock.
+func (i *Integration) SetPlanReviewAnswerValidator(kind string, validate func(context.Context, map[string]any, map[string]any) error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.reviewAnswerValidators == nil {
+		i.reviewAnswerValidators = make(map[string]func(context.Context, map[string]any, map[string]any) error)
+	}
+	i.reviewAnswerValidators[kind] = validate
+}
+func (i *Integration) validatePlanReviewAnswer(ctx context.Context, kind string, subject, answer map[string]any) error {
+	if kind != workstate.ApprovalKindPlanReview {
+		return nil
+	}
+	i.mu.RLock()
+	validate := i.reviewAnswerValidators[rowString(subject, "reviewType")]
+	i.mu.RUnlock()
+	if validate != nil {
+		return validate(ctx, subject, answer)
+	}
+	return nil
+}
+
 // recoverReviewDecision only recovers the fixed-template review bootstrap's
 // resume. It never replays training, promotion, or other approval side effects.
-func (i *Integration) recoverReviewDecision(ctx context.Context, approvalID, decision string) (map[string]any, error) {
+func (i *Integration) recoverReviewDecision(ctx context.Context, approvalID, decision string, answer map[string]any) (map[string]any, error) {
 	st := i.store()
 	approval, err := one(st.query(ctx, "query "+call("workApprovalForOwner", map[string]any{"approvalId": approvalID})))
 	if err != nil || approval == nil {
@@ -180,6 +204,9 @@ func (i *Integration) recoverReviewDecision(ctx context.Context, approvalID, dec
 	}
 	if rowString(approval, "kind") != workstate.ApprovalKindPlanReview || rowString(approval, "decision") != decision {
 		return nil, nil
+	}
+	if workstate.ArtifactHash(optMap(rowMap(approval, "answer"))) != workstate.ArtifactHash(optMap(answer)) {
+		return nil, fmt.Errorf("work: this approval already has a different recorded answer")
 	}
 	run, err := st.runForOwner(ctx, rowString(approval, "runId"))
 	if err != nil || run == nil {
@@ -205,4 +232,13 @@ func (i *Integration) recoverReviewDecision(ctx context.Context, approvalID, dec
 		return nil, err
 	}
 	return map[string]any{"approvalId": approvalID, "runId": memql.BareShortId(rowString(approval, "runId")), "decision": decision, "runResumed": resumed, "recovered": true}, nil
+}
+
+// LockPlanReview serializes replacing a proposal with deciding it. Consumers
+// take this gate before their document gate, matching the shared decision path.
+func (i *Integration) LockPlanReview(ctx context.Context, approvalID string) (func(), error) {
+	if i == nil || i.decisionGate == nil {
+		return nil, fmt.Errorf("work: approval coordination is unavailable")
+	}
+	return i.decisionGate(ctx, approvalID)
 }

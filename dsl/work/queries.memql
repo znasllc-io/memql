@@ -454,3 +454,16 @@ query run workDocumentRevisionRequest {
   sort "startedAt", "desc"
   paginate 1
 }
+
+/// A successor invalidates the earlier immutable proposal for application.
+/// Ordering is by admission, never a mutable heartbeat or decision timestamp.
+@actor
+query goal workDocumentRevisionAmendment {
+ args { requestId string! }
+ filter row => row.ownerUserId == actor.userId
+             && row.?input.proposal.reviewType == "library-document"
+             && row.?input.proposal.amendment.requestId == args.requestId
+ shape workRevisionAmendment
+ sort "row.createdAt", "desc"
+ paginate 1
+}

@@ -35,6 +35,9 @@ func (i *Integration) applyRevision(ctx context.Context, ids work.ReviewGoalRece
 			release()
 		}
 	}()
+	if err := i.validateCurrentRevision(ctx, proposal); err != nil {
+		return nil, err
+	}
 	version, valid := intArg(proposal["version"])
 	if !valid || doc.kind != proposal["documentKind"] || memql.BareShortId(doc.source) != proposal["sourceId"] {
 		return nil, fmt.Errorf("the revision no longer identifies this document")

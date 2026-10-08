@@ -12110,6 +12110,28 @@ QueryClient.prototype.workDescriptionGuidance = function (this: QueryClient, arg
   return this.executeNamed("workDescriptionGuidance", buildWorkDescriptionGuidance(args), opts);
 };
 
+/** A successor invalidates the earlier immutable proposal for application. Ordering is by admission, never a mutable heartbeat or decision timestamp. */
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workDocumentRevisionAmendment"] in generated_concepts.ts).
+export interface WorkDocumentRevisionAmendmentArgs {
+  requestId: string;
+}
+
+export function buildWorkDocumentRevisionAmendment(args: WorkDocumentRevisionAmendmentArgs): string {
+  const parts: string[] = [];
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  return "query workDocumentRevisionAmendment(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workDocumentRevisionAmendment(args: WorkDocumentRevisionAmendmentArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workDocumentRevisionAmendment = function (this: QueryClient, args: WorkDocumentRevisionAmendmentArgs = {} as WorkDocumentRevisionAmendmentArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workDocumentRevisionAmendment", buildWorkDocumentRevisionAmendment(args), opts);
+};
+
 /** Recover this person's latest document review across editor windows and restarts. Returns only an owned request identifier; Library checks the backing document before retrieving its review. This lookup exposes no captured document bytes. startedAt orders requests by admission, not by a later approval or heartbeat. */
 // Bound concept: v1:work:run (machine-readable: BoundConcepts["workDocumentRevisionRequest"] in generated_concepts.ts).
 export interface WorkDocumentRevisionRequestArgs {

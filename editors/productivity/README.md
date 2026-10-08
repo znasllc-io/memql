@@ -35,11 +35,34 @@ this directory. `npm test` exercises pure logic. The host suite uses
 after both extensions have been compiled. `npm run package` creates a VSIX
 with both entry points; it does not publish it.
 
-Markdown mode controls are available above the reading view and from the command
-palette: **Markdown Source**, **Markdown Reading View**, and **Markdown Split
-View**. The source and preview share one VS Code document, including unsaved
-changes. Save before adding shared feedback. Local files remain local; opening
+Markdown has **Source**, **Read**, and **Review** modes. Read is a clean reading
+surface. Review offers selected-passage feedback, section extensions beside
+headings, and document extensions at the end. **Markdown Split View** remains
+available in the editor title and command palette. These views share one VS Code
+document, including unsaved changes. Save before adding shared feedback. Local files remain local; opening
 one never silently uploads it or starts another Cockpit backup process.
+
+Review each proposal with **Accept**, **Decline**, or **Modify with AI**, then
+choose **Apply accepted**. Linked edits, such as moving a passage, share one
+decision. Modifying an item preserves the other proposed items and their
+decisions. The DSL workflow uses the harness for evidence collection when the
+feedback calls for research, then prepares exact replacements for human review.
+Unchanged text and formatting are preserved by default. **Show in document**
+keeps the target highlighted; expanded explanations survive status updates.
+
+In the MemQL browser editor, **Dictate** in the feedback composer uses Ask's
+microphone capture and authenticated transcription stream. Browser microphone
+permission is requested on first use. Stop to finish transcribing, edit the
+transcript, then add it to review. Nothing is submitted automatically. Closing
+the view or changing the connection cancels capture. Ordinary desktop VS Code
+does not expose this capture adapter, so its feedback composer remains text-only.
+
+The immutable approval records human feedback separately from proposed text,
+the measured provider/model calls behind each item, the exact accepted subset,
+and the source revision. A modified item gets its new attribution while retained
+items keep theirs. Existing document/file version history remains the source of
+earlier authorship; this does not infer missing model identities for imported
+or historical content.
 
 The reading view uses an HTML-disabled Markdown renderer and does not fetch
 remote images. Links open only after a deliberate click. Shared comments require
@@ -100,7 +123,7 @@ captures the ready template content it reviewed, so later copy edits do not
 change an in-progress campaign. Existing jobs without a captured snapshot retain
 the older live-template behavior; pause and recreate those jobs to capture a copy.
 
-In **Read**, select a passage and choose **Feedback** or **Extend**. The feedback
+In **Review**, select a passage and choose **Feedback** or **Extend**. The feedback
 icon also supports Ctrl/Cmd+Alt+M. Use **+** beside a heading to **Extend section**,
 or **Extend document** at the end. These share one extension flow: the anchor
 supplies a starting location, and the request describes the content to add. Unfinished notes stay attached to their selection across view
@@ -116,10 +139,10 @@ Reopening an editor restores the latest owned request from a DSL lookup in
 MemQL, even when the browser has an older saved receipt. Request ordering uses
 admission time, so later heartbeats on an older review cannot displace it.
 
-Choose up to 100 current notes and **Propose changes**. This starts one AI
-analysis against the exact saved Markdown source, up to 128 KiB. The DSL
-`reviseLibraryDocument` template orders source capture, the named prompt,
-validation, human review and application. The native capabilities enforce
+Choose up to 100 current notes and **Propose changes**. This starts a bounded
+AI revision against the exact saved Markdown source, up to 128 KiB. The DSL
+`reviseLibraryDocument` template orders source capture, harness evidence gathering,
+the named revision prompt, validation, human review and application. The native capabilities enforce
 ownership, source revisions, unambiguous non-overlapping replacements, exact
 approval and versioned storage. No generation-specific metadata is required:
 imported Markdown uses the same source, quote, context and position anchors.
@@ -129,8 +152,8 @@ location, including both ends of a move. Location links scroll to the affected
 passage without closing Review; proposal links use the actual insertion location,
 even when the request started at the document end. At narrow widths Review
 becomes a bottom panel, keeping the document reachable above it. **Compare full document** opens a
-read-only diff. **Approve & apply** resumes the same Nexus job and saves a new
-version; **Decline** keeps the document unchanged. Preservation is the default:
+read-only diff. **Apply accepted** resumes the same Nexus job and saves a new
+version containing only accepted items; declined items are excluded. Preservation is the default:
 people can say "Rename this to Draft Exchange" without asking to retain bold
 formatting, surrounding descriptions or other items. The DSL prompt requires
 minimal changes and a check that every difference serves the feedback. Native

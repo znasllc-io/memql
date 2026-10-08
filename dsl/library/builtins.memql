@@ -320,3 +320,15 @@ builtin libraryAuditTraining {  }
 @executor("integration.library.libraryComposeRevision")
 @args(profile="object")
 builtin libraryComposeRevision { name string! format string! statement string! }
+
+/// Revise one proposal item with AI; retain every other item unchanged.
+@sdk
+@executor("integration.library.modifyRevisionItem")
+@args(profile="object")
+builtin libraryModifyRevisionItem {
+ requestId string!
+ approvalId string!
+ itemId string!
+ instruction string!
+ newRequestId string!
+}

@@ -86,6 +86,9 @@ func (p *draftUploaderProbe) Upload(_ context.Context, _, objectName string, dat
 	return "https://test.invalid/" + objectName, nil
 }
 
+func (p *draftTurnProbe) ResolveOwnerAgent(_ context.Context, owner string) (string, error) {
+	return "plannerAgent-" + owner, nil
+}
 func (p *draftTurnProbe) RunTurn(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg) (string, error) {
 	ac, ok := auth.AccessFromContext(ctx)
 	if !ok || ac.UserId != "v1:identity:user:draft-owner" {

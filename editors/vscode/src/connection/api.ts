@@ -1,7 +1,8 @@
 // The versioned connection seam used by MemQL Productivity Tools on both hosts.
 // Credentials remain private to MemQL. Every operation carries the connection
 // lease it was opened under: selecting A -> B -> A never revives an old save.
-import type { QueryClient } from "@znasllc-io/memql-sdk-core/client";
+import { pushToTalk } from "@znasllc-io/memql-sdk-core/voice";
+import type { Dispatcher, QueryClient } from "@znasllc-io/memql-sdk-core/client";
 import { apiBaseUrlFor } from "./endpoint.js";
 import type { ClusterConfig } from "../clusters/model.js";
 
@@ -12,6 +13,7 @@ export interface EditorConnectionAPI {
   onDidChange(listener: () => void): { dispose(): void };
   connect(domain: string): Promise<ConnectionLease>;
   execute(lease: ConnectionLease, name: string, generatedCall: string): Promise<Record<string, unknown>[]>;
+  transcribe(lease: ConnectionLease, audio: ReadableStream<Uint8Array>, signal: AbortSignal, onPartial: (text:string)=>void): Promise<string>;
   readBytes(lease: ConnectionLease, artifactId: string, version?: number): Promise<Uint8Array>;
   uploadFile(lease: ConnectionLease, filename: string, mimeType: string, content: Uint8Array): Promise<{ fileId: string; artifactId: string }>;
   uploadVersion(lease: ConnectionLease, artifactId: string, filename: string, mimeType: string,
@@ -21,6 +23,7 @@ export interface EditorSession {
   cluster: ClusterConfig;
   query: Pick<QueryClient, "executeNamed">;
   bearer: string;
+  dispatcher?: Dispatcher;
 }
 export interface EditorConnectionDeps {
   session(): EditorSession | undefined;
@@ -70,6 +73,17 @@ export class EditorConnection implements EditorConnectionAPI {
     const result = await this.require(lease).query.executeNamed(name, generatedCall);
     this.require(lease);
     return result.rows();
+  }
+  async transcribe(lease:ConnectionLease,audio:ReadableStream<Uint8Array>,signal:AbortSignal,onPartial:(text:string)=>void):Promise<string> {
+    const dispatcher=this.require(lease).dispatcher;
+    if(!dispatcher)throw new Error("Connect to MemQL before dictating.");
+    const abort=new AbortController();
+    const cancel=()=>abort.abort();signal.addEventListener("abort",cancel,{once:true});if(signal.aborted)abort.abort();
+    const change=this.onDidChange(cancel);
+    try {
+      const result=await pushToTalk(dispatcher,audio,{audio:{encoding:"pcm16",sampleRate:16000,channels:1},signal:abort.signal,onPartial:part=>{this.require(lease);if(!abort.signal.aborted)onPartial(part.text);}});
+      this.require(lease);return result.text;
+    } finally {change.dispose();signal.removeEventListener("abort",cancel);}
   }
   async readBytes(lease: ConnectionLease, artifactId: string, version?: number): Promise<Uint8Array> {
     const session = this.require(lease);

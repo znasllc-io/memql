@@ -110,7 +110,7 @@ export async function activate(context: vscode.ExtensionContext) {
       try { await examples.resume(); } catch (error) { void vscode.window.showErrorMessage((error as Error).message); }
     }),
     vscode.window.registerCustomEditorProvider("memql.productivity.markdown", markdown, { supportsMultipleEditorsPerDocument: true }),
-    ...(["source", "reading", "split"] as const).map(mode => vscode.commands.registerCommand(`memql.productivity.markdown.${mode}`, async (uri?: vscode.Uri) => {
+    ...(["source", "reading", "review", "split"] as const).map(mode => vscode.commands.registerCommand(`memql.productivity.markdown.${mode}`, async (uri?: vscode.Uri) => {
       try { await markdown.show(mode, uri); } catch (error) { void vscode.window.showErrorMessage((error as Error).message); }
     })),
     vscode.workspace.registerTextDocumentContentProvider("memql-review", { provideTextDocumentContent: uri => snapshots.get(uri.toString()) ?? "" }),

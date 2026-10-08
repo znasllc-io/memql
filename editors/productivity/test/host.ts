@@ -13,6 +13,7 @@ export async function run(): Promise<void> {
   check(core && productivity, "Both extensions must be installed in this host.");
   const api = await core.activate();
   check(api.connection?.version === 1, "The core extension must export the connection API on this host.");
+  check(typeof api.connection.transcribe === 'function', 'The core connection must expose shared dictation.');
   const tools = await productivity.activate();
   check(tools.connectionVersion === 1, "Productivity must use the core connection API.");
   const commands = await vscode.commands.getCommands(true);
@@ -73,6 +74,10 @@ export async function run(): Promise<void> {
   await markdownDocument.save();
   await vscode.commands.executeCommand("memql.productivity.markdown.reading", markdownURI);
   await tools.markdownReady(markdownURI);
+  await vscode.commands.executeCommand("memql.productivity.markdown.review", markdownURI);
+  check((await tools.markdownReady(markdownURI)).includes("Unsaved A rendered passage."), "Review mode must preserve the same document.");
+  await until(() => readingTabs().length === 1, "Review mode duplicated the document tab.");
+  await vscode.commands.executeCommand("memql.productivity.markdown.reading", markdownURI);
   const pdf = await PDFDocument.create(); pdf.addPage([400, 600]);
   const uri = vscode.Uri.joinPath(root, "host-smoke.pdf");
   await vscode.workspace.fs.writeFile(uri, await pdf.save());

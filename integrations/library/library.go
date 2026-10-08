@@ -111,6 +111,7 @@ func (i *Integration) IntegrationName() string { return "library" }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append([]memql.IntegrationCapability{
+		{Name: "modifyRevisionItem", Description: "Capture a person-requested revision of one immutable proposal item.", Handler: i.handleModifyRevisionItem},
 		{Name: "requestDocumentRevision", Description: "Capture feedback and start revision analysis.", Handler: i.handleRequestDocumentRevision},
 		{Name: "documentRevisionStatus", Description: "Read an owned revision request and its saved draft.", Handler: i.handleDocumentRevisionStatus},
 		{Name: "revisionInput", Description: "Read the current run's immutable document and feedback.", Handler: i.handleRevisionInput},

@@ -246,6 +246,10 @@ func validateRevisionResult(captured, proposal map[string]any) error {
 	if err != nil {
 		return err
 	}
+	rebuilt["attribution"] = proposal["attribution"]
+	if proposal["attribution"] == nil {
+		delete(rebuilt, "attribution")
+	}
 	if workstate.ArtifactHash(rebuilt) != workstate.ArtifactHash(proposal) {
 		return fmt.Errorf("the proposed changes differ from the captured source or validated replacements")
 	}

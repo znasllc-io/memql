@@ -56,7 +56,7 @@ export class RevisionReview {
     // A deliberate new submission may retry a terminal attempt. An uncertain
     // submission retains its identity until its durable status is known.
     const previous = pending?.fingerprint === fingerprint ? await this.files.revision(base, pending.requestId).catch(() => undefined) : undefined;
-    if (pending?.fingerprint !== fingerprint || (previous && ["failed", "cancelled", "succeeded"].includes(String(previous.status)))) {
+    if (pending?.fingerprint !== fingerprint || (previous && (previous.cancelRequested || ["failed", "cancelled", "succeeded"].includes(String(previous.status))))) {
       pending = { fingerprint, requestId: globalThis.crypto.randomUUID() };
       // Persist before submitting so a lost response or editor restart retries
       // the same request, including after only the first server write landed.
@@ -71,7 +71,13 @@ export class RevisionReview {
     await this.recover(document, base);
     const saved = this.context.workspaceState.get<SavedRequest>(this.key(document.uri));
     if (!saved) return undefined;
-    return this.files.revision(base, saved.requestId);
+    let status = await this.files.revision(base, saved.requestId);
+    for (let n=0; typeof status.supersededBy === "string" && status.supersededBy && n<20; n++) {
+      const requestId = status.supersededBy;
+      status = await this.files.revision(base, requestId);
+      await this.context.workspaceState.update(this.key(document.uri), {fingerprint:saved.fingerprint, requestId});
+    }
+    return status;
   }
   async resumePreparation(document: vscode.TextDocument): Promise<void> {
     const saved = this.context.workspaceState.get<SavedRequest>(this.key(document.uri));
@@ -79,10 +85,47 @@ export class RevisionReview {
     const base = await this.load(document.uri);
     const status = await this.files.revision(base, saved.requestId);
     const proposal = status.proposal as Record<string, unknown>;
+    const amendment = proposal.amendment as Record<string, string> | undefined;
+    if (amendment) {
+      await this.files.modifyRevision(base, amendment.requestId, amendment.approvalId, amendment.itemId, amendment.instruction, saved.requestId);
+      return;
+    }
     if (typeof proposal.version !== "number" || typeof proposal.revision !== "string" || !Array.isArray(proposal.commentIds) || !proposal.commentIds.every(id => typeof id === "string") || typeof proposal.instruction !== "string") throw new Error("The stored proposal is incomplete.");
     await this.files.requestRevision({ ...base, version: proposal.version, revision: proposal.revision }, proposal.commentIds as string[], proposal.instruction, saved.requestId);
   }
-  async decide(document: vscode.TextDocument, approvalId: string, decision: "approved" | "rejected"): Promise<void> {
+  async cancel(document:vscode.TextDocument):Promise<void>{
+    const saved=this.context.workspaceState.get<SavedRequest>(this.key(document.uri));
+    if(!saved)throw new Error("This document has no active revision.");
+    await this.files.cancelRevision(await this.load(document.uri),saved.requestId);
+  }
+  async modify(document: vscode.TextDocument, approvalId: string, itemId: string, instruction: string): Promise<void> {
+    if (document.isDirty) throw new Error("Save or discard local edits before modifying this proposal.");
+    const key = this.key(document.uri), saved = this.context.workspaceState.get<SavedRequest>(key);
+    if (!saved) throw new Error("Prepare a proposal first.");
+    const base = await this.load(document.uri);
+    const status = await this.files.revision(base, saved.requestId);
+    assertRevisionBase(base, document.getText(), status.proposal as Record<string, unknown>);
+    const amendmentKey = `${key}:amendment`;
+    const fingerprint = JSON.stringify([saved.requestId, approvalId, itemId, instruction.trim()]);
+    let pending = this.context.workspaceState.get<SavedRequest>(amendmentKey);
+    if (pending?.fingerprint !== fingerprint) { pending = { fingerprint, requestId: globalThis.crypto.randomUUID() }; await this.context.workspaceState.update(amendmentKey, pending); }
+    await this.files.modifyRevision(base, saved.requestId, approvalId, itemId, instruction.trim(), pending.requestId);
+    await this.context.workspaceState.update(key, {fingerprint: saved.fingerprint, requestId: pending.requestId});
+  }
+  async retryModification(document:vscode.TextDocument):Promise<void>{
+    const key=this.key(document.uri),saved=this.context.workspaceState.get<SavedRequest>(key);
+    if(!saved)throw new Error("Open the failed revision first.");
+    const base=await this.load(document.uri),status=await this.files.revision(base,saved.requestId);
+    const proposal=status.proposal as Record<string,any>,amendment=proposal.amendment;
+    if(!amendment || !(status.cancelRequested || ["failed","cancelled"].includes(String(status.status))))throw new Error("This modification is still running.");
+    assertRevisionBase(base,document.getText(),proposal);
+    const retryKey=`${key}:retry`,fingerprint=saved.requestId;
+    let pending=this.context.workspaceState.get<SavedRequest>(retryKey);
+    if(pending?.fingerprint!==fingerprint){pending={fingerprint,requestId:globalThis.crypto.randomUUID()};await this.context.workspaceState.update(retryKey,pending);}
+    await this.files.modifyRevision(base,amendment.requestId,amendment.approvalId,amendment.itemId,amendment.instruction,pending.requestId);
+    await this.context.workspaceState.update(key,{fingerprint:saved.fingerprint,requestId:pending.requestId});
+  }
+  async decide(document: vscode.TextDocument, approvalId: string, decision: "approved" | "rejected", answer?: Record<string, unknown>): Promise<void> {
     const saved = this.context.workspaceState.get<SavedRequest>(this.key(document.uri));
     if (!saved) throw new Error("Prepare and review a revision request first.");
     const base = await this.load(document.uri);
@@ -91,7 +134,7 @@ export class RevisionReview {
       const status = await this.files.revision(base, saved.requestId);
       assertRevisionBase(base, document.getText(), status.proposal as Record<string, unknown>);
     }
-    await this.files.decideRevision(base, saved.requestId, approvalId, decision);
+    await this.files.decideRevision(base, saved.requestId, approvalId, decision, answer);
   }
   async compare(document: vscode.TextDocument): Promise<void> {
     const saved = this.context.workspaceState.get<SavedRequest>(this.key(document.uri));

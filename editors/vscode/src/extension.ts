@@ -501,7 +501,7 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
     session: () => {
       if (!workspace.isTrusted || connections?.state.status !== 'connected' || !connections.query || !connections.bearer) return undefined;
       const cluster = clusterCache.get(connections.state.clusterName);
-      return cluster ? { cluster, query: connections.query, bearer: connections.bearer } : undefined;
+      return cluster ? { cluster, query: connections.query, bearer: connections.bearer, dispatcher: connections.dispatcher } : undefined;
     },
     connect: async domain => {
       if (!workspace.isTrusted || !handoffSurface) throw new Error('Trust this workspace before connecting MemQL.');

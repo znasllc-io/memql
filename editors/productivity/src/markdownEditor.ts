@@ -1,3 +1,4 @@
+import { DocumentDictation } from "./dictation.js";
 import * as vscode from "vscode";
 import { RevisionReview } from "./revisionReview.js";
 import { Documents, type OpenDocument } from "./documents.js";
@@ -11,9 +12,10 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
   private readonly panels = new Set<{ document: vscode.TextDocument; panel: vscode.WebviewPanel }>();
   private readonly rendered = new Map<string, { version: number; text: string }>();
   private readonly revisions: RevisionReview;
+  private readonly dictation: DocumentDictation;
   constructor(private readonly context: vscode.ExtensionContext, private readonly files: Documents,
     private readonly load: (uri: vscode.Uri) => Promise<OpenDocument>,
-    private readonly refreshRemote: (document: vscode.TextDocument) => Promise<boolean> = async () => false) { this.revisions = new RevisionReview(context, files, load); }
+    private readonly refreshRemote: (document: vscode.TextDocument) => Promise<boolean> = async () => false) { this.revisions = new RevisionReview(context, files, load); this.dictation = new DocumentDictation(context,files); }
   async whenRendered(uri: vscode.Uri, version?: number): Promise<string> {
     const end = Date.now() + 15000;
     while (Date.now() < end) {
@@ -28,9 +30,11 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
     if (!target) throw new Error("Open a Markdown document first.");
     return target;
   }
-  async show(mode: "source" | "reading" | "split", uri?: vscode.Uri): Promise<void> {
+  async show(mode: "source" | "reading" | "review" | "split", uri?: vscode.Uri): Promise<void> {
     const target = this.document(uri);
+    if(mode!=="review")for(const entry of this.panels)this.dictation.cancel(entry.panel);
     const document = await vscode.workspace.openTextDocument(target);
+    if (mode !== "source" && mode !== "split") await this.context.workspaceState.update(`memql.markdownMode:${target.toString()}`, mode);
     if (document.languageId !== "markdown" && !/\.(md|markdown)$/i.test(target.path)) throw new Error("Open a Markdown document first.");
     const current = [...this.panels].find(entry => entry.document.uri.toString() === target.toString() && entry.panel.visible)
       ?? [...this.panels].find(entry => entry.document.uri.toString() === target.toString());
@@ -38,7 +42,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
     if (mode === "source") {
       await vscode.window.showTextDocument(document, { viewColumn: source?.viewColumn ?? current?.panel.viewColumn, preview: false });
       for (const entry of this.panels) if (entry.document === document) entry.panel.dispose();
-    } else if (mode === "reading") {
+    } else if (mode === "reading" || mode === "review") {
       await vscode.commands.executeCommand("vscode.openWith", target, "memql.productivity.markdown", { viewColumn: source?.viewColumn ?? current?.panel.viewColumn ?? vscode.ViewColumn.Active, preview: false });
       this.closeOtherPreviews(document);
       // Reveal in the source's group instead of closing its tab. Desktop VS Code
@@ -67,7 +71,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
     for (const { document, panel } of this.panels) {
       const split = panel.visible && vscode.window.visibleTextEditors.some(editor =>
         editor.document === document && editor.viewColumn !== panel.viewColumn);
-      void panel.webview.postMessage({ type: "viewMode", mode: split ? "split" : "reading" });
+      void panel.webview.postMessage({ type: "viewMode", mode: this.context.workspaceState.get(`memql.markdownMode:${document.uri.toString()}`, "reading"), split });
     }
   }
 
@@ -133,7 +137,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
       } catch (e) { await error(e); }
     };
     const subscriptions = [
-      panel.onDidChangeViewState(() => { if (panel.active) this.active = entry; this.updateModes(); if (panel.visible) void refreshRevision().catch(error); else if (timer) clearTimeout(timer); }),
+      panel.onDidChangeViewState(() => { if (panel.active) this.active = entry; if(!panel.visible)this.dictation.cancel(panel); this.updateModes(); if (panel.visible) void refreshRevision().catch(error); else if (timer) clearTimeout(timer); }),
       vscode.window.onDidChangeVisibleTextEditors(() => this.updateModes()),
       vscode.workspace.onDidChangeTextDocument(event => { if (event.document === document) void render(); }),
       vscode.workspace.onDidSaveTextDocument(saved => { if (saved === document) void render(); }),
@@ -142,24 +146,33 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
           if (!message || typeof message !== "object") return;
           if (message.type === "ready") {
             await panel.webview.postMessage({type:"restoreDraft", state:this.context.workspaceState.get(draftKey)});
+            await panel.webview.postMessage({type:"dictationAvailable",available:await this.dictation.available()});
             this.updateModes(); await render();
           } else if (message.type === "draftState" && message.state && typeof message.state === "object" && JSON.stringify(message.state).length <= 300000) {
             await this.context.workspaceState.update(draftKey, message.state);
           }
           else if (message.type === "rendered" && message.version === document.version && typeof message.text === "string") {
             this.rendered.set(document.uri.toString(), { version: message.version, text: message.text });
-          } else if (message.type === "source" || message.type === "reading" || message.type === "split") await this.show(message.type, document.uri);
+          } else if (message.type === "source" || message.type === "reading" || message.type === "review" || message.type === "split") await this.show(message.type, document.uri);
+          else if (message.type === "dictationStart") { if(document.uri.scheme!=="memql-file"||document.isDirty)throw new Error("Save the MemQL document before dictating feedback.");void this.dictation.start(panel,await this.load(document.uri)).catch(error); }
+          else if (message.type === "dictationStop") await this.dictation.stop(panel);
+          else if (message.type === "dictationCancel") this.dictation.cancel(panel);
           else if (message.type === "refresh") { await refreshComments(); await refreshRevision(); }
-          else if (["prepareRevision", "resumePreparation", "decideRevision", "compareRevision"].includes(message.type) && !saving) {
+          else if (["prepareRevision", "resumePreparation", "decideRevision", "compareRevision", "modifyRevisionItem", "retryRevisionItem", "cancelRevision"].includes(message.type) && !saving) {
             saving = true;
             try {
               if (message.type === "prepareRevision") {
                 if (message.version !== document.version || !Array.isArray(message.commentIds) || !message.commentIds.every((id: unknown) => typeof id === "string") || typeof message.instruction !== "string") throw new Error("Select current comments and describe the change.");
                 await this.revisions.prepare(document, message.commentIds, message.instruction);
-              } else if (message.type === "resumePreparation") await this.revisions.resumePreparation(document);
+              } else if (message.type === "cancelRevision") await this.revisions.cancel(document);
+              else if (message.type === "resumePreparation") await this.revisions.resumePreparation(document);
               else if (message.type === "decideRevision") {
                 if (typeof message.approvalId !== "string" || !["approved", "rejected"].includes(message.decision)) return;
-                await this.revisions.decide(document, message.approvalId, message.decision);
+                await this.revisions.decide(document, message.approvalId, message.decision, message.answer);
+              } else if (message.type === "retryRevisionItem") await this.revisions.retryModification(document);
+              else if (message.type === "modifyRevisionItem") {
+                if (typeof message.itemId !== "string" || typeof message.instruction !== "string" || typeof message.approvalId !== "string") throw new Error("Choose a change and describe the revision.");
+                await this.revisions.modify(document, message.approvalId, message.itemId, message.instruction);
               } else if (message.type === "compareRevision") {
                 await this.revisions.compare(document);
               }
@@ -180,14 +193,19 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
             try {
               await this.files.comment(base, { ...anchor }, message.body, commentPending.requestId);
               commentPending = undefined;
-              await panel.webview.postMessage({ type: "saved" });
               await refreshComments();
+              // Re-enable actions only after their new request is visible and
+              // this handler has released the write guard. An immediate
+              // Propose click must not be silently discarded as another save.
+              saving = false;
+              await panel.webview.postMessage({ type: "saved" });
             } finally { saving = false; }
           }
         } catch (e) { await error(e); }
       }),
     ];
     panel.onDidDispose(() => {
+      this.dictation.cancel(panel);
       disposed = true; generation++; if (timer) clearTimeout(timer);
       this.panels.delete(entry);
       for (const subscription of subscriptions) subscription.dispose();

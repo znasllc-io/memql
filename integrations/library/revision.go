@@ -25,9 +25,11 @@ const documentRevisionTemplate = "reviseLibraryDocument"
 const revisionContentLimit = 128 * 1024
 
 type ReviewGoalOpener interface {
+	LockPlanReview(context.Context, string) (func(), error)
 	OpenAnalysisGoal(context.Context, string, work.DirectGoal) (work.ReviewGoalReceipt, error)
 	AskPlanReview(context.Context, string, string, map[string]any, string) (string, error)
 	SetPlanReviewValidator(string, func(context.Context, map[string]any) error)
+	SetPlanReviewAnswerValidator(string, func(context.Context, map[string]any, map[string]any) error)
 }
 
 // SetReviewGoals joins the registered Library and Nexus instances. No editor
@@ -36,6 +38,10 @@ func (i *Integration) SetReviewGoals(opener ReviewGoalOpener) {
 	i.reviewGoals = opener
 	if opener != nil {
 		opener.SetPlanReviewValidator(documentReviewType, i.ValidateRevisionProposal)
+		opener.SetPlanReviewAnswerValidator(documentReviewType, func(ctx context.Context, proposal, answer map[string]any) error {
+			_, err := selectedRevisionProposal(proposal, answer)
+			return err
+		})
 	}
 }
 
@@ -229,7 +235,7 @@ func (i *Integration) handleRequestDocumentRevision(ctx context.Context, args ma
 	ac, _ := auth.AccessFromContext(ctx)
 	receipt, err := i.reviewGoals.OpenAnalysisGoal(ctx, "library-revision:"+requestID, work.DirectGoal{
 		OwnerUserId: ac.UserId, Statement: "Revise " + asString(proposal["name"]), AutomationName: documentRevisionTemplate,
-		RequestedVia: "library", TriggeredBy: "document-review", Ceilings: map[string]any{"maxModelCalls": 1},
+		RequestedVia: "library", TriggeredBy: "document-review", Ceilings: map[string]any{"maxModelCalls": 16},
 		Input: map[string]any{"requestId": requestID, "proposal": proposal},
 	})
 	if err != nil {
@@ -250,6 +256,9 @@ func (i *Integration) ValidateRevisionProposal(ctx context.Context, proposal map
 		return err
 	}
 	defer release()
+	if err := i.validateCurrentRevision(ctx, proposal); err != nil {
+		return err
+	}
 	version, valid := intArg(proposal["version"])
 	if !valid || version != doc.version || proposal["revision"] != doc.revision || proposal["sourceId"] != memql.BareShortId(doc.source) || proposal["documentKind"] != doc.kind {
 		return fmt.Errorf("the document changed; prepare a new request against the current revision")
@@ -325,7 +334,15 @@ func (i *Integration) handleDocumentRevisionStatus(ctx context.Context, args map
 	if approval != nil {
 		proposal = revisionMap(approval["subject"])
 	}
-	return reviewResult(map[string]any{"prepared": run != nil, "goalId": ids.GoalID, "runId": ids.RunID, "approvalId": ids.ApprovalID,
+	items, err := revisionItems(proposal)
+	if err != nil {
+		return nil, err
+	}
+	successor, err := i.revisionRow(memql.ContextWithFreshRead(ctx), "workDocumentRevisionAmendment", map[string]any{"requestId": args["requestId"]})
+	if err != nil {
+		return nil, err
+	}
+	return reviewResult(map[string]any{"cancelRequested": run["cancelRequested"], "items": items, "proposalHash": workstate.ArtifactHash(proposal), "answer": approval["answer"], "supersededBy": successor["requestId"], "prepared": run != nil, "goalId": ids.GoalID, "runId": ids.RunID, "approvalId": ids.ApprovalID,
 		"proposal": proposal, "decision": approval["decision"], "status": run["status"], "errorMessage": run["errorMessage"], "result": revisionMap(run["outcome"])["returned"]})
 }
 
@@ -361,7 +378,11 @@ func (i *Integration) handleRevisionInput(ctx context.Context, args map[string]a
 	if err = i.ValidateRevisionProposal(ctx, captured); err != nil {
 		return nil, err
 	}
-	passages, err := revisionPassages(captured)
+	promptSource := captured
+	if amendment := revisionMap(captured["amendment"]); len(amendment) > 0 {
+		promptSource = amendmentCapture(captured, amendment)
+	}
+	passages, err := revisionPassages(promptSource)
 	if err != nil {
 		return nil, err
 	}
@@ -369,7 +390,7 @@ func (i *Integration) handleRevisionInput(ctx context.Context, args map[string]a
 	if err != nil {
 		return nil, err
 	}
-	return reviewResult(map[string]any{"content": captured["content"], "passages": passages, "passagesJSON": string(encoded), "instruction": captured["instruction"]})
+	return reviewResult(map[string]any{"content": captured["content"], "passages": passages, "passagesJSON": string(encoded), "instruction": captured["instruction"], "amendment": captured["amendment"]})
 }
 
 func (i *Integration) handleRevisionProposal(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -377,10 +398,15 @@ func (i *Integration) handleRevisionProposal(ctx context.Context, args map[strin
 	if err != nil {
 		return nil, err
 	}
-	proposal, err := buildRevisionProposal(captured, args["response"])
+	proposal, err := buildAmendedRevisionProposal(captured, args["response"])
 	if err != nil {
 		return nil, err
 	}
+	attribution, err := i.revisionAttribution(ctx, captured, proposal)
+	if err != nil {
+		return nil, err
+	}
+	proposal["attribution"] = attribution
 	return reviewResult(map[string]any{"proposal": proposal, "changed": proposal["revisedContent"] != captured["content"], "summary": proposal["summary"]})
 }
 
@@ -392,6 +418,15 @@ func (i *Integration) handleReviewRevision(ctx context.Context, args map[string]
 	proposal := revisionMap(args["proposal"])
 	if err = validateRevisionResult(captured, proposal); err != nil {
 		return nil, err
+	}
+	if existing == nil {
+		measured, err := i.revisionAttribution(ctx, captured, proposal)
+		if err != nil {
+			return nil, err
+		}
+		if workstate.ArtifactHash(measured) != workstate.ArtifactHash(revisionMap(proposal["attribution"])) {
+			return nil, fmt.Errorf("the proposal's model attribution differs from the recorded calls")
+		}
 	}
 	if proposal["revisedContent"] == captured["content"] {
 		return nil, fmt.Errorf("there are no proposed changes to approve")
@@ -437,5 +472,9 @@ func (i *Integration) handleExecuteDocumentRevision(ctx context.Context, args ma
 	if err = validateRevisionResult(captured, proposal); err != nil {
 		return nil, err
 	}
-	return i.applyRevision(ctx, ids, proposal)
+	selected, err := selectedRevisionProposal(proposal, revisionMap(approval["answer"]))
+	if err != nil {
+		return nil, err
+	}
+	return i.applyRevision(ctx, ids, selected)
 }

@@ -70,10 +70,12 @@ builtin agent {
 @executor("integration.agents.runAgentTurn")
 @description("Run one agent turn and return its reply. The work spine's way to invoke an agent with no Plan in the path. Synchronous: the asynchrony belongs to the run that calls it. Answers only on an agent node.")
 builtin runAgentTurn {
-  agentId  string!
-  prompt   string!
+  agentId  string @description("Agent to run. Omit within an owned work run to use its owner's existing reasoning agent.")
+  prompt   string
   scopeId  string
   requireFile bool
+  templateId string @description("Render this named prompt for the turn. Omit prompt when using a template.")
+  data object @description("Data validated against the named prompt schema.")
 }
 
 // ---- builtin ai -------------------------------------------------------

@@ -1935,6 +1935,35 @@ QueryClient.prototype.libraryDocumentRevisionStatus = function (this: QueryClien
   return this.executeNamed("libraryDocumentRevisionStatus", buildLibraryDocumentRevisionStatus(args), opts);
 };
 
+/** Revise one proposal item with AI; retain every other item unchanged. */
+export interface LibraryModifyRevisionItemArgs {
+  requestId: string;
+  approvalId: string;
+  itemId: string;
+  instruction: string;
+  newRequestId: string;
+}
+
+export function buildLibraryModifyRevisionItem(args: LibraryModifyRevisionItemArgs): string {
+  const parts: string[] = [];
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  parts.push("itemId: " + renderMemQLValue(args.itemId));
+  parts.push("instruction: " + renderMemQLValue(args.instruction));
+  parts.push("newRequestId: " + renderMemQLValue(args.newRequestId));
+  return "builtin libraryModifyRevisionItem(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryModifyRevisionItem(args: LibraryModifyRevisionItemArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryModifyRevisionItem = function (this: QueryClient, args: LibraryModifyRevisionItemArgs = {} as LibraryModifyRevisionItemArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryModifyRevisionItem", buildLibraryModifyRevisionItem(args), opts);
+};
+
 /** Remove a label from a Library artifact index row. Idempotent -- a label already absent is left alone and nothing is written. Same owner-threaded load/write shape as libraryAddArtifactLabel. */
 export interface LibraryRemoveArtifactLabelArgs {
   artifactId: string;

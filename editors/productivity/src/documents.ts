@@ -1,5 +1,5 @@
 import {
-  buildLibraryArtifactById, buildLibraryFileById, buildGeneratedOutputById,
+  buildCancelGoal, buildLibraryModifyRevisionItem, buildLibraryArtifactById, buildLibraryFileById, buildGeneratedOutputById,
   buildTemplateById, buildCampaignSaveTemplate, buildDocumentVersions, buildEditDocument, buildLibraryDocumentReview, buildLibraryAddDocumentComment, buildLibraryRequestDocumentRevision, buildLibraryDocumentRevisionStatus, buildDecideApproval,
 } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
@@ -75,6 +75,14 @@ export class Documents {
     if (!rows[0]) throw new Error("The cluster did not return document feedback.");
     return rows[0];
   }
+  async transcribe(document:OpenDocument,audio:ReadableStream<Uint8Array>,signal:AbortSignal,onPartial:(text:string)=>void):Promise<string>{
+    return this.api.transcribe(document.lease,audio,signal,onPartial);
+  }
+  async cancelRevision(document:OpenDocument,requestId:string):Promise<void>{
+    const status=await this.revision(document,requestId);
+    if(typeof status.goalId!=="string")throw new Error("This revision has no work receipt.");
+    await this.api.execute(document.lease,"cancelGoal",buildCancelGoal({goalId:status.goalId,reason:"Stopped document revision preparation."}));
+  }
   async comment(document: OpenDocument, anchor: Record<string, unknown>, body: string, requestId: string): Promise<void> {
     const result = await this.api.execute(document.lease, "libraryAddDocumentComment", buildLibraryAddDocumentComment({
       artifactId: document.resource.id, expectedVersion: document.version, expectedRevision: document.revision ?? "",
@@ -95,10 +103,14 @@ export class Documents {
     if (!proposal || proposal.artifactId !== document.resource.id) throw new Error("This revision request does not belong to the open document.");
     return result;
   }
-  async decideRevision(document: OpenDocument, requestId: string, approvalId: string, decision: "approved" | "rejected"): Promise<void> {
+  async modifyRevision(document: OpenDocument, requestId: string, approvalId: string, itemId: string, instruction: string, newRequestId: string): Promise<void> {
+    const result = (await this.api.execute(document.lease, "libraryModifyRevisionItem", buildLibraryModifyRevisionItem({requestId, approvalId, itemId, instruction, newRequestId})))[0];
+    if (result?.requestId !== newRequestId) throw new Error("The cluster did not confirm the modified request. Retry to recover it.");
+  }
+  async decideRevision(document: OpenDocument, requestId: string, approvalId: string, decision: "approved" | "rejected", answer?: Record<string, unknown>): Promise<void> {
     const current = await this.revision(document, requestId);
     if (current.approvalId !== approvalId) throw new Error("The approval changed. Review the request again.");
-    const result = (await this.api.execute(document.lease, "decideApproval", buildDecideApproval({ approvalId, decision })))[0];
+    const result = (await this.api.execute(document.lease, "decideApproval", buildDecideApproval({ approvalId, decision, answer })))[0];
     if (result?.decision !== decision) throw new Error("The cluster did not confirm your decision. Refresh or retry to recover it.");
     if (result.resumeError) throw new Error("Your decision was saved, but the job could not start. Retry to recover the same job.");
   }

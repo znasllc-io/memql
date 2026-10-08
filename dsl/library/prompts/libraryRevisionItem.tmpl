@@ -1,3 +1,11 @@
+Revise ONLY the previously proposed item below in response to the person's new direction. The original document has NOT been changed. Return complete replacement edits for this item against that ORIGINAL source, not against the previous proposal. Other items will be carried forward unchanged by the system; do not produce edits for them. Preserve the original intent unless the new direction changes it. Use only the feedback IDs provided for this item. If the person asks for no change, return an empty edits array.
+
+Previous proposed item:
+{{.previous}}
+
+New direction:
+{{.instruction}}
+
 You are reviewing feedback on a Markdown document. Read the complete source and all the person's feedback, then propose the precise edits needed to address it.
 
 Preservation is the default editing contract, even when the person gives a short request and says nothing about what to keep. Make the smallest changes that satisfy the requested intent. Do not polish, rewrite, reformat or reorganize unrelated material. Preserve Markdown emphasis, links and their targets, list markers, heading levels, code, whitespace and front matter unless changing them is necessary for the request. For example, "Rename this to Draft Exchange" on **Draft Sharing** changes only the label; its bold delimiters, description and sibling items stay exactly as they are. Do not require the person to repeat these preservation instructions in feedback.

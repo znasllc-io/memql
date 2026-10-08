@@ -4,6 +4,19 @@ import * as vscode from "vscode";
 import { assertRevisionBase, RevisionReview } from "../src/revisionReview.js";
 import type { Documents, OpenDocument } from "../src/documents.js";
 
+test("an interrupted item revision resumes its own immutable request", async () => {
+  const noop=()=>({dispose(){}});
+  Object.assign(vscode.workspace,{registerTextDocumentContentProvider:noop,onDidCloseTextDocument:noop});
+  const uri=vscode.Uri.parse('memql-file://cluster/artifacts/doc/Guide.md');
+  const amendment={requestId:'parent',approvalId:'approval',itemId:'item',instruction:'Use the research'};
+  const submitted:unknown[][]=[];
+  const files={revision:async()=>({proposal:{amendment}}),modifyRevision:async(...args:unknown[])=>{submitted.push(args);},requestRevision:async()=>{assert.fail('must resume modification, not generate the full proposal');}} as unknown as Documents;
+  const context={subscriptions:[],workspaceState:{get:()=>({requestId:'retry-same-id'})}} as unknown as vscode.ExtensionContext;
+  const base={} as OpenDocument;
+  await new RevisionReview(context,files,async()=>base).resumePreparation({uri} as vscode.TextDocument);
+  assert.deepEqual(submitted,[[base,'parent','approval','item','Use the research','retry-same-id']]);
+});
+
 test("applying a reviewed draft requires the exact source bytes and saved revision", () => {
   const base = { resource: { id: "one" }, version: 3, revision: "file:3" } as OpenDocument;
   const proposal = { artifactId: "one", version: 3, revision: "file:3", content: "Original" };

@@ -1,3 +1,4 @@
+import { registerDictation } from './dictation';
 import { requestedResource, checkTools } from './handoff.mjs';
 import { BrowserSecrets } from './secrets';
 import { appearanceSettings, appearanceTheme, readEditorAppearance } from '../../productivity/src/editorAppearance';
@@ -85,6 +86,7 @@ export async function start(isBasic: () => boolean, ready: () => void) {
     } catch { void api.window.showWarningMessage('The editor theme could not be matched. You can change it in Settings.'); }
   }
   if (isBasic()) { ready(); return; }
+  registerDictation(api);
   await checkTools((command: string) => api.commands.executeCommand(command));
   if (isBasic()) { ready(); return; }
   api.commands.registerCommand('memql.editor.showTools', () => api.commands.executeCommand('workbench.extensions.search', '@builtin memql'));

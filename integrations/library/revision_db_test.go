@@ -32,22 +32,35 @@ import (
 // Only the model boundary is replaced. The installed DSL, journal, authorization,
 // two independent engines, approvals and version writes run against PostgreSQL.
 type revisionAI struct {
-	calls  atomic.Int32
-	answer revisionAnswer
+	calls         atomic.Int32
+	researchCalls atomic.Int32
+	answer        revisionAnswer
 }
 
 func (*revisionAI) IntegrationName() string { return "agents" }
 func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
-	return []memql.IntegrationCapability{{Name: "invokePrompt", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-		data := revisionMap(args["data"])
-		passages, valid := data["passages"].(string)
-		if args["templateId"] != "libraryRevisionPassages" || !valid || !json.Valid([]byte(passages)) || data["document"] == nil {
-			return nil, fmt.Errorf("DSL lost the review prompt or captured feedback")
-		}
-		a.calls.Add(1)
-		body, _ := json.Marshal(a.answer)
-		return reviewResult(map[string]any{"reply": string(body)})
-	}}}
+	return []memql.IntegrationCapability{
+		{Name: "ensureForGoal", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return reviewResult(map[string]any{"agentId": "review-test-agent"})
+		}},
+		{Name: "runAgentTurn", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			data := revisionMap(args["data"])
+			if args["templateId"] != "libraryRevisionResearch" || data["document"] == nil || data["passages"] == nil {
+				return nil, fmt.Errorf("DSL omitted evidence stage context")
+			}
+			a.researchCalls.Add(1)
+			return reviewResult(map[string]any{"reply": "Evidence report for the selected feedback."})
+		}},
+		{Name: "invokePrompt", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			data := revisionMap(args["data"])
+			passages, valid := data["passages"].(string)
+			if (args["templateId"] != "libraryRevisionPassages" && args["templateId"] != "libraryRevisionItem") || data["evidence"] != "Evidence report for the selected feedback." || !valid || !json.Valid([]byte(passages)) || data["document"] == nil {
+				return nil, fmt.Errorf("DSL lost the review prompt or captured feedback")
+			}
+			a.calls.Add(1)
+			body, _ := json.Marshal(a.answer)
+			return reviewResult(map[string]any{"reply": string(body)})
+		}}}
 }
 
 type revisionDB struct {
@@ -252,7 +265,7 @@ func TestDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing
 			if err = f.second.ValidateRevisionProposal(revisionActor(f.owner, auth.RoleReader), captured); err == nil {
 				t.Fatal("reader approved write")
 			}
-			decision := map[string]any{"approvalId": memql.BareShortId(asString(approval["id"])), "decision": "approved"}
+			decision := map[string]any{"approvalId": memql.BareShortId(asString(approval["id"])), "decision": "approved", "answer": f.accepted(request)}
 			f.query(f.other, f.ctx, "query", "decideApproval", decision)
 			f.query(f.engine, f.ctx, "query", "decideApproval", decision)
 			if err = f.execute(f.other, request, true); err != nil {
@@ -348,7 +361,7 @@ func TestDocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove(t *testing.T) {
 	if err := f.execute(f.engine, request, false); !errors.As(err, &wait) {
 		t.Fatal(err)
 	}
-	f.query(f.other, f.ctx, "query", "decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved"})
+	f.query(f.other, f.ctx, "query", "decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": f.accepted(request)})
 	ids, _, _, approval, err := f.second.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
 	if err != nil {
 		t.Fatal(err)
@@ -376,5 +389,114 @@ func TestDocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove(t *testing.T) {
 	}
 	if f.ai.calls.Load() != 1 {
 		t.Fatal("recovery called the model again")
+	}
+}
+
+func (f *revisionDB) accepted(request string) map[string]any {
+	f.t.Helper()
+	status := f.query(f.other, f.ctx, "query", "libraryDocumentRevisionStatus", map[string]any{"requestId": request})[0]
+	items, err := revisionItems(revisionMap(status["proposal"]))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	ids := []string{}
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	return map[string]any{"acceptedItemIds": ids, "proposalHash": status["proposalHash"]}
+}
+
+func TestDocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas(t *testing.T) {
+	f := newRevisionDB(t)
+	source := "# Plan\n\nFirst paragraph.\n\nSecond paragraph.\n"
+	artifact, doc := f.document(source)
+	a, noteA := f.submit(artifact, doc, map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": "First paragraph.", "sourceQuote": "First paragraph."}, "Clarify the first paragraph")
+	_, noteB := f.submit(artifact, doc, map[string]any{"kind": "markdown", "startLine": 4, "endLine": 5, "quote": "Second paragraph.", "sourceQuote": "Second paragraph."}, "Clarify the second paragraph")
+	a["requestId"] = "combined-" + fmt.Sprint(time.Now().UnixNano())
+	a["commentIds"] = []string{noteA, noteB}
+	if _, err := f.first.handleRequestDocumentRevision(f.ctx, a, 0); err != nil {
+		t.Fatal(err)
+	}
+	request := asString(a["requestId"])
+	recordModel := func(request, model string) {
+		t.Helper()
+		ids, err := revisionIdentity(f.ctx, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = work.NewModelJournal(f.engine).Record(f.ctx, f.owner, memql.JournaledCall{RunId: ids.RunID, StepKey: "analysis", RequestHash: request, Provider: "fixture", Model: model, PromptRef: "libraryRevisionPassages", Served: "live"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recordModel(request, "initial-model")
+	f.ai.answer = revisionAnswer{Summary: "Two changes", Edits: []revisionReplacement{{Before: "First paragraph.", After: "First clear paragraph.", Reason: "Clarify first", CommentIDs: []string{noteA}}, {Before: "Second paragraph.", After: "Second clear paragraph.", Reason: "Clarify second", CommentIDs: []string{noteB}}}}
+	var wait *workstate.HumanWait
+	if err := f.execute(f.engine, request, false); !errors.As(err, &wait) {
+		t.Fatal(err)
+	}
+	_, _, _, approval, err := f.second.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := revisionMap(approval["subject"])
+	items, err := revisionItems(proposal)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("items: %v %v", items, err)
+	}
+	inherited := revisionMap(revisionMap(proposal["attribution"])["items"])[items[1].ID]
+	invalid, _ := langparser.RenderCall("decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": map[string]any{"acceptedItemIds": []string{"invented"}, "proposalHash": workstate.ArtifactHash(proposal)}})
+	if _, err = f.other.Execute(f.ctx, "query "+invalid); err == nil {
+		t.Fatal("invalid item decision accepted")
+	}
+	newer := "modified-" + fmt.Sprint(time.Now().UnixNano())
+	args := map[string]any{"requestId": request, "approvalId": wait.ApprovalID, "itemId": items[0].ID, "instruction": "Research the first passage and use the evidence", "newRequestId": newer}
+	for _, lib := range []*Integration{f.first, f.second} {
+		if _, err = lib.handleModifyRevisionItem(f.ctx, args, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = f.second.ValidateRevisionProposal(f.ctx, proposal); err == nil {
+		t.Fatal("superseded proposal still applicable")
+	}
+	recordModel(newer, "replacement-model")
+	f.ai.answer = revisionAnswer{Summary: "A researched first passage", Edits: []revisionReplacement{{Before: "First paragraph.", After: "First verified paragraph.", Reason: "Verified against fixture evidence", CommentIDs: []string{noteA}}}}
+	if err = f.execute(f.other, newer, false); !errors.As(err, &wait) {
+		t.Fatal(err)
+	}
+	_, _, _, approval, err = f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), newer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal = revisionMap(approval["subject"])
+	modified, err := revisionItems(proposal)
+	if err != nil || len(modified) != 2 {
+		t.Fatalf("modified items: %v %v", modified, err)
+	}
+	if modified[1].ID != items[1].ID {
+		t.Fatal("unmodified proposal item was regenerated")
+	}
+	attributed := revisionMap(revisionMap(proposal["attribution"])["items"])
+	if workstate.ArtifactHash(revisionMap(inherited)) != workstate.ArtifactHash(revisionMap(attributed[items[1].ID])) {
+		t.Fatal("unchanged item lost its original model attribution")
+	}
+	modelJSON, _ := json.Marshal(attributed[modified[0].ID])
+	if !strings.Contains(string(modelJSON), "replacement-model") || strings.Contains(string(modelJSON), "initial-model") {
+		t.Fatalf("replacement attribution: %s", modelJSON)
+	}
+	decision := map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": map[string]any{"acceptedItemIds": []string{modified[0].ID}, "proposalHash": workstate.ArtifactHash(proposal)}}
+	f.query(f.other, f.ctx, "query", "decideApproval", decision)
+	f.query(f.engine, f.ctx, "query", "decideApproval", decision)
+	if err = f.execute(f.engine, newer, true); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := f.second.reviewDocument(memql.ContextWithFreshRead(f.ctx), artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.backing["body"] != "# Plan\n\nFirst verified paragraph.\n\nSecond paragraph.\n" {
+		t.Fatalf("declined paragraph changed: %q", changed.backing["body"])
+	}
+	if f.ai.researchCalls.Load() != 2 || f.ai.calls.Load() != 2 {
+		t.Fatal("evidence or edits reran on approval")
 	}
 }

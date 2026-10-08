@@ -84,6 +84,16 @@ describe("the inbox", () => {
 });
 
 describe("deciding one", () => {
+  it("binds Apply all changes to the exact document proposal's item IDs", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({id:'a1',kind:'planReview',artifactHash:'exact-proposal',subject:{reviewType:'library-document',requestId:'request'}})] });
+    const status=vi.fn().mockResolvedValue({rows:()=>[{approvalId:'a1',proposalHash:'exact-proposal',items:[{id:'item-a'},{id:'item-b'}]}]});
+    Object.assign(conn.query,{libraryDocumentRevisionStatus:status});
+    mount(conn);
+    fireEvent.click(await screen.findByText('Step sendInvoice'));
+    fireEvent.click(await screen.findByText('Apply all changes'));
+    await waitFor(()=>expect(conn.query.decideApproval).toHaveBeenCalled());
+    expect(conn.query.decideApproval.mock.calls[0]?.[0]).toEqual({approvalId:'a1',decision:'approved',answer:{acceptedItemIds:['item-a','item-b'],proposalHash:'exact-proposal'}});
+  });
   it("does NOT offer approve from the list -- the decision is made beside the evidence", async () => {
     // An approval is a decision about a SPECIFIC artifact and the builtin
     // refuses one whose artifact moved. A one-click approve in a list is the

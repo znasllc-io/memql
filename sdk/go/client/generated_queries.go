@@ -12769,6 +12769,28 @@ func WorkDescriptionGuidanceBuild(args WorkDescriptionGuidanceArgs) string {
 	return b.String()
 }
 
+// WorkDocumentRevisionAmendment -- A successor invalidates the earlier immutable proposal for application. Ordering is by admission, never a mutable heartbeat or decision timestamp.
+//
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workDocumentRevisionAmendment"] in generated_concepts.go).
+type WorkDocumentRevisionAmendmentArgs struct {
+	RequestId string
+}
+
+// WorkDocumentRevisionAmendment calls the engine query workDocumentRevisionAmendment.
+func (qc *QueryClient) WorkDocumentRevisionAmendment(ctx context.Context, args WorkDocumentRevisionAmendmentArgs) (*Result, error) {
+	call := WorkDocumentRevisionAmendmentBuild(args)
+	return qc.executeNamed(ctx, "workDocumentRevisionAmendment", call)
+}
+
+func WorkDocumentRevisionAmendmentBuild(args WorkDocumentRevisionAmendmentArgs) string {
+	var b strings.Builder
+	b.WriteString("query workDocumentRevisionAmendment(")
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkDocumentRevisionRequest -- Recover this person's latest document review across editor windows and restarts. Returns only an owned request identifier; Library checks the backing document before retrieving its review. This lookup exposes no captured document bytes. startedAt orders requests by admission, not by a later approval or heartbeat.
 //
 // Bound concept: v1:work:run (machine-readable: BoundConcepts["workDocumentRevisionRequest"] in generated_concepts.go).

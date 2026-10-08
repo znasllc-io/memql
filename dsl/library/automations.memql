@@ -1,4 +1,4 @@
-use agents.builtins.{ ai }
+use agents.builtins.{ ai, runAgentTurn }
 
 // library domain -- promotion triggers.
 //
@@ -246,13 +246,27 @@ automation archiveFileOnArtifactArchive {
 
 /// Analyze passage feedback, review exact replacements, then apply only what the
 /// person approved. Every step is journaled, so a resume reuses the AI result.
+@actor
 @template
 automation reviseLibraryDocument {
  args { requestId string! proposal object! }
  captured := builtin libraryRevisionInput(requestId: args.requestId)
- analysis := builtin ai(templateId: "libraryRevisionPassages", data: {
-  document: captured.content, passages: captured.passagesJSON, instruction: captured.instruction
+ evidence := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
+  document: captured.content, passages: captured.passagesJSON,
+  instruction: captured.amendment.instruction ?? captured.instruction,
+  previous: captured.amendment.edits
  })
+
+ if captured.amendment != nil {
+  analysis := builtin ai(templateId: "libraryRevisionItem", data: {
+   document: captured.content, passages: captured.passagesJSON, instruction: captured.amendment.instruction,
+   previous: captured.amendment.edits, evidence: evidence.reply
+  })
+ } else {
+  analysis := builtin ai(templateId: "libraryRevisionPassages", data: {
+   document: captured.content, passages: captured.passagesJSON, instruction: captured.instruction, evidence: evidence.reply
+  })
+ }
  proposed := builtin libraryRevisionProposal(requestId: args.requestId, response: analysis.reply)
  if proposed.changed {
   review := builtin libraryReviewRevision(requestId: args.requestId, proposal: proposed.proposal,
