@@ -49,34 +49,34 @@ ALL_PKGS    := $(MODULE)/...
 all: build healthcheck
 
 ## Build the standalone MemQL server (all components)
-build:
+build: identity-tailwind
 	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/memql .
 
 ## Build all binaries including node-type variants
 build-all: build bff agent planner identity healthcheck
 
 ## Build BFF node binary
-bff:
+bff: identity-tailwind
 	$(GO) build $(GOFLAGS) -tags bff -o $(BIN_DIR)/memql-bff .
 
 ## Build agent node binary
-agent:
+agent: identity-tailwind
 	$(GO) build $(GOFLAGS) -tags agent -o $(BIN_DIR)/memql-agent .
 
 ## Build planner node binary
-planner:
+planner: identity-tailwind
 	$(GO) build $(GOFLAGS) -tags planner -o $(BIN_DIR)/memql-planner .
 
 ## Build workbench node binary
-workbench:
+workbench: identity-tailwind
 	$(GO) build $(GOFLAGS) -tags workbench -o $(BIN_DIR)/memql-workbench .
 
 ## Build mcp node binary (Model Context Protocol server, epic memql#1529)
-mcp:
+mcp: identity-tailwind
 	$(GO) build $(GOFLAGS) -tags mcp -o $(BIN_DIR)/memql-mcp .
 
 ## Build edge node binary (serves hosted sites, the OS shell among them)
-edge:
+edge: identity-tailwind
 	$(GO) build $(GOFLAGS) -tags edge -o $(BIN_DIR)/memql-edge .
 
 ##@ VS Code / LSP
@@ -787,15 +787,15 @@ vscode-test-host:
 	bash scripts/vscode/host-test.sh
 
 ## Run all tests
-test:
+test: identity-tailwind
 	$(GO) test $(ALL_PKGS)
 
 ## Run all tests with verbose output
-test-v:
+test-v: identity-tailwind
 	$(GO) test -v $(ALL_PKGS)
 
 ## Run tests with coverage report
-test-cover:
+test-cover: identity-tailwind
 	$(GO) test -coverprofile=coverage.out $(ALL_PKGS)
 	$(GO) tool cover -func=coverage.out
 	@rm -f coverage.out
@@ -808,7 +808,7 @@ test-cover:
 .PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check platform-graph platform-graph-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check concept-snapshot concept-snapshot-check docs-matrix docs-matrix-check docs-grammar docs-grammar-check docs-bundle docs-bundle-check memqlbreaking memqlbreaking-capture
 
 ## Run go vet on all packages
-vet:
+vet: identity-tailwind
 	$(GO) vet $(ALL_PKGS)
 
 ## Format all Go files

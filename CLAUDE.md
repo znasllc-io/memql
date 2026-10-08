@@ -51,9 +51,10 @@ make down                    # tear down (PURGE=1 also removes the kubeconfig co
 # Tests -- see Testing below. A bare `go test ./...` does NOT reach the engine.
 make test
 
-# Build. BFF is the default (no tag needed); the other node types are under
-# Distributed Node Architecture below.
-go build -o bin/memql .
+# Build. The Makefile generates the ignored identity CSS bundle before Go
+# packages embed it. BFF is the default (no tag needed); the other node types
+# are under Distributed Node Architecture below.
+make build
 
 # Database shell (after `make up`)
 psql postgres://memql:memql_dev@localhost:5432/memql
