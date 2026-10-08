@@ -19,6 +19,14 @@ import (
 // authority or shared storage is touched; controls and Job live in one disposable
 // namespace. The real generated clone, builder and collector all execute.
 func TestImageBuildAgainstLocalKubernetes(t *testing.T) {
+	mode := os.Getenv("MEMQL_PIPELINES_IMAGE_BUILD_TEST_MODE")
+	if mode == "" {
+		mode = "network"
+	}
+	if mode != "network" && mode != "process-sandbox" {
+		t.Fatalf("MEMQL_PIPELINES_IMAGE_BUILD_TEST_MODE must be network or process-sandbox, got %q", mode)
+	}
+	networkChecks := mode == "network"
 	sha := os.Getenv("MEMQL_PIPELINES_IMAGE_BUILD_TEST_SHA")
 	if sha == "" {
 		t.Skip("set MEMQL_PIPELINES_IMAGE_BUILD_TEST_SHA to a pushed fixture commit")
@@ -28,9 +36,18 @@ func TestImageBuildAgainstLocalKubernetes(t *testing.T) {
 	}
 	ctx, cluster, ns, kubectl := localPipelineControls(t)
 	kubectl(nil, "label", "namespace", ns, "pod-security.kubernetes.io/enforce=baseline")
-	kube := localPipelineKubeProxy(t, ctx, cluster, ns, []string{"--reject-paths=^$", "--accept-paths=^/(api/v1|apis/batch/v1)/namespaces/" + ns + "/"})
+	var kube *Kube
+	if networkChecks {
+		kube = localPipelineKubeProxy(t, ctx, cluster, ns, []string{"--reject-paths=^$", "--accept-paths=^/(api/v1|apis/batch/v1)/namespaces/" + ns + "/"})
+	} else {
+		kube = localPipelineKube(t, ctx, cluster, ns)
+	}
 	base := filepath.Join("..", "..", "deploy", "k8s", "components", "pipelines")
-	for _, file := range []string{"step-serviceaccount.yaml", "networkpolicy.yaml", "probe-networkpolicy.yaml", "ceiling.yaml"} {
+	files := []string{"step-serviceaccount.yaml", "ceiling.yaml"}
+	if networkChecks {
+		files = append(files, "networkpolicy.yaml", "probe-networkpolicy.yaml")
+	}
+	for _, file := range files {
 		body, err := os.ReadFile(filepath.Join(base, file))
 		if err != nil {
 			t.Fatal(err)
@@ -52,30 +69,38 @@ func TestImageBuildAgainstLocalKubernetes(t *testing.T) {
 	if cfg.NodePool == "" {
 		t.Fatal("fixture requires the dedicated build pool")
 	}
-	const busy = "docker.io/rancher/mirrored-library-busybox@sha256:101b4afd76732482eff9b95cae5f94bcf295e521fbec4e01b69c5421f3f3f3e5"
-	for _, control := range []struct{ name, role, command string }{
-		{"listener", "listener", "mkdir -p /www; echo control-alive > /www/index.html; exec httpd -f -p 8080 -h /www"},
-		{"positive", "control", "exec sleep 600"},
-		{"sentinel", "sentinel", "exec sh -c 'sleep 600' memql-outer-sentinel-only"},
-	} {
-		pod := map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": control.name, "labels": map[string]string{"memql.io/probe": "isolation", "memql.io/probe-role": control.role}}, "spec": map[string]any{
-			"restartPolicy": "Never", "automountServiceAccountToken": false, "activeDeadlineSeconds": 600,
-			"containers": []any{map[string]any{"name": control.name, "image": busy, "command": []string{"sh", "-ec", control.command}, "resources": map[string]any{"limits": map[string]string{"cpu": "100m", "memory": "32Mi"}}}},
-		}}
-		body, _ := json.Marshal(pod)
-		kubectl(body, "-n", ns, "create", "-f", "-")
-	}
-	kubectl(nil, "-n", ns, "wait", "--for=condition=Ready", "pod", "--all", "--timeout=120s")
-	listener := strings.TrimSpace(string(kubectl(nil, "-n", ns, "get", "pod", "listener", "-o", "jsonpath={.status.podIP}")))
-	positive := func() {
-		t.Helper()
-		if out := kubectl(nil, "-n", ns, "exec", "positive", "--", "wget", "-qO-", "-T", "5", "http://"+listener+":8080/"); strings.TrimSpace(string(out)) != "control-alive" {
-			t.Fatal("private listener positive control is unavailable")
+	listener := ""
+	positive := func() {}
+	if networkChecks {
+		const busy = "docker.io/rancher/mirrored-library-busybox@sha256:101b4afd76732482eff9b95cae5f94bcf295e521fbec4e01b69c5421f3f3f3e5"
+		for _, control := range []struct{ name, role, command string }{
+			{"listener", "listener", "mkdir -p /www; echo control-alive > /www/index.html; exec httpd -f -p 8080 -h /www"},
+			{"positive", "control", "exec sleep 600"},
+			{"sentinel", "sentinel", "exec sh -c 'sleep 600' memql-outer-sentinel-only"},
+		} {
+			pod := map[string]any{"apiVersion": "v1", "kind": "Pod", "metadata": map[string]any{"name": control.name, "labels": map[string]string{"memql.io/probe": "isolation", "memql.io/probe-role": control.role}}, "spec": map[string]any{
+				"restartPolicy": "Never", "automountServiceAccountToken": false, "activeDeadlineSeconds": 600,
+				"containers": []any{map[string]any{"name": control.name, "image": busy, "command": []string{"sh", "-ec", control.command}, "resources": map[string]any{"limits": map[string]string{"cpu": "100m", "memory": "32Mi"}}}},
+			}}
+			body, _ := json.Marshal(pod)
+			kubectl(body, "-n", ns, "create", "-f", "-")
+		}
+		kubectl(nil, "-n", ns, "wait", "--for=condition=Ready", "pod", "--all", "--timeout=120s")
+		listener = strings.TrimSpace(string(kubectl(nil, "-n", ns, "get", "pod", "listener", "-o", "jsonpath={.status.podIP}")))
+		positive = func() {
+			t.Helper()
+			if out := kubectl(nil, "-n", ns, "exec", "positive", "--", "wget", "-qO-", "-T", "5", "http://"+listener+":8080/"); strings.TrimSpace(string(out)) != "control-alive" {
+				t.Fatal("private listener positive control is unavailable")
+			}
 		}
 	}
 	positive()
 	run := rtRun()
-	run.ImageBuild = &pl.ImageBuild{Context: "integrations/pipelinesteps/testdata/image-build", Dockerfile: "integrations/pipelinesteps/testdata/image-build/Dockerfile", Args: map[string]string{"PRIVATE_LISTENER": listener + ":8080"}}
+	buildArgs := map[string]string(nil)
+	if networkChecks {
+		buildArgs = map[string]string{"PRIVATE_LISTENER": listener + ":8080"}
+	}
+	run.ImageBuild = &pl.ImageBuild{Context: "integrations/pipelinesteps/testdata/image-build", Dockerfile: "integrations/pipelinesteps/testdata/image-build/Dockerfile", Args: buildArgs}
 	run.Image, run.Command, run.ImagePullSecret = "", "", ""
 	run.Platform = os.Getenv("MEMQL_PIPELINES_IMAGE_BUILD_TEST_PLATFORM")
 	run.Caches, run.Services, run.Secrets, run.Needs = nil, nil, nil, nil
@@ -166,5 +191,5 @@ func TestImageBuildAgainstLocalKubernetes(t *testing.T) {
 	if pods, err := kube.JobPods(ctx, name); err != nil || len(pods) != 0 {
 		t.Fatalf("builder cleanup: %d pods, %v", len(pods), err)
 	}
-	t.Logf("pinned source %s built under restricted profile; two clients recovered archive %s; builder Job and pods absent", sha, digest)
+	t.Logf("pinned source %s built under restricted profile (mode=%s); two clients recovered archive %s; builder Job and pods absent", sha, mode, digest)
 }

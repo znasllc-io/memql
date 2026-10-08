@@ -1,6 +1,7 @@
 package pipelinesteps
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,13 +33,13 @@ func TestImageBuildJobHasOnlyItsBoundedRootlessPrivileges(t *testing.T) {
 		t.Fatal(err)
 	}
 	pod := job.Spec.Template.Spec
-	if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken || len(pod.ImagePullSecrets) != 0 ||
+	if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken || pod.HostUsers == nil || *pod.HostUsers || len(pod.ImagePullSecrets) != 0 ||
 		len(pod.Containers) != 2 || len(pod.InitContainers) != 2 || pod.FSGroupForTest() != 1000 {
 		t.Fatalf("unexpected builder pod authority: %+v", pod)
 	}
 	producer := pod.Containers[0]
 	security := producer.SecurityContext
-	if producer.Image != imageBuildImage || security.RunAsUser == nil || *security.RunAsUser != 1000 ||
+	if producer.Image != imageBuildImage || security.RunAsUser == nil || *security.RunAsUser != 1000 || security.ProcMount != "Unmasked" ||
 		!reflect.DeepEqual(security.Capabilities.Drop, []string{"ALL"}) || !reflect.DeepEqual(security.Capabilities.Add, []string{"SETUID", "SETGID"}) ||
 		security.SeccompProfile.Type != "Localhost" || security.SeccompProfile.LocalhostProfile != imageBuildProfile("linux/arm64") {
 		t.Fatalf("builder security differs from its fixed profile: %+v", producer)
@@ -47,6 +48,26 @@ func TestImageBuildJobHasOnlyItsBoundedRootlessPrivileges(t *testing.T) {
 		if v.ValueFrom != nil || v.Name == "ROOTLESSKIT_FLAGS" || v.Name == gitTokenKey {
 			t.Fatalf("builder received uncontrolled environment: %+v", v)
 		}
+		if v.Name == "BUILDKITD_FLAGS" && strings.Contains(v.Value, "no-process-sandbox") {
+			t.Fatalf("builder still shares the daemon PID namespace: %q", v.Value)
+		}
+	}
+	wire, err := json.Marshal(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(wire, &document); err != nil {
+		t.Fatal(err)
+	}
+	spec := document["spec"].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+	if hostUsers, ok := spec["hostUsers"].(bool); !ok || hostUsers {
+		t.Fatalf("typed image-build pod did not serialize hostUsers:false: %s", wire)
+	}
+	containers := spec["containers"].([]any)
+	securityWire := containers[0].(map[string]any)["securityContext"].(map[string]any)
+	if securityWire["procMount"] != "Unmasked" {
+		t.Fatalf("typed image-build pod did not serialize procMount:Unmasked: %s", wire)
 	}
 	for _, v := range pod.Volumes {
 		if v.EmptyDir == nil || v.EmptyDir.SizeLimit != cfg.WorkspaceLimit {
@@ -59,6 +80,18 @@ func TestImageBuildJobHasOnlyItsBoundedRootlessPrivileges(t *testing.T) {
 	for _, c := range append(pod.InitContainers, pod.Containers[1:]...) {
 		if c.SecurityContext.AllowPrivilegeEscalation == nil || *c.SecurityContext.AllowPrivilegeEscalation || len(c.SecurityContext.Capabilities.Add) > 0 {
 			t.Fatalf("builder privilege leaked to %s", c.Name)
+		}
+	}
+	ordinary, err := BuildJob(testConfig(), testRun(), testJobName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ordinary.Spec.Template.Spec.HostUsers != nil {
+		t.Fatal("ordinary command Job unexpectedly opted into a user namespace")
+	}
+	for _, container := range ordinary.Spec.Template.Spec.Containers {
+		if container.SecurityContext.ProcMount != "" {
+			t.Fatalf("ordinary command container unexpectedly requested procMount=%q", container.SecurityContext.ProcMount)
 		}
 	}
 }
