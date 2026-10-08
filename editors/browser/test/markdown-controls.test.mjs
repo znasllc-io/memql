@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { ContextKeyExpr } from '@codingame/monaco-vscode-api/vscode/vs/platform/contextkey/common/contextkey';
+import { getAllCodicons } from '@codingame/monaco-vscode-api/vscode/vs/base/common/codicons';
 
 const manifest = JSON.parse(readFileSync(new URL('../../productivity/package.json', import.meta.url), 'utf8'));
 const modes = ['source', 'reading', 'split'];
@@ -12,7 +13,8 @@ test('Markdown view buttons stay in the editor header regardless of text-editor 
     const entry = entries.find(item => item.command === `memql.productivity.markdown.${mode}`);
     assert.ok(entry, `${mode} must have an editor header button`);
     assert.match(entry.group, /^navigation@\d+$/, 'View controls must be buttons, not overflow menu items');
-    assert.ok(manifest.contributes.commands.find(command => command.command === entry.command)?.icon);
+    const icon = manifest.contributes.commands.find(command => command.command === entry.command)?.icon;
+    assert.ok(getAllCodicons().some(codicon => icon === `$(${codicon.id})`), `${mode} needs an icon the host actually supplies`);
     return ContextKeyExpr.deserialize(entry.when).evaluate({ getValue: key => context[key] });
   });
   // The title's resource context survives native source/custom editor switches.

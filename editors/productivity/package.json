@@ -72,13 +72,13 @@
         "command": "memql.productivity.markdown.reading",
         "title": "Markdown Reading View",
         "category": "MemQL Productivity",
-        "icon": "$(open-preview)"
+        "icon": "$(preview)"
       },
       {
         "command": "memql.productivity.markdown.split",
         "title": "Markdown Split View",
         "category": "MemQL Productivity",
-        "icon": "$(split-editor)"
+        "icon": "$(open-preview)"
       },
       {
         "command": "memql.productivity.template.source",
