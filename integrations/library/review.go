@@ -213,12 +213,14 @@ func validateReviewAnchor(value any) (map[string]any, error) {
 			return nil, fmt.Errorf("invalid document feedback intent")
 		}
 		result["intent"] = intent
-		if scope, exists := anchor["scope"]; exists {
-			if scope != "section" {
-				return nil, fmt.Errorf("invalid document extension scope")
-			}
-			result["scope"] = scope
+	}
+	// Scope identifies the selected context, independently of the operation
+	// requested in the person's feedback. The DSL harness resolves that intent.
+	if scope, exists := anchor["scope"]; exists {
+		if scope != "section" {
+			return nil, fmt.Errorf("invalid document feedback scope")
 		}
+		result["scope"] = scope
 	}
 	for _, key := range []string{"startBlock", "endBlock", "startTextOffset", "endTextOffset"} {
 		if value, exists := anchor[key]; exists {

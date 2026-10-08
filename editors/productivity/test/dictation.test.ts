@@ -60,3 +60,26 @@ test('a dismissed old microphone prompt cannot interrupt a new dictation', {time
  captures[1].reject(new Error('Microphone permission denied'));await second;
  assert.equal(messages.at(-1).phase,'idle');assert.equal(messages.at(-1).error,'Microphone permission denied');
 });
+
+test('unavailable speech releases capture, gives a recovery action, and permits retry', async () => {
+ const messages:any[]=[];let stopped=0,attempts=0;
+ Object.assign(vscode.commands,{
+  registerCommand:()=>({dispose(){}}),getCommands:async()=>['memql.editor.dictation.start'],
+  executeCommand:async(name:string)=>{if(name.endsWith('.stop'))stopped++;},
+ });
+ const panel={webview:{postMessage:async(message:any)=>{messages.push(message);return true;}}} as vscode.WebviewPanel;
+ const files={transcribe:async()=>{
+  if(attempts++===0)throw new Error('pushToTalk: failed to finalize streaming transcription: every_door_shut: no door [policy fastLocalFirst]; '+ 'provider HALF-CONFIGURED; '.repeat(80));
+  return 'Add a concrete example.';
+ }} as unknown as Documents;
+ const dictation=new DocumentDictation({subscriptions:[]} as unknown as vscode.ExtensionContext,files);
+ await dictation.start(panel,{} as OpenDocument);
+ assert.equal(stopped,1);
+ assert.match(messages.at(-1).error,/speech recognition model.*Fleet/);
+ assert.ok(messages.at(-1).error.length<200);
+ assert.equal(messages.some(m=>m.final),false);
+ await dictation.start(panel,{} as OpenDocument);
+ assert.equal(stopped,2);
+ assert.equal(messages.at(-1).text,'Add a concrete example.');
+ assert.equal(messages.at(-1).final,true);
+});

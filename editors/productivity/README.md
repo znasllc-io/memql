@@ -36,8 +36,8 @@ after both extensions have been compiled. `npm run package` creates a VSIX
 with both entry points; it does not publish it.
 
 Markdown has **Source**, **Read**, and **Review** modes. Read is a clean reading
-surface. Review offers selected-passage feedback, section extensions beside
-headings, and document extensions at the end. **Markdown Split View** remains
+surface. Review offers one feedback action for selections and sections, plus
+a document extension entry point at the end. **Markdown Split View** remains
 available in the editor title and command palette. These views share one VS Code
 document, including unsaved changes. Save before adding shared feedback. Local files remain local; opening
 one never silently uploads it or starts another Cockpit backup process.
@@ -57,6 +57,9 @@ permission is requested on first use. Stop to finish transcribing, edit the
 transcript, then add it to review. Nothing is submitted automatically. Closing
 the view, switching to Read or changing the connection cancels capture. Ordinary desktop VS Code
 does not expose this capture adapter, so its feedback composer remains text-only.
+The cluster must offer an eligible speech recognition model: a running Whisper
+endpoint also needs its Cockpit worker registered, connected and allowed to
+serve that model. Text-model readiness alone does not establish dictation readiness.
 
 The immutable approval records human feedback separately from proposed text,
 the measured provider/model calls behind each item, the exact accepted subset,
@@ -124,10 +127,11 @@ captures the ready template content it reviewed, so later copy edits do not
 change an in-progress campaign. Existing jobs without a captured snapshot retain
 the older live-template behavior; pause and recreate those jobs to capture a copy.
 
-In **Review**, select a passage and choose **Feedback** or **Extend**. The feedback
-icon also supports Ctrl/Cmd+Alt+M. Use **+** beside a heading to **Extend section**,
-or **Extend document** at the end. These share one extension flow: the anchor
-supplies a starting location, and the request describes the content to add. Unfinished notes stay attached to their selection across view
+In **Review**, select a passage and choose **Feedback**, use the feedback icon
+beside a heading, or press Ctrl/Cmd+Alt+M. Describe what you want; the DSL-driven
+harness infers additions, revisions, deletion, moves and research from that
+request. Selecting a section supplies context without forcing an operation.
+**Extend document** at the end also starts a request without a selection. Unfinished notes stay attached to their selection across view
 changes; if the source changes, their text is preserved and must be reselected.
 Both composers use **Add to review**. The **Requests** list uses labeled
 **Included / Excluded** switches to choose what enters the next proposal; a
@@ -158,8 +162,9 @@ version containing only accepted items; declined items are excluded. Preservatio
 people can say "Rename this to Draft Exchange" without asking to retain bold
 formatting, surrounding descriptions or other items. The DSL prompt requires
 minimal changes and a check that every difference serves the feedback. Native
-application copies unaffected bytes and matching context from the saved source;
-extension-only edits cannot rewrite existing content. Extensions default to
+application copies unaffected bytes and matching context from the saved source.
+Explicit document-end extension requests also enforce insertion-only changes;
+addition-only feedback follows the preservation contract in the DSL prompt. Additions default to
 the selected section or passage, or append when started at the document end.
 Instructions can direct an addition elsewhere, such as question time after lunch
 in a schedule. The button's location does not constrain the insertion point.

@@ -36,7 +36,7 @@ export class DocumentDictation {
       if('error' in result)throw result.error;
       if(!session.abort.signal.aborted)await panel.webview.postMessage({type:'dictation',phase:'idle',text:result.text,final:true});
     } catch(error) {
-      if(!session.abort.signal.aborted)await panel.webview.postMessage({type:'dictation',phase:'idle',error:error instanceof Error?error.message:'Dictation failed. Your draft is preserved.'});
+      if(!session.abort.signal.aborted)await panel.webview.postMessage({type:'dictation',phase:'idle',error:dictationProblem(error)});
     } finally {
       session.abort.abort();await vscode.commands.executeCommand('memql.editor.dictation.stop',session.id);
       if(this.active===session)this.active=undefined;
@@ -45,4 +45,14 @@ export class DocumentDictation {
   }
   async stop(panel:vscode.WebviewPanel):Promise<void>{if(this.active?.panel===panel)await vscode.commands.executeCommand('memql.editor.dictation.stop',this.active.id);}
   cancel(panel?:vscode.WebviewPanel):void {const session=this.active;if(!session||panel&&session.panel!==panel)return;session.abort.abort();if(!session.ended){session.ended=true;session.controller.close();}void vscode.commands.executeCommand('memql.editor.dictation.stop',session.id);this.active=undefined;void session.panel.webview.postMessage({type:'dictation',phase:'idle'});}
+}
+
+// Keep provider diagnostics in cluster logs rather than filling the document
+// composer with every unavailable model and credential setting.
+function dictationProblem(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  if (/every_door_shut:|streaming transcription is not configured/.test(message)) {
+    return 'No speech recognition model is available. Check the speech model in Fleet, then try again. Your draft is preserved.';
+  }
+  return message.replace(/^pushToTalk:\s*/, '') || 'Dictation failed. Your draft is preserved.';
 }

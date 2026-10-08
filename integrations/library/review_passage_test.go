@@ -83,9 +83,12 @@ func TestReviewAnchorValidatesExtensionIntent(t *testing.T) {
 		intent, scope string
 		valid         bool
 	}{
-		{"extend", "section", true}, {"extend", "", true}, {"replace", "section", false}, {"extend", "unknown", false},
+		{"", "section", true}, {"", "unknown", false}, {"extend", "section", true}, {"extend", "", true}, {"replace", "section", false}, {"extend", "unknown", false},
 	} {
-		anchor := map[string]any{"kind": "markdown", "startLine": 0, "endLine": 1, "quote": "Heading", "sourceQuote": "# Heading", "intent": tc.intent}
+		anchor := map[string]any{"kind": "markdown", "startLine": 0, "endLine": 1, "quote": "Heading", "sourceQuote": "# Heading"}
+		if tc.intent != "" {
+			anchor["intent"] = tc.intent
+		}
 		if tc.scope != "" {
 			anchor["scope"] = tc.scope
 		}
@@ -93,7 +96,7 @@ func TestReviewAnchorValidatesExtensionIntent(t *testing.T) {
 		if (err == nil) != tc.valid {
 			t.Fatalf("%+v: %v", tc, err)
 		}
-		if tc.valid && (got["intent"] != "extend" || got["scope"] != anchor["scope"]) {
+		if tc.valid && (got["intent"] != anchor["intent"] || got["scope"] != anchor["scope"]) {
 			t.Fatalf("lost intent: %v", got)
 		}
 	}

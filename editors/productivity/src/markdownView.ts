@@ -56,7 +56,7 @@ function controls() {
   byId("dictation-status").textContent=dictationStatus("feedback");
   annotate.disabled = dictationPhase!=="idle"&&dictationTarget!=="feedback" || !connected || (!selection && !(feedback.value && draftAnchor));
   annotate.title = selection ? "Add feedback on this selection" : feedback.value && draftAnchor ? "Continue your feedback" : "Select text to add feedback";
-  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>("#extend,.section-extend"))) button.disabled = !connected||dictationPhase!=="idle";
+  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>("#extend,.section-feedback"))) button.disabled = !connected||dictationPhase!=="idle";
   feedback.readOnly=dictationPhase!=="idle";
   add.disabled = dictationPhase!=="idle" || !connected || !draftAnchor || !feedback.value.trim() || commentBusy;
   add.textContent = commentBusy ? "Adding…" : "Add to review";
@@ -89,7 +89,7 @@ function openComposer(anchor: Anchor, rect?: DOMRect) {
   const extend = isExtension(draftAnchor);
   byId("composer-title").textContent = extend ? draftAnchor?.kind === "document-end" ? "Extend document" : draftAnchor?.scope === "section" ? "Extend section" : "Extend passage" : "Add feedback";
   feedback.setAttribute("aria-label", extend ? "Extension request" : "Feedback");
-  feedback.placeholder = extend ? "What would you like to add here?" : "What would you like to change?";
+  feedback.placeholder = extend ? "What would you like to add here?" : "Describe what you’d like to change, add, move, or research…";
   byId("selected").textContent = draftAnchor?.quote ?? "";
   byId("selected").hidden = draftAnchor?.kind === "document-end";
   byId("composer").hidden = false; byId("selection-tools").hidden = true;
@@ -117,10 +117,9 @@ function captureSelection() {
   byId("selection-tools").hidden = !connected; position(byId("selection-tools"),selectionRect,true); controls();
 }
 document.addEventListener("selectionchange",captureSelection);
-for (const id of ["selection-feedback", "selection-extend"]) byId(id).addEventListener("mousedown", event => event.preventDefault());
+byId("selection-feedback").addEventListener("mousedown", event => event.preventDefault());
 annotate.addEventListener("mousedown",event => event.preventDefault());
 for (const id of ["selection-feedback","annotate"]) byId(id).addEventListener("click",() => { const anchor = selection ?? draftAnchor; if (anchor && connected) openComposer(anchor,selectionRect); });
-byId("selection-extend").addEventListener("click", () => { if (selection && selection.kind !== "document-end" && connected) openComposer({...selection, intent:"extend"}, selectionRect); });
 byId("extend").addEventListener("click",() => openComposer({kind:"document-end",quote:"End of document"},byId("extend").getBoundingClientRect()));
 byId("dictate").addEventListener("click",()=>dictate("feedback"));
 byId("composer-close").addEventListener("click",closeComposer);
@@ -207,13 +206,13 @@ function sectionTools() {
     if (!heading.dataset.blockId) continue;
     const quote = heading.textContent?.trim() ?? "";
     const button = document.createElement("button");
-    button.className = "section-extend icon-button";
-    button.setAttribute("aria-label", `Extend section: ${quote}`);
-    button.title = "Extend section";
-    button.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+    button.className = "section-feedback icon-button";
+    button.setAttribute("aria-label", `Feedback on section: ${quote}`);
+    button.title = "Give feedback on this section";
+    button.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z"/></svg>';
     button.addEventListener("click", () => {
       if (!connected) return;
-      const anchor: Anchor = { kind:"markdown", intent:"extend", scope:"section", quote,
+      const anchor: Anchor = { kind:"markdown", scope:"section", quote,
         startLine:Number(heading.dataset.startLine), endLine:Number(heading.dataset.endLine),
         startBlock:Number(heading.dataset.blockId), endBlock:Number(heading.dataset.blockId), startTextOffset:0, endTextOffset:quote.length };
       selectionRange = undefined;
@@ -257,7 +256,7 @@ function renderComments() {
     if (!inFlight) list.append(textElement("p", "Include the requests you want in this proposal.", "muted request-help"));
     for (const row of current) list.append(requestNote(row, !inFlight));
   }
-  if (!rows.length && !revision) list.append(textElement("p", "Select text for feedback, or use + beside a heading to extend a section.", "empty"));
+  if (!rows.length && !revision) list.append(textElement("p", "Select text or use the feedback button beside a heading. Describe the change or addition you want.", "empty"));
   if (earlier.length) {
     const details = textElement("details", "", "earlier"); details.append(textElement("summary", `Earlier requests (${earlier.length})`));
     for (const row of earlier) details.append(requestNote(row, false)); list.append(details);

@@ -84,15 +84,15 @@ test("standalone extensions replace the previous review with the same diff and a
 });
 
 
-test("section and selected-passage extensions preserve their precise starting locations",()=>{
+test("one feedback action carries addition requests at precise section and passage locations",()=>{
   const f=fixture();f.document("# Guide\n\n## Examples\n\nKeep **this selection** and the rest.\n\n## Examples\n\nLater content.\n");
-  const sections=f.doc.querySelectorAll<HTMLButtonElement>('button[aria-label="Extend section: Examples"]');
-  sections[1].click();assert.equal(f.el("composer-title").textContent,"Extend section");f.input("feedback","Add an exercise");f.el("add").click();
+  const sections=f.doc.querySelectorAll<HTMLButtonElement>('button[aria-label="Feedback on section: Examples"]');
+  sections[1].click();assert.equal(f.el("composer-title").textContent,"Add feedback");f.input("feedback","Add an exercise");f.el("add").click();
   const section=f.messages.find(m=>m.type==="comment").selection;
-  assert.equal(section.intent,"extend");assert.equal(section.scope,"section");assert.equal(section.startLine,6);assert.equal(section.quote,"Examples");assert.equal(section.endTextOffset,8);
-  f.send({type:"saved"});f.select();f.el("selection-extend").click();assert.equal(f.el("composer-title").textContent,"Extend passage");f.input("feedback","Add a concrete example");f.el("add").click();
+  assert.equal(section.intent,undefined);assert.equal(section.scope,"section");assert.equal(section.startLine,6);assert.equal(section.quote,"Examples");assert.equal(section.endTextOffset,8);
+  f.send({type:"saved"});f.select();assert.equal(f.doc.querySelectorAll("#selection-tools button").length,1);f.el("selection-feedback").click();assert.equal(f.el("composer-title").textContent,"Add feedback");f.input("feedback","Add a concrete example");f.el("add").click();
   const passage=f.messages.filter(m=>m.type==="comment").at(-1).selection;
-  assert.equal(passage.intent,"extend");assert.equal(passage.scope,undefined);assert.equal(passage.quote,"this selection");assert.equal(passage.startTextOffset,5);assert.equal(passage.endTextOffset,19);
+  assert.equal(passage.intent,undefined);assert.equal(passage.scope,undefined);assert.equal(passage.quote,"this selection");assert.equal(passage.startTextOffset,5);assert.equal(passage.endTextOffset,19);
   f.dom.window.close();
 });
 
