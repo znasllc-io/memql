@@ -131,6 +131,22 @@ query pipeline pipelinesPolled {
   shape     pipelineFull
 }
 
+/// Every active pipeline is checked once per day against its current default-branch manifest. The
+/// manifest decides whether it opts into a scheduled scan; the runner reads it at the head rather
+/// than cache schedule policy at connect time, so adding or removing `schedule: daily` takes effect
+/// without reconnecting. The scheduled agent automation has no person behind it, so actor.userId
+/// cannot scope the read; it must see all owners' active pipelines under the cluster-owner guard.
+/// Bounded at 500; the scheduler warns when it receives a full page rather than treating it as the
+/// whole set.
+@serverOnly
+@actor
+query pipeline pipelinesForScheduledScan {
+  filter    row => statusIsActive(row) && actor.isClusterOwner == true
+  sort      "row.createdAt", "asc"
+  paginate  500
+  shape     pipelineFull
+}
+
 /// One pipeline by id, whoever owns it -- what the driver loads before it drives a run. @serverOnly:
 /// the driver is an agent replica acting for the run, not a person, and must learn the owner FROM
 /// this row before it can borrow that owner's authority, so it cannot scope by actor.userId first.

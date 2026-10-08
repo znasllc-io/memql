@@ -3920,7 +3920,8 @@
           "merge_group",
           "pull_request",
           "push",
-          "release"
+          "release",
+          "schedule"
         ],
         "mode": [
           "affected",
@@ -3934,6 +3935,7 @@
         "trigger": [
           "poll",
           "rerun",
+          "schedule",
           "webhook"
         ]
       }

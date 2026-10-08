@@ -108,7 +108,12 @@ func TestValidate(t *testing.T) {
 			s.Stages[1].Needs = []string{strings.Repeat("a", 40)}
 		}), "", ""},
 		{"on names events and modes", fromValidateBase(func(s *Spec) {
-			s.Stages[1].On = []string{"affected", "full", "pull_request", "merge_group", "push", "release"}
+			s.Schedule = "daily"
+			s.Stages[1].On = []string{"affected", "full", "pull_request", "merge_group", "push", "release", "schedule"}
+		}), "", ""},
+		{"daily schedule with an explicit scan stage", fromValidateBase(func(s *Spec) {
+			s.Schedule = "daily"
+			s.Stages[0].On = []string{"schedule"}
 		}), "", ""},
 		{"a step name repeats across stages", fromValidateBase(func(s *Spec) { goTests(s).Name = "build" }), "", ""},
 		{"a notify stage that needs an earlier stage", fromValidateBase(func(s *Spec) {
@@ -184,6 +189,9 @@ func TestValidate(t *testing.T) {
 		{"a link URL of 513 bytes", linkURL("https://memql.io/" + strings.Repeat("a", 513-len("https://memql.io/"))), CodeStageInvalid, "notify"},
 		{"on names an unknown event", fromValidateBase(func(s *Spec) { s.Stages[2].On = []string{"pushed"} }), CodeEventUnknown, "notify"},
 		{"on names a rerequest", fromValidateBase(func(s *Spec) { s.Stages[2].On = []string{"check_run"} }), CodeEventUnknown, "notify"},
+		{"schedule stage requires daily opt-in", fromValidateBase(func(s *Spec) { s.Stages[0].On = []string{"schedule"} }), CodeStageInvalid, "checks"},
+		{"daily opt-in requires scheduled stage", fromValidateBase(func(s *Spec) { s.Schedule = "daily" }), CodeStageInvalid, "schedule"},
+		{"unknown scan cadence", fromValidateBase(func(s *Spec) { s.Schedule = "hourly" }), CodeStageInvalid, "schedule"},
 
 		// Steps.
 		{"a step without a name", fromValidateBase(func(s *Spec) { build(s).Name = "" }), CodeStepInvalid, "checks/steps[0]"},

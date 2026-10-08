@@ -404,7 +404,7 @@ func fullRuns(runs []RunFacts) []fullRun {
 	}
 	byKey := map[string]*attempts{}
 	for row, r := range runs {
-		if r.Mode != ModeFull {
+		if r.Mode != ModeFull || r.Event == EventSchedule {
 			continue
 		}
 		key := runKeyOf(r, row)

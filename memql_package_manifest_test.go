@@ -347,9 +347,9 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 		t.Fatalf("the pipeline declares no %q service, so the db-gated trees have nothing to test against", manifestPostgresService)
 	}
 
-	fullStages := []string{manifestStageChecks, "secrets-history", manifestStageTests}
+	fullStages := []string{manifestStageChecks, "vulnerabilities", "secrets-history", manifestStageTests}
 	analysisStages := append(slices.Clone(fullStages), "analysis")
-	pullRequestStages := []string{manifestStageChecks, "secrets-current", manifestStageTests, manifestStageGates}
+	pullRequestStages := []string{manifestStageChecks, "vulnerabilities", "secrets-current", manifestStageTests, manifestStageGates}
 	every := []string{manifestStepGoChecks, manifestStepPathRouting,
 		manifestStepGoTests, manifestStepDBTests, manifestStepFuzz, manifestStepOSChecks,
 		"sdk-ts-typecheck", "viewkit-checks", "mcp-conformance", "proving"}
@@ -374,6 +374,10 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			runs: every, absent: []string{manifestStepGateInputs}},
 		{name: "a release", event: pipelines.EventRelease, stages: analysisStages,
 			runs: every, absent: []string{manifestStepGateInputs}},
+		// A scheduled scan selects only its explicit opt-in stages; default
+		// stages such as checks and history scans are intentionally absent.
+		{name: "a daily scheduled security scan", event: pipelines.EventSchedule,
+			stages: []string{"vulnerabilities", "analysis"}, absent: []string{manifestStepGateInputs}},
 		// The compiler of this very manifest: Go source only, and the db-gated
 		// driver (component/pipelinerun) imports it, so the change reaches both
 		// test steps and the filesystem-gates bucket.
@@ -432,7 +436,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 			byName := map[string][]pipelines.Step{}
 			for _, step := range plan.Steps() {
 				byName[step.Name] = append(byName[step.Name], step)
-				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "secrets-current" || step.Stage == "secrets-history") {
+				if step.RunAfterFailure != (step.Stage == "analysis" || step.Stage == "vulnerabilities" || step.Stage == "secrets-current" || step.Stage == "secrets-history") {
 					t.Errorf("failure policy was lost or leaked to another stage: %+v", step)
 				}
 				if step.Kind != pipelines.StepCommand || step.Image != expectedEngineStepImage(spec, step.Name) {
@@ -483,7 +487,7 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 				}
 			}
 
-			if mode, _ := manifestEventMode(o.event); mode == pipelines.ModeFull {
+			if mode, _ := manifestEventMode(o.event); mode == pipelines.ModeFull && o.event != pipelines.EventSchedule {
 				checkEngineTestsPartitionEveryPackage(t, spec, graph, byName)
 			}
 		})

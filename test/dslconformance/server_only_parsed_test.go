@@ -1586,7 +1586,7 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// epic memql#5477, pipelines. Two arguments, and neither is "caller
 		// scoping was inconvenient".
 		//
-		// THE ELEVEN READS have NO PERSON BEHIND THEIR CALLER. A delivery is
+		// THE TWELVE READS have NO PERSON BEHIND THEIR CALLER. A delivery is
 		// GitHub's, the poll and recovery are a schedule's, the driver is an
 		// agent replica acting for a run, and the readiness report is the
 		// cluster asking about itself -- so actor.userId names nobody, and
@@ -1617,6 +1617,7 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// grant and read the manifest, under the owner's borrowed authority.
 		{Path: "pipelines/queries.memql", Name: "pipelinesForRepository"}:               true,
 		{Path: "pipelines/queries.memql", Name: "pipelinesPolled"}:                      true,
+		{Path: "pipelines/queries.memql", Name: "pipelinesForScheduledScan"}:            true,
 		{Path: "pipelines/queries.memql", Name: "pipelineById"}:                         true,
 		{Path: "pipelines/queries.memql", Name: "pipelineRunsForKey"}:                   true,
 		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineSha"}:           true,

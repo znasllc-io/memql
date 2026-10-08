@@ -100,6 +100,17 @@ func TestAPreviewReadsTheManifestAndWritesNothing(t *testing.T) {
 	}
 }
 
+func TestPreviewReportsManifestSchedule(t *testing.T) {
+	h := connectHarness(t, dailyScanManifest)
+	res, err := h.integ.Preview(personCtx(ownerID), packageID)
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if res.Refusal != nil || res.Schedule != "daily" || res.payload()["schedule"] != "daily" {
+		t.Fatalf("preview does not expose the schedule: %+v", res)
+	}
+}
+
 func TestPreviewCarriesFleetPlacementWithoutHostNeeds(t *testing.T) {
 	for _, execution := range []string{"native", "container"} {
 		manifest := "formatVersion: 1\nname: shop\npipeline:\n  platform: linux/arm64\n  stages:\n    - name: build\n      steps:\n        - name: build\n          execution: " + execution + "\n          placement: fleet\n          run: make\n"

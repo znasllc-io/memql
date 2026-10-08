@@ -42,6 +42,7 @@ type PreviewResult struct {
 	// called on GitHub under it.
 	Name      string
 	CheckName string
+	Schedule  string
 	Stages    []PreviewStage
 	// Needs and Secrets are every step's, each once, sorted: what the
 	// Compute and Confirm stops ask a person about.
@@ -140,6 +141,7 @@ func (i *Integration) Preview(ctx context.Context, packageID string) (PreviewRes
 	spec := insp.manifest.Pipeline
 	res.Name = insp.manifest.Name
 	res.CheckName = pipelines.CheckRunName(res.Name)
+	res.Schedule = spec.Schedule
 	needs, secrets := map[string]bool{}, map[string]bool{}
 	for _, st := range spec.Stages {
 		stage := PreviewStage{Name: st.Name, On: append([]string(nil), st.On...), Channel: st.Channel}
@@ -209,7 +211,7 @@ func (r PreviewResult) payload() map[string]any {
 	}
 	out := map[string]any{
 		"repository": r.Repository, "defaultBranch": r.DefaultBranch, "sha": r.SHA,
-		"name": r.Name, "checkName": r.CheckName, "stages": stages,
+		"name": r.Name, "checkName": r.CheckName, "schedule": r.Schedule, "stages": stages,
 		"needs": nonNil(r.Needs), "secrets": nonNil(r.Secrets), "suggestedDelivery": r.SuggestedDelivery,
 		"existing": nil, "refusal": nil,
 	}

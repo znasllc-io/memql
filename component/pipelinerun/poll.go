@@ -63,7 +63,7 @@ func (i *Integration) handlePoll(ctx context.Context, _ map[string]any, _ int) (
 
 // Poll walks every polled pipeline, then calls the recovery hook. One
 // pipeline that cannot be polled -- a revoked grant, GitHub down -- is
-// reported and does not stop the others. It is the schedule's alone: a call
+// reported and does not stop the others. It is the poll automation's alone: a call
 // that did not arrive with internal origin is refused (ErrClientOrigin)
 // before anything is read.
 func (i *Integration) Poll(ctx context.Context) (PollResult, error) {

@@ -11,9 +11,9 @@ const (
 	ModeFull Mode = "full"
 )
 
-// Event is the GitHub event a run was opened for (D5, plus `release` from the
-// documentation program's D15). A re-requested check run is not an event of
-// its own: it re-runs the original run's event and mode.
+// Event is the cause a run was opened for (GitHub events, plus MemQL's
+// manifest-opted-in daily schedule). A re-requested check run is not an event
+// of its own: it re-runs the original run's event and mode.
 type Event string
 
 const (
@@ -21,6 +21,7 @@ const (
 	EventMergeGroup  Event = "merge_group"
 	EventPush        Event = "push"
 	EventRelease     Event = "release"
+	EventSchedule    Event = "schedule"
 )
 
 // Compute is where a pipeline's steps may run (D10, D14). Absent means

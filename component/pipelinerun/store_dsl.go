@@ -42,6 +42,7 @@ const (
 	// Server-only reads, every owner's rows, cluster-owner conjunct.
 	qPipelinesForRepository     = "pipelinesForRepository"     // (repository)
 	qPipelinesPolled            = "pipelinesPolled"            // ()
+	qPipelinesForScheduledScan  = "pipelinesForScheduledScan"  // ()
 	qPipelineByID               = "pipelineById"               // (pipelineId)
 	qPipelineRunsForKey         = "pipelineRunsForKey"         // (runKey)
 	qPipelineRunsForPipelineSha = "pipelineRunsForPipelineSha" // (pipelineId, sha)
@@ -361,6 +362,10 @@ func (s *dslStore) PipelinesForRepository(ctx context.Context, repository string
 
 func (s *dslStore) PipelinesPolled(ctx context.Context) ([]Pipeline, error) {
 	return allPipelines(s.systemRead(ctx, qPipelinesPolled, nil))
+}
+
+func (s *dslStore) PipelinesForScheduledScan(ctx context.Context) ([]Pipeline, error) {
+	return allPipelines(s.systemRead(ctx, qPipelinesForScheduledScan, nil))
 }
 
 func (s *dslStore) PipelineByID(ctx context.Context, pipelineID string) (*Pipeline, error) {

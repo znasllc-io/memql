@@ -195,6 +195,9 @@ func TestTheDSLStoreOverRealRows(t *testing.T) {
 	if got, err := store.PipelinesPolled(ctx); err != nil || !hasPipeline(got, p.ID) {
 		t.Errorf("pipelinesPolled: %d rows, %v", len(got), err)
 	}
+	if got, err := store.PipelinesForScheduledScan(ctx); err != nil || !hasPipeline(got, p.ID) {
+		t.Errorf("pipelinesForScheduledScan: %d rows, %v", len(got), err)
+	}
 
 	// ---- the poll's heads, then a reconnect that must keep them ----
 	heads := map[string]string{"branch:main": shaA, "pr:7": shaB}

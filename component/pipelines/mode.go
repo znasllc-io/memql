@@ -1,7 +1,9 @@
 package pipelines
 
 import (
+	"fmt"
 	"strings"
+	"time"
 )
 
 // Events is the supported GitHub protocol event vocabulary. Run policy lives
@@ -24,4 +26,31 @@ func Events() []Event {
 func RunKey(repository, sha string, mode Mode, event Event) string {
 	return strings.ToLower(strings.TrimSpace(repository)) + "@" +
 		strings.ToLower(strings.TrimSpace(sha)) + ":" + string(mode) + ":" + string(event)
+}
+
+// ScheduledRunKey adds the UTC day to a scheduled run's identity. A daily
+// scan must run again when the branch head is unchanged, while duplicate
+// scheduler deliveries on the same day must collapse to one run.
+func ScheduledRunKey(repository, sha string, mode Mode, day string) (string, error) {
+	if mode != ModeFull {
+		return "", fmt.Errorf("pipelines: scheduled run mode %q must be full", mode)
+	}
+	parsed, err := time.Parse("2006-01-02", day)
+	if err != nil || parsed.Format("2006-01-02") != day {
+		return "", fmt.Errorf("pipelines: scheduled run day %q must be YYYY-MM-DD", day)
+	}
+	return RunKey(repository, sha, mode, EventSchedule) + ":" + day, nil
+}
+
+// ScheduledDayFromRunKey recovers the day a manual re-run must preserve.
+func ScheduledDayFromRunKey(key string) (string, bool) {
+	base, day, ok := strings.Cut(key, ":schedule:")
+	if !ok || strings.Contains(day, ":") || !strings.HasSuffix(base, ":full") || !strings.Contains(base, "@") {
+		return "", false
+	}
+	parsed, err := time.Parse("2006-01-02", day)
+	if err != nil || parsed.Format("2006-01-02") != day {
+		return "", false
+	}
+	return day, true
 }

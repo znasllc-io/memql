@@ -222,7 +222,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // decided by the pinned core pipeline workflow rather than Go.
 // 143 -> 146: sealed package coverage, per-step package source/filter, and
 // path-bucket decisions now run through the pinned core pipeline workflow.
-const shippedAutomationCount = 146
+// 146 -> 147: the daily opt-in pipeline security scan is installed.
+const shippedAutomationCount = 147
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

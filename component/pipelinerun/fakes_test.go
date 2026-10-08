@@ -324,6 +324,19 @@ func (s *memStore) PipelinesPolled(context.Context) ([]Pipeline, error) {
 	return out, nil
 }
 
+func (s *memStore) PipelinesForScheduledScan(context.Context) ([]Pipeline, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Pipeline
+	for _, p := range s.pipelines {
+		if p.Active() {
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
 func (s *memStore) PipelineByID(_ context.Context, pipelineID string) (*Pipeline, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

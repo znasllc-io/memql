@@ -118,6 +118,7 @@ func everyStoreCall(s Store, value string) []struct {
 		{"InboundDelivery", func() error { _, err := s.InboundDelivery(ctx, value); return err }},
 		{"PipelinesForRepository", func() error { _, err := s.PipelinesForRepository(ctx, value); return err }},
 		{"PipelinesPolled", func() error { _, err := s.PipelinesPolled(ctx); return err }},
+		{"PipelinesForScheduledScan", func() error { _, err := s.PipelinesForScheduledScan(ctx); return err }},
 		{"PipelineByID", func() error { _, err := s.PipelineByID(ctx, value); return err }},
 		{"PipelinesActive", func() error { _, err := s.PipelinesActive(ctx); return err }},
 		{"WorkSteps", func() error { _, err := s.WorkSteps(ctx, value); return err }},
@@ -265,7 +266,7 @@ func TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares(t *testing.T) {
 	}
 	for _, want := range []string{
 		qPipelinesForOwner, qPipelineForOwner, qPipelineForPackage, qPipelineRunsForOwner, qPipelineRunForOwner,
-		qPipelinesForRepository, qPipelinesPolled, qPipelineByID, qPipelineRunsForKey, qPipelineRunsForPipelineSha,
+		qPipelinesForRepository, qPipelinesPolled, qPipelinesForScheduledScan, qPipelineByID, qPipelineRunsForKey, qPipelineRunsForPipelineSha,
 		qPipelineRunByCheckRun, qPipelineRunsUnfinished, qPipelineRunsUnfinishedForPullRequest, qPipelineRunsCheckRunLost,
 		qPipelineRunByID, qPipelinesActive, qWorkStepsForRun,
 		mCreatePipeline, mUpdatePipeline, mCreatePipelineRun, mUpdatePipelineRun, qPackageByID, qInboundRequestByID,
