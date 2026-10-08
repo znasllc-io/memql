@@ -161,6 +161,13 @@
       }
     ],
     "menus": {
+      "webview/context": [
+        {
+          "command": "editor.action.clipboardCopyAction",
+          "when": "webviewId == memql.productivity.markdown && webviewSection == markdownReadOnly",
+          "group": "5_cutcopypaste@2"
+        }
+      ],
       "editor/title": [
         {
           "command": "memql.productivity.markdown.source",

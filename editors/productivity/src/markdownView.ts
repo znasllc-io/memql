@@ -8,6 +8,17 @@ const instruction = byId("revision-instruction") as HTMLTextAreaElement;
 const add = byId("add") as HTMLButtonElement;
 const annotate = byId("annotate") as HTMLButtonElement;
 const prepare = byId("prepare-revision") as HTMLButtonElement;
+// VS Code otherwise adds Cut and Paste even to noneditable rendered text.
+// Resolve each textarea's current state before the host builds its menu, also
+// covering per-item fields and inputs temporarily locked during dictation.
+document.addEventListener("contextmenu", event => {
+  if (!(event.target instanceof HTMLTextAreaElement)) return;
+  const readOnly = event.target.readOnly || event.target.disabled;
+  event.target.dataset.vscodeContext = JSON.stringify({
+    webviewSection: readOnly ? "markdownReadOnly" : "markdownInput",
+    preventDefaultContextMenuItems: readOnly,
+  });
+}, true);
 type Anchor = { kind?: "markdown"; intent?: "extend"; scope?: "section"; sectionPath?: string[]; startLine: number; endLine: number; quote: string; startBlock: number; endBlock: number; startTextOffset: number; endTextOffset: number; prefix?: string; suffix?: string } | { kind: "document-end"; quote: string };
 type ReviewRow = { id: string; body: string; outdated?: boolean; anchor: Anchor };
 const state = (api.getState() ?? {}) as { draft?: string; anchor?: Anchor; draftVersion?: number; source?: string; instruction?: string; reviewOpen?: boolean; included?: string[]; seen?: string[]; decisions?: Record<string, "accepted" | "declined">; modifications?: Record<string,string>; expanded?: Record<string,boolean>; reviewSource?: string };
