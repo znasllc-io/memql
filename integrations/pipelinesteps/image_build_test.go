@@ -16,6 +16,7 @@ func imageBuildRun() (Config, StepRun) {
 	cfg.ImageBuilder, cfg.NodePool = ImageBuilderRootlessV1, "builds"
 	run := testRun()
 	run.ImageBuild = &pl.ImageBuild{Context: ".", Dockerfile: "Dockerfile", Args: map[string]string{"BUILD_TAGS": "edge"}}
+	run.ImageBuild = imageBuildWithProvenance(run.ImageBuild, run.SHA, pl.Event(run.Env[eventVar]), run.Env["MEMQL_VERSION"])
 	run.Image, run.Command, run.ImagePullSecret = "", "", ""
 	run.Caches, run.Services, run.Secrets, run.Needs = nil, nil, nil, nil
 	run.Platform, run.MemoryMiB = "linux/arm64", 2048
@@ -96,16 +97,20 @@ func TestImageBuildCPUReservationHonorsOperatorBudget(t *testing.T) {
 
 func TestImageBuildRefusesUnsafeForwardBeforeResources(t *testing.T) {
 	for name, edit := range map[string]func(*Config, *StepRun){
-		"disabled":            func(c *Config, r *StepRun) { c.ImageBuilder = "" },
-		"unknown profile":     func(c *Config, r *StepRun) { c.ImageBuilder = "privileged" },
-		"shared serving pool": func(c *Config, r *StepRun) { c.NodePool = "" },
-		"credential":          func(c *Config, r *StepRun) { r.Secrets = map[string]string{"TOKEN": "secret"} },
-		"services":            func(c *Config, r *StepRun) { r.Services = map[string]pl.Service{"db": {Image: "db"}} },
-		"shared cache":        func(c *Config, r *StepRun) { r.Caches = []string{"go"} },
-		"command":             func(c *Config, r *StepRun) { r.Command = "override" },
-		"image":               func(c *Config, r *StepRun) { r.Image = "override" },
-		"artifact":            func(c *Config, r *StepRun) { r.Artifacts = []string{"other"} },
-		"no memory bound":     func(c *Config, r *StepRun) { r.MemoryMiB = 0 },
+		"disabled":                    func(c *Config, r *StepRun) { c.ImageBuilder = "" },
+		"unknown profile":             func(c *Config, r *StepRun) { c.ImageBuilder = "privileged" },
+		"shared serving pool":         func(c *Config, r *StepRun) { c.NodePool = "" },
+		"credential":                  func(c *Config, r *StepRun) { r.Secrets = map[string]string{"TOKEN": "secret"} },
+		"services":                    func(c *Config, r *StepRun) { r.Services = map[string]pl.Service{"db": {Image: "db"}} },
+		"shared cache":                func(c *Config, r *StepRun) { r.Caches = []string{"go"} },
+		"command":                     func(c *Config, r *StepRun) { r.Command = "override" },
+		"image":                       func(c *Config, r *StepRun) { r.Image = "override" },
+		"artifact":                    func(c *Config, r *StepRun) { r.Artifacts = []string{"other"} },
+		"no memory bound":             func(c *Config, r *StepRun) { r.MemoryMiB = 0 },
+		"forged commit":               func(c *Config, r *StepRun) { r.ImageBuild.Args["MEMQL_COMMIT"] = "another-source" },
+		"missing release metadata":    func(c *Config, r *StepRun) { delete(r.ImageBuild.Args, "MEMQL_RELEASE") },
+		"environment source mismatch": func(c *Config, r *StepRun) { r.Env["MEMQL_SHA"] = "another-source" },
+		"forged release metadata":     func(c *Config, r *StepRun) { r.ImageBuild.Args["MEMQL_RELEASE"] = "9.9.9" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg, run := imageBuildRun()
@@ -131,7 +136,7 @@ func TestImageBuildArgumentsRemainLiteralShellWords(t *testing.T) {
 		t.Fatal(err)
 	}
 	value := "quote' newline\n$(touch injected); --secret=id=publish"
-	build := &pl.ImageBuild{Context: ".", Dockerfile: "Dockerfile", Args: map[string]string{"VALUE": value}}
+	build := imageBuildWithProvenance(&pl.ImageBuild{Context: ".", Dockerfile: "Dockerfile", Args: map[string]string{"VALUE": value}}, testSHA, pl.EventRelease, "v1.2.3")
 	// Move the fixed checkout mount to isolated test scratch; everything else
 	// is the real generated program, executed by the real POSIX shell.
 	program := strings.ReplaceAll(imageBuildCommand(build, "linux/arm64"), workspacePath, root)
@@ -146,5 +151,8 @@ func TestImageBuildArgumentsRemainLiteralShellWords(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "injected")); !os.IsNotExist(err) {
 		t.Fatal("build argument executed as shell code")
+	}
+	if !strings.Contains(string(out), "build-arg:MEMQL_COMMIT="+testSHA+"\n") || !strings.Contains(string(out), "build-arg:MEMQL_RELEASE=1.2.3\n") {
+		t.Fatalf("pinned provenance was not passed to BuildKit: %s", out)
 	}
 }

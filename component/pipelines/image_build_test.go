@@ -29,18 +29,20 @@ func TestImageBuildCompilesWithoutSourceControlledRuntime(t *testing.T) {
 
 func TestImageBuildRefusesCredentialAndExecutionOverrides(t *testing.T) {
 	for name, edit := range map[string]func(*StepSpec){
-		"shell":               func(s *StepSpec) { s.Run = "push" },
-		"image":               func(s *StepSpec) { s.Image = "attacker:latest" },
-		"fleet":               func(s *StepSpec) { s.Placement = PlacementFleet },
-		"native":              func(s *StepSpec) { s.Execution = ExecutionNative },
-		"secrets":             func(s *StepSpec) { s.Secrets = []string{"PUBLISH_TOKEN"} },
-		"pull credential":     func(s *StepSpec) { s.ImagePullSecret = "REGISTRY_AUTH" },
-		"cache":               func(s *StepSpec) { cache := []string{"go"}; s.Caches = &cache },
-		"artifact override":   func(s *StepSpec) { s.Artifacts = []string{"anything"} },
-		"escape":              func(s *StepSpec) { s.ImageBuild.Context = "../other" },
-		"absolute dockerfile": func(s *StepSpec) { s.ImageBuild.Dockerfile = "/etc/passwd" },
-		"empty platform":      func(s *StepSpec) { s.Platform = "darwin/arm64" },
-		"argument injection":  func(s *StepSpec) { s.ImageBuild.Args["KEY --secret"] = "value" },
+		"shell":                func(s *StepSpec) { s.Run = "push" },
+		"image":                func(s *StepSpec) { s.Image = "attacker:latest" },
+		"fleet":                func(s *StepSpec) { s.Placement = PlacementFleet },
+		"native":               func(s *StepSpec) { s.Execution = ExecutionNative },
+		"secrets":              func(s *StepSpec) { s.Secrets = []string{"PUBLISH_TOKEN"} },
+		"pull credential":      func(s *StepSpec) { s.ImagePullSecret = "REGISTRY_AUTH" },
+		"cache":                func(s *StepSpec) { cache := []string{"go"}; s.Caches = &cache },
+		"artifact override":    func(s *StepSpec) { s.Artifacts = []string{"anything"} },
+		"escape":               func(s *StepSpec) { s.ImageBuild.Context = "../other" },
+		"absolute dockerfile":  func(s *StepSpec) { s.ImageBuild.Dockerfile = "/etc/passwd" },
+		"empty platform":       func(s *StepSpec) { s.Platform = "darwin/arm64" },
+		"argument injection":   func(s *StepSpec) { s.ImageBuild.Args["KEY --secret"] = "value" },
+		"forged source commit": func(s *StepSpec) { s.ImageBuild.Args["MEMQL_COMMIT"] = "deadbeef" },
+		"forged release":       func(s *StepSpec) { s.ImageBuild.Args["MEMQL_RELEASE"] = "9.9.9" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			spec := imageBuildSpec()

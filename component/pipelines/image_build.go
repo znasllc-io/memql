@@ -47,6 +47,9 @@ func CheckImageBuild(build *ImageBuild, platform string) error {
 		return fmt.Errorf("imageBuild supports at most 64 public build arguments")
 	}
 	for key, value := range build.Args {
+		if key == "MEMQL_COMMIT" || key == "MEMQL_RELEASE" {
+			return fmt.Errorf("imageBuild argument %q is reserved for pinned pipeline provenance", key)
+		}
 		if !imageBuildName.MatchString(key) || len(value) > 4096 || strings.ContainsRune(value, 0) {
 			return fmt.Errorf("imageBuild argument names and values must be bounded text without NUL")
 		}

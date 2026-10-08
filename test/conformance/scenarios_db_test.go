@@ -500,9 +500,11 @@ func (r *scenarioRig) dryRun(t *testing.T, sc scenarioCase) {
 		req.TriggerEvent = &memql.DryRunTriggerEvent{Topic: ev.Topic, Kind: ev.Kind.String(), Payload: ev.Payload}
 	}
 	// createdAt is authored data: earlier scenarios can leave future-dated
-	// versions. Comparing it with the wall clock counts those old rows as
-	// new writes. Measure stored versions across the sandbox call instead.
-	versionsBefore, err := r.env.DB.NewSelect().Model((*memoryNodes.MemoryNode)(nil)).Count(context.Background())
+	// versions. The database is shared across Go test packages, so a global
+	// table count would also mistake another package's concurrent writes for
+	// this dry run. Count only rows carrying this variant's unique ID suffix.
+	versionsBefore, err := r.env.DB.NewSelect().Model((*memoryNodes.MemoryNode)(nil)).
+		Where("id LIKE ?", "%-"+v.tag).Count(context.Background())
 	if err != nil {
 		t.Fatalf("count stored versions before the dry run: %v", err)
 	}
@@ -520,7 +522,8 @@ func (r *scenarioRig) dryRun(t *testing.T, sc scenarioCase) {
 	if after := v.snapshot(); !reflect.DeepEqual(before, after) {
 		t.Errorf("dryRun %s changed a seeded row:\nbefore %v\nafter  %v", f.Automation, before, after)
 	}
-	versionsAfter, err := r.env.DB.NewSelect().Model((*memoryNodes.MemoryNode)(nil)).Count(context.Background())
+	versionsAfter, err := r.env.DB.NewSelect().Model((*memoryNodes.MemoryNode)(nil)).
+		Where("id LIKE ?", "%-"+v.tag).Count(context.Background())
 	if err != nil {
 		t.Fatalf("count the rows written since the dry run began: %v", err)
 	}

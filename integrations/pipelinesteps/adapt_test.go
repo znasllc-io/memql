@@ -170,6 +170,29 @@ func TestStepRequestBecomesAStepRun(t *testing.T) {
 	})
 }
 
+func TestImageBuildReceivesPinnedCommitAndReleaseMetadata(t *testing.T) {
+	req := testRequest()
+	req.SHA = testSHA
+	req.Event, req.Version = pl.EventRelease, "v1.25.0"
+	req.Step.ImageBuild = &pl.ImageBuild{Context: ".", Dockerfile: "Dockerfile", Args: map[string]string{"BUILD_TAGS": "edge"}}
+	run := stepRunFor(req, 600, pl.CodeStepTimeout)
+	if got := run.ImageBuild.Args["MEMQL_COMMIT"]; got != testSHA {
+		t.Fatalf("MEMQL_COMMIT = %q, want pinned SHA %q", got, testSHA)
+	}
+	if got := run.ImageBuild.Args["MEMQL_RELEASE"]; got != "1.25.0" {
+		t.Fatalf("MEMQL_RELEASE = %q, want bare release version", got)
+	}
+	if _, ok := req.Step.ImageBuild.Args["MEMQL_COMMIT"]; ok {
+		t.Fatal("adding build provenance mutated the source step definition")
+	}
+
+	req.Event, req.Version = pl.EventPush, testSHA
+	run = stepRunFor(req, 600, pl.CodeStepTimeout)
+	if got := run.ImageBuild.Args["MEMQL_RELEASE"]; got != "" {
+		t.Fatalf("non-release MEMQL_RELEASE = %q, want empty", got)
+	}
+}
+
 // TestSecretValuesAreEveryValueToMask: the capture and the fleet's result mask
 // the resolved secrets and the clone token, sorted, blanks dropped.
 func TestSecretValuesAreEveryValueToMask(t *testing.T) {
