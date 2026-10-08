@@ -41,6 +41,9 @@ func (s *libraryRevisionFiles) SaveRevision(ctx context.Context, write library.R
 		return fmt.Errorf("document storage is unavailable on this node")
 	}
 	ctx = memql.ContextWithFreshRead(ctx)
+	// Internal document records carry canonical ids; derived version identities
+	// and the storage adapter contract use the bare file id.
+	write.FileID = memql.BareShortId(write.FileID)
 	current, err := s.store.File(ctx, server.LibraryFileConceptRef(write.FileID))
 	if err != nil {
 		return err
