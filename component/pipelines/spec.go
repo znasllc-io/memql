@@ -14,6 +14,10 @@ package pipelines
 // is deliberate: a typo in a pipeline must fail that pipeline's run with a
 // typed refusal (D9), not refuse every deploy of the source it sits in.
 type Spec struct {
+	// Schedule opts the pipeline into the sealed periodic schedule. The first
+	// supported cadence is one UTC daily run; stages must also opt in with
+	// `on: [schedule]`.
+	Schedule string `yaml:"schedule,omitempty" json:"schedule,omitempty"`
 	// Workflow selects an installed MemQL automation over the compiled steps.
 	// Empty selects the sealed core workflow; the manifest never supplies code.
 	Workflow string `yaml:"workflow,omitempty" json:"workflow,omitempty"`
@@ -57,7 +61,8 @@ type StageSpec struct {
 	// Needs names earlier stages this one depends on.
 	Needs []string `yaml:"needs,omitempty" json:"needs,omitempty"`
 	// On restricts the stage to events (pull_request, merge_group, push,
-	// release) or modes (affected, full). Empty means every run.
+	// release, schedule) or modes (affected, full). Empty means every
+	// non-scheduled run; scheduled scans require an explicit `schedule` entry.
 	On []string `yaml:"on,omitempty" json:"on,omitempty"`
 	// Channel makes this a notify stage: it names a v1:pipelines:channel and
 	// carries no steps (D16).

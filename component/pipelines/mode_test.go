@@ -54,6 +54,34 @@ func TestRunKeyIsOneKeyForOneHead(t *testing.T) {
 	}
 }
 
+func TestScheduledRunKeyDeduplicatesOneUTCDateAndRescansUnchangedHeadsNextDate(t *testing.T) {
+	const sha = "c5fa05f142af4f7c6bd9b18c24924ebed165a4ab"
+	one, err := ScheduledRunKey("Acme-Corp/Storefront", strings.ToUpper(sha), ModeFull, "2026-10-07")
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate, err := ScheduledRunKey("acme-corp/storefront", sha, ModeFull, "2026-10-07")
+	if err != nil || duplicate != one {
+		t.Fatalf("same day scheduled keys = %q and %q, err %v", one, duplicate, err)
+	}
+	nextDay, err := ScheduledRunKey("acme-corp/storefront", sha, ModeFull, "2026-10-08")
+	if err != nil || nextDay == one {
+		t.Fatalf("next day key = %q, err %v; same-head daily scans must be distinct", nextDay, err)
+	}
+	if day, ok := ScheduledDayFromRunKey(one); !ok || day != "2026-10-07" {
+		t.Fatalf("ScheduledDayFromRunKey(%q) = %q, %v", one, day, ok)
+	}
+	if _, err := ScheduledRunKey("acme-corp/storefront", sha, ModeFull, "2026-10-7"); err == nil {
+		t.Fatal("accepted a non-canonical scheduled date")
+	}
+	if _, err := ScheduledRunKey("acme-corp/storefront", sha, ModeAffected, "2026-10-07"); err == nil {
+		t.Fatal("accepted an affected-mode scheduled run")
+	}
+	if _, ok := ScheduledDayFromRunKey("acme-corp/storefront@" + sha + ":affected:schedule:2026-10-07"); ok {
+		t.Fatal("accepted a malformed scheduled run key")
+	}
+}
+
 // Decision 14: the check run's details link is the OS run page, read at boot
 // from one query parameter.
 func TestRunPageURLEscapesTheRunID(t *testing.T) {

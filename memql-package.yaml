@@ -10,11 +10,13 @@
 # The command parity gates compare the retained GitHub lanes with this package.
 # Working legacy workflows remain until equivalent local and production evidence
 # and retirement gates are satisfied. Remaining gaps include image builds,
-# installed-cluster lifecycle tests, editor host matrices, SARIF publication, release
-# publication and scheduled scans. No missing lane is considered passed.
+# installed-cluster lifecycle tests, editor host matrices, SARIF publication and
+# release publication. The daily scan is declared here but still needs a real
+# run from an installed MemQL build. No missing lane is considered passed.
 formatVersion: 1
 name: memql
 pipeline:
+  schedule: daily
   platform: linux/arm64
   # deploy/toolchain-image: Go 1.27.1, Node 22, protoc 33.4, kubectl 1.32.13, the
   # Docker client (no daemon), git, make, jq, python3 and the PostgreSQL client,
@@ -220,6 +222,10 @@ pipeline:
           run: |
             set -eu
             bash ./scripts/ci/bash32-smoke.sh
+    - name: vulnerabilities
+      on: [pull_request, merge_group, push, release, schedule]
+      runAfterFailure: true
+      steps:
         - name: go-vulnerabilities
           placement: cluster
           timeout: 30m
@@ -496,7 +502,7 @@ pipeline:
     # main pushes and release qualification, including their re-runs. The
     # scheduler owns periodic full runs; a skipped scan is never a clean scan.
     - name: analysis
-      on: [push, release]
+      on: [push, release, schedule]
       runAfterFailure: true
       steps:
         - name: codeql-go

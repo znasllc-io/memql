@@ -183,8 +183,14 @@ func TestTheRunnersEntryPointsRefuseAClientAndReadAsTheSystemActor(t *testing.T)
 	if _, err := integ.Poll(caller); !errors.Is(err, ErrClientOrigin) {
 		t.Errorf("a person's poll: %v, want ErrClientOrigin", err)
 	}
+	if _, err := integ.Schedule(caller); !errors.Is(err, ErrClientOrigin) {
+		t.Errorf("a person's scheduled scan: %v, want ErrClientOrigin", err)
+	}
 	if _, err := integ.handlePoll(caller, nil, 0); !errors.Is(err, ErrClientOrigin) {
 		t.Errorf("a person's poll capability: %v, want ErrClientOrigin", err)
+	}
+	if _, err := integ.handleSchedule(caller, nil, 0); !errors.Is(err, ErrClientOrigin) {
+		t.Errorf("a person's scheduled scan capability: %v, want ErrClientOrigin", err)
 	}
 	if calls := engine.recorded(); len(calls) != 0 {
 		t.Fatalf("a refused client call read %d rows first: %v", len(calls), calls)

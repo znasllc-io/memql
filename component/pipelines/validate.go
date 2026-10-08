@@ -66,6 +66,7 @@ var stageOnValues = map[string]bool{
 	string(EventMergeGroup):  true,
 	string(EventPush):        true,
 	string(EventRelease):     true,
+	string(EventSchedule):    true,
 	string(ModeAffected):     true,
 	string(ModeFull):         true,
 }
@@ -89,6 +90,9 @@ func Validate(spec *Spec) *Refusal {
 	if spec.Workflow != "" && !workflowNameRe.MatchString(spec.Workflow) {
 		return Refuse(CodeStageInvalid, "workflow", "workflow must name an installed MemQL automation (letters, digits or underscores, starting with a letter, at most 128 characters).")
 	}
+	if spec.Schedule != "" && spec.Schedule != "daily" {
+		return Refuse(CodeStageInvalid, "schedule", "schedule must be empty or daily (one UTC run per day).")
+	}
 	if len(spec.Stages) == 0 {
 		return Refuse(CodeStageInvalid, "", "The pipeline declares no stages.")
 	}
@@ -109,7 +113,19 @@ func Validate(spec *Spec) *Refusal {
 		}
 		earlier[stage.Name] = true
 	}
+	if spec.Schedule == "daily" && !hasScheduledStage(spec) {
+		return Refuse(CodeStageInvalid, "schedule", "schedule is daily but no stage opts in with on: [schedule].")
+	}
 	return nil
+}
+
+func hasScheduledStage(spec *Spec) bool {
+	for _, stage := range spec.Stages {
+		if slices.Contains(stage.On, string(EventSchedule)) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateServices(services map[string]Service) *Refusal {
@@ -198,6 +214,9 @@ func validateStage(spec *Spec, i int, stage StageSpec, earlier, declared map[str
 		if !stageOnValues[on] {
 			return Refuse(CodeEventUnknown, stage.Name, "Stage %q runs on %q, which is neither an event nor a mode; use %s.",
 				stage.Name, on, strings.Join(slices.Sorted(maps.Keys(stageOnValues)), ", "))
+		}
+		if on == string(EventSchedule) && spec.Schedule != "daily" {
+			return Refuse(CodeStageInvalid, stage.Name, "Stage %q opts into schedule, but the pipeline has no daily schedule.", stage.Name)
 		}
 	}
 

@@ -247,10 +247,11 @@ func (i *Integration) released(ctx context.Context, d Deps, p Pipeline, t pipeli
 // rerunOf is the opening of r's next attempt: whole, or -- failedOnly, a
 // person's "Re-run failed" -- running only what r did not pass.
 func rerunOf(r Run, deliveryID string, failedOnly bool) Opening {
+	scheduleSlot, _ := pipelines.ScheduledDayFromRunKey(r.RunKey)
 	return Opening{
 		Event: r.Event, Mode: r.Mode, SHA: r.SHA, BaseSHA: r.BaseSHA, Branch: r.HeadBranch,
 		Title: r.Title, PullRequest: r.PullRequest, Version: r.Version,
-		Trigger: TriggerRerun, RerunOf: r.ID, DeliveryID: deliveryID, FailedOnly: failedOnly,
+		ScheduleSlot: scheduleSlot, Trigger: TriggerRerun, RerunOf: r.ID, DeliveryID: deliveryID, FailedOnly: failedOnly,
 	}
 }
 

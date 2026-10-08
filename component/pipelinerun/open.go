@@ -41,6 +41,9 @@ type Opening struct {
 	Fork           bool
 	HeadRepository string
 	ReleaseTag     string
+	// ScheduleSlot is the UTC YYYY-MM-DD slot for EventSchedule. It is part
+	// of the run key so the same head is rescanned once each day.
+	ScheduleSlot string
 	// Version is MEMQL_VERSION; empty derives it (pipelines.Version). A
 	// re-run carries its original's, which for a release is the tag.
 	Version string
@@ -118,6 +121,15 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 		}
 	}
 	key := pipelines.RunKey(p.Repository, sha, mode, o.Event)
+	if o.Event == pipelines.EventSchedule {
+		scheduledKey, err := pipelines.ScheduledRunKey(p.Repository, sha, mode, strings.TrimSpace(o.ScheduleSlot))
+		if err != nil {
+			return OpenResult{}, err
+		}
+		key = scheduledKey
+	} else if strings.TrimSpace(o.ScheduleSlot) != "" {
+		return OpenResult{}, fmt.Errorf("pipelines: schedule slot supplied for non-scheduled event %q", o.Event)
+	}
 
 	// Asked first, fresh and with no gate held: a redelivery, a retried
 	// trigger or a poll that sees a head a webhook already opened is

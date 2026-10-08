@@ -40,9 +40,9 @@ func init() {
 // IntegrationName implements memql.IntegrationProvider.
 func (i *Integration) IntegrationName() string { return IntegrationName }
 
-// Capabilities implements memql.IntegrationProvider: the six executors
-// dsl/pipelines/builtins.memql declares, plus `status`, which no builtin
-// declares -- the readiness evaluator reads it directly by its executor name.
+// Capabilities implements memql.IntegrationProvider: every executor declared
+// in dsl/pipelines/builtins.memql, plus `status`, which no builtin declares --
+// the readiness evaluator reads it directly by its executor name.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{Name: "workflowFacts", Description: "Read the current claimed workflow's step receipts.", Handler: workflowCapability("workflowFacts")},
@@ -64,8 +64,14 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema:  map[string]string{},
 		},
 		{
+			Name:        "schedule",
+			Description: "The daily scheduled scan, reachable only from the sealed agent automation. Reads the active pipelines' current default-branch manifests and opens a full run only where `schedule: daily` is declared. The run key includes the UTC day, so a duplicate scheduler delivery is harmless and an unchanged head is scanned again the next day. The sealed stage policy runs only stages explicitly marked `on: [schedule]`.",
+			Handler:     i.handleSchedule,
+			ArgsSchema:  map[string]string{},
+		},
+		{
 			Name:        "connect",
-			Description: "Connect a pipeline to one of the caller's sources (D12, D14): prove the grant reaches the repository by minting a token through it, read memql-package.yaml at the default branch's head, refuse a source with no pipeline block (pipeline_not_declared) or one that does not validate, and create or reconnect the source's one pipeline. Answers {pipelineId, repository, delivery, compute, stages}.",
+			Description: "Connect a pipeline to one of the caller's sources (D12, D14): prove the grant reaches the repository by minting a token through it, read memql-package.yaml at the default branch's head, refuse a source with no pipeline block (pipeline_not_declared) or one that does not validate, and create or reconnect the source's one pipeline. Answers {pipelineId, repository, delivery, compute, schedule, stages}.",
 			Handler:     i.handleConnect,
 			ArgsSchema: map[string]string{
 				"packageId":   "string (required) -- the caller's v1:platform:package source",
@@ -76,7 +82,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "preview",
-			Description: "Read what connecting one of the caller's sources would act on, writing nothing (epic memql#5479): the grant proved by a mint, the default branch's head, and the pipeline block there -- its stages and steps, the needs and the secrets they name -- with the source's existing pipeline when it has one. A typed refusal (no block, a block that does not validate, a repository another source runs, a grant that no longer reaches it) is the answer's refusal, not an error. Answers {repository, defaultBranch, sha, name, checkName, stages, needs, secrets, suggestedDelivery, existing, refusal}.",
+			Description: "Read what connecting one of the caller's sources would act on, writing nothing (epic memql#5479): the grant proved by a mint, the default branch's head, and the pipeline block there -- its schedule, stages and steps, the needs and the secrets they name -- with the source's existing pipeline when it has one. A typed refusal (no block, a block that does not validate, a repository another source runs, a grant that no longer reaches it) is the answer's refusal, not an error. Answers {repository, defaultBranch, sha, name, checkName, schedule, stages, needs, secrets, suggestedDelivery, existing, refusal}.",
 			Handler:     i.handlePreview,
 			ArgsSchema:  map[string]string{"packageId": "string (required) -- the caller's v1:platform:package source"},
 		},

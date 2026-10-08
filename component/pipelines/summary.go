@@ -406,6 +406,8 @@ func metaLine(r RunReport) string {
 		parts = append(parts, "Push to the default branch")
 	case EventRelease:
 		parts = append(parts, "Release")
+	case EventSchedule:
+		parts = append(parts, "Scheduled security scan")
 	}
 	if sha := strings.TrimSpace(r.SHA); sha != "" {
 		if len(sha) > 7 {

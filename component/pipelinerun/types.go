@@ -36,9 +36,10 @@ const (
 	ConclusionRefused   = "refused"
 
 	// What opened a run row.
-	TriggerWebhook = "webhook"
-	TriggerPoll    = "poll"
-	TriggerRerun   = "rerun"
+	TriggerWebhook  = "webhook"
+	TriggerPoll     = "poll"
+	TriggerSchedule = "schedule"
+	TriggerRerun    = "rerun"
 
 	// Whether the run's GitHub check run exists. Pending is the value a run
 	// is opened with before any write was attempted; refused is GitHub's

@@ -37,6 +37,14 @@ automation pollPipelines {
   polled := builtin pipelinesPoll()
 }
 
+/// Once a day: active pipelines are checked at their current default-branch head, and only a
+/// manifest declaring `schedule: daily` opens a full scheduled scan. The opened run is handled by the
+/// ordinary agent driver; this automation executes no pipeline step itself.
+@trigger(schedule="0 30 3 * * *", node="agent", lease="pipelines-daily-scan")
+automation schedulePipelines {
+  scheduled := builtin pipelinesSchedule()
+}
+
 /// The default pipeline workflow: stages in manifest order, independent steps
 /// concurrently, and declared follow-up stages even after an earlier failure.
 /// The pipeline runtime supplies compiled steps and enforces the run lease.
@@ -74,6 +82,9 @@ automation runPipelineStages {
 @template
 automation pipelineStageIncluded {
   args { event string! mode string! on []string! }
+  if args.event == "schedule" {
+    return args.on.any(value => value == "schedule")
+  }
   return args.on.count() == 0 || args.on.any(value => value == args.event || value == args.mode)
 }
 
@@ -130,7 +141,7 @@ automation pipelineModeForEvent {
   args { event string! }
   switch args.event {
     case "pull_request" { return "affected" }
-    case "merge_group", "push", "release" { return "full" }
+    case "merge_group", "push", "release", "schedule" { return "full" }
     default { return "" }
   }
 }
@@ -144,6 +155,7 @@ automation pipelineNotificationCopy {
   failedMessage string! stages int! stageCount string! durationMs number! duration string!
  }
  subject := args.eventName == "release" ? ("Release" + (args.version == "" ? "" : " " + args.version)) :
+  args.eventName == "schedule" ? "Scheduled security scan" :
   args.eventName == "push" ? (args.branch == "" ? ("Push" + (args.sha == "" ? "" : " " + args.sha)) : "Push to " + args.branch) :
   args.eventName == "pull_request" ? ("Pull request" + (args.prNumber > 0 ? " #" + args.prLabel : "")) :
   (args.eventName == "merge_group" ? "Merge queue" : "Run") + (args.sha == "" ? "" : " " + args.sha)

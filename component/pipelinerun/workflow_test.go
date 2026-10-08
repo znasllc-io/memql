@@ -212,6 +212,7 @@ func TestModeForIsTheEventTable(t *testing.T) {
 		{pipelines.EventMergeGroup, pipelines.ModeFull, true},
 		{pipelines.EventPush, pipelines.ModeFull, true},
 		{pipelines.EventRelease, pipelines.ModeFull, true},
+		{pipelines.EventSchedule, pipelines.ModeFull, true},
 		// A re-requested check run is not an event of its own: it re-runs the
 		// original run's event, so the table has no row for it.
 		{"check_run", "", false},
@@ -261,6 +262,7 @@ func TestStageApplicabilityComesFromPinnedPipelineDSL(t *testing.T) {
 		{Name: "pull-request", On: []string{"pull_request"}},
 		{Name: "full", On: []string{"full"}},
 		{Name: "release", On: []string{"release"}},
+		{Name: "scheduled", On: []string{"schedule"}},
 	}
 	cases := []struct {
 		event pipelines.Event
@@ -270,6 +272,7 @@ func TestStageApplicabilityComesFromPinnedPipelineDSL(t *testing.T) {
 		{pipelines.EventPullRequest, pipelines.ModeAffected, []string{"always", "pull-request"}},
 		{pipelines.EventPush, pipelines.ModeFull, []string{"always", "full"}},
 		{pipelines.EventRelease, pipelines.ModeFull, []string{"always", "full", "release"}},
+		{pipelines.EventSchedule, pipelines.ModeFull, []string{"scheduled"}},
 	}
 	for _, tc := range cases {
 		got, err := dr.selectStages(context.Background(), stages, tc.event, tc.mode)

@@ -107,6 +107,7 @@ type Store interface {
 	InboundDelivery(ctx context.Context, requestID string) (*InboundDelivery, error)
 	PipelinesForRepository(ctx context.Context, repository string) ([]Pipeline, error)
 	PipelinesPolled(ctx context.Context) ([]Pipeline, error)
+	PipelinesForScheduledScan(ctx context.Context) ([]Pipeline, error)
 	PipelineByID(ctx context.Context, pipelineID string) (*Pipeline, error)
 	RunsForKey(ctx context.Context, runKey string) ([]Run, error)
 	// RunsForPipelineSHA answers newest first.

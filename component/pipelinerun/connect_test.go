@@ -111,6 +111,17 @@ func TestConnectCreatesTheSourcesOnePipeline(t *testing.T) {
 	}
 }
 
+func TestConnectReportsManifestSchedule(t *testing.T) {
+	h := connectHarness(t, dailyScanManifest)
+	res, err := connect(h, personCtx(ownerID), ConnectRequest{})
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	if res.Schedule != "daily" {
+		t.Fatalf("connect schedule = %q, want daily", res.Schedule)
+	}
+}
+
 func TestConnectRefusesAPersonWhoDoesNotOwnTheSource(t *testing.T) {
 	h := connectHarness(t, connectManifest)
 

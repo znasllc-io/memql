@@ -678,6 +678,15 @@ func TestAFullRunWithNoPullRequestRunIsNotCounted(t *testing.T) {
 	fgAssertReport(t, CountFalseGreens(runs, steps), fgWant(4, 4, 0, nil, nil))
 }
 
+func TestScheduledScanIsNotCountedAsALandedFullRun(t *testing.T) {
+	runs := []RunFacts{
+		fgPullRequestRun("pr-a", 42, 0, "success"),
+		{ID: "scheduled-a", SHA: strings.Repeat("a", 40), Event: EventSchedule, Mode: ModeFull, Conclusion: "failure", QueuedAt: fgAt(50)},
+	}
+	steps := map[string][]StepFacts{"pr-a": {fgDone("tests.lane")}}
+	fgAssertReport(t, CountFalseGreens(runs, steps), fgWant(0, 0, 0, nil, nil))
+}
+
 // A full run with no queue time cannot be placed after anything.
 func TestAFullRunQueuedAtNoTimePairsWithNothing(t *testing.T) {
 	full := fgPushRun("main-a", 42, 0, "failure")

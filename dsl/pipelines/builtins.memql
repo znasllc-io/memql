@@ -2,9 +2,10 @@
 // memql#5477). Every executor is integration.pipelines.*, the plug-in in
 // component/pipelinerun.
 //
-// TWO ARE THE RUNNER'S: pipelinesTrigger, for the automation on a staged
-// GitHub delivery, and pipelinesPoll, for the every-minute schedule. Neither
-// has a person behind it, and each reads across owners under the runner's own
+// THREE ARE THE RUNNER'S: pipelinesTrigger, for the automation on a staged
+// GitHub delivery; pipelinesPoll, for the every-minute poll; and
+// pipelinesSchedule, for the daily manifest-opted-in scan. None has a person
+// behind it, and each reads across owners under the runner's own
 // identity. They carry no @sdk, which keeps them out of the generated SDKs AND
 // NOTHING MORE: @sdk has no engine effect, a builtin takes no @serverOnly, and
 // any signed-in client's query can name a builtin. So the gate is in the
@@ -52,8 +53,13 @@ builtin pipelinesTrigger {
 }
 
 @executor("integration.pipelines.poll")
-@description("The polling delivery, every minute (D4, D11). Only the schedule reaches it: a call without internal origin is refused before anything is read. For each active pipeline whose delivery is poll, read the default branch's head and the open pull requests' heads through the owner's grant, and open a push run for a moved default head and a pull_request run (fork-aware) for a new or moved pull request head. The FIRST poll of a pipeline records its heads as a baseline and opens nothing, so connecting never floods a repository's history with runs. Closed pull requests' keys are dropped. Then, on a node that drives runs, recover: claim and drive every queued run no agent claimed and every in-progress run whose driver stopped renewing its lease.")
+@description("The polling delivery, every minute (D4, D11). Only the poll automation reaches it: a call without internal origin is refused before anything is read. For each active pipeline whose delivery is poll, read the default branch's head and the open pull requests' heads through the owner's grant, and open a push run for a moved default head and a pull_request run (fork-aware) for a new or moved pull request head. The FIRST poll of a pipeline records its heads as a baseline and opens nothing, so connecting never floods a repository's history with runs. Closed pull requests' keys are dropped. Then, on a node that drives runs, recover: claim and drive every queued run no agent claimed and every in-progress run whose driver stopped renewing its lease.")
 builtin pipelinesPoll {
+}
+
+@executor("integration.pipelines.schedule")
+@description("Open today's scheduled scan for active pipelines whose current default-branch manifest declares schedule: daily. Only the daily sealed agent automation reaches it: a call without internal origin is refused before anything is read. The UTC day is part of the run key, so duplicate invocations collapse and unchanged heads are scanned again tomorrow. The sealed workflow includes only stages explicitly marked on: [schedule].")
+builtin pipelinesSchedule {
 }
 
 /// Read pipeline configuration and each workbench's last runner isolation verdict.
@@ -67,7 +73,7 @@ builtin pipelinesStatus {
 @executor("integration.pipelines.connect")
 @args(profile="object")
 @requiresCapability("execute", "app:deployables/connect")
-@description("Connect a pipeline to one of the caller's sources (D12, D14). The caller must own the package, which must be a GitHub repository source fetched under a grant; the grant must reach the repository, proved by minting an installation token through it. Reads memql-package.yaml at the repository's default-branch head: a source with no `pipeline:` block is refused with pipeline_not_declared; a block that does not validate, or a step whose need or secret this connection's compute and secretNames do not allow, is refused with its own pipeline_* code; and a repository another source already runs is refused with pipeline_already_connected, so a pipeline that could never compile is never connected. Creates the source's one pipeline -- its id derived from the package id -- or reconnects it, which restates the configuration and keeps what the poll has seen. Answers {pipelineId, repository, delivery, compute, stages}, the stages being the block's stage names in order.")
+@description("Connect a pipeline to one of the caller's sources (D12, D14). The caller must own the package, which must be a GitHub repository source fetched under a grant; the grant must reach the repository, proved by minting an installation token through it. Reads memql-package.yaml at the repository's default-branch head: a source with no `pipeline:` block is refused with pipeline_not_declared; a block that does not validate, or a step whose need or secret this connection's compute and secretNames do not allow, is refused with its own pipeline_* code; and a repository another source already runs is refused with pipeline_already_connected, so a pipeline that could never compile is never connected. Creates the source's one pipeline -- its id derived from the package id -- or reconnects it, which restates the configuration and keeps what the poll has seen. Answers {pipelineId, repository, delivery, compute, schedule, stages}, with schedule daily or empty and stages naming the block's stages in order.")
 builtin pipelinesConnect {
   packageId    string!    @description("The v1:platform:package source to connect. Must be the caller's own.")
   delivery     string!    @description("How changes reach the pipeline: webhook (a GitHub delivery to this cluster's inbound seam) or poll (every minute, for a cluster GitHub cannot reach).")
@@ -79,7 +85,7 @@ builtin pipelinesConnect {
 @executor("integration.pipelines.preview")
 @args(profile="object")
 @requiresCapability("execute", "app:deployables/connect")
-@description("Read what connecting one of the caller's sources would act on, and write nothing (epic memql#5479: the connect rail's first stop shows the stages before anything is confirmed). The same read pipelinesConnect makes: the caller must own the package; the grant is proved by minting a token through it; memql-package.yaml is read at the default branch's head and its pipeline block validated. Answers one row: {repository, defaultBranch, sha, name, checkName, stages [{name, on, channel, steps [{name, packages, only, shards, bucket, needs, secrets, services}]}], needs, secrets, suggestedDelivery, existing {pipelineId, status, delivery, compute, secretNames} or null, refusal {code, message, scope} or null}. A typed refusal -- no pipeline block, a block that does not validate, a repository another source runs, a grant that no longer reaches it -- is the answer's refusal, never an error, so the stop that asked can render it with its remedy. suggestedDelivery is webhook where GitHub can plausibly reach this cluster and poll otherwise.")
+@description("Read what connecting one of the caller's sources would act on, and write nothing (epic memql#5479: the connect rail's first stop shows the stages before anything is confirmed). The same read pipelinesConnect makes: the caller must own the package; the grant is proved by minting a token through it; memql-package.yaml is read at the default branch's head and its pipeline block validated. Answers one row: {repository, defaultBranch, sha, name, checkName, schedule, stages [{name, on, channel, steps [{name, packages, only, shards, bucket, needs, secrets, services}]}], needs, secrets, suggestedDelivery, existing {pipelineId, status, delivery, compute, secretNames} or null, refusal {code, message, scope} or null}. schedule is daily or empty. A typed refusal -- no pipeline block, a block that does not validate, a repository another source runs, a grant that no longer reaches it -- is the answer's refusal, never an error, so the stop that asked can render it with its remedy. suggestedDelivery is webhook where GitHub can plausibly reach this cluster and poll otherwise.")
 builtin pipelinesPreview {
   packageId  string!  @description("The v1:platform:package source to read. Must be the caller's own.")
 }

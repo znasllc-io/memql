@@ -195,6 +195,9 @@ func TestTheDSLStoreOverRealRows(t *testing.T) {
 	if got, err := store.PipelinesPolled(ctx); err != nil || !hasPipeline(got, p.ID) {
 		t.Errorf("pipelinesPolled: %d rows, %v", len(got), err)
 	}
+	if got, err := store.PipelinesForScheduledScan(ctx); err != nil || !hasPipeline(got, p.ID) {
+		t.Errorf("pipelinesForScheduledScan: %d rows, %v", len(got), err)
+	}
 
 	// ---- the poll's heads, then a reconnect that must keep them ----
 	heads := map[string]string{"branch:main": shaA, "pr:7": shaB}
@@ -724,17 +727,17 @@ func TestEveryPipelinesBuiltinResolvesToACapability(t *testing.T) {
 	if registerErr != nil {
 		t.Fatalf("register: %v", registerErr)
 	}
-	// The control: the engine has loaded the workflow and lifecycle builtins (epic 2's six, plus
-	// connect preview, installations and the read-only runner status), so
-	// the audit below is about them rather than about an empty registry.
+	// The control: the engine has loaded all twelve shipped pipeline builtins,
+	// including schedule opt-in, connect preview, installations and runner
+	// status, so this audit is about the shipped DSL rather than an empty registry.
 	executors := 0
 	for _, fn := range eng.Functions().Snapshot() {
 		if fn != nil && fn.IsBuiltin() && strings.HasPrefix(fn.Executor, "integration.pipelines.") {
 			executors++
 		}
 	}
-	if executors != 11 {
-		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 11", executors)
+	if executors != 12 {
+		t.Fatalf("dsl/pipelines declares %d integration.pipelines builtins on this engine, want 12", executors)
 	}
 	if err := eng.AuditIntegrationExecutors(); err != nil {
 		t.Fatalf("the shipped DSL names a pipelines capability this integration does not offer: %v", err)

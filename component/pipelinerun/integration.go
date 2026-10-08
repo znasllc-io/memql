@@ -1,6 +1,6 @@
 // Package pipelinerun is the `pipelines` plug-in (epic memql#5477): it
-// connects a source's pipeline, turns a GitHub delivery or the poll into a
-// queued v1:pipelines:run with a check run beside it, and answers the person
+// connects a source's pipeline, turns a GitHub delivery, poll or daily scan
+// into a queued v1:pipelines:run with a check run beside it, and answers the person
 // acts on a run -- re-run and cancel -- and the readiness self-report.
 //
 // The pure half -- the manifest block, validation, compilation, the event
@@ -12,7 +12,7 @@
 // WHO DOES WHAT, AND ON WHICH NODE
 // ===========================================================================
 // A run is OPENED where its cause arrives -- the bff that staged a webhook,
-// the agent replica the poll is placed on -- as a `queued` row and a
+// or the agent replica the poll or daily scan is placed on -- as a `queued` row and a
 // `queued` check run. It is DRIVEN by an agent node that claims it under a
 // row lease (Task 10b's driver, in this same package): compiled, executed
 // over the work spine, concluded. Nothing about a run lives in one node's

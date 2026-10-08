@@ -43,6 +43,7 @@ type ConnectResult struct {
 	Repository  string
 	Delivery    string
 	Compute     pipelines.Compute
+	Schedule    string
 	Stages      []string
 	Reconnected bool
 }
@@ -72,6 +73,7 @@ func (i *Integration) handleConnect(ctx context.Context, args map[string]any, _ 
 		"repository":  res.Repository,
 		"delivery":    res.Delivery,
 		"compute":     string(res.Compute),
+		"schedule":    res.Schedule,
 		"stages":      res.Stages,
 		"reconnected": res.Reconnected,
 	}), nil
@@ -202,7 +204,7 @@ func (i *Integration) Connect(ctx context.Context, req ConnectRequest) (ConnectR
 	}
 	return ConnectResult{
 		PipelineID: p.ID, Repository: repository, Delivery: delivery, Compute: compute,
-		Stages: stages, Reconnected: reconnected,
+		Schedule: manifest.Pipeline.Schedule, Stages: stages, Reconnected: reconnected,
 	}, nil
 }
 
