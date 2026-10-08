@@ -80,7 +80,44 @@ function renderHistory() {
   if(historyData.branchesHasMore)family.append(textElement("small","Showing the 100 most recent branches. All branches remain available in Files."));
   historyControls();
 }
-byId("find").addEventListener("click",()=>api.postMessage({type:"find"}));
+const findQuery=byId("find-query") as HTMLInputElement;
+let findRanges:Range[]=[],findIndex=-1;
+function showFind(open:boolean) {
+ byId("document-find").hidden=!open;
+ if(open){closeComposer();byId("selection-tools").hidden=true;findQuery.focus();findQuery.select();updateFind(false);}
+ else {highlight("memql-find",[]);highlight("memql-find-active",[]);content.focus({preventScroll:true});}
+ renderNoteMarkers();
+}
+function updateFind(scroll=true) {
+ if(byId("document-find").hidden)return;
+ const nodes:{node:Text;start:number;end:number}[]=[];let text="";
+ const walker=document.createTreeWalker(content,NodeFilter.SHOW_TEXT);let node:Node|null;
+ while((node=walker.nextNode())){if(node.parentElement?.closest("button"))continue;const value=node.textContent??"";nodes.push({node:node as Text,start:text.length,end:text.length+value.length});text+=value;}
+ findRanges=[];findIndex=-1;
+ if(findQuery.value){
+  const escaped=findQuery.value.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  const pattern=new RegExp(escaped,"giu");let match:RegExpExecArray|null;
+  while((match=pattern.exec(text))&&findRanges.length<5000){
+   const start=nodes.find(part=>part.start<=match!.index&&part.end>match!.index),end=nodes.find(part=>part.start<match!.index+match![0].length&&part.end>=match!.index+match![0].length);
+   if(start&&end){const range=document.createRange();range.setStart(start.node,match.index-start.start);range.setEnd(end.node,match.index+match[0].length-end.start);findRanges.push(range);}
+  }
+ }
+ if(findRanges.length)findIndex=0;showFindMatch(scroll);
+}
+function showFindMatch(scroll:boolean) {
+ highlight("memql-find",findRanges);const active=findRanges[findIndex];highlight("memql-find-active",active?[active]:[]);
+ byId("find-count").textContent=!findQuery.value?"":findRanges.length?`${findIndex+1} of ${findRanges.length}${findRanges.length===5000?"+":""}`:"No matches";
+ (byId("find-previous") as HTMLButtonElement).disabled=(byId("find-next") as HTMLButtonElement).disabled=!findRanges.length;
+ if(scroll&&active)mapped(active.startContainer)?.scrollIntoView?.({block:"center"});
+}
+function nextFind(direction:number){if(findRanges.length){findIndex=(findIndex+direction+findRanges.length)%findRanges.length;showFindMatch(true);}}
+byId("find").addEventListener("click",()=>showFind(true));
+byId("find-close").addEventListener("click",()=>showFind(false));
+byId("find-next").addEventListener("click",()=>nextFind(1));
+byId("find-previous").addEventListener("click",()=>nextFind(-1));
+findQuery.addEventListener("input",()=>updateFind());
+findQuery.addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();event.stopPropagation();nextFind(event.shiftKey?-1:1);}if(event.key==="Escape"){event.preventDefault();event.stopPropagation();showFind(false);}});
+
 byId("history-toggle").addEventListener("click",()=>{showHistory(!historyOpen);if(historyOpen)historyRequest({type:"history"});});
 byId("history-close").addEventListener("click",()=>{showHistory(false);byId("history-toggle").focus();});
 byId("history-more").addEventListener("click",()=>historyRequest({type:"history",beforeVersion:historyData.beforeVersion}));
@@ -223,6 +260,7 @@ prepare.addEventListener("click",() => {
   api.postMessage({type:"prepareRevision",version,commentIds:[...selected],instruction:instruction.value});
 });
 document.addEventListener("keydown",event => {
+  if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="f"){event.preventDefault();event.stopPropagation();showFind(true);return;}
   if (event.key === "Escape") { if(notesOpen){showNotes(false);byId("notes-toggle").focus();return;} if(historyOpen){showHistory(false);byId("history-toggle").focus();return;} if (!byId("composer").hidden) closeComposer(); else if (!byId("review-panel").hidden) { showReview(false); byId("review-toggle").focus(); } else byId("selection-tools").hidden = true; }
   if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !byId("composer").hidden) { event.preventDefault(); add.click(); }
   if ((event.ctrlKey || event.metaKey) && event.altKey && event.key.toLowerCase() === "m" && selection && connected) { event.preventDefault(); openComposer(selection,selectionRect); }
@@ -503,6 +541,7 @@ function renderRevisionContent() {
 window.addEventListener("message",event=>{
   const message=event.data;
   if(message.type==="selectionNote"&&contextSelection&&connected&&!historyPreview){openComposer(contextSelection.anchor,contextSelection.rect,"note");contextSelection=undefined;}
+  if(message.type==="find")showFind(true);
   if(message.type==="notes"){personalNotes=message.rows??[];byId("notes-status").textContent=message.hasMore?"Showing your 500 most recent notes. Older notes remain saved.":"";byId("notes-retry").hidden=true;renderNotes();}
   if(message.type==="notesError"){byId("notes-status").textContent=message.message;byId("notes-retry").hidden=false;}
   if(message.type==="noteSaved"){commentBusy=false;feedback.value="";draftAnchor=undefined;closeComposer();controls();showNotes(true);}
@@ -540,7 +579,7 @@ window.addEventListener("message",event=>{
   if(message.type==="historyVersion"){
     showNotes(false);
     historyPreview=true;previewVersion=message.version;connected=false;selection=undefined;selectionRange=undefined;contextSelection=undefined;
-    document.body.classList.add("history-preview");content.innerHTML=message.html;highlight("memql-active",[]);
+    document.body.classList.add("history-preview");content.innerHTML=message.html;highlight("memql-active",[]);updateFind(false);
     byId("history-banner").hidden=false;byId("history-caption").textContent=`Version ${message.version} · Read-only preview`;
     branchName.value=`Branch from v${message.version}`;byId("history-branch").hidden=false;byId("history-status").textContent=latestDocument?.connected?"":"Save your local changes before starting a branch.";
     document.documentElement.scrollTop=0;showReview(reviewRequested);renderHistory();controls();
@@ -562,7 +601,7 @@ window.addEventListener("message",event=>{
     if(sourceIdentity && sourceIdentity!==incoming)activeAnchor=undefined;
     sourceIdentity=incoming;if(activeAnchor&&mode==="review")jumpTo(activeAnchor,false);selection=undefined;selectionRange=undefined;byId("selection-tools").hidden=true;
     if(!connected)byId("status").textContent=message.status??"Save the document before sharing feedback.";
-    document.documentElement.scrollTop=scroll;renderRevision();renderNotes();controls();saveState();api.postMessage({type:"rendered",version,text:content.textContent?.slice(0,500)});
+    document.documentElement.scrollTop=scroll;updateFind(false);renderRevision();renderNotes();controls();saveState();api.postMessage({type:"rendered",version,text:content.textContent?.slice(0,500)});
   }
   if(message.type==="comments") {
     const next=message.rows??[],different=JSON.stringify(next)!==JSON.stringify(rows);rows=next;

@@ -228,7 +228,7 @@ test("document-wide feedback and extension remain different scopes without presc
  const f=fixture();f.document();f.el("document-feedback").click();assert.equal(f.el("composer-title").textContent,"Revise entire document");
  f.input("feedback","Replace Alice with Morgan throughout.");f.el("add").click();assert.equal(f.messages.at(-1).selection.kind,"document");
  f.send({type:"saved"});f.el("extend").click();f.input("feedback","Add an example.");f.el("add").click();assert.equal(f.messages.at(-1).selection.kind,"document-end");
- f.el("find").click();assert.equal(f.messages.at(-1).type,"find");f.dom.window.close();
+ f.el("find").click();assert.equal(f.el("document-find").hidden,false);f.dom.window.close();
 });
 test("history preview isolates source and feedback, survives polling and returns to the current document",()=>{
  const f=fixture({reviewOpen:true});f.document();f.send({type:"document",html:renderMarkdown("Current text"),version:17,sourceIdentity:"Current text",connected:true,historyAvailable:true});
@@ -259,4 +259,14 @@ test("Read selection offers copy and private notes; markers open the separate no
  assert.equal(f.doc.querySelectorAll(".note-marker").length,0);assert.match(f.el("personal-notes").textContent!,/earlier version/);
  f.document("# Title\n\nNew introduction.\n\nKeep **this selection** and the rest.\n",19);assert.equal(f.doc.querySelectorAll(".note-marker").length,1);
  f.dom.window.close();
+});
+
+test("document search matches across inline formatting, wraps, and never searches notes or review text",()=>{
+ const f=fixture();f.document("# Guide\n\nAlice labels **every box**.\n\nAsk Alice to close.\n");f.send({type:"viewMode",mode:"reading"});
+ f.doc.dispatchEvent(new f.dom.window.KeyboardEvent("keydown",{key:"f",metaKey:true,cancelable:true,bubbles:true}));assert.equal(f.el("document-find").hidden,false);
+ f.input("find-query","Alice");assert.equal(f.el("find-count").textContent,"1 of 2");f.el("find-next").click();assert.equal(f.el("find-count").textContent,"2 of 2");f.el("find-next").click();assert.equal(f.el("find-count").textContent,"1 of 2");f.el("find-previous").click();assert.equal(f.el("find-count").textContent,"2 of 2");
+ f.input("find-query","labels every box");assert.equal(f.el("find-count").textContent,"1 of 1");
+ f.input("find-query","[.*]");assert.equal(f.el("find-count").textContent,"No matches");assert.equal((f.el("find-next") as HTMLButtonElement).disabled,true);
+ f.send({type:"comments",rows:[{id:"a",body:"Only in feedback",anchor:{kind:"document"}}]});f.input("find-query","Only in feedback");assert.equal(f.el("find-count").textContent,"No matches");
+ f.input("find-query","Alice");f.document("# Replacement\n\nNo occurrences.\n",18);assert.equal(f.el("find-count").textContent,"No matches");f.el("find-close").click();assert.equal(f.el("document-find").hidden,true);f.dom.window.close();
 });

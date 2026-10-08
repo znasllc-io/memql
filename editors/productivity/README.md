@@ -44,8 +44,8 @@ button above the document accepts whole-document direction: a name correction
 changes only relevant references; a requested rewrite can rework the whole
 document. Both require proposal review and approval.
 
-The header’s **Find in document** button and ⌘F/Ctrl+F use VS Code’s find widget
-in Read and Review, including next/previous matches. Source uses the native
+The header’s **Find in document** button and ⌘F/Ctrl+F search rendered document text
+in Read and Review, with highlighted matches, counts and next/previous navigation. Source uses the native
 VS Code text editor, including Find/Replace, selection, Cut/Copy/Paste and undo.
 
 **Version history** opens retained versions without replacing the current head.

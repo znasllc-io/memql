@@ -168,7 +168,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
             this.rendered.set(document.uri.toString(), { version: message.version, text: message.text });
           } else if(message.type === "copy") { await vscode.commands.executeCommand("editor.action.clipboardCopyAction");
           } else if(message.type === "refreshNotes") { await refreshNotes();
-          } else if(message.type === "find") { await vscode.commands.executeCommand("editor.action.webvieweditor.showFind");
+          } else if(message.type === "find") { await panel.webview.postMessage({type:"find"});
           } else if (["history", "historyVersion", "historyCurrent", "historyFork", "historyOpen"].includes(message.type)) {
             if (document.uri.scheme !== "memql-file") throw new Error("Open a saved MemQL document to use history.");
             if(message.type === "historyCurrent") { preview=undefined; historyGeneration++; await panel.webview.postMessage({type:"historyCurrent"}); await render(); return; }
