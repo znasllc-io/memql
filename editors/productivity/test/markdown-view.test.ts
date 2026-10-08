@@ -60,3 +60,21 @@ test("unfinished feedback survives switching out of Read and back, without retar
   const next=fixture();next.send({type:"restoreDraft",state:saved});next.document();next.el("annotate").click();
   assert.equal((next.el("feedback") as HTMLTextAreaElement).value,"Keep this unfinished note");assert.equal(next.state().anchor.quote,"this selection");assert.equal((next.el("add") as HTMLButtonElement).disabled,false);next.dom.window.close();
 });
+
+test("standalone extensions replace the previous review with the same diff and approval controls",()=>{
+  const f=fixture();f.document();
+  const prior={status:"succeeded",result:{applied:true},proposal:{commentIds:["old"],summary:"Earlier edit",edits:[{before:"Old",after:"Earlier",reason:"Earlier edit"}]}};
+  f.send({type:"revision",status:prior});f.el("extend").click();f.input("feedback","Add next steps");
+  assert.equal(f.el("add").textContent,"Add to review");f.el("add").click();
+  f.send({type:"saved"});f.send({type:"comments",rows:[{id:"extension",body:"Add next steps",anchor:{kind:"document-end"}}]});
+  assert.equal(f.el("review-panel").hidden,false);
+  assert.match(f.el("revision").textContent!,/Ready to propose/);
+  const previous=f.doc.querySelector<HTMLDetailsElement>("#revision > details")!;
+  assert.equal(previous.open,false);assert.match(previous.textContent!,/Earlier edit/);
+  f.el("prepare-revision").click();assert.deepEqual(Array.from(f.messages.at(-1).commentIds),["extension"]);
+  assert.match(f.el("revision").textContent!,/Preparing changes/);assert.ok(!f.el("revision").textContent!.includes("Earlier edit"));
+  f.send({type:"revision",status:{status:"waiting",prepared:true,approvalId:"extension-approval",proposal:{commentIds:["extension"],summary:"Add next steps",revisedContent:"Existing\n\n## Next steps",edits:[{before:"Existing",after:"Existing\n\n## Next steps",reason:"Extend"}]}}});
+  f.send({type:"revisionIdle"});
+  assert.equal(f.doc.querySelectorAll(".change").length,1);assert.match(f.el("revision").textContent!,/## Next steps/);
+  assert.ok([...f.doc.querySelectorAll<HTMLButtonElement>("#review-actions button")].some(button=>button.textContent==="Approve & apply"&&!button.disabled));f.dom.window.close();
+});

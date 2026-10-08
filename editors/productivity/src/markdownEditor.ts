@@ -4,6 +4,7 @@ import { Documents, type OpenDocument } from "./documents.js";
 import { anchorStillMatches, markdownAnchor, renderMarkdown, type MarkdownAnchor } from "./markdown.js";
 
 import { markdownPage } from "./markdownPage.js";
+import { refreshQueue } from "./refreshQueue.js";
 
 export class MarkdownEditor implements vscode.CustomTextEditorProvider {
   private active?: { document: vscode.TextDocument; panel: vscode.WebviewPanel };
@@ -85,7 +86,6 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
     let generation = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let refreshedRun = "";
-    let refreshing = false;
     const error = (e: unknown) => panel.webview.postMessage({ type: "error", message: e instanceof Error ? e.message : "The document could not be loaded." });
     const refreshComments = async () => {
       if (document.uri.scheme !== "memql-file") return;
@@ -102,26 +102,26 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
         if (review.hasMore) await error(new Error("Showing the first 500 comments. Older feedback remains stored in MemQL."));
       } catch (e) { if (!disposed && generation === ticket) await error(e); }
     };
-    const refreshRevision = async () => {
-      if (refreshing || disposed) return;
-      refreshing = true;
+    const refreshRevision = refreshQueue(async current => {
+      if (disposed) return;
       if (timer) clearTimeout(timer);
       try {
         const status = await this.revisions.status(document);
-        if (disposed) return;
+        if (disposed || !current()) return;
         await panel.webview.postMessage({ type: "revision", status });
         if (status?.status === "succeeded" && (status.result as Record<string,unknown> | undefined)?.applied && refreshedRun !== status.runId) {
           if (await this.refreshRemote(document)) { refreshedRun = String(status.runId); await refreshComments(); }
           else await panel.webview.postMessage({type:"notice",message:"Changes are saved in MemQL. Your local edits are preserved; compare with the latest revision before saving."});
         }
-        if (status && !["succeeded","failed","cancelled"].includes(String(status.status)) && panel.visible) {
+        if (current() && status && !["succeeded","failed","cancelled"].includes(String(status.status)) && panel.visible) {
           timer = setTimeout(() => { void refreshRevision().catch(error); }, status.status === "waiting" ? 5000 : 2000);
         }
       } catch (e) {
+        if (disposed || !current()) return;
         if (!disposed && panel.visible) timer = setTimeout(() => { void refreshRevision().catch(error); }, 10000);
         throw e;
-      } finally { refreshing = false; }
-    };
+      }
+    });
     const render = async () => {
       try {
         await panel.webview.postMessage({ type: "document", html: renderMarkdown(document.getText()), version: document.version, sourceIdentity: document.getText(),

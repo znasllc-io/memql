@@ -17,7 +17,7 @@ let draftAnchor = state.anchor;
 let selectionRect: DOMRect | undefined;
 let selectionRange: Range | undefined;
 let version = 0, sourceIdentity = "";
-let connected = false, commentBusy = false, revisionBusy = false;
+let connected = false, commentBusy = false, revisionBusy = false, preparing = false;
 let revision: Record<string, any> | undefined;
 let rows: ReviewRow[] = [];
 const selected = new Set<string>(state.included ?? []);
@@ -30,7 +30,7 @@ function controls() {
   annotate.title = selection ? "Add feedback on this selection" : feedback.value && draftAnchor ? "Continue your feedback" : "Select text to add feedback";
   (byId("extend") as HTMLButtonElement).disabled = !connected;
   add.disabled = !connected || !draftAnchor || !feedback.value.trim() || commentBusy;
-  add.textContent = commentBusy ? "Saving…" : draftAnchor?.kind === "document-end" ? "Save request" : "Save feedback";
+  add.textContent = commentBusy ? "Adding…" : "Add to review";
   prepare.disabled = !connected || revisionBusy || !!activeRun() || selected.size === 0;
   prepare.textContent = revisionBusy ? "Submitting…" : selected.size ? `Propose changes · ${selected.size}` : "Propose changes";
   byId("review-submit").hidden = !!activeRun() || selected.size === 0;
@@ -101,7 +101,7 @@ add.addEventListener("click",() => {
 });
 prepare.addEventListener("click",() => {
   if (prepare.disabled) return;
-  byId("status").textContent = ""; revisionBusy = true; controls();
+  byId("status").textContent = ""; revisionBusy = true; preparing = true; controls(); renderRevision();
   api.postMessage({type:"prepareRevision",version,commentIds:[...selected],instruction:instruction.value});
 });
 document.addEventListener("keydown",event => {
@@ -153,7 +153,15 @@ function renderComments() {
   highlight("memql-notes",current.map(row=>rangeFor(row.anchor)).filter((range):range is Range=>!!range));
 }
 function renderRevision() {
-  const panel=byId("revision");panel.replaceChildren();const actions=byId("review-actions");actions.replaceChildren();if(!revision)return;
+  const root=byId("revision");root.replaceChildren();const actions=byId("review-actions");actions.replaceChildren();
+  if(preparing){root.append(textElement("h3","Preparing changes"),textElement("p","Submitting your feedback…","phase busy"));return;}
+  const pending=rows.some(row=>!row.outdated&&!revision?.proposal?.commentIds?.includes(row.id));
+  let panel:HTMLElement=root;
+  if(!activeRun()&&pending){
+    root.append(textElement("h3","Ready to propose"),textElement("p","Choose Propose changes to preview the edits for your feedback.","phase"));
+    if(revision){const previous=document.createElement("details");previous.className="earlier";previous.append(textElement("summary","Previous request"));root.append(previous);panel=previous;}
+  }
+  if(!revision)return;
   const status=revision,proposal=status.proposal??{};
   const terminal=["succeeded","failed","cancelled"].includes(status.status);
   const awaiting=!!status.approvalId && !status.decision && status.status==="waiting";
@@ -164,7 +172,7 @@ function renderRevision() {
   if(Array.isArray(proposal.edits))for(const [index,edit] of proposal.edits.entries()) {
     if(edit.before===edit.after)continue;
     const card=document.createElement("details");card.className="change";card.open=true;
-    const label=edit.after===""?"Remove passage":edit.before===""?"Add content":"Revise passage";
+    const label=edit.after===""?"Remove passage":edit.before===""||edit.after.startsWith(edit.before)?"Add content":"Revise passage";
     card.append(textElement("summary",`${index+1}. ${label}`),textElement("p",String(edit.reason??""),"reason"));
     for(const [key,label,cls] of [["before","Original","before"],["after","Proposed","after"]]) {
       const block=textElement("div","",cls);block.append(textElement("div",label,"diff-label"),textElement("pre",String(edit[key]??"")||(key==="after"?"Removed":"New content")));card.append(block);
@@ -199,15 +207,15 @@ window.addEventListener("message",event=>{
     document.documentElement.scrollTop=scroll;renderComments();controls();saveState();api.postMessage({type:"rendered",version,text:content.textContent?.slice(0,500)});
   }
   if(message.type==="comments") {
-    rows=message.rows??[];
+    const next=message.rows??[],different=JSON.stringify(next)!==JSON.stringify(rows);rows=next;
     for(const row of rows){if(!row.outdated&&!seen.has(row.id))selected.add(row.id);if(row.outdated)selected.delete(row.id);seen.add(row.id);}
     const available=new Set(rows.filter(row=>!row.outdated).map(row=>row.id));for(const id of selected)if(!available.has(id))selected.delete(id);
-    renderComments();controls();saveState();
+    renderComments();if(different)renderRevision();controls();saveState();
   }
   if(message.type==="revision") {const changed=message.status?.approvalId&&message.status.approvalId!==revision?.approvalId;const different=JSON.stringify(message.status)!==JSON.stringify(revision);revision=message.status;if(different)renderRevision();controls();if(changed){byId("status").textContent="";showReview(true);}}
-  if(message.type==="revisionIdle"){revisionBusy=false;controls();renderRevision();}
-  if(message.type==="saved"){commentBusy=false;feedback.value="";draftAnchor=undefined;closeComposer();byId("status").textContent="Saved. Add more feedback or propose changes when you’re ready.";controls();showReview(true);}
-  if(message.type==="error"){commentBusy=false;revisionBusy=false;controls();renderRevision();if(!byId("composer").hidden)byId("composer-status").textContent=message.message;else{byId("status").textContent=message.message;showReview(true);}}
+  if(message.type==="revisionIdle"){revisionBusy=false;preparing=false;controls();renderRevision();}
+  if(message.type==="saved"){commentBusy=false;feedback.value="";draftAnchor=undefined;closeComposer();byId("status").textContent="Added to review.";controls();showReview(true);}
+  if(message.type==="error"){commentBusy=false;revisionBusy=false;preparing=false;controls();renderRevision();if(!byId("composer").hidden)byId("composer-status").textContent=message.message;else{byId("status").textContent=message.message;showReview(true);}}
   if(message.type==="notice")byId("status").textContent=message.message;
 });
 showReview(state.reviewOpen??false);controls();api.postMessage({type:"ready"});

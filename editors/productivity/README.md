@@ -105,6 +105,10 @@ icon (keyboard: Ctrl/Cmd+Alt+M). Saved notes appear in the review panel. Use
 **Extend document** at the end to describe new sections, examples or other
 content to add. Unfinished notes stay attached to their selection across view
 changes; if the source changes, their text is preserved and must be reselected.
+Both composers use **Add to review**. New notes appear above a collapsed previous
+request, then **Propose changes** generates the same before/after review and
+approval controls for passage feedback and standalone extensions. Overlapping
+status reads cannot let an old completed request hide a new proposal.
 
 Choose up to 100 current notes and **Propose changes**. This starts one AI
 analysis against the exact saved Markdown source, up to 128 KiB. The DSL
