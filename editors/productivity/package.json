@@ -157,14 +157,19 @@
     "menus": {
       "editor/title": [
         {
+          "command": "memql.productivity.markdown.source",
+          "when": "resourceLangId == markdown || resourceFilename =~ /\\.(md|markdown)$/i",
+          "group": "navigation@1"
+        },
+        {
           "command": "memql.productivity.markdown.reading",
-          "when": "editorLangId == markdown",
-          "group": "navigation"
+          "when": "resourceLangId == markdown || resourceFilename =~ /\\.(md|markdown)$/i",
+          "group": "navigation@2"
         },
         {
           "command": "memql.productivity.markdown.split",
-          "when": "editorLangId == markdown",
-          "group": "navigation"
+          "when": "resourceLangId == markdown || resourceFilename =~ /\\.(md|markdown)$/i",
+          "group": "navigation@3"
         },
         {
           "command": "memql.productivity.template.preview",
