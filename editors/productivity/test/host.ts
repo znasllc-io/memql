@@ -54,6 +54,9 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand("memql.productivity.markdown.split", markdownURI);
   const markdownDocument = await vscode.workspace.openTextDocument(markdownURI);
   check(vscode.window.visibleTextEditors.some(editor => editor.document === markdownDocument), "Split view must include the same source document.");
+  const readingTabs = () => vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab =>
+    tab.input instanceof vscode.TabInputCustom && tab.input.uri.toString() === markdownURI.toString());
+  await until(() => readingTabs().length === 1, "Split retained a duplicate reading tab.");
   const groups = vscode.window.tabGroups.all.length;
   await vscode.commands.executeCommand("memql.productivity.markdown.split", markdownURI);
   check(vscode.window.tabGroups.all.length === groups, "Repeated Split created another editor group.");
@@ -63,6 +66,7 @@ export async function run(): Promise<void> {
   check((await tools.markdownReady(markdownURI, markdownDocument.version)).includes("Unsaved A rendered passage."), "Reading view must follow unsaved source edits.");
   await vscode.commands.executeCommand("memql.productivity.markdown.reading", markdownURI);
   await until(() => !vscode.window.visibleTextEditors.some(editor => editor.document === markdownDocument), "Read mode left the source pane open.");
+  await until(() => readingTabs().length === 1, "Read mode duplicated the reading pane.");
   check(markdownDocument.isDirty && markdownDocument.getText().includes("Unsaved"), "Read mode discarded the shared dirty buffer.");
   await vscode.commands.executeCommand("memql.productivity.markdown.source", markdownURI);
   check(vscode.window.activeTextEditor?.document.getText().includes("Unsaved A **rendered** passage."), "Source mode discarded the dirty buffer.");

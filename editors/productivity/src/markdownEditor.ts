@@ -37,8 +37,8 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
       await vscode.window.showTextDocument(document, { viewColumn: source?.viewColumn ?? current?.panel.viewColumn, preview: false });
       for (const entry of this.panels) if (entry.document === document) entry.panel.dispose();
     } else if (mode === "reading") {
-      if (current) current.panel.reveal(source?.viewColumn ?? current.panel.viewColumn);
-      else await vscode.commands.executeCommand("vscode.openWith", target, "memql.productivity.markdown", { viewColumn: vscode.ViewColumn.Active, preview: false });
+      await vscode.commands.executeCommand("vscode.openWith", target, "memql.productivity.markdown", { viewColumn: source?.viewColumn ?? current?.panel.viewColumn ?? vscode.ViewColumn.Active, preview: false });
+      this.closeOtherPreviews(document);
       // Reveal in the source's group instead of closing its tab. Desktop VS Code
       // can save a dirty TextDocument when its text tab closes, even while the
       // custom editor remains open. A hidden source tab preserves that buffer.
@@ -48,11 +48,18 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
         current.panel.reveal(current.panel.viewColumn);
       } else {
         await vscode.window.showTextDocument(document, { viewColumn: source?.viewColumn ?? current?.panel.viewColumn, preview: false });
-        if (current) current.panel.reveal(vscode.ViewColumn.Beside);
-        else await vscode.commands.executeCommand("vscode.openWith", target, "memql.productivity.markdown", { viewColumn: vscode.ViewColumn.Beside, preview: false });
+        await vscode.commands.executeCommand("vscode.openWith", target, "memql.productivity.markdown", { viewColumn: vscode.ViewColumn.Beside, preview: false });
+        this.closeOtherPreviews(document);
       }
     }
     this.updateModes();
+  }
+  private closeOtherPreviews(document: vscode.TextDocument): void {
+    // VS Code may clone a custom editor when opening it in another group.
+    // Keep the newly activated view, not a second reading pane beside it.
+    const keep = [...this.panels].find(entry => entry.document === document && entry.panel.active);
+    if (!keep) return;
+    for (const entry of this.panels) if (entry.document === document && entry !== keep) entry.panel.dispose();
   }
   private updateModes(): void {
     for (const { document, panel } of this.panels) {
