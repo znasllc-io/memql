@@ -36,7 +36,9 @@ after both extensions have been compiled. `npm run package` creates a VSIX
 with both entry points; it does not publish it.
 
 Markdown has **Source**, **Read**, and **Review** modes. Read is a clean reading
-surface. Review offers one feedback action for selections and sections, plus
+surface with **Copy** in its context menu. Review adds **Feedback** to that menu
+for selected text. Cut and Paste are available in Source and editable feedback
+fields, never on the rendered document. Review offers one feedback action for selections and sections, plus
 a document extension entry point at the end. **Markdown Split View** remains
 available in the editor title and command palette. These views share one VS Code
 document, including unsaved changes. Save before adding shared feedback. Local files remain local; opening

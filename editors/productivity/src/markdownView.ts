@@ -8,10 +8,16 @@ const instruction = byId("revision-instruction") as HTMLTextAreaElement;
 const add = byId("add") as HTMLButtonElement;
 const annotate = byId("annotate") as HTMLButtonElement;
 const prepare = byId("prepare-revision") as HTMLButtonElement;
-// VS Code otherwise adds Cut and Paste even to noneditable rendered text.
+// VS Code otherwise adds Cut, Copy and Paste to noneditable rendered text.
 // Resolve each textarea's current state before the host builds its menu, also
 // covering per-item fields and inputs temporarily locked during dictation.
 document.addEventListener("contextmenu", event => {
+  const inDocument = event.target instanceof Node && content.contains(event.target);
+  if (inDocument) captureSelection();
+  contextSelection = inDocument && mode === "review" && connected && selection
+    ? { anchor: selection, rect: selectionRect } : undefined;
+  document.body.dataset.vscodeContext = JSON.stringify({webviewSection:"markdownReadOnly",
+    preventDefaultContextMenuItems:true,memqlMarkdownFeedback:!!contextSelection});
   if (!(event.target instanceof HTMLTextAreaElement)) return;
   const readOnly = event.target.readOnly || event.target.disabled;
   event.target.dataset.vscodeContext = JSON.stringify({
@@ -37,6 +43,7 @@ let selection: Anchor | undefined;
 let draftAnchor = state.anchor;
 let selectionRect: DOMRect | undefined;
 let selectionRange: Range | undefined;
+let contextSelection: { anchor: Anchor; rect?: DOMRect } | undefined;
 let version = 0, sourceIdentity = "";
 let connected = false, commentBusy = false, revisionBusy = false, preparing = false;
 let revision: Record<string, any> | undefined;
@@ -381,6 +388,9 @@ function renderRevisionContent() {
 }
 window.addEventListener("message",event=>{
   const message=event.data;
+  if(message.type==="selectionFeedback" && contextSelection && connected && mode==="review") {
+    openComposer(contextSelection.anchor,contextSelection.rect);contextSelection=undefined;
+  }
   if(message.type==="dictationAvailable"){dictationAvailable=!!message.available;controls();renderRevision();}
   if(message.type==="dictation"){
     dictationPhase=message.phase;dictationError=message.error??"";
@@ -402,13 +412,14 @@ window.addEventListener("message",event=>{
   }
   if(message.type==="viewMode") {
     const changed=mode!==message.mode;
-    mode=message.mode;document.body.classList.toggle("review-mode",mode==="review");
+    mode=message.mode;contextSelection=undefined;document.body.classList.toggle("review-mode",mode==="review");
     for(const item of ["source","reading","review"])byId(item).setAttribute("aria-pressed",String(item===mode));
     showReview(changed&&mode==="review" ? true : reviewRequested);
     if(mode!=="review"){if(dictationPhase!=="idle")api.postMessage({type:"dictationCancel"});byId("selection-tools").hidden=true;byId("composer").hidden=true;highlight("memql-active",[]);for(const el of document.querySelectorAll(".document-target"))el.classList.remove("document-target");}
     renderRevision();
   }
   if(message.type==="document") {
+    contextSelection=undefined;
     const scroll=document.documentElement.scrollTop;
     content.innerHTML=message.html; // Host uses the HTML-disabled Markdown renderer.
     sectionTools(); version=message.version;connected=message.connected;

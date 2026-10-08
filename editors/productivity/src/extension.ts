@@ -113,6 +113,7 @@ export async function activate(context: vscode.ExtensionContext) {
     ...(["source", "reading", "review", "split"] as const).map(mode => vscode.commands.registerCommand(`memql.productivity.markdown.${mode}`, async (uri?: vscode.Uri) => {
       try { await markdown.show(mode, uri); } catch (error) { void vscode.window.showErrorMessage((error as Error).message); }
     })),
+    vscode.commands.registerCommand("memql.productivity.markdown.feedback", () => markdown.feedbackSelection()),
     vscode.workspace.registerTextDocumentContentProvider("memql-review", { provideTextDocumentContent: uri => snapshots.get(uri.toString()) ?? "" }),
     vscode.commands.registerCommand("memql.productivity.compareLatest", async () => {
       try {

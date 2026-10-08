@@ -29,6 +29,27 @@ test("collapsed selection disables the tool; keyboard selection can still open i
   const f=fixture();f.document();f.select();f.dom.window.getSelection()!.removeAllRanges();f.doc.dispatchEvent(new f.dom.window.Event("selectionchange"));assert.equal(f.el("selection-tools").hidden,true);assert.equal((f.el("annotate") as HTMLButtonElement).disabled,true);
   f.select();f.doc.dispatchEvent(new f.dom.window.KeyboardEvent("keydown",{key:"m",ctrlKey:true,altKey:true}));assert.equal(f.el("composer").hidden,false);assert.equal(f.doc.activeElement?.id,"feedback");f.dom.window.close();
 });
+test("context-menu feedback keeps the selected passage through menu focus and refuses stale or reading selections",()=>{
+  const f=fixture();f.document();f.select();
+  const context=()=>{f.doc.querySelector("strong")!.dispatchEvent(new f.dom.window.MouseEvent("contextmenu",{bubbles:true}));return JSON.parse(f.doc.body.dataset.vscodeContext!);};
+  assert.equal(context().memqlMarkdownFeedback,true);
+  f.dom.window.getSelection()!.removeAllRanges();f.doc.dispatchEvent(new f.dom.window.Event("selectionchange"));
+  f.send({type:"selectionFeedback"});assert.equal(f.el("composer").hidden,false);assert.equal(f.el("selected").textContent,"this selection");
+  f.el("composer-close").click();f.select();context();f.send({type:"viewMode",mode:"reading"});f.send({type:"selectionFeedback"});assert.equal(f.el("composer").hidden,true);
+  assert.equal(context().memqlMarkdownFeedback,false);
+  f.send({type:"viewMode",mode:"review"});f.select();context();f.document("Changed source",18);f.send({type:"selectionFeedback"});assert.equal(f.el("composer").hidden,true);
+  f.document(undefined,19,false);f.select();assert.equal(context().memqlMarkdownFeedback,false);f.dom.window.close();
+});
+test("clipboard menus follow feedback-field editability, including dynamic and dictation-locked fields",()=>{
+  const f=fixture();f.document();f.el("extend").click();
+  const input=f.el("feedback") as HTMLTextAreaElement;
+  const context=(target:HTMLTextAreaElement)=>{target.dispatchEvent(new f.dom.window.MouseEvent("contextmenu",{bubbles:true}));return JSON.parse(target.dataset.vscodeContext!);};
+  assert.equal(context(input).preventDefaultContextMenuItems,false);
+  f.send({type:"dictation",phase:"listening"});assert.equal(context(input).preventDefaultContextMenuItems,true);
+  f.send({type:"dictation",phase:"idle"});assert.equal(context(input).preventDefaultContextMenuItems,false);
+  const dynamic=f.doc.createElement("textarea");f.el("revision").append(dynamic);assert.equal(context(dynamic).preventDefaultContextMenuItems,false);
+  dynamic.disabled=true;assert.equal(context(dynamic).preventDefaultContextMenuItems,true);f.dom.window.close();
+});
 test("end-of-document extension has its own intent and preserves drafts on errors",()=>{
   const f=fixture();f.document();f.el("extend").click();assert.equal(f.el("composer-title").textContent,"Extend document");f.input("feedback","Add examples and next steps.");f.el("add").click();
   const message=f.messages.find(m=>m.type==="comment");assert.equal(message.selection.kind,"document-end");assert.equal(message.body,"Add examples and next steps.");

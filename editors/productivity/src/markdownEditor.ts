@@ -30,6 +30,9 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
     if (!target) throw new Error("Open a Markdown document first.");
     return target;
   }
+  async feedbackSelection(): Promise<void> {
+    if (this.active?.panel.visible) await this.active.panel.webview.postMessage({type:"selectionFeedback"});
+  }
   async show(mode: "source" | "reading" | "review" | "split", uri?: vscode.Uri): Promise<void> {
     const target = this.document(uri);
     if(mode!=="review")for(const entry of this.panels)this.dictation.cancel(entry.panel);

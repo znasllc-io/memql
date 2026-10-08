@@ -87,6 +87,11 @@
         "icon": "$(open-preview)"
       },
       {
+        "command": "memql.productivity.markdown.feedback",
+        "title": "Feedback",
+        "category": "MemQL Productivity"
+      },
+      {
         "command": "memql.productivity.template.source",
         "title": "Email Template Source",
         "category": "MemQL Productivity"
@@ -161,11 +166,22 @@
       }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "memql.productivity.markdown.feedback",
+          "when": "false"
+        }
+      ],
       "webview/context": [
         {
           "command": "editor.action.clipboardCopyAction",
           "when": "webviewId == memql.productivity.markdown && webviewSection == markdownReadOnly",
           "group": "5_cutcopypaste@2"
+        },
+        {
+          "command": "memql.productivity.markdown.feedback",
+          "when": "webviewId == memql.productivity.markdown && webviewSection == markdownReadOnly && memqlMarkdownFeedback",
+          "group": "6_feedback"
         }
       ],
       "editor/title": [
