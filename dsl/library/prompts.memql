@@ -16,7 +16,7 @@ prompt libraryRevisionItem {
  document string!
  passages string!
  instruction string!
- previous any!
+ previous []object!
 }
 
 /// Carry out the research, verification or reasoning called for by document feedback before proposing edits.
@@ -26,5 +26,5 @@ prompt libraryRevisionResearch {
  document string!
  passages string!
  instruction string
- previous any
+ previous []object
 }
