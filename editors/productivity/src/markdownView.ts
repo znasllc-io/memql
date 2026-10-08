@@ -13,7 +13,8 @@ type ReviewRow = { id: string; body: string; outdated?: boolean; anchor: Anchor 
 const state = (api.getState() ?? {}) as { draft?: string; anchor?: Anchor; draftVersion?: number; source?: string; instruction?: string; reviewOpen?: boolean; included?: string[]; seen?: string[]; decisions?: Record<string, "accepted" | "declined">; modifications?: Record<string,string>; expanded?: Record<string,boolean>; reviewSource?: string };
 let restored = false;
 let mode = "reading";
-let dictationPhase="idle", dictatedBase="";
+let dictationPhase="idle", dictatedBase="", dictationTarget="feedback", dictationError="";
+let dictationAvailable=false;
 let reviewRequested = state.reviewOpen ?? false;
 let activeAnchor: Anchor | undefined;
 const decisions = state.decisions ?? {};
@@ -34,21 +35,39 @@ const seen = new Set<string>(state.seen ?? []);
 feedback.value = state.draft ?? ""; instruction.value = state.instruction ?? "";
 function saveState() { const saved = { draft: feedback.value, anchor: draftAnchor, source: sourceIdentity || state.source, instruction: instruction.value, reviewOpen: reviewRequested, included: [...selected], seen: [...seen], decisions, modifications, expanded, reviewSource }; api.setState(saved); if (restored) api.postMessage({type:"draftState",state:saved}); }
 function activeRun() { return revision && !revision.cancelRequested && !["succeeded", "failed", "cancelled"].includes(revision.status); }
+function dictate(target: string) {
+  if(dictationPhase==="idle") {
+    if(!dictationAvailable||!connected)return;
+    dictationTarget=target;dictatedBase=target==="feedback"?feedback.value:modifications[target]??"";dictationError="";dictationPhase="starting";
+    controls();renderRevision();api.postMessage({type:"dictationStart"});
+  } else if(dictationTarget===target)api.postMessage({type:dictationPhase==="listening"?"dictationStop":"dictationCancel"});
+}
+function dictationControl(button: HTMLButtonElement, target: string) {
+  const active=dictationPhase!=="idle"&&dictationTarget===target;
+  button.hidden=!dictationAvailable;button.disabled=!connected||dictationPhase!=="idle"&&!active;
+  button.textContent=active?dictationPhase==="listening"?"Stop":"Cancel":"Dictate";
+  button.setAttribute("aria-label",active?dictationPhase==="listening"?"Stop dictation":"Cancel dictation":target==="feedback"?"Dictate feedback":"Dictate direction for this change");
+}
+function dictationStatus(target: string) {
+  return dictationTarget!==target?"":dictationError|| (dictationPhase==="starting"?"Opening microphone…":dictationPhase==="listening"?"Listening…":dictationPhase==="transcribing"?"Transcribing…":"");
+}
 function controls() {
-  annotate.disabled = !connected || (!selection && !(feedback.value && draftAnchor));
+  dictationControl(byId("dictate") as HTMLButtonElement,"feedback");
+  byId("dictation-status").textContent=dictationStatus("feedback");
+  annotate.disabled = dictationPhase!=="idle"&&dictationTarget!=="feedback" || !connected || (!selection && !(feedback.value && draftAnchor));
   annotate.title = selection ? "Add feedback on this selection" : feedback.value && draftAnchor ? "Continue your feedback" : "Select text to add feedback";
-  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>("#extend,.section-extend"))) button.disabled = !connected;
+  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>("#extend,.section-extend"))) button.disabled = !connected||dictationPhase!=="idle";
   feedback.readOnly=dictationPhase!=="idle";
   add.disabled = dictationPhase!=="idle" || !connected || !draftAnchor || !feedback.value.trim() || commentBusy;
   add.textContent = commentBusy ? "Adding…" : "Add to review";
-  prepare.disabled = !connected || revisionBusy || !!activeRun() || selected.size === 0;
+  prepare.disabled = dictationPhase!=="idle" || !connected || revisionBusy || !!activeRun() || selected.size === 0;
   prepare.textContent = revisionBusy ? "Submitting…" : "Propose changes";
   byId("review-submit").hidden = !!activeRun() || selected.size === 0;
   byId("review-footer").hidden = byId("review-submit").hidden && !byId("review-actions").childElementCount;
   const count = rows.filter(row => !row.outdated).length;
   byId("note-count").textContent = String(count); byId("note-count").hidden = !count;
 }
-function showReview(open: boolean) { reviewRequested = open; open = open && mode === "review"; document.body.classList.toggle("review-open", open); byId("review-panel").hidden = !open; byId("review-toggle").setAttribute("aria-expanded", String(open)); if (open) byId("selection-tools").hidden = true; saveState(); }
+function showReview(open: boolean) { if(!open&&dictationPhase!=="idle"&&dictationTarget!=="feedback")api.postMessage({type:"dictationCancel"});reviewRequested = open; open = open && mode === "review"; document.body.classList.toggle("review-open", open); byId("review-panel").hidden = !open; byId("review-toggle").setAttribute("aria-expanded", String(open)); if (open) byId("selection-tools").hidden = true; saveState(); }
 function position(element: HTMLElement, rect?: DOMRect, compact = false) {
   const width = compact ? 236 : Math.min(360, window.innerWidth - 32);
   const height = compact ? 42 : Math.min(340, window.innerHeight - 32);
@@ -103,11 +122,7 @@ annotate.addEventListener("mousedown",event => event.preventDefault());
 for (const id of ["selection-feedback","annotate"]) byId(id).addEventListener("click",() => { const anchor = selection ?? draftAnchor; if (anchor && connected) openComposer(anchor,selectionRect); });
 byId("selection-extend").addEventListener("click", () => { if (selection && selection.kind !== "document-end" && connected) openComposer({...selection, intent:"extend"}, selectionRect); });
 byId("extend").addEventListener("click",() => openComposer({kind:"document-end",quote:"End of document"},byId("extend").getBoundingClientRect()));
-byId("dictate").addEventListener("click",()=>{
-  if(dictationPhase==="idle"){dictatedBase=feedback.value;dictationPhase="starting";controls();api.postMessage({type:"dictationStart"});}
-  else if(dictationPhase==="listening")api.postMessage({type:"dictationStop"});
-  else api.postMessage({type:"dictationCancel"});
-});
+byId("dictate").addEventListener("click",()=>dictate("feedback"));
 byId("composer-close").addEventListener("click",closeComposer);
 byId("review-toggle").addEventListener("click",() => showReview(byId("review-panel").hidden));
 byId("review-close").addEventListener("click",() => { showReview(false); byId("review-toggle").focus(); });
@@ -308,15 +323,18 @@ function renderRevisionContent() {
     if(awaiting) {
       const bar=textElement("div","","item-actions");
       for(const [label,value] of [["Accept","accepted"],["Decline","declined"],["Modify with AI","modify"]] as const){
-        const button=textElement("button",label,"secondary") as HTMLButtonElement;button.disabled=revisionBusy;button.dataset.focusKey=`${item.id}:${value}`;button.setAttribute("aria-pressed",String(value===decisions[item.id]));
+        const button=textElement("button",label,"secondary") as HTMLButtonElement;button.disabled=revisionBusy||dictationPhase!=="idle";button.dataset.focusKey=`${item.id}:${value}`;button.setAttribute("aria-pressed",String(value===decisions[item.id]));
         button.addEventListener("click",()=>{if(value==="modify"){modifying=modifying===item.id?"":item.id;}else{if(decisions[item.id]===value)delete decisions[item.id];else decisions[item.id]=value;}saveState();renderRevision();if(value==="modify")document.querySelector<HTMLTextAreaElement>(".item-modify textarea")?.focus();});bar.append(button);
       }
       card.append(bar);
       if(modifying===item.id){
         const editor=textElement("div","","item-modify"),input=document.createElement("textarea"),send=textElement("button","Request revision","primary") as HTMLButtonElement;
         input.maxLength=8000;input.placeholder="Describe what you’d like instead…";input.setAttribute("aria-label","Direction for this change");input.dataset.focusKey=`${item.id}:instruction`;input.value=modifications[item.id]??"";
-        send.disabled=revisionBusy||!input.value.trim();input.addEventListener("input",()=>{modifications[item.id]=input.value;send.disabled=revisionBusy||!input.value.trim();saveState();});
-        send.addEventListener("click",()=>{if(send.disabled)return;revisionBusy=true;api.postMessage({type:"modifyRevisionItem",approvalId:status.approvalId,itemId:item.id,instruction:input.value});renderRevision();});editor.append(input,send);card.append(editor);
+        input.readOnly=dictationPhase!=="idle";send.disabled=revisionBusy||dictationPhase!=="idle"||!input.value.trim();input.addEventListener("input",()=>{modifications[item.id]=input.value;send.disabled=revisionBusy||dictationPhase!=="idle"||!input.value.trim();saveState();});
+        send.addEventListener("click",()=>{if(send.disabled)return;revisionBusy=true;api.postMessage({type:"modifyRevisionItem",approvalId:status.approvalId,itemId:item.id,instruction:input.value});renderRevision();});
+        const mic=textElement("button","Dictate","secondary") as HTMLButtonElement;mic.dataset.focusKey=`${item.id}:dictate`;dictationControl(mic,item.id);mic.addEventListener("click",()=>dictate(item.id));
+        const voiceStatus=textElement("small",dictationStatus(item.id),"dictation-status");voiceStatus.setAttribute("role","status");
+        const actions=textElement("div","","composer-actions");actions.append(send,mic,voiceStatus);editor.append(input,actions);card.append(editor);
       }
     }
     panel.append(card);
@@ -335,7 +353,7 @@ function renderRevisionContent() {
   }
   const action = (label: string, type: string, decision?: string, primary = false, answer?: Record<string,unknown>) => {
     const button = textElement("button", label, primary ? "primary" : "secondary") as HTMLButtonElement;
-    button.disabled = revisionBusy || (decision === "approved" && !connected);
+    button.disabled = dictationPhase!=="idle" || revisionBusy || (decision === "approved" && !connected);
     button.addEventListener("click", () => { revisionBusy = true; controls(); renderRevision(); api.postMessage({ type, approvalId:status.approvalId, decision, answer }); }); return button;
   };
   if (typeof proposal.revisedContent === "string") { const compare = action("Compare full document", "compareRevision"); compare.className = "compare secondary"; panel.append(compare); }
@@ -345,22 +363,23 @@ function renderRevisionContent() {
     const accepted=items.filter(item=>decisions[item.id]==="accepted").map(item=>item.id),remaining=items.filter(item=>!decisions[item.id]).length;
     actions.append(textElement("p",remaining ? `${remaining} ${remaining===1?"change needs":"changes need"} a decision` : `${accepted.length} accepted · ${items.length-accepted.length} declined`,"review-progress"));
     const apply=action(accepted.length ? `Apply accepted (${accepted.length})` : "Finish review","decideRevision",accepted.length?"approved":"rejected",true,{acceptedItemIds:accepted,proposalHash:status.proposalHash});
-    apply.disabled=revisionBusy||!connected||remaining>0||items.length===0;actions.append(apply);
+    apply.disabled=dictationPhase!=="idle"||revisionBusy||!connected||remaining>0||items.length===0;actions.append(apply);
   }
   else if (status.decision === "approved" && status.status === "waiting") actions.append(action("Resume approved changes", "decideRevision", "approved", true, status.answer));
   else if (!terminal && !status.decision) actions.append(action("Stop preparing", "cancelRevision"));
 }
 window.addEventListener("message",event=>{
   const message=event.data;
-  if(message.type==="dictationAvailable")byId("dictate").hidden=!message.available;
+  if(message.type==="dictationAvailable"){dictationAvailable=!!message.available;controls();renderRevision();}
   if(message.type==="dictation"){
-    dictationPhase=message.phase;
-    if(typeof message.text==="string"){feedback.value=dictatedBase+(dictatedBase&&!/\s$/.test(dictatedBase)?" ":"")+message.text;saveState();}
-    byId("dictate").textContent=dictationPhase==="idle"?"Dictate":dictationPhase==="listening"?"Stop":"Cancel";
-    byId("dictate").setAttribute("aria-label",dictationPhase==="idle"?"Dictate feedback":dictationPhase==="listening"?"Stop dictation":"Cancel dictation");
-    byId("dictation-status").textContent=dictationPhase==="starting"?"Opening microphone…":dictationPhase==="listening"?"Listening…":dictationPhase==="transcribing"?"Transcribing…":"";
-    if(message.error)byId("composer-status").textContent=message.error;
-    controls();
+    dictationPhase=message.phase;dictationError=message.error??"";
+    if(typeof message.text==="string"){
+      const text=dictatedBase+(dictatedBase&&!/\s$/.test(dictatedBase)?" ":"")+message.text;
+      if(dictationTarget==="feedback")feedback.value=text;else modifications[dictationTarget]=text;
+      saveState();
+    }
+    if(message.error&&dictationTarget==="feedback")byId("composer-status").textContent=message.error;
+    controls();renderRevision();
   }
   if(message.type==="restoreDraft") {
     if(message.state && !restored) {
@@ -375,7 +394,7 @@ window.addEventListener("message",event=>{
     mode=message.mode;document.body.classList.toggle("review-mode",mode==="review");
     for(const item of ["source","reading","review"])byId(item).setAttribute("aria-pressed",String(item===mode));
     showReview(changed&&mode==="review" ? true : reviewRequested);
-    if(mode!=="review"){byId("selection-tools").hidden=true;byId("composer").hidden=true;highlight("memql-active",[]);for(const el of document.querySelectorAll(".document-target"))el.classList.remove("document-target");}
+    if(mode!=="review"){if(dictationPhase!=="idle")api.postMessage({type:"dictationCancel"});byId("selection-tools").hidden=true;byId("composer").hidden=true;highlight("memql-active",[]);for(const el of document.querySelectorAll(".document-target"))el.classList.remove("document-target");}
     renderRevision();
   }
   if(message.type==="document") {

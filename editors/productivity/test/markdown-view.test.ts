@@ -165,3 +165,28 @@ test("reopening a decided proposal restores the recorded subset rather than loca
  f.send({type:"revision",status:{status:"succeeded",decision:"approved",answer:{acceptedItemIds:["kept"]},items:[{id:"kept",edits:[{before:"Keep",after:"Retain"}]},{id:"omitted",edits:[{before:"rest",after:"other"}]}],proposal:{artifactId:"doc",revision:"v1",edits:[]},result:{applied:true}}});
  assert.deepEqual([...f.doc.querySelectorAll('.item-decision')].map(el=>el.textContent),["Accepted","Declined"]);f.dom.window.close();
 });
+
+
+test("item dictation survives polling, stays on its item and requires explicit revision submission",()=>{
+ const f=fixture();f.document();f.input("feedback","Separate note");
+ const status={status:"waiting",approvalId:"approval",proposal:{artifactId:"doc",revision:"v1",version:1,edits:[{before:"this selection",after:"better words",reason:"Clear wording",commentIds:["note"]}],comments:[{id:"note",body:"Rephrase",anchor:{kind:"document-end"}}]}};
+ f.send({type:"revision",status});
+ [...f.doc.querySelectorAll<HTMLButtonElement>(".item-actions button")].find(b=>b.textContent==="Modify with AI")!.click();
+ const mic=()=>f.doc.querySelector<HTMLButtonElement>('.item-modify [data-focus-key$=":dictate"]')!;
+ assert.equal(mic().hidden,true);f.send({type:"dictationAvailable",available:true});assert.equal(mic().hidden,false);
+ const input=f.doc.querySelector<HTMLTextAreaElement>(".item-modify textarea")!;input.value="Please";input.dispatchEvent(new f.dom.window.Event("input"));
+ mic().click();assert.equal(f.messages.at(-1).type,"dictationStart");
+ f.send({type:"dictation",phase:"listening",text:"verify"});f.send({type:"revision",status:{...status,heartbeat:2}});f.send({type:"dictation",phase:"listening",text:"verify the source"});
+ assert.equal(f.doc.querySelector<HTMLTextAreaElement>(".item-modify textarea")!.value,"Please verify the source");
+ assert.equal((f.el("feedback") as HTMLTextAreaElement).value,"Separate note");
+ assert.equal(f.doc.querySelector<HTMLButtonElement>(".item-modify .primary")!.disabled,true);
+ mic().click();assert.equal(f.messages.at(-1).type,"dictationStop");f.send({type:"dictation",phase:"idle",text:"verify the source.",final:true});
+ assert.ok(!f.messages.some(m=>m.type==="modifyRevisionItem"));f.doc.querySelector<HTMLButtonElement>(".item-modify .primary")!.click();
+ assert.equal(f.messages.at(-1).type,"modifyRevisionItem");assert.equal(f.messages.at(-1).instruction,"Please verify the source.");f.dom.window.close();
+});
+
+test("switching to quiet Read cancels microphone capture and preserves the partial note",()=>{
+ const f=fixture();f.document();f.el("extend").click();f.send({type:"dictationAvailable",available:true});f.el("dictate").click();
+ f.send({type:"dictation",phase:"listening",text:"Add examples"});f.send({type:"viewMode",mode:"reading"});
+ assert.ok(f.messages.some(m=>m.type==="dictationCancel"));assert.equal((f.el("feedback") as HTMLTextAreaElement).value,"Add examples");assert.equal(f.el("composer").hidden,true);assert.ok(!f.messages.some(m=>m.type==="comment"));f.dom.window.close();
+});

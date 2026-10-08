@@ -50,11 +50,12 @@ feedback calls for research, then prepares exact replacements for human review.
 Unchanged text and formatting are preserved by default. **Show in document**
 keeps the target highlighted; expanded explanations survive status updates.
 
-In the MemQL browser editor, **Dictate** in the feedback composer uses Ask's
+In the MemQL browser editor, **Dictate** in feedback, extension and per-item
+modification composers uses Ask's
 microphone capture and authenticated transcription stream. Browser microphone
 permission is requested on first use. Stop to finish transcribing, edit the
 transcript, then add it to review. Nothing is submitted automatically. Closing
-the view or changing the connection cancels capture. Ordinary desktop VS Code
+the view, switching to Read or changing the connection cancels capture. Ordinary desktop VS Code
 does not expose this capture adapter, so its feedback composer remains text-only.
 
 The immutable approval records human feedback separately from proposed text,
