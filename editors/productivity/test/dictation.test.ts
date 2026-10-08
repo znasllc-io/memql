@@ -39,3 +39,24 @@ test('dictation routes PCM to the connected document and cancellation releases c
   assert.equal(messages.at(-1).phase,'idle');
   assert.doesNotThrow(()=>handlers.get('memql.productivity.dictationAudio')!({id:activeID,chunk:[5]}));
 });
+
+
+test('a dismissed old microphone prompt cannot interrupt a new dictation', {timeout:5000}, async () => {
+ const messages:any[]=[];const captures:Array<{id:string;reject:(error:Error)=>void}>=[];
+ Object.assign(vscode.commands,{
+  registerCommand:()=>({dispose(){}}),getCommands:async()=>['memql.editor.dictation.start'],
+  executeCommand:(name:string,id:string)=>name.endsWith('.stop')?Promise.resolve():new Promise<void>((_,reject)=>captures.push({id,reject})),
+ });
+ const panel={webview:{postMessage:async(message:any)=>{messages.push(message);return true;}}} as vscode.WebviewPanel;
+ const files={transcribe:async(_base:OpenDocument,audio:ReadableStream<Uint8Array>,signal:AbortSignal)=>new Promise<string>((_,reject)=>signal.addEventListener('abort',()=>{void audio.cancel();reject(new Error('cancelled'));},{once:true}))} as Documents;
+ const dictation=new DocumentDictation({subscriptions:[]} as unknown as vscode.ExtensionContext,files);
+ const first=dictation.start(panel,{} as OpenDocument);
+ while(captures.length<1)await new Promise(resolve=>setTimeout(resolve,0));
+ dictation.cancel(panel);await first;
+ const second=dictation.start(panel,{} as OpenDocument);
+ while(captures.length<2)await new Promise(resolve=>setTimeout(resolve,0));
+ const count=messages.length;captures[0].reject(new Error('Old permission prompt dismissed'));
+ await new Promise(resolve=>setTimeout(resolve,0));assert.equal(messages.length,count);
+ captures[1].reject(new Error('Microphone permission denied'));await second;
+ assert.equal(messages.at(-1).phase,'idle');assert.equal(messages.at(-1).error,'Microphone permission denied');
+});

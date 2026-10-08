@@ -27,7 +27,10 @@ export class DocumentDictation {
     const transcript=this.files.transcribe(base,audio,session.abort.signal,text=>{if(this.active===session&&!session.abort.signal.aborted)void panel.webview.postMessage({type:'dictation',phase:session.ended?'transcribing':'listening',text});});
     // Attach the rejection handler before waiting for a permission prompt.
     const finished=transcript.then(text=>({text}),error=>({error}));
-    const capture=vscode.commands.executeCommand('memql.editor.dictation.start',session.id).then(()=>undefined,error=>{session.abort.abort();return error;});
+    const capture=vscode.commands.executeCommand('memql.editor.dictation.start',session.id).then(()=>undefined,error=>{
+      if(this.active===session&&!session.abort.signal.aborted)void panel.webview.postMessage({type:'dictation',phase:'idle',error:error instanceof Error?error.message:String(error)});
+      session.abort.abort();
+    });
     try {
       const result=await finished;
       if('error' in result)throw result.error;
@@ -37,7 +40,7 @@ export class DocumentDictation {
     } finally {
       session.abort.abort();await vscode.commands.executeCommand('memql.editor.dictation.stop',session.id);
       if(this.active===session)this.active=undefined;
-      void capture.then(error=>{if(error)void panel.webview.postMessage({type:'dictation',phase:'idle',error:error instanceof Error?error.message:String(error)});});
+      void capture;
     }
   }
   async stop(panel:vscode.WebviewPanel):Promise<void>{if(this.active?.panel===panel)await vscode.commands.executeCommand('memql.editor.dictation.stop',this.active.id);}
