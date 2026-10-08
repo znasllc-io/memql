@@ -87,6 +87,11 @@
         "icon": "$(open-preview)"
       },
       {
+        "command": "memql.productivity.markdown.copy",
+        "title": "Copy",
+        "category": "MemQL Productivity"
+      },
+      {
         "command": "memql.productivity.markdown.feedback",
         "title": "Feedback",
         "category": "MemQL Productivity"
@@ -168,13 +173,17 @@
     "menus": {
       "commandPalette": [
         {
+          "command": "memql.productivity.markdown.copy",
+          "when": "false"
+        },
+        {
           "command": "memql.productivity.markdown.feedback",
           "when": "false"
         }
       ],
       "webview/context": [
         {
-          "command": "editor.action.clipboardCopyAction",
+          "command": "memql.productivity.markdown.copy",
           "when": "webviewId == memql.productivity.markdown && webviewSection == markdownReadOnly",
           "group": "5_cutcopypaste@2"
         },
