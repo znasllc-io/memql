@@ -1201,12 +1201,14 @@ Each of these is understood, and accepted for this release.
   cluster scripts, `deploy/k8s` or the workflow -- so a change to the
   substrate's code alone does not run it. A live lane against GitHub itself,
   `pipelines-live.yml`, ships disarmed.
-- **Readiness cannot see the workbench.** Settings -> Pipelines' runner fact
-  says whether the agent node reporting it registered an executor, which every
-  agent node now does. It cannot see whether a workbench replica can run steps,
-  or whether the isolation proof passes: a cluster whose workbench has no clone
-  image, or whose isolation cannot be proved, reads configured and fails its
-  steps (memql#5803).
+- **Per-workbench readiness has not yet been verified in an installed release.**
+  Settings -> Pipelines separates step-dispatcher installation from reports for
+  each known workbench. The report path asks each replica for its own runner
+  availability and last isolation result; a missing answer stays unknown. The
+  observed local installation had no workbench readiness report (#5803), so
+  dispatcher presence does not establish that cluster steps can run. Reading
+  the page does not run an isolation probe: a step proves isolation before it
+  starts, or again after its prior proof expires.
 - **A step can run twice after an agent replica loses a run's lease mid-step.**
   The old replica may take the step's outcome and have its Job deleted before the
   new driver hands the same attempt over again, which then finds no Job and

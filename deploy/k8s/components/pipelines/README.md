@@ -12,7 +12,7 @@ Epic memql#5478, task memql#5492.
 | Object | Namespace | What it is for |
 |---|---|---|
 | `Namespace/memql-pipelines` | — | Where steps run. Pod Security `enforce: baseline`, `warn: restricted` |
-| `Role` + `RoleBinding/memql-pipelines-runner` | `memql-pipelines` | The runner's grant, bound to `memql-engine` |
+| `Role` + `RoleBinding/memql-pipelines-runner` | `memql-pipelines` | The runner's grant, bound to `memql-engine-workbench` |
 | `ServiceAccount/memql-pipelines-step` | `memql-pipelines` | The step pod's identity: no token mounted, nothing bound |
 | `PersistentVolumeClaim/memql-pipelines-cache` | `memql-pipelines` | Go and npm caches shared across runs, mounted at `/cache` |
 | `ResourceQuota/memql-pipelines-ceiling` | `memql-pipelines` | How many steps run at once (`count/jobs.batch`) |
@@ -183,7 +183,7 @@ which is in `integrations/pipelinesteps/kube.go`:
 
 | Resource | Verbs | Why |
 |---|---|---|
-| `batch/jobs` | create, get, patch, delete, deletecollection | one Job per step attempt, and the isolation probe's; read back by name (the runner polls the Job it holds, so it never lists or watches Jobs); its heartbeat and outcome annotations; deleted once the agent has the result; a cancelled run swept by label |
+| `batch/jobs` | create, get, patch, delete, deletecollection | one Job per step attempt, and the isolation probe's; read back by name (the runner polls the Job it holds, so it never lists or watches Jobs); its heartbeat and outcome annotations; a step Job stays until the agent acknowledges its durably committed receipt, then cleanup confirms the Job, Secret and pods are absent; a cancelled run is swept by label |
 | `pods` | list | the Job's pods, by the job-name label: they classify a failure (image pull, clone) and hold the probe's listener |
 | `pods/log` | get | the step's output, followed while it runs, and the tails of the clone, the services and the probe |
 | `secrets` | create, get, list, patch, delete, deletecollection | one Secret per Job: the clone token and the step's resolved secrets; listed (by label, metadata alone) by the sweep that deletes a Secret no Job ever came to own |
