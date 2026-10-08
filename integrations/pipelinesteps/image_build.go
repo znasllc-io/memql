@@ -78,9 +78,9 @@ func imageBuildWithProvenance(build *pl.ImageBuild, sha string, event pl.Event, 
 }
 
 // This container contains neither clone credentials nor publication authority.
-// RUN processes share only this disposable container's PID namespace with the
-// daemon; no service or shared cache is admitted. The collector has its own PID
-// namespace and reads the export only after this producer has terminated.
+// BuildKit gives each RUN a process namespace separate from its daemon; no
+// service or shared cache is admitted. The collector has its own PID namespace
+// and reads the export only after this producer has terminated.
 func imageBuildContainer(cfg Config, run StepRun, jobName string) Container {
 	compiled := run
 	compiled.Image = imageBuildImage
@@ -88,11 +88,11 @@ func imageBuildContainer(cfg Config, run StepRun, jobName string) Container {
 	compiled.Env = nil // arbitrary forwarded variables cannot configure BuildKit
 	c := stepContainer(compiled, jobName, "", nil)
 	c.Env = append(c.Env,
-		plainVar("BUILDKITD_FLAGS", "--oci-worker-no-process-sandbox --oci-worker-snapshotter=native"),
+		plainVar("BUILDKITD_FLAGS", "--oci-worker-snapshotter=native"),
 		plainVar("BUILDKIT_HOST", ""),
 	)
 	c.SecurityContext = &SecurityContext{
-		RunAsUser: ptr(int64(1000)), RunAsGroup: ptr(int64(1000)),
+		RunAsUser: ptr(int64(1000)), RunAsGroup: ptr(int64(1000)), ProcMount: "Unmasked",
 		AllowPrivilegeEscalation: ptr(true), // only the pinned image's newuidmap/newgidmap helpers
 		Capabilities:             &Capabilities{Drop: []string{capAll}, Add: []string{"SETUID", "SETGID"}},
 		SeccompProfile:           &SeccompProfile{Type: "Localhost", LocalhostProfile: imageBuildProfile(run.Platform)},

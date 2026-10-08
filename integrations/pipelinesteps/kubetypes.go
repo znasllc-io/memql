@@ -108,6 +108,7 @@ type PodTemplateSpec struct {
 // PodSpec is the step's pod.
 type PodSpec struct {
 	ImagePullSecrets             []LocalObjectReference `json:"imagePullSecrets,omitempty"`
+	HostUsers                    *bool                  `json:"hostUsers,omitempty"`
 	NodeName                     string                 `json:"nodeName,omitempty"`
 	SchedulingGates              []PodSchedulingGate    `json:"schedulingGates,omitempty"`
 	NodeSelector                 map[string]string      `json:"nodeSelector,omitempty"`
@@ -189,6 +190,7 @@ type Resources struct {
 // image's own user.
 type SecurityContext struct {
 	SeccompProfile           *SeccompProfile `json:"seccompProfile,omitempty"`
+	ProcMount                string          `json:"procMount,omitempty"`
 	RunAsGroup               *int64          `json:"runAsGroup,omitempty"`
 	ReadOnlyRootFilesystem   *bool           `json:"readOnlyRootFilesystem,omitempty"`
 	RunAsUser                *int64          `json:"runAsUser,omitempty"`

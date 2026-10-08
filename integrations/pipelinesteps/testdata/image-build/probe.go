@@ -33,25 +33,38 @@ func main() {
 	checks["root_maps_to_unprivileged_user"] = err == nil && len(uidMap) >= 3 && uidMap[0] == "0" && uidMap[1] == "1000"
 	raw, err = os.ReadFile("/proc/self/status")
 	checks["seccomp_filter_active"] = err == nil && strings.Contains(string(raw), "Seccomp:\t2")
-	checks["no_other_container_process"] = true
-	files, _ := filepath.Glob("/proc/[0-9]*/cmdline")
+	if os.Args[1] != "" {
+		checks["no_other_container_process"] = true
+	}
+	checks["no_buildkit_daemon_process"] = true
+	files, globErr := filepath.Glob("/proc/[0-9]*/cmdline")
+	checks["process_table_readable"] = globErr == nil && len(files) > 0
 	for _, p := range files {
-		b, _ := os.ReadFile(p)
+		b, err := os.ReadFile(p)
+		if err != nil && !os.IsNotExist(err) {
+			checks["process_table_readable"] = false
+			continue
+		}
 		if strings.Contains(string(b), "memql-outer-sentinel-only") {
 			checks["no_other_container_process"] = false
 		}
+		if strings.Contains(string(b), "buildkitd") || strings.Contains(string(b), "rootlesskit") {
+			checks["no_buildkit_daemon_process"] = false
+		}
 	}
-	for key, addr := range map[string]string{"private_listener_denied": os.Args[1], "metadata_denied": "169.254.169.254:80", "azure_wireserver_denied": "168.63.129.16:80"} {
-		c, err := net.DialTimeout("tcp", addr, 2*time.Second)
-		checks[key] = err != nil
+	if os.Args[1] != "" {
+		for key, addr := range map[string]string{"private_listener_denied": os.Args[1], "metadata_denied": "169.254.169.254:80", "azure_wireserver_denied": "168.63.129.16:80"} {
+			c, err := net.DialTimeout("tcp", addr, 2*time.Second)
+			checks[key] = err != nil
+			if c != nil {
+				c.Close()
+			}
+		}
+		c, err := net.DialTimeout("tcp", "github.com:443", 10*time.Second)
+		checks["public_https_reachable"] = err == nil
 		if c != nil {
 			c.Close()
 		}
-	}
-	c, err := net.DialTimeout("tcp", "github.com:443", 10*time.Second)
-	checks["public_https_reachable"] = err == nil
-	if c != nil {
-		c.Close()
 	}
 	json.NewEncoder(os.Stdout).Encode(checks)
 	for key, passed := range checks {

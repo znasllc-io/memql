@@ -445,6 +445,14 @@ and output paths. An image build has no registry publication credential.
 resolve outside it. `target` optionally names a Dockerfile stage. `args` holds
 at most 64 public arguments: never put secrets there. A step uses the matching
 Linux architecture, rather than silently emulating another architecture.
+The rootless builder runs each Dockerfile `RUN` in its own process namespace.
+Its pod uses a Kubernetes user namespace (`hostUsers: false`), which Kubernetes
+requires when the builder requests an unmasked `/proc` for that process sandbox.
+Clusters must support pod user namespaces and unmasked `/proc`; on older
+feature-gated Kubernetes releases, enable `UserNamespacesSupport` on the API
+server and kubelet, and `UserNamespacesPodSecurityStandards` on the API server
+when baseline Pod Security admission is enforced. Clusters that cannot run this
+pod contract cannot execute typed image builds.
 The runner supplies the pinned commit as `MEMQL_COMMIT` and, for a release
 event, the bare release version as `MEMQL_RELEASE`; both names are reserved and
 cannot be set in the manifest. Other events receive an empty `MEMQL_RELEASE`.
@@ -472,18 +480,21 @@ service-account token, shared cache, service sidecar or forwarded secret.
 Network isolation and CPU, memory, scratch, duration and collection ceilings
 still apply. Clone credentials stay in the separate init container.
 
-Rootless BuildKit uses its native snapshotter and no process sandbox inside
-this disposable container: Dockerfile processes can disrupt their own builder.
-The container PID boundary and complete Pod deletion contain those processes;
-these builds cannot share a daemon across attempts. The profile does not grant
-BuildKit insecure entitlements. Host user-namespace and AppArmor policy must
-support this profile; qualify the actual node runtime and architecture before
-opting in. Local ARM64 qualification does not certify an amd64 cloud node.
+Rootless BuildKit uses its native snapshotter and process sandbox for every
+Dockerfile `RUN`; the untrusted process cannot inspect or signal the builder
+daemon through `/proc`. The disposable container PID boundary and complete Pod
+deletion also contain failures; builds cannot share a daemon across attempts.
+The profile does not grant BuildKit insecure entitlements. Host user-namespace
+and AppArmor policy must support this profile; qualify the actual node runtime
+and architecture before opting in. Local ARM64 qualification does not certify
+an amd64 cloud node.
 
 The opt-in `TestImageBuildAgainstLocalKubernetes` exercises the actual generated
 Job against a disposable local namespace, with an explicit pushed fixture SHA.
-It proves positive and denied network controls, process restrictions, pinned
-checkout, image export, two independent artifact readers, OCI verification and
+Its default `network` mode proves positive and denied network controls; the
+`process-sandbox` mode qualifies the builder on a cluster that does not enforce
+NetworkPolicy. Both prove process restrictions, pinned checkout, image export,
+two independent artifact readers, OCI verification and
 foreground Job/Pod cleanup. Runtime profile changes require repeating this proof.
 
 ## The isolation proof

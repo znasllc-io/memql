@@ -233,6 +233,26 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 		volumes = append(volumes, Volume{Name: artifactVolume, EmptyDir: &EmptyDirVolumeSource{SizeLimit: cfg.WorkspaceLimit}})
 		containers = append(containers, artifactCollector(cfg, run.TimeoutSeconds))
 	}
+	pod := PodSpec{
+		ImagePullSecrets:              pulls,
+		NodeSelector:                  cfg.nodeSelector(run.Platform),
+		Tolerations:                   cfg.tolerations(),
+		RestartPolicy:                 "Never",
+		ServiceAccountName:            cfg.StepServiceAccount,
+		AutomountServiceAccountToken:  ptr(false),
+		EnableServiceLinks:            ptr(false),
+		TerminationGracePeriodSeconds: ptr(int64(stepGracePeriodSeconds)),
+		SecurityContext:               podSecurity,
+		InitContainers:                initContainers,
+		Containers:                    containers,
+		Volumes:                       volumes,
+	}
+	if run.ImageBuild != nil {
+		// Rootless BuildKit needs an unmasked /proc to create a dedicated PID
+		// namespace for each Dockerfile RUN. Kubernetes permits that only in a
+		// user namespace; never fall back to sharing the daemon's PID namespace.
+		pod.HostUsers = ptr(false)
+	}
 	return Job{
 		APIVersion: "batch/v1",
 		Kind:       "Job",
@@ -248,20 +268,7 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 			TTLSecondsAfterFinished: ptr(ttl),
 			Template: PodTemplateSpec{
 				Metadata: ObjectMeta{Labels: objectLabels(run)},
-				Spec: PodSpec{
-					ImagePullSecrets:              pulls,
-					NodeSelector:                  cfg.nodeSelector(run.Platform),
-					Tolerations:                   cfg.tolerations(),
-					RestartPolicy:                 "Never",
-					ServiceAccountName:            cfg.StepServiceAccount,
-					AutomountServiceAccountToken:  ptr(false),
-					EnableServiceLinks:            ptr(false),
-					TerminationGracePeriodSeconds: ptr(int64(stepGracePeriodSeconds)),
-					SecurityContext:               podSecurity,
-					InitContainers:                initContainers,
-					Containers:                    containers,
-					Volumes:                       volumes,
-				},
+				Spec:     pod,
 			},
 		},
 	}, nil
