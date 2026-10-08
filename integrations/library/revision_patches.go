@@ -128,7 +128,7 @@ func buildRevisionProposal(captured map[string]any, response any) (map[string]an
 		if (edit.Before == "" && (normalized != "" || len(answer.Edits) != 1)) || len(edit.Before) > revisionContentLimit || len(edit.After) > revisionContentLimit || strings.TrimSpace(edit.Reason) == "" || len(edit.Reason) > 4000 || len(edit.CommentIDs) == 0 {
 			return nil, fmt.Errorf("each proposed edit needs an exact source, feedback reference and explanation")
 		}
-		if edit.Before != "" && strings.Count(normalized, edit.Before) != 1 {
+		if edit.Before != "" && (strings.Index(normalized, edit.Before) < 0 || strings.Index(normalized, edit.Before) != strings.LastIndex(normalized, edit.Before)) {
 			return nil, fmt.Errorf("a proposed edit does not identify a unique passage in the saved document")
 		}
 		seen := map[string]bool{}

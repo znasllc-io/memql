@@ -69,3 +69,11 @@ func TestRevisionExtensionsIncludeImportedAndEmptyDocuments(t *testing.T) {
 		}
 	}
 }
+
+func TestRevisionPatchesRefuseSelfOverlappingOccurrence(t *testing.T) {
+	captured := capturedRevision("aaa", "aa", 0, 1)
+	_, err := buildRevisionProposal(captured, revisionAnswer{Summary: "Clarify", Edits: []revisionReplacement{{Before: "aa", After: "b", Reason: "Clarify", CommentIDs: []string{"note-1"}}}})
+	if err == nil {
+		t.Fatal("overlapping duplicate occurrences were treated as unique")
+	}
+}

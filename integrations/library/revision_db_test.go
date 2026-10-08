@@ -293,3 +293,45 @@ func TestDocumentRevisionRefusesStaleApprovalAndAllowsDecline(t *testing.T) {
 		t.Fatalf("decline did not stop run: %v %v", run, err)
 	}
 }
+
+func TestDocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove(t *testing.T) {
+	f := newRevisionDB(t)
+	source := "# Recovery\n\nOriginal text.\n"
+	artifact, doc := f.document(source)
+	args, note := f.submit(artifact, doc, map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": "Original text.", "sourceQuote": "Original text."}, "Clarify this")
+	f.ai.answer = revisionAnswer{Summary: "Clarify", Edits: []revisionReplacement{{Before: "Original text.", After: "Clear text.", Reason: "Clarify", CommentIDs: []string{note}}}}
+	request := asString(args["requestId"])
+	var wait *workstate.HumanWait
+	if err := f.execute(f.engine, request, false); !errors.As(err, &wait) {
+		t.Fatal(err)
+	}
+	f.query(f.other, f.ctx, "query", "decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved"})
+	ids, _, _, approval, err := f.second.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := revisionMap(approval["subject"])
+	// Inject the real durable boundary: history committed, backing write absent.
+	latest, _, err := f.first.latestVersion(f.ctx, doc.source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.first.appendVersion(f.ctx, appendArgs{versionAt: nextDocumentTime(doc.backing, latest), versionId: "revision-" + ids.RunID, documentId: doc.source, versionNumber: doc.version + 1, content: asString(proposal["revisedContent"]), authorKind: "assistant", note: "Clarify", parentVersionId: stringField(latest, "id"), producedByRunId: ids.RunID, partitionId: stringField(doc.backing, "partitionId")}); err != nil {
+		t.Fatal(err)
+	}
+	// Reconcile the bounded apply operation on another replica. The separate
+	// workflow tests above exercise journal continuation at the approval gate.
+	ctx := common.ContextWithRun(f.ctx, common.RunContext{RunId: ids.RunID, GoalId: ids.GoalID, OwnerUserId: f.owner})
+	for _, lib := range []*Integration{f.second, f.first} {
+		if _, err = lib.handleExecuteDocumentRevision(ctx, map[string]any{"requestId": request}, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	current, err := f.second.reviewDocument(memql.ContextWithFreshRead(f.ctx), artifact)
+	if err != nil || current.version != doc.version+1 || current.backing["body"] != "# Recovery\n\nClear text.\n" {
+		t.Fatalf("did not recover the single version: %+v %v", current, err)
+	}
+	if f.ai.calls.Load() != 1 {
+		t.Fatal("recovery called the model again")
+	}
+}
