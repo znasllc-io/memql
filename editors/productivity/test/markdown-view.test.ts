@@ -159,3 +159,9 @@ test("a paused preparation does not look like an active model call",()=>{
  const f=fixture();f.document();f.send({type:"revision",status:{prepared:true,status:"waiting",errorMessage:"The local model stopped responding.",proposal:{comments:[],edits:[]}}});
  assert.equal(f.doc.querySelector("#revision h3")!.textContent,"Preparation paused");assert.equal(f.doc.querySelector("#revision .busy"),null);assert.match(f.el("revision").textContent!,/stopped responding/);assert.match(f.el("review-actions").textContent!,/Stop preparing/);f.dom.window.close();
 });
+
+test("reopening a decided proposal restores the recorded subset rather than local guesses",()=>{
+ const f=fixture({decisions:{kept:"declined",omitted:"accepted"}});f.document();
+ f.send({type:"revision",status:{status:"succeeded",decision:"approved",answer:{acceptedItemIds:["kept"]},items:[{id:"kept",edits:[{before:"Keep",after:"Retain"}]},{id:"omitted",edits:[{before:"rest",after:"other"}]}],proposal:{artifactId:"doc",revision:"v1",edits:[]},result:{applied:true}}});
+ assert.deepEqual([...f.doc.querySelectorAll('.item-decision')].map(el=>el.textContent),["Accepted","Declined"]);f.dom.window.close();
+});

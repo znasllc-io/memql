@@ -399,6 +399,14 @@ window.addEventListener("message",event=>{
     const nextSource=JSON.stringify([message.status?.proposal?.artifactId,message.status?.proposal?.revision,message.status?.proposal?.version]);
     if(reviewSource && nextSource!==reviewSource){for(const id of Object.keys(decisions))delete decisions[id];}
     reviewSource=nextSource;
+    // The recorded answer wins over local choices, including when another
+    // editor or Nexus applied this proposal and this view is reopening it.
+    if(message.status?.decision==="approved" && Array.isArray(message.status.answer?.acceptedItemIds)){
+      const accepted=new Set(message.status.answer.acceptedItemIds);
+      for(const item of message.status.items??[])decisions[item.id]=accepted.has(item.id)?"accepted":"declined";
+    } else if(message.status?.decision==="rejected"){
+      for(const item of message.status.items??[])decisions[item.id]="declined";
+    }
     const changed=message.status?.approvalId&&message.status.approvalId!==revision?.approvalId;const different=JSON.stringify(message.status)!==JSON.stringify(revision);revision=message.status;if(different)renderRevision();controls();if(changed){byId("status").textContent="";showReview(true);}saveState();}
   if(message.type==="revisionIdle"){revisionBusy=false;preparing=false;renderRevision();controls();}
   if(message.type==="saved"){commentBusy=false;feedback.value="";draftAnchor=undefined;closeComposer();byId("status").textContent="Added to review.";controls();showReview(true);}
