@@ -98,7 +98,7 @@ func TestRevisionPatchesPreserveFormattingWithoutUserReminders(t *testing.T) {
 	}
 }
 
-func TestRevisionExtensionsCannotRewriteOrInsertInsideExistingContent(t *testing.T) {
+func TestRevisionExtensionsCanInsertAtRequestedLocationsWithoutRewriting(t *testing.T) {
 	source := "# Guide\n\nExisting introduction.\n\n## Last section\n\nExisting ending.\n"
 	captured := map[string]any{"content": source, "comments": []any{map[string]any{"id": "note-1", "body": "Add practice prompts", "anchor": map[string]any{"kind": "document-end", "quote": "End of document"}}}}
 	for _, tc := range []struct {
@@ -107,7 +107,7 @@ func TestRevisionExtensionsCannotRewriteOrInsertInsideExistingContent(t *testing
 	}{
 		{"append", "Existing ending.", "Existing ending.\n\n## Practice\n\nTry an example.", true},
 		{"rewrite ending", "Existing ending.", "A polished ending.\n\n## Practice\n\nTry an example.", false},
-		{"insert in middle", "Existing introduction.", "Existing introduction.\n\nTry an example.", false},
+		{"insert in middle", "Existing introduction.", "Existing introduction.\n\nTry an example.", true},
 		{"delete", "Existing introduction.", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

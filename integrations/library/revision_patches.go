@@ -144,8 +144,8 @@ func buildRevisionProposal(captured map[string]any, response any) (map[string]an
 		}
 		start := strings.Index(normalized, edit.Before)
 		prefix, beforeEnd, _ := revisionChangeBounds(edit.Before, edit.After)
-		if extensionOnly && (prefix != beforeEnd || strings.TrimSpace(normalized[start+beforeEnd:]) != "") {
-			return nil, fmt.Errorf("an extension may only add content at the end of the document; existing content must remain unchanged")
+		if extensionOnly && prefix != beforeEnd {
+			return nil, fmt.Errorf("an extension must add content without replacing existing text; use a separate edit for each insertion")
 		}
 		replacements = append(replacements, located{edit, start, start + len(edit.Before)})
 	}

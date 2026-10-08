@@ -126,7 +126,9 @@ people can say "Rename this to Draft Exchange" without asking to retain bold
 formatting, surrounding descriptions or other items. The DSL prompt requires
 minimal changes and a check that every difference serves the feedback. Native
 application copies unaffected bytes and matching context from the saved source;
-extension-only edits cannot rewrite existing content or insert in the middle.
+extension-only edits cannot rewrite existing content. Extensions append by
+default, or insert at a requested location, such as question time after lunch
+in a schedule. The button's location does not constrain the insertion point.
 Requests can also delete, rearrange or extend content. The
 panel follows progress and refreshes a clean editor after application, while
 preserving unsaved local edits. Invalid or ambiguous AI output fails without a
