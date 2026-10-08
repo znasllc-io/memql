@@ -154,3 +154,8 @@ test("dictation appends cumulative transcripts once and leaves submission to the
  f.send({type:"dictation",phase:"listening",text:"add"});f.send({type:"dictation",phase:"listening",text:"add examples"});assert.equal((f.el("feedback") as HTMLTextAreaElement).value,"Please add examples");assert.equal((f.el("add") as HTMLButtonElement).disabled,true);
  f.el("dictate").click();assert.equal(f.messages.at(-1).type,"dictationStop");f.send({type:"dictation",phase:"idle",text:"add examples.",final:true});assert.equal((f.el("add") as HTMLButtonElement).disabled,false);assert.equal((f.el("feedback") as HTMLTextAreaElement).value,"Please add examples.");assert.ok(!f.messages.some(m=>m.type==="comment"));f.dom.window.close();
 });
+
+test("a paused preparation does not look like an active model call",()=>{
+ const f=fixture();f.document();f.send({type:"revision",status:{prepared:true,status:"waiting",errorMessage:"The local model stopped responding.",proposal:{comments:[],edits:[]}}});
+ assert.equal(f.doc.querySelector("#revision h3")!.textContent,"Preparation paused");assert.equal(f.doc.querySelector("#revision .busy"),null);assert.match(f.el("revision").textContent!,/stopped responding/);assert.match(f.el("review-actions").textContent!,/Stop preparing/);f.dom.window.close();
+});

@@ -270,14 +270,15 @@ function renderRevisionContent() {
   const status = revision, proposal = status.proposal ?? {};
   const terminal = !!status.cancelRequested || ["succeeded", "failed", "cancelled"].includes(status.status);
   const awaiting = !terminal && !!status.approvalId && !status.decision && status.status === "waiting";
+  const paused = !terminal && !awaiting && !status.decision && status.prepared !== false && status.status === "waiting";
   let panel: HTMLElement = root;
   if (terminal && pending) {
     const previous = document.createElement("details"); previous.className = "earlier";
     previous.append(textElement("summary", "Previous review")); root.append(previous); panel = previous;
   }
   const phase = status.cancelRequested ? "Stop requested" : status.decision === "rejected" ? "Changes declined" : status.status === "succeeded" ? status.result?.applied ? "Changes applied" : "No changes needed"
-    : status.status === "failed" || status.status === "cancelled" ? "Couldn’t prepare changes" : awaiting ? "Proposed changes" : status.decision === "approved" ? "Applying changes…" : "Preparing changes…";
-  panel.append(textElement("h3", phase, !terminal && !awaiting ? "phase busy" : ""));
+    : status.status === "failed" || status.status === "cancelled" ? "Couldn’t prepare changes" : awaiting ? "Proposed changes" : paused ? "Preparation paused" : status.decision === "approved" ? "Applying changes…" : "Preparing changes…";
+  panel.append(textElement("h3", phase, !terminal && !awaiting && !paused ? "phase busy" : ""));
   if (status.errorMessage) panel.append(textElement("p", String(status.errorMessage), "review-error"));
   const requested: ReviewRow[] = Array.isArray(proposal.comments) ? proposal.comments : rows.filter(row => proposal.commentIds?.includes(row.id));
   const edits: Record<string, any>[] = Array.isArray(proposal.edits) ? proposal.edits.filter((edit: any) => edit.before !== edit.after) : [];
