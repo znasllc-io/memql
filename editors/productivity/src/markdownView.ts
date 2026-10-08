@@ -213,9 +213,9 @@ window.addEventListener("message",event=>{
     renderComments();if(different)renderRevision();controls();saveState();
   }
   if(message.type==="revision") {const changed=message.status?.approvalId&&message.status.approvalId!==revision?.approvalId;const different=JSON.stringify(message.status)!==JSON.stringify(revision);revision=message.status;if(different)renderRevision();controls();if(changed){byId("status").textContent="";showReview(true);}}
-  if(message.type==="revisionIdle"){revisionBusy=false;preparing=false;controls();renderRevision();}
+  if(message.type==="revisionIdle"){revisionBusy=false;preparing=false;renderRevision();controls();}
   if(message.type==="saved"){commentBusy=false;feedback.value="";draftAnchor=undefined;closeComposer();byId("status").textContent="Added to review.";controls();showReview(true);}
-  if(message.type==="error"){commentBusy=false;revisionBusy=false;preparing=false;controls();renderRevision();if(!byId("composer").hidden)byId("composer-status").textContent=message.message;else{byId("status").textContent=message.message;showReview(true);}}
+  if(message.type==="error"){commentBusy=false;revisionBusy=false;preparing=false;renderRevision();controls();if(!byId("composer").hidden)byId("composer-status").textContent=message.message;else{byId("status").textContent=message.message;showReview(true);}}
   if(message.type==="notice")byId("status").textContent=message.message;
 });
 showReview(state.reviewOpen??false);controls();api.postMessage({type:"ready"});

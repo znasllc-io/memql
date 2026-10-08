@@ -75,6 +75,7 @@ test("standalone extensions replace the previous review with the same diff and a
   assert.match(f.el("revision").textContent!,/Preparing changes/);assert.ok(!f.el("revision").textContent!.includes("Earlier edit"));
   f.send({type:"revision",status:{status:"waiting",prepared:true,approvalId:"extension-approval",proposal:{commentIds:["extension"],summary:"Add next steps",revisedContent:"Existing\n\n## Next steps",edits:[{before:"Existing",after:"Existing\n\n## Next steps",reason:"Extend"}]}}});
   f.send({type:"revisionIdle"});
+  assert.equal(f.el("review-footer").hidden,false);assert.equal(f.el("review-submit").hidden,true);
   assert.equal(f.doc.querySelectorAll(".change").length,1);assert.match(f.el("revision").textContent!,/## Next steps/);
   assert.ok([...f.doc.querySelectorAll<HTMLButtonElement>("#review-actions button")].some(button=>button.textContent==="Approve & apply"&&!button.disabled));f.dom.window.close();
 });
