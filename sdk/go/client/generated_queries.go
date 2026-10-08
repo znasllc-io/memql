@@ -12630,6 +12630,28 @@ func WorkApprovalForOwnerBuild(args WorkApprovalForOwnerArgs) string {
 	return b.String()
 }
 
+// WorkApprovalsForOwnedRun -- Durable decisions for one of the caller's runs, including decided reviews.
+//
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwnedRun"] in generated_concepts.go).
+type WorkApprovalsForOwnedRunArgs struct {
+	RunId string
+}
+
+// WorkApprovalsForOwnedRun calls the engine query workApprovalsForOwnedRun.
+func (qc *QueryClient) WorkApprovalsForOwnedRun(ctx context.Context, args WorkApprovalsForOwnedRunArgs) (*Result, error) {
+	call := WorkApprovalsForOwnedRunBuild(args)
+	return qc.executeNamed(ctx, "workApprovalsForOwnedRun", call)
+}
+
+func WorkApprovalsForOwnedRunBuild(args WorkApprovalsForOwnedRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workApprovalsForOwnedRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkApprovalsForOwner -- The caller's pending approvals, newest first. Owned. `row.decision == ""` is the pending state, and it matches because createWorkApproval STAMPS the empty string rather than leaving the key absent.
 //
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwner"] in generated_concepts.go).

@@ -100,20 +100,31 @@ captures the ready template content it reviewed, so later copy edits do not
 change an in-progress campaign. Existing jobs without a captured snapshot retain
 the older live-template behavior; pause and recreate those jobs to capture a copy.
 
-For an AI-assisted Markdown revision, select up to 20 current comments, describe
-what should change, and choose **Review change request**. The cluster captures
-the exact saved source (up to 128 KiB), selected feedback and instruction before
-opening a Nexus job that waits for human approval. Inspect the captured source
-and feedback, then choose **Approve draft job** or **Decline**. Approval can also
-be handled in the existing Nexus inbox. Refresh the reading view to see progress.
+In **Read**, select a passage and choose **Add feedback**, or use the feedback
+icon (keyboard: Ctrl/Cmd+Alt+M). Saved notes appear in the review panel. Use
+**Extend document** at the end to describe new sections, examples or other
+content to add. Unfinished notes stay attached to their selection across view
+changes; if the source changes, their text is preserved and must be reselected.
 
-The approved job uses Materializer and MemQL's model router with a one-model-call
-ceiling. It saves a separate draft in Files. **Compare draft** opens a read-only
-diff; return to the reading view and choose **Apply compared draft** when ready.
-The original is saved as a new version only after that action. Source changes or
-revoked write access before approval/execution stop the job; an intervening save
-before applying the draft refuses the save and keeps the local edits. Request
-and decision retries recover the same work identities, including an interrupted
-bootstrap or resume. Opening a file, adding a comment, or preparing a request
-does not itself start AI work. Feedback-driven revision currently supports
-Markdown; email example generation and publishing use their separate controls.
+Choose up to 100 current notes and **Propose changes**. This starts one AI
+analysis against the exact saved Markdown source, up to 128 KiB. The DSL
+`reviseLibraryDocument` template orders source capture, the named prompt,
+validation, human review and application. The native capabilities enforce
+ownership, source revisions, unambiguous non-overlapping replacements, exact
+approval and versioned storage. No generation-specific metadata is required:
+imported Markdown uses the same source, quote, context and position anchors.
+
+The review panel shows the original and proposed text for every affected
+location, including both ends of a move. **Compare full document** opens a
+read-only diff. **Approve & apply** resumes the same Nexus job and saves a new
+version; **Decline** keeps the document unchanged. A small rephrase preserves
+unaffected bytes. Requests can also delete, rearrange or extend content. The
+panel follows progress and refreshes a clean editor after application, while
+preserving unsaved local edits. Invalid or ambiguous AI output fails without a
+write; a failed or declined attempt can be submitted again.
+
+Opening a document and saving notes do not start AI work. Approval is tied to
+the exact proposal and source revision; intervening edits or revoked authority
+refuse the save. Repeated submissions and decisions recover existing receipts,
+and resumption on another replica reuses the journaled AI result. Feedback-driven
+revision currently supports Markdown; email composition uses separate controls.

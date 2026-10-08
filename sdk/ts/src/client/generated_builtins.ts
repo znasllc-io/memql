@@ -1914,7 +1914,7 @@ QueryClient.prototype.libraryDocumentReview = function (this: QueryClient, args:
   return this.executeNamed("libraryDocumentReview", buildLibraryDocumentReview(args), opts);
 };
 
-/** Read the exact owned proposal, approval, run and output draft. */
+/** Read the owned analysis, proposed replacements, decision and saved result. */
 export interface LibraryDocumentRevisionStatusArgs {
   requestId: string;
 }
@@ -1958,7 +1958,7 @@ QueryClient.prototype.libraryRemoveArtifactLabel = function (this: QueryClient, 
   return this.executeNamed("libraryRemoveArtifactLabel", buildLibraryRemoveArtifactLabel(args), opts);
 };
 
-/** Capture selected current feedback and open a Nexus run waiting for approval. */
+/** Capture selected current feedback and start its analysis run. */
 export interface LibraryRequestDocumentRevisionArgs {
   artifactId: string;
   expectedVersion: number;

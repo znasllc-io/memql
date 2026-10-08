@@ -171,7 +171,7 @@ builtin libraryAddDocumentComment {
   requestId string!
 }
 
-/// Capture selected current feedback and open a Nexus run waiting for approval.
+/// Capture selected current feedback and start its analysis run.
 @sdk
 @executor("integration.library.requestDocumentRevision")
 @args(profile="object")
@@ -184,13 +184,28 @@ builtin libraryRequestDocumentRevision {
  requestId string!
 }
 
-/// Read the exact owned proposal, approval, run and output draft.
+/// Read the owned analysis, proposed replacements, decision and saved result.
 @sdk
 @executor("integration.library.documentRevisionStatus")
 @args(profile="object")
 builtin libraryDocumentRevisionStatus {
  requestId string!
 }
+
+/// Revalidate and read the immutable source captured for the current owned run.
+@executor("integration.library.revisionInput")
+@args(profile="object")
+builtin libraryRevisionInput { requestId string! }
+
+/// Decode and validate replacements only within the selected source passages.
+@executor("integration.library.revisionProposal")
+@args(profile="object")
+builtin libraryRevisionProposal { requestId string! response any! }
+
+/// Park the current run on an exact proposal; return only after human approval.
+@executor("integration.library.reviewRevision")
+@args(profile="object")
+builtin libraryReviewRevision { requestId string! proposal object! question string! }
 
 /// Only its approved, server-owned run may execute this revision.
 @executor("integration.library.executeDocumentRevision")

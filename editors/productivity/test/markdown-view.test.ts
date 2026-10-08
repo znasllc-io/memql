@@ -5,85 +5,57 @@ import { JSDOM } from "jsdom";
 import { markdownPage } from "../src/markdownPage.js";
 import { renderMarkdown } from "../src/markdown.js";
 
-test("rendered passage selection sends a revision-bound comment and comments render as text", () => {
-  const dom = new JSDOM(markdownPage("Review.md", "", "test"), {runScripts: "outside-only"});
-  const messages: Record<string, unknown>[] = [];
-  Object.assign(dom.window, { acquireVsCodeApi: () => ({postMessage: (message: Record<string,unknown>) => messages.push(message), getState: () => undefined, setState: () => {}}) });
-  dom.window.eval(readFileSync("dist-test/markdown-view.js", "utf8"));
-  const send = (data: unknown) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", {data}));
-  send({type:"document", html:renderMarkdown("# A title\n\nReview **this section**.\n"),version:17,connected:true,status:""});
-  const doc=dom.window.document;
-  const range=doc.createRange(); range.selectNodeContents(doc.querySelector("strong")!);
-  dom.window.getSelection()!.removeAllRanges(); dom.window.getSelection()!.addRange(range);
-  doc.dispatchEvent(new dom.window.Event("selectionchange"));
-  (doc.getElementById("feedback") as HTMLTextAreaElement).value="Clarify this section.";
-  doc.getElementById("add")!.click();
-  const comment=messages.find(m=>m.type==="comment");
-  assert.equal(comment?.version,17);
-  assert.deepEqual(JSON.parse(JSON.stringify(comment?.selection)),{startBlock:1,endBlock:1,startTextOffset:7,endTextOffset:19,startLine:2,endLine:3,quote:"this section"});
-  assert.equal(comment?.body,"Clarify this section.");
-  send({type:"comments",rows:[{authorUserId:"person",anchor:{quote:"<img src=x>"},body:"<script>steal()</script>",outdated:true}]});
-  assert.equal(doc.querySelectorAll("#comments script,#comments img").length,0);
-  assert.match(doc.getElementById("comments")!.textContent!,/Earlier revision/);
-  send({type:"document",html:renderMarkdown("Unsaved"),version:18,connected:false,status:"Save first"});
-  assert.equal((doc.getElementById("add") as HTMLButtonElement).disabled,true);
-  dom.window.close();
-});
-
-test("review view binds selected current comments, renders captured content safely and gates applying behind comparison", () => {
-  const dom = new JSDOM(markdownPage("Review.md", "", "test"), { runScripts: "outside-only" });
-  const messages: Record<string, unknown>[] = [];
-  Object.assign(dom.window, { acquireVsCodeApi: () => ({ postMessage: (message: Record<string, unknown>) => messages.push(message), getState: () => undefined, setState: () => {} }) });
-  dom.window.eval(readFileSync("dist-test/markdown-view.js", "utf8"));
-  const send = (data: unknown) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", { data }));
-  const doc = dom.window.document;
-  send({ type: "document", html: renderMarkdown("Original"), version: 4, connected: true });
-  send({ type: "comments", rows: [{ id: "current", body: "Clarify", outdated: false }, { id: "old", body: "Old feedback", outdated: true }] });
-  assert.equal(doc.querySelectorAll('input[type="checkbox"]').length, 1);
-  (doc.querySelector('input[type="checkbox"]') as HTMLInputElement).click();
-  const instruction = doc.getElementById("revision-instruction") as HTMLTextAreaElement;
-  instruction.value = "Use clear language"; instruction.dispatchEvent(new dom.window.Event("input"));
-  doc.getElementById("prepare-revision")!.click();
-  const request = messages.find(message => message.type === "prepareRevision")!;
-  assert.equal(request.version, 4); assert.deepEqual(Array.from(request.commentIds as string[]), ["current"]);
-  const status = { approvalId: "exact-approval", status: "waiting", decision: "", proposal: { revision: "file:3", instruction: "Clarify", content: "<script>private()</script>", comments: [{ body: "<img src=x>", anchor: { quote: "Original" } }] } };
-  send({ type: "revision", status }); send({ type: "revisionIdle" });
-  assert.equal(doc.querySelectorAll("#revision script,#revision img").length, 0);
-  const buttons = () => [...doc.querySelectorAll<HTMLButtonElement>("#revision button")];
-  buttons().find(button => button.textContent === "Approve draft job")!.click();
-  assert.equal(messages.at(-1)?.approvalId, "exact-approval");
-  assert.equal(messages.at(-1)?.decision, "approved");
-  send({ type: "revision", status: { ...status, decision: "approved", status: "succeeded", compositionStatus: "ready", outputArtifactId: "draft" } });
-  send({ type: "revisionIdle" });
-  assert.ok(!buttons().some(button => button.textContent === "Apply compared draft"));
-  buttons().find(button => button.textContent === "Compare draft")!.click();
-  send({ type: "revisionCompared" }); send({ type: "revisionIdle" });
-  assert.ok(buttons().some(button => button.textContent === "Apply compared draft"));
-  dom.window.close();
-});
-
-test("view buttons reflect the host layout and feedback disclosure preserves a draft", () => {
+function fixture(initial: any = {}) {
   const dom = new JSDOM(markdownPage("Review.md", "", "test"), {runScripts:"outside-only"});
-  const messages: any[] = []; let state: any = {draft:"Keep this draft"};
-  Object.assign(dom.window, {acquireVsCodeApi: () => ({postMessage: (m:any) => messages.push(m),getState:()=>state,setState:(s:any)=>{state=s;}})});
+  const messages: any[]=[];let state=initial;
+  Object.assign(dom.window,{acquireVsCodeApi:()=>({postMessage:(message:any)=>messages.push(message),getState:()=>state,setState:(value:any)=>{state=value;}})});
   dom.window.eval(readFileSync("dist-test/markdown-view.js","utf8"));
-  const doc=dom.window.document;
-  assert.equal(doc.getElementById("feedback-panel")!.hidden,true);
-  doc.getElementById("split")!.click();
-  assert.equal(messages.at(-1).type,"split");
-  dom.window.dispatchEvent(new dom.window.MessageEvent("message",{data:{type:"viewMode",mode:"split"}}));
-  assert.equal(doc.getElementById("split")!.getAttribute("aria-pressed"),"true");
-  assert.equal(doc.getElementById("reading")!.getAttribute("aria-pressed"),"false");
-  doc.getElementById("reading")!.click();
-  assert.equal(messages.at(-1).type,"reading");
-  doc.getElementById("source")!.dispatchEvent(new dom.window.KeyboardEvent("keydown",{key:"ArrowRight",bubbles:true}));
-  assert.equal(doc.activeElement?.id,"reading");
-  doc.getElementById("feedback-toggle")!.click();
-  assert.equal(doc.getElementById("feedback-panel")!.hidden,false);
-  doc.getElementById("feedback-toggle")!.click();
-  assert.equal(state.draft,"Keep this draft");
-  dom.window.dispatchEvent(new dom.window.MessageEvent("message",{data:{type:"error",message:"Retry this read"}}));
-  assert.equal(doc.getElementById("feedback-panel")!.hidden,false);
-  assert.equal(doc.getElementById("status")!.textContent,"Retry this read");
-  dom.window.close();
+  const doc=dom.window.document,el=(id:string)=>doc.getElementById(id)!;
+  const send=(data:unknown)=>dom.window.dispatchEvent(new dom.window.MessageEvent("message",{data}));
+  const document=(source="# Title\n\nKeep **this selection** and the rest.\n",version=17,connected=true)=>send({type:"document",html:renderMarkdown(source),version,sourceIdentity:source,connected,status:"Save first"});
+  const select=(selector="strong")=>{const range=doc.createRange();range.selectNodeContents(doc.querySelector(selector)!);dom.window.getSelection()!.removeAllRanges();dom.window.getSelection()!.addRange(range);doc.dispatchEvent(new dom.window.Event("selectionchange"));};
+  const input=(id:string,value:string)=>{(el(id) as HTMLTextAreaElement).value=value;el(id).dispatchEvent(new dom.window.Event("input"));};
+  return {dom,doc,el,send,document,select,input,messages,state:()=>state};
+}
+test("selection tools appear contextually and preserve exact rendered offsets",()=>{
+  const f=fixture();f.document();assert.equal(f.doc.querySelector("#feedback-toggle"),null);assert.equal((f.el("annotate") as HTMLButtonElement).disabled,true);
+  f.select();assert.equal(f.el("selection-tools").hidden,false);f.el("selection-feedback").click();assert.equal(f.el("composer").hidden,false);
+  f.input("feedback","Rephrase just these words.");f.el("add").click();
+  const message=f.messages.find(m=>m.type==="comment");assert.equal(message.version,17);assert.equal(message.selection.quote,"this selection");assert.equal(message.selection.startTextOffset,5);assert.equal(message.selection.endTextOffset,19);assert.equal(message.selection.prefix,"Keep ");assert.equal(message.selection.suffix," and the rest.");
+  f.send({type:"saved"});assert.equal(f.el("composer").hidden,true);assert.equal((f.el("feedback") as HTMLTextAreaElement).value,"");f.dom.window.close();
+});
+test("collapsed selection disables the tool; keyboard selection can still open it",()=>{
+  const f=fixture();f.document();f.select();f.dom.window.getSelection()!.removeAllRanges();f.doc.dispatchEvent(new f.dom.window.Event("selectionchange"));assert.equal(f.el("selection-tools").hidden,true);assert.equal((f.el("annotate") as HTMLButtonElement).disabled,true);
+  f.select();f.doc.dispatchEvent(new f.dom.window.KeyboardEvent("keydown",{key:"m",ctrlKey:true,altKey:true}));assert.equal(f.el("composer").hidden,false);assert.equal(f.doc.activeElement?.id,"feedback");f.dom.window.close();
+});
+test("end-of-document extension has its own intent and preserves drafts on errors",()=>{
+  const f=fixture();f.document();f.el("extend").click();assert.equal(f.el("composer-title").textContent,"Extend document");f.input("feedback","Add examples and next steps.");f.el("add").click();
+  const message=f.messages.find(m=>m.type==="comment");assert.equal(message.selection.kind,"document-end");assert.equal(message.body,"Add examples and next steps.");
+  f.send({type:"error",message:"Connection lost; retry"});assert.equal(f.state().draft,"Add examples and next steps.");assert.equal((f.el("add") as HTMLButtonElement).disabled,false);assert.equal(f.el("composer-status").textContent,"Connection lost; retry");
+  f.el("composer-close").click();assert.equal(f.state().draft,"Add examples and next steps.");f.dom.window.close();
+});
+test("a second selection cannot silently retarget an unfinished note, and a new source requires reanchoring",()=>{
+  const f=fixture();f.document();f.select();f.el("annotate").click();f.input("feedback","Keep my note");f.el("composer-close").click();f.el("extend").click();assert.equal(f.state().anchor.kind,undefined);assert.match(f.el("composer-status").textContent!,/original selection/);
+  f.document("Changed source",18);assert.equal((f.el("add") as HTMLButtonElement).disabled,true);assert.equal(f.state().draft,"Keep my note");f.dom.window.close();
+});
+test("multiple notes submit together; actual proposed changes precede approval and render safely",()=>{
+  const f=fixture();f.document();f.send({type:"comments",rows:[{id:"a",body:"Rephrase",outdated:false,anchor:{quote:"word"}},{id:"b",body:"Add examples",outdated:false,anchor:{kind:"document-end"}},{id:"old",body:"Earlier",outdated:true,anchor:{quote:"old"}}]});
+  assert.equal(f.doc.querySelectorAll('input[type="checkbox"]').length,2);f.el("prepare-revision").click();const request=f.messages.find(m=>m.type==="prepareRevision");assert.deepEqual(Array.from(request.commentIds),["a","b"]);assert.equal(request.instruction,"");
+  f.send({type:"revision",status:{status:"running",proposal:{}}});f.send({type:"revisionIdle"});assert.ok(!f.el("revision").textContent!.includes("Approve & apply"));
+  const status={prepared:true,approvalId:"exact-approval",status:"waiting",decision:"",proposal:{summary:"Move and expand",revisedContent:"Revised",edits:[{before:"<script>private()</script>",after:"<img src=x>",reason:"Move this"},{before:"Destination",after:"Destination\n\nMoved text.",reason:"Insert there"}]}};
+  f.send({type:"revision",status});assert.equal(f.doc.querySelectorAll("#revision script,#revision img").length,0);assert.equal(f.doc.querySelectorAll(".change").length,2);assert.equal(f.el("review-panel").hidden,false);
+  [...f.doc.querySelectorAll<HTMLButtonElement>("#revision button")].find(b=>b.textContent==="Approve & apply")!.click();assert.equal(f.messages.at(-1).approvalId,"exact-approval");assert.equal(f.messages.at(-1).decision,"approved");
+  f.send({type:"revision",status:{...status,status:"succeeded",decision:"approved",result:{applied:true}}});f.send({type:"revisionIdle"});assert.match(f.el("revision").textContent!,/Changes applied/);f.dom.window.close();
+});
+test("selection choices survive refresh and views retain accessible keyboard controls",()=>{
+  const f=fixture();f.document();const rows=[{id:"a",body:"One",anchor:{kind:"document-end"}},{id:"b",body:"Two",anchor:{kind:"document-end"}}];f.send({type:"comments",rows});(f.doc.querySelector('input[type="checkbox"]') as HTMLInputElement).click();f.send({type:"comments",rows});assert.equal((f.doc.querySelector('input[type="checkbox"]') as HTMLInputElement).checked,false);
+  f.el("split").click();assert.equal(f.messages.at(-1).type,"split");f.send({type:"viewMode",mode:"split"});assert.equal(f.el("split").getAttribute("aria-pressed"),"true");f.el("source").dispatchEvent(new f.dom.window.KeyboardEvent("keydown",{key:"ArrowRight",bubbles:true}));assert.equal(f.doc.activeElement?.id,"reading");
+  f.document("Local edits",18,false);assert.equal((f.el("prepare-revision") as HTMLButtonElement).disabled,true);assert.equal((f.el("extend") as HTMLButtonElement).disabled,true);f.dom.window.close();
+});
+
+test("unfinished feedback survives switching out of Read and back, without retargeting",()=>{
+  const first=fixture();first.send({type:"restoreDraft"});first.document();first.select();first.el("annotate").click();first.input("feedback","Keep this unfinished note");
+  const saved=first.messages.filter(m=>m.type==="draftState").at(-1).state;first.dom.window.close();
+  const next=fixture();next.send({type:"restoreDraft",state:saved});next.document();next.el("annotate").click();
+  assert.equal((next.el("feedback") as HTMLTextAreaElement).value,"Keep this unfinished note");assert.equal(next.state().anchor.quote,"this selection");assert.equal((next.el("add") as HTMLButtonElement).disabled,false);next.dom.window.close();
 });

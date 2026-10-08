@@ -73,7 +73,7 @@ test("revision requests and decisions stay on the document lease and refuse anot
   let wrong = false;
   const api = { execute: async (actual: unknown, name: string, call: string) => {
     assert.equal(actual, lease); calls.push({ name, call });
-    if (name === "libraryRequestDocumentRevision") return [{ approvalId: "approval", proposal: { artifactId: "abc" } }];
+    if (name === "libraryRequestDocumentRevision") return [{ runId: "run", proposal: { artifactId: "abc" } }];
     if (name === "libraryDocumentRevisionStatus") return [{ approvalId: "approval", proposal: { artifactId: wrong ? "another" : "abc" } }];
     return [{ decision: "approved" }];
   } } as unknown as EditorConnectionAPI;

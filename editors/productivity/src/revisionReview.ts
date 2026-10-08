@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import { Documents, type OpenDocument } from "./documents.js";
 
 interface SavedRequest { fingerprint: string; requestId: string }
-interface ComparedDraft { base: OpenDocument; content: Uint8Array; proposal: Record<string, unknown> }
 
 export function assertRevisionBase(base: OpenDocument, source: string, proposal: Record<string, unknown>): void {
   if (base.resource.id !== proposal.artifactId || base.revision !== proposal.revision || base.version !== proposal.version || source !== proposal.content) {
@@ -14,7 +13,6 @@ export function assertRevisionBase(base: OpenDocument, source: string, proposal:
 // execution stay in the core extension and cluster; this class owns no worker.
 export class RevisionReview {
   private readonly snapshots = new Map<string, string>();
-  private readonly compared = new Map<string, ComparedDraft>();
   private count = 0;
   constructor(private readonly context: vscode.ExtensionContext, private readonly files: Documents,
     private readonly load: (uri: vscode.Uri) => Promise<OpenDocument>) {
@@ -29,14 +27,16 @@ export class RevisionReview {
     if (new TextDecoder().decode(base.content) !== document.getText()) throw new Error("Compare with the saved document before requesting changes.");
     const fingerprint = JSON.stringify([base.revision, base.version, [...commentIds].sort(), instruction.trim()]);
     let pending = this.context.workspaceState.get<SavedRequest>(this.key(document.uri));
-    if (pending?.fingerprint !== fingerprint) {
+    // A deliberate new submission may retry a terminal attempt. An uncertain
+    // submission retains its identity until its durable status is known.
+    const previous = pending?.fingerprint === fingerprint ? await this.files.revision(base, pending.requestId).catch(() => undefined) : undefined;
+    if (pending?.fingerprint !== fingerprint || (previous && ["failed", "cancelled", "succeeded"].includes(String(previous.status)))) {
       pending = { fingerprint, requestId: globalThis.crypto.randomUUID() };
       // Persist before submitting so a lost response or editor restart retries
       // the same request, including after only the first server write landed.
       await this.context.workspaceState.update(this.key(document.uri), pending);
     }
     await this.files.requestRevision(base, commentIds, instruction.trim(), pending.requestId);
-    this.compared.delete(document.uri.toString());
     return this.files.revision(base, pending.requestId);
   }
   async status(document: vscode.TextDocument): Promise<Record<string, unknown> | undefined> {
@@ -70,27 +70,11 @@ export class RevisionReview {
     const base = await this.load(document.uri);
     const status = await this.files.revision(base, saved.requestId);
     const proposal = status.proposal as Record<string, unknown>;
-    const draft = await this.files.revisionDraft(base, status);
+    if (typeof proposal.revisedContent !== "string") throw new Error("The proposed changes are not ready yet.");
     const sourceURI = vscode.Uri.parse(`memql-revision-preview:/source-${++this.count}.md`);
     const draftURI = vscode.Uri.parse(`memql-revision-preview:/draft-${this.count}.md`);
     this.snapshots.set(sourceURI.toString(), String(proposal.content));
-    this.snapshots.set(draftURI.toString(), new TextDecoder("utf-8", { fatal: true }).decode(draft.content));
-    this.compared.set(document.uri.toString(), { base, content: new Uint8Array(draft.content), proposal });
+    this.snapshots.set(draftURI.toString(), proposal.revisedContent);
     await vscode.commands.executeCommand("vscode.diff", sourceURI, draftURI, "Reviewed source ↔ Revised draft");
-  }
-  async apply(document: vscode.TextDocument): Promise<void> {
-    const compared = this.compared.get(document.uri.toString());
-    if (!compared) throw new Error("Compare the revised draft before applying it.");
-    if (document.isDirty) throw new Error("Save or discard your local edits before applying the compared draft.");
-    const base = await this.load(document.uri);
-    assertRevisionBase(base, document.getText(), compared.proposal);
-    const replacement = new TextDecoder("utf-8", { fatal: true }).decode(compared.content);
-    const edit = new vscode.WorkspaceEdit();
-    edit.replace(document.uri, new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), replacement);
-    if (!await vscode.workspace.applyEdit(edit)) throw new Error("The editor could not apply the compared draft.");
-    // The file provider retains the original version and connection lease.
-    // A concurrent cluster save refuses here and preserves the local edits.
-    if (!await document.save()) throw new Error("The draft is in the editor but was not saved. Keep your edits and compare with the latest cluster version.");
-    this.compared.delete(document.uri.toString());
   }
 }

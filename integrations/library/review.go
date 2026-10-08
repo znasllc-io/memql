@@ -190,7 +190,10 @@ func validateReviewAnchor(value any) (map[string]any, error) {
 		return nil, fmt.Errorf("select a shorter passage")
 	}
 	var anchor map[string]any
-	if json.Unmarshal(bytes, &anchor) != nil || anchor["kind"] != "markdown" {
+	if json.Unmarshal(bytes, &anchor) == nil && anchor["kind"] == "document-end" {
+		return map[string]any{"kind": "document-end", "quote": "End of document"}, nil
+	}
+	if anchor["kind"] != "markdown" {
 		return nil, fmt.Errorf("select a Markdown passage")
 	}
 	start, startOK := intArg(anchor["startLine"])
@@ -209,6 +212,20 @@ func validateReviewAnchor(value any) (map[string]any, error) {
 			result[key] = float64(n)
 		}
 	}
+	for _, key := range []string{"prefix", "suffix"} {
+		if value, ok := anchor[key].(string); ok && len(value) <= 512 {
+			result[key] = value
+		}
+	}
+	if raw, ok := anchor["sectionPath"].([]any); ok && len(raw) <= 6 {
+		path := make([]string, 0, len(raw))
+		for _, item := range raw {
+			if value, ok := item.(string); ok && len(value) <= 2000 {
+				path = append(path, value)
+			}
+		}
+		result["sectionPath"] = path
+	}
 	return result, nil
 }
 
@@ -216,6 +233,9 @@ func validateReviewAnchor(value any) (map[string]any, error) {
 // saves. A client-supplied revision alone cannot attest a passage. Blob URLs
 // come only from the authorized backing row and use the configured store.
 func (i *Integration) verifyReviewPassage(ctx context.Context, doc reviewDocument, anchor map[string]any) error {
+	if anchor["kind"] == "document-end" {
+		return nil
+	}
 	const maxBytes = 2 * 1024 * 1024
 	var content []byte
 	if doc.kind == "file" {

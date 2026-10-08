@@ -26,10 +26,20 @@ type ReviewGoalReceipt struct {
 // No run is published as running during bootstrap; the existing Nexus decision
 // flow is the only way to release it. A partially written request is recoverable.
 func (i *Integration) OpenReviewGoal(ctx context.Context, requestKey string, g DirectGoal, subject map[string]any, question string) (ReviewGoalReceipt, error) {
+	return i.openReviewGoal(ctx, requestKey, g, subject, question, false)
+}
+
+// OpenAnalysisGoal starts a stable, owner-bound request immediately. The DSL
+// template decides where to request review; no approval is manufactured here.
+func (i *Integration) OpenAnalysisGoal(ctx context.Context, requestKey string, g DirectGoal) (ReviewGoalReceipt, error) {
+	return i.openReviewGoal(ctx, requestKey, g, nil, "", true)
+}
+
+func (i *Integration) openReviewGoal(ctx context.Context, requestKey string, g DirectGoal, subject map[string]any, question string, analyze bool) (ReviewGoalReceipt, error) {
 	var receipt ReviewGoalReceipt
 	owner := strings.TrimSpace(g.OwnerUserId)
 	requestKey, question = strings.TrimSpace(requestKey), strings.TrimSpace(question)
-	if i == nil || owner == "" || memql.BareShortId(callerUserId(ctx)) != memql.BareShortId(owner) || requestKey == "" || len(requestKey) > 200 || strings.TrimSpace(g.Statement) == "" || strings.TrimSpace(g.AutomationName) == "" || question == "" || len(subject) == 0 {
+	if i == nil || owner == "" || memql.BareShortId(callerUserId(ctx)) != memql.BareShortId(owner) || requestKey == "" || len(requestKey) > 200 || strings.TrimSpace(g.Statement) == "" || strings.TrimSpace(g.AutomationName) == "" || (!analyze && (question == "" || len(subject) == 0)) {
 		return receipt, fmt.Errorf("work: a reviewed request needs its authenticated owner, stable key, proposal and template")
 	}
 	receipt = ReviewGoalIdentity(owner, requestKey)
@@ -95,12 +105,21 @@ func (i *Integration) OpenReviewGoal(ctx context.Context, requestKey string, g D
 			}
 		}
 		now := i.clock().UTC()
+		status := runStatusWaiting
+		waiting := map[string]any{"kind": "approval", "subject": receipt.ApprovalID, "since": rfc(now)}
+		if analyze {
+			status = runStatusRunning
+			waiting = nil
+		}
 		if err = st.createRunRow(scoped, runSeed{Spine: spine, RunId: receipt.RunID, GoalId: receipt.GoalID, AutomationName: g.AutomationName,
-			Input: g.Input, Variables: g.Input, Mode: modeLive, Status: runStatusWaiting, NodeId: selfNodeId(), StartedAt: now,
+			Input: g.Input, Variables: g.Input, Mode: modeLive, Status: status, NodeId: selfNodeId(), StartedAt: now,
 			OwnerUserId: owner, TriggeredBy: g.TriggeredBy, ExecutionAuthority: authority,
-			WaitingOn: map[string]any{"kind": "approval", "subject": receipt.ApprovalID, "since": rfc(now)}}); err != nil {
+			WaitingOn: waiting}); err != nil {
 			return receipt, err
 		}
+	}
+	if analyze {
+		return receipt, nil
 	}
 	approval, err := one(st.query(scoped, "query "+call("workApprovalForOwner", map[string]any{"approvalId": receipt.ApprovalID})))
 	if err != nil {

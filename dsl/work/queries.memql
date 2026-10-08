@@ -430,3 +430,12 @@ query approval workComputerScopesForOwnerRun {
  filter row => row.ownerUserId == actor.userId && row.runId == args.runId && row.kind == "scopeElevation"
  shape workApprovalFull
 }
+
+/// Durable decisions for one of the caller's runs, including decided reviews.
+@actor
+@unbounded("approvals bounded by one owned run")
+query approval workApprovalsForOwnedRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId
+ shape workApprovalFull
+}

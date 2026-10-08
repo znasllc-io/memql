@@ -1,165 +1,213 @@
 export {};
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void; getState(): unknown; setState(state: unknown): void };
 const api = acquireVsCodeApi();
-const content = document.getElementById("content")!;
-const comments = document.getElementById("comments")!;
-const feedbackStatus = document.getElementById("status")!;
-const feedback = document.getElementById("feedback") as HTMLTextAreaElement;
-const add = document.getElementById("add") as HTMLButtonElement;
-let selection: { startLine: number; endLine: number; quote: string; startBlock: number; endBlock: number; startTextOffset: number; endTextOffset: number } | undefined;
-let version = 0;
-let connected = false;
-let revisionBusy = false;
-let revisionCompared = false;
-let revisionStatus: Record<string, any> | undefined;
-const selectedComments = new Set<string>();
-const instruction = document.getElementById("revision-instruction") as HTMLTextAreaElement;
-const prepareRevision = document.getElementById("prepare-revision") as HTMLButtonElement;
-function updateRevisionControls() { prepareRevision.disabled = revisionBusy || !connected || selectedComments.size === 0 || !instruction.value.trim(); }
-instruction.addEventListener("input", updateRevisionControls);
-prepareRevision.addEventListener("click", () => {
-  revisionBusy = true; revisionCompared = false; updateRevisionControls();
-  api.postMessage({ type: "prepareRevision", version, commentIds: [...selectedComments], instruction: instruction.value });
-});
-function renderRevision() {
-  const panel = document.getElementById("revision")!; panel.replaceChildren();
-  const status = revisionStatus; if (!status) return;
-  const heading = document.createElement("h3"); heading.textContent = "Change request";
-  const phase = document.createElement("p");
-  phase.textContent = status.errorMessage || status.failureReason || (status.prepared === false ? "Request saved; finish preparing it for approval" : status.outputArtifactId ? "Draft ready for comparison" : status.decision === "approved" ? `Approved · ${status.status}. Refresh to check progress.` : status.decision === "rejected" ? "Request declined" : "Waiting for your approval");
-  const proposal = status.proposal || {};
-  const revision = document.createElement("small"); revision.textContent = `Saved revision: ${proposal.revision ?? ""}`;
-  const requested = document.createElement("p"); requested.textContent = proposal.instruction ?? "";
-  const selected = document.createElement("div");
-  for (const comment of proposal.comments ?? []) {
-    const quote = document.createElement("blockquote"); quote.textContent = comment.anchor?.quote ?? "";
-    const body = document.createElement("p"); body.textContent = comment.body ?? ""; selected.append(quote, body);
-  }
-  const source = document.createElement("details");
-  const summary = document.createElement("summary"); summary.textContent = "Review captured source";
-  const code = document.createElement("pre"); code.textContent = proposal.content ?? ""; source.append(summary, code);
-  panel.append(heading, phase, revision, requested, selected, source);
-  const button = (label: string, type: string, decision?: string) => {
-    const el = document.createElement("button"); el.textContent = label; el.disabled = revisionBusy;
-    el.addEventListener("click", () => { revisionBusy = true; updateRevisionControls(); renderRevision(); api.postMessage({ type, approvalId: status.approvalId, decision }); }); panel.append(el);
-  };
-  if (status.prepared === false) button("Finish preparing request", "resumePreparation");
-  else if (!status.decision) { button("Approve draft job", "decideRevision", "approved"); button("Decline", "decideRevision", "rejected"); }
-  else if (status.decision === "approved" && status.status === "waiting") button("Resume approved job", "decideRevision", "approved");
-  if (status.outputArtifactId && status.compositionStatus === "ready") {
-    button("Compare draft", "compareRevision");
-    if (revisionCompared) button("Apply compared draft", "applyRevision");
-  }
+const byId = (id: string) => document.getElementById(id)!;
+const content = byId("content");
+const feedback = byId("feedback") as HTMLTextAreaElement;
+const instruction = byId("revision-instruction") as HTMLTextAreaElement;
+const add = byId("add") as HTMLButtonElement;
+const annotate = byId("annotate") as HTMLButtonElement;
+const prepare = byId("prepare-revision") as HTMLButtonElement;
+type Anchor = { kind?: "markdown"; startLine: number; endLine: number; quote: string; startBlock: number; endBlock: number; startTextOffset: number; endTextOffset: number; prefix?: string; suffix?: string } | { kind: "document-end"; quote: string };
+type ReviewRow = { id: string; body: string; outdated?: boolean; anchor: Anchor };
+const state = (api.getState() ?? {}) as { draft?: string; anchor?: Anchor; draftVersion?: number; source?: string; instruction?: string; reviewOpen?: boolean; included?: string[]; seen?: string[] };
+let restored = false;
+let selection: Anchor | undefined;
+let draftAnchor = state.anchor;
+let selectionRect: DOMRect | undefined;
+let selectionRange: Range | undefined;
+let version = 0, sourceIdentity = "";
+let connected = false, commentBusy = false, revisionBusy = false;
+let revision: Record<string, any> | undefined;
+let rows: ReviewRow[] = [];
+const selected = new Set<string>(state.included ?? []);
+const seen = new Set<string>(state.seen ?? []);
+feedback.value = state.draft ?? ""; instruction.value = state.instruction ?? "";
+function saveState() { const saved = { draft: feedback.value, anchor: draftAnchor, source: sourceIdentity || state.source, instruction: instruction.value, reviewOpen: !byId("review-panel").hidden, included: [...selected], seen: [...seen] }; api.setState(saved); if (restored) api.postMessage({type:"draftState",state:saved}); }
+function activeRun() { return revision && !["succeeded", "failed", "cancelled"].includes(revision.status); }
+function controls() {
+  annotate.disabled = !connected || (!selection && !(feedback.value && draftAnchor));
+  annotate.title = selection ? "Add feedback on this selection" : feedback.value && draftAnchor ? "Continue your feedback" : "Select text to add feedback";
+  (byId("extend") as HTMLButtonElement).disabled = !connected;
+  add.disabled = !connected || !draftAnchor || !feedback.value.trim() || commentBusy;
+  add.textContent = commentBusy ? "Saving…" : draftAnchor?.kind === "document-end" ? "Save request" : "Save feedback";
+  prepare.disabled = !connected || revisionBusy || !!activeRun() || selected.size === 0;
+  prepare.textContent = revisionBusy ? "Submitting…" : selected.size ? `Propose changes · ${selected.size}` : "Propose changes";
+  const count = rows.filter(row => !row.outdated).length;
+  byId("note-count").textContent = String(count); byId("note-count").hidden = !count;
 }
-const state = (api.getState() ?? {}) as { draft?: string; feedbackOpen?: boolean };
-const feedbackToggle = document.getElementById("feedback-toggle")!;
-function saveState() { api.setState({ draft: feedback.value, feedbackOpen: feedbackToggle.getAttribute("aria-expanded") === "true" }); }
-function showFeedback(open: boolean) {
-  document.body.dataset.feedback = String(open);
-  document.getElementById("feedback-panel")!.hidden = !open;
-  feedbackToggle.setAttribute("aria-expanded", String(open));
-  saveState();
+function showReview(open: boolean) { byId("review-panel").hidden = !open; byId("review-toggle").setAttribute("aria-expanded", String(open)); if (open) byId("selection-tools").hidden = true; saveState(); }
+function position(element: HTMLElement, rect?: DOMRect, compact = false) {
+  const width = compact ? 154 : Math.min(360, window.innerWidth - 32);
+  const height = compact ? 42 : Math.min(340, window.innerHeight - 32);
+  element.style.left = `${Math.max(16, Math.min(window.innerWidth - width - 16, rect ? rect.left + rect.width / 2 - width / 2 : (window.innerWidth - width) / 2))}px`;
+  const below = rect ? rect.bottom + 10 : Math.max(90, window.innerHeight / 3);
+  element.style.top = `${Math.max(16, Math.min(window.innerHeight - height - 16, below + height <= window.innerHeight ? below : (rect?.top ?? below) - height - 10))}px`;
+  element.style.maxHeight = `${Math.max(180,window.innerHeight - 32)}px`; element.style.overflowY = "auto";
 }
-feedbackToggle.addEventListener("click", () => showFeedback(feedbackToggle.getAttribute("aria-expanded") !== "true"));
-feedback.value = state.draft ?? "";
-showFeedback(state.feedbackOpen ?? false);
-feedback.addEventListener("input", saveState);
+function highlight(name: string, ranges: Range[]) {
+  const css = (window as any).CSS, Constructor = (window as any).Highlight;
+  if (css?.highlights && Constructor) { if (ranges.length) css.highlights.set(name, new Constructor(...ranges)); else css.highlights.delete(name); }
+}
+function openComposer(anchor: Anchor, rect?: DOMRect) {
+  // A second selection must never silently move an unfinished note.
+  if (feedback.value.trim() && draftAnchor && JSON.stringify(draftAnchor) !== JSON.stringify(anchor)) {
+    byId("composer-status").textContent = "Your unfinished note is still attached to its original selection. Save it before starting another.";
+  } else { draftAnchor = anchor; byId("composer-status").textContent = ""; }
+  const extend = draftAnchor?.kind === "document-end";
+  byId("composer-title").textContent = extend ? "Extend document" : "Add feedback";
+  feedback.setAttribute("aria-label", extend ? "Extension request" : "Feedback");
+  feedback.placeholder = extend ? "What should come next? Describe the sections, examples or detail to add…" : "Rephrase, remove, move or expand this passage…";
+  byId("selected").textContent = draftAnchor?.quote ?? "";
+  byId("selected").hidden = extend;
+  byId("composer").hidden = false; byId("selection-tools").hidden = true;
+  highlight("memql-active", selectionRange ? [selectionRange] : []);
+  position(byId("composer"), rect); controls(); saveState(); feedback.focus();
+}
+function closeComposer() { byId("composer").hidden = true; highlight("memql-active", []); saveState(); content.focus({ preventScroll: true }); }
 function mapped(node: Node | null): HTMLElement | null {
-  const element = node?.nodeType === Node.ELEMENT_NODE ? node as Element : node?.parentElement;
-  return element?.closest<HTMLElement>("[data-start-line][data-end-line]") ?? null;
+  return (node?.nodeType === Node.ELEMENT_NODE ? node as Element : node?.parentElement)?.closest<HTMLElement>("[data-start-line][data-end-line]") ?? null;
 }
 function captureSelection() {
+  if (!byId("composer").hidden) return;
   const selected = window.getSelection();
-  if (!selected?.rangeCount || selected.isCollapsed) return;
+  if (!selected?.rangeCount || selected.isCollapsed) { selection = undefined; selectionRange = undefined; byId("selection-tools").hidden = true; controls(); return; }
   const range = selected.getRangeAt(0);
-  if (!content.contains(range.startContainer) || !content.contains(range.endContainer)) return;
+  if (!content.contains(range.startContainer) || !content.contains(range.endContainer)) { selection = undefined; byId("selection-tools").hidden = true; controls(); return; }
   const start = mapped(range.startContainer), end = mapped(range.endContainer);
-  if (!start || !end) return;
-  const startPrefix = document.createRange(); startPrefix.selectNodeContents(start); startPrefix.setEnd(range.startContainer, range.startOffset);
-  const endPrefix = document.createRange(); endPrefix.selectNodeContents(end); endPrefix.setEnd(range.endContainer, range.endOffset);
-  selection = { startBlock: Number(start.dataset.blockId), endBlock: Number(end.dataset.blockId), startTextOffset: startPrefix.toString().length, endTextOffset: endPrefix.toString().length, startLine: Number(start.dataset.startLine), endLine: Number(end.dataset.endLine), quote: selected.toString() };
-  document.getElementById("selected")!.textContent = selection.quote;
-  add.disabled = !connected;
+  if (!start || !end || !selected.toString().trim()) return;
+  const prefix = document.createRange(); prefix.selectNodeContents(start); prefix.setEnd(range.startContainer,range.startOffset);
+  const endPrefix = document.createRange(); endPrefix.selectNodeContents(end); endPrefix.setEnd(range.endContainer,range.endOffset);
+  selection = {startBlock:Number(start.dataset.blockId),endBlock:Number(end.dataset.blockId),startTextOffset:prefix.toString().length,endTextOffset:endPrefix.toString().length,startLine:Number(start.dataset.startLine),endLine:Number(end.dataset.endLine),quote:selected.toString(),prefix:prefix.toString().slice(-80),suffix:(end.textContent ?? "").slice(endPrefix.toString().length,endPrefix.toString().length+80)};
+  selectionRange = range.cloneRange(); selectionRect = typeof range.getBoundingClientRect === "function" ? range.getBoundingClientRect() : undefined;
+  byId("selection-tools").hidden = !connected; position(byId("selection-tools"),selectionRect,true); controls();
 }
-document.addEventListener("selectionchange", captureSelection);
-add.addEventListener("click", () => {
-  if (!selection || !feedback.value.trim()) return;
-  add.disabled = true;
-  api.postMessage({ type: "comment", version, selection, body: feedback.value });
+document.addEventListener("selectionchange",captureSelection);
+byId("selection-feedback").addEventListener("mousedown", event => event.preventDefault());
+annotate.addEventListener("mousedown",event => event.preventDefault());
+for (const id of ["selection-feedback","annotate"]) byId(id).addEventListener("click",() => { const anchor = selection ?? draftAnchor; if (anchor && connected) openComposer(anchor,selectionRect); });
+byId("extend").addEventListener("click",() => openComposer({kind:"document-end",quote:"End of document"},byId("extend").getBoundingClientRect()));
+byId("composer-close").addEventListener("click",closeComposer);
+byId("review-toggle").addEventListener("click",() => showReview(byId("review-panel").hidden));
+byId("review-close").addEventListener("click",() => { showReview(false); byId("review-toggle").focus(); });
+feedback.addEventListener("input",() => { controls(); saveState(); });
+instruction.addEventListener("input",saveState);
+add.addEventListener("click",() => {
+  if (add.disabled || !draftAnchor) return;
+  commentBusy = true; controls(); byId("composer-status").textContent = "";
+  api.postMessage({type:"comment",version,selection:draftAnchor,body:feedback.value});
 });
-for (const mode of ["source", "reading", "split"]) document.getElementById(mode)!.addEventListener("click", () => api.postMessage({ type: mode }));
-// Arrow keys move within the compact choice without stealing ordinary Tab navigation.
+prepare.addEventListener("click",() => {
+  if (prepare.disabled) return;
+  revisionBusy = true; controls();
+  api.postMessage({type:"prepareRevision",version,commentIds:[...selected],instruction:instruction.value});
+});
+document.addEventListener("keydown",event => {
+  if (event.key === "Escape") { if (!byId("composer").hidden) closeComposer(); else if (!byId("review-panel").hidden) { showReview(false); byId("review-toggle").focus(); } else byId("selection-tools").hidden = true; }
+  if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !byId("composer").hidden) { event.preventDefault(); add.click(); }
+  if ((event.ctrlKey || event.metaKey) && event.altKey && event.key.toLowerCase() === "m" && selection && connected) { event.preventDefault(); openComposer(selection,selectionRect); }
+});
+window.addEventListener("scroll",() => { byId("selection-tools").hidden = true; },{passive:true});
+window.addEventListener("resize",() => { byId("selection-tools").hidden = true; if (!byId("composer").hidden) position(byId("composer")); });
+for (const mode of ["source","reading","split"]) byId(mode).addEventListener("click",() => api.postMessage({type:mode}));
 const views = Array.from(document.querySelectorAll<HTMLButtonElement>(".views button"));
-views.forEach((button, index) => button.addEventListener("keydown", event => {
-  const next = event.key === "ArrowRight" ? (index + 1) % views.length : event.key === "ArrowLeft" ? (index + views.length - 1) % views.length : event.key === "Home" ? 0 : event.key === "End" ? views.length - 1 : undefined;
-  if (next === undefined) return;
-  event.preventDefault(); views[next].focus();
+views.forEach((button,index) => button.addEventListener("keydown",event => {
+  const next = event.key === "ArrowRight" ? (index+1)%views.length : event.key === "ArrowLeft" ? (index+views.length-1)%views.length : event.key === "Home" ? 0 : event.key === "End" ? views.length-1 : undefined;
+  if (next !== undefined) { event.preventDefault(); views[next].focus(); }
 }));
-document.getElementById("refresh")!.addEventListener("click", () => api.postMessage({ type: "refresh" }));
-content.addEventListener("click", event => {
-  const link = (event.target as Element).closest<HTMLElement>("[data-external]");
-  if (link) { event.preventDefault(); api.postMessage({ type: "external", href: link.dataset.external }); }
-});
-window.addEventListener("message", event => {
-  const message = event.data;
-  if (message.type === "viewMode") {
-    for (const mode of ["source", "reading", "split"]) document.getElementById(mode)!.setAttribute("aria-pressed", String(mode === message.mode));
-  }
-  if (message.type === "document") {
-    const scroll = document.documentElement.scrollTop;
-    content.innerHTML = message.html; // HTML comes only from the host's HTML-disabled Markdown renderer.
-    version = message.version; connected = message.connected;
-    selection = undefined; add.disabled = true; updateRevisionControls();
-    document.getElementById("selected")!.textContent = "Select a passage to comment.";
-    feedbackStatus.textContent = message.status;
-    document.documentElement.scrollTop = scroll;
-    api.postMessage({ type: "rendered", version, text: content.textContent?.slice(0, 500) });
-  }
-  if (message.type === "comments") {
-    comments.replaceChildren(); selectedComments.clear(); updateRevisionControls();
-    for (const row of message.rows) {
-      const article = document.createElement("article");
-      const label = document.createElement("small"); label.textContent = `${row.authorUserId} · ${row.outdated ? "Earlier revision" : "Current revision"}`;
-      const quote = document.createElement("blockquote"); quote.textContent = row.anchor?.quote ?? "";
-      const body = document.createElement("p"); body.textContent = row.body;
-      article.append(label, quote, body);
-      if (!row.outdated && typeof row.id === "string") {
-        const pick = document.createElement("input"); pick.type = "checkbox";
-        const pickLabel = document.createElement("label"); pickLabel.append(pick, " Include in change request"); article.append(pickLabel);
-        pick.addEventListener("change", () => { if (pick.checked) selectedComments.add(row.id); else selectedComments.delete(row.id); updateRevisionControls(); });
-      }
-      if (!row.outdated && row.anchor && Number.isInteger(row.anchor.startBlock)) {
-        const passage = document.createElement("button"); passage.textContent = "Show passage";
-        passage.addEventListener("click", () => showPassage(row.anchor)); article.append(passage);
-      }
-      comments.append(article);
-    }
-  }
-  if (message.type === "revision") { revisionStatus = message.status; renderRevision(); }
-  if (message.type === "revisionApplied") { revisionCompared = false; renderRevision(); }
-  if (message.type === "revisionCompared") { revisionCompared = true; renderRevision(); }
-  if (message.type === "revisionIdle") { revisionBusy = false; updateRevisionControls(); renderRevision(); }
-  if (message.type === "saved") { feedback.value = ""; saveState(); feedbackStatus.textContent = "Comment saved to MemQL."; }
-  if (message.type === "error") { revisionBusy = false; updateRevisionControls(); renderRevision(); showFeedback(true); feedbackStatus.textContent = message.message; add.disabled = !connected || !selection; }
-});
-api.postMessage({ type: "ready" });
-
-function showPassage(anchor: {startBlock:number;endBlock:number;startTextOffset:number;endTextOffset:number}) {
-  const start = content.querySelector<HTMLElement>(`[data-block-id="${anchor.startBlock}"]`);
-  const end = content.querySelector<HTMLElement>(`[data-block-id="${anchor.endBlock}"]`);
+content.addEventListener("click",event => { const link = (event.target as Element).closest<HTMLElement>("[data-external]"); if (link) { event.preventDefault(); api.postMessage({type:"external",href:link.dataset.external}); } });
+function textElement(tag: string, text: string, className = "") { const element = document.createElement(tag); element.textContent = text; element.className = className; return element; }
+function rangeFor(anchor: Anchor): Range | undefined {
+  if (anchor.kind === "document-end") return;
+  const start = content.querySelector<HTMLElement>(`[data-block-id="${anchor.startBlock}"]`), end = content.querySelector<HTMLElement>(`[data-block-id="${anchor.endBlock}"]`);
   if (!start || !end) return;
-  function at(element: HTMLElement, offset: number): [Node, number] | undefined {
-    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-    let node: Node | null;
-    while ((node = walker.nextNode())) {
-      const length = node.textContent?.length ?? 0;
-      if (offset <= length) return [node, offset];
-      offset -= length;
-    }
-  }
-  const from = at(start, anchor.startTextOffset), to = at(end, anchor.endTextOffset);
-  if (!from || !to) return;
-  const range = document.createRange(); range.setStart(...from); range.setEnd(...to);
-  const selected = window.getSelection(); selected?.removeAllRanges(); selected?.addRange(range);
-  start.scrollIntoView({ block: "center", behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+  const at = (element:HTMLElement,offset:number):[Node,number]|undefined => {
+    const walker = document.createTreeWalker(element,NodeFilter.SHOW_TEXT); let node:Node|null;
+    while ((node=walker.nextNode())) { const length=node.textContent?.length ?? 0; if (offset<=length) return [node,offset]; offset-=length; }
+  };
+  const from=at(start,anchor.startTextOffset),to=at(end,anchor.endTextOffset); if(!from || !to)return;
+  const range=document.createRange();range.setStart(...from);range.setEnd(...to);return range;
 }
+function renderComments() {
+  const list = byId("comments"); list.replaceChildren();
+  const current = rows.filter(row=>!row.outdated), earlier = rows.filter(row=>row.outdated);
+  if (!current.length && !revision) list.append(textElement("p","Select text to leave feedback, or describe what to add at the end of the document.","empty"));
+  if (current.length) list.append(textElement("h3",`Feedback · ${current.length}`));
+  const note = (row:ReviewRow) => {
+    const article=textElement("article","","note"); const head=textElement("div","","note-head");
+    const kind=row.anchor?.kind==="document-end" ? "Extension" : "Passage feedback";
+    if (!row.outdated) {
+      const label=document.createElement("label"),pick=document.createElement("input");pick.type="checkbox";pick.checked=selected.has(row.id);pick.setAttribute("aria-label",`Include ${kind.toLowerCase()}: ${row.body.slice(0,80)}`);
+      pick.addEventListener("change",()=>{if(pick.checked)selected.add(row.id);else selected.delete(row.id);controls();saveState();});label.append(pick,kind);head.append(label);
+    } else head.textContent=`${kind} · Earlier revision`;
+    article.append(head);
+    if(row.anchor?.kind!=="document-end") article.append(textElement("blockquote",row.anchor?.quote ?? ""));
+    article.append(textElement("p",row.body));
+    if(!row.outdated){const jump=document.createElement("button");jump.className="passage";jump.textContent=row.anchor?.kind==="document-end"?"Go to end":"Show passage";jump.addEventListener("click",()=>{const range=rangeFor(row.anchor);showReview(false);const target=row.anchor?.kind==="document-end"?byId("extend"):mapped(range?.startContainer??null);target?.scrollIntoView?.({block:"center",behavior:window.matchMedia?.("(prefers-reduced-motion: reduce)").matches?"instant":"smooth"});if(range){highlight("memql-active",[range]);setTimeout(()=>highlight("memql-active",[]),2500);}});article.append(jump);}
+    return article;
+  };
+  for(const row of current)list.append(note(row));
+  if(earlier.length){const details=textElement("details","","earlier");details.append(textElement("summary",`Earlier feedback · ${earlier.length}`));for(const row of earlier)details.append(note(row));list.append(details);}
+  highlight("memql-notes",current.map(row=>rangeFor(row.anchor)).filter((range):range is Range=>!!range));
+}
+function renderRevision() {
+  const panel=byId("revision");panel.replaceChildren();if(!revision)return;
+  const status=revision,proposal=status.proposal??{};
+  const terminal=["succeeded","failed","cancelled"].includes(status.status);
+  const awaiting=!!status.approvalId && !status.decision && status.status==="waiting";
+  let phase=status.decision==="rejected"?"Changes declined. Your document is unchanged.":status.status==="succeeded"?(status.result?.applied?"Changes applied to the document.":"Review complete. No changes were needed."):status.status==="failed"||status.status==="cancelled"?"This request could not be completed.":awaiting?"Ready for your review":status.decision==="approved"?"Applying your approved changes…":"Analyzing your feedback…";
+  panel.append(textElement("h3",awaiting?"Proposed changes":"Change request"),textElement("p",phase,`phase${!terminal&&!awaiting?" busy":""}`));
+  if(status.errorMessage)panel.append(textElement("p",String(status.errorMessage),"muted"));
+  const summary=proposal.summary??status.result?.summary;if(summary)panel.append(textElement("p",String(summary),"proposal-summary"));
+  if(Array.isArray(proposal.edits))for(const [index,edit] of proposal.edits.entries()) {
+    if(edit.before===edit.after)continue;
+    const card=document.createElement("details");card.className="change";card.open=true;
+    const label=edit.after===""?"Remove passage":edit.before===""?"Add content":"Revise passage";
+    card.append(textElement("summary",`${index+1}. ${label}`),textElement("p",String(edit.reason??""),"reason"));
+    for(const [key,label,cls] of [["before","Original","before"],["after","Proposed","after"]]) {
+      const block=textElement("div","",cls);block.append(textElement("div",label,"diff-label"),textElement("pre",String(edit[key]??"")||(key==="after"?"Removed":"New content")));card.append(block);
+    }
+    panel.append(card);
+  }
+  const action=(label:string,type:string,decision?:string,primary=false)=>{const button=document.createElement("button");button.textContent=label;button.className=primary?"primary":"secondary";button.disabled=revisionBusy||(decision==="approved"&&!connected);button.addEventListener("click",()=>{revisionBusy=true;controls();renderRevision();api.postMessage({type,approvalId:status.approvalId,decision});});return button;};
+  if(typeof proposal.revisedContent==="string") { const compare=action("Compare full document","compareRevision");compare.className="compare";panel.append(compare); }
+  const actions=textElement("div","","revision-actions");
+  if(status.prepared===false)actions.append(action("Retry submission","resumePreparation",undefined,true));
+  else if(awaiting)actions.append(action("Decline","decideRevision","rejected"),action("Approve & apply","decideRevision","approved",true));
+  else if(status.decision==="approved"&&status.status==="waiting")actions.append(action("Resume approved changes","decideRevision","approved",true));
+  panel.append(actions);
+}
+window.addEventListener("message",event=>{
+  const message=event.data;
+  if(message.type==="restoreDraft") {
+    if(message.state && !restored) {
+      Object.assign(state,message.state); draftAnchor=state.anchor; feedback.value=state.draft??""; instruction.value=state.instruction??"";
+      selected.clear(); seen.clear(); for(const id of state.included??[])selected.add(id); for(const id of state.seen??[])seen.add(id);
+      showReview(state.reviewOpen??false); controls();
+    }
+    restored=true;
+  }
+  if(message.type==="viewMode")for(const mode of ["source","reading","split"])byId(mode).setAttribute("aria-pressed",String(mode===message.mode));
+  if(message.type==="document") {
+    const scroll=document.documentElement.scrollTop;
+    content.innerHTML=message.html; // Host uses the HTML-disabled Markdown renderer.
+    version=message.version;connected=message.connected;
+    const incoming=String(message.sourceIdentity??version);
+    if(draftAnchor && (sourceIdentity||state.source) && (sourceIdentity||state.source)!==incoming){draftAnchor=undefined;byId("composer-status").textContent="The document changed. Your note is preserved; select its passage again before saving.";}
+    sourceIdentity=incoming;selection=undefined;selectionRange=undefined;byId("selection-tools").hidden=true;
+    if(!connected)byId("status").textContent=message.status??"Save the document before sharing feedback.";
+    document.documentElement.scrollTop=scroll;renderComments();controls();saveState();api.postMessage({type:"rendered",version,text:content.textContent?.slice(0,500)});
+  }
+  if(message.type==="comments") {
+    rows=message.rows??[];
+    for(const row of rows){if(!row.outdated&&!seen.has(row.id))selected.add(row.id);if(row.outdated)selected.delete(row.id);seen.add(row.id);}
+    const available=new Set(rows.filter(row=>!row.outdated).map(row=>row.id));for(const id of selected)if(!available.has(id))selected.delete(id);
+    renderComments();controls();saveState();
+  }
+  if(message.type==="revision") {const changed=message.status?.approvalId&&message.status.approvalId!==revision?.approvalId;revision=message.status;renderRevision();controls();if(changed)showReview(true);}
+  if(message.type==="revisionIdle"){revisionBusy=false;controls();renderRevision();}
+  if(message.type==="saved"){commentBusy=false;feedback.value="";draftAnchor=undefined;closeComposer();byId("status").textContent="Saved. Add more feedback or propose changes when you’re ready.";controls();showReview(true);}
+  if(message.type==="error"){commentBusy=false;revisionBusy=false;controls();renderRevision();if(!byId("composer").hidden)byId("composer-status").textContent=message.message;else{byId("status").textContent=message.message;showReview(true);}}
+  if(message.type==="notice")byId("status").textContent=message.message;
+});
+showReview(state.reviewOpen??false);controls();api.postMessage({type:"ready"});

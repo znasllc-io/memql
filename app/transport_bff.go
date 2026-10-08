@@ -31,7 +31,7 @@ func (a *App) transportBFF() {
 	// capabilities resolve, and every materialization answers "object
 	// storage is not configured on this node" on a cluster that is.
 	a.wireComposeIntegration(uploader, container)
-	a.wireLibraryIntegration(uploader)
+	a.wireLibraryIntegration(uploader, container)
 	a.wireReleaseCandidates(uploader, container)
 	// Inbound-delivery receiver (POST /inbound/{source}, memql#2957). The
 	// counterpart to the outbound worker: a third party dials US, so it is HTTP

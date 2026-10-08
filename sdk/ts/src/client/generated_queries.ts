@@ -11962,6 +11962,28 @@ QueryClient.prototype.workApprovalForOwner = function (this: QueryClient, args: 
   return this.executeNamed("workApprovalForOwner", buildWorkApprovalForOwner(args), opts);
 };
 
+/** Durable decisions for one of the caller's runs, including decided reviews. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwnedRun"] in generated_concepts.ts).
+export interface WorkApprovalsForOwnedRunArgs {
+  runId: string;
+}
+
+export function buildWorkApprovalsForOwnedRun(args: WorkApprovalsForOwnedRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workApprovalsForOwnedRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workApprovalsForOwnedRun(args: WorkApprovalsForOwnedRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workApprovalsForOwnedRun = function (this: QueryClient, args: WorkApprovalsForOwnedRunArgs = {} as WorkApprovalsForOwnedRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workApprovalsForOwnedRun", buildWorkApprovalsForOwnedRun(args), opts);
+};
+
 /** The caller's pending approvals, newest first. Owned. `row.decision == ""` is the pending state, and it matches because createWorkApproval STAMPS the empty string rather than leaving the key absent. */
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwner"] in generated_concepts.ts).
 export interface WorkApprovalsForOwnerArgs {

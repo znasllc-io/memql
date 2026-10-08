@@ -11,7 +11,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
-	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
@@ -26,7 +25,8 @@ const documentRevisionTemplate = "reviseLibraryDocument"
 const revisionContentLimit = 128 * 1024
 
 type ReviewGoalOpener interface {
-	OpenReviewGoal(context.Context, string, work.DirectGoal, map[string]any, string) (work.ReviewGoalReceipt, error)
+	OpenAnalysisGoal(context.Context, string, work.DirectGoal) (work.ReviewGoalReceipt, error)
+	AskPlanReview(context.Context, string, string, map[string]any, string) (string, error)
 	SetPlanReviewValidator(string, func(context.Context, map[string]any) error)
 }
 
@@ -119,8 +119,8 @@ func revisionCommentIDs(v any) ([]string, error) {
 		return nil, err
 	}
 	var ids []string
-	if json.Unmarshal(raw, &ids) != nil || len(ids) == 0 || len(ids) > 20 {
-		return nil, fmt.Errorf("select between 1 and 20 current comments")
+	if json.Unmarshal(raw, &ids) != nil || len(ids) == 0 || len(ids) > 100 {
+		return nil, fmt.Errorf("select between 1 and 100 current comments")
 	}
 	for n, id := range ids {
 		if strings.TrimSpace(id) == "" {
@@ -153,8 +153,8 @@ func (i *Integration) handleRequestDocumentRevision(ctx context.Context, args ma
 		return nil, err
 	}
 	instruction := strings.TrimSpace(asString(args["instruction"]))
-	if instruction == "" || len(instruction) > 8000 {
-		return nil, fmt.Errorf("describe the requested change in 1–8000 bytes")
+	if len(instruction) > 8000 {
+		return nil, fmt.Errorf("additional direction must be at most 8000 bytes")
 	}
 	comments, err := revisionCommentIDs(args["commentIds"])
 	if err != nil {
@@ -224,18 +224,18 @@ func (i *Integration) handleRequestDocumentRevision(ctx context.Context, args ma
 			}
 			selected = append(selected, map[string]any{"id": commentID, "authorUserId": memql.BareShortId(stringField(row, "authorUserId")), "body": stringField(row, "body"), "anchor": anchor})
 		}
-		proposal = map[string]any{"reviewType": documentReviewType, "requestId": requestID, "artifactId": doc.artifact, "sourceId": memql.BareShortId(doc.source), "documentKind": doc.kind, "revision": doc.revision, "version": doc.version, "name": name, "format": "markdown", "content": content, "commentIds": comments, "comments": selected, "instruction": instruction}
+		proposal = map[string]any{"reviewType": documentReviewType, "requestId": requestID, "artifactId": doc.artifact, "sourceId": memql.BareShortId(doc.source), "documentKind": doc.kind, "revision": doc.revision, "version": doc.version, "name": name, "format": "markdown", "content": content, "blobURL": stringField(doc.backing, "blobUrl"), "commentIds": comments, "comments": selected, "instruction": instruction}
 	}
 	ac, _ := auth.AccessFromContext(ctx)
-	receipt, err := i.reviewGoals.OpenReviewGoal(ctx, "library-revision:"+requestID, work.DirectGoal{
+	receipt, err := i.reviewGoals.OpenAnalysisGoal(ctx, "library-revision:"+requestID, work.DirectGoal{
 		OwnerUserId: ac.UserId, Statement: "Revise " + asString(proposal["name"]), AutomationName: documentRevisionTemplate,
 		RequestedVia: "library", TriggeredBy: "document-review", Ceilings: map[string]any{"maxModelCalls": 1},
 		Input: map[string]any{"requestId": requestID, "proposal": proposal},
-	}, proposal, "Create a separate draft from this saved revision and the selected feedback?")
+	})
 	if err != nil {
 		return nil, err
 	}
-	return reviewResult(map[string]any{"goalId": receipt.GoalID, "runId": receipt.RunID, "approvalId": receipt.ApprovalID, "requestId": requestID, "proposal": proposal})
+	return reviewResult(map[string]any{"goalId": receipt.GoalID, "runId": receipt.RunID, "requestId": requestID, "proposal": proposal})
 }
 
 // ValidateRevisionProposal is used by the shared Nexus decision path as well
@@ -288,89 +288,154 @@ func (i *Integration) revisionRequest(ctx context.Context, requestID string) (wo
 	if err != nil {
 		return ids, nil, nil, nil, err
 	}
-	approval, err := i.revisionRow(ctx, "workApprovalForOwner", map[string]any{"approvalId": ids.ApprovalID})
-	return ids, proposal, run, approval, err
-}
-func (i *Integration) handleDocumentRevisionStatus(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	ctx = memql.ContextWithFreshRead(ctx)
-	ids, proposal, run, approval, err := i.revisionRequest(ctx, asString(args["requestId"]))
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]any{"prepared": run != nil && approval != nil, "goalId": ids.GoalID, "runId": ids.RunID, "approvalId": ids.ApprovalID, "proposal": proposal, "decision": approval["decision"], "status": run["status"], "errorMessage": run["errorMessage"]}
-	composition, err := i.revisionRow(ctx, "compositionsForRun", map[string]any{"runId": ids.RunID})
-	if err != nil {
-		return nil, err
-	}
-	if composition != nil {
-		out["compositionId"], out["compositionStatus"] = memql.BareShortId(asString(composition["id"])), composition["status"]
-		out["failureReason"] = composition["failureReason"]
-		if file := asString(composition["outputFileId"]); file != "" {
-			artifact, err := i.revisionRow(ctx, "libraryArtifactBySourceConceptRef", map[string]any{"sourceConceptRef": file})
-			if err != nil {
-				return nil, err
+	approvals, err := i.revisionRows(ctx, "workApprovalsForOwnedRun", map[string]any{"runId": ids.RunID})
+	var approval map[string]any
+	ids.ApprovalID = ""
+	for _, candidate := range approvals {
+		subject := revisionMap(candidate["subject"])
+		if candidate["kind"] == workstate.ApprovalKindPlanReview && subject["reviewType"] == documentReviewType && subject["requestId"] == requestID {
+			if approval != nil {
+				return ids, nil, nil, nil, fmt.Errorf("revision has conflicting approval receipts")
 			}
-			if artifact != nil {
-				out["outputArtifactId"], out["outputName"] = memql.BareShortId(asString(artifact["id"])), artifact["title"]
-			}
+			approval = candidate
+			ids.ApprovalID = memql.BareShortId(asString(candidate["id"]))
 		}
 	}
-	return reviewResult(out)
+	return ids, proposal, run, approval, err
 }
-func (i *Integration) handleExecuteDocumentRevision(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	rc, ok := common.RunFromContext(ctx)
-	if !ok || rc.RunId == "" || rc.GoalId == "" {
-		return nil, fmt.Errorf("a document revision requires its approved Nexus run")
-	}
-	ctx = memql.ContextWithFreshRead(ctx)
-	ids, proposal, run, approval, err := i.revisionRequest(ctx, asString(args["requestId"]))
+
+func (i *Integration) revisionRows(ctx context.Context, name string, args map[string]any) ([]map[string]any, error) {
+	call, err := langparser.RenderCall(name, args)
 	if err != nil {
 		return nil, err
 	}
-	if memql.BareShortId(rc.RunId) != ids.RunID || memql.BareShortId(rc.GoalId) != ids.GoalID || asString(run["automationName"]) != documentRevisionTemplate || asString(run["status"]) != "running" || run["cancelRequested"] == true {
-		return nil, fmt.Errorf("this run does not own the document revision request")
+	raw, err := i.engine.Execute(ctx, "query "+call)
+	if err != nil {
+		return nil, err
+	}
+	return extractRows(raw), nil
+}
+
+func (i *Integration) handleDocumentRevisionStatus(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	ids, captured, run, approval, err := i.revisionRequest(memql.ContextWithFreshRead(ctx), asString(args["requestId"]))
+	if err != nil {
+		return nil, err
+	}
+	proposal := captured
+	if approval != nil {
+		proposal = revisionMap(approval["subject"])
+	}
+	return reviewResult(map[string]any{"prepared": run != nil, "goalId": ids.GoalID, "runId": ids.RunID, "approvalId": ids.ApprovalID,
+		"proposal": proposal, "decision": approval["decision"], "status": run["status"], "errorMessage": run["errorMessage"], "result": revisionMap(run["outcome"])["returned"]})
+}
+
+// Only a live instance of the captured run can reach the bounded operations.
+// Each replica reconstructs authority and inputs from the durable goal/run.
+func (i *Integration) revisionRun(ctx context.Context, requestID string) (work.ReviewGoalReceipt, map[string]any, map[string]any, error) {
+	ids, captured, run, approval, err := i.revisionRequest(memql.ContextWithFreshRead(ctx), requestID)
+	if err != nil {
+		return ids, nil, nil, err
+	}
+	rc, ok := common.RunFromContext(ctx)
+	if !ok || memql.BareShortId(rc.RunId) != ids.RunID || memql.BareShortId(rc.GoalId) != ids.GoalID || asString(run["automationName"]) != documentRevisionTemplate || asString(run["status"]) != "running" || run["cancelRequested"] == true {
+		return ids, nil, nil, fmt.Errorf("this live run does not own the document revision request")
+	}
+	if err := revisionWriter(ctx); err != nil {
+		return ids, nil, nil, err
 	}
 	goal, err := i.revisionRow(ctx, "workGoalForOwner", map[string]any{"goalId": ids.GoalID})
 	if err != nil {
-		return nil, err
+		return ids, nil, nil, err
 	}
 	if goal["status"] != "open" {
-		return nil, fmt.Errorf("the document revision goal is closed")
+		return ids, nil, nil, fmt.Errorf("the document revision goal is closed")
 	}
-	if approval["decision"] != "approved" || approval["artifactHash"] != workstate.ArtifactHash(proposal) || workstate.ArtifactHash(revisionMap(approval["subject"])) != workstate.ArtifactHash(proposal) {
-		return nil, fmt.Errorf("this exact revision proposal has not been approved")
+	return ids, captured, approval, nil
+}
+
+func (i *Integration) handleRevisionInput(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	_, captured, _, err := i.revisionRun(ctx, asString(args["requestId"]))
+	if err != nil {
+		return nil, err
+	}
+	if err = i.ValidateRevisionProposal(ctx, captured); err != nil {
+		return nil, err
+	}
+	passages, err := revisionPassages(captured)
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(passages)
+	if err != nil {
+		return nil, err
+	}
+	return reviewResult(map[string]any{"content": captured["content"], "passages": passages, "passagesJSON": string(encoded), "instruction": captured["instruction"]})
+}
+
+func (i *Integration) handleRevisionProposal(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	_, captured, _, err := i.revisionRun(ctx, asString(args["requestId"]))
+	if err != nil {
+		return nil, err
+	}
+	proposal, err := buildRevisionProposal(captured, args["response"])
+	if err != nil {
+		return nil, err
+	}
+	return reviewResult(map[string]any{"proposal": proposal, "changed": proposal["revisedContent"] != captured["content"], "summary": proposal["summary"]})
+}
+
+func (i *Integration) handleReviewRevision(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	ids, captured, existing, err := i.revisionRun(ctx, asString(args["requestId"]))
+	if err != nil {
+		return nil, err
+	}
+	proposal := revisionMap(args["proposal"])
+	if err = validateRevisionResult(captured, proposal); err != nil {
+		return nil, err
+	}
+	if proposal["revisedContent"] == captured["content"] {
+		return nil, fmt.Errorf("there are no proposed changes to approve")
+	}
+	if checkpoint, ok := ctx.Value(revisionCheckpointKey{}).(string); ok && checkpoint != ids.ApprovalID {
+		return nil, fmt.Errorf("the document review checkpoint changed")
+	}
+	if existing != nil && workstate.ArtifactHash(revisionMap(existing["subject"])) != workstate.ArtifactHash(proposal) {
+		return nil, fmt.Errorf("this request already has a different proposal; submit new feedback")
 	}
 	if err = i.ValidateRevisionProposal(ctx, proposal); err != nil {
 		return nil, err
 	}
-	feedback, err := json.Marshal(proposal["comments"])
+	ac, _ := auth.AccessFromContext(ctx)
+	approvalID, err := i.reviewGoals.AskPlanReview(ctx, ac.UserId, ids.RunID, proposal, asString(args["question"]))
 	if err != nil {
 		return nil, err
 	}
-	var raw any
-	_, err = workflowhost.Run(ctx, "libraryRevisionWorkflow", map[string]any{"name": proposal["name"], "instruction": proposal["instruction"], "feedback": string(feedback)}, workflowhost.Options{Logger: i.logger, Operations: map[string]workflowhost.Operation{
-		"libraryComposeRevision": func(ctx context.Context, args map[string]any) (any, error) {
-			call, err := langparser.RenderCall("composeMaterialize", map[string]any{"name": args["name"], "format": args["format"], "statement": args["statement"], "draft": proposal["content"]})
-			if err != nil {
-				return nil, err
-			}
-			raw, err = i.engine.Execute(ctx, "query "+call)
-			return nil, err
-		},
-	}})
+	approval, err := i.revisionRow(memql.ContextWithFreshRead(ctx), "workApprovalForOwner", map[string]any{"approvalId": approvalID})
 	if err != nil {
 		return nil, err
 	}
-	rows := extractRows(raw)
-	if len(rows) != 1 || asString(rows[0]["outputFileId"]) == "" {
-		return nil, fmt.Errorf("Materializer did not return a saved revision draft")
+	if approval["decision"] == "approved" {
+		return reviewResult(map[string]any{"approvalId": approvalID})
 	}
-	composition, err := i.revisionRow(ctx, "compositionById", map[string]any{"compositionId": rows[0]["compositionId"]})
+	if approval["decision"] == "rejected" {
+		return nil, fmt.Errorf("the proposed changes were declined")
+	}
+	return nil, &workstate.HumanWait{ApprovalID: approvalID}
+}
+
+// This operation only applies an already validated and approved result. AI,
+// sequencing and the review question belong to the journaled DSL template.
+func (i *Integration) handleExecuteDocumentRevision(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	ids, captured, approval, err := i.revisionRun(ctx, asString(args["requestId"]))
 	if err != nil {
 		return nil, err
 	}
-	if composition["status"] != "ready" || memql.BareShortId(asString(composition["outputFileId"])) != memql.BareShortId(asString(rows[0]["outputFileId"])) {
-		return nil, fmt.Errorf("the revision draft has no completed composition receipt")
+	proposal := revisionMap(approval["subject"])
+	if approval["decision"] != "approved" || approval["artifactHash"] != workstate.ArtifactHash(proposal) {
+		return nil, fmt.Errorf("this exact revision proposal has not been approved")
 	}
-	return reviewResult(rows[0])
+	if err = validateRevisionResult(captured, proposal); err != nil {
+		return nil, err
+	}
+	return i.applyRevision(ctx, ids, proposal)
 }

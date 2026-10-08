@@ -1,0 +1,8 @@
+/// Propose bounded Markdown replacements from the person's passage feedback.
+@level("strong")
+@templateFile("prompts/libraryRevisionPassages.tmpl")
+prompt libraryRevisionPassages {
+ document string!
+ passages string!
+ instruction string!
+}

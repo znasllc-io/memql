@@ -1079,6 +1079,7 @@ export const BoundConcepts = {
   validationQueue: "v1:forge:request",
   warmupStateForIdentity: "v1:campaigns:warmupState",
   workApprovalForOwner: "v1:work:approval",
+  workApprovalsForOwnedRun: "v1:work:approval",
   workApprovalsForOwner: "v1:work:approval",
   workAutomationStepsForOwner: "v1:work:step",
   workCheckpointForOwner: "v1:work:observation",

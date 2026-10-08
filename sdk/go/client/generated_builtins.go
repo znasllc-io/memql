@@ -2411,7 +2411,7 @@ func LibraryDocumentReviewBuild(args LibraryDocumentReviewArgs) string {
 	return b.String()
 }
 
-// LibraryDocumentRevisionStatus -- Read the exact owned proposal, approval, run and output draft.
+// LibraryDocumentRevisionStatus -- Read the owned analysis, proposed replacements, decision and saved result.
 type LibraryDocumentRevisionStatusArgs struct {
 	RequestId string
 }
@@ -2457,7 +2457,7 @@ func LibraryRemoveArtifactLabelBuild(args LibraryRemoveArtifactLabelArgs) string
 	return b.String()
 }
 
-// LibraryRequestDocumentRevision -- Capture selected current feedback and open a Nexus run waiting for approval.
+// LibraryRequestDocumentRevision -- Capture selected current feedback and start its analysis run.
 type LibraryRequestDocumentRevisionArgs struct {
 	ArtifactId       string
 	ExpectedVersion  int

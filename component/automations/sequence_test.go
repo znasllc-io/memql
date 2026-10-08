@@ -2,7 +2,9 @@ package automations
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"reflect"
 	"strings"
 	"sync"
@@ -366,5 +368,27 @@ automation acts {
 	got := probe.argsOf(t, "publish:deployed", 0)
 	if got["version"] != "1.2.3" || got["at"] != "now" {
 		t.Fatalf("the payload was %v: an action's value is its capability's result, not the envelope", got)
+	}
+}
+
+func TestBuiltinStatementBindsSingleIntegrationResult(t *testing.T) {
+	typed := memql.NewResultWithOutput(map[string]memorynodes.MemoryNode{"result-id": {ID: "result-id", Concept: "integration:probe:result", Payload: json.RawMessage(`{"reply":"model answer"}`)}})
+	if got := unwrapStatementValue(functionStatementValue("builtin", typed)).(map[string]any)["reply"]; got != "model answer" {
+		t.Fatalf("native result envelope: %v", got)
+	}
+
+	raw := memql.NewResultWithOutput(map[string]any{"result-id": map[string]any{"id": "result-id", "concept": "integration:probe:result", "payload": map[string]any{"reply": "model answer", "proposal": map[string]any{"content": "captured"}}}})
+	value := functionStatementValue("builtin", raw)
+	payload, ok := unwrapStatementValue(value).(map[string]any)
+	if !ok || payload["reply"] != "model answer" {
+		t.Fatalf("transport envelope leaked into DSL value: %#v", value)
+	}
+	query := functionStatementValue("query", raw)
+	if _, ok := unwrapStatementValue(query).(map[string]any)["result-id"]; !ok {
+		t.Fatal("query result semantics changed")
+	}
+	ordinary := functionStatementValue("builtin", memql.NewResultWithOutput(map[string]any{"answer": 42}))
+	if unwrapStatementValue(ordinary).(map[string]any)["answer"] != 42 {
+		t.Fatal("ordinary builtin result changed")
 	}
 }

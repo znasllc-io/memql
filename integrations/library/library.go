@@ -54,6 +54,7 @@ const resultConcept = "integration:library:result"
 type Integration struct {
 	engine          memql.IntegrationEngineAccess
 	reviewGoals     ReviewGoalOpener
+	revisionFiles   RevisionFileWriter
 	versionGate     func(context.Context, string) (func(), error)
 	fileVersionGate func(context.Context, string) (func(), error)
 
@@ -110,8 +111,11 @@ func (i *Integration) IntegrationName() string { return "library" }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append([]memql.IntegrationCapability{
-		{Name: "requestDocumentRevision", Description: "Prepare a revision request awaiting human approval.", Handler: i.handleRequestDocumentRevision},
+		{Name: "requestDocumentRevision", Description: "Capture feedback and start revision analysis.", Handler: i.handleRequestDocumentRevision},
 		{Name: "documentRevisionStatus", Description: "Read an owned revision request and its saved draft.", Handler: i.handleDocumentRevisionStatus},
+		{Name: "revisionInput", Description: "Read the current run's immutable document and feedback.", Handler: i.handleRevisionInput},
+		{Name: "revisionProposal", Description: "Validate bounded passage replacements.", Handler: i.handleRevisionProposal},
+		{Name: "reviewRevision", Description: "Park on exact proposed document changes.", Handler: i.handleReviewRevision},
 		{Name: "executeDocumentRevision", Description: "Execute an exact approved revision in its owning Nexus run.", Handler: i.handleExecuteDocumentRevision},
 		{Name: "documentReview", Description: "Read comments on an accessible document.", Handler: i.handleDocumentReview},
 		{Name: "addDocumentComment", Description: "Add feedback bound to a saved document revision.", Handler: i.handleAddDocumentComment},

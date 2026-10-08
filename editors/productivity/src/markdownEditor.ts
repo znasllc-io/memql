@@ -11,7 +11,8 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
   private readonly rendered = new Map<string, { version: number; text: string }>();
   private readonly revisions: RevisionReview;
   constructor(private readonly context: vscode.ExtensionContext, private readonly files: Documents,
-    private readonly load: (uri: vscode.Uri) => Promise<OpenDocument>) { this.revisions = new RevisionReview(context, files, load); }
+    private readonly load: (uri: vscode.Uri) => Promise<OpenDocument>,
+    private readonly refreshRemote: (document: vscode.TextDocument) => Promise<boolean> = async () => false) { this.revisions = new RevisionReview(context, files, load); }
   async whenRendered(uri: vscode.Uri, version?: number): Promise<string> {
     const end = Date.now() + 15000;
     while (Date.now() < end) {
@@ -77,10 +78,14 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
     panel.webview.options = { enableScripts: true, localResourceRoots: [root] };
     const script = panel.webview.asWebviewUri(vscode.Uri.joinPath(root, "markdownView.js"));
     const nonce = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+    const draftKey = `memql.markdownReviewDraft:${document.uri.toString()}`;
     let disposed = false;
     let commentPending: { fingerprint: string; requestId: string } | undefined;
     let saving = false;
     let generation = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let refreshedRun = "";
+    let refreshing = false;
     const error = (e: unknown) => panel.webview.postMessage({ type: "error", message: e instanceof Error ? e.message : "The document could not be loaded." });
     const refreshComments = async () => {
       if (document.uri.scheme !== "memql-file") return;
@@ -93,17 +98,33 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
         const content = document.getText();
         await panel.webview.postMessage({ type: "comments", rows: rows.map(row => ({ ...row,
           outdated: row.outdated || document.isDirty || row.revision !== base.revision ||
-            !row.anchor || !anchorStillMatches(content, row.anchor as MarkdownAnchor) })) });
+            !row.anchor || ((row.anchor as Record<string,unknown>).kind !== "document-end" && !anchorStillMatches(content, row.anchor as MarkdownAnchor)) })) });
         if (review.hasMore) await error(new Error("Showing the first 500 comments. Older feedback remains stored in MemQL."));
       } catch (e) { if (!disposed && generation === ticket) await error(e); }
     };
     const refreshRevision = async () => {
-      const status = await this.revisions.status(document);
-      if (!disposed) await panel.webview.postMessage({ type: "revision", status });
+      if (refreshing || disposed) return;
+      refreshing = true;
+      if (timer) clearTimeout(timer);
+      try {
+        const status = await this.revisions.status(document);
+        if (disposed) return;
+        await panel.webview.postMessage({ type: "revision", status });
+        if (status?.status === "succeeded" && (status.result as Record<string,unknown> | undefined)?.applied && refreshedRun !== status.runId) {
+          if (await this.refreshRemote(document)) { refreshedRun = String(status.runId); await refreshComments(); }
+          else await panel.webview.postMessage({type:"notice",message:"Changes are saved in MemQL. Your local edits are preserved; compare with the latest revision before saving."});
+        }
+        if (status && !["succeeded","failed","cancelled"].includes(String(status.status)) && panel.visible) {
+          timer = setTimeout(() => { void refreshRevision().catch(error); }, status.status === "waiting" ? 5000 : 2000);
+        }
+      } catch (e) {
+        if (!disposed && panel.visible) timer = setTimeout(() => { void refreshRevision().catch(error); }, 10000);
+        throw e;
+      } finally { refreshing = false; }
     };
     const render = async () => {
       try {
-        await panel.webview.postMessage({ type: "document", html: renderMarkdown(document.getText()), version: document.version,
+        await panel.webview.postMessage({ type: "document", html: renderMarkdown(document.getText()), version: document.version, sourceIdentity: document.getText(),
           connected: document.uri.scheme === "memql-file" && !document.isDirty,
           status: document.uri.scheme !== "memql-file" ? "Local document. Open its MemQL copy to share feedback."
             : document.isDirty ? "Unsaved changes. Save before adding revision-bound feedback." : "Feedback is saved to MemQL." });
@@ -112,19 +133,24 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
       } catch (e) { await error(e); }
     };
     const subscriptions = [
-      panel.onDidChangeViewState(() => { if (panel.active) this.active = entry; this.updateModes(); }),
+      panel.onDidChangeViewState(() => { if (panel.active) this.active = entry; this.updateModes(); if (panel.visible) void refreshRevision().catch(error); else if (timer) clearTimeout(timer); }),
       vscode.window.onDidChangeVisibleTextEditors(() => this.updateModes()),
       vscode.workspace.onDidChangeTextDocument(event => { if (event.document === document) void render(); }),
       vscode.workspace.onDidSaveTextDocument(saved => { if (saved === document) void render(); }),
       panel.webview.onDidReceiveMessage(async message => {
         try {
           if (!message || typeof message !== "object") return;
-          if (message.type === "ready") { this.updateModes(); await render(); }
+          if (message.type === "ready") {
+            await panel.webview.postMessage({type:"restoreDraft", state:this.context.workspaceState.get(draftKey)});
+            this.updateModes(); await render();
+          } else if (message.type === "draftState" && message.state && typeof message.state === "object" && JSON.stringify(message.state).length <= 300000) {
+            await this.context.workspaceState.update(draftKey, message.state);
+          }
           else if (message.type === "rendered" && message.version === document.version && typeof message.text === "string") {
             this.rendered.set(document.uri.toString(), { version: message.version, text: message.text });
           } else if (message.type === "source" || message.type === "reading" || message.type === "split") await this.show(message.type, document.uri);
           else if (message.type === "refresh") { await refreshComments(); await refreshRevision(); }
-          else if (["prepareRevision", "resumePreparation", "decideRevision", "compareRevision", "applyRevision"].includes(message.type) && !saving) {
+          else if (["prepareRevision", "resumePreparation", "decideRevision", "compareRevision"].includes(message.type) && !saving) {
             saving = true;
             try {
               if (message.type === "prepareRevision") {
@@ -136,8 +162,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
                 await this.revisions.decide(document, message.approvalId, message.decision);
               } else if (message.type === "compareRevision") {
                 await this.revisions.compare(document);
-                await panel.webview.postMessage({ type: "revisionCompared" });
-              } else { await this.revisions.apply(document); await panel.webview.postMessage({ type: "revisionApplied" }); }
+              }
               await refreshRevision();
             } finally { saving = false; await panel.webview.postMessage({ type: "revisionIdle" }); }
           }
@@ -146,7 +171,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
           } else if (message.type === "comment" && !saving) {
             if (document.uri.scheme !== "memql-file" || document.isDirty || message.version !== document.version) throw new Error("Save this revision before adding feedback, then select the passage again.");
             if (typeof message.body !== "string" || !message.body.trim() || message.body.length > 16000) throw new Error("Enter a comment of up to 16000 characters.");
-            const anchor = markdownAnchor(document.getText(), message.selection);
+            const anchor = message.selection?.kind === "document-end" ? {kind:"document-end", quote:"End of document"} : markdownAnchor(document.getText(), message.selection);
             const base = await this.load(document.uri);
             if (new TextDecoder().decode(base.content) !== document.getText()) throw new Error("Compare this document with its saved revision before adding feedback.");
             const fingerprint = JSON.stringify([base.revision, anchor, message.body]);
@@ -163,7 +188,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
       }),
     ];
     panel.onDidDispose(() => {
-      disposed = true; generation++;
+      disposed = true; generation++; if (timer) clearTimeout(timer);
       this.panels.delete(entry);
       for (const subscription of subscriptions) subscription.dispose();
       if (this.active?.panel === panel) this.active = undefined;

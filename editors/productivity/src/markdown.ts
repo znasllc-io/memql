@@ -6,6 +6,9 @@ export interface MarkdownAnchor {
   endLine: number;
   sourceQuote: string;
   quote: string;
+  prefix?: string;
+  suffix?: string;
+  sectionPath?: string[];
   startBlock?: number;
   endBlock?: number;
   startTextOffset?: number;
@@ -88,7 +91,16 @@ export function markdownAnchor(source: string, input: unknown): MarkdownAnchor {
     if (!Number.isSafeInteger(value) || value < 0 || value > MAX_MARKDOWN_CHARS) throw new Error("Select the passage again.");
     position[key] = value;
   }
-  return { kind: "markdown", startLine, endLine, sourceQuote, quote, ...position };
+  const sectionPath: string[] = [];
+  let inFence = false;
+  for (const line of lines.slice(0,startLine+1)) {
+    if (/^\s*(`{3,}|~{3,})/.test(line)) inFence = !inFence;
+    const heading = !inFence && line.match(/^(#{1,6})\s+(.+?)\s*#*$/);
+    if (heading) { sectionPath.length = Math.min(sectionPath.length,heading[1].length-1); sectionPath.push(heading[2]); }
+  }
+  return { kind: "markdown", startLine, endLine, sourceQuote, quote, ...position,
+    prefix: typeof row.prefix === "string" ? row.prefix.slice(-80) : "", suffix: typeof row.suffix === "string" ? row.suffix.slice(0,80) : "", sectionPath };
+
 }
 export function anchorStillMatches(source: string, anchor: MarkdownAnchor): boolean {
   return source.split(/\r?\n/).slice(anchor.startLine, anchor.endLine).join("\n") === anchor.sourceQuote;

@@ -63,7 +63,15 @@ export async function activate(context: vscode.ExtensionContext) {
   if (connection?.version !== 1) throw new Error("Update the MemQL extension to use Productivity Tools.");
   const files = new Documents(connection);
   const provider = new MemQLFiles(files);
-  const markdown = new MarkdownEditor(context, files, uri => provider.load(uri));
+  const markdown = new MarkdownEditor(context, files, uri => provider.load(uri), async document => {
+    if (document.isDirty) return false;
+    const version = document.version;
+    const latest = await provider.latest(document.uri);
+    if (document.isDirty || document.version !== version) return false;
+    provider.useBase(document.uri, latest);
+    provider.changed.fire([{type:vscode.FileChangeType.Changed,uri:document.uri}]);
+    return true;
+  });
   const pdf = new PDFEditor(context, {
     base: async uri => { const doc = await provider.load(uri); return { version: doc.version, revision: doc.revision, sourceId: doc.sourceId }; },
     recover: async (uri, base) => {
