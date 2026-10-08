@@ -226,3 +226,62 @@ automation workSpineAuthor {
  }
  return builtin spineRefuse(message: "The authored draft did not pass Gate 1 within the repair budget.")
 }
+
+/// Encode the default execution recipe as ordinary journaled automation steps.
+/// Native operations bind validated data and quote source; sequencing and instructions live here.
+@template
+automation workSpineDraftProgram {
+ facts := builtin spineDraftFacts()
+ inputHeading := "\n\nGoal input (JSON):\n"
+ if facts.navigation { return builtin spineDraftAppend(kind: "navigation") }
+ if !facts.fanout {
+  if facts.file && facts.research {
+   builtin spineDraftAppend(kind: "research", inputHeading: inputHeading, instruction: facts.goal + "\nGather the evidence required for this deliverable using authorized capabilities. Preserve source references, uncertainties and the complete draft. Do not save the final file: the next step renders it from your result.")
+  }
+  return builtin spineDraftAppend(kind: facts.file ? "file" : "answer", instruction: facts.goal, inputHeading: inputHeading)
+ }
+ for section in facts.sections {
+  if section.catalog {
+   builtin spineDraftAppend(kind: "catalog", section: section.name)
+  } else {
+   instruction := logic workSpineSectionInstruction(section: section, goal: facts.goal)
+   builtin spineDraftAppend(kind: section.live ? "live" : "inline", section: section.name, instruction: instruction, inputHeading: inputHeading)
+  }
+ }
+ builtin spineDraftAppend(kind: "collect")
+ if facts.file || facts.intelligence {
+  kind := facts.sections.any(section => section.dependent) ? "sections" : "independent sections"
+  return builtin spineDraftAppend(kind: facts.file ? "file" : "answer", inputHeading: inputHeading, sectionsHeading: "\n\nCompleted sections:\n", instruction: facts.goal + "\n\nAssemble the completed " + kind + " into the requested deliverable. Verify completeness. " + facts.assembly)
+ }
+ return builtin spineDraftAppend(kind: "returnSections")
+}
+
+/// Replan only the unfinished suffix. Native validation preserves the completed journal prefix.
+@template
+automation workSpineReplan {
+ context := builtin spineRemedyContext()
+ if !context.hasFailedStep { return builtin spineRemedyAsk(reason: "This run was to be re-planned from the step it failed at, and it has no failed step to re-plan from.") }
+ if !context.hasGoal { return builtin spineRemedyAsk(reason: "This run's goal could not be read, so there is no plan to re-plan from its failed step.") }
+ if !context.sandbox { return false }
+ draft := builtin spineRemedyGenerate(prompt: "replanGap")
+ if !draft.available { return false }
+ if !draft.ok { return builtin spineRemedyAsk(reason: "The re-plan for this run's failed step could not be made: " + draft.message) }
+ if draft.goalAlreadyServed { return builtin spineRemedyAsk(reason: "The re-plan found nothing left to do: it judged the completed steps already serve the goal. Retry the failed step, or abandon the run.") }
+ validation := builtin spineRemedyValidate()
+ if !validation.ok {
+  reason := logic workSpineReplanRefusal(stage: validation.stage, message: validation.message)
+  return builtin spineRemedyAsk(reason: reason)
+ }
+ persisted := builtin spineRemedyPersist()
+ if !persisted.ok { return builtin spineRemedyAsk(reason: "The re-planned draft could not be made this run's template: " + persisted.message) }
+ return builtin spineRemedyInstall()
+}
+
+/// Repair uses the existing guided step rerun, with a human question only when the run is still waiting.
+@template
+automation workSpineRepair {
+ repair := builtin spineRemedyRepair()
+ if repair.ok { return true }
+ if repair.moved { return false }
+ return builtin spineRemedyAsk(reason: "The failed step could not be run again with the violation as guidance: " + repair.message)
+}

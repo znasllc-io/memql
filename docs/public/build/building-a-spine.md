@@ -10,12 +10,13 @@ owner: znas
 # Building a Spine
 
 The **Spine** is the harness that takes a goal through planning and execution.
-Its planning policy is an installed MemQL workflow. The native runtime owns
+Its planning, execution-recipe and recovery policies are installed MemQL workflows. The native runtime owns
 identity, budgets, distributed claims, the execution journal, cancellation,
-approval integrity and recovery. A planner is one phase of the Spine; an agent
+approval integrity and safe recovery mechanics. A planner is one phase of the Spine; an agent
 is a participant that a resulting automation can invoke.
 
-This contract, `work.spine/1`, makes the **goal compilation phase selectable**.
+The `work.spine/1` contract supports selection of compilation, draft assembly,
+tool fallback, failure response, replan and guided repair recipes.
 It does not replace the executor or turn an agent's token and tool loop into a
 second DSL interpreter. It uses the same automation interpreter as other
 MemQL workflows. See [Engine, integration and workflow boundaries](integration-boundary.md).
@@ -49,14 +50,17 @@ The Spine entry is called without arguments and must not require any; read the
 goal and its input through `spineContext`. Child templates can declare arguments
 supplied by their callers.
 
-Admission resolves the complete reachable template and pure-logic closure and
+Admission resolves the complete reachable template, pure-logic and scoped-action closure and
 checks every branch before opening the goal. It persists the source, entry,
 native contract version and SHA-256 fingerprint in `v1:work:run.spine`.
 The engine admits that field only from native writes and refuses replacement
 or removal after admission, including through raw or authored mutations.
 The receiving planner reconstructs the workflow exclusively from that row;
 changing or removing an installed child cannot silently change accepted work.
-Forks and branches inherit the snapshot. The compiled work template has its own
+Forks and branches inherit the snapshot. Direct agent and reviewed document
+goals also pin the default recipes; delegation from a run owned by the same
+person retains that run's snapshot. A separate owner's goal uses the default.
+The compiled work template has its own
 existing version and fingerprint: planning code and the plan it produces are
 different artifacts.
 
@@ -64,7 +68,10 @@ The snapshot supports at most 64 constructs and 512 KiB of source. An unknown
 entry, unsafe child, recursion, malformed snapshot or incompatible native
 contract fails closed. A pre-upgrade run without a Spine snapshot cannot start
 compilation with an implicitly substituted workflow; open a new goal. Already
-compiled runs continue using their existing template and journal.
+compiled runs continue using their existing template and journal. Earlier
+`work.spine/1` snapshots without phase entries retain their pinned compilation
+policy and use the installed default recipes for the newly exposed execution
+and recovery hooks. New snapshots pin all phases.
 
 ## An exact-catalog-only Spine
 
@@ -124,6 +131,94 @@ evidence, delivery contracts, source closure and side-effect boundaries.
 A workflow can be more restrictive than the runtime, but cannot weaken those
 gates with `on error continue` or a fabricated success return.
 
+## Reuse or replace execution and recovery recipes
+
+The platform ships one default harness. Accounts and organizations do not have
+to install or define one. Developers select bundle code, and can reuse defaults
+while replacing particular policies. An optional ordinary template named
+`<entry>Phases` returns a map of hook names to installed template names:
+
+```memql
+use planner.builtins.{ spineRemedyAsk }
+
+@template
+automation companyAnswerSpinePhases {
+  return {
+    workSpineRecovery: "companyReviewedRecovery",
+    workSpineReplan: "companyReviewedReplan"
+  }
+}
+
+@template
+automation companyReviewedRecovery {
+  args { symptom string! retriesSpent int! maxRetries int! hasGoal bool! }
+  return {act: "ask", retrySeconds: 30}
+}
+
+@template
+automation companyReviewedReplan {
+  return builtin spineRemedyAsk(reason: "Review the failed step before changing this plan.")
+}
+```
+
+The configuration template has no native operations and takes no arguments.
+Admission checks it before opening rows and freezes its source, the mapping,
+and every selected dependency. Unknown hooks, missing templates and effectful
+configuration fail admission. Omitted hooks use the defaults. The checked
+company example contains these definitions alongside `companyAnswerSpine`.
+This is a naming convention over existing automations, not a new construct.
+
+| Hook (also the default template) | Role | Native boundary |
+|---|---|---|
+| `workSpineDraftProgram` | Assemble answer, navigation, research, section and file steps; choose their instructions | `spineDraftFacts` exposes validated facts. `spineDraftAppend` quotes and encodes source, validates section order and requires the promised output. It does not execute the generated work. |
+| `agentWorkbenchRecovery` | Choose a headless retry or read-only computer observation after a workbench environment mismatch | `agentRecoveryContext` supplies verified pre-start evidence. Scoped actions can retry the original call once, observe the computer, or request missing consent. |
+| `workSpineRecovery` | Choose `retry`, `repair`, `replan`, `heal` or `ask`, with `retrySeconds` from 1 to 3600 | Pure decision, no operations. Receives the argument shape shown above. Native terminal-failure checks, retry ceilings and replay/effect evidence remain mandatory. |
+| `workSpineReplan` | Generate, validate, persist and install a replacement unfinished suffix, or request review | `spineRemedyContext`, `spineRemedyGenerate`, `spineRemedyValidate`, `spineRemedyPersist`, `spineRemedyInstall`, `spineRemedyAsk`. One model attempt, immutable completed prefix, Gate 1 and an atomic run-state check. |
+| `workSpineRepair` | Request a guided rerun of the failed step or ask a person | `spineRemedyRepair`, `spineRemedyAsk`. Existing journal, effect and current-wait checks still apply. |
+
+Except for the failure decision, hooks receive their facts through scoped
+operations and take no arguments. Each invocation receives only its own
+operations. A phase cannot borrow another phase's authority simply because
+both definitions appear in the same snapshot. A standalone engine embedder must
+wire the scoped snapshot interpreter to execute a pinned recovery policy; an
+unwired engine fails closed for pinned runs.
+
+The default draft recipe is in `dsl/planner/automations.memql`. It chooses
+research before rendering when needed, catalog/live/inline sections, collection,
+and final answer or file delivery. `spineDraftAppend` accepts a `kind` and,
+where relevant, `section`, `instruction`, `inputHeading` and `sectionsHeading`.
+Its source encoder remains native, like the parser and compiler. The resulting
+automation runs through the normal durable executor.
+
+## Headless work and computer-use fallback
+
+The shipped fallback is expressed through ordinary actions and logic:
+
+```memql
+use capabilities.integration.agents.{ spineRetryHost, spineObserveComputer }
+
+action retrySpineHost { capability spineRetryHost() }
+action observeSpineComputer { capability spineObserveComputer(action: "window_list") }
+```
+
+`agentWorkbenchRecovery` calls the observation action for a display-only
+mismatch, and the host retry action for other unmet needs. Only a verified
+**pre-start** environment mismatch enters this recipe. An ordinary command
+failure, timeout or uncertain outcome does not authorize repeating a command.
+The retry preserves the original arguments, owner, run and worker constraints.
+
+Computer observation currently supports `window_list` and `display_info`.
+It supplies structured context for the next agent turn; it does not invent
+mouse clicks, implement a visual agent or translate a refused command into an
+automatic desktop action. The normal `workerComputer` capability remains the
+route for authorized subsequent computer work.
+
+The `agentRecoveryConsent` child requests the minimum required scope only on
+an actual missing-consent or insufficient-scope refusal. Kill switches are
+returned unchanged. Consent wording lives in pure logic, while the native gate
+binds the actual owner and run. After dispatch, a transport error remains an
+unknown outcome rather than reverting to the earlier pre-start refusal.
+
 ## Native operations
 
 These builtins are scoped ports, not standalone API endpoints. Direct calls
@@ -153,7 +248,7 @@ persisting a valid plan fails compilation.
 
 ## Versioning and recovery limits
 
-The source fingerprint pins the template and pure-logic closure. It is **not**
+The source fingerprint pins the templates, pure logic, actions and phase mapping. It is **not**
 a promise of byte-identical model output or a snapshot of the entire
 installation. The typed native operations in contract v1 retain the engine's
 shipped classifier, design, emission and repair prompt recipes, provider
@@ -162,9 +257,10 @@ prompt/model/tool callback inside compilation. Record the engine release and
 bundle digest alongside the workflow fingerprint when reproducing a result.
 
 Templates may use expressions, branches, finite loops, synchronous children,
-joined parallel blocks and pure logic. Arbitrary queries, mutations, actions,
+joined parallel blocks and pure logic. Actions are allowed only when their capability is explicitly bound by the
+invoking phase. Arbitrary queries, mutations, ambient integration calls,
 independent journals, scheduled triggers and detached children are outside
-this compilation scope. Work produced by the Spine runs through the normal
+these scopes. Work produced by the Spine runs through the normal
 executor, where actions, bounded agent turns and human approvals already have
 their own contracts.
 

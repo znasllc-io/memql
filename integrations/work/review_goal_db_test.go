@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -46,6 +47,10 @@ func TestReviewGoalBootstrapSurvivesReplicaRetries(t *testing.T) {
 		return row
 	}
 	run := readRun(receipt.RunID)
+	snapshot, err := workflowhost.SnapshotFromMap(rowMap(run, "spine"))
+	if err != nil || len(snapshot.Phases) != 5 {
+		t.Fatalf("review goal lost its execution recipes on the receiving replica: %v", err)
+	}
 	if rowString(run, "status") != runStatusWaiting || rowString(rowMap(run, "waitingOn"), "subject") != receipt.ApprovalID {
 		t.Fatalf("run was eligible before review: %v", run)
 	}

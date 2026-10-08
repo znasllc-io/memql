@@ -263,7 +263,8 @@ function check_prerequisites() {
         cap_fail 4 "missing required tools: ${missing[*]}"
     fi
 
-    if ! k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}[[:space:]]"; then
+    # Drain the listing: grep -q can SIGPIPE k3d under pipefail after a match.
+    if ! k3d cluster list 2>/dev/null | grep "^${CLUSTER_NAME}[[:space:]]" >/dev/null; then
         error "Cluster '${CLUSTER_NAME}' is not running. Run 'make up' first."
         cap_fail 4 "cluster '${CLUSTER_NAME}' is not running"
     fi

@@ -299,7 +299,7 @@ func (d sectionableDecision) cutsSectionAutomations(req CompileRequest) bool {
 // one agent turn whose answer it returns -- the section's value, which the
 // template binds under the section's name (steps/automation.go binds what a
 // sub-automation returns).
-func sectionAutomationSource(ls *liveSection, agentId string, s sectionSpec) string {
+func sectionAutomationSource(ls *liveSection, agentId string, s sectionSpec, instruction string) string {
 	var b strings.Builder
 	b.WriteString("use agents.builtins.{ runAgentTurn }\n\n")
 	fmt.Fprintf(&b, "@description(%s)\n@template\nautomation %s {\n", langparser.QuoteString(strings.TrimSpace(s.Purpose)), ls.Automation)
@@ -310,7 +310,7 @@ func sectionAutomationSource(ls *liveSection, agentId string, s sectionSpec) str
 	fmt.Fprintf(&b, "    %s any\n", sectionGoalArg)
 	b.WriteString("  }\n")
 	prompt := []string{
-		langparser.QuoteString(sectionAutomationPrompt(s) + "\n\nOverall goal (context only): "),
+		langparser.QuoteString(instruction + "\n\nOverall goal (context only): "),
 		"toString(args." + sectionGoalArg + " ?? " + langparser.QuoteString(sectionGoalUnknown) + ")",
 	}
 	if len(ls.Inputs) > 0 {
@@ -331,24 +331,6 @@ func sectionAutomationSource(ls *liveSection, agentId string, s sectionSpec) str
 // sectionInputsHeading introduces, in a section automation's prompt, the
 // values of the inputs it was called with.
 const sectionInputsHeading = "\n\nInputs (JSON):\n"
-
-// sectionAutomationPrompt is the fixed instruction a section automation runs:
-// sectionPrompt's, in the section's own words and without this goal's, which
-// arrive as arguments.
-func sectionAutomationPrompt(s sectionSpec) string {
-	var b strings.Builder
-	if footprintOf(s.Effects).IsSideEffect() {
-		b.WriteString("Carry out only the section below, one part of a larger goal, and report what you did as text. Make only the changes this section describes.")
-	} else {
-		b.WriteString("Produce only the section below, one part of a larger goal, and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools.")
-	}
-	b.WriteString("\n\nSection: " + s.Label + "\n" + s.Instruction)
-	b.WriteString("\nPurpose: " + strings.TrimSpace(s.Purpose))
-	if post := strings.TrimSpace(s.Postcondition); post != "" {
-		b.WriteString("\nIt is finished when: " + post)
-	}
-	return b.String()
-}
 
 // LiveSection is how the draft wrote one section planned live.
 type LiveSection struct {

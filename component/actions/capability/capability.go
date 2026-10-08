@@ -101,9 +101,13 @@ var (
 // conservatively as not-side-effecting -- so a newly added integration must be
 // audited in to be enforced.
 var integrationClass = map[string]string{
-	"pipelines.workflowFacts":  ClassRead,
-	"pipelines.executeStep":    ClassExec,
-	"pipelines.reportProgress": ClassWrite,
+	"agents.spineRetryHost":       ClassExec,
+	"agents.spineObserveComputer": ClassRead,
+	"agents.spineRequestScope":    ClassWrite,
+	"agents.agentRecoveryContext": ClassRead,
+	"pipelines.workflowFacts":     ClassRead,
+	"pipelines.executeStep":       ClassExec,
+	"pipelines.reportProgress":    ClassWrite,
 	// --- read: lookups, permission checks, pure compute, external reads ---
 	"auth.resolveUser":                 ClassRead,
 	"auth.checkPermission":             ClassRead,

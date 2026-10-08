@@ -107,3 +107,29 @@ automation agentFactoryDecide {
  }
  builtin agentFactoryRejectDecision()
 }
+
+/// A verified pre-start mismatch may change surfaces once. Unknown execution outcomes stop.
+@template
+automation agentWorkbenchRecovery {
+ context := builtin agentRecoveryContext()
+ desktop := logic agentRecoveryUsesDesktop(needs: context.needs)
+ if desktop {
+  observation := action observeSpineComputer()
+  return automation agentRecoveryConsent(receipt: observation, context: context)
+ }
+ host := action retrySpineHost()
+ return automation agentRecoveryConsent(receipt: host, context: context)
+}
+
+/// Only missing consent asks for consent. Kill switches and uncertain results are returned unchanged.
+@template
+automation agentRecoveryConsent {
+ args { receipt object! context object! }
+ needsConsent := logic agentRecoveryNeedsConsent(errorCode: args.receipt.errorCode)
+ if needsConsent {
+  summary := logic agentRecoveryExplanation(needs: args.context.needs, action: args.context.action)
+  consent := action requestSpineComputerScope(summary: summary)
+  return consent.content
+ }
+ return args.receipt.content
+}

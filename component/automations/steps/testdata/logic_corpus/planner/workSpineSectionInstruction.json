@@ -1,0 +1,229 @@
+{
+  "construct": "planner/logic.memql workSpineSectionInstruction",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "goal": "s-goal",
+          "section": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): s-goal\n\nSection: \n"
+      }
+    }
+  }
+}

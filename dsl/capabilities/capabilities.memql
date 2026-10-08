@@ -143,3 +143,17 @@ capability integration.pipelines.executeStep {
 /// Update the current pipeline run's existing GitHub check from its recorded step results.
 @sideEffect("write")
 capability integration.pipelines.reportProgress { }
+
+/// Retry the exact refused host call under the current tool invocation's authority, once.
+@sideEffect("exec")
+capability integration.agents.spineRetryHost {}
+
+/// Observe an authorized computer after a verified display mismatch; never replay the command.
+@sideEffect("read")
+capability integration.agents.spineObserveComputer { args { action string! } }
+
+/// Request consent after this invocation was refused for missing approval or scope.
+@sideEffect("write")
+capability integration.agents.spineRequestScope {
+ args { summary string! }
+}

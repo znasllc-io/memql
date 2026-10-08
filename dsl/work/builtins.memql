@@ -25,7 +25,7 @@
 @sdk
 @executor("integration.work.createGoal")
 builtin createGoal {
-  spine         string   @description("Installed Spine template name. Defaults to defaultWorkSpine. Its reachable templates and pure logic are frozen onto this run before compilation.")
+  spine         string   @description("Installed Spine template name. Defaults to defaultWorkSpine. Its templates, pure logic, scoped actions and selected phase recipes are frozen onto this run before compilation.")
   statement     string!  @description("The goal in the person's own words.")
   input         object   @description("The typed input object: the shape the chosen template's args declare.")
   accountIds    []string @description("Optional account tags -- a record of who the work is for, never a visibility scope.")

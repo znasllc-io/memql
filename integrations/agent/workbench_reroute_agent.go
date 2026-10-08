@@ -2,46 +2,17 @@
 
 package agent
 
-// WORKBENCH FIRST, THE FLEET WHEN IT CANNOT (memql#4353, design D7).
-//
-// The workbench is the default surface for headless work and stays that way.
-// What changes here is what happens when it answers `environment_mismatch`:
-// the action needs a display, a GPU, macOS tooling or files that live on the
-// user's own machine, and the workbench said so BEFORE running anything
-// instead of failing three layers down.
-//
-// THE PROHIBITION THIS IMPLEMENTS RATHER THAN REPLACES. The workbench
-// knowledge domain (integrations/knowledge/seed.go, the
-// `workbench:failureFallback` chunk) rules:
-//
-//	"Never silently switch to the user's own machine. If the workbench cannot
-//	do the job, say so and request computer-use scope through
-//	requestComputerUseScope -- the user approves on the canvas card before any
-//	tool touches their machine."
-//
-// That ruling stands, and the automatic path does not weaken it. The reroute
-// runs the call on the user's machine ONLY where the user has already
-// consented to exactly that: an approved task, and standing scope at or above
-// the tier the unmet needs imply. Where either is missing, the card is raised
-// exactly as before. So this is not "switch silently when convenient" -- it is
-// "stop making the user re-approve something they already approved".
-//
-// HOW THE DECISION IS MADE, and why it is not a second copy of the rule. The
-// reroute does not re-derive whether the user consented. It ATTEMPTS the fleet
-// dispatch, and the dispatcher's existing gate -- per-task approval, the kill
-// switch, standing scope, the classifier -- answers. Those gates run entirely
-// BEFORE any wire traffic, so an attempt that is refused touches nothing.
-// Asking the gate is what keeps one authority for the answer; re-implementing
-// its ladder here is how the tool loop and the dispatcher come to disagree
-// about what the user approved.
-//
-// A KILL SWITCH IS NOT A MISSING CARD. `kill_switch_engaged` means the user
-// deliberately turned computer use off, so it is surfaced rather than answered
-// with a card asking them to turn it back on.
+// The default fallback recipe lives in dsl/agents/automations.memql.
+// Native code owns pre-start evidence, authority, call ceilings and tool dispatch.
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
+	"github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/common"
+	"slices"
 	"strings"
 
 	agentworker "github.com/znasllc-io/memql/integrations/agent/worker"
@@ -54,118 +25,161 @@ const (
 	rerouteScopeTool = "requestComputerUseScope"
 )
 
-// rerouteWorkbenchMismatch inspects a workbenchHost result and, when it is an
-// environment mismatch, either runs the call on the user's fleet or raises the
-// consent card.
-//
-// It returns the content the model should see and whether it replaced the
-// original. A result that is not a mismatch -- a success, any other failure,
-// or a tool that is not workbenchHost -- returns ("", false) and the caller
-// keeps what it had.
-func (r *Replier) rerouteWorkbenchMismatch(
-	ctx context.Context,
-	turnCtx turnContext,
-	toolName string,
-	result string,
-	args map[string]any,
-) (string, bool) {
+// rerouteWorkbenchMismatch lends the tool invocation to an installed DSL recipe.
+// The host retains the original call and the verified pre-start mismatch;
+// workflow arguments can neither invent that evidence nor change the call.
+func (r *Replier) rerouteWorkbenchMismatch(ctx context.Context, turnCtx turnContext, toolName, result string, args map[string]any) (string, bool) {
 	if toolName != "workbenchHost" || r == nil || r.stamper == nil {
 		return "", false
 	}
-	plan, ok := planWorkbenchReroute(result, args, turnCtx)
-	if !ok {
+	plan, eligible := planWorkbenchReroute(result, args, turnCtx)
+	if !eligible {
 		return "", false
 	}
-	mismatch, action, requireLabels := plan.Mismatch, plan.Action, plan.RequireLabels
-
-	r.logger.Info("agent: workbench reported an environment mismatch; trying the fleet",
-		"action", action,
-		"unmet_needs", mismatch.UnmetNeeds,
-		"require_labels", requireLabels,
-		"plan_id", turnCtx.RunId,
-	)
-
-	fleetArgs := plan.FleetArgs
-	fleetResult, err := r.stamper.ExecuteToolByName(
-		agentToolCallContext(ctx, rerouteFleetTool, turnCtx), rerouteFleetTool, fleetArgs)
+	s := &toolRecoveryScope{plan: plan, turn: turnCtx, original: result,
+		execute: r.stamper.ExecuteToolByName}
+	value, err := s.run(ctx, nil)
 	if err != nil {
-		// The fleet tool itself failed to execute -- not a refusal, an error.
-		// Leave the workbench's own mismatch as the answer: it is the more
-		// useful one, and it already tells the model what the action needs.
-		r.logger.Warn("agent: the fleet dispatch failed to execute after a workbench mismatch",
-			"error", err)
-		return "", false
+		r.logger.Warn("agent: tool recovery stopped", "error", err, "run_id", turnCtx.RunId)
+		// A transport error after dispatch is an UNKNOWN outcome. Never hide it
+		// behind the earlier workbench refusal, which proved only that first call
+		// did not start, and could invite a duplicate effect on the next turn.
+		code := "recovery_unavailable"
+		if s.attempted {
+			code = "tool_outcome_unknown"
+		}
+		b, _ := json.Marshal(map[string]any{"ok": false, "errorCode": code, "errorMessage": err.Error()})
+		return string(b), true
 	}
-
-	code := rerouteErrorCode(fleetResult)
-	if code != "denied_no_per_task_approval" && code != "denied_by_scope" {
-		// Ran, or failed for a reason a card cannot fix. Either way this is
-		// the answer.
-		return fleetResult, true
-	}
-
-	// NO CONSENT YET. Raise the card, exactly as the corpus prescribes, and
-	// tell the model to end its turn -- the user's Allow dispatches a fresh
-	// one.
-	scope := plan.RequestedScope
-	cardArgs := plan.CardArgs
-	cardResult, cardErr := r.stamper.ExecuteToolByName(
-		agentToolCallContext(ctx, rerouteScopeTool, turnCtx), rerouteScopeTool, cardArgs)
-	if cardErr != nil {
-		r.logger.Warn("agent: could not raise the consent card after a workbench mismatch",
-			"error", cardErr)
-		return "", false
-	}
-	r.logger.Info("agent: raised the computer-use consent card after a workbench mismatch",
-		"requested_scope", scope, "unmet_needs", mismatch.UnmetNeeds)
-	return cardResult, true
+	return value, value != result
 }
 
-// rerouteCardSummary is the human sentence on the canvas card. It says what the
-// workbench could not do, in the user's terms, because "environment_mismatch"
-// is not a thing anyone should have to read.
-func rerouteCardSummary(m workbench.EnvironmentMismatch, action string) string {
-	var b strings.Builder
-	b.WriteString("The sandboxed workbench cannot run this ")
-	if action != "" {
-		b.WriteString(action + " ")
-	}
-	b.WriteString("step: it needs ")
-	b.WriteString(describeNeeds(m.UnmetNeeds))
-	b.WriteString(".")
-	return b.String()
+type toolRecoveryScope struct {
+	plan                 workbenchReroute
+	turn                 turnContext
+	original, last       string
+	execute              func(context.Context, string, map[string]any) (string, error)
+	attempted, requested bool
+	lastErr              error
 }
 
-// describeNeeds renders the closed need set as prose.
-func describeNeeds(needs []string) string {
-	if len(needs) == 0 {
-		return "something the workbench does not provide"
+func (s *toolRecoveryScope) operations() map[string]workflowhost.Operation {
+	return map[string]workflowhost.Operation{
+		"agentRecoveryContext": func(context.Context, map[string]any) (any, error) {
+			needs := make([]any, len(s.plan.Mismatch.UnmetNeeds))
+			for i, need := range s.plan.Mismatch.UnmetNeeds {
+				needs[i] = need
+			}
+			return map[string]any{"action": s.plan.Action, "needs": needs,
+				"requestedScope": s.plan.RequestedScope, "original": s.original}, nil
+		},
+		"integration.agents.spineRetryHost": func(ctx context.Context, _ map[string]any) (any, error) {
+			return s.attempt(ctx, rerouteFleetTool, s.plan.FleetArgs)
+		},
+		"integration.agents.spineObserveComputer": func(ctx context.Context, args map[string]any) (any, error) {
+			if !slices.Contains(s.plan.Mismatch.UnmetNeeds, workbench.NeedDisplay) {
+				return nil, fmt.Errorf("computer observation requires a verified display mismatch")
+			}
+			// This observes the UI for the next model turn. It never translates a
+			// refused shell command into invented clicks or repeats a completed effect.
+			observation := getRecoveryObservation(args)
+			if observation == "" {
+				return nil, fmt.Errorf("computer recovery observation must be window_list or display_info")
+			}
+			s.plan.RequestedScope = "observe"
+			s.plan.CardArgs["requestedScope"] = "observe"
+			s.plan.CardArgs["intent"] = observation
+			return s.attempt(ctx, "workerComputer", map[string]any{
+				"action": observation, "args": map[string]any{}, "requireLabels": s.plan.RequireLabels,
+				"agentId": s.turn.AgentId, "ownerUserId": s.turn.OwnerUserId, "runId": s.turn.RunId,
+			})
+		},
+		"integration.agents.spineRequestScope": func(ctx context.Context, args map[string]any) (any, error) {
+			code := rerouteErrorCode(s.last)
+			if s.lastErr != nil || !s.attempted || s.requested || (code != "denied_no_per_task_approval" && code != "denied_by_scope") {
+				return nil, fmt.Errorf("scope request requires this invocation's verified consent refusal and may run once")
+			}
+			summary := strings.TrimSpace(stringFromArgs(args, "summary"))
+			if summary == "" {
+				return nil, fmt.Errorf("scope request requires a summary")
+			}
+			s.requested = true
+			s.plan.CardArgs["summary"] = summary
+			return s.call(ctx, rerouteScopeTool, s.plan.CardArgs)
+		},
 	}
-	words := make([]string, 0, len(needs))
-	for _, need := range needs {
-		switch need {
-		case workbench.NeedDisplay:
-			words = append(words, "a graphical display")
-		case workbench.NeedGPU:
-			words = append(words, "a GPU")
-		case workbench.NeedMacOSTooling:
-			words = append(words, "macOS-only tooling")
-		case workbench.NeedUserFiles:
-			words = append(words, "files that are on your own machine")
-		case workbench.UnmetNeedOS:
-			words = append(words, "a different operating system")
-		default:
-			words = append(words, need)
+}
+
+func (s *toolRecoveryScope) attempt(ctx context.Context, tool string, args map[string]any) (any, error) {
+	if s.attempted || s.lastErr != nil {
+		return nil, fmt.Errorf("tool recovery permits one attempt after a verified pre-start refusal")
+	}
+	s.attempted = true
+	return s.call(ctx, tool, args)
+}
+
+func (s *toolRecoveryScope) call(ctx context.Context, tool string, args map[string]any) (any, error) {
+	result, err := s.execute(agentToolCallContext(ctx, tool, s.turn), tool, args)
+	if err == nil && tool == "workerComputer" {
+		// The original workbench call did not execute. An observation is evidence
+		// for a subsequent decision, never a receipt for the refused command.
+		var receipt map[string]any
+		if json.Unmarshal([]byte(result), &receipt) == nil && receipt != nil {
+			receipt["recovery"] = map[string]any{"kind": "computer_observation", "originalActionExecuted": false, "originalAction": s.plan.Action}
+			encoded, encodeErr := json.Marshal(receipt)
+			if encodeErr != nil {
+				return nil, encodeErr
+			}
+			result = string(encoded)
 		}
 	}
-	switch len(words) {
-	case 1:
-		return words[0]
-	case 2:
-		return words[0] + " and " + words[1]
-	default:
-		return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
+	s.last, s.lastErr = result, err
+	if err != nil {
+		return nil, err
 	}
+	return map[string]any{"content": result, "errorCode": rerouteErrorCode(result)}, nil
+}
+
+func (s *toolRecoveryScope) run(ctx context.Context, source workflowhost.SourceLoader) (string, error) {
+	ops := s.operations()
+	var snapshot *workflowhost.Snapshot
+	var err error
+	contract := "agent.tool-recovery/1"
+	if run, ok := common.RunFromContext(ctx); ok && run.Spine != nil {
+		snapshot, err = workflowhost.SnapshotFromMap(run.Spine)
+		if err != nil {
+			return "", err
+		}
+		if len(snapshot.Entries) > 0 {
+			contract = work.SpineContract
+		} else {
+			snapshot = nil
+		}
+	}
+	if snapshot == nil {
+		snapshot, err = workflowhost.Capture("agentWorkbenchRecovery", contract, source, ops)
+	}
+	if err != nil {
+		return "", err
+	}
+	out, err := workflowhost.RunSnapshotEntry(ctx, snapshot, contract, snapshot.PhaseEntry("agentWorkbenchRecovery"), nil, workflowhost.Options{Operations: ops})
+	if s.lastErr != nil {
+		return "", s.lastErr
+	}
+	if err != nil {
+		return "", err
+	}
+	value, ok := out.(string)
+	// A recipe chooses actions, not fabricated tool evidence. Once a dispatch
+	// happened its actual result is what the model must see.
+	expected := s.original
+	if s.attempted {
+		expected = s.last
+	}
+	if !ok || value != expected {
+		return "", fmt.Errorf("tool recovery must return its actual final tool result")
+	}
+	return value, nil
 }
 
 // rerouteErrorCode pulls errorCode out of a worker tool result. An unparseable
@@ -237,7 +251,7 @@ func planWorkbenchReroute(result string, args map[string]any, turnCtx turnContex
 			"args":          inner,
 			"agentId":       turnCtx.AgentId,
 			"ownerUserId":   turnCtx.OwnerUserId,
-			"planId":        turnCtx.RunId,
+			"runId":         turnCtx.RunId,
 			"requireLabels": requireLabels,
 			// The routing record's answer to "why did this run on the laptop".
 			"reroutedFrom": agentworker.ReroutedFromWorkbench,
@@ -245,13 +259,23 @@ func planWorkbenchReroute(result string, args map[string]any, turnCtx turnContex
 		CardArgs: map[string]any{
 			"intent":         action,
 			"requestedScope": scope,
-			"summary":        rerouteCardSummary(mismatch, action),
-			"agentId":        turnCtx.AgentId,
-			"ownerUserId":    turnCtx.OwnerUserId,
-			"partitionId":    turnCtx.PartitionId,
+
+			"agentId":     turnCtx.AgentId,
+			"ownerUserId": turnCtx.OwnerUserId,
+			"partitionId": turnCtx.PartitionId,
 			// The card names the requirement, so the user's Allow visibly
 			// covers a SET of machines rather than appearing to name one.
 			"requireLabels": requireLabels,
 		},
 	}, true
+}
+
+// The current agent tool conversation is text-based. Structured desktop facts
+// are usable observations; passing screenshot bytes as text would not be vision.
+func getRecoveryObservation(args map[string]any) string {
+	action, _ := args["action"].(string)
+	if action == "window_list" || action == "display_info" {
+		return action
+	}
+	return ""
 }

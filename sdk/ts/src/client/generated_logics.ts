@@ -47,6 +47,67 @@ QueryClient.prototype.accountDeletionSweep = function (this: QueryClient, args: 
   return this.executeNamed("accountDeletionSweep", buildAccountDeletionSweep(args), opts);
 };
 
+/** Human wording for the bounded recovery consent card. */
+export interface AgentRecoveryExplanationArgs {
+}
+
+export function buildAgentRecoveryExplanation(args: AgentRecoveryExplanationArgs): string {
+  void args;
+  return "logic agentRecoveryExplanation()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    agentRecoveryExplanation(args?: AgentRecoveryExplanationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.agentRecoveryExplanation = function (this: QueryClient, args: AgentRecoveryExplanationArgs = {} as AgentRecoveryExplanationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("agentRecoveryExplanation", buildAgentRecoveryExplanation(args), opts);
+};
+
+/** Only a verified consent refusal is a reason to ask for access. */
+export interface AgentRecoveryNeedsConsentArgs {
+  errorCode: string;
+}
+
+export function buildAgentRecoveryNeedsConsent(args: AgentRecoveryNeedsConsentArgs): string {
+  const parts: string[] = [];
+  parts.push("errorCode: " + renderMemQLValue(args.errorCode));
+  return "logic agentRecoveryNeedsConsent(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    agentRecoveryNeedsConsent(args: AgentRecoveryNeedsConsentArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.agentRecoveryNeedsConsent = function (this: QueryClient, args: AgentRecoveryNeedsConsentArgs = {} as AgentRecoveryNeedsConsentArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("agentRecoveryNeedsConsent", buildAgentRecoveryNeedsConsent(args), opts);
+};
+
+/** A display-only mismatch benefits from observing the UI. Other needs retain the original host call. */
+export interface AgentRecoveryUsesDesktopArgs {
+  needs: string[];
+}
+
+export function buildAgentRecoveryUsesDesktop(args: AgentRecoveryUsesDesktopArgs): string {
+  const parts: string[] = [];
+  parts.push("needs: " + renderMemQLValue(args.needs));
+  return "logic agentRecoveryUsesDesktop(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    agentRecoveryUsesDesktop(args: AgentRecoveryUsesDesktopArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.agentRecoveryUsesDesktop = function (this: QueryClient, args: AgentRecoveryUsesDesktopArgs = {} as AgentRecoveryUsesDesktopArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("agentRecoveryUsesDesktop", buildAgentRecoveryUsesDesktop(args), opts);
+};
+
 /** Decides whether to create the cluster row on first startup (ADR S2.1 pure logic, #2235). Reads existingCluster() and returns one boolean -- true only when no cluster row exists yet AND this node is the bff (both idempotency guards). The calling automation gates the v1:cluster:cluster create on `decide == true`; the database and identity-provider creates are gated on clusterInfraRefresh instead (memql#4766), the idp create additionally requiring an identityProvider block in the startup envelope. */
 export interface BootstrapClusterArgs {
   event: Record<string, unknown>;
@@ -628,6 +689,44 @@ QueryClient.prototype.usersDueDeletionReminder = function (this: QueryClient, ar
   return this.executeNamed("usersDueDeletionReminder", buildUsersDueDeletionReminder(args), opts);
 };
 
+/** Choose a localized remedy; a retry never restores a consumed budget or erases completed effects. */
+export interface WorkSpineRecoveryActArgs {
+}
+
+export function buildWorkSpineRecoveryAct(args: WorkSpineRecoveryActArgs): string {
+  void args;
+  return "logic workSpineRecoveryAct()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSpineRecoveryAct(args?: WorkSpineRecoveryActArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSpineRecoveryAct = function (this: QueryClient, args: WorkSpineRecoveryActArgs = {} as WorkSpineRecoveryActArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSpineRecoveryAct", buildWorkSpineRecoveryAct(args), opts);
+};
+
+/** Explain which mandatory validator refused a proposed replan. */
+export interface WorkSpineReplanRefusalArgs {
+}
+
+export function buildWorkSpineReplanRefusal(args: WorkSpineReplanRefusalArgs): string {
+  void args;
+  return "logic workSpineReplanRefusal()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSpineReplanRefusal(args?: WorkSpineReplanRefusalArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSpineReplanRefusal = function (this: QueryClient, args: WorkSpineReplanRefusalArgs = {} as WorkSpineReplanRefusalArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSpineReplanRefusal", buildWorkSpineReplanRefusal(args), opts);
+};
+
 /** Value-only routing; classification and effects remain in the enclosing Spine. */
 export interface WorkSpineRouteArgs {
   triage: Record<string, unknown>;
@@ -647,6 +746,25 @@ declare module "./query.js" {
 
 QueryClient.prototype.workSpineRoute = function (this: QueryClient, args: WorkSpineRouteArgs = {} as WorkSpineRouteArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workSpineRoute", buildWorkSpineRoute(args), opts);
+};
+
+/** Reusable section instruction policy, shared by inline and cataloguable live sections. */
+export interface WorkSpineSectionInstructionArgs {
+}
+
+export function buildWorkSpineSectionInstruction(args: WorkSpineSectionInstructionArgs): string {
+  void args;
+  return "logic workSpineSectionInstruction()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workSpineSectionInstruction(args?: WorkSpineSectionInstructionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workSpineSectionInstruction = function (this: QueryClient, args: WorkSpineSectionInstructionArgs = {} as WorkSpineSectionInstructionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workSpineSectionInstruction", buildWorkSpineSectionInstruction(args), opts);
 };
 
 /** Every app session nobody is holding, judged by TWO cutoffs.

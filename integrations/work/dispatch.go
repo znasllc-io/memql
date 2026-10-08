@@ -714,6 +714,10 @@ func (i *Integration) OpenDirectGoal(ctx context.Context, g DirectGoal) (goalId,
 		g.TriggeredBy = "direct"
 	}
 
+	spine, err := goalSpine(ctx, owner)
+	if err != nil {
+		return "", "", err
+	}
 	st := i.store()
 	now := i.clock().UTC()
 	goalId = newRowId(goalConcept)
@@ -764,6 +768,7 @@ func (i *Integration) OpenDirectGoal(ctx context.Context, g DirectGoal) (goalId,
 	}
 
 	if err := st.createRunRow(scoped, runSeed{
+		Spine:              spine,
 		ExecutionAuthority: authority,
 		RunId:              runId,
 		GoalId:             goalId,

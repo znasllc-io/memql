@@ -1,0 +1,261 @@
+{
+  "construct": "work/logic.memql workSpineRecoveryAct",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "hasGoal": true,
+          "maxRetries": 3,
+          "retriesSpent": 3,
+          "symptom": "s-symptom"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ask"
+      }
+    }
+  }
+}

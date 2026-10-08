@@ -501,6 +501,7 @@ func (i *Integration) serveRemedy(remedy Remedy, kind, runId, owner, since strin
 	}
 	stepKey, reason := rowString(waiting, "subject"), rowString(waiting, "reason")
 	rc := common.RunContext{
+		Spine: rowMap(run, "spine"),
 		RunId: runId, GoalId: rowString(run, "goalId"), OwnerUserId: owner,
 		Mode: rowString(run, "mode"), ReplayPolicy: rowString(run, "replayPolicy"),
 		Routing: common.RouteChoiceFrom(run["routing"]),

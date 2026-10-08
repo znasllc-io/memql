@@ -1,0 +1,77 @@
+{
+  "automation": "planner/automations.memql workSpineDraftProgram",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.workSpineDraftProgram"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "spineDraftFacts"
+          },
+          {
+            "args": {
+              "inputHeading": "\n\nGoal input (JSON):\n",
+              "kind": "answer"
+            },
+            "kind": "builtin",
+            "name": "spineDraftAppend"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "inputHeading": "\n\nGoal input (JSON):\n",
+              "kind": "answer"
+            },
+            "builtin": "spineDraftAppend"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.workSpineDraftProgram"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "spineDraftFacts"
+          },
+          {
+            "args": {
+              "inputHeading": "\n\nGoal input (JSON):\n",
+              "kind": "answer"
+            },
+            "kind": "builtin",
+            "name": "spineDraftAppend"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "inputHeading": "\n\nGoal input (JSON):\n",
+              "kind": "answer"
+            },
+            "builtin": "spineDraftAppend"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

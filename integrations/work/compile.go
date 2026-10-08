@@ -128,6 +128,7 @@ func (i *Integration) pendingCompile(ctx context.Context, runId string) (Compile
 	}
 	req.StartedAt, _ = time.Parse(time.RFC3339Nano, rowString(run, "startedAt"))
 	rc = common.RunContext{
+		Spine: rowMap(run, "spine"),
 		RunId: runId, GoalId: goalId, OwnerUserId: req.OwnerUserId,
 		Mode: rowString(run, "mode"), ReplayPolicy: rowString(run, "replayPolicy"),
 		SourceRunId: rowString(run, "forkedFromRunId"), ForkAtStepKey: rowString(run, "forkAtStepKey"),

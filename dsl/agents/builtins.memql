@@ -285,3 +285,7 @@ builtin agentFactoryExtend {
 builtin agentFactoryCreate {
 
 }
+
+/// Verified facts about the current tool's pre-start refusal, available only in its recovery scope.
+@executor("integration.agents.agentRecoveryContext")
+builtin agentRecoveryContext {}

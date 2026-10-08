@@ -185,7 +185,15 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"partitionId": "string (required) -- space the plan lives in (auto-stamped)",
 			},
 		},
-	}, workflowhost.ScopedCapabilities((&factoryScope{}).operations())...)
+	}, workflowhost.ScopedCapabilities(factoryAndRecoveryOperations())...)
+}
+
+func factoryAndRecoveryOperations() map[string]workflowhost.Operation {
+	ops := (&factoryScope{}).operations()
+	for _, name := range []string{"agentRecoveryContext", "spineRetryHost", "spineObserveComputer", "spineRequestScope"} {
+		ops[name] = nil
+	}
+	return ops
 }
 
 // envelopeConcept is the namespace used for the MemoryNode this

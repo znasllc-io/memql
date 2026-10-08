@@ -252,3 +252,48 @@ builtin spinePersist {
 builtin spineRefuse {
  message string!
 }
+
+/// Validated goal and section facts inside the deterministic draft encoder.
+@executor("integration.planner.spineDraftFacts")
+builtin spineDraftFacts {}
+
+/// Encode one instruction of the installed execution recipe; this performs no model call or effect.
+@executor("integration.planner.spineDraftAppend")
+@args(profile="object")
+builtin spineDraftAppend {
+ kind string!
+ section string
+ instruction string
+ inputHeading string
+ sectionsHeading string
+}
+
+/// Bounded operation inside the claimed remedy scope.
+@executor("integration.planner.spineRemedyContext")
+builtin spineRemedyContext {  }
+
+/// Bounded operation inside the claimed remedy scope.
+@executor("integration.planner.spineRemedyGenerate")
+@args(profile="object")
+builtin spineRemedyGenerate { prompt string! }
+
+/// Bounded operation inside the claimed remedy scope.
+@executor("integration.planner.spineRemedyValidate")
+builtin spineRemedyValidate {  }
+
+/// Bounded operation inside the claimed remedy scope.
+@executor("integration.planner.spineRemedyPersist")
+builtin spineRemedyPersist {  }
+
+/// Bounded operation inside the claimed remedy scope.
+@executor("integration.planner.spineRemedyInstall")
+builtin spineRemedyInstall {  }
+
+/// Bounded operation inside the claimed remedy scope.
+@executor("integration.planner.spineRemedyRepair")
+builtin spineRemedyRepair {  }
+
+/// Bounded operation inside the claimed remedy scope.
+@executor("integration.planner.spineRemedyAsk")
+@args(profile="object")
+builtin spineRemedyAsk { reason string! }

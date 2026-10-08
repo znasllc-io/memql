@@ -278,7 +278,8 @@ func TestApprovedTrainingWritesNoPlanRow(t *testing.T) {
 		t.Fatalf("decideApproval: %v", err)
 	}
 	for _, c := range eng.recorded() {
-		if strings.Contains(strings.ToLower(c.Query), "plan") {
+		// Inspect the operation, not the frozen Spine source carried as data.
+		if strings.Contains(strings.ToLower(c.Name()), "plan") {
 			t.Errorf("a plan-shaped call reached the engine: %s", c.Query)
 		}
 	}

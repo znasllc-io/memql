@@ -361,7 +361,7 @@ func TestReadSectionAutomationIsTheOneReading(t *testing.T) {
 	sp := sectionPlan{Name: "workRun_x_summary", Spec: sectionSpec{Label: "summary", Instruction: "Summarise.", Purpose: purpose, Inputs: []string{"team", "month"}}}
 	sig := work.SectionSignature(workSection(sp))
 	ls := &liveSection{Automation: sectionAutomationNameFor(sig, "summary"), Signature: sig, Inputs: []string{"month", "team"}}
-	read, err := ReadSectionAutomation(sectionAutomationSource(ls, "agent-1", sp.Spec))
+	read, err := ReadSectionAutomation(sectionAutomationSource(ls, "agent-1", sp.Spec, "Section instruction"))
 	if err != nil {
 		t.Fatalf("ReadSectionAutomation: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestReadSectionAutomationIsTheOneReading(t *testing.T) {
 		t.Fatalf("read back %+v, want %s with purpose %q and signature %s", read, ls.Automation, purpose, sig)
 	}
 
-	renamed := strings.ReplaceAll(sectionAutomationSource(ls, "agent-1", sp.Spec), ls.Automation, SectionAutomationPrefix+"00000000_summary")
+	renamed := strings.ReplaceAll(sectionAutomationSource(ls, "agent-1", sp.Spec, "Section instruction"), ls.Automation, SectionAutomationPrefix+"00000000_summary")
 	if _, err := ReadSectionAutomation(renamed); err == nil || !strings.Contains(err.Error(), "signature") {
 		t.Fatalf("a name that does not carry its signature was read: %v", err)
 	}

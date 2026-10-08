@@ -52,6 +52,7 @@ package automations
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -59,6 +60,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/airoute"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -180,7 +182,10 @@ func (j *workJournal) classifyAndAct(ctx context.Context, exec *AutomationExecut
 		sig.RetriesSpent, sig.MaxRetries = budget.spent, budget.max
 	}
 
-	act := work.ActFor(symptom, sig.RetriesSpent, sig.MaxRetries)
+	act, backoff, policyOK := j.recoveryDecision(ctx, symptom, budget)
+	if !policyOK {
+		return false
+	}
 	if (act == work.ActReplan || act == work.ActRepair) && budget.goalId == "" {
 		// A RUN WITH NO GOAL HAS NOTHING EITHER REMEDY CAN ACT ON. A re-plan
 		// installs a new template for a goal's run, and a repair is a re-run,
@@ -198,7 +203,7 @@ func (j *workJournal) classifyAndAct(ctx context.Context, exec *AutomationExecut
 			"kind":     WaitKindRetry,
 			"subject":  stepKey,
 			"since":    rfc3339(now),
-			"resumeAt": rfc3339(now.Add(retryBackoff)),
+			"resumeAt": rfc3339(now.Add(backoff)),
 			"reason":   evidence.Reason,
 			"ruleId":   evidence.RuleId,
 		}, budget.spending())
@@ -241,6 +246,55 @@ func (j *workJournal) classifyAndAct(ctx context.Context, exec *AutomationExecut
 			"source", evidence.Source, "ruleId", evidence.RuleId)
 	}
 	return true
+}
+
+// The interpreter is supplied through the engine to avoid an automations ->
+// workflowhost import cycle. The policy gets facts, never a write capability.
+type recoveryWorkflowRunner interface {
+	RunScopedSnapshot(context.Context, map[string]any, string, string, map[string]any, map[string]memql.WorkflowOperation) (any, error)
+}
+
+func (j *workJournal) recoveryDecision(ctx context.Context, symptom work.Symptom, budget runRetryBudget) (work.Act, time.Duration, bool) {
+	runner, wired := j.exec.(recoveryWorkflowRunner)
+	if !wired {
+		// Journal-only embedders have no DSL interpreter. Keep their original
+		// bounded behavior; every engine-hosted execution uses the recipe.
+		return work.ActFor(symptom, budget.spent, budget.max), retryBackoff, true
+	}
+	run, _ := common.RunFromContext(ctx)
+	value, err := runner.RunScopedSnapshot(ctx, run.Spine, work.SpineContract, "workSpineRecovery", map[string]any{
+		"symptom": string(symptom), "retriesSpent": budget.spent, "maxRetries": budget.max, "hasGoal": budget.goalId != "",
+	}, nil)
+	if errors.Is(err, memql.ErrScopedSnapshotUnwired) && len(run.Spine) == 0 {
+		// An unpinned journal-only embedder retains its original bounded behavior.
+		// A pinned run must never silently substitute a different recovery policy.
+		return work.ActFor(symptom, budget.spent, budget.max), retryBackoff, true
+	}
+	if err != nil {
+		j.warn("workSpineRecovery", err)
+		return "", 0, false
+	}
+	decision, ok := value.(map[string]any)
+	if !ok {
+		return "", 0, false
+	}
+	act := work.Act(stringField(decision, "act"))
+	switch act {
+	case work.ActRetry, work.ActRepair, work.ActReplan, work.ActHeal, work.ActAsk:
+	default:
+		return "", 0, false
+	}
+	// Policy cannot replenish a budget, reinterpret a terminal failure, or
+	// turn an unknown/effectful outcome into replay permission. Resume still
+	// validates effect evidence on the execution replica.
+	if work.SpendsRetry(act) && budget.spent >= budget.max {
+		act = work.ActAsk
+	}
+	seconds := intField(decision, "retrySeconds")
+	if seconds < 1 || seconds > 3600 {
+		return "", 0, false
+	}
+	return act, time.Duration(seconds) * time.Second, true
 }
 
 // failTerminally closes the run as `failed` with the code naming why another

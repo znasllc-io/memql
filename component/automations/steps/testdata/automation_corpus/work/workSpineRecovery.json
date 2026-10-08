@@ -1,0 +1,55 @@
+{
+  "automation": "work/automations.memql workSpineRecovery",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "hasGoal": true,
+            "maxRetries": 3,
+            "retriesSpent": 3,
+            "symptom": "s-symptom"
+          },
+          "topic": "automation.invocation.workSpineRecovery"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "act": "ask",
+            "retrySeconds": 30
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "hasGoal": true,
+            "maxRetries": 3,
+            "retriesSpent": 3,
+            "symptom": "s-symptom"
+          },
+          "topic": "automation.invocation.workSpineRecovery"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "act": "ask",
+            "retrySeconds": 30
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

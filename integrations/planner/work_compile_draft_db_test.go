@@ -184,6 +184,10 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 	t.Run("navigation adopts Ask variables on a separate receiver", func(t *testing.T) {
 		bridge := &draftDBCompiler{engine: plannerEngine, triage: map[string]any{"intent": "task", "complexity": "trivial", "requiresFile": false, "workload": "lookup", "acknowledgement": "I’ll open Deployables.", "navigation": map[string]any{"app": "deployables", "section": "deployables"}}}
 		req := CompileRequest{GoalId: "v1:work:goal:nav", RunId: "v1:work:run:" + id.NewShortId(), OwnerUserId: "v1:identity:user:draft-owner", Statement: "Open Deployables", Input: map[string]any{"conversation": []any{map[string]any{"role": "user", "content": "Open Deployables"}}}}
+		req.Spine, err = workintegration.CaptureSpine("")
+		if err != nil {
+			t.Fatal(err)
+		}
 		out, err := (&PlannerAgentLoop{engine: bridge, logger: testLogger()}).CompileGoalForRun(ctx, req, nil, bridge)
 		if err != nil {
 			t.Fatal(err)
@@ -201,13 +205,13 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = receiver.Execute(auth.ContextWithInternalOrigin(ctx), "mutation createWorkRun("+encodeArgs(map[string]any{"runId": req.RunId, "goalId": req.GoalId, "automationName": out.AutomationName, "templateFingerprint": out.TemplateFingerprint, "status": "running", "input": req.Input, "variables": req.Input, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})+")")
+		_, err = receiver.Execute(auth.ContextWithInternalOrigin(ctx), "mutation createWorkRun("+encodeArgs(map[string]any{"spine": req.Spine.Map(), "runId": req.RunId, "goalId": req.GoalId, "automationName": out.AutomationName, "templateFingerprint": out.TemplateFingerprint, "status": "running", "input": req.Input, "variables": req.Input, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})+")")
 		if err != nil {
 			t.Fatal(err)
 		}
 		executor := automations.NewExecutor(automations.ExecutorOptions{Engine: receiver, Logger: testLogger(), StepRegistry: steps.NewRegistry()})
 		defer executor.Close()
-		executionCtx := common.ContextWithRun(ctx, common.RunContext{RunId: req.RunId, GoalId: req.GoalId, OwnerUserId: req.OwnerUserId})
+		executionCtx := common.ContextWithRun(ctx, common.RunContext{RunId: req.RunId, GoalId: req.GoalId, OwnerUserId: req.OwnerUserId, Spine: req.Spine.Map()})
 		execution, err := executor.ExecuteAdopted(executionCtx, automation, automations.RunAdoption{RunId: req.RunId, Variables: req.Input})
 		if err != nil || execution.Status != "completed" {
 			t.Fatalf("navigation failed: %+v %v", execution, err)
@@ -229,6 +233,10 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 			}
 			bridge := &draftDBCompiler{engine: plannerEngine, triage: triage}
 			req := CompileRequest{GoalId: "v1:work:goal:draft-goal", RunId: "v1:work:run:" + id.NewShortId(), OwnerUserId: "v1:identity:user:draft-owner", Statement: "Create and save the requested deliverable", Input: map[string]any{"filename": "draft.md", "region": "EMEA"}}
+			req.Spine, err = workintegration.CaptureSpine("")
+			if err != nil {
+				t.Fatal(err)
+			}
 			out, err := (&PlannerAgentLoop{engine: bridge, logger: testLogger()}).CompileGoalForRun(ctx, req, nil, bridge)
 			if err != nil {
 				t.Fatal(err)
@@ -257,7 +265,7 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 				t.Fatal("receiver template fingerprint differs")
 			}
 			_, err = receiver.Execute(auth.ContextWithInternalOrigin(ctx), "mutation createWorkRun("+encodeArgs(map[string]any{
-				"runId": req.RunId, "goalId": req.GoalId, "automationName": out.AutomationName,
+				"spine": req.Spine.Map(), "runId": req.RunId, "goalId": req.GoalId, "automationName": out.AutomationName,
 				"templateFingerprint": out.TemplateFingerprint, "templateConstructId": out.ConstructId,
 				"templateVersion": out.TemplateVersion, "input": req.Input, "variables": req.Input,
 				"status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano),
@@ -361,6 +369,10 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 					}
 					req.RunId = "v1:work:run:" + id.NewShortId()
 					req.Statement = "Create a \"Marvel\" report and save it in the Library.\nInclude the literal path C:\\notes\\hero.txt and the characters \\n."
+					req.Spine, err = workintegration.CaptureSpine("")
+					if err != nil {
+						t.Fatal(err)
+					}
 					out, err := (&PlannerAgentLoop{engine: bridge, logger: testLogger()}).CompileGoalForRun(ctx, req, nil, bridge)
 					if err != nil {
 						t.Fatal(err)
@@ -374,7 +386,7 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 						t.Fatal(err)
 					}
 					_, err = receiver.Execute(auth.ContextWithInternalOrigin(ctx), "mutation createWorkRun("+encodeArgs(map[string]any{
-						"runId": req.RunId, "goalId": req.GoalId, "automationName": out.AutomationName,
+						"spine": req.Spine.Map(), "runId": req.RunId, "goalId": req.GoalId, "automationName": out.AutomationName,
 						"templateFingerprint": out.TemplateFingerprint, "templateConstructId": out.ConstructId,
 						"templateVersion": out.TemplateVersion, "input": req.Input, "variables": req.Input,
 						"status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano),

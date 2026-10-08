@@ -37,7 +37,6 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
-	"github.com/znasllc-io/memql/component/memql"
 	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
 
@@ -101,157 +100,24 @@ func (r *WorkRemedy) Replan(ctx context.Context, runId, ownerUserId, stepKey, re
 	}
 	rc, err := r.reader.LoadReplanContext(ctx, ownerUserId, runId, stepKey)
 	if err != nil {
-		r.warn("work remedy: could not read the run's replan context; the run stays parked rather than re-planning against an empty prefix", runId, err)
+		r.warn("work remedy: could not read the run's replan context; the run stays parked", runId, err)
 		return false
 	}
 	failedKey := strings.TrimSpace(stepKey)
 	if failedKey == "" && rc.FailedStep != nil {
 		failedKey, _ = rc.FailedStep["key"].(string)
 	}
-	if rc.FailedStep == nil || failedKey == "" {
-		return r.ask(ctx, ownerUserId, runId, stepKey, workintegration.RemedyReplan,
-			"This run was to be re-planned from the step it failed at, and it has no failed step to re-plan from.")
-	}
-	if strings.TrimSpace(rc.Statement) == "" {
-		return r.ask(ctx, ownerUserId, runId, failedKey, workintegration.RemedyReplan,
-			"This run's goal could not be read, so there is no plan to re-plan from its failed step.")
-	}
-	sandbox, ok := r.loop.engine.(authoringSandbox)
-	if !ok || sandbox == nil {
-		// Nothing was spent, and a planner that has Gate 1 can serve this:
-		// parked, to be served again once the claim lapses. A draft that has
-		// not passed Gate 1 must not be run.
-		r.warn("work remedy: this node has no Gate 1 sandbox, so it cannot install a re-planned draft; the run stays parked", runId, fmt.Errorf("no sandbox"))
-		return false
-	}
-
-	data := map[string]any{
-		"statement":      rc.Statement,
-		"completedSteps": rc.CompletedSteps,
-		"failedStep":     rc.FailedStep,
-		// The run's arguments, by name: the new version declares exactly
-		// these, because resume binds the run's stored values into them.
-		"inputKeys": inputKeys(rc.Variables),
-		"now":       r.clock().UTC().Format(time.RFC3339),
-	}
-	if trimmed := strings.TrimSpace(reason); trimmed != "" {
-		data["remainingGoal"] = trimmed
-	}
-
-	// replanGap declares @level("reasoning"), so the router resolves it at the
-	// level the prompt asked for and the shipped reasoningParks rule decides
-	// what happens when no door can serve it. Nothing here names a model. The
-	// call belongs to the run -- integrations/work put it on the context -- so
-	// it is journaled on the run and charged to its ceilings; it is made as
-	// the planner's system actor, as every authoring prompt here is.
-	out, err := r.loop.engine.InvokeAI(systemActorContext(ctx), "replanGap", data)
-	if err != nil {
-		if memql.IsProviderUnavailable(err) {
-			// No door could serve the call, so nothing was spent, and a door
-			// may open: parked, served again once the claim lapses.
-			r.warn("work remedy: no model can serve the re-plan right now; the run stays parked", runId, err)
-			return false
-		}
-		return r.ask(ctx, ownerUserId, runId, failedKey, workintegration.RemedyReplan,
-			"The re-plan for this run's failed step could not be made: "+err.Error())
-	}
-	draft, err := parseReplanDraft(out)
-	if err != nil {
-		return r.ask(ctx, ownerUserId, runId, failedKey, workintegration.RemedyReplan,
-			"The re-plan returned no plan this run can use: "+err.Error())
-	}
-	if draft.GoalAlreadyServed {
-		// A model's judgment that the work is done does not close a run as
-		// succeeded; a person who can see the completed steps does.
-		return r.ask(ctx, ownerUserId, runId, failedKey, workintegration.RemedyReplan,
-			"The re-plan found nothing left to do: it judged the completed steps already serve the goal. Retry the failed step, or abandon the run.")
-	}
-	auto, err := automations.NewLoader(automations.LoaderOptions{Logger: r.loop.logger}).CompileSource(draft.Source, "work-replan/"+runId+".memql")
-	if err != nil {
-		return r.ask(ctx, ownerUserId, runId, failedKey, workintegration.RemedyReplan,
-			"The re-planned draft does not compile: "+err.Error())
-	}
-	resumeAt, stepKeys, err := replanKeepsPrefix(auto, rc)
-	if err != nil {
-		return r.ask(ctx, ownerUserId, runId, failedKey, workintegration.RemedyReplan,
-			"The re-planned draft does not keep the completed steps where they would be served: "+err.Error())
-	}
-	// HELD TO THE RUN'S VARIABLES BEFORE IT IS PERSISTED (memql#5664). Resume
-	// binds them into the new template's args before any step runs, so a
-	// draft declaring an argument the run never had would be installed and
-	// refuse every resume of the run it was installed on.
-	if err := automations.CheckArgs(auto, rc.Variables); err != nil {
-		return r.ask(ctx, ownerUserId, runId, failedKey, workintegration.RemedyReplan,
-			"The re-planned draft asks for arguments this run was not given: "+err.Error())
-	}
-	persisted, err := r.loop.persistWorkDraft(ctx,
-		CompileRequest{RunId: runId, OwnerUserId: ownerUserId, Statement: rc.Statement},
-		CompileOutcome{},
-		authoringBundle{AutomationName: auto.Name, Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: auto.Name, Source: draft.Source}}},
-		sandbox)
-	if err != nil {
-		return r.ask(ctx, ownerUserId, runId, failedKey, workintegration.RemedyReplan,
-			"The re-planned draft could not be made this run's template: "+err.Error())
-	}
-
-	if err := r.writer.InstallReplan(ctx, ownerUserId, runId, workintegration.ReplanTemplate{
-		AutomationName:      persisted.AutomationName,
-		TemplateConstructId: persisted.ConstructId,
-		TemplateFingerprint: persisted.TemplateFingerprint,
-		TemplateVersion:     persisted.TemplateVersion,
-		StepKeys:            stepKeys,
-		ResumeAt:            resumeAt,
-		Outcome: map[string]any{
-			"replannedFrom":       failedKey,
-			"replannedAt":         r.clock().UTC().Format(time.RFC3339),
-			"prefixKept":          len(rc.CompletedSteps),
-			"abandonedAssumption": draft.AbandonedAssumption,
-		},
-	}); err != nil {
-		// The run moved on while the draft was made -- cancelled or decided --
-		// or the write failed. Either way its current state stands; the
-		// persisted draft is a validated bundle nothing runs.
-		r.warn("work remedy: could not install the re-planned template on the run", runId, err)
-		return false
-	}
-	if r.loop.logger != nil {
-		r.loop.logger.Info("work remedy: re-planned the gap from a failed step and installed the new template, keeping the completed prefix",
-			"run", runId, "step", failedKey, "prefixKept", len(rc.CompletedSteps),
-			"automation", persisted.AutomationName, "construct", persisted.ConstructId)
-	}
-	return true
+	s := &remedyScope{remedy: r, runID: runId, owner: ownerUserId, step: failedKey, reason: reason, kind: workintegration.RemedyReplan, context: rc}
+	return s.run(ctx, "workSpineReplan")
 }
 
-// Repair re-runs the failed step with the violation as guidance (spec section
-// E): the completed prefix is served, the step runs as a new version, and the
-// violation reaches its model calls as what was wrong with the previous
-// version. integrations/work writes it as a re-run request -- the one a
-// person's rerunStep writes -- so the agent serves it on that path.
-//
-// It is still mostly UNREACHABLE TODAY: the rules produce a contract symptom
-// only from Signal.PostconditionFailed, which nothing in the automations
-// executor evaluates, so a contract miss reaches here only when the
-// classifier model names one. It is served properly for when it does.
+// Repair keeps the completed prefix and binds guidance to one failed step.
 func (r *WorkRemedy) Repair(ctx context.Context, runId, ownerUserId, stepKey, violation string) bool {
 	if r == nil || r.writer == nil {
 		return false
 	}
-	if err := r.writer.RequestRepair(ctx, ownerUserId, runId, stepKey, violation); err != nil {
-		if errors.Is(err, workintegration.ErrRemedyNotWaiting) {
-			r.warn("work remedy: the run moved on before its repair could be requested", runId, err)
-			return false
-		}
-		// The step is not one this run can re-run, or the run has nothing to
-		// run again. No model was asked and asking again changes nothing, so
-		// a person decides.
-		return r.ask(ctx, ownerUserId, runId, stepKey, workintegration.RemedyRepair,
-			"The failed step could not be run again with the violation as guidance: "+err.Error())
-	}
-	if r.loop != nil && r.loop.logger != nil {
-		r.loop.logger.Info("work remedy: re-running a failed step with its contract violation as guidance",
-			"run", runId, "step", stepKey)
-	}
-	return true
+	s := &remedyScope{remedy: r, runID: runId, owner: ownerUserId, step: stepKey, reason: violation, kind: workintegration.RemedyRepair}
+	return s.run(ctx, "workSpineRepair")
 }
 
 // ask moves a run whose remedy could not be carried out onto a person's
