@@ -110,9 +110,11 @@ func buildRevisionProposal(captured map[string]any, response any) (map[string]an
 		return nil, err
 	}
 	allowed := map[string]bool{}
+	extensions := map[string]bool{}
 	for _, p := range passages {
 		for _, c := range p.Comments {
 			allowed[asString(c["id"])] = true
+			extensions[asString(c["id"])] = c["kind"] == "extend"
 		}
 	}
 	original := asString(captured["content"])
@@ -132,13 +134,19 @@ func buildRevisionProposal(captured map[string]any, response any) (map[string]an
 			return nil, fmt.Errorf("a proposed edit does not identify a unique passage in the saved document")
 		}
 		seen := map[string]bool{}
+		extensionOnly := true
 		for _, id := range edit.CommentIDs {
 			if !allowed[id] || seen[id] {
 				return nil, fmt.Errorf("a proposed edit references unknown or repeated feedback")
 			}
 			seen[id] = true
+			extensionOnly = extensionOnly && extensions[id]
 		}
 		start := strings.Index(normalized, edit.Before)
+		prefix, beforeEnd, _ := revisionChangeBounds(edit.Before, edit.After)
+		if extensionOnly && (prefix != beforeEnd || strings.TrimSpace(normalized[start+beforeEnd:]) != "") {
+			return nil, fmt.Errorf("an extension may only add content at the end of the document; existing content must remain unchanged")
+		}
 		replacements = append(replacements, located{edit, start, start + len(edit.Before)})
 	}
 	sort.SliceStable(replacements, func(a, b int) bool { return replacements[a].start < replacements[b].start })
@@ -150,14 +158,16 @@ func buildRevisionProposal(captured map[string]any, response any) (map[string]an
 		if start < cursor {
 			return nil, fmt.Errorf("the proposed changes overlap; they cannot be applied safely")
 		}
-		replacement := edit.After
-		if edit.After == edit.Before {
-			replacement = original[start:end]
-		} else if strings.Contains(original[start:end], "\r\n") || (!strings.Contains(original[start:end], "\n") && strings.Contains(original, "\r\n")) {
+		prefix, beforeEnd, afterEnd := revisionChangeBounds(edit.Before, edit.After)
+		changeStart, changeEnd := offsets[edit.start+prefix], offsets[edit.start+beforeEnd]
+		replacement := edit.After[prefix:afterEnd]
+		if strings.Contains(original[changeStart:changeEnd], "\r\n") || (!strings.Contains(original[changeStart:changeEnd], "\n") && strings.Contains(original, "\r\n")) {
 			replacement = strings.ReplaceAll(replacement, "\n", "\r\n")
 		}
 		result.WriteString(original[cursor:start])
+		result.WriteString(original[start:changeStart])
 		result.WriteString(replacement)
+		result.WriteString(original[changeEnd:end])
 		cursor = end
 		edits = append(edits, map[string]any{"startLine": strings.Count(normalized[:edit.start], "\n"), "endLine": strings.Count(normalized[:edit.end], "\n") + 1, "before": edit.Before, "after": edit.After, "reason": edit.Reason, "commentIds": edit.CommentIDs})
 	}
@@ -171,6 +181,28 @@ func buildRevisionProposal(captured map[string]any, response any) (map[string]an
 	}
 	proposal["summary"], proposal["edits"], proposal["revisedContent"] = answer.Summary, edits, result.String()
 	return proposal, nil
+}
+
+// Context only disambiguates a replacement. Copy matching context from the
+// saved bytes, including mixed line endings, rather than regenerating it from
+// model output. Keep boundaries on complete UTF-8 characters.
+func revisionChangeBounds(before, after string) (prefix, beforeEnd, afterEnd int) {
+	for prefix < len(before) && prefix < len(after) && before[prefix] == after[prefix] {
+		prefix++
+	}
+	for prefix > 0 && ((prefix < len(before) && !utf8.RuneStart(before[prefix])) || (prefix < len(after) && !utf8.RuneStart(after[prefix]))) {
+		prefix--
+	}
+	beforeEnd, afterEnd = len(before), len(after)
+	for beforeEnd > prefix && afterEnd > prefix && before[beforeEnd-1] == after[afterEnd-1] {
+		beforeEnd--
+		afterEnd--
+	}
+	for (beforeEnd < len(before) && !utf8.RuneStart(before[beforeEnd])) || (afterEnd < len(after) && !utf8.RuneStart(after[afterEnd])) {
+		beforeEnd++
+		afterEnd++
+	}
+	return
 }
 
 // Map normalized UTF-8 byte boundaries back to the original source so Windows

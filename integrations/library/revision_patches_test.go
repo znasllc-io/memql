@@ -3,6 +3,7 @@ package library
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func capturedRevision(source, quote string, start, end int) map[string]any {
@@ -75,5 +76,62 @@ func TestRevisionPatchesRefuseSelfOverlappingOccurrence(t *testing.T) {
 	_, err := buildRevisionProposal(captured, revisionAnswer{Summary: "Clarify", Edits: []revisionReplacement{{Before: "aa", After: "b", Reason: "Clarify", CommentIDs: []string{"note-1"}}}})
 	if err == nil {
 		t.Fatal("overlapping duplicate occurrences were treated as unique")
+	}
+}
+
+func TestRevisionPatchesPreserveFormattingWithoutUserReminders(t *testing.T) {
+	source := "---\r\ntitle: Workshop\n---\r\n# Activities\n\n- **Draft Sharing**: Read excerpts.\r\n- [Peer feedback](https://example.com/review): Give comments.\n\nCafé notes.\r\n"
+	captured := capturedRevision(source, "Sharing", 5, 6)
+	captured["comments"].([]any)[0].(map[string]any)["body"] = "Rename this to Draft Exchange"
+	before := strings.ReplaceAll(source, "\r\n", "\n")
+	proposal, err := buildRevisionProposal(captured, revisionAnswer{Summary: "Rename activity", Edits: []revisionReplacement{{
+		Before: before, After: strings.Replace(before, "Draft Sharing", "Draft Exchange", 1), Reason: "Rename selected activity", CommentIDs: []string{"note-1"},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := strings.Replace(source, "Draft Sharing", "Draft Exchange", 1); proposal["revisedContent"] != want {
+		t.Fatalf("formatting or unrelated bytes changed: %q", proposal["revisedContent"])
+	}
+	if err := validateRevisionResult(captured, proposal); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRevisionExtensionsCannotRewriteOrInsertInsideExistingContent(t *testing.T) {
+	source := "# Guide\n\nExisting introduction.\n\n## Last section\n\nExisting ending.\n"
+	captured := map[string]any{"content": source, "comments": []any{map[string]any{"id": "note-1", "body": "Add practice prompts", "anchor": map[string]any{"kind": "document-end", "quote": "End of document"}}}}
+	for _, tc := range []struct {
+		name, before, after string
+		allowed             bool
+	}{
+		{"append", "Existing ending.", "Existing ending.\n\n## Practice\n\nTry an example.", true},
+		{"rewrite ending", "Existing ending.", "A polished ending.\n\n## Practice\n\nTry an example.", false},
+		{"insert in middle", "Existing introduction.", "Existing introduction.\n\nTry an example.", false},
+		{"delete", "Existing introduction.", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := buildRevisionProposal(captured, revisionAnswer{Summary: "Add practice prompts", Edits: []revisionReplacement{{Before: tc.before, After: tc.after, Reason: "Practice prompts", CommentIDs: []string{"note-1"}}}})
+			if (err == nil) != tc.allowed {
+				t.Fatalf("allowed=%v, error=%v", tc.allowed, err)
+			}
+			if tc.allowed && p["revisedContent"] != strings.Replace(source, tc.before, tc.after, 1) {
+				t.Fatal("extension changed unrelated content")
+			}
+		})
+	}
+}
+
+func TestRevisionChangeBoundsStayOnUTF8Characters(t *testing.T) {
+	for _, tc := range [][2]string{{"café", "cafè"}, {"\u0080", "\u0480"}, {"😀 text", "😁 text"}, {"same", "same"}, {"", "new"}, {"old", ""}} {
+		prefix, beforeEnd, afterEnd := revisionChangeBounds(tc[0], tc[1])
+		for _, part := range []string{tc[0][:prefix], tc[0][prefix:beforeEnd], tc[0][beforeEnd:], tc[1][:prefix], tc[1][prefix:afterEnd], tc[1][afterEnd:]} {
+			if !utf8.ValidString(part) {
+				t.Fatalf("split a Unicode character in %q → %q: %d/%d/%d", tc[0], tc[1], prefix, beforeEnd, afterEnd)
+			}
+		}
+		if tc[0][:prefix]+tc[1][prefix:afterEnd]+tc[0][beforeEnd:] != tc[1] {
+			t.Fatal("changed the replacement")
+		}
 	}
 }

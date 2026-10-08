@@ -117,8 +117,13 @@ imported Markdown uses the same source, quote, context and position anchors.
 The review panel shows the original and proposed text for every affected
 location, including both ends of a move. **Compare full document** opens a
 read-only diff. **Approve & apply** resumes the same Nexus job and saves a new
-version; **Decline** keeps the document unchanged. A small rephrase preserves
-unaffected bytes. Requests can also delete, rearrange or extend content. The
+version; **Decline** keeps the document unchanged. Preservation is the default:
+people can say "Rename this to Draft Exchange" without asking to retain bold
+formatting, surrounding descriptions or other items. The DSL prompt requires
+minimal changes and a check that every difference serves the feedback. Native
+application copies unaffected bytes and matching context from the saved source;
+extension-only edits cannot rewrite existing content or insert in the middle.
+Requests can also delete, rearrange or extend content. The
 panel follows progress and refreshes a clean editor after application, while
 preserving unsaved local edits. Invalid or ambiguous AI output fails without a
 write; a failed or declined attempt can be submitted again.
