@@ -72,20 +72,9 @@ function local_image_canonical_ref() {
     printf '%s\n' "$image"
 }
 
-function import_local_image_verified() {
-    local image="$1" cluster="$2" expected="$3" nodes after node canonical listing target config ready
-    local_image_matches "$image" "$expected" || return 1
-    nodes="$(local_image_nodes "$cluster")" || return 1
-    canonical="$(local_image_canonical_ref "$image")"
-    # A tools-node import returned success after ctr reported a short read.
-    # Direct mode avoids the shared tarball; verify actual runtime state too.
-    k3d image import "$image" --cluster "$cluster" --mode direct >&2 || return 1
-    local_image_matches "$image" "$expected" || return 1
-    after="$(local_image_nodes "$cluster")" || return 1
-    if [[ "$nodes" != "$after" ]]; then
-        printf 'ERROR: Cluster nodes changed during import; retry against the current cluster.\n' >&2
-        return 1
-    fi
+function local_image_nodes_match() {
+    local image="$1" expected="$2" canonical="$3" nodes="$4"
+    local node listing target config ready
     while read -r node; do
         listing="$(docker exec "$node" ctr -n k8s.io images ls "name==${canonical}")" || return 1
         target="$(printf '%s\n' "$listing" | awk -v ref="$canonical" '$1 == ref { print $3 }')"
@@ -104,4 +93,43 @@ function import_local_image_verified() {
         fi
         printf 'INFO: Verified %s on %s (%s).\n' "$image" "$node" "$expected" >&2
     done <<< "$nodes"
+}
+
+function import_local_image_verified() {
+    local image="$1" cluster="$2" expected="$3" nodes after canonical attempt import_status
+    local attempt
+    local_image_matches "$image" "$expected" || return 1
+    nodes="$(local_image_nodes "$cluster")" || return 1
+    canonical="$(local_image_canonical_ref "$image")"
+
+    # Docker can close its socket during a direct import after copying some or
+    # all content. Reconcile the exact destination state before retrying: a
+    # failed command is adoptable only when every unchanged node has the full,
+    # unpacked content for this captured image ID. Otherwise one bounded,
+    # idempotent import retry may complete the same image transfer.
+    for attempt in 1 2; do
+        if k3d image import "$image" --cluster "$cluster" --mode direct >&2; then
+            import_status=0
+        else
+            import_status=$?
+            printf 'WARNING: k3d image import returned %s for %s; reconciling node contents.\n' "$import_status" "$image" >&2
+        fi
+
+        local_image_matches "$image" "$expected" || return 1
+        after="$(local_image_nodes "$cluster")" || return 1
+        if [[ "$nodes" != "$after" ]]; then
+            printf 'ERROR: Cluster nodes changed during import; retry against the current cluster.\n' >&2
+            return 1
+        fi
+        if local_image_nodes_match "$image" "$expected" "$canonical" "$nodes"; then
+            if [[ "$import_status" != 0 ]]; then
+                printf 'INFO: Adopted complete image contents after import command failed.\n' >&2
+            fi
+            return 0
+        fi
+
+        if [[ "$attempt" == 2 ]]; then return 1; fi
+        printf 'WARNING: %s is incomplete in the cluster; retrying the verified import once.\n' "$image" >&2
+        sleep 1
+    done
 }

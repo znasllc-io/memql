@@ -37,14 +37,17 @@ function docker() {
    printf 'k3d-memql-server-0 server running\nk3d-memql-server-1 server running\nk3d-memql-agent-0 agent %s\nk3d-memql-serverlb loadbalancer running\nk3d-memql-tools tools running\n' "${FAKE_AGENT_STATE:-running}" ;;
   exec)
    local node="$2"
+   local imported="${FAKE_IMPORTED}.${node}"
    [ "$node" != "${FAKE_EXEC_FAIL:-}" ] || return 1
    case "$*" in
     *'images ls'*)
+     [ -f "$imported" ] || { echo 'REF TYPE DIGEST SIZE'; return 0; }
      local id="$FAKE_IMAGE_A"
      [ "$node" != "${FAKE_BAD_NODE:-}" ] || id="$FAKE_IMAGE_B"
      printf 'REF TYPE DIGEST SIZE\ndocker.io/library/memql-bff:local application/vnd.oci.image.index.v1+json %s 1MiB\n' "$id" ;;
-    *'images check'*) [ "$node" = "${FAKE_INCOMPLETE_NODE:-}" ] || echo docker.io/library/memql-bff:local ;;
+    *'images check'*) [ -f "$imported" ] && [ "$node" != "${FAKE_INCOMPLETE_NODE:-}" ] || return 0; echo docker.io/library/memql-bff:local ;;
     *'crictl inspecti'*)
+     [ -f "$imported" ] || return 1
      if [ "${FAKE_CLASSIC:-}" = 1 ]; then echo "$FAKE_IMAGE_A"; else echo "$FAKE_IMAGE_B"; fi ;;
     *) return 8 ;;
    esac ;;
@@ -55,6 +58,22 @@ function k3d() {
  printf 'k3d %s\n' "$*" >> "$FAKE_CALLS"
  if [ "${FAKE_IMPORT_DRIFT:-}" = 1 ]; then touch "$FAKE_STATE"; fi
  if [ "${FAKE_BAD_NODE:-}" != '' ]; then echo 'ctr: short read: unexpected EOF' >&2; fi
+ local count=0
+ [ ! -f "$FAKE_IMPORT_COUNT" ] || count="$(cat "$FAKE_IMPORT_COUNT")"
+ count=$((count + 1))
+ printf '%s\n' "$count" > "$FAKE_IMPORT_COUNT"
+ if [ "${FAKE_IMPORT_FAIL_AFTER_COMPLETE:-}" = 1 ]; then
+  for node in k3d-memql-server-0 k3d-memql-server-1 k3d-memql-agent-0; do touch "${FAKE_IMPORTED}.${node}"; done
+  return 1
+ fi
+ if [ "${FAKE_FAIL_FIRST_IMPORT:-}" = 1 ] && [ "$count" = 1 ]; then
+  touch "${FAKE_IMPORTED}.k3d-memql-server-0"
+  echo 'write unix @->/run/docker.sock: use of closed network connection' >&2
+  return 1
+ fi
+ if [ "${FAKE_IMPORT_EXIT:-0}" = 0 ]; then
+  for node in k3d-memql-server-0 k3d-memql-server-1 k3d-memql-agent-0; do touch "${FAKE_IMPORTED}.${node}"; done
+ fi
  return "${FAKE_IMPORT_EXIT:-0}"
 }
 function restart_deployment() { echo restarted >> "$FAKE_CALLS"; }
@@ -65,7 +84,7 @@ func runImageIntegrity(t *testing.T, body string, vars ...string) (bool, string,
 	tmp := t.TempDir()
 	calls := filepath.Join(tmp, "calls")
 	command := exec.Command("bash", "-c", "source \""+filepath.Join(repoRoot(t), "scripts/k3d/dev.sh")+"\"\n"+imageIntegrityHarness+"\n"+body)
-	command.Env = append(os.Environ(), "FAKE_CALLS="+calls, "FAKE_STATE="+filepath.Join(tmp, "changed"))
+	command.Env = append(os.Environ(), "FAKE_CALLS="+calls, "FAKE_STATE="+filepath.Join(tmp, "changed"), "FAKE_IMPORTED="+filepath.Join(tmp, "imported"), "FAKE_IMPORT_COUNT="+filepath.Join(tmp, "import-count"))
 	command.Env = append(command.Env, vars...)
 	output, err := command.CombinedOutput()
 	raw, _ := os.ReadFile(calls)
@@ -114,6 +133,44 @@ func TestImageImportRefusesFalseSuccess(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestImageImportReconcilesAndRetriesBoundedly(t *testing.T) {
+	t.Run("adopts complete import despite command failure", func(t *testing.T) {
+		ok, out, calls := runImageIntegrity(t, `import_image memql-bff:local "$FAKE_IMAGE_A"`, "FAKE_IMPORT_FAIL_AFTER_COMPLETE=1")
+		if !ok {
+			t.Fatalf("complete node contents were not adopted: %s\n%s", out, calls)
+		}
+		if got := strings.Count(calls, "k3d image import"); got != 1 {
+			t.Fatalf("completed import was retried %d times:\n%s", got, calls)
+		}
+		if !strings.Contains(out, "Adopted complete image contents") {
+			t.Fatalf("missing reconciliation evidence: %s", out)
+		}
+	})
+
+	t.Run("retries incomplete transient import once", func(t *testing.T) {
+		ok, out, calls := runImageIntegrity(t, `import_image memql-bff:local "$FAKE_IMAGE_A"`, "FAKE_FAIL_FIRST_IMPORT=1")
+		if !ok {
+			t.Fatalf("transient import was not recovered: %s\n%s", out, calls)
+		}
+		if got := strings.Count(calls, "k3d image import"); got != 2 {
+			t.Fatalf("expected exactly one bounded retry, got %d:\n%s", got, calls)
+		}
+		if !strings.Contains(out, "retrying the verified import once") {
+			t.Fatalf("partial node import was not diagnosed before retry: %s", out)
+		}
+	})
+
+	t.Run("permanent import failure stops after retry", func(t *testing.T) {
+		ok, out, calls := runImageIntegrity(t, `import_image memql-bff:local "$FAKE_IMAGE_A"`, "FAKE_IMPORT_EXIT=1")
+		if ok {
+			t.Fatalf("permanent import failure reported success: %s\n%s", out, calls)
+		}
+		if got := strings.Count(calls, "k3d image import"); got != 2 {
+			t.Fatalf("expected exactly two bounded attempts, got %d:\n%s", got, calls)
+		}
+	})
 }
 
 func TestImageImportAcceptsClassicDockerConfigID(t *testing.T) {
