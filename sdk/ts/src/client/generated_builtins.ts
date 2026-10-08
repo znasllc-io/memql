@@ -862,6 +862,8 @@ QueryClient.prototype.composeRunRecipe = function (this: QueryClient, args: Comp
 
 /** Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all. */
 export interface CreateGoalArgs {
+  /** Installed Spine template name. Defaults to defaultWorkSpine. Its reachable templates and pure logic are frozen onto this run before compilation. */
+  spine?: string;
   /** The goal in the person's own words. */
   statement: string;
   /** The typed input object: the shape the chosen template's args declare. */
@@ -876,6 +878,7 @@ export interface CreateGoalArgs {
 
 export function buildCreateGoal(args: CreateGoalArgs): string {
   const parts: string[] = [];
+  if (args.spine !== undefined) parts.push("spine: " + renderMemQLValue(args.spine));
   parts.push("statement: " + renderMemQLValue(args.statement));
   if (args.input !== undefined) parts.push("input: " + renderMemQLValue(args.input));
   if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));

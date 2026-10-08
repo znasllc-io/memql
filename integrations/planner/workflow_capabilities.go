@@ -7,11 +7,12 @@ import (
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/work"
 )
 
 func (p *PlannerIntegration) IntegrationName() string { return "planner" }
 func (p *PlannerIntegration) Capabilities() []memql.IntegrationCapability {
-	return append([]memql.IntegrationCapability{{Name: "plannerPursueResponsibilities", Handler: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	capabilities := append([]memql.IntegrationCapability{{Name: "plannerPursueResponsibilities", Handler: func(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 		if !auth.OriginFromContext(ctx).IsInternal() {
 			return nil, fmt.Errorf("responsibility sweep requires the trusted scheduler")
 		}
@@ -25,4 +26,9 @@ func (p *PlannerIntegration) Capabilities() []memql.IntegrationCapability {
 		"plannerResponsibilityOwners": nil, "plannerProcessOwner": nil, "plannerProcessResponsibility": nil, "plannerConverge": nil, "plannerHasLiveGoal": nil, "plannerClaimResponsibility": nil, "plannerResolveAssistant": nil, "plannerResolveSpecialist": nil, "plannerAssignResponsibility": nil, "plannerAppendDirective": nil, "plannerRecordEvaluation": nil, "plannerTryHonor": nil, "plannerOpenResponsibilityGoal": nil, "plannerWorkflowRefusal": nil, "plannerClaimConvergence": nil, "plannerSpaceGoals": nil, "plannerRecentMemory": nil, "plannerConvergenceTurn": nil, "plannerDispatchConvergence": nil, "plannerClaimAction": nil, "plannerConvergenceGoal": nil, "plannerConvergenceNudge": nil, "plannerLogNudge": nil, "plannerConvergenceSpecialist": nil,
 		"knowledgeRefreshCandidates": nil, "knowledgeRefreshCandidate": nil, "knowledgeClaimRefresh": nil, "knowledgeOpenRefresh": nil, "knowledgeDispatchRefresh": nil,
 	})...)
+	ops := map[string]workflowhost.Operation{}
+	for _, name := range work.SpineOperations() {
+		ops[name] = nil
+	}
+	return append(capabilities, workflowhost.ScopedCapabilities(ops)...)
 }

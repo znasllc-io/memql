@@ -2,110 +2,6 @@ package work
 
 import "testing"
 
-// The headline test of spec section J: a goal that fully matches the
-// catalog makes ZERO provider calls. Decide is pure, so "zero calls" is
-// provable as a property of the decision rather than by counting.
-func TestDecide_ExactCatalogHitReachesNoModel(t *testing.T) {
-	d := Decide(CompileInput{
-		Statement: "Summarise yesterday's support tickets",
-		InputKeys: []string{"day"},
-		Exact:     []CatalogCandidate{{ConstructId: "c1", Name: "summariseTickets", Signature: "sig"}},
-	})
-	if d.Route != RouteCatalogExact {
-		t.Fatalf("route = %q, want catalogExact", d.Route)
-	}
-	if d.NeedsModel {
-		t.Fatal("an exact catalog hit must reach no model -- this is the spec's headline claim")
-	}
-	if d.NeedsTriage {
-		t.Fatal("an exact hit must not even run the cheap triage classifier: triage is a model call")
-	}
-	if d.Candidate == nil || d.Candidate.ConstructId != "c1" {
-		t.Fatalf("candidate = %+v", d.Candidate)
-	}
-	if len(d.Gaps) != 0 {
-		t.Errorf("an exact match has no gaps, got %v", d.Gaps)
-	}
-}
-
-// Order is the whole design: exact BEFORE near, near BEFORE triage.
-// A near match that outranks an exact one would make the cheap path
-// unreachable exactly when it is most valuable.
-func TestDecide_ExactBeatsNear(t *testing.T) {
-	d := Decide(CompileInput{
-		Statement:     "x",
-		Exact:         []CatalogCandidate{{ConstructId: "exact"}},
-		Near:          []CatalogCandidate{{ConstructId: "near", Similarity: 0.99}},
-		NearThreshold: 0.82,
-	})
-	if d.Candidate.ConstructId != "exact" {
-		t.Fatalf("near match outranked an exact one: %+v", d.Candidate)
-	}
-}
-
-func TestDecide_NearMatchCarriesTheGapListAndStillSkipsTriage(t *testing.T) {
-	d := Decide(CompileInput{
-		Statement:     "Summarise yesterday's tickets by team",
-		InputKeys:     []string{"day", "team"},
-		Near:          []CatalogCandidate{{ConstructId: "c2", Similarity: 0.9, MissingArgs: []string{"team"}}},
-		NearThreshold: 0.82,
-	})
-	if d.Route != RouteCatalogNear {
-		t.Fatalf("route = %q, want catalogNear", d.Route)
-	}
-	if d.NeedsTriage {
-		t.Fatal("a near match above threshold is already a decision; triage would be a wasted call")
-	}
-	if len(d.Gaps) != 1 || d.Gaps[0] != "team" {
-		t.Fatalf("gaps = %v, want [team]", d.Gaps)
-	}
-	if !d.NeedsModel {
-		t.Error("closing a gap is reasoning, so a near match does reach a model -- just not to author from scratch")
-	}
-}
-
-func TestDecide_NearBelowThresholdFallsThroughToTriage(t *testing.T) {
-	d := Decide(CompileInput{
-		Statement:     "something new",
-		Near:          []CatalogCandidate{{ConstructId: "c3", Similarity: 0.5}},
-		NearThreshold: 0.82,
-	})
-	if d.Route != RouteUnknown || !d.NeedsTriage {
-		t.Fatalf("a weak near match must fall through to the cheap triage classifier; got %+v", d)
-	}
-}
-
-func TestDecide_TriageRoutes(t *testing.T) {
-	for _, tc := range []struct {
-		complexity  string
-		sectionable bool
-		want        Route
-	}{
-		{"trivial", false, RouteTrivial},
-		{"moderate", true, RouteSectionable},
-		{"complex", true, RouteSectionable},
-		{"moderate", false, RouteAuthor},
-		{"complex", false, RouteAuthor},
-	} {
-		d := Decide(CompileInput{Statement: "x", Complexity: tc.complexity, Sectionable: tc.sectionable, NearThreshold: 0.82})
-		if d.Route != tc.want {
-			t.Errorf("complexity=%s sectionable=%v -> %q, want %q", tc.complexity, tc.sectionable, d.Route, tc.want)
-		}
-		if d.NeedsTriage {
-			t.Errorf("complexity=%s: triage already ran; asking again is a second call", tc.complexity)
-		}
-	}
-}
-
-// The sectionable generator is deterministic after the shared triage call,
-// so it must not be marked as reaching a model again.
-func TestDecide_SectionableIsDeterministicAfterTriage(t *testing.T) {
-	d := Decide(CompileInput{Statement: "x", Complexity: "moderate", Sectionable: true, NearThreshold: 0.82})
-	if d.NeedsModel {
-		t.Fatal("the sectionable generator is deterministic after the one shared triage call")
-	}
-}
-
 func TestGoalSignature_NormalisesStatementAndInputShape(t *testing.T) {
 	a := GoalSignature("  Summarise   Yesterday's TICKETS! ", []string{"day", "team"})
 	b := GoalSignature("summarise yesterday's tickets", []string{"team", "day"})
@@ -124,28 +20,6 @@ func TestGoalSignature_IsStableAcrossCalls(t *testing.T) {
 	for i := 0; i < 8; i++ {
 		if GoalSignature("do the thing", []string{"b", "a", "c"}) != GoalSignature("do the thing", []string{"c", "b", "a"}) {
 			t.Fatal("signature is not stable; a catalog keyed on it would miss its own entries")
-		}
-	}
-}
-
-// A learned procedure reaches compile as an exact catalog candidate carrying
-// its ladder rung (epic memql#5408). The planner has already filtered it
-// through DecideServe, so Decide treats it like any exact hit -- the catalog
-// route, no model, no triage -- and hands back the rung, which is what routes
-// the run to the replay automation rather than to the construct by name. A
-// decision that lost the rung would run a learned procedure as though a person
-// had authored it.
-func TestDecide_AnExactHitOnALearnedProcedureKeepsItsRungAndReachesNoModel(t *testing.T) {
-	for _, rung := range []Rung{RungNone, RungCanary, RungTrusted} {
-		d := Decide(CompileInput{
-			Statement: "export last month's invoices",
-			Exact:     []CatalogCandidate{{ConstructId: "v1:authoring:construct:c1", Name: "exportInvoices", Signature: "sig", Rung: rung}},
-		})
-		if d.Route != RouteCatalogExact || d.NeedsModel || d.NeedsTriage {
-			t.Fatalf("rung %q: an exact hit is the catalog route and reaches no model; got %+v", rung, d)
-		}
-		if d.Candidate == nil || d.Candidate.Rung != rung {
-			t.Fatalf("rung %q: the decision must carry the candidate's rung; got %+v", rung, d.Candidate)
 		}
 	}
 }

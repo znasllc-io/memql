@@ -9,6 +9,7 @@ import (
 
 	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/node"
@@ -116,6 +117,10 @@ func TestCompileDB_BFFRunEventCrossesToOnePlannerReplica(t *testing.T) {
 		t.Fatal("BFF with event-forward must report compileDispatched; the run graph event is the handoff")
 	}
 	got := awaitCompile(t, probe)
+	pinned, pinErr := workflowhost.SnapshotFromMap(got.request.Spine)
+	if pinErr != nil || pinned.Entry != "defaultWorkSpine" || len(pinned.Constructs) != 4 {
+		t.Fatalf("pinned Spine lost across BFF/planner hop: %v %+v", pinErr, pinned)
+	}
 	if got.request.StartedAt.IsZero() {
 		t.Fatal("the receiving planner lost the persisted run start used by its deadline")
 	}
@@ -625,5 +630,39 @@ func TestCompileDB_QuickEstimatePromotesAcrossReplicasWithoutResettingSpend(t *t
 	original, err := ceilingsOf(goal)
 	if err != nil || original.MaxModelCalls != 5 || original.WallClockMs != 300000 {
 		t.Fatalf("classifier modified the goal: %+v %v", original, err)
+	}
+}
+
+func TestCompileDBRawWritesCannotReplaceOrPlantSpine(t *testing.T) {
+	_, bff, _, _ := compileDB(t)
+	ctx := actorCtx("compile-alice")
+	nodes, err := bff.handleCreateGoal(ctx, map[string]any{"statement": "keep this planning definition"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := decodeReply(t, nodes)["runId"].(string)
+	before, err := bff.store().runForOwner(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := rowMap(before, "spine")
+	// Raw insert is a read-merge update. It bypasses @serverOnly constructs,
+	// so these assertions exercise the engine's final write boundary itself.
+	for _, writeCtx := range []context.Context{ctx, auth.ContextWithInternalOrigin(ctx)} {
+		_, err = bff.engine.Execute(writeCtx, `insert("v1:work:run", id="`+runID+`", payload={"spine":{"version":"forged"}})`)
+		if err == nil || !strings.Contains(err.Error(), "spine is immutable") {
+			t.Fatalf("snapshot replacement escaped raw write guard: %v", err)
+		}
+	}
+	_, err = bff.engine.Execute(ctx, `insert("v1:work:run", payload={"automationName":"work.compile","templateFingerprint":"","status":"compiling","spine":{"version":"forged"}})`)
+	if err == nil || !strings.Contains(err.Error(), "spine is admitted only") {
+		t.Fatalf("client planted a snapshot: %v", err)
+	}
+	if err = bff.store().updateRun(ctx, runID, map[string]any{"status": "failed"}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := bff.store().runForOwner(ctx, runID)
+	if err != nil || rowMap(after, "spine")["version"] != snapshot["version"] {
+		t.Fatalf("ordinary run update lost snapshot: %v", err)
 	}
 }

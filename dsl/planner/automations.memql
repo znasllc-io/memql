@@ -155,3 +155,74 @@ automation plannerConvergenceAction {
   builtin plannerConvergenceSpecialist()
  }
 }
+
+/// The default Spine: owned reuse before paid reasoning; policy is ordinary installed DSL.
+@template
+automation defaultWorkSpine {
+ context := builtin spineContext()
+ if !context.conversational {
+  exact := builtin spineCandidates(kind: "exact")
+  procedures := builtin spineCandidates(kind: "procedure")
+  for candidate in procedures.candidates {
+   return builtin spineUseCandidate(handle: candidate.handle)
+  }
+  for candidate in exact.candidates {
+   return builtin spineUseCandidate(handle: candidate.handle)
+  }
+  near := builtin spineCandidates(kind: "near")
+  for candidate in near.candidates {
+   if candidate.similarity >= 0.82 { return builtin spineUseCandidate(handle: candidate.handle) }
+  }
+ }
+ triage := builtin spineClassify()
+ if triage.conversational && triage.workload != "quick" && triage.acknowledgement == "" {
+  builtin spineAcknowledge()
+ }
+ route := logic workSpineRoute(triage: triage)
+ if route != "author" {
+  sections := builtin spinePrepareSections(route: route)
+  if sections.valid || (triage.conversational && triage.intent != "automation") {
+   return automation workSpineDraft()
+  }
+ }
+ return automation workSpineAuthor(repairAttempts: context.repairAttempts)
+}
+
+/// Retry representation only when the host proves no persistence was attempted.
+@template
+automation workSpineDraft {
+ draft := builtin spineDraft(mode: "default")
+ if draft.ok { return true }
+ if draft.hasCatalog {
+  live := builtin spineDraft(mode: "live")
+  if live.ok { return true }
+  if live.hasLiveSections {
+   inlineLive := builtin spineDraft(mode: "inline")
+   if inlineLive.ok { return true }
+   return builtin spineRefuse(message: inlineLive.message)
+  }
+  return builtin spineRefuse(message: live.message)
+ }
+ if draft.hasLiveSections {
+  inline := builtin spineDraft(mode: "inline")
+  if inline.ok { return true }
+  return builtin spineRefuse(message: inline.message)
+ }
+ return builtin spineRefuse(message: draft.message)
+}
+
+/// Design and emit once, then repair within the native call and iteration ceilings.
+@template
+automation workSpineAuthor {
+ args { repairAttempts []int! }
+ builtin spineDesign()
+ builtin spineEmit()
+ validation := builtin spineValidate()
+ if validation.ok { return builtin spinePersist() }
+ for attempt in args.repairAttempts {
+  builtin spineRepair()
+  repaired := builtin spineValidate()
+  if repaired.ok { return builtin spinePersist() }
+ }
+ return builtin spineRefuse(message: "The authored draft did not pass Gate 1 within the repair budget.")
+}

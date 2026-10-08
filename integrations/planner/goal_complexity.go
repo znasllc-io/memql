@@ -15,7 +15,7 @@ package planner
 //
 // What is NOT here is `triageRoute` / `routeForComplexity` / the shortcut:
 // those mapped a complexity onto "direct turn or decompose loop", and there is
-// no decompose loop to route to. component/work.Decide owns routing now.
+// no decompose loop to route to. the installed Spine owns routing now.
 
 import (
 	"encoding/json"

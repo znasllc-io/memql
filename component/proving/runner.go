@@ -2,12 +2,14 @@ package proving
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/proving/cassette"
 	"github.com/znasllc-io/memql/component/proving/figure"
@@ -505,44 +507,61 @@ func automationName(s scenario.Scenario) string {
 	return fmt.Sprintf("proving_%s_%d", safe, time.Now().UnixNano())
 }
 
-// CompileCallsOnCatalogHit measures the epic's cheapest and most checkable
-// claim: a goal that exactly matches the catalog reaches no model at all.
-//
-// It calls component/work.Decide directly, which is the honest measurement --
-// the claim IS a property of that function's return value, and routing it
-// through a provider stub would measure the stub. The negative control is the
-// companion below: without it, a counter that is never incremented on ANY path
-// reads as zero forever.
-func CompileCallsOnCatalogHit(statement string, inputKeys []string) int {
-	d := work.Decide(work.CompileInput{
-		Statement: statement,
-		InputKeys: inputKeys,
-		Exact: []work.CatalogCandidate{{
-			ConstructId: "v1:authoring:construct:proving",
-			Name:        "provingTemplate",
-			Signature:   work.GoalSignature(statement, inputKeys),
-		}},
-	})
-	return modelCalls(d)
+// CompileCallsOnCatalogHit measures the installed default Spine, stopping at
+// its first model boundary. No duplicate native routing policy is involved.
+func CompileCallsOnCatalogHit(statement string, inputKeys []string) (int, error) {
+	return compileCalls(statement, inputKeys, true)
 }
 
-// CompileCallsOnCatalogMiss is the negative control for the figure above. A
-// miss must reach a model; if this ever returns zero, the counter is dead and
-// the headline claim means nothing.
-func CompileCallsOnCatalogMiss(statement string, inputKeys []string) int {
-	d := work.Decide(work.CompileInput{Statement: statement, InputKeys: inputKeys})
-	return modelCalls(d)
+// CompileCallsOnCatalogMiss is the negative control: a miss must reach the
+// classifier, otherwise the zero-call hit measurement proves nothing.
+func CompileCallsOnCatalogMiss(statement string, inputKeys []string) (int, error) {
+	return compileCalls(statement, inputKeys, false)
 }
 
-func modelCalls(d work.Decision) int {
-	n := 0
-	if d.NeedsTriage {
-		n++
+func compileCalls(statement string, inputKeys []string, hit bool) (int, error) {
+	boundary := errors.New("measured classifier boundary")
+	calls := 0
+	selected := false
+	operations := map[string]workflowhost.Operation{}
+	for _, name := range work.SpineOperations() {
+		operations[name] = func(context.Context, map[string]any) (any, error) {
+			return nil, fmt.Errorf("compile measurement reached unexpected operation %s", name)
+		}
 	}
-	if d.NeedsModel && !d.NeedsTriage {
-		n++
+	operations["spineContext"] = func(context.Context, map[string]any) (any, error) {
+		return map[string]any{"statement": statement, "conversational": false}, nil
 	}
-	return n
+	operations["spineCandidates"] = func(_ context.Context, args map[string]any) (any, error) {
+		candidates := []any{}
+		if hit && args["kind"] == "exact" {
+			candidates = append(candidates, map[string]any{"handle": work.GoalSignature(statement, inputKeys)})
+		}
+		return map[string]any{"ok": true, "candidates": candidates, "message": ""}, nil
+	}
+	operations["spineUseCandidate"] = func(_ context.Context, args map[string]any) (any, error) {
+		if args["handle"] != work.GoalSignature(statement, inputKeys) {
+			return nil, fmt.Errorf("compile measurement selected unknown evidence")
+		}
+		selected = true
+		return true, nil
+	}
+	operations["spineClassify"] = func(context.Context, map[string]any) (any, error) { calls++; return nil, boundary }
+	snapshot, err := workflowhost.Capture(work.DefaultSpine, work.SpineContract, nil, operations)
+	if err != nil {
+		return 0, err
+	}
+	_, err = workflowhost.RunSnapshot(context.Background(), snapshot, work.SpineContract, nil, workflowhost.Options{Operations: operations})
+	if errors.Is(err, boundary) {
+		return calls, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if !selected {
+		return 0, fmt.Errorf("compile measurement returned without selecting evidence or reaching a model")
+	}
+	return calls, nil
 }
 
 // boolCount renders a predicate as the count a row assertion compares against:

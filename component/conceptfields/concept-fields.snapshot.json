@@ -8551,6 +8551,7 @@
         "rerun",
         "routing",
         "spent",
+        "spine",
         "staleSteps",
         "startedAt",
         "status",

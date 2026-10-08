@@ -100,6 +100,7 @@ func (i *Integration) handleBranchRun(ctx context.Context, args map[string]any, 
 	runId := newRowId(runConcept)
 	now := i.clock().UTC()
 	seed := runSeed{
+		Spine:               rowMap(source.row, "spine"),
 		ExecutionAuthority:  rowMap(source.row, "executionAuthority"),
 		RunId:               runId,
 		GoalId:              rowString(source.row, "goalId"),

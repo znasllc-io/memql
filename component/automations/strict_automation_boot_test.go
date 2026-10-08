@@ -223,7 +223,7 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 143 -> 146: sealed package coverage, per-step package source/filter, and
 // path-bucket decisions now run through the pinned core pipeline workflow.
 // 146 -> 147: the daily opt-in pipeline security scan is installed.
-const shippedAutomationCount = 147
+const shippedAutomationCount = 150
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

@@ -12,13 +12,16 @@ import "testing"
 // instrument were unplugged.
 
 func TestAnExactCatalogHitReachesNoModel(t *testing.T) {
-	if got := CompileCallsOnCatalogHit("Produce the weekly ledger reconciliation", []string{"account"}); got != 0 {
+	if got, err := CompileCallsOnCatalogHit("Produce the weekly ledger reconciliation", []string{"account"}); err != nil || got != 0 {
 		t.Fatalf("an exact catalog hit made %d model call(s), want 0", got)
 	}
 }
 
 func TestTheControlProvesTheCounterCanRise(t *testing.T) {
-	got := CompileCallsOnCatalogMiss("Draft an unprecedented settlement narrative in the style of a court filing", []string{"account"})
+	got, err := CompileCallsOnCatalogMiss("Draft an unprecedented settlement narrative in the style of a court filing", []string{"account"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got == 0 {
 		t.Fatal("a catalog MISS also made zero model calls. " +
 			"That means the counter never rises on any path, so the zero in the test above proves nothing " +
@@ -26,17 +29,13 @@ func TestTheControlProvesTheCounterCanRise(t *testing.T) {
 	}
 }
 
-func TestTheClaimIsAPropertyOfTheReturnedValueAndNotOfAStub(t *testing.T) {
-	// component/work.Decide is a pure function over values, so "an exact hit
-	// needs no model" is decidable without a provider, a database or a
-	// network. Routing it through a stub provider would measure the stub.
-	//
-	// Asserting the argument order matters too: the same statement with
-	// different argument names is a DIFFERENT goal signature, and a catalog
-	// keyed on an order-sensitive signature would miss on a caller's spelling.
-	a := CompileCallsOnCatalogHit("Reconcile the ledger", []string{"account", "period"})
-	b := CompileCallsOnCatalogHit("Reconcile the ledger", []string{"period", "account"})
-	if a != 0 || b != 0 {
-		t.Fatalf("argument ORDER changed the answer: %d and %d", a, b)
+func TestCompileMeasurementUsesTheSameInputShapeRegardlessOfArgumentOrder(t *testing.T) {
+	a, err := CompileCallsOnCatalogHit("Reconcile the ledger", []string{"account", "period"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := CompileCallsOnCatalogHit("Reconcile the ledger", []string{"period", "account"})
+	if err != nil || a != 0 || b != 0 {
+		t.Fatalf("argument order changed measurement: %d %d %v", a, b, err)
 	}
 }

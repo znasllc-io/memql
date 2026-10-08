@@ -91,6 +91,10 @@ func (i *Integration) handleCreateGoal(ctx context.Context, args map[string]any,
 		return nil, errNoCompileSurface
 	}
 
+	spine, err := CaptureSpine(argString(args, "spine"))
+	if err != nil {
+		return nil, err
+	}
 	st := i.store()
 	now := i.clock().UTC()
 	goalId := newRowId(goalConcept)
@@ -133,6 +137,7 @@ func (i *Integration) handleCreateGoal(ctx context.Context, args map[string]any,
 	// path that needs it being the one path that forgets.
 	runCtx := ownerActor(ctx, owner)
 	if err := st.createRunRow(runCtx, runSeed{
+		Spine:              spine.Map(),
 		ExecutionAuthority: authority,
 		RunId:              runId,
 		GoalId:             goalId,

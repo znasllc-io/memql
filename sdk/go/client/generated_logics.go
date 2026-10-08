@@ -627,6 +627,26 @@ func UsersDueDeletionReminderBuild(args UsersDueDeletionReminderArgs) string {
 	return b.String()
 }
 
+// WorkSpineRoute -- Value-only routing; classification and effects remain in the enclosing Spine.
+type WorkSpineRouteArgs struct {
+	Triage map[string]any
+}
+
+// WorkSpineRoute calls the engine logic workSpineRoute.
+func (qc *QueryClient) WorkSpineRoute(ctx context.Context, args WorkSpineRouteArgs) (*Result, error) {
+	call := WorkSpineRouteBuild(args)
+	return qc.executeNamed(ctx, "workSpineRoute", call)
+}
+
+func WorkSpineRouteBuild(args WorkSpineRouteArgs) string {
+	var b strings.Builder
+	b.WriteString("logic workSpineRoute(")
+	b.WriteString("triage: ")
+	b.WriteString(renderMemQLValue(args.Triage))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkerAppSessionStaleSweep -- Every app session nobody is holding, judged by TWO cutoffs.
 // The STALL grace is against heartbeatAt, which the holder re-writes every two seconds (component/worker's recordingPublishInterval) from the session's start until its recording closes; the default of 90s is some forty missed flushes, so a replica that is merely slow is never taken for a dead one. The MAX AGE is against startedAt, and it defaults to the four-hour session ceiling (integrations/agent/worker's defaultAppSessionMaxDuration) plus half an hour: nothing legitimately runs that long, and it is the only judgment available for a row written before heartbeatAt existed. Both defaults are hand copies of Go values, so each is pinned against its value by a Go test beside it.
 // Both are read from globalVariables so an operator can widen them on a slow cluster without a release, and both default generously: failing a session that is merely slow is worse than leaving a dead one on screen for another minute.

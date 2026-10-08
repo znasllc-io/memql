@@ -186,6 +186,8 @@ jobs:
               - 'examples/reading-list/memql.toml'
               - 'examples/reading-list/namespace.pin'
               - 'examples/research-desk/research/memql.toml'
+              # The root Spine example gate checks its declared language line.
+              - 'examples/spine/company/memql.toml'
               - '**/*.md'
               - '**/*.memql'
               # The docs bundle's boundary allowlist (memql#5717). The root

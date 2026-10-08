@@ -121,6 +121,7 @@ func (i *Integration) pendingCompile(ctx context.Context, runId string) (Compile
 		return req, rc, false, err
 	}
 	req = CompileRequest{
+		Spine:              rowMap(run, "spine"),
 		ExecutionAuthority: rowMap(run, "executionAuthority"),
 		RunId:              runId, GoalId: goalId, OwnerUserId: rowString(run, "ownerUserId"),
 		Statement: rowString(goal, "statement"), Input: rowMap(run, "input"), Ceilings: rowMap(goal, "ceilings"),

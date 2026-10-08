@@ -1,32 +1,7 @@
 package work
 
-// compile.go -- the compile ORDER (design record
-// docs/superpowers/specs/2026-09-05-work-spine-design.md, section B
-// "Compile").
-//
-// Catalog exact match on the normalized statement and input shape, then
-// near-match at or above the threshold with a gap list, then the cheap
-// triage classifier. Trivial becomes a one-step run; sectionable goes to
-// the existing deterministic parallel generator; everything else runs one
-// reasoning step (compileGoal) that emits an automation draft, which must
-// pass Gate 1 before the run proceeds.
-//
-// THE ORDER IS THE DESIGN, AND IT IS WHY THIS FILE IS PURE. The spec's
-// headline claim -- "a goal that fully matches the catalog makes zero
-// provider calls" -- is a property of the DECISION, not of a mock. Decide
-// takes values and returns a value, so a test proves the claim with no
-// engine, no provider and no database; the wiring in
-// integrations/planner/work_compile.go is then only responsible for
-// obeying it.
-//
-// A NOTE ON THE SIGNATURE. The existing catalog key (CatalogKey in
-// component/memql) hashes the construct SOURCE, per kind, and refuses
-// `automation` outright -- which is exactly the kind a compiled goal is.
-// So a goal cannot be looked up by it. GoalSignature is the new key: the
-// normalized statement plus the SORTED input arg names, which is the pair
-// that decides whether two goals want the same template. Sorting matters:
-// argument order is a spelling, not a difference, and an order-sensitive
-// key would miss its own entries roughly half the time.
+// Shared compile values and stable goal signatures. Planning order lives in
+// the installed defaultWorkSpine automation, not in a second native policy.
 
 import (
 	"crypto/sha256"
@@ -67,99 +42,14 @@ type CatalogCandidate struct {
 	// MissingArgs are the arguments this goal supplies that the candidate
 	// does not declare -- the gap list a near match must close.
 	MissingArgs []string
-	// Rung is RungNone for an authored construct and the ladder rung for a
-	// learned procedure (epic memql#5408). Decide does not read it: the
-	// planner passes a procedure through DecideServe BEFORE Decide, keeps
-	// only the ones that serve, and ranks trusted before canary. What Decide
-	// returns carries it, and it is what routes an exact hit on a learned
-	// procedure to the replay automation rather than to the construct by
-	// name.
+	// Rung is RungNone for an authored construct. The planner filters learned
+	// procedures through DecideServe, ranks trusted before canary, and binds
+	// the rung into the scoped handle so selection uses the replay template.
 	Rung Rung
 }
 
-// CompileInput is everything the decision reads.
-type CompileInput struct {
-	// Statement is the goal in the person's words.
-	Statement string
-	// InputKeys are the argument names the goal supplies.
-	InputKeys []string
-	// Exact are candidates whose signature equals this goal's.
-	Exact []CatalogCandidate
-	// Near are similarity-ranked candidates, highest first.
-	Near []CatalogCandidate
-	// NearThreshold is the similarity floor for a near match. The
-	// authoring pipeline's existing floor is 0.82; passing 0 means
-	// "no near tier", not "everything matches".
-	NearThreshold float64
-	// Complexity is the triage classifier's verdict, empty until it runs.
-	Complexity string
-	// Sectionable is the same classifier's second answer, read off the
-	// same response -- so consulting it costs no extra call.
-	Sectionable bool
-}
-
-// Decision is what compile decided and what it will cost.
-type Decision struct {
-	// Route is the branch taken.
-	Route Route
-	// Candidate is the template reused, for the two catalog routes.
-	Candidate *CatalogCandidate
-	// Gaps are the arguments a near match must close.
-	Gaps []string
-	// NeedsTriage is true when the caller must run the cheap classifier
-	// before it can decide. It is the ONLY way to reach triage.
-	NeedsTriage bool
-	// NeedsModel is true when following this route reaches a provider.
-	// An exact catalog hit is the case where it is false, which is the
-	// whole point of the catalog.
-	NeedsModel bool
-}
-
-// Decide runs the compile order. It never calls anything.
-func Decide(in CompileInput) Decision {
-	// Tier 1: exact. Free, and it outranks everything -- a near match
-	// that could beat an exact one would make the cheap path unreachable
-	// exactly when it is most valuable.
-	if len(in.Exact) > 0 {
-		c := in.Exact[0]
-		return Decision{Route: RouteCatalogExact, Candidate: &c}
-	}
-
-	// Tier 2: near, at or above the threshold. Reaching a model to close
-	// a gap list is still far cheaper than authoring from scratch, and it
-	// keeps the catalogued template's shape.
-	if in.NearThreshold > 0 {
-		for i := range in.Near {
-			c := in.Near[i]
-			if c.Similarity >= in.NearThreshold {
-				return Decision{
-					Route:      RouteCatalogNear,
-					Candidate:  &c,
-					Gaps:       append([]string(nil), c.MissingArgs...),
-					NeedsModel: true,
-				}
-			}
-			// The list is similarity-descending, so the first miss ends it.
-			break
-		}
-	}
-
-	// Tier 3: the cheap triage classifier. Until it has run there is
-	// nothing more to decide.
-	switch in.Complexity {
-	case "":
-		return Decision{Route: RouteUnknown, NeedsTriage: true, NeedsModel: true}
-	case "trivial":
-		return Decision{Route: RouteTrivial, NeedsModel: true}
-	}
-	if in.Sectionable {
-		// Deterministic after the one shared triage call: the generator
-		// synthesizes the bundle from the classifier's own section list
-		// and reaches no provider of its own.
-		return Decision{Route: RouteSectionable}
-	}
-	return Decision{Route: RouteAuthor, NeedsModel: true}
-}
+// Decision carries a decomposition validation result back to the Spine.
+type Decision struct{ Route Route }
 
 // GoalSignature is the catalog key for a goal: the normalized statement
 // and the sorted input arg names. Always computable -- an empty goal

@@ -12,7 +12,13 @@ import (
 func TestABranchCreatesAForkRunPointingThePrefixAtTheSource(t *testing.T) {
 	i, eng, store := newActsIntegration(t)
 	addPristineRun(store, actRunId, "fetch", "draft", "publish")
-	eng.reply("workRunForOwner", actRunRow(runStatusSucceeded))
+	source := actRunRow(runStatusSucceeded)
+	spine, err := CaptureSpine("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source["spine"] = spine.Map()
+	eng.reply("workRunForOwner", source)
 
 	nodes, err := i.handleBranchRun(callerContext(actOwner), map[string]any{
 		"runId":   actRunId,
@@ -33,6 +39,9 @@ func TestABranchCreatesAForkRunPointingThePrefixAtTheSource(t *testing.T) {
 		t.Errorf("the fork was created as %q with origin %v; it belongs to the SOURCE's owner and createWorkRun is @serverOnly", create.Actor, create.Origin)
 	}
 	args := create.Args(t)
+	if !reflect.DeepEqual(args["spine"], source["spine"]) {
+		t.Fatal("branched run lost its admitted Spine source")
+	}
 	forkId, _ := args["runId"].(string)
 	if forkId == "" || forkId == actRunId || !strings.HasPrefix(forkId, runConcept+":") {
 		t.Fatalf("fork run id = %q", forkId)

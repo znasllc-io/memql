@@ -1,0 +1,35 @@
+use planner.builtins.{ spineCandidates, spineUseCandidate, spineClassify, spinePrepareSections, spineDraft, spineRefuse }
+
+/// A company policy that runs only an exact owned catalog match and spends no model calls.
+@template
+automation companyCatalogSpine {
+ catalog := builtin spineCandidates(kind: "exact")
+ if !catalog.ok { return builtin spineRefuse(message: "The catalog could not be read. Try again after it is available.") }
+ if catalog.candidates.count() == 0 { return builtin spineRefuse(message: "This request needs a reviewed catalog automation.") }
+ for candidate in catalog.candidates {
+    return builtin spineUseCandidate(handle: candidate.handle)
+  }
+}
+
+/// A company policy for ad-hoc questions and file requests. It never authors new source with a model.
+@template
+automation companyAnswerSpine {
+ triage := builtin spineClassify()
+ route := logic companyAnswerRoute(triage: triage)
+ if route == "refuse" { return builtin spineRefuse(message: "This Spine handles answers and files. Choose an authoring Spine for a new automation.") }
+ sections := builtin spinePrepareSections(route: route)
+ if !sections.valid { return builtin spineRefuse(message: sections.reason) }
+ draft := builtin spineDraft(mode: "default")
+ if draft.ok { return true }
+ // This policy stops after the first failed representation. A different
+ // installation may choose the default Spine's live/inline fallbacks.
+ return builtin spineRefuse(message: draft.message)
+}
+
+/// A reusable pure decision over validated classification evidence.
+logic companyAnswerRoute {
+ args { triage object! }
+ if args.triage.intent == "automation" { return "refuse" }
+ if args.triage.sectionable { return "sectionable" }
+ return "trivial"
+}

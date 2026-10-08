@@ -1,0 +1,111 @@
+{
+  "automation": "planner/automations.memql defaultWorkSpine",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.defaultWorkSpine"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "spineContext"
+          },
+          {
+            "args": {
+              "kind": "exact"
+            },
+            "kind": "builtin",
+            "name": "spineCandidates"
+          },
+          {
+            "args": {
+              "kind": "procedure"
+            },
+            "kind": "builtin",
+            "name": "spineCandidates"
+          },
+          {
+            "args": {
+              "kind": "near"
+            },
+            "kind": "builtin",
+            "name": "spineCandidates"
+          },
+          {
+            "kind": "builtin",
+            "name": "spineClassify"
+          },
+          {
+            "kind": "automation",
+            "name": "workSpineAuthor"
+          }
+        ],
+        "result": {
+          "output": {
+            "automation": "workSpineAuthor"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.defaultWorkSpine"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "spineContext"
+          },
+          {
+            "args": {
+              "kind": "exact"
+            },
+            "kind": "builtin",
+            "name": "spineCandidates"
+          },
+          {
+            "args": {
+              "kind": "procedure"
+            },
+            "kind": "builtin",
+            "name": "spineCandidates"
+          },
+          {
+            "args": {
+              "kind": "near"
+            },
+            "kind": "builtin",
+            "name": "spineCandidates"
+          },
+          {
+            "kind": "builtin",
+            "name": "spineClassify"
+          },
+          {
+            "kind": "automation",
+            "name": "workSpineAuthor"
+          }
+        ],
+        "result": {
+          "output": {
+            "automation": "workSpineAuthor"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}
