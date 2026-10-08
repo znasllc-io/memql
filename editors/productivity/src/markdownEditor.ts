@@ -1,10 +1,13 @@
 import * as vscode from "vscode";
 import { RevisionReview } from "./revisionReview.js";
 import { Documents, type OpenDocument } from "./documents.js";
-import { anchorStillMatches, escapeHTML, markdownAnchor, renderMarkdown, type MarkdownAnchor } from "./markdown.js";
+import { anchorStillMatches, markdownAnchor, renderMarkdown, type MarkdownAnchor } from "./markdown.js";
+
+import { markdownPage } from "./markdownPage.js";
 
 export class MarkdownEditor implements vscode.CustomTextEditorProvider {
   private active?: { document: vscode.TextDocument; panel: vscode.WebviewPanel };
+  private readonly panels = new Set<{ document: vscode.TextDocument; panel: vscode.WebviewPanel }>();
   private readonly rendered = new Map<string, { version: number; text: string }>();
   private readonly revisions: RevisionReview;
   constructor(private readonly context: vscode.ExtensionContext, private readonly files: Documents,
@@ -27,23 +30,42 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
     const target = this.document(uri);
     const document = await vscode.workspace.openTextDocument(target);
     if (document.languageId !== "markdown" && !/\.(md|markdown)$/i.test(target.path)) throw new Error("Open a Markdown document first.");
-    const current = this.active?.document.uri.toString() === target.toString() ? this.active : undefined;
+    const current = [...this.panels].find(entry => entry.document.uri.toString() === target.toString() && entry.panel.visible)
+      ?? [...this.panels].find(entry => entry.document.uri.toString() === target.toString());
+    const source = vscode.window.visibleTextEditors.find(editor => editor.document.uri.toString() === target.toString());
     if (mode === "source") {
-      await vscode.window.showTextDocument(document, { viewColumn: current?.panel.viewColumn, preview: false });
-      current?.panel.dispose();
+      await vscode.window.showTextDocument(document, { viewColumn: source?.viewColumn ?? current?.panel.viewColumn, preview: false });
+      for (const entry of this.panels) if (entry.document === document) entry.panel.dispose();
     } else if (mode === "reading") {
-      await vscode.commands.executeCommand("vscode.openWith", target, "memql.productivity.markdown", { viewColumn: vscode.ViewColumn.Active, preview: false });
+      if (current) current.panel.reveal(source?.viewColumn ?? current.panel.viewColumn);
+      else await vscode.commands.executeCommand("vscode.openWith", target, "memql.productivity.markdown", { viewColumn: vscode.ViewColumn.Active, preview: false });
+      // Reveal in the source's group instead of closing its tab. Desktop VS Code
+      // can save a dirty TextDocument when its text tab closes, even while the
+      // custom editor remains open. A hidden source tab preserves that buffer.
     } else {
-      // Both tabs share VS Code's TextDocument, including unsaved edits and undo.
-      if (current) await vscode.window.showTextDocument(document, { viewColumn: vscode.ViewColumn.Beside, preview: false });
-      else {
-        await vscode.window.showTextDocument(document, { preview: false });
-        await vscode.commands.executeCommand("vscode.openWith", target, "memql.productivity.markdown", { viewColumn: vscode.ViewColumn.Beside, preview: false });
+      // Reuse the existing pair. Repeated Split must not add editor groups.
+      if (source && current?.panel.visible && source.viewColumn !== current.panel.viewColumn) {
+        current.panel.reveal(current.panel.viewColumn);
+      } else {
+        await vscode.window.showTextDocument(document, { viewColumn: source?.viewColumn ?? current?.panel.viewColumn, preview: false });
+        if (current) current.panel.reveal(vscode.ViewColumn.Beside);
+        else await vscode.commands.executeCommand("vscode.openWith", target, "memql.productivity.markdown", { viewColumn: vscode.ViewColumn.Beside, preview: false });
       }
     }
+    this.updateModes();
   }
+  private updateModes(): void {
+    for (const { document, panel } of this.panels) {
+      const split = panel.visible && vscode.window.visibleTextEditors.some(editor =>
+        editor.document === document && editor.viewColumn !== panel.viewColumn);
+      void panel.webview.postMessage({ type: "viewMode", mode: split ? "split" : "reading" });
+    }
+  }
+
   async resolveCustomTextEditor(document: vscode.TextDocument, panel: vscode.WebviewPanel): Promise<void> {
     this.active = { document, panel };
+    const entry = this.active;
+    this.panels.add(entry);
     const root = vscode.Uri.joinPath(this.context.extensionUri, "out");
     panel.webview.options = { enableScripts: true, localResourceRoots: [root] };
     const script = panel.webview.asWebviewUri(vscode.Uri.joinPath(root, "markdownView.js"));
@@ -83,16 +105,17 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
       } catch (e) { await error(e); }
     };
     const subscriptions = [
-      panel.onDidChangeViewState(() => { if (panel.active) this.active = { document, panel }; }),
+      panel.onDidChangeViewState(() => { if (panel.active) this.active = entry; this.updateModes(); }),
+      vscode.window.onDidChangeVisibleTextEditors(() => this.updateModes()),
       vscode.workspace.onDidChangeTextDocument(event => { if (event.document === document) void render(); }),
       vscode.workspace.onDidSaveTextDocument(saved => { if (saved === document) void render(); }),
       panel.webview.onDidReceiveMessage(async message => {
         try {
           if (!message || typeof message !== "object") return;
-          if (message.type === "ready") await render();
+          if (message.type === "ready") { this.updateModes(); await render(); }
           else if (message.type === "rendered" && message.version === document.version && typeof message.text === "string") {
             this.rendered.set(document.uri.toString(), { version: message.version, text: message.text });
-          } else if (message.type === "source" || message.type === "split") await this.show(message.type, document.uri);
+          } else if (message.type === "source" || message.type === "reading" || message.type === "split") await this.show(message.type, document.uri);
           else if (message.type === "refresh") { await refreshComments(); await refreshRevision(); }
           else if (["prepareRevision", "resumePreparation", "decideRevision", "compareRevision", "applyRevision"].includes(message.type) && !saving) {
             saving = true;
@@ -134,16 +157,11 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
     ];
     panel.onDidDispose(() => {
       disposed = true; generation++;
+      this.panels.delete(entry);
       for (const subscription of subscriptions) subscription.dispose();
       if (this.active?.panel === panel) this.active = undefined;
       this.rendered.delete(document.uri.toString());
     });
-    panel.webview.html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src 'none'; form-action 'none'; base-uri 'none'"><title>${escapeHTML(document.fileName)}</title><style>
-      body{margin:0;color:var(--vscode-editor-foreground);background:var(--vscode-editor-background);font:var(--vscode-font-size)/1.65 var(--vscode-font-family)}
-      nav{position:sticky;top:0;display:flex;gap:8px;align-items:center;padding:10px 20px;background:var(--vscode-editor-background);border-bottom:1px solid var(--vscode-panel-border);z-index:1}
-      button,textarea{font:inherit;color:inherit;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:4px;padding:5px 10px}button{cursor:pointer}button:disabled{opacity:.5;cursor:default}
-      main{max-width:1180px;margin:0 auto;padding:28px;display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:36px}#content{overflow-wrap:anywhere}h1,h2,h3{line-height:1.3}pre{padding:16px;overflow:auto;background:var(--vscode-textCodeBlock-background)}code{font-family:var(--vscode-editor-font-family)}table{border-collapse:collapse}td,th{border:1px solid var(--vscode-panel-border);padding:6px 12px}blockquote{margin:12px 0;padding-left:14px;border-left:3px solid var(--vscode-textBlockQuote-border);color:var(--vscode-descriptionForeground)}a{color:var(--vscode-textLink-foreground)}
-      aside{border-left:1px solid var(--vscode-panel-border);padding-left:20px}aside h2{margin-top:0}@media(max-width:800px){main{display:block}aside{border-left:0;border-top:1px solid var(--vscode-panel-border);margin-top:36px;padding:20px 0}}textarea{display:block;box-sizing:border-box;width:100%;min-height:90px;margin:10px 0}#status,small{color:var(--vscode-descriptionForeground)}article{border-top:1px solid var(--vscode-panel-border);padding:16px 0}#selected{max-height:120px;overflow:auto}#refresh{margin-left:auto}.image-alt{font-style:italic}
-      </style></head><body><nav aria-label="Markdown view"><button id="source">Source</button><span aria-current="page">Reading</span><button id="split">Split</button><button id="refresh">Refresh comments</button></nav><main><section id="content" aria-label="Rendered Markdown"></section><aside aria-label="Document feedback"><h2>Feedback</h2><div id="status" role="status"></div><blockquote id="selected">Select a passage to comment.</blockquote><textarea id="feedback" aria-label="Comment" placeholder="Add feedback on this passage"></textarea><button id="add" disabled>Add comment</button><section id="comments" aria-label="Comments"></section><textarea id="revision-instruction" aria-label="Requested change" placeholder="Describe the change for the selected comments"></textarea><button id="prepare-revision" disabled>Review change request</button><section id="revision" aria-label="Revision request"></section></aside></main><script nonce="${nonce}" src="${script}"></script></body></html>`;
+    panel.webview.html = markdownPage(document.fileName, String(script), nonce);
   }
 }

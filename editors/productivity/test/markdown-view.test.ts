@@ -2,10 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
+import { markdownPage } from "../src/markdownPage.js";
 import { renderMarkdown } from "../src/markdown.js";
 
 test("rendered passage selection sends a revision-bound comment and comments render as text", () => {
-  const dom = new JSDOM('<section id="content"></section><section id="comments"></section><div id="status"></div><textarea id="feedback"></textarea><button id="add"></button><button id="source"></button><button id="split"></button><button id="refresh"></button><blockquote id="selected"></blockquote><textarea id="revision-instruction"></textarea><button id="prepare-revision"></button><section id="revision"></section>', {runScripts: "outside-only"});
+  const dom = new JSDOM(markdownPage("Review.md", "", "test"), {runScripts: "outside-only"});
   const messages: Record<string, unknown>[] = [];
   Object.assign(dom.window, { acquireVsCodeApi: () => ({postMessage: (message: Record<string,unknown>) => messages.push(message), getState: () => undefined, setState: () => {}}) });
   dom.window.eval(readFileSync("dist-test/markdown-view.js", "utf8"));
@@ -22,7 +23,7 @@ test("rendered passage selection sends a revision-bound comment and comments ren
   assert.deepEqual(JSON.parse(JSON.stringify(comment?.selection)),{startBlock:1,endBlock:1,startTextOffset:7,endTextOffset:19,startLine:2,endLine:3,quote:"this section"});
   assert.equal(comment?.body,"Clarify this section.");
   send({type:"comments",rows:[{authorUserId:"person",anchor:{quote:"<img src=x>"},body:"<script>steal()</script>",outdated:true}]});
-  assert.equal(doc.querySelectorAll("script,img").length,0);
+  assert.equal(doc.querySelectorAll("#comments script,#comments img").length,0);
   assert.match(doc.getElementById("comments")!.textContent!,/Earlier revision/);
   send({type:"document",html:renderMarkdown("Unsaved"),version:18,connected:false,status:"Save first"});
   assert.equal((doc.getElementById("add") as HTMLButtonElement).disabled,true);
@@ -30,7 +31,7 @@ test("rendered passage selection sends a revision-bound comment and comments ren
 });
 
 test("review view binds selected current comments, renders captured content safely and gates applying behind comparison", () => {
-  const dom = new JSDOM('<section id="content"></section><section id="comments"></section><div id="status"></div><textarea id="feedback"></textarea><button id="add"></button><button id="source"></button><button id="split"></button><button id="refresh"></button><blockquote id="selected"></blockquote><textarea id="revision-instruction"></textarea><button id="prepare-revision"></button><section id="revision"></section>', { runScripts: "outside-only" });
+  const dom = new JSDOM(markdownPage("Review.md", "", "test"), { runScripts: "outside-only" });
   const messages: Record<string, unknown>[] = [];
   Object.assign(dom.window, { acquireVsCodeApi: () => ({ postMessage: (message: Record<string, unknown>) => messages.push(message), getState: () => undefined, setState: () => {} }) });
   dom.window.eval(readFileSync("dist-test/markdown-view.js", "utf8"));
@@ -47,7 +48,7 @@ test("review view binds selected current comments, renders captured content safe
   assert.equal(request.version, 4); assert.deepEqual(Array.from(request.commentIds as string[]), ["current"]);
   const status = { approvalId: "exact-approval", status: "waiting", decision: "", proposal: { revision: "file:3", instruction: "Clarify", content: "<script>private()</script>", comments: [{ body: "<img src=x>", anchor: { quote: "Original" } }] } };
   send({ type: "revision", status }); send({ type: "revisionIdle" });
-  assert.equal(doc.querySelectorAll("script,img").length, 0);
+  assert.equal(doc.querySelectorAll("#revision script,#revision img").length, 0);
   const buttons = () => [...doc.querySelectorAll<HTMLButtonElement>("#revision button")];
   buttons().find(button => button.textContent === "Approve draft job")!.click();
   assert.equal(messages.at(-1)?.approvalId, "exact-approval");
@@ -58,5 +59,31 @@ test("review view binds selected current comments, renders captured content safe
   buttons().find(button => button.textContent === "Compare draft")!.click();
   send({ type: "revisionCompared" }); send({ type: "revisionIdle" });
   assert.ok(buttons().some(button => button.textContent === "Apply compared draft"));
+  dom.window.close();
+});
+
+test("view buttons reflect the host layout and feedback disclosure preserves a draft", () => {
+  const dom = new JSDOM(markdownPage("Review.md", "", "test"), {runScripts:"outside-only"});
+  const messages: any[] = []; let state: any = {draft:"Keep this draft"};
+  Object.assign(dom.window, {acquireVsCodeApi: () => ({postMessage: (m:any) => messages.push(m),getState:()=>state,setState:(s:any)=>{state=s;}})});
+  dom.window.eval(readFileSync("dist-test/markdown-view.js","utf8"));
+  const doc=dom.window.document;
+  assert.equal(doc.getElementById("feedback-panel")!.hidden,true);
+  doc.getElementById("split")!.click();
+  assert.equal(messages.at(-1).type,"split");
+  dom.window.dispatchEvent(new dom.window.MessageEvent("message",{data:{type:"viewMode",mode:"split"}}));
+  assert.equal(doc.getElementById("split")!.getAttribute("aria-pressed"),"true");
+  assert.equal(doc.getElementById("reading")!.getAttribute("aria-pressed"),"false");
+  doc.getElementById("reading")!.click();
+  assert.equal(messages.at(-1).type,"reading");
+  doc.getElementById("source")!.dispatchEvent(new dom.window.KeyboardEvent("keydown",{key:"ArrowRight",bubbles:true}));
+  assert.equal(doc.activeElement?.id,"reading");
+  doc.getElementById("feedback-toggle")!.click();
+  assert.equal(doc.getElementById("feedback-panel")!.hidden,false);
+  doc.getElementById("feedback-toggle")!.click();
+  assert.equal(state.draft,"Keep this draft");
+  dom.window.dispatchEvent(new dom.window.MessageEvent("message",{data:{type:"error",message:"Retry this read"}}));
+  assert.equal(doc.getElementById("feedback-panel")!.hidden,false);
+  assert.equal(doc.getElementById("status")!.textContent,"Retry this read");
   dom.window.close();
 });

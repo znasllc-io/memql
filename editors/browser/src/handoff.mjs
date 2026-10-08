@@ -1,4 +1,4 @@
-/** A URL carries only a resource reference, never content, commands or credentials. */
+/** Resource identity is separate from appearance; neither carries content or credentials. */
 export function requestedResource(pageURL) {
   const page = new URL(pageURL);
   const resources = page.searchParams.getAll('resource');

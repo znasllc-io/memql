@@ -12,6 +12,7 @@ import {
   env,
   ExtensionContext,
   ExtensionMode,
+  extensions,
   languages,
   OutputChannel,
   Position,
@@ -540,13 +541,14 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
 
   startLanguageClient(context);
 
-  // The one-time offer to wear the brand in the workbench too (memql#4421).
+  // Productivity owns its contextual OS-matching offer when installed.
+  // Standalone development installs keep the one-time brand offer (#4421).
   //
   // OUTSIDE THE TRUST GATE, deliberately. It reads two editor settings and
   // writes one; it touches no credential, opens no connection and looks at
   // nothing in the workspace. Putting it behind the gate would mean an
   // operator in a restricted folder never learns the themes exist.
-  offerMemqlThemeOnce(context);
+  if (!extensions.getExtension("znasllc.memql-productivity-tools")) offerMemqlThemeOnce(context);
 
   registerLanguageReference(context);
 

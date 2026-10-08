@@ -107,6 +107,23 @@ user's machine: opening it never extracts it or loads it as an editor folder.
 PDFs belong to Productivity Tools' viewing and editing surface, including
 versioned saves to MemQL when connected.
 
+## Appearance and Markdown
+
+Opening a file from OS carries its current light/dark mode and rendered color
+pack as bounded appearance metadata, separate from the resource URI. The
+hosted browser editor applies it before revealing the workbench. Each new
+handoff takes a fresh snapshot; an already-open editor does not subscribe to
+OS theme changes. Installed VS Code and Cursor ask once whether to match;
+`MemQL Productivity: Os Theme` in Settings can change that choice. High contrast
+themes are preserved. Overrides are scoped to MemQL themes, leaving other
+themes and unrelated color settings intact.
+
+Markdown uses Source / Read / Split buttons with a selected state reflecting
+the actual pane layout. Split reuses the source/preview pair, and switching
+views retains the shared unsaved document. Feedback is available behind its
+toolbar button; hiding it keeps the comment draft. Its refresh action stays
+inside feedback because comments are fetched on demand, not a live collection.
+
 ## Delivery status
 
 This is the owner-approved responsibility boundary, recorded October 1, 2026.

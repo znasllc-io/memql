@@ -7,6 +7,7 @@ import { TemplatePublisher } from "./templatePublish.js";
 import { TemplateExamples } from "./templateExamples.js";
 import { MarkdownEditor } from "./markdownEditor.js";
 import { PDFEditor } from "./pdfEditor.js";
+import { syncDesktopAppearance } from "./themeSync.js";
 
 class MemQLFiles implements vscode.FileSystemProvider {
   readonly changed = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
@@ -144,8 +145,12 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     vscode.window.registerUriHandler({ handleUri: async uri => {
       try {
-        const resource = new URLSearchParams(uri.query).get("resource");
+        const params = new URLSearchParams(uri.query);
+        const resource = params.get("resource");
         if (uri.path !== "/open" || !resource) throw new Error("Invalid MemQL file link.");
+        resourceFrom(resource);
+        try { await syncDesktopAppearance(params.get("appearance")); }
+        catch { void vscode.window.showWarningMessage("The editor theme could not be matched. You can change it in Settings."); }
         await open(resource);
       } catch (error) { void vscode.window.showErrorMessage((error as Error).message); }
     } }),

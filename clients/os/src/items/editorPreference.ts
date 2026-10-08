@@ -1,3 +1,5 @@
+import { currentEditorAppearance } from "./editorAppearance";
+
 export type EditorPreference = "browser" | "vscode" | "cursor";
 
 const EDITOR_PREFERENCE_KEY = "memql-os-editor-v1";
@@ -50,11 +52,13 @@ export function editorTemplateURL(domain: string, templateId: string, name: stri
 }
 
 function editorResourceURL(resource: string, preference: EditorPreference): string {
+  const appearance = currentEditorAppearance();
+  const theme = appearance ? `&appearance=${encodeURIComponent(JSON.stringify(appearance))}` : "";
   if (preference === "browser") {
     // The cluster-hosted editor includes both MemQL extensions.
-    // Only a resource reference travels here. Its file provider authenticates
+    // A resource reference and appearance travel here. The provider authenticates
     // through the MemQL extension; no file bytes or credential enter the URL.
-    return `https://vscode.${new URL(resource).hostname}/editor/?resource=${encodeURIComponent(resource)}`;
+    return `https://vscode.${new URL(resource).hostname}/editor/?resource=${encodeURIComponent(resource)}${theme}`;
   }
-  return `${preference}://znasllc.memql-productivity-tools/open?resource=${encodeURIComponent(resource)}`;
+  return `${preference}://znasllc.memql-productivity-tools/open?resource=${encodeURIComponent(resource)}${theme}`;
 }

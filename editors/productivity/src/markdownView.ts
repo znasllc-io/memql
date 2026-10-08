@@ -51,9 +51,19 @@ function renderRevision() {
     if (revisionCompared) button("Apply compared draft", "applyRevision");
   }
 }
-const state = (api.getState() ?? {}) as { draft?: string };
+const state = (api.getState() ?? {}) as { draft?: string; feedbackOpen?: boolean };
+const feedbackToggle = document.getElementById("feedback-toggle")!;
+function saveState() { api.setState({ draft: feedback.value, feedbackOpen: feedbackToggle.getAttribute("aria-expanded") === "true" }); }
+function showFeedback(open: boolean) {
+  document.body.dataset.feedback = String(open);
+  document.getElementById("feedback-panel")!.hidden = !open;
+  feedbackToggle.setAttribute("aria-expanded", String(open));
+  saveState();
+}
+feedbackToggle.addEventListener("click", () => showFeedback(feedbackToggle.getAttribute("aria-expanded") !== "true"));
 feedback.value = state.draft ?? "";
-feedback.addEventListener("input", () => api.setState({ draft: feedback.value }));
+showFeedback(state.feedbackOpen ?? false);
+feedback.addEventListener("input", saveState);
 function mapped(node: Node | null): HTMLElement | null {
   const element = node?.nodeType === Node.ELEMENT_NODE ? node as Element : node?.parentElement;
   return element?.closest<HTMLElement>("[data-start-line][data-end-line]") ?? null;
@@ -77,7 +87,14 @@ add.addEventListener("click", () => {
   add.disabled = true;
   api.postMessage({ type: "comment", version, selection, body: feedback.value });
 });
-for (const mode of ["source", "split"]) document.getElementById(mode)!.addEventListener("click", () => api.postMessage({ type: mode }));
+for (const mode of ["source", "reading", "split"]) document.getElementById(mode)!.addEventListener("click", () => api.postMessage({ type: mode }));
+// Arrow keys move within the compact choice without stealing ordinary Tab navigation.
+const views = Array.from(document.querySelectorAll<HTMLButtonElement>(".views button"));
+views.forEach((button, index) => button.addEventListener("keydown", event => {
+  const next = event.key === "ArrowRight" ? (index + 1) % views.length : event.key === "ArrowLeft" ? (index + views.length - 1) % views.length : event.key === "Home" ? 0 : event.key === "End" ? views.length - 1 : undefined;
+  if (next === undefined) return;
+  event.preventDefault(); views[next].focus();
+}));
 document.getElementById("refresh")!.addEventListener("click", () => api.postMessage({ type: "refresh" }));
 content.addEventListener("click", event => {
   const link = (event.target as Element).closest<HTMLElement>("[data-external]");
@@ -85,6 +102,9 @@ content.addEventListener("click", event => {
 });
 window.addEventListener("message", event => {
   const message = event.data;
+  if (message.type === "viewMode") {
+    for (const mode of ["source", "reading", "split"]) document.getElementById(mode)!.setAttribute("aria-pressed", String(mode === message.mode));
+  }
   if (message.type === "document") {
     const scroll = document.documentElement.scrollTop;
     content.innerHTML = message.html; // HTML comes only from the host's HTML-disabled Markdown renderer.
@@ -119,8 +139,8 @@ window.addEventListener("message", event => {
   if (message.type === "revisionApplied") { revisionCompared = false; renderRevision(); }
   if (message.type === "revisionCompared") { revisionCompared = true; renderRevision(); }
   if (message.type === "revisionIdle") { revisionBusy = false; updateRevisionControls(); renderRevision(); }
-  if (message.type === "saved") { feedback.value = ""; api.setState({ draft: "" }); feedbackStatus.textContent = "Comment saved to MemQL."; }
-  if (message.type === "error") { revisionBusy = false; updateRevisionControls(); renderRevision(); feedbackStatus.textContent = message.message; add.disabled = !connected || !selection; }
+  if (message.type === "saved") { feedback.value = ""; saveState(); feedbackStatus.textContent = "Comment saved to MemQL."; }
+  if (message.type === "error") { revisionBusy = false; updateRevisionControls(); renderRevision(); showFeedback(true); feedbackStatus.textContent = message.message; add.disabled = !connected || !selection; }
 });
 api.postMessage({ type: "ready" });
 
@@ -141,5 +161,5 @@ function showPassage(anchor: {startBlock:number;endBlock:number;startTextOffset:
   if (!from || !to) return;
   const range = document.createRange(); range.setStart(...from); range.setEnd(...to);
   const selected = window.getSelection(); selected?.removeAllRanges(); selected?.addRange(range);
-  start.scrollIntoView({ block: "center", behavior: "smooth" });
+  start.scrollIntoView({ block: "center", behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
 }

@@ -2,6 +2,11 @@ import * as vscode from "vscode";
 import { PDFDocument } from "pdf-lib";
 
 function check(value: unknown, detail: string): asserts value { if (!value) throw new Error(detail); }
+async function until(predicate: () => boolean, detail: string): Promise<void> {
+  const deadline = Date.now() + 5000;
+  while (!predicate() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 40));
+  check(predicate(), detail);
+}
 export async function run(): Promise<void> {
   const core = vscode.extensions.getExtension("znasllc.memql");
   const productivity = vscode.extensions.getExtension("znasllc.memql-productivity-tools");
@@ -49,10 +54,16 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand("memql.productivity.markdown.split", markdownURI);
   const markdownDocument = await vscode.workspace.openTextDocument(markdownURI);
   check(vscode.window.visibleTextEditors.some(editor => editor.document === markdownDocument), "Split view must include the same source document.");
+  const groups = vscode.window.tabGroups.all.length;
+  await vscode.commands.executeCommand("memql.productivity.markdown.split", markdownURI);
+  check(vscode.window.tabGroups.all.length === groups, "Repeated Split created another editor group.");
   const edit = new vscode.WorkspaceEdit();
   edit.insert(markdownURI, new vscode.Position(2, 0), "Unsaved ");
   check(await vscode.workspace.applyEdit(edit), "Source edit failed.");
   check((await tools.markdownReady(markdownURI, markdownDocument.version)).includes("Unsaved A rendered passage."), "Reading view must follow unsaved source edits.");
+  await vscode.commands.executeCommand("memql.productivity.markdown.reading", markdownURI);
+  await until(() => !vscode.window.visibleTextEditors.some(editor => editor.document === markdownDocument), "Read mode left the source pane open.");
+  check(markdownDocument.isDirty && markdownDocument.getText().includes("Unsaved"), "Read mode discarded the shared dirty buffer.");
   await vscode.commands.executeCommand("memql.productivity.markdown.source", markdownURI);
   check(vscode.window.activeTextEditor?.document.getText().includes("Unsaved A **rendered** passage."), "Source mode discarded the dirty buffer.");
   await markdownDocument.save();

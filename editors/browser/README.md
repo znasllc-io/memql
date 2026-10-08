@@ -14,6 +14,12 @@ files without opening the requested MemQL resource; the banner says connected
 files and versioned saves are unavailable. `?mode=basic` starts without the two
 extensions, including on a fresh profile.
 
+The optional `appearance` parameter carries a validated snapshot of the OS's
+current light/dark colors. The editor matches it automatically on each handoff,
+including imported color packs, while preserving high contrast. Startup UI and
+Markdown webviews use the same palette. No prompt is needed in this dedicated
+browser host; installed editors offer matching once through Productivity Tools.
+
 The `resource` URL parameter contains only a `memql-file:` reference belonging
 to this installation. No file content or credential travels in a handoff URL.
 The core extension signs in through the existing device grant and owns cluster

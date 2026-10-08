@@ -65,17 +65,20 @@
       {
         "command": "memql.productivity.markdown.source",
         "title": "Markdown Source",
-        "category": "MemQL Productivity"
+        "category": "MemQL Productivity",
+        "icon": "$(code)"
       },
       {
         "command": "memql.productivity.markdown.reading",
         "title": "Markdown Reading View",
-        "category": "MemQL Productivity"
+        "category": "MemQL Productivity",
+        "icon": "$(open-preview)"
       },
       {
         "command": "memql.productivity.markdown.split",
         "title": "Markdown Split View",
-        "category": "MemQL Productivity"
+        "category": "MemQL Productivity",
+        "icon": "$(split-editor)"
       },
       {
         "command": "memql.productivity.template.source",
@@ -174,6 +177,27 @@
           "group": "navigation"
         }
       ]
+    },
+    "configuration": {
+      "title": "MemQL Productivity",
+      "properties": {
+        "memql.productivity.osTheme": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "match",
+            "keep"
+          ],
+          "enumDescriptions": [
+            "Ask once when opening a file from MemQL OS.",
+            "Match MemQL OS each time a file opens.",
+            "Keep the current editor theme."
+          ],
+          "default": "ask",
+          "scope": "application",
+          "description": "Theme matching for files opened from MemQL OS in an installed editor. High contrast themes are preserved."
+        }
+      }
     }
   },
   "scripts": {
