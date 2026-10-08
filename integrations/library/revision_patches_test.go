@@ -135,3 +135,36 @@ func TestRevisionChangeBoundsStayOnUTF8Characters(t *testing.T) {
 		}
 	}
 }
+
+func TestAnchoredExtensionsKeepAdditiveContract(t *testing.T) {
+	source := "# Guide\n\n## Examples\n\nAn existing example.\n\n## Next\n\nKeep this.\n"
+	for _, section := range []bool{false, true} {
+		start, quote := 4, "existing example"
+		if section {
+			start, quote = 2, "Examples"
+		}
+		captured := capturedRevision(source, quote, start, start+1)
+		anchor := captured["comments"].([]any)[0].(map[string]any)["anchor"].(map[string]any)
+		anchor["intent"] = "extend"
+		if section {
+			anchor["scope"] = "section"
+		}
+		passages, err := revisionPassages(captured)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if passages[0].Comments[0]["kind"] != "extend" || passages[0].Comments[0]["scope"] != anchor["scope"] {
+			t.Fatalf("lost extension location: %v", passages)
+		}
+		for _, after := range []string{"An existing example.\n\nOne more example.", "A replacement example."} {
+			proposal, err := buildRevisionProposal(captured, revisionAnswer{Summary: "Add an example", Edits: []revisionReplacement{{Before: "An existing example.", After: after, Reason: "Add example", CommentIDs: []string{"note-1"}}}})
+			additive := strings.HasPrefix(after, "An existing example.")
+			if (err == nil) != additive {
+				t.Fatalf("additive=%v, err=%v", additive, err)
+			}
+			if additive && proposal["revisedContent"] != strings.Replace(source, "An existing example.", after, 1) {
+				t.Fatal("changed unrelated section")
+			}
+		}
+	}
+}

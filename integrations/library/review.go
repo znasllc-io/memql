@@ -208,6 +208,18 @@ func validateReviewAnchor(value any) (map[string]any, error) {
 		return nil, fmt.Errorf("select a shorter passage")
 	}
 	result := map[string]any{"kind": "markdown", "startLine": float64(start), "endLine": float64(end), "quote": quote, "sourceQuote": source}
+	if intent, exists := anchor["intent"]; exists {
+		if intent != "extend" {
+			return nil, fmt.Errorf("invalid document feedback intent")
+		}
+		result["intent"] = intent
+		if scope, exists := anchor["scope"]; exists {
+			if scope != "section" {
+				return nil, fmt.Errorf("invalid document extension scope")
+			}
+			result["scope"] = scope
+		}
+	}
 	for _, key := range []string{"startBlock", "endBlock", "startTextOffset", "endTextOffset"} {
 		if value, exists := anchor[key]; exists {
 			n, ok := intArg(value)

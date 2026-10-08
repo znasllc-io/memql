@@ -56,7 +56,11 @@ func revisionPassages(captured map[string]any) ([]revisionPassage, error) {
 		if end > len(lines) || strings.Join(lines[start:end], "\n") != anchor["sourceQuote"] {
 			return nil, fmt.Errorf("feedback no longer matches the captured source")
 		}
-		passages = append(passages, revisionPassage{StartLine: start, EndLine: end, Comments: []map[string]any{{"id": comment["id"], "quote": anchor["quote"], "feedback": comment["body"], "prefix": anchor["prefix"], "suffix": anchor["suffix"], "sectionPath": anchor["sectionPath"]}}})
+		kind := "feedback"
+		if anchor["intent"] == "extend" {
+			kind = "extend"
+		}
+		passages = append(passages, revisionPassage{StartLine: start, EndLine: end, Comments: []map[string]any{{"id": comment["id"], "kind": kind, "scope": anchor["scope"], "quote": anchor["quote"], "feedback": comment["body"], "prefix": anchor["prefix"], "suffix": anchor["suffix"], "sectionPath": anchor["sectionPath"]}}})
 	}
 	sort.SliceStable(passages, func(a, b int) bool { return passages[a].StartLine < passages[b].StartLine })
 	merged := make([]revisionPassage, 0, len(passages))

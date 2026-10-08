@@ -39,3 +39,11 @@ test("passage anchors capture source plus rendered quote and become stale after 
   assert.throws(() => markdownAnchor(source, { startLine: -1, endLine: 2, quote: "fake" }));
   assert.throws(() => markdownAnchor(source, { startLine: 2, endLine: 999, quote: "fake" }));
 });
+
+test("extension metadata retains a verified section or passage anchor", () => {
+  const source = "# Guide\n\n## Examples\n\nTry **this**.\n";
+  const section = markdownAnchor(source, {startLine:2,endLine:3,quote:"Examples",intent:"extend",scope:"section"});
+  assert.equal(section.intent,"extend");assert.equal(section.scope,"section");assert.equal(section.sourceQuote,"## Examples");assert.deepEqual(section.sectionPath,["Guide","Examples"]);
+  const passage = markdownAnchor(source, {startLine:4,endLine:5,quote:"this",intent:"extend"});
+  assert.equal(passage.intent,"extend");assert.equal(passage.scope,undefined);assert.equal(passage.sourceQuote,"Try **this**.");
+});

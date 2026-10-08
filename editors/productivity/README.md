@@ -100,13 +100,16 @@ captures the ready template content it reviewed, so later copy edits do not
 change an in-progress campaign. Existing jobs without a captured snapshot retain
 the older live-template behavior; pause and recreate those jobs to capture a copy.
 
-In **Read**, select a passage and choose **Add feedback**, or use the feedback
-icon (keyboard: Ctrl/Cmd+Alt+M). Saved notes appear in the review panel. Use
-**Extend document** at the end to describe new sections, examples or other
-content to add. Unfinished notes stay attached to their selection across view
+In **Read**, select a passage and choose **Feedback** or **Extend**. The feedback
+icon also supports Ctrl/Cmd+Alt+M. Use **+** beside a heading to **Extend section**,
+or **Extend document** at the end. These share one extension flow: the anchor
+supplies a starting location, and the request describes the content to add. Unfinished notes stay attached to their selection across view
 changes; if the source changes, their text is preserved and must be reselected.
-Both composers use **Add to review**. New notes get a ready-to-propose state and
-the previous request is collapsed. **Propose changes** generates the same before/after review and
+Both composers use **Add to review**. The **Requests** list uses labeled
+**Included / Excluded** switches to choose what enters the next proposal; a
+previous completed review is collapsed. Submitted requests become read-only
+and appear beside their corresponding changes, without inclusion controls.
+**Propose changes** generates the same before/after review and
 approval controls for passage feedback and standalone extensions. Overlapping
 status reads cannot let an old completed request hide a new proposal.
 Reopening an editor restores the latest owned request from a DSL lookup in
@@ -122,15 +125,19 @@ approval and versioned storage. No generation-specific metadata is required:
 imported Markdown uses the same source, quote, context and position anchors.
 
 The review panel shows the original and proposed text for every affected
-location, including both ends of a move. **Compare full document** opens a
+location, including both ends of a move. Location links scroll to the affected
+passage without closing Review; proposal links use the actual insertion location,
+even when the request started at the document end. At narrow widths Review
+becomes a bottom panel, keeping the document reachable above it. **Compare full document** opens a
 read-only diff. **Approve & apply** resumes the same Nexus job and saves a new
 version; **Decline** keeps the document unchanged. Preservation is the default:
 people can say "Rename this to Draft Exchange" without asking to retain bold
 formatting, surrounding descriptions or other items. The DSL prompt requires
 minimal changes and a check that every difference serves the feedback. Native
 application copies unaffected bytes and matching context from the saved source;
-extension-only edits cannot rewrite existing content. Extensions append by
-default, or insert at a requested location, such as question time after lunch
+extension-only edits cannot rewrite existing content. Extensions default to
+the selected section or passage, or append when started at the document end.
+Instructions can direct an addition elsewhere, such as question time after lunch
 in a schedule. The button's location does not constrain the insertion point.
 Requests can also delete, rearrange or extend content. The
 panel follows progress and refreshes a clean editor after application, while

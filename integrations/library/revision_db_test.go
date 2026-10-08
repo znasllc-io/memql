@@ -187,12 +187,14 @@ func TestDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing
 	f := newRevisionDB(t)
 	for _, tc := range []struct {
 		name, source, quote, feedback, want string
-		extension                           bool
+		extension, section, passage         bool
 		edits                               []revisionReplacement
 	}{
 		{name: "precise rephrase", source: "# Guide\n\nKeep the opening. This bit is verbose. Keep the ending.\n", quote: "This bit is verbose.", feedback: "Rephrase only this sentence.", want: "# Guide\n\nKeep the opening. This is clear. Keep the ending.\n", edits: []revisionReplacement{{Before: "This bit is verbose.", After: "This is clear.", Reason: "Shorten the selected sentence"}}},
 		{name: "delete", source: "# Guide\n\nKeep this. Remove this. Keep that.\n", quote: "Remove this.", feedback: "Delete this sentence.", want: "# Guide\n\nKeep this. Keep that.\n", edits: []revisionReplacement{{Before: "Remove this. ", After: "", Reason: "Remove the selected sentence"}}},
 		{name: "move and expand", source: "# Guide\n\nMove this example. Keep the intro.\n\n## Examples\n\nExisting example.\n", quote: "Move this example.", feedback: "Move this into Examples and explain it.", want: "# Guide\n\nKeep the intro.\n\n## Examples\n\nExisting example.\n\nMoved example, with an explanation.\n", edits: []revisionReplacement{{Before: "Move this example. ", After: "", Reason: "Remove from intro"}, {Before: "Existing example.", After: "Existing example.\n\nMoved example, with an explanation.", Reason: "Move into Examples and explain"}}},
+		{name: "extend existing section", source: "# Guide\n\n## Examples\n\nAn existing example.\n\n## Next\n\nKeep this.\n", quote: "Examples", section: true, feedback: "Add a practical exercise.", want: "# Guide\n\n## Examples\n\nAn existing example.\n\nTry a practical exercise.\n\n## Next\n\nKeep this.\n", edits: []revisionReplacement{{Before: "An existing example.", After: "An existing example.\n\nTry a practical exercise.", Reason: "Extend the selected section"}}},
+		{name: "extend selected passage", source: "# Guide\n\nKeep the introduction. An existing example. Keep the conclusion.\n", quote: "An existing example.", passage: true, feedback: "Add a practical exercise here.", want: "# Guide\n\nKeep the introduction. An existing example. Try a practical exercise. Keep the conclusion.\n", edits: []revisionReplacement{{Before: "An existing example.", After: "An existing example. Try a practical exercise.", Reason: "Expand the selected passage"}}},
 		{name: "extend imported document", source: "# Imported note\n\nOriginal content.\n", extension: true, feedback: "Add next steps.", want: "# Imported note\n\nOriginal content.\n\n## Next steps\n\nTry the example.\n", edits: []revisionReplacement{{Before: "Original content.", After: "Original content.\n\n## Next steps\n\nTry the example.", Reason: "Extend with requested next steps"}}},
 		{name: "extend schedule after lunch", source: "# Workshop\n\n## Schedule\n\n- 12:00 PM: Lunch break\n\n## Activities\n\nRead an excerpt.\n", extension: true, feedback: "Extend the workshop after the lunch break with time for asking questions.", want: "# Workshop\n\n## Schedule\n\n- 12:00 PM: Lunch break\n- 1:00 PM: Questions and discussion\n\n## Activities\n\nRead an excerpt.\n", edits: []revisionReplacement{{Before: "- 12:00 PM: Lunch break", After: "- 12:00 PM: Lunch break\n- 1:00 PM: Questions and discussion", Reason: "Add question time after lunch in the schedule"}}},
 	} {
@@ -201,6 +203,12 @@ func TestDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing
 			anchor := map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": tc.quote, "sourceQuote": strings.Split(tc.source, "\n")[2]}
 			if tc.extension {
 				anchor = map[string]any{"kind": "document-end"}
+			}
+			if tc.section || tc.passage {
+				anchor["intent"] = "extend"
+			}
+			if tc.section {
+				anchor["scope"] = "section"
 			}
 			args, note := f.submit(artifact, doc, anchor, tc.feedback)
 			request := asString(args["requestId"])

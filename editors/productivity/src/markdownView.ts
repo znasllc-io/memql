@@ -8,7 +8,7 @@ const instruction = byId("revision-instruction") as HTMLTextAreaElement;
 const add = byId("add") as HTMLButtonElement;
 const annotate = byId("annotate") as HTMLButtonElement;
 const prepare = byId("prepare-revision") as HTMLButtonElement;
-type Anchor = { kind?: "markdown"; startLine: number; endLine: number; quote: string; startBlock: number; endBlock: number; startTextOffset: number; endTextOffset: number; prefix?: string; suffix?: string } | { kind: "document-end"; quote: string };
+type Anchor = { kind?: "markdown"; intent?: "extend"; scope?: "section"; sectionPath?: string[]; startLine: number; endLine: number; quote: string; startBlock: number; endBlock: number; startTextOffset: number; endTextOffset: number; prefix?: string; suffix?: string } | { kind: "document-end"; quote: string };
 type ReviewRow = { id: string; body: string; outdated?: boolean; anchor: Anchor };
 const state = (api.getState() ?? {}) as { draft?: string; anchor?: Anchor; draftVersion?: number; source?: string; instruction?: string; reviewOpen?: boolean; included?: string[]; seen?: string[] };
 let restored = false;
@@ -28,19 +28,19 @@ function activeRun() { return revision && !["succeeded", "failed", "cancelled"].
 function controls() {
   annotate.disabled = !connected || (!selection && !(feedback.value && draftAnchor));
   annotate.title = selection ? "Add feedback on this selection" : feedback.value && draftAnchor ? "Continue your feedback" : "Select text to add feedback";
-  (byId("extend") as HTMLButtonElement).disabled = !connected;
+  for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>("#extend,.section-extend"))) button.disabled = !connected;
   add.disabled = !connected || !draftAnchor || !feedback.value.trim() || commentBusy;
   add.textContent = commentBusy ? "Adding…" : "Add to review";
   prepare.disabled = !connected || revisionBusy || !!activeRun() || selected.size === 0;
-  prepare.textContent = revisionBusy ? "Submitting…" : selected.size ? `Propose changes · ${selected.size}` : "Propose changes";
+  prepare.textContent = revisionBusy ? "Submitting…" : "Propose changes";
   byId("review-submit").hidden = !!activeRun() || selected.size === 0;
   byId("review-footer").hidden = byId("review-submit").hidden && !byId("review-actions").childElementCount;
   const count = rows.filter(row => !row.outdated).length;
   byId("note-count").textContent = String(count); byId("note-count").hidden = !count;
 }
-function showReview(open: boolean) { byId("review-panel").hidden = !open; byId("review-toggle").setAttribute("aria-expanded", String(open)); if (open) byId("selection-tools").hidden = true; saveState(); }
+function showReview(open: boolean) { document.body.classList.toggle("review-open", open); byId("review-panel").hidden = !open; byId("review-toggle").setAttribute("aria-expanded", String(open)); if (open) byId("selection-tools").hidden = true; saveState(); }
 function position(element: HTMLElement, rect?: DOMRect, compact = false) {
-  const width = compact ? 154 : Math.min(360, window.innerWidth - 32);
+  const width = compact ? 236 : Math.min(360, window.innerWidth - 32);
   const height = compact ? 42 : Math.min(340, window.innerHeight - 32);
   element.style.left = `${Math.max(16, Math.min(window.innerWidth - width - 16, rect ? rect.left + rect.width / 2 - width / 2 : (window.innerWidth - width) / 2))}px`;
   const below = rect ? rect.bottom + 10 : Math.max(90, window.innerHeight / 3);
@@ -56,12 +56,12 @@ function openComposer(anchor: Anchor, rect?: DOMRect) {
   if (feedback.value.trim() && draftAnchor && JSON.stringify(draftAnchor) !== JSON.stringify(anchor)) {
     byId("composer-status").textContent = "Your unfinished note is still attached to its original selection. Save it before starting another.";
   } else { draftAnchor = anchor; byId("composer-status").textContent = ""; }
-  const extend = draftAnchor?.kind === "document-end";
-  byId("composer-title").textContent = extend ? "Extend document" : "Add feedback";
+  const extend = isExtension(draftAnchor);
+  byId("composer-title").textContent = extend ? draftAnchor?.kind === "document-end" ? "Extend document" : draftAnchor?.scope === "section" ? "Extend section" : "Extend passage" : "Add feedback";
   feedback.setAttribute("aria-label", extend ? "Extension request" : "Feedback");
-  feedback.placeholder = extend ? "What should come next? Describe the sections, examples or detail to add…" : "Rephrase, remove, move or expand this passage…";
+  feedback.placeholder = extend ? "What would you like to add here?" : "What would you like to change?";
   byId("selected").textContent = draftAnchor?.quote ?? "";
-  byId("selected").hidden = extend;
+  byId("selected").hidden = draftAnchor?.kind === "document-end";
   byId("composer").hidden = false; byId("selection-tools").hidden = true;
   highlight("memql-active", selectionRange ? [selectionRange] : []);
   position(byId("composer"), rect); controls(); saveState(); feedback.focus();
@@ -85,9 +85,10 @@ function captureSelection() {
   byId("selection-tools").hidden = !connected; position(byId("selection-tools"),selectionRect,true); controls();
 }
 document.addEventListener("selectionchange",captureSelection);
-byId("selection-feedback").addEventListener("mousedown", event => event.preventDefault());
+for (const id of ["selection-feedback", "selection-extend"]) byId(id).addEventListener("mousedown", event => event.preventDefault());
 annotate.addEventListener("mousedown",event => event.preventDefault());
 for (const id of ["selection-feedback","annotate"]) byId(id).addEventListener("click",() => { const anchor = selection ?? draftAnchor; if (anchor && connected) openComposer(anchor,selectionRect); });
+byId("selection-extend").addEventListener("click", () => { if (selection && selection.kind !== "document-end" && connected) openComposer({...selection, intent:"extend"}, selectionRect); });
 byId("extend").addEventListener("click",() => openComposer({kind:"document-end",quote:"End of document"},byId("extend").getBoundingClientRect()));
 byId("composer-close").addEventListener("click",closeComposer);
 byId("review-toggle").addEventListener("click",() => showReview(byId("review-panel").hidden));
@@ -130,60 +131,164 @@ function rangeFor(anchor: Anchor): Range | undefined {
   const from=at(start,anchor.startTextOffset),to=at(end,anchor.endTextOffset); if(!from || !to)return;
   const range=document.createRange();range.setStart(...from);range.setEnd(...to);return range;
 }
+function isExtension(anchor?: Anchor) { return anchor?.kind === "document-end" || anchor?.intent === "extend"; }
+function location(anchor?: Anchor): string {
+  if (anchor?.kind === "document-end") return "Document end";
+  if (anchor?.scope === "section") return anchor.quote;
+  return anchor?.sectionPath?.at(-1) || "Selected passage";
+}
+function jumpTo(anchor: Anchor) {
+  const range = rangeFor(anchor);
+  const target = anchor.kind === "document-end" ? byId("extend") : mapped(range?.startContainer ?? null)
+    ?? content.querySelector<HTMLElement>(`[data-start-line="${anchor.startLine}"]`);
+  target?.scrollIntoView?.({ block: window.innerWidth < 1000 ? "start" : "center", behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+  if (range) { highlight("memql-active", [range]); setTimeout(() => highlight("memql-active", []), 2500); }
+  // Navigation keeps the review, its scroll position and the invoking control.
+}
+function locationButton(anchor: Anchor, label = location(anchor)) {
+  const jump = textElement("button", label, "passage") as HTMLButtonElement;
+  jump.setAttribute("aria-label", `Show ${location(anchor)} in document`);
+  jump.addEventListener("click", () => jumpTo(anchor));
+  return jump;
+}
+function editLocation(edit: Record<string, any>): Anchor | undefined {
+  const before = String(edit.before ?? "");
+  if (!before) return {kind:"document-end", quote:"End of document"};
+  const source = sourceIdentity.replace(/\r\n/g, "\n");
+  const offset = source.indexOf(before);
+  if (offset < 0 || source.indexOf(before, offset + 1) >= 0) return;
+  const line = source.slice(0, offset).split("\n").length - 1;
+  const blocks = Array.from(content.querySelectorAll<HTMLElement>("[data-block-id]"));
+  const target = blocks.filter(block => Number(block.dataset.startLine) <= line && Number(block.dataset.endLine) > line).at(-1);
+  if (!target) return;
+  const heading = blocks.filter(block => /^H[1-6]$/.test(block.tagName) && Number(block.dataset.startLine) <= line).at(-1);
+  return {kind:"markdown", quote:target.textContent ?? "", startBlock:Number(target.dataset.blockId), endBlock:Number(target.dataset.blockId),
+    startLine:Number(target.dataset.startLine), endLine:Number(target.dataset.endLine), startTextOffset:0, endTextOffset:target.textContent?.length ?? 0,
+    sectionPath:heading ? [heading.textContent ?? ""] : []};
+}
+function sectionTools() {
+  for (const heading of Array.from(content.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6"))) {
+    if (!heading.dataset.blockId) continue;
+    const quote = heading.textContent?.trim() ?? "";
+    const button = document.createElement("button");
+    button.className = "section-extend icon-button";
+    button.setAttribute("aria-label", `Extend section: ${quote}`);
+    button.title = "Extend section";
+    button.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+    button.addEventListener("click", () => {
+      if (!connected) return;
+      const anchor: Anchor = { kind:"markdown", intent:"extend", scope:"section", quote,
+        startLine:Number(heading.dataset.startLine), endLine:Number(heading.dataset.endLine),
+        startBlock:Number(heading.dataset.blockId), endBlock:Number(heading.dataset.blockId), startTextOffset:0, endTextOffset:quote.length };
+      selectionRange = undefined;
+      openComposer(anchor, button.getBoundingClientRect());
+    });
+    heading.append(button);
+  }
+}
+function requestNote(row: ReviewRow, editable: boolean): HTMLElement {
+  const article = textElement("article", "", "note");
+  const head = textElement("div", "", "note-head");
+  const meta = textElement("div", "", "note-location");
+  meta.append(textElement("span", isExtension(row.anchor) ? "Extend" : "Feedback", "request-kind"));
+  if (row.outdated) meta.append(textElement("span", location(row.anchor)));
+  else meta.append(locationButton(row.anchor));
+  head.append(meta);
+  if (editable) {
+    const toggle = document.createElement("button");
+    toggle.className = "include-toggle";
+    toggle.setAttribute("role", "switch");
+    toggle.setAttribute("aria-label", `Include request: ${row.body.slice(0, 120)}`);
+    const paint = () => { const included = selected.has(row.id); toggle.setAttribute("aria-checked", String(included)); toggle.textContent = included ? "Included" : "Excluded"; article.classList.toggle("excluded", !included); };
+    toggle.addEventListener("click", () => { if (selected.has(row.id)) selected.delete(row.id); else selected.add(row.id); paint(); controls(); saveState(); });
+    paint(); head.append(toggle);
+  }
+  article.append(head, textElement("p", row.body));
+  if (row.anchor?.kind !== "document-end" && row.anchor?.scope !== "section") {
+    const quote = document.createElement("details"); quote.className = "request-quote";
+    quote.append(textElement("summary", "Selected text"), textElement("blockquote", row.anchor?.quote ?? "")); article.append(quote);
+  }
+  return article;
+}
 function renderComments() {
   const list = byId("comments"); list.replaceChildren();
-  const current = rows.filter(row=>!row.outdated), earlier = rows.filter(row=>row.outdated);
-  if (!current.length && !revision) list.append(textElement("p","Select text to leave feedback, or describe what to add at the end of the document.","empty"));
-  if (current.length) list.append(textElement("h3",`Feedback · ${current.length}`));
-  const note = (row:ReviewRow) => {
-    const article=textElement("article","","note"); const head=textElement("div","","note-head");
-    const kind=row.anchor?.kind==="document-end" ? "Extension" : "Passage feedback";
-    if (!row.outdated) {
-      const label=document.createElement("label"),pick=document.createElement("input");pick.type="checkbox";pick.checked=selected.has(row.id);pick.setAttribute("aria-label",`Include ${kind.toLowerCase()}: ${row.body.slice(0,80)}`);
-      pick.addEventListener("change",()=>{if(pick.checked)selected.add(row.id);else selected.delete(row.id);controls();saveState();});label.append(pick,kind);head.append(label);
-    } else head.textContent=`${kind} · Earlier revision`;
-    article.append(head);
-    if(row.anchor?.kind!=="document-end") article.append(textElement("blockquote",row.anchor?.quote ?? ""));
-    article.append(textElement("p",row.body));
-    if(!row.outdated){const jump=document.createElement("button");jump.className="passage";jump.textContent=row.anchor?.kind==="document-end"?"Go to end":"Show passage";jump.addEventListener("click",()=>{const range=rangeFor(row.anchor);showReview(false);const target=row.anchor?.kind==="document-end"?byId("extend"):mapped(range?.startContainer??null);target?.scrollIntoView?.({block:"center",behavior:window.matchMedia?.("(prefers-reduced-motion: reduce)").matches?"instant":"smooth"});if(range){highlight("memql-active",[range]);setTimeout(()=>highlight("memql-active",[]),2500);}});article.append(jump);}
-    return article;
-  };
-  for(const row of current)list.append(note(row));
-  if(earlier.length){const details=textElement("details","","earlier");details.append(textElement("summary",`Earlier feedback · ${earlier.length}`));for(const row of earlier)details.append(note(row));list.append(details);}
-  highlight("memql-notes",current.map(row=>rangeFor(row.anchor)).filter((range):range is Range=>!!range));
+  const inFlight = preparing || !!activeRun();
+  const captured = new Set<string>(preparing ? selected : revision?.proposal?.commentIds ?? []);
+  const current = rows.filter(row => !row.outdated && (!inFlight || !captured.has(row.id)));
+  const earlier = rows.filter(row => row.outdated && !captured.has(row.id));
+  if (current.length) {
+    list.append(textElement("h3", inFlight ? "For your next review" : "Requests"));
+    if (!inFlight) list.append(textElement("p", "Include the requests you want in this proposal.", "muted request-help"));
+    for (const row of current) list.append(requestNote(row, !inFlight));
+  }
+  if (!rows.length && !revision) list.append(textElement("p", "Select text for feedback, or use + beside a heading to extend a section.", "empty"));
+  if (earlier.length) {
+    const details = textElement("details", "", "earlier"); details.append(textElement("summary", `Earlier requests (${earlier.length})`));
+    for (const row of earlier) details.append(requestNote(row, false)); list.append(details);
+  }
+  highlight("memql-notes", rows.filter(row => !row.outdated).map(row => rangeFor(row.anchor)).filter((range): range is Range => !!range));
 }
 function renderRevision() {
-  const root=byId("revision");root.replaceChildren();const actions=byId("review-actions");actions.replaceChildren();
-  if(preparing){root.append(textElement("h3","Preparing changes"),textElement("p","Submitting your feedback…","phase busy"));return;}
-  const pending=rows.some(row=>!row.outdated&&!revision?.proposal?.commentIds?.includes(row.id));
-  let panel:HTMLElement=root;
-  if(!activeRun()&&pending){
-    root.append(textElement("h3","Ready to propose"),textElement("p","Choose Propose changes to preview the edits for your feedback.","phase"));
-    if(revision){const previous=document.createElement("details");previous.className="earlier";previous.append(textElement("summary","Previous request"));root.append(previous);panel=previous;}
+  renderComments();
+  const root = byId("revision"); root.replaceChildren(); const actions = byId("review-actions"); actions.replaceChildren();
+  const pending = rows.some(row => !row.outdated && !revision?.proposal?.commentIds?.includes(row.id));
+  document.body.classList.toggle("review-draft", !preparing && !activeRun() && (pending || !revision));
+  if (preparing) { root.append(textElement("p", "Preparing changes…", "phase busy")); return; }
+  if (!revision) return;
+  const status = revision, proposal = status.proposal ?? {};
+  const terminal = ["succeeded", "failed", "cancelled"].includes(status.status);
+  const awaiting = !!status.approvalId && !status.decision && status.status === "waiting";
+  let panel: HTMLElement = root;
+  if (terminal && pending) {
+    const previous = document.createElement("details"); previous.className = "earlier";
+    previous.append(textElement("summary", "Previous review")); root.append(previous); panel = previous;
   }
-  if(!revision)return;
-  const status=revision,proposal=status.proposal??{};
-  const terminal=["succeeded","failed","cancelled"].includes(status.status);
-  const awaiting=!!status.approvalId && !status.decision && status.status==="waiting";
-  let phase=status.decision==="rejected"?"Changes declined. Your document is unchanged.":status.status==="succeeded"?(status.result?.applied?"Changes applied to the document.":"Review complete. No changes were needed."):status.status==="failed"||status.status==="cancelled"?"This request could not be completed.":awaiting?"Ready for your review":status.decision==="approved"?"Applying your approved changes…":"Analyzing your feedback…";
-  panel.append(textElement("h3",awaiting?"Proposed changes":"Change request"),textElement("p",phase,`phase${!terminal&&!awaiting?" busy":""}`));
-  if(status.errorMessage)panel.append(textElement("p",String(status.errorMessage),"muted"));
-  const summary=proposal.summary??status.result?.summary;if(summary)panel.append(textElement("p",String(summary),"proposal-summary"));
-  if(Array.isArray(proposal.edits))for(const [index,edit] of proposal.edits.entries()) {
-    if(edit.before===edit.after)continue;
-    const card=document.createElement("details");card.className="change";card.open=true;
-    const label=edit.after===""?"Remove passage":edit.before===""||edit.after.startsWith(edit.before)?"Add content":"Revise passage";
-    card.append(textElement("summary",`${index+1}. ${label}`),textElement("p",String(edit.reason??""),"reason"));
-    for(const [key,label,cls] of [["before","Original","before"],["after","Proposed","after"]]) {
-      const block=textElement("div","",cls);block.append(textElement("div",label,"diff-label"),textElement("pre",String(edit[key]??"")||(key==="after"?"Removed":"New content")));card.append(block);
+  const phase = status.decision === "rejected" ? "Changes declined" : status.status === "succeeded" ? status.result?.applied ? "Changes applied" : "No changes needed"
+    : status.status === "failed" || status.status === "cancelled" ? "Couldn’t prepare changes" : awaiting ? "Proposed changes" : status.decision === "approved" ? "Applying changes…" : "Preparing changes…";
+  panel.append(textElement("h3", phase, !terminal && !awaiting ? "phase busy" : ""));
+  if (status.errorMessage) panel.append(textElement("p", String(status.errorMessage), "review-error"));
+  const requested: ReviewRow[] = Array.isArray(proposal.comments) ? proposal.comments : rows.filter(row => proposal.commentIds?.includes(row.id));
+  const edits: Record<string, any>[] = Array.isArray(proposal.edits) ? proposal.edits.filter((edit: any) => edit.before !== edit.after) : [];
+  const addressed = new Set(edits.flatMap(edit => edit.commentIds ?? []));
+  for (const edit of edits) {
+    const related = requested.filter(row => edit.commentIds?.includes(row.id));
+    const destination = editLocation(edit);
+    const card = document.createElement("details"); card.className = "change"; card.open = !terminal;
+    const label = edit.after === "" ? "Remove passage" : edit.before === "" || edit.after.startsWith(edit.before) ? "Add content" : "Revise passage";
+    card.append(textElement("summary", related.length === 1 ? `${isExtension(related[0].anchor) ? "Extend" : "Feedback"}: ${location(destination ?? related[0].anchor)}` : label));
+    for (const row of related) {
+      const context = textElement("div", "", "request-context");
+      context.append(textElement("p", row.body));
+      if (!terminal) context.append(locationButton(destination ?? row.anchor, "Show in document"));
+      card.append(context);
     }
+    for (const [key, label, cls] of [["before", "Current", "before"], ["after", "Proposed", "after"]]) {
+      const block = textElement("div", "", cls); block.append(textElement("div", label, "diff-label"), textElement("pre", String(edit[key] ?? "") || (key === "after" ? "Removed" : "New content"))); card.append(block);
+    }
+    if (edit.reason) { const why = textElement("details", "", "change-reason"); why.append(textElement("summary", "Why this change"), textElement("p", String(edit.reason))); card.append(why); }
     panel.append(card);
   }
-  const action=(label:string,type:string,decision?:string,primary=false)=>{const button=document.createElement("button");button.textContent=label;button.className=primary?"primary":"secondary";button.disabled=revisionBusy||(decision==="approved"&&!connected);button.addEventListener("click",()=>{revisionBusy=true;controls();renderRevision();api.postMessage({type,approvalId:status.approvalId,decision});});return button;};
-  if(typeof proposal.revisedContent==="string") { const compare=action("Compare full document","compareRevision");compare.className="compare";panel.append(compare); }
-  if(status.prepared===false)actions.append(action("Retry submission","resumePreparation",undefined,true));
-  else if(awaiting)actions.append(action("Decline","decideRevision","rejected"),action("Approve & apply","decideRevision","approved",true));
-  else if(status.decision==="approved"&&status.status==="waiting")actions.append(action("Resume approved changes","decideRevision","approved",true));
+  if (awaiting || (!terminal && !edits.length)) {
+    for (const row of requested.filter(row => !addressed.has(row.id))) {
+      const note = requestNote(row, false);
+      if (awaiting) note.append(textElement("p", "No change proposed for this request.", "muted"));
+      panel.append(note);
+    }
+  }
+  const summary = proposal.summary ?? status.result?.summary;
+  if (summary) {
+    if (!edits.length) panel.append(textElement("p", String(summary), "proposal-summary"));
+    else { const overview = textElement("details", "", "proposal-summary"); overview.append(textElement("summary", "Summary"), textElement("p", String(summary))); panel.append(overview); }
+  }
+  const action = (label: string, type: string, decision?: string, primary = false) => {
+    const button = textElement("button", label, primary ? "primary" : "secondary") as HTMLButtonElement;
+    button.disabled = revisionBusy || (decision === "approved" && !connected);
+    button.addEventListener("click", () => { revisionBusy = true; controls(); renderRevision(); api.postMessage({ type, approvalId:status.approvalId, decision }); }); return button;
+  };
+  if (typeof proposal.revisedContent === "string") { const compare = action("Compare full document", "compareRevision"); compare.className = "compare secondary"; panel.append(compare); }
+  if (status.prepared === false) actions.append(action("Retry submission", "resumePreparation", undefined, true));
+  else if (awaiting) actions.append(action("Decline", "decideRevision", "rejected"), action("Approve & apply", "decideRevision", "approved", true));
+  else if (status.decision === "approved" && status.status === "waiting") actions.append(action("Resume approved changes", "decideRevision", "approved", true));
 }
 window.addEventListener("message",event=>{
   const message=event.data;
@@ -199,18 +304,18 @@ window.addEventListener("message",event=>{
   if(message.type==="document") {
     const scroll=document.documentElement.scrollTop;
     content.innerHTML=message.html; // Host uses the HTML-disabled Markdown renderer.
-    version=message.version;connected=message.connected;
+    sectionTools(); version=message.version;connected=message.connected;
     const incoming=String(message.sourceIdentity??version);
     if(draftAnchor && (sourceIdentity||state.source) && (sourceIdentity||state.source)!==incoming){draftAnchor=undefined;byId("composer-status").textContent="The document changed. Your note is preserved; select its passage again before saving.";}
     sourceIdentity=incoming;selection=undefined;selectionRange=undefined;byId("selection-tools").hidden=true;
     if(!connected)byId("status").textContent=message.status??"Save the document before sharing feedback.";
-    document.documentElement.scrollTop=scroll;renderComments();controls();saveState();api.postMessage({type:"rendered",version,text:content.textContent?.slice(0,500)});
+    document.documentElement.scrollTop=scroll;renderRevision();controls();saveState();api.postMessage({type:"rendered",version,text:content.textContent?.slice(0,500)});
   }
   if(message.type==="comments") {
     const next=message.rows??[],different=JSON.stringify(next)!==JSON.stringify(rows);rows=next;
     for(const row of rows){if(!row.outdated&&!seen.has(row.id))selected.add(row.id);if(row.outdated)selected.delete(row.id);seen.add(row.id);}
     const available=new Set(rows.filter(row=>!row.outdated).map(row=>row.id));for(const id of selected)if(!available.has(id))selected.delete(id);
-    renderComments();if(different)renderRevision();controls();saveState();
+    if(different)renderRevision();controls();saveState();
   }
   if(message.type==="revision") {const changed=message.status?.approvalId&&message.status.approvalId!==revision?.approvalId;const different=JSON.stringify(message.status)!==JSON.stringify(revision);revision=message.status;if(different)renderRevision();controls();if(changed){byId("status").textContent="";showReview(true);}}
   if(message.type==="revisionIdle"){revisionBusy=false;preparing=false;renderRevision();controls();}
