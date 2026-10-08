@@ -38,6 +38,7 @@ function activeRun() { return revision && !revision.cancelRequested && !["succee
 function dictate(target: string) {
   if(dictationPhase==="idle") {
     if(!dictationAvailable||!connected)return;
+    if(target==="feedback"&&dictationError)byId("composer-status").textContent="";
     dictationTarget=target;dictatedBase=target==="feedback"?feedback.value:modifications[target]??"";dictationError="";dictationPhase="starting";
     controls();renderRevision();api.postMessage({type:"dictationStart"});
   } else if(dictationTarget===target)api.postMessage({type:dictationPhase==="listening"?"dictationStop":"dictationCancel"});
@@ -53,7 +54,7 @@ function dictationStatus(target: string) {
 }
 function controls() {
   dictationControl(byId("dictate") as HTMLButtonElement,"feedback");
-  byId("dictation-status").textContent=dictationStatus("feedback");
+  byId("dictation-status").textContent=dictationTarget==="feedback"&&dictationError?"":dictationStatus("feedback");
   annotate.disabled = dictationPhase!=="idle"&&dictationTarget!=="feedback" || !connected || (!selection && !(feedback.value && draftAnchor));
   annotate.title = selection ? "Add feedback on this selection" : feedback.value && draftAnchor ? "Continue your feedback" : "Select text to add feedback";
   for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>("#extend,.section-feedback"))) button.disabled = !connected||dictationPhase!=="idle";

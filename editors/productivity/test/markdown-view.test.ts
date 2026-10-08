@@ -190,3 +190,15 @@ test("switching to quiet Read cancels microphone capture and preserves the parti
  f.send({type:"dictation",phase:"listening",text:"Add examples"});f.send({type:"viewMode",mode:"reading"});
  assert.ok(f.messages.some(m=>m.type==="dictationCancel"));assert.equal((f.el("feedback") as HTMLTextAreaElement).value,"Add examples");assert.equal(f.el("composer").hidden,true);assert.ok(!f.messages.some(m=>m.type==="comment"));f.dom.window.close();
 });
+
+test("speech failure appears once, preserves typed feedback and clears on retry",()=>{
+ const f=fixture();f.document();f.select();f.el("selection-feedback").click();f.input("feedback","Add an example.");
+ f.send({type:"dictationAvailable",available:true});f.el("dictate").click();
+ const error="No speech recognition model is available. Check Fleet.";
+ f.send({type:"dictation",phase:"idle",error});
+ assert.equal(f.el("composer-status").textContent,error);assert.equal(f.el("dictation-status").textContent,"");
+ assert.equal((f.el("feedback") as HTMLTextAreaElement).value,"Add an example.");
+ assert.equal((f.el("add") as HTMLButtonElement).disabled,false);
+ f.el("dictate").click();assert.equal(f.el("composer-status").textContent,"");assert.equal(f.messages.at(-1).type,"dictationStart");
+ assert.ok(!f.messages.some(m=>m.type==="comment"));f.dom.window.close();
+});
