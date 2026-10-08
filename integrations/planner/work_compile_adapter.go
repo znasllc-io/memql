@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 	workintegration "github.com/znasllc-io/memql/integrations/work"
@@ -104,7 +105,13 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 	}
 	maxCalls := runCeilings.MaxModelCalls
 
+	spine, err := workflowhost.SnapshotFromMap(req.Spine)
+	if err != nil {
+		c.failRun(ctx, req, fmt.Errorf("work compile: missing or invalid pinned Spine: %w", err))
+		return
+	}
 	out, err := c.loop.CompileGoalForRun(ctx, CompileRequest{
+		Spine:         spine,
 		GoalId:        req.GoalId,
 		RunId:         req.RunId,
 		OwnerUserId:   req.OwnerUserId,

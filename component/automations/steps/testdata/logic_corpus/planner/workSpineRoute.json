@@ -1,0 +1,213 @@
+{
+  "construct": "planner/logic.memql workSpineRoute",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "triage": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "triage": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "triage": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "triage": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "triage": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "triage": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "triage": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "triage": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "triage": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "triage": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "triage": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "triage": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "triage": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "triage": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "triage": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "triage": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "author"
+      }
+    }
+  }
+}

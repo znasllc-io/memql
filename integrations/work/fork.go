@@ -192,6 +192,7 @@ func (i *Integration) deriveRun(ctx context.Context, source map[string]any, d de
 		return "", errNoCompileSurface
 	}
 	seed := runSeed{
+		Spine:              rowMap(source, "spine"),
 		ExecutionAuthority: rowMap(source, "executionAuthority"),
 		RunId:              runId,
 		GoalId:             goalId,

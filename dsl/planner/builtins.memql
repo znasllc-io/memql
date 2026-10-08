@@ -169,3 +169,86 @@ builtin plannerLogNudge {
 builtin plannerConvergenceSpecialist {
 
 }
+
+/// A bounded operation inside an authorized work.spine/1 planning scope.
+@executor("integration.planner.spineContext")
+builtin spineContext {
+
+}
+
+/// A bounded operation inside an authorized work.spine/1 planning scope.
+@executor("integration.planner.spineCandidates")
+@args(profile="object")
+builtin spineCandidates {
+ kind enum("exact", "procedure", "near")!
+}
+
+/// A bounded operation inside an authorized work.spine/1 planning scope.
+@executor("integration.planner.spineUseCandidate")
+@args(profile="object")
+builtin spineUseCandidate {
+ handle string!
+}
+
+/// A bounded operation inside an authorized work.spine/1 planning scope.
+@executor("integration.planner.spineClassify")
+builtin spineClassify {
+
+}
+
+/// A bounded operation inside an authorized work.spine/1 planning scope.
+@executor("integration.planner.spineAcknowledge")
+builtin spineAcknowledge {
+
+}
+
+/// A bounded operation inside an authorized work.spine/1 planning scope.
+@executor("integration.planner.spinePrepareSections")
+@args(profile="object")
+builtin spinePrepareSections {
+ route enum("trivial", "sectionable")!
+}
+
+/// A bounded operation inside an authorized work.spine/1 planning scope.
+@executor("integration.planner.spineDraft")
+@args(profile="object")
+builtin spineDraft {
+ mode enum("default", "live", "inline")!
+}
+
+/// A bounded operation inside an authorized work.spine/1 planning scope.
+@executor("integration.planner.spineDesign")
+builtin spineDesign {
+
+}
+
+/// A bounded operation inside an authorized work.spine/1 planning scope.
+@executor("integration.planner.spineEmit")
+builtin spineEmit {
+
+}
+
+/// A bounded operation inside an authorized work.spine/1 planning scope.
+@executor("integration.planner.spineValidate")
+builtin spineValidate {
+
+}
+
+/// A bounded operation inside an authorized work.spine/1 planning scope.
+@executor("integration.planner.spineRepair")
+builtin spineRepair {
+
+}
+
+/// A bounded operation inside an authorized work.spine/1 planning scope.
+@executor("integration.planner.spinePersist")
+builtin spinePersist {
+
+}
+
+/// A bounded operation inside an authorized work.spine/1 planning scope.
+@executor("integration.planner.spineRefuse")
+@args(profile="object")
+builtin spineRefuse {
+ message string!
+}

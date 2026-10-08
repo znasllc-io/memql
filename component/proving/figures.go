@@ -128,19 +128,18 @@ func Figures(s scenario.Scenario, results map[figure.Arm]ArmResult, overhead *Ov
 			}
 		}
 		if want(figure.MetricCompileCallsExact) && arm == figure.ArmPlatform {
-			// Measured directly against component/work.Decide, which is where
-			// the claim lives: an exact catalog hit returns NeedsModel false
-			// and NeedsTriage false, so the zero is a property of a returned
-			// value rather than an absence of instrumentation.
-			//
+			// Execute the installed DSL through the first model boundary.
 			// A CONTROL scenario measures the MISS path instead. The baseline
 			// arm cannot be the control here the way it is everywhere else --
 			// a bare loop does not compile at all -- so the control is an
 			// explicit scenario, and without it a counter that is never
 			// incremented on any path would read as zero forever.
-			calls := CompileCallsOnCatalogHit(s.Goal, variableKeys(s))
+			calls, compileErr := CompileCallsOnCatalogHit(s.Goal, variableKeys(s))
 			if s.NegativeControlFor == figure.MetricCompileCallsExact {
-				calls = CompileCallsOnCatalogMiss(s.Goal, variableKeys(s))
+				calls, compileErr = CompileCallsOnCatalogMiss(s.Goal, variableKeys(s))
+			}
+			if compileErr != nil {
+				return nil, nil, compileErr
 			}
 			if err := measured(arm, figure.MetricCompileCallsExact, float64(calls)); err != nil {
 				return nil, nil, err

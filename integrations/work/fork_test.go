@@ -45,9 +45,14 @@ func TestForkAndReplayDeriveARunAndLeaveTheSourceAlone(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			i, eng := newTestIntegration(t)
-			eng.reply("workRunForOwner", sourceRun("u-alice"))
+			source := sourceRun("u-alice")
+			spine, err := CaptureSpine("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			source["spine"] = spine.Map()
+			eng.reply("workRunForOwner", source)
 
-			var err error
 			if tc.wantMode == modeFork {
 				_, err = i.handleForkRun(callerContext("u-alice"), tc.args, 0)
 			} else {
@@ -59,6 +64,9 @@ func TestForkAndReplayDeriveARunAndLeaveTheSourceAlone(t *testing.T) {
 
 			create := eng.callTo(t, "createWorkRun")
 			args := create.Args(t)
+			if !reflect.DeepEqual(args["spine"], source["spine"]) {
+				t.Fatal("derived run lost its admitted Spine source")
+			}
 			if args["mode"] != tc.wantMode {
 				t.Errorf("mode = %v, want %v", args["mode"], tc.wantMode)
 			}

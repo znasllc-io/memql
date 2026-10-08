@@ -1173,6 +1173,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 	}
+	if conceptMeta.Name == conceptWorkRun {
+		if err := validateWorkSpineImmutable(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+	}
 
 	// Annotation-driven PII scrub (memql#1711). A mutation tagged
 	// @scrubPii (the hard-delete / data-deletion path) clears EVERY field

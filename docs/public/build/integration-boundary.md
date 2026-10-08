@@ -104,6 +104,15 @@ Unfinished compiled steps and required steps skipped as blocked cannot produce
 a successful check result. Each action reference executes the exact definition
 captured for that run, even if the global action registry later gains a version.
 
+## Goal planning
+
+A goal may select an installed Spine template. Admission freezes its transitive
+automation and pure-logic source onto the run before planner execution. The DSL
+chooses catalog tiers, classification, source-authoring stages and safe
+representation fallbacks; the native scope retains run authority, budgets,
+validation and persistence integrity. See [Building a Spine](building-a-spine.md)
+for the complete contract, examples and recovery limits.
+
 ## Schedule placement
 
 Installed bundles can declare node placement alongside a schedule:

@@ -3,3 +3,14 @@ logic plannerTriggerOpensGoal {
  args { trigger string }
  return args.trigger == "reactive" || args.trigger == "recurring"
 }
+
+/// Value-only routing; classification and effects remain in the enclosing Spine.
+logic workSpineRoute {
+ args { triage object! }
+ if args.triage.conversational && args.triage.intent != "automation" && !args.triage.sectionable {
+  return "trivial"
+ }
+ if args.triage.complexity == "trivial" { return "trivial" }
+ if args.triage.sectionable { return "sectionable" }
+ return "author"
+}

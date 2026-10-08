@@ -37,6 +37,7 @@
 @actor
 mutation run createWorkRun {
   args {
+    spine object
     executionAuthority object
     runId                  string!
     goalId                 string
@@ -66,7 +67,7 @@ mutation run createWorkRun {
     routing                object
   }
   insert {
-    accept { executionAuthority, goalId, goalSignature, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, waitingOn, startedAt, parentRunId, head, rerun, routing }
+    accept { spine, executionAuthority, goalId, goalSignature, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, waitingOn, startedAt, parentRunId, head, rerun, routing }
     stamp {
       id: args.runId
       ownerUserId: actor.userId

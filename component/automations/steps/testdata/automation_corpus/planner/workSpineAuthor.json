@@ -1,0 +1,113 @@
+{
+  "automation": "planner/automations.memql workSpineAuthor",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "repairAttempts": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.workSpineAuthor"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "spineDesign"
+          },
+          {
+            "kind": "builtin",
+            "name": "spineEmit"
+          },
+          {
+            "kind": "builtin",
+            "name": "spineValidate"
+          },
+          {
+            "kind": "builtin",
+            "name": "spineRepair"
+          },
+          {
+            "kind": "builtin",
+            "name": "spineValidate"
+          },
+          {
+            "args": {
+              "message": "The authored draft did not pass Gate 1 within the repair budget."
+            },
+            "kind": "builtin",
+            "name": "spineRefuse"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "message": "The authored draft did not pass Gate 1 within the repair budget."
+            },
+            "builtin": "spineRefuse"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "repairAttempts": [
+              "a"
+            ]
+          },
+          "topic": "automation.invocation.workSpineAuthor"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "spineDesign"
+          },
+          {
+            "kind": "builtin",
+            "name": "spineEmit"
+          },
+          {
+            "kind": "builtin",
+            "name": "spineValidate"
+          },
+          {
+            "kind": "builtin",
+            "name": "spineRepair"
+          },
+          {
+            "kind": "builtin",
+            "name": "spineValidate"
+          },
+          {
+            "args": {
+              "message": "The authored draft did not pass Gate 1 within the repair budget."
+            },
+            "kind": "builtin",
+            "name": "spineRefuse"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "message": "The authored draft did not pass Gate 1 within the repair budget."
+            },
+            "builtin": "spineRefuse"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

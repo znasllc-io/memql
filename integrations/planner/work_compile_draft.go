@@ -435,7 +435,10 @@ func (l *PlannerAgentLoop) persistWorkDraft(ctx context.Context, req CompileRequ
 	bundleId := id.NewShortId()
 	write := func(name string, args map[string]any) error {
 		_, err := l.engine.Execute(ownerActorContext(ctx, req.OwnerUserId), name+"("+encodeArgs(args)+")")
-		return err
+		if err != nil {
+			return &draftPersistenceError{err: err}
+		}
+		return nil
 	}
 	args := map[string]any{"bundleId": bundleId, "title": truncate(req.Statement, 120), "sourceRunId": req.RunId}
 	if len(bundle.ReuseEdges) > 0 {

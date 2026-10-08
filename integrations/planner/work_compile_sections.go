@@ -217,7 +217,7 @@ func (l *PlannerAgentLoop) decideDecomposition(ctx context.Context, req CompileR
 		out.DecompositionRefused = err.Error()
 		l.infoCompile("work compile: the decomposition was refused; the goal is authored whole", req, "reason", err.Error())
 		dec.Sectionable, dec.Sections = false, nil
-		return work.Decision{Route: work.RouteAuthor, NeedsModel: true}, dec
+		return work.Decision{Route: work.RouteAuthor}, dec
 	}
 	plan, rows := l.routeSections(ctx, req, sections)
 	dec.catalog = l.bindCatalogSections(ctx, req, usable, &plan, rows)

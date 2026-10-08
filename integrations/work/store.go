@@ -309,6 +309,9 @@ func (s *store) createRunRow(ctx context.Context, r runSeed) error {
 		"rerun":               optMap(r.Rerun),
 		"waitingOn":           optMap(r.WaitingOn),
 	}
+	if r.Spine != nil {
+		args["spine"] = r.Spine
+	}
 	// Named only when there is one, so every run opened without a signature
 	// renders exactly the call it always did.
 	if sig := trim(r.GoalSignature); sig != "" {
@@ -408,6 +411,7 @@ type goalSeed struct {
 }
 
 type runSeed struct {
+	Spine               map[string]any
 	WaitingOn           map[string]any
 	ExecutionAuthority  map[string]any
 	RunId               string

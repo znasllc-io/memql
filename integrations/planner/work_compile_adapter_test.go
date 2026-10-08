@@ -43,7 +43,12 @@ func (r *recordingRunWriter) LimitWorkloadBudget(context.Context, string, string
 }
 
 func adapterReq() workintegration.CompileRequest {
+	spine, err := workintegration.CaptureSpine("")
+	if err != nil {
+		panic(err)
+	}
 	return workintegration.CompileRequest{
+		Spine:       spine.Map(),
 		GoalId:      "v1:work:goal:g1",
 		RunId:       "v1:work:run:r1",
 		OwnerUserId: "u1",

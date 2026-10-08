@@ -1,43 +1,26 @@
 package planner
 
-// work_compile.go -- the work spine's compile pass (epic memql#4966,
-// design record docs/superpowers/specs/2026-09-05-work-spine-design.md,
-// section B "Compile").
-//
-// WHY IT LIVES HERE rather than in component/work. The order it obeys is
-// pure and lives there (work.Decide); what it needs to DO the work with
-// is the authoring pipeline -- runDesignPass, emitAndRepairBundle,
-// classifySectionable, maybeGenerateSectionable, loadCatalog -- and every
-// one of those is an unexported method on *PlannerAgentLoop. Exporting
-// five of them to move one caller would widen a surface for no gain, so
-// the caller moved instead.
-//
-// THE ORDER IS THE PRODUCT. Catalog exact match, then near match with a
-// gap list, then ONE triage call. An exact hit reaches no model AT ALL --
-// not even the cheap classifier -- and that is the spec's headline claim,
-// the reason the catalog is worth keeping, and the thing that gets
-// quietly broken by an innocent-looking refactor. CompileGoalForRun
-// therefore reports what it did in CompileOutcome.Route and how many
-// provider calls it made in CompileOutcome.ModelCalls, and the test
-// asserts BOTH: a route with no calls, proved by a counting provider.
+// The Spine's compile entry and native source-materialization helpers.
+// Installed DSL templates choose the planning policy; work_spine.go binds
+// only the bounded operations available inside one authorized compile.
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
-	"github.com/znasllc-io/memql/core/airoute"
-	"github.com/znasllc-io/memql/core/id"
+	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
 
 // CompileRequest is one goal to compile.
 type CompileRequest struct {
+	Spine *workflowhost.Snapshot
 	// GoalId is the v1:work:goal being compiled.
 	GoalId string
 	// RunId is the run opened for it, already in `compiling`.
@@ -128,261 +111,33 @@ type catalogReader interface {
 	Execute(ctx context.Context, query string) (any, error)
 }
 
-// CompileGoalForRun runs the compile order for one goal.
-//
-// near and sandbox may be nil: a build with no similarity provider has no
-// near tier, and a build whose sandbox is unavailable cannot author. Both
-// degrade to the next tier rather than failing, which is the behaviour
-// the authoring pipeline already has -- an author path that refuses
-// because a nice-to-have is missing would make the whole spine unusable
-// on a cluster with no vector index.
+// CompileGoalForRun executes the run's frozen Spine. The DSL owns order and
+// policy; the scope owns evidence, authority, budgets and validated persistence.
 func (l *PlannerAgentLoop) CompileGoalForRun(ctx context.Context, req CompileRequest, near authoringNearMatcher, sandbox authoringSandbox) (CompileOutcome, error) {
-	if strings.TrimSpace(req.Statement) == "" {
-		return CompileOutcome{}, fmt.Errorf("work compile: goal %s has an empty statement", req.GoalId)
-	}
-	keys := inputKeys(req.Input)
-	sig := work.GoalSignature(req.Statement, keys)
-	conversation, conversational := req.Input["conversation"]
-	if conversational {
-		// A follow-up has no reusable meaning without its transcript. Keep it out
-		// of both text-only catalogue tiers, including learned procedures.
-		raw, err := json.Marshal(conversation)
-		if err != nil {
-			return CompileOutcome{}, fmt.Errorf("work compile: invalid conversation: %w", err)
-		}
-		sig = work.GoalSignature(req.Statement+"\nconversation:"+string(id.NewUntracked().FromBytes(raw)), keys)
-	}
-	out := CompileOutcome{Signature: sig}
-
-	in := work.CompileInput{
-		Statement:     req.Statement,
-		InputKeys:     keys,
-		NearThreshold: nearMatchThreshold,
-	}
-
-	// Tier 1: exact, pushed down as a filter. Free.
-	var exact, procedures []work.CatalogCandidate
-	var err error
-	if !conversational {
-		exact, err = l.cataloguedForSignature(ctx, req.OwnerUserId, sig)
-	}
+	scope, err := l.newSpineScope(req, near, sandbox)
 	if err != nil {
-		// A catalog read that fails must not make the goal unrunnable --
-		// it makes it EXPENSIVE, which is a different and recoverable
-		// problem. Logged and treated as a miss.
-		l.warnCompile("work compile: exact catalog read failed; falling through to the paid tiers", req, err)
+		return CompileOutcome{}, err
 	}
-	// The ladder's half of the same tier (epic memql#5408): learned
-	// procedures on a rung DecideServe serves from, ranked ahead of the
-	// authored catalog. A failed read is a miss for the same reason as above.
-	var perr error
-	if !conversational {
-		procedures, perr = l.servableProceduresForSignature(ctx, req.OwnerUserId, sig)
-	}
-	if perr != nil {
-		l.warnCompile("work compile: learned-procedure read failed; the ladder is skipped for this goal", req, perr)
-	}
-	in.Exact = append(procedures, exact...)
-
-	// Tier 2: near. Only consulted when the exact tier missed, because
-	// building the candidate list costs a vector search.
-	if !conversational && len(in.Exact) == 0 && near != nil {
-		matchText := work.NormalizeStatement(req.Statement)
-		if candidates, nerr := near.CatalogNearMatches(ctx, matchText, maxNearMatchCandidates); nerr != nil {
-			l.warnCompile("work compile: near-match read failed; falling through to triage", req, nerr)
-		} else {
-			in.Near = nearCandidates(candidates, keys)
-		}
-	}
-
-	// Decide with what we have. A decision that needs triage is the ONLY
-	// way a model is reached before the author tier.
-	d := work.Decide(in)
-	if !d.NeedsTriage {
-		return l.finishCompile(ctx, req, d, out, sandbox, sectionableDecision{}, nil)
-	}
-
-	// DESCRIPTION GUIDANCE (epic memql#5414, D23), read HERE and nowhere
-	// earlier: this is the first point at which a model is genuinely about to
-	// be used for the goal. An exact catalog hit and a procedure serve never
-	// get this far, and a replay never compiles at all -- text is not a row a
-	// replay can act on. The same guidance reaches the design pass if the
-	// goal is authored.
-	guidance := l.descriptionGuidance(ctx, req, sig)
-	if conversational {
-		ctx = l.withAcknowledgementCandidate(ctx, req)
-	}
-
-	// Tier 3: ONE classifier call answering complexity AND sectionability.
-	triageCtx, cancelTriage := context.WithTimeout(airoute.WithCallPurpose(ctx, "Understanding request", 0), 60*time.Second)
-	complexity, _, sectionable, cerr := l.classifyGoal(triageCtx, req.Statement, time.Now().UTC().Format(time.RFC3339), guidance, keys, conversation)
-	cancelTriage()
-	if cerr == nil || !memql.IsProviderUnavailable(cerr) {
-		// Counted when the call reached a provider. A cluster with no
-		// classifier made no call, and ModelCalls counts only calls that ran.
-		out.ModelCalls++
-	}
-	if cerr != nil {
-		return out, fmt.Errorf("work compile: intent classification failed; retry the request: %w", cerr)
-	}
-	if complexity == complexityUnknown {
-		return out, fmt.Errorf("work compile: intent classification returned no valid complexity; retry the request")
-	}
-	if conversational && sectionable.Intent != "reply" && sectionable.Intent != "task" && sectionable.Intent != "automation" {
-		return out, fmt.Errorf("work compile: intent classification omitted a valid intent; retry the request")
-	}
-	if conversational && sectionable.RequiresFile == nil {
-		return out, fmt.Errorf("work compile: intent classification omitted the delivery contract; retry the request")
-	}
-	in.Complexity = string(complexity)
-	out.Workload, out.WorkTitle = sectionable.Workload, strings.TrimSpace(sectionable.WorkTitle)
-	ack := strings.TrimSpace(sectionable.Acknowledgement)
-	if validAcknowledgement(ack) {
-		out.Acknowledgement = ack
-	}
-	switch out.Workload {
-	case "quick", "lookup", "research", "project":
-	case "":
-		// Older authored classifiers remain valid; complexity supplies a
-		// conservative estimate without manufacturing another model call.
-		out.Workload = "research"
-		if sectionable.Intent == "reply" && complexity == complexityTrivial {
-			out.Workload = "quick"
-		}
-	default:
-		return out, fmt.Errorf("work compile: invalid workload classification")
-	}
-	if len([]rune(out.WorkTitle)) > 80 {
-		out.WorkTitle = string([]rune(out.WorkTitle)[:80])
-	}
-	if conversational && out.Workload != "quick" && out.Acknowledgement == "" && (req.MaxModelCalls == 0 || out.ModelCalls < req.MaxModelCalls) {
-		// Repair prose once, without reclassifying or replaying any work. The
-		// provider guard and this run's call ceiling still apply to this call.
-		out.Acknowledgement = l.repairAcknowledgement(ctx, req, conversation, &out)
-	}
-	in.Sectionable = sectionable.Sectionable
-	// A difficult reply is still a reply. Only an explicit automation intent
-	// may send a conversation through the source-authoring pipeline.
-	if conversational && sectionable.Intent != "automation" && !sectionable.Sectionable {
-		in.Complexity = string(complexityTrivial)
-	}
-	if conversational && sectionable.Intent == "reply" {
-		if sectionable.Sectionable || *sectionable.RequiresFile || sectionable.Navigation != nil {
-			return out, fmt.Errorf("work compile: conflicting reply delivery contract; retry the request")
-		}
-		out.Reply = out.Workload == "quick"
-	}
-
-	d = work.Decide(in)
-	// DECOMPOSITION (epic memql#5414, D24): a decomposition that breaks the
-	// boundary rule sends the goal to the author route; one that holds asks
-	// the catalog for every section before any is planned live. Neither
-	// reaches a model.
-	d, sectionable = l.decideDecomposition(ctx, req, d, sectionable, &out)
-	if conversational && sectionable.Intent != "automation" && d.Route == work.RouteAuthor {
-		// A refused decomposition is not authorization to invent a responsibility.
-		in.Complexity, in.Sectionable = string(complexityTrivial), false
-		sectionable.Sectionable, sectionable.Sections = false, nil
-		d = work.Decide(in)
-	}
-	return l.finishCompile(ctx, req, d, out, sandbox, sectionable, guidance)
-}
-
-// finishCompile carries out whichever route was decided. guidance is the
-// goal's description guidance, read before triage; nil when no model has
-// been asked about the goal.
-func (l *PlannerAgentLoop) finishCompile(ctx context.Context, req CompileRequest, d work.Decision, out CompileOutcome, sandbox authoringSandbox, sectionable sectionableDecision, guidance []map[string]any) (CompileOutcome, error) {
-	out.Route = d.Route
-	if d.Candidate != nil {
-		out.ConstructId = d.Candidate.ConstructId
-		out.AutomationName = d.Candidate.Name
-	}
-	out.Gaps = d.Gaps
-
-	switch d.Route {
-	case work.RouteCatalogExact, work.RouteCatalogNear:
-		if d.Route == work.RouteCatalogExact && d.Candidate != nil && d.Candidate.Rung != work.RungNone {
-			// A LEARNED PROCEDURE on a servable rung. It is served through
-			// the one embedded replay template, never as its own construct:
-			// no templateConstructId (the template loader would try to run
-			// the procedure's bundle, which was validated for another run),
-			// and the construct id rides the run's variables instead.
-			out.AutomationName = replayProcedureAutomation
-			out.ConstructId = ""
-			out.Variables = map[string]any{work.ProcedureConstructVariable: d.Candidate.ConstructId}
-			return out, nil
-		}
-		// The template is the catalogue's. Nothing more to author; the
-		// near route's gap list is closed by the run's own reasoning
-		// steps rather than by a second compile pass.
-		return out, nil
-	case work.RouteSectionable, work.RouteTrivial:
-		if sandbox == nil {
-			return out, fmt.Errorf("work compile: goal %s needs a runnable draft and no Gate 1 sandbox is available", req.GoalId)
-		}
-		persisted, err := l.reasoningDraft(ctx, req, out, sandbox, sectionable)
-		if err != nil && sectionable.catalog != nil {
-			// A CATALOGUED SECTION THAT CANNOT TRAVEL IS PLANNED LIVE, never a
-			// failed goal. The draft carries every served automation's bundle,
-			// and Gate 1 or the dependency seal can refuse the combination --
-			// two bundles naming one construct differently, a member that no
-			// longer compiles. Nothing was written (persistWorkDraft writes
-			// only after both), so the goal is drafted again with every
-			// section live, which costs a model per section rather than the
-			// goal.
-			l.warnCompile("work compile: a catalogued section could not be carried into the draft; every section is planned live", req, err)
-			sectionable = sectionable.withoutCatalog()
-			for n := range out.Sections {
-				out.Sections[n].Route, out.Sections[n].Candidate, out.Sections[n].Similarity = work.SectionIntelligence, nil, 0
-			}
-			persisted, err = l.reasoningDraft(ctx, req, out, sandbox, sectionable)
-		}
-		if err != nil && sectionable.cutsSectionAutomations(req) {
-			// A SECTION AUTOMATION THAT DOES NOT PERSIST IS WRITTEN INLINE,
-			// never a failed goal -- the same answer the catalog fallback
-			// gives, one level down. The draft is written again with every
-			// live section an agent turn of the template, as it was before
-			// sections became automations, and the outcome says why for each.
-			l.warnCompile("work compile: the draft with its live sections as automations did not persist; every live section is written inline", req, err)
-			sectionable.inlineAll = "the draft that wrote it as an automation of its own did not persist: " + err.Error()
-			persisted, err = l.reasoningDraft(ctx, req, out, sandbox, sectionable)
-		}
-		return persisted, err
-	case work.RouteAuthor:
-		if sandbox == nil {
-			return out, fmt.Errorf("work compile: goal %s needs authoring and no sandbox is available; a draft that cannot pass Gate 1 must not be run", req.GoalId)
-		}
-		plan, err := l.runDesignPassGuided(airoute.WithCallPurpose(ctx, "Designing automation", 0), compileStatement(req), req.OwnerUserId, nil, guidance)
+	snapshot := req.Spine
+	if snapshot == nil {
+		// Direct in-process callers have no durable run reader. The production
+		// WorkCompiler requires the persisted snapshot before reaching this method.
+		snapshot, err = workintegration.CaptureSpine("")
 		if err != nil {
-			return out, fmt.Errorf("work compile: design pass for goal %s: %w", req.GoalId, err)
+			return scope.out, err
 		}
-		out.ModelCalls++
-		// THE REPAIR LOOP IS BOUNDED HERE (memql#5000). It used to be handed
-		// an empty plan id, and the gate that read it returned "not
-		// exhausted" on its first line -- so this path, the one the work
-		// spine actually uses, was bounded by repairAttemptCap and nothing
-		// else. `out.ModelCalls` is what the compile has spent before the
-		// bundle; the gate adds the emit and each repair to it.
-		spent := out.ModelCalls
-		budget := callCapGate(req.MaxModelCalls, "this run's maxModelCalls ceiling")
-		bundle, report, clean, err := l.emitAndRepairBundle(ctx,
-			func(gctx context.Context, callsMade int) (bool, string) {
-				return budget(gctx, spent+callsMade)
-			}, compileStatement(req), plan, sandbox)
-		if err != nil {
-			return out, fmt.Errorf("work compile: emit for goal %s: %w", req.GoalId, err)
-		}
-		out.ModelCalls++
-		if !clean {
-			// Gate 1 refused it. The run does NOT proceed on a draft that
-			// did not compile -- that is the whole reason the gate is
-			// before execution rather than after it.
-			return out, fmt.Errorf("work compile: the draft for goal %s did not pass Gate 1: %v", req.GoalId, failingDiagnostics(report))
-		}
-		return l.persistWorkDraft(ctx, req, out, bundle, sandbox)
-	default:
-		return out, fmt.Errorf("work compile: goal %s reached no route", req.GoalId)
 	}
+	_, err = workflowhost.RunSnapshot(ctx, snapshot, work.SpineContract, nil, workflowhost.Options{Logger: l.logger, Operations: scope.operations()})
+	if err != nil {
+		return scope.out, err
+	}
+	if scope.failed != nil {
+		return scope.out, scope.failed
+	}
+	if !scope.done {
+		return scope.out, fmt.Errorf("work compile: Spine returned without selecting a validated plan")
+	}
+	return scope.out, nil
 }
 
 // reasoningDraft synthesizes the deterministic draft for a trivial or

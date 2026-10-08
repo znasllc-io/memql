@@ -11,7 +11,7 @@
 //	integration.work.retentionSweep  -- archive then delete journal detail
 //
 // THE DIVISION OF LABOUR IS THE DESIGN. Every DECISION is a pure function in
-// component/work -- the compile order, the symptom table, the replay verdict,
+// component/work -- the symptom table, the replay verdict,
 // the ceilings, the artifact-hash rule -- so the spec's headline claims are
 // properties of values and are provable with no engine, no provider and no
 // database. This package is only responsible for OBEYING those decisions and
@@ -136,8 +136,8 @@ type Integration struct {
 // exist. It is a SEAM rather than an implementation because compile is the
 // other half of epic A2: the catalog lookup, the three prompts and the Gate-1
 // sandbox compile-and-bind. The ORDER it must follow is already pure and
-// already tested -- component/work.Decide -- so an implementation of this
-// interface is responsible for obeying that decision and nothing more.
+// authored in the installed Spine. This interface binds the native runtime
+// to that frozen workflow, preserving its run authority and budgets.
 type Compiler interface {
 	// Compile runs the compile order for one run. It is called on a
 	// DETACHED goroutine, so it must not assume the caller's context is
@@ -149,6 +149,7 @@ type Compiler interface {
 // the planner. No caller-local run, actor, or budget context is assumed to
 // survive the graph event that crosses the node boundary.
 type CompileRequest struct {
+	Spine              map[string]any
 	StartedAt          time.Time
 	ExecutionAuthority map[string]any
 	GoalId             string
@@ -277,6 +278,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Accept a goal and start work on it: opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile (locally or via the run graph event to a planner). Refuses with no compile surface when neither a local compiler nor event forward is available. Returns {goalId, runId, compileDispatched}.",
 			Handler:     i.handleCreateGoal,
 			ArgsSchema: map[string]string{
+				"spine":        "string -- installed Spine template; frozen at admission",
 				"statement":    "string (required) -- the goal in the person's own words",
 				"input":        "object -- the typed input object the chosen template's args declare",
 				"accountIds":   "[]string -- account tags; a record of who the work is for, never a visibility scope",
@@ -824,6 +826,10 @@ func (i *Integration) OpenResponsibilityGoal(ctx context.Context, g Responsibili
 		return "", "", errNoCompileSurface
 	}
 
+	spine, err := CaptureSpine("")
+	if err != nil {
+		return "", "", err
+	}
 	st := i.store()
 	now := i.clock().UTC()
 	goalId := newRowId(goalConcept)
@@ -841,6 +847,7 @@ func (i *Integration) OpenResponsibilityGoal(ctx context.Context, g Responsibili
 		return "", "", err
 	}
 	if err := st.createRunRow(scoped, runSeed{
+		Spine:          spine.Map(),
 		RunId:          runId,
 		GoalId:         goalId,
 		AutomationName: compilingAutomationName,
