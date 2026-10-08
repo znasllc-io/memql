@@ -43,8 +43,9 @@ test("multiple notes submit together; actual proposed changes precede approval a
   assert.equal(f.doc.querySelectorAll('input[type="checkbox"]').length,2);f.el("prepare-revision").click();const request=f.messages.find(m=>m.type==="prepareRevision");assert.deepEqual(Array.from(request.commentIds),["a","b"]);assert.equal(request.instruction,"");
   f.send({type:"revision",status:{status:"running",proposal:{}}});f.send({type:"revisionIdle"});assert.ok(!f.el("revision").textContent!.includes("Approve & apply"));
   const status={prepared:true,approvalId:"exact-approval",status:"waiting",decision:"",proposal:{summary:"Move and expand",revisedContent:"Revised",edits:[{before:"<script>private()</script>",after:"<img src=x>",reason:"Move this"},{before:"Destination",after:"Destination\n\nMoved text.",reason:"Insert there"}]}};
-  f.send({type:"revision",status});assert.equal(f.doc.querySelectorAll("#revision script,#revision img").length,0);assert.equal(f.doc.querySelectorAll(".change").length,2);assert.equal(f.el("review-panel").hidden,false);
-  [...f.doc.querySelectorAll<HTMLButtonElement>("#revision button")].find(b=>b.textContent==="Approve & apply")!.click();assert.equal(f.messages.at(-1).approvalId,"exact-approval");assert.equal(f.messages.at(-1).decision,"approved");
+  f.send({type:"revision",status});assert.equal(f.doc.querySelectorAll("#revision script,#revision img").length,0);assert.equal(f.doc.querySelectorAll(".change").length,2);assert.equal(f.el("review-panel").hidden,false);assert.equal(f.el("review-submit").hidden,true);assert.equal(f.el("review-footer").hidden,false);
+  const approve=f.el("review-actions").lastElementChild;f.send({type:"revision",status});assert.equal(f.el("review-actions").lastElementChild,approve,"polling must preserve focus and expanded changes");
+  [...f.doc.querySelectorAll<HTMLButtonElement>("#review-actions button")].find(b=>b.textContent==="Approve & apply")!.click();assert.equal(f.messages.at(-1).approvalId,"exact-approval");assert.equal(f.messages.at(-1).decision,"approved");
   f.send({type:"revision",status:{...status,status:"succeeded",decision:"approved",result:{applied:true}}});f.send({type:"revisionIdle"});assert.match(f.el("revision").textContent!,/Changes applied/);f.dom.window.close();
 });
 test("selection choices survive refresh and views retain accessible keyboard controls",()=>{

@@ -33,6 +33,8 @@ function controls() {
   add.textContent = commentBusy ? "Saving…" : draftAnchor?.kind === "document-end" ? "Save request" : "Save feedback";
   prepare.disabled = !connected || revisionBusy || !!activeRun() || selected.size === 0;
   prepare.textContent = revisionBusy ? "Submitting…" : selected.size ? `Propose changes · ${selected.size}` : "Propose changes";
+  byId("review-submit").hidden = !!activeRun() || selected.size === 0;
+  byId("review-footer").hidden = byId("review-submit").hidden && !byId("review-actions").childElementCount;
   const count = rows.filter(row => !row.outdated).length;
   byId("note-count").textContent = String(count); byId("note-count").hidden = !count;
 }
@@ -99,7 +101,7 @@ add.addEventListener("click",() => {
 });
 prepare.addEventListener("click",() => {
   if (prepare.disabled) return;
-  revisionBusy = true; controls();
+  byId("status").textContent = ""; revisionBusy = true; controls();
   api.postMessage({type:"prepareRevision",version,commentIds:[...selected],instruction:instruction.value});
 });
 document.addEventListener("keydown",event => {
@@ -151,7 +153,7 @@ function renderComments() {
   highlight("memql-notes",current.map(row=>rangeFor(row.anchor)).filter((range):range is Range=>!!range));
 }
 function renderRevision() {
-  const panel=byId("revision");panel.replaceChildren();if(!revision)return;
+  const panel=byId("revision");panel.replaceChildren();const actions=byId("review-actions");actions.replaceChildren();if(!revision)return;
   const status=revision,proposal=status.proposal??{};
   const terminal=["succeeded","failed","cancelled"].includes(status.status);
   const awaiting=!!status.approvalId && !status.decision && status.status==="waiting";
@@ -171,11 +173,9 @@ function renderRevision() {
   }
   const action=(label:string,type:string,decision?:string,primary=false)=>{const button=document.createElement("button");button.textContent=label;button.className=primary?"primary":"secondary";button.disabled=revisionBusy||(decision==="approved"&&!connected);button.addEventListener("click",()=>{revisionBusy=true;controls();renderRevision();api.postMessage({type,approvalId:status.approvalId,decision});});return button;};
   if(typeof proposal.revisedContent==="string") { const compare=action("Compare full document","compareRevision");compare.className="compare";panel.append(compare); }
-  const actions=textElement("div","","revision-actions");
   if(status.prepared===false)actions.append(action("Retry submission","resumePreparation",undefined,true));
   else if(awaiting)actions.append(action("Decline","decideRevision","rejected"),action("Approve & apply","decideRevision","approved",true));
   else if(status.decision==="approved"&&status.status==="waiting")actions.append(action("Resume approved changes","decideRevision","approved",true));
-  panel.append(actions);
 }
 window.addEventListener("message",event=>{
   const message=event.data;
@@ -204,7 +204,7 @@ window.addEventListener("message",event=>{
     const available=new Set(rows.filter(row=>!row.outdated).map(row=>row.id));for(const id of selected)if(!available.has(id))selected.delete(id);
     renderComments();controls();saveState();
   }
-  if(message.type==="revision") {const changed=message.status?.approvalId&&message.status.approvalId!==revision?.approvalId;revision=message.status;renderRevision();controls();if(changed)showReview(true);}
+  if(message.type==="revision") {const changed=message.status?.approvalId&&message.status.approvalId!==revision?.approvalId;const different=JSON.stringify(message.status)!==JSON.stringify(revision);revision=message.status;if(different)renderRevision();controls();if(changed){byId("status").textContent="";showReview(true);}}
   if(message.type==="revisionIdle"){revisionBusy=false;controls();renderRevision();}
   if(message.type==="saved"){commentBusy=false;feedback.value="";draftAnchor=undefined;closeComposer();byId("status").textContent="Saved. Add more feedback or propose changes when you’re ready.";controls();showReview(true);}
   if(message.type==="error"){commentBusy=false;revisionBusy=false;controls();renderRevision();if(!byId("composer").hidden)byId("composer-status").textContent=message.message;else{byId("status").textContent=message.message;showReview(true);}}
