@@ -69,7 +69,7 @@ func (r *ForwardRouter) ForwardModelCall(
 	ownerUserId string,
 	start *memqlv1.ModelCallStart,
 	timeout time.Duration,
-	onDelta func(seq uint64, content string),
+	onDelta func(seq uint64, content string, keepalive bool),
 ) (ModelForwardOutcome, error) {
 	if r == nil || r.sender == nil {
 		return ModelForwardOutcome{RefusedBeforeStart: true}, ErrNoPeerForNode
@@ -103,13 +103,7 @@ func (r *ForwardRouter) ForwardModelCall(
 	call := &modelForwardCall{resp: make(chan *nodev1.ModelForwardResponse, 1)}
 	if onDelta != nil {
 		call.onDelta = func(d *nodev1.ModelForwardDelta) {
-			// A keepalive crossed the hop to prove the machine is alive; it
-			// is not output, so it stops here exactly as it stops at the
-			// stream session.
-			if d.GetKeepalive() {
-				return
-			}
-			onDelta(d.GetSeq(), d.GetContent())
+			onDelta(d.GetSeq(), d.GetContent(), d.GetKeepalive())
 		}
 	}
 	r.modelMu.Lock()

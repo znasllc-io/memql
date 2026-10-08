@@ -299,6 +299,8 @@ type FleetCallRequest struct {
 	Level string
 	// OnDelta, when set, receives streamed content as it arrives.
 	OnDelta func(string)
+	// OnActivity carries worker liveness without fabricating answer text.
+	OnActivity func()
 }
 
 // Needs derives the capability requirement from the request itself, so a
@@ -1173,6 +1175,12 @@ func (p *fleetProvider) CallChatStreamWithTools(
 				case <-ctx.Done():
 				}
 			},
+			OnActivity: func() {
+				select {
+				case out <- common.StreamToolChunk{}:
+				case <-ctx.Done():
+				}
+			},
 		})
 		if err != nil {
 			select {
@@ -1209,6 +1217,12 @@ func (p *fleetProvider) CallChatStream(ctx context.Context, messages []common.Ch
 			OnDelta: func(s string) {
 				select {
 				case out <- common.StreamChunk{Content: s}:
+				case <-ctx.Done():
+				}
+			},
+			OnActivity: func() {
+				select {
+				case out <- common.StreamChunk{}:
 				case <-ctx.Done():
 				}
 			},

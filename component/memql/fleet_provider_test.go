@@ -16,6 +16,7 @@ type stubFleet struct {
 	lastReq   FleetCallRequest
 	lastActor string
 	answer    string
+	activity  bool
 	toolCalls []common.ToolCall
 	err       error
 	// preference stands in for the owner's routingPolicy.modelPreference.
@@ -36,6 +37,9 @@ func (s *stubFleet) Call(_ context.Context, req FleetCallRequest) (FleetCallResu
 	s.lastReq = req
 	if s.err != nil {
 		return FleetCallResult{}, s.err
+	}
+	if s.activity && req.OnActivity != nil {
+		req.OnActivity()
 	}
 	if req.OnDelta != nil {
 		req.OnDelta(s.answer)
@@ -320,4 +324,56 @@ func newPromptRegistryForTest(defaults map[string]string) *PromptRegistry {
 		r.byName[name] = &PromptTemplate{Name: name, DefaultProvider: provider}
 	}
 	return r
+}
+
+// Liveness has to reach the harness before text exists, without becoming
+// answer text, a tool invocation, or a terminal completion.
+func TestFleetStreamsCarryLivenessWithoutOutput(t *testing.T) {
+	for _, withTools := range []bool{false, true} {
+		t.Run(map[bool]string{false: "chat", true: "tools"}[withTools], func(t *testing.T) {
+			r := newProviderRegistry()
+			r.SetFleetInference(&stubFleet{models: []FleetModel{onlineModel("local", true)}, answer: "answer", activity: true})
+			ctx := userCtx("alice")
+			entry, _ := r.EntryForContext(ctx, "fleet:local")
+			if withTools {
+				ch, err := entry.Client.(common.ChatStreamWithToolsProvider).CallChatStreamWithTools(ctx, nil, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				first := <-ch
+				if first.Content != "" || first.Done || first.Error != nil || len(first.ToolCalls) != 0 {
+					t.Fatalf("liveness became output: %+v", first)
+				}
+				text := ""
+				for c := range ch {
+					text += c.Content
+					if c.Error != nil {
+						t.Fatal(c.Error)
+					}
+				}
+				if text != "answer" {
+					t.Fatalf("answer = %q", text)
+				}
+			} else {
+				ch, err := entry.Client.(common.ChatStreamProvider).CallChatStream(ctx, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				first := <-ch
+				if first.Content != "" || first.Done || first.Error != nil {
+					t.Fatalf("liveness became output: %+v", first)
+				}
+				text := ""
+				for c := range ch {
+					text += c.Content
+					if c.Error != nil {
+						t.Fatal(c.Error)
+					}
+				}
+				if text != "answer" {
+					t.Fatalf("answer = %q", text)
+				}
+			}
+		})
+	}
 }

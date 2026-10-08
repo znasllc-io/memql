@@ -122,7 +122,7 @@ func TestAModelCallReachesAMachineHeldByAnotherReplica(t *testing.T) {
 	start.Params = &memqlv1.ModelCallParams{ContextTokens: 32768}
 	out, err := h.link.router.ForwardModelCall(
 		authorityCtx(t, h.owner), nodeB, "laptop", h.owner, start, 10*time.Second,
-		func(_ uint64, content string) {
+		func(_ uint64, content string, _ bool) {
 			mu.Lock()
 			defer mu.Unlock()
 			got = append(got, content)
@@ -170,7 +170,7 @@ func TestDuplicateAndOutOfOrderDeltasAreDroppedAcrossTheHop(t *testing.T) {
 	var got []string
 	out, err := h.link.router.ForwardModelCall(
 		authorityCtx(t, h.owner), nodeB, "laptop", h.owner, h.start(), 10*time.Second,
-		func(seq uint64, content string) {
+		func(seq uint64, content string, _ bool) {
 			mu.Lock()
 			defer mu.Unlock()
 			seqs = append(seqs, seq)
