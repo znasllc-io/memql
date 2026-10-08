@@ -1148,7 +1148,7 @@ func ComposeRunRecipeBuild(args ComposeRunRecipeArgs) string {
 
 // CreateGoal -- Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all.
 type CreateGoalArgs struct {
-	// Installed Spine template name. Defaults to defaultWorkSpine. Its reachable templates and pure logic are frozen onto this run before compilation.
+	// Installed Spine template name. Defaults to defaultWorkSpine. Its templates, pure logic, scoped actions and selected phase recipes are frozen onto this run before compilation.
 	Spine string
 	// The goal in the person's own words.
 	Statement string

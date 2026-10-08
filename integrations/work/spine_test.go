@@ -3,6 +3,7 @@ package work
 import (
 	"context"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 	"os"
 	"testing"
 
@@ -113,5 +114,53 @@ func TestDefaultFrozenRecoveryPolicyCoversSymptomsAndBudgets(t *testing.T) {
 		if value.(map[string]any)["act"] != tc.act {
 			t.Fatalf("%+v: %v", tc, value)
 		}
+	}
+}
+
+func TestDirectGoalsPinDefaultOrInheritTheSameOwnersRecipes(t *testing.T) {
+	parent, err := captureSpine("defaultWorkSpine", func(kind, name string) (string, error) {
+		source, err := workflowhost.InstalledSource(kind, name)
+		if err == nil && kind == "automation" && name == "defaultWorkSpine" {
+			source += "\n// frozen parent bundle revision"
+		}
+		return source, err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, owner string
+		source      map[string]any
+		wantError   bool
+	}{
+		{"standalone", "alice", nil, false},
+		{"same owner", "alice", parent.Map(), false},
+		{"another owner", "bob", parent.Map(), false},
+		{"invalid inherited source", "alice", map[string]any{"version": "corrupt"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			integration, engine := newTestIntegration(t)
+			ctx := common.ContextWithRun(callerContext(tc.owner), common.RunContext{RunId: "parent", OwnerUserId: "alice", Spine: tc.source})
+			_, _, err := integration.OpenDirectGoal(ctx, DirectGoal{OwnerUserId: tc.owner, Statement: "test delegation", AutomationName: "invokeAgent"})
+			if tc.wantError {
+				if err == nil || engine.summary() != "(none)" {
+					t.Fatalf("invalid source admitted: %v %s", err, engine.summary())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := workflowhost.SnapshotFromMap(argMap(engine.callTo(t, "createWorkRun").Args(t), "spine"))
+			if err != nil || len(snapshot.Phases) != 5 {
+				t.Fatalf("direct run has no full Spine: %v", err)
+			}
+			if tc.name == "another owner" && snapshot.Version == parent.Version {
+				t.Fatal("different owner inherited the parent bundle")
+			}
+			if tc.name == "same owner" && snapshot.Version != parent.Version {
+				t.Fatal("delegation substituted a different recipe")
+			}
+		})
 	}
 }

@@ -54,6 +54,61 @@ func AccountDeletionSweepBuild(args AccountDeletionSweepArgs) string {
 	return b.String()
 }
 
+// AgentRecoveryExplanation -- Human wording for the bounded recovery consent card.
+type AgentRecoveryExplanationArgs struct {
+}
+
+// AgentRecoveryExplanation calls the engine logic agentRecoveryExplanation.
+func (qc *QueryClient) AgentRecoveryExplanation(ctx context.Context, args AgentRecoveryExplanationArgs) (*Result, error) {
+	call := AgentRecoveryExplanationBuild(args)
+	return qc.executeNamed(ctx, "agentRecoveryExplanation", call)
+}
+
+func AgentRecoveryExplanationBuild(args AgentRecoveryExplanationArgs) string {
+	_ = args
+	return "logic agentRecoveryExplanation()"
+}
+
+// AgentRecoveryNeedsConsent -- Only a verified consent refusal is a reason to ask for access.
+type AgentRecoveryNeedsConsentArgs struct {
+	ErrorCode string
+}
+
+// AgentRecoveryNeedsConsent calls the engine logic agentRecoveryNeedsConsent.
+func (qc *QueryClient) AgentRecoveryNeedsConsent(ctx context.Context, args AgentRecoveryNeedsConsentArgs) (*Result, error) {
+	call := AgentRecoveryNeedsConsentBuild(args)
+	return qc.executeNamed(ctx, "agentRecoveryNeedsConsent", call)
+}
+
+func AgentRecoveryNeedsConsentBuild(args AgentRecoveryNeedsConsentArgs) string {
+	var b strings.Builder
+	b.WriteString("logic agentRecoveryNeedsConsent(")
+	b.WriteString("errorCode: ")
+	b.WriteString(quoteMemQL(args.ErrorCode))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AgentRecoveryUsesDesktop -- A display-only mismatch benefits from observing the UI. Other needs retain the original host call.
+type AgentRecoveryUsesDesktopArgs struct {
+	Needs []string
+}
+
+// AgentRecoveryUsesDesktop calls the engine logic agentRecoveryUsesDesktop.
+func (qc *QueryClient) AgentRecoveryUsesDesktop(ctx context.Context, args AgentRecoveryUsesDesktopArgs) (*Result, error) {
+	call := AgentRecoveryUsesDesktopBuild(args)
+	return qc.executeNamed(ctx, "agentRecoveryUsesDesktop", call)
+}
+
+func AgentRecoveryUsesDesktopBuild(args AgentRecoveryUsesDesktopArgs) string {
+	var b strings.Builder
+	b.WriteString("logic agentRecoveryUsesDesktop(")
+	b.WriteString("needs: ")
+	b.WriteString(renderMemQLValue(args.Needs))
+	b.WriteString(")")
+	return b.String()
+}
+
 // BootstrapCluster -- Decides whether to create the cluster row on first startup (ADR S2.1 pure logic, #2235). Reads existingCluster() and returns one boolean -- true only when no cluster row exists yet AND this node is the bff (both idempotency guards). The calling automation gates the v1:cluster:cluster create on `decide == true`; the database and identity-provider creates are gated on clusterInfraRefresh instead (memql#4766), the idp create additionally requiring an identityProvider block in the startup envelope.
 type BootstrapClusterArgs struct {
 	Event map[string]any
@@ -627,6 +682,36 @@ func UsersDueDeletionReminderBuild(args UsersDueDeletionReminderArgs) string {
 	return b.String()
 }
 
+// WorkSpineRecoveryAct -- Choose a localized remedy; a retry never restores a consumed budget or erases completed effects.
+type WorkSpineRecoveryActArgs struct {
+}
+
+// WorkSpineRecoveryAct calls the engine logic workSpineRecoveryAct.
+func (qc *QueryClient) WorkSpineRecoveryAct(ctx context.Context, args WorkSpineRecoveryActArgs) (*Result, error) {
+	call := WorkSpineRecoveryActBuild(args)
+	return qc.executeNamed(ctx, "workSpineRecoveryAct", call)
+}
+
+func WorkSpineRecoveryActBuild(args WorkSpineRecoveryActArgs) string {
+	_ = args
+	return "logic workSpineRecoveryAct()"
+}
+
+// WorkSpineReplanRefusal -- Explain which mandatory validator refused a proposed replan.
+type WorkSpineReplanRefusalArgs struct {
+}
+
+// WorkSpineReplanRefusal calls the engine logic workSpineReplanRefusal.
+func (qc *QueryClient) WorkSpineReplanRefusal(ctx context.Context, args WorkSpineReplanRefusalArgs) (*Result, error) {
+	call := WorkSpineReplanRefusalBuild(args)
+	return qc.executeNamed(ctx, "workSpineReplanRefusal", call)
+}
+
+func WorkSpineReplanRefusalBuild(args WorkSpineReplanRefusalArgs) string {
+	_ = args
+	return "logic workSpineReplanRefusal()"
+}
+
 // WorkSpineRoute -- Value-only routing; classification and effects remain in the enclosing Spine.
 type WorkSpineRouteArgs struct {
 	Triage map[string]any
@@ -645,6 +730,21 @@ func WorkSpineRouteBuild(args WorkSpineRouteArgs) string {
 	b.WriteString(renderMemQLValue(args.Triage))
 	b.WriteString(")")
 	return b.String()
+}
+
+// WorkSpineSectionInstruction -- Reusable section instruction policy, shared by inline and cataloguable live sections.
+type WorkSpineSectionInstructionArgs struct {
+}
+
+// WorkSpineSectionInstruction calls the engine logic workSpineSectionInstruction.
+func (qc *QueryClient) WorkSpineSectionInstruction(ctx context.Context, args WorkSpineSectionInstructionArgs) (*Result, error) {
+	call := WorkSpineSectionInstructionBuild(args)
+	return qc.executeNamed(ctx, "workSpineSectionInstruction", call)
+}
+
+func WorkSpineSectionInstructionBuild(args WorkSpineSectionInstructionArgs) string {
+	_ = args
+	return "logic workSpineSectionInstruction()"
 }
 
 // WorkerAppSessionStaleSweep -- Every app session nobody is holding, judged by TWO cutoffs.

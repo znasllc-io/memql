@@ -60,15 +60,22 @@ func (i *Integration) OpenReviewGoal(ctx context.Context, requestKey string, g D
 	if goal != nil && rowString(goal, "requestFingerprint") != fingerprint {
 		return receipt, fmt.Errorf("work: this review request was already used for a different proposal")
 	}
+	run, err := st.runForOwner(scoped, receipt.RunID)
+	if err != nil {
+		return receipt, err
+	}
+	var spine map[string]any
+	if run == nil {
+		spine, err = goalSpine(ctx, owner)
+		if err != nil {
+			return receipt, err
+		}
+	}
 	if goal == nil {
 		if err = st.createGoalRow(scoped, goalSeed{GoalId: receipt.GoalID, Statement: g.Statement, Origin: "user", Input: g.Input,
 			AccountIds: g.AccountIds, Ceilings: g.Ceilings, RequestedVia: g.RequestedVia, RequestFingerprint: fingerprint}); err != nil {
 			return receipt, err
 		}
-	}
-	run, err := st.runForOwner(scoped, receipt.RunID)
-	if err != nil {
-		return receipt, err
 	}
 	if run == nil {
 		if goal != nil && rowString(goal, "status") == "closed" {
@@ -88,7 +95,7 @@ func (i *Integration) OpenReviewGoal(ctx context.Context, requestKey string, g D
 			}
 		}
 		now := i.clock().UTC()
-		if err = st.createRunRow(scoped, runSeed{RunId: receipt.RunID, GoalId: receipt.GoalID, AutomationName: g.AutomationName,
+		if err = st.createRunRow(scoped, runSeed{Spine: spine, RunId: receipt.RunID, GoalId: receipt.GoalID, AutomationName: g.AutomationName,
 			Input: g.Input, Variables: g.Input, Mode: modeLive, Status: runStatusWaiting, NodeId: selfNodeId(), StartedAt: now,
 			OwnerUserId: owner, TriggeredBy: g.TriggeredBy, ExecutionAuthority: authority,
 			WaitingOn: map[string]any{"kind": "approval", "subject": receipt.ApprovalID, "since": rfc(now)}}); err != nil {

@@ -57,7 +57,10 @@ The engine admits that field only from native writes and refuses replacement
 or removal after admission, including through raw or authored mutations.
 The receiving planner reconstructs the workflow exclusively from that row;
 changing or removing an installed child cannot silently change accepted work.
-Forks and branches inherit the snapshot. The compiled work template has its own
+Forks and branches inherit the snapshot. Direct agent and reviewed document
+goals also pin the default recipes; delegation from a run owned by the same
+person retains that run's snapshot. A separate owner's goal uses the default.
+The compiled work template has its own
 existing version and fingerprint: planning code and the plan it produces are
 different artifacts.
 

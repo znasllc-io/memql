@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
+	"github.com/znasllc-io/memql/component/memql"
 	workcore "github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // CaptureSpine accepts only an installed template name. Intake uses it before
@@ -78,4 +80,24 @@ func captureSpine(name string, source workflowhost.SourceLoader) (*workflowhost.
 		return nil, fmt.Errorf("Spine %q entry arguments: %w", name, err)
 	}
 	return snapshot, nil
+}
+
+// goalSpine pins direct execution too. Delegation by the same owner's run
+// retains its admitted recipes; a separate owner's goal gets the default.
+func goalSpine(ctx context.Context, owner string) (map[string]any, error) {
+	if run, ok := common.RunFromContext(ctx); ok && run.OwnerUserId != "" && memql.BareShortId(run.OwnerUserId) == memql.BareShortId(owner) && run.Spine != nil {
+		snapshot, err := workflowhost.SnapshotFromMap(run.Spine)
+		if err != nil {
+			return nil, err
+		}
+		if snapshot.Contract != workcore.SpineContract {
+			return nil, fmt.Errorf("incompatible inherited Spine contract")
+		}
+		return snapshot.Map(), nil
+	}
+	snapshot, err := CaptureSpine("")
+	if err != nil {
+		return nil, err
+	}
+	return snapshot.Map(), nil
 }
