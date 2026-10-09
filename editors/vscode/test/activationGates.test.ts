@@ -27,6 +27,7 @@ import {
   isTrustListenerArmed,
   recorded,
   settings,
+  Uri,
   workspace,
 } from './support/vscodeStub.js';
 
@@ -63,6 +64,7 @@ settings.set('memql.lsp.serverPath', {
   workspaceValue: path.join(home, 'workspace-supplied-memql-lsp'),
 });
 workspace.isTrusted = false;
+workspace.textDocuments.push({ uri: Uri.file(path.join(home, 'example.memql')), languageId: 'memql', getText: () => '', isDirty: false });
 activate(context);
 
 test('an untrusted workspace registers no runtime surface', () => {
