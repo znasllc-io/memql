@@ -44,7 +44,9 @@ export class RevisionReview {
       })();
       this.recoveries.set(key, recovery);
     }
-    try { await recovery; } catch (error) { this.recoveries.delete(key); throw error; }
+    // Coalesce concurrent reads, but check again on the next refresh: another
+    // editor can replace a stopped or completed request while this one is open.
+    try { await recovery; } finally { if (this.recoveries.get(key) === recovery) this.recoveries.delete(key); }
   }
   async prepare(document: vscode.TextDocument, commentIds: string[], instruction: string): Promise<Record<string, unknown>> {
     if (document.isDirty || document.uri.scheme !== "memql-file") throw new Error("Save the MemQL document before requesting a revision.");

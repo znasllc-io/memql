@@ -564,7 +564,10 @@ function renderRevisionContent() {
     const apply=action(accepted.length ? `Apply accepted (${accepted.length})` : "Finish review","decideRevision",accepted.length?"approved":"rejected",true,{acceptedItemIds:accepted,proposalHash:status.proposalHash});
     apply.disabled=dictationPhase!=="idle"||revisionBusy||!connected||remaining>0||items.length===0;actions.append(apply);
   }
-  else if (status.decision === "approved" && status.status === "waiting") actions.append(action("Resume approved changes", "decideRevision", "approved", true, status.answer));
+  else if (!terminal && status.approvalId && status.decision === "approved" && status.status === "waiting") {
+    actions.append(textElement("p", "Your approval is saved. Resume to apply the accepted changes.", "review-progress"));
+    actions.append(action("Resume approved changes", "decideRevision", "approved", true, status.answer));
+  }
   else if (!terminal && !status.decision) actions.append(action("Stop preparing", "cancelRevision"));
 }
 window.addEventListener("message",event=>{

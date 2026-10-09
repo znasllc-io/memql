@@ -182,6 +182,21 @@ test("a paused preparation does not look like an active model call",()=>{
  assert.equal(f.doc.querySelector("#revision h3")!.textContent,"Preparation paused");assert.equal(f.doc.querySelector("#revision .busy"),null);assert.match(f.el("revision").textContent!,/stopped responding/);assert.match(f.el("review-actions").textContent!,/Stop preparing/);f.dom.window.close();
 });
 
+test("resume applies the recorded approval once and disappears for stopped or completed reviews",()=>{
+ const f=fixture();f.document();
+ const answer={acceptedItemIds:["kept"],proposalHash:"reviewed-hash"};
+ const status={prepared:true,status:"waiting",approvalId:"approval",decision:"approved",answer,proposal:{}};
+ const resume=()=>[...f.doc.querySelectorAll<HTMLButtonElement>("#review-actions button")].find(button=>button.textContent==="Resume approved changes");
+ f.send({type:"revision",status});assert.ok(resume());resume()!.click();
+ assert.equal(f.messages.at(-1).type,"decideRevision");assert.equal(f.messages.at(-1).approvalId,"approval");assert.equal(f.messages.at(-1).answer,answer);
+ assert.equal(resume()!.disabled,true);resume()!.click();assert.equal(f.messages.filter(message=>message.type==="decideRevision").length,1);
+ f.send({type:"revisionIdle"});
+ for(const change of [{cancelRequested:true},{status:"cancelled"},{status:"failed"},{status:"succeeded",result:{applied:true}}]){
+   f.send({type:"revision",status:{...status,...change}});assert.equal(resume(),undefined);
+ }
+ f.dom.window.close();
+});
+
 test("reopening a decided proposal restores the recorded subset rather than local guesses",()=>{
  const f=fixture({decisions:{kept:"declined",omitted:"accepted"}});f.document();
  f.send({type:"revision",status:{status:"succeeded",decision:"approved",answer:{acceptedItemIds:["kept"]},items:[{id:"kept",edits:[{before:"Keep",after:"Retain"}]},{id:"omitted",edits:[{before:"rest",after:"other"}]}],proposal:{artifactId:"doc",revision:"v1",edits:[]},result:{applied:true}}});

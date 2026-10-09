@@ -138,6 +138,8 @@ export class Documents {
   async decideRevision(document: OpenDocument, requestId: string, approvalId: string, decision: "approved" | "rejected", answer?: Record<string, unknown>): Promise<void> {
     const current = await this.revision(document, requestId);
     if (current.approvalId !== approvalId) throw new Error("The approval changed. Review the request again.");
+    if (current.cancelRequested || current.status === "cancelled") throw new Error("This review was stopped. Submit a new proposal to continue.");
+    if (["succeeded", "failed"].includes(String(current.status))) throw new Error("This review has finished. Refresh to see its result.");
     const result = (await this.api.execute(document.lease, "decideApproval", buildDecideApproval({ approvalId, decision, answer })))[0];
     if (result?.decision !== decision) throw new Error("The cluster did not confirm your decision. Refresh or retry to recover it.");
     if (result.resumeError) throw new Error("Your decision was saved, but the job could not start. Retry to recover the same job.");

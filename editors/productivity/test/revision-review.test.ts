@@ -62,3 +62,26 @@ test("an uncertain submission retains its request identifier during recovery", a
   const review = new RevisionReview(context, files, async () => ({} as OpenDocument));
   await assert.rejects(review.status(document), /Receipt unavailable/);
 });
+
+test("an open editor discovers a newer review after its initial recovery", async () => {
+  const noop = () => ({ dispose() {} });
+  Object.assign(vscode.workspace, { registerTextDocumentContentProvider: noop, onDidCloseTextDocument: noop });
+  const uri = vscode.Uri.parse("memql-file://cluster/artifacts/doc/Guide.md");
+  const document = { uri } as vscode.TextDocument;
+  const key = `memql.documentRevision:${uri}`;
+  const saved = new Map<string, unknown>([[key, { requestId: "stopped", fingerprint: "old" }]]);
+  const context = { subscriptions: [], workspaceState: { get: (key: string) => saved.get(key), update: async (key: string, value: unknown) => { saved.set(key, value); } } } as unknown as vscode.ExtensionContext;
+  const proposal = { artifactId: "doc", revision: "file:1", version: 1, commentIds: ["extension"], instruction: "" };
+  let latest = "stopped";
+  const files = {
+    review: async () => ({ requestId: latest }),
+    revision: async (_base: unknown, requestId: string) => requestId === "stopped"
+      ? { status: "waiting", cancelRequested: true, decision: "approved", proposal }
+      : { status: "succeeded", result: { applied: true }, proposal },
+  } as unknown as Documents;
+  const review = new RevisionReview(context, files, async () => ({} as OpenDocument));
+  assert.equal((await review.status(document))?.cancelRequested, true);
+  latest = "replacement";
+  assert.deepEqual((await review.status(document))?.result, { applied: true });
+  assert.equal((saved.get(key) as {requestId:string}).requestId, "replacement");
+});

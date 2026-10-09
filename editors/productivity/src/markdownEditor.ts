@@ -129,8 +129,11 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
           if (await this.refreshRemote(document)) { refreshedRun = String(status.runId); await refreshComments(); }
           else await panel.webview.postMessage({type:"notice",message:"Changes are saved in MemQL. Your local edits are preserved; compare with the latest revision before saving."});
         }
-        if (current() && status && !["succeeded","failed","cancelled"].includes(String(status.status)) && panel.visible) {
-          timer = setTimeout(() => { void refreshRevision().catch(error); }, status.status === "waiting" ? 5000 : 2000);
+        if (current() && panel.visible) {
+          // Keep discovering reviews submitted from another editor, including
+          // after this panel's previous run stopped or finished.
+          const inactive = !status || status.cancelRequested || ["succeeded","failed","cancelled"].includes(String(status.status));
+          timer = setTimeout(() => { void refreshRevision().catch(error); }, inactive ? 10000 : status.status === "waiting" ? 5000 : 2000);
         }
       } catch (e) {
         if (disposed || !current()) return;
@@ -219,6 +222,11 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
                 await this.revisions.compare(document);
               }
               await refreshRevision();
+            } catch (e) {
+              // A stale action can race a remote stop or a newer review. Show
+              // the current receipt alongside the actionable error.
+              await refreshRevision().catch(() => undefined);
+              throw e;
             } finally { saving = false; await panel.webview.postMessage({ type: "revisionIdle" }); }
           }
           else if (message.type === "external" && typeof message.href === "string" && /^https?:\/\//i.test(message.href)) {
