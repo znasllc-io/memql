@@ -94,6 +94,10 @@ var promptLevels = map[string]string{
 	// the bounded harness. Its output informs a proposal, never a direct write;
 	// the same human review gate makes strong sufficient here.
 	"libraryRevisionResearch": "strong",
+	// A one-word classification gates optional app usage.
+	"libraryRevisionIntent": "fast",
+	// An app gathers a bounded evidence report; a human reviews the proposal.
+	"libraryRevisionAppResearch": "strong",
 	// workContextCheckpoint summarizes a bounded immutable prefix. Originals
 	// remain available for recall; this derived memory neither executes work nor
 	// changes authority. The fast band handles this constrained extraction.

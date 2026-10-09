@@ -12284,6 +12284,28 @@ QueryClient.prototype.workDocumentRevisionRequest = function (this: QueryClient,
   return this.executeNamed("workDocumentRevisionRequest", buildWorkDocumentRevisionRequest(args), opts);
 };
 
+/** Latest public-output snapshots, owned and bounded independently of tool history. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workDraftsForOwnerRun"] in generated_concepts.ts).
+export interface WorkDraftsForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkDraftsForOwnerRun(args: WorkDraftsForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workDraftsForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workDraftsForOwnerRun(args: WorkDraftsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workDraftsForOwnerRun = function (this: QueryClient, args: WorkDraftsForOwnerRunArgs = {} as WorkDraftsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workDraftsForOwnerRun", buildWorkDraftsForOwnerRun(args), opts);
+};
+
 /** One of the caller's goals by id. */
 // Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalForOwner"] in generated_concepts.ts).
 export interface WorkGoalForOwnerArgs {

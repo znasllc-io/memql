@@ -136,8 +136,35 @@ func (a actsDB) runRow(t *testing.T, runId string) map[string]any {
 	return rows[0]
 }
 
-func TestStepVersionsReturnsEveryVersionOnceAndMarksTheHead(t *testing.T) {
-	a := openActsDB(t)
+// Version acts share immutable DSL, with independent integration state and
+// owners per case. Keep the boot under the parent so its cleanup runs last.
+func TestWorkVersionActs(t *testing.T) {
+	shared := openActsDB(t)
+	cases := []struct {
+		name string
+		run  func(*testing.T, actsDB)
+	}{
+		{"StepVersionsReturnsEveryVersionOnceAndMarksTheHead", testStepVersionsReturnsEveryVersionOnceAndMarksTheHead},
+		{"AHeadMoveMakesEveryCollapsedReadAnswerWithTheHead", testAHeadMoveMakesEveryCollapsedReadAnswerWithTheHead},
+		{"ARerunAndAVerdictLandOnTheirRows", testARerunAndAVerdictLandOnTheirRows},
+		{"TheFailurePathsReleasesLandOnTheirRows", testTheFailurePathsReleasesLandOnTheirRows},
+		{"ABranchOpensAForkRunItsOwnerCanRead", testABranchOpensAForkRunItsOwnerCanRead},
+		{"TheValidatorsRowsLand", testTheValidatorsRowsLand},
+		{"TheValidatorObeysThePolicyRow", testTheValidatorObeysThePolicyRow},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := shared
+			a.owner = fmt.Sprintf("dbtest-work-acts-%d", time.Now().UnixNano())
+			a.i = New(a.eng, testLogger())
+			a.i.bunDB = func() *bun.DB { return a.db }
+			a.i.admitRow = memqlengine.AdmitSourceRow
+			tc.run(t, a)
+		})
+	}
+}
+
+func testStepVersionsReturnsEveryVersionOnceAndMarksTheHead(t *testing.T, a actsDB) {
 	runId := a.openRun(t, nil)
 	canonicalRun := runId
 	// The journal writes the run id bare for a trigger run and canonical for
@@ -219,8 +246,7 @@ func TestStepVersionsReturnsEveryVersionOnceAndMarksTheHead(t *testing.T) {
 // The head move's whole point, measured where only a database can show it:
 // after moving back, every COLLAPSED read answers with the head, and the later
 // versions are still there.
-func TestAHeadMoveMakesEveryCollapsedReadAnswerWithTheHead(t *testing.T) {
-	a := openActsDB(t)
+func testAHeadMoveMakesEveryCollapsedReadAnswerWithTheHead(t *testing.T, a actsDB) {
 	runId := a.openRun(t, nil)
 	a.writeVersion(t, runId, runId, "fetch", 0, 1, nil, "fetched", nil)
 	a.writeVersion(t, runId, runId, "draft", 1, 1, nil, "draft one", nil)
@@ -271,8 +297,7 @@ func TestAHeadMoveMakesEveryCollapsedReadAnswerWithTheHead(t *testing.T) {
 // real type checks: run.rerun and run.staleSteps, the reopened run's cleared
 // fields, and observation.kind "feedback" -- which, with its goal signature,
 // is what description guidance reads back.
-func TestARerunAndAVerdictLandOnTheirRows(t *testing.T) {
-	a := openActsDB(t)
+func testARerunAndAVerdictLandOnTheirRows(t *testing.T, a actsDB) {
 	signature := "sig-dbtest-" + a.owner
 	runId := a.openRun(t, map[string]any{"goalSignature": signature})
 	a.writeVersion(t, runId, runId, "fetch", 0, 1, nil, "fetched", nil)
@@ -323,8 +348,7 @@ func TestARerunAndAVerdictLandOnTheirRows(t *testing.T) {
 // dropped and starts the run from a request of its own, and a failure
 // question's Retry releases its run under a re-run request on the step it
 // failed at, with the step's next version read off the stored versions.
-func TestTheFailurePathsReleasesLandOnTheirRows(t *testing.T) {
-	a := openActsDB(t)
+func testTheFailurePathsReleasesLandOnTheirRows(t *testing.T, a actsDB) {
 	now := time.Now().UTC()
 
 	t.Run("a re-plan's install", func(t *testing.T) {
@@ -393,8 +417,7 @@ func TestTheFailurePathsReleasesLandOnTheirRows(t *testing.T) {
 
 // A branch's fork run type-checks with its head, its request and the goal
 // signature it inherits, and belongs to the source's owner.
-func TestABranchOpensAForkRunItsOwnerCanRead(t *testing.T) {
-	a := openActsDB(t)
+func testABranchOpensAForkRunItsOwnerCanRead(t *testing.T, a actsDB) {
 	source := a.openRun(t, map[string]any{"goalSignature": "sig-branch-" + a.owner, "variables": map[string]any{"week": "39"}})
 	a.writeVersion(t, source, source, "fetch", 0, 1, nil, "fetched", nil)
 	a.writeVersion(t, source, source, "draft", 1, 1, nil, "draft one", nil)
@@ -439,8 +462,7 @@ func (j *dbJudge) CallAIStructured(_ context.Context, req airoute.ResolveRequest
 	return out, nil
 }
 
-func TestTheValidatorsRowsLand(t *testing.T) {
-	a := openActsDB(t)
+func testTheValidatorsRowsLand(t *testing.T, a actsDB) {
 	a.i.engine = &dbJudge{MemQLEngine: a.eng, prompts: realPrompts(t)}
 	a.i.ServeAnswerChecks(nil) // an agent's integration: the node that serves answer checks
 	goalId := newRowId(goalConcept)
@@ -492,8 +514,7 @@ func bareShort(id string) string { return bareRunId(id) }
 // answer the seeded defaults, and a cluster that turned the validator off
 // would go on spending a model call on every goal. The row is written the way
 // the seed materializer writes it and put back to the seeded value after.
-func TestTheValidatorObeysThePolicyRow(t *testing.T) {
-	a := openActsDB(t)
+func testTheValidatorObeysThePolicyRow(t *testing.T, a actsDB) {
 	seed := auth.ContextWithUserActor(context.Background(), "system:seed")
 	seed = auth.ContextWithInternalOrigin(auth.ContextWithAccess(seed, &auth.AccessContext{
 		UserId: "system:seed", Role: auth.RoleOwner, Synthetic: true, Unranked: true,

@@ -320,6 +320,15 @@ func (e *ParallelExecutor) Execute(ctx context.Context, step *automations.Step, 
 
 	result.Status = "success"
 	result.Result = branchResults
+	if step.Binds != "" {
+		values := make(map[string]any, len(branches))
+		for _, child := range childResults {
+			if child != nil {
+				values[strings.TrimPrefix(child.StepId, step.ID+".")] = automations.UnwrapStepResult(child.Result)
+			}
+		}
+		result.Result = values
+	}
 	result.CompletedAt = time.Now()
 	result.Duration = result.CompletedAt.Sub(result.StartedAt)
 	result.Metadata = map[string]any{

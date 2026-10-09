@@ -161,3 +161,33 @@ func TestWorkContextFailureRetainsOriginalsAndPendingCalls(t *testing.T) {
 	require.Error(t, err)
 	require.NotContains(t, messages[3].Content, "[Archived tool result")
 }
+
+func TestWorkContextArchivesMediumParallelResultsWhenPinnedTailExceedsBudget(t *testing.T) {
+	e, _, _ := readMergeTestEngine(t)
+	ctx := contextTestRun(t, e)
+	messages := []common.ChatMessage{
+		{Role: "system", Content: strings.Repeat("authority ", 1000)},
+		{Role: "user", Content: strings.Repeat("request ", 950)},
+		{Role: "user", Content: "[Memory checkpoint old]\nEarlier evidence"},
+		{Role: "assistant", ToolCalls: []common.ToolCall{{ID: "one", Name: "fetch"}, {ID: "two", Name: "fetch"}, {ID: "three", Name: "fetch"}}},
+		{Role: "tool", ToolCallId: "one", Content: strings.Repeat("evidence ", 1090)},
+		{Role: "tool", ToolCallId: "two", Content: strings.Repeat("evidence ", 1320)},
+		{Role: "tool", ToolCallId: "three", Content: strings.Repeat("evidence ", 480)},
+	}
+	tools := []common.ToolDefinition{{Name: "fetch", Description: strings.Repeat("tool contract ", 1400)}}
+	require.Greater(t, WorkContextSize(messages, tools), 20000)
+	compacted, err := e.CompactWorkContext(ctx, messages, tools, 20000)
+	require.NoError(t, err)
+	require.LessOrEqual(t, WorkContextSize(compacted, tools), 20000)
+	require.Equal(t, messages[:4], compacted[:4], "authority, request, memory and tool-call IDs remain intact")
+	for _, unit := range workContextUnits(compacted) {
+		require.True(t, unit.complete)
+	}
+	require.Contains(t, compacted[5].Content, "[Archived tool result ")
+	raw, _ := json.Marshal([]common.ChatMessage{messages[5]})
+	fingerprint := workContextHash("tool-v2", raw)
+	result, err := e.recallWorkHistoryBuiltin(ctx, map[string]any{"checkpoint": fingerprint, "messageIndex": 0, "maxChars": 16000}, 0)
+	require.NoError(t, err)
+	require.Contains(t, string(result[0].Payload), "evidence")
+	require.NotContains(t, messages[5].Content, "[Archived", "caller input remains unchanged")
+}

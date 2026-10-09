@@ -1,3 +1,4 @@
+use work.queries.{ workStepForOwnerRun }
 use agents.builtins.{ ai, runAgentTurn }
 
 // library domain -- promotion triggers.
@@ -251,20 +252,49 @@ automation archiveFileOnArtifactArchive {
 automation reviseLibraryDocument {
  args { requestId string! proposal object! }
  captured := builtin libraryRevisionInput(requestId: args.requestId)
- evidence := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
-  document: captured.content, passages: captured.passagesJSON,
-  instruction: captured.amendment.instruction ?? captured.instruction,
-  previous: captured.amendment.edits
+ intent := builtin ai(templateId: "libraryRevisionIntent", data: {
+  passages: captured.passagesJSON,
+  instruction: captured.amendment.instruction ?? captured.instruction
  })
+ evidence := parallel {
+  branch headless {
+   report := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
+    document: captured.content, passages: captured.passagesJSON,
+    instruction: captured.amendment.instruction ?? captured.instruction,
+    previous: captured.amendment.edits
+   })
+   return report.reply
+  }
+  branch app {
+   if captured.previousRunId != nil {
+    previous := query workStepForOwnerRun(runId: captured.previousRunId, stepKey: "evidence.app/report")
+    for completed in previous {
+     if completed.status == "done" && completed.result.value.reply != nil {
+      return completed.result.value.reply
+     }
+    }
+   }
+   if lower(trim(intent.reply)) == "research" {
+    report := builtin ai(templateId: "libraryRevisionAppResearch", data: {
+     document: captured.content, passages: captured.passagesJSON,
+     instruction: captured.amendment.instruction ?? captured.instruction,
+     previous: captured.amendment.edits
+    }) on error continue
+    return report.reply ?? "App research was unavailable. Use the independently collected headless evidence and disclose any unsupported claims; no app findings were obtained."
+   }
+   return "No independent app research requested by the local intent assessment."
+  }
+ }
+ combinedEvidence := "Independent headless report:\n" + evidence.headless + "\nIndependent app report:\n" + evidence.app
 
  if captured.amendment != nil {
-  analysis := builtin ai(templateId: "libraryRevisionItem", data: {
+  analysis := builtin ai(templateId: "libraryRevisionItem", progress: true, data: {
    document: captured.content, passages: captured.passagesJSON, instruction: captured.amendment.instruction,
-   previous: captured.amendment.edits, evidence: evidence.reply
+   previous: captured.amendment.edits, evidence: combinedEvidence
   })
  } else {
-  analysis := builtin ai(templateId: "libraryRevisionPassages", data: {
-   document: captured.content, passages: captured.passagesJSON, instruction: captured.instruction, evidence: evidence.reply
+  analysis := builtin ai(templateId: "libraryRevisionPassages", progress: true, data: {
+   document: captured.content, passages: captured.passagesJSON, instruction: captured.instruction, evidence: combinedEvidence
   })
  }
  proposed := builtin libraryRevisionProposal(requestId: args.requestId, response: analysis.reply)

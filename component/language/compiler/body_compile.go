@@ -217,6 +217,9 @@ func assignStepIDs(flat []flatStatement) []string {
 		if a, ok := f.stmt.(*ast.AssignStatement); ok {
 			ids[i] = claimStepID(a.Name, claimed)
 		}
+		if p, ok := f.stmt.(*ast.ParallelStatement); ok && p.Name != "" {
+			ids[i] = claimStepID(p.Name, claimed)
+		}
 	}
 	for i, f := range flat {
 		if ids[i] == "" {
@@ -252,6 +255,9 @@ func stepIDBase(s ast.BodyStatement) string {
 	case *ast.ForStatement:
 		return "for_" + t.Var
 	case *ast.ParallelStatement:
+		if t.Name != "" {
+			return t.Name
+		}
 		return "parallel"
 	case *ast.PublishStatement:
 		return "publish"
@@ -311,6 +317,9 @@ func compileStatement(s ast.BodyStatement) map[string]any {
 		step := map[string]any{
 			"type":     "parallel",
 			"parallel": map[string]any{"wait": wait, "failFast": true, "branches": branches},
+		}
+		if t.Name != "" {
+			step["binds"] = t.Name
 		}
 		addOnError(step, t.Mods)
 		return step
@@ -396,6 +405,9 @@ func compileBeforeWriteStatements(stmts []ast.BodyStatement) []map[string]any {
 	ast.WalkBody(stmts, func(s ast.BodyStatement) bool {
 		if a, ok := s.(*ast.AssignStatement); ok {
 			used[a.Name] = true
+		}
+		if p, ok := s.(*ast.ParallelStatement); ok && p.Name != "" {
+			used[p.Name] = true
 		}
 		return true
 	})

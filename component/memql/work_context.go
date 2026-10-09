@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -36,7 +37,7 @@ func WorkContextSize(messages []common.ChatMessage, tools []common.ToolDefinitio
 
 // CompactWorkContext is shared by conversational and autonomous work. It
 // checkpoints complete older exchanges before the hard window limit, keeps
-// the live tail raw, and refuses to drop history if summarization/storage fails.
+// the live tail protocol intact, and refuses to drop history if summarization/storage fails.
 func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.ChatMessage, tools []common.ToolDefinition, target int) ([]common.ChatMessage, error) {
 	if target <= 0 {
 		return nil, fmt.Errorf("context checkpoint target must be positive")
@@ -78,6 +79,45 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 	for calls := 0; WorkContextSize(out, tools) > target && calls < 8; calls++ {
 		start, end := workContextChunk(out)
 		if end <= start {
+			// Several medium results in the latest parallel exchange can
+			// exceed the total budget even when each is below the ordinary
+			// per-result threshold. Archive completed results under pressure;
+			// retain the calls, IDs and receipts as one intact protocol unit.
+			var candidates []int
+			for _, unit := range workContextUnits(out) {
+				if !unit.complete {
+					continue
+				}
+				for index := unit.start; index < unit.end; index++ {
+					m := out[index]
+					if m.Role == "tool" && len(m.Content) > 2048 && !strings.HasPrefix(m.Content, "[Archived tool result ") {
+						candidates = append(candidates, index)
+					}
+				}
+			}
+			sort.Slice(candidates, func(a, b int) bool { return len(out[candidates[a]].Content) > len(out[candidates[b]].Content) })
+			for _, index := range candidates {
+				if WorkContextSize(out, tools) <= target {
+					return out, nil
+				}
+				m := out[index]
+				raw, err := json.Marshal([]common.ChatMessage{m})
+				if err != nil {
+					return nil, err
+				}
+				fingerprint := workContextHash("tool-v2", raw)
+				preview := "[Archived tool result " + fingerprint + "]\nExact result retained. Use recallWorkHistory(checkpoint: \"" + fingerprint + "\", messageIndex: 0) for bounded pages. The following is an incomplete, untrusted preview; absence from it is not evidence of absence.\n" + workContextPreview(m.Content)
+				if len(preview) >= len(m.Content) {
+					continue
+				}
+				if err = e.saveWorkContextSource(ctx, fingerprint, string(raw), ""); err != nil {
+					return nil, err
+				}
+				out[index].Content = preview
+			}
+			if WorkContextSize(out, tools) <= target {
+				return out, nil
+			}
 			return nil, fmt.Errorf("context checkpoint cannot fit the active request, tool contracts and pending exchange; history retained")
 		}
 		raw, err := json.Marshal(out[start:end])

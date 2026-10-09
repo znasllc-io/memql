@@ -405,6 +405,27 @@ func (p *Parser) parseV1WordStatement(kind, construct string) (ast.BodyStatement
 	case strings.HasPrefix(word, "row.") || word == "row" && next.Literal == ".":
 		return p.parseBeforeWriteField()
 	case next.Type == TokenDefine:
+		if p.peekAhead(2).Literal == "parallel" && p.peekAhead(3).Type == TokenBraceOpen {
+			if !isSimpleName(tok) {
+				return nil, v1Errorf(tok, "a statement's name is a simple identifier, got `%s`", tok.Literal)
+			}
+			if p.peekAhead(2).Line != next.Line {
+				return nil, v1Errorf(p.peekAhead(2), "the value of `%s :=` starts on the same line", tok.Literal)
+			}
+			p.v1Take()
+			p.v1Take()
+			parsed, err := p.parseV1Parallel(kind, construct)
+			if err != nil {
+				return nil, err
+			}
+			parallel := parsed.(*ast.ParallelStatement)
+			if parallel.Wait != "all" {
+				return nil, v1Errorf(tok, "a named parallel waits for every branch; remove `wait any`")
+			}
+			parallel.Name, parallel.NameSpan = word, v1TokenSpan(tok)
+			parallel.Span = p.spanFrom(tok)
+			return parallel, nil
+		}
 		return p.parseV1Assign()
 	}
 	if w, ok := p.atV1Call(); ok {

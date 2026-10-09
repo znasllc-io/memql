@@ -168,6 +168,7 @@ builtin runAgentTurn {
 builtin ai {
   templateId  string!
   data        object!
+  progress    bool @description("Persist public output snapshots for an owned work run as the model generates them. No private reasoning is recorded.")
 }
 
 // ---- builtin requestUserFeedback -------------------------------------

@@ -169,3 +169,26 @@ rule compilerLocalOnly { }
 @onUnavailable("park")
 @locked
 rule policyCompilerLocalOnly { }
+
+/// The headless evidence branch runs on local models and MemQL's tools.
+@when(prompt="libraryRevisionResearch")
+@policy("localOnly")
+@precedence(150)
+@onUnavailable("park")
+@locked
+rule documentResearchHarness { }
+
+/// A separate concurrent branch delegates independent research to an app.
+@when(prompt="libraryRevisionAppResearch")
+@policy("researchApps")
+@precedence(151)
+@onUnavailable("park")
+@locked
+rule documentAppResearch { }
+
+@when(prompt="libraryRevisionIntent")
+@policy("localOnly")
+@precedence(152)
+@onUnavailable("park")
+@locked
+rule documentResearchIntent { }

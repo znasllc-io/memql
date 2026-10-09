@@ -28,3 +28,21 @@ prompt libraryRevisionResearch {
  instruction string
  previous []object
 }
+
+/// Independent evidence from an available subscription app's own tools; no MemQL tool loop.
+@level("strong")
+@templateFile("prompts/libraryRevisionAppResearch.tmpl")
+prompt libraryRevisionAppResearch {
+ document string!
+ passages string!
+ instruction string
+ previous []object
+}
+
+/// Decide whether feedback calls for external evidence before spending app quota.
+@level("fast")
+@templateFile("prompts/libraryRevisionIntent.tmpl")
+prompt libraryRevisionIntent {
+ passages string!
+ instruction string
+}

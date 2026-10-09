@@ -565,23 +565,9 @@ func (i *Integration) handleListWorkers(ctx context.Context, args map[string]any
 	}}, nil
 }
 
-// handleStatus mirrors app/computer_use_status_agent.go's resolution
-// logic but lives in the integration so the agent can call it as a
-// runtime tool. Three-state result:
-//
-//	"connected"    -- registry has a live worker for the owner
-//	"disconnected" -- no online worker, but a non-revoked
-//	                  v1:worker:registration row exists
-//	"unconfigured" -- no rows at all for the owner
-//
-// The detail field carries the connected worker's name when
-// status="connected" so the agent has a natural-language echo.
+// handleStatus probes the same shared fleet that dispatch uses. Connectivity
+// is not permission, and headless availability does not imply desktop control.
 func (i *Integration) handleStatus(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	if i.registry == nil {
-		return nil, fmt.Errorf("worker integration: registry not configured")
-	}
-	// Whose machines are probed is the caller's own unless the context may
-	// act for another user (memql.CallOwner).
 	owner, err := memql.CallOwner(ctx, "workerStatus", asString(args["ownerUserId"]))
 	if err != nil {
 		return nil, err
@@ -589,77 +575,18 @@ func (i *Integration) handleStatus(ctx context.Context, args map[string]any, _ i
 	if owner == "" {
 		return nil, fmt.Errorf("worker integration: ownerUserId required")
 	}
-
-	status := "unconfigured"
-	detail := ""
-
-	// Diagnostic prelude: log the inputs so we can correlate with the
-	// registry + DB state when investigating "Sofia says unconfigured
-	// but the pill is green" reports. The agent log is the only
-	// observability surface that can answer "did handleStatus see the
-	// right owner / find the live worker / find the registration row?"
-	registryWorkerCount := 0
-	if i.registry != nil {
-		registryWorkerCount = len(i.registry.WorkersForUser(owner))
+	availability, err := i.dispatcher.Router().Availability(ctx, owner)
+	if err != nil {
+		return nil, err
 	}
-	if i.logger != nil {
-		i.logger.Info("workerStatus: handleStatus enter",
-			"owner_user_id", owner,
-			"agent_id", strings.TrimSpace(asString(args["agentId"])),
-			"registry_worker_count", registryWorkerCount,
-		)
+	payload, err := json.Marshal(availability)
+	if err != nil {
+		return nil, err
 	}
-
-	// Online check: in-memory registry knows currently-streaming
-	// cockpits. Mirrors app/computer_use_status_agent.go:61-69.
-	if workers := i.registry.WorkersForUser(owner); len(workers) > 0 {
-		w := workers[0]
-		name := strings.TrimSpace(w.Name)
-		if name == "" {
-			name = owner
-		}
-		status = "connected"
-		detail = name
-	} else if i.engine != nil {
-		// Configured-but-offline check: look for non-revoked
-		// v1:worker:registration rows. Mirrors
-		// app/computer_use_status_agent.go:127-156.
-		hasConfigured, err := workerHasConfigured(ctx, i.engine, owner)
-		if i.logger != nil {
-			i.logger.Info("workerStatus: hasConfigured fallback",
-				"owner_user_id", owner,
-				"has_configured", hasConfigured,
-				"error", err,
-			)
-		}
-		if err == nil && hasConfigured {
-			status = "disconnected"
-		}
-		// On error, fall through to "unconfigured" -- safer
-		// guidance than implying the user just needs to start
-		// the cockpit.
-	}
-
-	if i.logger != nil {
-		i.logger.Info("workerStatus: handleStatus result",
-			"owner_user_id", owner,
-			"status", status,
-			"detail", detail,
-		)
-	}
-
-	payload, _ := json.Marshal(map[string]any{
-		"status":     status,
-		"detail":     detail,
-		"online":     status == "connected",
-		"configured": status != "unconfigured",
-	})
 	return []memorynodes.MemoryNode{{
-		ID:        fmt.Sprintf("worker-status:%d", time.Now().UnixNano()),
-		Concept:   "integration:worker:status",
-		Type:      memorynodes.NodeTypeObject,
-		CreatedAt: time.Now().UTC(),
-		Payload:   payload,
+		ID:      fmt.Sprintf("worker-status:%d", time.Now().UnixNano()),
+		Concept: "integration:worker:status", Type: memorynodes.NodeTypeObject,
+		CreatedAt: time.Now().UTC(), Payload: payload,
 	}}, nil
 }
 
@@ -750,73 +677,6 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 		CreatedAt: time.Now().UTC(),
 		Payload:   payload,
 	}}, nil
-}
-
-// workerHasConfigured runs workersForUser and reports whether
-// any non-revoked rows exist. Lives in the integration to avoid
-// pulling in app-package code from the agent build.
-//
-// workersForUser uses shape(), which means rows land in
-// res.OutputPayload() (Data axis), NOT res.Bundle.Nodes. The earlier
-// implementation read Bundle.Nodes only and silently returned false
-// for every user -- exactly the symptom Sofia hit when the
-// kill-switch pill was green ("Connected: ...") but the agent reported
-// "unconfigured and offline." Fix is the same shape() unwrap pattern
-// used by app/computer_use_status_agent.go's userHasConfiguredWorker.
-func workerHasConfigured(ctx context.Context, engine *memql.MemQLEngine, ownerUserId string) (bool, error) {
-	if engine == nil || strings.TrimSpace(ownerUserId) == "" {
-		return false, nil
-	}
-	q := fmt.Sprintf(`query workersForUser(ownerUserId:%s)`, langparser.QuoteString(ownerUserId))
-	// The owner's actor, not the caller's (epic memql#4349). workersForUser is
-	// now caller-scoped -- v1:worker:registration declares the composite owner
-	// tier and the read gate has no internal-origin escape -- and the ctx here
-	// belongs to a TURN, whose actor is not reliably the machine's owner: the
-	// owner is resolved from the AGENT row, and an agent answers in spaces its
-	// owner need not be the caller in. Without this stamp the probe reports
-	// "unconfigured" for a user whose laptop is sitting right there, which is
-	// the shape of the bug workerHasConfigured's own doc comment describes.
-	//
-	// Built inline as the argument to this one Execute, never stamped onto the
-	// request's context.
-	res, err := engine.Execute(auth.ContextWithUserActor(ctx, ownerUserId), q)
-	if err != nil {
-		return false, err
-	}
-	if res == nil {
-		return false, nil
-	}
-	// Shape-query path: walk the projected rows directly.
-	for _, row := range outputPayloadRows(res.OutputPayload()) {
-		if row == nil {
-			continue
-		}
-		if rev, ok := row["revokedAt"].(string); ok && strings.TrimSpace(rev) != "" {
-			continue
-		}
-		return true, nil
-	}
-	// Bundle path (legacy / non-shape callers): scan Nodes too so we
-	// don't silently miss a future variant that re-introduces the
-	// raw bundle return.
-	if res.Bundle != nil {
-		for _, n := range res.Bundle.Nodes {
-			if n == nil || n.Payload == nil {
-				continue
-			}
-			fields := n.Payload.GetFields()
-			if fields == nil {
-				continue
-			}
-			if v, ok := fields["revokedAt"]; ok && v != nil {
-				if rev := strings.TrimSpace(v.GetStringValue()); rev != "" {
-					continue
-				}
-			}
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // withUserActor stamps a synthetic TokenInfo on ctx so engine

@@ -302,7 +302,8 @@ func TestRunnerAnswerIsTheAppsOwnOutput(t *testing.T) {
 	go func() {
 		waitForSession(t, session, "sess-run")
 		session.handleAppSessionChunk(&memqlv1.AppSessionChunk{SessionId: "sess-run", Stream: AppSessionStreamStderr, Data: []byte(note), Seq: 1})
-		session.handleAppSessionChunk(&memqlv1.AppSessionChunk{SessionId: "sess-run", Stream: AppSessionStreamStdout, Data: []byte("Hi! What would you like help with?"), Seq: 2})
+		session.handleAppSessionChunk(&memqlv1.AppSessionChunk{SessionId: "sess-run", Stream: "tool", Data: []byte(`{"type":"webSearch","query":"research"}`), Seq: 2})
+		session.handleAppSessionChunk(&memqlv1.AppSessionChunk{SessionId: "sess-run", Stream: "text", Data: []byte("Hi! What would you like help with?"), Seq: 3})
 		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run"})
 	}()
 
@@ -315,6 +316,9 @@ func TestRunnerAnswerIsTheAppsOwnOutput(t *testing.T) {
 	}
 	if !strings.Contains(result.Transcript, note) || !strings.Contains(result.Transcript, "Hi!") {
 		t.Errorf("transcript = %q, want both streams: it is the record a reader inspects", result.Transcript)
+	}
+	if !strings.Contains(result.Transcript, "webSearch") {
+		t.Fatal("tool diagnostics lost from the inspection transcript")
 	}
 }
 

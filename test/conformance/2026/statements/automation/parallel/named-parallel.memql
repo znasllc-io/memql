@@ -1,0 +1,14 @@
+@trigger(schedule="0 0 * * * *")
+automation namedParallelStatement {
+  reports := parallel {
+    branch counts {
+      low := query lowStock()
+      return low.count()
+    }
+    branch levels {
+      level := logic restockLevel(n: 2)
+      return level
+    }
+  }
+  mutation restock(note: reports.counts > 0 && reports.levels > 11 ? "replenish" : "enough")
+}

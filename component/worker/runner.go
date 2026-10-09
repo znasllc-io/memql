@@ -809,10 +809,9 @@ type transcriptCollector struct {
 	seen      int
 	max       int64
 	truncated bool
-	// answer is the app's own output: every chunk except stderr, which is
-	// diagnostics (the cockpit's level note, the app's warnings) and belongs
-	// only in the transcript. A chunk naming no stream is the app's output,
-	// as it was before streams were named. Bounded by the same max.
+	// answer contains prose only. Tool protocol records and diagnostics stay
+	// in the transcript; feeding them back as an answer wastes context and
+	// can exhaust the bound before the actual answer arrives.
 	answer strings.Builder
 }
 
@@ -820,7 +819,7 @@ func (c *transcriptCollector) append(chunk AppSessionChunk) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.seen += len(chunk.Data)
-	if chunk.Stream != AppSessionStreamStderr {
+	if chunk.Stream == "text" || chunk.Stream == AppSessionStreamStdout || chunk.Stream == "" {
 		if room := int(c.max) - c.answer.Len(); room > 0 {
 			if len(chunk.Data) <= room {
 				c.answer.Write(chunk.Data)

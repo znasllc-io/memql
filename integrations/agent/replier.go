@@ -315,13 +315,21 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	}
 
 	promptName := "agentReply"
+	routingPromptName := promptName
 	if isOwnedWorkExecution(ctx) {
 		promptName = "workAgentReply"
+		routingPromptName = promptName
+		// The DSL prompt rendered by runAgentTurn remains routing metadata.
+		// Without it, every research/authoring step becomes workAgentReply and
+		// an authored rule cannot choose the appropriate execution surface.
+		if name := strings.TrimSpace(msg.Hints["work_prompt_template"]); name != "" {
+			routingPromptName = name
+		}
 	}
 	routerReq := router.ResolveRequest{
 		RequestId:        msg.RequestId,
 		AgentId:          msg.AgentId,
-		PromptName:       promptName,
+		PromptName:       routingPromptName,
 		Level:            airoute.LevelStrong,
 		Modality:         airoute.ModalityStreamingTools,
 		Needs:            airoute.Needs{Tools: true},

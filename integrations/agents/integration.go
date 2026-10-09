@@ -276,6 +276,7 @@ func (i *Integration) handleInvoke(ctx context.Context, args map[string]any, _ i
 		Input: map[string]any{
 			"agentId": def.Id,
 			"prompt":  prompt,
+			"scopeId": partitionId,
 		},
 		RequestedVia: "agent",
 		TriggeredBy:  "agent.dsl",

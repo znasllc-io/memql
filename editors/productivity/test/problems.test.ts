@@ -40,6 +40,7 @@ test("input validation stays actionable; arbitrary server strings never pass thr
   const denied=new Error("Permission denied");denied.name="NotAllowedError";
   assert.match(userMessage(denied,"transcribe your feedback"),/Microphone access/);
   assert.doesNotMatch(userMessage(denied,"copy the reference"),/Microphone/);
+  assert.match(userMessage(new Error("context checkpoint cannot fit the active request, tool contracts and pending exchange; history retained"),"prepare changes"),/Your work is saved/);
   assert.match(userMessage(new Error("model_call_timeout: deadline exceeded"),"prepare changes"),/AI couldn’t finish/);
 });
 

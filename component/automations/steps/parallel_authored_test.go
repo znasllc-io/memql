@@ -2,9 +2,11 @@ package steps
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +17,114 @@ import (
 )
 
 type wrappedBranchOutput struct{}
+
+type researchConcurrencyProbe struct{ headless, app chan struct{} }
+
+func (p *researchConcurrencyProbe) Execute(ctx context.Context, step *automations.Step, _ *Context) (*automations.StepResult, error) {
+	result := &automations.StepResult{StepId: step.ID, Status: "success", Result: "headless evidence"}
+	if step.Automation.Name == "appProbe" {
+		close(p.app)
+		select {
+		case <-p.headless:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		result.Status, result.Error = "failed", "You've hit your weekly limit"
+		return result, fmt.Errorf("%s", result.Error)
+	}
+	close(p.headless)
+	select {
+	case <-p.app:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return result, nil
+}
+
+func TestOptionalParallelFailureDoesNotCancelHeadlessResearch(t *testing.T) {
+	const source = `@template
+automation collect {
+  evidence := parallel {
+    branch headless {
+      report := automation headlessProbe()
+      return report
+    }
+    branch app {
+      report := automation appProbe() on error continue
+      return report ?? "app unavailable"
+    }
+  }
+  return evidence
+}`
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	auto, err := automations.NewLoader(automations.LoaderOptions{Logger: logger}).CompileSource(source, "test:optional-parallel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := NewRegistry()
+	registry.Register(automations.StepTypeAutomation, &researchConcurrencyProbe{headless: make(chan struct{}), app: make(chan struct{})})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	exec, err := automations.NewExecutor(automations.ExecutorOptions{Logger: logger, StepRegistry: registry}).ExecuteWithEvent(ctx, auto, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"headless": "headless evidence", "app": "app unavailable"}
+	if exec.Status != "completed" || !reflect.DeepEqual(exec.Output, want) {
+		t.Fatalf("optional app failure stopped or lost research: %+v", exec)
+	}
+}
+
+func TestNamedParallelCollectsBranchReturnsWithoutReturningFromAutomation(t *testing.T) {
+	const source = `@template
+automation collect {
+  evidence := parallel {
+    branch headless {
+      report := {reply: "source A"}
+      return report
+    }
+    branch app {
+      return {reply: "source B"}
+    }
+  }
+  return {combined: [evidence.headless.reply, evidence.app.reply]}
+}`
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	auto, err := automations.NewLoader(automations.LoaderOptions{Logger: logger}).CompileSource(source, "test:named-parallel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec, err := automations.NewExecutor(automations.ExecutorOptions{Logger: logger, StepRegistry: NewRegistry()}).ExecuteWithEvent(context.Background(), auto, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exec.Status != "completed" {
+		t.Fatalf("%+v", exec)
+	}
+	encoded := fmt.Sprintf("%v", exec.Output)
+	if !strings.Contains(encoded, "source A") || !strings.Contains(encoded, "source B") {
+		t.Fatalf("following step lost branch outputs: %s; steps=%+v; evidence=%+v", encoded, exec.Steps, exec.Steps["evidence"])
+	}
+}
+
+func TestNamedParallelRefusesAmbiguousValuesAndEscapingNames(t *testing.T) {
+	for name, source := range map[string]string{
+		"compound name":        "evidence.bad := parallel { branch a { return 1 } }",
+		"newline after bind":   "evidence :=\n parallel { branch a { return 1 } }",
+		"first-result race":    "evidence := parallel { branch a { return 1 } } wait any",
+		"branch local escapes": "evidence := parallel { branch a { secret := 1\n return secret } }\n return secret",
+		"forward reference":    "return evidence\n evidence := parallel { branch a { return 1 } }",
+		"self reference":       "evidence := parallel { branch a { return evidence } }",
+		"reserved binding":     "args := parallel { branch a { return 1 } }",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource("@template\nautomation invalid {\n"+source+"\n}", "test:named-parallel")
+			if err == nil {
+				t.Fatal("invalid named parallel was admitted")
+			}
+		})
+	}
+}
 
 func (wrappedBranchOutput) Execute(_ context.Context, step *automations.Step, _ *Context) (*automations.StepResult, error) {
 	return &automations.StepResult{StepId: step.ID, Status: "success", Result: memql.NewResultWithOutput(map[string]any{"reply": "section content"})}, nil

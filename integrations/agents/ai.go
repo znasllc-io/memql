@@ -189,7 +189,18 @@ func (i *Integration) handleInvokePrompt(ctx context.Context, args map[string]an
 	// validate the data against its body, render, route by @level through
 	// core/airoute, cache, journal -- happens inside this one call, and none
 	// of it is re-implemented here.
-	reply, err := i.engine.InvokeAI(ctx, templateId, data)
+	var reply any
+	if args["progress"] == true {
+		engine, ok := i.engine.(interface {
+			InvokeAIProgress(context.Context, string, map[string]any) (any, error)
+		})
+		if !ok {
+			return nil, fmt.Errorf("ai: output progress is unavailable on this engine")
+		}
+		reply, err = engine.InvokeAIProgress(ctx, templateId, data)
+	} else {
+		reply, err = i.engine.InvokeAI(ctx, templateId, data)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("ai(%q): %w", templateId, err)
 	}

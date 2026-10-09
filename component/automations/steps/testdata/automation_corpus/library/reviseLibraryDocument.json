@@ -27,6 +27,16 @@
               "data": {
                 "instruction": null
               },
+              "templateId": "libraryRevisionIntent"
+            },
+            "kind": "builtin",
+            "name": "ai"
+          },
+          {
+            "args": {
+              "data": {
+                "instruction": null
+              },
               "templateId": "libraryRevisionResearch"
             },
             "kind": "builtin",
@@ -34,7 +44,10 @@
           },
           {
             "args": {
-              "data": {},
+              "data": {
+                "evidence": "Independent headless report:\n\nIndependent app report:\nNo independent app research requested by the local intent assessment."
+              },
+              "progress": true,
               "templateId": "libraryRevisionPassages"
             },
             "kind": "builtin",
@@ -82,6 +95,16 @@
               "data": {
                 "instruction": null
               },
+              "templateId": "libraryRevisionIntent"
+            },
+            "kind": "builtin",
+            "name": "ai"
+          },
+          {
+            "args": {
+              "data": {
+                "instruction": null
+              },
               "templateId": "libraryRevisionResearch"
             },
             "kind": "builtin",
@@ -89,7 +112,10 @@
           },
           {
             "args": {
-              "data": {},
+              "data": {
+                "evidence": "Independent headless report:\n\nIndependent app report:\nNo independent app research requested by the local intent assessment."
+              },
+              "progress": true,
               "templateId": "libraryRevisionPassages"
             },
             "kind": "builtin",

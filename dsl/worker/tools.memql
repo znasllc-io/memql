@@ -1,4 +1,6 @@
-/// Read whether this person's enrolled computers can serve the request.
+/// Read this person's eligible workers across all cluster replicas.
+/// computerUseOnline means desktop control with a display is available;
+/// headlessOnline means host tools are available. Neither grants permission.
 @handler(type="function", name="agentworkerStatus")
 @requiresAgentRole("assistant", "specialist")
 tool workerStatus {
@@ -34,6 +36,9 @@ tool workerHost {
 }
 
 /// Interact with an enrolled computer's desktop after scoped approval.
+/// Final fallback for web research that headless tools cannot complete: control
+/// its browser, search and follow observed links. Probe workerStatus first;
+/// use requireLabels={display: "true"}. Reuse existing valid approval.
 @handler(type="function", name="agentworkerDispatchComputer")
 @requiresAgentRole("assistant", "specialist")
 tool workerComputer {

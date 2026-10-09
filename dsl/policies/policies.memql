@@ -94,3 +94,12 @@ policy federationStrongest { }
 /// same authoring act.
 @primary("embedder:active")
 policy embeddingsBinding { }
+
+/// Research can use the tools inside existing signed-in subscription apps.
+/// Each concrete app is a separate fallback, so a quota refusal from one does
+/// not hide the other behind a wildcard. No metered provider is in this chain.
+/// Balanced models bound the current validation cost. Headless research runs
+/// independently in the DSL and survives an unavailable app branch.
+@primary("app:codex:gpt-5.6-terra")
+@fallback("app:claude-code:sonnet")
+policy researchApps { }

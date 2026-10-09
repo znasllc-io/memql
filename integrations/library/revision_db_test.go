@@ -34,6 +34,9 @@ import (
 type revisionAI struct {
 	calls         atomic.Int32
 	researchCalls atomic.Int32
+	appCalls      atomic.Int32
+	needsResearch bool
+	appError      error
 	answer        revisionAnswer
 }
 
@@ -53,9 +56,29 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 		}},
 		{Name: "invokePrompt", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			data := revisionMap(args["data"])
+			if args["templateId"] == "libraryRevisionIntent" {
+				intent := "edit"
+				if a.needsResearch {
+					intent = "research"
+				}
+				return reviewResult(map[string]any{"reply": intent})
+			}
+			if args["templateId"] == "libraryRevisionAppResearch" {
+				a.appCalls.Add(1)
+				if a.appError != nil {
+					return nil, a.appError
+				}
+				return reviewResult(map[string]any{"reply": "Independent app evidence with a second source."})
+			}
 			passages, valid := data["passages"].(string)
-			if (args["templateId"] != "libraryRevisionPassages" && args["templateId"] != "libraryRevisionItem") || data["evidence"] != "Evidence report for the selected feedback." || !valid || !json.Valid([]byte(passages)) || data["document"] == nil {
+			if (args["templateId"] != "libraryRevisionPassages" && args["templateId"] != "libraryRevisionItem") || !strings.Contains(asString(data["evidence"]), "Evidence report for the selected feedback.") || !valid || !json.Valid([]byte(passages)) || data["document"] == nil {
 				return nil, fmt.Errorf("DSL lost the review prompt or captured feedback")
+			}
+			if a.needsResearch && a.appError == nil && !strings.Contains(asString(data["evidence"]), "Independent app evidence") {
+				return nil, fmt.Errorf("app evidence missing from reconciliation")
+			}
+			if a.needsResearch && a.appError != nil && !strings.Contains(asString(data["evidence"]), "App research was unavailable") {
+				return nil, fmt.Errorf("app failure disguised as research")
 			}
 			a.calls.Add(1)
 			body, _ := json.Marshal(a.answer)
@@ -196,8 +219,43 @@ func (f *revisionDB) execute(engine *memql.MemQLEngine, request string, resume b
 	}
 	return err
 }
-func TestDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing.T) {
-	f := newRevisionDB(t)
+
+// These cases mount the same immutable DSL on two independent replicas.
+// Bootstrap them once under this parent; each case owns fresh document/run IDs
+// and model state. Do not use a package-global fixture or parallel subtests.
+func TestDocumentRevisionWorkflow(t *testing.T) {
+	shared := newRevisionDB(t)
+	cases := []struct {
+		name string
+		run  func(*testing.T, *revisionDB)
+	}{
+		{"DocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas", testDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas},
+		{"DocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure", testDocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure},
+		{"DocumentRetryReusesCompletedAppEvidence", testDocumentRetryReusesCompletedAppEvidence},
+		{"DocumentRevisionRecoveryOrdersByRequestAndRechecksAccess", testDocumentRevisionRecoveryOrdersByRequestAndRechecksAccess},
+		{"DocumentRevisionRefusesStaleApprovalAndAllowsDecline", testDocumentRevisionRefusesStaleApprovalAndAllowsDecline},
+		{"DocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove", testDocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove},
+		{"DocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas", testDocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas},
+		{"DocumentRevisionStatusCarriesRetryAcrossReplicas", testDocumentRevisionStatusCarriesRetryAcrossReplicas},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := *shared
+			f.t = t
+			f.owner = fmt.Sprintf("revision-%d", time.Now().UnixNano())
+			f.ctx = revisionActor(f.owner, auth.RoleWriter)
+			f.ai.calls.Store(0)
+			f.ai.appCalls.Store(0)
+			f.ai.researchCalls.Store(0)
+			f.ai.needsResearch = false
+			f.ai.appError = nil
+			f.ai.answer = revisionAnswer{}
+			tc.run(t, &f)
+		})
+	}
+}
+
+func testDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing.T, f *revisionDB) {
 	for _, tc := range []struct {
 		name, source, quote, feedback, want string
 		extension, section, whole           bool
@@ -301,8 +359,56 @@ func TestDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing
 		})
 	}
 }
-func TestDocumentRevisionRecoveryOrdersByRequestAndRechecksAccess(t *testing.T) {
-	f := newRevisionDB(t)
+
+func testDocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure(t *testing.T, f *revisionDB) {
+	for _, appErr := range []error{nil, errors.New("Claude Code: You've hit your weekly limit (429)"), errors.New("Codex unavailable; Claude Code weekly limit"), context.DeadlineExceeded} {
+		t.Run(fmt.Sprint(appErr), func(t *testing.T) {
+			f.ai.calls.Store(0)
+			f.ai.appCalls.Store(0)
+			f.ai.researchCalls.Store(0)
+			f.ai.needsResearch, f.ai.appError = true, appErr
+			artifact, doc := f.document("# Research\n\nOriginal claim.\n")
+			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Research and verify this claim.")
+			f.ai.answer = revisionAnswer{Summary: "Verified claim", Edits: []revisionReplacement{{Before: "Original claim.", After: "Verified claim.", Reason: "Based on retrieved evidence", CommentIDs: []string{note}}}}
+			request := asString(args["requestId"])
+			var wait *workstate.HumanWait
+			if err := f.execute(f.engine, request, false); !errors.As(err, &wait) {
+				t.Fatalf("research did not reach ordinary edit approval: %v", err)
+			}
+			ids, _, run, approval, err := f.second.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+			if err != nil || run["status"] != "waiting" || approval["kind"] != "planReview" {
+				t.Fatalf("optional app failure parked the goal: %v %v %v", run, approval, err)
+			}
+			if f.ai.researchCalls.Load() != 1 || f.ai.appCalls.Load() != 1 || f.ai.calls.Load() != 1 {
+				t.Fatal("research did not execute exactly once per branch")
+			}
+			f.query(f.other, f.ctx, "query", "decideApproval", map[string]any{"approvalId": memql.BareShortId(asString(approval["id"])), "decision": "approved", "answer": f.accepted(request)})
+			if err := f.execute(f.other, request, true); err != nil {
+				t.Fatalf("resume lost parallel results: %v", err)
+			}
+			changed, err := f.first.reviewDocument(memql.ContextWithFreshRead(f.ctx), artifact)
+			if err != nil || changed.backing["body"] != "# Research\n\nVerified claim.\n" {
+				t.Fatalf("goal did not finish: %v %v", changed, err)
+			}
+			if f.ai.researchCalls.Load() != 1 || f.ai.appCalls.Load() != 1 {
+				t.Fatal("approval spent research quota again")
+			}
+			if appErr != nil {
+				rows := f.query(f.other, f.ctx, "query", "workStepsForOwnerRun", map[string]any{"runId": ids.RunID})
+				recorded := false
+				for _, row := range rows {
+					if row["status"] == "failed" && strings.Contains(asString(row["errorMessage"]), appErr.Error()) {
+						recorded = true
+					}
+				}
+				if !recorded {
+					t.Fatal("optional app failure disappeared from the durable journal")
+				}
+			}
+		})
+	}
+}
+func testDocumentRevisionRecoveryOrdersByRequestAndRechecksAccess(t *testing.T, f *revisionDB) {
 	artifact, doc := f.document("# Guide\n\nOriginal content.\n")
 	anchor := map[string]any{"kind": "document-end"}
 	old, note := f.submit(artifact, doc, anchor, "Add next steps.")
@@ -331,8 +437,7 @@ func TestDocumentRevisionRecoveryOrdersByRequestAndRechecksAccess(t *testing.T) 
 	}
 }
 
-func TestDocumentRevisionRefusesStaleApprovalAndAllowsDecline(t *testing.T) {
-	f := newRevisionDB(t)
+func testDocumentRevisionRefusesStaleApprovalAndAllowsDecline(t *testing.T, f *revisionDB) {
 	source := "# Guide\n\nA paragraph."
 	artifact, doc := f.document(source)
 	args, note := f.submit(artifact, doc, map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": "paragraph", "sourceQuote": "A paragraph."}, "Clarify this")
@@ -358,8 +463,7 @@ func TestDocumentRevisionRefusesStaleApprovalAndAllowsDecline(t *testing.T) {
 	}
 }
 
-func TestDocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove(t *testing.T) {
-	f := newRevisionDB(t)
+func testDocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove(t *testing.T, f *revisionDB) {
 	source := "# Recovery\n\nOriginal text.\n"
 	artifact, doc := f.document(source)
 	args, note := f.submit(artifact, doc, map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": "Original text.", "sourceQuote": "Original text."}, "Clarify this")
@@ -414,8 +518,7 @@ func (f *revisionDB) accepted(request string) map[string]any {
 	return map[string]any{"acceptedItemIds": ids, "proposalHash": status["proposalHash"]}
 }
 
-func TestDocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas(t *testing.T) {
-	f := newRevisionDB(t)
+func testDocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas(t *testing.T, f *revisionDB) {
 	source := "# Plan\n\nFirst paragraph.\n\nSecond paragraph.\n"
 	artifact, doc := f.document(source)
 	a, noteA := f.submit(artifact, doc, map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": "First paragraph.", "sourceQuote": "First paragraph."}, "Clarify the first paragraph")
@@ -509,8 +612,7 @@ func TestDocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas(t *testing.T) 
 	}
 }
 
-func TestDocumentRevisionStatusCarriesRetryAcrossReplicas(t *testing.T) {
-	f := newRevisionDB(t)
+func testDocumentRevisionStatusCarriesRetryAcrossReplicas(t *testing.T, f *revisionDB) {
 	artifact, doc := f.document("# Guide\n\nOriginal content.\n")
 	request, _ := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Expand the guide.")
 	ids, _ := revisionIdentity(f.ctx, asString(request["requestId"]))
@@ -518,12 +620,19 @@ func TestDocumentRevisionStatusCarriesRetryAcrossReplicas(t *testing.T) {
 	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{
 		"runId": ids.RunID, "status": "waiting", "waitingOn": map[string]any{"kind": "retry", "resumeAt": resumeAt, "reason": "internal provider detail"}, "spent": map[string]any{"retries": 2}, "errorMessage": "idle ceiling",
 	})
+	progressCtx := common.ContextWithRun(f.ctx, common.RunContext{RunId: ids.RunID, GoalId: ids.GoalID, StepKey: "analysis", OwnerUserId: f.owner})
+	if err := f.engine.RecordWorkProgress(progressCtx, memql.WorkEvent{ID: "ai-draft", Kind: "draft", Text: `{"edits":[{"after":"First section`, Phase: "paused"}); err != nil {
+		t.Fatal(err)
+	}
 	rows, err := f.second.handleDocumentRevisionStatus(f.ctx, map[string]any{"requestId": request["requestId"]}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var payload map[string]any
 	_ = json.Unmarshal(rows[0].Payload, &payload)
+	if draft := revisionMap(payload["draft"]); draft["phase"] != "paused" || !strings.Contains(asString(draft["text"]), "First section") {
+		t.Fatalf("cross-replica partial draft lost: %v", draft)
+	}
 	waiting := revisionMap(payload["waitingOn"])
 	if payload["status"] != "waiting" || waiting["kind"] != "retry" || waiting["resumeAt"] != resumeAt || payload["retryCount"] != float64(2) {
 		t.Fatalf("retry metadata lost: %+v", payload)
@@ -533,5 +642,49 @@ func TestDocumentRevisionStatusCarriesRetryAcrossReplicas(t *testing.T) {
 	}
 	if payload["approvalId"] != "" {
 		t.Fatal("retry appeared to be document approval")
+	}
+}
+
+func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
+	f.ai.needsResearch = true
+	artifact, doc := f.document("# Research\n\nOriginal claim.\n")
+	args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Research and verify this claim.")
+	f.ai.answer = revisionAnswer{Summary: "Verified claim", Edits: []revisionReplacement{{Before: "Original claim.", After: "Verified claim.", Reason: "Evidence", CommentIDs: []string{note}}}}
+	request := asString(args["requestId"])
+	var wait *workstate.HumanWait
+	if err := f.execute(f.engine, request, false); !errors.As(err, &wait) {
+		t.Fatal(err)
+	}
+	ids, _, _, _, err := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{"runId": ids.RunID, "status": "failed", "errorMessage": "automation definition changed since the run started"})
+	args["requestId"] = "retry-" + fmt.Sprint(time.Now().UnixNano())
+	if _, err = f.second.handleRequestDocumentRevision(f.ctx, args, 0); err != nil {
+		t.Fatal(err)
+	}
+	next := asString(args["requestId"])
+	_, captured, _, _, err := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), next)
+	if err != nil || captured["previousRunId"] != ids.RunID {
+		t.Fatalf("retry lost its validated predecessor: %v %v", captured, err)
+	}
+	if err = f.execute(f.other, next, false); !errors.As(err, &wait) {
+		t.Fatal(err)
+	}
+	if f.ai.appCalls.Load() != 1 || f.ai.researchCalls.Load() != 2 {
+		t.Fatalf("retry repeated subscription research or skipped fresh headless research: app=%d headless=%d", f.ai.appCalls.Load(), f.ai.researchCalls.Load())
+	}
+	// Changed direction is new work, even against the same unchanged file.
+	nextIDs, _, _, _, _ := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), next)
+	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{"runId": nextIDs.RunID, "status": "failed"})
+	args["requestId"] = "different-" + fmt.Sprint(time.Now().UnixNano())
+	args["instruction"] = "Investigate a different question."
+	if _, err = f.second.handleRequestDocumentRevision(f.ctx, args, 0); err != nil {
+		t.Fatal(err)
+	}
+	_, different, _, _, err := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), asString(args["requestId"]))
+	if err != nil || different["previousRunId"] != nil {
+		t.Fatalf("new feedback inherited old evidence: %v %v", different, err)
 	}
 }

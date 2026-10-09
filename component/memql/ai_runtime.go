@@ -148,7 +148,12 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 	// wakes. The old branch reconstructed that shape here from a registry
 	// miss, and could only ever produce it for a `fleet:` name -- a shut app
 	// door or an exhausted chain fell through to a generic error.
-	req, err := requestForPrompt(ctx, prompt, invocation, airoute.ModalityChat, text)
+	modality := airoute.ModalityChat
+	sink, progressing := ctx.Value(aiProgressKey{}).(aiProgressSink)
+	if progressing {
+		modality = airoute.ModalityStreamingChat
+	}
+	req, err := requestForPrompt(ctx, prompt, invocation, modality, text)
 	if err != nil {
 		return nil, err
 	}
@@ -175,6 +180,13 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 	// chat wrapper serves the same bare prompt form (memql.AIProvider), walks
 	// the route, records every attempt, and says which source served.
 	caller, ok := resolved.Client.(AIProvider)
+	if progressing {
+		stream, streams := resolved.Client.(common.ChatStreamProvider)
+		if !streams {
+			return nil, fmt.Errorf("resolved provider does not support output streaming")
+		}
+		caller, ok = promptStreamCaller{provider: stream, sink: sink}, true
+	}
 	if !ok {
 		return nil, fmt.Errorf("the router resolved %q for an ai() expression and its client (%T) has no prompt form", providerName, resolved.Client)
 	}
