@@ -167,6 +167,16 @@ function renderReviewHistory() {
   for(const detail of Array.from(root.querySelectorAll<HTMLDetailsElement>("details[data-review-key]"))){const id=detail.dataset.reviewKey!;if(id in expanded)detail.open=expanded[id];detail.addEventListener("toggle",()=>{expanded[id]=detail.open;saveState();});}
   if(key)Array.from(root.querySelectorAll<HTMLElement>("[data-focus-key]")).find(el=>el.dataset.focusKey===key)?.focus({preventScroll:true});
 }
+function proposalSummary(status:Record<string,any>,historical=false) {
+  const items=status.items??[],applied=items.filter((item:any)=>status.answer?.acceptedItemIds?.includes(item.id));
+  return historical&&applied.length!==items.length ? `${applied.length} ${applied.length===1?"change was":"changes were"} applied from this review.` : status.proposal?.summary??status.result?.summary;
+}
+function versionSummary(entry:Record<string,any>) {
+  if(completedReview?.result?.applied&&completedReview.proposal?.version+1===entry.version)return proposalSummary(completedReview,true);
+  if(entry.note)return String(entry.note);
+  const applied=rows.filter(row=>row.applied&&row.versionNumber!==undefined&&row.versionNumber+1===entry.version);
+  return applied.length ? `${applied.length} applied ${applied.length===1?"request":"requests"} · ${[...new Set(applied.map(row=>location(row.anchor)))].join(", ")}` : "";
+}
 function paintReviewHistory() {
   const root=byId("review-history-content"),notice=byId("review-history-status");root.replaceChildren();notice.replaceChildren();
   const link=(label:string,action:()=>void,cls="passage")=>{const button=textElement("button",label,cls) as HTMLButtonElement;button.dataset.focusKey=`history:${label}`;button.addEventListener("click",action);return button;};
@@ -199,7 +209,7 @@ function paintReviewHistory() {
       const button=link("",()=>{historySelection=entry.version;renderReviewHistory();saveState();root.querySelector<HTMLButtonElement>(".review-history-back")?.focus();},"review-history-row");button.dataset.version=String(entry.version);button.dataset.focusKey=`history:version:${entry.version}`;
       button.setAttribute("aria-label",`Review version ${entry.version}`);
       button.append(textElement("strong",`Version ${entry.version}${entry.current?" · Current":""}`),textElement("small",stamp(entry)));
-      if(entry.note)button.append(textElement("p",String(entry.note)));
+      const description=versionSummary(entry);if(description)button.append(textElement("p",String(description)));
       root.append(button);
     }
     if(historyData.hasMore){const more=link("Load earlier versions",()=>historyRequest({type:"history",beforeVersion:historyData.beforeVersion}));more.disabled=historyBusy;root.append(more);}
@@ -819,7 +829,7 @@ function renderProposal(status:Record<string,any>,panel:HTMLElement,actions:HTML
   const edits: Record<string, any>[] = Array.isArray(proposal.edits) ? proposal.edits.filter((edit: any) => edit.before !== edit.after) : [];
   const addressed = new Set(edits.flatMap(edit => edit.commentIds ?? []));
   const items: Record<string,any>[] = (Array.isArray(status.items) ? status.items : []).filter((item:any)=>!historical||status.answer?.acceptedItemIds?.includes(item.id));
-  const summary = historical && items.length !== (status.items??[]).length ? `${items.length} ${items.length===1?"change was":"changes were"} applied from this review.` : proposal.summary ?? status.result?.summary;
+  const summary = proposalSummary(status,historical);
   if(summary)panel.append(textElement("p",String(summary),"review-overview"));
   for (const item of items) {
     const related = requested.filter(row => item.commentIds?.includes(row.id));

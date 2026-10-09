@@ -620,6 +620,7 @@ test("completed proposals become history and retain only the actually applied co
  f.send({type:"revision",status:{...status,status:"succeeded",decision:"approved",answer:{acceptedItemIds:["a"]},result:{applied:true}}});
  assert.equal(f.el("review-tab-history").getAttribute("aria-selected"),"true");assert.equal(f.el("review-footer").hidden,true);
  f.send({type:"history",data:{versions:[{version:2,current:true,note:"Clarify"}]}});f.send({type:"historyIdle"});
+ assert.match(f.doc.querySelector<HTMLButtonElement>('[aria-label="Review version 2"]')!.textContent!,/1 change was applied/);
  f.doc.querySelector<HTMLButtonElement>('[aria-label="Review version 2"]')!.click();
  assert.match(f.el("review-history-content").textContent!,/BeforeOldAfterClear/);assert.doesNotMatch(f.el("review-history-content").textContent!,/Much more|Accept|Delete/);
  assert.match(f.el("review-history-content").textContent!,/1 change was applied from this review/);
