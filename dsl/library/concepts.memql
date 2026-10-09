@@ -683,6 +683,7 @@ concept watchedFolder {
 @displayCard(primary="body")
 @rowAuthz(owner="ownerUserId", clusterOwner)
 concept documentComment {
+  removed bool @description("A deleted annotation stays as an idempotency and authorship receipt but is excluded from document feedback and notes.")
   attachments []object @description("Authorized image and Markdown references pinned to their saved revision and content hash.")
   purpose enum("feedback", "note") @description("Absent means feedback. A personal note is never eligible for AI revision input.")
   ownerUserId  string! @serverSet @description("The backing document's owner; assigned only by the review store after caller authorization.")

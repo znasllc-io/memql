@@ -157,6 +157,14 @@ func buildAmendedRevisionProposal(captured map[string]any, response any) (map[st
 }
 
 func (i *Integration) validateCurrentRevision(ctx context.Context, proposal map[string]any) error {
+	removed, err := i.removedRevisionComments(ctx, proposal)
+	if err != nil {
+		return err
+	}
+	if len(removed) > 0 {
+		return fmt.Errorf("feedback in this proposal was deleted; propose changes again with the remaining requests")
+	}
+
 	successor, err := i.revisionRow(ctx, "workDocumentRevisionAmendment", map[string]any{"requestId": proposal["requestId"]})
 	if err != nil {
 		return err

@@ -2413,6 +2413,25 @@ func nodeMatchesComparison(node memorynodes.MemoryNode, cmp *ComparisonExpressio
 			}
 			return compareStringValues(node.Concept, strings.TrimSpace(want), cmp.Operator)
 		case intrinsicFieldId:
+			if cmp.Operator == OpIn || cmp.Operator == OpOut {
+				values, err := ensureStringSlice(cmp.Value)
+				if err != nil {
+					return false, err
+				}
+				if len(values) == 0 {
+					return false, fmt.Errorf("id list must include at least one value")
+				}
+				found := false
+				for _, value := range values {
+					if node.ID == strings.TrimSpace(value) {
+						found = true
+					}
+				}
+				if cmp.Operator == OpOut {
+					return !found, nil
+				}
+				return found, nil
+			}
 			want, err := ensureString(cmp.Value)
 			if err != nil {
 				return false, err

@@ -393,3 +393,10 @@ builtin libraryRevisionReferences {
  templateId string!
  level string!
 }
+
+/// Delete the caller's feedback, extension request or personal note.
+/// Stops are handled through the existing goal cancellation before deletion.
+@sdk
+@executor("integration.library.removeDocumentAnnotation")
+@args(profile="object")
+builtin libraryRemoveDocumentAnnotation { artifactId string! commentId string! }

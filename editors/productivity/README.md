@@ -73,6 +73,15 @@ document with its own history and a durable link to the exact parent revision.
 History loads earlier pages on demand. Initial generated content is retained
 before its first edit; versions not retained by older releases cannot be recovered.
 
+Saved feedback, section or document extension requests, and personal notes each
+have a **Delete** trash icon and an inline confirmation. Deletion removes the
+request and its highlight without editing document content. Only its author may
+delete it. If it belongs to a running review, confirmation stops that proposal;
+other requests remain saved and can be proposed again. Approved changes must
+finish first. A deleted request cannot be restored by a delayed submission or
+applied from an older editor or approval. The internal receipt remains for
+idempotency and authorship history; it is no longer an active annotation.
+
 **Add note** creates a personal passage annotation, available in Read and Review.
 The header’s Notes button opens a separate panel; passage markers show note
 previews on hover and open the note on click. Unchanged, unambiguous passages

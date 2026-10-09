@@ -1177,6 +1177,10 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "library/mutations.memql", Name: "appendDocumentComment"}:     true,
 		{Path: "library/queries.memql", Name: "documentCommentsForArtifact"}: true,
 		{Path: "library/queries.memql", Name: "documentCommentById"}:         true,
+		// Removal must verify original authorship and serialize with active
+		// proposals; ownership alone cannot attest either invariant.
+		{Path: "library/mutations.memql", Name: "removeDocumentAnnotation"}: true,
+		{Path: "library/queries.memql", Name: "removedDocumentComments"}:    true,
 
 		// Note reads borrow the backing owner only after artifact authorization.
 		// actor.userId cannot attest the original caller under that authority;

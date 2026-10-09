@@ -103,14 +103,15 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
     let preview: {version:number;revision:string;content:string}|undefined;
     const branchKey=`memql.markdownBranch:${document.uri.toString()}`;
     let branchPending=this.context.workspaceState.get<{fingerprint:string;requestId:string}>(branchKey);
-    let generation = 0;
+    let generation = 0, notesGeneration = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let refreshedRun = "";
     const error = (e: unknown) => panel.webview.postMessage({ type: "error", ...reportProblem(e, "complete this document action") });
     const refreshNotes = async () => {
       if(document.uri.scheme!=="memql-file")return;
-      try { const result=await this.files.notes(await this.load(document.uri));if(!disposed)await panel.webview.postMessage({type:"notes",rows:result.notes??[],hasMore:result.hasMore}); }
-      catch(e){if(!disposed)await panel.webview.postMessage({type:"notesError",...reportProblem(e,"load your notes")});}
+      const ticket=++notesGeneration;
+      try { const result=await this.files.notes(await this.load(document.uri));if(!disposed&&ticket===notesGeneration)await panel.webview.postMessage({type:"notes",rows:result.notes??[],hasMore:result.hasMore}); }
+      catch(e){if(!disposed&&ticket===notesGeneration)await panel.webview.postMessage({type:"notesError",...reportProblem(e,"load your notes")});}
     };
     const refreshComments = async () => {
       if (document.uri.scheme !== "memql-file") return;
@@ -147,7 +148,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
           // Keep discovering reviews submitted from another editor, including
           // after this panel's previous run stopped or finished.
           const inactive = !status || status.cancelRequested || ["succeeded","failed","cancelled"].includes(String(status.status));
-          timer = setTimeout(() => { void refreshRevision().catch(error); }, inactive ? 10000 : status.status === "waiting" ? 5000 : 2000);
+          timer = setTimeout(() => { void refreshComments().then(refreshNotes).then(refreshRevision).catch(error); }, inactive ? 10000 : status.status === "waiting" ? 5000 : 2000);
         }
       } catch (e) {
         if (disposed || !current()) return;
@@ -232,6 +233,31 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
           else if (message.type === "dictationStart") { if(document.uri.scheme!=="memql-file"||document.isDirty)throw new UserInputError("Save the MemQL document before dictating feedback.");void this.dictation.start(panel,await this.load(document.uri)).catch(error); }
           else if (message.type === "dictationStop") await this.dictation.stop(panel);
           else if (message.type === "dictationCancel") this.dictation.cancel(panel);
+          else if (message.type === "removeAnnotation") {
+            if (saving) { await panel.webview.postMessage({type:"annotationRemoveError",message:"Wait for the current action to finish, then try again."}); return; }
+            saving = true; generation++; notesGeneration++;
+            try {
+              if (document.uri.scheme !== "memql-file" || typeof message.id !== "string" || !["feedback","note"].includes(message.purpose)) throw new UserInputError("Choose saved feedback or a note to delete.");
+              const base = await this.load(document.uri);
+              const collection = message.purpose === "note" ? (await this.files.notes(base)).notes : (await this.files.review(base)).comments;
+              const row = (collection as Record<string,unknown>[] | undefined)?.find(row => row.id === message.id);
+              if (row && row.canRemove !== true) throw new UserInputError("Only the author can delete this feedback or note.");
+              if (message.purpose === "feedback" && row) {
+                const status = await this.revisions.status(document);
+                const proposal = status?.proposal as Record<string,any> | undefined;
+                if (proposal?.commentIds?.includes(message.id) && !["succeeded","failed","cancelled"].includes(String(status?.status))) {
+                  if (status?.decision === "approved") throw new UserInputError("Wait for the approved changes to finish, then delete this feedback.");
+                  if (status?.runId !== message.runId) throw new UserInputError("The review changed. Open it and try deleting this request again.");
+                  if (!status?.cancelRequested) await this.files.cancelRevision(base, proposal.requestId);
+                }
+              }
+              await this.files.removeAnnotation(base,message.id);
+              generation++; notesGeneration++;
+              await panel.webview.postMessage({type:"annotationRemoved",id:message.id,purpose:message.purpose});
+              await refreshComments(); await refreshNotes(); await refreshRevision();
+            } catch(e) { await panel.webview.postMessage({type:"annotationRemoveError",...reportProblem(e,"delete this feedback or note")}); }
+            finally { saving = false; }
+          }
           else if (message.type === "refresh") { await refreshComments(); await refreshRevision(); }
           else if (["prepareRevision", "resumePreparation", "decideRevision", "compareRevision", "modifyRevisionItem", "retryRevisionItem", "cancelRevision"].includes(message.type) && !saving) {
             saving = true;
@@ -290,7 +316,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
     ];
     panel.onDidDispose(() => {
       this.dictation.cancel(panel);
-      disposed = true; generation++; if (timer) clearTimeout(timer);
+      disposed = true; generation++; notesGeneration++; if (timer) clearTimeout(timer);
       this.panels.delete(entry);
       for (const subscription of subscriptions) subscription.dispose();
       if (this.active?.panel === panel) this.active = undefined;

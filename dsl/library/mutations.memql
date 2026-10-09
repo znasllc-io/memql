@@ -1121,3 +1121,13 @@ mutation documentComment appendDocumentComment {
     stamp { id: args.commentId, ownerUserId: actor.userId }
   }
 }
+
+/// Library verifies current artifact access and original authorship under the document lock.
+/// An actor.userId filter alone cannot attest original authorship under borrowed
+/// document-owner authority, or serialize deletion with an active approval.
+@serverOnly
+@actor
+mutation documentComment removeDocumentAnnotation {
+  args { commentId string! }
+  update { id: args.commentId, removed: true }
+}

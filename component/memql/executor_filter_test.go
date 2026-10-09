@@ -848,3 +848,28 @@ func TestRowIdFilterRoundTripsWithStorageId(t *testing.T) {
 		})
 	}
 }
+
+// Combined queries run both SQL and the post-filter. The SQL path already
+// supports ID membership; its post-filter must not coerce a list to a string.
+func TestIDMembershipPostFilter(t *testing.T) {
+	for _, op := range []ComparisonOperator{OpIn, OpOut} {
+		for _, stored := range []string{"v1:library:documentComment:one", "v1:library:documentComment:other", " v1:library:documentComment:one "} {
+			cmp := &ComparisonExpression{Field: FieldReference{Parts: []string{"id"}}, Operator: op, Value: []any{" one ", "two"}}
+			_, err := compileIdComparison(op, cmp.Value, "v1:library:documentComment")
+			require.NoError(t, err)
+			resolved, err := resolveComparisonForExecution(cmp, "v1:library:documentComment")
+			require.NoError(t, err)
+			got, err := nodeMatchesComparison(memorynodes.MemoryNode{ID: stored}, resolved, map[string]map[string]any{})
+			require.NoError(t, err)
+			want := stored == "v1:library:documentComment:one"
+			if op == OpOut {
+				want = !want
+			}
+			require.Equal(t, want, got)
+		}
+		for _, invalid := range []any{[]any{}, []any{123}, "one"} {
+			_, err := nodeMatchesComparison(memorynodes.MemoryNode{ID: "one"}, &ComparisonExpression{Field: FieldReference{Parts: []string{"id"}}, Operator: op, Value: invalid}, nil)
+			require.Error(t, err)
+		}
+	}
+}

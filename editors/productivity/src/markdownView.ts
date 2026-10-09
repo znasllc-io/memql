@@ -28,7 +28,7 @@ document.addEventListener("contextmenu", event => {
 }, true);
 type Anchor = { kind?: "markdown"; intent?: "extend"; scope?: "section"; sectionPath?: string[]; sourceQuote?: string; startLine: number; endLine: number; quote: string; startBlock: number; endBlock: number; startTextOffset: number; endTextOffset: number; prefix?: string; suffix?: string } | { kind: "document-end"; quote: string; intent?: never; scope?: never; sectionPath?: never } | { kind: "document"; quote: string; intent?: never; scope?: never; sectionPath?: never };
 type Attachment = { artifactId:string; version:number; revision:string; name:string; mimeType:string; size:number; uri:string };
-type ReviewRow = { attachments?:Attachment[]; id: string; body: string; outdated?: boolean; anchor: Anchor };
+type ReviewRow = { canRemove?:boolean; attachments?:Attachment[]; id: string; body: string; outdated?: boolean; anchor: Anchor };
 const state = (api.getState() ?? {}) as { attachments?:Attachment[]; draft?: string; purpose?: "feedback"|"note"; anchor?: Anchor; draftVersion?: number; source?: string; instruction?: string; reviewOpen?: boolean; included?: string[]; seen?: string[]; decisions?: Record<string, "accepted" | "declined">; modifications?: Record<string,string>; expanded?: Record<string,boolean>; reviewSource?: string };
 let attachments: Attachment[] = state.attachments ?? [];
 const attachmentPreviews = new Map<string,string>();
@@ -214,7 +214,7 @@ let pendingAnchors: Anchor[] | undefined;
 let progressKey = "";
 let progressWasWhole = false;
 let draftKey="";
-function revisionLocked() { return preparing || revisionBusy || !!activeRun(); }
+function revisionLocked() { return !!removingAnnotation || preparing || revisionBusy || !!activeRun(); }
 function documentProcessing() {
   return preparing || !!pendingAnchors && revisionBusy || !!activeRun() && (revision?.status !== "waiting" || ["retry","replan","repair"].includes(revision?.waitingOn?.kind));
 }
@@ -290,7 +290,7 @@ const selected = new Set<string>(state.included ?? []);
 const seen = new Set<string>(state.seen ?? []);
 feedback.value = state.draft ?? ""; instruction.value = state.instruction ?? "";
 function saveState() { const saved = { draft: feedback.value, attachments, purpose:composerPurpose, anchor: draftAnchor, source: sourceIdentity || state.source, instruction: instruction.value, reviewOpen: reviewRequested, included: [...selected], seen: [...seen], decisions, modifications, expanded, reviewSource }; api.setState(saved); if (restored) api.postMessage({type:"draftState",state:saved}); }
-function activeRun() { return revision && !revision.cancelRequested && !["succeeded", "failed", "cancelled"].includes(revision.status); }
+function activeRun() { return revision && !revision.removedCommentIds?.length && !revision.cancelRequested && !["succeeded", "failed", "cancelled"].includes(revision.status); }
 function renderEmptyDocument() {
   const empty = !!latestDocument && emptyDocument && !historyPreview;
   document.body.classList.toggle("document-empty-view", empty);
@@ -352,7 +352,7 @@ function controls() {
   (byId("selection-note") as HTMLButtonElement).disabled=!connected;
   (byId("selection-feedback") as HTMLButtonElement).disabled=!connected||locked;
   byId("selection-feedback").hidden=mode!=="review";
-  prepare.disabled = dictationPhase!=="idle" || !connected || revisionBusy || !!activeRun() || selected.size === 0;
+  prepare.disabled = !!removingAnnotation || dictationPhase!=="idle" || !connected || revisionBusy || !!activeRun() || selected.size === 0;
   prepare.textContent = revisionBusy ? "Submitting…" : "Propose changes";
   byId("review-submit").hidden = !!activeRun() || selected.size === 0;
   byId("review-footer").hidden = byId("review-submit").hidden && !byId("review-actions").childElementCount;
@@ -544,6 +544,35 @@ function currentNoteAnchor(row:ReviewRow):Anchor|undefined {
 function openNote(id:string) {
   activeNote=id;showNotes(true);renderNotes();Array.from(byId("personal-notes").querySelectorAll<HTMLElement>("[data-note-id]")).find(element=>element.dataset.noteId===id)?.scrollIntoView?.({block:"nearest"});
 }
+let confirmingAnnotation = "", removingAnnotation = "", annotationProblem: {message:string;reference?:string}|undefined;
+function deleteAnnotationControl(row:ReviewRow,purpose:"feedback"|"note"):HTMLElement {
+  const slot=textElement("div","","annotation-delete");
+  if(row.canRemove!==true)return slot;
+  const noun=purpose==="note"?"note":isExtension(row.anchor)?"extension request":"feedback";
+  const linked=purpose==="feedback"&&activeRun()&&revision?.proposal?.commentIds?.includes(row.id);
+  const busy=!!removingAnnotation||revisionBusy||preparing||commentBusy||dictationPhase!=="idle";
+  const deleting=removingAnnotation===row.id;
+  const redraw=()=>{renderNotes();renderRevision();controls();};
+  const focus=(key:string)=>{const target=Array.from(document.querySelectorAll<HTMLElement>("[data-focus-key]")).find(el=>el.dataset.focusKey===key);target?.focus({preventScroll:true});target?.closest(".annotation-delete")?.scrollIntoView?.({block:"nearest"});};
+  if(confirmingAnnotation!==row.id){
+    const button=textElement("button","","icon-button delete-annotation") as HTMLButtonElement;
+    button.setAttribute("aria-label",`Delete ${noun}`);button.title=`Delete ${noun}`;button.dataset.focusKey=`delete:${row.id}`;
+    button.innerHTML='<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg>';
+    button.disabled=busy||!connected||!!linked&&revision?.decision==="approved";
+    if(linked&&revision?.decision==="approved")button.title="Wait for the approved changes to finish";
+    button.addEventListener("click",()=>{confirmingAnnotation=row.id;annotationProblem=undefined;redraw();focus(`keep:${row.id}`);});slot.append(button);return slot;
+  }
+  slot.classList.add("confirming");
+  const message=textElement("p",linked?`Delete this ${noun} and stop this proposal? Other requests stay saved for a new review.`:`Delete this ${noun} and its document highlight?`);
+  const actions=textElement("div","","annotation-delete-actions");
+  const cancel=textElement("button","Keep","passage") as HTMLButtonElement;cancel.disabled=busy;cancel.dataset.focusKey=`keep:${row.id}`;
+  cancel.addEventListener("click",()=>{confirmingAnnotation="";annotationProblem=undefined;redraw();focus(`delete:${row.id}`);});
+  const remove=textElement("button",deleting?"Deleting…":"Delete","secondary danger") as HTMLButtonElement;remove.disabled=busy||!connected;remove.dataset.focusKey=`confirm-delete:${row.id}`;
+  remove.addEventListener("click",()=>{removingAnnotation=row.id;annotationProblem=undefined;redraw();api.postMessage({type:"removeAnnotation",id:row.id,purpose,runId:revision?.runId});});
+  actions.append(cancel,remove);slot.append(message,actions);
+  if(annotationProblem){const problem=textElement("div","","annotation-problem");problem.setAttribute("role","alert");renderProblem(problem,annotationProblem,value=>api.postMessage(value));slot.append(problem);}
+  return slot;
+}
 function renderNotes() {
   const list=byId("personal-notes");list.replaceChildren();
   byId("personal-note-count").textContent=String(personalNotes.length);byId("personal-note-count").hidden=!personalNotes.length;
@@ -553,7 +582,7 @@ function renderNotes() {
     const anchor=currentNoteAnchor(row);
     if(anchor){const button=textElement("button",location(anchor),"passage");button.setAttribute("aria-label","Show note passage in document");button.addEventListener("click",()=>jumpTo(anchor));card.append(button);}
     else card.append(textElement("small","Passage from an earlier version"));
-    card.append(textElement("blockquote",row.anchor.quote),textElement("p",row.body));list.append(card);
+    card.append(textElement("blockquote",row.anchor.quote),textElement("p",row.body),deleteAnnotationControl(row,"note"));list.append(card);
   }
   renderNoteMarkers();
 }
@@ -615,13 +644,14 @@ function requestNote(row: ReviewRow, editable: boolean): HTMLElement {
   if (editable) {
     const toggle = document.createElement("button");
     toggle.className = "include-toggle";
+    toggle.disabled=!!removingAnnotation;
     toggle.setAttribute("role", "switch");
     toggle.setAttribute("aria-label", `Include request: ${row.body.slice(0, 120)}`);
     const paint = () => { const included = selected.has(row.id); toggle.setAttribute("aria-checked", String(included)); toggle.textContent = included ? "Included" : "Excluded"; article.classList.toggle("excluded", !included); };
     toggle.addEventListener("click", () => { if (selected.has(row.id)) selected.delete(row.id); else selected.add(row.id); paint(); controls(); saveState(); });
     paint(); head.append(toggle);
   }
-  article.append(head, textElement("p", row.body));
+  article.append(head, textElement("p", row.body),deleteAnnotationControl(row,"feedback"));
   for(const ref of row.attachments??[])article.append(attachmentRow(ref));
   if (row.anchor?.kind !== "document-end" && row.anchor?.kind !== "document" && row.anchor?.scope !== "section") {
     const quote = document.createElement("details"); quote.className = "request-quote";
@@ -632,7 +662,7 @@ function requestNote(row: ReviewRow, editable: boolean): HTMLElement {
 function renderComments() {
   const list = byId("comments"); list.replaceChildren();
   const inFlight = preparing || !!activeRun();
-  const captured = new Set<string>(preparing ? selected : revision?.proposal?.commentIds ?? []);
+  const captured = new Set<string>(preparing ? selected : revision?.removedCommentIds?.length ? [] : revision?.proposal?.commentIds ?? []);
   const current = rows.filter(row => !row.outdated && (!inFlight || !captured.has(row.id)));
   const earlier = rows.filter(row => row.outdated && !captured.has(row.id));
   if (current.length) {
@@ -645,7 +675,7 @@ function renderComments() {
     const details = textElement("details", "", "earlier"); details.append(textElement("summary", `Earlier requests (${earlier.length})`));
     for (const row of earlier) details.append(requestNote(row, false)); list.append(details);
   }
-  highlight("memql-notes", (mode === "review" ? rows : []).filter(row => !row.outdated).map(row => rangeFor(row.anchor)).filter((range): range is Range => !!range));
+  highlight("memql-feedback", (mode === "review" && !historyPreview ? rows : []).filter(row => !row.outdated).map(row => rangeFor(row.anchor)).filter((range): range is Range => !!range));
 }
 function renderRevision() {
   renderEmptyDocument();
@@ -667,6 +697,10 @@ function renderRevisionContent() {
   document.body.classList.toggle("review-draft", !preparing && !activeRun() && (pending || !revision));
   if (preparing) { root.append(textElement("p", "Preparing changes…", "phase busy")); return; }
   if (!revision) return;
+  if(revision.removedCommentIds?.length){
+    root.append(textElement("p","A request was deleted. Propose changes again with the remaining requests.","muted"));
+    document.body.classList.add("review-draft");return;
+  }
   const status = revision, proposal = status.proposal ?? {};
   const terminal = !!status.cancelRequested || ["succeeded", "failed", "cancelled"].includes(status.status);
   const awaiting = !terminal && !!status.approvalId && !status.decision && status.status === "waiting";
@@ -695,7 +729,7 @@ function renderRevisionContent() {
     const card = document.createElement("details"); card.className = "change"; card.open = !terminal; card.dataset.reviewKey=item.id;
     const title = textElement("summary", related.length === 1 ? `${isExtension(related[0].anchor) ? "Extend" : "Feedback"}: ${location(destination ?? related[0].anchor)}` : item.edits.length>1 ? "Linked changes" : "Document change");
     title.append(textElement("span", decisions[item.id] === "accepted" ? "Accepted" : decisions[item.id] === "declined" ? "Declined" : "", "item-decision"));card.append(title);
-    for (const row of related) { const context=textElement("div","","request-context");context.append(textElement("p",row.body));card.append(context); }
+    for (const row of related) { const context=textElement("div","","request-context");context.append(textElement("p",row.body));const saved=rows.find(saved=>saved.id===row.id);if(saved)context.append(deleteAnnotationControl(saved,"feedback"));card.append(context); }
     if (item.edits.length>1) card.append(textElement("p", "These edits belong together and share one decision.", "request-context muted"));
     for (const edit of item.edits) {
       const target = editLocation(edit) ?? related[0]?.anchor;
@@ -713,7 +747,7 @@ function renderRevisionContent() {
     if(awaiting) {
       const bar=textElement("div","","item-actions");
       for(const [label,value] of [["Accept","accepted"],["Decline","declined"],["Modify with AI","modify"]] as const){
-        const button=textElement("button",label,"secondary") as HTMLButtonElement;button.disabled=revisionBusy||dictationPhase!=="idle";button.dataset.focusKey=`${item.id}:${value}`;button.setAttribute("aria-pressed",String(value===decisions[item.id]));
+        const button=textElement("button",label,"secondary") as HTMLButtonElement;button.disabled=!!removingAnnotation||revisionBusy||dictationPhase!=="idle";button.dataset.focusKey=`${item.id}:${value}`;button.setAttribute("aria-pressed",String(value===decisions[item.id]));
         button.addEventListener("click",()=>{if(value==="modify"){modifying=modifying===item.id?"":item.id;}else{if(decisions[item.id]===value)delete decisions[item.id];else decisions[item.id]=value;}saveState();renderRevision();if(value==="modify")document.querySelector<HTMLTextAreaElement>(".item-modify textarea")?.focus();});bar.append(button);
       }
       card.append(bar);
@@ -744,7 +778,7 @@ function renderRevisionContent() {
   }
   const action = (label: string, type: string, decision?: string, primary = false, answer?: Record<string,unknown>) => {
     const button = textElement("button", label, primary ? "primary" : "secondary") as HTMLButtonElement;
-    button.disabled = dictationPhase!=="idle" || revisionBusy || (decision === "approved" && !connected);
+    button.disabled = !!removingAnnotation || dictationPhase!=="idle" || revisionBusy || (decision === "approved" && !connected);
     button.addEventListener("click", () => { if(type==="decideRevision" && decision==="approved")pendingAnchors=items.filter(item=>decisions[item.id]==="accepted"||status.answer?.acceptedItemIds?.includes(item.id)).flatMap(item=>item.edits.map(editLocation)).filter((anchor:Anchor|undefined):anchor is Anchor=>!!anchor); revisionBusy = true; controls(); renderRevision(); api.postMessage({ type, approvalId:status.approvalId, decision, answer }); }); return button;
   };
   if (typeof proposal.revisedContent === "string") { const compare = action("Compare full document", "compareRevision"); compare.className = "compare secondary"; panel.append(compare); }
@@ -754,7 +788,7 @@ function renderRevisionContent() {
     const accepted=items.filter(item=>decisions[item.id]==="accepted").map(item=>item.id),remaining=items.filter(item=>!decisions[item.id]).length;
     actions.append(textElement("p",remaining ? `${remaining} ${remaining===1?"change needs":"changes need"} a decision` : `${accepted.length} accepted · ${items.length-accepted.length} declined`,"review-progress"));
     const apply=action(accepted.length ? `Apply accepted (${accepted.length})` : "Finish review","decideRevision",accepted.length?"approved":"rejected",true,{acceptedItemIds:accepted,proposalHash:status.proposalHash});
-    apply.disabled=dictationPhase!=="idle"||revisionBusy||!connected||remaining>0||items.length===0;actions.append(apply);
+    apply.disabled=!!removingAnnotation||dictationPhase!=="idle"||revisionBusy||!connected||remaining>0||items.length===0;actions.append(apply);
   }
   else if (!terminal && !retrying && status.approvalId && status.decision === "approved" && status.status === "waiting") {
     actions.append(textElement("p", "Your approval is saved. Resume to apply the accepted changes.", "review-progress"));
@@ -764,6 +798,18 @@ function renderRevisionContent() {
 }
 window.addEventListener("message",event=>{
   const message=event.data;
+  if(message.type==="annotationRemoveError"){removingAnnotation="";annotationProblem=message;renderNotes();renderRevision();controls();}
+  if(message.type==="annotationRemoved"){
+    removingAnnotation="";confirmingAnnotation="";annotationProblem=undefined;
+    rows=rows.filter(row=>row.id!==message.id);personalNotes=personalNotes.filter(row=>row.id!==message.id);selected.delete(message.id);seen.delete(message.id);
+    if(activeNote===message.id)activeNote="";
+    if(message.purpose==="feedback"&&revision?.proposal?.commentIds?.includes(message.id))revision.removedCommentIds=[...(revision.removedCommentIds??[]),message.id];
+    selection=undefined;selectionRange=undefined;contextSelection=undefined;window.getSelection()?.removeAllRanges();byId("selection-tools").hidden=true;
+    highlight("memql-active",[]);for(const el of document.querySelectorAll(".document-target"))el.classList.remove("document-target");
+    renderNotes();renderRevision();controls();saveState();
+    const status=byId(message.purpose==="note"?"notes-status":"status");status.textContent=message.purpose==="note"?"Note deleted.":"Request deleted.";
+    byId(message.purpose==="note"?"notes-close":"review-close").focus({preventScroll:true});
+  }
   if(message.type==="selectionNote"&&contextSelection&&connected&&!historyPreview){openComposer(contextSelection.anchor,contextSelection.rect,"note");contextSelection=undefined;}
   if(message.type==="find")showFind(true);
   if(message.type==="notes"){personalNotes=message.rows??[];byId("notes-status").textContent=message.hasMore?"Showing your 500 most recent notes. Older notes remain saved.":"";byId("notes-retry").hidden=true;renderNotes();}

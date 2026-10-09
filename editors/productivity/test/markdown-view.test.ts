@@ -478,3 +478,65 @@ test("attachment uploads disable submission, preserve feedback on failure and re
   f.send({type:"attachmentUploaded",uploadId:next.uploadId,attachment:{artifactId:"ref",version:1,revision:"file:1",name:"reference.md",mimeType:"text/markdown",size:11,uri:"memql-file://cluster/artifacts/ref/reference.md"}});
   assert.equal(f.state().attachments.length,1);f.el("attachments").querySelector<HTMLButtonElement>("button")!.click();assert.equal(f.state().attachments.length,0);assert.equal(f.messages.some(m=>m.type==="deleteFile"),false);f.dom.window.close();
 });
+
+test("feedback and extensions delete only after confirmation and a server receipt",()=>{
+  const f=fixture();f.document();
+  const anchor={kind:"markdown",startLine:2,endLine:3,startBlock:1,endBlock:1,startTextOffset:5,endTextOffset:19,quote:"this selection"};
+  const rows=[{id:"feedback",body:"Clarify",anchor,canRemove:true},{id:"extension",body:"Add references",anchor:{kind:"document-end",quote:"End of document"},canRemove:true}];
+  f.send({type:"comments",rows});
+  f.doc.querySelector<HTMLButtonElement>('[aria-label="Delete feedback"]')!.click();
+  assert.equal(f.messages.some(m=>m.type==="removeAnnotation"),false);
+  f.doc.querySelector<HTMLButtonElement>('[data-focus-key="keep:feedback"]')!.click();
+  assert.equal(f.doc.activeElement?.getAttribute("aria-label"),"Delete feedback");
+  f.doc.querySelector<HTMLButtonElement>('[aria-label="Delete extension request"]')!.click();
+  f.doc.querySelector<HTMLButtonElement>('[data-focus-key="confirm-delete:extension"]')!.click();
+  assert.equal(f.messages.at(-1).type,"removeAnnotation");assert.equal(f.messages.at(-1).id,"extension");
+  assert.ok(f.el("comments").textContent?.includes("Add references"),"kept until confirmed");
+  assert.equal((f.el("prepare-revision") as HTMLButtonElement).disabled,true);
+  f.send({type:"annotationRemoveError",message:"Connection lost. Try again."});
+  assert.match(f.el("comments").textContent!,/Connection lost/);
+  f.doc.querySelector<HTMLButtonElement>('[data-focus-key="confirm-delete:extension"]')!.click();
+  f.send({type:"annotationRemoved",id:"extension",purpose:"feedback"});
+  assert.equal(f.el("comments").textContent?.includes("Add references"),false);
+  assert.deepEqual(Array.from(f.state().included),["feedback"]);
+  f.select();f.send({type:"annotationRemoved",id:"feedback",purpose:"feedback"});
+  assert.equal(f.dom.window.getSelection()?.toString(),"");
+  assert.equal(f.highlights.get("memql-active")?.size??0,0);
+  assert.equal((f.el("prepare-revision") as HTMLButtonElement).disabled,true);
+  f.dom.window.close();
+});
+test("deleting a proposed request hides its obsolete proposal and keeps other requests",()=>{
+  const f=fixture();f.document();
+  const row={id:"one",body:"Clarify",canRemove:true,anchor:{kind:"document",quote:"Entire document"}};
+  const next={...row,id:"two",body:"Add sources"};
+  f.send({type:"comments",rows:[row,next]});
+  f.send({type:"revision",status:{runId:"run",status:"waiting",approvalId:"approval",proposal:{commentIds:["one","two"],comments:[row,next],edits:[{before:"this selection",after:"a clear selection",commentIds:["one"]}]}}});
+  const control=f.el("revision").querySelector<HTMLButtonElement>('[aria-label="Delete feedback"]')!;control.click();
+  assert.match(f.el("revision").textContent!,/stop this proposal/);
+  // Polling must preserve confirmation and keyboard focus.
+  f.send({type:"revision",status:{runId:"run",status:"waiting",approvalId:"approval",proposal:{commentIds:["one","two"],comments:[row,next],edits:[{before:"this selection",after:"a clear selection",commentIds:["one"]}]}}});
+  f.doc.querySelector<HTMLButtonElement>('[data-focus-key="confirm-delete:one"]')!.click();
+  assert.equal(f.messages.at(-1).runId,"run");
+  f.send({type:"annotationRemoved",id:"one",purpose:"feedback"});
+  assert.equal(f.doc.querySelector(".change"),null);
+  assert.match(f.el("comments").textContent!,/Add sources/);
+  assert.equal((f.el("prepare-revision") as HTMLButtonElement).disabled,false);
+  f.el("prepare-revision").click();assert.deepEqual(Array.from(f.messages.at(-1).commentIds),["two"]);
+  f.dom.window.close();
+});
+test("personal notes delete in read mode without touching feedback or other note markers",()=>{
+  const f=fixture();f.document();f.send({type:"viewMode",mode:"reading"});
+  const row={id:"note",body:"A private thought",canRemove:true,anchor:{kind:"markdown",startLine:2,endLine:3,startBlock:1,endBlock:1,startTextOffset:5,endTextOffset:19,quote:"this selection"}};
+  f.send({type:"notes",rows:[row,{...row,id:"other",body:"Another thought"}]});
+  f.el("note-markers").querySelector<HTMLButtonElement>("button")!.click();
+  f.doc.querySelector<HTMLButtonElement>('[aria-label="Delete note"]')!.click();
+  f.doc.querySelector<HTMLButtonElement>('[data-focus-key="confirm-delete:note"]')!.click();
+  assert.equal(f.messages.at(-1).purpose,"note");
+  f.send({type:"annotationRemoved",id:"note",purpose:"note"});
+  assert.equal(f.el("notes-panel").hidden,false);
+  assert.equal(f.doc.querySelectorAll(".personal-note").length,1);
+  assert.equal(f.highlights.get("memql-notes")?.size,1);
+  f.send({type:"annotationRemoved",id:"other",purpose:"note"});
+  assert.equal(f.highlights.get("memql-notes")?.size??0,0);assert.equal(f.el("note-markers").children.length,0);
+  f.dom.window.close();
+});
