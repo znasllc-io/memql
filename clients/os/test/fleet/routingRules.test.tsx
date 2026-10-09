@@ -106,6 +106,7 @@ describe("the rules, as sentences", () => {
   it("reads each rule as When -> Route, in the order the engine tries them, the floor last", async () => {
     await openRules();
     expect(sentences()).toEqual([
+      "Library revision evidence prompt -> Local only",
       "Library revision intent prompt -> Local only",
       "Library revision app research prompt -> Research apps",
       "Library revision research prompt -> Local only",
@@ -126,7 +127,7 @@ describe("the rules, as sentences", () => {
   it("gives a shipped rule a lock and no control at all", async () => {
     await openRules();
     const shipped = lines().filter((li) => li.hasAttribute("data-os-locked"));
-    expect(shipped).toHaveLength(12);
+    expect(shipped).toHaveLength(shippedRules().length);
     for (const li of shipped) {
       expect(li.querySelector(".fleet-rule-lock")).not.toBeNull();
       expect(within(li).queryAllByRole("button")).toHaveLength(0);
