@@ -219,8 +219,42 @@ func (f *revisionDB) execute(engine *memql.MemQLEngine, request string, resume b
 	}
 	return err
 }
-func TestDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing.T) {
-	f := newRevisionDB(t)
+
+// These cases mount the same immutable DSL on two independent replicas.
+// Bootstrap them once under this parent; each case owns fresh document/run IDs
+// and model state. Do not use a package-global fixture or parallel subtests.
+func TestDocumentRevisionWorkflow(t *testing.T) {
+	shared := newRevisionDB(t)
+	cases := []struct {
+		name string
+		run  func(*testing.T, *revisionDB)
+	}{
+		{"DocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas", testDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas},
+		{"DocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure", testDocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure},
+		{"DocumentRevisionRecoveryOrdersByRequestAndRechecksAccess", testDocumentRevisionRecoveryOrdersByRequestAndRechecksAccess},
+		{"DocumentRevisionRefusesStaleApprovalAndAllowsDecline", testDocumentRevisionRefusesStaleApprovalAndAllowsDecline},
+		{"DocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove", testDocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove},
+		{"DocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas", testDocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas},
+		{"DocumentRevisionStatusCarriesRetryAcrossReplicas", testDocumentRevisionStatusCarriesRetryAcrossReplicas},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := *shared
+			f.t = t
+			f.owner = fmt.Sprintf("revision-%d", time.Now().UnixNano())
+			f.ctx = revisionActor(f.owner, auth.RoleWriter)
+			f.ai.calls.Store(0)
+			f.ai.appCalls.Store(0)
+			f.ai.researchCalls.Store(0)
+			f.ai.needsResearch = false
+			f.ai.appError = nil
+			f.ai.answer = revisionAnswer{}
+			tc.run(t, &f)
+		})
+	}
+}
+
+func testDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing.T, f *revisionDB) {
 	for _, tc := range []struct {
 		name, source, quote, feedback, want string
 		extension, section, whole           bool
@@ -325,10 +359,12 @@ func TestDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing
 	}
 }
 
-func TestDocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure(t *testing.T) {
+func testDocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure(t *testing.T, f *revisionDB) {
 	for _, appErr := range []error{nil, errors.New("Claude Code: You've hit your weekly limit (429)"), errors.New("Codex unavailable; Claude Code weekly limit"), context.DeadlineExceeded} {
 		t.Run(fmt.Sprint(appErr), func(t *testing.T) {
-			f := newRevisionDB(t)
+			f.ai.calls.Store(0)
+			f.ai.appCalls.Store(0)
+			f.ai.researchCalls.Store(0)
 			f.ai.needsResearch, f.ai.appError = true, appErr
 			artifact, doc := f.document("# Research\n\nOriginal claim.\n")
 			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Research and verify this claim.")
@@ -371,8 +407,7 @@ func TestDocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure(t *test
 		})
 	}
 }
-func TestDocumentRevisionRecoveryOrdersByRequestAndRechecksAccess(t *testing.T) {
-	f := newRevisionDB(t)
+func testDocumentRevisionRecoveryOrdersByRequestAndRechecksAccess(t *testing.T, f *revisionDB) {
 	artifact, doc := f.document("# Guide\n\nOriginal content.\n")
 	anchor := map[string]any{"kind": "document-end"}
 	old, note := f.submit(artifact, doc, anchor, "Add next steps.")
@@ -401,8 +436,7 @@ func TestDocumentRevisionRecoveryOrdersByRequestAndRechecksAccess(t *testing.T) 
 	}
 }
 
-func TestDocumentRevisionRefusesStaleApprovalAndAllowsDecline(t *testing.T) {
-	f := newRevisionDB(t)
+func testDocumentRevisionRefusesStaleApprovalAndAllowsDecline(t *testing.T, f *revisionDB) {
 	source := "# Guide\n\nA paragraph."
 	artifact, doc := f.document(source)
 	args, note := f.submit(artifact, doc, map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": "paragraph", "sourceQuote": "A paragraph."}, "Clarify this")
@@ -428,8 +462,7 @@ func TestDocumentRevisionRefusesStaleApprovalAndAllowsDecline(t *testing.T) {
 	}
 }
 
-func TestDocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove(t *testing.T) {
-	f := newRevisionDB(t)
+func testDocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove(t *testing.T, f *revisionDB) {
 	source := "# Recovery\n\nOriginal text.\n"
 	artifact, doc := f.document(source)
 	args, note := f.submit(artifact, doc, map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": "Original text.", "sourceQuote": "Original text."}, "Clarify this")
@@ -484,8 +517,7 @@ func (f *revisionDB) accepted(request string) map[string]any {
 	return map[string]any{"acceptedItemIds": ids, "proposalHash": status["proposalHash"]}
 }
 
-func TestDocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas(t *testing.T) {
-	f := newRevisionDB(t)
+func testDocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas(t *testing.T, f *revisionDB) {
 	source := "# Plan\n\nFirst paragraph.\n\nSecond paragraph.\n"
 	artifact, doc := f.document(source)
 	a, noteA := f.submit(artifact, doc, map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": "First paragraph.", "sourceQuote": "First paragraph."}, "Clarify the first paragraph")
@@ -579,8 +611,7 @@ func TestDocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas(t *testing.T) 
 	}
 }
 
-func TestDocumentRevisionStatusCarriesRetryAcrossReplicas(t *testing.T) {
-	f := newRevisionDB(t)
+func testDocumentRevisionStatusCarriesRetryAcrossReplicas(t *testing.T, f *revisionDB) {
 	artifact, doc := f.document("# Guide\n\nOriginal content.\n")
 	request, _ := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Expand the guide.")
 	ids, _ := revisionIdentity(f.ctx, asString(request["requestId"]))
