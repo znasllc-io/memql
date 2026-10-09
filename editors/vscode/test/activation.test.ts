@@ -27,7 +27,7 @@ import type { ExtensionContext } from 'vscode';
 
 import { activate } from '../src/extension.js';
 import { constructed } from './support/languageClientStub.js';
-import { recorded, settings, workspace } from './support/vscodeStub.js';
+import { openTextDocument, recorded, settings, Uri, workspace } from './support/vscodeStub.js';
 
 // A home directory of our own. registerRuntimeSurface reads (and mkdirs)
 // ~/.memql, and a test has no business touching the developer's real one.
@@ -186,7 +186,15 @@ test('every file the trees read is watched, so an external edit refreshes them',
   ].sort());
 });
 
-test('the missing-binary message names the language features, not the extension', () => {
+test('cluster setup does not show a missing language-server error', () => {
+  assert.deepEqual(recorded.errors, []);
+  assert.deepEqual(constructed, []);
+});
+
+test('opening a local MemQL file reports the missing language server once', () => {
+  const doc = { uri: Uri.file(path.join(home, 'example.memql')), languageId: 'memql', getText: () => '', isDirty: false };
+  openTextDocument(doc);
+  openTextDocument(doc);
   assert.equal(recorded.errors.length, 1, `unexpected errors: ${recorded.errors.join(' | ')}`);
   const message = recorded.errors[0] ?? '';
 

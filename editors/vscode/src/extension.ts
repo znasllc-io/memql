@@ -19,6 +19,7 @@ import {
   ProgressLocation,
   Range,
   RelativePattern,
+  TextDocument,
   TreeView,
   Uri,
   window,
@@ -542,7 +543,7 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
     })
   );
 
-  startLanguageClient(context);
+  registerLanguageClient(context);
 
   // Productivity owns its contextual OS-matching offer when installed.
   // Standalone development installs keep the one-time brand offer (#4421).
@@ -699,6 +700,24 @@ function offerMemqlThemeOnce(context: ExtensionContext): void {
       .getConfiguration('workbench')
       .update('colorTheme', memqlThemeFor(editorKind), ConfigurationTarget.Global);
   })();
+}
+
+// Opening Clusters, an installer, or a portal link does not make the open
+// folder a MemQL source tree. Building the offline registry at activation
+// treated unrelated directories (for example ~/go and ~/projects) as domains
+// and interrupted setup with missing-memql.toml warnings. Wait for a document
+// the language client actually serves, including one already open at activation.
+function registerLanguageClient(context: ExtensionContext): void {
+  let requested = false;
+  const startForDocument = (document: TextDocument): void => {
+    if (requested || document.languageId !== 'memql' || document.uri.scheme !== 'file') return;
+    requested = true;
+    listener.dispose();
+    startLanguageClient(context);
+  };
+  const listener = workspace.onDidOpenTextDocument(startForDocument);
+  context.subscriptions.push(listener);
+  for (const document of workspace.textDocuments) startForDocument(document);
 }
 
 // startLanguageClient boots the memql-lsp client, or reports why it could not.

@@ -22,6 +22,7 @@ export const TransportKind = {
 
 /** Ids passed to `new LanguageClient(id, ...)`, in construction order. */
 export const constructed: string[] = [];
+export const instances: LanguageClient[] = [];
 
 export class LanguageClient {
   initializeResult: undefined;
@@ -33,6 +34,7 @@ export class LanguageClient {
     readonly clientOptions: unknown
   ) {
     constructed.push(id);
+    instances.push(this);
   }
 
   start(): Promise<void> {
