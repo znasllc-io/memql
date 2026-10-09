@@ -594,7 +594,10 @@ export interface FailureView {
   remedy?: string;
 }
 
+const CLEANUP_WORDS = { title: "Cleaning up setup", busy: "Cleaning up", failed: "Couldn't clean up", done: "Setup removed" };
+
 export interface RunInput {
+  cleanup?: boolean;
   mode: "install" | "repair" | "uninstall";
   phase: RunPhase;
   /** 0-100; undefined before the plan arrives (the bar is indeterminate). */
@@ -681,7 +684,7 @@ export function runProgressUpdate(input: RunInput): {
     ...(input.startedAt === undefined ? {} : { startedAt: input.startedAt }),
     ...(input.endedAt === undefined ? {} : { endedAt: input.endedAt }),
     state: progressState(input.phase),
-    title: RUN_WORDS[input.mode].title,
+    title: (input.cleanup ? CLEANUP_WORDS : RUN_WORDS[input.mode]).title,
   };
 }
 
@@ -700,7 +703,7 @@ export function runProgressUpdate(input: RunInput): {
  * retryable) once a failure has come to rest; Back and Resume once a stop has.
  */
 export function runScreen(input: RunInput): RegionParts {
-  const words = RUN_WORDS[input.mode];
+  const words = input.cleanup ? CLEANUP_WORDS : RUN_WORDS[input.mode];
   const update = runProgressUpdate(input);
   const body =
     progress({
@@ -961,6 +964,7 @@ export function addedScreen(input: AddedInput): RegionParts {
 export const DELETE_DATA_PHRASE = "delete memql data";
 
 export interface UninstallPreviewInput {
+  cleanup?: boolean;
   /** The preview is being read: the page draws the list's shape. */
   loading: boolean;
   /** No local cluster was found to uninstall. `removeFromList`: a list entry still points at it. */
@@ -1003,7 +1007,7 @@ export function phraseMatches(phrase: string): boolean {
  * there is no button; with nothing to remove at all there is none either.
  */
 export function uninstallPreviewScreen(input: UninstallPreviewInput): RegionParts {
-  const top = head({ title: TAB_TITLES.uninstall });
+  const top = head({ title: input.cleanup ? "Clean up setup" : TAB_TITLES.uninstall });
   if (input.loading) {
     return {
       head: top,
@@ -1034,7 +1038,7 @@ export function uninstallPreviewScreen(input: UninstallPreviewInput): RegionPart
       body: `<p class="ac-line">No local cluster was found on this computer.</p>`,
       actions: actionBar({
         // Why "Remove from list" is here, when it is: the entry outlived the cluster.
-        state: input.nothingHere.removeFromList ? "Still in your clusters" : "Nothing to uninstall",
+        state: input.nothingHere.removeFromList ? "Still in your clusters" : "Nothing to remove",
         tone: "idle",
         acts: [
           { act: "uninstallBack", label: "Back" },
@@ -1112,19 +1116,19 @@ export function uninstallPreviewScreen(input: UninstallPreviewInput): RegionPart
   const wouldRemove = removed.length > 0 || [...input.chosen].some((id) => input.sharedTools.some((t) => t.id === id));
   const dataOn = input.deleteData?.on === true;
   const acts: Act[] = [{ act: "uninstallBack", label: "Cancel" }];
-  let state = "Ready to uninstall";
+  let state = input.cleanup ? "Ready to clean up" : "Ready to uninstall";
   // NO CONFIRMATION SENTENCE OVER THE BAR. The list above already reads "The
   // cluster · memql, and every database in it" under "Will be removed", and
   // the switch says it can't be undone: a third telling above the button is
   // the same fact again, not a further consent.
   if (dataOn) {
     if (confirmed) {
-      acts.push({ act: "uninstallStart", label: "Uninstall and delete data", tone: "danger" });
+      acts.push({ act: "uninstallStart", label: input.cleanup ? "Clean up and delete data" : "Uninstall and delete data", tone: "danger" });
     } else {
       state = "Type the phrase to confirm";
     }
   } else if (wouldRemove) {
-    acts.push({ act: "uninstallStart", label: "Uninstall", tone: "danger" });
+    acts.push({ act: "uninstallStart", label: input.cleanup ? "Clean up" : "Uninstall", tone: "danger" });
   } else {
     state = "Nothing to remove";
   }
@@ -1148,6 +1152,7 @@ function lowerFirst(text: string): string {
 // -----------------------------------------------------------------------------
 
 export interface UninstalledInput {
+  cleanup?: boolean;
   removed: number;
   kept: number;
   /** The machine is clean but the editor's own records of it were not ("" when they were). */
@@ -1170,7 +1175,7 @@ export function uninstalledProgressUpdate(input: UninstalledInput): ProgressUpda
     ...(input.startedAt === undefined ? {} : { startedAt: input.startedAt }),
     ...(input.endedAt === undefined ? {} : { endedAt: input.endedAt }),
     state: "done",
-    title: RUN_WORDS.uninstall.done,
+    title: input.cleanup ? CLEANUP_WORDS.done : RUN_WORDS.uninstall.done,
   };
 }
 
@@ -1194,16 +1199,16 @@ export function uninstalledScreen(input: UninstalledInput): RegionParts {
     (input.followUpProblem === ""
       ? ""
       : input.stillListed === true
-        ? notice({ tone: "warn", line: "It's uninstalled, but it's still in your clusters.", next: "Remove it from the list in the Clusters view." })
+        ? notice({ tone: "warn", line: "Removed from this computer, but still in your clusters.", next: "Remove it from the list in the Clusters view." })
         : notice({
             tone: "warn",
-            line: "It's uninstalled, but MemQL still has a record of it.",
+            line: "Removed from this computer, but MemQL still has a record of it.",
             acts: [{ act: "openOutput", label: "Open in Output", tone: "secondary" }],
           })) +
     logsDisclosure(input.logsOpen, input.logLines ?? [], "Uninstall log");
   return {
     head: "",
     body,
-    actions: actionBar({ state: "Uninstalled", tone: "idle", acts: [{ act: "leave", label: "Back" }] }),
+    actions: actionBar({ state: input.cleanup ? "Setup removed" : "Uninstalled", tone: "idle", acts: [{ act: "leave", label: "Back" }] }),
   };
 }

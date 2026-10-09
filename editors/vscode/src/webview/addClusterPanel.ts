@@ -534,7 +534,8 @@ export class AddClusterPanel {
   /** The tab is called what the page is doing. */
   private setFlow(flow: PanelFlow): void {
     const title = flow === "repair" && this.detected?.facts.verdict === "install-incomplete"
-      ? "Continue setup" : TAB_TITLES[flow];
+      ? "Continue setup" : flow === "uninstall" && this.detected?.facts.verdict === "install-incomplete"
+        ? "Clean up setup" : TAB_TITLES[flow];
     if (this.panel.title !== title) this.panel.title = title;
   }
 
@@ -2145,6 +2146,7 @@ export class AddClusterPanel {
     if (this.state.screen !== "uninstallPreview" || u.phase !== "removed") return undefined;
     const steps = u.steps;
     return {
+      cleanup: this.detected?.facts.verdict === "install-incomplete",
       removed: steps.filter((step) => step.state === "done").length,
       kept: steps.filter((step) => step.state === "preserved").length,
       followUpProblem: u.followUpProblem,
@@ -2174,6 +2176,7 @@ export class AddClusterPanel {
       return {
         key: "uninstall",
         parts: uninstallPreviewScreen({
+          cleanup: this.detected?.facts.verdict === "install-incomplete",
           loading:
             this.uninstallLoading ||
             (preview === undefined && this.uninstallNothing === undefined && !this.uninstallUnreadable),
@@ -2262,6 +2265,7 @@ export class AddClusterPanel {
     const percent = steps.length > 0 ? progress.percent : phase === "running" ? undefined : 0;
     return {
       mode,
+      cleanup: mode === "uninstall" && this.detected?.facts.verdict === "install-incomplete",
       phase,
       ...(percent === undefined ? {} : { percent }),
       status,
