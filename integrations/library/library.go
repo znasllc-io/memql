@@ -111,6 +111,7 @@ func (i *Integration) IntegrationName() string { return "library" }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append([]memql.IntegrationCapability{
+		{Name: "removeDocumentAnnotation", Description: "Remove your document feedback or personal note.", Handler: i.handleRemoveDocumentAnnotation},
 		{Name: "documentNotes", Description: "Read the caller’s personal notes.", Handler: i.handleDocumentNotes},
 		{Name: "addDocumentNote", Description: "Save a personal note, excluded from AI feedback.", Handler: i.handleAddDocumentNote},
 		{Name: "documentHistory", Description: "Read retained versions and branch provenance.", Handler: i.handleDocumentHistory},

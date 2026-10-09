@@ -287,6 +287,7 @@ shape watchedFolder watchedFolderFull {
 /// Document feedback with its immutable source revision and author.
 @row
 shape documentComment documentCommentFull {
+  removed
   attachments
   purpose
   row.id

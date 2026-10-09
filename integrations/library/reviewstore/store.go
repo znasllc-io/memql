@@ -49,3 +49,19 @@ func Notes(ctx context.Context, engine memql.IntegrationEngineAccess, owner, art
 	}
 	return execute(ctx, engine, owner, "query", call)
 }
+
+func Remove(ctx context.Context, engine memql.IntegrationEngineAccess, owner, comment string) (*memql.ExecuteResult, error) {
+	call, err := langparser.RenderCall("removeDocumentAnnotation", map[string]any{"commentId": comment})
+	if err != nil {
+		return nil, err
+	}
+	return execute(ctx, engine, owner, "mutation", call)
+}
+
+func Removed(ctx context.Context, engine memql.IntegrationEngineAccess, owner, artifact string, ids []string) (*memql.ExecuteResult, error) {
+	call, err := langparser.RenderCall("removedDocumentComments", map[string]any{"artifactId": artifact, "commentIds": ids})
+	if err != nil {
+		return nil, err
+	}
+	return execute(ctx, engine, owner, "query", call)
+}

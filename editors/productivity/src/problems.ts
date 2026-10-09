@@ -13,6 +13,9 @@ export class ReportedError extends Error {
 export function userMessage(error: unknown, operation: string): string {
   if (error instanceof UserInputError) return error.message;
   const detail = error instanceof Error ? error.message : String(error);
+  if (/stop (?:the current|active document) review/i.test(detail)) return "This feedback is still in use by a review. Stop that review first, or wait for approved changes to finish, then try deleting it again.";
+  if (/feedback in this proposal was deleted/i.test(detail)) return "A request in this review was deleted. Propose changes again with the remaining requests.";
+  if (/the review changed/i.test(detail)) return "The review changed in another window. Reopen it before deleting this request.";
   if (/context checkpoint|context.*(?:window|budget).*exceed/i.test(detail)) return "MemQL couldn’t make enough room to continue this request. Your work is saved. Use the troubleshooting reference if retrying doesn’t help.";
   if (/idle ceiling|idle.timeout|stopped producing output/i.test(detail)) return "The AI stopped responding. Try again.";
   if (/(?:model|local runtime).*?(?:timeout|timed? out|deadline)|model_call_timeout/i.test(detail)) return "The AI couldn’t finish within the time allowed. Try a smaller request, or choose another model in Fleet.";

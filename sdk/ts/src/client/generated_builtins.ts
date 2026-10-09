@@ -2116,6 +2116,25 @@ QueryClient.prototype.libraryRemoveArtifactLabel = function (this: QueryClient, 
   return this.executeNamed("libraryRemoveArtifactLabel", buildLibraryRemoveArtifactLabel(args), opts);
 };
 
+/** Delete the caller's feedback, extension request or personal note. Stops are handled through the existing goal cancellation before deletion. */
+export interface LibraryRemoveDocumentAnnotationArgs {
+}
+
+export function buildLibraryRemoveDocumentAnnotation(args: LibraryRemoveDocumentAnnotationArgs): string {
+  void args;
+  return "builtin libraryRemoveDocumentAnnotation()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryRemoveDocumentAnnotation(args?: LibraryRemoveDocumentAnnotationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryRemoveDocumentAnnotation = function (this: QueryClient, args: LibraryRemoveDocumentAnnotationArgs = {} as LibraryRemoveDocumentAnnotationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryRemoveDocumentAnnotation", buildLibraryRemoveDocumentAnnotation(args), opts);
+};
+
 /** Capture selected current feedback and start its analysis run. */
 export interface LibraryRequestDocumentRevisionArgs {
   artifactId: string;

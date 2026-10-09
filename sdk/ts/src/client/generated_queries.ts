@@ -12046,6 +12046,28 @@ QueryClient.prototype.warmupStateForIdentity = function (this: QueryClient, args
   return this.executeNamed("warmupStateForIdentity", buildWarmupStateForIdentity(args), opts);
 };
 
+/** Deletion must account for every live review, including older editor windows. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workActiveDocumentRevisionRequests"] in generated_concepts.ts).
+export interface WorkActiveDocumentRevisionRequestsArgs {
+  artifactId: string;
+}
+
+export function buildWorkActiveDocumentRevisionRequests(args: WorkActiveDocumentRevisionRequestsArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  return "query workActiveDocumentRevisionRequests(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workActiveDocumentRevisionRequests(args: WorkActiveDocumentRevisionRequestsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workActiveDocumentRevisionRequests = function (this: QueryClient, args: WorkActiveDocumentRevisionRequestsArgs = {} as WorkActiveDocumentRevisionRequestsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workActiveDocumentRevisionRequests", buildWorkActiveDocumentRevisionRequests(args), opts);
+};
+
 /** Exact caller-owned approval receipt, including decided approvals for recovery. */
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalForOwner"] in generated_concepts.ts).
 export interface WorkApprovalForOwnerArgs {

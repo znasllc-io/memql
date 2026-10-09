@@ -108,6 +108,8 @@ func (i *Integration) handleDocumentReview(ctx context.Context, args map[string]
 		row["id"] = memql.BareShortId(stringField(row, "id"))
 		row["authorUserId"] = memql.BareShortId(stringField(row, "authorUserId"))
 		row["outdated"] = stringField(row, "revision") != doc.revision
+		access, _ := auth.AccessFromContext(ctx)
+		row["canRemove"] = access != nil && memql.BareShortId(access.UserId) == memql.BareShortId(stringField(row, "authorUserId"))
 		delete(row, "ownerUserId")
 		delete(row, "requestId")
 	}
@@ -156,6 +158,8 @@ func (i *Integration) handleDocumentNotes(ctx context.Context, args map[string]a
 	for _, row := range rows {
 		row["id"] = memql.BareShortId(stringField(row, "id"))
 		row["outdated"] = stringField(row, "revision") != doc.revision
+		access, _ := auth.AccessFromContext(ctx)
+		row["canRemove"] = access != nil && memql.BareShortId(access.UserId) == memql.BareShortId(stringField(row, "authorUserId"))
 		delete(row, "ownerUserId")
 		delete(row, "requestId")
 	}
@@ -212,6 +216,9 @@ func (i *Integration) addDocumentAnnotation(ctx context.Context, args map[string
 		return nil, err
 	}
 	if rows := extractRows(raw); len(rows) > 0 {
+		if boolField(rows[0], "removed") {
+			return nil, fmt.Errorf("this feedback was deleted; create a new request")
+		}
 		oldVersion, _ := intArg(rows[0]["versionNumber"])
 		if (stringField(rows[0], "purpose") == "note") != (purpose == "note") || stringField(rows[0], "body") != body || stringField(rows[0], "revision") != revision || oldVersion != expected || !reflect.DeepEqual(rows[0]["anchor"], anchor) || !sameReviewAttachments(rows[0]["attachments"], attachments) {
 			return nil, fmt.Errorf("this feedback request was already used with different content")
