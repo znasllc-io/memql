@@ -396,7 +396,10 @@ func CollectConstructs(root string) ([]Construct, error) {
 				if !sdkMarkerRe.MatchString(attrPreamble(preambles, src, m[0])) {
 					continue
 				}
-				args = parseFields(body)
+				args, err = parseBuiltinFields(name, body)
+				if err != nil {
+					return fmt.Errorf("parse SDK builtin %s in %s: %w", name, path, err)
+				}
 			} else {
 				args = parseArgsBlock(body)
 			}
@@ -538,10 +541,46 @@ func parseArgsBlock(body string) []ArgField {
 	return parseFields(inner)
 }
 
+// parseBuiltinFields uses the engine grammar: a newline is not a field
+// separator, so several fields on one line must survive SDK generation.
+// Refuse malformed schemas instead of silently publishing an empty call.
+func parseBuiltinFields(name, body string) ([]ArgField, error) {
+	decl, err := langparser.ParseBuiltinDecl("builtin " + name + " {" + body + "}")
+	if err != nil {
+		return nil, err
+	}
+	// The builtin AST retains annotations but not doc comments. Preserve the
+	// adjacent /// documentation for fields that begin a source line.
+	docs := map[string]string{}
+	starts := regexp.MustCompile(`(?m)^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]+`).FindAllStringSubmatchIndex(body, -1)
+	for _, pos := range starts {
+		docs[body[pos[2]:pos[3]]] = docLinesAbove(body[:pos[0]])
+	}
+	var out []ArgField
+	for _, field := range decl.Fields {
+		arg := ArgField{Name: field.Name, Type: field.Type, Required: field.Required, Description: docs[field.Name]}
+		for _, attr := range field.Attributes {
+			switch attr.Name {
+			case "description":
+				if arg.Description == "" {
+					arg.Description, _ = attr.Value.(string)
+				}
+			case "enum":
+				switch value := attr.Value.(type) {
+				case string:
+					arg.Enum = append(arg.Enum, value)
+				case []string:
+					arg.Enum = append(arg.Enum, value...)
+				}
+			}
+		}
+		out = append(out, arg)
+	}
+	return out, nil
+}
+
 // parseFields parses `<name> <type> [@annotations]` declarations out of
-// a block of text in source order. Used for both the inner text of an
-// `args { }` block (queries / mutations) and a builtin's body, where
-// the field list IS the body (no args block).
+// the inner text of an `args { }` block in source order.
 func parseFields(inner string) []ArgField {
 	var out []ArgField
 	matches := argsFieldRe.FindAllStringSubmatchIndex(inner, -1)

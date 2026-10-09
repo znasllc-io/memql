@@ -2679,6 +2679,8 @@ func LibraryRemoveArtifactLabelBuild(args LibraryRemoveArtifactLabelArgs) string
 
 // LibraryRemoveDocumentAnnotation -- Delete the caller's feedback, extension request or personal note. Stops are handled through the existing goal cancellation before deletion.
 type LibraryRemoveDocumentAnnotationArgs struct {
+	ArtifactId string
+	CommentId  string
 }
 
 // LibraryRemoveDocumentAnnotation calls the engine builtin libraryRemoveDocumentAnnotation.
@@ -2688,8 +2690,17 @@ func (qc *QueryClient) LibraryRemoveDocumentAnnotation(ctx context.Context, args
 }
 
 func LibraryRemoveDocumentAnnotationBuild(args LibraryRemoveDocumentAnnotationArgs) string {
-	_ = args
-	return "builtin libraryRemoveDocumentAnnotation()"
+	var b strings.Builder
+	b.WriteString("builtin libraryRemoveDocumentAnnotation(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if b.Len() > 40 {
+		b.WriteString(", ")
+	}
+	b.WriteString("commentId: ")
+	b.WriteString(quoteMemQL(args.CommentId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // LibraryRequestDocumentRevision -- Capture selected current feedback and start its analysis run.

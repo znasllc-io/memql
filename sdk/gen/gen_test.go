@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -702,5 +703,49 @@ func TestParseFields_BlankDetachedDocIgnored(t *testing.T) {
 	}
 	if fields[0].Description != "" {
 		t.Errorf("blank-detached field doc must not attach, got %q", fields[0].Description)
+	}
+}
+
+func TestCollectConstructs_BuiltinInlineFields(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "builtins.memql", `
+@sdk
+builtin removeAnnotation { artifactId string! commentId string! }
+@sdk
+builtin describe {
+  /// Stable identifier.
+  artifactId string! commentId string @description("Optional comment.")
+  mode enum("feedback", "note")! labels []string
+  state string @enum("ready") @required
+}
+`)
+	got, err := CollectConstructs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("constructs: %+v", got)
+	}
+	want := []ArgField{{Name: "artifactId", Type: "string", Required: true}, {Name: "commentId", Type: "string", Required: true}}
+	if !reflect.DeepEqual(got[0].Args, want) {
+		t.Fatalf("inline fields: %+v, want %+v", got[0].Args, want)
+	}
+	want = []ArgField{
+		{Name: "artifactId", Type: "string", Required: true, Description: "Stable identifier."},
+		{Name: "commentId", Type: "string", Description: "Optional comment."},
+		{Name: "mode", Type: "string", Required: true, Enum: []string{"feedback", "note"}},
+		{Name: "labels", Type: "[]string"},
+		{Name: "state", Type: "string", Required: true, Enum: []string{"ready"}},
+	}
+	if !reflect.DeepEqual(got[1].Args, want) {
+		t.Fatalf("field metadata: %+v, want %+v", got[1].Args, want)
+	}
+}
+
+func TestCollectConstructs_RejectsMalformedBuiltinSchema(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "builtins.memql", "@sdk\nbuiltin removeAnnotation { artifactId string! commentId }")
+	if _, err := CollectConstructs(root); err == nil || !strings.Contains(err.Error(), "removeAnnotation") {
+		t.Fatalf("expected actionable schema error, got %v", err)
 	}
 }
