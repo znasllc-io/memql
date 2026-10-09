@@ -2403,32 +2403,22 @@ query identity signInIdentitiesForSelf {
 /// unclaimed. That is the same circularity that kept activeUsers and userByEmail
 /// server-only (memql#2881), and the reason the self-scoped twin
 /// signInIdentitiesForSelf cannot serve this caller.
+/// includeHistory also admits revoked routes and OIDC credentials for first-passkey
+/// recovery. The identity service reads the recorded owner before issuing any grant;
+/// a previous sign-in credential must never reopen ownership setup.
 @serverOnly
 query identity signInIdentitiesForUser {
   args {
     userId  string!
+    includeHistory  boolean
   }
-  filter   row => (identityIsMagicLink(row) || identityIsPasskey(row))
+  filter   row => (identityIsMagicLink(row) || identityIsPasskey(row)
+                   || (args.includeHistory == true && identityIsOidc(row)))
                && row.userId == args.userId
-               && isActiveRecord(row)
+               && (isActiveRecord(row) || args.includeHistory == true)
   sort     "row.createdAt", "desc"
   paginate 50
   shape    identitySummary
-}
-
-/// Detect any previous sign-in credential, including revoked credentials, before
-/// allowing an installer-named owner to register their FIRST passkey. Internal
-/// callers only; a revoked credential must never reopen first-run ownership.
-/// actor.userId cannot scope this pre-authentication check: no actor exists yet.
-/// The identity service supplies the user ID from the recorded installation owner,
-/// and must check revoked as well as active credentials before issuing a grant.
-@serverOnly
-query identity ownerCredentialHistory {
-  args { userId string! }
-  filter row => row.userId == args.userId
-             && (identityIsPasskey(row) || identityIsMagicLink(row) || identityIsOidc(row))
-  paginate 1
-  shape identitySummary
 }
 
 // ---- queries/v1/identity/nodeTokenIdentityByBinding.memql ----

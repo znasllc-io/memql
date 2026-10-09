@@ -151,7 +151,7 @@ func TestOwnerRecoveryRequiresHostedEmailAndNeverOverwritesCredential(t *testing
 		require.Nil(t, pending)
 	}
 	engine.byCredentialId = map[string]map[string]any{}
-	engine.fail = "ownerCredentialHistory"
+	engine.fail = "includeHistory: true"
 	pending, err := first.Store.PendingOwnerSetup(context.Background(), first.Cfg)
 	require.Error(t, err)
 	require.Nil(t, pending)

@@ -1007,18 +1007,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// caller-supplied userId with no caller check: on the wire it would let
 		// any authenticated client enumerate how recoverable somebody else's
 		// account is. Its self-scoped twin signInIdentitiesForSelf stays on the
-		// wire and is unchanged. Sole caller: component/identity/store.go, which
-		// stamps auth.ContextWithInternalOrigin.
+		// wire and is unchanged. Callers: component/identity/store.go and
+		// bootstrap_recovery.go, both stamping auth.ContextWithInternalOrigin.
+		// The includeHistory option admits revoked/OIDC credentials only for
+		// first-passkey eligibility; existing callers retain active routes.
 		{Path: "identity/queries.memql", Name: "signInIdentitiesForUser"}: true,
-
-		// First-passkey recovery runs before an actor exists. actor.userId
-		// cannot answer whether the installer-named owner has EVER held a
-		// sign-in credential, including revoked credentials. Only the identity
-		// service may supply that ID; exposing this read would disclose another
-		// account's credential history. bootstrap_recovery.go stamps internal
-		// origin at this one read, before any grant is issued under the claim lock.
-		{Path: "identity/queries.memql", Name: "ownerCredentialHistory"}: true,
-
 		// memql#3716. The write that grants an OAuth client credentialed CORS
 		// access to identity's cookie-bearing auth endpoints.
 		//

@@ -70,7 +70,7 @@ func (s *Store) PendingOwnerSetup(ctx context.Context, cfg Config) (*BootstrapEn
 			strings.TrimPrefix(owners[0], "v1:identity:user:") != strings.TrimPrefix(owner.ID, "v1:identity:user:") {
 			return nil, nil
 		}
-		history, err := s.executeAndExtract(auth.ContextWithInternalOrigin(ctx), fmt.Sprintf(`query ownerCredentialHistory(userId: %s)`, dslJSONString(owner.ID)))
+		history, err := s.executeAndExtract(auth.ContextWithInternalOrigin(ctx), fmt.Sprintf(`query signInIdentitiesForUser(userId: %s, includeHistory: true)`, dslJSONString(owner.ID)))
 		if err != nil {
 			return nil, err
 		}
