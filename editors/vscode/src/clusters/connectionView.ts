@@ -41,6 +41,7 @@ import { clusterStatus, stateSentence, stateWord, type ClusterStatus } from "./s
 
 /** Where a sign-in to this cluster stands, while one is running. */
 export interface SignInFlight {
+  ownerSetup?: boolean;
   /** opening / waiting / finishing a browser sign-in, or showing a device code. */
   phase: "opening" | "waiting" | "finishing" | "code";
   /** Whether "Use a code instead" is on offer (the browser has been waited on long enough). */
@@ -212,7 +213,7 @@ function pageActionBar(cluster: ClusterConfig, status: ClusterStatus, input: Clu
   if (flight !== undefined && status.state !== "connected") {
     const acts = [act("cancel", "Cancel")];
     if (flight.codeOffered && flight.phase === "waiting") acts.unshift(act("useCode", "Use a code instead"));
-    return actionBar({ state: "Signing in", detail: PHASE_WORDS[flight.phase], tone: "busy", acts });
+    return actionBar({ state: flight.ownerSetup ? "Registering owner passkey" : "Signing in", detail: PHASE_WORDS[flight.phase], tone: "busy", acts });
   }
 
   const word = stateWord(status, cluster, true);
@@ -225,9 +226,10 @@ function pageActionBar(cluster: ClusterConfig, status: ClusterStatus, input: Clu
     }
     case "connecting":
       return actionBar({ state: word, tone: "busy", acts: [act("cancel", "Cancel")] });
+    case "ownerSetup":
+      return actionBar({ state: "Owner passkey required", tone: "warn", acts: [act("takeOwnership", "Register owner passkey", "primary")] });
     case "signIn": {
       const acts: Act[] = [];
-      if (facts?.ownerSetup === true) acts.push(act("takeOwnership", "Create owner passkey"));
       acts.push(act("signInWithCode", "Sign in with a code"), act("signIn", "Sign in", "primary"));
       return actionBar({ state: stateSentence(status, cluster).replace(/\.$/, ""), tone: "warn", acts });
     }

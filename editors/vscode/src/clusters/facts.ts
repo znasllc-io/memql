@@ -1,20 +1,5 @@
-// What this machine knows about a cluster's sign-in, without asking the cluster.
-//
-// WHY THIS EXISTS. The Clusters row and the cluster page used to decide "needs
-// sign-in" from clusters.yaml alone. But the thirty-day refresh token lives in
-// SecretStorage once a sign-in has happened, and the access token in the file
-// is cleared on a terminal refresh -- or by the Cockpit rewriting the shared
-// file. So a row said "needs sign-in" for a cluster a click would simply
-// connect, and sent the person through a browser for nothing. These facts read
-// every place a credential can be (the file and SecretStorage), once,
-// asynchronously, for the synchronous renderers to use.
-//
-// THE PASSKEY OFFER is decided here too, because it rests on the same kind of
-// evidence: the install receipt names this cluster's owner, and nobody has
-// signed in to it from this machine yet (clusters/ownershipRoute.ts).
-//
-// Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
-
+// Combine stored credentials and the install receipt with current owner/passkey state.
+// The server wins after a reinstall, even if this editor remembers an older session.
 import { classifyToken, jwtExpirySeconds } from "../connection/credentials.js";
 import { recordedDomain, recordedOwner, type Receipt } from "../install/receipt.js";
 import { composeConsoleUrl } from "./consoleUrl.js";
@@ -31,7 +16,7 @@ export interface ClusterFacts {
   session: boolean;
   /** A credential of any kind is stored here, so Sign out has something to end. */
   signedIn: boolean;
-  /** "Create the owner passkey" may be offered (ownershipRoute.ts ownerSetupPending). */
+  /** The first owner passkey is required before the cluster can be used. */
   ownerSetup: boolean;
   /** MemQL OS, composed from the domain; "" when nothing names it. */
   consoleUrl: string;
@@ -53,6 +38,8 @@ export interface ClusterFactDeps {
   readReceipt(): Promise<Receipt | null>;
   /** Whether a sign-in to this cluster has completed on this machine before. */
   signedInBefore(cluster: ClusterConfig): boolean;
+  /** Server state overrides receipt/history, including after a reinstall. */
+  ownerState?(cluster: ClusterConfig): Promise<import("./claimState.js").ClaimState>;
   /** Epoch milliseconds. */
   now(): number;
 }
@@ -61,7 +48,11 @@ export interface ClusterFactDeps {
 export async function gatherClusterFacts(cluster: ClusterConfig, deps: ClusterFactDeps): Promise<ClusterFacts> {
   const secretRefresh = ((await deps.readRefreshToken(cluster.name).catch(() => undefined)) ?? "").trim();
   const receipt = cluster.local === true ? await deps.readReceipt().catch(() => null) : null;
-  return factsFrom(cluster, { secretRefresh, receipt, signedInBefore: deps.signedInBefore(cluster), nowMs: deps.now() });
+  const facts = factsFrom(cluster, { secretRefresh, receipt, signedInBefore: deps.signedInBefore(cluster), nowMs: deps.now() });
+  const state = await deps.ownerState?.(cluster).catch(() => "unknown");
+  if (state === "unclaimed") return { ...facts, ownerSetup: true, session: false };
+  if (state === "claimed") return { ...facts, ownerSetup: false };
+  return facts;
 }
 
 /** The pure half, for tests and for a caller that already holds the inputs. */

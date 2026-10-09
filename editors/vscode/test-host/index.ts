@@ -1211,6 +1211,15 @@ smoke("connection-dependent behaviour beyond a read-only probe", () => {
  * exits nonzero on it, and on nothing else.
  */
 export async function run(): Promise<void> {
+  // These cases overwrite the registry. Refuse before running any case unless
+  // both the host and its registry resolve inside the runner's throwaway HOME.
+  const home = fs.realpathSync(os.homedir());
+  const expected = process.env.MEMQL_HOST_SMOKE_HOME;
+  const temp = fs.realpathSync(os.tmpdir());
+  assert.ok(expected && home === fs.realpathSync(expected), "Host smoke HOME does not match its isolated test directory");
+  assert.ok(home.startsWith(path.join(temp, "memql-vscode-host-")) && path.basename(home) === "home",
+    "Refusing to run destructive host fixtures outside a temporary memql-vscode-host HOME");
+  assert.equal(defaultClustersPath(), path.join(os.homedir(), ".memql", "clusters.yaml"));
   info(`HOME=${os.homedir()}`);
   registerLiveCases();
   await runCases();

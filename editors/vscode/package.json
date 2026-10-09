@@ -2,7 +2,7 @@
   "name": "memql",
   "displayName": "MemQL",
   "description": "MemQL language support for Visual Studio Code and Cursor, plus installing, connecting to and working with MemQL clusters.",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "publisher": "znasllc",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -217,77 +217,77 @@
       {
         "view": "memqlDeployments",
         "contents": "Sign in to see this cluster's history.\n[Sign In](command:memql.deployments.signIn)",
-        "when": "memql.clusterSelected && memql.connectionState == signIn"
+        "when": "memql.clusterSelected && memql.connectionState == signIn && !memql.ownerSetupPending"
       },
       {
         "view": "memqlDeployments",
         "contents": "No history yet.",
-        "when": "memql.clusterSelected && memql.connectionState == connected"
+        "when": "memql.clusterSelected && memql.connectionState == connected && !memql.ownerSetupPending"
       },
       {
         "view": "memqlDeployments",
         "contents": "Connecting.",
-        "when": "memql.clusterSelected && memql.connectionState == connecting"
+        "when": "memql.clusterSelected && memql.connectionState == connecting && !memql.ownerSetupPending"
       },
       {
         "view": "memqlDeployments",
         "contents": "Can't reach this cluster.\n[Show Details](command:memql.deployments.openCluster)",
-        "when": "memql.clusterSelected && memql.connectionState == unreachable"
+        "when": "memql.clusterSelected && memql.connectionState == unreachable && !memql.ownerSetupPending"
       },
       {
         "view": "memqlDeployments",
         "contents": "This cluster has no address.\n[Edit Cluster](command:memql.clusters.edit)",
-        "when": "memql.clusterSelected && memql.connectionState == notConfigured"
+        "when": "memql.clusterSelected && memql.connectionState == notConfigured && !memql.ownerSetupPending"
       },
       {
         "view": "memqlConstructs",
         "contents": "No cluster selected.",
-        "when": "!memql.clusterSelected"
+        "when": "!memql.clusterSelected && !memql.ownerSetupPending"
       },
       {
         "view": "memqlConstructs",
         "contents": "Sign in to see constructs.\n[Sign In](command:memql.clusters.signIn)",
-        "when": "memql.connectionState == signIn"
+        "when": "memql.connectionState == signIn && !memql.ownerSetupPending"
       },
       {
         "view": "memqlConstructs",
         "contents": "The cluster isn't answering.\n[Retry](command:memql.constructs.refresh)",
-        "when": "memql.connectionState == unreachable"
+        "when": "memql.connectionState == unreachable && !memql.ownerSetupPending"
       },
       {
         "view": "memqlConstructs",
         "contents": "This cluster has no address.\n[Edit Cluster](command:memql.clusters.edit)",
-        "when": "memql.connectionState == notConfigured"
+        "when": "memql.connectionState == notConfigured && !memql.ownerSetupPending"
       },
       {
         "view": "memqlData",
         "contents": "No cluster selected.",
-        "when": "!memql.clusterSelected"
+        "when": "!memql.clusterSelected && !memql.ownerSetupPending"
       },
       {
         "view": "memqlData",
         "contents": "Sign in to see data.\n[Sign In](command:memql.clusters.signIn)",
-        "when": "memql.connectionState == signIn"
+        "when": "memql.connectionState == signIn && !memql.ownerSetupPending"
       },
       {
         "view": "memqlData",
         "contents": "The cluster isn't answering.\n[Retry](command:memql.data.refresh)",
-        "when": "memql.connectionState == unreachable"
+        "when": "memql.connectionState == unreachable && !memql.ownerSetupPending"
       },
       {
         "view": "memqlData",
         "contents": "This cluster has no address.\n[Edit Cluster](command:memql.clusters.edit)",
-        "when": "memql.connectionState == notConfigured"
+        "when": "memql.connectionState == notConfigured && !memql.ownerSetupPending"
       },
       {
         "view": "memqlRuns",
         "contents": "Runs you save from a Run form appear here.\n[Edit Saved Runs](command:memql.runs.open)",
-        "when": "memql.clusterSelected && (workbenchState != empty)"
+        "when": "memql.clusterSelected && (workbenchState != empty) && !memql.ownerSetupPending"
       },
       {
         "view": "memqlRuns",
         "contents": "Open a folder to save runs.\n[Open Folder](command:vscode.openFolder)",
-        "when": "memql.clusterSelected && (workbenchState == empty)"
+        "when": "memql.clusterSelected && (workbenchState == empty) && !memql.ownerSetupPending"
       },
       {
         "view": "memqlClusters",
@@ -297,12 +297,32 @@
       {
         "view": "memqlRuns",
         "contents": "No saved runs.",
-        "when": "!memql.clusterSelected"
+        "when": "!memql.clusterSelected && !memql.ownerSetupPending"
       },
       {
         "view": "memqlDeployments",
         "contents": "No cluster selected.",
-        "when": "!memql.clusterSelected"
+        "when": "!memql.clusterSelected && !memql.ownerSetupPending"
+      },
+      {
+        "view": "memqlDeployments",
+        "contents": "Register the owner passkey in Clusters to finish setup.",
+        "when": "memql.ownerSetupPending"
+      },
+      {
+        "view": "memqlConstructs",
+        "contents": "Register the owner passkey in Clusters to finish setup.",
+        "when": "memql.ownerSetupPending"
+      },
+      {
+        "view": "memqlData",
+        "contents": "Register the owner passkey in Clusters to finish setup.",
+        "when": "memql.ownerSetupPending"
+      },
+      {
+        "view": "memqlRuns",
+        "contents": "Register the owner passkey in Clusters to finish setup.",
+        "when": "memql.ownerSetupPending"
       }
     ],
     "commands": [
@@ -431,7 +451,7 @@
       },
       {
         "command": "memql.clusters.takeOwnership",
-        "title": "Create Owner Passkey",
+        "title": "Register Owner Passkey",
         "category": "MemQL",
         "icon": "$(key)"
       },
@@ -830,6 +850,11 @@
       ],
       "view/item/context": [
         {
+          "command": "memql.clusters.takeOwnership",
+          "when": "!isWeb && view == memqlClusters && viewItem =~ /^memqlCluster;ownerSetup(;|$)/",
+          "group": "inline@1"
+        },
+        {
           "command": "memql.clusters.signIn",
           "when": "view == memqlClusters && viewItem =~ /^memqlCluster;signIn(;|$)/",
           "group": "inline@1"
@@ -923,6 +948,7 @@
   "dependencies": {
     "@znasllc-io/memql-sdk-core": "file:../../sdk/ts",
     "@znasllc-io/memql-view-kit": "file:../../sdk/ts-viewkit",
+    "undici": "^6.29.0",
     "vscode-languageclient": "^10.1.0",
     "ws": "^8.21.3",
     "yaml": "^2.9.0"

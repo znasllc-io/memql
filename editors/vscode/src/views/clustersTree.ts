@@ -52,7 +52,7 @@ export interface ClustersTreeDeps {
   /** The facts for one cluster; never rejects. */
   factsFor?: (cluster: ClusterConfig) => Promise<ClusterFacts>;
   /** Told after every read of the file, with what it listed (the welcome's presence key). */
-  onRead?: (clusters: readonly ClusterConfig[]) => void;
+  onRead?: (clusters: readonly ClusterConfig[], selectedCluster: string) => void;
 }
 
 export class ClustersTreeProvider implements vscode.TreeDataProvider<ClusterNode> {
@@ -98,7 +98,7 @@ export class ClustersTreeProvider implements vscode.TreeDataProvider<ClusterNode
       // show it) or leaving the panel looking merely empty.
       return [{ cluster: { name: "", endpoint: "" }, selected: false, error: result.error }];
     }
-    this.deps.onRead?.(result.file.clusters);
+    this.deps.onRead?.(result.file.clusters, result.file.selectedCluster);
     // Fire-and-forget: THIS is what triggers the first release fetch and the
     // first version refresh, so activation stays offline and the work is
     // caused by somebody actually looking at the tree. Not awaited, because
@@ -216,6 +216,7 @@ function themeIconFor(state: ClusterState, inUse: boolean): vscode.ThemeIcon {
       return new vscode.ThemeIcon("loading~spin");
     case "unreachable":
       return new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
+    case "ownerSetup":
     case "signIn":
       return new vscode.ThemeIcon("key", new vscode.ThemeColor("charts.yellow"));
     case "notConfigured":

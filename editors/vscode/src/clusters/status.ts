@@ -39,7 +39,7 @@ import type { ReleaseListing } from "../version/releaseCache.js";
 import type { ClusterFacts } from "./facts.js";
 import { displayLabel, type ClusterConfig } from "./model.js";
 
-export type ClusterState = "connected" | "connecting" | "signIn" | "unreachable" | "notConfigured" | "idle";
+export type ClusterState = "connected" | "connecting" | "ownerSetup" | "signIn" | "unreachable" | "notConfigured" | "idle";
 
 /** Why a cluster is in the `signIn` state, which decides the one sentence said about it. */
 export type SignInReason = "missing" | "expired" | "refused" | "wrongToken";
@@ -75,6 +75,7 @@ const SIGN_IN_REASONS: Readonly<Partial<Record<ConnectionErrorReason, SignInReas
 /** The state of one cluster, from the live connection when it names this cluster, else from what is stored. */
 export function clusterStatus(input: StatusInput): ClusterStatus {
   const { cluster, connection } = input;
+  if (input.facts.ownerSetup) return { state: "ownerSetup" };
   const active = connection.status !== "disconnected" && connection.clusterName === cluster.name;
   if (active) {
     switch (connection.status) {
@@ -111,6 +112,8 @@ export function stateWord(status: ClusterStatus, cluster: ClusterConfig, inUse: 
       return "Connected";
     case "connecting":
       return "Connecting";
+    case "ownerSetup":
+      return "Register owner passkey";
     case "signIn":
       return "Sign in";
     case "unreachable":
@@ -130,6 +133,8 @@ export function stateSentence(status: ClusterStatus, cluster: ClusterConfig): st
       return "Connected.";
     case "connecting":
       return "Connecting.";
+    case "ownerSetup":
+      return "Register the owner passkey to finish setup.";
     case "signIn":
       switch (status.signInReason) {
         case "expired":
@@ -226,7 +231,7 @@ export function clusterContextValue(
   if (cluster.local === true) parts.push("local");
   if (facts.signedIn) parts.push("signedIn");
   if (facts.ownerSetup && status.state !== "connected") parts.push("ownerSetup");
-  if (facts.consoleUrl !== "") parts.push("os");
+  if (facts.consoleUrl !== "" && !facts.ownerSetup) parts.push("os");
   if (inUse) parts.push("inUse");
   return parts.join(";");
 }

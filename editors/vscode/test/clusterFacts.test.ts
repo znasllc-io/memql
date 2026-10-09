@@ -136,3 +136,23 @@ test("a completed sign-in is remembered by slot and domain", () => {
   assert.equal(signedInKey(cluster()), "local|memql.localhost");
   assert.equal(signedInKey(cluster({ domain: " MemQL.localhost " })), "local|memql.localhost");
 });
+
+test("server ownership overrides old install/sign-in history after a reinstall", async () => {
+  for (const local of [true, false]) {
+    const deps = { readRefreshToken: async () => "old-session", readReceipt: async () => receipt("ada@example.com"),
+      signedInBefore: () => true, now: () => NOW_MS, ownerState: async () => "unclaimed" as const };
+    const facts = await gatherClusterFacts(cluster({ local }), deps);
+    assert.equal(facts.ownerSetup, true);
+    assert.equal(facts.session, false);
+    const completed = await gatherClusterFacts(cluster({ local }), { ...deps, ownerState: async () => "claimed" as const });
+    assert.equal(completed.ownerSetup, false);
+  }
+});
+
+test("a completed owner setup retires the receipt offer even before editor sign-in", async () => {
+  const facts = await gatherClusterFacts(cluster({ local: true }), {
+    readRefreshToken: async () => undefined, readReceipt: async () => receipt("ada@example.com"),
+    signedInBefore: () => false, now: () => NOW_MS, ownerState: async () => "claimed",
+  });
+  assert.equal(facts.ownerSetup, false);
+});

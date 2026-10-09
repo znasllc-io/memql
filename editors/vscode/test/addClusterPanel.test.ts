@@ -273,6 +273,7 @@ interface OpenOptions {
   sudoIsFree?: () => Promise<boolean>;
   listLocalClusters?: () => Promise<string[]>;
   isSignedIn?: (name: string) => boolean;
+  ownerSetupPending?: AddClusterDeps["ownerSetupPending"];
   removeRegistryEntry?: (name: string) => Promise<unknown>;
   probeCluster?: AddClusterDeps["probeCluster"];
   runs?: LocalRuns;
@@ -303,6 +304,7 @@ async function open(options: OpenOptions = {}): Promise<Harness> {
     ...(options.confirmDestructive ? { confirmDestructive: options.confirmDestructive } : {}),
     ...(options.listLocalClusters ? { listLocalClusters: options.listLocalClusters } : {}),
     ...(options.isSignedIn ? { isSignedIn: options.isSignedIn } : {}),
+    ...(options.ownerSetupPending ? { ownerSetupPending: options.ownerSetupPending } : {}),
     // Never the real https probe: a unit lane does not dial out.
     probeCluster: options.probeCluster ?? (async () => ({ ok: false, reason: "no network in this lane" })),
     // A slot of its own per case, unless the case shares one on purpose: a run
@@ -1268,21 +1270,32 @@ async function runToDoneWithOwner(): Promise<Harness> {
   return h;
 }
 
-test("an owner account to enrol against adds Set up a passkey beside Sign in", async () => {
-  // ONE NEXT ACT: Sign in. The sign-in command itself routes a fresh owner to
-  // passkey enrolment (memql#3906), so the passkey set-up is a quiet act
-  // beside it rather than a second primary.
+test("an owner awaiting registration has one primary passkey action", async () => {
   const h = await runToDoneWithOwner();
   try {
     const html = h.html();
-    assert.deepEqual(barActs(html), ["back", "enrolPasskey", "signIn"]);
-    assert.match(html, /class="mq-textbtn" data-act="enrolPasskey"/);
-    assert.match(html, /class="mq-btn" data-tone="primary" data-act="signIn"/);
+    assert.deepEqual(barActs(html), ["back", "enrolPasskey"]);
+    assert.match(html, /class="mq-btn" data-tone="primary" data-act="enrolPasskey"/);
+    assert.doesNotMatch(html, /data-act="(?:signIn|openOs)"/);
     h.post({ type: "enrolPasskey" });
     await until(() => recorded.executed.includes("memql.clusters.takeOwnership"), "the enrolment");
   } finally {
     h.close();
   }
+});
+
+test("completed installation opens owner setup even with a session from a previous installation", async () => {
+  let pending = true;
+  const h = await open({ isSignedIn: () => true, ownerSetupPending: async () => pending });
+  try {
+    beginInstall(h);
+    await until(() => recorded.executed.includes("memql.clusters.takeOwnership"), "automatic owner registration");
+    assert.deepEqual(barActs(h.html()), ["back", "enrolPasskey"]);
+    pending = false;
+    h.post({ type: "enrolPasskey" });
+    await until(() => barActs(h.html()).includes("openOs"), "completion refreshed after registration");
+    assert.deepEqual(barActs(h.html()), ["back", "openOs"]);
+  } finally { h.close(); }
 });
 
 test("no enrolment credential reaches the webview", async () => {

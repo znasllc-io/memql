@@ -47,6 +47,7 @@ export async function run(): Promise<void> {
     Object.assign(result, { preExisting: false, ownerAccountExists: true });
     if (capability === "install.cloneStack") Object.assign(result, { dest: root, ref: request.params.branch ?? request.params.tag, refKind: request.params.branch ? "branch" : "tag", commit: "a".repeat(40) });
     if (capability === "install.binary") Object.assign(result, { path: path.join(stateDir, request.params.tool), installed: true });
+    if (capability === "install.enrolmentLink") Object.assign(result, { ownerClaimed: true, enrolmentState: "minted" });
     if (capability === "k3d.up") Object.assign(result, { cluster: "memql", argocdReady: !failed, workloadsReady: !failed });
     if (capability === "install.removeArtifact") Object.assign(result, { kind: request.params.kind, removed: true });
     const message = "ComparisonError: git fetch failed: RPC failed; curl 56 Recv failure: Connection reset by peer; fatal: early EOF";

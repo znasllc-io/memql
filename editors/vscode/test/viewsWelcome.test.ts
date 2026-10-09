@@ -50,9 +50,11 @@ interface Manifest {
 const manifest = JSON.parse(fs.readFileSync(MANIFEST, "utf8")) as Manifest;
 const welcomes = manifest.contributes.viewsWelcome;
 
+// Normal-state assertions assume owner setup has completed. Pending setup is
+// checked separately against the unmodified manifest below.
 // The workbench renders welcomes only when the tree is empty.
 function welcomeFor(view: string): WelcomeEntry[] {
-  return welcomes.filter((entry) => entry.view === view && !(entry.when ?? "").startsWith("isWeb")).map(entry => ({ ...entry, when: entry.when?.replace(/^!isWeb && \((.*)\)$/, "$1") }));
+  return welcomes.filter((entry) => entry.view === view && !(entry.when ?? "").startsWith("isWeb")).map(entry => ({ ...entry, when: entry.when?.replace(/ && !memql\.ownerSetupPending$/, "").replace(/^!isWeb && \((.*)\)$/, "$1") }));
 }
 
 /** The command ids a welcome's markdown links reach. */
@@ -166,3 +168,16 @@ test("browser welcome connects without offering a native installation", () => {
   assert.deepEqual(linkedCommands(browser[0].contents), ["memql.clusters.add"]);
   for (const entry of welcomes.filter(entry => entry.contents.includes("Install Local Cluster"))) assert.match(entry.when ?? "", /!isWeb/);
 });
+
+for (const view of ["memqlDeployments", "memqlConstructs", "memqlData", "memqlRuns"]) {
+  test(`${view} offers no competing action while the owner passkey is pending`, () => {
+    const entries = welcomes.filter(e => e.view === view);
+    const pending = entries.filter(e => e.when === "memql.ownerSetupPending");
+    assert.equal(pending.length, 1);
+    assert.deepEqual(linkedCommands(pending[0].contents), []);
+    assert.match(pending[0].contents, /owner passkey.*Clusters/);
+    for (const normal of entries.filter(e => !pending.includes(e))) {
+      assert.match(normal.when ?? "", /!memql\.ownerSetupPending/);
+    }
+  });
+}

@@ -117,6 +117,8 @@ export interface AuthFlowDeps {
   resolveExternalUri: ExternalUriResolver;
   /** vscode.env.openExternal. */
   openExternal: ExternalOpener;
+  /** Finish first ownership before any session is issued. */
+  ownerSetup?: boolean;
   /** Defaults to the real network. */
   fetch?: FetchLike;
   /** Defaults to startLoopbackListener. */
@@ -197,7 +199,9 @@ export async function runAuthorizationFlow(
       "browserUnavailable",
       `A browser sign-in cannot complete from a ${remote} window: the sign-in callback would be ` +
         `sent to this editor's own machine, not to the remote host this extension is running on. ` +
-        `Signing in with a device code instead -- it needs no callback.`,
+        (deps.ownerSetup
+          ? `Open this cluster from a local VS Code window to register the owner passkey.`
+          : `Signing in with a device code instead -- it needs no callback.`),
     );
   }
 
@@ -295,7 +299,9 @@ export async function runAuthorizationFlow(
       );
     }
 
-    await openInBrowser(authorizeUrl, deps);
+    const browserUrl = deps.ownerSetup ? new URL(`${resolvedIssuer}/setup`) : new URL(authorizeUrl);
+    if (deps.ownerSetup) browserUrl.search = new URL(authorizeUrl).search;
+    await openInBrowser(browserUrl.toString(), deps);
     deps.onPhase?.("waiting");
 
     const callback = await listener.waitForCallback();
@@ -414,6 +420,8 @@ export async function preValidateAuthorize(
     const raw = await response.text().catch(() => "");
     return { verdict: "refused", reason: refusalReason(raw) };
   }
+  // Release the body so the desktop TLS dispatcher can reuse its connection.
+  await response.text().catch(() => "");
   return response.status === 200 ? { verdict: "accepted" } : { verdict: "unknown" };
 }
 

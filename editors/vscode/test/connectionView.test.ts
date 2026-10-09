@@ -119,12 +119,10 @@ test("an ended session says so, with the same two acts", () => {
   assert.deepEqual(bar(page.actions), ["signInWithCode:Sign in with a code", "signIn:Sign in"]);
 });
 
-test("a first run on this machine also offers the owner passkey", () => {
+test("pending ownership gates every other connection action", () => {
   const page = clusterPage(input({ cluster: cluster({ local: true }), facts: { ...NOTHING, ownerSetup: true } }));
   assert.deepEqual(bar(page.actions), [
-    "takeOwnership:Create owner passkey",
-    "signInWithCode:Sign in with a code",
-    "signIn:Sign in",
+    "takeOwnership:Register owner passkey",
   ]);
 });
 

@@ -866,7 +866,7 @@ export function doneProgressUpdate(input: DoneInput): ProgressUpdate {
 }
 
 function doneStatus(input: DoneInput): string {
-  return input.notListed === true ? "Not added to your clusters" : input.signedIn ? "Signed in" : "Ready to sign in";
+  return input.notListed === true ? "Not added to your clusters" : input.signedIn ? "Signed in" : input.canEnrol || input.claim ? "Owner passkey required" : "Ready to sign in";
 }
 
 export function doneScreen(input: DoneInput): RegionParts {
@@ -887,7 +887,7 @@ export function doneScreen(input: DoneInput): RegionParts {
       state: "done",
       ...(input.now === undefined ? {} : { now: input.now }),
     }) +
-    `<div class="ac-column">${facts(rows)}${recoveryKeyBlock(input.recoveryKey)}${!input.signedIn && input.notListed !== true && input.kind !== "added" ? "<p>Sign in to finish setup. If you have not registered a passkey, use the owner email entered during installation.</p>" : ""}</div>` +
+    `<div class="ac-column">${facts(rows)}${recoveryKeyBlock(input.recoveryKey)}${!input.signedIn && (input.canEnrol || input.claim) && input.notListed !== true ? "<p>Register your owner passkey to finish setup. Use the email entered during installation.</p>" : ""}</div>` +
     (input.startedAt === undefined ? "" : logsDisclosure(input.logsOpen === true, input.logLines ?? []));
 
   // BACK, as a quiet text act: to the landing, which looks at this computer
@@ -901,13 +901,11 @@ export function doneScreen(input: DoneInput): RegionParts {
     acts = [back];
     // One of the two at most: a cluster with an owner to enrol has nobody
     // left to claim it.
-    if (input.canEnrol && !input.signedIn) acts.push({ act: "enrolPasskey", label: "Set up a passkey" });
-    else if (input.claim && !input.signedIn) acts.push({ act: "claimCluster", label: "Claim this cluster" });
-    acts.push(
-      input.signedIn
-        ? { act: "openOs", label: "Open MemQL OS", tone: "primary" }
-        : { act: "signIn", label: "Sign in", tone: "primary" },
-    );
+    acts.push(input.signedIn
+      ? { act: "openOs", label: "Open MemQL OS", tone: "primary" }
+      : input.canEnrol || input.claim
+        ? { act: "enrolPasskey", label: "Register owner passkey", tone: "primary" }
+        : { act: "signIn", label: "Sign in", tone: "primary" });
   }
   const state = input.kind === "added" ? "In your clusters" : input.kind === "repaired" ? "Repaired" : "Installed";
   return {
