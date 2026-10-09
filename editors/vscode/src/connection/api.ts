@@ -27,6 +27,9 @@ export interface EditorSession {
 }
 export interface EditorConnectionDeps {
   session(): EditorSession | undefined;
+  // Stable only across a verified retry of the same authenticated target.
+  // Hosts without a scope invalidate leases on every lifecycle transition.
+  scope?(): object;
   connect(domain: string): Promise<void>;
   fetch?: typeof fetch;
 }
@@ -36,18 +39,21 @@ export class EditorConnection implements EditorConnectionAPI {
   readonly version = 1 as const;
   private generation = 0;
   private previous: EditorSession["query"] | undefined;
+  private previousScope: object | undefined;
   private listeners = new Set<() => void>();
   constructor(private readonly deps: EditorConnectionDeps) {}
 
   // Called for every lifecycle transition, including disconnect and reconnect.
   changed(): void {
-    this.generation++;
+    const scope = this.deps.scope?.();
+    if (!scope || scope !== this.previousScope) this.generation++;
+    this.previousScope = scope;
     this.previous = this.deps.session()?.query;
     for (const listener of this.listeners) listener();
   }
   current(): ConnectionLease | undefined {
     const session = this.deps.session();
-    if (session?.query !== this.previous) this.changed();
+    if (session?.query !== this.previous || this.deps.scope?.() !== this.previousScope) this.changed();
     if (!session?.cluster.domain) return undefined;
     return Object.freeze({ domain: session.cluster.domain.toLowerCase(), name: session.cluster.name, generation: this.generation });
   }

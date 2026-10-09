@@ -498,6 +498,7 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
   const registryHelper = resolveServerPath(context, false);
   if (registryHelper) configureRegistryWriter(nativeRegistryWriter(registryHelper));
   editorConnection = new EditorConnection({
+    scope: () => connections?.editorSessionScope ?? context,
     session: () => {
       if (!workspace.isTrusted || connections?.state.status !== 'connected' || !connections.query || !connections.bearer) return undefined;
       const cluster = clusterCache.get(connections.state.clusterName);
