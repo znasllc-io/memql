@@ -268,11 +268,10 @@ export async function runAuthorizationFlow(
   const state = generateState();
 
   const listener = await startListener({ timeoutMs: deps.timeoutMs, signal: deps.signal });
-  // The browser is answered only once the exchange has settled (loopback.ts):
-  // "You're signed in" on success, and "Sign-in didn't finish" otherwise --
-  // which the `finally` below covers by closing, since close() answers a held
-  // response with the failure page.
+  // After a callback, finish answers the browser and owns bounded cleanup.
+  // Before one arrives, close immediately releases an unused listener.
   let exchanged = false;
+  let receivedCallback = false;
   try {
     const authorizeUrl = buildAuthorizeUrl({
       issuer: resolvedIssuer,
@@ -305,6 +304,7 @@ export async function runAuthorizationFlow(
     deps.onPhase?.("waiting");
 
     const callback = await listener.waitForCallback();
+    receivedCallback = true;
     deps.onPhase?.("finishing");
 
     if (callback.error !== undefined && callback.error !== "") {
@@ -351,11 +351,13 @@ export async function runAuthorizationFlow(
       clientId,
     };
   } finally {
-    // Tell the browser how it went, then release the port. Idempotent: a throw
-    // anywhere above must not leave a port bound or a browser tab loading, and
-    // close() answers any response still held with the failure page.
-    listener.finish?.(exchanged ? "success" : "failure");
-    listener.close();
+    // Keep the result page reachable for retries; closing immediately after
+    // finish left a successful sign-in followed by a dead browser page.
+    if (receivedCallback && listener.finish !== undefined) {
+      listener.finish(exchanged ? "success" : "failure");
+    } else {
+      listener.close();
+    }
   }
 }
 

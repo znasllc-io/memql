@@ -28,9 +28,9 @@ import { CALLBACK_PATH, LOOPBACK_HOST } from "./loopbackAddress.js";
 // tab pointed at the port -- each is a request this server sees. Resolving on
 // "the first request" would let any of them end the flow with no code at all,
 // so only the callback path resolves; everything else gets a 404 and the
-// listener keeps waiting. The FIRST request on the callback path resolves the
-// flow and the server stops accepting -- there is no second chance to redeem,
-// which is what "one-shot" buys.
+// listener keeps waiting. Only a GET navigation delivers the callback. Probes
+// and speculative prefetches cannot redeem it. A retry of the same callback
+// receives the same outcome without delivering a second code to the flow.
 //
 // -----------------------------------------------------------------------------
 // THE BROWSER IS ANSWERED AFTER THE EXCHANGE, NOT BEFORE
@@ -83,6 +83,9 @@ export const DEFAULT_CALLBACK_TIMEOUT_MS = 600_000;
  */
 export const HOLD_LIMIT_MS = 60_000;
 
+/** Keep the result reachable for browser retries after the exchange finishes. */
+export const COMPLETION_GRACE_MS = 60_000;
+
 /** The raw query parameters the callback carried. Interpreting them is flow.ts's job. */
 export interface CallbackParams {
   code?: string;
@@ -117,7 +120,8 @@ export interface LoopbackListener {
    * Answers the browser that delivered the callback, once the exchange has
    * settled. Idempotent; a no-op before a callback has arrived.
    *
-   * Optional so a test double need not implement it; the real listener does.
+   * Owns cleanup after a bounded result-page grace period. Optional so a test
+   * double need not implement it; the real listener does.
    */
   finish?(outcome: CallbackOutcome): void;
   /**
@@ -132,6 +136,8 @@ export interface LoopbackOptions {
   path?: string;
   /** Overrides the deadline. Defaults to DEFAULT_CALLBACK_TIMEOUT_MS. */
   timeoutMs?: number;
+  /** Overrides the result-page grace period. Defaults to COMPLETION_GRACE_MS. */
+  completionGraceMs?: number;
   /** Aborts the wait -- rejects as `cancelled` and closes the server. */
   signal?: AbortSignal;
 }
@@ -149,15 +155,19 @@ export async function startLoopbackListener(
 ): Promise<LoopbackListener> {
   const path = options.path ?? CALLBACK_PATH;
   const timeoutMs = options.timeoutMs ?? DEFAULT_CALLBACK_TIMEOUT_MS;
+  const completionGraceMs = options.completionGraceMs ?? COMPLETION_GRACE_MS;
   const signal = options.signal;
 
   let settled = false;
   let timer: NodeJS.Timeout | undefined;
   let abortListener: (() => void) | undefined;
   // The callback's response, held until `finish` says how the exchange went.
-  let held: ServerResponse | undefined;
+  const held = new Set<ServerResponse>();
   let holdTimer: NodeJS.Timeout | undefined;
-  let answered = false;
+  let completionTimer: NodeJS.Timeout | undefined;
+  let outcome: CallbackOutcome | undefined;
+  let acceptedCallback: string | undefined;
+  let closed = false;
 
   let resolveCallback!: (params: CallbackParams) => void;
   let rejectCallback!: (err: unknown) => void;
@@ -173,21 +183,7 @@ export async function startLoopbackListener(
 
   const server: Server = createServer();
 
-  // Drops every socket still open. Deferred by one tick so it can never race a
-  // response still flushing, and an optional call because closeAllConnections
-  // only exists from Node 18.2; the extension targets node20, but the cast
-  // says so rather than assuming it. It sweeps a connection that opened and
-  // never sent a complete request, which would otherwise hold the server
-  // handle (and the event loop) open.
-  const dropSockets = (): void => {
-    setImmediate(() => {
-      (server as { closeAllConnections?: () => void }).closeAllConnections?.();
-    });
-  };
-
-  // Stops listening and clears the wait's own bookkeeping. The held response,
-  // if any, is left for `answer` -- dropping its socket here would cut off the
-  // page the person is waiting to see.
+  // End the callback deadline without closing the browser's return address.
   const stopWaiting = (): void => {
     if (timer !== undefined) {
       clearTimeout(timer);
@@ -197,33 +193,45 @@ export async function startLoopbackListener(
       signal.removeEventListener("abort", abortListener);
       abortListener = undefined;
     }
-    // Stops accepting immediately, so the port is unusable from here on.
-    server.close();
   };
 
-  // Writes the verdict page to the held response and then releases the sockets.
-  const answer = (outcome: CallbackOutcome): void => {
-    if (answered) return;
-    answered = true;
+  const stopServer = (): void => {
+    if (closed) return;
+    closed = true;
+    stopWaiting();
+    if (completionTimer !== undefined) clearTimeout(completionTimer);
+    // Let responses flush naturally. Only abandoned sockets need a forced
+    // close; destroying every connection on the next tick can truncate a page.
+    const drainTimer = setTimeout(() => server.closeAllConnections(), 1000);
+    drainTimer.unref();
+    server.close(() => clearTimeout(drainTimer));
+  };
+
+  const respond = (res: ServerResponse, result: CallbackOutcome): void => {
+    if (res.destroyed) return;
+    res.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "referrer-policy": "no-referrer",
+      connection: "close",
+    });
+    res.end(loopbackPage(result));
+  };
+
+  // The exchange is one-shot; serving its result is not. Keep the listener
+  // alive briefly so a browser retry does not land on a closed port.
+  const answer = (result: CallbackOutcome): void => {
+    if (outcome !== undefined) return;
+    outcome = result;
     if (holdTimer !== undefined) {
       clearTimeout(holdTimer);
       holdTimer = undefined;
     }
-    const res = held;
-    held = undefined;
-    if (res === undefined) {
-      dropSockets();
-      return;
-    }
-    res.writeHead(200, {
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": "no-store",
-      // No keep-alive: this server is about to stop existing, and a browser
-      // holding the socket open would keep the handle (and the event loop)
-      // alive well past the flow it belongs to.
-      connection: "close",
-    });
-    res.end(loopbackPage(outcome), () => dropSockets());
+    for (const res of held) respond(res, result);
+    held.clear();
+    completionTimer = setTimeout(stopServer, completionGraceMs);
+    completionTimer.unref();
+    server.unref();
   };
 
   const succeed = (params: CallbackParams): void => {
@@ -237,12 +245,14 @@ export async function startLoopbackListener(
     if (settled) {
       // Already delivered: the only thing left to close is a held response.
       answer("failure");
+      stopServer();
       return;
     }
     settled = true;
     stopWaiting();
     rejectCallback(err);
     answer("failure");
+    stopServer();
   };
 
   timer = setTimeout(() => {
@@ -262,10 +272,21 @@ export async function startLoopbackListener(
       respondNotFound(res);
       return;
     }
-    if (url.pathname !== path || settled) {
+    if (url.pathname !== path || closed) {
       // A favicon fetch, a prefetch, a stray tab. Answered and IGNORED: the
       // flow is still waiting for the real callback (or already has it).
       respondNotFound(res);
+      return;
+    }
+    if (req.method !== "GET") {
+      res.writeHead(405, { allow: "GET", "cache-control": "no-store", connection: "close" });
+      res.end();
+      return;
+    }
+    const purpose = `${req.headers.purpose ?? ""} ${req.headers["sec-purpose"] ?? ""}`;
+    if (/\bprefetch\b/i.test(purpose)) {
+      res.writeHead(204, { "cache-control": "no-store", connection: "close" });
+      res.end();
       return;
     }
     const q = url.searchParams;
@@ -275,9 +296,20 @@ export async function startLoopbackListener(
       error: q.get("error") ?? undefined,
       errorDescription: q.get("error_description") ?? undefined,
     };
-    // HELD, not answered: the page says how the exchange went, so it is
-    // written by `finish` once the flow knows (see the header).
-    held = res;
+    const key = JSON.stringify(params);
+    if (settled && key !== acceptedCallback) {
+      respondNotFound(res);
+      return;
+    }
+    if (outcome !== undefined) {
+      respond(res, outcome);
+      return;
+    }
+    // Hold both the original navigation and any retry until the flow knows.
+    held.add(res);
+    res.once("close", () => held.delete(res));
+    if (settled) return;
+    acceptedCallback = key;
     holdTimer = setTimeout(() => answer("failure"), HOLD_LIMIT_MS);
     succeed(params);
   });

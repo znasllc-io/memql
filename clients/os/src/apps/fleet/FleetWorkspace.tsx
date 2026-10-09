@@ -19,6 +19,7 @@ import { RefreshButton, useFleetScroll } from "./FleetControls";
 import { AddMachinePage } from "./addMachine/AddMachinePage";
 import type { AddMachineFlow } from "./addMachine/useAddMachineFlow";
 import { MachineDetail, MachineAppsHelp } from "./machines/MachineDetail";
+import { AppPermissionHelp } from "./machines/AppPermissionHelp";
 import { machineModelsFrom, type MachineModel } from "./machines/models";
 import { canLend, sharingLinkWords } from "./machines/sharing";
 import { MACHINE_SHARING_SECTION, MACHINE_SHARING_TARGET } from "./machines/sharingAttention";
@@ -257,7 +258,7 @@ export function MachineEquipment({ machine, now, onInspect }: { machine: Machine
     </div>
     {selectedModel || selectedApp ? <section className="fleet-equipment-reading" aria-label="Selected equipment" aria-live="polite" data-os-page-context={JSON.stringify({ selectedModel: selectedModel?.modelId, selectedApp: selectedApp?.id })}>
       {selectedModel ? <div><strong>{selectedModel.modelId}</strong><p>{modelSummary(selectedModel)}{!online ? " · Machine offline" : ""}</p></div>
-        : selectedApp ? <div><strong>{selectedApp.label}</strong><p>{selectedApp.why || (selectedApp.runnable ? "Available to run on this machine." : "Not available to run.")}{!online ? " Machine offline." : ""}</p></div> : null}
+        : selectedApp ? <div><strong>{selectedApp.label}</strong><p>{selectedApp.why || (selectedApp.runnable ? "Available to run on this machine." : "Not available to run.")}{!online ? " Machine offline." : ""}</p><AppPermissionHelp app={selectedApp} machine={machine} /></div> : null}
     </section> : null}
     <div className="fleet-machine-tools"><div><Wrench size={16} aria-hidden /><strong>Tools</strong><span>{machine.capabilities.filter(c => c !== "MODEL").map(c => c === "HEADLESS" ? "Terminal" : c === "COMPUTERUSE" ? "Computer use" : c).join(", ") || "None reported"}</span><InfoDetail title="Machine capabilities"><p>{desktop.answer}</p><p>Capabilities are reported by this machine. Connecting it does not grant missing operating-system permissions.</p></InfoDetail></div><button type="button" className="fleet-reading-link os-attention-anchor" onClick={() => onInspect("sharing")}>{sharingLinkWords(machine)}<ChevronRight size={14} aria-hidden />{lendable ? <AttentionMarker appId="fleet" sectionId={MACHINE_SHARING_SECTION} target={MACHINE_SHARING_TARGET} /> : null}</button></div>
   </ActivityTarget>;
