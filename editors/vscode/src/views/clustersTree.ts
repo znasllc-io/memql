@@ -216,6 +216,7 @@ function themeIconFor(state: ClusterState, inUse: boolean): vscode.ThemeIcon {
       return new vscode.ThemeIcon("loading~spin");
     case "unreachable":
       return new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
+    case "ownerSetup":
     case "signIn":
       return new vscode.ThemeIcon("key", new vscode.ThemeColor("charts.yellow"));
     case "notConfigured":

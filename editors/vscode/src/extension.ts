@@ -1,3 +1,6 @@
+import { DesktopTrust } from "./connection/desktopTrust.js";
+import { desktopDialWithTrust } from "./connection/manager.js";
+import { readOwnerSetupState } from "./clusters/claimState.js";
 import { configureRegistryWriter, nativeRegistryWriter } from "./clusters/atomicWrite.js";
 import { EditorConnection, type EditorConnectionAPI } from "./connection/api.js";
 import * as fs from 'fs';
@@ -91,12 +94,6 @@ import { completeInstallHandoff } from './install/handoff.js';
 import { listK3dClusters } from "./clusters/k3dListing.js";
 import { ClusterPresence } from './clusters/presence.js';
 import {
-  claimProbeSignal,
-  probeClaimStateForCluster,
-  setupUrlForCluster,
-} from './clusters/claimState.js';
-import { resolveOwnershipRoute, type OwnershipRoute } from './clusters/ownershipRoute.js';
-import {
   SIGN_IN_DEVICE_CODE,
   SIGN_IN_EDIT_CLUSTER,
   SIGN_IN_RETRY,
@@ -177,8 +174,6 @@ import {
   type DiagnosticSink,
 } from './state/diagnostics.js';
 import { runCapabilityScript } from './install/runner.js';
-import { EnrolmentError, openEnrolmentLink } from './install/enrolment.js';
-import { OWNERSHIP_LINK_TTL, OwnershipError, mintOwnershipLink } from './clusters/takeOwnership.js';
 import { defaultRunsDir, reconcileOrphanedRuns } from './state/runLog.js';
 import {
   DEPLOYMENT_CONCEPT,
@@ -301,6 +296,7 @@ let client: LanguageClient | undefined;
 // either can arrive first. registerRunSurface installs this once trust is given.
 let attachLanguageRuntime: () => void = () => {};
 let connections: ConnectionManager | undefined;
+let desktopTrust = new DesktopTrust(async () => []);
 let editorConnection: EditorConnection | undefined;
 
 /**
@@ -418,43 +414,6 @@ export function wireLanguageSkewNotice(
     (notice, clusterName) => presentLanguageSkew(notice, clusterName, extensionId),
     undefined,
     clusterLabel
-  );
-}
-
-/** The action an enrolment failure toast carries when the link survives it. */
-const COPY_ENROLMENT_LINK = 'Copy link';
-
-/**
- * Puts a minted enrolment link on the clipboard (memql#4618).
- *
- * The shape `copyRecoveryKey` established for the one-time recovery key
- * (webview/addClusterPanel.ts): copy, then say plainly whether it worked. Loud
- * on failure, because an operator who believes they copied a credential they did
- * not is worse off than one who was told to get it another way.
- *
- * THE LINK IS NEVER LOGGED. install/enrolment.ts states the rule -- it goes from
- * the mint to the opener and is written nowhere -- and the clipboard is where
- * the operator just asked for it, which a diagnostic channel is not. So the
- * failure record below carries the clipboard error and not the link.
- */
-async function copyEnrolmentLink(url: string): Promise<void> {
-  try {
-    await env.clipboard.writeText(url);
-  } catch (err) {
-    noteDiagnostic(
-      connectionOutput,
-      'copying the enrolment link failed',
-      err instanceof Error ? err.message : String(err)
-    );
-    void offerDetails(
-      'error',
-      connectionOutput,
-      "MemQL: Couldn't copy the passkey setup link."
-    );
-    return;
-  }
-  void window.showInformationMessage(
-    `MemQL: Passkey setup link copied. It works once and expires in ${OWNERSHIP_LINK_TTL}.`
   );
 }
 
@@ -1524,10 +1483,17 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   //     access token also stays in SecretStorage. Cockpit authenticates independently.
   //     See src/connection/credentials.ts for the full split.
   //   - a write-back that clears legacy token keys after secret custody.
-  //   - the global fetch, for the /oauth/token exchange.
+  //   - cluster-scoped TLS trust for discovery, OAuth and WebSocket.
+  desktopTrust.dispose();
+  desktopTrust = new DesktopTrust(async () => {
+    const registry = await readClustersFileSafe(clustersPath);
+    return registry.ok ? registry.file.clusters : [];
+  });
+  context.subscriptions.push(desktopTrust);
   connections = new ConnectionManager(
-    undefined,
+    desktopDialWithTrust(url => desktopTrust.certificateFor(url)),
     new CredentialResolver({
+      fetch: desktopTrust.fetch,
       secrets: context.secrets,
       persist: async (clusterName, update) => {
         // undefined leaves the on-disk value alone; "" DELETES the key. So the
@@ -1672,6 +1638,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     gatherClusterFacts(cluster, {
       readRefreshToken: (name) => new ClusterCredentialStore(context.secrets).readRefreshToken(name),
       readReceipt: () => readReceipt(receiptPath),
+      ownerState: (cluster) => readOwnerSetupState(cluster, desktopTrust.fetch),
       signedInBefore: (c) => signedInClusters(context).includes(signedInKey(c)),
       now: () => Date.now(),
     });
@@ -2566,6 +2533,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     showDiagnostics: () => void;
     listLocalClusters: () => Promise<string[]>;
     isSignedIn: (name: string) => boolean;
+    ownerSetupPending: (cluster: ClusterConfig) => Promise<boolean>;
   } => ({
     clustersPath,
     refreshTree: () => clustersTree.refresh(),
@@ -2582,6 +2550,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // The done screen's one next act: Open MemQL OS once signed in, Sign in
     // before.
     isSignedIn: (name) => connectedTo(connections, name),
+    ownerSetupPending: async (cluster) => (await factsForCluster(cluster)).ownerSetup,
     // ONE receipt path for the install that writes it, the uninstall that
     // reverses it and the repair that reads a key path back out of it. The
     // page used to resolve it three times for itself.
@@ -2656,7 +2625,8 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if ((node as { quiet?: unknown } | undefined)?.quiet === true) {
         await setSelectedCluster(clustersPath, dialing.name);
         clustersTree.refresh();
-        await connections?.connect(dialing);
+        const facts = await factsForCluster(dialing);
+        if (facts.session && !facts.ownerSetup) await connections?.connect(dialing);
         clustersTree.refresh();
         return;
       }
@@ -2669,6 +2639,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
 
       const current = connections?.state ?? { status: 'disconnected' as const };
       const facts = await factsForCluster(dialing);
+      if (facts.ownerSetup) {
+        await setSelectedCluster(clustersPath, dialing.name);
+        clustersTree.refresh();
+        await openPage();
+        return;
+      }
       const click = rowClickAction(dialing, current, facts);
       if (click === 'openPage') {
         // Connected (or connecting) to it already; or nothing stored can
@@ -2764,170 +2740,23 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (target === undefined || target.cluster.name === '') {
         return;
       }
-      // ONE CLICK, ONE PROGRESS. The ownership question -- is there an owner
-      // to sign in to at all? -- is asked silently inside the sign-in's own
-      // progress notification (signInToCluster), and only an unclaimed
-      // cluster stops to say so. The dialogs that used to stand in front of
-      // the browser ("checking what X needs", "Create the owner passkey or
-      // sign in?") are gone: a claimed cluster is signed in to
-      // (clusters/ownershipRoute.ts), and the owner passkey is an offer on
-      // the cluster page when it is really a first run.
+      // Current owner/passkey state chooses the browser entry point.
       await signInToCluster(target.cluster, {
         clustersPath,
         store: signInStore,
         clustersTree,
       });
     }),
-    // Minting the FIRST credential for a cluster's owner, from the editor
-    // (znasllc-io#3905).
-    //
-    // The owner account exists the moment `seedBootstrap` runs and holds nothing
-    // a person can sign in with. The install mints an enrolment link, and an
-    // operator who dismissed the notification, whose 15-minute link expired, or
-    // who installed before that screen offered one had no way back to a link at
-    // all -- the only route was a terminal, which is not a route a extension user
-    // has.
-    //
-    // A FRESH LINK EVERY TIME, never a replay: the install's link is single-use
-    // and short-lived, and re-opening a spent credential would fail in a way
-    // that reads as the feature being broken. It is the same capability the
-    // install graph runs, so the two cannot drift.
+    // Owner setup and sign-in share one browser callback and session store.
     commands.registerCommand('memql.clusters.takeOwnership', async (node?: ClusterNode) => {
-      const target = node ?? (await pickCluster(clustersPath, 'Create Owner Passkey'));
+      const target = node ?? (await pickCluster(clustersPath, 'Register Owner Passkey'));
       if (target === undefined || target.cluster.name === '') {
         return;
       }
-      // FIRST THING, before anything can fail or be abandoned: this walk owns
-      // the cluster's enrolment story for the rest of the session (memql#4078).
-      // The walk ends in a sign-in, and every sign-in runs the independent
-      // passkey offer (offerPasskeyEnrolment) -- which used to stack a fresh
-      // "Enrol a passkey" toast on top of the walk's own notifications, and
-      // leave it in the bell to be clicked after the passkey already existed.
-      // Suppressed rather than declined, because the operator said nothing.
-      passkeyOfferMemory.suppress(target.cluster.name);
-      const receipt = await readReceipt(receiptPath).catch(() => null);
-      const owner = recordedOwner(receipt);
-      let url: string;
-      try {
-        url = await window.withProgress(
-          { location: ProgressLocation.Notification, title: 'MemQL: Preparing passkey setup' },
-          () =>
-            mintOwnershipLink(
-              {
-                cluster: target.cluster,
-                ownerEmail: owner.email,
-                receiptDomain: recordedDomain(receipt),
-                repoRoot: installRootFor(context),
-              },
-              runCapabilityScript
-            )
-        );
-      } catch (err) {
-        const detail = err instanceof OwnershipError ? err.message : String(err);
-        noteDiagnostic(connectionOutput, 'minting an enrolment link failed', detail);
-        // The fix as a button when the extension has one: no recorded owner
-        // means this is not a first run here -- sign in; a receipt for another
-        // cluster is what Repair re-records.
-        const reason = err instanceof OwnershipError ? err.reason : undefined;
-        const fix = reason === 'noOwner' ? 'Sign in' : reason === 'otherCluster' ? 'Repair' : undefined;
-        // The sentence is the refusal's own when it names a cause the person
-        // can act on; a failed or empty mint says only that setup did not
-        // start, and its detail is in the channel.
-        const sentence =
-          reason === 'notLocal' || reason === 'noOwner' || reason === 'otherCluster' || reason === 'noLink'
-            ? detail
-            : "Couldn't start passkey setup.";
-        void (async () => {
-          const choice = await offerDetails(
-            'error',
-            connectionOutput,
-            `MemQL: ${sentence}`,
-            ...(fix === undefined ? [] : [fix])
-          );
-          if (choice === 'Sign in') await signInToCluster(target.cluster, { clustersPath, store: signInStore, clustersTree });
-          else if (choice === 'Repair') await commands.executeCommand('memql.clusters.repair');
-        })();
-        return;
-      }
-      try {
-        // The one place a minted link is validated (https, `/enroll?code=`)
-        // before a browser is pointed at it. Every route into ownership -- this
-        // command, the install's done screen, the Clusters tree -- arrives here.
-        await openEnrolmentLink(url, {
-          resolveExternalUri: async (u) => (await env.asExternalUri(Uri.parse(u))).toString(true),
-          openExternal: async (u) => await env.openExternal(Uri.parse(u)),
-        });
-      } catch (err) {
-        const detail = err instanceof EnrolmentError ? err.message : String(err);
-        noteDiagnostic(connectionOutput, 'opening the enrolment link failed', detail);
-        // `browserUnavailable` IS A DESIGNED-RECOVERABLE KIND, AND THIS IS THE
-        // CALLER IT WAS DESIGNED FOR (memql#4618). install/enrolment.ts says the
-        // kind exists as its own reason "because 'this machine has no browser'
-        // is a real, recoverable state -- the caller can fall back to showing
-        // the link". This caller did not: it raised an error toast and returned,
-        // throwing away a live credential the mint had just produced. On a
-        // headless host, a container with no desktop session, or an SSH session
-        // with nothing to hand a URL to, that is the whole product of the step
-        // discarded because of how it usually travels.
-        //
-        // ONLY ON THAT REASON. `malformed` means the value is not an https
-        // /enroll?code= URL -- precisely the value not to put on somebody's
-        // clipboard, since offering to copy it would hand them whatever the mint
-        // actually printed and invite them to open it.
-        const recoverable = err instanceof EnrolmentError && err.reason === 'browserUnavailable';
-        const headline = recoverable
-          ? "MemQL: Couldn't open your browser for passkey setup."
-          : "MemQL: Couldn't start passkey setup.";
-        // DETACHED, the shape this file uses wherever a toast carries a button
-        // (memql#4079): a non-modal notification with an action does not time
-        // out, so awaiting one holds the command open until somebody answers it.
-        void (async () => {
-          const choice = recoverable
-            ? await offerDetails('error', connectionOutput, headline, COPY_ENROLMENT_LINK)
-            : await offerDetails('error', connectionOutput, headline);
-          if (choice === COPY_ENROLMENT_LINK) await copyEnrolmentLink(url);
-        })();
-        return;
-      }
-      // THE REST OF THE WALK, offered rather than assumed (memql#3906).
-      //
-      // Enrolling a passkey is a browser ceremony this side cannot observe --
-      // an OS prompt, a security key, a fingerprint -- so there is no event to
-      // wait on and no way to know when it finished. What the editor CAN do is
-      // leave the next step one click away instead of leaving the operator on a
-      // notification that congratulates them and stops.
-      //
-      // THE ORDER IS FORCED, not chosen. The console authenticates like every
-      // other surface, so it cannot be the page that grants the first
-      // credential; sign-in cannot work until the passkey exists. Each step is
-      // therefore only offered once the one before it can succeed. The sign-in
-      // straight after enrolment is WANTED, not ceremony: it is how the
-      // operator verifies that the passkey they just approved actually works.
-      //
-      // ONE VOCABULARY (memql#4078). Three surfaces used to narrate this walk
-      // as three different tasks -- "take ownership", "enrol a passkey", "sign
-      // in" -- and, stacked, they read as three competing demands. Every step
-      // now speaks as one task, finishing setup of the cluster the operator
-      // owns; "take ownership" survives only as this command's id and palette
-      // title, which are contributions, not copy.
-      const enrolled = await window.showInformationMessage(
-        `MemQL: Approve the passkey in your browser, then sign in to ${displayLabel(target.cluster)}.`,
-        'Sign in'
-      );
-      if (enrolled !== 'Sign in') return;
-      const signedIn = await signInToCluster(target.cluster, {
-        clustersPath,
-        store: signInStore,
-        clustersTree,
-      });
-      if (!signedIn) return;
-      const next = await window.showInformationMessage(
-        `MemQL: You're the owner of ${displayLabel(target.cluster)}.`,
-        'Open MemQL OS'
-      );
-      if (next === 'Open MemQL OS') {
-        await commands.executeCommand('memql.clusters.openConsole', target);
-      }
+      // One browser ceremony, carrying the editor's PKCE callback through
+      // owner setup. The server matches the local owner email or verifies the
+      // hosted owner's email, then requires a passkey before issuing a session.
+      await signInToCluster(target.cluster, { clustersPath, store: signInStore, clustersTree });
     }),
     // The counterpart: forget this cluster's session. The store owns what that
     // means in each of the two places a credential lives (memql#3404).
@@ -2949,7 +2778,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         revocation = await signOutCredentials(storeDeps, target.cluster.name, (refreshToken) =>
           issuer === undefined
             ? Promise.resolve({ attempted: false as const })
-            : revokeRefreshToken(issuer, refreshToken, (url, init) => fetch(url, init))
+            : revokeRefreshToken(issuer, refreshToken, desktopTrust.fetch)
         );
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
@@ -3162,6 +2991,10 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     commands.registerCommand('memql.clusters.openConsole', async (node?: ClusterNode) => {
       const target = node ?? (await pickCluster(clustersPath, 'Open MemQL OS'));
       if (target === undefined || target.cluster.name === '') {
+        return;
+      }
+      if ((await factsForCluster(target.cluster)).ownerSetup) {
+        await signInToCluster(target.cluster, { clustersPath, store: signInStore, clustersTree });
         return;
       }
       const url = await consoleUrlForCluster(target.cluster);
@@ -4776,36 +4609,11 @@ interface SignInDeps {
 }
 
 /**
- * Whether the cluster has an owner to sign in to at all.
- *
- * `claim` only on a real 200 from `/setup` -- the one state with no account to
- * sign in to. Everything else, `claimed` and `unknown` alike, is a sign-in
- * (clusters/ownershipRoute.ts): the old third route, "create the owner
- * passkey", fired for any local cluster with nothing stored and sent the
- * owner's own machine to a dead end.
- *
- * The probe runs under a deadline and the sign-in's own cancellation, so an
- * unroutable host cannot hold the command (memql#4620), and it is asked of the
- * CLUSTER (probeClaimStateForCluster), which is where the identity host is
- * decided.
- */
-async function ownershipRouteFor(
-  cluster: ClusterConfig,
-  cancel?: AbortSignal
-): Promise<OwnershipRoute> {
-  return resolveOwnershipRoute(() =>
-    probeClaimStateForCluster(cluster, {
-      fetch: globalThis.fetch,
-      signal: claimProbeSignal(cancel),
-    })
-  );
-}
-
-/**
  * A sign-in in flight, as the cluster page shows it: which phase, whether "Use
  * a code instead" is on offer, and the two controls the page binds to.
  */
 interface ActiveSignIn {
+  ownerSetup?: boolean;
   phase: 'opening' | 'waiting' | 'finishing' | 'code';
   codeOffered: boolean;
   cancel(): void;
@@ -4824,19 +4632,10 @@ const signInFlights = new SingleFlight<boolean>();
 // notification whose line moves through "Opening your browser" -> "Waiting for
 // you in the browser" -> "Finishing sign-in" -> "Connecting".
 //
-// WHAT HAPPENS IN IT, in order:
-//   - the ownership question, silently: only a cluster with no owner stops,
-//     to offer its wizard (ownershipRouteFor);
-//   - the browser sign-in, which is checked before the browser opens -- a
-//     cluster that refuses this editor fails in seconds (auth/flow.ts) -- and
-//     which falls back to a device code by itself on a host that cannot do
-//     loopback (auth/deviceCode.ts);
-//   - after CODE_OFFER_AFTER_MS without a callback, "Use a code instead",
-//     which runs the device grant BESIDE the browser (auth/codeOffer.ts): the
-//     loopback listener stays up, so a late callback still wins;
-//   - on success: this cluster is selected and connected (signing in to a
-//     cluster is asking to use it), and remembered as signed in here, which is
-//     what retires the owner-passkey offer.
+// The server's ownership state selects registration or ordinary sign-in.
+// Registration carries the same PKCE callback and token exchange through /setup;
+// canceling it leaves every application action gated. No local install receipt
+// or previously saved sign-in may override a server-reported pending setup.
 //
 // WHY THE FAILURE TOAST IS NOT AWAITED. Awaiting it would keep this command
 // pending until a human dismissed a notification, which makes the command
@@ -4878,11 +4677,12 @@ async function runSignInToCluster(
   flow: SignInFlow = 'auto'
 ): Promise<boolean> {
   const label = displayLabel(cluster);
-  let offerClaim = false;
+  const ownerSetup = (await factsForCluster(cluster)).ownerSetup;
+  if (ownerSetup) flow = 'auto';
   const signedIn = await window.withProgress(
     {
       location: ProgressLocation.Notification,
-      title: `MemQL: Signing in to ${label}`,
+      title: ownerSetup ? `MemQL: Register owner passkey for ${label}` : `MemQL: Signing in to ${label}`,
       cancellable: true,
     },
     async (progress, token) => {
@@ -4892,6 +4692,7 @@ async function runSignInToCluster(
       let fallbackFired = false;
       let offerTimer: ReturnType<typeof setTimeout> | undefined;
       const flight: ActiveSignIn = {
+        ownerSetup,
         phase: flow === 'deviceCode' ? 'code' : 'opening',
         codeOffered: false,
         cancel: () => aborter.abort(),
@@ -4928,10 +4729,12 @@ async function runSignInToCluster(
       const resolveExternalUri = async (url: string): Promise<string> =>
         (await env.asExternalUri(Uri.parse(url))).toString(true);
       const runDevice = (signal: AbortSignal | undefined): ReturnType<typeof runDeviceCodeFlow> =>
-        runDeviceCodeFlow(cluster, { signal, onUserCode });
+        runDeviceCodeFlow(cluster, { signal, onUserCode, fetch: desktopTrust.fetch });
       const runBrowser = (signal: AbortSignal | undefined): ReturnType<typeof signInWithDeviceCodeFallback> =>
         signInWithDeviceCodeFallback(cluster, {
           signal,
+          ownerSetup,
+          fetch: desktopTrust.fetch,
           onUserCode,
           resolveExternalUri,
           openExternal: (url) => env.openExternal(Uri.parse(url)),
@@ -4951,18 +4754,12 @@ async function runSignInToCluster(
 
       try {
         say(flow === 'deviceCode' ? 'Requesting a code' : SIGN_IN_PHASE_LINES.opening);
-        // Is there an owner to sign in to? Only a real "unclaimed" stops.
-        const route = skipClaimProbe.has(cluster.name) ? 'signIn' : await ownershipRouteFor(cluster, aborter.signal);
-        if (route === 'claim' && !aborter.signal.aborted) {
-          offerClaim = true;
-          return false;
-        }
         if (aborter.signal.aborted) return false;
 
         // The grant. The choice of runner stays selectSignInRunner's
         // (memql#3515); the browser side is wrapped so a code can be taken
         // beside it without closing the loopback listener.
-        const runFlow = selectSignInRunner(flow, {
+        const runFlow = selectSignInRunner(ownerSetup ? 'auto' : flow, {
           loopbackWithDeviceFallback: (_target, signal) => {
             const race = new BrowserOrCodeSignIn({
               runBrowser: (s) => runBrowser(s),
@@ -4975,7 +4772,7 @@ async function runSignInToCluster(
                 say('Requesting a code');
               }
             };
-            offerTimer = setTimeout(() => {
+            if (!ownerSetup) offerTimer = setTimeout(() => {
               if (settled || fallbackFired || flight.phase !== 'waiting') return;
               flight.codeOffered = true;
               ConnectionPanel.repaint();
@@ -5007,7 +4804,7 @@ async function runSignInToCluster(
           // NOT AWAITED: the command settles now, so a Try again is a fresh
           // flow rather than a joiner.
           void (async () => {
-            const choice = await offerDetails(severity, connectionOutput, `MemQL: ${report.message}`, ...actions);
+            const choice = await offerDetails(severity, connectionOutput, ownerSetup ? "MemQL: Couldn’t finish owner passkey setup." : `MemQL: ${report.message}`, ...actions.filter(action => !ownerSetup || action !== SIGN_IN_DEVICE_CODE));
             if (choice === SIGN_IN_RETRY) {
               await signInToCluster(cluster, deps, flow);
             } else if (choice === SIGN_IN_DEVICE_CODE) {
@@ -5077,7 +4874,6 @@ async function runSignInToCluster(
       return true;
     }
   );
-  if (offerClaim) void offerClaimWizard(cluster, deps, flow);
   return signedIn;
 }
 
@@ -5099,46 +4895,6 @@ async function offerCodeInstead(
   );
   if (choice === take && !isStale()) useCode();
 }
-
-/**
- * The one case sign-in cannot help: the cluster has no owner yet, so there is
- * no account to sign in to. Its ownership wizard mints the first one.
- */
-async function offerClaimWizard(cluster: ClusterConfig, deps: SignInDeps, flow: SignInFlow): Promise<void> {
-  const claim = 'Claim it';
-  const anyway = 'Sign in anyway';
-  const choice = await window.showInformationMessage(
-    `MemQL: ${displayLabel(cluster)} has no owner yet.`,
-    claim,
-    anyway
-  );
-  if (choice === claim) {
-    // asExternalUri first: under Remote-SSH or Codespaces the wizard runs on
-    // the REMOTE host, and the person's browser is local.
-    const wizard = setupUrlForCluster(cluster);
-    if (wizard === '') return;
-    const external = (await env.asExternalUri(Uri.parse(wizard))).toString(true);
-    await env.openExternal(Uri.parse(external));
-    return;
-  }
-  if (choice === anyway) {
-    // Straight to the grant: the ownership question has just been answered.
-    await signInFlights.run(cluster.name, () => runSignInSkippingClaim(cluster, deps, flow));
-  }
-}
-
-// A sign-in that does not ask the ownership question again, for "Sign in
-// anyway". Implemented as the normal flow against a probe that answers
-// "claimed", so there is still one sign-in shell.
-async function runSignInSkippingClaim(cluster: ClusterConfig, deps: SignInDeps, flow: SignInFlow): Promise<boolean> {
-  skipClaimProbe.add(cluster.name);
-  try {
-    return await runSignInToCluster(cluster, deps, flow);
-  } finally {
-    skipClaimProbe.delete(cluster.name);
-  }
-}
-const skipClaimProbe = new Set<string>();
 
 /**
  * A dropped connection the retries could not restore: one line and Reconnect.

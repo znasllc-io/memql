@@ -2,7 +2,7 @@
   "name": "memql",
   "displayName": "MemQL",
   "description": "MemQL language support for Visual Studio Code and Cursor, plus installing, connecting to and working with MemQL clusters.",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "publisher": "znasllc",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -431,7 +431,7 @@
       },
       {
         "command": "memql.clusters.takeOwnership",
-        "title": "Create Owner Passkey",
+        "title": "Register Owner Passkey",
         "category": "MemQL",
         "icon": "$(key)"
       },
@@ -830,6 +830,11 @@
       ],
       "view/item/context": [
         {
+          "command": "memql.clusters.takeOwnership",
+          "when": "!isWeb && view == memqlClusters && viewItem =~ /^memqlCluster;ownerSetup(;|$)/",
+          "group": "inline@1"
+        },
+        {
           "command": "memql.clusters.signIn",
           "when": "view == memqlClusters && viewItem =~ /^memqlCluster;signIn(;|$)/",
           "group": "inline@1"
@@ -923,6 +928,7 @@
   "dependencies": {
     "@znasllc-io/memql-sdk-core": "file:../../sdk/ts",
     "@znasllc-io/memql-view-kit": "file:../../sdk/ts-viewkit",
+    "undici": "^6.29.0",
     "vscode-languageclient": "^10.1.0",
     "ws": "^8.21.3",
     "yaml": "^2.9.0"

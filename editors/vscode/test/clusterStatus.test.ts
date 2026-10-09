@@ -137,13 +137,13 @@ test("no tooltip shouts a prefix, names an internal field, or points at a channe
 test("the contextValue carries the state and the flags the menus need", () => {
   const facts: ClusterFacts = { session: false, signedIn: false, ownerSetup: true, consoleUrl: "https://os.memql.localhost/" };
   assert.equal(
-    clusterContextValue(cluster({ local: true }), { state: "signIn" }, facts, true),
-    "memqlCluster;signIn;local;ownerSetup;os;inUse",
+    clusterContextValue(cluster({ local: true }), { state: "ownerSetup" }, facts, true),
+    "memqlCluster;ownerSetup;local;ownerSetup;inUse",
   );
   assert.equal(clusterContextValue(cluster(), { state: "idle" }, SESSION, false), "memqlCluster;idle;signedIn;os");
   // Never an owner-passkey offer on a cluster this editor is connected to.
   assert.equal(
-    clusterContextValue(cluster({ local: true }), { state: "connected" }, { ...facts, signedIn: true }, true),
+    clusterContextValue(cluster({ local: true }), { state: "connected" }, { ...facts, signedIn: true, ownerSetup: false }, true),
     "memqlCluster;connected;local;signedIn;os;inUse",
   );
   assert.equal(clusterContextValue(cluster(), { state: "notConfigured" }, { ...NOTHING, consoleUrl: "" }, false), "memqlCluster;notConfigured");

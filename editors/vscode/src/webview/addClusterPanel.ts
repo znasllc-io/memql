@@ -302,6 +302,8 @@ export interface AddClusterDeps {
   listLocalClusters?: () => Promise<string[]>;
   /** Whether the editor holds a live session with the named cluster; never, when absent. */
   isSignedIn?: (clusterName: string) => boolean;
+  /** Live owner/passkey state, independent of saved editor sessions and install receipts. */
+  ownerSetupPending?: (cluster: ClusterConfig) => Promise<boolean>;
   /**
    * The machine's run slot, shared with the Deployment page; tests inject
    * their own. An install, repair or uninstall holds it while it goes.
@@ -595,10 +597,14 @@ export class AddClusterPanel {
     }
     if (this.disposed) return;
     const clusterName = result.clusterName;
+    const registry = clusterName && this.deps.ownerSetupPending ? await readClustersFileSafe(this.deps.clustersPath) : undefined;
+    const local = registry?.ok ? registry.file.clusters.find(c => c.name === clusterName) : undefined;
+    const ownerSetup = local ? await this.deps.ownerSetupPending?.(local) : false;
     this.detected = {
       facts: {
         verdict,
         registered: clusterName !== undefined,
+        ownerSetup,
         hasReceipt: result.evidence.receipt,
         platform: verdict === "absent" ? (this.platform ?? "unknown") : "unknown",
         signedIn: clusterName !== undefined && (this.deps.isSignedIn?.(clusterName) ?? false),
@@ -1095,6 +1101,8 @@ export class AddClusterPanel {
     }
     this.doneKind = action === "repair" && this.detected?.facts.verdict !== "install-incomplete" ? "repaired" : "installed";
     await this.handOffAfterInstall(inputs.domain);
+    await this.refreshOwnerSetup();
+    if (this.deps.ownerSetupPending && !this.disposed && this.state.canEnrol) void this.enrolPasskey();
   }
 
   /** One install event into the state machine, the log and the bar -- without a document. */
@@ -1544,11 +1552,21 @@ export class AddClusterPanel {
     return result.ok ? result.file.clusters.find((c) => c.name === name) : undefined;
   }
 
-  /** A passkey enrolment link, minted on click by the one command that does it (memql#3408, #3906). */
+  /** Complete the owner ceremony, then show the next action from current server state. */
   private async enrolPasskey(): Promise<void> {
     const cluster = this.currentCluster();
     if (cluster === undefined) return;
     await vscode.commands.executeCommand("memql.clusters.takeOwnership", { cluster, selected: true });
+    await this.refreshOwnerSetup();
+  }
+
+  private async refreshOwnerSetup(): Promise<void> {
+    const cluster = this.currentCluster();
+    if (!cluster || !this.deps.ownerSetupPending) return;
+    const pending = await this.deps.ownerSetupPending(cluster);
+    if (this.disposed) return;
+    this.state.setOwnerAccountExists(pending);
+    this.render();
   }
 
   /**
@@ -2130,7 +2148,7 @@ export class AddClusterPanel {
       name: cluster?.name ?? "",
       address: cluster?.endpoint ?? (handoff.ok ? "" : handoff.reachableAt),
       osUrl: cluster === undefined ? "" : composeConsoleUrl(cluster),
-      signedIn: cluster !== undefined && this.signedIn(cluster.name),
+      signedIn: cluster !== undefined && this.signedIn(cluster.name) && !(this.deps.ownerSetupPending && s.canEnrol),
       canEnrol: s.canEnrol,
       claim: s.primaryHandoffAction === "claim",
       recoveryKey: {

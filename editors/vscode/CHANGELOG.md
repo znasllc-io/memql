@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.7
+
+- Register the owner passkey before offering sign-in or MemQL OS. Setup opens
+  automatically after a successful local install and remains available after
+  cancellation or repair. The cluster’s current ownership state takes priority
+  over a previous installation or saved sign-in.
+- Use the installed local CA for the editor’s identity requests, token refresh,
+  and cluster connection. Certificate and hostname verification stay enabled;
+  local trust is restricted to the registered local cluster.
+
 ## 0.6.6
 
 - Allow ArgoCD to recover from a timed-out initial repository download within

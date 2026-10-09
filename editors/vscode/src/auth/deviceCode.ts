@@ -32,7 +32,7 @@ export async function signInWithDeviceCodeFallback(
   try {
     tokens = await runAuthorizationFlow(cluster, deps);
   } catch (err) {
-    if (!shouldFallBackToDeviceCode(err)) throw err;
+    if (deps.ownerSetup || !shouldFallBackToDeviceCode(err)) throw err;
     deps.onFallback?.(err as AuthFlowError);
     tokens = await runDeviceCodeFlow(cluster, deps);
   }

@@ -1652,6 +1652,8 @@ export interface LandingFacts {
   platform: "supported" | "unsupported" | "unknown";
   /** The editor holds a live session with the listed local cluster. */
   signedIn: boolean;
+  /** The server still requires the first owner passkey. */
+  ownerSetup?: boolean;
 }
 
 export interface LandingView {
@@ -1758,7 +1760,9 @@ export function landingView(facts: LandingFacts): LandingView {
           ],
         };
       }
-      const enter: LandingChoice = facts.signedIn
+      const enter: LandingChoice = facts.ownerSetup
+        ? { act: "signIn", label: "Register owner passkey", note: "Finish ownership setup in your browser." }
+        : facts.signedIn
         ? { act: "openOs", label: "Open MemQL OS", note: "You're signed in to this cluster." }
         : { act: "signIn", label: "Sign in", note: "Opens your browser to sign in." };
       const repair: LandingChoice[] = facts.hasReceipt ? [repairChoice] : [];

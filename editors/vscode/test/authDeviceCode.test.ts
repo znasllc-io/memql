@@ -765,3 +765,15 @@ test("a remote extension host signs in through the device code, not a dead callb
   assert.match(fallbacks[0]?.message ?? "", /ssh-remote/);
   assert.ok(codes.length > 0, "the user was never given a code to approve");
 });
+
+
+test("unfinished ownership never falls back to a device sign-in", async () => {
+  const fake = identity();
+  let offered = false;
+  await assert.rejects(signInWithDeviceCodeFallback(cluster(), {
+    ...loopbackDeps(fake), ownerSetup: true, remoteName: "ssh-remote",
+    onFallback: () => { offered = true; },
+  }));
+  assert.equal(offered, false);
+  assert.equal(fake.calls.length, 0);
+});

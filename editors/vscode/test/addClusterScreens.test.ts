@@ -236,7 +236,7 @@ test("the done screen has one next act, and its facts claim no reachability", ()
   // Never four acts: an owner to enrol and a claim link do not both apply,
   // and if a caller says they do, the passkey wins and the bar stays legal.
   const both = doneScreen({ kind: "installed", name: "m", address: "a", osUrl: "o", signedIn: false, canEnrol: true, claim: true });
-  assert.deepEqual(barActs(both), ["back", "enrolPasskey", "signIn"]);
+  assert.deepEqual(barActs(both), ["back", "enrolPasskey"]);
 });
 
 test("the recovery key is masked until Show, and copyable without being shown", () => {
