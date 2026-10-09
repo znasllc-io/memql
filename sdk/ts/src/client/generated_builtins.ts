@@ -1864,6 +1864,7 @@ QueryClient.prototype.libraryAddArtifactLabel = function (this: QueryClient, arg
 
 /** Save feedback against the exact saved revision. A repeated requestId returns the original receipt; changed content under that requestId is refused. */
 export interface LibraryAddDocumentCommentArgs {
+  attachments?: Record<string, unknown>[];
   artifactId: string;
   expectedVersion: number;
   expectedRevision: string;
@@ -1874,6 +1875,7 @@ export interface LibraryAddDocumentCommentArgs {
 
 export function buildLibraryAddDocumentComment(args: LibraryAddDocumentCommentArgs): string {
   const parts: string[] = [];
+  if (args.attachments !== undefined) parts.push("attachments: " + renderMemQLValue(args.attachments));
   parts.push("artifactId: " + renderMemQLValue(args.artifactId));
   parts.push("expectedVersion: " + renderMemQLValue(args.expectedVersion));
   parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));

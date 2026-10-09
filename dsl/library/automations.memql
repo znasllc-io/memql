@@ -252,19 +252,25 @@ automation archiveFileOnArtifactArchive {
 automation reviseLibraryDocument {
  args { requestId string! proposal object! }
  captured := builtin libraryRevisionInput(requestId: args.requestId)
+ references := builtin libraryRevisionReferences(requestId: args.requestId, templateId: "libraryRevisionImages", level: "fast")
  intent := builtin ai(templateId: "libraryRevisionIntent", data: {
-  passages: captured.passagesJSON,
+  passages: captured.passagesJSON, references: references.references,
   instruction: captured.amendment.instruction ?? captured.instruction
  })
  evidence := parallel {
   branch headless {
+   // A positively classified editorial change already has the document and
+   // authorized references. Tool research adds no evidence for this work.
+   if lower(trim(intent.reply)) == "edit" {
+    return "Editorial change: use the supplied document and reference files directly. No external research was requested or performed."
+   }
    if lower(trim(intent.reply)) == "research" {
     priorEvidence := query workCompletedStepsForOwnerRuns(runIds: captured.evidenceRunIds, stepKey: "evidence.app/report")
    } else {
     priorEvidence := []
    }
    report := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
-    priorEvidence: priorEvidence.select(receipt => receipt.result.value.reply), document: captured.content, passages: captured.passagesJSON,
+    priorEvidence: priorEvidence.select(receipt => receipt.result.value.reply), document: captured.content, passages: captured.passagesJSON, references: references.references,
     instruction: captured.amendment.instruction ?? captured.instruction,
     previous: captured.amendment.edits
    })
@@ -283,7 +289,7 @@ automation reviseLibraryDocument {
    }
    if lower(trim(intent.reply)) == "research" {
     report := builtin ai(templateId: "libraryRevisionAppResearch", data: {
-     document: captured.content, passages: captured.passagesJSON,
+     document: captured.content, passages: captured.passagesJSON, references: references.references,
      instruction: captured.amendment.instruction ?? captured.instruction,
      previous: captured.amendment.edits
     }) on error continue
@@ -296,12 +302,12 @@ automation reviseLibraryDocument {
 
  if captured.amendment != nil {
   analysis := builtin ai(templateId: "libraryRevisionItem", progress: true, data: {
-   document: captured.content, passages: captured.passagesJSON, instruction: captured.amendment.instruction,
+   document: captured.content, passages: captured.passagesJSON, references: references.references, instruction: captured.amendment.instruction,
    previous: captured.amendment.edits, evidence: combinedEvidence
   })
  } else {
   analysis := builtin ai(templateId: "libraryRevisionPassages", progress: true, data: {
-   document: captured.content, passages: captured.passagesJSON, instruction: captured.instruction, evidence: combinedEvidence
+   document: captured.content, passages: captured.passagesJSON, references: references.references, instruction: captured.instruction, evidence: combinedEvidence
   })
  }
  proposed := builtin libraryRevisionProposal(requestId: args.requestId, response: analysis.reply)

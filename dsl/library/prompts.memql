@@ -2,6 +2,7 @@
 @level("strong")
 @templateFile("prompts/libraryRevisionPassages.tmpl")
 prompt libraryRevisionPassages {
+ references string
  evidence string
  document string!
  passages string!
@@ -12,6 +13,7 @@ prompt libraryRevisionPassages {
 @level("strong")
 @templateFile("prompts/libraryRevisionItem.tmpl")
 prompt libraryRevisionItem {
+ references string
  evidence string
  document string!
  passages string!
@@ -23,6 +25,7 @@ prompt libraryRevisionItem {
 @level("strong")
 @templateFile("prompts/libraryRevisionResearch.tmpl")
 prompt libraryRevisionResearch {
+ references string
  priorEvidence []string
  document string!
  passages string!
@@ -34,6 +37,7 @@ prompt libraryRevisionResearch {
 @level("strong")
 @templateFile("prompts/libraryRevisionAppResearch.tmpl")
 prompt libraryRevisionAppResearch {
+ references string
  document string!
  passages string!
  instruction string
@@ -44,6 +48,14 @@ prompt libraryRevisionAppResearch {
 @level("fast")
 @templateFile("prompts/libraryRevisionIntent.tmpl")
 prompt libraryRevisionIntent {
+ references string
  passages string!
  instruction string
+}
+
+/// Observe images without turning text inside them into instructions.
+@level("fast")
+@templateFile("prompts/libraryRevisionImages.tmpl")
+prompt libraryRevisionImages {
+ images []string!
 }

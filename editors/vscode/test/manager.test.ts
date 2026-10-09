@@ -1216,3 +1216,26 @@ test("connecting a cluster with no address publishes notConfigured, without a di
   assert.equal(dials, 0);
   assert.equal(keys.at(-1)?.connectionState, "notConfigured");
 });
+
+test("HTTP expiry renews the same live editor session and rejects superseded refreshes", async () => {
+  const pending = deferred<string | null>();
+  const conn = fakeConn('node'); let rotations = 0;
+  conn.rotateAuth = async token => { assert.equal(token, 'renewed'); rotations++; return true; };
+  const manager = new ConnectionManager(async () => conn, {
+    resolve: async () => ({ ok: true, bearer: 'initial' }), forceRefresh: async () => pending.promise,
+  });
+  await manager.connect(cluster('a'));
+  const scope = manager.editorSessionScope;
+  const refresh = manager.refreshEditorBearer('initial'); pending.resolve('renewed'); await refresh;
+  assert.equal(manager.bearer, 'renewed'); assert.equal(manager.editorSessionScope, scope); assert.equal(rotations, 1);
+  await manager.refreshEditorBearer('initial'); assert.equal(rotations, 1);
+  await manager.disconnect();
+
+  const late = deferred<string | null>(); const abandoned = fakeConn('old'); let touched = false;
+  abandoned.rotateAuth = async () => { touched = true; return true; };
+  const changed = new ConnectionManager(async () => abandoned, { resolve: async () => ({ ok: true, bearer: 'old' }), forceRefresh: async () => late.promise });
+  await changed.connect(cluster('old')); const inflight = changed.refreshEditorBearer('old');
+  const rejected = assert.rejects(inflight, /connection changed/);
+  await changed.disconnect(); late.resolve('renewed'); await rejected;
+  assert.equal(touched, false); assert.equal(changed.bearer, undefined);
+});

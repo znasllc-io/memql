@@ -8,7 +8,7 @@ import { anchorStillMatches, markdownAnchor, renderMarkdown, type MarkdownAnchor
 
 import { markdownPage } from "./markdownPage.js";
 import { refreshQueue } from "./refreshQueue.js";
-import { markdownImageURI } from "./markdownAssets.js";
+import { feedbackAttachmentMime, MAX_IMAGE_BYTES, markdownImageURI } from "./markdownAssets.js";
 
 export class MarkdownEditor implements vscode.CustomTextEditorProvider {
   private active?: { document: vscode.TextDocument; panel: vscode.WebviewPanel };
@@ -214,6 +214,21 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
           } else if (message.type === "copyProblemReference" && typeof message.reference === "string" && /^(tools-|review-run-)[a-zA-Z0-9-]{1,100}$/.test(message.reference)) { await vscode.env.clipboard.writeText(message.reference);
           } else if (preview && !["external","dictationCancel"].includes(message.type)) return;
           else if (message.type === "source" || message.type === "reading" || message.type === "review" || message.type === "split") await this.show(message.type, document.uri);
+          else if (message.type === "uploadAttachment") {
+            try {
+              if (document.uri.scheme !== "memql-file" || document.isDirty || typeof message.name !== "string" || typeof message.base64 !== "string" || message.base64.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(message.base64)) throw new UserInputError("Save the document, then attach a supported image or Markdown file.");
+              const bytes = Uint8Array.from(atob(message.base64), c => c.charCodeAt(0));
+              const mime = feedbackAttachmentMime(message.name, bytes);
+              const base = await this.load(document.uri);
+              const uri = await this.files.createFile(base.lease, message.name, mime, bytes);
+              const file = await this.files.read(uri, base.lease);
+              await panel.webview.postMessage({type:"attachmentUploaded", uploadId:message.uploadId, attachment:{artifactId:file.resource.id,version:file.version,revision:file.revision,name:file.resource.name,mimeType:mime,size:bytes.length,uri}});
+            } catch(e) { await panel.webview.postMessage({type:"attachmentFailed",uploadId:message.uploadId,...reportProblem(e,"attach reference file")}); }
+          }
+          else if (message.type === "attachmentPreview" && typeof message.uri === "string") {
+            const uri = markdownImageURI(message.uri, document.uri.toString());
+            if (uri) await panel.webview.postMessage({type:"attachmentPreview",uri:message.uri,preview:String(panel.webview.asWebviewUri(vscode.Uri.parse(uri)))});
+          }
           else if (message.type === "dictationStart") { if(document.uri.scheme!=="memql-file"||document.isDirty)throw new UserInputError("Save the MemQL document before dictating feedback.");void this.dictation.start(panel,await this.load(document.uri)).catch(error); }
           else if (message.type === "dictationStop") await this.dictation.stop(panel);
           else if (message.type === "dictationCancel") this.dictation.cancel(panel);
@@ -252,11 +267,14 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
             const anchor = message.selection?.kind === "document" ? {kind:"document",quote:"Entire document"} : message.selection?.kind === "document-end" ? {kind:"document-end", quote:"End of document"} : markdownAnchor(document.getText(), message.selection);
             const base = await this.load(document.uri);
             if (new TextDecoder().decode(base.content) !== document.getText()) throw new UserInputError("Compare this document with its saved revision before adding feedback.");
-            const fingerprint = JSON.stringify([message.type, base.revision, anchor, message.body]);
+            const attachments = message.type === "comment" && Array.isArray(message.attachments) ? message.attachments : [];
+            if (attachments.length > 8 || attachments.some((ref: any) => !ref || typeof ref.artifactId !== "string" || typeof ref.version !== "number" || typeof ref.revision !== "string")) throw new UserInputError("Attach up to eight images or Markdown files.");
+            const references = attachments.map((ref: any) => ({artifactId:ref.artifactId,version:ref.version,revision:ref.revision}));
+            const fingerprint = JSON.stringify([message.type, base.revision, anchor, message.body, references]);
             if (commentPending?.fingerprint !== fingerprint) commentPending = { fingerprint, requestId: globalThis.crypto.randomUUID() };
             saving = true;
             try {
-              await (message.type === "note" ? this.files.note(base, { ...anchor }, message.body, commentPending.requestId) : this.files.comment(base, { ...anchor }, message.body, commentPending.requestId));
+              await (message.type === "note" ? this.files.note(base, { ...anchor }, message.body, commentPending.requestId) : this.files.comment(base, { ...anchor }, message.body, commentPending.requestId, references));
               commentPending = undefined;
               await refreshComments();
               await refreshNotes();

@@ -49,6 +49,7 @@ require (
 	github.com/znasllc-io/memql/component/workjournal v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
 	github.com/znasllc-io/memql/dsl v0.0.0
+	golang.org/x/image v0.46.0
 	golang.org/x/net v0.59.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12

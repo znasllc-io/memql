@@ -163,6 +163,7 @@ builtin libraryDocumentReview {
 @executor("integration.library.addDocumentComment")
 @args(profile="object")
 builtin libraryAddDocumentComment {
+  attachments []object
   artifactId string!
   expectedVersion int!
   expectedRevision string!
@@ -382,4 +383,13 @@ builtin libraryAddDocumentNote {
   anchor object!
   body string!
   requestId string!
+}
+
+/// Read pinned feedback references, with bounded image analysis using DSL policy.
+@executor("integration.library.revisionReferences")
+@args(profile="object")
+builtin libraryRevisionReferences {
+ requestId string!
+ templateId string!
+ level string!
 }

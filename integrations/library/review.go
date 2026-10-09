@@ -196,6 +196,13 @@ func (i *Integration) addDocumentAnnotation(ctx context.Context, args map[string
 	if access == nil || access.UserId == "" {
 		return nil, fmt.Errorf("sign in to add feedback")
 	}
+	attachments, _, err := i.reviewAttachments(ctx, args["attachments"])
+	if err != nil {
+		return nil, err
+	}
+	if purpose == "note" && len(attachments) > 0 {
+		return nil, fmt.Errorf("attachments belong to review feedback")
+	}
 	author := access.UserId
 	commentID := string(id.New().MustFromMap(map[string]any{"artifact": doc.artifact, "author": author, "request": requestID}))
 	expected, valid := intArg(args["expectedVersion"])
@@ -206,7 +213,7 @@ func (i *Integration) addDocumentAnnotation(ctx context.Context, args map[string
 	}
 	if rows := extractRows(raw); len(rows) > 0 {
 		oldVersion, _ := intArg(rows[0]["versionNumber"])
-		if (stringField(rows[0], "purpose") == "note") != (purpose == "note") || stringField(rows[0], "body") != body || stringField(rows[0], "revision") != revision || oldVersion != expected || !reflect.DeepEqual(rows[0]["anchor"], anchor) {
+		if (stringField(rows[0], "purpose") == "note") != (purpose == "note") || stringField(rows[0], "body") != body || stringField(rows[0], "revision") != revision || oldVersion != expected || !reflect.DeepEqual(rows[0]["anchor"], anchor) || !sameReviewAttachments(rows[0]["attachments"], attachments) {
 			return nil, fmt.Errorf("this feedback request was already used with different content")
 		}
 		return reviewResult(map[string]any{"commentId": commentID, "saved": true})
@@ -219,7 +226,7 @@ func (i *Integration) addDocumentAnnotation(ctx context.Context, args map[string
 	}
 	_, err = reviewstore.Append(ctx, i.engine, doc.owner, map[string]any{
 		"purpose": purpose, "commentId": commentID, "artifactId": doc.artifact, "authorUserId": author,
-		"revision": doc.revision, "versionNumber": doc.version, "anchor": anchor, "body": body, "requestId": requestID,
+		"revision": doc.revision, "versionNumber": doc.version, "anchor": anchor, "body": body, "requestId": requestID, "attachments": attachments,
 	})
 	if err != nil {
 		return nil, err

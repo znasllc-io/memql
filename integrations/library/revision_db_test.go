@@ -37,6 +37,7 @@ type revisionAI struct {
 	retainedEvidenceCalls atomic.Int32
 	appCalls              atomic.Int32
 	needsResearch         bool
+	expectedReference     string
 	appError              error
 	answer                revisionAnswer
 }
@@ -49,6 +50,9 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 		}},
 		{Name: "runAgentTurn", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			data := revisionMap(args["data"])
+			if a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
+				return nil, fmt.Errorf("reference contents did not reach the DSL model step")
+			}
 			if args["templateId"] != "libraryRevisionResearch" || data["document"] == nil || data["passages"] == nil {
 				return nil, fmt.Errorf("DSL omitted evidence stage context")
 			}
@@ -65,6 +69,9 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 		}},
 		{Name: "invokePrompt", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			data := revisionMap(args["data"])
+			if a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
+				return nil, fmt.Errorf("reference contents did not reach the DSL model step")
+			}
 			if args["templateId"] == "libraryRevisionIntent" {
 				intent := "edit"
 				if a.needsResearch {
@@ -80,7 +87,11 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				return reviewResult(map[string]any{"reply": "Independent app evidence with a second source."})
 			}
 			passages, valid := data["passages"].(string)
-			if (args["templateId"] != "libraryRevisionPassages" && args["templateId"] != "libraryRevisionItem") || !strings.Contains(asString(data["evidence"]), "Evidence report for the selected feedback.") || !valid || !json.Valid([]byte(passages)) || data["document"] == nil {
+			expectedEvidence := "Editorial change:"
+			if a.needsResearch {
+				expectedEvidence = "Evidence report for the selected feedback."
+			}
+			if (args["templateId"] != "libraryRevisionPassages" && args["templateId"] != "libraryRevisionItem") || !strings.Contains(asString(data["evidence"]), expectedEvidence) || !valid || !json.Valid([]byte(passages)) || data["document"] == nil {
 				return nil, fmt.Errorf("DSL lost the review prompt or captured feedback")
 			}
 			if a.needsResearch && a.appError == nil && !strings.Contains(asString(data["evidence"]), "Independent app evidence") {
@@ -535,6 +546,7 @@ func (f *revisionDB) accepted(request string) map[string]any {
 }
 
 func testDocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas(t *testing.T, f *revisionDB) {
+	f.ai.needsResearch = true
 	source := "# Plan\n\nFirst paragraph.\n\nSecond paragraph.\n"
 	artifact, doc := f.document(source)
 	a, noteA := f.submit(artifact, doc, map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": "First paragraph.", "sourceQuote": "First paragraph."}, "Clarify the first paragraph")

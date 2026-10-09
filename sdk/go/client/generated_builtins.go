@@ -2343,6 +2343,7 @@ func LibraryAddArtifactLabelBuild(args LibraryAddArtifactLabelArgs) string {
 
 // LibraryAddDocumentComment -- Save feedback against the exact saved revision. A repeated requestId returns the original receipt; changed content under that requestId is refused.
 type LibraryAddDocumentCommentArgs struct {
+	Attachments      []map[string]any
 	ArtifactId       string
 	ExpectedVersion  int
 	ExpectedRevision string
@@ -2360,6 +2361,13 @@ func (qc *QueryClient) LibraryAddDocumentComment(ctx context.Context, args Libra
 func LibraryAddDocumentCommentBuild(args LibraryAddDocumentCommentArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin libraryAddDocumentComment(")
+	if args.Attachments != nil {
+		b.WriteString("attachments: ")
+		b.WriteString(renderMemQLValue(args.Attachments))
+	}
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
 	b.WriteString("artifactId: ")
 	b.WriteString(quoteMemQL(args.ArtifactId))
 	if b.Len() > 34 {

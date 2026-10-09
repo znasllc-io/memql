@@ -24,6 +24,15 @@
           },
           {
             "args": {
+              "level": "fast",
+              "requestId": "s-requestId",
+              "templateId": "libraryRevisionImages"
+            },
+            "kind": "builtin",
+            "name": "libraryRevisionReferences"
+          },
+          {
+            "args": {
               "data": {
                 "instruction": null
               },
@@ -90,6 +99,15 @@
             },
             "kind": "builtin",
             "name": "libraryRevisionInput"
+          },
+          {
+            "args": {
+              "level": "fast",
+              "requestId": "s-requestId",
+              "templateId": "libraryRevisionImages"
+            },
+            "kind": "builtin",
+            "name": "libraryRevisionReferences"
           },
           {
             "args": {

@@ -453,3 +453,28 @@ test("partial draft remains visibly incomplete after a pause and disappears only
  f.send({type:"viewMode",mode:"review"});assert.equal(f.el("draft-preview").hidden,false);
  f.send({type:"revision",status:{status:"succeeded",draftParts,result:{applied:true},proposal:{}}});assert.equal(f.el("draft-preview").hidden,true);f.dom.window.close();
 });
+
+test("feedback attachments survive reload, stay with their anchor and clear only after a saved receipt", () => {
+  const ref={artifactId:"ref",version:1,revision:"file:1",name:"Evidence.md",mimeType:"text/markdown",size:40,uri:"memql-file://cluster/artifacts/ref/Evidence.md"};
+  const f=fixture({draft:"Use the attached reference",anchor:{kind:"document",quote:"Entire document"},attachments:[ref]});f.document();
+  f.el("document-feedback").click();
+  assert.match(f.el("attachments").textContent??"",/Evidence.md/);
+  f.el("extend").click();f.el("add").click();
+  const posted=f.messages.find(m=>m.type==="comment");assert.equal(posted.attachments[0].artifactId,"ref");assert.equal(posted.selection.kind,"document");
+  f.send({type:"error",message:"Try again"});assert.equal(f.state().attachments.length,1);assert.equal((f.el("feedback") as HTMLTextAreaElement).value,"Use the attached reference");
+  f.send({type:"saved"});assert.equal(f.state().attachments.length,0);assert.equal(f.el("attachments").childElementCount,0);f.dom.window.close();
+});
+test("attachment uploads disable submission, preserve feedback on failure and remove without deleting files",async()=>{
+  const f=fixture();f.document();f.el("document-feedback").click();f.input("feedback","Use this image");
+  const input=f.el("attachment-input") as HTMLInputElement;
+  Object.defineProperty(input,"files",{configurable:true,value:[new f.dom.window.File(["# reference"],"reference.md",{type:"text/markdown"})]});
+  input.dispatchEvent(new f.dom.window.Event("change"));assert.equal((f.el("add") as HTMLButtonElement).disabled,true);
+  for(let n=0;n<30&&!f.messages.some(m=>m.type==="uploadAttachment");n++)await new Promise(resolve=>setTimeout(resolve,5));
+  const upload=f.messages.find(m=>m.type==="uploadAttachment");assert.ok(upload);assert.equal(f.state().draft,"Use this image");
+  f.send({type:"attachmentFailed",uploadId:upload.uploadId,message:"Upload failed"});assert.equal((f.el("add") as HTMLButtonElement).disabled,false);assert.equal(f.state().draft,"Use this image");
+  input.dispatchEvent(new f.dom.window.Event("change"));
+  for(let n=0;n<30&&f.messages.filter(m=>m.type==="uploadAttachment").length<2;n++)await new Promise(resolve=>setTimeout(resolve,5));
+  const next=f.messages.filter(m=>m.type==="uploadAttachment").at(-1);
+  f.send({type:"attachmentUploaded",uploadId:next.uploadId,attachment:{artifactId:"ref",version:1,revision:"file:1",name:"reference.md",mimeType:"text/markdown",size:11,uri:"memql-file://cluster/artifacts/ref/reference.md"}});
+  assert.equal(f.state().attachments.length,1);f.el("attachments").querySelector<HTMLButtonElement>("button")!.click();assert.equal(f.state().attachments.length,0);assert.equal(f.messages.some(m=>m.type==="deleteFile"),false);f.dom.window.close();
+});

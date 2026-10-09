@@ -1105,6 +1105,7 @@ mutation file stampLibraryFileProvenance {
 @actor
 mutation documentComment appendDocumentComment {
   args {
+    attachments []object
     purpose enum("feedback", "note")
     commentId string!
     artifactId string!
@@ -1116,7 +1117,7 @@ mutation documentComment appendDocumentComment {
     requestId string!
   }
   insert {
-    accept { purpose, artifactId, authorUserId, revision, versionNumber, anchor, body, requestId }
+    accept { purpose, artifactId, authorUserId, revision, versionNumber, anchor, body, requestId, attachments }
     stamp { id: args.commentId, ownerUserId: actor.userId }
   }
 }

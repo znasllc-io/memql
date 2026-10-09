@@ -48,11 +48,11 @@ func revisionPassages(captured map[string]any) ([]revisionPassage, error) {
 			return nil, err
 		}
 		if anchor["kind"] == "document-end" {
-			passages = append(passages, revisionPassage{StartLine: len(lines), EndLine: len(lines), Comments: []map[string]any{{"id": comment["id"], "kind": "extend", "quote": "End of document", "feedback": comment["body"], "prefix": anchor["prefix"], "suffix": anchor["suffix"], "sectionPath": anchor["sectionPath"]}}})
+			passages = append(passages, revisionPassage{StartLine: len(lines), EndLine: len(lines), Comments: []map[string]any{{"id": comment["id"], "kind": "extend", "quote": "End of document", "feedback": comment["body"], "attachments": comment["attachments"], "prefix": anchor["prefix"], "suffix": anchor["suffix"], "sectionPath": anchor["sectionPath"]}}})
 			continue
 		}
 		if anchor["kind"] == "document" {
-			passages = append(passages, revisionPassage{StartLine: 0, EndLine: len(lines), Comments: []map[string]any{{"id": comment["id"], "kind": "feedback", "scope": "document", "quote": "Entire document", "feedback": comment["body"]}}})
+			passages = append(passages, revisionPassage{StartLine: 0, EndLine: len(lines), Comments: []map[string]any{{"id": comment["id"], "kind": "feedback", "scope": "document", "quote": "Entire document", "feedback": comment["body"], "attachments": comment["attachments"]}}})
 			continue
 		}
 		start, _ := intArg(anchor["startLine"])
@@ -64,7 +64,7 @@ func revisionPassages(captured map[string]any) ([]revisionPassage, error) {
 		if anchor["intent"] == "extend" {
 			kind = "extend"
 		}
-		passages = append(passages, revisionPassage{StartLine: start, EndLine: end, Comments: []map[string]any{{"id": comment["id"], "kind": kind, "scope": anchor["scope"], "quote": anchor["quote"], "feedback": comment["body"], "prefix": anchor["prefix"], "suffix": anchor["suffix"], "sectionPath": anchor["sectionPath"]}}})
+		passages = append(passages, revisionPassage{StartLine: start, EndLine: end, Comments: []map[string]any{{"id": comment["id"], "kind": kind, "scope": anchor["scope"], "quote": anchor["quote"], "feedback": comment["body"], "attachments": comment["attachments"], "prefix": anchor["prefix"], "suffix": anchor["suffix"], "sectionPath": anchor["sectionPath"]}}})
 	}
 	sort.SliceStable(passages, func(a, b int) bool { return passages[a].StartLine < passages[b].StartLine })
 	merged := make([]revisionPassage, 0, len(passages))

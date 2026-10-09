@@ -130,10 +130,10 @@ export class Documents {
     if(typeof status.goalId!=="string")throw new Error("This revision has no work receipt.");
     await this.api.execute(document.lease,"cancelGoal",buildCancelGoal({goalId:status.goalId,reason:"Stopped document revision preparation."}));
   }
-  async comment(document: OpenDocument, anchor: Record<string, unknown>, body: string, requestId: string): Promise<void> {
+  async comment(document: OpenDocument, anchor: Record<string, unknown>, body: string, requestId: string, attachments: Record<string, unknown>[] = []): Promise<void> {
     const result = await this.api.execute(document.lease, "libraryAddDocumentComment", buildLibraryAddDocumentComment({
       artifactId: document.resource.id, expectedVersion: document.version, expectedRevision: document.revision ?? "",
-      anchor, body, requestId,
+      anchor, body, requestId, attachments,
     }));
     if (!result[0]?.saved) throw new Error("The cluster did not confirm this comment. Retry to recover its receipt.");
   }
