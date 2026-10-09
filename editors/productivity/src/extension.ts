@@ -30,7 +30,7 @@ class MemQLFiles implements vscode.FileSystemProvider {
       pending = userOperation("open the file", () => this.files.read(key)).then(async doc => {
         if (isZip(doc.resource.name, doc.mime, doc.content)) {
           const destination = await vscode.window.showSaveDialog({ saveLabel: "Download ZIP", defaultUri: vscode.Uri.file(doc.resource.name) });
-          if (destination && destination.scheme !== "memql-file") await vscode.workspace.fs.writeFile(destination, doc.content);
+          if (destination && destination.scheme !== "memql-file") await userOperation("download the ZIP", async () => { await vscode.workspace.fs.writeFile(destination, doc.content); });
           throw vscode.FileSystemError.Unavailable("ZIP files are downloaded intact and cannot be opened as editor workspaces.");
         }
         if (this.pending.get(key) === pending) this.documents.set(key, doc);
@@ -121,9 +121,15 @@ export async function activate(context: vscode.ExtensionContext) {
     ...(["source", "reading", "review", "split"] as const).map(mode => vscode.commands.registerCommand(`memql.productivity.markdown.${mode}`, async (uri?: vscode.Uri) => {
       try { await markdown.show(mode, uri); } catch (error) { void showProblem(error, "open the Markdown view"); }
     })),
-    vscode.commands.registerCommand("memql.productivity.markdown.note", () => markdown.feedbackSelection("selectionNote")),
-    vscode.commands.registerCommand("memql.productivity.markdown.feedback", () => markdown.feedbackSelection()),
-    vscode.commands.registerCommand("memql.productivity.markdown.copy", () => vscode.commands.executeCommand("editor.action.clipboardCopyAction")),
+    vscode.commands.registerCommand("memql.productivity.markdown.note", async () => {
+      try { await markdown.feedbackSelection("selectionNote"); } catch (error) { void showProblem(error, "add a note"); }
+    }),
+    vscode.commands.registerCommand("memql.productivity.markdown.feedback", async () => {
+      try { await markdown.feedbackSelection(); } catch (error) { void showProblem(error, "add feedback"); }
+    }),
+    vscode.commands.registerCommand("memql.productivity.markdown.copy", async () => {
+      try { await vscode.commands.executeCommand("editor.action.clipboardCopyAction"); } catch (error) { void showProblem(error, "copy the selection"); }
+    }),
     vscode.workspace.registerTextDocumentContentProvider("memql-review", { provideTextDocumentContent: uri => snapshots.get(uri.toString()) ?? "" }),
     vscode.commands.registerCommand("memql.productivity.compareLatest", async () => {
       try {
@@ -179,7 +185,7 @@ export async function activate(context: vscode.ExtensionContext) {
         if (uri.path !== "/open" || !resource) throw new UserInputError("Invalid MemQL file link.");
         resourceFrom(resource);
         try { await syncDesktopAppearance(params.get("appearance")); }
-        catch { void vscode.window.showWarningMessage("The editor theme could not be matched. You can change it in Settings."); }
+        catch (error) { void showProblem(error, "match the editor theme"); }
         await open(resource);
       } catch (error) { void showProblem(error, "open the file"); }
     } }),

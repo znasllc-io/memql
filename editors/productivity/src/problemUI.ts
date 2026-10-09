@@ -14,6 +14,9 @@ export async function showProblemDetails(problem: Problem): Promise<void> {
     modal: true,
     detail: `${problem.reference}\n\nSearch this reference in MemQL OS → Logs. If the cluster was unavailable, technical details remain in the MemQL Productivity Tools output here.`,
   }, "Copy reference", "Open local log");
-  if (choice === "Copy reference") await vscode.env.clipboard.writeText(problem.reference);
+  if (choice === "Copy reference") {
+    try { await vscode.env.clipboard.writeText(problem.reference); }
+    catch (error) { void showProblem(error, "copy the reference"); }
+  }
   if (choice === "Open local log") output?.show(true);
 }

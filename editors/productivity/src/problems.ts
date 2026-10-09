@@ -14,6 +14,7 @@ export function userMessage(error: unknown, operation: string): string {
   if (error instanceof UserInputError) return error.message;
   const detail = error instanceof Error ? error.message : String(error);
   if (/idle ceiling|idle.timeout|stopped producing output/i.test(detail)) return "The AI stopped responding. Try again.";
+  if (/(?:model|local runtime).*?(?:timeout|timed? out|deadline)|model_call_timeout/i.test(detail)) return "The AI couldn’t finish within the time allowed. Try a smaller request, or choose another model in Fleet.";
   if (/every_door_shut|speech recognition|transcription is not configured/i.test(detail)) return "No suitable AI model is available for this request. Check the models in Fleet, then try again.";
   if (/microphone.*(denied|permission)|permission.*microphone/i.test(detail) || /transcrib|dictat/i.test(operation) && /NotAllowedError|permission denied/i.test(error instanceof Error ? `${error.name}: ${detail}` : detail)) return "Microphone access is blocked. Allow it in your browser settings, then try dictating again.";
   if (/connection changed|another cluster|different cluster/i.test(detail)) return "The MemQL connection changed. Reconnect to the file’s cluster and compare with its latest version before saving.";

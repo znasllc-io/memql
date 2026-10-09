@@ -40,6 +40,7 @@ test("input validation stays actionable; arbitrary server strings never pass thr
   const denied=new Error("Permission denied");denied.name="NotAllowedError";
   assert.match(userMessage(denied,"transcribe your feedback"),/Microphone access/);
   assert.doesNotMatch(userMessage(denied,"copy the reference"),/Microphone/);
+  assert.match(userMessage(new Error("model_call_timeout: deadline exceeded"),"prepare changes"),/AI couldn’t finish/);
 });
 
 test("offline and refused diagnostics preserve a local reference without retries or recursion",async()=>{
