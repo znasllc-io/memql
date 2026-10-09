@@ -265,6 +265,8 @@ export interface AddClusterDeps {
    * stream, and this is where it outlives the page.
    */
   diagnostics: DiagnosticSink;
+  /** The running extension's version, included in copied installation logs. */
+  installerVersion?: string;
   /** Brings the MemQL Install output forward ("Open in Output"). */
   showDiagnostics?: () => void;
   /** Repaints the Clusters view once an entry lands. */
@@ -903,6 +905,11 @@ export class AddClusterPanel {
     this.runStartedAt = Date.now();
     this.runEndedAt = undefined;
     this.runError = "";
+    if (this.deps.installerVersion) {
+      const line = `MemQL installer ${this.deps.installerVersion} (${process.platform}/${process.arch})`;
+      this.deps.diagnostics.appendLine(line);
+      this.queueLine(this.runLog.add("installer", "Installer", line));
+    }
     // The bar starts from this run, not from where the last one ended: a
     // reloaded page is sent the latest progress, and it must be this one's.
     this.pushProgress();

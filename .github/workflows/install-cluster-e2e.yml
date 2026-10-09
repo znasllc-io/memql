@@ -1163,35 +1163,42 @@ jobs:
       # effort throughout: this step must never be the reason a run is red.
       - name: Cluster diagnostics
         if: failure()
+        timeout-minutes: 4
         run: |
           set +e
           export PATH="$HOME/.memql/bin:$PATH"
+          function diagnostic_kubectl() {
+            timeout --signal=TERM --kill-after=5s 15s \
+              sudo -n -E env "HOME=$HOME" "PATH=$PATH" \
+              kubectl --request-timeout=10s "$@"
+          }
           {
             echo "=== k3d clusters ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" k3d cluster list
+            timeout --signal=TERM --kill-after=5s 15s \
+              sudo -n -E env "HOME=$HOME" "PATH=$PATH" k3d cluster list
             # The node's allocatable versus what the manifests request. A
             # hosted runner is 4 cores and 16 GB, and the failure that shape
             # produces is pods Pending on `Insufficient cpu` -- which arrives as
             # "workloadsReady did not hold" and names nothing.
             echo "=== node capacity and allocation ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl describe nodes
+            diagnostic_kubectl describe nodes
             echo "=== pods ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get pods -A -o wide
+            diagnostic_kubectl get pods -A -o wide
             echo "=== argocd applications ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get applications -A -o wide
+            diagnostic_kubectl get applications -A -o wide
             echo "=== recent events ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get events -A --sort-by=.lastTimestamp | tail -60
+            diagnostic_kubectl get events -A --sort-by=.lastTimestamp | tail -60
             echo "=== pods that are not Running ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get pods -A \
+            diagnostic_kubectl get pods -A \
               --field-selector=status.phase!=Running -o wide
             echo "=== the memql namespace, described ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl describe pods -n memql
+            diagnostic_kubectl describe pods -n memql
             # Where pipeline steps run: what a failed `pipelines` leg left, and
             # why its pods did what they did. Empty on the other legs.
             echo "=== the memql-pipelines namespace ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get jobs,pods,secrets,pvc,resourcequota -n memql-pipelines -o wide
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl describe pods -n memql-pipelines
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get events -n memql-pipelines --sort-by=.lastTimestamp
+            diagnostic_kubectl get jobs,pods,secrets,pvc,resourcequota -n memql-pipelines -o wide
+            diagnostic_kubectl describe pods -n memql-pipelines
+            diagnostic_kubectl get events -n memql-pipelines --sort-by=.lastTimestamp
           } > "$RUNNER_TEMP/diagnostics.txt" 2>&1
           cat "$RUNNER_TEMP/diagnostics.txt"
           exit 0
@@ -1206,13 +1213,15 @@ jobs:
       # `if: always()` and after the diff, never before it.
       - name: Tear the cluster down whatever happened
         if: always()
+        timeout-minutes: 2
         run: |
           set +e
           export PATH="$HOME/.memql/bin:$PATH"
           # A successful uninstall already removed the binary, which is the
           # common case and not worth a `command not found` in the log.
           if command -v k3d >/dev/null 2>&1; then
-            sudo -E env "HOME=$HOME" "PATH=$PATH" k3d cluster delete memql
+            timeout --signal=TERM --kill-after=5s 90s \
+              sudo -n -E env "HOME=$HOME" "PATH=$PATH" k3d cluster delete memql
           else
             echo "no k3d binary on PATH -- the uninstall took it, so there is nothing to tear down"
           fi

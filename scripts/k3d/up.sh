@@ -1062,11 +1062,21 @@ function operator_diagnostics() {
     local ns="$1"
     argocd_app_state >&2
     printf '\n' >&2
-    kubectl get application "$APP_NAME" -n "$ARGOCD_NAMESPACE" \
+    kubectl get application "$APP_NAME" -n "$ARGOCD_NAMESPACE" --request-timeout=10s \
         -o jsonpath='{.status.operationState.phase}{": "}{.status.operationState.message}{"\n"}{range .status.operationState.syncResult.resources[*]}{.kind}{"/"}{.name}{": "}{.message}{"\n"}{end}' >&2 || true
-    kubectl get pods -n "$ARGOCD_NAMESPACE" >&2 || true
-    kubectl get pods -n "$ns" >&2 || true
-    kubectl get events -n "$ns" --sort-by=.lastTimestamp 2>/dev/null | tail -15 >&2 || true
+    kubectl get pods -n "$ARGOCD_NAMESPACE" --request-timeout=10s >&2 || true
+    kubectl get pods -n "$ns" --request-timeout=10s >&2 || true
+    kubectl get events -n "$ns" --request-timeout=10s --sort-by=.lastTimestamp 2>/dev/null | tail -15 >&2 || true
+    # Running pods do not prove that the controller can reach the API, Redis or
+    # the repository server. With no Application status, these logs may be the
+    # only account of why reconciliation never started. Bound each read so a
+    # broken API cannot turn failure reporting into another indefinite wait.
+    local resource
+    for resource in statefulset/argocd-application-controller deployment/argocd-repo-server; do
+        info "Recent ${resource} logs:"
+        kubectl logs "$resource" -n "$ARGOCD_NAMESPACE" --request-timeout=10s \
+            --pod-running-timeout=5s --tail=50 >&2 || true
+    done
 }
 
 # install_operator_stack -- register cert-manager and CloudNativePG, in that
@@ -1170,11 +1180,11 @@ YAML
 function argocd_app_state() {
     local sync health conds
     sync="$(kubectl get application "${APP_NAME}" -n "${ARGOCD_NAMESPACE}" \
-        -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
+        --request-timeout=10s -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
     health="$(kubectl get application "${APP_NAME}" -n "${ARGOCD_NAMESPACE}" \
-        -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
+        --request-timeout=10s -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
     conds="$(kubectl get application "${APP_NAME}" -n "${ARGOCD_NAMESPACE}" \
-        -o jsonpath='{range .status.conditions[*]}{.type}: {.message}{"; "}{end}' 2>/dev/null || true)"
+        --request-timeout=10s -o jsonpath='{range .status.conditions[*]}{.type}: {.message}{"; "}{end}' 2>/dev/null || true)"
     printf 'Application %s sync=%s health=%s%s' \
         "${APP_NAME}" "${sync:-<none>}" "${health:-<none>}" \
         "${conds:+ conditions: ${conds}}"
@@ -1220,6 +1230,7 @@ function argocd_retryable_source_error() {
 # The optional absolute deadline lets operators share this wait with rollout.
 function wait_for_app_comparison() {
     local deadline="${1:-$((SECONDS + APP_COMPARE_TIMEOUT))}"
+    local started=$SECONDS
     local snapshot sync="" refresh="" err="" confirmations=0 tick=3
     local retries=0 next_retry=0 backoff=5 remaining
     local -r APP_ERROR_CONFIRMATIONS=3 MAX_SOURCE_RETRIES=3
@@ -1281,7 +1292,7 @@ function wait_for_app_comparison() {
     # the same class as a slow image pull -- and this script does not abort a
     # developer's cluster over slow. It is recorded instead, so the reason
     # travels even if the namespace turns out empty.
-    warn "ArgoCD produced no comparison for '${APP_NAME}' within ${APP_COMPARE_TIMEOUT}s."
+    warn "ArgoCD produced no comparison for '${APP_NAME}' after $((SECONDS - started))s."
     warn "  $(argocd_app_state)"
 }
 

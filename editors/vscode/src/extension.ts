@@ -2562,6 +2562,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     receiptFile: string;
     removeRegistryEntry: (name: string) => Promise<ClusterConfig>;
     diagnostics: DiagnosticSink;
+    installerVersion: string;
     showDiagnostics: () => void;
     listLocalClusters: () => Promise<string[]>;
     isSignedIn: (name: string) => boolean;
@@ -2572,6 +2573,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // The MemQL Install channel (memql#4194): where every run's full,
     // redacted stderr lives. The page's "Open in Output" brings it forward.
     diagnostics: sinkFor(installOutput),
+    installerVersion: context.extension.packageJSON.version,
     showDiagnostics: () => installOutput?.show(true),
     // What lets the uninstall preview see a cluster that has no install
     // record -- `make up`'s, or one adopted into the list -- rather than
