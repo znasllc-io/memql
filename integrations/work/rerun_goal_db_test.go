@@ -17,7 +17,7 @@ func TestRerunCancelledGoalAcrossReplicas(t *testing.T) {
 	goalID := rowString(a.runRow(t, runID), "goalId")
 	_, err := a.i.handleCancelGoal(actorCtx(a.owner), map[string]any{"goalId": goalID, "reason": "stop this attempt"}, 0)
 	require.NoError(t, err)
-	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "status": runStatusCancelled, "cancelRequested": true, "spent": map[string]any{"modelCalls": 3}})
+	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "status": runStatusWaiting, "cancelRequested": true, "spent": map[string]any{"modelCalls": 3}})
 	// Prime the receiving replica with the closed version, then advance its
 	// timestamp beyond this host's clock. Reopening must beat both hazards.
 	old, err := b.i.store().goalForOwner(actorCtx(a.owner), goalID)

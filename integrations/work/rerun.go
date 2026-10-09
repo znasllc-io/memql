@@ -58,7 +58,10 @@ func (i *Integration) handleRerunStep(ctx context.Context, args map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	if err := run.requireFinished(); err != nil {
+	// A cancelled wait has no executing step to finish. Its cancelled
+	// flag also prevents the parked approval/retry from dispatching it.
+	stoppedWait := rowString(run.row, "status") == runStatusWaiting && run.row["cancelRequested"] == true
+	if err := run.requireFinished(); err != nil && !stoppedWait {
 		return nil, err
 	}
 	if err := run.requireExecutable(); err != nil {

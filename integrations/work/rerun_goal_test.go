@@ -13,6 +13,7 @@ func TestRerunReopensOwnedGoalBeforeDispatch(t *testing.T) {
 		missing, writeFails bool
 	}{
 		{name: "closed", status: "closed", owner: actOwner},
+		{name: "cancelled wait", status: "closed", owner: actOwner},
 		{name: "already open", status: "open", owner: actOwner},
 		{name: "missing", missing: true},
 		{name: "another owner", status: "closed", owner: "someone-else"},
@@ -23,6 +24,9 @@ func TestRerunReopensOwnedGoalBeforeDispatch(t *testing.T) {
 			addPristineRun(steps, actRunId, "fetch", "draft", "publish")
 			run := actRunRow(runStatusCancelled)
 			run["cancelRequested"] = true
+			if tc.name == "cancelled wait" {
+				run["status"] = runStatusWaiting
+			}
 			eng.reply("workRunForOwner", run)
 			future := testNow.Add(time.Minute)
 			if tc.missing {
