@@ -112,6 +112,9 @@ func TestReviewAttachmentsAcrossReplicas(t *testing.T) {
 	if err = f.execute(f.other, request, false); !errors.As(err, &wait) {
 		t.Fatalf("attachment workflow did not reach review: %v", err)
 	}
+	if f.ai.researchCalls.Load() != 0 || f.ai.appCalls.Load() != 0 {
+		t.Fatal("image placement entered unnecessary external research")
+	}
 	if vision.calls != 1 {
 		t.Fatalf("vision calls: %d", vision.calls)
 	}

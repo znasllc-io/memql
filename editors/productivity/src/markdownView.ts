@@ -675,10 +675,10 @@ function renderRevisionContent() {
     const previous = document.createElement("details"); previous.className = "earlier";
     previous.append(textElement("summary", "Previous review")); root.append(previous); panel = previous;
   }
-  const phase = status.cancelRequested ? "Stop requested" : status.decision === "rejected" ? "Changes declined" : status.status === "succeeded" ? status.result?.applied ? "Changes applied" : "No changes needed"
+  const phase = status.cancelRequested ? (["cancelled", "failed"].includes(status.status) ? "Preparation stopped" : "Stop requested") : status.decision === "rejected" ? "Changes declined" : status.status === "succeeded" ? status.result?.applied ? "Changes applied" : "No changes needed"
     : status.status === "failed" || status.status === "cancelled" ? "Couldn’t prepare changes" : awaiting ? "Proposed changes" : retrying ? "Retrying automatically…" : paused ? "Preparation paused" : status.decision === "approved" ? "Applying changes…" : "Preparing changes…";
   panel.append(textElement("h3", phase, !terminal && !awaiting && !paused ? "phase busy" : ""));
-  if (status.problem && (retrying || paused || ["failed","cancelled"].includes(status.status))) {
+  if (status.problem && !status.cancelRequested && (retrying || paused || ["failed","cancelled"].includes(status.status))) {
     const notice=textElement("div","","review-error");
     renderProblem(notice, {...status.problem, message: retrying ? "The last attempt couldn’t finish. MemQL will retry automatically. Your feedback is saved." : paused ? `${status.problem.message} Your feedback is saved. Stop this attempt, then propose changes again.` : status.problem.message}, value=>api.postMessage(value));
     panel.append(notice);

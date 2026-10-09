@@ -3,6 +3,8 @@ package library
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -19,7 +21,6 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
-	"github.com/znasllc-io/memql/core/id"
 	_ "golang.org/x/image/webp"
 )
 
@@ -28,14 +29,14 @@ const reviewAttachmentBytes = 16 << 20
 const reviewMarkdownBytes = 32 << 10
 
 type reviewAttachment struct {
-	ArtifactID  string `json:"artifactId"`
-	Version     int    `json:"version"`
-	Revision    string `json:"revision"`
-	Fingerprint string `json:"fingerprint,omitempty"`
-	Name        string `json:"name,omitempty"`
-	MIME        string `json:"mimeType,omitempty"`
-	URI         string `json:"uri,omitempty"`
-	Size        int    `json:"size,omitempty"`
+	ArtifactID string `json:"artifactId"`
+	Version    int    `json:"version"`
+	Revision   string `json:"revision"`
+	SHA256     string `json:"sha256,omitempty"`
+	Name       string `json:"name,omitempty"`
+	MIME       string `json:"mimeType,omitempty"`
+	URI        string `json:"uri,omitempty"`
+	Size       int    `json:"size,omitempty"`
 }
 
 // Refs confer no authority. Resolve both index and backing rows as the caller,
@@ -104,12 +105,12 @@ func (i *Integration) reviewAttachments(ctx context.Context, input any) ([]revie
 		if total > reviewAttachmentBytes || markdownTotal > 64<<10 {
 			return nil, nil, fmt.Errorf("attachments exceed 16 MiB, or 64 KiB of Markdown")
 		}
-		// Use the shared content identity without retaining per-byte cache entries.
-		hash := string(id.NewUntracked().FromBytes(content))
-		if ref.Fingerprint != "" && ref.Fingerprint != hash {
+		digest := sha256.Sum256(content)
+		hash := hex.EncodeToString(digest[:])
+		if ref.SHA256 != "" && ref.SHA256 != hash {
 			return nil, nil, fmt.Errorf("an attachment's contents changed; attach its current version")
 		}
-		*ref = reviewAttachment{ArtifactID: doc.artifact, Version: doc.version, Revision: doc.revision, Fingerprint: hash, Name: name, MIME: mime, Size: len(content), URI: "../" + url.PathEscape(doc.artifact) + "/" + url.PathEscape(name)}
+		*ref = reviewAttachment{ArtifactID: doc.artifact, Version: doc.version, Revision: doc.revision, SHA256: hash, Name: name, MIME: mime, Size: len(content), URI: "../" + url.PathEscape(doc.artifact) + "/" + url.PathEscape(name)}
 		contents = append(contents, content)
 	}
 	return refs, contents, nil
