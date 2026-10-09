@@ -76,12 +76,40 @@ tool navigateOS {
 @description("Search original conversation messages and checkpoint sources in this work run by a word, name or identifier.")
 @executor("recallWorkHistory")
 @args(profile="object")
-builtin workRecallHistory { search string! }
+builtin workRecallHistory {
+ search string
+ checkpoint string
+ messageIndex int
+ offset int
+ maxChars int
+ cursor string
+}
 
 /// Recover exact evidence from the original messages of the current work run.
-@handler(type="query", query="query workRecallHistory(search: args.search)")
+@handler(type="query", query="query workRecallHistory(search: args.search, checkpoint: args.checkpoint, messageIndex: args.messageIndex, offset: args.offset, maxChars: args.maxChars, cursor: args.cursor)")
 @requiresAgentRole("assistant", "specialist")
-tool recallWorkHistory { search string! @description("An exact name, word, identifier or phrase from earlier conversation or tool output.") }
+tool recallWorkHistory {
+ search string @description("A name, word, identifier or phrase from earlier conversation or tool output. Omit when reading an exact checkpoint.")
+ checkpoint string @description("Exact archived reference returned by a checkpoint or previous search; with messageIndex selects one original message.")
+ messageIndex int @description("Zero-based source message index, default 0, for an exact checkpoint read.")
+ offset int @description("Unicode character offset in the serialized source message, default 0 for exact reads. Use nextOffset to continue.")
+ maxChars int @description("Characters per excerpt, default 1600, maximum 4000. Entire response excerpts share an 8000-character budget.")
+ cursor string @description("Continue searching older archive records using the prior response's cursor. An empty page with hasMore is not an exhausted search.")
+}
+
+/// Read only context archives, one bounded page; execution-progress snapshots
+/// are not pulled into memory by a history search. Authority remains per owner.
+@actor
+query observation workContextSourcesForOwnerRun {
+ args {
+  runId string!
+  fingerprint string!
+ }
+ filter row => row.ownerUserId == actor.userId && row.runId == args.runId && row.?data.sourceMessages != nil && (args.fingerprint == "" || row.?data.contextHash == args.fingerprint)
+ sort "row.createdAt", "desc"
+ paginate 4
+ shape workObservationFull
+}
 
 /// Reuse a checkpoint only for these exact source bytes and this owner.
 @actor

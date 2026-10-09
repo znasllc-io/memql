@@ -42,7 +42,8 @@ func TestWorkCheckpointRetainsSourcesReusesExactMemoryAndIsolatesOwners(t *testi
 	require.NoError(t, err)
 	require.Less(t, WorkContextSize(compacted, nil), 15001)
 	require.Equal(t, messages[len(messages)-6:], compacted[len(compacted)-6:])
-	require.Contains(t, compacted[1].Content, "owner@example.test")
+	require.Equal(t, messages[1], compacted[1], "the original request stays exact")
+	require.Contains(t, compacted[2].Content, "owner@example.test")
 	calls := model.calls
 	require.Positive(t, calls)
 	again, err := e.CompactWorkContext(ctx, messages, nil, 15000)
@@ -53,7 +54,7 @@ func TestWorkCheckpointRetainsSourcesReusesExactMemoryAndIsolatesOwners(t *testi
 	rows, err := e.workRows(ctx, "workObservationsForOwnerRun", run.RunId)
 	require.NoError(t, err)
 	require.NotEmpty(t, rows)
-	require.Contains(t, fmt.Sprint(rows), "Turn 0: CNAS", "original source must remain recoverable")
+	require.Contains(t, fmt.Sprint(rows), "Turn 1: CNAS", "original source must remain recoverable")
 	stranger := auth.ContextWithUserActor(context.Background(), "v1:identity:user:"+id.NewShortId())
 	rows, err = e.workRows(stranger, "workObservationsForOwnerRun", run.RunId)
 	require.NoError(t, err)

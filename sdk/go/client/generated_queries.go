@@ -12811,6 +12811,34 @@ func WorkComputerScopesForOwnerRunBuild(args WorkComputerScopesForOwnerRunArgs) 
 	return b.String()
 }
 
+// WorkContextSourcesForOwnerRun -- Read only context archives, one bounded page; execution-progress snapshots are not pulled into memory by a history search. Authority remains per owner.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workContextSourcesForOwnerRun"] in generated_concepts.go).
+type WorkContextSourcesForOwnerRunArgs struct {
+	RunId       string
+	Fingerprint string
+}
+
+// WorkContextSourcesForOwnerRun calls the engine query workContextSourcesForOwnerRun.
+func (qc *QueryClient) WorkContextSourcesForOwnerRun(ctx context.Context, args WorkContextSourcesForOwnerRunArgs) (*Result, error) {
+	call := WorkContextSourcesForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workContextSourcesForOwnerRun", call)
+}
+
+func WorkContextSourcesForOwnerRunBuild(args WorkContextSourcesForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workContextSourcesForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("fingerprint: ")
+	b.WriteString(quoteMemQL(args.Fingerprint))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkContinuationForOwnerRun -- Latest durable tool exchange checkpoint for this owner's step. Separate receipts cannot overwrite concurrent run cancellation or human decisions.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workContinuationForOwnerRun"] in generated_concepts.go).

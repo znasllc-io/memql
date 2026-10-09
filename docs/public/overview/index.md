@@ -31,7 +31,7 @@ use the [language reference](../language/memql.md) as you write. The
 [training](../language/training.md) explains when a definition becomes live.
 
 - **Data:** [validation](../concepts/data-validation.md), [identifiers](../concepts/identifiers.md), [events](../concepts/events.md), [data origins](../concepts/data-origins.md).
-- **AI and work:** [routing](../operate/ai-routing.md), [cost control](../ai/llm-cost-control.md), [agent harness](why-memql-harness.md), [audio streaming](../build/audio-streaming.md).
+- **AI and work:** [routing](../operate/ai-routing.md), [cost control](../ai/llm-cost-control.md), [context and recovery](../ai/work-context-and-recovery.md), [agent harness](why-memql-harness.md), [audio streaming](../build/audio-streaming.md).
 - **Applications:** [clients](../concepts/clients.md), [site hosting](../operate/site-hosting.md), [packs](../build/building-a-pack.md), [Go SDK](../../../sdk/go), [TypeScript SDK](../../../sdk/ts/README.md).
 
 ## Operate a cluster

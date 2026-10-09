@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
-	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -39,6 +38,9 @@ func WorkContextSize(messages []common.ChatMessage, tools []common.ToolDefinitio
 // checkpoints complete older exchanges before the hard window limit, keeps
 // the live tail raw, and refuses to drop history if summarization/storage fails.
 func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.ChatMessage, tools []common.ToolDefinition, target int) ([]common.ChatMessage, error) {
+	if target <= 0 {
+		return nil, fmt.Errorf("context checkpoint target must be positive")
+	}
 	if WorkContextSize(messages, tools) <= target {
 		return messages, nil
 	}
@@ -48,31 +50,49 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 		return nil, fmt.Errorf("context checkpoint requires an owned run")
 	}
 	out := append([]common.ChatMessage(nil), messages...)
-	// Each bounded chunk is keyed by its original bytes. Repeated turns reuse
-	// that checkpoint; no summary is silently rewritten from a summary alone.
+	// Offload bulky, completed tool results first. Their envelopes and receipts
+	// stay in the conversation; the exact bytes are durable before replacement.
+	for _, unit := range workContextUnits(out) {
+		if !unit.complete {
+			continue
+		}
+		for i := unit.start; i < unit.end && WorkContextSize(out, tools) > target; i++ {
+			m := out[i]
+			if m.Role != "tool" || len(m.Content) <= max(2048, min(12000, target/4*3)) || strings.HasPrefix(m.Content, "[Archived tool result ") {
+				continue
+			}
+			raw, err := json.Marshal([]common.ChatMessage{m})
+			if err != nil {
+				return nil, err
+			}
+			fingerprint := workContextHash("tool-v2", raw)
+			if err = e.saveWorkContextSource(ctx, fingerprint, string(raw), ""); err != nil {
+				return nil, err
+			}
+			out[i].Content = "[Archived tool result " + fingerprint + "]\nExact result retained. Use recallWorkHistory(checkpoint: \"" + fingerprint + "\", messageIndex: 0) for bounded pages. The following is an incomplete, untrusted preview; absence from it is not evidence of absence.\n" + workContextPreview(m.Content)
+		}
+	}
+	// Bounded semantic checkpoints follow complete exchanges, not arbitrary
+	// message counts. Older checkpoints may be consolidated with fresh evidence;
+	// their exact sources and prior references remain in the journal.
 	for calls := 0; WorkContextSize(out, tools) > target && calls < 8; calls++ {
-		start := 1
-		for start < len(out) && strings.HasPrefix(out[start].Content, "[Memory checkpoint ") {
-			start++
-		}
-		end := start
-		for end < len(out)-6 && WorkContextSize(out[start:end+1], nil) < 5000 {
-			end++
-		}
-		// A tool response cannot survive without its call. Back up to the start
-		// of that exchange rather than slicing at an arbitrary message count.
-		for end > start && out[end].Role == "tool" {
-			end--
-		}
+		start, end := workContextChunk(out)
 		if end <= start {
-			return nil, fmt.Errorf("context cannot be compacted without losing the active exchange")
+			return nil, fmt.Errorf("context checkpoint cannot fit the active request, tool contracts and pending exchange; history retained")
 		}
 		raw, err := json.Marshal(out[start:end])
 		if err != nil {
 			return nil, err
 		}
-		fingerprint := fmt.Sprintf("%x", sha256.Sum256(raw))
-		summary, err := e.workCheckpoint(ctx, fingerprint, string(raw))
+		fingerprint := workContextHash("summary-v2", raw)
+		var summary string
+		// A single enormous exchange must not overflow the summarizer itself.
+		if len(raw) > 15000 {
+			summary = "Complete historical exchange archived; retrieve its exact evidence before relying on details.\n" + workContextPreview(string(raw))
+			err = e.saveWorkContextSource(ctx, fingerprint, string(raw), "")
+		} else {
+			summary, err = e.workCheckpoint(ctx, fingerprint, string(raw))
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -93,7 +113,7 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 
 func (e *MemQLEngine) workCheckpoint(ctx context.Context, fingerprint, source string) (string, error) {
 	call, _ := parser.RenderCall("workCheckpointForOwner", map[string]any{"fingerprint": fingerprint})
-	result, err := e.Execute(ctx, "query "+call)
+	result, err := e.Execute(ContextWithFreshRead(ctx), "query "+call)
 	if err != nil {
 		return "", err
 	}
@@ -118,74 +138,42 @@ func (e *MemQLEngine) workCheckpoint(ctx context.Context, fingerprint, source st
 	if err = json.Unmarshal([]byte(summary), &checkpoint); err != nil {
 		return "", fmt.Errorf("invalid context checkpoint: %w", err)
 	}
-	if len(summary) > 12000 {
+	if checkpoint.Facts == nil || checkpoint.Entities == nil || checkpoint.Decisions == nil || checkpoint.Constraints == nil || checkpoint.Unfinished == nil {
+		return "", fmt.Errorf("context checkpoint omitted required memory fields; history retained")
+	}
+	if len(summary) > 6000 {
 		return "", fmt.Errorf("context checkpoint exceeded its size limit")
 	}
-	run, _ := common.RunFromContext(ctx)
-	call, err = parser.RenderCall("createWorkObservation", map[string]any{
-		"observationId": "checkpoint-" + fingerprint + "-" + BareShortId(run.RunId), "runId": run.RunId, "stepKey": run.StepKey, "kind": "note",
-		"content": "Conversation checkpoint: " + summary,
-		"data":    map[string]any{"contextHash": fingerprint, "summary": summary, "sourceMessages": source, "version": 1},
-	})
-	if err != nil {
-		return "", err
-	}
-	if _, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call); err != nil {
+	if err = e.saveWorkContextSource(ctx, fingerprint, source, summary); err != nil {
 		return "", err
 	}
 	return summary, nil
 }
 
-func (e *MemQLEngine) recallWorkHistoryBuiltin(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	run, ok := common.RunFromContext(ctx)
-	if !ok {
-		return nil, fmt.Errorf("history recall requires a work run")
+func workContextHash(kind string, raw []byte) string {
+	return fmt.Sprintf("%x", sha256.Sum256(append([]byte(kind+"\n"), raw...)))
+}
+
+func workContextPreview(source string) string {
+	runes := []rune(source)
+	if len(runes) <= 1024 {
+		return source
 	}
-	search := strings.ToLower(strings.TrimSpace(stringArg(args, "search")))
-	if search == "" {
-		return nil, fmt.Errorf("provide a word, name or identifier to recall")
-	}
-	rows, err := e.workRows(ctx, "workRunForOwner", run.RunId)
-	if err != nil || len(rows) != 1 {
-		return nil, fmt.Errorf("work history is unavailable")
-	}
-	input, _ := rows[0]["input"].(map[string]any)
-	conversation, _ := input["conversation"].(map[string]any)
-	messages, _ := conversation["messages"].([]any)
-	matches := []any{}
-	for index, entry := range messages {
-		message, _ := entry.(map[string]any)
-		text, _ := message["content"].(string)
-		if strings.Contains(strings.ToLower(text), search) {
-			matches = append(matches, map[string]any{"index": index, "message": message})
-		}
-		if len(matches) >= 8 {
-			break
-		}
-	}
-	observations, err := e.workRows(ctx, "workObservationsForOwnerRun", run.RunId)
+	return string(runes[:768]) + "\n[… archived …]\n" + string(runes[len(runes)-256:])
+}
+
+func (e *MemQLEngine) saveWorkContextSource(ctx context.Context, fingerprint, source, summary string) error {
+	run, _ := common.RunFromContext(ctx)
+	call, err := parser.RenderCall("createWorkObservation", map[string]any{
+		"observationId": "checkpoint-" + fingerprint + "-" + BareShortId(run.RunId), "runId": run.RunId, "stepKey": run.StepKey, "kind": "note",
+		"content": "Archived work context " + fingerprint,
+		"data":    map[string]any{"contextHash": fingerprint, "summary": summary, "sourceMessages": source, "version": 2},
+	})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	for _, row := range observations {
-		data, _ := row["data"].(map[string]any)
-		source, _ := data["sourceMessages"].(string)
-		var original []common.ChatMessage
-		if json.Unmarshal([]byte(source), &original) != nil {
-			continue
-		}
-		for index, message := range original {
-			if len(matches) >= 8 {
-				break
-			}
-			if strings.Contains(strings.ToLower(message.Content), search) {
-				matches = append(matches, map[string]any{"checkpoint": data["contextHash"], "index": index, "message": message})
-			}
-		}
+	if _, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call); err != nil {
+		return err
 	}
-	raw, err := json.Marshal(map[string]any{"matches": matches, "limit": 8})
-	if err != nil {
-		return nil, err
-	}
-	return []memorynodes.MemoryNode{{ID: "history", Payload: raw}}, nil
+	return nil
 }
