@@ -279,12 +279,12 @@ automation reviseLibraryDocument {
  combinedEvidence := "Independent headless report:\n" + evidence.headless + "\nIndependent app report:\n" + evidence.app
 
  if captured.amendment != nil {
-  analysis := builtin ai(templateId: "libraryRevisionItem", data: {
+  analysis := builtin ai(templateId: "libraryRevisionItem", progress: true, data: {
    document: captured.content, passages: captured.passagesJSON, instruction: captured.amendment.instruction,
    previous: captured.amendment.edits, evidence: combinedEvidence
   })
  } else {
-  analysis := builtin ai(templateId: "libraryRevisionPassages", data: {
+  analysis := builtin ai(templateId: "libraryRevisionPassages", progress: true, data: {
    document: captured.content, passages: captured.passagesJSON, instruction: captured.instruction, evidence: combinedEvidence
   })
  }

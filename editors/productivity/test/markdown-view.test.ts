@@ -34,6 +34,66 @@ test("section and footnote links focus and highlight their destination without c
   assert.equal(f.messages.filter(m => m.type === "external").length, 0);
   f.dom.window.close();
 });
+test("empty documents replace boundary buttons with one creation flow and retain dictation and drafts", () => {
+  const f = fixture();
+  assert.equal(f.el("document-empty").hidden, true, "loading must not look empty");
+  f.document(" \n\t");
+  assert.equal(f.el("document-empty").hidden, false);
+  assert.equal(f.el("document-feedback").hidden, true);
+  assert.equal(f.el("extend").hidden, true);
+  f.el("empty-create").click();
+  assert.equal(f.el("composer-title").textContent, "Create your document");
+  assert.equal(f.el("feedback").getAttribute("aria-label"), "Document description");
+  f.input("feedback", "Research membranes for a technical audience.");
+  f.send({type:"dictationAvailable",available:true});
+  f.el("dictate").click();
+  assert.equal(f.messages.at(-1).type,"dictationStart");
+  f.send({type:"dictation",phase:"idle",text:"Include primary sources."});
+  f.el("add").click();
+  const message=f.messages.find(m=>m.type==="comment");
+  assert.equal(message.selection.kind,"document");
+  assert.match(message.body,/Include primary sources/);
+  f.send({type:"saved"});
+  f.send({type:"comments",rows:[{id:"brief",body:message.body,anchor:message.selection}]});
+  f.el("review-close").click();
+  f.el("empty-create").click();
+  assert.equal(f.el("review-panel").hidden,false);
+  assert.equal(f.el("composer").hidden,true,"a saved request must not start another draft");
+  f.el("prepare-revision").click();
+  assert.equal(f.messages.at(-1).type,"prepareRevision");
+  assert.deepEqual(Array.from(f.messages.at(-1).commentIds),["brief"]);
+  f.dom.window.close();
+});
+test("empty-state progress opens the current review without starting another generation", () => {
+  const f=fixture();f.document("");
+  f.send({type:"revision",status:{status:"running",proposal:{}}});
+  f.send({type:"revisionIdle"});
+  assert.equal(f.el("empty-title").textContent,"Creating your draft");
+  f.el("review-close").click();const before=f.messages.length;
+  f.el("empty-create").click();assert.equal(f.el("review-panel").hidden,false);
+  assert.equal(f.messages.slice(before).some(m=>["comment","prepareRevision"].includes(m.type)),false);
+  f.send({type:"revision",status:{status:"waiting",prepared:true,proposal:{}}});
+  assert.equal(f.el("empty-title").textContent,"Draft preparation paused");
+  f.send({type:"revision",status:{status:"waiting",approvalId:"approval",proposal:{}}});
+  assert.equal(f.el("empty-title").textContent,"Your draft is ready");
+  f.document("# Generated document\n\nEvidence.",18);
+  assert.equal(f.el("document-empty").hidden,true);
+  assert.equal(f.el("extend").hidden,false);
+  assert.equal(f.el("document-feedback").hidden,false);
+  f.dom.window.close();
+});
+test("empty reading and history views keep creation behind the appropriate mode", () => {
+  const f=fixture();f.document("");f.send({type:"viewMode",mode:"reading"});
+  f.el("empty-create").click();assert.equal(f.messages.at(-1).type,"review");
+  assert.equal(f.el("composer").hidden,true);
+  f.el("empty-source").click();assert.equal(f.messages.at(-1).type,"source");
+  f.document("",18,false);assert.equal(f.el("empty-create").hidden,true);
+  f.send({type:"historyVersion",version:1,html:""});
+  assert.equal(f.el("document-empty").hidden,true);
+  f.send({type:"historyCurrent"});
+  assert.equal(f.el("document-empty").hidden,false);
+  f.dom.window.close();
+});
 test("selection tools appear contextually and preserve exact rendered offsets",()=>{
   const f=fixture();f.document();assert.equal(f.doc.querySelector("#feedback-toggle"),null);assert.equal((f.el("annotate") as HTMLButtonElement).disabled,true);
   f.select();assert.equal(f.el("selection-tools").hidden,false);f.el("selection-feedback").click();assert.equal(f.el("composer").hidden,false);
@@ -332,4 +392,64 @@ test("automatic retries have a stable details panel and never offer manual resum
  f.send({type:"revision",status:{...status,status:"running",waitingOn:null,retryCount:1}});assert.match(f.el("revision").textContent!,/Retrying automatically/);
  f.send({type:"revision",status:{...status,status:"running",waitingOn:null,retryCount:0}});assert.equal(f.doc.querySelector(".problem-details"),null);
  f.dom.window.close();
+});
+
+
+test("whole-document skeleton tracks work without replacing source and ends for review, failure and Read",()=>{
+ const f=fixture();assert.equal(f.el("document-progress").hidden,false);
+ f.document();const html=f.el("content").querySelector("p")!.innerHTML;
+ const row={id:"whole",body:"Rewrite",anchor:{kind:"document",quote:"Entire document"}};
+ f.send({type:"comments",rows:[row]});f.el("prepare-revision").click();
+ assert.equal(f.el("document-progress").hidden,false);assert.equal(f.el("content").querySelector("p")!.innerHTML,html);
+ for(const id of ["source","document-feedback","extend","prepare-revision"])assert.equal((f.el(id) as HTMLButtonElement).disabled,true,id);
+ f.send({type:"revision",status:{status:"running",proposal:{comments:[row]}}});f.send({type:"revisionIdle"});
+ const line=f.el("document-progress").firstChild;f.send({type:"revision",status:{status:"running",proposal:{comments:[row]}}});assert.equal(f.el("document-progress").firstChild,line,"polls do not restart the shimmer");
+ f.send({type:"viewMode",mode:"reading"});assert.equal(f.el("document-progress").hidden,true);
+ f.send({type:"viewMode",mode:"review"});assert.equal(f.el("document-progress").hidden,false);
+ f.send({type:"revision",status:{status:"waiting",approvalId:"approve",proposal:{comments:[row]}}});assert.equal(f.el("document-progress").hidden,true);assert.equal(f.el("content").getAttribute("aria-busy"),"false");
+ f.send({type:"revision",status:{status:"failed",proposal:{comments:[row]}}});assert.equal((f.el("source") as HTMLButtonElement).disabled,false);assert.equal((f.el("document-feedback") as HTMLButtonElement).disabled,false);
+ f.dom.window.close();
+});
+test("passage skeleton uses exact selection rectangles and never changes adjacent text or source offsets",()=>{
+ const f=fixture();f.document();f.select();f.el("selection-feedback").click();f.input("feedback","Clarify");f.el("add").click();
+ const anchor=f.messages.find(m=>m.type==="comment").selection;f.send({type:"saved"});
+ const measured:string[]=[];
+ (f.dom.window.Range.prototype as any).getClientRects=function(){measured.push(this.toString());return [{left:40,top:70,width:100,height:18},{left:40,top:98,width:60,height:18}];};
+ f.send({type:"comments",rows:[{id:"part",body:"Clarify",anchor}]});const html=f.el("content").querySelector("p")!.innerHTML;
+ f.el("prepare-revision").click();
+ assert.equal(f.el("document-progress").hidden,true);assert.equal(f.el("passage-progress").children.length,2);assert.ok(measured.every(text=>text==="this selection"));assert.equal(f.el("content").querySelector("p")!.innerHTML,html);
+ assert.equal((f.el("selection-feedback") as HTMLButtonElement).disabled,true);assert.equal((f.el("selection-copy") as HTMLButtonElement).disabled,false);
+ f.el("composer-close").click();f.doc.dispatchEvent(new f.dom.window.KeyboardEvent("keydown",{key:"m",ctrlKey:true,altKey:true}));assert.equal(f.el("composer").hidden,true,"shortcut also respects processing lock");
+ f.send({type:"error",message:"Could not prepare"});assert.equal(f.el("passage-progress").children.length,0);assert.equal((f.el("source") as HTMLButtonElement).disabled,false);
+ f.dom.window.close();
+});
+test("loading stops on human pauses and historical views and resumes only for active retry",()=>{
+ const f=fixture();f.document("");
+ const proposal={comments:[{id:"whole",anchor:{kind:"document"}}]};
+ f.send({type:"revision",status:{status:"running",proposal}});assert.equal(f.el("document-progress").hidden,false);
+ f.send({type:"revision",status:{status:"waiting",waitingOn:{kind:"question"},proposal}});assert.equal(f.el("document-progress").hidden,true);
+ f.send({type:"revision",status:{status:"waiting",waitingOn:{kind:"retry"},proposal}});assert.equal(f.el("document-progress").hidden,false);
+ f.send({type:"historyVersion",version:1,html:"<p>Earlier</p>"});assert.equal(f.el("document-progress").hidden,true);
+ f.send({type:"historyCurrent"});assert.equal(f.el("document-progress").hidden,false);
+ f.send({type:"revision",status:{status:"running",cancelRequested:true,proposal}});assert.equal(f.el("document-progress").hidden,true);
+ f.dom.window.close();
+});
+test("reduced motion skips reveal animation and document polls do not animate unchanged content",()=>{
+ const f=fixture();let animations=0;
+ (f.dom.window.HTMLElement.prototype as any).animate=()=>{animations++;return {};};
+ f.dom.window.matchMedia=(()=>({matches:true})) as any;f.document();assert.equal(animations,0);
+ f.dom.window.matchMedia=(()=>({matches:false})) as any;f.document("New content",18);assert.equal(animations,1);f.document("New content",18);assert.equal(animations,1);
+ assert.match(f.doc.querySelector("style")!.textContent!,/prefers-reduced-motion:reduce.*skeleton-line/s);f.dom.window.close();
+});
+
+test("partial draft remains visibly incomplete after a pause and disappears only after application",()=>{
+ const f=fixture();f.document("");
+ const draftParts=[{before:"",after:"# First section",html:"<h1>First section</h1>",complete:false}];
+ f.send({type:"revision",status:{status:"running",draftParts,proposal:{comments:[{anchor:{kind:"document"}}]}}});
+ assert.equal(f.el("draft-preview").hidden,false);assert.match(f.el("draft-caption").textContent!,/in progress/);assert.equal(f.el("document-progress").hidden,false);
+ const part=f.el("draft-parts").firstChild;
+ f.send({type:"revision",status:{status:"waiting",draftParts,proposal:{}}});assert.equal(f.el("draft-parts").firstChild,part);assert.match(f.el("draft-caption").textContent!,/Incomplete/);assert.equal(f.el("document-progress").hidden,true);
+ f.send({type:"viewMode",mode:"reading"});assert.equal(f.el("draft-preview").hidden,true);
+ f.send({type:"viewMode",mode:"review"});assert.equal(f.el("draft-preview").hidden,false);
+ f.send({type:"revision",status:{status:"succeeded",draftParts,result:{applied:true},proposal:{}}});assert.equal(f.el("draft-preview").hidden,true);f.dom.window.close();
 });

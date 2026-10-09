@@ -1,3 +1,4 @@
+import { revisionDraftParts } from "./revisionDraft.js";
 import { reportProblem, UserInputError } from "./problems.js";
 import { DocumentDictation } from "./dictation.js";
 import * as vscode from "vscode";
@@ -135,7 +136,9 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
         const awaiting = status?.status === "waiting" && status.approvalId && !status.decision;
         const problem = status?.errorMessage && !awaiting && ["waiting","failed","cancelled"].includes(String(status.status))
           ? reportProblem(new Error(String(status.errorMessage)), status.decision === "approved" ? "apply the approved changes" : "prepare changes", (await this.load(document.uri)).lease, String(status.runId)) : undefined;
-        await panel.webview.postMessage({ type: "revision", status: status ? {...status, errorMessage:undefined, problem} : status });
+        const draft = status?.draft as Record<string,unknown> | undefined;
+        const draftParts = revisionDraftParts(draft?.text).map(part => ({...part, html:renderDocumentHTML(part.after)}));
+        await panel.webview.postMessage({ type: "revision", status: status ? {...status, draft:undefined, draftParts, errorMessage:undefined, problem} : status });
         if (status?.status === "succeeded" && (status.result as Record<string,unknown> | undefined)?.applied && refreshedRun !== status.runId) {
           if (await this.refreshRemote(document)) { refreshedRun = String(status.runId); await refreshComments(); }
           else await panel.webview.postMessage({type:"notice",message:"Changes are saved in MemQL. Your local edits are preserved; compare with the latest revision before saving."});

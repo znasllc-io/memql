@@ -467,3 +467,13 @@ query goal workDocumentRevisionAmendment {
  sort "row.createdAt", "desc"
  paginate 1
 }
+
+/// Latest public-output snapshots, owned and bounded independently of tool history.
+@actor
+query observation workDraftsForOwnerRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId && row.?data.execution.kind == "draft"
+ sort "row.createdAt", "desc"
+ paginate 1
+ shape workObservationFull
+}

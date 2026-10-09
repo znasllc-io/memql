@@ -342,7 +342,15 @@ func (i *Integration) handleDocumentRevisionStatus(ctx context.Context, args map
 	if err != nil {
 		return nil, err
 	}
-	return reviewResult(map[string]any{"cancelRequested": run["cancelRequested"], "items": items, "proposalHash": workstate.ArtifactHash(proposal), "answer": approval["answer"], "supersededBy": successor["requestId"], "prepared": run != nil, "goalId": ids.GoalID, "runId": ids.RunID, "approvalId": ids.ApprovalID,
+	drafts, err := i.revisionRows(ctx, "workDraftsForOwnerRun", map[string]any{"runId": ids.RunID})
+	if err != nil {
+		return nil, err
+	}
+	var draft map[string]any
+	if len(drafts) > 0 {
+		draft = revisionMap(revisionMap(drafts[0]["data"])["execution"])
+	}
+	return reviewResult(map[string]any{"draft": draft, "cancelRequested": run["cancelRequested"], "items": items, "proposalHash": workstate.ArtifactHash(proposal), "answer": approval["answer"], "supersededBy": successor["requestId"], "prepared": run != nil, "goalId": ids.GoalID, "runId": ids.RunID, "approvalId": ids.ApprovalID,
 		"proposal": proposal, "decision": approval["decision"], "status": run["status"], "errorMessage": run["errorMessage"], "waitingOn": map[string]any{"kind": revisionMap(run["waitingOn"])["kind"], "resumeAt": revisionMap(run["waitingOn"])["resumeAt"]}, "retryCount": revisionMap(run["spent"])["retries"], "result": revisionMap(run["outcome"])["returned"]})
 }
 

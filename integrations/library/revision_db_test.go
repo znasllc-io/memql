@@ -619,12 +619,19 @@ func testDocumentRevisionStatusCarriesRetryAcrossReplicas(t *testing.T, f *revis
 	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{
 		"runId": ids.RunID, "status": "waiting", "waitingOn": map[string]any{"kind": "retry", "resumeAt": resumeAt, "reason": "internal provider detail"}, "spent": map[string]any{"retries": 2}, "errorMessage": "idle ceiling",
 	})
+	progressCtx := common.ContextWithRun(f.ctx, common.RunContext{RunId: ids.RunID, GoalId: ids.GoalID, StepKey: "analysis", OwnerUserId: f.owner})
+	if err := f.engine.RecordWorkProgress(progressCtx, memql.WorkEvent{ID: "ai-draft", Kind: "draft", Text: `{"edits":[{"after":"First section`, Phase: "paused"}); err != nil {
+		t.Fatal(err)
+	}
 	rows, err := f.second.handleDocumentRevisionStatus(f.ctx, map[string]any{"requestId": request["requestId"]}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var payload map[string]any
 	_ = json.Unmarshal(rows[0].Payload, &payload)
+	if draft := revisionMap(payload["draft"]); draft["phase"] != "paused" || !strings.Contains(asString(draft["text"]), "First section") {
+		t.Fatalf("cross-replica partial draft lost: %v", draft)
+	}
 	waiting := revisionMap(payload["waitingOn"])
 	if payload["status"] != "waiting" || waiting["kind"] != "retry" || waiting["resumeAt"] != resumeAt || payload["retryCount"] != float64(2) {
 		t.Fatalf("retry metadata lost: %+v", payload)

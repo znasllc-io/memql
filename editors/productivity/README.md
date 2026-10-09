@@ -49,8 +49,11 @@ in Read and Review, with highlighted matches, counts and next/previous navigatio
 VS Code text editor, including Find/Replace, selection, Cut/Copy/Paste and undo.
 
 **New Markdown Document** in the command palette creates a blank file in the
-connected cluster and opens Review. Describe the content with the whole-document
-feedback button, propose changes, and review the generated text before applying.
+connected cluster and opens Review. An empty document offers **Describe document**
+and **Write in Source** instead of the revision and extension circle buttons.
+Describe the content, add it to review, then propose and approve the draft.
+While preparation is running, the empty state opens that existing review;
+it does not start another generation. Read keeps creation behind **Start in Review**.
 **Markdown: Insert Image** in Source uploads a PNG, JPEG, GIF, or WebP (up to
 8 MiB and 24 million pixels) to the same cluster and inserts its Markdown link with an accessible
 description. Save the document to retain that link in its version history.
@@ -236,3 +239,18 @@ harness can stream a completed answer followed by a small explicit completion
 marker, avoiding a long answer buffered inside tool arguments. Unmarked text,
 missing answers, questions, and completion mixed with side-effect calls retain
 the existing validation and human-review boundaries.
+
+Document loading and active whole-document requests use a theme-aware skeleton;
+passage requests mask only their exact rendered selection. The saved text stays
+unchanged until approval. Placeholders stop for human review, pauses and errors.
+Content uses a short reveal transition, respecting reduced-motion preferences.
+Source and feedback mutation controls are disabled during an active revision;
+Read, copy, notes, review navigation and cancellation remain available.
+
+The DSL opts document composition into `ai(progress: true)`. Public model output
+is recorded as throttled, bounded work-journal snapshots. The editor renders
+only replacement Markdown strings as an explicitly unapproved draft; incomplete
+JSON escapes wait for the next chunk. Remaining content keeps its skeleton while
+running. A pause or failure retains the partial draft with an incomplete label
+and stops the shimmer. Read mode continues to show the saved version. No extra
+model calls are made for progress, and generation still requires approval to save.
