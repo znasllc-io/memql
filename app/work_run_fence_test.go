@@ -51,3 +51,28 @@ func TestTheStoredJournalFencesAnIdOnlyEvent(t *testing.T) {
 		t.Fatal("the control: a compiled goal run is no longer admitted on an id-only event")
 	}
 }
+
+func TestRerunIntakeHeartbeatDoesNotImpersonateALiveExecutor(t *testing.T) {
+	now := time.Now().UTC()
+	req := work.DispatchRequest{RunId: "r", GoalId: "g", Status: "running", RerunRequestId: "new-request"}
+	// Replica B has only the persisted journal. The old process died with a
+	// running intent; replica A reopened it and stamped the intake heartbeat.
+	j := &automations.RunJournal{RunId: "r", GoalId: "g", Status: "running", HasRunningStep: true,
+		HeartbeatAt: now, Rerun: &automations.RerunSpec{RequestId: "new-request", RequestedAt: now}}
+	if !workRunCanStart(req, j, now) {
+		t.Fatal("intake heartbeat stranded the requested rerun behind an old intent")
+	}
+	stale := req
+	stale.RerunRequestId = "old-request"
+	if workRunCanStart(stale, j, now) {
+		t.Fatal("an old dispatch gained admission from the newer request")
+	}
+	j.HeartbeatAt = now.Add(time.Millisecond)
+	if workRunCanStart(req, j, now.Add(time.Second)) {
+		t.Fatal("another replica could enter after the new executor started")
+	}
+	j.Rerun.RequestedAt = time.Time{}
+	if workRunCanStart(req, j, now.Add(time.Second)) {
+		t.Fatal("an unproven intake timestamp bypassed the live-worker fence")
+	}
+}

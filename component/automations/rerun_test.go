@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
@@ -590,6 +591,7 @@ func TestARerunDecodesTheRequestOffTheRunRow(t *testing.T) {
 	run["staleSteps"] = []any{"b", "publish"}
 	run["rerun"] = map[string]any{
 		"requestId": "req-9", "reason": "rerun", "stepKey": "b", "workspace": "r1-v2", "requestedBy": "u1",
+		"requestedAt": "2026-10-09T10:09:54.425041464Z",
 		"override": map[string]any{"level": "fast", "inputs": map[string]any{"region": "EMEA"},
 			"guidance": map[string]any{"axes": map[string]any{"performance": true, "product": true}, "reason": "Too slow."}},
 		"snapshot": map[string]any{"files": []any{}, "unrecordedCommands": float64(0)},
@@ -603,6 +605,9 @@ func TestARerunDecodesTheRequestOffTheRunRow(t *testing.T) {
 	s := j.Rerun
 	if s == nil || s.RequestId != "req-9" || s.Reason != RerunReasonRerun || s.StepKey != "b" || s.Workspace != "r1-v2" || s.RequestedBy != "u1" {
 		t.Fatalf("request = %+v", s)
+	}
+	if s.RequestedAt.Format(time.RFC3339Nano) != "2026-10-09T10:09:54.425041464Z" {
+		t.Fatalf("request timestamp lost at the execution hop: %v", s.RequestedAt)
 	}
 	if s.Override == nil || s.Override.Level != "fast" || s.Override.Inputs["region"] != "EMEA" ||
 		!reflect.DeepEqual(s.Override.GuidanceAxes, []string{"product", "performance"}) || s.Override.GuidanceReason != "Too slow." {
