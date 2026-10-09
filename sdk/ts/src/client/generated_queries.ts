@@ -12152,6 +12152,26 @@ QueryClient.prototype.workCheckpointForOwner = function (this: QueryClient, args
   return this.executeNamed("workCheckpointForOwner", buildWorkCheckpointForOwner(args), opts);
 };
 
+/** Latest completed receipt from a bounded set of caller-owned attempts. */
+// Bound concept: v1:work:step (machine-readable: BoundConcepts["workCompletedStepsForOwnerRuns"] in generated_concepts.ts).
+export interface WorkCompletedStepsForOwnerRunsArgs {
+}
+
+export function buildWorkCompletedStepsForOwnerRuns(args: WorkCompletedStepsForOwnerRunsArgs): string {
+  void args;
+  return "query workCompletedStepsForOwnerRuns()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workCompletedStepsForOwnerRuns(args?: WorkCompletedStepsForOwnerRunsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workCompletedStepsForOwnerRuns = function (this: QueryClient, args: WorkCompletedStepsForOwnerRunsArgs = {} as WorkCompletedStepsForOwnerRunsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workCompletedStepsForOwnerRuns", buildWorkCompletedStepsForOwnerRuns(args), opts);
+};
+
 /** Read only this run's own computer-use decisions, including previous grants. */
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerScopesForOwnerRun"] in generated_concepts.ts).
 export interface WorkComputerScopesForOwnerRunArgs {
@@ -12282,6 +12302,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.workDocumentRevisionRequest = function (this: QueryClient, args: WorkDocumentRevisionRequestArgs = {} as WorkDocumentRevisionRequestArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workDocumentRevisionRequest", buildWorkDocumentRevisionRequest(args), opts);
+};
+
+/** Bounded retry candidates; Library verifies identical source and feedback. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workDocumentRevisionRequests"] in generated_concepts.ts).
+export interface WorkDocumentRevisionRequestsArgs {
+  artifactId: string;
+}
+
+export function buildWorkDocumentRevisionRequests(args: WorkDocumentRevisionRequestsArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  return "query workDocumentRevisionRequests(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workDocumentRevisionRequests(args: WorkDocumentRevisionRequestsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workDocumentRevisionRequests = function (this: QueryClient, args: WorkDocumentRevisionRequestsArgs = {} as WorkDocumentRevisionRequestsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workDocumentRevisionRequests", buildWorkDocumentRevisionRequests(args), opts);
 };
 
 /** Latest public-output snapshots, owned and bounded independently of tool history. */

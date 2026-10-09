@@ -296,7 +296,7 @@ query step workStepForOwnerRun {
 @actor
 query step workCompletedStepsForOwnerRuns {
  args { runIds []string! stepKey string! }
- filter row => row.runId in args.runIds.select(id => canonicalId(id, run)) && row.key == args.stepKey
+ filter row => row.runId in args.runIds.select(candidate => canonicalId(candidate, run)) && row.key == args.stepKey
             && row.ownerUserId == actor.userId && row.status == "done"
  shape workStepFull
  sort "finishedAt", "desc"
