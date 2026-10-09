@@ -16,7 +16,13 @@ func workRunCanStart(req work.DispatchRequest, j *automations.RunJournal, now ti
 	}
 	// A renewable heartbeat fences the current executor after the arbitration
 	// lease expires. Failed steps have no live intent and remain resumable.
-	if j.Status == "running" && j.HasRunningStep && !j.HeartbeatAt.IsZero() && now.Sub(j.HeartbeatAt) < work.DefaultAbandonedAfterSeconds*time.Second {
+	// Reopening a stopped run stamps heartbeatAt at requestedAt, before any
+	// executor starts. Old running-step intents must not fence that new request.
+	// Its own dispatch claim arbitrates replicas; the first executor heartbeat
+	// advances past requestedAt and restores the normal live-worker fence.
+	intakeHeartbeat := j.Rerun != nil && !j.Rerun.RequestedAt.IsZero() &&
+		j.HeartbeatAt.Equal(j.Rerun.RequestedAt) && workRerunServable(req, j)
+	if j.Status == "running" && j.HasRunningStep && !intakeHeartbeat && !j.HeartbeatAt.IsZero() && now.Sub(j.HeartbeatAt) < work.DefaultAbandonedAfterSeconds*time.Second {
 		return false
 	}
 	return req.CanDispatchStoredRun(j.GoalId, j.Status, j.WaitingOn, now)

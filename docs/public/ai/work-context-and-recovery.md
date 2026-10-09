@@ -131,6 +131,11 @@ Owned work uses the following layers:
    If a recalled page itself exceeds the active budget, the engine directs
    the next read to the same original source and offset with a smaller page.
    It never directs the model into another archive of that recall response.
+   Exact checkpoint reads also return a bounded `sources[].messages` directory
+   of message indexes, roles and tool calls. Derived checkpoints are labelled,
+   so the researcher can select the original tool result instead of reopening
+   an older summary. `nextMessageIndex` continues the directory; `nextOffset`
+   continues the selected message without changing its serialized bytes.
 
 The runtime bounds summarizer input and output, model calls per compaction,
 and recall excerpts. A single exchange too large for the summarizer is

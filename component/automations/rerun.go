@@ -35,6 +35,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
@@ -82,6 +83,9 @@ type RerunSpec struct {
 	// it, so a re-run is never refused by the lease of the execution before
 	// it.
 	RequestId string
+	// RequestedAt distinguishes the intake's fresh heartbeat from one written
+	// by an executor. An interrupted prior version may still have running steps.
+	RequestedAt time.Time
 	// Reason is RerunReasonRerun, RerunReasonHeadMove or RerunReasonBranch.
 	Reason string
 	// StepKey is the top-level step the request targets: the step re-run, the
@@ -190,6 +194,7 @@ func rerunSpecFrom(v any) *RerunSpec {
 		RequestedBy: strings.TrimSpace(stringField(m, "requestedBy")),
 		Snapshot:    workspaceSnapshotFrom(m["snapshot"]),
 	}
+	spec.RequestedAt, _ = time.Parse(time.RFC3339Nano, stringField(m, "requestedAt"))
 	if record, ok := m["override"].(map[string]any); ok && len(record) > 0 {
 		spec.OverrideRecord = record
 		spec.Override = stepOverrideFrom(record)
