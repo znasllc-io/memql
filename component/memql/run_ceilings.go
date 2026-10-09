@@ -279,11 +279,14 @@ func (e *MemQLEngine) ContextWithRunDeadline(ctx context.Context) (context.Conte
 
 // observeAgentSpend accounts for direct streaming/tool calls, which bypass
 // InvokeAI. Prompt calls remain owned by modelSeam.serve to avoid double charges.
+// The call modality owns this distinction. A DSL-authored agent turn keeps its
+// own prompt name for routing; it must not disappear from accounting because
+// its name differs from the generic workAgentReply prompt.
 func (s *modelSeam) observeAgentSpend(ctx context.Context, cancel context.CancelCauseFunc) airoute.Observer {
 	var mu sync.Mutex
 	admitted := map[string]bool{}
 	return func(call airoute.CallObservation) {
-		if call.PromptName == "workAgentReply" && s != nil {
+		if airoute.Modality(call.Modality).NeedsTools() && s != nil {
 			mu.Lock()
 			if call.Phase == "running" {
 				if err := s.admit(ctx, 0); err != nil {
