@@ -868,6 +868,7 @@ statements/automation/onError/on-error-on-an-if.memql
 statements/automation/onError/on-error-stop.memql
 statements/automation/onSurface/on-surface.memql
 statements/automation/onSurface/surface-on-a-builtin.memql
+statements/automation/parallel/named-parallel.memql
 statements/automation/parallel/parallel.memql
 statements/automation/parallel/return-in-a-parallel-branch.memql
 statements/automation/publish/publish-with-retry.memql
