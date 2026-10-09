@@ -171,9 +171,9 @@ function context(): ExtensionContext {
   return { subscriptions: [] } as unknown as ExtensionContext;
 }
 
-type Verdict = "absent" | "installed-healthy" | "installed-unreachable" | "present-unreceipted";
+type Verdict = "install-incomplete" | "absent" | "installed-healthy" | "installed-unreachable" | "present-unreceipted";
 
-/** A receipt with one executed artifact, which is what presence counts as an install. */
+/** A completed installation, with its front door verified. */
 const INSTALLED_RECEIPT = {
   version: 1,
   graph: "install",
@@ -190,6 +190,7 @@ const INSTALLED_RECEIPT = {
       changed: true,
       recordedAt: "",
     },
+    { stepId: "frontDoor", script: "install.verify", receipt: "", preExisting: false, params: {}, result: { allPassed: true }, changed: false, recordedAt: "" },
   ],
 };
 
@@ -206,7 +207,7 @@ function presenceFor(
     clustersPath: path.join(HOME, "clusters.yaml"),
     receiptPath: path.join(HOME, "no-such-receipt.json"),
     readReceiptFile: async () =>
-      verdict === "absent" || verdict === "present-unreceipted" ? null : (INSTALLED_RECEIPT as unknown as Receipt),
+      verdict === "absent" || verdict === "present-unreceipted" ? null : ({ ...INSTALLED_RECEIPT, entries: verdict === "install-incomplete" ? INSTALLED_RECEIPT.entries.slice(0, 1) : INSTALLED_RECEIPT.entries } as Receipt),
     readClusters: async () => ({
       ok: true as const,
       file: {
@@ -1101,6 +1102,13 @@ test("the log opens AT the failed step, not at its tail", async () => {
       .filter((m) => (m as { type?: string; reset?: boolean }).type === "log" && (m as { reset?: boolean }).reset === true)
       .at(-1) as { lines: { text: string; anchor?: boolean; label?: string }[] } | undefined;
     assert.ok(reset !== undefined, "the log was re-sent for the failure");
+    const resetIndex = h.panel.posted.indexOf(reset);
+    const failurePatchIndex = h.panel.posted.findIndex((m) => {
+      const msg = m as { type?: string; regions?: { body?: string } };
+      return msg.type === "patch" && (msg.regions?.body ?? "").includes("mq-notice");
+    });
+    assert.ok(failurePatchIndex >= 0 && failurePatchIndex < resetIndex,
+      "the failure log must be replayed after the patch that mounts its container");
     const anchored = reset.lines.find((l) => l.anchor === true);
     assert.equal(anchored?.text, "docker: permission denied");
     assert.equal(anchored?.label, "Checking Docker");
@@ -2029,4 +2037,32 @@ test("an install holds the machine's slot while it runs, and gives it back when 
     gate.release();
     h.close();
   }
+});
+
+
+test("partial setup offers continuation and cleanup, never sign-in as a completed install", async () => {
+  const h = await open({ verdict: "install-incomplete" });
+  try {
+    await until(() => /Setup incomplete/.test(h.html()), "partial setup landing");
+    assert.match(h.html(), /Continue setup/);
+    assert.match(h.html(), /Clean up setup/);
+    assert.doesNotMatch(h.html(), /data-act="(?:reconnect|signIn)"/);
+    h.post({ type: "choose", value: "repair" });
+    await until(() => /data-act="begin"/.test(h.html()), "continuation form");
+    assert.equal(h.panel.title, "Continue setup");
+    assert.match(h.html(), /Continue setup/);
+  } finally { h.close(); }
+});
+
+
+test("continuing setup restores the recorded domain over the default", async () => {
+  const h = await open({ verdict: "install-incomplete", action: "repair", receipt: {
+    ...INSTALLED_RECEIPT, entries: INSTALLED_RECEIPT.entries.slice(0, 1),
+    intent: { tag: "main", commit: "", imageTag: "", imagesFromSource: true, domain: "qa.example.test", ownerEmail: "owner@example.test", ownerFirstName: "Ada", ownerLastName: "Lovelace" },
+  }});
+  try {
+    await until(() => /Ada Lovelace/.test(h.html()), "receipt prefill");
+    assert.match(h.html(), /qa.example.test/);
+    assert.match(h.html(), /owner@example.test/);
+  } finally { h.close(); }
 });

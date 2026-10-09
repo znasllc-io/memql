@@ -227,6 +227,7 @@ import {
   CONNECTED_KEY,
   CONNECTION_STATE_KEY,
   LOCAL_CLUSTER_PRESENT_KEY,
+  LOCAL_CLUSTER_STATE_KEY,
   NOT_CONNECTED_REFUSAL,
 } from './state/connectionContext.js';
 import { connectionWordFor, type ConnectionFacts } from './state/deploymentsCatalog.js';
@@ -1468,6 +1469,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // live sessions. Ordinary operation always uses the shared registry.
   const testState = context.extensionMode === ExtensionMode.Test ? process.env.MEMQL_EDITOR_TEST_STATE_DIR : undefined;
   const clustersPath = testState && path.isAbsolute(testState) ? path.join(testState, 'clusters.yaml') : defaultClustersPath();
+  const receiptPath = testState && path.isAbsolute(testState) ? path.join(testState, 'install-receipt.json') : defaultReceiptPath();
 
   // The sign-in persistence seam (memql#3403 / memql#3404).
   //
@@ -1606,7 +1608,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // Lazy: only the local-cluster status source needs it, and resolving it
       // at activation would make startup depend on a path nothing has asked for.
       repoRoot: () => resolveInstallRoot(context.extensionPath),
-      readReceipt: () => readReceipt(defaultReceiptPath()).catch(() => null),
+      readReceipt: () => readReceipt(receiptPath).catch(() => null),
       runCapability: runCapabilityScript,
       // The two live sources are closures rather than clients, so the
       // collector module stays free of connection plumbing. Both return
@@ -1647,7 +1649,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   factsForCluster = (cluster) =>
     gatherClusterFacts(cluster, {
       readRefreshToken: (name) => new ClusterCredentialStore(context.secrets).readRefreshToken(name),
-      readReceipt: () => readReceipt(defaultReceiptPath()),
+      readReceipt: () => readReceipt(receiptPath),
       signedInBefore: (c) => signedInClusters(context).includes(signedInKey(c)),
       now: () => Date.now(),
     });
@@ -1706,9 +1708,9 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   const watcher = workspace.createFileSystemWatcher(
     new RelativePattern(Uri.file(clustersDir), path.basename(clustersPath))
   );
-  watcher.onDidChange(() => clustersRegistryChanged(clustersTree));
-  watcher.onDidCreate(() => clustersRegistryChanged(clustersTree));
-  watcher.onDidDelete(() => clustersRegistryChanged(clustersTree));
+  watcher.onDidChange(() => { presence.invalidate(); clustersRegistryChanged(clustersTree); });
+  watcher.onDidCreate(() => { presence.invalidate(); clustersRegistryChanged(clustersTree); });
+  watcher.onDidDelete(() => { presence.invalidate(); clustersRegistryChanged(clustersTree); });
   // The cluster page reads the same file; an edit there (or by the Cockpit)
   // is a change to what it says.
   watcher.onDidChange(() => ConnectionPanel.refresh());
@@ -1776,7 +1778,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
 
   const deploymentsTree = new DeploymentsTreeProvider({
     clustersPath,
-    receiptPath: defaultReceiptPath(),
+    receiptPath,
     presence: () => presence.get(),
     ...(buildStampForCatalog !== undefined ? { buildStamp: buildStampForCatalog } : {}),
     // The ONE connection answer, read rather than re-derived (design D1): the
@@ -1816,7 +1818,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   const deploymentPanelDeps = (): DeploymentPanelDeps => ({
     catalog: {
       clustersPath,
-      receiptPath: defaultReceiptPath(),
+      receiptPath,
       presence: () => presence.get(),
       ...(buildStampForCatalog !== undefined ? { buildStamp: buildStampForCatalog } : {}),
     },
@@ -1848,7 +1850,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         }),
       ),
     installRoot: installRootFor(context),
-    receiptFile: defaultReceiptPath(),
+    receiptFile: receiptPath,
     refreshTree: () => {
       // The presence memo is invalidated too: a run that changed the machine
       // is one of the events that change the verdict deterministically.
@@ -2003,7 +2005,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // directory the install cloned, shared by the page, the Connection page
     // and the wizard's done screen.
     commands.registerCommand('memql.deployments.openCheckout', async () => {
-      const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
+      const receipt = await readReceipt(receiptPath).catch(() => null);
       const dir = recordedStackDir(receipt);
       if (dir === '') {
         await noCheckout();
@@ -2029,7 +2031,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   //   install-receipt.json the local instance's version and domain
   //   runs/               the local run log: one file per run, rewritten per
   //                       step, so a run in flight repaints the tree as it goes
-  const runsDir = defaultRunsDir();
+  const runsDir = testState && path.isAbsolute(testState) ? path.join(testState, 'runs') : defaultRunsDir();
   try {
     fs.mkdirSync(runsDir, { recursive: true });
   } catch {
@@ -2054,9 +2056,6 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   const deploymentsWatchers = [
     workspace.createFileSystemWatcher(
       new RelativePattern(Uri.file(clustersDir), path.basename(clustersPath))
-    ),
-    workspace.createFileSystemWatcher(
-      new RelativePattern(Uri.file(clustersDir), path.basename(defaultReceiptPath()))
     ),
     workspace.createFileSystemWatcher(new RelativePattern(Uri.file(runsDir), '*.json')),
   ];
@@ -2471,7 +2470,8 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // listing reads exactly like an empty one.
   const presence = new ClusterPresence({
     clustersPath,
-    listClusters: () => listK3dClusters({ root: installRootFor(context) }),
+    receiptPath,
+    listClusters: () => testState ? Promise.resolve([]) : listK3dClusters({ root: installRootFor(context) }),
     // Why a probe said "not answering", for the person who wonders: the
     // Deployments view and the "+" page only show the verdict.
     onProbeFailure: (endpoint, reason) =>
@@ -2484,14 +2484,28 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // Asked when the tree reads the file, through the presence memo, so a
   // repaint does not re-dial; install, uninstall and remove invalidate the
   // memo and refresh the tree, which asks again.
-  let presencePublished: boolean | undefined;
+  const receiptWatcher = workspace.createFileSystemWatcher(
+    new RelativePattern(Uri.file(path.dirname(receiptPath)), path.basename(receiptPath))
+  );
+  const setupChanged = () => {
+    presence.invalidate();
+    clustersTree.refresh();
+    deploymentsTree.refresh();
+  };
+  receiptWatcher.onDidChange(setupChanged);
+  receiptWatcher.onDidCreate(setupChanged);
+  receiptWatcher.onDidDelete(setupChanged);
+  context.subscriptions.push(receiptWatcher);
+
+  let presencePublished: string | undefined;
   onClustersRead = () => {
     void presence
       .get()
       .then((result) => {
         const present = result.verdict !== 'absent';
-        if (present === presencePublished) return;
-        presencePublished = present;
+        if (result.verdict === presencePublished) return;
+        presencePublished = result.verdict;
+        void commands.executeCommand('setContext', LOCAL_CLUSTER_STATE_KEY, result.verdict);
         void commands.executeCommand('setContext', LOCAL_CLUSTER_PRESENT_KEY, present);
       })
       .catch(() => undefined);
@@ -2547,12 +2561,15 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // ONE receipt path for the install that writes it, the uninstall that
     // reverses it and the repair that reads a key path back out of it. The
     // page used to resolve it three times for itself.
-    receiptFile: defaultReceiptPath(),
+    receiptFile: receiptPath,
     removeRegistryEntry,
   });
 
   context.subscriptions.push(
-    commands.registerCommand('memql.clusters.refresh', () => clustersTree.refresh()),
+    commands.registerCommand('memql.clusters.refresh', () => {
+      presence.invalidate();
+      clustersTree.refresh();
+    }),
     // The escape hatch out of the release listing's ten-minute TTL
     // (memql#3992). An operator who has just cut a release should not have to
     // wait out a timer to see it offered.
@@ -2682,6 +2699,10 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // composed exactly as a finished install composes it (clusters/
     // reconnect.ts), then selected and connected like any row click.
     commands.registerCommand('memql.clusters.connectLocal', async () => {
+      if ((await presence.get()).verdict === 'install-incomplete') {
+        AddClusterPanel.show(context, presence, addClusterDeps(), 'repair');
+        return;
+      }
       // Already in the list (the palette can reach this with a local row
       // present): use that entry rather than composing a second one over an
       // entry the person may have edited by hand.
@@ -2691,7 +2712,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         await commands.executeCommand('memql.clusters.select', { cluster: listed, selected: registry.ok && registry.file.selectedCluster === listed.name });
         return;
       }
-      const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
+      const receipt = await readReceipt(receiptPath).catch(() => null);
       const plan = planLocalReconnect(receipt);
       const result = await completeInstallHandoff(
         { domain: plan.domain },
@@ -2760,7 +2781,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // leave it in the bell to be clicked after the passkey already existed.
       // Suppressed rather than declined, because the operator said nothing.
       passkeyOfferMemory.suppress(target.cluster.name);
-      const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
+      const receipt = await readReceipt(receiptPath).catch(() => null);
       const owner = recordedOwner(receipt);
       let url: string;
       try {

@@ -141,6 +141,7 @@ export function kitStyles(): string {
              border: 1.5px solid currentColor; border-right-color: transparent;
              animation: mq-spin 0.8s linear infinite; }
   @keyframes mq-spin { to { transform: rotate(360deg); } }
+  .mq-iconbtn { width: var(--memql-control-h); padding: 0; flex: none; }
   .mq-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
   /* ---- the action bar: the state in words, then the legal acts ---- */
@@ -280,9 +281,9 @@ export function kitStyles(): string {
   .mq-log-line[data-tone="muted"] .mq-log-text { color: var(--memql-muted); }
 
   /* ---- one progress screen for every long operation ---- */
-  .mq-progress { display: flex; flex-direction: column; align-items: center; gap: 8px;
-                 box-sizing: border-box; width: 100%; max-width: 560px; margin: 0 auto;
-                 padding: 44px 0 16px; text-align: center; }
+  .mq-progress { display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+                 box-sizing: border-box; width: 100%; max-width: 560px; margin: 0;
+                 padding: 0 0 16px; text-align: left; }
   .mq-progress-mark { color: var(--memql-accent); line-height: 0; margin-bottom: 10px; }
   .mq-progress-mark .memql-mark { display: block; }
   .mq-progress-title { margin: 0; font-size: 1.25em; font-weight: 600; line-height: 1.3; }
@@ -301,11 +302,11 @@ export function kitStyles(): string {
   .mq-progress[data-state="failed"] .mq-progress-status { color: var(--memql-danger); }
   .mq-progress-meta { margin: 0; min-height: 1.45em; color: var(--memql-muted);
                       font-size: 0.923em; font-variant-numeric: tabular-nums; }
-  /* The progress screen is one centred column: what follows the block (the
+  /* Progress stays aligned with the form: what follows the block (the
      reason, the log) sits under it on the same axis and the same width, so
      "Show logs" starts where the bar starts rather than hanging off it. */
   .mq-progress ~ :is(.mq-notice, .mq-disclosure, .mq-empty, .mq-code, .mq-logbox) {
-    max-width: 560px; margin-left: auto; margin-right: auto; }
+    max-width: 560px; margin-left: 0; margin-right: 0; }
 ${barRules()}
 
   /* ---- loading is the shape of the content ---- */

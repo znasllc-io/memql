@@ -1111,3 +1111,13 @@ test("a second run starts with no magic link from the first", () => {
   assert.equal(s.hasClaimLink, false, "beginRun must clear the previous run's magic link");
   assert.equal(s.claimUrl, "");
 });
+
+
+test("late receipt prefill never overwrites an edited repair field", () => {
+  const state = new AddClusterState();
+  state.chooseAction("repair");
+  state.setInput("domain", "chosen.example.test");
+  state.seedRepairInputs({ domain: "recorded.example.test", ownerEmail: "owner@example.test" });
+  assert.equal(state.inputs.domain, "chosen.example.test");
+  assert.equal(state.inputs.ownerEmail, "owner@example.test");
+});

@@ -186,23 +186,33 @@
     "viewsWelcome": [
       {
         "view": "memqlClusters",
-        "contents": "No clusters yet.\n[Install Local Cluster](command:memql.deployments.createDeployment)\n[Connect to a Cluster](command:memql.clusters.add)",
-        "when": "!isWeb && (!memql.localClusterPresent)"
+        "contents": "Checking local setup\u2026",
+        "when": "!isWeb && !memql.localClusterState"
       },
       {
         "view": "memqlClusters",
-        "contents": "A local cluster is running on this computer.\n[Connect](command:memql.clusters.connectLocal)\n[Add Another Cluster](command:memql.clusters.add)",
-        "when": "memql.localClusterPresent"
+        "contents": "No clusters yet.\n[Install Local Cluster](command:memql.deployments.createDeployment)\n[Add Cluster](command:memql.clusters.add)",
+        "when": "!isWeb && (memql.localClusterState == absent)"
       },
       {
-        "view": "memqlDeployments",
-        "contents": "Not connected to a cluster.\n[Show Local Cluster](command:memql.deployments.open)\n[Connect to a Cluster](command:memql.clusters.select)",
-        "when": "!memql.clusterSelected && memql.localClusterPresent"
+        "view": "memqlClusters",
+        "contents": "Local setup is incomplete.\n[Continue Setup](command:memql.clusters.repair)\n[Add Cluster](command:memql.clusters.add)",
+        "when": "!isWeb && (memql.localClusterState == install-incomplete)"
       },
       {
-        "view": "memqlDeployments",
-        "contents": "Not connected to a cluster.\n[Install Local Cluster](command:memql.deployments.createDeployment)\n[Connect to a Cluster](command:memql.clusters.select)",
-        "when": "!isWeb && (!memql.clusterSelected && !memql.localClusterPresent)"
+        "view": "memqlClusters",
+        "contents": "A local cluster is on this computer.\n[Connect to Local Cluster](command:memql.clusters.connectLocal)\n[Add Cluster](command:memql.clusters.add)",
+        "when": "!isWeb && (memql.localClusterState == installed-healthy)"
+      },
+      {
+        "view": "memqlClusters",
+        "contents": "The local cluster is not responding.\n[Review Local Cluster](command:memql.clusters.add)",
+        "when": "!isWeb && (memql.localClusterState == installed-unreachable)"
+      },
+      {
+        "view": "memqlClusters",
+        "contents": "A local cluster is on this computer.\n[Review Local Cluster](command:memql.clusters.add)",
+        "when": "!isWeb && (memql.localClusterState == present-unreceipted)"
       },
       {
         "view": "memqlDeployments",
@@ -231,7 +241,7 @@
       },
       {
         "view": "memqlConstructs",
-        "contents": "Not connected to a cluster.\n[Connect to a Cluster](command:memql.clusters.select)\n[Add Cluster](command:memql.clusters.add)",
+        "contents": "No cluster selected.",
         "when": "!memql.clusterSelected"
       },
       {
@@ -251,7 +261,7 @@
       },
       {
         "view": "memqlData",
-        "contents": "Not connected to a cluster.\n[Connect to a Cluster](command:memql.clusters.select)\n[Add Cluster](command:memql.clusters.add)",
+        "contents": "No cluster selected.",
         "when": "!memql.clusterSelected"
       },
       {
@@ -272,17 +282,27 @@
       {
         "view": "memqlRuns",
         "contents": "Runs you save from a Run form appear here.\n[Edit Saved Runs](command:memql.runs.open)",
-        "when": "workbenchState != empty"
+        "when": "memql.clusterSelected && (workbenchState != empty)"
       },
       {
         "view": "memqlRuns",
         "contents": "Open a folder to save runs.\n[Open Folder](command:vscode.openFolder)",
-        "when": "workbenchState == empty"
+        "when": "memql.clusterSelected && (workbenchState == empty)"
       },
       {
         "view": "memqlClusters",
-        "contents": "[Connect to a Cluster](command:memql.clusters.add)",
+        "contents": "[Add Cluster](command:memql.clusters.add)",
         "when": "isWeb && !memql.clusterSelected"
+      },
+      {
+        "view": "memqlRuns",
+        "contents": "No saved runs.",
+        "when": "!memql.clusterSelected"
+      },
+      {
+        "view": "memqlDeployments",
+        "contents": "No cluster selected.",
+        "when": "!memql.clusterSelected"
       }
     ],
     "commands": [
@@ -743,11 +763,6 @@
           "group": "navigation@1"
         },
         {
-          "command": "memql.deployments.createDeployment",
-          "when": "!isWeb && (view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstanceAbsent)",
-          "group": "1_install@1"
-        },
-        {
           "command": "memql.deployments.changeVersion",
           "when": "!isWeb && (view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance)",
           "group": "2_version@1"
@@ -794,22 +809,22 @@
         },
         {
           "command": "memql.constructs.refresh",
-          "when": "!isWeb && (view == memqlConstructs)",
+          "when": "memql.clusterSelected && (!isWeb && (view == memqlConstructs))",
           "group": "navigation@1"
         },
         {
           "command": "memql.language.showReference",
-          "when": "!isWeb && (view == memqlConstructs)",
+          "when": "memql.clusterSelected && (!isWeb && (view == memqlConstructs))",
           "group": "9_reference@1"
         },
         {
           "command": "memql.data.refresh",
-          "when": "!isWeb && (view == memqlData)",
+          "when": "memql.clusterSelected && (!isWeb && (view == memqlData))",
           "group": "navigation@1"
         },
         {
           "command": "memql.runs.open",
-          "when": "!isWeb && (view == memqlRuns && workbenchState != empty)",
+          "when": "memql.clusterSelected && (!isWeb && (view == memqlRuns && workbenchState != empty))",
           "group": "navigation@1"
         }
       ],
@@ -902,7 +917,8 @@
     "test:host": "npm run compile && tsc -p tsconfig.host.json && node esbuild.host.js && node test-host/runner.js",
     "gallery": "node gallery/build.mjs",
     "gallery:shoot": "node gallery/shoot.mjs",
-    "gallery:check": "node gallery/check.mjs"
+    "gallery:check": "node gallery/check.mjs",
+    "test:installer-ui": "npm run compile && tsc -p tsconfig.host.json && node esbuild.host.js && node test-host/installManualRunner.js"
   },
   "dependencies": {
     "@znasllc-io/memql-sdk-core": "file:../../sdk/ts",

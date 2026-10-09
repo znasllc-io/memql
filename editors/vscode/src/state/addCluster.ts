@@ -586,6 +586,7 @@ export class AddClusterState {
   private currentScreen: Screen = "landing";
   private chosen: AddClusterAction | undefined;
   private values: Inputs = { ...DEFAULT_INPUTS };
+  private touchedInputs = new Set<InputField>();
   /** Whether `version` carries an operator's answer rather than a default. */
   private versionTouched = false;
   private fieldErrors: FieldError[] = [];
@@ -1058,6 +1059,7 @@ export class AddClusterState {
    * forgetting what it had already told them.
    */
   setInput(field: InputField, value: string): void {
+    this.touchedInputs.add(field);
     // TOUCHING THE VERSION FIELD IS RECORDED, and it is recorded HERE because
     // this is the one place an operator's own answer reaches the field
     // (memql#4429). The tag listing arrives asynchronously and seeds this field
@@ -1068,6 +1070,15 @@ export class AddClusterState {
     this.fieldErrors = this.fieldErrors.filter((e) => e.field !== field);
     const problem = this.problemWith(field, value);
     if (problem !== undefined) this.fieldErrors.push({ field, message: problem });
+  }
+
+  /** Restore receipt values over defaults, without overwriting a person's edits. */
+  seedRepairInputs(values: Partial<Inputs>): void {
+    if (this.chosen !== "repair") return;
+    for (const field of Object.keys(values) as InputField[]) {
+      const value = values[field];
+      if (value && !this.touchedInputs.has(field)) this.values[field] = value;
+    }
   }
 
   /**
@@ -1707,6 +1718,17 @@ export function landingView(facts: LandingFacts): LandingView {
         tone: "idle",
         choices: [
           { act: "install", label: "Install MemQL on this computer", note: "Runs a local cluster in Docker." },
+          CONNECT_ELSEWHERE,
+        ],
+      };
+    case "install-incomplete":
+      return {
+        state: "Setup incomplete",
+        tone: "warn",
+        line: "Setup left some items on this computer. Continue to finish, or remove them.",
+        choices: [
+          { act: "repair", label: "Continue setup", note: "Checks completed steps and retries what is missing." },
+          { ...UNINSTALL, label: "Clean up setup", note: "Review and remove items left by setup." },
           CONNECT_ELSEWHERE,
         ],
       };

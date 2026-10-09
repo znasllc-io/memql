@@ -1004,11 +1004,17 @@ function _wait_for_operator() {
     local ns="$1" APP_NAME="$2"
     shift 2
     local timeout="${MEMQL_K3D_OPERATOR_TIMEOUT:-300}"
-    local d deadline
+    local d deadline comparison_checked=false
     deadline=$((SECONDS + timeout))
 
     for d in "$@"; do
         while ! kubectl get deployment "$d" -n "$ns" &>/dev/null; do
+            if [[ "$comparison_checked" == false ]] && ((SECONDS < deadline)); then
+                # Sync retries do not retry a failed source comparison. Recover
+                # that first, within the SAME budget as the deployment wait.
+                wait_for_app_comparison "$deadline"
+                comparison_checked=true
+            fi
             if ((SECONDS >= deadline)); then
                 local reason
                 reason="$(argocd_app_state)"
@@ -1159,79 +1165,102 @@ function argocd_app_state() {
         "${conds:+ conditions: ${conds}}"
 }
 
-# argocd_app_error -- the Application's terminal error conditions, if any.
-#
-# ONLY the three ArgoCD calls "error" conditions. SyncError is deliberately
-# absent: a sync can fail once and succeed on the retry, whereas a source that
-# cannot be fetched, a spec that cannot be admitted, or a comparison that
-# cannot be made will not fix itself.
-function argocd_app_error() {
-    kubectl get application "${APP_NAME}" -n "${ARGOCD_NAMESPACE}" -o jsonpath='
-{range .status.conditions[?(@.type=="ComparisonError")]}{.message}{"\n"}{end}
-{range .status.conditions[?(@.type=="InvalidSpecError")]}{.message}{"\n"}{end}
-{range .status.conditions[?(@.type=="UnknownError")]}{.message}{"\n"}{end}' 2>/dev/null |
-        tr -s '\n' ' ' | sed 's/^ *//; s/ *$//'
+# Read one snapshot: a refresh annotation and its old ComparisonError must not
+# come from different reconciliations. Argo removes the annotation together with
+# the new status, after the requested comparison completes.
+function argocd_comparison_state() {
+    kubectl get application "${APP_NAME}" -n "${ARGOCD_NAMESPACE}" --request-timeout=10s -o jsonpath='{.status.sync.status}{"\n"}{.metadata.annotations.argocd\.argoproj\.io/refresh}{"\n"}{range .status.conditions[?(@.type=="ComparisonError")]}{.type}{": "}{.message}{"\n"}{end}{range .status.conditions[?(@.type=="InvalidSpecError")]}{.type}{": "}{.message}{"\n"}{end}{range .status.conditions[?(@.type=="UnknownError")]}{.type}{": "}{.message}{"\n"}{end}{"."}'
 }
 
-# wait_for_app_comparison -- FAIL WHERE IT WENT WRONG (memql#5029).
-#
-# WHY THIS EXISTS. apply_argocd_app used to end at "Application registered",
-# and nothing anywhere in this script ever read the Application back. So a
-# source ArgoCD cannot fetch, a path that is not in the repo, or an AppProject
-# that refuses the source all produced the same run: every step green, the
-# namespace empty, wait_for_workloads recording workloadsReady=false, the
-# "Bootstrap complete" banner printed over it, `cap_ok`, exit 0 -- and the only
-# line saying anything was wrong arriving from the install graph, one assertion
-# later, as `result.workloadsReady did not satisfy resultTrue`. That names a
-# JSON path where a diagnosis belongs, and it points at the workloads, which
-# were never the fault.
-#
-# So this reads the Application's own conditions and fails HERE, with ArgoCD's
-# own message.
-#
-# WHAT IT DOES NOT WAIT FOR: a successful sync, or healthy workloads. Only that
-# ArgoCD managed to COMPARE the source at all -- which is the fetch, the path
-# and the AppProject, and which every healthy install clears in seconds. The
-# workload wait keeps its deliberate non-fatality (see wait_for_workloads); a
-# cluster that is merely slow must still leave the operator something to
-# inspect. A source that cannot be read is not slow.
-#
-# WHY AN ERROR MUST PERSIST. ArgoCD publishes a ComparisonError while its first
-# fetch is still in flight and clears it moments later, so a single poll would
-# make a healthy install fail intermittently -- the exact flakiness this issue
-# is about. The condition has to survive APP_ERROR_CONFIRMATIONS consecutive
-# polls before it is believed.
-function wait_for_app_comparison() {
-    local deadline=$((SECONDS + APP_COMPARE_TIMEOUT)) sync="" err="" confirmations=0 tick=5
-    local -r APP_ERROR_CONFIRMATIONS=3
+# Only transient source transport failures get an automatic retry. A missing
+# revision, invalid manifest, denied repository or invalid project needs a fix.
+# ARGOCD_GIT_ATTEMPTS_COUNT in our pinned Argo only retries ls-remote, NOT the
+# native `git fetch` that failed on Pop!_OS. syncPolicy.retry runs later still.
+function argocd_retryable_source_error() {
+    local message
+    message="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    case "$message" in
+        *invalidspecerror:*|*unknownerror:*) return 1 ;;
+    esac
+    case "$message" in
+        *comparisonerror:*) ;;
+        *) return 1 ;;
+    esac
+    case "$message" in
+        *'connection reset by peer'*|*'early eof'*|*'unexpected disconnect'*|\
+        *'transfer closed with'*|*'bytes of body are still expected'*|\
+        *'tls connection was non-properly terminated'*|*'http/2 stream'*|\
+        *'connection timed out'*|*'i/o timeout'*|*'deadline exceeded'*|\
+        *'failed timeout after'*|*'temporary failure in name resolution'*|\
+        *'could not resolve host'*|*'the requested url returned error: 429'*|\
+        *'the requested url returned error: 500'*|*'the requested url returned error: 502'*|\
+        *'the requested url returned error: 503'*|*'the requested url returned error: 504'*) return 0 ;;
+    esac
+    return 1
+}
 
-    info "Waiting up to ${APP_COMPARE_TIMEOUT}s for ArgoCD to compare '${APP_NAME}' against its source..."
-    while :; do
-        err="$(argocd_app_error)"
-        if [[ -n "$err" ]]; then
-            confirmations=$((confirmations + 1))
-            if ((confirmations >= APP_ERROR_CONFIRMATIONS)); then
-                error "ArgoCD cannot read the source this Application names."
-                error "  repo:     ${REPO_URL}"
-                error "  revision: ${TARGET_REVISION}"
-                error "  path:     ${OVERLAY_PATH}"
-                error "  project:  ${APP_PROJECT}"
-                cap_fail 5 "ArgoCD refused the Application source and will not sync it: ${err}"
-            fi
-        else
-            confirmations=0
-            sync="$(kubectl get application "${APP_NAME}" -n "${ARGOCD_NAMESPACE}" \
-                -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
-            if [[ -n "$sync" ]]; then
-                info "ArgoCD compared '${APP_NAME}' (sync=${sync}); reconciliation is under way."
-                return 0
+# A hard refresh bypasses the cached comparison failure and actually asks the
+# repo-server to fetch again. Keep the selected revision and ArgoCD deployment
+# path; never turn a transport failure into a direct-apply or a different ref.
+# The optional absolute deadline lets operators share this wait with rollout.
+function wait_for_app_comparison() {
+    local deadline="${1:-$((SECONDS + APP_COMPARE_TIMEOUT))}"
+    local snapshot sync="" refresh="" err="" confirmations=0 tick=3
+    local retries=0 next_retry=0 backoff=5 remaining
+    local -r APP_ERROR_CONFIRMATIONS=3 MAX_SOURCE_RETRIES=3
+
+    info "Waiting for ArgoCD to compare '${APP_NAME}' against its source..."
+    while ((SECONDS < deadline)); do
+        if snapshot="$(argocd_comparison_state 2>/dev/null)"; then
+            snapshot="${snapshot%.}"
+            sync="${snapshot%%$'\n'*}"
+            snapshot="${snapshot#*$'\n'}"
+            refresh="${snapshot%%$'\n'*}"
+            err="${snapshot#*$'\n'}"
+            # A requested retry still carries the previous failure until the
+            # controller publishes its result. Do not spend retries on it.
+            if [[ -n "$refresh" ]]; then
+                confirmations=0
+            elif [[ -n "$err" ]]; then
+                if argocd_retryable_source_error "$err"; then
+                    confirmations=0
+                    if ((next_retry == 0)); then next_retry=$((SECONDS + backoff)); fi
+                    if ((SECONDS >= next_retry)); then
+                        if ((retries >= MAX_SOURCE_RETRIES)); then
+                            cap_fail 5 "ArgoCD could not download the source for '${APP_NAME}' after ${retries} automatic retries: ${err}"
+                        fi
+                        info "Source download interrupted. Retrying '${APP_NAME}' ($((retries + 1))/${MAX_SOURCE_RETRIES})..."
+                        if ! kubectl annotate application "$APP_NAME" -n "$ARGOCD_NAMESPACE" \
+                            argocd.argoproj.io/refresh=hard --overwrite --request-timeout=10s >&2; then
+                            cap_fail 5 "Could not request another source download for '${APP_NAME}'. ${err}"
+                        fi
+                        retries=$((retries + 1))
+                        backoff=$((backoff * 2))
+                        next_retry=0
+                    fi
+                else
+                    confirmations=$((confirmations + 1))
+                    if ((confirmations >= APP_ERROR_CONFIRMATIONS)); then
+                        cap_fail 5 "ArgoCD refused the source for application '${APP_NAME}': ${err}"
+                    fi
+                fi
+            else
+                confirmations=0
+                next_retry=0
+                case "$sync" in
+                    Synced|OutOfSync)
+                        info "ArgoCD compared '${APP_NAME}' (sync=${sync}); reconciliation is under way."
+                        return 0 ;;
+                esac
             fi
         fi
-        if ((SECONDS >= deadline)); then
-            break
-        fi
-        sleep "$tick"
+        remaining=$((deadline - SECONDS))
+        if ((remaining <= 0)); then break; fi
+        if ((remaining < tick)); then sleep "$remaining"; else sleep "$tick"; fi
     done
+    if [[ -n "$err" ]]; then
+        cap_fail 5 "ArgoCD could not compare the source for '${APP_NAME}' before the deadline (${retries} automatic retries). ${err}"
+    fi
 
     # NOT FATAL. A comparison that has not finished is a slow fetch, which is
     # the same class as a slow image pull -- and this script does not abort a

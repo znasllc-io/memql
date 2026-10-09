@@ -98,9 +98,8 @@ const RUN_WORDS: Readonly<
 export const ADD_CLUSTER_STYLES = `
   .ac-line { margin: 0 0 16px; max-width: 60ch; }
   .ac-narrow { max-width: 40rem; }
-  .ac-choices { list-style: none; margin: 0; padding: 0; max-width: 40rem;
-                border-top: 1px solid var(--memql-border); }
-  .ac-choices > li { border-bottom: 1px solid var(--memql-border); }
+  .ac-choices { list-style: none; margin: 0; padding: 0; }
+  .ac-choices > li + li { border-top: 1px solid var(--memql-border); }
   .ac-choice { display: flex; align-items: center; gap: 12px; box-sizing: border-box; width: 100%;
                margin: 0; padding: 10px 8px 10px 2px; font: inherit; line-height: 1.4; text-align: left;
                color: var(--memql-fg); background: none; border: 0; border-radius: var(--memql-radius);
@@ -112,10 +111,10 @@ export const ADD_CLUSTER_STYLES = `
   .ac-choice[data-tone="danger"] .ac-choice-label { color: var(--memql-danger); }
   .ac-choice-note { color: var(--memql-muted); font-size: 0.923em; }
   .ac-chevron { flex: none; color: var(--memql-subtle); }
-  .ac-list { list-style: none; margin: 0; padding: 0; max-width: 40rem;
-             border-top: 1px solid var(--memql-border); }
+  .ac-list { list-style: none; margin: 0; padding: 0; }
+  .ac-row + .ac-row { border-top: 1px solid var(--memql-border); }
   .ac-row { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; row-gap: 2px;
-            padding: 8px 2px; border-bottom: 1px solid var(--memql-border); }
+            padding: 8px 2px; }
   .ac-row-name { font-weight: 500; }
   .ac-row-detail { flex: 1 1 12em; min-width: 0; color: var(--memql-muted); overflow-wrap: anywhere; }
   .ac-row-tag { margin-left: auto; color: var(--memql-muted); font-size: 0.923em; white-space: nowrap; }
@@ -125,7 +124,7 @@ export const ADD_CLUSTER_STYLES = `
   .ac-word[data-tone="attention"] { color: var(--memql-warn); font-weight: 500; }
   .ac-word[data-tone="error"] { color: var(--memql-danger); font-weight: 500; }
   .ac-word-note { display: block; margin-top: 1px; color: var(--memql-muted); font-size: 0.923em; }
-  .ac-column { box-sizing: border-box; max-width: 560px; margin: 8px auto 0; }
+  .ac-column { box-sizing: border-box; max-width: 560px; margin: 8px 0 0; }
   .ac-column > .mq-subhead { margin-top: 24px; }
   .ac-quiet { margin: 10px 0 0; color: var(--memql-muted); }
   .ac-key .mq-code-text { letter-spacing: 0.04em; }
@@ -242,6 +241,8 @@ export interface CollectInput {
   remoteProblem?: string;
   /** The password was refused three times, or the prompt could not be answered. */
   passwordProblem?: string;
+  /** Finish a stopped or failed first installation using its recorded choices. */
+  continuing?: boolean;
 }
 
 /** The fields each action asks for, and which of them sit behind "More options". */
@@ -440,15 +441,15 @@ export function collectScreen(input: CollectInput): RegionParts {
     subhead("Checks") +
     checksList(input.checks);
 
-  const verb = flow === "install" ? "Install" : "Repair";
+  const verb = input.continuing ? "Continue setup" : flow === "install" ? "Install" : "Repair";
   const acts: Act[] = [{ act: "back", label: "Cancel" }];
   if (!blocked) acts.push({ act: "begin", label: verb, tone: "primary" });
   const problems = input.errors.length > 0;
   return {
-    head: head({ title: TAB_TITLES[flow] }),
+    head: head({ title: input.continuing ? "Continue setup" : TAB_TITLES[flow] }),
     body,
     actions: actionBar({
-      state: blocked ? "Can't start" : problems ? "Check the details" : flow === "install" ? "Ready to install" : "Ready to repair",
+      state: blocked ? "Can't start" : problems ? "Check the details" : input.continuing ? "Setup incomplete" : flow === "install" ? "Ready to install" : "Ready to repair",
       tone: blocked || problems ? "warn" : "idle",
       acts,
     }),
@@ -626,8 +627,8 @@ export function logsDisclosure(open: boolean, lines: readonly LogLine[] = [], la
       lines,
       empty: "Waiting for output",
       acts: [
-        { act: "copyLog", label: "Copy" },
-        { act: "openOutput", label: "Open in Output" },
+        { act: "copyLog", label: "Copy log", icon: "copy" },
+        { act: "openOutput", label: "Open in Output", icon: "open" },
       ],
     }),
   });
@@ -718,7 +719,7 @@ export function runScreen(input: RunInput): RegionParts {
   let bar: string;
   switch (input.phase) {
     case "running":
-      bar = actionBar({ state: words.busy, tone: "busy", acts: [{ act: "cancel", label: "Cancel" }] });
+      bar = actionBar({ state: words.busy, tone: "busy", acts: [{ act: "cancel", label: "Stop" }] });
       break;
     case "stopping":
       bar = actionBar({ state: "Stopping after the current step", tone: "busy", acts: [] });
@@ -734,7 +735,7 @@ export function runScreen(input: RunInput): RegionParts {
         state: words.failed,
         tone: "error",
         acts: [
-          { act: "leave", label: "Cancel" },
+          { act: "leave", label: "Back" },
           ...(input.retryable ? [{ act: "retry", label: "Retry", tone: "primary" as const }] : []),
         ],
       });

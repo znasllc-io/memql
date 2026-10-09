@@ -52,6 +52,7 @@ import {
   removalParams,
   unreceiptedClusterReceipt,
   type Receipt,
+  recordInstallIntent,
 } from "./receipt.js";
 import { refuseUnsupportedPlatform } from "./platform.js";
 import { resolveScriptRoot } from "./root.js";
@@ -941,6 +942,13 @@ export async function runInstall(
   hooks: SessionHooks = {},
 ): Promise<ExecutionReport> {
   const graph = hooks.graph ?? (await loadGraphFor("install", opts));
+  if (hooks.signal?.aborted !== true) {
+    await recordInstallIntent(opts.receiptFile, graph.name, {
+      tag: opts.tag ?? "", commit: opts.commit ?? "", imageTag: opts.imageTag ?? "",
+      imagesFromSource: imagesFromSource(opts), domain: opts.domain ?? "",
+      ownerEmail: opts.ownerEmail ?? "", ownerFirstName: opts.ownerFirstName ?? "", ownerLastName: opts.ownerLastName ?? "",
+    });
+  }
   return execute(graph, installPlan(opts), opts, hooks, opts.receiptFile);
 }
 
@@ -1030,16 +1038,10 @@ export async function runUninstall(
  * adds a third. memql#5056 fixed one of the two by naming flows, and the miss
  * was exactly that.
  *
- * `k3d.up` IS DELIBERATELY ABSENT even though `clusterUp` also takes a
- * `--repo-root` and has the same shape. It is reachable from the RELEASE lane,
- * where the checkout is an arbitrary older tag, and `scripts/lib/capability.sh`
- * refuses an undeclared flag outright:
- *
- *     cap_fail 2 "unknown flag: --${name} (declared params: ...)"
- *
- * so handing a current graph's params to an old release's `up.sh` can refuse the
- * install. That is a compatibility question with its own answer to design, not a
- * line to sweep in here. Tracked on memql#5064.
+ * `k3d.up` follows the checkout on the from-source lane too, including
+ * repair. Otherwise a new main checkout still bootstraps with the extension's
+ * older ArgoCD recovery logic. Release installs keep the bundled script:
+ * historical release scripts may not declare the current graph's flags.
  */
 const CHECKOUT_SCRIPT_CAPABILITIES = new Set(["k3d.dev"]);
 
@@ -1065,7 +1067,8 @@ function scriptRootFor(
   params: Record<string, string>,
   opts: SessionOptions,
 ): string {
-  if (!CHECKOUT_SCRIPT_CAPABILITIES.has(step.script)) {
+  const sourceBootstrap = step.script === "k3d.up" && imagesFromSource(opts);
+  if (!sourceBootstrap && !CHECKOUT_SCRIPT_CAPABILITIES.has(step.script)) {
     return opts.root;
   }
   const declared = (params["repo-root"] ?? "").trim();

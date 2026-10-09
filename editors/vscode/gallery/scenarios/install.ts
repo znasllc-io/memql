@@ -75,6 +75,7 @@ function landing(id: string, title: string, f?: LandingFacts): Scenario {
 const landings: Scenario[] = [
   landing("install-landing-detecting", "Detecting (skeleton)"),
   landing("install-landing-absent", "Nothing local", facts({})),
+  landing("install-landing-incomplete", "Setup stopped before completion", facts({ verdict: "install-incomplete", hasReceipt: true })),
   landing(
     "install-landing-listed",
     "Installed and listed, signed out",
@@ -339,7 +340,7 @@ function run(id: string, title: string, input: Partial<RunInput>): Scenario {
 const PORT_FAILURE = {
   id: "clusterUp",
   line: "Port 443 is already in use on this computer.",
-  next: "Retrying often helps. If it fails again, the log has the details.",
+  next: "Review the error, then retry. Completed steps will be checked and reused.",
   remedy: "k3d cluster stop memql",
 };
 

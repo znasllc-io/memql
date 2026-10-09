@@ -533,7 +533,8 @@ export class AddClusterPanel {
 
   /** The tab is called what the page is doing. */
   private setFlow(flow: PanelFlow): void {
-    const title = TAB_TITLES[flow];
+    const title = flow === "repair" && this.detected?.facts.verdict === "install-incomplete"
+      ? "Continue setup" : TAB_TITLES[flow];
     if (this.panel.title !== title) this.panel.title = title;
   }
 
@@ -1048,6 +1049,7 @@ export class AddClusterPanel {
     await recorder.finish(
       controller.signal.aborted ? "cancelled" : failure !== undefined || report?.ok !== true ? "failed" : "succeeded",
     );
+    this.presence.invalidate();
     this.deps.refreshTree();
     if (this.disposed) return;
 
@@ -1083,7 +1085,7 @@ export class AddClusterPanel {
       this.state.setClaimUrl(claimUrlFrom(report));
       this.state.setRecoveryKey(revealedRecoveryKeyFrom(report), recoveryKeyStateFrom(report));
     }
-    this.doneKind = action === "repair" ? "repaired" : "installed";
+    this.doneKind = action === "repair" && this.detected?.facts.verdict !== "install-incomplete" ? "repaired" : "installed";
     await this.handOffAfterInstall(inputs.domain);
   }
 
@@ -1150,8 +1152,10 @@ export class AddClusterPanel {
   private openLogAtFailure(stepId: string): void {
     this.pendingLines = [];
     this.clearFlushTimer();
-    this.live.log(this.runLog.anchoredAt(stepId), { reset: true });
+    // The failure notice changes the body and can replace the log container.
+    // Mount it first, then replay the lines into that container.
     this.render();
+    this.live.log(this.runLog.anchoredAt(stepId), { reset: true });
     this.pushProgress();
     void this.panel.webview.postMessage({ type: "setDisclosure", id: "run-logs", open: true });
   }
@@ -1282,16 +1286,9 @@ export class AddClusterPanel {
   private async prefillFromReceipt(): Promise<void> {
     const receipt = await readReceipt(this.deps.receiptFile).catch(() => null);
     if (this.disposed || this.state.action !== "repair") return;
-    const recordedHost = recordedDomain(receipt);
-    if (this.state.inputs.domain === "" && recordedHost !== "") this.state.setInput("domain", recordedHost);
     const owner = recordedOwner(receipt);
-    if (this.state.inputs.ownerEmail === "" && owner.email !== "") this.state.setInput("ownerEmail", owner.email);
-    if (this.state.inputs.ownerFirstName === "" && owner.firstName !== "") {
-      this.state.setInput("ownerFirstName", owner.firstName);
-    }
-    if (this.state.inputs.ownerLastName === "" && owner.lastName !== "") {
-      this.state.setInput("ownerLastName", owner.lastName);
-    }
+    this.state.seedRepairInputs({ domain: recordedDomain(receipt), ownerEmail: owner.email,
+      ownerFirstName: owner.firstName, ownerLastName: owner.lastName });
     this.render();
   }
 
@@ -2078,6 +2075,7 @@ export class AddClusterPanel {
           key: `collect-${action}`,
           parts: collectScreen({
             action,
+            continuing: this.detected?.facts.verdict === "install-incomplete",
             values: s.inputs,
             errors: s.errors,
             versionChoices: this.versionChoices,
@@ -2215,7 +2213,7 @@ export class AddClusterPanel {
     }
     const s = this.state;
     if (s.screen !== "running" && s.screen !== "failedStep" && s.screen !== "done") return undefined;
-    const mode = s.action === "repair" ? "repair" : "install";
+    const mode = s.action === "repair" && this.detected?.facts.verdict !== "install-incomplete" ? "repair" : "install";
     let phase: RunPhase;
     if (s.screen === "running") phase = s.stopping ? "stopping" : "running";
     else if (s.screen === "failedStep") phase = this.runInFlight ? "finishing" : "failed";

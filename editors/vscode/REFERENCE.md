@@ -1093,7 +1093,8 @@ to any of them is a race whose winner depends on listener registration order.
 | `memql.clusterSelected` | This editor has a cluster in hand: dialling one, holding one, or tried and refused | `ConnectionManager` |
 | `memql.connected` | That cluster's transport is up right now | `ConnectionManager` |
 | `memql.connectionState` | The connection in one word: `none`, `connecting` (a dropped connection retrying included), `connected`, `signIn`, `unreachable`, `notConfigured` | `ConnectionManager` |
-| `memql.localClusterPresent` | A MemQL local cluster exists on this machine, listed or not | `src/extension.ts`, from the presence check |
+| `memql.localClusterPresent` | A local cluster or partial setup exists on this machine, listed or not | `src/extension.ts`, from the presence check |
+| `memql.localClusterState` | The same local setup verdict the Add Cluster page uses | `src/extension.ts`, from the presence check |
 | `memql.deploymentsInstance` | What the selected cluster IS: `memqlLocalInstance`, `memqlLocalInstanceAbsent`, `memqlLocalInstanceUnreceipted`, `memqlRemoteInstance`, or unset | `DeploymentsTreeProvider` |
 | `memql.deploymentsHasCheckout` / `memql.deploymentsHasBranch` | The selected local cluster has a recorded checkout / that checkout is on a branch | `DeploymentsTreeProvider` |
 
@@ -1159,7 +1160,18 @@ each webview opens. It needs a display, and falls back to `xvfb-run` when
 `DISPLAY` is unset. CI runs it against both the declared `engines.vscode` floor
 and current stable, because that floor is where this bug class actually fires.
 
-Neither lane dials a cluster. Everything downstream of a connection is verified
+For an interactive installer walkthrough, run `npm run test:installer-ui` from
+`editors/vscode`. It opens a separate VS Code profile with disposable receipts
+and registry state. Use the fixture webview, or **Ctrl+Alt+I** to reopen it:
+its first bootstrap fails, Retry succeeds, and Stop/Resume, repair and cleanup
+use the real controller with simulated capability results. It does not test
+Docker, certificate trust, password prompts or passkey enrollment. Commands
+outside the fixture still belong to the real extension; use a disposable
+machine for a complete lifecycle against real scripts. Close the test window
+to finish and remove its temporary profile. `MEMQL_VSCODE_EXECUTABLE` selects
+another VS Code executable on macOS or Linux.
+
+Neither automated lane dials a cluster. Everything downstream of a connection is verified
 by hand against the [manual verification
 checklist](https://github.com/znasllc-io/memql/blob/main/docs/public/language/vscode-runtime-panel-verification.md).
 

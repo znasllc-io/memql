@@ -55,7 +55,7 @@ You need Docker running, on Linux x64 or Apple Silicon macOS.
 
 **One progress screen** follows the install: a bar, the step running now
 ("Creating the cluster"), the step count and the time so far. **Show logs**
-opens the live log, with **Copy** and **Open in Output**. **Cancel** stops after
+opens the live log, with **Copy** and **Open in Output**. **Stop** stops after
 the current step, and **Resume** picks up from there. When a step fails, the
 screen names it and says why, gives the fix as a command you can **Run in
 terminal**, and offers **Retry**.
@@ -64,7 +64,9 @@ When it is done, save the recovery key it shows you (it is shown only once),
 then press **Sign in**, or **Set up a passkey** for the owner account.
 
 **MemQL: Repair Local Cluster** runs the install again and fixes only what is
-missing.
+missing. An interrupted first install is marked **Setup incomplete**, with
+**Continue setup** preserving your version, domain and owner details. Cleanup
+is available when you want to remove a partial setup; it is not required to retry.
 
 ## Uninstall a local cluster
 

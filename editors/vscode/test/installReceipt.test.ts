@@ -30,6 +30,8 @@ import {
   readReceipt,
   recordedImageSource,
   recordedOwner,
+  recordedCheckout,
+  recordInstallIntent,
   recordedRebuild,
   recordedStackDir,
   removalParams,
@@ -710,4 +712,20 @@ test("no receipt and an empty receipt both answer with nothing to go on", () => 
   assert.equal(recordedRebuild(null), undefined);
   assert.equal(recordedImageSource(emptyReceipt("install")), "");
   assert.equal(recordedRebuild(emptyReceipt("install")), undefined);
+});
+
+
+test("install intent excludes credentials and preserves the actual checkout pin", async () => {
+  const file = path.join(await tempDir(), "receipt.json");
+  await appendReceiptEntry(file, "install", entry({ stepId: "stackCheckout", result: { refKind: "branch", ref: "main", commit: "a".repeat(40) } }));
+  await recordInstallIntent(file, "install", {
+    tag: "main", commit: "", imageTag: "", imagesFromSource: true, domain: "memql.localhost",
+    ownerEmail: "owner@example.test", ownerFirstName: "Ada", ownerLastName: "Lovelace",
+    ...{ password: "do-not-store", recoveryKey: "do-not-store", token: "do-not-store" },
+  });
+  const receipt = await readReceipt(file);
+  assert.equal(recordedCheckout(receipt).commit, "a".repeat(40));
+  assert.equal(recordedCheckout(receipt).fromSource, true, "no buildImages step is needed to remember the lane");
+  assert.doesNotMatch(await fs.readFile(file, "utf8"), /do-not-store/);
+  assert.equal(receipt?.entries.length, 1);
 });

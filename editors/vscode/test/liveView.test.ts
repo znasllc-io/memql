@@ -228,6 +228,21 @@ test("through a stub panel: html until ready, then patches, progress and log on 
   ]);
   view.render("run", { head: "<h1>Two</h1>", body: "<p>Body</p>", actions: "" });
   assert.equal(panel.renders, 2, "a ready page is patched, not reloaded");
-  assert.deepEqual(panel.posted.at(-1), { type: "patch", regions: { body: "<p>Body</p>" } });
+  assert.deepEqual(panel.posted.slice(-2), [
+    { type: "patch", regions: { body: "<p>Body</p>" } },
+    { type: "log", lines: [line(1)], reset: true },
+  ]);
   panel.close();
+});
+
+
+test("replacing the body on completion preserves the streamed log", () => {
+  const r = recorder();
+  r.view.render("run", { ...PARTS, body: "running" });
+  r.view.handleMessage({ type: "ready" });
+  r.view.log([line(1), line(2)]);
+  r.posts.length = 0;
+  r.view.render("run", { ...PARTS, body: "finished" });
+  assert.equal(r.posts[0]?.type, "patch");
+  assert.deepEqual(r.posts.at(-1), { type: "log", lines: [line(1), line(2)], reset: true });
 });
