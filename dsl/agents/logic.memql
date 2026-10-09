@@ -2,7 +2,7 @@
 /// A display-only mismatch benefits from observing the UI. Other needs retain the original host call.
 logic agentRecoveryUsesDesktop {
  args { needs []string! }
- return args.needs.count() == 1 && args.needs.0 == "display"
+ return args.needs.count() == 1 && "display" in args.needs
 }
 
 /// Human wording for the bounded recovery consent card.

@@ -2,7 +2,6 @@ package library
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"io"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/library/versionstore"
 )
 
@@ -227,7 +227,7 @@ func (i *Integration) handleForkDocumentVersion(ctx context.Context, args map[st
 		return nil, err
 	}
 	ac, _ := auth.AccessFromContext(ctx)
-	output := fmt.Sprintf("branch-%x", sha256.Sum256([]byte(ac.UserId+"\x00"+request)))
+	output := "branch-" + string(id.New().FromString(ac.UserId+"\x00"+request))
 	release, err := i.versionGate(ctx, output)
 	if err != nil {
 		return nil, err

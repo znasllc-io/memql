@@ -87,6 +87,13 @@ var promptLevels = map[string]string{
 	// Native validation checks source identity and exact approval before writing;
 	// the prose judgment band is sufficient and no executable DSL is emitted.
 	"libraryRevisionPassages": "strong",
+	// libraryRevisionItem produces one alternative within the reviewed scope.
+	// Exact patches are validated and the human must accept the replacement.
+	"libraryRevisionItem": "strong",
+	// libraryRevisionResearch gathers evidence for the requested change through
+	// the bounded harness. Its output informs a proposal, never a direct write;
+	// the same human review gate makes strong sufficient here.
+	"libraryRevisionResearch": "strong",
 	// workContextCheckpoint summarizes a bounded immutable prefix. Originals
 	// remain available for recall; this derived memory neither executes work nor
 	// changes authority. The fast band handles this constrained extraction.

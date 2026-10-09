@@ -1176,6 +1176,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "library/queries.memql", Name: "documentCommentsForArtifact"}: true,
 		{Path: "library/queries.memql", Name: "documentCommentById"}:         true,
 
+		// Note reads borrow the backing owner only after artifact authorization.
+		// actor.userId cannot attest the original caller under that authority;
+		// only the integration may supply authorUserId, or a caller could ask
+		// for another person's private annotations.
+		{Path: "library/queries.memql", Name: "documentNotesForArtifact"}: true,
+
 		// The provenance stamps (epic memql#5391, design D9). Caller-scoping is
 		// not the fix here and the reason is unusual enough to be worth the
 		// line: the party who would write a FALSE stamp is the row's own owner.

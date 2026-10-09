@@ -5,7 +5,7 @@ import { ContextKeyExpr } from '@codingame/monaco-vscode-api/vscode/vs/platform/
 import { getAllCodicons } from '@codingame/monaco-vscode-api/vscode/vs/base/common/codicons';
 
 const manifest = JSON.parse(readFileSync(new URL('../../productivity/package.json', import.meta.url), 'utf8'));
-const modes = ['source', 'reading', 'split'];
+const modes = ['source', 'reading', 'review'];
 
 test('Markdown view buttons stay in the editor header regardless of text-editor focus', () => {
   const entries = manifest.contributes.menus['editor/title'];

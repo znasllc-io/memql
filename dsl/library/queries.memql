@@ -765,6 +765,8 @@ query documentVersion libraryDocumentBranches {
 
 /// Personal annotations, after artifact authorization. The original caller's
 /// identity is supplied by the integration, never borrowed from the document owner.
+/// actor.userId scopes the backing owner, not the note's author; exposing the
+/// authorUserId argument would let callers request another person's private notes.
 @serverOnly
 @actor
 query documentComment documentNotesForArtifact {
