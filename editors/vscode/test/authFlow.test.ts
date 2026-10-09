@@ -16,6 +16,7 @@ import { isAuthFlowError } from "../src/auth/errors.js";
 import { runAuthorizationFlow, type AuthFlowDeps } from "../src/auth/flow.js";
 import { codeChallengeS256 } from "../src/auth/pkce.js";
 import { WELL_KNOWN_CLIENT_ID } from "../src/auth/wellKnownClient.js";
+import { startLoopbackListener, type LoopbackListener } from "../src/auth/loopback.js";
 
 const ISSUER = "https://identity.memql.localhost";
 const NOW_MS = 1_800_000_000_000;
@@ -237,6 +238,34 @@ test("signs in end to end: authorizes, redeems, returns the tokens", async () =>
   assert.equal(tokens.clientId, WELL_KNOWN_CLIENT_ID);
 
   assert.deepEqual(net.oauthUrls(), [`${ISSUER}/oauth/token`]);
+});
+
+test("after the flow returns tokens, browser retries show success without redeeming again", async () => {
+  const net = identity();
+  const ui = browser();
+  let listener: LoopbackListener | undefined;
+  try {
+    const tokens = await runAuthorizationFlow(cluster(), deps(net, ui, {
+      startListener: async options => {
+        listener = await startLoopbackListener(options);
+        return listener;
+      },
+    }));
+    assert.equal(tokens.accessToken, "ACCESS");
+    assert.match(await ui.page!(), /You're signed in/);
+    const query = new URL(ui.opened[0]!).searchParams;
+    const callback = new URL(query.get("redirect_uri")!);
+    callback.searchParams.set("code", "AUTHCODE");
+    callback.searchParams.set("state", query.get("state")!);
+    for (let retry = 0; retry < 2; retry++) {
+      const response = await fetch(callback);
+      assert.equal(response.status, 200);
+      assert.match(await response.text(), /You're signed in/);
+    }
+    assert.deepEqual(net.oauthUrls(), [`${ISSUER}/oauth/token`]);
+  } finally {
+    listener?.close();
+  }
 });
 
 test("the authorization URL is a PKCE S256 code request against this flow's own listener", async () => {

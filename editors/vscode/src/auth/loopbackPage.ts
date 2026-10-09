@@ -9,7 +9,7 @@
 // module renders one of two honest pages: signed in, or not finished.
 //
 // WHAT IT CAN REFERENCE. Nothing: it is served from a throwaway loopback port
-// that is gone a moment later, so it carries its own styles and the MemQL mark
+// with a short lifetime, so it carries its own styles and the MemQL mark
 // inline. It follows the browser's light or dark preference; the gallery
 // pins one (`scheme`) so both can be photographed.
 //

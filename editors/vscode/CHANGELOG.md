@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.8
+
+- Keep the browser’s sign-in result reachable briefly after returning to the
+  editor. Browser probes no longer consume the callback, and a retry or reload
+  shows the existing result without exchanging the sign-in code again.
+
 ## 0.6.7
 
 - Register the owner passkey before offering sign-in or MemQL OS. Setup opens

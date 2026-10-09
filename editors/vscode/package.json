@@ -2,7 +2,7 @@
   "name": "memql",
   "displayName": "MemQL",
   "description": "MemQL language support for Visual Studio Code and Cursor, plus installing, connecting to and working with MemQL clusters.",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "publisher": "znasllc",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -186,7 +186,7 @@
     "viewsWelcome": [
       {
         "view": "memqlClusters",
-        "contents": "Checking local setup\u2026",
+        "contents": "Checking local setup…",
         "when": "!isWeb && !memql.localClusterState"
       },
       {
