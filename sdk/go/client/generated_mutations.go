@@ -10275,12 +10275,12 @@ func RejectOverrideBuild(args RejectOverrideArgs) string {
 	return b.String()
 }
 
-// ReleaseWorkspace -- Mark a workbench workspace as released. Called from releaseWorkspaceOnPlanTerminal when the parent Plan reaches a terminal status. The actual on-disk teardown is the workbench integration's responsibility -- this mutation only flips the lifecycle bit.
+// ReleaseWorkspace -- Mark a workbench workspace as released. Called from releaseWorkspaceOnRunTerminal when the parent run reaches a terminal status. The actual on-disk teardown is the workbench integration's responsibility -- this mutation only flips the lifecycle bit.
 //
 // Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["releaseWorkspace"] in generated_concepts.go).
 type ReleaseWorkspaceArgs struct {
 	WorkspaceId string
-	// Enum: plan_terminal | explicit | ttl_expired | node_lost
+	// Enum: plan_terminal | run_terminal | explicit | ttl_expired | node_lost
 	Reason string
 }
 
