@@ -357,6 +357,9 @@ function renderDocumentProgress(force = false) {
   const key = JSON.stringify([loading,processing,whole,atEnd,anchors,version,historyPreview,mode,draftKey]);
   if (!force && key === progressKey) return;
   progressKey = key;
+  // Safari paints wrapped annotation backgrounds beyond the glyph rectangles.
+  // Mask just the busy ranges beneath the skeleton, preserving other annotations.
+  highlight("memql-processing", ranges, 1);
   const wrap = byId("content-wrap"), full = byId("document-progress"), passages = byId("passage-progress");
   const wasBusy = content.getAttribute("aria-busy") === "true";
   const wasWhole = progressWasWhole; progressWasWhole = whole;

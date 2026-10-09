@@ -435,6 +435,32 @@ test("loading stops on human pauses and historical views and resumes only for ac
  f.send({type:"revision",status:{status:"running",cancelRequested:true,proposal}});assert.equal(f.el("document-progress").hidden,true);
  f.dom.window.close();
 });
+test("passage loading masks only its annotations and restores them for review, pauses and failure",()=>{
+ const f=fixture();f.document();f.select();f.el("selection-feedback").click();f.input("feedback","Clarify");f.el("add").click();
+ const anchor={...f.messages.find(m=>m.type==="comment").selection,kind:"markdown"};f.send({type:"saved"});
+ const row={id:"part",body:"Clarify",anchor};
+ const other={id:"other",body:"Keep this request",anchor:{...anchor,startTextOffset:0,endTextOffset:4,quote:"Keep"}};
+ f.send({type:"comments",rows:[row,other]});f.send({type:"notes",rows:[{...row,id:"note",body:"Personal note"}]});
+ const proposal={comments:[row],commentIds:[row.id]};
+ const maskedText=()=>[...(f.highlights.get("memql-processing")??[])].map(range=>range.toString());
+ for(const end of [{status:"waiting",approvalId:"approval"},{status:"waiting",waitingOn:{kind:"question"}},{status:"failed"},{status:"cancelled"},{status:"running",cancelRequested:true}]){
+  f.send({type:"revision",status:{status:"running",proposal}});
+  assert.deepEqual(maskedText(),["this selection"],"only the busy passage is masked, including after a retry");
+  const mask=f.highlights.get("memql-processing")!;
+  assert.ok((mask as any).priority>(f.highlights.get("memql-feedback") as any).priority);
+  f.send({type:"revision",status:{status:"running",proposal}});assert.equal(f.highlights.get("memql-processing"),mask,"unchanged polls keep the same layer");
+  f.send({type:"revision",status:{...end,proposal}});
+  assert.equal(f.highlights.has("memql-processing"),false);
+  assert.deepEqual([...f.highlights.get("memql-feedback")!].map(range=>range.toString()),["this selection","Keep"]);
+  assert.equal([...f.highlights.get("memql-notes")!][0].toString(),"this selection");
+ }
+ f.send({type:"revision",status:{status:"running",proposal}});
+ f.send({type:"viewMode",mode:"reading"});assert.deepEqual(maskedText(),[]);
+ f.send({type:"viewMode",mode:"review"});assert.deepEqual(maskedText(),["this selection"]);
+ f.send({type:"historyVersion",version:1,html:"<p>Earlier</p>"});assert.deepEqual(maskedText(),[]);
+ f.send({type:"historyCurrent"});assert.deepEqual(maskedText(),["this selection"]);
+ f.dom.window.close();
+});
 test("reduced motion skips reveal animation and document polls do not animate unchanged content",()=>{
  const f=fixture();let animations=0;
  (f.dom.window.HTMLElement.prototype as any).animate=()=>{animations++;return {};};
