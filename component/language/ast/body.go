@@ -128,6 +128,10 @@ type ParallelBranch struct {
 
 // ParallelStatement is `parallel { branch a { } branch b { } } [wait any]`.
 type ParallelStatement struct {
+	// Name captures each branch's returned value under its label after all
+	// branches finish. Empty retains the unbound statement form.
+	Name     string
+	NameSpan Span
 	Branches []ParallelBranch
 	// Wait is "all" (the default, never written) or "any".
 	Wait string

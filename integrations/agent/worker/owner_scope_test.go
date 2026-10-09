@@ -181,7 +181,8 @@ func TestWorkerStatusActsForItsCaller(t *testing.T) {
 		reg := workerservice.NewRegistry(nil, fleetNow)
 		reg.Add(&workerservice.Worker{RegistrationId: "machine-" + owner, OwnerUserId: owner, Name: "m",
 			Capabilities: []string{workerservice.CapabilityHeadless}})
-		nodes, err := NewIntegration(nil, reg, nil, nil).handleStatus(ctx, map[string]any{"ownerUserId": owner}, 0)
+		dispatcher := &Dispatcher{router: newTestRouter(&fakeFleet{owner: owner, machines: []Candidate{machine("machine-" + owner)}})}
+		nodes, err := NewIntegration(dispatcher, reg, nil, nil).handleStatus(ctx, map[string]any{"ownerUserId": owner}, 0)
 		if err != nil {
 			return "", err
 		}

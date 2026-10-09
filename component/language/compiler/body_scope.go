@@ -409,7 +409,12 @@ func (w *scopeWalk) statement(s ast.BodyStatement, sc *bodyScope, path []onceSte
 		for _, b := range t.Branches {
 			branch := &bodyScope{parent: sc, kind: scopeParallel}
 			w.scopeLines[branch] = spanOr(b.Span, t.Span).Line
-			w.statements(b.Body, branch, path, anc, true)
+			// A bound parallel consumes each return as that branch's value;
+			// it never returns from the enclosing automation.
+			w.statements(b.Body, branch, path, anc, t.Name == "")
+		}
+		if t.Name != "" {
+			w.bind(t.Name, spanOr(t.NameSpan, t.Span), self.stmt, sc, path, anc)
 		}
 	case *ast.PublishStatement:
 		if w.kind == "logic" {

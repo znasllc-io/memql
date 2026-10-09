@@ -34,6 +34,9 @@ import (
 type revisionAI struct {
 	calls         atomic.Int32
 	researchCalls atomic.Int32
+	appCalls      atomic.Int32
+	needsResearch bool
+	appError      error
 	answer        revisionAnswer
 }
 
@@ -53,9 +56,29 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 		}},
 		{Name: "invokePrompt", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			data := revisionMap(args["data"])
+			if args["templateId"] == "libraryRevisionIntent" {
+				intent := "edit"
+				if a.needsResearch {
+					intent = "research"
+				}
+				return reviewResult(map[string]any{"reply": intent})
+			}
+			if args["templateId"] == "libraryRevisionAppResearch" {
+				a.appCalls.Add(1)
+				if a.appError != nil {
+					return nil, a.appError
+				}
+				return reviewResult(map[string]any{"reply": "Independent app evidence with a second source."})
+			}
 			passages, valid := data["passages"].(string)
-			if (args["templateId"] != "libraryRevisionPassages" && args["templateId"] != "libraryRevisionItem") || data["evidence"] != "Evidence report for the selected feedback." || !valid || !json.Valid([]byte(passages)) || data["document"] == nil {
+			if (args["templateId"] != "libraryRevisionPassages" && args["templateId"] != "libraryRevisionItem") || !strings.Contains(asString(data["evidence"]), "Evidence report for the selected feedback.") || !valid || !json.Valid([]byte(passages)) || data["document"] == nil {
 				return nil, fmt.Errorf("DSL lost the review prompt or captured feedback")
+			}
+			if a.needsResearch && a.appError == nil && !strings.Contains(asString(data["evidence"]), "Independent app evidence") {
+				return nil, fmt.Errorf("app evidence missing from reconciliation")
+			}
+			if a.needsResearch && a.appError != nil && !strings.Contains(asString(data["evidence"]), "App research was unavailable") {
+				return nil, fmt.Errorf("app failure disguised as research")
 			}
 			a.calls.Add(1)
 			body, _ := json.Marshal(a.answer)
@@ -297,6 +320,53 @@ func TestDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing
 			_ = json.Unmarshal(status[0].Payload, &payload)
 			if payload["status"] != "succeeded" || revisionMap(payload["result"])["applied"] != true {
 				t.Fatalf("missing completion receipt: %v", payload)
+			}
+		})
+	}
+}
+
+func TestDocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure(t *testing.T) {
+	for _, appErr := range []error{nil, errors.New("Claude Code: You've hit your weekly limit (429)"), errors.New("Codex unavailable; Claude Code weekly limit"), context.DeadlineExceeded} {
+		t.Run(fmt.Sprint(appErr), func(t *testing.T) {
+			f := newRevisionDB(t)
+			f.ai.needsResearch, f.ai.appError = true, appErr
+			artifact, doc := f.document("# Research\n\nOriginal claim.\n")
+			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Research and verify this claim.")
+			f.ai.answer = revisionAnswer{Summary: "Verified claim", Edits: []revisionReplacement{{Before: "Original claim.", After: "Verified claim.", Reason: "Based on retrieved evidence", CommentIDs: []string{note}}}}
+			request := asString(args["requestId"])
+			var wait *workstate.HumanWait
+			if err := f.execute(f.engine, request, false); !errors.As(err, &wait) {
+				t.Fatalf("research did not reach ordinary edit approval: %v", err)
+			}
+			ids, _, run, approval, err := f.second.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+			if err != nil || run["status"] != "waiting" || approval["kind"] != "planReview" {
+				t.Fatalf("optional app failure parked the goal: %v %v %v", run, approval, err)
+			}
+			if f.ai.researchCalls.Load() != 1 || f.ai.appCalls.Load() != 1 || f.ai.calls.Load() != 1 {
+				t.Fatal("research did not execute exactly once per branch")
+			}
+			f.query(f.other, f.ctx, "query", "decideApproval", map[string]any{"approvalId": memql.BareShortId(asString(approval["id"])), "decision": "approved", "answer": f.accepted(request)})
+			if err := f.execute(f.other, request, true); err != nil {
+				t.Fatalf("resume lost parallel results: %v", err)
+			}
+			changed, err := f.first.reviewDocument(memql.ContextWithFreshRead(f.ctx), artifact)
+			if err != nil || changed.backing["body"] != "# Research\n\nVerified claim.\n" {
+				t.Fatalf("goal did not finish: %v %v", changed, err)
+			}
+			if f.ai.researchCalls.Load() != 1 || f.ai.appCalls.Load() != 1 {
+				t.Fatal("approval spent research quota again")
+			}
+			if appErr != nil {
+				rows := f.query(f.other, f.ctx, "query", "workStepsForOwnerRun", map[string]any{"runId": ids.RunID})
+				recorded := false
+				for _, row := range rows {
+					if row["status"] == "failed" && strings.Contains(asString(row["errorMessage"]), appErr.Error()) {
+						recorded = true
+					}
+				}
+				if !recorded {
+					t.Fatal("optional app failure disappeared from the durable journal")
+				}
 			}
 		})
 	}

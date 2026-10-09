@@ -44,6 +44,50 @@ existing plan-review approval. There is no promise that every failure can be
 recovered automatically or that a language model can identify every platform
 bug correctly.
 
+## Browser research fallback
+
+The document DSL first assesses whether feedback needs external evidence using
+a local model. For research, it runs local headless collection and independent
+app research concurrently. The `researchApps` policy tries Codex with a balanced
+model, then Claude Code with Sonnet; each uses its own tools. The headless
+branch runs on local models. Both reports reach the proposal stage, which
+combines complementary findings and checks disagreements against primary
+sources. Ordinary wording edits do not spend app quota.
+
+App research is optional. Credit limits, missing apps, connection errors and
+bounded timeouts are journaled under the failed branch call. They never cancel
+headless research, stop the goal, or require a person to approve an unavailable
+app. The proposal uses the evidence available and discloses unsupported work.
+No metered provider is in either research chain. A genuine permission gate for
+headless or desktop access remains mandatory. Explicit owner routing and step
+overrides still take precedence.
+
+Remaining subscription quota is not inferred from sign-in. A failed session
+or bounded timeout remains an error with its attempt receipt. The chain may
+continue while the parent run is active; cancellation of the parent stops it.
+A session that timed out is closed before another attempt. These mechanisms
+reuse the app session's existing permission, timeout and cleanup boundaries.
+
+Research prefers available headless search and bounded source retrieval. When
+search APIs are unavailable or disallowed, the agent can use public search
+interfaces. If headless tools cannot obtain the evidence, the final fallback
+is Computer Use on an eligible enrolled desktop in the cluster. This follows
+the same routing policy, scoped approval and kill switch as other desktop
+work; a connected machine does not grant access.
+
+`workerStatus` reads the shared fleet, including workers connected to another
+replica. `headlessOnline` and `computerUseOnline` distinguish host execution
+from a worker that advertises desktop control and a display. Availability is
+a snapshot; dispatch rechecks the route and permission before acting. A fleet
+read error is reported as a failure, not converted to an offline answer.
+
+The agent retains gathered sources, failed attempts and remaining questions
+when switching tools or waiting for permission. Browser actions must follow
+the observed interface. A search snippet or access challenge is not proof of
+a source's claims. No fallback enables paid services, invents evidence or
+broadens the goal's authority. If no eligible desktop is available, the run
+reports the missing capability and preserves its progress.
+
 ## Keeping active context useful
 
 Owned work uses the following layers:

@@ -1,6 +1,11 @@
 {
   "cases": [
     {
+      "file": "named-parallel.memql",
+      "verdict": "load_ok",
+      "note": "a named parallel captures branch returns by label after all branches finish; local names stay private"
+    },
+    {
       "file": "parallel.memql",
       "verdict": "load_ok",
       "note": "each branch is a list of its own; a name bound in one exists in that branch only"

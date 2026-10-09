@@ -37,6 +37,9 @@ func (e *workPromptEngine) Execute(ctx context.Context, query string) (any, erro
 func (e *workPromptEngine) RenderPrompt(name string, data map[string]any) (string, error) {
 	prompt, ok := e.prompts.Get(name)
 	if !ok {
+		if name == "agentReply" {
+			return "ordinary reply", nil
+		}
 		return "", fmt.Errorf("prompt %s not registered", name)
 	}
 	encoded, err := json.Marshal(data)
@@ -100,6 +103,18 @@ func TestOwnedWorkTurnUsesShippedPrompt(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("actual work turn has no file tool")
+	}
+	msg.Hints["work_prompt_template"] = "libraryRevisionResearch"
+	withTemplate, err := r.prepareTurn(ctx, msg, time.Now())
+	if err != nil || withTemplate.routerReq.PromptName != "libraryRevisionResearch" {
+		t.Fatalf("DSL prompt lost before routing: %+v %v", withTemplate, err)
+	}
+	withoutRun, err := r.prepareTurn(auth.ContextWithUserActor(context.Background(), owner), msg, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withoutRun.routerReq.PromptName == "libraryRevisionResearch" {
+		t.Fatal("client hint selected a work routing policy outside its owned run")
 	}
 }
 

@@ -50,12 +50,16 @@ var shippedPolicies = []string{
 	"localOnly",
 	"federationStrongest",
 	"embeddingsBinding",
+	"researchApps",
 }
 
 // shippedRules is every rule this repository seeds, with the policy it names.
 // The pair is spelled out rather than derived so that changing one without the
 // other is a failure rather than a silent re-route.
 var shippedRules = map[string]string{
+	"documentResearchHarness": "localOnly",
+	"documentAppResearch":     "researchApps",
+	"documentResearchIntent":  "localOnly",
 	"default":                 "localFirst",
 	"fastLane":                "fastLocalFirst",
 	"backgroundLane":          "localFirst",
@@ -247,6 +251,14 @@ func TestEveryShippedPolicyStartsAtTheCheapestDoor(t *testing.T) {
 		// vector space, which is the defect the policy exists to prevent, and
 		// the check below still catches it.
 		if len(chain) == 1 && chain[0] == embedderActiveRef {
+			continue
+		}
+		// This optional branch complements a concurrent local harness. It can
+		// use subscription apps only: never a metered vendor fallback.
+		if name == "researchApps" {
+			if strings.Join(chain, ",") != "app:codex:gpt-5.6-terra,app:claude-code:sonnet" {
+				t.Errorf("research apps must retain the bounded subscription-only chain: %v", chain)
+			}
 			continue
 		}
 		wantLocal := fleetStrongestRef

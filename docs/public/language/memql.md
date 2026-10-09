@@ -2304,7 +2304,7 @@ A bare name is a statement's name, a loop variable, a lambda parameter or a rese
 - A name is bound once, and read only after the statement that binds it. Reading it earlier is refused, naming both lines (`body_forward_reference`).
 - An `if`/`else` branch or a `switch` case runs at most once, and shares the scope around it. A name bound in a branch that did not run reads absent. The branches of one chain may each bind the same name; whichever runs binds it.
 - A loop body and a parallel branch have their own scope. A name bound inside exists only there, and it may not shadow a name or a root outside.
-- This remains true when `parallel` waits for all branches: waiting does not export their names. Keep dependent statements in the same branch, or run them sequentially when a later statement needs their results. `wait any` uses the same scope rule.
+- This remains true when `parallel` waits for all branches: waiting does not export their local names. To collect results, name the parallel (`reports := parallel { ... }`) and return each branch's value; the following statement reads `reports.<branchLabel>`. The named form always waits for every branch and refuses `wait any`.
 - An automation reading `actor` declares `@actor`; every `args.<name>` it reads must be declared in its argument schema. These rules are checked when its statements compile.
 - `config.<key>` reads the configuration allow-list (`component/config`). A key the list does not hold is refused at load (`body_config_unknown`) rather than read as absent.
 
@@ -2312,7 +2312,7 @@ A bare name is a statement's name, a loop variable, a lambda parameter or a rese
 
 - A logic calls `query`, `mutation`, `logic` and `builtin`. `publish`, `automation` and `action` are an automation's, and a logic that uses one is refused (`body_publish_in_logic`, `body_call_not_in_logic`). A logic's last top-level statement is a `return` (`body_logic_return`).
 - An automation makes every call, publishes, and may `return` to end its run early. The value it returns is recorded on the run.
-- `return` is refused inside a parallel branch (`body_return_in_parallel`).
+- `return` is refused inside an unbound parallel branch (`body_return_in_parallel`). In a named parallel, it ends only that branch and supplies its value. It never returns from the enclosing automation.
 
 ### What runs
 
@@ -2695,6 +2695,32 @@ automation parallelStatement {
   }
 }
 ```
+
+A named parallel captures independent results without sharing mutable bindings:
+
+<!-- corpus: 2026/statements/automation/parallel/named-parallel.memql -->
+```memql
+@trigger(schedule="0 0 * * * *")
+automation namedParallelStatement {
+  reports := parallel {
+    branch counts {
+      low := query lowStock()
+      return low.count()
+    }
+    branch levels {
+      level := logic restockLevel(n: 2)
+      return level
+    }
+  }
+  mutation restock(note: reports.counts > 0 && reports.levels > 11 ? "replenish" : "enough")
+}
+```
+
+The result is journaled with the parallel step. Resuming a completed step restores
+its captured values without repeating its branches. A branch that finishes
+without a return supplies `nil`. Put `on error continue` on an optional call
+inside a branch and return an explicit fallback value to preserve the other
+branches' work. Cancellation and required journal failures still stop execution.
 
 Each branch has its own scope, and a branch label is used once per `parallel`. A failed branch stops the others and fails the `parallel`; closing it with `on error continue` lets the body go on past it.
 

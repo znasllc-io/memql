@@ -102,7 +102,8 @@ func (i *Integration) handleRunAgentTurn(ctx context.Context, args map[string]an
 	}
 	agentId := strings.TrimSpace(asString(args["agentId"]))
 	prompt := strings.TrimSpace(asString(args["prompt"]))
-	if templateID := strings.TrimSpace(asString(args["templateId"])); templateID != "" {
+	templateID := strings.TrimSpace(asString(args["templateId"]))
+	if templateID != "" {
 		if prompt != "" {
 			return nil, fmt.Errorf("runAgentTurn: supply either prompt or templateId")
 		}
@@ -165,6 +166,9 @@ func (i *Integration) handleRunAgentTurn(ctx context.Context, args map[string]an
 		History: []*memqlv1.AgentTurnMessage{
 			{Role: "user", Content: prompt},
 		},
+	}
+	if templateID != "" {
+		msg.Hints = map[string]string{"work_prompt_template": templateID}
 	}
 	if i.engine != nil {
 		history, err := workTurnHistory(ctx, i.engine, prompt)

@@ -23,8 +23,9 @@ package automations
 //
 // The top-level list of an automation also writes the journal, honours both
 // cancellations and advances the chain head, exactly as the legacy loop in
-// executeWithEvent does for every other automation; a nested list does none of
-// that, as a forEach's children never did. A logic's statements journal too
+// executeWithEvent does for every other automation. Nested lists write only
+// their uniquely keyed step rows; they never advance the owning run. A logic's
+// statements journal too
 // (logic_statements.go): as rows of the run they were called in, or as a run
 // of their own that opens at the logic's first write. Every step is keyed in
 // its run by its list's path and its id (stepKeyIn), which is what a logic it
@@ -201,12 +202,12 @@ func (e *Evaluator) Bind(name string, v any) {
 }
 
 // withBodyRunner puts the runner for nested lists into ctx.
-func (e *Executor) withBodyRunner(ctx context.Context, parent *StepContext) context.Context {
+func (e *Executor) withBodyRunner(ctx context.Context, parent *sequenceRun) context.Context {
 	var run bodyRunner
 	run = func(ctx context.Context, steps []*Step, ev *Evaluator) (seqOutcome, error) {
-		child := *parent
+		child := *parent.stepCtx
 		child.Evaluator = ev
-		return e.runSequence(ctx, steps, &sequenceRun{stepCtx: &child})
+		return e.runSequence(ctx, steps, &sequenceRun{stepCtx: &child, journal: parent.journal, rowsOnly: true})
 	}
 	return context.WithValue(ctx, bodyRunnerKey{}, run)
 }
@@ -226,7 +227,7 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 			ev.names.declare(s.Binds)
 		}
 	}
-	ctx = e.withBodyRunner(ctx, stepCtx)
+	ctx = e.withBodyRunner(ctx, run)
 
 	for stepIndex, step := range steps {
 		if err := requiredJournalError(ctx); err != nil {
@@ -434,9 +435,8 @@ func isHumanWait(err error) bool {
 
 // recordStep puts a top-level step's result on the run and tells the
 // observer, and writes the journal's receipt for a list that journals. A
-// nested list's steps are the step that holds them -- a `for`, a block -- as a
-// forEach's children always were: their ids are unique only within their own
-// list, so on the run they would collide.
+// nested list writes rows under its full path, without mutating the shared
+// execution or notifying a top-level observer from concurrent branches.
 func (e *Executor) recordStep(ctx context.Context, run *sequenceRun, step *Step, result *StepResult) {
 	if result.Status != "skipped" {
 		run.journalFinished(ctx, step, result)
@@ -454,7 +454,8 @@ func (e *Executor) recordStep(ctx context.Context, run *sequenceRun, step *Step,
 
 // journalRunning writes a step's intent row, when this list journals.
 func (r *sequenceRun) journalRunning(ctx context.Context, step *Step, seq, attempt int) {
-	r.journal.stepRunning(ctx, r.stepCtx.Execution, step, seq, attempt)
+	exec, keyed := r.journalIdentity(ctx, step)
+	r.journal.stepRunning(ctx, exec, keyed, seq, attempt)
 }
 
 // journalFinished writes a step's receipt, the way this list journals: a
@@ -462,7 +463,10 @@ func (r *sequenceRun) journalRunning(ctx context.Context, step *Step, seq, attem
 // run write their rows only, the run row being the caller's.
 func (r *sequenceRun) journalFinished(ctx context.Context, step *Step, result *StepResult) {
 	if r.rowsOnly {
-		r.journal.stepFinishedRowOnly(ctx, r.stepCtx.Execution, step, result)
+		exec, keyed := r.journalIdentity(ctx, step)
+		receipt := *result
+		receipt.StepId = keyed.ID
+		r.journal.stepFinishedRowOnly(ctx, exec, keyed, &receipt)
 		return
 	}
 	r.journal.stepFinished(ctx, r.stepCtx.Execution, step, result, r.chainHead)
@@ -471,7 +475,20 @@ func (r *sequenceRun) journalFinished(ctx context.Context, step *Step, result *S
 // journalSkipped writes a skipped step's row, when this list journals, as the
 // version it would have run as.
 func (r *sequenceRun) journalSkipped(ctx context.Context, step *Step, seq, version int) {
-	r.journal.stepSkipped(ctx, r.stepCtx.Execution, step, seq, version)
+	exec, keyed := r.journalIdentity(ctx, step)
+	r.journal.stepSkipped(ctx, exec, keyed, seq, version)
+}
+
+// journalIdentity gives nested statements unique durable keys without changing
+// their lexical ids or advancing the owning run's head from parallel branches.
+// Only the outer sequence owns the heartbeat, chain and resume position.
+func (r *sequenceRun) journalIdentity(ctx context.Context, step *Step) (*AutomationExecution, *Step) {
+	if !r.rowsOnly || r.stepCtx.Execution == nil {
+		return r.stepCtx.Execution, step
+	}
+	keyed := *step
+	keyed.ID = stepKeyIn(ctx, step.ID)
+	return &AutomationExecution{ID: r.stepCtx.Execution.ID}, &keyed
 }
 
 // rereadStatement runs a finished read again for its value and writes no row

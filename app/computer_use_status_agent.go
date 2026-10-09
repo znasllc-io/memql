@@ -10,7 +10,6 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/component/worker"
 	"github.com/znasllc-io/memql/integrations/agent"
 )
 
@@ -20,12 +19,12 @@ import (
 // The hook returns three values:
 //
 //	status -- worker reachability tag:
-//	  "connected"    cockpit online for the owner. Detail is hostname.
+//	  "connected"    eligible worker online in the shared fleet.
 //	  "disconnected" registration row exists, no online worker.
 //	  "unconfigured" no registration rows.
 //	  ""             agent owner unresolved; suppress prompt context.
 //
-//	detail -- connected worker's hostname when status="connected";
+//	detail -- eligible worker name and headless-only limitation, when connected;
 //	          empty otherwise.
 //
 //	scope  -- the agent's CURRENT standing computer_use scope from
@@ -39,74 +38,31 @@ import (
 //	          (the user-visible "I keep clicking Allow but Sofia
 //	          keeps asking for full" loop).
 func (a *App) computerUseStatusFn() agent.ComputerUseStatusFn {
-	if a.workerService == nil {
+	if a.engine == nil {
 		return nil
 	}
-	svc, ok := a.workerService.(*worker.Service)
-	if !ok || svc == nil {
-		return nil
-	}
-	registry := svc.Registry()
-	engine := a.engine
-	logger := a.Logger
-
 	return func(ctx context.Context, agentId string) (status, detail, scope string) {
-		if engine == nil || registry == nil {
+		owner, err := resolveAgentOwner(ctx, a.engine, agentId)
+		if err != nil || owner == "" {
 			return "", "", ""
 		}
-		ownerUserId, err := resolveAgentOwner(ctx, engine, agentId)
-		if err != nil || ownerUserId == "" {
-			if logger != nil {
-				logger.Debug("computer_use status: agent owner unresolved",
-					"agent_id", agentId,
-					"error", err,
-				)
-			}
-			return "", "", ""
+		scope = standingComputerUseScope(ctx, a.engine, agentId, owner, a.Logger)
+		integration := a.lookupWorkerIntegration()
+		if integration == nil {
+			return "", "", scope
 		}
-
-		// Resolve the standing scope independently of worker
-		// reachability -- a connected cockpit + empty scope means
-		// "the user paired a worker but hasn't approved any
-		// computer_use action yet"; an offline cockpit + full
-		// scope means "the user previously approved full but the
-		// cockpit isn't running this turn." Both are real states
-		// the prompt branches on.
-		scope = standingComputerUseScope(ctx, engine, agentId, ownerUserId, logger)
-
-		// Online check: in-memory registry knows currently-streaming
-		// cockpits.
-		if workers := registry.WorkersForUser(ownerUserId); len(workers) > 0 {
-			// Pick the first online worker for the detail line --
-			// stable enough for the prompt's natural-language echo.
-			w := workers[0]
-			name := strings.TrimSpace(w.Name)
-			if name == "" {
-				name = ownerUserId
-			}
-			return "connected", name, scope
-		}
-
-		// Configured-but-offline check: query the persistent
-		// v1:worker:registration rows. Any non-revoked row means
-		// the user has paired a computer at some point.
-		hasConfigured, err := userHasConfiguredWorker(ctx, engine, ownerUserId)
+		availability, err := integration.Dispatcher().Router().Availability(auth.ContextWithUserActor(ctx, owner), owner)
 		if err != nil {
-			if logger != nil {
-				logger.Debug("computer_use status: registration lookup failed",
-					"owner_user_id", ownerUserId,
-					"error", err,
-				)
+			if a.Logger != nil {
+				a.Logger.Warn("computer_use availability could not be read", "error", err)
 			}
-			// On error, default to "unconfigured" -- it's the
-			// safer guidance than implying the user just needs to
-			// start the cockpit.
-			return "unconfigured", "", scope
+			return "", "", scope
 		}
-		if hasConfigured {
-			return "disconnected", "", scope
+		detail = availability.Detail
+		if availability.Online && !availability.ComputerUseOnline {
+			detail += " (headless operations only; no eligible desktop control)"
 		}
-		return "unconfigured", "", scope
+		return availability.Status, detail, scope
 	}
 }
 
@@ -237,72 +193,6 @@ func resolveAgentOwner(ctx context.Context, engine *memqlengine.MemQLEngine, age
 		}
 	}
 	return "", nil
-}
-
-// userHasConfiguredWorker reports whether the user has any non-
-// revoked v1:worker:registration row. Distinguishes "the user has
-// paired a computer but it's offline" from "the user has never
-// paired anything" so the agent's prompt-context message can
-// branch on it.
-//
-// workersForUser is a shape() query -- same Data-vs-Bundle
-// caveat as resolveAgentOwner above. Read OutputPayload first.
-func userHasConfiguredWorker(ctx context.Context, engine *memqlengine.MemQLEngine, ownerUserId string) (bool, error) {
-	if engine == nil || strings.TrimSpace(ownerUserId) == "" {
-		return false, nil
-	}
-	q := fmt.Sprintf(`query workersForUser(ownerUserId:%s)`, langparser.QuoteString(ownerUserId))
-	// The owner's actor, not the caller's (epic memql#4349). workersForUser is
-	// now caller-scoped -- v1:worker:registration declares the composite owner
-	// tier and the read gate has no internal-origin escape -- and the ctx here
-	// belongs to a TURN, whose actor is not reliably the machine's owner: the
-	// owner is resolved from the AGENT row, and an agent answers in spaces its
-	// owner need not be the caller in. Without this stamp the probe reports
-	// "unconfigured" for a user whose laptop is sitting right there, which is
-	// the shape of the bug workerHasConfigured's own doc comment describes.
-	//
-	// Built inline as the argument to this one Execute, never stamped onto the
-	// request's context.
-	res, err := engine.Execute(auth.ContextWithUserActor(ctx, ownerUserId), q)
-	if err != nil {
-		return false, err
-	}
-	if res == nil {
-		return false, nil
-	}
-	// Shape-query path: walk the Data array, skip rows with non-empty
-	// revokedAt.
-	if rows := outputPayloadRows(res.OutputPayload()); rows != nil {
-		for _, row := range rows {
-			if row == nil {
-				continue
-			}
-			if rev, ok := row["revokedAt"].(string); ok && strings.TrimSpace(rev) != "" {
-				continue
-			}
-			return true, nil
-		}
-		return false, nil
-	}
-	// Bundle path (legacy fallback).
-	if res.Bundle != nil {
-		for _, n := range res.Bundle.Nodes {
-			if n == nil || n.Payload == nil {
-				continue
-			}
-			fields := n.Payload.GetFields()
-			if fields == nil {
-				continue
-			}
-			if v, ok := fields["revokedAt"]; ok && v != nil {
-				if rev := strings.TrimSpace(v.GetStringValue()); rev != "" {
-					continue
-				}
-			}
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // firstStringField scans an OutputPayload (typed as `any` to handle

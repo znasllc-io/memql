@@ -85,6 +85,9 @@ func TestInvokeActsForItsCaller(t *testing.T) {
 		if len(goals.opened) != 1 || goals.opened[0].OwnerUserId != tc.want {
 			t.Fatalf("%s: opened %+v, want one goal owned by %s", tc.name, goals.opened, tc.want)
 		}
+		if goals.opened[0].Input["scopeId"] != "s1" {
+			t.Fatal("invokeAgent would pass an empty scope to runAgentTurn")
+		}
 	}
 }
 

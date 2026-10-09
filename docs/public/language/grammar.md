@@ -120,7 +120,7 @@ Edition `2026`, grammar version `2026.10-workflow-placement-df34b1a1`.
 <if-statement>        ::= "if" <expression> "{" <statement>* "}" { "else" "if" <expression> "{" <statement>* "}" } [ "else" "{" <statement>* "}" ]
 <for-statement>       ::= "for" <name> "in" <expression> [ "if" <expression> ] [ "parallel" "(" <number> ")" ] "{" <statement>* "}" [ <trailing-clause> ]
 <switch-statement>    ::= "switch" <expression> "{" { "case" <literal> { "," <literal> } "{" <statement>* "}" } [ "default" "{" <statement>* "}" ] "}"
-<parallel-statement>  ::= "parallel" "{" { "branch" <name> "{" <statement>* "}" } "}" [ "wait" "any" ] [ <trailing-clause> ]
+<parallel-statement>  ::= [ <name> ":=" ] "parallel" "{" { "branch" <name> "{" <statement>* "}" } "}" [ "wait" "any" ] [ <trailing-clause> ]
 <publish-statement>   ::= "publish" <string> "{" <map-entry> { "," <map-entry> } "}"
 <return-statement>    ::= "return" [ <construct-call> | <expression> ]
 
