@@ -89,6 +89,7 @@ export function shippedRules(): Row[] {
     ruleRow({ name: "documentResearchHarness", when: { prompt: "libraryRevisionResearch" }, policy: "localOnly", onUnavailable: "park", locked: true, precedence: 150 }),
     ruleRow({ name: "documentAppResearch", when: { prompt: "libraryRevisionAppResearch" }, policy: "researchApps", onUnavailable: "park", locked: true, precedence: 151 }),
     ruleRow({ name: "documentResearchIntent", when: { prompt: "libraryRevisionIntent" }, policy: "localOnly", onUnavailable: "park", locked: true, precedence: 152 }),
+    ruleRow({ name: "documentResearchEvidence", when: { prompt: "libraryRevisionEvidence" }, policy: "localOnly", onUnavailable: "park", locked: true, precedence: 153 }),
     ruleRow({ name: "embeddingsBound", when: { level: "embeddings" }, policy: "embeddingsBinding", onUnavailable: "park", locked: true, precedence: 110 }),
     ruleRow({ name: "compilerLocalOnly", when: { prompt: "compileRule" }, policy: "localOnly", onUnavailable: "park", locked: true, precedence: 120 }),
     ruleRow({ name: "policyCompilerLocalOnly", when: { prompt: "composeRoutingPolicy" }, policy: "localOnly", onUnavailable: "park", locked: true, precedence: 121 }),
@@ -203,4 +204,3 @@ export function routingConnection(seed: { machines?: Row[]; federationConfigured
   });
   return { connection: { ...connection, query: query as unknown as typeof connection.query }, state, calls: q as unknown as RoutingCalls };
 }
-
