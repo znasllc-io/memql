@@ -12,8 +12,9 @@ const (
 )
 
 // Event is the cause a run was opened for (GitHub events, plus MemQL's
-// manifest-opted-in daily schedule). A re-requested check run is not an event
-// of its own: it re-runs the original run's event and mode.
+// manifest-opted-in daily schedule and owner-requested manual rehearsal). A
+// re-requested check run is not an event of its own: it re-runs the original
+// run's event and mode.
 type Event string
 
 const (
@@ -22,6 +23,7 @@ const (
 	EventPush        Event = "push"
 	EventRelease     Event = "release"
 	EventSchedule    Event = "schedule"
+	EventManual      Event = "manual"
 )
 
 // Compute is where a pipeline's steps may run (D10, D14). Absent means

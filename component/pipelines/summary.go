@@ -56,22 +56,23 @@ func CheckOutput(r RunReport) (title, summary, text string) {
 // refusalTitles is what a refused run's title says, by code. The scope, when
 // there is one, follows in parentheses.
 var refusalTitles = map[string]string{
-	CodeNotDeclared:       "no pipeline block in memql-package.yaml",
-	CodeStageInvalid:      "invalid stage",
-	CodeStepInvalid:       "invalid step",
-	CodeSelectInvalid:     "invalid select block",
-	CodeSelectMissing:     "package selection not declared",
-	CodeEventUnknown:      "unknown event",
-	CodeBucketUnknown:     "unknown bucket",
-	CodeServiceUnknown:    "unknown service",
-	CodeNeedUnknown:       "unknown need",
-	CodeSecretInvalid:     "invalid secret name",
-	CodeSecretNotAllowed:  "secret not allowed",
-	CodeFleetNotConsented: "fleet compute not allowed",
-	CodeForkRefused:       "pull request from a fork",
-	CodeDisconnected:      "pipeline disconnected",
-	CodeAlreadyConnected:  "repository already has a pipeline",
-	CodeNothingToRerun:    "nothing failed to re-run",
+	CodeNotDeclared:                "no pipeline block in memql-package.yaml",
+	CodeStageInvalid:               "invalid stage",
+	CodeStepInvalid:                "invalid step",
+	CodeSelectInvalid:              "invalid select block",
+	CodeSelectMissing:              "package selection not declared",
+	CodeEventUnknown:               "unknown event",
+	CodeBucketUnknown:              "unknown bucket",
+	CodeServiceUnknown:             "unknown service",
+	CodeNeedUnknown:                "unknown need",
+	CodeSecretInvalid:              "invalid secret name",
+	CodeSecretNotAllowed:           "secret not allowed",
+	CodeFleetNotConsented:          "fleet compute not allowed",
+	CodeForkRefused:                "pull request from a fork",
+	CodeDisconnected:               "pipeline disconnected",
+	CodeManualRequiresDisconnected: "automatic delivery still connected",
+	CodeAlreadyConnected:           "repository already has a pipeline",
+	CodeNothingToRerun:             "nothing failed to re-run",
 }
 
 // manifestRemedy is the remedy for every refusal a manifest edit fixes.
@@ -80,22 +81,23 @@ const manifestRemedy = "Correct the pipeline block in `memql-package.yaml` and p
 // refusalRemedies is what a person does about a refused run, by code. A
 // refusal that says what is wrong and not what to do is half a sentence.
 var refusalRemedies = map[string]string{
-	CodeNotDeclared:       "Add a pipeline block to `memql-package.yaml`, or disconnect the pipeline in MemQL OS.",
-	CodeStageInvalid:      manifestRemedy,
-	CodeStepInvalid:       manifestRemedy,
-	CodeSelectInvalid:     manifestRemedy,
-	CodeSelectMissing:     manifestRemedy,
-	CodeEventUnknown:      manifestRemedy,
-	CodeBucketUnknown:     manifestRemedy,
-	CodeServiceUnknown:    manifestRemedy,
-	CodeNeedUnknown:       manifestRemedy,
-	CodeSecretInvalid:     manifestRemedy,
-	CodeSecretNotAllowed:  "Allow the secret on the pipeline in MemQL OS, or remove it from the step.",
-	CodeFleetNotConsented: "Allow fleet compute for the pipeline in MemQL OS, or remove the step's needs.",
-	CodeForkRefused:       "Checks run only on branches in this repository. Push the branch here to run them.",
-	CodeDisconnected:      "Reconnect the pipeline in MemQL OS to run checks again.",
-	CodeAlreadyConnected:  "Disconnect the pipeline the other source holds, or work from that source.",
-	CodeNothingToRerun:    "Re-run the whole run in MemQL OS instead.",
+	CodeNotDeclared:                "Add a pipeline block to `memql-package.yaml`, or disconnect the pipeline in MemQL OS.",
+	CodeStageInvalid:               manifestRemedy,
+	CodeStepInvalid:                manifestRemedy,
+	CodeSelectInvalid:              manifestRemedy,
+	CodeSelectMissing:              manifestRemedy,
+	CodeEventUnknown:               manifestRemedy,
+	CodeBucketUnknown:              manifestRemedy,
+	CodeServiceUnknown:             manifestRemedy,
+	CodeNeedUnknown:                manifestRemedy,
+	CodeSecretInvalid:              manifestRemedy,
+	CodeSecretNotAllowed:           "Allow the secret on the pipeline in MemQL OS, or remove it from the step.",
+	CodeFleetNotConsented:          "Allow fleet compute for the pipeline in MemQL OS, or remove the step's needs.",
+	CodeForkRefused:                "Checks run only on branches in this repository. Push the branch here to run them.",
+	CodeDisconnected:               "Reconnect the pipeline in MemQL OS to run checks again.",
+	CodeManualRequiresDisconnected: "Disconnect automatic delivery in MemQL OS before starting a manual rehearsal.",
+	CodeAlreadyConnected:           "Disconnect the pipeline the other source holds, or work from that source.",
+	CodeNothingToRerun:             "Re-run the whole run in MemQL OS instead.",
 }
 
 // The stage table's Status values that are not built from a reason.
@@ -408,6 +410,8 @@ func metaLine(r RunReport) string {
 		parts = append(parts, "Release")
 	case EventSchedule:
 		parts = append(parts, "Scheduled security scan")
+	case EventManual:
+		parts = append(parts, "Manual run")
 	}
 	if sha := strings.TrimSpace(r.SHA); sha != "" {
 		if len(sha) > 7 {

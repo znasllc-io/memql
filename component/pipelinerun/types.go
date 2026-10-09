@@ -39,6 +39,7 @@ const (
 	TriggerWebhook  = "webhook"
 	TriggerPoll     = "poll"
 	TriggerSchedule = "schedule"
+	TriggerManual   = "manual"
 	TriggerRerun    = "rerun"
 
 	// Whether the run's GitHub check run exists. Pending is the value a run

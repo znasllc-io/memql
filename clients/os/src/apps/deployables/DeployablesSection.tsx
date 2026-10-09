@@ -419,6 +419,7 @@ export function DeployablesSection({
             breadcrumbs={[...sourceCrumbs, { label: "Pipeline" }]}
             onChange={() => { connectFlow?.start(pkg.id, pipeline); setView({ kind: "connect", packageId: pkg.id }); }}
             onOpenRuns={onOpenRuns ? () => onOpenRuns(pipeline.id) : undefined}
+            onOpenRun={(runId) => setView({ kind: "run", packageId: pkg.id, runId })}
           />
         );
       }

@@ -9,7 +9,7 @@ vi.mock("../../../src/live/connection", () => ({
 
 import { DeployablesApp } from "../../../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../../../src/apps/deployables/settings";
-import { PIPELINE_CONCEPT } from "../../../src/apps/deployables/pipelines/rows";
+import { PIPELINE_CONCEPT, RUN_CONCEPT } from "../../../src/apps/deployables/pipelines/rows";
 import { formatMoment } from "../../../src/kit/format";
 import { click, emit, fakeConnection, siteRow, withSession, type FakeConnection, type FakeSeed } from "../harness";
 import { PACKAGE_ID, VIEWER, minutesAgo, packageRow, pipelineRow, runRow } from "./fixtures";
@@ -136,8 +136,8 @@ describe("pipeline settings", () => {
     // It arrives on the feed, and the page reads it.
     await emit(connection, PIPELINE_CONCEPT, pipelineRow({ status: "disconnected" }));
     await waitFor(() => expect(bar().word).toBe("Disconnected"));
-    expect(bar().acts).toEqual(["Connect again"]);
-    expect(bar().buttons).toEqual(["Connect again"]);
+    expect(bar().acts).toEqual(["Run latest", "Connect again"]);
+    expect(bar().buttons).toEqual(["Run latest"]);
   });
 
   it("renders a refusal in the page, with its copy, and leaves the pipeline as it was", async () => {
@@ -158,6 +158,22 @@ describe("pipeline settings", () => {
     const page = await openSettings();
     await click(within(page).getByRole("button", { name: "All runs" }));
     expect(navigate).toHaveBeenCalledWith("runs", { fromContent: true });
+  });
+
+  it("opens a manual rehearsal only for a disconnected pipeline and follows its run row", async () => {
+    const connection = fakeConnection(seed({ pipelines: [pipelineRow({ status: "disconnected" })] }));
+    mount(connection);
+    const page = await openSettings();
+    expect(bar().word).toBe("Disconnected");
+    await click(screen.getByRole("button", { name: "Run latest" }));
+    expect(connection.callsNamed("pipelinesRunLatest")).toEqual(['builtin pipelinesRunLatest(pipelineId: "pl-shop")']);
+    await waitFor(() => expect(bar().word).toBe("Manual run queued"));
+    expect(bar().detail).toBe("main · 3f9c2ab");
+    expect(within(page).getByRole("button", { name: "All runs" })).toBeTruthy();
+
+    // The live collection applies the owner's read scope to graph events too.
+    await emit(connection, RUN_CONCEPT, runRow({ id: "run-manual", ownerUserId: VIEWER, event: "manual", trigger: "manual", headBranch: "main", status: "queued" }), "NODE_CREATED");
+    await waitFor(() => expect(screen.getByRole("region", { name: "Run Show the cart" })).toBeTruthy());
   });
 
   it("opens the connect flow over the source for Change, and goes back to the source", async () => {

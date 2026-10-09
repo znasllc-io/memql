@@ -223,7 +223,7 @@ pipeline:
             set -eu
             bash ./scripts/ci/bash32-smoke.sh
     - name: vulnerabilities
-      on: [pull_request, merge_group, push, release, schedule]
+      on: [pull_request, merge_group, push, release, schedule, manual]
       runAfterFailure: true
       steps:
         - name: go-vulnerabilities
@@ -251,7 +251,7 @@ pipeline:
     # Event selection is declared, so the plan exposes the selected scan.
     # Both scans preserve failure reports even when an earlier check failed.
     - name: secrets-current
-      on: [pull_request]
+      on: [pull_request, manual]
       runAfterFailure: true
       steps:
         - name: gitleaks
@@ -267,7 +267,7 @@ pipeline:
             export GOMAXPROCS=2 GOMEMLIMIT=2GiB
             gitleaks dir . --no-banner --redact=100 --report-format=json --report-path=.memql-security/gitleaks/findings.json
     - name: secrets-history
-      on: [push, merge_group, release]
+      on: [push, merge_group, release, manual]
       runAfterFailure: true
       steps:
         - name: gitleaks
@@ -487,7 +487,7 @@ pipeline:
     # every stage after a failed one. The packages are ci.yml's GATE_PACKAGES;
     # the test holds them equal.
     - name: gates
-      on: [pull_request]
+      on: [pull_request, manual]
       steps:
         - name: gate-inputs
           placement: cluster
@@ -502,7 +502,7 @@ pipeline:
     # main pushes and release qualification, including their re-runs. The
     # scheduler owns periodic full runs; a skipped scan is never a clean scan.
     - name: analysis
-      on: [push, release, schedule]
+      on: [push, release, schedule, manual]
       runAfterFailure: true
       steps:
         - name: codeql-go

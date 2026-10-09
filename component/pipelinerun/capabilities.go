@@ -93,6 +93,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema:  map[string]string{"pipelineId": "string (required) -- the caller's v1:pipelines:pipeline, or any for a cluster owner"},
 		},
 		{
+			Name:        "runLatest",
+			Description: "Open a full, owner-requested rehearsal of the current default-branch head for one of the caller's pipelines. Automatic delivery must be disconnected to prevent duplicate webhook or poll runs. Reads and opens the exact commit through the source owner's GitHub grant; the manual run is deduplicated by repository, SHA, mode and event. Answers {runId, attempt, status, sha, branch}.",
+			Handler:     i.handleRunLatest,
+			ArgsSchema:  map[string]string{"pipelineId": "string (required) -- the caller's v1:pipelines:pipeline; it must be disconnected"},
+		},
+		{
 			Name:        "rerun",
 			Description: "Re-run one of the caller's runs: the next attempt of its run key, with the original's mode and event, trigger rerun and rerunOf naming the original, and a new check run. With failedOnly, only what the original did not pass runs again -- every step it passed with the same package slice is carried over as skipped pipeline_passed_earlier -- and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. Refused while the key's newest attempt is still going. Answers {runId, attempt, rerunOf, status, failedOnly}.",
 			Handler:     i.handleRerun,

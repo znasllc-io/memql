@@ -3785,6 +3785,27 @@ func PipelinesRerunBuild(args PipelinesRerunArgs) string {
 	return b.String()
 }
 
+// PipelinesRunLatest -- Start a full manual rehearsal of the current default-branch head for one of the caller's disconnected pipelines. Automatic delivery must be disconnected so this run cannot duplicate a webhook or poll. The source owner's GitHub grant reads the branch and the exact SHA is pinned in the run. The sealed workflow includes stages with no `on` list and stages explicitly marked `on: [manual]`; it does not treat manual as push or release, so future publication steps remain opted out. Repeated requests for the same head resolve to the existing attempt; re-run that attempt to start another.
+type PipelinesRunLatestArgs struct {
+	// The caller's v1:pipelines:pipeline. It must be disconnected.
+	PipelineId string
+}
+
+// PipelinesRunLatest calls the engine builtin pipelinesRunLatest.
+func (qc *QueryClient) PipelinesRunLatest(ctx context.Context, args PipelinesRunLatestArgs) (*Result, error) {
+	call := PipelinesRunLatestBuild(args)
+	return qc.executeNamed(ctx, "pipelinesRunLatest", call)
+}
+
+func PipelinesRunLatestBuild(args PipelinesRunLatestArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesRunLatest(")
+	b.WriteString("pipelineId: ")
+	b.WriteString(quoteMemQL(args.PipelineId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelinesStatus -- Read pipeline configuration and each workbench's last runner isolation verdict. This read never starts a build or an isolation probe. Restricted to cluster operators.
 type PipelinesStatusArgs struct {
 }

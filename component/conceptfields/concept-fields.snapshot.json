@@ -3929,6 +3929,7 @@
           "success"
         ],
         "event": [
+          "manual",
           "merge_group",
           "pull_request",
           "push",
@@ -3945,6 +3946,7 @@
           "queued"
         ],
         "trigger": [
+          "manual",
           "poll",
           "rerun",
           "schedule",

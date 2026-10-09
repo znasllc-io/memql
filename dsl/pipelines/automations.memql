@@ -85,6 +85,9 @@ automation pipelineStageIncluded {
   if args.event == "schedule" {
     return args.on.any(value => value == "schedule")
   }
+  if args.event == "manual" {
+    return args.on.count() == 0 || args.on.any(value => value == "manual")
+  }
   return args.on.count() == 0 || args.on.any(value => value == args.event || value == args.mode)
 }
 
@@ -141,7 +144,7 @@ automation pipelineModeForEvent {
   args { event string! }
   switch args.event {
     case "pull_request" { return "affected" }
-    case "merge_group", "push", "release", "schedule" { return "full" }
+    case "merge_group", "push", "release", "schedule", "manual" { return "full" }
     default { return "" }
   }
 }
@@ -155,6 +158,7 @@ automation pipelineNotificationCopy {
   failedMessage string! stages int! stageCount string! durationMs number! duration string!
  }
  subject := args.eventName == "release" ? ("Release" + (args.version == "" ? "" : " " + args.version)) :
+  args.eventName == "manual" ? ("Manual run" + (args.sha == "" ? "" : " " + args.sha)) :
   args.eventName == "schedule" ? "Scheduled security scan" :
   args.eventName == "push" ? (args.branch == "" ? ("Push" + (args.sha == "" ? "" : " " + args.sha)) : "Push to " + args.branch) :
   args.eventName == "pull_request" ? ("Pull request" + (args.prNumber > 0 ? " #" + args.prLabel : "")) :

@@ -67,6 +67,7 @@ var stageOnValues = map[string]bool{
 	string(EventPush):        true,
 	string(EventRelease):     true,
 	string(EventSchedule):    true,
+	string(EventManual):      true,
 	string(ModeAffected):     true,
 	string(ModeFull):         true,
 }

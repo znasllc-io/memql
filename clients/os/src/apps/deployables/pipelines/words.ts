@@ -135,6 +135,10 @@ export function triggerWords(run: RunRow): string {
       return run.pullRequest > 0 ? `Pull request #${run.pullRequest}` : "Pull request";
     case "merge_group":
       return "Merge queue";
+    case "schedule":
+      return "Scheduled security scan";
+    case "manual":
+      return "Manual run";
     case "release":
       return run.version !== "" && run.version !== run.sha ? `Release ${run.version}` : "Release";
   }

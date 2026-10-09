@@ -183,10 +183,18 @@ A pipeline lives in **Deployables**, on its source -- not in an app of its own
   many stages the newest run planned, how changes arrive, where steps run), and
   **Latest upstream** says what that commit's checks said -- *checks passed,
   not yet deployed* among them. The bar reads *checks on* and carries **Pipeline
-  settings**, or **Connect pipeline** for a source that has none. A source that
-  produces no apps and runs a pipeline -- the engine repository is one -- reads
-  *pipeline* where its app count goes in the Sources list, and the Overview map
-  draws a **Checks** node beside the deployables a checked source serves.
+  settings**, or **Connect pipeline** for a source that has none. A source with a
+  disconnected pipeline can use its settings to start **Run latest**. MemQL
+  reads the GitHub default branch through that source's installation grant and
+  pins the returned commit SHA. Automatic delivery must be disconnected first,
+  so a webhook or poll cannot race the rehearsal. Only stages with no `on`
+  selector or with `on: [manual]` run; publication stages should name their
+  intended events explicitly. Repeating the request for the same head returns
+  the same run; use **Re-run** after it finishes to create another attempt. A
+  source that produces no apps and runs a pipeline -- the engine repository is
+  one -- reads *pipeline* where its app count goes in the Sources list, and the
+  Overview map draws a **Checks** node beside the deployables a checked source
+  serves.
 - **Connect pipeline** is the add-a-deployable wizard's device over the source,
   three steps. **Repository** reads `memql-package.yaml` at the default
   branch's head with `pipelinesPreview`, so the stages show before anything is
@@ -341,7 +349,7 @@ mounts is the runner's ([Caches](pipelines-substrate.md#caches)): it knows
 |---|---|---|
 | `name` | The stage's name | Missing, breaking the rule, or used twice: `pipeline_stage_invalid` |
 | `needs` | Earlier stages this one depends on. Recorded rather than scheduled on: stages run in the order written whatever it says | A stage that comes later, the stage itself, or no stage at all: `pipeline_stage_invalid` |
-| `on` | The events (`pull_request`, `merge_group`, `push`, `release`) and modes (`affected`, `full`) the stage runs for. Absent means every run | Anything else: `pipeline_event_unknown` |
+| `on` | The events (`pull_request`, `merge_group`, `push`, `release`, `schedule`, `manual`) and modes (`affected`, `full`) the stage runs for. Absent means every run, including a manual rehearsal | Anything else: `pipeline_event_unknown` |
 | `runAfterFailure` | Boolean, default `false`. Run this stage even when an earlier stage failed; useful for independent security analysis. Does not erase failures or bypass cancellation | Non-boolean values fail manifest parsing |
 | `steps` | The stage's steps, which run at once | Both `steps` and `channel`, or neither: `pipeline_stage_invalid` |
 | `channel` | Makes the stage a notify stage naming a channel. It carries no steps, and compiles to one step, `<stage>.notify` | A name that breaks the rule: `pipeline_stage_invalid` |

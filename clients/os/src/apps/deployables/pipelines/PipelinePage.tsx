@@ -11,7 +11,7 @@ import type { PackageRow } from "../packages/rows";
 import { ProblemNotice } from "../packages/ReportView";
 import { toneFor } from "../packages/refusals";
 import type { PartsHeld } from "../parts";
-import { disconnectPipeline, problemFrom, type Problem } from "./calls";
+import { disconnectPipeline, problemFrom, runLatestPipeline, type Problem } from "./calls";
 import type { PipelineRow, RunRow } from "./rows";
 import { computeShort, computeWords, deliveryShort, deliveryWords } from "./words";
 import "./checks.css";
@@ -51,22 +51,34 @@ export interface PipelinePageProps {
   onChange: () => void;
   /** Open Runs refined to this pipeline. Without it -- Runs not drawn for this person -- there is no All runs. */
   onOpenRuns?: () => void;
+  /** Open the manual attempt once its row has reached the owner's run feed. */
+  onOpenRun?: (runId: string) => void;
 }
 
-export function PipelinePage({ pkg, pipeline, can, backLabel, onBack, breadcrumbs, onChange, onOpenRuns }: PipelinePageProps) {
+export function PipelinePage({ pkg, pipeline, runs, can, backLabel, onBack, breadcrumbs, onChange, onOpenRuns, onOpenRun }: PipelinePageProps) {
   const connection = useOsConnection();
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
+  const [manualRun, setManualRun] = useState<{ runId: string; sha: string; branch: string } | null>(null);
   const active = pipeline.status === "active";
+
+  useEffect(() => {
+    if (manualRun === null || onOpenRun === undefined || !runs.some((run) => run.id === manualRun.runId)) return;
+    onOpenRun(manualRun.runId);
+    setManualRun(null);
+  }, [manualRun, onOpenRun, runs]);
 
   // The wait ends when the row says so, and so does a question the row has
   // answered from elsewhere -- another window disconnecting it. A pipeline
   // that comes back active later, connected again, is a new state rather than
   // the end of this disconnect.
   useEffect(() => {
-    if (active) return;
+    if (active) {
+      setManualRun(null);
+      return;
+    }
     setSent(false);
     setAsking(false);
   }, [active]);
@@ -83,6 +95,21 @@ export function PipelinePage({ pkg, pipeline, can, backLabel, onBack, breadcrumb
     } finally {
       setBusy(false);
       setAsking(false);
+    }
+  }
+
+  async function runLatest() {
+    if (!connection) return;
+    setBusy(true);
+    setProblem(null);
+    try {
+      const result = await runLatestPipeline(connection.query, pipeline.id);
+      if (result.runId === "") throw new Error("The cluster did not return a run id for the manual rehearsal.");
+      setManualRun(result);
+    } catch (err) {
+      setProblem(problemFrom(err));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -111,7 +138,25 @@ export function PipelinePage({ pkg, pipeline, can, backLabel, onBack, breadcrumb
                 ]
               : [],
           }
-        : { state: "Disconnected", detail: "", tone: "none", acts: can.connect ? [{ label: "Connect again", tone: "primary", onAct: onChange }] : [] };
+      : manualRun !== null
+        ? {
+            state: "Manual run queued",
+            detail: `${manualRun.branch} · ${manualRun.sha.slice(0, 7)}`,
+            tone: "busy",
+            acts: [
+              ...(runs.some((run) => run.id === manualRun.runId) && onOpenRun ? [{ label: "Open run", tone: "primary" as const, onAct: () => onOpenRun(manualRun.runId) }] : []),
+              ...(can.connect ? [{ label: "Connect again", text: true, onAct: onChange }] : []),
+            ],
+          }
+        : {
+            state: "Disconnected",
+            detail: "",
+            tone: "none",
+            acts: [
+              ...(can.rerun ? [{ label: "Run latest", tone: "primary" as const, busy, onAct: () => void runLatest() }] : []),
+              ...(can.connect ? [{ label: "Connect again", text: true, onAct: onChange }] : []),
+            ],
+          };
 
   const label = sourceName(pkg);
   return (

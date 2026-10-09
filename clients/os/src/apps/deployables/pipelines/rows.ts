@@ -113,10 +113,10 @@ export interface RunRow {
   repository: string;
   sha: string;
   mode: "affected" | "full";
-  event: "pull_request" | "merge_group" | "push" | "release";
+  event: "pull_request" | "merge_group" | "push" | "release" | "schedule" | "manual";
   runKey: string;
   attempt: number;
-  trigger: "webhook" | "poll" | "rerun";
+  trigger: "webhook" | "poll" | "schedule" | "manual" | "rerun";
   rerunOf: string;
   rerunFailedOnly: boolean;
   pullRequest: number;
@@ -141,7 +141,7 @@ export interface RunRow {
 }
 
 const STAGE_STATUSES: ReadonlySet<string> = new Set(["waiting", "running", "passed", "failed", "cancelled", "skipped", "blocked"]);
-const EVENTS: ReadonlySet<string> = new Set(["pull_request", "merge_group", "push", "release"]);
+const EVENTS: ReadonlySet<string> = new Set(["pull_request", "merge_group", "push", "release", "schedule", "manual"]);
 const CONCLUSIONS: ReadonlySet<string> = new Set(["success", "failure", "cancelled", "refused"]);
 
 function objectsOf(row: Row, key: string): Row[] {
@@ -171,7 +171,7 @@ export function runFromRow(raw: Row): RunRow {
     event: (EVENTS.has(event) ? event : "push") as RunRow["event"],
     runKey: rowString(row, "runKey"),
     attempt: Math.max(1, rowNumber(row, "attempt")),
-    trigger: trigger === "poll" || trigger === "rerun" ? trigger : "webhook",
+    trigger: (["poll", "schedule", "manual", "rerun"].includes(trigger) ? trigger : "webhook") as RunRow["trigger"],
     rerunOf: idTail(rowString(row, "rerunOf")),
     rerunFailedOnly: boolOr(row, "rerunFailedOnly", false),
     pullRequest: rowNumber(row, "pullRequest"),

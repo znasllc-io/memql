@@ -489,12 +489,13 @@ const (
 	CodePipelineForkRefused = "pipeline_fork_refused"
 
 	// The run.
-	CodePipelineRunnerUnavailable      = "pipeline_runner_unavailable"
-	CodePipelineExecutorError          = "pipeline_executor_error"
-	CodePipelineExecutionUncertain     = "pipeline_execution_uncertain"
-	CodePipelineSecretMissing          = "pipeline_secret_missing"
-	CodePipelineDisconnected           = "pipeline_disconnected"
-	CodePipelineCheckPermissionMissing = "pipeline_check_permission_missing"
+	CodePipelineRunnerUnavailable          = "pipeline_runner_unavailable"
+	CodePipelineExecutorError              = "pipeline_executor_error"
+	CodePipelineExecutionUncertain         = "pipeline_execution_uncertain"
+	CodePipelineSecretMissing              = "pipeline_secret_missing"
+	CodePipelineDisconnected               = "pipeline_disconnected"
+	CodePipelineManualRequiresDisconnected = "pipeline_manual_requires_disconnected"
+	CodePipelineCheckPermissionMissing     = "pipeline_check_permission_missing"
 
 	// Skips: a step the plan or the run decided not to execute.
 	CodePipelineStageBlocked = "pipeline_stage_blocked"
