@@ -565,16 +565,12 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           // prove when no image exists yet" (install-main.json's delta 1) --
           // and `buildImages`' own restart-and-wait is the real gate.
           //
-          // THE PREDICATE IS THE FRESH INSTALL, NOT `imagesFromSource`, and the
-          // difference is a repair. A repair of a from-source cluster carries
-          // `imagesFromSource` READ BACK OFF THE RECEIPT while its version is
-          // empty -- so `isMainBranchChoice("")` is false, the panel loads
-          // install.json rather than install-main.json, and that graph's
-          // clusterUp verifies `result.workloadsReady`. Keying on the lane
-          // would hand that repair a 60s ceiling for a check it has to pass,
-          // on a cluster whose pods are restarting. Its `:local` images DO
-          // already exist, so its wait is a real budget and keeps the real one.
-          "workload-timeout": isMainBranchChoice(opts.tag ?? "") ? "60" : "900",
+          // Source continuation uses the same graph as a fresh source install:
+          // clusterUp checks argocdReady, then buildImages starts and verifies
+          // the workloads. A stopped install may never have built any images,
+          // so a receipt's pinned commit must not turn this into a 900s wait
+          // for images that only the next step can create.
+          "workload-timeout": imagesFromSource(opts) ? "60" : "900",
           // THE REGISTRY FLAGS, AND THE LANE THAT HAS NONE (memql#4430).
           //
           // A from-source install passes NEITHER, and omitting them is what
