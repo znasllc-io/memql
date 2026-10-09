@@ -47,6 +47,7 @@
               "data": {
                 "evidence": "Independent headless report:\n\nIndependent app report:\nNo independent app research requested by the local intent assessment."
               },
+              "progress": true,
               "templateId": "libraryRevisionPassages"
             },
             "kind": "builtin",
@@ -114,6 +115,7 @@
               "data": {
                 "evidence": "Independent headless report:\n\nIndependent app report:\nNo independent app research requested by the local intent assessment."
               },
+              "progress": true,
               "templateId": "libraryRevisionPassages"
             },
             "kind": "builtin",

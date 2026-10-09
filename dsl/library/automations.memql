@@ -268,8 +268,10 @@ automation reviseLibraryDocument {
   branch app {
    if captured.previousRunId != nil {
     previous := query workStepForOwnerRun(runId: captured.previousRunId, stepKey: "evidence.app/report")
-    if previous.0.status == "done" && previous.0.result.value.reply != nil {
-     return previous.0.result.value.reply
+    for completed in previous {
+     if completed.status == "done" && completed.result.value.reply != nil {
+      return completed.result.value.reply
+     }
     }
    }
    if lower(trim(intent.reply)) == "research" {
