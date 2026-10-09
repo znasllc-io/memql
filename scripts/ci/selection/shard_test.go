@@ -15,6 +15,7 @@ go      root      .                   300s     uncached  1
 go      default   -                   600s     -         3
 db      memql     component/memql     600s     serial    2
 db      packages  component/packages  300s     -         1
+db      work      integrations/work  180s     serial    1
 db      default   -                   180s     -         2
 `
 
@@ -34,6 +35,7 @@ func TestParseClassesReadsTheTable(t *testing.T) {
 		{Lane: "go", Name: "default", Timeout: "600s", Shards: 3},
 		{Lane: "db", Name: "memql", Trees: []string{"component/memql"}, Timeout: "600s", Serial: true, Shards: 2},
 		{Lane: "db", Name: "packages", Trees: []string{"component/packages"}, Timeout: "300s", Shards: 1},
+		{Lane: "db", Name: "work", Trees: []string{"integrations/work"}, Timeout: "180s", Serial: true, Shards: 1},
 		{Lane: "db", Name: "default", Timeout: "180s", Shards: 2},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -116,6 +118,13 @@ func TestPartitionKeepsBudgetsApart(t *testing.T) {
 	pkgs, ok := shardByName(shards, "packages")
 	if !ok || !reflect.DeepEqual(pkgs.Dirs, []string{"component/packages"}) || pkgs.Timeout != "300s" {
 		t.Errorf("component/packages must run in its own 300s class, never beside component/memql; got %+v", pkgs)
+	}
+	work, ok := shardByName(shards, "work")
+	if !ok || !reflect.DeepEqual(work.Dirs, []string{"integrations/work"}) {
+		t.Errorf("integrations/work must run alone in its own database shard, got %+v", work)
+	}
+	if work.Parallel != 1 || work.Timeout != "180s" {
+		t.Errorf("integrations/work must keep its 180s budget and run without shard contention, got -p=%d -timeout=%s", work.Parallel, work.Timeout)
 	}
 	for _, s := range shards {
 		if s.Class == "default" && (s.Timeout != "180s" || s.Parallel != 4) {
