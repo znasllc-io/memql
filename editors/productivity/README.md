@@ -116,6 +116,18 @@ available vision-capable model; this works with the locally installed Qwen3.5
 4B. No additional model download or paid provider is required when that local
 route is available. Human approval still governs insertion into the document.
 
+The review panel separates **Requests**, **Changes**, and **History**. Requests
+holds unapplied feedback and extensions; requests from an older version are
+labelled **Not applied** and need a new selection before they can be proposed.
+Changes holds the current proposal, its summary, comparisons and decisions.
+History lists saved versions newest first. Open an entry to inspect its recorded
+requests, open its saved document, or compare its exact saved bytes with the
+previous version. The latest completed proposal also retains its accepted-item
+comparisons and authorship. Declined items never appear as applied changes.
+Completed work leaves the current proposal view; status polling preserves the
+chosen tab, decisions, drafts and expanded explanations. The header's history
+control opens this same History tab while in Review; Read retains version browsing.
+
 Review each proposal with **Accept**, **Decline**, or **Modify with AI**, then
 choose **Apply accepted**. Linked edits, such as moving a passage, share one
 decision. Modifying an item preserves the other proposed items and their

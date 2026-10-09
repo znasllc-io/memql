@@ -28,8 +28,8 @@ document.addEventListener("contextmenu", event => {
 }, true);
 type Anchor = { kind?: "markdown"; intent?: "extend"; scope?: "section"; sectionPath?: string[]; sourceQuote?: string; startLine: number; endLine: number; quote: string; startBlock: number; endBlock: number; startTextOffset: number; endTextOffset: number; prefix?: string; suffix?: string } | { kind: "document-end"; quote: string; intent?: never; scope?: never; sectionPath?: never } | { kind: "document"; quote: string; intent?: never; scope?: never; sectionPath?: never };
 type Attachment = { artifactId:string; version:number; revision:string; name:string; mimeType:string; size:number; uri:string };
-type ReviewRow = { applied?:boolean; canRemove?:boolean; attachments?:Attachment[]; id: string; body: string; outdated?: boolean; anchor: Anchor };
-const state = (api.getState() ?? {}) as { attachments?:Attachment[]; draft?: string; purpose?: "feedback"|"note"; anchor?: Anchor; draftVersion?: number; source?: string; instruction?: string; reviewOpen?: boolean; included?: string[]; seen?: string[]; decisions?: Record<string, "accepted" | "declined">; modifications?: Record<string,string>; expanded?: Record<string,boolean>; reviewSource?: string };
+type ReviewRow = { versionNumber?:number; applied?:boolean; canRemove?:boolean; attachments?:Attachment[]; id: string; body: string; outdated?: boolean; anchor: Anchor };
+const state = (api.getState() ?? {}) as { attachments?:Attachment[]; draft?: string; purpose?: "feedback"|"note"; anchor?: Anchor; draftVersion?: number; source?: string; instruction?: string; reviewOpen?: boolean; included?: string[]; seen?: string[]; decisions?: Record<string, "accepted" | "declined">; modifications?: Record<string,string>; expanded?: Record<string,boolean>; reviewSource?: string; reviewTab?: ReviewTab; historySelection?: number };
 let attachments: Attachment[] = state.attachments ?? [];
 const attachmentPreviews = new Map<string,string>();
 const requestedPreviews = new Set<string>();
@@ -83,15 +83,45 @@ let notesOpen=false;
 let personalNotes:ReviewRow[]=[];
 let activeNote="";
 let mode = "reading";
-let historyOpen=false, historyBusy=false, historyPreview=false;
+let historyOpen=false, historyBusy=false, historyPreview=false, historyFromReview=false;
 let historyData: Record<string,any>={}, historyVersions: Record<string,any>[]=[];
 let latestDocument: any;
 let previewVersion: number|undefined;
 let historyRetry: Record<string,unknown>={type:"history"};
+let historyLoaded=false, historyStale=false, historyProblem: {message:string;reference?:string}|undefined;
+type ReviewTab = "requests"|"changes"|"history";
+let reviewTab: ReviewTab = state.reviewTab ?? "requests";
+let historySelection: number|undefined = state.historySelection;
+const tabScroll = {requests:0,changes:0,history:0};
+let completedReview: Record<string,any>|undefined;
+function reviewApplied(row:ReviewRow) {
+  return row.applied===true || [revision,completedReview].some(status=>status?.result?.applied===true && (status.items??[]).some((item:any)=>status.answer?.acceptedItemIds?.includes(item.id)&&item.commentIds?.includes(row.id)));
+}
+function capturedRequest(row:ReviewRow) {
+  return preparing ? selected.has(row.id) : !!activeRun() && !revision?.removedCommentIds?.length && !!revision?.proposal?.commentIds?.includes(row.id);
+}
+function selectReviewTab(tab:ReviewTab, focusTab=false) {
+  tabScroll[reviewTab]=document.querySelector(".review-scroll")!.scrollTop;
+  if(tab!==reviewTab && dictationPhase!=="idle" && dictationTarget!=="feedback")api.postMessage({type:"dictationCancel"});
+  reviewTab=tab;syncReviewTabs();
+  document.querySelector(".review-scroll")!.scrollTop=tabScroll[tab];
+  if(focusTab)byId(`review-tab-${tab}`).focus();
+  if(tab==="history" && (!historyLoaded||historyStale) && !historyBusy && !historyProblem && latestDocument?.historyAvailable)historyRequest({type:"history"});
+  controls();saveState();
+}
+function syncReviewTabs() {
+  for(const tab of ["requests","changes","history"] as const) {
+    const button=byId(`review-tab-${tab}`);button.setAttribute("aria-selected",String(tab===reviewTab));button.tabIndex=tab===reviewTab?0:-1;
+    byId(`review-${tab}`).hidden=tab!==reviewTab;
+  }
+  const counts={requests:rows.filter(row=>!reviewApplied(row)&&!capturedRequest(row)).length,changes:revision?.result?.applied?0:(revision?.items??[]).length};
+  for(const tab of ["requests","changes"] as const){byId(`${tab}-count`).textContent=String(counts[tab]);byId(`${tab}-count`).hidden=!counts[tab];}
+}
+
 const branchName=byId("branch-name") as HTMLInputElement;
 function historyRequest(message:Record<string,unknown>) {
   if(historyBusy)return;
-  historyRetry=message;historyBusy=true;byId("history-status").textContent=message.type==="historyFork"?"Creating branch…":"Loading…";
+  historyRetry=message;historyBusy=true;historyProblem=undefined;renderReviewHistory();byId("history-status").textContent=message.type==="historyFork"?"Creating branch…":"Loading…";
   byId("history-retry").hidden=true;historyControls();api.postMessage(message);
 }
 function historyControls() {
@@ -127,7 +157,53 @@ function renderHistory() {
   if(historyData.parentArtifactId){family.append(textElement("small",`${historyData.branchName} · branched from version ${historyData.parentVersion}`));link(historyData.parentArtifactId,"Document","Open parent document");}
   for(const branch of historyData.branches??[])link(branch.artifactId,branch.name,branch.name);
   if(historyData.branchesHasMore)family.append(textElement("small","Showing the 100 most recent branches. All branches remain available in Files."));
-  historyControls();
+  historyControls();renderReviewHistory();
+}
+function renderReviewHistory() {
+  const root=byId("review-history-content");
+  const active=document.activeElement as HTMLElement|null,key=active?.dataset.focusKey;
+  for(const detail of Array.from(root.querySelectorAll<HTMLDetailsElement>("details[data-review-key]")))expanded[detail.dataset.reviewKey!]=detail.open;
+  paintReviewHistory();
+  for(const detail of Array.from(root.querySelectorAll<HTMLDetailsElement>("details[data-review-key]"))){const id=detail.dataset.reviewKey!;if(id in expanded)detail.open=expanded[id];detail.addEventListener("toggle",()=>{expanded[id]=detail.open;saveState();});}
+  if(key)Array.from(root.querySelectorAll<HTMLElement>("[data-focus-key]")).find(el=>el.dataset.focusKey===key)?.focus({preventScroll:true});
+}
+function paintReviewHistory() {
+  const root=byId("review-history-content"),notice=byId("review-history-status");root.replaceChildren();notice.replaceChildren();
+  const link=(label:string,action:()=>void,cls="passage")=>{const button=textElement("button",label,cls) as HTMLButtonElement;button.dataset.focusKey=`history:${label}`;button.addEventListener("click",action);return button;};
+  if(historyProblem){renderProblem(notice,historyProblem,value=>api.postMessage(value));notice.append(link("Try again",()=>historyRequest(historyRetry)));}
+  root.setAttribute("aria-busy",String(historyBusy));
+  if(!historyLoaded){
+    if(historyBusy){const skeleton=textElement("div","","review-skeleton");skeleton.setAttribute("aria-label","Loading saved versions");skeleton.setAttribute("role","status");for(let n=0;n<4;n++){const line=textElement("div","","skeleton-line");line.setAttribute("aria-hidden","true");skeleton.append(line);}root.append(skeleton);}
+    else if(!historyProblem)root.append(textElement("p",latestDocument?.historyAvailable?"Open History to browse saved versions.":"Save this document in MemQL to keep a version history.","empty"));
+    return;
+  }
+  const entry=historyVersions.find(row=>row.version===historySelection);
+  const stamp=(row:Record<string,any>)=>[row.createdAt?new Date(row.createdAt).toLocaleString():"",row.authorKind==="user"?"Human edit":row.authorKind==="assistant"?"AI revision":row.authorKind==="system"?"Snapshot":""].filter(Boolean).join(" · ");
+  if(entry){
+    const back=link("‹ All versions",()=>{historySelection=undefined;renderReviewHistory();saveState();byId("review-history-content").querySelector<HTMLButtonElement>(`[data-version="${entry.version}"]`)?.focus();},"passage review-history-back");root.append(back);
+    root.append(textElement("h3",`Version ${entry.version}${entry.current?" · Current":""}`),textElement("small",stamp(entry)));
+    const actions=textElement("div","","history-detail-actions");
+    const open=link("Open saved version",()=>{historyFromReview=true;showHistory(true);historyRequest({type:"historyVersion",version:entry.version});});open.disabled=historyBusy;actions.append(open);
+    if(entry.version>0){const compare=link("Compare with previous",()=>historyRequest({type:"historyCompare",version:entry.version}));compare.disabled=historyBusy;actions.append(compare);}
+    root.append(actions);
+    if(completedReview?.result?.applied && completedReview.proposal?.version+1===entry.version){
+      renderProposal(completedReview,root,document.createElement("div"),true);
+    } else {
+      if(entry.note)root.append(textElement("p",String(entry.note),"review-overview"));
+      const applied=rows.filter(row=>row.applied && row.versionNumber!==undefined && row.versionNumber+1===entry.version);
+      if(applied.length){root.append(textElement("h3","Applied requests"));for(const row of applied)root.append(requestNote({...row,outdated:true,canRemove:false},false));}
+    }
+  } else {
+    if(!historyVersions.length)root.append(textElement("p","No saved versions are available.","empty"));
+    for(const entry of historyVersions){
+      const button=link("",()=>{historySelection=entry.version;renderReviewHistory();saveState();root.querySelector<HTMLButtonElement>(".review-history-back")?.focus();},"review-history-row");button.dataset.version=String(entry.version);button.dataset.focusKey=`history:version:${entry.version}`;
+      button.setAttribute("aria-label",`Review version ${entry.version}`);
+      button.append(textElement("strong",`Version ${entry.version}${entry.current?" · Current":""}`),textElement("small",stamp(entry)));
+      if(entry.note)button.append(textElement("p",String(entry.note)));
+      root.append(button);
+    }
+    if(historyData.hasMore){const more=link("Load earlier versions",()=>historyRequest({type:"history",beforeVersion:historyData.beforeVersion}));more.disabled=historyBusy;root.append(more);}
+  }
 }
 function syncChromeLayout(){document.documentElement.style.setProperty("--document-tools-offset",`${byId("document-chrome").getBoundingClientRect().height}px`);}
 if(typeof ResizeObserver!=="undefined")new ResizeObserver(()=>{syncChromeLayout();renderNoteMarkers();}).observe(byId("document-chrome"));
@@ -184,13 +260,27 @@ byId("find-previous").addEventListener("click",()=>nextFind(-1));
 findQuery.addEventListener("input",()=>updateFind());
 findQuery.addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();event.stopPropagation();nextFind(event.shiftKey?-1:1);}if(event.key==="Escape"){event.preventDefault();event.stopPropagation();showFind(false);}});
 
-byId("history-toggle").addEventListener("click",()=>{showHistory(!historyOpen);if(historyOpen)historyRequest({type:"history"});});
+byId("history-toggle").addEventListener("click",()=>{
+  if(mode==="review"&&!historyPreview){showNotes(false);showHistory(false);showReview(true);selectReviewTab("history",true);}
+  else {showHistory(!historyOpen);if(historyOpen)historyRequest({type:"history"});}
+});
 byId("history-close").addEventListener("click",()=>{showHistory(false);byId("history-toggle").focus();});
 byId("history-more").addEventListener("click",()=>historyRequest({type:"history",beforeVersion:historyData.beforeVersion}));
 byId("history-retry").addEventListener("click",()=>historyRequest(historyRetry));
 byId("history-current").addEventListener("click",()=>api.postMessage({type:"historyCurrent"}));
 byId("history-fork").addEventListener("click",()=>historyRequest({type:"historyFork",name:branchName.value.trim()}));
 branchName.addEventListener("input",historyControls);
+
+const reviewTabs=["requests","changes","history"] as const;
+for(const tab of reviewTabs){
+  const button=byId(`review-tab-${tab}`);
+  button.addEventListener("click",()=>selectReviewTab(tab));
+  button.addEventListener("keydown",event=>{
+    if(!["ArrowLeft","ArrowRight","Home","End"].includes(event.key))return;
+    event.preventDefault();const index=reviewTabs.indexOf(tab);
+    selectReviewTab(event.key==="Home"?"requests":event.key==="End"?"history":reviewTabs[(index+(event.key==="ArrowRight"?1:2))%3],true);
+  });
+}
 
 let dictationPhase="idle", dictatedBase="", dictationTarget="feedback", dictationError="", dictationReference="";
 let dictationAvailable=false;
@@ -289,7 +379,7 @@ let rows: ReviewRow[] = [];
 const selected = new Set<string>(state.included ?? []);
 const seen = new Set<string>(state.seen ?? []);
 feedback.value = state.draft ?? ""; instruction.value = state.instruction ?? "";
-function saveState() { const saved = { draft: feedback.value, attachments, purpose:composerPurpose, anchor: draftAnchor, source: sourceIdentity || state.source, instruction: instruction.value, reviewOpen: reviewRequested, included: [...selected], seen: [...seen], decisions, modifications, expanded, reviewSource }; api.setState(saved); if (restored) api.postMessage({type:"draftState",state:saved}); }
+function saveState() { const saved = { draft: feedback.value, attachments, purpose:composerPurpose, anchor: draftAnchor, source: sourceIdentity || state.source, instruction: instruction.value, reviewOpen: reviewRequested, included: [...selected], seen: [...seen], decisions, modifications, expanded, reviewSource, reviewTab, historySelection }; api.setState(saved); if (restored) api.postMessage({type:"draftState",state:saved}); }
 function activeRun() { return revision && !revision.removedCommentIds?.length && !revision.cancelRequested && !["succeeded", "failed", "cancelled"].includes(revision.status); }
 function renderEmptyDocument() {
   const empty = !!latestDocument && emptyDocument && !historyPreview;
@@ -354,9 +444,13 @@ function controls() {
   byId("selection-feedback").hidden=mode!=="review";
   prepare.disabled = !!removingAnnotation || dictationPhase!=="idle" || !connected || revisionBusy || !!activeRun() || selected.size === 0;
   prepare.textContent = revisionBusy ? "Submitting…" : "Propose changes";
-  byId("review-submit").hidden = !!activeRun() || selected.size === 0;
-  byId("review-footer").hidden = byId("review-submit").hidden && !byId("review-actions").childElementCount;
-  const count = rows.filter(row => !row.outdated).length;
+  byId("review-submit").hidden = reviewTab!=="requests" || !!activeRun() || selected.size === 0;
+  byId("review-actions").hidden=reviewTab!=="changes";
+  byId("review-footer").hidden = byId("review-submit").hidden && (byId("review-actions").hidden || !byId("review-actions").childElementCount);
+  syncReviewTabs();
+  byId("history-toggle").setAttribute("aria-controls",mode==="review"&&!historyPreview?"review-panel":"history-panel");
+  byId("history-toggle").setAttribute("aria-expanded",String(historyOpen||mode==="review"&&reviewRequested&&reviewTab==="history"));
+  const count = rows.filter(row => !row.outdated && !reviewApplied(row)).length;
   byId("note-count").textContent = String(count); byId("note-count").hidden = !count;
 }
 function showReview(open: boolean) { if(open&&notesOpen)return; if(!open&&dictationPhase!=="idle"&&dictationTarget!=="feedback")api.postMessage({type:"dictationCancel"});reviewRequested = open; open = open && mode === "review" && !historyOpen && !historyPreview; document.body.classList.toggle("review-open", open); byId("review-panel").hidden = !open; byId("review-toggle").setAttribute("aria-expanded", String(open)); if (open) byId("selection-tools").hidden = true; saveState(); renderNoteMarkers(); }
@@ -420,7 +514,7 @@ byId("document-feedback").addEventListener("click",()=>{selectionRange=undefined
 byId("empty-create").addEventListener("click", () => {
   if (!connected || historyPreview || !emptyDocument) return;
   if (mode !== "review") { api.postMessage({type:"review"}); return; }
-  if (preparing || activeRun() || rows.some(row => !row.outdated)) { showNotes(false); showHistory(false); showReview(true); byId("review-close").focus(); return; }
+  if (preparing || activeRun() || rows.some(row => !row.outdated)) { showNotes(false); showHistory(false); selectReviewTab(preparing||activeRun()?"changes":"requests"); showReview(true); byId("review-close").focus(); return; }
   selectionRange = undefined;
   openComposer({kind:"document",quote:"Entire document"}, byId("empty-create").getBoundingClientRect());
 });
@@ -441,7 +535,7 @@ add.addEventListener("click",() => {
 prepare.addEventListener("click",() => {
   if (prepare.disabled) return;
   pendingAnchors = rows.filter(row => selected.has(row.id) && !row.outdated).map(row => row.anchor);
-  byId("status").textContent = ""; revisionBusy = true; preparing = true; controls(); renderRevision();
+  byId("status").textContent = ""; revisionBusy = true; preparing = true; selectReviewTab("changes"); controls(); renderRevision();
   api.postMessage({type:"prepareRevision",version,commentIds:[...selected],instruction:instruction.value});
 });
 document.addEventListener("keydown",event => {
@@ -549,7 +643,7 @@ function deleteAnnotationControl(row:ReviewRow,purpose:"feedback"|"note"):HTMLEl
   const slot=textElement("div","","annotation-delete");
   // A completion can arrive before the refreshed comment permissions. Close
   // any pending confirmation immediately, including in an older editor window.
-  const applied=purpose==="feedback"&&(row.applied===true||revision?.result?.applied===true&&(revision?.items??[]).some((item:any)=>revision?.answer?.acceptedItemIds?.includes(item.id)&&item.commentIds?.includes(row.id)));
+  const applied=purpose==="feedback"&&reviewApplied(row);
   if(row.canRemove!==true||applied){if(confirmingAnnotation===row.id)confirmingAnnotation="";return slot;}
   const noun=purpose==="note"?"note":isExtension(row.anchor)?"extension request":"feedback";
   const linked=purpose==="feedback"&&activeRun()&&revision?.proposal?.commentIds?.includes(row.id);
@@ -665,20 +759,18 @@ function requestNote(row: ReviewRow, editable: boolean): HTMLElement {
 function renderComments() {
   const list = byId("comments"); list.replaceChildren();
   const inFlight = preparing || !!activeRun();
-  const captured = new Set<string>(preparing ? selected : revision?.removedCommentIds?.length ? [] : revision?.proposal?.commentIds ?? []);
-  const current = rows.filter(row => !row.outdated && (!inFlight || !captured.has(row.id)));
-  const earlier = rows.filter(row => row.outdated && !captured.has(row.id));
-  if (current.length) {
-    list.append(textElement("h3", inFlight ? "For your next review" : "Requests"));
-    if (!inFlight) list.append(textElement("p", "Include the requests you want in this proposal.", "muted request-help"));
-    for (const row of current) list.append(requestNote(row, !inFlight));
+  for(const row of rows)if(reviewApplied(row))selected.delete(row.id);
+  const pending=rows.filter(row=>!reviewApplied(row)&&!capturedRequest(row));
+  const current=pending.filter(row=>!row.outdated);
+  const earlier=pending.filter(row=>row.outdated);
+  if(inFlight){const link=textElement("button","View current proposal","passage request-link");link.addEventListener("click",()=>selectReviewTab("changes",true));list.append(link);}
+  if(current.length){
+    list.append(textElement("p",inFlight?"These requests will be part of your next review.":"Choose the requests to include in your next proposal.","review-overview"));
+    for(const row of current)list.append(requestNote(row,!inFlight));
   }
-  if (!rows.length && !revision) list.append(textElement("p", emptyDocument ? "Describe your document to begin." : "Select text or use the feedback button beside a heading. Describe the change or addition you want.", "empty"));
-  if (earlier.length) {
-    const details = textElement("details", "", "earlier"); details.append(textElement("summary", `Earlier requests (${earlier.length})`));
-    for (const row of earlier) details.append(requestNote(row, false)); list.append(details);
-  }
-  highlight("memql-feedback", (mode === "review" && !historyPreview ? rows : []).filter(row => !row.outdated).map(row => rangeFor(row.anchor)).filter((range): range is Range => !!range));
+  for(const row of earlier){const note=requestNote(row,false);note.prepend(textElement("p","Not applied · From an older version","request-status"));list.append(note);}
+  if(!current.length&&!earlier.length)list.append(textElement("p",inFlight?"All saved requests are in the current proposal.":"No pending requests. Select text or use a document feedback control to begin.","empty"));
+  highlight("memql-feedback", (mode === "review" && !historyPreview ? rows : []).filter(row => !row.outdated&&!reviewApplied(row)).map(row => rangeFor(row.anchor)).filter((range): range is Range => !!range));
 }
 function renderRevision() {
   renderEmptyDocument();
@@ -688,6 +780,7 @@ function renderRevision() {
   const active=document.activeElement as HTMLInputElement | HTMLTextAreaElement | null;
   const focusKey=active?.dataset.focusKey, selectionStart=active?.selectionStart, selectionEnd=active?.selectionEnd;
   const scroll=document.querySelector(".review-scroll")!.scrollTop;
+  renderReviewHistory();
   renderRevisionContent();
   for (const {element,key} of keyed()) { if (key in expanded) element.open=expanded[key]; element.addEventListener("toggle",()=>{expanded[key]=element.open;saveState();}); }
   if(focusKey) { const target=[...document.querySelectorAll<HTMLElement>("[data-focus-key]")].find(el=>el.dataset.focusKey===focusKey);target?.focus({preventScroll:true});if(target instanceof HTMLTextAreaElement && selectionStart!=null && selectionEnd!=null)target.setSelectionRange(selectionStart,selectionEnd); }
@@ -696,27 +789,27 @@ function renderRevision() {
 function renderRevisionContent() {
   renderComments();
   const root = byId("revision"); root.replaceChildren(); const actions = byId("review-actions"); actions.replaceChildren();
-  const pending = rows.some(row => !row.outdated && !revision?.proposal?.commentIds?.includes(row.id));
-  document.body.classList.toggle("review-draft", !preparing && !activeRun() && (pending || !revision));
   if (preparing) { root.append(textElement("p", "Preparing changes…", "phase busy")); return; }
-  if (!revision) return;
+  if (!revision || revision.result?.applied) {
+    root.append(textElement("p","No proposal awaiting review.","empty"));
+    const links=textElement("div","","review-empty-actions");
+    for(const [tab,label] of [["requests","View requests"],["history","View history"]] as const){const link=textElement("button",label,"passage");link.addEventListener("click",()=>selectReviewTab(tab,true));links.append(link);}root.append(links);return;
+  }
   if(revision.removedCommentIds?.length){
     root.append(textElement("p","A request was deleted. Propose changes again with the remaining requests.","muted"));
-    document.body.classList.add("review-draft");return;
+    return;
   }
-  const status = revision, proposal = status.proposal ?? {};
-  const terminal = !!status.cancelRequested || ["succeeded", "failed", "cancelled"].includes(status.status);
+  renderProposal(revision,root,actions);
+}
+function renderProposal(status:Record<string,any>,panel:HTMLElement,actions:HTMLElement,historical=false) {
+  const proposal=status.proposal??{};
+  const terminal = historical || !!status.cancelRequested || ["succeeded", "failed", "cancelled"].includes(status.status);
   const awaiting = !terminal && !!status.approvalId && !status.decision && status.status === "waiting";
   const retrying = !terminal && !awaiting && (["retry","replan","repair"].includes(status.waitingOn?.kind) || status.status === "running" && Number(status.retryCount)>0);
   const paused = !retrying && !terminal && !awaiting && !status.decision && status.prepared !== false && status.status === "waiting";
-  let panel: HTMLElement = root;
-  if (terminal && pending) {
-    const previous = document.createElement("details"); previous.className = "earlier";
-    previous.append(textElement("summary", "Previous review")); root.append(previous); panel = previous;
-  }
   const phase = status.cancelRequested ? (["cancelled", "failed"].includes(status.status) ? "Preparation stopped" : "Stop requested") : status.decision === "rejected" ? "Changes declined" : status.status === "succeeded" ? status.result?.applied ? "Changes applied" : "No changes needed"
     : status.status === "failed" || status.status === "cancelled" ? "Couldn’t prepare changes" : awaiting ? "Proposed changes" : retrying ? "Retrying automatically…" : paused ? "Preparation paused" : status.decision === "approved" ? "Applying changes…" : "Preparing changes…";
-  panel.append(textElement("h3", phase, !terminal && !awaiting && !paused ? "phase busy" : ""));
+  if(!historical)panel.append(textElement("h3", phase, !terminal && !awaiting && !paused ? "phase busy" : ""));
   if (status.problem && !status.cancelRequested && (retrying || paused || ["failed","cancelled"].includes(status.status))) {
     const notice=textElement("div","","review-error");
     renderProblem(notice, {...status.problem, message: retrying ? "The last attempt couldn’t finish. MemQL will retry automatically. Your feedback is saved." : paused ? `${status.problem.message} Your feedback is saved. Stop this attempt, then propose changes again.` : status.problem.message}, value=>api.postMessage(value));
@@ -725,25 +818,27 @@ function renderRevisionContent() {
   const requested: ReviewRow[] = Array.isArray(proposal.comments) ? proposal.comments : rows.filter(row => proposal.commentIds?.includes(row.id));
   const edits: Record<string, any>[] = Array.isArray(proposal.edits) ? proposal.edits.filter((edit: any) => edit.before !== edit.after) : [];
   const addressed = new Set(edits.flatMap(edit => edit.commentIds ?? []));
-  const items: Record<string,any>[] = Array.isArray(status.items) ? status.items : [];
+  const items: Record<string,any>[] = (Array.isArray(status.items) ? status.items : []).filter((item:any)=>!historical||status.answer?.acceptedItemIds?.includes(item.id));
+  const summary = historical && items.length !== (status.items??[]).length ? `${items.length} ${items.length===1?"change was":"changes were"} applied from this review.` : proposal.summary ?? status.result?.summary;
+  if(summary)panel.append(textElement("p",String(summary),"review-overview"));
   for (const item of items) {
     const related = requested.filter(row => item.commentIds?.includes(row.id));
     const destination = editLocation(item.edits[0]);
-    const card = document.createElement("details"); card.className = "change"; card.open = !terminal; card.dataset.reviewKey=item.id;
+    const card = document.createElement("details"); card.className = "change"; card.open = !terminal; card.dataset.reviewKey=`${historical?"history:":""}${item.id}`;
     const title = textElement("summary", related.length === 1 ? `${isExtension(related[0].anchor) ? "Extend" : "Feedback"}: ${location(destination ?? related[0].anchor)}` : item.edits.length>1 ? "Linked changes" : "Document change");
-    title.append(textElement("span", decisions[item.id] === "accepted" ? "Accepted" : decisions[item.id] === "declined" ? "Declined" : "", "item-decision"));card.append(title);
-    for (const row of related) { const context=textElement("div","","request-context");context.append(textElement("p",row.body));const saved=rows.find(saved=>saved.id===row.id);if(saved)context.append(deleteAnnotationControl(saved,"feedback"));card.append(context); }
+    title.append(textElement("span", historical ? "Applied" : decisions[item.id] === "accepted" ? "Accepted" : decisions[item.id] === "declined" ? "Declined" : "", "item-decision"));card.append(title);
+    for (const row of related) { const context=textElement("div","","request-context");context.append(textElement("p",row.body));const saved=rows.find(saved=>saved.id===row.id);if(saved&&!historical)context.append(deleteAnnotationControl(saved,"feedback"));card.append(context); }
     if (item.edits.length>1) card.append(textElement("p", "These edits belong together and share one decision.", "request-context muted"));
     for (const edit of item.edits) {
       const target = editLocation(edit) ?? related[0]?.anchor;
       if (!terminal && target) {const context=textElement("div","","request-context");context.append(locationButton(target,"Show in document"));card.append(context);}
-      for (const [key,label,cls] of [["before","Current","before"],["after","Proposed","after"]]) {
+      for (const [key,label,cls] of [["before",historical?"Before":"Current","before"],["after",historical?"After":"Proposed","after"]]) {
         const block=textElement("div","",cls);block.append(textElement("div",label,"diff-label"),textElement("pre",String(edit[key]??"")||(key==="after"?"Removed":"New content")));card.append(block);
       }
-      if(edit.reason){const why=textElement("details","","change-reason");why.dataset.reviewKey=`${item.id}:reason:${item.edits.indexOf(edit)}`;why.append(textElement("summary","Why this change"),textElement("p",String(edit.reason)));card.append(why);}
+      if(edit.reason){const why=textElement("details","","change-reason");why.dataset.reviewKey=`${historical?"history:":""}${item.id}:reason:${item.edits.indexOf(edit)}`;why.append(textElement("summary","Why this change"),textElement("p",String(edit.reason)));card.append(why);}
     }
     const origin=proposal.attribution?.items?.[item.id];
-    if(origin){const attribution=textElement("details","","change-reason");attribution.dataset.reviewKey=`${item.id}:attribution`;attribution.append(textElement("summary","Authorship"));
+    if(origin){const attribution=textElement("details","","change-reason");attribution.dataset.reviewKey=`${historical?"history:":""}${item.id}:attribution`;attribution.append(textElement("summary","Authorship"));
       const models=[...new Set((origin.models??[]).map((call:Record<string,any>)=>[call.provider,call.model].filter(Boolean).join(" · ")).filter(Boolean))];
       attribution.append(textElement("p",models.length?`AI proposal · ${models.join("; ")}`:"AI proposal · model identity was not reported"),textElement("p","Based on your feedback. Unchanged passages keep their previous authorship. Accepting a proposal records your approval; it does not label its text as human-written."));card.append(attribution);
     }
@@ -774,17 +869,14 @@ function renderRevisionContent() {
       panel.append(note);
     }
   }
-  const summary = proposal.summary ?? status.result?.summary;
-  if (summary) {
-    if (!edits.length) panel.append(textElement("p", String(summary), "proposal-summary"));
-    else { const overview = textElement("details", "", "proposal-summary"); overview.append(textElement("summary", "Summary"), textElement("p", String(summary))); panel.append(overview); }
-  }
+  if(historical)return;
   const action = (label: string, type: string, decision?: string, primary = false, answer?: Record<string,unknown>) => {
     const button = textElement("button", label, primary ? "primary" : "secondary") as HTMLButtonElement;
     button.disabled = !!removingAnnotation || dictationPhase!=="idle" || revisionBusy || (decision === "approved" && !connected);
     button.addEventListener("click", () => { if(type==="decideRevision" && decision==="approved")pendingAnchors=items.filter(item=>decisions[item.id]==="accepted"||status.answer?.acceptedItemIds?.includes(item.id)).flatMap(item=>item.edits.map(editLocation)).filter((anchor:Anchor|undefined):anchor is Anchor=>!!anchor); revisionBusy = true; controls(); renderRevision(); api.postMessage({ type, approvalId:status.approvalId, decision, answer }); }); return button;
   };
   if (typeof proposal.revisedContent === "string") { const compare = action("Compare full document", "compareRevision"); compare.className = "compare secondary"; panel.append(compare); }
+  if(terminal){const requests=textElement("button","Review saved requests","passage request-link");requests.addEventListener("click",()=>selectReviewTab("requests",true));panel.append(requests);}
   if((status.cancelRequested || ["failed","cancelled"].includes(status.status)) && proposal.amendment)actions.append(action("Try revision again","retryRevisionItem",undefined,true));
   else if (status.prepared === false) actions.append(action("Retry submission", "resumePreparation", undefined, true));
   else if (awaiting) {
@@ -843,7 +935,7 @@ window.addEventListener("message",event=>{
   }
   if(message.type==="restoreDraft") {
     if(message.state && !restored) {
-      Object.assign(state,message.state); attachments=state.attachments??[]; renderAttachments(); Object.assign(decisions,state.decisions??{});Object.assign(modifications,state.modifications??{});Object.assign(expanded,state.expanded??{});reviewSource=state.reviewSource??""; draftAnchor=state.anchor; composerPurpose=state.purpose??"feedback"; feedback.value=state.draft??""; instruction.value=state.instruction??"";
+      Object.assign(state,message.state); reviewTab=state.reviewTab??"requests";historySelection=state.historySelection; attachments=state.attachments??[]; renderAttachments(); Object.assign(decisions,state.decisions??{});Object.assign(modifications,state.modifications??{});Object.assign(expanded,state.expanded??{});reviewSource=state.reviewSource??""; draftAnchor=state.anchor; composerPurpose=state.purpose??"feedback"; feedback.value=state.draft??""; instruction.value=state.instruction??"";
       selected.clear(); seen.clear(); for(const id of state.included??[])selected.add(id); for(const id of state.seen??[])seen.add(id);
       showReview(state.reviewOpen??false); controls();
     }
@@ -857,7 +949,7 @@ window.addEventListener("message",event=>{
     if(mode!=="review"){if(dictationPhase!=="idle")api.postMessage({type:"dictationCancel"});byId("selection-tools").hidden=true;byId("composer").hidden=true;highlight("memql-active",[]);for(const el of document.querySelectorAll(".document-target"))el.classList.remove("document-target");}
     renderRevision();
   }
-  if(message.type==="history"){historyData=message.data;historyVersions=message.append?[...historyVersions,...message.data.versions]:message.data.versions;byId("history-status").textContent="";renderHistory();}
+  if(message.type==="history"){historyLoaded=true;historyStale=false;historyProblem=undefined;historyData=message.data;historyVersions=message.append?[...historyVersions,...message.data.versions]:message.data.versions;byId("history-status").textContent="";renderHistory();}
   if(message.type==="historyVersion"){
     showNotes(false);
     historyPreview=true;previewVersion=message.version;connected=false;selection=undefined;selectionRange=undefined;contextSelection=undefined;
@@ -868,10 +960,10 @@ window.addEventListener("message",event=>{
   }
   if(message.type==="historyCurrent"){
     historyPreview=false;previewVersion=undefined;document.body.classList.remove("history-preview");byId("history-banner").hidden=true;byId("history-branch").hidden=true;
-    if(latestDocument)window.dispatchEvent(new MessageEvent("message",{data:latestDocument}));renderHistory();showReview(reviewRequested);
+    if(latestDocument)window.dispatchEvent(new MessageEvent("message",{data:latestDocument}));if(historyFromReview){historyFromReview=false;showHistory(false);}renderHistory();showReview(reviewRequested);
   }
-  if(message.type==="historyIdle"){historyBusy=false;historyControls();}
-  if(message.type==="historyError"){renderProblem(byId("history-status"),message,value=>api.postMessage(value));byId("history-retry").hidden=false;}
+  if(message.type==="historyIdle"){historyBusy=false;historyControls();renderReviewHistory();}
+  if(message.type==="historyError"){historyProblem=message;renderReviewHistory();renderProblem(byId("history-status"),message,value=>api.postMessage(value));byId("history-retry").hidden=false;}
   if(message.type==="document") {
     latestDocument=message;documentLoadFailed=false;historyControls();if(historyPreview)return;
     emptyDocument = typeof message.sourceIdentity === "string" ? !message.sourceIdentity.trim() : !String(message.html ?? "").trim();
@@ -879,6 +971,7 @@ window.addEventListener("message",event=>{
     contextSelection=undefined;
     const scroll=document.documentElement.scrollTop;
     const incomingChanged = sourceIdentity !== String(message.sourceIdentity??message.version);
+    if(sourceIdentity&&incomingChanged)historyStale=true;
     content.innerHTML=message.html; progressKey=""; if(incomingChanged && !documentProcessing())reveal(content); // Host uses the HTML-disabled Markdown renderer.
     sectionTools(); version=message.version;connected=message.connected;
     const incoming=String(message.sourceIdentity??version);
@@ -886,12 +979,12 @@ window.addEventListener("message",event=>{
     if(sourceIdentity && sourceIdentity!==incoming)activeAnchor=undefined;
     sourceIdentity=incoming;if(activeAnchor&&mode==="review")jumpTo(activeAnchor,false);selection=undefined;selectionRange=undefined;byId("selection-tools").hidden=true;
     if(!connected)byId("status").textContent=message.status??"Save the document before sharing feedback.";
-    document.documentElement.scrollTop=scroll;updateFind(false);renderRevision();renderNotes();controls();saveState();api.postMessage({type:"rendered",version,text:content.textContent?.slice(0,500)});
+    document.documentElement.scrollTop=scroll;updateFind(false);renderRevision();renderNotes();controls();saveState();if(reviewTab==="history"&&(!historyLoaded||historyStale)&&latestDocument.historyAvailable&&!historyBusy&&!historyProblem)historyRequest({type:"history"});api.postMessage({type:"rendered",version,text:content.textContent?.slice(0,500)});
   }
   if(message.type==="comments") {
     const next=message.rows??[],different=JSON.stringify(next)!==JSON.stringify(rows);rows=next;
-    for(const row of rows){if(!row.outdated&&!seen.has(row.id))selected.add(row.id);if(row.outdated)selected.delete(row.id);seen.add(row.id);}
-    const available=new Set(rows.filter(row=>!row.outdated).map(row=>row.id));for(const id of selected)if(!available.has(id))selected.delete(id);
+    for(const row of rows){if(!row.outdated&&!reviewApplied(row)&&!seen.has(row.id))selected.add(row.id);if(row.outdated||reviewApplied(row))selected.delete(row.id);seen.add(row.id);}
+    const available=new Set(rows.filter(row=>!row.outdated&&!reviewApplied(row)).map(row=>row.id));for(const id of selected)if(!available.has(id))selected.delete(id);
     if(different)renderRevision();controls();saveState();
   }
   if(message.type==="revision") {
@@ -906,9 +999,16 @@ window.addEventListener("message",event=>{
     } else if(message.status?.decision==="rejected"){
       for(const item of message.status.items??[])decisions[item.id]="declined";
     }
-    const changed=message.status?.approvalId&&message.status.approvalId!==revision?.approvalId;const different=JSON.stringify(message.status)!==JSON.stringify(revision);revision=message.status;if(different)renderRevision();controls();if(changed){byId("status").textContent="";showReview(true);}saveState();}
+    const changed=message.status?.approvalId&&message.status.approvalId!==revision?.approvalId;const different=JSON.stringify(message.status)!==JSON.stringify(revision);
+    const appliedNow=!!message.status?.result?.applied && !revision?.result?.applied;
+    const firstStatus=!revision;
+    revision=message.status;
+    if(revision?.result?.applied)completedReview=revision;
+    if(appliedNow){historyStale=true;if(reviewTab==="changes" || firstStatus&&!state.reviewTab){if(!firstStatus||state.historySelection===undefined)historySelection=undefined;selectReviewTab("history");}}
+    else if(firstStatus&&revision&&!revision.result?.applied&&!state.reviewTab)selectReviewTab("changes");
+    if(different)renderRevision();controls();if(changed){byId("status").textContent="";showReview(true);}saveState();}
   if(message.type==="revisionIdle"){revisionBusy=false;preparing=false;pendingAnchors=undefined;renderRevision();controls();}
-  if(message.type==="saved"){commentBusy=false;attachments=[];renderAttachments();feedback.value="";draftAnchor=undefined;closeComposer();byId("status").textContent="Added to review.";controls();showReview(true);}
+  if(message.type==="saved"){selectReviewTab("requests");commentBusy=false;attachments=[];renderAttachments();feedback.value="";draftAnchor=undefined;closeComposer();byId("status").textContent="Added to review.";controls();showReview(true);}
   if(message.type==="error"){if(!latestDocument)documentLoadFailed=true;commentBusy=false;revisionBusy=false;preparing=false;pendingAnchors=undefined;renderRevision();controls();if(!byId("composer").hidden)renderProblem(byId("composer-status"),message,value=>api.postMessage(value));else{renderProblem(byId("status"),message,value=>api.postMessage(value));showReview(true);}}
   if(message.type==="notice")byId("status").textContent=message.message;
 });

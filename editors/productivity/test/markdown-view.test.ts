@@ -145,7 +145,7 @@ test("multiple notes submit together; actual proposed changes precede approval a
   const approve=f.el("review-actions").lastElementChild;f.send({type:"revision",status});assert.equal(f.el("review-actions").lastElementChild,approve,"polling must preserve focus and expanded changes");
   for(const button of [...f.doc.querySelectorAll<HTMLButtonElement>(".item-actions button")].filter(b=>b.textContent==="Accept")){const key=button.dataset.focusKey;[...f.doc.querySelectorAll<HTMLButtonElement>("[data-focus-key]")].find(b=>b.dataset.focusKey===key)!.click();}
   [...f.doc.querySelectorAll<HTMLButtonElement>("#review-actions button")].find(b=>b.textContent==="Apply accepted (2)")!.click();assert.equal(f.messages.at(-1).approvalId,"exact-approval");assert.equal(f.messages.at(-1).decision,"approved");
-  f.send({type:"revision",status:{...status,status:"succeeded",decision:"approved",result:{applied:true}}});f.send({type:"revisionIdle"});assert.match(f.el("revision").textContent!,/Changes applied/);f.dom.window.close();
+  f.send({type:"revision",status:{...status,status:"succeeded",decision:"approved",result:{applied:true}}});f.send({type:"revisionIdle"});assert.equal(f.el("review-tab-history").getAttribute("aria-selected"),"true");assert.equal(f.el("review-footer").hidden,true);f.dom.window.close();
 });
 test("selection choices survive refresh and views retain accessible keyboard controls",()=>{
   const f=fixture();f.document();const rows=[{id:"a",body:"One",anchor:{kind:"document-end"}},{id:"b",body:"Two",anchor:{kind:"document-end"}}];f.send({type:"comments",rows});(f.doc.querySelector('[role="switch"]') as HTMLInputElement).click();f.send({type:"comments",rows});assert.equal((f.doc.querySelector('[role="switch"]') as HTMLButtonElement).getAttribute("aria-checked"),"false");
@@ -167,9 +167,8 @@ test("standalone extensions replace the previous review with the same diff and a
   assert.equal(f.el("add").textContent,"Add to review");f.el("add").click();
   f.send({type:"saved"});f.send({type:"comments",rows:[{id:"extension",body:"Add next steps",anchor:{kind:"document-end"}}]});
   assert.equal(f.el("review-panel").hidden,false);
-  assert.match(f.el("comments").textContent!,/Requests/);
-  const previous=f.doc.querySelector<HTMLDetailsElement>("#revision > details")!;
-  assert.equal(previous.open,false);assert.match(previous.textContent!,/Earlier edit/);
+  assert.equal(f.el("review-tab-requests").getAttribute("aria-selected"),"true");
+  assert.equal(f.doc.querySelector("#revision > details"),null);assert.doesNotMatch(f.el("comments").textContent!,/Earlier edit/);
   f.el("prepare-revision").click();assert.deepEqual(Array.from(f.messages.at(-1).commentIds),["extension"]);
   assert.match(f.el("revision").textContent!,/Preparing changes/);assert.ok(!f.el("revision").textContent!.includes("Earlier edit"));
   f.send({type:"revision",status:{status:"waiting",prepared:true,approvalId:"extension-approval",proposal:{commentIds:["extension"],summary:"Add next steps",revisedContent:"Existing\n\n## Next steps",edits:[{before:"Existing",after:"Existing\n\n## Next steps",reason:"Extend"}]}}});
@@ -274,8 +273,10 @@ test("resume applies the recorded approval once and disappears for stopped or co
 
 test("reopening a decided proposal restores the recorded subset rather than local guesses",()=>{
  const f=fixture({decisions:{kept:"declined",omitted:"accepted"}});f.document();
- f.send({type:"revision",status:{status:"succeeded",decision:"approved",answer:{acceptedItemIds:["kept"]},items:[{id:"kept",edits:[{before:"Keep",after:"Retain"}]},{id:"omitted",edits:[{before:"rest",after:"other"}]}],proposal:{artifactId:"doc",revision:"v1",edits:[]},result:{applied:true}}});
- assert.deepEqual([...f.doc.querySelectorAll('.item-decision')].map(el=>el.textContent),["Accepted","Declined"]);f.dom.window.close();
+ f.send({type:"revision",status:{status:"succeeded",decision:"approved",answer:{acceptedItemIds:["kept"]},items:[{id:"kept",edits:[{before:"Keep",after:"Retain"}]},{id:"omitted",edits:[{before:"rest",after:"other"}]}],proposal:{artifactId:"doc",revision:"v1",version:1,edits:[]},result:{applied:true}}});
+ f.send({type:"history",data:{versions:[{version:2,current:true}]}});f.doc.querySelector<HTMLButtonElement>('[aria-label="Review version 2"]')!.click();
+ assert.deepEqual({...f.state().decisions},{kept:"accepted",omitted:"declined"});
+ assert.deepEqual([...f.doc.querySelectorAll('.item-decision')].map(el=>el.textContent),["Applied"]);f.dom.window.close();
 });
 
 
@@ -323,7 +324,7 @@ test("document-wide feedback and extension remain different scopes without presc
 });
 test("history preview isolates source and feedback, survives polling and returns to the current document",()=>{
  const f=fixture({reviewOpen:true});f.document();f.send({type:"document",html:renderMarkdown("Current text"),version:17,sourceIdentity:"Current text",connected:true,historyAvailable:true});
- f.el("history-toggle").click();assert.equal(f.messages.at(-1).type,"history");assert.equal(f.el("review-panel").hidden,true);
+ f.send({type:"viewMode",mode:"reading"});f.el("history-toggle").click();assert.equal(f.messages.at(-1).type,"history");assert.equal(f.el("review-panel").hidden,true);
  f.send({type:"history",data:{versions:[{version:7,current:true},{version:0}],hasMore:true,beforeVersion:0,branches:[]}});f.send({type:"historyIdle"});
  f.doc.querySelector<HTMLButtonElement>('[aria-label="Open version 0"]')!.click();assert.equal(f.messages.at(-1).version,0);
  f.send({type:"historyVersion",version:0,revision:"initial",html:renderMarkdown("Earlier text")});f.send({type:"historyIdle"});
@@ -377,7 +378,7 @@ test("recovered and applied proposals do not retain an error from an earlier mod
  const f=fixture();f.document();
  const status={prepared:true,status:"waiting",approvalId:"ready",errorMessage:"Earlier attempt timed out",proposal:{comments:[],edits:[{before:"old",after:"new"}]}};
  f.send({type:"revision",status});assert.equal(f.doc.querySelector("#revision .review-error"),null);assert.match(f.el("revision").textContent!,/Proposed changes/);
- f.send({type:"revision",status:{...status,status:"succeeded",decision:"approved",result:{applied:true}}});assert.equal(f.doc.querySelector("#revision .review-error"),null);assert.match(f.el("revision").textContent!,/Changes applied/);f.dom.window.close();
+ f.send({type:"revision",status:{...status,status:"succeeded",decision:"approved",result:{applied:true}}});assert.equal(f.doc.querySelector("#revision .review-error"),null);assert.equal(f.el("review-tab-history").getAttribute("aria-selected"),"true");assert.equal(f.el("review-footer").hidden,true);f.dom.window.close();
 });
 
 
@@ -567,4 +568,68 @@ test("applied feedback and extensions lose Delete even before refreshed permissi
   f.send({type:"notes",rows:[{...feedback,id:"note",body:"Personal thought"}]});
   assert.ok(f.doc.querySelector('[data-focus-key="delete:note"]'));
   f.dom.window.close();
+});
+
+test("review tabs separate requests, proposals and saved history without losing choices",()=>{
+ const f=fixture();f.document();
+ const current={id:"new",body:"Clarify this",anchor:{kind:"document"}};
+ const applied={id:"old",body:"Already applied",applied:true,outdated:true,anchor:{kind:"document"}};
+ const stale={id:"stale",body:"Not done",outdated:true,canRemove:true,anchor:{kind:"document-end"}};
+ f.send({type:"comments",rows:[current,applied,stale]});
+ assert.doesNotMatch(f.el("comments").textContent!,/Already applied|Earlier requests/);
+ assert.match(f.el("comments").textContent!,/Not applied/);
+ f.el("prepare-revision").click();assert.equal(f.el("review-tab-changes").getAttribute("aria-selected"),"true");
+ const status={status:"waiting",approvalId:"approval",proposal:{version:1,commentIds:[current.id],comments:[current],edits:[{before:"Old",after:"Clear",reason:"Precise",commentIds:[current.id]}]}};
+ f.send({type:"revision",status});f.send({type:"revisionIdle"});
+ f.doc.querySelector<HTMLButtonElement>(".item-actions button")!.click();
+ const reason=f.doc.querySelector<HTMLDetailsElement>(".change-reason")!;reason.open=true;
+ f.el("review-tab-requests").click();assert.equal(f.el("review-footer").hidden,true);assert.doesNotMatch(f.el("comments").textContent!,/Clarify this/);
+ f.send({type:"revision",status:{...status,retryCount:0}});
+ assert.equal(f.el("review-tab-requests").getAttribute("aria-selected"),"true","polling must not change tabs");
+ f.el("review-tab-changes").click();assert.equal(f.doc.querySelector<HTMLDetailsElement>(".change-reason")!.open,true);
+ assert.ok(Object.values(f.state().decisions).includes("accepted"));
+ assert.equal(f.el("review-footer").hidden,false);f.dom.window.close();
+});
+
+test("history tabs support keyboard navigation, paging, saved comparisons and recoverable failures",()=>{
+ const f=fixture();f.send({type:"document",html:renderMarkdown("Current text"),sourceIdentity:"Current text",version:4,connected:true,historyAvailable:true});
+ f.el("review-tab-requests").dispatchEvent(new f.dom.window.KeyboardEvent("keydown",{key:"End",bubbles:true}));
+ assert.equal(f.doc.activeElement?.id,"review-tab-history");assert.equal(f.messages.at(-1).type,"history");
+ assert.equal(f.el("review-history-content").getAttribute("aria-busy"),"true");assert.ok(f.doc.querySelector(".review-skeleton"));
+ f.send({type:"history",data:{versions:[{version:3,current:true,note:"Expanded examples",authorKind:"assistant"}],hasMore:true,beforeVersion:3}});f.send({type:"historyIdle"});
+ const row=()=>f.doc.querySelector<HTMLButtonElement>('[aria-label="Review version 3"]')!;row().click();
+ assert.equal(f.doc.querySelectorAll(".review-history-row").length,0,"detail replaces list");
+ const compare=()=>[...f.el("review-history-content").querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent==="Compare with previous")!;
+ compare().click();assert.equal(f.messages.at(-1).type,"historyCompare");assert.equal(f.messages.at(-1).version,3);
+ f.send({type:"historyError",message:"Previous version is unavailable",reference:"tools-test"});f.send({type:"historyIdle"});
+ assert.match(f.el("review-history-content").textContent!,/Expanded examples/);assert.match(f.el("review-history-status").textContent!,/Previous version/);
+ f.el("review-history-status").querySelector<HTMLButtonElement>("button.passage")!.click();assert.equal(f.messages.at(-1).type,"historyCompare");f.send({type:"historyIdle"});
+ f.doc.querySelector<HTMLButtonElement>(".review-history-back")!.click();assert.equal(f.doc.activeElement,row());
+ [...f.el("review-history-content").querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent==="Load earlier versions")!.click();assert.equal(f.messages.at(-1).beforeVersion,3);
+ f.send({type:"history",append:true,data:{versions:[{version:0,note:"Initial"}],hasMore:false}});f.send({type:"historyIdle"});assert.equal(f.doc.querySelectorAll(".review-history-row").length,2);
+ f.el("review-tab-history").dispatchEvent(new f.dom.window.KeyboardEvent("keydown",{key:"Home",bubbles:true}));assert.equal(f.doc.activeElement?.id,"review-tab-requests");f.dom.window.close();
+});
+
+test("completed proposals become history and retain only the actually applied comparison",()=>{
+ const f=fixture();f.send({type:"document",html:renderMarkdown("Old"),sourceIdentity:"Old",version:1,connected:true,historyAvailable:true});
+ const rows=[{id:"kept",body:"Clarify",versionNumber:1,anchor:{kind:"document"}},{id:"omitted",body:"Extend",versionNumber:1,anchor:{kind:"document-end"}}];
+ f.send({type:"comments",rows});
+ const status={runId:"run",status:"waiting",approvalId:"approval",proposal:{version:1,summary:"Clarify wording",commentIds:rows.map(r=>r.id),comments:rows},items:[{id:"a",commentIds:["kept"],edits:[{before:"Old",after:"Clear",reason:"Clarity"}]},{id:"b",commentIds:["omitted"],edits:[{before:"More",after:"Much more"}]}]};
+ f.send({type:"revision",status});
+ assert.equal(f.el("requests-count").hidden,true,"captured requests are counted only in Changes");
+ f.send({type:"revision",status:{...status,status:"succeeded",decision:"approved",answer:{acceptedItemIds:["a"]},result:{applied:true}}});
+ assert.equal(f.el("review-tab-history").getAttribute("aria-selected"),"true");assert.equal(f.el("review-footer").hidden,true);
+ f.send({type:"history",data:{versions:[{version:2,current:true,note:"Clarify"}]}});f.send({type:"historyIdle"});
+ f.doc.querySelector<HTMLButtonElement>('[aria-label="Review version 2"]')!.click();
+ assert.match(f.el("review-history-content").textContent!,/BeforeOldAfterClear/);assert.doesNotMatch(f.el("review-history-content").textContent!,/Much more|Accept|Delete/);
+ assert.match(f.el("review-history-content").textContent!,/1 change was applied from this review/);
+ const why=f.doc.querySelector<HTMLDetailsElement>("#review-history-content .change-reason")!;why.open=true;
+ f.send({type:"historyIdle"});assert.equal(f.doc.querySelector<HTMLDetailsElement>("#review-history-content .change-reason")!.open,true);
+ f.el("review-tab-requests").click();assert.doesNotMatch(f.el("comments").textContent!,/Clarify/);assert.match(f.el("comments").textContent!,/Extend/);
+ assert.ok(!Array.from(f.state().included).includes("kept"));
+ f.el("history-toggle").click();assert.equal(f.el("review-tab-history").getAttribute("aria-selected"),"true");assert.equal(f.el("history-panel").hidden,true);
+ [...f.el("review-history-content").querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent==="Open saved version")!.click();
+ assert.equal(f.messages.at(-1).type,"historyVersion");assert.equal(f.el("history-panel").hidden,false);
+ f.send({type:"historyVersion",version:2,html:renderMarkdown("Clear")});f.send({type:"historyIdle"});
+ f.send({type:"historyCurrent"});assert.equal(f.el("history-panel").hidden,true);assert.equal(f.el("review-panel").hidden,false);assert.equal(f.el("review-tab-history").getAttribute("aria-selected"),"true");f.dom.window.close();
 });
