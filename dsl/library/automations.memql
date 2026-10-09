@@ -1,4 +1,4 @@
-use work.queries.{ workStepForOwnerRun }
+use work.queries.{ workCompletedStepsForOwnerRuns }
 use agents.builtins.{ ai, runAgentTurn }
 
 // library domain -- promotion triggers.
@@ -258,8 +258,8 @@ automation reviseLibraryDocument {
  })
  evidence := parallel {
   branch headless {
-   if captured.previousRunId != nil {
-    priorEvidence := query workStepForOwnerRun(runId: captured.previousRunId, stepKey: "evidence.app/report")
+   if lower(trim(intent.reply)) == "research" {
+    priorEvidence := query workCompletedStepsForOwnerRuns(runIds: captured.evidenceRunIds, stepKey: "evidence.app/report")
    } else {
     priorEvidence := []
    }
@@ -274,18 +274,10 @@ automation reviseLibraryDocument {
    if lower(trim(intent.reply)) == "research" {
     // Retrying a failed sibling must not spend the app quota again. The
     // request capture is immutable; only a completed owned receipt is reusable.
-    current := query workStepForOwnerRun(runId: captured.runId, stepKey: "evidence.app/report")
+    current := query workCompletedStepsForOwnerRuns(runIds: captured.evidenceRunIds, stepKey: "evidence.app/report")
     for retained in current {
-     if retained.status == "done" && retained.result.value.reply != nil {
+     if retained.result.value.reply != nil {
       return retained.result.value.reply
-     }
-    }
-   }
-   if captured.previousRunId != nil {
-    previous := query workStepForOwnerRun(runId: captured.previousRunId, stepKey: "evidence.app/report")
-    for completed in previous {
-     if completed.status == "done" && completed.result.value.reply != nil {
-      return completed.result.value.reply
      }
     }
    }

@@ -680,7 +680,7 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 		t.Fatal(err)
 	}
 	if f.ai.appCalls.Load() != 1 || f.ai.researchCalls.Load() != 2 {
-		t.Fatalf("same-run retry repeated app research: app=%d headless=%d", f.ai.appCalls.Load(), f.ai.researchCalls.Load())
+		t.Fatalf("same-run retry repeated app research: app=%d headless=%d rows=%v", f.ai.appCalls.Load(), f.ai.researchCalls.Load(), f.query(f.other, f.ctx, "query", "workCompletedStepsForOwnerRuns", map[string]any{"runIds": []string{ids.RunID}, "stepKey": "evidence.app/report"}))
 	}
 	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{"runId": ids.RunID, "status": "waiting", "cancelRequested": true, "errorMessage": "cancelled: the person asked this work to stop"})
 	args["requestId"] = "retry-" + fmt.Sprint(time.Now().UnixNano())
@@ -689,7 +689,7 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 	}
 	next := asString(args["requestId"])
 	_, captured, _, _, err := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), next)
-	if err != nil || captured["previousRunId"] != ids.RunID {
+	if err != nil || !strings.Contains(fmt.Sprint(captured["previousRunIds"]), ids.RunID) {
 		t.Fatalf("retry lost its validated predecessor: %v %v", captured, err)
 	}
 	if err = f.execute(f.other, next, false); !errors.As(err, &wait) {
@@ -698,19 +698,31 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 	if f.ai.appCalls.Load() != 1 || f.ai.researchCalls.Load() != 3 {
 		t.Fatalf("retry repeated subscription research or skipped fresh headless research: app=%d headless=%d", f.ai.appCalls.Load(), f.ai.researchCalls.Load())
 	}
-	if f.ai.retainedEvidenceCalls.Load() != 1 {
+	if f.ai.retainedEvidenceCalls.Load() != 2 {
 		t.Fatal("new attempt did not give its researcher the existing source leads")
 	}
-	// Changed direction is new work, even against the same unchanged file.
+	// An interrupted retry has no app/report receipt of its own. A later
+	// attempt must still find the original completed evidence.
 	nextIDs, _, _, _, _ := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), next)
-	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{"runId": nextIDs.RunID, "status": "failed"})
+	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{"runId": nextIDs.RunID, "status": "cancelled"})
+	args["requestId"] = "third-" + fmt.Sprint(time.Now().UnixNano())
+	if _, err = f.second.handleRequestDocumentRevision(f.ctx, args, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.execute(f.other, asString(args["requestId"]), false); !errors.As(err, &wait) {
+		t.Fatal(err)
+	}
+	if f.ai.appCalls.Load() != 1 || f.ai.retainedEvidenceCalls.Load() != 3 {
+		t.Fatal("intervening attempt hid the completed app evidence")
+	}
+	// Changed direction is new work, even against the same unchanged file.
 	args["requestId"] = "different-" + fmt.Sprint(time.Now().UnixNano())
 	args["instruction"] = "Investigate a different question."
 	if _, err = f.second.handleRequestDocumentRevision(f.ctx, args, 0); err != nil {
 		t.Fatal(err)
 	}
 	_, different, _, _, err := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), asString(args["requestId"]))
-	if err != nil || different["previousRunId"] != nil {
+	if err != nil || len(fmt.Sprint(different["previousRunIds"])) > 2 {
 		t.Fatalf("new feedback inherited old evidence: %v %v", different, err)
 	}
 }
