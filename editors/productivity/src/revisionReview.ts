@@ -139,6 +139,17 @@ export class RevisionReview {
     }
     await this.files.decideRevision(base, saved.requestId, approvalId, decision, answer);
   }
+  async compareVersion(document: vscode.TextDocument, version: number): Promise<void> {
+    if (!Number.isInteger(version) || version < 1) throw new UserInputError("Choose a version with a previous snapshot.");
+    const base = await this.load(document.uri);
+    const [before, after] = await Promise.all([this.files.version(base, version - 1), this.files.version(base, version)]);
+    const sourceURI = vscode.Uri.parse(`memql-revision-preview:/version-${++this.count}-before.md`);
+    const savedURI = vscode.Uri.parse(`memql-revision-preview:/version-${this.count}-after.md`);
+    this.snapshots.set(sourceURI.toString(), before.content);
+    this.snapshots.set(savedURI.toString(), after.content);
+    try { await vscode.commands.executeCommand("vscode.diff", sourceURI, savedURI, `Version ${version - 1} ↔ Version ${version}`, {preview:false}); }
+    catch(error) { this.snapshots.delete(sourceURI.toString()); this.snapshots.delete(savedURI.toString()); throw error; }
+  }
   async compare(document: vscode.TextDocument): Promise<void> {
     const saved = this.context.workspaceState.get<SavedRequest>(this.key(document.uri));
     if (!saved) throw new UserInputError("Prepare a revision request first.");

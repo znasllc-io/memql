@@ -187,7 +187,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
           } else if(message.type === "copy") { await vscode.commands.executeCommand("editor.action.clipboardCopyAction");
           } else if(message.type === "refreshNotes") { await refreshNotes();
           } else if(message.type === "find") { await panel.webview.postMessage({type:"find"});
-          } else if (["history", "historyVersion", "historyCurrent", "historyFork", "historyOpen"].includes(message.type)) {
+          } else if (["history", "historyVersion", "historyCurrent", "historyFork", "historyOpen", "historyCompare"].includes(message.type)) {
             if (document.uri.scheme !== "memql-file") throw new UserInputError("Open a saved MemQL document to use history.");
             if(message.type === "historyCurrent") { preview=undefined; historyGeneration++; await panel.webview.postMessage({type:"historyCurrent"}); await render(); return; }
             if(historyBusy)return;
@@ -197,6 +197,8 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
               if(message.type === "history") {
                 const data=await this.files.history(base,Number.isInteger(message.beforeVersion)?message.beforeVersion:undefined);
                 if(ticket===historyGeneration)await panel.webview.postMessage({type:"history",data,append:Number.isInteger(message.beforeVersion)});
+              } else if(message.type === "historyCompare") {
+                await this.revisions.compareVersion(document,message.version);
               } else if(message.type === "historyVersion") {
                 if(!Number.isInteger(message.version)||message.version<0)throw new UserInputError("Choose a saved version.");
                 const snapshot=await this.files.version(base,message.version);

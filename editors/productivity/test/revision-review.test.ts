@@ -85,3 +85,15 @@ test("an open editor discovers a newer review after its initial recovery", async
   assert.deepEqual((await review.status(document))?.result, { applied: true });
   assert.equal((saved.get(key) as {requestId:string}).requestId, "replacement");
 });
+
+test("history compares retained versions, not unsaved text or an unaccepted proposal",async()=>{
+ let provider:any;const noop=()=>({dispose(){}});
+ Object.assign(vscode.workspace,{registerTextDocumentContentProvider:(_scheme:string,value:any)=>{provider=value;return noop();},onDidCloseTextDocument:noop});
+ const calls:any[]=[];Object.assign(vscode.commands,{executeCommand:async(...args:any[])=>{calls.push(args);}});
+ const reads:number[]=[];const files={version:async(_base:unknown,version:number)=>{reads.push(version);return {content:version===2?"Previous saved":"Applied subset"};}} as unknown as Documents;
+ const review=new RevisionReview({subscriptions:[]} as unknown as vscode.ExtensionContext,files,async()=>({} as OpenDocument));
+ await review.compareVersion({getText:()=>"Unsaved content"} as vscode.TextDocument,3);
+ assert.deepEqual(reads,[2,3]);assert.equal(calls[0][0],"vscode.diff");
+ assert.equal(provider.provideTextDocumentContent(calls[0][1]),"Previous saved");assert.equal(provider.provideTextDocumentContent(calls[0][2]),"Applied subset");
+ await assert.rejects(review.compareVersion({} as vscode.TextDocument,0),/previous snapshot/);
+});
