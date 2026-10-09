@@ -118,6 +118,8 @@ Owned work uses the following layers:
    existing input budget and is part of its cache identity. The DSL distinguishes
    retrieved metadata from verified findings and tool parameters from human
    constraints, so incidental output does not crowd out the remaining work.
+   Semantic consolidation declares the strong model tier: preserving relevance
+   and uncertainty through repeated checkpoints is more than classification.
    When parallel tool results together exceed the summarizer's input window,
    the engine archives the largest results first so the previous semantic
    checkpoint can still be consolidated with the new evidence.
