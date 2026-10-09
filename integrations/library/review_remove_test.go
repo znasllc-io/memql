@@ -8,7 +8,6 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	workstate "github.com/znasllc-io/memql/component/work"
-	sdk "github.com/znasllc-io/memql/sdk/go/client"
 )
 
 func TestDeleteDocumentAnnotationsAcrossReplicas(t *testing.T) {
@@ -48,15 +47,11 @@ func TestDeleteDocumentAnnotationsAcrossReplicas(t *testing.T) {
 			if _, err = f.second.handleRemoveDocumentAnnotation(f.ctx, wrong, 0); err == nil {
 				t.Fatal("wrong artifact accepted")
 			}
-			// Exercise the public, generated call on both replicas. Direct
-			// handler tests cannot catch an SDK that drops the supplied IDs.
-			call := sdk.LibraryRemoveDocumentAnnotationBuild(sdk.LibraryRemoveDocumentAnnotationArgs{ArtifactId: artifact, CommentId: id})
+			// Exercise public builtin dispatch on both replicas. SDK request
+			// serialization is covered in the client modules, so this module
+			// does not acquire a dependency on its consumers.
 			for _, replica := range []*memql.MemQLEngine{f.other, f.engine} {
-				result, executeErr := replica.Execute(f.ctx, call)
-				if executeErr != nil {
-					t.Fatalf("generated deletion call: %v", executeErr)
-				}
-				receipt := extractRows(result)
+				receipt := f.query(replica, f.ctx, "builtin", "libraryRemoveDocumentAnnotation", remove)
 				if len(receipt) != 1 || receipt[0]["removed"] != true {
 					t.Fatalf("missing deletion receipt: %v", receipt)
 				}
