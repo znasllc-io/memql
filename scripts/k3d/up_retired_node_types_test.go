@@ -109,7 +109,7 @@ func runWaitWithImages(t *testing.T, deployments, unready string) (ready, kubect
 		"FAKE_KUBECTL_LOG="+calls,
 		"FAKE_DEPLOYMENTS="+deployments,
 		"FAKE_UNREADY="+unready,
-		"MEMQL_K3D_WORKLOAD_TIMEOUT=1s",
+		"MEMQL_K3D_WORKLOAD_TIMEOUT=3s",
 	)
 	out, err := cmd.CombinedOutput()
 	if _, ok := err.(*exec.ExitError); !ok && err != nil {

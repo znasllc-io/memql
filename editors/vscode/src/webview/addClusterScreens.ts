@@ -98,9 +98,8 @@ const RUN_WORDS: Readonly<
 export const ADD_CLUSTER_STYLES = `
   .ac-line { margin: 0 0 16px; max-width: 60ch; }
   .ac-narrow { max-width: 40rem; }
-  .ac-choices { list-style: none; margin: 0; padding: 0; max-width: 40rem;
-                border-top: 1px solid var(--memql-border); }
-  .ac-choices > li { border-bottom: 1px solid var(--memql-border); }
+  .ac-choices { list-style: none; margin: 0; padding: 0; }
+  .ac-choices > li + li { border-top: 1px solid var(--memql-border); }
   .ac-choice { display: flex; align-items: center; gap: 12px; box-sizing: border-box; width: 100%;
                margin: 0; padding: 10px 8px 10px 2px; font: inherit; line-height: 1.4; text-align: left;
                color: var(--memql-fg); background: none; border: 0; border-radius: var(--memql-radius);
@@ -112,10 +111,10 @@ export const ADD_CLUSTER_STYLES = `
   .ac-choice[data-tone="danger"] .ac-choice-label { color: var(--memql-danger); }
   .ac-choice-note { color: var(--memql-muted); font-size: 0.923em; }
   .ac-chevron { flex: none; color: var(--memql-subtle); }
-  .ac-list { list-style: none; margin: 0; padding: 0; max-width: 40rem;
-             border-top: 1px solid var(--memql-border); }
+  .ac-list { list-style: none; margin: 0; padding: 0; }
+  .ac-row + .ac-row { border-top: 1px solid var(--memql-border); }
   .ac-row { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 10px; row-gap: 2px;
-            padding: 8px 2px; border-bottom: 1px solid var(--memql-border); }
+            padding: 8px 2px; }
   .ac-row-name { font-weight: 500; }
   .ac-row-detail { flex: 1 1 12em; min-width: 0; color: var(--memql-muted); overflow-wrap: anywhere; }
   .ac-row-tag { margin-left: auto; color: var(--memql-muted); font-size: 0.923em; white-space: nowrap; }
@@ -125,7 +124,7 @@ export const ADD_CLUSTER_STYLES = `
   .ac-word[data-tone="attention"] { color: var(--memql-warn); font-weight: 500; }
   .ac-word[data-tone="error"] { color: var(--memql-danger); font-weight: 500; }
   .ac-word-note { display: block; margin-top: 1px; color: var(--memql-muted); font-size: 0.923em; }
-  .ac-column { box-sizing: border-box; max-width: 560px; margin: 8px auto 0; }
+  .ac-column { box-sizing: border-box; max-width: 560px; margin: 8px 0 0; }
   .ac-column > .mq-subhead { margin-top: 24px; }
   .ac-quiet { margin: 10px 0 0; color: var(--memql-muted); }
   .ac-key .mq-code-text { letter-spacing: 0.04em; }
@@ -242,6 +241,8 @@ export interface CollectInput {
   remoteProblem?: string;
   /** The password was refused three times, or the prompt could not be answered. */
   passwordProblem?: string;
+  /** Finish a stopped or failed first installation using its recorded choices. */
+  continuing?: boolean;
 }
 
 /** The fields each action asks for, and which of them sit behind "More options". */
@@ -440,15 +441,15 @@ export function collectScreen(input: CollectInput): RegionParts {
     subhead("Checks") +
     checksList(input.checks);
 
-  const verb = flow === "install" ? "Install" : "Repair";
+  const verb = input.continuing ? "Continue setup" : flow === "install" ? "Install" : "Repair";
   const acts: Act[] = [{ act: "back", label: "Cancel" }];
   if (!blocked) acts.push({ act: "begin", label: verb, tone: "primary" });
   const problems = input.errors.length > 0;
   return {
-    head: head({ title: TAB_TITLES[flow] }),
+    head: head({ title: input.continuing ? "Continue setup" : TAB_TITLES[flow] }),
     body,
     actions: actionBar({
-      state: blocked ? "Can't start" : problems ? "Check the details" : flow === "install" ? "Ready to install" : "Ready to repair",
+      state: blocked ? "Can't start" : problems ? "Check the details" : input.continuing ? "Setup incomplete" : flow === "install" ? "Ready to install" : "Ready to repair",
       tone: blocked || problems ? "warn" : "idle",
       acts,
     }),
@@ -593,7 +594,10 @@ export interface FailureView {
   remedy?: string;
 }
 
+const CLEANUP_WORDS = { title: "Cleaning up setup", busy: "Cleaning up", failed: "Couldn't clean up", done: "Setup removed" };
+
 export interface RunInput {
+  cleanup?: boolean;
   mode: "install" | "repair" | "uninstall";
   phase: RunPhase;
   /** 0-100; undefined before the plan arrives (the bar is indeterminate). */
@@ -626,8 +630,8 @@ export function logsDisclosure(open: boolean, lines: readonly LogLine[] = [], la
       lines,
       empty: "Waiting for output",
       acts: [
-        { act: "copyLog", label: "Copy" },
-        { act: "openOutput", label: "Open in Output" },
+        { act: "copyLog", label: "Copy log", icon: "copy" },
+        { act: "openOutput", label: "Open in Output", icon: "open" },
       ],
     }),
   });
@@ -680,7 +684,7 @@ export function runProgressUpdate(input: RunInput): {
     ...(input.startedAt === undefined ? {} : { startedAt: input.startedAt }),
     ...(input.endedAt === undefined ? {} : { endedAt: input.endedAt }),
     state: progressState(input.phase),
-    title: RUN_WORDS[input.mode].title,
+    title: (input.cleanup ? CLEANUP_WORDS : RUN_WORDS[input.mode]).title,
   };
 }
 
@@ -699,7 +703,7 @@ export function runProgressUpdate(input: RunInput): {
  * retryable) once a failure has come to rest; Back and Resume once a stop has.
  */
 export function runScreen(input: RunInput): RegionParts {
-  const words = RUN_WORDS[input.mode];
+  const words = input.cleanup ? CLEANUP_WORDS : RUN_WORDS[input.mode];
   const update = runProgressUpdate(input);
   const body =
     progress({
@@ -718,7 +722,7 @@ export function runScreen(input: RunInput): RegionParts {
   let bar: string;
   switch (input.phase) {
     case "running":
-      bar = actionBar({ state: words.busy, tone: "busy", acts: [{ act: "cancel", label: "Cancel" }] });
+      bar = actionBar({ state: words.busy, tone: "busy", acts: [{ act: "cancel", label: "Stop" }] });
       break;
     case "stopping":
       bar = actionBar({ state: "Stopping after the current step", tone: "busy", acts: [] });
@@ -734,7 +738,7 @@ export function runScreen(input: RunInput): RegionParts {
         state: words.failed,
         tone: "error",
         acts: [
-          { act: "leave", label: "Cancel" },
+          { act: "leave", label: "Back" },
           ...(input.retryable ? [{ act: "retry", label: "Retry", tone: "primary" as const }] : []),
         ],
       });
@@ -960,6 +964,7 @@ export function addedScreen(input: AddedInput): RegionParts {
 export const DELETE_DATA_PHRASE = "delete memql data";
 
 export interface UninstallPreviewInput {
+  cleanup?: boolean;
   /** The preview is being read: the page draws the list's shape. */
   loading: boolean;
   /** No local cluster was found to uninstall. `removeFromList`: a list entry still points at it. */
@@ -1002,7 +1007,7 @@ export function phraseMatches(phrase: string): boolean {
  * there is no button; with nothing to remove at all there is none either.
  */
 export function uninstallPreviewScreen(input: UninstallPreviewInput): RegionParts {
-  const top = head({ title: TAB_TITLES.uninstall });
+  const top = head({ title: input.cleanup ? "Clean up setup" : TAB_TITLES.uninstall });
   if (input.loading) {
     return {
       head: top,
@@ -1033,7 +1038,7 @@ export function uninstallPreviewScreen(input: UninstallPreviewInput): RegionPart
       body: `<p class="ac-line">No local cluster was found on this computer.</p>`,
       actions: actionBar({
         // Why "Remove from list" is here, when it is: the entry outlived the cluster.
-        state: input.nothingHere.removeFromList ? "Still in your clusters" : "Nothing to uninstall",
+        state: input.nothingHere.removeFromList ? "Still in your clusters" : "Nothing to remove",
         tone: "idle",
         acts: [
           { act: "uninstallBack", label: "Back" },
@@ -1111,19 +1116,19 @@ export function uninstallPreviewScreen(input: UninstallPreviewInput): RegionPart
   const wouldRemove = removed.length > 0 || [...input.chosen].some((id) => input.sharedTools.some((t) => t.id === id));
   const dataOn = input.deleteData?.on === true;
   const acts: Act[] = [{ act: "uninstallBack", label: "Cancel" }];
-  let state = "Ready to uninstall";
+  let state = input.cleanup ? "Ready to clean up" : "Ready to uninstall";
   // NO CONFIRMATION SENTENCE OVER THE BAR. The list above already reads "The
   // cluster · memql, and every database in it" under "Will be removed", and
   // the switch says it can't be undone: a third telling above the button is
   // the same fact again, not a further consent.
   if (dataOn) {
     if (confirmed) {
-      acts.push({ act: "uninstallStart", label: "Uninstall and delete data", tone: "danger" });
+      acts.push({ act: "uninstallStart", label: input.cleanup ? "Clean up and delete data" : "Uninstall and delete data", tone: "danger" });
     } else {
       state = "Type the phrase to confirm";
     }
   } else if (wouldRemove) {
-    acts.push({ act: "uninstallStart", label: "Uninstall", tone: "danger" });
+    acts.push({ act: "uninstallStart", label: input.cleanup ? "Clean up" : "Uninstall", tone: "danger" });
   } else {
     state = "Nothing to remove";
   }
@@ -1147,6 +1152,7 @@ function lowerFirst(text: string): string {
 // -----------------------------------------------------------------------------
 
 export interface UninstalledInput {
+  cleanup?: boolean;
   removed: number;
   kept: number;
   /** The machine is clean but the editor's own records of it were not ("" when they were). */
@@ -1169,7 +1175,7 @@ export function uninstalledProgressUpdate(input: UninstalledInput): ProgressUpda
     ...(input.startedAt === undefined ? {} : { startedAt: input.startedAt }),
     ...(input.endedAt === undefined ? {} : { endedAt: input.endedAt }),
     state: "done",
-    title: RUN_WORDS.uninstall.done,
+    title: input.cleanup ? CLEANUP_WORDS.done : RUN_WORDS.uninstall.done,
   };
 }
 
@@ -1193,16 +1199,16 @@ export function uninstalledScreen(input: UninstalledInput): RegionParts {
     (input.followUpProblem === ""
       ? ""
       : input.stillListed === true
-        ? notice({ tone: "warn", line: "It's uninstalled, but it's still in your clusters.", next: "Remove it from the list in the Clusters view." })
+        ? notice({ tone: "warn", line: "Removed from this computer, but still in your clusters.", next: "Remove it from the list in the Clusters view." })
         : notice({
             tone: "warn",
-            line: "It's uninstalled, but MemQL still has a record of it.",
+            line: "Removed from this computer, but MemQL still has a record of it.",
             acts: [{ act: "openOutput", label: "Open in Output", tone: "secondary" }],
           })) +
     logsDisclosure(input.logsOpen, input.logLines ?? [], "Uninstall log");
   return {
     head: "",
     body,
-    actions: actionBar({ state: "Uninstalled", tone: "idle", acts: [{ act: "leave", label: "Back" }] }),
+    actions: actionBar({ state: input.cleanup ? "Setup removed" : "Uninstalled", tone: "idle", acts: [{ act: "leave", label: "Back" }] }),
   };
 }

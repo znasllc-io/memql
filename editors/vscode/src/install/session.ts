@@ -52,6 +52,7 @@ import {
   removalParams,
   unreceiptedClusterReceipt,
   type Receipt,
+  recordInstallIntent,
 } from "./receipt.js";
 import { refuseUnsupportedPlatform } from "./platform.js";
 import { resolveScriptRoot } from "./root.js";
@@ -564,16 +565,12 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           // prove when no image exists yet" (install-main.json's delta 1) --
           // and `buildImages`' own restart-and-wait is the real gate.
           //
-          // THE PREDICATE IS THE FRESH INSTALL, NOT `imagesFromSource`, and the
-          // difference is a repair. A repair of a from-source cluster carries
-          // `imagesFromSource` READ BACK OFF THE RECEIPT while its version is
-          // empty -- so `isMainBranchChoice("")` is false, the panel loads
-          // install.json rather than install-main.json, and that graph's
-          // clusterUp verifies `result.workloadsReady`. Keying on the lane
-          // would hand that repair a 60s ceiling for a check it has to pass,
-          // on a cluster whose pods are restarting. Its `:local` images DO
-          // already exist, so its wait is a real budget and keeps the real one.
-          "workload-timeout": isMainBranchChoice(opts.tag ?? "") ? "60" : "900",
+          // Source continuation uses the same graph as a fresh source install:
+          // clusterUp checks argocdReady, then buildImages starts and verifies
+          // the workloads. A stopped install may never have built any images,
+          // so a receipt's pinned commit must not turn this into a 900s wait
+          // for images that only the next step can create.
+          "workload-timeout": imagesFromSource(opts) ? "60" : "900",
           // THE REGISTRY FLAGS, AND THE LANE THAT HAS NONE (memql#4430).
           //
           // A from-source install passes NEITHER, and omitting them is what
@@ -941,6 +938,13 @@ export async function runInstall(
   hooks: SessionHooks = {},
 ): Promise<ExecutionReport> {
   const graph = hooks.graph ?? (await loadGraphFor("install", opts));
+  if (hooks.signal?.aborted !== true) {
+    await recordInstallIntent(opts.receiptFile, graph.name, {
+      tag: opts.tag ?? "", commit: opts.commit ?? "", imageTag: opts.imageTag ?? "",
+      imagesFromSource: imagesFromSource(opts), domain: opts.domain ?? "",
+      ownerEmail: opts.ownerEmail ?? "", ownerFirstName: opts.ownerFirstName ?? "", ownerLastName: opts.ownerLastName ?? "",
+    });
+  }
   return execute(graph, installPlan(opts), opts, hooks, opts.receiptFile);
 }
 
@@ -1030,16 +1034,10 @@ export async function runUninstall(
  * adds a third. memql#5056 fixed one of the two by naming flows, and the miss
  * was exactly that.
  *
- * `k3d.up` IS DELIBERATELY ABSENT even though `clusterUp` also takes a
- * `--repo-root` and has the same shape. It is reachable from the RELEASE lane,
- * where the checkout is an arbitrary older tag, and `scripts/lib/capability.sh`
- * refuses an undeclared flag outright:
- *
- *     cap_fail 2 "unknown flag: --${name} (declared params: ...)"
- *
- * so handing a current graph's params to an old release's `up.sh` can refuse the
- * install. That is a compatibility question with its own answer to design, not a
- * line to sweep in here. Tracked on memql#5064.
+ * `k3d.up` follows the checkout on the from-source lane too, including
+ * repair. Otherwise a new main checkout still bootstraps with the extension's
+ * older ArgoCD recovery logic. Release installs keep the bundled script:
+ * historical release scripts may not declare the current graph's flags.
  */
 const CHECKOUT_SCRIPT_CAPABILITIES = new Set(["k3d.dev"]);
 
@@ -1065,7 +1063,8 @@ function scriptRootFor(
   params: Record<string, string>,
   opts: SessionOptions,
 ): string {
-  if (!CHECKOUT_SCRIPT_CAPABILITIES.has(step.script)) {
+  const sourceBootstrap = step.script === "k3d.up" && imagesFromSource(opts);
+  if (!sourceBootstrap && !CHECKOUT_SCRIPT_CAPABILITIES.has(step.script)) {
     return opts.root;
   }
   const declared = (params["repo-root"] ?? "").trim();

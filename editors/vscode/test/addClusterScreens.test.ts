@@ -318,3 +318,17 @@ test("a finished uninstall that left a record behind says which, and keeps the e
   assert.match(recorded, /data-act="openOutput"[^>]*>Open in Output</);
   assert.doesNotMatch(recorded, /output has the details/i);
 });
+
+
+test("removing incomplete setup uses cleanup wording through confirmation and completion", () => {
+  const preview = uninstallPreviewScreen({ cleanup: true, loading: false, rows: removalRows(PLAN),
+    sharedTools: sharedToolRows(PLAN), chosen: new Set(), clusterName: "memql" });
+  assert.match(preview.head, /Clean up setup/);
+  assert.match(preview.actions, />Clean up</);
+  assert.doesNotMatch(preview.actions, />Uninstall</);
+  const running = runScreen({ cleanup: true, mode: "uninstall", phase: "running", status: "Removing items",
+    stepText: "Step 1 of 4", failures: [], retryable: true, logsOpen: false });
+  assert.match(running.body, /Cleaning up setup/);
+  const done = uninstalledScreen({ cleanup: true, removed: 4, kept: 0, followUpProblem: "", logsOpen: false });
+  assert.match(done.body, /Setup removed/);
+});

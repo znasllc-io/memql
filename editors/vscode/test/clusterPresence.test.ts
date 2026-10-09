@@ -48,8 +48,8 @@ function entry(over: Partial<ReceiptEntry> = {}): ReceiptEntry {
   };
 }
 
-/** A receipt describing one executed step -- the "an install happened" shape. */
-function installedReceipt(entries: ReceiptEntry[] = [entry()]): Receipt {
+/** A completed install has passed the front-door verification. */
+function installedReceipt(entries: ReceiptEntry[] = [entry(), entry({ stepId: "frontDoor", receipt: "", result: { allPassed: true } })]): Receipt {
   return { ...emptyReceipt("install"), entries };
 }
 
@@ -541,7 +541,7 @@ test("an artifact a step FOUND already present is still evidence", async () => {
     probeTimeoutMs: 25,
   });
 
-  assert.equal(result.verdict, "installed-unreachable");
+  assert.equal(result.verdict, "install-incomplete");
   assert.deepEqual(result.evidence, { receipt: true, registry: false, liveCluster: false });
 });
 
@@ -617,4 +617,41 @@ test("with no receipt, the version is the one clusters.yaml records", async () =
     probeTimeoutMs: 25,
   });
   assert.equal(result.version, "main");
+});
+
+
+for (const partial of [
+  [entry({ preExisting: true, changed: false, result: { cluster: "memql" } })],
+  [entry({ stepId: "toolK3d", receipt: "binary", result: { installed: true } })],
+  [entry({ result: { cluster: "memql", argocdReady: true } })],
+  [entry(), entry({ stepId: "frontDoor", receipt: "", result: { allPassed: false } })],
+]) {
+  test(`unfinished setup (${partial[0].stepId}, ${partial.length} entries) offers continuation without dialing`, async () => {
+    const probe = fixedProbe(true);
+    const result = await detectPresence({ clustersPath: CLUSTERS_PATH,
+      readReceiptFile: async () => installedReceipt(partial), readClusters: NO_CLUSTERS, probe });
+    assert.equal(result.verdict, "install-incomplete");
+    assert.deepEqual(probe.calls, []);
+  });
+}
+
+
+test("cleanup invalidates an in-flight installed verdict as well as the cached one", async () => {
+  let removed = false;
+  let releaseProbe!: (value: boolean) => void;
+  let startedProbe!: () => void;
+  const started = new Promise<void>(resolve => { startedProbe = resolve; });
+  const presence = new ClusterPresence({ clustersPath: CLUSTERS_PATH,
+    readReceiptFile: async () => null,
+    readClusters: async () => removed ? NO_CLUSTERS() : clustersWith([LOCAL_ENTRY])(),
+    probe: () => { startedProbe(); return new Promise<boolean>(resolve => { releaseProbe = resolve; }); },
+    probeTimeoutMs: 1000 });
+  const oldRead = presence.get();
+  await started;
+  removed = true;
+  presence.invalidate();
+  assert.equal((await presence.get()).verdict, "absent");
+  releaseProbe(true);
+  assert.equal((await oldRead).verdict, "absent");
+  assert.equal((await presence.get()).verdict, "absent");
 });

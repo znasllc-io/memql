@@ -67,6 +67,7 @@ import type { ClusterConfig } from "./model.js";
  */
 export type PresenceVerdict =
   | "absent"
+  | "install-incomplete"
   | "installed-healthy"
   | "installed-unreachable"
   /**
@@ -368,6 +369,16 @@ export async function detectPresence(opts: PresenceOptions): Promise<PresenceRes
     return { verdict: verdictFor(evidence, false), evidence, endpoint: "" };
   }
 
+  // Tools or a partially created cluster are not a completed install. Keep
+  // their receipt for cleanup, but offer continuation instead of sign-in.
+  // A registered cluster remains an existing cluster. Pre-existing artifacts
+  // alone do not prove that a previous setup ever finished.
+  if (!local && fromReceipt.receipt && evidence.receipt &&
+      !fromReceipt.receipt.entries.some((e) =>
+        e.stepId === "frontDoor" && e.result.allPassed === true)) {
+    return { verdict: "install-incomplete", evidence, endpoint: "" };
+  }
+
   const endpoint = probeEndpointFor(local, fromReceipt.receipt);
   let answer: ProbeAnswer = { answered: false };
   for (let attempt = 0; attempt < PROBE_TRIES && !answer.answered; attempt += 1) {
@@ -524,6 +535,7 @@ function probeErrorText(url: string, err: unknown): string {
 export class ClusterPresence {
   private cached: { at: number; result: PresenceResult } | undefined;
   private inflight: Promise<PresenceResult> | undefined;
+  private revision = 0;
 
   constructor(private readonly opts: PresenceOptions) {}
 
@@ -537,6 +549,8 @@ export class ClusterPresence {
    */
   invalidate(): void {
     this.cached = undefined;
+    this.inflight = undefined;
+    this.revision += 1;
   }
 
   async get(): Promise<PresenceResult> {
@@ -547,15 +561,19 @@ export class ClusterPresence {
     }
     if (this.inflight !== undefined) return this.inflight;
 
-    this.inflight = detectPresence(this.opts)
+    const revision = this.revision;
+    const pending: Promise<PresenceResult> = detectPresence(this.opts)
       .then((result) => {
+        // A probe started before cleanup cannot republish an installed state.
+        if (revision !== this.revision) return this.get();
         this.cached = { at: (this.opts.now ?? Date.now)(), result };
         return result;
       })
       .finally(() => {
-        this.inflight = undefined;
+        if (this.inflight === pending) this.inflight = undefined;
       });
-    return this.inflight;
+    this.inflight = pending;
+    return pending;
   }
 }
 

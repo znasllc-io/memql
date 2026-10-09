@@ -399,7 +399,7 @@ test("every action the instance row offered is reachable from the title menu", (
   }
   assert.ok(
     titleEntriesFor("memql.deployments.createDeployment").some((entry) =>
-      matches(entry, ABSENT_INSTANCE_SELECTED)
+      matches(entry, { view: "memqlClusters" })
     ),
     "create deployment is unreachable on a machine with nothing installed"
   );
@@ -641,5 +641,12 @@ test("both commands the menu names are declared", () => {
     "memql.clusters.openConsole",
   ]) {
     assert.ok(declared.has(command), `${command} appears in a menu but is not a contributed command`);
+  }
+});
+
+
+test("without a selected cluster only Clusters has sidebar actions", () => {
+  for (const view of ["memqlDeployments", "memqlConstructs", "memqlData", "memqlRuns"]) {
+    assert.deepEqual(titleMenu.filter((entry) => matches(entry, { view })), [], view);
   }
 });

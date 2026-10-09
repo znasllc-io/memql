@@ -64,6 +64,8 @@ export interface Act {
    * the row it sits in ("Promote" on a rollout's row is "Promote memql-bff").
    */
   ariaLabel?: string;
+  /** Compact utility action; the label remains its accessible name and tooltip. */
+  icon?: "copy" | "open";
   /** Extra `data-*` attributes, keys without the `data-` prefix; posted camelCased. */
   data?: Readonly<Record<string, string>>;
 }
@@ -94,16 +96,20 @@ function dataAttrs(data: Readonly<Record<string, string>> | undefined, reserved:
 export function button(a: Act): string {
   const tone = a.tone ?? "text";
   const isText = tone === "text";
-  const cls = isText ? "mq-textbtn" : "mq-btn";
+  const cls = (isText ? "mq-textbtn" : "mq-btn") + (a.icon ? " mq-iconbtn" : "");
   const toneAttr = isText ? "" : ` data-tone="${tone}"`;
   const value = a.value === undefined ? "" : ` data-value="${escapeHtml(a.value)}"`;
-  const title = a.title === undefined ? "" : ` title="${escapeHtml(a.title)}"`;
-  const aria = a.ariaLabel === undefined || a.ariaLabel === "" ? "" : ` aria-label="${escapeHtml(a.ariaLabel)}"`;
+  const tooltip = a.title ?? (a.icon ? a.label : undefined);
+  const title = tooltip === undefined ? "" : ` title="${escapeHtml(tooltip)}"`;
+  const accessible = a.ariaLabel || (a.icon ? a.label : "");
+  const aria = accessible === "" ? "" : ` aria-label="${escapeHtml(accessible)}"`;
   const busy = a.busy === true ? ` aria-busy="true" aria-disabled="true"` : "";
   const spinner = a.busy === true ? `<span class="mq-spin" aria-hidden="true"></span>` : "";
+  const path = a.icon === "copy" ? '<rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1h-8v8h1"/>' : '<path d="M9 2.5h4.5V7M13 3l-7 7M7 2.5H2.5v11h11V9"/>';
+  const label = a.icon ? `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round">${path}</svg>` : escapeHtml(a.label);
   return (
     `<button type="button" class="${cls}"${toneAttr} data-act="${escapeHtml(a.act)}"${value}` +
-    `${dataAttrs(a.data, ["act", "value", "tone"])}${title}${aria}${busy}>${spinner}${escapeHtml(a.label)}</button>`
+    `${dataAttrs(a.data, ["act", "value", "tone"])}${title}${aria}${busy}>${spinner}${label}</button>`
   );
 }
 
@@ -543,7 +549,7 @@ export function formatElapsed(ms: number): string {
  *
  * The title is the page's h1, so a progress screen renders no `head()` above
  * it; the reason, the "Show logs" disclosure and the log that follow it sit on
- * the same centred column.
+ * the same left edge as the form.
  */
 export function progress(i: ProgressInput): string {
   const id = escapeHtml(i.id ?? "mq-progress");
