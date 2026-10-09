@@ -153,8 +153,13 @@ if [ -n "$STUB_FAIL_ISSUE" ]; then
   printf 'stub: refusing to issue\n' >&2
   exit 1
 fi
-[ -n "$cert" ] && printf 'stub-cert\n' > "$cert"
-[ -n "$key" ]  && printf 'stub-key\n'  > "$key"
+if [ -n "${STUB_ISSUED_CERT:-}" ]; then
+  cp "$STUB_ISSUED_CERT" "$cert"
+  cp "$STUB_ISSUED_KEY" "$key"
+else
+  [ -n "$cert" ] && printf 'stub-cert\n' > "$cert"
+  [ -n "$key" ]  && printf 'stub-key\n'  > "$key"
+fi
 exit 0
 `
 

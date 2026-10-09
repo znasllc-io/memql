@@ -43,12 +43,17 @@ import (
 const appFakeKubectl = `#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FAKE_KUBECTL_LOG"
 case "$*" in
+  *"logs statefulset/argocd-application-controller"*)
+    printf '%s\n' "${FAKE_CONTROLLER_LOG:-}"; exit "${FAKE_LOG_EXIT:-0}" ;;
+  *"logs deployment/argocd-repo-server"*)
+    printf '%s\n' "${FAKE_REPO_LOG:-}"; exit "${FAKE_LOG_EXIT:-0}" ;;
   *"rollout status"*)
     case "$*" in *"${FAKE_ROLLOUT_FAILURE:-no-such-resource}"*) echo 'ImagePullBackOff' >&2; exit 1 ;; esac
     exit 0 ;;
   *"get deployment"*)
+    case "$*" in *"get deployment ${FAKE_OPERATOR_EXISTING:-no-such-deployment} "*) exit 0 ;; esac
     if [ "${FAKE_OPERATOR_AFTER_REFRESH:-}" = 1 ]; then [ -f "$FAKE_APP_READS.refreshed" ]; exit $?; fi
-    [ "${FAKE_OPERATOR_ABSENT:-}" != 1 ] ;;
+    [ "${FAKE_OPERATOR_ABSENT:-}" != 1 ]; exit $? ;;
   *"annotate application"*)
     [ "${FAKE_REFRESH_EXIT:-0}" = 0 ] || exit "$FAKE_REFRESH_EXIT"
     touch "$FAKE_APP_READS.refreshed"

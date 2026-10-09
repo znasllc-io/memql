@@ -109,6 +109,7 @@ cap_spec_param "grpc-host"   "hostname for the gRPC reachability probe (default:
 cap_spec_param "port"        "TLS port (default 443)"
 cap_spec_param "expect-addr" "the address every hostname must resolve to (default 127.0.0.1)"
 cap_spec_param "timeout"     "per-probe timeout in seconds (default 8)"
+cap_spec_param "caroot"      "installation CA directory, for diagnosing TLS failures (never overrides the system-trust check)"
 cap_spec_param "report-only" "report failures without failing the run (flag)"
 cap_spec_param "wildcard-probe-host" \
     "unclaimed hostname under the wildcard rule, proving exact-vs-wildcard precedence is testable (default: ${WILDCARD_PROBE_LABEL}.<apex of the first host>)"
@@ -250,15 +251,21 @@ function check_dns() {
 _FD_RC=0
 _FD_VERSION=""
 _FD_CODE=""
+_FD_TLS_ERROR=""
+_FD_CAROOT=""
 function https_probe() {
     local host="$1" port="$2" timeout="$3" out=""
     _FD_RC=0
+    _FD_TLS_ERROR=""
     out="$(curl --silent --show-error \
                 --http2 \
                 --max-time "$timeout" \
                 --output /dev/null \
                 --write-out '%{http_version} %{http_code}' \
-                "https://${host}:${port}/" 2>/dev/null)" || _FD_RC=$?
+                "https://${host}:${port}/" 2>&1)" || _FD_RC=$?
+    if [[ "$_FD_RC" != "0" ]]; then
+        _FD_TLS_ERROR="${out%%$'\n'*}"
+    fi
     _FD_VERSION="${out%% *}"
     _FD_CODE="${out##* }"
 }
@@ -271,9 +278,28 @@ function curl_tls_hint() {
         28) printf 'timed out' ;;
         35) printf 'TLS handshake failed' ;;
         51) printf 'certificate hostname mismatch' ;;
-        60) printf 'certificate not trusted -- run `mkcert -install` and re-issue the wildcard' ;;
+        60) printf 'certificate verification failed' ;;
         *)  printf 'transport failure' ;;
     esac
+}
+
+# A second, CA-pinned probe diagnoses a failed system-trust check. It must
+# NEVER turn that failure into a pass: browsers and other clients still need
+# the system/browser stores fixed. In particular, do not recommend a bare
+# `mkcert -install`, which can select a different CA from the installer's.
+function tls_failure_detail() {
+    local host="$1" port="$2" timeout="$3" ca="${_FD_CAROOT}/rootCA.pem"
+    printf 'curl exit %s: %s' "$_FD_RC" "$(curl_tls_hint "$_FD_RC")"
+    [[ -z "$_FD_TLS_ERROR" ]] || printf '; %s' "$_FD_TLS_ERROR"
+    [[ "$_FD_RC" == "60" && -n "$_FD_CAROOT" ]] || return 0
+    if [[ ! -f "$ca" ]]; then
+        printf '; installation CA missing at %s; retry certificate setup' "$ca"
+    elif curl --silent --show-error --http2 --max-time "$timeout" --cacert "$ca" \
+            --output /dev/null "https://${host}:${port}/" >/dev/null 2>&1; then
+        printf '; the server verifies with %s, but the active curl trust store rejects it. Check CURL_CA_BUNDLE, SSL_CERT_FILE and SSL_CERT_DIR overrides and retry certificate setup' "$ca"
+    else
+        printf '; the server also fails verification against %s. Retry setup to renew and reload the local certificate' "$ca"
+    fi
 }
 
 # check_tls <host> <port> <timeout>
@@ -281,7 +307,7 @@ function check_tls() {
     local host="$1" port="$2" timeout="$3"
     https_probe "$host" "$port" "$timeout"
     if [[ "$_FD_RC" != "0" ]]; then
-        record_check tls "$host" false "curl exit ${_FD_RC}: $(curl_tls_hint "$_FD_RC")"
+        record_check tls "$host" false "$(tls_failure_detail "$host" "$port" "$timeout")"
         return
     fi
     record_check tls "$host" true "TLS handshake ok against a trusted certificate (HTTP ${_FD_CODE})"
@@ -293,7 +319,7 @@ function check_grpc() {
     local host="$1" port="$2" timeout="$3"
     https_probe "$host" "$port" "$timeout"
     if [[ "$_FD_RC" != "0" ]]; then
-        record_check grpc "$host" false "curl exit ${_FD_RC}: $(curl_tls_hint "$_FD_RC")"
+        record_check grpc "$host" false "$(tls_failure_detail "$host" "$port" "$timeout")"
         return
     fi
     case "$_FD_VERSION" in
@@ -663,6 +689,7 @@ function check_precedence() {
 function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
+    _FD_CAROOT="$(cap_param caroot "")"
 
     local hosts grpc_host port expect timeout report_only
     local domain

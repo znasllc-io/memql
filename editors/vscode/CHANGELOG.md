@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.6
+
+- Allow ArgoCD to recover from a timed-out initial repository download within
+  one shared bootstrap deadline. Deployment readiness retains its own shorter
+  limit, and long source comparisons report progress.
+
+## 0.6.5
+
+- Repair expired local certificates, certificates signed by an old CA, and
+  mismatched certificate keys during setup. Secure-access failures retain the
+  actual TLS error and distinguish the installation CA from the active trust
+  store.
+- Include ArgoCD controller and repository-server logs when cluster setup
+  times out waiting for an operator.
+
 ## 0.6.4
 
 - Recognizes installed schedule placement with `node` and `lease` in MemQL

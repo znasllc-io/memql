@@ -243,45 +243,12 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     name: ${{ matrix.leg }}
     runs-on: ubuntu-latest
-    # A HANG BOUND, NOT A BUDGET, and the numbers in this file NEST.
-    #
-    # The intended cost is ~15-20 minutes per leg (image pull, ArgoCD reconcile,
-    # readiness wait, teardown). What this value has to survive is the WORST
-    # case, and the worst case is a sum of budgets that must fit inside each
-    # other or the outer one truncates a wait that was about to succeed --
-    # reported, unhelpfully, as whatever the inner step was doing:
-    #
-    #   argocd-timeout 480s + operator 480s + workload 720s = 1680s  (clusterUp)
-    #                                            --timeout = 1800s  (per step)
-    #                                      timeout-minutes =   50m  (the job)
-    #
-    # Fifty rather than forty because the upgrade leg runs clusterUp twice; the
-    # second is mostly no-ops (ArgoCD is installed, the operators exist, the
-    # workloads are already Available) but it is not free. A timeout tight
-    # enough to cancel a healthy run turns a slow morning into a red gate, which
-    # is the headroom convention scripts/ci/workflow_timeout_test.go records.
-    #
-    # `from-source` gets its own number because it is a different job wearing
-    # the same YAML: it COMPILES seven engine images before the cluster can
-    # start, on top of everything the release legs do. The graph gives
-    # `buildImages` 2700s of its own, which does not fit inside 50 minutes
-    # beside a cold cluster bring-up -- and a job timeout that fires during a
-    # legitimate build reports "the installer hung" about a runner that was
-    # working. 90 keeps the nesting rule above intact: 1680s clusterUp +
-    # 2700s buildImages = 4380s, inside 90m with room for the round trip.
-    #
-    # `pipelines` is `from-source` and then one Go test, under two bounds of
-    # its own that nest the same way:
-    #
-    #                go test -timeout = 30m  (the test binary's run)
-    #   the test step timeout-minutes = 40m  (that run, plus compiling the
-    #                                         test binary and handing over
-    #                                         the kubeconfig)
-    #
-    # 4380s (73m) + 40m = 113m, inside 135m: the same 17m of room for the
-    # round trip `from-source` keeps, plus 5m for setting up Go, restoring its
-    # cache and building the stylesheet before the test step starts.
-    timeout-minutes: ${{ matrix.leg == 'pipelines' && 135 || matrix.leg == 'from-source' && 90 || 50 }}
+    # These ceilings contain the install graph's waits. clusterUp now allows
+    # up to 60m, including one shared cold-repository/operator budget, and
+    # buildImages has its own 45m ceiling. Normal runs finish much earlier.
+    # Keep room for setup, the warm repair/upgrade and teardown; the pipelines
+    # leg also runs its separately bounded 40m test step.
+    timeout-minutes: ${{ matrix.leg == 'pipelines' && 165 || matrix.leg == 'from-source' && 120 || 80 }}
     strategy:
       fail-fast: false
       matrix:
@@ -1163,35 +1130,42 @@ jobs:
       # effort throughout: this step must never be the reason a run is red.
       - name: Cluster diagnostics
         if: failure()
+        timeout-minutes: 4
         run: |
           set +e
           export PATH="$HOME/.memql/bin:$PATH"
+          function diagnostic_kubectl() {
+            timeout --signal=TERM --kill-after=5s 15s \
+              sudo -n -E env "HOME=$HOME" "PATH=$PATH" \
+              kubectl --request-timeout=10s "$@"
+          }
           {
             echo "=== k3d clusters ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" k3d cluster list
+            timeout --signal=TERM --kill-after=5s 15s \
+              sudo -n -E env "HOME=$HOME" "PATH=$PATH" k3d cluster list
             # The node's allocatable versus what the manifests request. A
             # hosted runner is 4 cores and 16 GB, and the failure that shape
             # produces is pods Pending on `Insufficient cpu` -- which arrives as
             # "workloadsReady did not hold" and names nothing.
             echo "=== node capacity and allocation ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl describe nodes
+            diagnostic_kubectl describe nodes
             echo "=== pods ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get pods -A -o wide
+            diagnostic_kubectl get pods -A -o wide
             echo "=== argocd applications ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get applications -A -o wide
+            diagnostic_kubectl get applications -A -o wide
             echo "=== recent events ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get events -A --sort-by=.lastTimestamp | tail -60
+            diagnostic_kubectl get events -A --sort-by=.lastTimestamp | tail -60
             echo "=== pods that are not Running ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get pods -A \
+            diagnostic_kubectl get pods -A \
               --field-selector=status.phase!=Running -o wide
             echo "=== the memql namespace, described ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl describe pods -n memql
+            diagnostic_kubectl describe pods -n memql
             # Where pipeline steps run: what a failed `pipelines` leg left, and
             # why its pods did what they did. Empty on the other legs.
             echo "=== the memql-pipelines namespace ==="
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get jobs,pods,secrets,pvc,resourcequota -n memql-pipelines -o wide
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl describe pods -n memql-pipelines
-            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get events -n memql-pipelines --sort-by=.lastTimestamp
+            diagnostic_kubectl get jobs,pods,secrets,pvc,resourcequota -n memql-pipelines -o wide
+            diagnostic_kubectl describe pods -n memql-pipelines
+            diagnostic_kubectl get events -n memql-pipelines --sort-by=.lastTimestamp
           } > "$RUNNER_TEMP/diagnostics.txt" 2>&1
           cat "$RUNNER_TEMP/diagnostics.txt"
           exit 0
@@ -1206,13 +1180,15 @@ jobs:
       # `if: always()` and after the diff, never before it.
       - name: Tear the cluster down whatever happened
         if: always()
+        timeout-minutes: 2
         run: |
           set +e
           export PATH="$HOME/.memql/bin:$PATH"
           # A successful uninstall already removed the binary, which is the
           # common case and not worth a `command not found` in the log.
           if command -v k3d >/dev/null 2>&1; then
-            sudo -E env "HOME=$HOME" "PATH=$PATH" k3d cluster delete memql
+            timeout --signal=TERM --kill-after=5s 90s \
+              sudo -n -E env "HOME=$HOME" "PATH=$PATH" k3d cluster delete memql
           else
             echo "no k3d binary on PATH -- the uninstall took it, so there is nothing to tear down"
           fi

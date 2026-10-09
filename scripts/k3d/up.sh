@@ -167,6 +167,12 @@ ARGOCD_TIMEOUT="${MEMQL_K3D_ARGOCD_TIMEOUT:-300}"
 # budget for the fetch itself. See wait_for_app_comparison (memql#5029).
 APP_COMPARE_TIMEOUT="${MEMQL_K3D_APP_COMPARE_TIMEOUT:-180}"
 
+# One ceiling for both operators, including ArgoCD's cold repository fetch.
+# A fetch itself can take 300s; ending setup at the same instant prevents even
+# one recovery attempt. This shared budget covers retries without granting a
+# fresh long wait to each operator or each Deployment.
+OPERATOR_STACK_TIMEOUT="${MEMQL_K3D_OPERATOR_STACK_TIMEOUT:-1200}"
+
 # Outcome tracking (result envelope + idempotency reporting).
 CLUSTER_CREATED=false
 ARGOCD_READY=false
@@ -1019,22 +1025,31 @@ function _wait_for_operator() {
     local ns="$1" APP_NAME="$2"
     shift 2
     local timeout="${MEMQL_K3D_OPERATOR_TIMEOUT:-300}"
-    local d deadline comparison_checked=false
+    local d deadline started=$SECONDS comparison_checked=false
+    local stack_deadline="${operator_stack_deadline:-$((SECONDS + OPERATOR_STACK_TIMEOUT))}"
+    # Repository comparison and pod readiness are different waits. A cold
+    # fetch must not consume the five minutes intended for the pods to start.
+    # Existing Deployments still go straight to their readiness checks.
+    cap_progress "Starting cluster services"
     deadline=$((SECONDS + timeout))
+    if ((deadline > stack_deadline)); then deadline=$stack_deadline; fi
 
     for d in "$@"; do
-        while ! kubectl get deployment "$d" -n "$ns" &>/dev/null; do
-            if [[ "$comparison_checked" == false ]] && ((SECONDS < deadline)); then
-                # Sync retries do not retry a failed source comparison. Recover
-                # that first, within the SAME budget as the deployment wait.
-                wait_for_app_comparison "$deadline"
+        while ! kubectl get deployment "$d" -n "$ns" --request-timeout=10s &>/dev/null; do
+            if [[ "$comparison_checked" == false ]] && ((timeout > 0 && SECONDS < stack_deadline)); then
+                cap_progress "Downloading cluster configuration"
+                wait_for_app_comparison "$stack_deadline"
                 comparison_checked=true
+                deadline=$((SECONDS + timeout))
+                if ((deadline > stack_deadline)); then deadline=$stack_deadline; fi
+                cap_progress "Starting cluster services"
+                continue
             fi
             if ((SECONDS >= deadline)); then
                 local reason
                 reason="$(argocd_app_state)"
                 operator_diagnostics "$ns"
-                cap_fail 5 "timed out after ${timeout}s waiting for deployment/${d} in ${ns}. ${reason}"
+                cap_fail 5 "timed out after $((SECONDS - started))s waiting for deployment/${d} in ${ns}. ${reason}"
             fi
             sleep 3
         done
@@ -1043,14 +1058,14 @@ function _wait_for_operator() {
     # `deadline` above is computed once, but this loop used to hand each
     # Deployment a fresh full `--timeout`, so cert-manager's three plus CNPG's
     # two could consume 5 x 480s = 2400s against a step the install graph caps
-    # at 1800s. The kill then arrived as an executor timeout with no envelope
+    # at its outer ceiling. The kill arrived as an executor timeout with no envelope
     # at all -- "the script produced no result envelope" -- which names neither
     # the namespace nor the Deployment. Each wait now gets what is LEFT.
     for d in "$@"; do
         local remaining=$((deadline - SECONDS))
         if ((remaining <= 0)); then
             operator_diagnostics "$ns"
-            cap_fail 5 "ran out of the ${timeout}s operator budget before deployment/${d} in ${ns} became available. $(argocd_app_state)"
+            cap_fail 5 "operator readiness deadline reached before deployment/${d} in ${ns} became available. $(argocd_app_state)"
         fi
         kubectl rollout status "deployment/${d}" -n "$ns" --timeout="${remaining}s" >&2 \
             || { operator_diagnostics "$ns"; cap_fail 5 "deployment/${d} in ${ns} did not become available. $(argocd_app_state)"; }
@@ -1062,11 +1077,21 @@ function operator_diagnostics() {
     local ns="$1"
     argocd_app_state >&2
     printf '\n' >&2
-    kubectl get application "$APP_NAME" -n "$ARGOCD_NAMESPACE" \
+    kubectl get application "$APP_NAME" -n "$ARGOCD_NAMESPACE" --request-timeout=10s \
         -o jsonpath='{.status.operationState.phase}{": "}{.status.operationState.message}{"\n"}{range .status.operationState.syncResult.resources[*]}{.kind}{"/"}{.name}{": "}{.message}{"\n"}{end}' >&2 || true
-    kubectl get pods -n "$ARGOCD_NAMESPACE" >&2 || true
-    kubectl get pods -n "$ns" >&2 || true
-    kubectl get events -n "$ns" --sort-by=.lastTimestamp 2>/dev/null | tail -15 >&2 || true
+    kubectl get pods -n "$ARGOCD_NAMESPACE" --request-timeout=10s >&2 || true
+    kubectl get pods -n "$ns" --request-timeout=10s >&2 || true
+    kubectl get events -n "$ns" --request-timeout=10s --sort-by=.lastTimestamp 2>/dev/null | tail -15 >&2 || true
+    # Running pods do not prove that the controller can reach the API, Redis or
+    # the repository server. With no Application status, these logs may be the
+    # only account of why reconciliation never started. Bound each read so a
+    # broken API cannot turn failure reporting into another indefinite wait.
+    local resource
+    for resource in statefulset/argocd-application-controller deployment/argocd-repo-server; do
+        info "Recent ${resource} logs:"
+        kubectl logs "$resource" -n "$ARGOCD_NAMESPACE" --request-timeout=10s \
+            --pod-running-timeout=5s --tail=50 >&2 || true
+    done
 }
 
 # install_operator_stack -- register cert-manager and CloudNativePG, in that
@@ -1084,6 +1109,7 @@ function operator_diagnostics() {
 # The stack is reconciled by ArgoCD in every environment, from the same two
 # directories; this function is bootstrap, not a second install path.
 function install_operator_stack() {
+    local operator_stack_deadline=$((SECONDS + OPERATOR_STACK_TIMEOUT))
     section "Registering the cluster operator stack (cert-manager + CloudNativePG)"
     # One phase for this and apply_argocd_app, which follows it: both register
     # what the cluster is to run, and a status line that changed between them
@@ -1170,11 +1196,11 @@ YAML
 function argocd_app_state() {
     local sync health conds
     sync="$(kubectl get application "${APP_NAME}" -n "${ARGOCD_NAMESPACE}" \
-        -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
+        --request-timeout=10s -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
     health="$(kubectl get application "${APP_NAME}" -n "${ARGOCD_NAMESPACE}" \
-        -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
+        --request-timeout=10s -o jsonpath='{.status.health.status}' 2>/dev/null || true)"
     conds="$(kubectl get application "${APP_NAME}" -n "${ARGOCD_NAMESPACE}" \
-        -o jsonpath='{range .status.conditions[*]}{.type}: {.message}{"; "}{end}' 2>/dev/null || true)"
+        --request-timeout=10s -o jsonpath='{range .status.conditions[*]}{.type}: {.message}{"; "}{end}' 2>/dev/null || true)"
     printf 'Application %s sync=%s health=%s%s' \
         "${APP_NAME}" "${sync:-<none>}" "${health:-<none>}" \
         "${conds:+ conditions: ${conds}}"
@@ -1217,11 +1243,13 @@ function argocd_retryable_source_error() {
 # A hard refresh bypasses the cached comparison failure and actually asks the
 # repo-server to fetch again. Keep the selected revision and ArgoCD deployment
 # path; never turn a transport failure into a direct-apply or a different ref.
-# The optional absolute deadline lets operators share this wait with rollout.
+# The optional absolute deadline bounds comparison by the shared operator stack.
 function wait_for_app_comparison() {
     local deadline="${1:-$((SECONDS + APP_COMPARE_TIMEOUT))}"
+    local started=$SECONDS
     local snapshot sync="" refresh="" err="" confirmations=0 tick=3
     local retries=0 next_retry=0 backoff=5 remaining
+    local next_report=$((SECONDS + 30))
     local -r APP_ERROR_CONFIRMATIONS=3 MAX_SOURCE_RETRIES=3
 
     info "Waiting for ArgoCD to compare '${APP_NAME}' against its source..."
@@ -1269,6 +1297,10 @@ function wait_for_app_comparison() {
                 esac
             fi
         fi
+        if ((SECONDS >= next_report)); then
+            info "Still waiting for ArgoCD to compare '${APP_NAME}' ($((SECONDS - started))s elapsed)."
+            next_report=$((SECONDS + 30))
+        fi
         remaining=$((deadline - SECONDS))
         if ((remaining <= 0)); then break; fi
         if ((remaining < tick)); then sleep "$remaining"; else sleep "$tick"; fi
@@ -1281,7 +1313,7 @@ function wait_for_app_comparison() {
     # the same class as a slow image pull -- and this script does not abort a
     # developer's cluster over slow. It is recorded instead, so the reason
     # travels even if the namespace turns out empty.
-    warn "ArgoCD produced no comparison for '${APP_NAME}' within ${APP_COMPARE_TIMEOUT}s."
+    warn "ArgoCD produced no comparison for '${APP_NAME}' after $((SECONDS - started))s."
     warn "  $(argocd_app_state)"
 }
 

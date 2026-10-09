@@ -107,3 +107,27 @@ function localtls_sans_oneline() {
 function localtls_has_dns_name() {
     printf '%s\n' "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -Fxq "DNS:$2"
 }
+
+# A matching hostname alone does not make a reusable TLS pair: a previous
+# installation may have issued it from another CA, or it may have expired.
+# Verify against ONLY the selected CA, never a different root in the system
+# store, and compare public keys without printing private key material.
+# Unknown preserves callers' behavior when OpenSSL/the CA cannot be read.
+function localtls_pair_status() {
+    local cert="$1" key="$2" ca="$3" cert_public key_public
+    if ! command -v openssl &>/dev/null || ! openssl x509 -in "$ca" -noout &>/dev/null; then
+        printf 'unknown'
+        return 0
+    fi
+    if ! openssl verify -purpose sslserver -trusted "$ca" "$cert" &>/dev/null; then
+        printf 'invalid'
+        return 0
+    fi
+    cert_public="$(openssl x509 -in "$cert" -noout -pubkey 2>/dev/null)" || cert_public=""
+    key_public="$(openssl pkey -in "$key" -pubout -passin pass: 2>/dev/null)" || key_public=""
+    if [[ -n "$cert_public" && "$cert_public" == "$key_public" ]]; then
+        printf 'valid'
+    else
+        printf 'invalid'
+    fi
+}

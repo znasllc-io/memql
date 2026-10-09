@@ -194,8 +194,9 @@ for a in "${list[@]}"; do printf '%s STREAM %s\n' "$a" "$host"; done
 exit 0
 `
 	curlStub := `#!/usr/bin/env bash
-url=""; w=""; prev=""; sink=""; pinned=""
+url=""; w=""; prev=""; sink=""; pinned=""; cacert=""
 for a in "$@"; do
+  [[ -n "${STUB_ARGS_LOG:-}" ]] && printf '%s\n' "$a" >> "$STUB_ARGS_LOG"
   case "$a" in
     https://*|http://*) url="$a" ;;
   esac
@@ -203,6 +204,7 @@ for a in "$@"; do
     -w|--write-out) w="$a" ;;
     -o|--output)    sink="$a" ;;
     --resolve)      pinned="$a" ;;
+    --cacert)       cacert="$a" ;;
   esac
   prev="$a"
 done
@@ -222,6 +224,7 @@ fi
 spec="$(awk -F'|' -v h="$host" '$1==h {print substr($0, index($0,"|")+1); exit}' "$STUB_HTTP_MAP")"
 if [[ -z "$spec" ]]; then echo "stub curl: no route for $host" >&2; exit 7; fi
 rc="${spec%%|*}"; rest="${spec#*|}"
+[[ -n "$cacert" && -n "${STUB_CA_RC:-}" ]] && rc="$STUB_CA_RC"
 ver="${rest%%|*}"; rest="${rest#*|}"
 code="${rest%%|*}"
 body=""
@@ -520,7 +523,7 @@ func TestVerifyFrontDoorDnsNotResolvingFails(t *testing.T) {
 
 // TestVerifyFrontDoorTlsFailureIsIsolated: a certificate problem must be
 // reported as the TLS check failing, with DNS still reported as passing. That
-// separation is what tells the operator to re-run `mkcert -install` instead of
+// separation is what tells the operator to repair certificate trust instead of
 // editing /etc/hosts.
 func TestVerifyFrontDoorTlsFailureIsIsolated(t *testing.T) {
 	env := fdWorld(t,
@@ -541,6 +544,54 @@ func TestVerifyFrontDoorTlsFailureIsIsolated(t *testing.T) {
 	}
 	if !strings.Contains(tls.Detail, "60") {
 		t.Errorf("tls detail should name what curl reported; got %q", tls.Detail)
+	}
+}
+
+// Diagnosing against the installer's CA can explain a failure, but must never
+// hide a broken system trust store from the user or the install executor.
+func TestVerifyFrontDoorCATrustDiagnosticsNeverWaiveFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, caRC, want string
+		missingCA        bool
+	}{
+		{"trust store rejects current CA", "0", "active curl trust store rejects it", false},
+		{"server certificate is wrong", "60", "also fails verification against", false},
+		{"installation CA missing", "0", "installation CA missing", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := fdWorld(t, map[string]string{fdAPI: "127.0.0.1"}, map[string]string{fdAPI: "60|0|000"})
+			caroot := filepath.Join(t.TempDir(), "CA with spaces")
+			ca := filepath.Join(caroot, "rootCA.pem")
+			if !tc.missingCA {
+				writeTLSFixture(t, ca, []byte("stub CA"))
+			}
+			argsLog := filepath.Join(t.TempDir(), "curl-args")
+			env = append(env, "STUB_CA_RC="+tc.caRC, "STUB_ARGS_LOG="+argsLog)
+			stdout, stderr, code := fdRun(t, env, "--hosts="+fdAPI, "--caroot="+caroot)
+			if code != 5 {
+				t.Fatalf("diagnostic waived a failed TLS check: exit %d\n%s\n%s", code, stdout, stderr)
+			}
+			envelope, res := fdParse(t, stdout)
+			if envelope.OK || res.AllPassed || res.Failed != 2 {
+				t.Fatalf("TLS and gRPC failures must remain failed: %s", stdout)
+			}
+			for _, kind := range []string{"tls", "grpc"} {
+				c := fdFind(t, res, kind, fdAPI)
+				if c.Passed || !strings.Contains(c.Detail, tc.want) || !strings.Contains(c.Detail, ca) || !strings.Contains(c.Detail, "stub curl: failure rc=60") {
+					t.Errorf("%s: missing diagnosis or original error: %+v", kind, c)
+				}
+			}
+			args, err := os.ReadFile(argsLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(args), "--insecure") || strings.Contains(string(args), "\n-k\n") {
+				t.Fatal("diagnostic disabled certificate verification")
+			}
+			if got := strings.Contains(string(args), "--cacert\n"+ca+"\n"); got == tc.missingCA {
+				t.Fatalf("diagnostic must use the exact CA path only when present: %s", args)
+			}
+		})
 	}
 }
 

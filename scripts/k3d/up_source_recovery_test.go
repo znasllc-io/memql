@@ -99,3 +99,81 @@ func TestTruncatedHTTPResponseIsRetried(t *testing.T) {
 		t.Fatalf("truncated response did not recover: %d\n%s\n%s", code, out, calls)
 	}
 }
+
+// Replay the Pop!_OS timeline: no status until a 300s Git timeout, then a
+// successful retry at 612s. The old 300s deployment deadline ends before the
+// first source failure is even published. No real sleeps or cluster needed.
+func TestColdSourceRetryDoesNotConsumeDeploymentReadinessBudget(t *testing.T) {
+	out, code, calls := sourceRecovery(t, `
+function sleep() { SECONDS=$((SECONDS + $1)); }
+function argocd_comparison_state() {
+    if ((SECONDS < 300)); then printf '\n\n.'
+    elif [[ ! -f "$FAKE_APP_READS.refreshed" ]]; then
+        printf 'Unknown\n\nComparisonError: git fetch failed timeout after 5m0s.'
+    elif ((SECONDS < 612)); then
+        printf 'Unknown\nhard\nComparisonError: git fetch failed timeout after 5m0s.'
+    else printf 'Synced\n\n.'; fi
+}
+
+unset SECONDS
+SECONDS=0
+_wait_for_operator cert-manager cert-manager controller
+`, "FAKE_OPERATOR_AFTER_REFRESH=1")
+	if code != 0 || strings.Count(calls, "annotate application") != 1 {
+		t.Fatalf("cold fetch did not recover: %d\n%s\n%s", code, out, calls)
+	}
+	if !strings.Contains(calls, "rollout status deployment/controller -n cert-manager --timeout=300s") {
+		t.Fatalf("source download consumed readiness time:\n%s", calls)
+	}
+	if !strings.Contains(out, "300s elapsed") || !strings.Contains(out, "600s elapsed") {
+		t.Fatalf("cold fetch became a silent wait:\n%s", out)
+	}
+}
+
+func TestOperatorStackDeadlineIsSharedAcrossNamespacesAndRollouts(t *testing.T) {
+	out, code, calls := sourceRecovery(t, `
+function _register_operator_app() { :; }
+function kubectl() {
+    command kubectl "$@"
+    local result=$?
+    case "$*" in *"rollout status"*) SECONDS=$((SECONDS + 20));; esac
+    return "$result"
+}
+unset SECONDS
+SECONDS=0
+OPERATOR_STACK_TIMEOUT=75
+install_operator_stack
+`)
+	if code != 5 || !strings.Contains(out, "deadline reached") {
+		t.Fatalf("operator stack escaped its deadline: %d\n%s\n%s", code, out, calls)
+	}
+	if strings.Count(calls, "rollout status") != 4 || !strings.Contains(calls, "rollout status deployment/cnpg-controller-manager -n cnpg-system --timeout=15s") {
+		t.Fatalf("second namespace received a fresh budget:\n%s", calls)
+	}
+	if strings.Contains(calls, "rollout status deployment/barman-cloud") {
+		t.Fatalf("rollout started after the shared deadline:\n%s", calls)
+	}
+}
+
+func TestPartialOperatorRetriesSourceForMissingSibling(t *testing.T) {
+	out, code, calls := sourceRecovery(t, `
+function sleep() { SECONDS=$((SECONDS + $1)); }
+_wait_for_operator cert-manager cert-manager controller webhook
+`, "FAKE_CLEAR_ON_REFRESH=1", "FAKE_OPERATOR_AFTER_REFRESH=1", "FAKE_OPERATOR_EXISTING=controller")
+	if code != 0 || strings.Count(calls, "annotate application") != 1 || !strings.Contains(calls, "rollout status deployment/webhook") {
+		t.Fatalf("partial operator did not recover: %d\n%s\n%s", code, out, calls)
+	}
+}
+
+func TestUnresponsiveSourceStillStopsAtSharedDeadline(t *testing.T) {
+	out, code, calls := sourceRecovery(t, `
+function sleep() { SECONDS=$((SECONDS + $1)); }
+unset SECONDS
+SECONDS=0
+OPERATOR_STACK_TIMEOUT=630
+_wait_for_operator cert-manager cert-manager controller
+`, "FAKE_OPERATOR_ABSENT=1", "FAKE_APP_SYNC=", "FAKE_APP_CONDITIONS=")
+	if code != 5 || !strings.Contains(out, "timed out after 630s") || strings.Contains(calls, "rollout status") {
+		t.Fatalf("unresponsive source escaped its deadline: %d\n%s\n%s", code, out, calls)
+	}
+}

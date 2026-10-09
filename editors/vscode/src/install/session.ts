@@ -678,7 +678,7 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
         // Probing the hosts this install actually created. Against the default
         // hostnames it was checking a front door nobody built, and reporting a
         // broken installer for a cluster that was fine (memql#3590).
-        params = present({ hosts: frontDoor?.probeHosts.join(",") });
+        params = present({ hosts: frontDoor?.probeHosts.join(","), caroot: pinnedCaroot() });
         break;
       case "buildImages":
         // THE FROM-SOURCE LANE'S ONE EXTRA STEP (memql#4430), and it is the same
