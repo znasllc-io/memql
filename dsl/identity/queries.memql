@@ -2419,6 +2419,9 @@ query identity signInIdentitiesForUser {
 /// Detect any previous sign-in credential, including revoked credentials, before
 /// allowing an installer-named owner to register their FIRST passkey. Internal
 /// callers only; a revoked credential must never reopen first-run ownership.
+/// actor.userId cannot scope this pre-authentication check: no actor exists yet.
+/// The identity service supplies the user ID from the recorded installation owner,
+/// and must check revoked as well as active credentials before issuing a grant.
 @serverOnly
 query identity ownerCredentialHistory {
   args { userId string! }

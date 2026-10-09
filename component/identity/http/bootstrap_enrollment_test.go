@@ -80,6 +80,9 @@ func (e *bootstrapEngine) Execute(ctx context.Context, q string) (*memqlengine.E
 		e.organization = extractField(q, "name")
 		e.organizationOwner = extractField(q, "ownerUserId")
 	case strings.Contains(q, "ownerCredentialHistory("):
+		if !auth.OriginFromContext(ctx).IsInternal() {
+			return nil, errors.New("credential history must be internal")
+		}
 		for _, credential := range e.byCredentialId {
 			return e.nodes(credential)
 		}
