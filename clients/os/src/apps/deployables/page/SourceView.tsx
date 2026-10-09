@@ -197,15 +197,16 @@ export function SourceView({
   // pipeline's -- never a deploy.
   const review: Act | null = onReview === undefined ? null : { label: pendingStatus === "awaiting_confirm" ? "Review" : "Resume setup", tone: "primary", onAct: onReview };
 
-  // THE PIPELINE'S ACT, one at a time: Pipeline settings for a pipeline that
-  // runs, Connect pipeline for a source with none or one disconnected. Absent
+  // THE PIPELINE'S ACT, one at a time: Pipeline settings for every existing
+  // pipeline, including a disconnected one, and Connect pipeline for a source
+  // with none. Absent
   // until the feeds answer -- an act offered on a reading that has not landed
   // is the act this page would take back -- and for an archived source, which
   // opens no runs. A gate waiting on somebody is the more urgent act, so beside
   // Review this is text; alone, it is the bar's one button.
   const pipelineAct: Pick<Act, "label" | "onAct"> | null =
     !checked || !settled || !canConnect || pkg.status === "archived" ? null
-    : pipeline?.status === "active" ? (onPipelineSettings ? { label: "Pipeline settings", onAct: onPipelineSettings } : null)
+    : pipeline !== null ? (onPipelineSettings ? { label: "Pipeline settings", onAct: onPipelineSettings } : null)
     : onConnectPipeline ? { label: "Connect pipeline", onAct: onConnectPipeline } : null;
   const acts: Act[] = [
     ...(pipelineAct === null ? [] : [review === null ? { ...pipelineAct, tone: "primary" as const } : { ...pipelineAct, text: true }]),

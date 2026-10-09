@@ -640,6 +640,10 @@ const COPY: Record<string, RefusalCopy> = {
     title: "This pipeline is disconnected",
     next: "The run did not go ahead. Connect the pipeline again, and the next push runs it.",
   },
+  pipeline_manual_requires_disconnected: {
+    title: "Automatic checks are still connected",
+    next: "Disconnect automatic delivery, then retry the manual rehearsal.",
+  },
   pipeline_already_connected: {
     // One pipeline per repository. A second would write a second check run
     // with the same name on every commit, so connect refuses it and names the
@@ -913,6 +917,7 @@ const NOT_A_FAULT: ReadonlySet<string> = new Set([
   "pipeline_fleet_not_consented",
   "pipeline_fleet_disabled",
   "pipeline_disconnected",
+	"pipeline_manual_requires_disconnected",
   "pipeline_already_connected",
   "pipeline_nothing_to_rerun",
   "pipeline_step_cancelled",

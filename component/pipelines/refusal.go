@@ -69,10 +69,11 @@ const (
 	CodeForkRefused = "pipeline_fork_refused"
 
 	// The run.
-	CodeRunnerUnavailable = "pipeline_runner_unavailable"
-	CodeExecutorError     = "pipeline_executor_error"
-	CodeSecretMissing     = "pipeline_secret_missing"
-	CodeDisconnected      = "pipeline_disconnected"
+	CodeRunnerUnavailable          = "pipeline_runner_unavailable"
+	CodeExecutorError              = "pipeline_executor_error"
+	CodeSecretMissing              = "pipeline_secret_missing"
+	CodeDisconnected               = "pipeline_disconnected"
+	CodeManualRequiresDisconnected = "pipeline_manual_requires_disconnected"
 	// One pipeline per repository: a second source connecting a repository
 	// another source already runs would write a second, same-named check
 	// run on every commit.
@@ -158,22 +159,23 @@ const (
 )
 
 var codeClasses = map[string]Class{
-	CodeNotDeclared:       ClassRefusal,
-	CodeStageInvalid:      ClassRefusal,
-	CodeStepInvalid:       ClassRefusal,
-	CodeSelectInvalid:     ClassRefusal,
-	CodeSelectMissing:     ClassRefusal,
-	CodeEventUnknown:      ClassRefusal,
-	CodeBucketUnknown:     ClassRefusal,
-	CodeServiceUnknown:    ClassRefusal,
-	CodeNeedUnknown:       ClassRefusal,
-	CodeSecretInvalid:     ClassRefusal,
-	CodeSecretNotAllowed:  ClassRefusal,
-	CodeFleetNotConsented: ClassRefusal,
-	CodeForkRefused:       ClassRefusal,
-	CodeDisconnected:      ClassRefusal,
-	CodeAlreadyConnected:  ClassRefusal,
-	CodeNothingToRerun:    ClassRefusal,
+	CodeNotDeclared:                ClassRefusal,
+	CodeStageInvalid:               ClassRefusal,
+	CodeStepInvalid:                ClassRefusal,
+	CodeSelectInvalid:              ClassRefusal,
+	CodeSelectMissing:              ClassRefusal,
+	CodeEventUnknown:               ClassRefusal,
+	CodeBucketUnknown:              ClassRefusal,
+	CodeServiceUnknown:             ClassRefusal,
+	CodeNeedUnknown:                ClassRefusal,
+	CodeSecretInvalid:              ClassRefusal,
+	CodeSecretNotAllowed:           ClassRefusal,
+	CodeFleetNotConsented:          ClassRefusal,
+	CodeForkRefused:                ClassRefusal,
+	CodeDisconnected:               ClassRefusal,
+	CodeManualRequiresDisconnected: ClassRefusal,
+	CodeAlreadyConnected:           ClassRefusal,
+	CodeNothingToRerun:             ClassRefusal,
 
 	CodeRunnerUnavailable:   ClassFailure,
 	CodeExecutorError:       ClassFailure,

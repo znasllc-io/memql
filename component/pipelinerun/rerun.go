@@ -68,7 +68,7 @@ func (i *Integration) Rerun(ctx context.Context, runID string, failedOnly bool) 
 	if p == nil {
 		return Run{}, fmt.Errorf("pipelines: run %q names a pipeline that no longer exists", runID)
 	}
-	if !p.Active() {
+	if !p.Active() && original.Event != pipelines.EventManual {
 		return Run{}, pipelines.Refuse(pipelines.CodeDisconnected, "",
 			"This run's pipeline is disconnected, so it opens no runs. Reconnect it to run this commit again.")
 	}

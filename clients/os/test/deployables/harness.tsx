@@ -329,6 +329,9 @@ export interface FakeSeed {
   pipelinesConnectResult?: Row;
   pipelinesConnectError?: string;
   pipelinesDisconnectError?: string;
+  /** What `pipelinesRunLatest` answers; defaults to one queued manual run. */
+  pipelinesRunLatestResult?: Row;
+  pipelinesRunLatestError?: string;
   /** What `pipelinesRerun` answers; defaults to a new attempt "run-rerun". */
   pipelinesRerunResult?: Row;
   pipelinesRerunError?: string;
@@ -428,6 +431,10 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
         if (seed.pipelinesDisconnectError !== undefined) throw new Error(seed.pipelinesDisconnectError);
         const id = /pipelineId: "([^"]*)"/.exec(call)?.[1] ?? "";
         return builtinReply("pipelinesDisconnect", [{ pipelineId: id, status: "disconnected" } as unknown as Row]);
+      }
+      if (call.startsWith("builtin pipelinesRunLatest(")) {
+        if (seed.pipelinesRunLatestError !== undefined) throw new Error(seed.pipelinesRunLatestError);
+        return builtinReply("pipelinesRunLatest", [seed.pipelinesRunLatestResult ?? ({ runId: "run-manual", sha: "3f9c2ab0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6", branch: "main" } as unknown as Row)]);
       }
       if (call.startsWith("builtin pipelinesRerun(")) {
         if (seed.pipelinesRerunError !== undefined) throw new Error(seed.pipelinesRerunError);

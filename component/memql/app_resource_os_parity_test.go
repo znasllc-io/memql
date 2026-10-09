@@ -231,6 +231,7 @@ func TestTheDeployablesPartsAreDeclaredOnTheirConstructs(t *testing.T) {
 		"pipelinesConnect":    "app:deployables/connect",
 		"pipelinesDisconnect": "app:deployables/connect",
 		"pipelinesRerun":      "app:deployables/rerun",
+		"pipelinesRunLatest":  "app:deployables/rerun",
 		"pipelinesCancel":     "app:deployables/cancel",
 	}
 	// The reads a section opens, declared on the construct that serves it: the

@@ -2917,6 +2917,28 @@ QueryClient.prototype.pipelinesRerun = function (this: QueryClient, args: Pipeli
   return this.executeNamed("pipelinesRerun", buildPipelinesRerun(args), opts);
 };
 
+/** Start a full manual rehearsal of the current default-branch head for one of the caller's disconnected pipelines. Automatic delivery must be disconnected so this run cannot duplicate a webhook or poll. The source owner's GitHub grant reads the branch and the exact SHA is pinned in the run. The sealed workflow includes stages with no `on` list and stages explicitly marked `on: [manual]`; it does not treat manual as push or release, so future publication steps remain opted out. Repeated requests for the same head resolve to the existing attempt; re-run that attempt to start another. */
+export interface PipelinesRunLatestArgs {
+  /** The caller's v1:pipelines:pipeline. It must be disconnected. */
+  pipelineId: string;
+}
+
+export function buildPipelinesRunLatest(args: PipelinesRunLatestArgs): string {
+  const parts: string[] = [];
+  parts.push("pipelineId: " + renderMemQLValue(args.pipelineId));
+  return "builtin pipelinesRunLatest(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesRunLatest(args: PipelinesRunLatestArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesRunLatest = function (this: QueryClient, args: PipelinesRunLatestArgs = {} as PipelinesRunLatestArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesRunLatest", buildPipelinesRunLatest(args), opts);
+};
+
 /** Read pipeline configuration and each workbench's last runner isolation verdict. This read never starts a build or an isolation probe. Restricted to cluster operators. */
 export interface PipelinesStatusArgs {
 }

@@ -381,7 +381,7 @@ func (dr *runDriver) steer(ctx context.Context) (verdict, bool) {
 		return refusedWith(pipelines.Refuse(pipelines.CodeDisconnected, "",
 			"This run's pipeline no longer exists, so nothing can run it. Connect the source's pipeline again and re-run.")), true
 	}
-	if !p.Active() && dr.run.Status == StatusQueued {
+	if !p.Active() && dr.run.Status == StatusQueued && dr.run.Event != pipelines.EventManual {
 		// A run already started runs to its end; one that has not, does not.
 		return refusedWith(pipelines.Refuse(pipelines.CodeDisconnected, "",
 			"This run's pipeline was disconnected before the run started, so it was not run. Reconnect the pipeline to run this commit again.")), true

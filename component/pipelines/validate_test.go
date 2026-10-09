@@ -109,7 +109,7 @@ func TestValidate(t *testing.T) {
 		}), "", ""},
 		{"on names events and modes", fromValidateBase(func(s *Spec) {
 			s.Schedule = "daily"
-			s.Stages[1].On = []string{"affected", "full", "pull_request", "merge_group", "push", "release", "schedule"}
+			s.Stages[1].On = []string{"affected", "full", "pull_request", "merge_group", "push", "release", "schedule", "manual"}
 		}), "", ""},
 		{"daily schedule with an explicit scan stage", fromValidateBase(func(s *Spec) {
 			s.Schedule = "daily"

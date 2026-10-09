@@ -81,6 +81,12 @@ export async function disconnectPipeline(query: QueryClient, pipelineId: string)
   await query.pipelinesDisconnect({ pipelineId });
 }
 
+export async function runLatestPipeline(query: QueryClient, pipelineId: string): Promise<{ runId: string; sha: string; branch: string }> {
+  const result = await query.pipelinesRunLatest({ pipelineId });
+  const row = firstRow(result);
+  return { runId: row ? rowString(row, "runId") : "", sha: rowString(row ?? {}, "sha"), branch: rowString(row ?? {}, "branch") };
+}
+
 // ---------------------------------------------------------------------------
 // The preview: what connecting a source would act on (pipelinesPreview)
 // ---------------------------------------------------------------------------

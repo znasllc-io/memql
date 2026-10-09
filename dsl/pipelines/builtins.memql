@@ -26,7 +26,8 @@
 // is the door, exactly as for the Deployables actions beside them in
 // dsl/platform/builtins.memql, and each act has its own (task memql#5498):
 // previewing, connecting and disconnecting is `app:deployables/connect`,
-// re-running is `app:deployables/rerun`, cancelling is
+// re-running and starting a disconnected manual rehearsal is
+// `app:deployables/rerun`, cancelling is
 // `app:deployables/cancel`. The installations read is the Settings Pipelines
 // item's (`read app:settings/pipelines`): it asks GitHub about the cluster's
 // own app, which is an owner's question, not a source's.
@@ -114,6 +115,15 @@ builtin pipelinesDisconnect {
 builtin pipelinesRerun {
   runId       string!  @description("The v1:pipelines:run to re-run. Must be the caller's own.")
   failedOnly  bool     @description("Run again only what did not pass: the original's passed steps are carried over. Absent or false re-runs every step.")
+}
+
+@sdk
+@executor("integration.pipelines.runLatest")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/rerun")
+@description("Start a full manual rehearsal of the current default-branch head for one of the caller's disconnected pipelines. Automatic delivery must be disconnected so this run cannot duplicate a webhook or poll. The source owner's GitHub grant reads the branch and the exact SHA is pinned in the run. The sealed workflow includes stages with no `on` list and stages explicitly marked `on: [manual]`; it does not treat manual as push or release, so future publication steps remain opted out. Repeated requests for the same head resolve to the existing attempt; re-run that attempt to start another.")
+builtin pipelinesRunLatest {
+  pipelineId  string!  @description("The caller's v1:pipelines:pipeline. It must be disconnected.")
 }
 
 @sdk

@@ -176,7 +176,7 @@ describe("a source with a pipeline that runs", () => {
 });
 
 describe("a source whose pipeline is disconnected", () => {
-  it("says so, keeps its runs as history, and offers Connect pipeline", async () => {
+  it("says so, keeps its runs as history, and opens Pipeline settings", async () => {
     mount(fakeConnection(seed({ pipelines: [pipelineRow({ status: "disconnected" })] })));
     const page = await openSource();
     await waitFor(() => expect(fact(page, "Pipeline")).toBe("Disconnected"));
@@ -184,7 +184,7 @@ describe("a source whose pipeline is disconnected", () => {
     expect(within(part).getByText("Disconnected. Its runs stay as history.")).toBeTruthy();
     expect([...part.querySelectorAll(".os-row-name")].map((n) => n.textContent)).toEqual(["main", "cart"]);
     expect(bar().detail).not.toContain("checks on");
-    expect(bar().acts).toEqual(["Connect pipeline"]);
+    expect(bar().acts).toEqual(["Pipeline settings"]);
   });
 });
 

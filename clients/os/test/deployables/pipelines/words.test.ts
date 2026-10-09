@@ -49,6 +49,8 @@ describe("the pipelines vocabulary", () => {
     expect(triggerWords(run({ event: "merge_group" }))).toBe("Merge queue");
     expect(triggerWords(run({ event: "push" }))).toBe("Push");
     expect(triggerWords(run({ event: "release", version: "v1.2.0" }))).toBe("Release v1.2.0");
+    expect(triggerWords(run({ event: "schedule" }))).toBe("Scheduled security scan");
+    expect(triggerWords(run({ event: "manual", trigger: "manual" }))).toBe("Manual run");
     expect(attemptWords(run())).toBe("");
     expect(attemptWords(run({ attempt: 2 }))).toBe("Attempt 2");
     expect(attemptWords(run({ attempt: 3, rerunFailedOnly: true }))).toBe("Attempt 3, failed steps only");

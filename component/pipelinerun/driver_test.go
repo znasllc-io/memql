@@ -784,6 +784,24 @@ func TestADisconnectedPipelinesQueuedRunConcludesDisconnected(t *testing.T) {
 	}
 }
 
+func TestManualRunCanDriveAfterAutomaticDeliveryIsDisconnected(t *testing.T) {
+	dh := newDriveHarness(t, driveManifest)
+	opening := Opening{Event: pipelines.EventManual, Mode: pipelines.ModeFull, SHA: shaA, Branch: "main", Trigger: TriggerManual}
+	run := dh.openRun(t, opening)
+	p, _ := dh.store.pipeline(dh.p.ID)
+	p.Status = PipelineDisconnected
+	dh.store.addPipeline(p)
+	deliver(t, dh.integ, run)
+
+	got, _ := dh.store.run(run.ID)
+	if got.Status != StatusCompleted || got.Conclusion != ConclusionSuccess || got.RefusalCode != "" {
+		t.Fatalf("manual rehearsal did not run on the disconnected pipeline: %+v", got)
+	}
+	if len(dh.exec.sent()) != 3 {
+		t.Fatalf("manual full run executed %d steps, want 3", len(dh.exec.sent()))
+	}
+}
+
 func TestATokenTheGrantRefusesConcludesWithTheGrantsCode(t *testing.T) {
 	dh := newDriveHarness(t, driveManifest)
 	run := dh.openRun(t, prOpening())
