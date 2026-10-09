@@ -151,7 +151,7 @@ test("a request to any other path gets a 404 and does NOT resolve the flow", asy
   });
 });
 
-test("only the FIRST callback is served -- the listener is one-shot", async () => {
+test("only the first callback is delivered, but the browser can reload its result", async () => {
   await withListener({}, async (listener) => {
     const waiting = listener.waitForCallback();
     const first = get(`${listener.redirectUri}?code=FIRST&state=S`);
@@ -159,8 +159,79 @@ test("only the FIRST callback is served -- the listener is one-shot", async () =
     listener.finish?.("success");
     await first;
 
-    // The port is released, so a replay of the same URL has nothing to hit.
-    await assert.rejects(() => get(`${listener.redirectUri}?code=SECOND&state=S`));
+    const reload = await get(`${listener.redirectUri}?code=FIRST&state=S`);
+    assert.equal(reload.status, 200);
+    assert.match(reload.body, /You're signed in/);
+    assert.equal((await get(`${listener.redirectUri}?code=SECOND&state=S`)).status, 404);
+    assert.equal((await get(`${listener.redirectUri}?code=FIRST&state=OTHER`)).status, 404);
+    assert.equal((await listener.waitForCallback()).code, "FIRST");
+  });
+});
+
+test("browser probes do not consume the callback before a page navigation", async () => {
+  await withListener({}, async (listener) => {
+    const url = `${listener.redirectUri}?code=AUTHCODE&state=S`;
+    const waiting = listener.waitForCallback();
+    for (const method of ["HEAD", "OPTIONS", "POST"]) {
+      const reply = await fetch(url, { method, signal: AbortSignal.timeout(1000) });
+      assert.equal(reply.status, 405);
+      assert.equal(reply.headers.get("allow"), "GET");
+      await reply.text();
+    }
+    for (const header of ["Purpose", "Sec-Purpose"]) {
+      const reply = await fetch(url, { headers: { [header]: "prefetch" } });
+      assert.equal(reply.status, 204);
+      await reply.text();
+    }
+    assert.ok(await pending(waiting));
+    const page = get(url);
+    assert.equal((await waiting).code, "AUTHCODE");
+    listener.finish?.("success");
+    assert.match((await page).body, /You're signed in/);
+  });
+});
+
+test("a browser retry during token exchange receives the same final result", async () => {
+  await withListener({}, async (listener) => {
+    const url = `${listener.redirectUri}?code=AUTHCODE&state=S`;
+    const first = get(url);
+    await listener.waitForCallback();
+    const retry = get(url);
+    const pages = Promise.all([first, retry]);
+    assert.ok(await pending(pages));
+    listener.finish?.("failure");
+    for (const page of await pages) {
+      assert.equal(page.status, 200);
+      assert.match(page.body, /Sign-in didn't finish/);
+    }
+    assert.match((await get(url)).body, /Sign-in didn't finish/);
+  });
+});
+
+test("a disconnected navigation can retry without losing the completion page", async () => {
+  await withListener({}, async (listener) => {
+    const url = `${listener.redirectUri}?code=AUTHCODE&state=S`;
+    const controller = new AbortController();
+    const first = fetch(url, { signal: controller.signal });
+    const disconnected = assert.rejects(first);
+    await listener.waitForCallback();
+    controller.abort();
+    await disconnected;
+    listener.finish?.("success");
+    assert.match((await get(url)).body, /You're signed in/);
+  });
+});
+
+test("the result page expires and releases its port without an explicit close", async () => {
+  await withListener({ completionGraceMs: 80 }, async (listener) => {
+    const url = `${listener.redirectUri}?code=AUTHCODE&state=S`;
+    const first = get(url);
+    await listener.waitForCallback();
+    listener.finish?.("success");
+    await first;
+    assert.equal((await get(url)).status, 200);
+    await delay(120);
+    await assert.rejects(() => get(url));
   });
 });
 
