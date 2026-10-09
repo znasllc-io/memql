@@ -37,6 +37,13 @@ type revisionAI struct {
 	retainedEvidenceCalls atomic.Int32
 	appCalls              atomic.Int32
 	needsResearch         bool
+	parallelResearch      bool
+	assessmentReply       string
+	assessmentError       error
+	assessmentCalls       atomic.Int32
+	headlessScope         string
+	appStarted            chan struct{}
+	headlessStarted       chan struct{}
 	expectedReference     string
 	appError              error
 	answer                revisionAnswer
@@ -57,6 +64,18 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				return nil, fmt.Errorf("DSL omitted evidence stage context")
 			}
 			a.researchCalls.Add(1)
+			if !a.parallelResearch && a.appCalls.Load() == 0 {
+				return nil, fmt.Errorf("local research started before the app attempt")
+			}
+			a.headlessScope = asString(data["gaps"])
+			if a.headlessStarted != nil {
+				close(a.headlessStarted)
+				select {
+				case <-a.appStarted:
+				case <-time.After(3 * time.Second):
+					return nil, fmt.Errorf("independent researchers did not overlap")
+				}
+			}
 			var priorEvidence []string
 			raw, _ := json.Marshal(data["priorEvidence"])
 			if err := json.Unmarshal(raw, &priorEvidence); err != nil {
@@ -77,19 +96,47 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				if a.needsResearch {
 					intent = "research"
 				}
+				if a.parallelResearch {
+					intent = "parallel"
+				}
 				return reviewResult(map[string]any{"reply": intent})
 			}
 			if args["templateId"] == "libraryRevisionAppResearch" {
 				a.appCalls.Add(1)
+				if a.appStarted != nil {
+					close(a.appStarted)
+					select {
+					case <-a.headlessStarted:
+					case <-time.After(3 * time.Second):
+						return nil, fmt.Errorf("independent researchers did not overlap")
+					}
+				}
 				if a.appError != nil {
 					return nil, a.appError
 				}
 				return reviewResult(map[string]any{"reply": "Independent app evidence with a second source."})
 			}
+			if args["templateId"] == "libraryRevisionEvidence" {
+				a.assessmentCalls.Add(1)
+				if a.appCalls.Load() == 0 || !strings.Contains(asString(data["appEvidence"]), "Independent app evidence") {
+					return nil, fmt.Errorf("assessment ran without the app's returned evidence")
+				}
+				if a.assessmentError != nil {
+					return nil, a.assessmentError
+				}
+				reply := a.assessmentReply
+				if reply == "" {
+					reply = "Verify the original claim against the cited primary source."
+				}
+				return reviewResult(map[string]any{"reply": reply})
+			}
 			passages, valid := data["passages"].(string)
 			expectedEvidence := "Editorial change:"
 			if a.needsResearch {
 				expectedEvidence = "Evidence report for the selected feedback."
+				if a.assessmentReply == "sufficient" && !a.parallelResearch {
+					expectedEvidence = "Independent app evidence"
+				}
 			}
 			if (args["templateId"] != "libraryRevisionPassages" && args["templateId"] != "libraryRevisionItem") || !strings.Contains(asString(data["evidence"]), expectedEvidence) || !valid || !json.Valid([]byte(passages)) || data["document"] == nil {
 				return nil, fmt.Errorf("DSL lost the review prompt or captured feedback")
@@ -258,6 +305,7 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 	}{
 		{"DocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas", testDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas},
 		{"DocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure", testDocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure},
+		{"DocumentResearchRouting", testDocumentResearchRouting},
 		{"DocumentRetryReusesCompletedAppEvidence", testDocumentRetryReusesCompletedAppEvidence},
 		{"DocumentRevisionRecoveryOrdersByRequestAndRechecksAccess", testDocumentRevisionRecoveryOrdersByRequestAndRechecksAccess},
 		{"DocumentRevisionRefusesStaleApprovalAndAllowsDecline", testDocumentRevisionRefusesStaleApprovalAndAllowsDecline},
@@ -274,7 +322,13 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 			f.ai.calls.Store(0)
 			f.ai.appCalls.Store(0)
 			f.ai.researchCalls.Store(0)
+			f.ai.retainedEvidenceCalls.Store(0)
 			f.ai.needsResearch = false
+			f.ai.parallelResearch = false
+			f.ai.assessmentReply, f.ai.headlessScope = "", ""
+			f.ai.assessmentError = nil
+			f.ai.assessmentCalls.Store(0)
+			f.ai.appStarted, f.ai.headlessStarted = nil, nil
 			f.ai.appError = nil
 			f.ai.answer = revisionAnswer{}
 			tc.run(t, &f)
@@ -393,6 +447,7 @@ func testDocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure(t *test
 			f.ai.calls.Store(0)
 			f.ai.appCalls.Store(0)
 			f.ai.researchCalls.Store(0)
+			f.ai.retainedEvidenceCalls.Store(0)
 			f.ai.needsResearch, f.ai.appError = true, appErr
 			artifact, doc := f.document("# Research\n\nOriginal claim.\n")
 			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Research and verify this claim.")
@@ -673,6 +728,56 @@ func testDocumentRevisionStatusCarriesRetryAcrossReplicas(t *testing.T, f *revis
 	}
 }
 
+func testDocumentResearchRouting(t *testing.T, f *revisionDB) {
+	for _, tc := range []struct {
+		name, assessment string
+		assessmentError  error
+		parallel         bool
+		localCalls       int32
+	}{
+		{name: "sufficient app evidence avoids local research", assessment: "sufficient", localCalls: 0},
+		{name: "missing source support gets targeted research", assessment: "Read the source abstract to verify the arsenic capacity.", localCalls: 1},
+		{name: "ambiguous assessment falls back", assessment: "probably sufficient", localCalls: 1},
+		{name: "blank assessment falls back", assessment: "  ", localCalls: 1},
+		{name: "unavailable assessment falls back", assessmentError: context.DeadlineExceeded, localCalls: 1},
+		{name: "independent corroboration overlaps both researchers", assessment: "sufficient", parallel: true, localCalls: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f.ai.calls.Store(0)
+			f.ai.appCalls.Store(0)
+			f.ai.researchCalls.Store(0)
+			f.ai.assessmentCalls.Store(0)
+			f.ai.needsResearch, f.ai.parallelResearch = true, tc.parallel
+			f.ai.assessmentReply, f.ai.assessmentError = tc.assessment, tc.assessmentError
+			f.ai.appStarted, f.ai.headlessStarted = nil, nil
+			if tc.parallel {
+				f.ai.appStarted, f.ai.headlessStarted = make(chan struct{}), make(chan struct{})
+			}
+			artifact, doc := f.document("# Research\n\nOriginal claim.\n")
+			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Research and verify this claim.")
+			f.ai.answer = revisionAnswer{Summary: "Verified claim", Edits: []revisionReplacement{{Before: "Original claim.", After: "Verified claim.", Reason: "Evidence", CommentIDs: []string{note}}}}
+			var wait *workstate.HumanWait
+			request := asString(args["requestId"])
+			if err := f.execute(f.engine, request, false); !errors.As(err, &wait) {
+				t.Fatalf("research did not reach review: %v", err)
+			}
+			if f.ai.appCalls.Load() != 1 || f.ai.assessmentCalls.Load() != 1 || f.ai.researchCalls.Load() != tc.localCalls {
+				t.Fatalf("wrong route: app=%d assessment=%d local=%d", f.ai.appCalls.Load(), f.ai.assessmentCalls.Load(), f.ai.researchCalls.Load())
+			}
+			if tc.localCalls > 0 && !tc.parallel && tc.assessmentError == nil && strings.TrimSpace(tc.assessment) != "" && f.ai.headlessScope != tc.assessment {
+				t.Fatalf("gap plan was lost: %q", f.ai.headlessScope)
+			}
+			f.query(f.other, f.ctx, "query", "decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": f.accepted(request)})
+			if err := f.execute(f.other, request, true); err != nil {
+				t.Fatalf("cross-replica approval failed: %v", err)
+			}
+			if f.ai.appCalls.Load() != 1 || f.ai.assessmentCalls.Load() != 1 || f.ai.researchCalls.Load() != tc.localCalls {
+				t.Fatal("approval repeated research")
+			}
+		})
+	}
+}
+
 func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 	f.ai.needsResearch = true
 	artifact, doc := f.document("# Research\n\nOriginal claim.\n")
@@ -715,7 +820,7 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 	if f.ai.appCalls.Load() != 1 || f.ai.researchCalls.Load() != 3 {
 		t.Fatalf("retry repeated subscription research or skipped fresh headless research: app=%d headless=%d", f.ai.appCalls.Load(), f.ai.researchCalls.Load())
 	}
-	if f.ai.retainedEvidenceCalls.Load() != 2 {
+	if f.ai.retainedEvidenceCalls.Load() != 3 {
 		t.Fatal("new attempt did not give its researcher the existing source leads")
 	}
 	// An interrupted retry has no app/report receipt of its own. A later
@@ -729,7 +834,7 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 	if err = f.execute(f.other, asString(args["requestId"]), false); !errors.As(err, &wait) {
 		t.Fatal(err)
 	}
-	if f.ai.appCalls.Load() != 1 || f.ai.retainedEvidenceCalls.Load() != 3 {
+	if f.ai.appCalls.Load() != 1 || f.ai.retainedEvidenceCalls.Load() != 4 {
 		t.Fatal("intervening attempt hid the completed app evidence")
 	}
 	// Changed direction is new work, even against the same unchanged file.

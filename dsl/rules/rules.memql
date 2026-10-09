@@ -178,7 +178,7 @@ rule policyCompilerLocalOnly { }
 @locked
 rule documentResearchHarness { }
 
-/// A separate concurrent branch delegates independent research to an app.
+/// App-first research, with independent parallel work only when the DSL selects it.
 @when(prompt="libraryRevisionAppResearch")
 @policy("researchApps")
 @precedence(151)
@@ -192,3 +192,11 @@ rule documentAppResearch { }
 @onUnavailable("park")
 @locked
 rule documentResearchIntent { }
+
+/// Evidence coverage is a bounded local assessment, never another paid app call.
+@when(prompt="libraryRevisionEvidence")
+@policy("localOnly")
+@precedence(153)
+@onUnavailable("park")
+@locked
+rule documentResearchEvidence { }

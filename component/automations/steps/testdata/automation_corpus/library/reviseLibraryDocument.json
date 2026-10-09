@@ -43,9 +43,30 @@
           },
           {
             "args": {
+              "stepKey": "evidence.app/report"
+            },
+            "kind": "query",
+            "name": "workCompletedStepsForOwnerRuns"
+          },
+          {
+            "args": {
               "data": {
+                "instruction": null
+              },
+              "templateId": "libraryRevisionAppResearch"
+            },
+            "kind": "builtin",
+            "name": "ai"
+          },
+          {
+            "args": {
+              "data": {
+                "gaps": "App research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.",
                 "instruction": null,
-                "priorEvidence": []
+                "priorEvidence": [
+                  "",
+                  ""
+                ]
               },
               "templateId": "libraryRevisionResearch"
             },
@@ -55,7 +76,7 @@
           {
             "args": {
               "data": {
-                "evidence": "Independent headless report:\n\nIndependent app report:\nNo independent app research requested by the local intent assessment."
+                "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n"
               },
               "progress": true,
               "templateId": "libraryRevisionPassages"
@@ -121,9 +142,30 @@
           },
           {
             "args": {
+              "stepKey": "evidence.app/report"
+            },
+            "kind": "query",
+            "name": "workCompletedStepsForOwnerRuns"
+          },
+          {
+            "args": {
               "data": {
+                "instruction": null
+              },
+              "templateId": "libraryRevisionAppResearch"
+            },
+            "kind": "builtin",
+            "name": "ai"
+          },
+          {
+            "args": {
+              "data": {
+                "gaps": "App research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.",
                 "instruction": null,
-                "priorEvidence": []
+                "priorEvidence": [
+                  "",
+                  ""
+                ]
               },
               "templateId": "libraryRevisionResearch"
             },
@@ -133,7 +175,7 @@
           {
             "args": {
               "data": {
-                "evidence": "Independent headless report:\n\nIndependent app report:\nNo independent app research requested by the local intent assessment."
+                "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n"
               },
               "progress": true,
               "templateId": "libraryRevisionPassages"

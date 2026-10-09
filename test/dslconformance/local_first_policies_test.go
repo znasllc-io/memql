@@ -57,18 +57,19 @@ var shippedPolicies = []string{
 // The pair is spelled out rather than derived so that changing one without the
 // other is a failure rather than a silent re-route.
 var shippedRules = map[string]string{
-	"documentResearchHarness": "localOnly",
-	"documentAppResearch":     "researchApps",
-	"documentResearchIntent":  "localOnly",
-	"default":                 "localFirst",
-	"fastLane":                "fastLocalFirst",
-	"backgroundLane":          "localFirst",
-	"backgroundEscalation":    "localFirst",
-	"operatorReasoning":       "localFirst",
-	"reasoningParks":          "federationStrongest",
-	"embeddingsBound":         "embeddingsBinding",
-	"compilerLocalOnly":       "localOnly",
-	"policyCompilerLocalOnly": "localOnly",
+	"documentResearchHarness":  "localOnly",
+	"documentAppResearch":      "researchApps",
+	"documentResearchEvidence": "localOnly",
+	"documentResearchIntent":   "localOnly",
+	"default":                  "localFirst",
+	"fastLane":                 "fastLocalFirst",
+	"backgroundLane":           "localFirst",
+	"backgroundEscalation":     "localFirst",
+	"operatorReasoning":        "localFirst",
+	"reasoningParks":           "federationStrongest",
+	"embeddingsBound":          "embeddingsBinding",
+	"compilerLocalOnly":        "localOnly",
+	"policyCompilerLocalOnly":  "localOnly",
 }
 
 // retiredPolicies were deleted by memql#5127. A policy nothing can name is a
