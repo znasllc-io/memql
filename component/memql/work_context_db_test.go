@@ -233,3 +233,34 @@ func TestWorkContextVerboseCheckpointContinuesAndRetainsExactSource(t *testing.T
 	require.NoError(t, err, "another replica reuses durable memory without another model call")
 	require.Equal(t, compacted, again)
 }
+
+func TestWorkContextConsolidatesMemoryWithLargeParallelResults(t *testing.T) {
+	e, _, _ := readMergeTestEngine(t)
+	ctx := contextTestRun(t, e)
+	model := &checkpointModel{reply: `{"facts":["Both source searches completed"],"entities":[],"decisions":["Follow the retrieved papers rather than repeat discovery"],"constraints":[],"unfinished":["Verify the primary evidence"]}`}
+	contextTestModel(e, model)
+	messages := []common.ChatMessage{
+		{Role: "system", Content: strings.Repeat("authority ", 2000)},
+		{Role: "user", Content: strings.Repeat("request ", 500)},
+		{Role: "user", Content: "[Memory checkpoint old]\nEarlier searches completed; read their primary sources."},
+		{Role: "assistant", ToolCalls: []common.ToolCall{{ID: "one", Name: "fetch"}, {ID: "two", Name: "fetch"}}},
+		{Role: "tool", ToolCallId: "one", Content: "First exact receipt " + strings.Repeat("evidence ", 1200)},
+		{Role: "tool", ToolCallId: "two", Content: "Second exact receipt " + strings.Repeat("evidence ", 1200)},
+		{Role: "assistant", ToolCalls: []common.ToolCall{{ID: "latest", Name: "read"}}},
+		{Role: "tool", ToolCallId: "latest", Content: "Latest exchange"},
+	}
+	tools := []common.ToolDefinition{{Name: "fetch", Description: strings.Repeat("tool contract ", 500)}}
+	compacted, err := e.CompactWorkContext(ctx, messages, tools, 16000)
+	require.NoError(t, err)
+	require.Positive(t, model.calls, "a large parallel group must still receive a semantic checkpoint")
+	require.LessOrEqual(t, WorkContextSize(compacted, tools), 16000)
+	require.Contains(t, fmt.Sprint(compacted), "Both source searches completed")
+	require.NotContains(t, fmt.Sprint(compacted), "Complete historical exchange archived")
+	require.Equal(t, messages[len(messages)-2:], compacted[len(compacted)-2:])
+	source, _ := json.Marshal([]common.ChatMessage{messages[5]})
+	fingerprint := workContextHash("tool-v2", source)
+	result, err := e.recallWorkHistoryBuiltin(ctx, map[string]any{"checkpoint": fingerprint, "messageIndex": 0, "maxChars": 16000}, 0)
+	require.NoError(t, err)
+	require.Contains(t, string(result[0].Payload), "Second exact receipt")
+	require.NotContains(t, messages[5].Content, "[Archived")
+}

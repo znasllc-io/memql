@@ -35,7 +35,8 @@
           {
             "args": {
               "data": {
-                "instruction": null
+                "instruction": null,
+                "priorEvidence": []
               },
               "templateId": "libraryRevisionResearch"
             },
@@ -103,7 +104,8 @@
           {
             "args": {
               "data": {
-                "instruction": null
+                "instruction": null,
+                "priorEvidence": []
               },
               "templateId": "libraryRevisionResearch"
             },

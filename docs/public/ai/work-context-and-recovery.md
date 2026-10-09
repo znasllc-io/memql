@@ -113,6 +113,9 @@ Owned work uses the following layers:
    facts, exact references, decisions, constraints, receipts, uncertainty,
    failed approaches and unfinished work. Older checkpoints can be
    consolidated with fresh evidence; their sources remain retrievable.
+   When parallel tool results together exceed the summarizer's input window,
+   the engine archives the largest results first so the previous semantic
+   checkpoint can still be consolidated with the new evidence.
    If the model returns an oversized checkpoint, the engine retains whole
    entries across these categories within its byte budget and labels the
    memory incomplete. It never truncates a claim or source URL to make it

@@ -258,20 +258,27 @@ automation reviseLibraryDocument {
  })
  evidence := parallel {
   branch headless {
+   if captured.previousRunId != nil {
+    priorEvidence := query workStepForOwnerRun(runId: captured.previousRunId, stepKey: "evidence.app/report")
+   } else {
+    priorEvidence := []
+   }
    report := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
-    document: captured.content, passages: captured.passagesJSON,
+    priorEvidence: priorEvidence, document: captured.content, passages: captured.passagesJSON,
     instruction: captured.amendment.instruction ?? captured.instruction,
     previous: captured.amendment.edits
    })
    return report.reply
   }
   branch app {
-   // Retrying a failed sibling must not spend the app quota again. The
-   // request capture is immutable; only a completed owned receipt is reusable.
-   current := query workStepForOwnerRun(runId: captured.runId, stepKey: "evidence.app/report")
-   for retained in current {
-    if retained.status == "done" && retained.result.value.reply != nil {
-     return retained.result.value.reply
+   if lower(trim(intent.reply)) == "research" {
+    // Retrying a failed sibling must not spend the app quota again. The
+    // request capture is immutable; only a completed owned receipt is reusable.
+    current := query workStepForOwnerRun(runId: captured.runId, stepKey: "evidence.app/report")
+    for retained in current {
+     if retained.status == "done" && retained.result.value.reply != nil {
+      return retained.result.value.reply
+     }
     }
    }
    if captured.previousRunId != nil {

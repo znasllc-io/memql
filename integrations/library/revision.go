@@ -231,7 +231,7 @@ func (i *Integration) handleRequestDocumentRevision(ctx context.Context, args ma
 			selected = append(selected, map[string]any{"id": commentID, "authorUserId": memql.BareShortId(stringField(row, "authorUserId")), "body": stringField(row, "body"), "anchor": anchor})
 		}
 		proposal = map[string]any{"reviewType": documentReviewType, "requestId": requestID, "artifactId": doc.artifact, "sourceId": memql.BareShortId(doc.source), "documentKind": doc.kind, "revision": doc.revision, "version": doc.version, "name": name, "format": "markdown", "content": content, "blobURL": stringField(doc.backing, "blobUrl"), "commentIds": comments, "comments": selected, "instruction": instruction}
-		// Bind a retry to the same owner's immediately preceding failed request.
+		// Bind a retry to the same owner's immediately preceding failed or stopped request.
 		// DSL chooses which completed evidence receipts can be reused; a changed
 		// source or feedback never inherits this link.
 		prior, err := i.revisionRow(ctx, "workDocumentRevisionRequest", map[string]any{"artifactId": doc.artifact})
@@ -243,7 +243,7 @@ func (i *Integration) handleRequestDocumentRevision(ctx context.Context, args ma
 			if err != nil {
 				return nil, err
 			}
-			if previousRun["status"] == "failed" || previousRun["status"] == "cancelled" {
+			if previousRun["status"] == "failed" || previousRun["status"] == "cancelled" || previousRun["cancelRequested"] == true {
 				matches := true
 				for _, key := range []string{"artifactId", "sourceId", "revision", "content", "comments", "instruction", "amendment"} {
 					if workstate.ArtifactHash(map[string]any{key: proposal[key]}) != workstate.ArtifactHash(map[string]any{key: previousProposal[key]}) {

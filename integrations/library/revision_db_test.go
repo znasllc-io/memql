@@ -32,12 +32,13 @@ import (
 // Only the model boundary is replaced. The installed DSL, journal, authorization,
 // two independent engines, approvals and version writes run against PostgreSQL.
 type revisionAI struct {
-	calls         atomic.Int32
-	researchCalls atomic.Int32
-	appCalls      atomic.Int32
-	needsResearch bool
-	appError      error
-	answer        revisionAnswer
+	calls                 atomic.Int32
+	researchCalls         atomic.Int32
+	retainedEvidenceCalls atomic.Int32
+	appCalls              atomic.Int32
+	needsResearch         bool
+	appError              error
+	answer                revisionAnswer
 }
 
 func (*revisionAI) IntegrationName() string { return "agents" }
@@ -52,6 +53,9 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				return nil, fmt.Errorf("DSL omitted evidence stage context")
 			}
 			a.researchCalls.Add(1)
+			if strings.Contains(fmt.Sprint(data["priorEvidence"]), "Independent app evidence") {
+				a.retainedEvidenceCalls.Add(1)
+			}
 			return reviewResult(map[string]any{"reply": "Evidence report for the selected feedback."})
 		}},
 		{Name: "invokePrompt", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -678,7 +682,7 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 	if f.ai.appCalls.Load() != 1 || f.ai.researchCalls.Load() != 2 {
 		t.Fatalf("same-run retry repeated app research: app=%d headless=%d", f.ai.appCalls.Load(), f.ai.researchCalls.Load())
 	}
-	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{"runId": ids.RunID, "status": "failed", "errorMessage": "automation definition changed since the run started"})
+	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{"runId": ids.RunID, "status": "waiting", "cancelRequested": true, "errorMessage": "cancelled: the person asked this work to stop"})
 	args["requestId"] = "retry-" + fmt.Sprint(time.Now().UnixNano())
 	if _, err = f.second.handleRequestDocumentRevision(f.ctx, args, 0); err != nil {
 		t.Fatal(err)
@@ -693,6 +697,9 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 	}
 	if f.ai.appCalls.Load() != 1 || f.ai.researchCalls.Load() != 3 {
 		t.Fatalf("retry repeated subscription research or skipped fresh headless research: app=%d headless=%d", f.ai.appCalls.Load(), f.ai.researchCalls.Load())
+	}
+	if f.ai.retainedEvidenceCalls.Load() != 1 {
+		t.Fatal("new attempt did not give its researcher the existing source leads")
 	}
 	// Changed direction is new work, even against the same unchanged file.
 	nextIDs, _, _, _, _ := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), next)

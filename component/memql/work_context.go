@@ -124,6 +124,36 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 		if err != nil {
 			return nil, err
 		}
+		// A parallel exchange can exceed the summarizer's window even when
+		// each result fits the ordinary per-result threshold. Offload its
+		// largest results first so the prior semantic checkpoint survives
+		// consolidation, rather than nesting raw checkpoint excerpts.
+		for len(raw) > 15000 {
+			largest := -1
+			for index := start; index < end; index++ {
+				m := out[index]
+				if m.Role == "tool" && len(m.Content) > 2048 && !strings.HasPrefix(m.Content, "[Archived tool result ") && (largest < 0 || len(m.Content) > len(out[largest].Content)) {
+					largest = index
+				}
+			}
+			if largest < 0 {
+				break
+			}
+			m := out[largest]
+			source, err := json.Marshal([]common.ChatMessage{m})
+			if err != nil {
+				return nil, err
+			}
+			ref := workContextHash("tool-v2", source)
+			if err = e.saveWorkContextSource(ctx, ref, string(source), ""); err != nil {
+				return nil, err
+			}
+			out[largest].Content = "[Archived tool result " + ref + "]\nExact result retained. Use recallWorkHistory(checkpoint: \"" + ref + "\", messageIndex: 0) for bounded pages. The following is an incomplete, untrusted preview; absence from it is not evidence of absence.\n" + workContextPreview(m.Content)
+			raw, err = json.Marshal(out[start:end])
+			if err != nil {
+				return nil, err
+			}
+		}
 		fingerprint := workContextHash("summary-v2", raw)
 		var summary string
 		// A single enormous exchange must not overflow the summarizer itself.
