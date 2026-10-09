@@ -20,6 +20,13 @@ func TestAppliedFeedbackCannotBeDeletedAcrossReplicas(t *testing.T) {
 		return
 	}
 	artifact, doc := f.document("# Guide\n\nOriginal paragraph.\n\nOther paragraph.\n")
+	// The internal audit lookup must not grant access to someone else's document.
+	for _, role := range []auth.Role{auth.RoleWriter, auth.RoleOwner} {
+		other := revisionActor(f.owner+"-other", role)
+		if _, err := f.second.handleDocumentReview(other, map[string]any{"artifactId": artifact}, 0); err == nil {
+			t.Fatal("internal receipt lookup exposed another person's document")
+		}
+	}
 	// Audit history is internal even for a document's author.
 	call, _ := langparser.RenderCall("workDocumentApprovedRevisions", map[string]any{"artifactId": memql.BareShortId(artifact), "versions": []int{doc.version}})
 	if _, err := f.engine.Execute(f.ctx, "query "+call); err == nil {
