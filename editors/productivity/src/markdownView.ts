@@ -27,8 +27,56 @@ document.addEventListener("contextmenu", event => {
   });
 }, true);
 type Anchor = { kind?: "markdown"; intent?: "extend"; scope?: "section"; sectionPath?: string[]; sourceQuote?: string; startLine: number; endLine: number; quote: string; startBlock: number; endBlock: number; startTextOffset: number; endTextOffset: number; prefix?: string; suffix?: string } | { kind: "document-end"; quote: string; intent?: never; scope?: never; sectionPath?: never } | { kind: "document"; quote: string; intent?: never; scope?: never; sectionPath?: never };
-type ReviewRow = { id: string; body: string; outdated?: boolean; anchor: Anchor };
-const state = (api.getState() ?? {}) as { draft?: string; purpose?: "feedback"|"note"; anchor?: Anchor; draftVersion?: number; source?: string; instruction?: string; reviewOpen?: boolean; included?: string[]; seen?: string[]; decisions?: Record<string, "accepted" | "declined">; modifications?: Record<string,string>; expanded?: Record<string,boolean>; reviewSource?: string };
+type Attachment = { artifactId:string; version:number; revision:string; name:string; mimeType:string; size:number; uri:string };
+type ReviewRow = { attachments?:Attachment[]; id: string; body: string; outdated?: boolean; anchor: Anchor };
+const state = (api.getState() ?? {}) as { attachments?:Attachment[]; draft?: string; purpose?: "feedback"|"note"; anchor?: Anchor; draftVersion?: number; source?: string; instruction?: string; reviewOpen?: boolean; included?: string[]; seen?: string[]; decisions?: Record<string, "accepted" | "declined">; modifications?: Record<string,string>; expanded?: Record<string,boolean>; reviewSource?: string };
+let attachments: Attachment[] = state.attachments ?? [];
+const attachmentPreviews = new Map<string,string>();
+const requestedPreviews = new Set<string>();
+const uploading = new Map<string,string>();
+const attachmentInput = byId("attachment-input") as HTMLInputElement;
+let readingAttachments = false;
+function attachmentRow(ref:Attachment, removable=false): HTMLElement {
+  const row=textElement("div","","attachment");
+  if(ref.mimeType.startsWith("image/")) {
+    const preview=attachmentPreviews.get(ref.uri);
+    if(preview) { const img=document.createElement("img");img.src=preview;img.alt="";img.loading="lazy";img.decoding="async";row.append(img); }
+    else if(!requestedPreviews.has(ref.uri)){requestedPreviews.add(ref.uri);api.postMessage({type:"attachmentPreview",uri:ref.uri});}
+  }
+  const name=textElement("span",ref.name,"attachment-name");
+  row.append(name,textElement("span",ref.mimeType==="text/markdown"?"Markdown":"Image","attachment-kind"));
+  if(removable) {
+    const remove=document.createElement("button");remove.className="icon-button";remove.textContent="×";remove.setAttribute("aria-label",`Remove ${ref.name}`);
+    remove.disabled=commentBusy||revisionLocked();
+    remove.addEventListener("click",()=>{attachments=attachments.filter(item=>item.artifactId!==ref.artifactId);renderAttachments();saveState();controls();byId("attach").focus();});
+    row.append(remove);
+  }
+  return row;
+}
+function renderAttachments() {
+  byId("attachments").replaceChildren(...attachments.map(ref=>attachmentRow(ref,true)));
+  const status=byId("attachment-status");
+  status.hidden=!uploading.size&&!readingAttachments;
+  status.textContent=uploading.size?`Uploading ${[...uploading.values()].join(", ")}…`:readingAttachments?"Reading attachments…":"";
+}
+function fileBase64(file:File):Promise<string> {
+  return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(",")[1]);reader.onerror=()=>reject(new Error("This file could not be read. Choose it again."));reader.readAsDataURL(file);});
+}
+byId("attach").addEventListener("click",()=>attachmentInput.click());
+attachmentInput.addEventListener("change",async()=>{
+  const files=Array.from(attachmentInput.files??[]);attachmentInput.value="";
+  if(!files.length||composerPurpose!=="feedback"||revisionLocked()||commentBusy||uploading.size||readingAttachments)return;
+  byId("composer-status").textContent="";
+  let total=attachments.reduce((sum,ref)=>sum+ref.size,0),markdown=attachments.filter(ref=>ref.mimeType==="text/markdown").reduce((sum,ref)=>sum+ref.size,0);
+  try {
+    if(attachments.length+files.length>8)throw new Error("Attach up to eight images or Markdown files.");
+    for(const file of files){const md=/\.md$/i.test(file.name);if(!/\.(md|png|jpe?g|gif|webp)$/i.test(file.name)||!file.size||file.size>(md?32*1024:8*1024*1024))throw new Error("Choose PNG, JPEG, GIF or WebP images up to 8 MiB, or Markdown files up to 32 KiB.");total+=file.size;if(md)markdown+=file.size;}
+    if(total>16*1024*1024||markdown>64*1024)throw new Error("Attach up to 16 MiB in total, including up to 64 KiB of Markdown.");
+    readingAttachments=true;renderAttachments();controls();
+    for(const file of files){const base64=await fileBase64(file);const uploadId=crypto.randomUUID();uploading.set(uploadId,file.name);api.postMessage({type:"uploadAttachment",uploadId,name:file.name,base64});}
+  } catch(error){byId("composer-status").textContent=(error as Error).message;}
+  finally{readingAttachments=false;renderAttachments();controls();saveState();}
+});
 let restored = false;
 let composerPurpose:"feedback"|"note"=state.purpose??"feedback";
 let notesOpen=false;
@@ -241,7 +289,7 @@ let rows: ReviewRow[] = [];
 const selected = new Set<string>(state.included ?? []);
 const seen = new Set<string>(state.seen ?? []);
 feedback.value = state.draft ?? ""; instruction.value = state.instruction ?? "";
-function saveState() { const saved = { draft: feedback.value, purpose:composerPurpose, anchor: draftAnchor, source: sourceIdentity || state.source, instruction: instruction.value, reviewOpen: reviewRequested, included: [...selected], seen: [...seen], decisions, modifications, expanded, reviewSource }; api.setState(saved); if (restored) api.postMessage({type:"draftState",state:saved}); }
+function saveState() { const saved = { draft: feedback.value, attachments, purpose:composerPurpose, anchor: draftAnchor, source: sourceIdentity || state.source, instruction: instruction.value, reviewOpen: reviewRequested, included: [...selected], seen: [...seen], decisions, modifications, expanded, reviewSource }; api.setState(saved); if (restored) api.postMessage({type:"draftState",state:saved}); }
 function activeRun() { return revision && !revision.cancelRequested && !["succeeded", "failed", "cancelled"].includes(revision.status); }
 function renderEmptyDocument() {
   const empty = !!latestDocument && emptyDocument && !historyPreview;
@@ -295,7 +343,9 @@ function controls() {
   annotate.title = selection ? "Add feedback on this selection" : feedback.value && draftAnchor ? "Continue your feedback" : "Select text to add feedback";
   for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>("#extend,#document-feedback,.section-feedback"))) button.disabled = locked||!connected||dictationPhase!=="idle";
   feedback.readOnly=dictationPhase!=="idle" || composerPurpose==="feedback" && locked;
-  add.disabled = composerPurpose==="feedback" && locked || dictationPhase!=="idle" || !connected || !draftAnchor || !feedback.value.trim() || commentBusy;
+  (byId("attach") as HTMLButtonElement).disabled=locked||!connected||commentBusy||!!uploading.size||readingAttachments||attachments.length>=8;
+  for(const button of Array.from(byId("attachments").querySelectorAll<HTMLButtonElement>("button")))button.disabled=locked||commentBusy;
+  add.disabled = !!uploading.size || readingAttachments || composerPurpose==="feedback" && locked || dictationPhase!=="idle" || !connected || !draftAnchor || !feedback.value.trim() || commentBusy;
   add.textContent = commentBusy ? "Saving…" : composerPurpose==="note" ? "Save note" : "Add to review";
   (byId("selection-note") as HTMLButtonElement).disabled=!connected;
   (byId("selection-feedback") as HTMLButtonElement).disabled=!connected||locked;
@@ -323,7 +373,7 @@ function highlight(name: string, ranges: Range[], priority=0) {
 function openComposer(anchor: Anchor, rect?: DOMRect, purpose:"feedback"|"note"="feedback") {
   if (purpose==="feedback" && (mode !== "review" || revisionLocked()) || historyPreview || !connected) return;
   // A second selection must never silently move an unfinished note.
-  if (feedback.value.trim() && draftAnchor && (JSON.stringify(draftAnchor) !== JSON.stringify(anchor) || purpose!==composerPurpose)) {
+  if ((feedback.value.trim() || attachments.length || uploading.size || readingAttachments) && draftAnchor && (JSON.stringify(draftAnchor) !== JSON.stringify(anchor) || purpose!==composerPurpose)) {
     byId("composer-status").textContent = "Your unfinished note is still attached to its original selection. Save it before starting another.";
   } else { draftAnchor = anchor; composerPurpose=purpose; byId("composer-status").textContent = ""; }
   document.body.classList.toggle("note-composing",composerPurpose==="note");
@@ -336,7 +386,7 @@ function openComposer(anchor: Anchor, rect?: DOMRect, purpose:"feedback"|"note"=
   byId("selected").hidden = draftAnchor?.kind === "document-end" || draftAnchor?.kind === "document";
   byId("composer").hidden = false; byId("selection-tools").hidden = true;
   highlight("memql-active", selectionRange ? [selectionRange] : []);
-  position(byId("composer"), rect); controls(); saveState(); feedback.focus();
+  position(byId("composer"), rect); renderAttachments(); controls(); saveState(); feedback.focus();
 }
 function closeComposer() {
   if(dictationPhase!=="idle")api.postMessage({type:"dictationCancel"}); byId("composer").hidden = true; highlight("memql-active", []); saveState(); content.focus({ preventScroll: true }); }
@@ -384,7 +434,7 @@ instruction.addEventListener("input",saveState);
 add.addEventListener("click",() => {
   if (add.disabled || !draftAnchor) return;
   commentBusy = true; controls(); byId("composer-status").textContent = "";
-  api.postMessage({type:composerPurpose==="note"?"note":"comment",version,selection:draftAnchor,body:feedback.value});
+  api.postMessage({type:composerPurpose==="note"?"note":"comment",version,selection:draftAnchor,body:feedback.value,attachments:composerPurpose==="feedback"?attachments:[]});
 });
 prepare.addEventListener("click",() => {
   if (prepare.disabled) return;
@@ -570,6 +620,7 @@ function requestNote(row: ReviewRow, editable: boolean): HTMLElement {
     paint(); head.append(toggle);
   }
   article.append(head, textElement("p", row.body));
+  for(const ref of row.attachments??[])article.append(attachmentRow(ref));
   if (row.anchor?.kind !== "document-end" && row.anchor?.kind !== "document" && row.anchor?.scope !== "section") {
     const quote = document.createElement("details"); quote.className = "request-quote";
     quote.append(textElement("summary", "Selected text"), textElement("blockquote", row.anchor?.quote ?? "")); article.append(quote);
@@ -730,9 +781,18 @@ window.addEventListener("message",event=>{
     if(message.error&&dictationTarget==="feedback")renderProblem(byId("composer-status"),{message:message.error,reference:message.reference},value=>api.postMessage(value));
     controls();renderRevision();
   }
+  if(message.type==="attachmentUploaded" && uploading.has(message.uploadId)) {
+    uploading.delete(message.uploadId);attachments.push(message.attachment);renderAttachments();controls();saveState();
+  }
+  if(message.type==="attachmentFailed" && uploading.has(message.uploadId)) {
+    uploading.delete(message.uploadId);renderAttachments();controls();renderProblem(byId("composer-status"),message,value=>api.postMessage(value));saveState();
+  }
+  if(message.type==="attachmentPreview") {
+    attachmentPreviews.set(message.uri,message.preview);renderAttachments();renderComments();
+  }
   if(message.type==="restoreDraft") {
     if(message.state && !restored) {
-      Object.assign(state,message.state); Object.assign(decisions,state.decisions??{});Object.assign(modifications,state.modifications??{});Object.assign(expanded,state.expanded??{});reviewSource=state.reviewSource??""; draftAnchor=state.anchor; composerPurpose=state.purpose??"feedback"; feedback.value=state.draft??""; instruction.value=state.instruction??"";
+      Object.assign(state,message.state); attachments=state.attachments??[]; renderAttachments(); Object.assign(decisions,state.decisions??{});Object.assign(modifications,state.modifications??{});Object.assign(expanded,state.expanded??{});reviewSource=state.reviewSource??""; draftAnchor=state.anchor; composerPurpose=state.purpose??"feedback"; feedback.value=state.draft??""; instruction.value=state.instruction??"";
       selected.clear(); seen.clear(); for(const id of state.included??[])selected.add(id); for(const id of state.seen??[])seen.add(id);
       showReview(state.reviewOpen??false); controls();
     }
@@ -797,7 +857,7 @@ window.addEventListener("message",event=>{
     }
     const changed=message.status?.approvalId&&message.status.approvalId!==revision?.approvalId;const different=JSON.stringify(message.status)!==JSON.stringify(revision);revision=message.status;if(different)renderRevision();controls();if(changed){byId("status").textContent="";showReview(true);}saveState();}
   if(message.type==="revisionIdle"){revisionBusy=false;preparing=false;pendingAnchors=undefined;renderRevision();controls();}
-  if(message.type==="saved"){commentBusy=false;feedback.value="";draftAnchor=undefined;closeComposer();byId("status").textContent="Added to review.";controls();showReview(true);}
+  if(message.type==="saved"){commentBusy=false;attachments=[];renderAttachments();feedback.value="";draftAnchor=undefined;closeComposer();byId("status").textContent="Added to review.";controls();showReview(true);}
   if(message.type==="error"){if(!latestDocument)documentLoadFailed=true;commentBusy=false;revisionBusy=false;preparing=false;pendingAnchors=undefined;renderRevision();controls();if(!byId("composer").hidden)renderProblem(byId("composer-status"),message,value=>api.postMessage(value));else{renderProblem(byId("status"),message,value=>api.postMessage(value));showReview(true);}}
   if(message.type==="notice")byId("status").textContent=message.message;
 });

@@ -86,6 +86,25 @@ available in the editor title and command palette. These views share one VS Code
 document, including unsaved changes. Save before adding shared feedback. Local files remain local; opening
 one never silently uploads it or starts another Cockpit backup process.
 
+In the feedback composer, **Attach images or Markdown** adds `.md`, PNG,
+JPEG, GIF, or WebP references. Describe how to use them: an image can inform the
+change or be inserted with a caption, and a Markdown file can supply reference
+material. Uploaded files appear beneath the feedback, with removable references
+and image previews. Removing a reference leaves its uploaded file in Files.
+Attachments stay with an unfinished feedback draft; saving or applying still
+requires an explicit action.
+
+Each request accepts up to eight attachments totaling 16 MiB. Images are limited
+to 8 MiB and 24 million pixels each; UTF-8 Markdown references to 32 KiB each and
+64 KiB combined. Access, saved version, and content hash are checked before
+analysis and approval. Attachments do not grant access to private files, and
+personal notes do not become AI inputs. The DSL analyzes image bytes through the
+shared vision route, then gives the resulting observations and Markdown content
+to the revision harness as untrusted references. Its `fast` level uses an
+available vision-capable model; this works with the locally installed Qwen3.5
+4B. No additional model download or paid provider is required when that local
+route is available. Human approval still governs insertion into the document.
+
 Review each proposal with **Accept**, **Decline**, or **Modify with AI**, then
 choose **Apply accepted**. Linked edits, such as moving a passage, share one
 decision. Modifying an item preserves the other proposed items and their

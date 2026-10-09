@@ -119,6 +119,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "modifyRevisionItem", Description: "Capture a person-requested revision of one immutable proposal item.", Handler: i.handleModifyRevisionItem},
 		{Name: "requestDocumentRevision", Description: "Capture feedback and start revision analysis.", Handler: i.handleRequestDocumentRevision},
 		{Name: "documentRevisionStatus", Description: "Read an owned revision request and its saved draft.", Handler: i.handleDocumentRevisionStatus},
+		{Name: "revisionReferences", Description: "Read authorized feedback references and analyze their images.", Handler: i.handleRevisionReferences},
 		{Name: "revisionInput", Description: "Read the current run's immutable document and feedback.", Handler: i.handleRevisionInput},
 		{Name: "revisionProposal", Description: "Validate bounded passage replacements.", Handler: i.handleRevisionProposal},
 		{Name: "reviewRevision", Description: "Park on exact proposed document changes.", Handler: i.handleReviewRevision},

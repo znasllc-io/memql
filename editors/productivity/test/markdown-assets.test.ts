@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { imageMime, imageMarkdown, markdownImageURI, MAX_IMAGE_BYTES } from "../src/markdownAssets.js";
+import { feedbackAttachmentMime, imageMime, imageMarkdown, markdownImageURI, MAX_IMAGE_BYTES } from "../src/markdownAssets.js";
 import { renderMarkdown } from "../src/markdown.js";
 import { markdownPage } from "../src/markdownPage.js";
 
@@ -43,4 +43,9 @@ test("research formatting includes footnotes, inert task lists, nested blocks an
   assert.match(html, /data-internal="methods"/); assert.match(html, /footnote-ref/); assert.match(html, /id="fn1"/);
   assert.match(html, /type="checkbox"/); assert.match(html, /disabled=""/); assert.doesNotMatch(html, /contenteditable/);
   assert.match(html, /<blockquote/); assert.match(html, /language-python/); assert.match(html, /<s>superseded<\/s>/); assert.match(html, /<table/);
+});
+
+test("feedback references admit bounded UTF-8 Markdown and the Source image types only", () => {
+  assert.equal(feedbackAttachmentMime("notes.MD",new TextEncoder().encode("# Reference\n\nEvidence.")),"text/markdown");
+  for(const [name,bytes] of [["notes.md",new Uint8Array([255])],["notes.md",new Uint8Array(32769)],["notes.md",new Uint8Array([65,0])],["notes.svg",new TextEncoder().encode("<svg/>")],["notes.pdf",new Uint8Array([1])]] as const)assert.throws(()=>feedbackAttachmentMime(name,bytes));
 });

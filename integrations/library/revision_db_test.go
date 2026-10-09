@@ -37,6 +37,7 @@ type revisionAI struct {
 	retainedEvidenceCalls atomic.Int32
 	appCalls              atomic.Int32
 	needsResearch         bool
+	expectedReference     string
 	appError              error
 	answer                revisionAnswer
 }
@@ -49,6 +50,9 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 		}},
 		{Name: "runAgentTurn", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			data := revisionMap(args["data"])
+			if a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
+				return nil, fmt.Errorf("reference contents did not reach the DSL model step")
+			}
 			if args["templateId"] != "libraryRevisionResearch" || data["document"] == nil || data["passages"] == nil {
 				return nil, fmt.Errorf("DSL omitted evidence stage context")
 			}
@@ -65,6 +69,9 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 		}},
 		{Name: "invokePrompt", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			data := revisionMap(args["data"])
+			if a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
+				return nil, fmt.Errorf("reference contents did not reach the DSL model step")
+			}
 			if args["templateId"] == "libraryRevisionIntent" {
 				intent := "edit"
 				if a.needsResearch {

@@ -45,3 +45,12 @@ export function imageMime(name: string, bytes: Uint8Array): string {
 export function imageMarkdown(alt: string, uri: string): string {
   return `![${alt.replace(/[\\\[\]]/g, "\\$&").replace(/[\r\n]/g, " ")}](<${uri.replace(/>/g, "%3E")}>)`;
 }
+
+export const MAX_REFERENCE_MARKDOWN_BYTES = 32 * 1024;
+export function feedbackAttachmentMime(name: string, bytes: Uint8Array): string {
+  if (!/\.md$/i.test(name)) return imageMime(name, bytes);
+  if (!bytes.length || bytes.length > MAX_REFERENCE_MARKDOWN_BYTES) throw new UserInputError("Choose a Markdown reference up to 32 KiB.");
+  try { if (new TextDecoder("utf-8", { fatal: true }).decode(bytes).includes("\0")) throw new Error(); }
+  catch { throw new UserInputError("Choose a readable UTF-8 Markdown file."); }
+  return "text/markdown";
+}

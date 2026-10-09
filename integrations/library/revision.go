@@ -228,9 +228,16 @@ func (i *Integration) handleRequestDocumentRevision(ctx context.Context, args ma
 			if total > 64000 {
 				return nil, fmt.Errorf("select less feedback for one revision request")
 			}
-			selected = append(selected, map[string]any{"id": commentID, "authorUserId": memql.BareShortId(stringField(row, "authorUserId")), "body": stringField(row, "body"), "anchor": anchor})
+			selected = append(selected, map[string]any{"id": commentID, "authorUserId": memql.BareShortId(stringField(row, "authorUserId")), "body": stringField(row, "body"), "anchor": anchor, "attachments": row["attachments"]})
 		}
 		proposal = map[string]any{"reviewType": documentReviewType, "requestId": requestID, "artifactId": doc.artifact, "sourceId": memql.BareShortId(doc.source), "documentKind": doc.kind, "revision": doc.revision, "version": doc.version, "name": name, "format": "markdown", "content": content, "blobURL": stringField(doc.backing, "blobUrl"), "commentIds": comments, "comments": selected, "instruction": instruction}
+		refs, err := proposalAttachmentRefs(proposal)
+		if err != nil {
+			return nil, err
+		}
+		if _, _, err = i.reviewAttachments(ctx, refs); err != nil {
+			return nil, err
+		}
 		// Validate a bounded window of owned requests against the exact source
 		// and feedback. DSL decides which completed receipts to reuse, even
 		// when an intervening stopped attempt produced no evidence of its own.
@@ -299,6 +306,13 @@ func (i *Integration) ValidateRevisionProposal(ctx context.Context, proposal map
 	}
 	content, err := i.revisionContent(ctx, doc)
 	if err != nil {
+		return err
+	}
+	refs, err := proposalAttachmentRefs(proposal)
+	if err != nil {
+		return err
+	}
+	if _, _, err = i.reviewAttachments(ctx, refs); err != nil {
 		return err
 	}
 	if content != proposal["content"] {
