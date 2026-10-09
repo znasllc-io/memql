@@ -143,6 +143,35 @@ func TestWorkContextRepeatedPressureBoundsActiveMemoryAndKeepsSources(t *testing
 	require.Greater(t, pages, 1)
 }
 
+func TestWorkContextRecallPressureReturnsToOriginalSource(t *testing.T) {
+	e, _, _ := readMergeTestEngine(t)
+	ctx := contextTestRun(t, e)
+	contextTestModel(e, &checkpointModel{fail: true})
+	messages := []common.ChatMessage{
+		{Role: "system", Content: "Follow the owner"},
+		{Role: "user", Content: "Verify the original evidence"},
+		{Role: "assistant", ToolCalls: []common.ToolCall{{ID: "recall", Name: "recallWorkHistory", Arguments: `{"checkpoint":"original-source","messageIndex":2,"offset":4000,"maxChars":4000}`}}},
+		{Role: "tool", Name: "recallWorkHistory", ToolCallId: "recall", Content: strings.Repeat(`{\"source\":\"nested evidence\"}`, 400)},
+	}
+	compacted, err := e.CompactWorkContext(ctx, messages, nil, 1200)
+	require.NoError(t, err)
+	require.LessOrEqual(t, WorkContextSize(compacted, nil), 1200)
+	require.Equal(t, messages[:3], compacted[:3])
+	require.Contains(t, compacted[3].Content, `"checkpoint":"original-source"`)
+	require.Contains(t, compacted[3].Content, `"offset":4000`)
+	require.Contains(t, compacted[3].Content, `"messageIndex":2`)
+	require.Contains(t, compacted[3].Content, `"maxChars":800`)
+	raw, _ := json.Marshal([]common.ChatMessage{messages[3]})
+	hash := workContextHash("tool-v2", raw)
+	require.NotContains(t, compacted[3].Content, hash, "do not send the model into an archive of a recalled page")
+	call, _ := parser.RenderCall("workCheckpointForOwner", map[string]any{"fingerprint": hash})
+	result, err := e.Execute(ContextWithFreshRead(ctx), "query "+call)
+	require.NoError(t, err)
+	rows := MaterializeRows(result.OutputPayload())
+	require.Len(t, rows, 1)
+	require.Equal(t, string(raw), rows[0]["data"].(map[string]any)["sourceMessages"])
+}
+
 func TestWorkContextFailureRetainsOriginalsAndPendingCalls(t *testing.T) {
 	e, db, _ := readMergeTestEngine(t)
 	ctx := contextTestRun(t, e)

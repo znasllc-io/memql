@@ -128,6 +128,9 @@ Owned work uses the following layers:
    search. An empty page with `hasMore` does not mean the evidence is absent.
    `matchLimitReached` means that some excerpts could not fit the response;
    narrow the search or read exact indexes from its listed source records.
+   If a recalled page itself exceeds the active budget, the engine directs
+   the next read to the same original source and offset with a smaller page.
+   It never directs the model into another archive of that recall response.
 
 The runtime bounds summarizer input and output, model calls per compaction,
 and recall excerpts. A single exchange too large for the summarizer is
