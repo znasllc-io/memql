@@ -10,11 +10,7 @@ import (
 	workstate "github.com/znasllc-io/memql/component/work"
 )
 
-func TestDeleteDocumentAnnotationsAcrossReplicas(t *testing.T) {
-	f := newRevisionDB(t)
-	if f == nil {
-		return
-	}
+func testDeleteDocumentAnnotationsAcrossReplicas(t *testing.T, f *revisionDB) {
 	artifact, doc := f.document("# Guide\n\nA selected paragraph.\n")
 	anchor := map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "sourceQuote": "A selected paragraph.", "quote": "selected"}
 	for _, purpose := range []string{"feedback", "extension", "note"} {
@@ -80,11 +76,7 @@ func TestDeleteDocumentAnnotationsAcrossReplicas(t *testing.T) {
 	}
 }
 
-func TestDeleteProposedFeedbackInvalidatesStaleReview(t *testing.T) {
-	f := newRevisionDB(t)
-	if f == nil {
-		return
-	}
+func testDeleteProposedFeedbackInvalidatesStaleReview(t *testing.T, f *revisionDB) {
 	artifact, doc := f.document("# Guide\n\nOriginal paragraph.\n")
 	args, id := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Clarify")
 	request := asString(args["requestId"])

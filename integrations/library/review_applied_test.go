@@ -14,11 +14,7 @@ import (
 	workstate "github.com/znasllc-io/memql/component/work"
 )
 
-func TestAppliedFeedbackCannotBeDeletedAcrossReplicas(t *testing.T) {
-	f := newRevisionDB(t)
-	if f == nil {
-		return
-	}
+func testAppliedFeedbackCannotBeDeletedAcrossReplicas(t *testing.T, f *revisionDB) {
 	artifact, doc := f.document("# Guide\n\nOriginal paragraph.\n\nOther paragraph.\n")
 	// The internal audit lookup must not grant access to someone else's document.
 	for _, role := range []auth.Role{auth.RoleWriter, auth.RoleOwner} {
