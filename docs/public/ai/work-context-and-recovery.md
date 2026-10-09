@@ -170,6 +170,13 @@ recovery attempts retain finite time and resource budgets. A long-lived goal
 must make progress through checkpointed steps and waits; it does not require
 one unbounded model call or an open client connection.
 
+A person can approve a budget pause with `decideApproval` and
+`answer: {newLimit: 64}` (for example, a model-call limit). This raises only
+the ceiling named by that approval; all other limits and accumulated usage
+remain intact. The limit must be finite, above recorded usage, and cannot
+lower a newer limit. Concurrent decisions on the same goal are serialized
+across replicas. Omitting `newLimit` retains the separate-update workflow.
+
 The regression suite exercises parallel tool groups, pending calls, repeated
 context pressure, exact Unicode/source reconstruction, cross-replica reads,
 owner isolation, and storage or summarizer failure. Both agent transport

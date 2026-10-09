@@ -184,6 +184,11 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// came off the approval row this caller already read under their own
 	// actor.
 	writeCtx := ownerActor(ctx, owner)
+	if decision == "approved" && kind == work.ApprovalKindBudget {
+		if err := i.raiseApprovedBudget(writeCtx, approval, answer, now); err != nil {
+			return nil, err
+		}
+	}
 	if err := st.decideApprovalRow(writeCtx, approvalId, decision, strings.TrimSpace(ac.UserId), now, answer, workRowVersionAfter(approval["createdAt"], now)); err != nil {
 		return nil, err
 	}

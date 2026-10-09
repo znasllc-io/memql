@@ -160,7 +160,7 @@ builtin workStepVersions {
 builtin decideApproval {
   approvalId  string!  @description("The v1:work:approval to decide.")
   decision    string!  @description("approved, rejected, or answered (for a feedback question).")
-  answer      object   @description("The person's answer, for a feedback approval.")
+  answer      object   @description("The person's answer. A budget approval may supply {newLimit: number} to raise only its named ceiling above recorded usage before resuming, preserving all other ceilings and spent counters. Count and time limits must be whole numbers.")
 }
 
 /// Resume every run whose timer wait is due and every run whose node died mid-flight. Cron-leader
